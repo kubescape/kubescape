@@ -34,7 +34,7 @@ func TestPullSingleResource_FieldSelectorDoesNotLeakAcrossIterations(t *testing.
 	var capturedSelectors []string
 
 	podList := &unstructured.UnstructuredList{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "PodList",
 		},
@@ -167,17 +167,17 @@ func TestPullResources_PartialFailure(t *testing.T) {
 	podsGVR := "/v1/pods"
 
 	pod := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "Pod",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      "pod-survives",
 				"namespace": "default",
 			},
 		},
 	}
 	podList := &unstructured.UnstructuredList{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "PodList",
 		},
@@ -313,14 +313,14 @@ func TestRecordFailedQueryStatuses_PartialFailureSessionField(t *testing.T) {
 	handler := getResourceHandlerMock()
 
 	fakeSecret := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "Secret",
-			"metadata":   map[string]interface{}{"name": "secret1", "namespace": "default"},
+			"metadata":   map[string]any{"name": "secret1", "namespace": "default"},
 		},
 	}
 	secretList := &unstructured.UnstructuredList{
-		Object: map[string]interface{}{"apiVersion": "v1", "kind": "SecretList"},
+		Object: map[string]any{"apiVersion": "v1", "kind": "SecretList"},
 		Items:  []unstructured.Unstructured{*fakeSecret},
 	}
 

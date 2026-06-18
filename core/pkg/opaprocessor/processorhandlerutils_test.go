@@ -65,7 +65,7 @@ func TestRemoveData(t *testing.T) {
 			assert.False(t, found)
 
 			if d, ok := workloadinterface.InspectMap(workload.GetObject(), "data"); ok {
-				data, ok := d.(map[string]interface{})
+				data, ok := d.(map[string]any)
 				assert.True(t, ok)
 				for key := range data {
 					assert.Equal(t, "XXXXXX", data[key])

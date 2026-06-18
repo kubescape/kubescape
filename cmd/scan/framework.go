@@ -58,10 +58,8 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			if len(args) > 0 {
 				frameworks := strings.Split(args[0], ",")
 				if len(frameworks) > 1 {
-					for _, framework := range frameworks {
-						if framework == "" {
-							return fmt.Errorf("usage: <framework-0>,<framework-1>")
-						}
+					if slices.Contains(frameworks, "") {
+						return fmt.Errorf("usage: <framework-0>,<framework-1>")
 					}
 				}
 			} else {

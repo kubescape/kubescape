@@ -43,10 +43,10 @@ type SummaryDetailsWithSeverity struct {
 	Controls                  map[string]ControlSummaryWithSeverity `json:"controls,omitempty"`
 	Status                    apis.ScanningStatus                   `json:"status"`
 	Frameworks                []reportsummary.FrameworkSummary      `json:"frameworks"`
-	ResourcesSeverityCounters reportsummary.SeverityCounters        `json:"resourcesSeverityCounters,omitempty"`
-	ControlsSeverityCounters  reportsummary.SeverityCounters        `json:"controlsSeverityCounters,omitempty"`
+	ResourcesSeverityCounters reportsummary.SeverityCounters        `json:"resourcesSeverityCounters"`
+	ControlsSeverityCounters  reportsummary.SeverityCounters        `json:"controlsSeverityCounters"`
 	StatusCounters            reportsummary.StatusCounters          `json:"ResourceCounters"`
-	Vulnerabilities           reportsummary.VulnerabilitySummary    `json:"vulnerabilities,omitempty"`
+	Vulnerabilities           reportsummary.VulnerabilitySummary    `json:"vulnerabilities"`
 	Score                     float32                               `json:"score"`
 	ComplianceScore           float32                               `json:"complianceScore"`
 }
@@ -54,15 +54,15 @@ type SummaryDetailsWithSeverity struct {
 // PostureReportWithSeverity wraps PostureReport to include severity in controls
 type PostureReportWithSeverity struct {
 	ReportGenerationTime string                            `json:"generationTime"`
-	ClusterAPIServerInfo interface{}                       `json:"clusterAPIServerInfo"`
+	ClusterAPIServerInfo any                               `json:"clusterAPIServerInfo"`
 	ClusterCloudProvider string                            `json:"clusterCloudProvider"`
 	CustomerGUID         string                            `json:"customerGUID"`
 	ClusterName          string                            `json:"clusterName"`
-	SummaryDetails       SummaryDetailsWithSeverity        `json:"summaryDetails,omitempty"`
+	SummaryDetails       SummaryDetailsWithSeverity        `json:"summaryDetails"`
 	Resources            []reporthandling.Resource         `json:"resources,omitempty"`
 	Attributes           []reportsummary.PostureAttributes `json:"attributes"`
 	Results              []ResultWithSeverity              `json:"results,omitempty"`
-	Metadata             reporthandlingv2.Metadata         `json:"metadata,omitempty"`
+	Metadata             reporthandlingv2.Metadata         `json:"metadata"`
 	ResourceLabels       map[string]map[string]string      `json:"resourceLabels,omitempty"` // map[resourceID]map[labelKey]labelValue - extracted labels from workloads
 	ScanCoverage         *cautils.ScanCoverage             `json:"scanCoverage,omitempty"`
 }
@@ -240,7 +240,7 @@ type infoStars struct {
 
 func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) []infoStars {
 	infoToPrintInfo := []infoStars{}
-	infoToPrintInfoMap := map[string]interface{}{}
+	infoToPrintInfoMap := map[string]any{}
 	starCount := indicator
 	for _, control := range controls {
 		if control.GetStatus().IsSkipped() && control.GetStatus().Info() != "" {

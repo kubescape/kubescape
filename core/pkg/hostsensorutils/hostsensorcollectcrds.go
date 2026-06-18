@@ -87,7 +87,7 @@ func (hsh *HostSensorHandler) convertCRDToEnvelope(item unstructured.Unstructure
 	// APIServerInfo, KubeProxyInfo, etc.
 	// However, for some resources like KubeletInfo, the CRD's 'spec' wraps the actual data
 	// in a field named after the resource type. We need to unwrap it if it exists.
-	var data interface{} = spec
+	var data any = spec
 	if inner, ok := spec[resourceType.String()]; ok {
 		data = inner
 	}
@@ -163,7 +163,7 @@ func (hsh *HostSensorHandler) getCNIInfo(ctx context.Context) ([]hostsensor.Host
 // If information are found, then return true. Return false otherwise.
 func hasCloudProviderInfo(cpi []hostsensor.HostSensorDataEnvelope) bool {
 	for index := range cpi {
-		var data map[string]interface{}
+		var data map[string]any
 		if err := stdjson.Unmarshal(cpi[index].GetData(), &data); err != nil {
 			continue
 		}

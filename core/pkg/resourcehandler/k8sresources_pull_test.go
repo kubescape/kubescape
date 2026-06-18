@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
-	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -51,10 +51,10 @@ func TestPullResources_PartialFailureSurface(t *testing.T) {
 			return &unstructured.UnstructuredList{
 				Items: []unstructured.Unstructured{
 					{
-						Object: map[string]interface{}{
+						Object: map[string]any{
 							"apiVersion": "v1",
 							"kind":       "Pod",
-							"metadata": map[string]interface{}{
+							"metadata": map[string]any{
 								"name":      "test-pod",
 								"namespace": "default",
 							},
@@ -109,10 +109,10 @@ func TestGetResources_SurfacesMissingGVRFailuresInInfoMap(t *testing.T) {
 			}
 			return &unstructured.UnstructuredList{
 				Items: []unstructured.Unstructured{{
-					Object: map[string]interface{}{
+					Object: map[string]any{
 						"apiVersion": "v1",
 						"kind":       "Namespace",
-						"metadata": map[string]interface{}{
+						"metadata": map[string]any{
 							"name": "default",
 						},
 					},

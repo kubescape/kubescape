@@ -184,7 +184,7 @@ func TestSaveInFile(t *testing.T) {
 		_ = os.RemoveAll(dir)
 	}()
 
-	policy := map[string]interface{}{
+	policy := map[string]any{
 		"key":    "value",
 		"number": 1.00,
 	}
@@ -195,7 +195,7 @@ func TestSaveInFile(t *testing.T) {
 
 		buf, err := os.ReadFile(target)
 		require.NoError(t, err)
-		var retrieved interface{}
+		var retrieved any
 		require.NoError(t, json.Unmarshal(buf, &retrieved))
 
 		require.EqualValues(t, policy, retrieved)
@@ -207,14 +207,14 @@ func TestSaveInFile(t *testing.T) {
 
 		buf, err := os.ReadFile(target)
 		require.NoError(t, err)
-		var retrieved interface{}
+		var retrieved any
 		require.NoError(t, json.Unmarshal(buf, &retrieved))
 
 		require.EqualValues(t, policy, retrieved)
 	})
 
 	t.Run("should error", func(t *testing.T) {
-		badPolicy := map[string]interface{}{
+		badPolicy := map[string]any{
 			"key":    "value",
 			"number": 1.00,
 			"err":    func() {},

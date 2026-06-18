@@ -221,8 +221,8 @@ func analyze(templateFile string, data []byte, partials map[string]map[string]st
 		}
 		visited[name] = struct{}{}
 		for r := range partials[name] {
-			if strings.HasPrefix(r, "@include:") {
-				resolve(strings.TrimPrefix(r, "@include:"))
+			if after, ok := strings.CutPrefix(r, "@include:"); ok {
+				resolve(after)
 				continue
 			}
 			refs[r] = struct{}{}

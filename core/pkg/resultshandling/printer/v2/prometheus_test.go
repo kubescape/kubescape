@@ -101,10 +101,10 @@ func TestScore(t *testing.T) {
 func TestResourceMetricsEmitted(t *testing.T) {
 	// Regression test for https://github.com/kubescape/kubescape/issues/2236
 	// Fails on master (setResourcesCounters commented out), passes with patch.
-	obj := map[string]interface{}{
+	obj := map[string]any{
 		"apiVersion": "apps/v1",
 		"kind":       "Deployment",
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"name":      "nginx",
 			"namespace": "default",
 		},

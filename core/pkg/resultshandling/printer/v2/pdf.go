@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -116,8 +117,8 @@ func (pp *PdfPrinter) getFormattedInformation(infoMap []infoStars) []string {
 func (pp *PdfPrinter) getTableObjects(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) *[]pdf.TableObject {
 	infoToPrintInfoMap := mapInfoToPrintInfo(summaryDetails.Controls)
 	var controls []pdf.TableObject
-	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
-		for _, c := range sortedControlIDs[i] {
+	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
+		for _, c := range sortedControlID {
 			row := generateTableRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfoMap)
 			controls = append(controls, *pdf.NewTableRow(
 				row.ref, row.name, row.counterFailed, row.counterAll, row.severity, row.complianceScore, getSeverityColor,

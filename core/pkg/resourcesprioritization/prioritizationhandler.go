@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -158,10 +159,8 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 
 func (handler *ResourcesPrioritizationHandler) isSupportedKind(obj workloadinterface.IMetadata) bool {
 	if obj != nil {
-		for _, kind := range supportedKinds {
-			if obj.GetKind() == kind {
-				return true
-			}
+		if slices.Contains(supportedKinds, obj.GetKind()) {
+			return true
 		}
 	}
 	return false

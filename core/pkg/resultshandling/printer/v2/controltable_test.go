@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -25,8 +26,8 @@ func Test_generateRowPdf(t *testing.T) {
 
 	var rows []TableRow
 
-	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
-		for _, c := range sortedControlIDs[i] {
+	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
+		for _, c := range sortedControlID {
 			row := *generateTableRow(mockSummary.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfoMap)
 			rows = append(rows, row)
 		}

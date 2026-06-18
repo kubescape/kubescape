@@ -60,7 +60,7 @@ func GenerateContainerScanLayer(layer *ScanResultLayer) {
 	layer.Packages = make(LinuxPkgs, 0)
 	vuls := rand.Intn(10) + 1 //nolint:gosec
 
-	for i := 0; i < vuls; i++ {
+	for range vuls {
 		v := Vulnerability{}
 		GenerateVulnerability(&v)
 		layer.Vulnerabilities = append(layer.Vulnerabilities, v)

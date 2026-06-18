@@ -211,8 +211,7 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 		logger.L().Info("requesting results", helpers.String("ID", resultsQueryParams.ScanID))
 
 		if res, err := readResultsFile(resultsQueryParams.ScanID); err != nil {
-			var scanFailed *ScanFailedError
-			if errors.As(err, &scanFailed) {
+			if scanFailed, ok := errors.AsType[*ScanFailedError](err); ok {
 				logger.L().Info("scan failed", helpers.String("ID", resultsQueryParams.ScanID), helpers.String("reason", scanFailed.Message))
 				w.WriteHeader(http.StatusInternalServerError)
 				response.Type = utilsapisv1.ErrorScanResponseType

@@ -3,6 +3,7 @@ package resourcehandler
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 
@@ -53,9 +54,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 			continue
 		}
 
-		for k, v := range workloadIDToSource {
-			sessionObj.ResourceSource[k] = v
-		}
+		maps.Copy(sessionObj.ResourceSource, workloadIDToSource)
 
 		// map all resources: map["/apiVersion/version/kind"][]<k8s workloads>
 		addWorkloadsToResourcesMap(mappedResources, workloads)

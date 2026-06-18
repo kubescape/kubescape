@@ -241,7 +241,7 @@ func (scanInfo *ScanInfo) Formats() []string {
 	}
 
 	var cleaned []string
-	for _, f := range strings.Split(scanInfo.Format, ",") {
+	for f := range strings.SplitSeq(scanInfo.Format, ",") {
 		if v := strings.TrimSpace(f); v != "" {
 			cleaned = append(cleaned, v)
 		}
@@ -296,7 +296,7 @@ func splitNamespaceList(s string) []string {
 		return nil
 	}
 	var out []string
-	for _, p := range strings.Split(s, ",") {
+	for p := range strings.SplitSeq(s, ",") {
 		if v := strings.TrimSpace(p); v != "" {
 			out = append(out, v)
 		}

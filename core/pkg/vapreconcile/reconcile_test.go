@@ -19,8 +19,8 @@ func makeVAP(name, controlID string) unstructured.Unstructured {
 
 func makeVAPB(name, policyName string, actions []string) unstructured.Unstructured {
 	u := unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"spec": map[string]interface{}{
+		Object: map[string]any{
+			"spec": map[string]any{
 				"policyName":        policyName,
 				"validationActions": toInterfaceSlice(actions),
 			},
@@ -30,8 +30,8 @@ func makeVAPB(name, policyName string, actions []string) unstructured.Unstructur
 	return u
 }
 
-func toInterfaceSlice(ss []string) []interface{} {
-	out := make([]interface{}, len(ss))
+func toInterfaceSlice(ss []string) []any {
+	out := make([]any, len(ss))
 	for i, s := range ss {
 		out[i] = s
 	}

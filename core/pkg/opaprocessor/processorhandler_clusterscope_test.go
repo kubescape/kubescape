@@ -28,20 +28,20 @@ func TestProcessRule_ClusterScopedPathsAcrossNamespaces(t *testing.T) {
 	largeClusterSize = 1
 	t.Cleanup(func() { largeClusterSize = origLarge })
 
-	clusterRole := workloadinterface.NewWorkloadObj(map[string]interface{}{
+	clusterRole := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "rbac.authorization.k8s.io/v1",
 		"kind":       "ClusterRole",
-		"metadata":   map[string]interface{}{"name": "wide-open"},
+		"metadata":   map[string]any{"name": "wide-open"},
 	})
-	podA := workloadinterface.NewWorkloadObj(map[string]interface{}{
+	podA := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
-		"metadata":   map[string]interface{}{"name": "pa", "namespace": "ns-a"},
+		"metadata":   map[string]any{"name": "pa", "namespace": "ns-a"},
 	})
-	podB := workloadinterface.NewWorkloadObj(map[string]interface{}{
+	podB := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
-		"metadata":   map[string]interface{}{"name": "pb", "namespace": "ns-b"},
+		"metadata":   map[string]any{"name": "pb", "namespace": "ns-b"},
 	})
 
 	sess := cautils.NewOPASessionObjMock()

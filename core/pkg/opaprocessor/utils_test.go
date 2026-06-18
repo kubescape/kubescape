@@ -64,7 +64,7 @@ func TestInitializeSummaryDetails_ManualReviewControl(t *testing.T) {
 			},
 		},
 	}
-	framework.Controls[0].Attributes = map[string]interface{}{
+	framework.Controls[0].Attributes = map[string]any{
 		reporthandling.ActionRequiredAttribute: string(apis.SubStatusManualReview),
 	}
 

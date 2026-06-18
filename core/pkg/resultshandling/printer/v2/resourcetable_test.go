@@ -379,11 +379,11 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 			name:           "Empty controls",
 			summaryDetails: reportsummary.SummaryDetails{},
 			controls:       []resourcesresults.ResourceAssociatedControl{},
-			resource: workloadinterface.NewWorkloadObj(map[string]interface{}{
+			resource: workloadinterface.NewWorkloadObj(map[string]any{
 				"kind": "Pod",
-				"spec": map[string]interface{}{
-					"containers": []interface{}{
-						map[string]interface{}{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
 							"name":  "alpine-container",
 							"image": "alpine:latest",
 						},
@@ -439,11 +439,11 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 					},
 				},
 			},
-			resource: workloadinterface.NewWorkloadObj(map[string]interface{}{
+			resource: workloadinterface.NewWorkloadObj(map[string]any{
 				"kind": "Pod",
-				"spec": map[string]interface{}{
-					"containers": []interface{}{
-						map[string]interface{}{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
 							"name":  "alpine-container",
 							"image": "alpine:latest",
 						},
@@ -499,11 +499,11 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 					},
 				},
 			},
-			resource: workloadinterface.NewWorkloadObj(map[string]interface{}{
+			resource: workloadinterface.NewWorkloadObj(map[string]any{
 				"kind": "Pod",
-				"spec": map[string]interface{}{
-					"containers": []interface{}{
-						map[string]interface{}{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
 							"name":  "nginx-container",
 							"image": "nginx:latest",
 						},
@@ -538,11 +538,11 @@ func TestAddContainerNameToAssistedRemediation_OutOfBounds(t *testing.T) {
 	}{
 		{
 			name: "valid container index appends name",
-			resource: workloadinterface.NewWorkloadObj(map[string]interface{}{
+			resource: workloadinterface.NewWorkloadObj(map[string]any{
 				"kind": "Pod",
-				"spec": map[string]interface{}{
-					"containers": []interface{}{
-						map[string]interface{}{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
 							"name":  "nginx",
 							"image": "nginx:latest",
 						},
@@ -554,11 +554,11 @@ func TestAddContainerNameToAssistedRemediation_OutOfBounds(t *testing.T) {
 		},
 		{
 			name: "out of bounds container index is skipped",
-			resource: workloadinterface.NewWorkloadObj(map[string]interface{}{
+			resource: workloadinterface.NewWorkloadObj(map[string]any{
 				"kind": "Pod",
-				"spec": map[string]interface{}{
-					"containers": []interface{}{
-						map[string]interface{}{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
 							"name":  "nginx",
 							"image": "nginx:latest",
 						},
@@ -570,15 +570,15 @@ func TestAddContainerNameToAssistedRemediation_OutOfBounds(t *testing.T) {
 		},
 		{
 			name: "mixed valid and out of bounds indices",
-			resource: workloadinterface.NewWorkloadObj(map[string]interface{}{
+			resource: workloadinterface.NewWorkloadObj(map[string]any{
 				"kind": "Pod",
-				"spec": map[string]interface{}{
-					"containers": []interface{}{
-						map[string]interface{}{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
 							"name":  "nginx",
 							"image": "nginx:latest",
 						},
-						map[string]interface{}{
+						map[string]any{
 							"name":  "sidecar",
 							"image": "sidecar:latest",
 						},
@@ -598,11 +598,11 @@ func TestAddContainerNameToAssistedRemediation_OutOfBounds(t *testing.T) {
 		},
 		{
 			name: "path without container index is unchanged",
-			resource: workloadinterface.NewWorkloadObj(map[string]interface{}{
+			resource: workloadinterface.NewWorkloadObj(map[string]any{
 				"kind": "Pod",
-				"spec": map[string]interface{}{
-					"containers": []interface{}{
-						map[string]interface{}{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
 							"name":  "nginx",
 							"image": "nginx:latest",
 						},

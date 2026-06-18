@@ -63,7 +63,7 @@ func TestCRDReferenceAttributesOmitsEmptyOptionalFields(t *testing.T) {
 }
 
 func TestCRDReferenceFromPolicyNotCRDBacked(t *testing.T) {
-	withAttrs := func(attrs map[string]interface{}) armotypes.PostureExceptionPolicy {
+	withAttrs := func(attrs map[string]any) armotypes.PostureExceptionPolicy {
 		policy := armotypes.PostureExceptionPolicy{}
 		policy.Attributes = attrs
 		return policy
@@ -74,8 +74,8 @@ func TestCRDReferenceFromPolicyNotCRDBacked(t *testing.T) {
 		policy armotypes.PostureExceptionPolicy
 	}{
 		{name: "nil attributes", policy: armotypes.PostureExceptionPolicy{}},
-		{name: "missing kind", policy: withAttrs(map[string]interface{}{crdNameAttribute: "se-a"})},
-		{name: "missing name", policy: withAttrs(map[string]interface{}{crdKindAttribute: "SecurityException"})},
+		{name: "missing kind", policy: withAttrs(map[string]any{crdNameAttribute: "se-a"})},
+		{name: "missing name", policy: withAttrs(map[string]any{crdKindAttribute: "SecurityException"})},
 	}
 
 	for _, tc := range tests {

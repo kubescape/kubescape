@@ -189,20 +189,20 @@ func emitMetricFamily(lines []string) string {
 		return ""
 	}
 	emitted := map[string]bool{}
-	r := ""
+	var r strings.Builder
 	for _, line := range lines {
 		// extract metric name (everything before '{')
 		name := line
-		if idx := strings.Index(line, "{"); idx >= 0 {
-			name = line[:idx]
+		if before, _, ok := strings.Cut(line, "{"); ok {
+			name = before
 		}
 		if !emitted[name] {
-			r += toMetricHeader(name, name) + "\n"
+			r.WriteString(toMetricHeader(name, name) + "\n")
 			emitted[name] = true
 		}
-		r += line + "\n"
+		r.WriteString(line + "\n")
 	}
-	return r
+	return r.String()
 }
 
 func (m *Metrics) String() string {

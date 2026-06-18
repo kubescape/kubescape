@@ -29,20 +29,20 @@ func (f *failingTransformer) Transform(prefix string, value string) (string, err
 
 type metadataOnly struct{}
 
-func (m *metadataOnly) SetNamespace(string)                {}
-func (m *metadataOnly) SetName(string)                     {}
-func (m *metadataOnly) SetKind(string)                     {}
-func (m *metadataOnly) SetWorkload(map[string]interface{}) {}
-func (m *metadataOnly) SetObject(map[string]interface{})   {}
-func (m *metadataOnly) SetApiVersion(string)               {}
+func (m *metadataOnly) SetNamespace(string)        {}
+func (m *metadataOnly) SetName(string)             {}
+func (m *metadataOnly) SetKind(string)             {}
+func (m *metadataOnly) SetWorkload(map[string]any) {}
+func (m *metadataOnly) SetObject(map[string]any)   {}
+func (m *metadataOnly) SetApiVersion(string)       {}
 
-func (m *metadataOnly) GetNamespace() string                { return "" }
-func (m *metadataOnly) GetName() string                     { return "" }
-func (m *metadataOnly) GetKind() string                     { return "" }
-func (m *metadataOnly) GetApiVersion() string               { return "" }
-func (m *metadataOnly) GetWorkload() map[string]interface{} { return nil }
-func (m *metadataOnly) GetObject() map[string]interface{}   { return nil }
-func (m *metadataOnly) GetID() string                       { return "metadata-only" }
+func (m *metadataOnly) GetNamespace() string        { return "" }
+func (m *metadataOnly) GetName() string             { return "" }
+func (m *metadataOnly) GetKind() string             { return "" }
+func (m *metadataOnly) GetApiVersion() string       { return "" }
+func (m *metadataOnly) GetWorkload() map[string]any { return nil }
+func (m *metadataOnly) GetObject() map[string]any   { return nil }
+func (m *metadataOnly) GetID() string               { return "metadata-only" }
 
 func (m *metadataOnly) GetObjectType() workloadinterface.ObjectType {
 	return workloadinterface.ObjectType("metadataOnly")
@@ -93,10 +93,10 @@ func TestAnonymizeSession_NilSession(t *testing.T) {
 }
 
 func TestAnonymizeSession_NamesAndNamespacesReplaced(t *testing.T) {
-	pod := workloadinterface.NewWorkloadObj(map[string]interface{}{
+	pod := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"name":      "my-secret-pod",
 			"namespace": "my-secret-ns",
 		},
@@ -126,10 +126,10 @@ func TestAnonymizeSession_NamesAndNamespacesReplaced(t *testing.T) {
 }
 
 func TestAnonymizeSession_IDConsistencyAcrossMaps(t *testing.T) {
-	pod := workloadinterface.NewWorkloadObj(map[string]interface{}{
+	pod := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"name":      "my-pod",
 			"namespace": "default",
 		},
@@ -354,13 +354,13 @@ func TestAnonymizeSession_LabelHandling(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			pod := workloadinterface.NewWorkloadObj(map[string]interface{}{
+			pod := workloadinterface.NewWorkloadObj(map[string]any{
 				"apiVersion": "v1",
 				"kind":       "Pod",
-				"metadata": map[string]interface{}{
+				"metadata": map[string]any{
 					"name":      "my-pod",
 					"namespace": "default",
-					"labels": map[string]interface{}{
+					"labels": map[string]any{
 						"team": "payments",
 						"env":  "production",
 					},
@@ -420,26 +420,26 @@ func TestAnonymizeResourceLabels_Guards(t *testing.T) {
 func TestAnonymizeSession_Annotations(t *testing.T) {
 	tests := []struct {
 		name     string
-		resource map[string]interface{}
+		resource map[string]any
 		validate func(t *testing.T, resource workloadinterface.IMetadata)
 	}{
 		{
 			name: "annotation values should be anonymized",
-			resource: map[string]interface{}{
+			resource: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "Pod",
-				"metadata": map[string]interface{}{
+				"metadata": map[string]any{
 					"name":      "payment-service",
 					"namespace": "production",
-					"annotations": map[string]interface{}{
+					"annotations": map[string]any{
 						"iam.amazonaws.com/role":                  "arn:aws:iam::ACCOUNT_ID:role/example-role",
 						"vault.hashicorp.com/agent-inject-secret": "example/path/config",
 					},
 				},
 			},
 			validate: func(t *testing.T, resource workloadinterface.IMetadata) {
-				metadata := resource.GetObject()["metadata"].(map[string]interface{})
-				annotations := metadata["annotations"].(map[string]interface{})
+				metadata := resource.GetObject()["metadata"].(map[string]any)
+				annotations := metadata["annotations"].(map[string]any)
 
 				assert.NotEqual(t, "arn:aws:iam::ACCOUNT_ID:role/example-role", annotations["iam.amazonaws.com/role"])
 				assert.NotEqual(t, "example/path/config", annotations["vault.hashicorp.com/agent-inject-secret"])
@@ -450,16 +450,16 @@ func TestAnonymizeSession_Annotations(t *testing.T) {
 		},
 		{
 			name: "nested template annotation values should be anonymized",
-			resource: map[string]interface{}{
+			resource: map[string]any{
 				"apiVersion": "apps/v1",
 				"kind":       "Deployment",
-				"metadata": map[string]interface{}{
+				"metadata": map[string]any{
 					"name": "analytics-worker",
 				},
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"metadata": map[string]interface{}{
-							"annotations": map[string]interface{}{
+				"spec": map[string]any{
+					"template": map[string]any{
+						"metadata": map[string]any{
+							"annotations": map[string]any{
 								"secret.company.io/runtime-path": "secret/prod/analytics/runtime",
 								"team.company.io/owner":          "analytics-platform",
 							},
@@ -468,10 +468,10 @@ func TestAnonymizeSession_Annotations(t *testing.T) {
 				},
 			},
 			validate: func(t *testing.T, resource workloadinterface.IMetadata) {
-				spec := resource.GetObject()["spec"].(map[string]interface{})
-				template := spec["template"].(map[string]interface{})
-				metadata := template["metadata"].(map[string]interface{})
-				annotations := metadata["annotations"].(map[string]interface{})
+				spec := resource.GetObject()["spec"].(map[string]any)
+				template := spec["template"].(map[string]any)
+				metadata := template["metadata"].(map[string]any)
+				annotations := metadata["annotations"].(map[string]any)
 
 				assert.NotEqual(
 					t,
@@ -500,26 +500,26 @@ func TestAnonymizeSession_Annotations(t *testing.T) {
 		},
 		{
 			name: "identical annotation values should map deterministically",
-			resource: map[string]interface{}{
+			resource: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "Pod",
-				"metadata": map[string]interface{}{
-					"annotations": map[string]interface{}{
+				"metadata": map[string]any{
+					"annotations": map[string]any{
 						"annotation-a": "internal.prod.local",
 						"annotation-b": "internal.prod.local",
 					},
 				},
 			},
 			validate: func(t *testing.T, resource workloadinterface.IMetadata) {
-				metadata := resource.GetObject()["metadata"].(map[string]interface{})
-				annotations := metadata["annotations"].(map[string]interface{})
+				metadata := resource.GetObject()["metadata"].(map[string]any)
+				annotations := metadata["annotations"].(map[string]any)
 
 				assert.Equal(t, annotations["annotation-a"], annotations["annotation-b"])
 			},
 		},
 		{
 			name: "missing metadata should not panic",
-			resource: map[string]interface{}{
+			resource: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "Pod",
 			},
@@ -527,10 +527,10 @@ func TestAnonymizeSession_Annotations(t *testing.T) {
 		},
 		{
 			name: "missing annotations should not panic",
-			resource: map[string]interface{}{
+			resource: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "Pod",
-				"metadata": map[string]interface{}{
+				"metadata": map[string]any{
 					"name": "payment",
 				},
 			},
@@ -538,11 +538,11 @@ func TestAnonymizeSession_Annotations(t *testing.T) {
 		},
 		{
 			name: "empty annotations should not panic",
-			resource: map[string]interface{}{
+			resource: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "Pod",
-				"metadata": map[string]interface{}{
-					"annotations": map[string]interface{}{},
+				"metadata": map[string]any{
+					"annotations": map[string]any{},
 				},
 			},
 			validate: func(t *testing.T, resource workloadinterface.IMetadata) {},

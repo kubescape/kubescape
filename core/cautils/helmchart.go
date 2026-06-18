@@ -122,7 +122,7 @@ func (hc *HelmChart) GetName() string {
 	return hc.chart.Name()
 }
 
-func (hc *HelmChart) GetDefaultValues() map[string]interface{} {
+func (hc *HelmChart) GetDefaultValues() map[string]any {
 	return hc.chart.Values
 }
 
@@ -153,14 +153,14 @@ func (hc *HelmChart) GetWorkloadsWithDefaultValues() (map[string][]workloadinter
 
 // GetWorkloads renders chart template using the provided values and returns a map of source (absolute) file path to its workloads.
 // Equivalent to GetWorkloadsWithOptions(values, ReleaseOptions{}).
-func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]workloadinterface.IMetadata, []error) {
+func (hc *HelmChart) GetWorkloads(values map[string]any) (map[string][]workloadinterface.IMetadata, []error) {
 	return hc.GetWorkloadsWithOptions(values, helmchartutil.ReleaseOptions{})
 }
 
 // GetWorkloadsWithOptions renders chart template using the provided values and Helm release options
 // (release name/namespace), returning a map of source (absolute) file path to its workloads.
 // Charts that reference .Release.Name or .Release.Namespace require these options to render.
-func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]interface{}, releaseOpts helmchartutil.ReleaseOptions) (map[string][]workloadinterface.IMetadata, []error) {
+func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts helmchartutil.ReleaseOptions) (map[string][]workloadinterface.IMetadata, []error) {
 	vals, err := helmchartutil.ToRenderValues(hc.chart, values, releaseOpts, nil)
 	if err != nil {
 		return nil, []error{err}
@@ -225,7 +225,7 @@ func (o HelmValueOptions) IsEmpty() bool {
 // MergeValues parses and merges the user-supplied value overrides using Helm's own
 // merger (the same code path used by `helm install -f ... --set ...`). The resulting
 // map is the final user-supplied values that should be merged over the chart defaults.
-func (o HelmValueOptions) MergeValues() (map[string]interface{}, error) {
+func (o HelmValueOptions) MergeValues() (map[string]any, error) {
 	opts := helmvalues.Options{
 		ValueFiles:   o.ValueFiles,
 		Values:       o.Values,

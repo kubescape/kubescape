@@ -9,7 +9,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/armosec/utils-go/boolutils"
 	logger "github.com/kubescape/go-logger"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"github.com/stretchr/testify/assert"
@@ -18,8 +17,8 @@ import (
 func TestGetScanParamsFromRequest(t *testing.T) {
 	{
 		body := utilsmetav1.PostScanRequest{
-			Submit:      boolutils.BoolPointer(true),
-			HostScanner: boolutils.BoolPointer(true),
+			Submit:      new(true),
+			HostScanner: new(true),
 			Account:     "aaaaaaaaaa",
 		}
 
@@ -49,8 +48,8 @@ func TestGetScanParamsFromRequest(t *testing.T) {
 
 	{
 		body := utilsmetav1.PostScanRequest{
-			Submit:      boolutils.BoolPointer(false),
-			HostScanner: boolutils.BoolPointer(false),
+			Submit:      new(false),
+			HostScanner: new(false),
 			Account:     "aaaaaaaaaa",
 		}
 
