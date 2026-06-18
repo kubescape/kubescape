@@ -16,10 +16,24 @@ func TestGetOutputPrinters(t *testing.T) {
 		Format:   "json,junit,html",
 	}
 
-	outputPrinters := GetOutputPrinters(scanInfo, ctx, "test-cluster")
+	outputPrinters, err := GetOutputPrinters(scanInfo, ctx, "test-cluster")
 
+	assert.NoError(t, err)
 	assert.NotNil(t, outputPrinters)
 	assert.Equal(t, 3, len(outputPrinters))
+}
+
+func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{
+		ScanType: cautils.ScanTypeControl,
+		Format:   "prometheus,pretty-printer",
+		Output:   "report",
+	}
+
+	_, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "output path collision")
 }
 
 func TestIsPrioritizationScanType(t *testing.T) {
@@ -203,8 +217,9 @@ func TestGetOutputPrintersDeduplicatesPrettyPrinterFallback(t *testing.T) {
 				ScanType: tt.scanType,
 			}
 
-			got := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+			got, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
 
+			assert.NoError(t, err)
 			assert.Len(t, got, tt.expectedLen)
 		})
 	}

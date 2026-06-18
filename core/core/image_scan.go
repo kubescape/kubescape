@@ -230,7 +230,10 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 
 	scanInfo.SetScanType(cautils.ScanTypeImage)
 
-	outputPrinters := GetOutputPrinters(scanInfo, ks.Context(), "")
+	outputPrinters, err := GetOutputPrinters(scanInfo, ks.Context(), "")
+	if err != nil {
+		return false, err
+	}
 
 	uiPrinter := GetUIPrinter(ks.Context(), scanInfo, "")
 

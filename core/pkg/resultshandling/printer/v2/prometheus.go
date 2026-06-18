@@ -18,7 +18,6 @@ import (
 
 const (
 	prometheusOutputFile = "report"
-	prometheusOutputExt  = ".txt"
 )
 
 var _ printer.IPrinter = &PrometheusPrinter{}
@@ -44,8 +43,8 @@ func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) {
 		if outputFile == "" {
 			outputFile = prometheusOutputFile
 		}
-		if filepath.Ext(outputFile) != prometheusOutputExt {
-			outputFile = outputFile + prometheusOutputExt
+		if filepath.Ext(outputFile) != printer.PrometheusOutputExt {
+			outputFile = outputFile + printer.PrometheusOutputExt
 		}
 	}
 	pp.writer = printer.GetWriter(ctx, outputFile)

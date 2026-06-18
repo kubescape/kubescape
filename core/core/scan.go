@@ -39,7 +39,7 @@ type componentInterfaces struct {
 	outputPrinters    []printer.IPrinter
 }
 
-func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInterfaces {
+func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentInterfaces, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "setup interfaces")
 	defer span.End()
 
@@ -95,7 +95,10 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	reportHandler := getReporter(ctx, tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, *scanInfo)
 
 	// setup printers
-	outputPrinters := GetOutputPrinters(scanInfo, ctx, tenantConfig.GetContextName())
+	outputPrinters, err := GetOutputPrinters(scanInfo, ctx, tenantConfig.GetContextName())
+	if err != nil {
+		return componentInterfaces{}, err
+	}
 
 	uiPrinter := GetUIPrinter(ctx, scanInfo, tenantConfig.GetContextName())
 
@@ -108,10 +111,10 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 		outputPrinters:    outputPrinters,
 		uiPrinter:         uiPrinter,
 		hostSensorHandler: hostSensorHandler,
-	}
+	}, nil
 }
 
-func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterName string) []printer.IPrinter {
+func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterName string) ([]printer.IPrinter, error) {
 	formats := scanInfo.Formats()
 	containPrettyPrinter := false
 	outputPrinters := make([]printer.IPrinter, 0)
@@ -119,7 +122,7 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 	for _, format := range formats {
 		usesPrettyPrinter, err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format)
 		if err != nil {
-			logger.L().Ctx(ctx).Fatal(err.Error())
+			return nil, err
 		}
 
 		if usesPrettyPrinter && containPrettyPrinter {
@@ -128,7 +131,7 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 
 		if path := resolvedOutputPath(format, scanInfo.Output); path != "" {
 			if existing, collision := resolvedPaths[path]; collision {
-				logger.L().Ctx(ctx).Fatal(fmt.Sprintf("output path collision: formats %q and %q both resolve to %q; specify distinct output paths or use format-specific file extensions", existing, format, path))
+				return nil, fmt.Errorf("output path collision: formats %q and %q both resolve to %q; specify distinct output paths or use format-specific file extensions", existing, format, path)
 			}
 			resolvedPaths[path] = format
 		}
@@ -142,7 +145,7 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 		}
 	}
 
-	return outputPrinters
+	return outputPrinters, nil
 }
 
 func resolvedOutputPath(format, outputFile string) string {
@@ -160,19 +163,19 @@ func resolvedOutputPath(format, outputFile string) string {
 func fileExtForFormat(format string) string {
 	switch format {
 	case printer.JsonFormat:
-		return ".json"
+		return printer.JsonOutputExt
 	case printer.JunitResultFormat:
-		return ".xml"
+		return printer.JunitOutputExt
 	case printer.SARIFFormat:
-		return ".sarif"
+		return printer.SARIFOutputExt
 	case printer.HtmlFormat:
-		return ".html"
+		return printer.HtmlOutputExt
 	case printer.PdfFormat:
-		return ".pdf"
+		return printer.PdfOutputExt
 	case printer.PrometheusFormat:
-		return ".txt"
+		return printer.PrometheusOutputExt
 	default:
-		return ".txt"
+		return printer.PrettyOutputExt
 	}
 }
 
@@ -184,7 +187,11 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	scanInfo.Init(ctxInit) // initialize scan info
 	defer scanInfo.Cleanup()
 
-	interfaces := getInterfaces(ctxInit, scanInfo)
+	interfaces, err := getInterfaces(ctxInit, scanInfo)
+	if err != nil {
+		spanInit.End()
+		return nil, err
+	}
 	interfaces.report.SetTenantConfig(interfaces.tenantConfig)
 
 	// Only create DownloadReleasedPolicy if not in air-gapped mode

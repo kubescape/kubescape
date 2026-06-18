@@ -22,7 +22,6 @@ import (
 
 const (
 	jsonOutputFile = "report"
-	jsonOutputExt  = ".json"
 )
 
 var _ printer.IPrinter = &JsonPrinter{}
@@ -40,8 +39,8 @@ func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = jsonOutputFile
 		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != jsonOutputExt {
-			outputFile = outputFile + jsonOutputExt
+		if filepath.Ext(strings.TrimSpace(outputFile)) != printer.JsonOutputExt {
+			outputFile = outputFile + printer.JsonOutputExt
 		}
 	}
 	jp.writer = printer.GetWriter(ctx, outputFile)

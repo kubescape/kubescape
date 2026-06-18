@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -38,13 +39,13 @@ func TestSetWriter(t *testing.T) {
 	base := filepath.Join(t.TempDir(), "test-prom")
 	promPrinter = &PrometheusPrinter{}
 	promPrinter.SetWriter(context.Background(), base)
-	expectedPath := base + prometheusOutputExt
+	expectedPath := base + printer.PrometheusOutputExt
 	f, err := os.Open(expectedPath)
 	assert.NoError(t, err)
 	defer f.Close()
 	assert.Equal(t, expectedPath, promPrinter.writer.Name())
 
-	withExt := filepath.Join(t.TempDir(), "test-prom"+prometheusOutputExt)
+	withExt := filepath.Join(t.TempDir(), "test-prom"+printer.PrometheusOutputExt)
 	promPrinter = &PrometheusPrinter{}
 	promPrinter.SetWriter(context.Background(), withExt)
 	f2, err := os.Open(withExt)

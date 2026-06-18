@@ -22,7 +22,6 @@ import (
 
 const (
 	junitOutputFile = "report"
-	junitOutputExt  = ".xml"
 )
 
 var _ printer.IPrinter = &JunitPrinter{}
@@ -104,8 +103,8 @@ func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = junitOutputFile
 		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
-			outputFile = outputFile + junitOutputExt
+		if filepath.Ext(strings.TrimSpace(outputFile)) != printer.JunitOutputExt {
+			outputFile = outputFile + printer.JunitOutputExt
 		}
 	}
 	jp.writer = printer.GetWriter(ctx, outputFile)

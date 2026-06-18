@@ -27,7 +27,6 @@ import (
 
 const (
 	prettyOutputFile = "report"
-	prettyOutputExt  = ".txt"
 )
 
 var _ printer.IPrinter = &PrettyPrinter{}
@@ -201,8 +200,8 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
 		if outputFile == "" {
 			outputFile = prettyOutputFile
 		}
-		if filepath.Ext(outputFile) != prettyOutputExt {
-			outputFile = outputFile + prettyOutputExt
+		if filepath.Ext(outputFile) != printer.PrettyOutputExt {
+			outputFile = outputFile + printer.PrettyOutputExt
 		}
 	}
 
