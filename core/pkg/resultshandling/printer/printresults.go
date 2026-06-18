@@ -24,6 +24,16 @@ const (
 	SARIFFormat       string = "sarif"
 )
 
+const (
+	JsonOutputExt       = ".json"
+	JunitOutputExt      = ".xml"
+	SARIFOutputExt      = ".sarif"
+	HtmlOutputExt       = ".html"
+	PdfOutputExt        = ".pdf"
+	PrometheusOutputExt = ".txt"
+	PrettyOutputExt     = ".txt"
+)
+
 type IPrinter interface {
 	PrintNextSteps()
 	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData)

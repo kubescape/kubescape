@@ -31,7 +31,6 @@ import (
 
 const (
 	sarifOutputFile = "report"
-	sarifOutputExt  = ".sarif"
 
 	toolName    = "kubescape"
 	toolInfoURI = "https://armosec.io"
@@ -80,8 +79,8 @@ func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = sarifOutputFile
 		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != sarifOutputExt {
-			outputFile = outputFile + sarifOutputExt
+		if filepath.Ext(strings.TrimSpace(outputFile)) != printer.SARIFOutputExt {
+			outputFile = outputFile + printer.SARIFOutputExt
 		}
 	}
 	sp.writer = printer.GetWriter(ctx, outputFile)

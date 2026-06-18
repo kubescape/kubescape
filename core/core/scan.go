@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -37,7 +39,7 @@ type componentInterfaces struct {
 	outputPrinters    []printer.IPrinter
 }
 
-func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInterfaces {
+func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentInterfaces, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "setup interfaces")
 	defer span.End()
 
@@ -93,7 +95,10 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	reportHandler := getReporter(ctx, tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, *scanInfo)
 
 	// setup printers
-	outputPrinters := GetOutputPrinters(scanInfo, ctx, tenantConfig.GetContextName())
+	outputPrinters, err := GetOutputPrinters(scanInfo, ctx, tenantConfig.GetContextName())
+	if err != nil {
+		return componentInterfaces{}, err
+	}
 
 	uiPrinter := GetUIPrinter(ctx, scanInfo, tenantConfig.GetContextName())
 
@@ -106,21 +111,29 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 		outputPrinters:    outputPrinters,
 		uiPrinter:         uiPrinter,
 		hostSensorHandler: hostSensorHandler,
-	}
+	}, nil
 }
 
-func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterName string) []printer.IPrinter {
+func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterName string) ([]printer.IPrinter, error) {
 	formats := scanInfo.Formats()
 	containPrettyPrinter := false
 	outputPrinters := make([]printer.IPrinter, 0)
+	resolvedPaths := make(map[string]string)
 	for _, format := range formats {
 		usesPrettyPrinter, err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format)
 		if err != nil {
-			logger.L().Ctx(ctx).Fatal(err.Error())
+			return nil, err
 		}
 
 		if usesPrettyPrinter && containPrettyPrinter {
 			continue
+		}
+
+		if path := resolvedOutputPath(format, scanInfo.Output); path != "" {
+			if existing, collision := resolvedPaths[path]; collision {
+				return nil, fmt.Errorf("output path collision: formats %q and %q both resolve to %q; specify distinct output paths or use format-specific file extensions", existing, format, path)
+			}
+			resolvedPaths[path] = format
 		}
 
 		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo, clusterName)
@@ -132,7 +145,38 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 		}
 	}
 
-	return outputPrinters
+	return outputPrinters, nil
+}
+
+func resolvedOutputPath(format, outputFile string) string {
+	trimmed := strings.TrimSpace(outputFile)
+	if trimmed == "" {
+		return ""
+	}
+	ext := fileExtForFormat(format)
+	if ext != "" && filepath.Ext(trimmed) != ext {
+		return trimmed + ext
+	}
+	return trimmed
+}
+
+func fileExtForFormat(format string) string {
+	switch format {
+	case printer.JsonFormat:
+		return printer.JsonOutputExt
+	case printer.JunitResultFormat:
+		return printer.JunitOutputExt
+	case printer.SARIFFormat:
+		return printer.SARIFOutputExt
+	case printer.HtmlFormat:
+		return printer.HtmlOutputExt
+	case printer.PdfFormat:
+		return printer.PdfOutputExt
+	case printer.PrometheusFormat:
+		return printer.PrometheusOutputExt
+	default:
+		return printer.PrettyOutputExt
+	}
 }
 
 func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
@@ -143,7 +187,11 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	scanInfo.Init(ctxInit) // initialize scan info
 	defer scanInfo.Cleanup()
 
-	interfaces := getInterfaces(ctxInit, scanInfo)
+	interfaces, err := getInterfaces(ctxInit, scanInfo)
+	if err != nil {
+		spanInit.End()
+		return nil, err
+	}
 	interfaces.report.SetTenantConfig(interfaces.tenantConfig)
 
 	// Only create DownloadReleasedPolicy if not in air-gapped mode
