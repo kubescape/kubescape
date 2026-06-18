@@ -109,7 +109,7 @@ func TestBuildScanCoverage_DeterministicOrder(t *testing.T) {
 	}
 
 	first := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		next := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil)
 		assert.Equal(t, first, next)
 	}

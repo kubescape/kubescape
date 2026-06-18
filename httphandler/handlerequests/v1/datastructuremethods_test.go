@@ -138,7 +138,7 @@ func TestSaveExceptionsConcurrent(t *testing.T) {
 	paths := make(map[string]struct{}, goroutines)
 	wg.Add(goroutines)
 
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		go func(id int) {
 			defer wg.Done()
 			exceptions := []armotypes.PostureExceptionPolicy{

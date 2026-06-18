@@ -671,10 +671,10 @@ func TestPrepareHelmSuggestions_RoutesHelmAwayFromYqAndCarriesValuesPaths(t *tes
 	failed := apis.StatusInfo{InnerStatus: apis.StatusFailed}
 
 	// Helm-source resource: must end up in HelmFixSuggestion, never in ResourceFixInfo.
-	helmObj := map[string]interface{}{
+	helmObj := map[string]any{
 		"apiVersion": "apps/v1",
 		"kind":       "Deployment",
-		"metadata":   map[string]interface{}{"name": "api"},
+		"metadata":   map[string]any{"name": "api"},
 	}
 	helmRes := &reporthandling.Resource{
 		Object: helmObj,
@@ -749,10 +749,10 @@ func TestPrepareHelmSuggestions_MixedHelmAndYamlResources(t *testing.T) {
 		t.Fatalf("write yaml fixture: %v", err)
 	}
 
-	yamlObj := map[string]interface{}{
+	yamlObj := map[string]any{
 		"apiVersion": "apps/v1",
 		"kind":       "Deployment",
-		"metadata":   map[string]interface{}{"name": "web"},
+		"metadata":   map[string]any{"name": "web"},
 		// sourcePath flags this as a LocalWorkload and feeds getFilePathAndIndex.
 		"sourcePath": yamlRelPath + ":0",
 	}
@@ -762,10 +762,10 @@ func TestPrepareHelmSuggestions_MixedHelmAndYamlResources(t *testing.T) {
 	}
 	yamlResID := yamlRes.GetID()
 
-	helmObj := map[string]interface{}{
+	helmObj := map[string]any{
 		"apiVersion": "apps/v1",
 		"kind":       "Deployment",
-		"metadata":   map[string]interface{}{"name": "api"},
+		"metadata":   map[string]any{"name": "api"},
 	}
 	helmRes := &reporthandling.Resource{
 		Object: helmObj,

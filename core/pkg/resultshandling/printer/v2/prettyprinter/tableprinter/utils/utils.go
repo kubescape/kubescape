@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/enescakir/emoji"
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -21,7 +22,7 @@ type InfoStars struct {
 
 func MapInfoToPrintInfoFromIface(ctrls []reportsummary.IControlSummary) []InfoStars {
 	infoToPrintInfo := []InfoStars{}
-	infoToPrintInfoMap := map[string]interface{}{}
+	infoToPrintInfoMap := map[string]any{}
 	starCount := "*"
 	for _, ctrl := range ctrls {
 		if ctrl.GetStatus().IsSkipped() && ctrl.GetStatus().Info() != "" {
@@ -40,7 +41,7 @@ func MapInfoToPrintInfoFromIface(ctrls []reportsummary.IControlSummary) []InfoSt
 
 func MapInfoToPrintInfo(controls reportsummary.ControlSummaries) []InfoStars {
 	infoToPrintInfo := []InfoStars{}
-	infoToPrintInfoMap := map[string]interface{}{}
+	infoToPrintInfoMap := map[string]any{}
 	starCount := "*"
 	for _, control := range controls {
 		if control.GetStatus().IsSkipped() && control.GetStatus().Info() != "" {
@@ -95,13 +96,14 @@ func FrameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 			return fmt.Sprintf("Framework scanned: %s\n", frameworks[0].GetName())
 		}
 	} else if len(frameworks) > 1 {
-		p := "Frameworks scanned: "
+		var p strings.Builder
+		p.WriteString("Frameworks scanned: ")
 		i := 0
 		for ; i < len(frameworks)-1; i++ {
-			p += fmt.Sprintf("%s (compliance score: %.2f), ", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
+			fmt.Fprintf(&p, "%s (compliance score: %.2f), ", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
 		}
-		p += fmt.Sprintf("%s (compliance score: %.2f)\n", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
-		return p
+		fmt.Fprintf(&p, "%s (compliance score: %.2f)\n", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
+		return p.String()
 	}
 	return ""
 }
@@ -149,10 +151,9 @@ func CheckShortTerminalWidth(rows []table.Row, headers table.Row) bool {
 				// If cell is not a string, skip this calculation
 				continue
 			}
-			cellLen := len(cellStr)
-			if cellLen > 50 { // Take only 50 characters of each sentence for counting size
-				cellLen = 50
-			}
+			cellLen := min(len(cellStr),
+				// Take only 50 characters of each sentence for counting size
+				50)
 			headerStr, ok := headers[idx].(string)
 			if !ok {
 				// If header is not a string, use cell length

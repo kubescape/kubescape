@@ -140,7 +140,7 @@ func indentContent(content string, indentationSpaces int) string {
 		return ""
 	}
 
-	indentedContent := ""
+	var indentedContent strings.Builder
 
 	if indentationSpaces < 0 {
 		indentationSpaces = 0
@@ -151,9 +151,9 @@ func indentContent(content string, indentationSpaces int) string {
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	for scanner.Scan() {
 		line := scanner.Text()
-		indentedContent += (indentSpaces + line + "\n")
+		indentedContent.WriteString((indentSpaces + line + "\n"))
 	}
-	return indentedContent
+	return indentedContent.String()
 }
 
 func getLineToInsert(fixInfoMetadata *fixInfoMetadata) int {

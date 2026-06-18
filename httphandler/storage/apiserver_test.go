@@ -475,22 +475,22 @@ func Test_RoleBindingResourceTripletToSlug(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			var obj1 map[string]interface{}
+			var obj1 map[string]any
 			_ = json.Unmarshal(readTestFile(tt.role), &obj1)
 			clusterRole := objectsenvelopes.NewObject(obj1)
 
-			var obj2 map[string]interface{}
+			var obj2 map[string]any
 			_ = json.Unmarshal(readTestFile(tt.roleBinding), &obj2)
 			clusterRoleBinding := objectsenvelopes.NewObject(obj2)
 
 			slugs := []string{}
 
 			subjects, _ := workloadinterface.InspectMap(clusterRoleBinding.GetObject(), "subjects")
-			if val, ok := subjects.([]interface{}); ok {
+			if val, ok := subjects.([]any); ok {
 				for _, s := range val {
-					subject := workloadinterface.NewBaseObject(map[string]interface{}{})
+					subject := workloadinterface.NewBaseObject(map[string]any{})
 
-					if subjectObj, ok := s.(map[string]interface{}); ok {
+					if subjectObj, ok := s.(map[string]any); ok {
 						if name, ok := subjectObj["name"]; ok {
 							subject.SetName(name.(string))
 						}
@@ -522,12 +522,12 @@ func TestStorePostureReportResults_SkipsOrphanedRoleBinding(t *testing.T) {
 
 	// RegoResponseVector with only 1 related object (RoleBinding, no Role) — simulates an
 	// orphaned binding whose referenced Role/ClusterRole has been deleted.
-	orphanObj := map[string]interface{}{
+	orphanObj := map[string]any{
 		"kind":      "ServiceAccount",
 		"name":      "my-sa",
 		"namespace": "default",
-		"relatedObjects": []interface{}{
-			map[string]interface{}{
+		"relatedObjects": []any{
+			map[string]any{
 				"kind":       "RoleBinding",
 				"name":       "orphan-binding",
 				"namespace":  "default",
@@ -537,10 +537,10 @@ func TestStorePostureReportResults_SkipsOrphanedRoleBinding(t *testing.T) {
 	}
 
 	// Normal Pod resource — should be persisted regardless of the orphaned binding above.
-	podObj := map[string]interface{}{
+	podObj := map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"name":      "test-pod",
 			"namespace": "default",
 		},

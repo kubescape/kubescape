@@ -19,7 +19,7 @@ type TimedCache[T any] struct {
 	mutex      sync.RWMutex
 	stopChan   chan struct{}
 	stopWg     sync.WaitGroup
-	stopped    uint32
+	stopped    atomic.Uint32
 	// invalidateHook, if non-nil, is called inside invalidateTask after the expiry
 	// check succeeds and before invalidateLocked. In the fixed implementation this
 	// call occurs while the write lock is held, so a concurrent Set blocks until
@@ -69,7 +69,7 @@ func (c *TimedCache[T]) Get() (T, bool) {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 
-	if atomic.LoadUint32(&c.stopped) != cacheStateActive {
+	if c.stopped.Load() != cacheStateActive {
 		return c.value, false
 	}
 
@@ -106,7 +106,7 @@ func (c *TimedCache[T]) invalidateTask() {
 }
 
 func (c *TimedCache[T]) Stop() {
-	if !atomic.CompareAndSwapUint32(&c.stopped, cacheStateActive, cacheStateStopping) {
+	if !c.stopped.CompareAndSwap(cacheStateActive, cacheStateStopping) {
 		return
 	}
 	close(c.stopChan)
@@ -114,7 +114,7 @@ func (c *TimedCache[T]) Stop() {
 }
 
 func (c *TimedCache[T]) Invalidate() {
-	if atomic.LoadUint32(&c.stopped) != cacheStateActive {
+	if c.stopped.Load() != cacheStateActive {
 		return
 	}
 	c.invalidateExternal()
@@ -127,7 +127,7 @@ func (c *TimedCache[T]) invalidateExternal() {
 }
 
 func (c *TimedCache[T]) invalidateLocked() {
-	if atomic.LoadUint32(&c.stopped) != cacheStateActive {
+	if c.stopped.Load() != cacheStateActive {
 		return
 	}
 	c.isSet = false

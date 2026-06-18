@@ -119,10 +119,10 @@ func TestNewPrometheusPrinterStoresVerboseMode(t *testing.T) {
 }
 
 func workload(apiVersion, kind, namespace, name string) workloadinterface.IMetadata {
-	return workloadinterface.NewWorkloadObj(map[string]interface{}{
+	return workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": apiVersion,
 		"kind":       kind,
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"namespace": namespace,
 			"name":      name,
 		},

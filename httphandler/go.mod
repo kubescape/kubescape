@@ -1,6 +1,6 @@
 module github.com/kubescape/kubescape/v3/httphandler
 
-go 1.25.10
+go 1.26.0
 
 replace github.com/kubescape/kubescape/v3 => ../
 

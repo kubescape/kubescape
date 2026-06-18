@@ -129,16 +129,16 @@ func getRelativePath(p string) string {
 // Converts a YAML object to a JSON object
 func TestConvertYamlToJson(t *testing.T) {
 	tests := []struct {
-		yamlObj map[interface{}]interface{}
-		jsonObj map[string]interface{}
+		yamlObj map[any]any
+		jsonObj map[string]any
 	}{
 		{
-			yamlObj: map[interface{}]interface{}{
+			yamlObj: map[any]any{
 				"name": "John",
 				"age":  30,
 				"city": "New York",
 			},
-			jsonObj: map[string]interface{}{
+			jsonObj: map[string]any{
 				"name": "John",
 				"age":  30,
 				"city": "New York",

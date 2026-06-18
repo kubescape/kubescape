@@ -38,7 +38,7 @@ func PolicyCachePath(identifier string) (string, error) {
 }
 
 // SaveInFile serializes any object as a JSON file.
-func SaveInFile(object interface{}, targetFile string) error {
+func SaveInFile(object any, targetFile string) error {
 	encodedData, err := json.MarshalIndent(object, "", "  ")
 	if err != nil {
 		return err
@@ -128,18 +128,12 @@ func httpRespToString(resp *http.Response) (string, error) {
 	_, err := io.Copy(&strBuilder, resp.Body)
 	respStr := strBuilder.String()
 	if err != nil {
-		respStrNewLen := len(respStr)
-		if respStrNewLen > 1024 {
-			respStrNewLen = 1024
-		}
+		respStrNewLen := min(len(respStr), 1024)
 		return "", fmt.Errorf("http-error: '%s', reason: '%s'", resp.Status, respStr[:respStrNewLen])
 		// return "", fmt.Errorf("HTTP request failed. URL: '%s', Read-ERROR: '%s', HTTP-CODE: '%s', BODY(top): '%s', HTTP-HEADERS: %v, HTTP-BODY-BUFFER-LENGTH: %v", resp.Request.URL.RequestURI(), err, resp.Status, respStr[:respStrNewLen], resp.Header, bytesNum)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respStrNewLen := len(respStr)
-		if respStrNewLen > 1024 {
-			respStrNewLen = 1024
-		}
+		respStrNewLen := min(len(respStr), 1024)
 		err = fmt.Errorf("http-error: '%s', reason: '%s'", resp.Status, respStr[:respStrNewLen])
 	}
 

@@ -19,38 +19,38 @@ func TestConvertCRDToEnvelope(t *testing.T) {
 	tests := []struct {
 		name         string
 		resourceType k8shostsensor.HostSensorResource
-		object       map[string]interface{}
-		wantData     map[string]interface{}
+		object       map[string]any
+		wantData     map[string]any
 		wantErr      string
 	}{
 		{
 			name:         "maps spec to envelope data and removes nodeName",
 			resourceType: k8shostsensor.OsReleaseFile,
-			object: map[string]interface{}{
-				"metadata": map[string]interface{}{"name": "node-1"},
-				"spec": map[string]interface{}{
+			object: map[string]any{
+				"metadata": map[string]any{"name": "node-1"},
+				"spec": map[string]any{
 					"nodeName": "node-1",
 					"pretty":   "Ubuntu",
 				},
 			},
-			wantData: map[string]interface{}{"pretty": "Ubuntu"},
+			wantData: map[string]any{"pretty": "Ubuntu"},
 		},
 		{
 			name:         "unwraps nested resource data",
 			resourceType: k8shostsensor.KubeletInfo,
-			object: map[string]interface{}{
-				"metadata": map[string]interface{}{"name": "node-2"},
-				"spec": map[string]interface{}{
-					"KubeletInfo": map[string]interface{}{"version": "v1.30.0"},
+			object: map[string]any{
+				"metadata": map[string]any{"name": "node-2"},
+				"spec": map[string]any{
+					"KubeletInfo": map[string]any{"version": "v1.30.0"},
 				},
 			},
-			wantData: map[string]interface{}{"version": "v1.30.0"},
+			wantData: map[string]any{"version": "v1.30.0"},
 		},
 		{
 			name:         "missing spec returns error",
 			resourceType: k8shostsensor.KernelVersion,
-			object: map[string]interface{}{
-				"metadata": map[string]interface{}{"name": "node-3"},
+			object: map[string]any{
+				"metadata": map[string]any{"name": "node-3"},
 			},
 			wantErr: "spec not found in CRD",
 		},
@@ -115,10 +115,10 @@ func TestHasCloudProviderInfo(t *testing.T) {
 
 func TestListCRDResources(t *testing.T) {
 	item := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": hostDataGroup + "/" + hostDataVersion,
 			"kind":       "OsReleaseFile",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name": "node-1",
 			},
 		},
@@ -144,7 +144,7 @@ func TestHostSensorHandlerLifecycleEdges(t *testing.T) {
 	require.ErrorContains(t, err, "nil k8s interface received")
 }
 
-func mustJSON(t *testing.T, value map[string]interface{}) string {
+func mustJSON(t *testing.T, value map[string]any) string {
 	t.Helper()
 
 	out, err := json.Marshal(value)
@@ -170,7 +170,7 @@ func TestInitAllowsEmptyCRDList(t *testing.T) {
 func TestConvertCRDToEnvelopeKeepsObjectMetadataName(t *testing.T) {
 	item := unstructured.Unstructured{}
 	item.SetName("node-from-metadata")
-	require.NoError(t, unstructured.SetNestedMap(item.Object, map[string]interface{}{"value": "5.15.0"}, "spec"))
+	require.NoError(t, unstructured.SetNestedMap(item.Object, map[string]any{"value": "5.15.0"}, "spec"))
 
 	got, err := (&HostSensorHandler{}).convertCRDToEnvelope(item, k8shostsensor.KernelVersion)
 

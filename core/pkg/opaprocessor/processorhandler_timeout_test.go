@@ -68,7 +68,7 @@ func TestProcess_ControlTimeout(t *testing.T) {
 					{
 						PortalBase: armotypes.PortalBase{
 							Name:       "blocking-rule",
-							Attributes: map[string]interface{}{},
+							Attributes: map[string]any{},
 						},
 						Rule: blockingRule,
 						Match: []reporthandling.RuleMatchObjects{

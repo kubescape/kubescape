@@ -32,30 +32,30 @@ func TestIsYAMLDocumentSeparator(t *testing.T) {
 
 func TestMergeMaps(t *testing.T) {
 	t.Run("override wins on conflict", func(t *testing.T) {
-		base := map[string]interface{}{"a": 1, "b": 2}
-		over := map[string]interface{}{"b": 99}
+		base := map[string]any{"a": 1, "b": 2}
+		over := map[string]any{"b": 99}
 		got := mergeMaps(base, over)
 		assert.Equal(t, 1, got["a"])
 		assert.Equal(t, 99, got["b"])
 	})
 
 	t.Run("deep merge nested maps", func(t *testing.T) {
-		base := map[string]interface{}{
-			"top": map[string]interface{}{"x": 1, "y": 2},
+		base := map[string]any{
+			"top": map[string]any{"x": 1, "y": 2},
 		}
-		over := map[string]interface{}{
-			"top": map[string]interface{}{"y": 42, "z": 3},
+		over := map[string]any{
+			"top": map[string]any{"y": 42, "z": 3},
 		}
 		got := mergeMaps(base, over)
-		nested := got["top"].(map[string]interface{})
+		nested := got["top"].(map[string]any)
 		assert.Equal(t, 1, nested["x"])
 		assert.Equal(t, 42, nested["y"])
 		assert.Equal(t, 3, nested["z"])
 	})
 
 	t.Run("does not mutate base", func(t *testing.T) {
-		base := map[string]interface{}{"k": "original"}
-		over := map[string]interface{}{"k": "changed"}
+		base := map[string]any{"k": "original"}
+		over := map[string]any{"k": "changed"}
 		mergeMaps(base, over)
 		assert.Equal(t, "original", base["k"])
 	})

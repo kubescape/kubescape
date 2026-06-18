@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -21,7 +22,6 @@ import (
 
 const (
 	pdfOutputFile = "report"
-	pdfOutputExt  = ".pdf"
 )
 
 var _ printer.IPrinter = &PdfPrinter{}
@@ -39,16 +39,16 @@ func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) {
 	if outputFile == "" {
 		// Binary PDF must never fall back to stdout: it corrupts TTYs and
 		// is rarely what the user intended. Default to ./report.pdf.
-		outputFile = pdfOutputFile + pdfOutputExt
+		outputFile = pdfOutputFile + printer.PdfOutputExt
 		logger.L().Info("no --output specified for pdf format; writing to default file",
 			helpers.String("filename", outputFile))
-	} else if filepath.Ext(outputFile) != pdfOutputExt {
-		outputFile = outputFile + pdfOutputExt
+	} else if filepath.Ext(outputFile) != printer.PdfOutputExt {
+		outputFile = outputFile + printer.PdfOutputExt
 	}
 	// PDF must never fall back to stdout on file-create errors either
 	// (e.g. read-only cwd) — use the no-stdout-fallback helper, which
 	// falls back to a temp file rather than corrupting the TTY.
-	pp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+pdfOutputExt)
+	pp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+printer.PdfOutputExt)
 }
 
 func (pp *PdfPrinter) Score(score float32) {
@@ -116,8 +116,8 @@ func (pp *PdfPrinter) getFormattedInformation(infoMap []infoStars) []string {
 func (pp *PdfPrinter) getTableObjects(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) *[]pdf.TableObject {
 	infoToPrintInfoMap := mapInfoToPrintInfo(summaryDetails.Controls)
 	var controls []pdf.TableObject
-	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
-		for _, c := range sortedControlIDs[i] {
+	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
+		for _, c := range sortedControlID {
 			row := generateTableRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfoMap)
 			controls = append(controls, *pdf.NewTableRow(
 				row.ref, row.name, row.counterFailed, row.counterAll, row.severity, row.complianceScore, getSeverityColor,

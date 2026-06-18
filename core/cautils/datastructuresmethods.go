@@ -75,7 +75,7 @@ func ShouldSkipRule(control reporthandling.Control, rule reporthandling.PolicyRu
 // Checks that kubescape version is in range of use for this rule
 // In local build (BuildNumber = ""):
 // returns true only if rule doesn't have the "until" attribute
-func isRuleKubescapeVersionCompatible(attributes map[string]interface{}, version string) bool {
+func isRuleKubescapeVersionCompatible(attributes map[string]any, version string) bool {
 	normalizedVersion := version
 	if version != "" && !semver.IsValid(version) {
 		normalizedVersion = "v" + version

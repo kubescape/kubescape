@@ -122,8 +122,8 @@ func (rbacObjects *RBACObjects) rbacObjectsToResources(resources *rbacutils.Rbac
 	return allresources, nil
 }
 
-func convertToMap(obj interface{}) (map[string]interface{}, error) {
-	var inInterface map[string]interface{}
+func convertToMap(obj any) (map[string]any, error) {
+	var inInterface map[string]any
 	inrec, err := json.Marshal(obj)
 	if err != nil {
 		return nil, err

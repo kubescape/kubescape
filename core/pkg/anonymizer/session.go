@@ -1,6 +1,7 @@
 package anonymizer
 
 import (
+	"maps"
 	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -138,9 +139,7 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, repoTran
 				len(control.ResourceIDs.All()),
 			)
 
-			for resourceID, status := range control.ResourceIDs.All() {
-				originalResourceIDs[resourceID] = status
-			}
+			maps.Copy(originalResourceIDs, control.ResourceIDs.All())
 
 			remappedResourceIDs.Clear()
 
@@ -258,16 +257,16 @@ func anonymizeSourcePath(sourcePath string, mapping *Mapping) string {
 
 // anonymizeAnnotationNodes recursively traverses unstructured resource objects
 // to locate metadata blocks regardless of workload nesting depth.
-func anonymizeAnnotationNodes(node interface{}, mapping *Mapping) {
+func anonymizeAnnotationNodes(node any, mapping *Mapping) {
 	switch v := node.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		anonymizeAnnotationMap(v, mapping)
 
 		for _, child := range v {
 			anonymizeAnnotationNodes(child, mapping)
 		}
 
-	case []interface{}:
+	case []any:
 		for _, item := range v {
 			anonymizeAnnotationNodes(item, mapping)
 		}
@@ -276,13 +275,13 @@ func anonymizeAnnotationNodes(node interface{}, mapping *Mapping) {
 
 // anonymizeAnnotationMap anonymizes string annotation values while preserving
 // annotation keys, which remain meaningful Kubernetes identifiers.
-func anonymizeAnnotationMap(obj map[string]interface{}, mapping *Mapping) {
+func anonymizeAnnotationMap(obj map[string]any, mapping *Mapping) {
 	rawMetadata, ok := obj["metadata"]
 	if !ok || rawMetadata == nil {
 		return
 	}
 
-	metadata, ok := rawMetadata.(map[string]interface{})
+	metadata, ok := rawMetadata.(map[string]any)
 	if !ok {
 		return
 	}
@@ -292,7 +291,7 @@ func anonymizeAnnotationMap(obj map[string]interface{}, mapping *Mapping) {
 		return
 	}
 
-	annotations, ok := rawAnnotations.(map[string]interface{})
+	annotations, ok := rawAnnotations.(map[string]any)
 	if !ok {
 		return
 	}

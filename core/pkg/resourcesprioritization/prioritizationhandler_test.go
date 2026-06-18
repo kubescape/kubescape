@@ -56,7 +56,7 @@ func ControlMock(id string, baseScore float32, tags, categories []string) report
 		ControlID: id,
 		BaseScore: baseScore,
 		PortalBase: armotypes.PortalBase{
-			Attributes: map[string]interface{}{
+			Attributes: map[string]any{
 				"controlTypeTags": tags,
 				"attackTracks": []reporthandling.AttackTrackCategories{
 					{

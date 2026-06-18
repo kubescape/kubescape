@@ -23,8 +23,8 @@ type CRDReference struct {
 }
 
 // CRDReferenceAttributes builds attribute entries that mark a policy as CRD-backed.
-func CRDReferenceAttributes(ref CRDReference) map[string]interface{} {
-	attrs := map[string]interface{}{
+func CRDReferenceAttributes(ref CRDReference) map[string]any {
+	attrs := map[string]any{
 		crdKindAttribute: ref.Kind,
 		crdNameAttribute: ref.Name,
 	}
@@ -75,7 +75,7 @@ func UnstructuredForCRD(ref CRDReference) *unstructured.Unstructured {
 	return obj
 }
 
-func getStringAttribute(attrs map[string]interface{}, key string) (string, bool) {
+func getStringAttribute(attrs map[string]any, key string) (string, bool) {
 	raw, ok := attrs[key]
 	if !ok {
 		return "", false

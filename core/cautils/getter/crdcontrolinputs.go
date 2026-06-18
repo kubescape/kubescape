@@ -87,7 +87,7 @@ func extractControlsInputs(obj *unstructured.Unstructured) (map[string][]string,
 
 	controls := make(map[string][]string, len(controlsRaw))
 	for key, val := range controlsRaw {
-		arr, ok := val.([]interface{})
+		arr, ok := val.([]any)
 		if !ok {
 			logger.L().Warning("unexpected type for control input, skipping",
 				helpers.String("key", key))

@@ -100,7 +100,7 @@ func TestPullResources_SemaphoreContextCancellation(t *testing.T) {
 	}
 
 	qrs := make(QueryableResources, maxParallelResourcePulls+2)
-	for i := 0; i < maxParallelResourcePulls+2; i++ {
+	for i := range maxParallelResourcePulls + 2 {
 		key := fmt.Sprintf("//v1/resource%d", i)
 		qrs[key] = QueryableResource{GroupVersionResourceTriplet: key}
 	}
@@ -114,7 +114,7 @@ func TestPullResources_SemaphoreContextCancellation(t *testing.T) {
 		_, _, failedQueries = handler.pullResources(ctx, qrs, &EmptySelector{})
 	}()
 
-	for i := 0; i < maxParallelResourcePulls; i++ {
+	for range maxParallelResourcePulls {
 		select {
 		case <-listStarted:
 		case <-time.After(5 * time.Second):

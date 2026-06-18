@@ -54,7 +54,7 @@ func ValidateSeverity(severity string) error {
 // ValidateScanFormat returns an error if any comma-separated entry in format is not a supported format.
 func ValidateScanFormat(format string, supported []string) error {
 	var entries int
-	for _, f := range strings.Split(format, ",") {
+	for f := range strings.SplitSeq(format, ",") {
 		f = strings.TrimSpace(f)
 		if f == "" {
 			continue

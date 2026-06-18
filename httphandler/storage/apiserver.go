@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"maps"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
@@ -552,8 +553,6 @@ func mergeMaps(existing, new map[string]string) map[string]string {
 	if existing == nil {
 		existing = make(map[string]string)
 	}
-	for k, v := range new {
-		existing[k] = v
-	}
+	maps.Copy(existing, new)
 	return existing
 }
