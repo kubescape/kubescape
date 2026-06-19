@@ -37,15 +37,17 @@ type ScanCoverage struct {
 // Fixed penalties (in percentage points) applied to the coverage score for
 // each incompleteness that does not by itself mark a control unevaluated.
 const (
+	failedGVRPullPenalty     float32 = 3
 	partialGVRPullPenalty    float32 = 2
 	policyDegradationPenalty float32 = 5
 )
 
 // ComputeCoverageScore derives CoverageScore from the controls actually
-// evaluated, discounted by a fixed penalty for every partial GVR pull and
-// every degraded policy input. The result is clamped to [0, 100]. totalControls
-// is the number of controls in scope. This is the single point where the score
-// is computed so that every consumer reports an identical value.
+// evaluated, discounted by a fixed penalty for every silent failed GVR pull,
+// every partial GVR pull, and every degraded policy input. The result is
+// clamped to [0, 100]. totalControls is the number of controls in scope.
+// This is the single point where the score is computed so that every consumer
+// reports an identical value.
 func (c *ScanCoverage) ComputeCoverageScore(totalControls int) {
 	c.TotalControls = totalControls
 	c.EvaluatedControls = totalControls - len(c.NotEvaluatedControls)
@@ -58,6 +60,24 @@ func (c *ScanCoverage) ComputeCoverageScore(totalControls int) {
 		score = float32(c.EvaluatedControls) / float32(totalControls) * 100
 	}
 
+	// A failed GVR whose controls all ended up in NotEvaluatedControls is
+	// already charged via the ratio above; only penalise GVRs whose failure
+	// is otherwise invisible because their controls still evaluated via other
+	// GVRs.
+	chargedGVRs := make(map[string]struct{}, len(c.NotEvaluatedControls))
+	for _, ne := range c.NotEvaluatedControls {
+		for _, gvr := range ne.MissingGVRs {
+			chargedGVRs[gvr] = struct{}{}
+		}
+	}
+	silentFailedGVRs := 0
+	for _, f := range c.FailedGVRPulls {
+		if _, ok := chargedGVRs[f.GVR]; !ok {
+			silentFailedGVRs++
+		}
+	}
+
+	score -= failedGVRPullPenalty * float32(silentFailedGVRs)
 	score -= partialGVRPullPenalty * float32(len(c.PartialGVRPulls))
 	score -= policyDegradationPenalty * float32(len(c.PolicyDegradations))
 
@@ -69,7 +89,8 @@ func (c *ScanCoverage) ComputeCoverageScore(totalControls int) {
 	}
 
 	c.CoverageScore = score
-	c.Degraded = score < 100
+	c.Degraded = len(c.FailedGVRPulls) > 0 || len(c.PartialGVRPulls) > 0 ||
+		len(c.PolicyDegradations) > 0 || len(c.NotEvaluatedControls) > 0
 }
 
 // PolicyDegradation records a policy input that could not be loaded from its

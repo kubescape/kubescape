@@ -231,6 +231,26 @@ func TestComputeCoverageScore_ZeroControls(t *testing.T) {
 	assert.False(t, c.Degraded)
 }
 
+func TestComputeCoverageScore_SilentFailedGVRReducesScore(t *testing.T) {
+	// networkpolicies failed entirely, but C-0001 also depends on deployments
+	// which succeeded, so it stays evaluated and is NOT in NotEvaluatedControls.
+	// The failed GVR is therefore silent and must still reduce the score.
+	infoMap := map[string]apis.StatusInfo{
+		"networking.k8s.io/v1/networkpolicies": {InnerStatus: apis.StatusSkipped, InnerInfo: "RBAC denied"},
+	}
+	resourceToControlsMap := map[string][]string{
+		"networking.k8s.io/v1/networkpolicies": {"C-0001"},
+		"apps/v1/deployments":                  {"C-0001"},
+	}
+	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil)
+	assert.Len(t, coverage.FailedGVRPulls, 1)
+	assert.Empty(t, coverage.NotEvaluatedControls)
+
+	coverage.ComputeCoverageScore(10)
+	assert.Less(t, coverage.CoverageScore, float32(100))
+	assert.True(t, coverage.Degraded)
+}
+
 func TestBuildScanCoverage_PartialGVRPullsPassedThrough(t *testing.T) {
 	// Partial failures (GVR has some data, specific selector failed) must flow
 	// into ScanCoverage.PartialGVRPulls so consumers can detect incomplete scans
