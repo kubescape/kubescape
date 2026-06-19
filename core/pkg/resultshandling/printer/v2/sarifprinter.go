@@ -218,7 +218,7 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 			if effectiveBase == "" && resourceSource.Path != "" {
 				effectiveBase = resourceSource.Path
 			}
-			rsrcAbsPath := path.Join(effectiveBase, filepath)
+			rsrcAbsPath := filepath.Join(effectiveBase, filepath)
 			locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
 			if err != nil {
 				logger.L().Warning("failed to create location resolver, SARIF locations will default to line 1", helpers.Error(err))
