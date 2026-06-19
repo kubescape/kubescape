@@ -28,9 +28,9 @@ func anonymizeContainerMetadata(resource workloadinterface.IMetadata, mapping *M
 // into generic maps or as fully unstructured manifests depending on the scan source,
 // so traversal stays representation-agnostic and delegates shape-specific handling
 // to dedicated helpers.
-func anonymizePodSpecs(node interface{}, mapping *Mapping) {
+func anonymizePodSpecs(node any, mapping *Mapping) {
 	switch v := node.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		anonymizeContainerList(v, "containers", mapping)
 		anonymizeContainerList(v, "initContainers", mapping)
 		anonymizeEphemeralContainerList(v, "ephemeralContainers", mapping)
@@ -41,7 +41,7 @@ func anonymizePodSpecs(node interface{}, mapping *Mapping) {
 			anonymizePodSpecs(child, mapping)
 		}
 
-	case []interface{}:
+	case []any:
 		for _, item := range v {
 			anonymizePodSpecs(item, mapping)
 		}
@@ -50,7 +50,7 @@ func anonymizePodSpecs(node interface{}, mapping *Mapping) {
 
 // anonymizeContainerFields handles unstructured container objects represented
 // as map[string]interface{}.
-func anonymizeContainerFields(container map[string]interface{}, mapping *Mapping) {
+func anonymizeContainerFields(container map[string]any, mapping *Mapping) {
 	if name, ok := container["name"].(string); ok && name != "" {
 		container["name"] = mapping.GetOrCreate("ctr", name)
 	}
@@ -64,7 +64,7 @@ func anonymizeContainerFields(container map[string]interface{}, mapping *Mapping
 }
 
 func anonymizeContainerList(
-	obj map[string]interface{},
+	obj map[string]any,
 	key string,
 	mapping *Mapping,
 ) {
@@ -91,9 +91,9 @@ func anonymizeContainerList(
 		return
 	}
 
-	if containers, ok := rawContainers.([]interface{}); ok {
+	if containers, ok := rawContainers.([]any); ok {
 		for _, item := range containers {
-			container, ok := item.(map[string]interface{})
+			container, ok := item.(map[string]any)
 			if !ok {
 				continue
 			}
@@ -106,7 +106,7 @@ func anonymizeContainerList(
 }
 
 func anonymizeEphemeralContainerList(
-	obj map[string]interface{},
+	obj map[string]any,
 	key string,
 	mapping *Mapping,
 ) {
@@ -133,9 +133,9 @@ func anonymizeEphemeralContainerList(
 		return
 	}
 
-	if containers, ok := rawContainers.([]interface{}); ok {
+	if containers, ok := rawContainers.([]any); ok {
 		for _, item := range containers {
-			container, ok := item.(map[string]interface{})
+			container, ok := item.(map[string]any)
 			if !ok {
 				continue
 			}
@@ -175,19 +175,19 @@ func anonymizeTypedEnv(envVars []corev1.EnvVar, mapping *Mapping) {
 }
 
 // anonymizeUnstructuredEnv handles env entries in generic manifest maps.
-func anonymizeUnstructuredEnv(container map[string]interface{}, mapping *Mapping) {
+func anonymizeUnstructuredEnv(container map[string]any, mapping *Mapping) {
 	rawEnv, exists := container["env"]
 	if !exists || rawEnv == nil {
 		return
 	}
 
-	envVars, ok := rawEnv.([]interface{})
+	envVars, ok := rawEnv.([]any)
 	if !ok {
 		return
 	}
 
 	for _, item := range envVars {
-		envVar, ok := item.(map[string]interface{})
+		envVar, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -205,7 +205,7 @@ func anonymizeUnstructuredEnv(container map[string]interface{}, mapping *Mapping
 			continue
 		}
 
-		valueFrom, ok := rawValueFrom.(map[string]interface{})
+		valueFrom, ok := rawValueFrom.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -237,14 +237,14 @@ func anonymizeTypedEnvFrom(envFrom []corev1.EnvFromSource, mapping *Mapping) {
 }
 
 // anonymizeUnstructuredEnvFrom handles envFrom entries in generic manifest maps.
-func anonymizeUnstructuredEnvFrom(container map[string]interface{}, mapping *Mapping) {
-	rawEnvFrom, ok := container["envFrom"].([]interface{})
+func anonymizeUnstructuredEnvFrom(container map[string]any, mapping *Mapping) {
+	rawEnvFrom, ok := container["envFrom"].([]any)
 	if !ok {
 		return
 	}
 
 	for _, item := range rawEnvFrom {
-		envFrom, ok := item.(map[string]interface{})
+		envFrom, ok := item.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -255,11 +255,11 @@ func anonymizeUnstructuredEnvFrom(container map[string]interface{}, mapping *Map
 }
 
 func anonymizeUnstructuredReference(
-	obj map[string]interface{},
+	obj map[string]any,
 	key string,
 	mapping *Mapping,
 ) {
-	ref, ok := obj[key].(map[string]interface{})
+	ref, ok := obj[key].(map[string]any)
 	if !ok {
 		return
 	}
@@ -334,7 +334,7 @@ func isSensitiveEnvName(name string) bool {
 }
 
 func anonymizeImagePullSecrets(
-	obj map[string]interface{},
+	obj map[string]any,
 	mapping *Mapping,
 ) {
 	rawRefs, ok := obj["imagePullSecrets"]
@@ -355,9 +355,9 @@ func anonymizeImagePullSecrets(
 	}
 
 	// Unstructured objects (runtime / normalized object path)
-	if refs, ok := rawRefs.([]interface{}); ok {
+	if refs, ok := rawRefs.([]any); ok {
 		for _, item := range refs {
-			ref, ok := item.(map[string]interface{})
+			ref, ok := item.(map[string]any)
 			if !ok {
 				continue
 			}
@@ -377,7 +377,7 @@ func anonymizeImagePullSecrets(
 // anonymizeServiceAccountName anonymizes pod-level service account references
 // across both typed and unstructured workload representations.
 func anonymizeServiceAccountName(
-	obj map[string]interface{},
+	obj map[string]any,
 	mapping *Mapping,
 ) {
 	for _, key := range []string{

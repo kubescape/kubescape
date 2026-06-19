@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -22,6 +23,10 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+)
+
+const (
+	prettyOutputFile = "report"
 )
 
 var _ printer.IPrinter = &PrettyPrinter{}
@@ -184,17 +189,23 @@ func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 }
 
 func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
-	// PrettyPrinter should accept Stdout at least by its full name (path)
-	// and follow the common behavior of outputting to a default filename
-	// otherwise
 	if outputFile == os.Stdout.Name() {
 		pp.writer = printer.GetWriter(ctx, "")
 		pp.SetMainPrinter()
 		return
 	}
 
-	pp.writer = printer.GetWriter(ctx, outputFile)
+	if outputFile != "" {
+		outputFile = strings.TrimSpace(outputFile)
+		if outputFile == "" {
+			outputFile = prettyOutputFile
+		}
+		if filepath.Ext(outputFile) != printer.PrettyOutputExt {
+			outputFile = outputFile + printer.PrettyOutputExt
+		}
+	}
 
+	pp.writer = printer.GetWriter(ctx, outputFile)
 	pp.SetMainPrinter()
 }
 
@@ -202,8 +213,8 @@ func (pp *PrettyPrinter) Score(_ float32) {
 }
 
 func (pp *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, sortedControlIDs [][]string) {
-	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
-		for _, c := range sortedControlIDs[i] {
+	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
+		for _, c := range sortedControlID {
 			controlSummary := controls.GetControl(reportsummary.EControlCriteriaID, c) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
 			pp.printTitle(controlSummary)
 			pp.printResources(controlSummary, allResources)
@@ -314,11 +325,11 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 }
 
 func getSeparator(sep string) string {
-	s := ""
-	for i := 0; i < 80; i++ {
-		s += sep
+	var s strings.Builder
+	for range 80 {
+		s.WriteString(sep)
 	}
-	return s
+	return s.String()
 }
 
 func isPrintSeparatorType(scanType cautils.ScanTypes) bool {
@@ -341,6 +352,8 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 	fmt.Fprintf(pp.writer, "\n%s\n", getSeparator("─"))
 	fmt.Fprintf(pp.writer, "Scan Coverage Warning\n")
 	fmt.Fprintf(pp.writer, "%s\n", getSeparator("─"))
+
+	fmt.Fprintf(pp.writer, "\nScan coverage score: %d%% (%d/%d controls evaluated)\n", cautils.Float32ToIntFloor(coverage.CoverageScore), coverage.EvaluatedControls, coverage.TotalControls)
 
 	if len(coverage.FailedGVRPulls) > 0 {
 		fmt.Fprintf(pp.writer, "\nThe following resource types could not be collected:\n")

@@ -67,14 +67,14 @@ func failedControl(id, name string, rules ...resourcesresults.ResourceAssociated
 func buildResource(t *testing.T, baseDir, filename, kind, name string, documentIndex int) *reporthandling.Resource {
 	t.Helper()
 
-	obj := map[string]interface{}{
+	obj := map[string]any{
 		"apiVersion": "apps/v1",
 		"kind":       kind,
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"name":      name,
 			"namespace": "default",
 		},
-		"spec": map[string]interface{}{},
+		"spec": map[string]any{},
 	}
 	lw := localworkload.NewLocalWorkload(obj)
 	lw.SetPath(filename + ":" + itoa(documentIndex))

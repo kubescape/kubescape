@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -187,7 +186,7 @@ func (h *FixHandler) buildResourcesMap() map[string]*reporthandling.Resource {
 	return resourceIdToRawResource
 }
 
-func (h *FixHandler) getPathFromRawResource(obj map[string]interface{}) string {
+func (h *FixHandler) getPathFromRawResource(obj map[string]any) string {
 	if localworkload.IsTypeLocalWorkload(obj) {
 		localwork := localworkload.NewLocalWorkload(obj)
 		return localwork.GetPath()
@@ -241,7 +240,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				logger.L().Ctx(ctx).Warning("Skipping invalid resource path: " + resourcePath)
 				skipReason = "skipped: invalid resource path"
 			} else {
-				absolutePath = path.Join(h.localBasePath, relativePath)
+				absolutePath = filepath.Join(h.localBasePath, relativePath)
 				documentIndex = idx
 				if _, err := os.Stat(absolutePath); err != nil {
 					logger.L().Ctx(ctx).Warning("Skipping missing file: " + absolutePath)
@@ -656,8 +655,8 @@ func plannedPathsFromExpressions(exprs map[string]armotypes.FixPath) []string {
 // "spec.…runAsNonRoot=true"). The reconciliation pass compares pure YAML
 // paths, so the suffix must not participate in the segment-boundary check.
 func normalizeFailedPath(p string) string {
-	if i := strings.IndexByte(p, '='); i >= 0 {
-		return p[:i]
+	if before, _, ok := strings.Cut(p, "="); ok {
+		return before
 	}
 	return p
 }

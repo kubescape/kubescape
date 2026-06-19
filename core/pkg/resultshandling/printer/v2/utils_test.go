@@ -766,23 +766,23 @@ func TestSetSeverityToSummaryMap(t *testing.T) {
 
 func createWorkloadWithLabels(name, namespace string, labels map[string]string) workloadinterface.IMetadata {
 	// Convert labels to map[string]interface{} for JSON marshaling
-	labelsInterface := make(map[string]interface{})
+	labelsInterface := make(map[string]any)
 	for k, v := range labels {
 		labelsInterface[k] = v
 	}
 
-	obj := map[string]interface{}{
+	obj := map[string]any{
 		"apiVersion": "apps/v1",
 		"kind":       "Deployment",
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"name":      name,
 			"namespace": namespace,
 			"labels":    labelsInterface,
 		},
-		"spec": map[string]interface{}{
-			"template": map[string]interface{}{
-				"spec": map[string]interface{}{
-					"containers": []interface{}{},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []any{},
 				},
 			},
 		},

@@ -82,8 +82,8 @@ func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl m
 }
 
 // [group][versionn][resource]
-func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToControls map[string][]string) map[string]map[string]map[string]interface{} {
-	k8sResources := make(map[string]map[string]map[string]interface{})
+func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToControls map[string][]string) map[string]map[string]map[string]any {
+	k8sResources := make(map[string]map[string]map[string]any)
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {
 			for _, rule := range control.Rules {
@@ -138,14 +138,14 @@ func insertControls(resource string, resourceToControl map[string][]string, cont
 	}
 }
 
-func insertKSResourcesAndControls(k8sResources map[string]map[string]map[string]interface{}, match reporthandling.RuleMatchObjects, resourceToControl map[string][]string, control reporthandling.Control) {
+func insertKSResourcesAndControls(k8sResources map[string]map[string]map[string]any, match reporthandling.RuleMatchObjects, resourceToControl map[string][]string, control reporthandling.Control) {
 	for _, apiGroup := range match.APIGroups {
 		if v, ok := k8sResources[apiGroup]; !ok || v == nil {
-			k8sResources[apiGroup] = make(map[string]map[string]interface{})
+			k8sResources[apiGroup] = make(map[string]map[string]any)
 		}
 		for _, apiVersions := range match.APIVersions {
 			if v, ok := k8sResources[apiGroup][apiVersions]; !ok || v == nil {
-				k8sResources[apiGroup][apiVersions] = make(map[string]interface{})
+				k8sResources[apiGroup][apiVersions] = make(map[string]any)
 			}
 			for _, resource := range match.Resources {
 				if _, ok := k8sResources[apiGroup][apiVersions][resource]; !ok {

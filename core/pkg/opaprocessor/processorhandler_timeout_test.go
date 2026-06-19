@@ -68,7 +68,7 @@ func TestProcess_ControlTimeout(t *testing.T) {
 					{
 						PortalBase: armotypes.PortalBase{
 							Name:       "blocking-rule",
-							Attributes: map[string]interface{}{},
+							Attributes: map[string]any{},
 						},
 						Rule: blockingRule,
 						Match: []reporthandling.RuleMatchObjects{
@@ -133,4 +133,10 @@ func TestProcess_ControlTimeout(t *testing.T) {
 	require.NoError(t, scorewrapper.Calculate(score.EPostureReportV2))
 	opap.reweightComplianceScores()
 	assert.Zero(t, opaSessionObj.Report.SummaryDetails.ComplianceScore, "timed-out control must not inflate overall compliance score")
+
+	// the timed-out control must drag the coverage score down: 0 of 1 controls evaluated
+	coverage.ComputeCoverageScore(len(opaSessionObj.Report.SummaryDetails.Controls))
+	assert.Equal(t, float32(0), coverage.CoverageScore)
+	assert.Equal(t, 0, coverage.EvaluatedControls)
+	assert.True(t, coverage.Degraded)
 }

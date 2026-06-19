@@ -7,7 +7,7 @@ import (
 
 func TestPrettyJson(t *testing.T) {
 	type args struct {
-		data interface{}
+		data any
 	}
 	tests := []struct {
 		name    string
@@ -18,7 +18,7 @@ func TestPrettyJson(t *testing.T) {
 		{
 			name: "SimpleJson",
 			args: args{
-				data: map[string]interface{}{
+				data: map[string]any{
 					"key": "value",
 				},
 			},
@@ -31,8 +31,8 @@ func TestPrettyJson(t *testing.T) {
 		{
 			name: "NestedJson",
 			args: args{
-				data: map[string]interface{}{
-					"key": map[string]interface{}{
+				data: map[string]any{
+					"key": map[string]any{
 						"key": "value",
 					},
 				},
@@ -48,11 +48,11 @@ func TestPrettyJson(t *testing.T) {
 		{
 			name: "ComplexJson",
 			args: args{
-				data: map[string]interface{}{
+				data: map[string]any{
 					"A": "B",
-					"C": map[string]interface{}{
+					"C": map[string]any{
 						"D": "E",
-						"F": map[string]interface{}{
+						"F": map[string]any{
 							"G": "H",
 							"I": "J",
 						},

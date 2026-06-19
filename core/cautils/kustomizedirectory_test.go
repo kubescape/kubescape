@@ -98,26 +98,26 @@ func TestKustomizeOverlayWithBase(t *testing.T) {
 
 				// Verify the deployment has the resource limits from the base
 				obj := wl.GetObject()
-				spec, ok := obj["spec"].(map[string]interface{})
+				spec, ok := obj["spec"].(map[string]any)
 				assert.True(t, ok, "deployment should have spec")
 
-				template, ok := spec["template"].(map[string]interface{})
+				template, ok := spec["template"].(map[string]any)
 				assert.True(t, ok, "deployment should have template")
 
-				templateSpec, ok := template["spec"].(map[string]interface{})
+				templateSpec, ok := template["spec"].(map[string]any)
 				assert.True(t, ok, "template should have spec")
 
-				containers, ok := templateSpec["containers"].([]interface{})
+				containers, ok := templateSpec["containers"].([]any)
 				assert.True(t, ok, "template spec should have containers")
 				assert.NotEmpty(t, containers, "should have at least one container")
 
-				container, ok := containers[0].(map[string]interface{})
+				container, ok := containers[0].(map[string]any)
 				assert.True(t, ok, "container should be a map")
 
-				resources, ok := container["resources"].(map[string]interface{})
+				resources, ok := container["resources"].(map[string]any)
 				assert.True(t, ok, "container should have resources (from base)")
 
-				limits, ok := resources["limits"].(map[string]interface{})
+				limits, ok := resources["limits"].(map[string]any)
 				assert.True(t, ok, "resources should have limits")
 				assert.Equal(t, "500m", limits["cpu"], "cpu limit should be from base")
 				assert.Equal(t, "256Mi", limits["memory"], "memory limit should be from base")

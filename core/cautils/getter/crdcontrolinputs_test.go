@@ -9,8 +9,8 @@ import (
 
 func TestExtractControlsInputs_EmptyObject(t *testing.T) {
 	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"spec": map[string]interface{}{},
+		Object: map[string]any{
+			"spec": map[string]any{},
 		},
 	}
 
@@ -21,7 +21,7 @@ func TestExtractControlsInputs_EmptyObject(t *testing.T) {
 
 func TestExtractControlsInputs_NoSpec(t *testing.T) {
 	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{},
+		Object: map[string]any{},
 	}
 
 	result, err := extractControlsInputs(obj)
@@ -31,12 +31,12 @@ func TestExtractControlsInputs_NoSpec(t *testing.T) {
 
 func TestExtractControlsInputs_WithControls(t *testing.T) {
 	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"spec": map[string]interface{}{
-				"controls": map[string]interface{}{
-					"c-0001": []interface{}{"val1", "val2"},
-					"c-0004": []interface{}{"val3"},
-					"c-0050": []interface{}{"0.5", "5"},
+		Object: map[string]any{
+			"spec": map[string]any{
+				"controls": map[string]any{
+					"c-0001": []any{"val1", "val2"},
+					"c-0004": []any{"val3"},
+					"c-0050": []any{"0.5", "5"},
 				},
 			},
 		},
@@ -52,11 +52,11 @@ func TestExtractControlsInputs_WithControls(t *testing.T) {
 
 func TestExtractControlsInputs_NumericValues(t *testing.T) {
 	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"spec": map[string]interface{}{
-				"controls": map[string]interface{}{
-					"maxCriticalVulnerabilities": []interface{}{int64(5)},
-					"cpuLimitMin":                []interface{}{float64(0.5)},
+		Object: map[string]any{
+			"spec": map[string]any{
+				"controls": map[string]any{
+					"maxCriticalVulnerabilities": []any{int64(5)},
+					"cpuLimitMin":                []any{float64(0.5)},
 				},
 			},
 		},
@@ -71,9 +71,9 @@ func TestExtractControlsInputs_NumericValues(t *testing.T) {
 
 func TestExtractControlsInputs_EmptyControls(t *testing.T) {
 	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"spec": map[string]interface{}{
-				"controls": map[string]interface{}{},
+		Object: map[string]any{
+			"spec": map[string]any{
+				"controls": map[string]any{},
 			},
 		},
 	}
@@ -86,10 +86,10 @@ func TestExtractControlsInputs_EmptyControls(t *testing.T) {
 func TestExtractControlsInputs_InvalidTypeSkipped(t *testing.T) {
 	// Non-array values (like a bare string) should be skipped gracefully
 	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"spec": map[string]interface{}{
-				"controls": map[string]interface{}{
-					"validKey":         []interface{}{"val1"},
+		Object: map[string]any{
+			"spec": map[string]any{
+				"controls": map[string]any{
+					"validKey":         []any{"val1"},
 					"invalidStringKey": "not-an-array",
 					"invalidIntKey":    int64(42),
 				},

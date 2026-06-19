@@ -93,7 +93,7 @@ func (c *ConfigScanInfo) GetRequestPayload() *apis.Commands {
 		Commands: []apis.Command{
 			{
 				CommandName: apis.TypeRunKubescape,
-				Args: map[string]interface{}{
+				Args: map[string]any{
 					KubescapeScanV1: utilsmetav1.PostScanRequest{
 						ExcludedNamespaces: c.ExcludedNamespaces,
 						IncludeNamespaces:  c.IncludedNamespaces,

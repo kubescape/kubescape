@@ -241,17 +241,17 @@ func TestIsFrameworkFitToScanScope(t *testing.T) {
 }
 
 var rule_v1_0_131 = &reporthandling.PolicyRule{PortalBase: armotypes.PortalBase{
-	Attributes: map[string]interface{}{"useUntilKubescapeVersion": "v1.0.132"}}}
+	Attributes: map[string]any{"useUntilKubescapeVersion": "v1.0.132"}}}
 var rule_v1_0_132 = &reporthandling.PolicyRule{PortalBase: armotypes.PortalBase{
-	Attributes: map[string]interface{}{"useFromKubescapeVersion": "v1.0.132", "useUntilKubescapeVersion": "v1.0.133"}}}
+	Attributes: map[string]any{"useFromKubescapeVersion": "v1.0.132", "useUntilKubescapeVersion": "v1.0.133"}}}
 var rule_v1_0_133 = &reporthandling.PolicyRule{PortalBase: armotypes.PortalBase{
-	Attributes: map[string]interface{}{"useFromKubescapeVersion": "v1.0.133", "useUntilKubescapeVersion": "v1.0.134"}}}
+	Attributes: map[string]any{"useFromKubescapeVersion": "v1.0.133", "useUntilKubescapeVersion": "v1.0.134"}}}
 var rule_v1_0_134 = &reporthandling.PolicyRule{PortalBase: armotypes.PortalBase{
-	Attributes: map[string]interface{}{"useFromKubescapeVersion": "v1.0.134"}}}
+	Attributes: map[string]any{"useFromKubescapeVersion": "v1.0.134"}}}
 var rule_invalid_from = &reporthandling.PolicyRule{PortalBase: armotypes.PortalBase{
-	Attributes: map[string]interface{}{"useFromKubescapeVersion": 1.0135, "useUntilKubescapeVersion": "v1.0.135"}}}
+	Attributes: map[string]any{"useFromKubescapeVersion": 1.0135, "useUntilKubescapeVersion": "v1.0.135"}}}
 var rule_invalid_until = &reporthandling.PolicyRule{PortalBase: armotypes.PortalBase{
-	Attributes: map[string]interface{}{"useFromKubescapeVersion": "v1.0.135", "useUntilKubescapeVersion": 1.0135}}}
+	Attributes: map[string]any{"useFromKubescapeVersion": "v1.0.135", "useUntilKubescapeVersion": 1.0135}}}
 
 func TestIsRuleKubescapeVersionCompatible(t *testing.T) {
 	// local build- no build number

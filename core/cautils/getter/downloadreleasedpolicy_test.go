@@ -14,14 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func min(a, b int64) int64 {
-	if a < b {
-		return a
-	}
-
-	return b
-}
-
 func TestReleasedPolicy(t *testing.T) {
 	t.Parallel()
 

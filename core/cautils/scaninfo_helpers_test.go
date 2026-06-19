@@ -28,12 +28,12 @@ func TestBoolPtrFlag_String(t *testing.T) {
 		},
 		{
 			name: "true value",
-			flag: NewBoolPtr(boolPtr(true)),
+			flag: NewBoolPtr(new(true)),
 			want: "true",
 		},
 		{
 			name: "false value",
-			flag: NewBoolPtr(boolPtr(false)),
+			flag: NewBoolPtr(new(false)),
 			want: "false",
 		},
 	}
@@ -73,12 +73,12 @@ func TestBoolPtrFlag_GetBool(t *testing.T) {
 		},
 		{
 			name: "true pointer returns true",
-			flag: NewBoolPtr(boolPtr(true)),
+			flag: NewBoolPtr(new(true)),
 			want: true,
 		},
 		{
 			name: "false pointer returns false",
-			flag: NewBoolPtr(boolPtr(false)),
+			flag: NewBoolPtr(new(false)),
 			want: false,
 		},
 	}
@@ -271,12 +271,4 @@ func TestScanInfo_contains(t *testing.T) {
 	assert.True(t, scanInfo.contains("mitre"))
 	assert.False(t, scanInfo.contains("cis"))
 	assert.False(t, scanInfo.contains(""))
-}
-
-// ---------------------------------------------------------------------------
-// helper
-// ---------------------------------------------------------------------------
-
-func boolPtr(b bool) *bool {
-	return &b
 }

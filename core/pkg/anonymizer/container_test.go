@@ -11,13 +11,13 @@ import (
 func TestAnonymizeContainerMetadata(t *testing.T) {
 	tests := []struct {
 		name     string
-		object   map[string]interface{}
-		validate func(t *testing.T, spec map[string]interface{})
+		object   map[string]any
+		validate func(t *testing.T, spec map[string]any)
 	}{
 		{
 			name: "typed containers should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
 					"containers": []corev1.Container{
 						{
 							Name:  "payment-api",
@@ -26,7 +26,7 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					},
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
+			validate: func(t *testing.T, spec map[string]any) {
 				containers, ok := spec["containers"].([]corev1.Container)
 				if !assert.True(t, ok, "expected typed containers") {
 					return
@@ -43,18 +43,18 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 		},
 		{
 			name: "unstructured containers should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"containers": []interface{}{
-						map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
 							"name":  "payment-api",
 							"image": "nginx:latest",
 						},
 					},
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
-				containers, ok := spec["containers"].([]interface{})
+			validate: func(t *testing.T, spec map[string]any) {
+				containers, ok := spec["containers"].([]any)
 				if !assert.True(t, ok, "expected unstructured containers") {
 					return
 				}
@@ -62,7 +62,7 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					return
 				}
 
-				container, ok := containers[0].(map[string]interface{})
+				container, ok := containers[0].(map[string]any)
 				if !assert.True(t, ok, "expected unstructured container map") {
 					return
 				}
@@ -75,8 +75,8 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 		},
 		{
 			name: "typed init containers should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
 					"initContainers": []corev1.Container{
 						{
 							Name:  "init-db",
@@ -85,7 +85,7 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					},
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
+			validate: func(t *testing.T, spec map[string]any) {
 				containers, ok := spec["initContainers"].([]corev1.Container)
 				if !assert.True(t, ok, "expected typed init containers") {
 					return
@@ -102,8 +102,8 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 		},
 		{
 			name: "typed ephemeral containers should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
 					"ephemeralContainers": []corev1.EphemeralContainer{
 						{
 							EphemeralContainerCommon: corev1.EphemeralContainerCommon{
@@ -114,7 +114,7 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					},
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
+			validate: func(t *testing.T, spec map[string]any) {
 				containers, ok := spec["ephemeralContainers"].([]corev1.EphemeralContainer)
 				if !assert.True(t, ok, "expected typed ephemeral containers") {
 					return
@@ -131,18 +131,18 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 		},
 		{
 			name: "unstructured ephemeral containers should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"ephemeralContainers": []interface{}{
-						map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
+					"ephemeralContainers": []any{
+						map[string]any{
 							"name":  "debug-shell",
 							"image": "busybox:latest",
 						},
 					},
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
-				containers, ok := spec["ephemeralContainers"].([]interface{})
+			validate: func(t *testing.T, spec map[string]any) {
+				containers, ok := spec["ephemeralContainers"].([]any)
 				if !assert.True(t, ok, "expected unstructured ephemeral containers") {
 					return
 				}
@@ -150,7 +150,7 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					return
 				}
 
-				container, ok := containers[0].(map[string]interface{})
+				container, ok := containers[0].(map[string]any)
 				if !assert.True(t, ok, "expected unstructured ephemeral container map") {
 					return
 				}
@@ -163,8 +163,8 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 		},
 		{
 			name: "typed container env references should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
 					"containers": []corev1.Container{
 						{
 							Name:  "payment-api",
@@ -195,7 +195,7 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					},
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
+			validate: func(t *testing.T, spec map[string]any) {
 				containers, ok := spec["containers"].([]corev1.Container)
 				if !assert.True(t, ok, "expected typed containers") {
 					return
@@ -213,25 +213,25 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 		},
 		{
 			name: "unstructured container env references should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"containers": []interface{}{
-						map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
 							"name":  "payment-api",
 							"image": "nginx:latest",
-							"env": []interface{}{
-								map[string]interface{}{
+							"env": []any{
+								map[string]any{
 									"name": "SECRET_TOKEN",
-									"valueFrom": map[string]interface{}{
-										"secretKeyRef": map[string]interface{}{
+									"valueFrom": map[string]any{
+										"secretKeyRef": map[string]any{
 											"name": "payment-secret",
 										},
 									},
 								},
-								map[string]interface{}{
+								map[string]any{
 									"name": "CONFIG_PATH",
-									"valueFrom": map[string]interface{}{
-										"configMapKeyRef": map[string]interface{}{
+									"valueFrom": map[string]any{
+										"configMapKeyRef": map[string]any{
 											"name": "payment-config",
 										},
 									},
@@ -241,8 +241,8 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					},
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
-				containers, ok := spec["containers"].([]interface{})
+			validate: func(t *testing.T, spec map[string]any) {
+				containers, ok := spec["containers"].([]any)
 				if !assert.True(t, ok, "expected unstructured containers") {
 					return
 				}
@@ -250,12 +250,12 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					return
 				}
 
-				container, ok := containers[0].(map[string]interface{})
+				container, ok := containers[0].(map[string]any)
 				if !assert.True(t, ok, "expected unstructured container map") {
 					return
 				}
 
-				env, ok := container["env"].([]interface{})
+				env, ok := container["env"].([]any)
 				if !assert.True(t, ok, "expected env slice") {
 					return
 				}
@@ -263,32 +263,32 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					return
 				}
 
-				secretEnv, ok := env[0].(map[string]interface{})
+				secretEnv, ok := env[0].(map[string]any)
 				if !assert.True(t, ok, "expected secret env map") {
 					return
 				}
 
-				configEnv, ok := env[1].(map[string]interface{})
+				configEnv, ok := env[1].(map[string]any)
 				if !assert.True(t, ok, "expected config env map") {
 					return
 				}
 
-				secretValueFrom, ok := secretEnv["valueFrom"].(map[string]interface{})
+				secretValueFrom, ok := secretEnv["valueFrom"].(map[string]any)
 				if !assert.True(t, ok, "expected secret valueFrom map") {
 					return
 				}
 
-				configValueFrom, ok := configEnv["valueFrom"].(map[string]interface{})
+				configValueFrom, ok := configEnv["valueFrom"].(map[string]any)
 				if !assert.True(t, ok, "expected config valueFrom map") {
 					return
 				}
 
-				secretRef, ok := secretValueFrom["secretKeyRef"].(map[string]interface{})
+				secretRef, ok := secretValueFrom["secretKeyRef"].(map[string]any)
 				if !assert.True(t, ok, "expected secretKeyRef map") {
 					return
 				}
 
-				configRef, ok := configValueFrom["configMapKeyRef"].(map[string]interface{})
+				configRef, ok := configValueFrom["configMapKeyRef"].(map[string]any)
 				if !assert.True(t, ok, "expected configMapKeyRef map") {
 					return
 				}
@@ -301,8 +301,8 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 		},
 		{
 			name: "typed container envFrom references should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
 					"containers": []corev1.Container{
 						{
 							Name: "payment-api",
@@ -326,7 +326,7 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					},
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
+			validate: func(t *testing.T, spec map[string]any) {
 				containers, ok := spec["containers"].([]corev1.Container)
 				if !assert.True(t, ok, "expected typed containers") {
 					return
@@ -343,19 +343,19 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 		},
 		{
 			name: "unstructured container envFrom references should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"containers": []interface{}{
-						map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
 							"name": "payment-api",
-							"envFrom": []interface{}{
-								map[string]interface{}{
-									"secretRef": map[string]interface{}{
+							"envFrom": []any{
+								map[string]any{
+									"secretRef": map[string]any{
 										"name": "payment-secret",
 									},
 								},
-								map[string]interface{}{
-									"configMapRef": map[string]interface{}{
+								map[string]any{
+									"configMapRef": map[string]any{
 										"name": "payment-config",
 									},
 								},
@@ -364,8 +364,8 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					},
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
-				containers, ok := spec["containers"].([]interface{})
+			validate: func(t *testing.T, spec map[string]any) {
+				containers, ok := spec["containers"].([]any)
 				if !assert.True(t, ok, "expected unstructured containers") {
 					return
 				}
@@ -373,12 +373,12 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					return
 				}
 
-				container, ok := containers[0].(map[string]interface{})
+				container, ok := containers[0].(map[string]any)
 				if !assert.True(t, ok, "expected unstructured container map") {
 					return
 				}
 
-				envFrom, ok := container["envFrom"].([]interface{})
+				envFrom, ok := container["envFrom"].([]any)
 				if !assert.True(t, ok, "expected envFrom slice") {
 					return
 				}
@@ -386,22 +386,22 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					return
 				}
 
-				secretEnvFrom, ok := envFrom[0].(map[string]interface{})
+				secretEnvFrom, ok := envFrom[0].(map[string]any)
 				if !assert.True(t, ok, "expected secret envFrom map") {
 					return
 				}
 
-				configEnvFrom, ok := envFrom[1].(map[string]interface{})
+				configEnvFrom, ok := envFrom[1].(map[string]any)
 				if !assert.True(t, ok, "expected config envFrom map") {
 					return
 				}
 
-				secretRef, ok := secretEnvFrom["secretRef"].(map[string]interface{})
+				secretRef, ok := secretEnvFrom["secretRef"].(map[string]any)
 				if !assert.True(t, ok, "expected secretRef map") {
 					return
 				}
 
-				configRef, ok := configEnvFrom["configMapRef"].(map[string]interface{})
+				configRef, ok := configEnvFrom["configMapRef"].(map[string]any)
 				if !assert.True(t, ok, "expected configMapRef map") {
 					return
 				}
@@ -414,8 +414,8 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 		},
 		{
 			name: "typed container literal env values should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
 					"containers": []corev1.Container{
 						{
 							Name: "payment-api",
@@ -445,7 +445,7 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					},
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
+			validate: func(t *testing.T, spec map[string]any) {
 				containers, ok := spec["containers"].([]corev1.Container)
 				if !assert.True(t, ok, "expected typed containers") {
 					return
@@ -468,29 +468,29 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 		},
 		{
 			name: "unstructured container literal env values should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"containers": []interface{}{
-						map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
 							"name": "payment-api",
-							"env": []interface{}{
-								map[string]interface{}{
+							"env": []any{
+								map[string]any{
 									"name":  "DATABASE_URL",
 									"value": "postgres://example-user@example-host.internal/prod",
 								},
-								map[string]interface{}{
+								map[string]any{
 									"name":  "REDIS_URL",
 									"value": "redis://:secret@redis.internal:6379",
 								},
-								map[string]interface{}{
+								map[string]any{
 									"name":  "CONFIG",
 									"value": "mongodb://example-user@example-host.internal:27017/prod",
 								},
-								map[string]interface{}{
+								map[string]any{
 									"name":  "FEATURE_FLAG",
 									"value": "true",
 								},
-								map[string]interface{}{
+								map[string]any{
 									"name":  "PORT",
 									"value": "8080",
 								},
@@ -499,8 +499,8 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					},
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
-				containers, ok := spec["containers"].([]interface{})
+			validate: func(t *testing.T, spec map[string]any) {
+				containers, ok := spec["containers"].([]any)
 				if !assert.True(t, ok, "expected unstructured containers") {
 					return
 				}
@@ -508,12 +508,12 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					return
 				}
 
-				container, ok := containers[0].(map[string]interface{})
+				container, ok := containers[0].(map[string]any)
 				if !assert.True(t, ok, "expected unstructured container map") {
 					return
 				}
 
-				env, ok := container["env"].([]interface{})
+				env, ok := container["env"].([]any)
 				if !assert.True(t, ok, "expected env slice") {
 					return
 				}
@@ -521,27 +521,27 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					return
 				}
 
-				firstEnv, ok := env[0].(map[string]interface{})
+				firstEnv, ok := env[0].(map[string]any)
 				if !assert.True(t, ok, "expected first env map") {
 					return
 				}
 
-				secondEnv, ok := env[1].(map[string]interface{})
+				secondEnv, ok := env[1].(map[string]any)
 				if !assert.True(t, ok, "expected second env map") {
 					return
 				}
 
-				thirdEnv, ok := env[2].(map[string]interface{})
+				thirdEnv, ok := env[2].(map[string]any)
 				if !assert.True(t, ok, "expected third env map") {
 					return
 				}
 
-				fourthEnv, ok := env[3].(map[string]interface{})
+				fourthEnv, ok := env[3].(map[string]any)
 				if !assert.True(t, ok, "expected fourth env map") {
 					return
 				}
 
-				fifthEnv, ok := env[4].(map[string]interface{})
+				fifthEnv, ok := env[4].(map[string]any)
 				if !assert.True(t, ok, "expected fifth env map") {
 					return
 				}
@@ -561,8 +561,8 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 
 		{
 			name: "typed image pull secrets should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
 					"imagePullSecrets": []corev1.LocalObjectReference{
 						{
 							Name: "corp-registry-creds",
@@ -571,7 +571,7 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 				},
 			},
 
-			validate: func(t *testing.T, spec map[string]interface{}) {
+			validate: func(t *testing.T, spec map[string]any) {
 				refs, ok := spec["imagePullSecrets"].([]corev1.LocalObjectReference)
 				if !assert.True(t, ok, "expected typed image pull secrets") {
 					return
@@ -587,12 +587,12 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 
 		{
 			name: "typed service account name should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
 					"serviceAccountName": "payments-runtime",
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
+			validate: func(t *testing.T, spec map[string]any) {
 				serviceAccountName, ok := spec["serviceAccountName"].(string)
 				if !assert.True(t, ok, "expected serviceAccountName string") {
 					return
@@ -604,12 +604,12 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 		},
 		{
 			name: "deprecated service account should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
 					"serviceAccount": "payments-runtime",
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
+			validate: func(t *testing.T, spec map[string]any) {
 				serviceAccount, ok := spec["serviceAccount"].(string)
 				if !assert.True(t, ok, "expected serviceAccount string") {
 					return
@@ -621,22 +621,22 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 		},
 		{
 			name: "nested template deprecated service account should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
+					"template": map[string]any{
+						"spec": map[string]any{
 							"serviceAccount": "analytics-runtime",
 						},
 					},
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
-				template, ok := spec["template"].(map[string]interface{})
+			validate: func(t *testing.T, spec map[string]any) {
+				template, ok := spec["template"].(map[string]any)
 				if !assert.True(t, ok, "expected template map") {
 					return
 				}
 
-				templateSpec, ok := template["spec"].(map[string]interface{})
+				templateSpec, ok := template["spec"].(map[string]any)
 				if !assert.True(t, ok, "expected template spec map") {
 					return
 				}
@@ -652,22 +652,22 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 		},
 		{
 			name: "nested template service account name should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"template": map[string]interface{}{
-						"spec": map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
+					"template": map[string]any{
+						"spec": map[string]any{
 							"serviceAccountName": "analytics-runtime",
 						},
 					},
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
-				template, ok := spec["template"].(map[string]interface{})
+			validate: func(t *testing.T, spec map[string]any) {
+				template, ok := spec["template"].(map[string]any)
 				if !assert.True(t, ok, "expected template map") {
 					return
 				}
 
-				templateSpec, ok := template["spec"].(map[string]interface{})
+				templateSpec, ok := template["spec"].(map[string]any)
 				if !assert.True(t, ok, "expected template spec map") {
 					return
 				}
@@ -684,17 +684,17 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 
 		{
 			name: "unstructured image pull secrets should be anonymized",
-			object: map[string]interface{}{
-				"spec": map[string]interface{}{
-					"imagePullSecrets": []interface{}{
-						map[string]interface{}{
+			object: map[string]any{
+				"spec": map[string]any{
+					"imagePullSecrets": []any{
+						map[string]any{
 							"name": "corp-registry-creds",
 						},
 					},
 				},
 			},
-			validate: func(t *testing.T, spec map[string]interface{}) {
-				refs, ok := spec["imagePullSecrets"].([]interface{})
+			validate: func(t *testing.T, spec map[string]any) {
+				refs, ok := spec["imagePullSecrets"].([]any)
 				if !assert.True(t, ok, "expected unstructured image pull secrets") {
 					return
 				}
@@ -702,7 +702,7 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					return
 				}
 
-				ref, ok := refs[0].(map[string]interface{})
+				ref, ok := refs[0].(map[string]any)
 				if !assert.True(t, ok, "expected image pull secret map") {
 					return
 				}
@@ -719,7 +719,7 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 
 			anonymizeContainerMetadata(resource, mapping)
 
-			spec, ok := resource.GetObject()["spec"].(map[string]interface{})
+			spec, ok := resource.GetObject()["spec"].(map[string]any)
 			assert.True(t, ok, "expected spec to be a map[string]interface{}")
 
 			test.validate(t, spec)
@@ -734,7 +734,7 @@ func TestAnonymizeContainerMetadata_NilResource(t *testing.T) {
 }
 
 func TestAnonymizeContainerList_MissingKey(t *testing.T) {
-	obj := map[string]interface{}{}
+	obj := map[string]any{}
 	mapping := NewMapping()
 
 	assert.NotPanics(t, func() {
@@ -743,7 +743,7 @@ func TestAnonymizeContainerList_MissingKey(t *testing.T) {
 }
 
 func TestAnonymizeContainerList_NilValue(t *testing.T) {
-	obj := map[string]interface{}{
+	obj := map[string]any{
 		"containers": nil,
 	}
 	mapping := NewMapping()
@@ -754,7 +754,7 @@ func TestAnonymizeContainerList_NilValue(t *testing.T) {
 }
 
 func TestAnonymizeContainerList_InvalidType(t *testing.T) {
-	obj := map[string]interface{}{
+	obj := map[string]any{
 		"containers": "invalid",
 	}
 	mapping := NewMapping()
@@ -795,9 +795,9 @@ func TestIsSensitiveEnvName_SeparatorlessVariants(t *testing.T) {
 func TestAnonymizeUnstructuredEnv_LeaksApiKeyValue(t *testing.T) {
 	const secret = "AKIAIOSFODNN7EXAMPLE" //nolint:gosec // G101: AWS example access key ID, test fixture, not a real credential
 
-	container := map[string]interface{}{
-		"env": []interface{}{
-			map[string]interface{}{
+	container := map[string]any{
+		"env": []any{
+			map[string]any{
 				"name":  "APIKEY",
 				"value": secret,
 			},
@@ -807,7 +807,7 @@ func TestAnonymizeUnstructuredEnv_LeaksApiKeyValue(t *testing.T) {
 	mapping := NewMapping()
 	anonymizeUnstructuredEnv(container, mapping)
 
-	got := container["env"].([]interface{})[0].(map[string]interface{})["value"].(string)
+	got := container["env"].([]any)[0].(map[string]any)["value"].(string)
 	if got == secret {
 		t.Fatalf("env var APIKEY value was not anonymized; secret leaked into output")
 	}

@@ -20,7 +20,6 @@ import (
 
 const (
 	htmlOutputFile = "report"
-	htmlOutputExt  = ".html"
 )
 
 //go:embed html/report.gohtml
@@ -45,15 +44,15 @@ func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
 	outputFile = strings.TrimSpace(outputFile)
 	if outputFile == "" {
 		// Raw HTML markup must never fall back to stdout on a TTY.
-		outputFile = htmlOutputFile + htmlOutputExt
+		outputFile = htmlOutputFile + printer.HtmlOutputExt
 		logger.L().Info("no --output specified for html format; writing to default file",
 			helpers.String("filename", outputFile))
-	} else if filepath.Ext(outputFile) != htmlOutputExt {
-		outputFile = outputFile + htmlOutputExt
+	} else if filepath.Ext(outputFile) != printer.HtmlOutputExt {
+		outputFile = outputFile + printer.HtmlOutputExt
 	}
 	// HTML must never fall back to stdout on file-create errors either
 	// (e.g. read-only cwd) — use the no-stdout-fallback helper.
-	hp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+htmlOutputExt)
+	hp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+printer.HtmlOutputExt)
 }
 
 func (hp *HtmlPrinter) PrintNextSteps() {

@@ -246,7 +246,7 @@ func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary)
 		cautils.SimpleDisplay(writer, "Receive full report by running: kubescape scan image <image>\n")
 	} else {
 		for _, img := range summary.Images {
-			imgWithoutTag := strings.Split(img, ":")[0]
+			imgWithoutTag, _, _ := strings.Cut(img, ":")
 			cautils.SimpleDisplay(writer, fmt.Sprintf("Receive a full report for %s by running: %s\n", imgWithoutTag, getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img))))
 		}
 	}

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -32,7 +31,6 @@ import (
 
 const (
 	sarifOutputFile = "report"
-	sarifOutputExt  = ".sarif"
 
 	toolName    = "kubescape"
 	toolInfoURI = "https://armosec.io"
@@ -81,8 +79,8 @@ func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = sarifOutputFile
 		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != sarifOutputExt {
-			outputFile = outputFile + sarifOutputExt
+		if filepath.Ext(strings.TrimSpace(outputFile)) != printer.SARIFOutputExt {
+			outputFile = outputFile + printer.SARIFOutputExt
 		}
 	}
 	sp.writer = printer.GetWriter(ctx, outputFile)
@@ -207,10 +205,10 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if result.GetStatus(nil).IsFailed() {
 			resourceSource := opaSessionObj.ResourceSource[resourceID]
-			filepath := resourceSource.RelativePath
+			relPath := resourceSource.RelativePath
 
 			// Github Code Scanning considers results not associated to a file path meaningless and invalid when uploading
-			if filepath == "" && basePath == "" {
+			if relPath == "" && basePath == "" {
 				continue
 			}
 
@@ -235,8 +233,8 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 					}
 					location := sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
 					sp.addRule(run, ctl)
-					r := sp.addResult(run, ctl, filepath, location)
-					collectFixes(ctx, r, ac, opaSessionObj, resourceID, filepath, rsrcAbsPath)
+					r := sp.addResult(run, ctl, relPath, location)
+					collectFixes(ctx, r, ac, opaSessionObj, resourceID, relPath, rsrcAbsPath)
 				}
 			}
 		}

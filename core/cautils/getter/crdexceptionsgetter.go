@@ -3,6 +3,7 @@ package getter
 import (
 	"context"
 	"fmt"
+	"maps"
 	"regexp"
 	"sort"
 	"time"
@@ -181,9 +182,7 @@ func convertCRDObjectToPosturePolicies(
 		if policy.Attributes == nil {
 			policy.Attributes = map[string]any{}
 		}
-		for k, v := range attrs {
-			policy.Attributes[k] = v
-		}
+		maps.Copy(policy.Attributes, attrs)
 		policies = append(policies, policy)
 	}
 
@@ -281,9 +280,7 @@ func buildResourceDesignators(
 			for _, ns := range namespaceNames {
 				for _, res := range resourceDesignators {
 					combined := map[string]string{identifiers.AttributeNamespace: ns}
-					for k, v := range res {
-						combined[k] = v
-					}
+					maps.Copy(combined, res)
 					designators = append(designators, combined)
 				}
 			}
@@ -310,9 +307,7 @@ func buildResourceDesignators(
 	// AND objectSelector.matchLabels into every designator produced above.
 	if len(objectSelectorLabels) > 0 {
 		for _, designator := range designators {
-			for k, v := range objectSelectorLabels {
-				designator[k] = v
-			}
+			maps.Copy(designator, objectSelectorLabels)
 		}
 	}
 

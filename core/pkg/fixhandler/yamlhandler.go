@@ -91,7 +91,7 @@ func getFixInfo(ctx context.Context, originalRootNodes, fixedRootNodes []yaml.No
 	contentToAdd := make([]contentToAdd, 0)
 	linesToRemove := make([]linesToRemove, 0)
 
-	for idx := 0; idx < len(fixedRootNodes); idx++ {
+	for idx := range fixedRootNodes {
 		originalList := flattenWithDFS(&originalRootNodes[idx])
 		fixedList := flattenWithDFS(&fixedRootNodes[idx])
 		nodeContentToAdd, nodeLinesToRemove := getFixInfoHelper(ctx, *originalList, *fixedList)

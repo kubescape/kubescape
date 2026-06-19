@@ -357,7 +357,7 @@ func TestCheckShortTerminalWidth(t *testing.T) {
 		{
 			name: "Rows with non-string values (map)",
 			rows: []table.Row{
-				{"cell1", map[string]interface{}{"key": "value"}, "cell3"},
+				{"cell1", map[string]any{"key": "value"}, "cell3"},
 				{"cell4", "cell5", "cell6"},
 			},
 			headers:        table.Row{"Header1", "Header2", "Header3"},
@@ -368,13 +368,13 @@ func TestCheckShortTerminalWidth(t *testing.T) {
 			rows: []table.Row{
 				{"cell1", "cell2", "cell3"},
 			},
-			headers:        table.Row{"Header1", map[string]interface{}{"key": "value"}, "Header3"},
+			headers:        table.Row{"Header1", map[string]any{"key": "value"}, "Header3"},
 			shouldNotPanic: true,
 		},
 		{
 			name: "Both rows and headers with non-string values",
 			rows: []table.Row{
-				{map[string]interface{}{"key": "value"}, "cell2", 123},
+				{map[string]any{"key": "value"}, "cell2", 123},
 			},
 			headers:        table.Row{[]string{"a", "b"}, "Header2", true},
 			shouldNotPanic: true,

@@ -22,6 +22,54 @@ type ScanCoverage struct {
 	// exceptions) that could not be loaded from their configured source and
 	// were served from a fallback so the scan could proceed.
 	PolicyDegradations []PolicyDegradation `json:"policyDegradations,omitempty"`
+	// CoverageScore is an aggregate 0-100 measure of how complete the scan was:
+	// the ratio of evaluated controls, discounted for partial resource pulls
+	// and degraded policy inputs. It is computed once by ComputeCoverageScore.
+	CoverageScore float32 `json:"coverageScore"`
+	// EvaluatedControls is the number of controls that were actually evaluated.
+	EvaluatedControls int `json:"evaluatedControls"`
+	// TotalControls is the number of controls in scope for the scan.
+	TotalControls int `json:"totalControls"`
+	// Degraded is true when the scan was not fully complete (CoverageScore < 100).
+	Degraded bool `json:"degraded"`
+}
+
+// Fixed penalties (in percentage points) applied to the coverage score for
+// each incompleteness that does not by itself mark a control unevaluated.
+const (
+	partialGVRPullPenalty    float32 = 2
+	policyDegradationPenalty float32 = 5
+)
+
+// ComputeCoverageScore derives CoverageScore from the controls actually
+// evaluated, discounted by a fixed penalty for every partial GVR pull and
+// every degraded policy input. The result is clamped to [0, 100]. totalControls
+// is the number of controls in scope. This is the single point where the score
+// is computed so that every consumer reports an identical value.
+func (c *ScanCoverage) ComputeCoverageScore(totalControls int) {
+	c.TotalControls = totalControls
+	c.EvaluatedControls = totalControls - len(c.NotEvaluatedControls)
+	if c.EvaluatedControls < 0 {
+		c.EvaluatedControls = 0
+	}
+
+	score := float32(100)
+	if totalControls > 0 {
+		score = float32(c.EvaluatedControls) / float32(totalControls) * 100
+	}
+
+	score -= partialGVRPullPenalty * float32(len(c.PartialGVRPulls))
+	score -= policyDegradationPenalty * float32(len(c.PolicyDegradations))
+
+	if score < 0 {
+		score = 0
+	}
+	if score > 100 {
+		score = 100
+	}
+
+	c.CoverageScore = score
+	c.Degraded = score < 100
 }
 
 // PolicyDegradation records a policy input that could not be loaded from its

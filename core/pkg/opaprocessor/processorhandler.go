@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -95,6 +96,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	// (recorded in TimedOutControls by markControlTimedOut) are reflected in
 	// NotEvaluatedControls alongside any collection-phase failures
 	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations)
+	opap.ScanCoverage.ComputeCoverageScore(len(opap.Report.SummaryDetails.Controls))
 
 	// edit results
 	opap.updateResults(ctx)
@@ -491,17 +493,25 @@ func appendPaths(paths []armotypes.PosturePaths, assistedRemediation reporthandl
 	return paths
 }
 
-func (opap *OPAProcessor) runOPAOnSingleRule(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
+func (opap *OPAProcessor) runOPAOnSingleRule(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
 	switch rule.RuleLanguage {
 	case reporthandling.RegoLanguage, reporthandling.RegoLanguage2:
 		return opap.runRegoOnK8s(ctx, rule, k8sObjects, getRuleData, ruleRegoDependenciesData)
+	case reporthandling.CELLanguage:
+		return opap.runCELOnK8s(ctx, rule, k8sObjects, getRuleData)
 	default:
 		return nil, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
 	}
 }
 
+// runCELOnK8s evaluates a CEL-based PolicyRule against k8s objects.
+// Stub: the CEL evaluator is added in follow-up PRs (kubescape/kubescape#2001).
+func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, getRuleData func(*reporthandling.PolicyRule) string) ([]reporthandling.RuleResponse, error) {
+	return nil, fmt.Errorf("rule: '%s', CEL evaluation not yet implemented", rule.Name)
+}
+
 // runRegoOnK8s compiles an OPA PolicyRule and evaluates its against k8s
-func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
+func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
 	opap.opaRegisterOnce.Do(func() {
 		rego.RegisterBuiltin2(cosignVerifySignatureDeclaration, cosignVerifySignatureDefinition)
 		rego.RegisterBuiltin1(cosignHasSignatureDeclaration, cosignHasSignatureDefinition)
@@ -533,7 +543,7 @@ func (opap *OPAProcessor) Print(ctx opaprint.Context, str string) error {
 	return nil
 }
 
-func (opap *OPAProcessor) regoEval(ctx context.Context, inputObj []map[string]interface{}, compiledRego *ast.Compiler, store *storage.Store) ([]reporthandling.RuleResponse, error) {
+func (opap *OPAProcessor) regoEval(ctx context.Context, inputObj []map[string]any, compiledRego *ast.Compiler, store *storage.Store) ([]reporthandling.RuleResponse, error) {
 	rego := rego.New(
 		rego.SetRegoVersion(ast.RegoV0),
 		rego.Query("data.armo_builtins"), // get package name from rule
@@ -557,7 +567,7 @@ func (opap *OPAProcessor) regoEval(ctx context.Context, inputObj []map[string]in
 	return results, nil
 }
 
-func (opap *OPAProcessor) enumerateData(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}) ([]map[string]interface{}, error) {
+func (opap *OPAProcessor) enumerateData(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any) ([]map[string]any, error) {
 	if ruleEnumeratorData(rule) == "" {
 		return k8sObjects, nil
 	}
@@ -568,7 +578,7 @@ func (opap *OPAProcessor) enumerateData(ctx context.Context, rule *reporthandlin
 		return nil, err
 	}
 
-	failedResources := make([]map[string]interface{}, 0, len(ruleResponse))
+	failedResources := make([]map[string]any, 0, len(ruleResponse))
 	for _, ruleResponse := range ruleResponse {
 		failedResources = append(failedResources, ruleResponse.GetFailedResources()...)
 	}
@@ -659,9 +669,7 @@ func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleDat
 	}
 
 	modules := make(map[string]string, len(baseModules)+1)
-	for k, v := range baseModules {
-		modules[k] = v
-	}
+	maps.Copy(modules, baseModules)
 	modules[ruleName] = ruleData
 
 	compiled, err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{

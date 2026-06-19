@@ -78,10 +78,7 @@ type OPASessionObj struct {
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo) *OPASessionObj {
-	clusterSize := estimateClusterSize(k8sResources)
-	if clusterSize < 100 {
-		clusterSize = 100
-	}
+	clusterSize := max(estimateClusterSize(k8sResources), 100)
 
 	return &OPASessionObj{
 		Report:                &reporthandlingv2.PostureReport{},
@@ -134,7 +131,7 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 
 	// set top workloads according to number of top workloads
 	topWorkloads := make([]reporthandling.IResource, 0, TopWorkloadsNumber)
-	for i := 0; i < TopWorkloadsNumber; i++ {
+	for i := range TopWorkloadsNumber {
 		if i >= len(topWorkloadsSorted) {
 			break
 		}

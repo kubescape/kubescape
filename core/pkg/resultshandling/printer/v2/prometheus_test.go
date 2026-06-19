@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -30,20 +32,27 @@ func TestNewPrometheusPrinter(t *testing.T) {
 }
 
 func TestSetWriter(t *testing.T) {
-	// Test case 1: Empty outputFile
 	outputFile := ""
 	promPrinter := &PrometheusPrinter{}
 	promPrinter.SetWriter(context.Background(), outputFile)
 	assert.Equal(t, os.Stdout, promPrinter.writer)
 
-	// Test case 2: Valid outputFile
-	outputFile = filepath.Join(os.TempDir(), "test.log")
+	base := filepath.Join(t.TempDir(), "test-prom")
 	promPrinter = &PrometheusPrinter{}
-	promPrinter.SetWriter(context.Background(), outputFile)
-	f, err := os.Open(outputFile)
+	promPrinter.SetWriter(context.Background(), base)
+	expectedPath := base + printer.PrometheusOutputExt
+	f, err := os.Open(expectedPath)
 	assert.NoError(t, err)
 	defer f.Close()
-	assert.NotNil(t, promPrinter.writer)
+	assert.Equal(t, expectedPath, promPrinter.writer.Name())
+
+	withExt := filepath.Join(t.TempDir(), "test-prom"+printer.PrometheusOutputExt)
+	promPrinter = &PrometheusPrinter{}
+	promPrinter.SetWriter(context.Background(), withExt)
+	f2, err := os.Open(withExt)
+	assert.NoError(t, err)
+	defer f2.Close()
+	assert.Equal(t, withExt, promPrinter.writer.Name())
 }
 
 func TestScore(t *testing.T) {
@@ -101,10 +110,10 @@ func TestScore(t *testing.T) {
 func TestResourceMetricsEmitted(t *testing.T) {
 	// Regression test for https://github.com/kubescape/kubescape/issues/2236
 	// Fails on master (setResourcesCounters commented out), passes with patch.
-	obj := map[string]interface{}{
+	obj := map[string]any{
 		"apiVersion": "apps/v1",
 		"kind":       "Deployment",
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"name":      "nginx",
 			"namespace": "default",
 		},
@@ -138,6 +147,7 @@ func TestResourceMetricsEmitted(t *testing.T) {
 		map[string]workloadinterface.IMetadata{resourceID: wl},
 		map[string]resourcesresults.Result{resourceID: result},
 		&reportsummary.SummaryDetails{},
+		cautils.ScanCoverage{},
 	)
 	output := metrics.String()
 
@@ -145,4 +155,35 @@ func TestResourceMetricsEmitted(t *testing.T) {
 		"missing kubescape_resource_count_controls_failed — setResourcesCounters may be commented out")
 	assert.Contains(t, output, "kubescape_resource_count_controls_skipped",
 		"missing kubescape_resource_count_controls_skipped — setResourcesCounters may be commented out")
+}
+
+func TestCoverageScoreMetricEmitted(t *testing.T) {
+	coverage := cautils.ScanCoverage{}
+	coverage.ComputeCoverageScore(10)
+	require.Equal(t, float32(100), coverage.CoverageScore)
+
+	pp := NewPrometheusPrinter(false)
+	metrics := pp.generatePrometheusFormat(
+		map[string]workloadinterface.IMetadata{},
+		map[string]resourcesresults.Result{},
+		&reportsummary.SummaryDetails{},
+		coverage,
+	)
+	output := metrics.String()
+
+	assert.Contains(t, output, "# TYPE kubescape_cluster_coverage_score gauge")
+	assert.Contains(t, output, "kubescape_cluster_coverage_score{} 100")
+
+	// a degraded scan must emit the discounted score
+	degraded := cautils.ScanCoverage{
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{{ControlID: "C-0001"}},
+	}
+	degraded.ComputeCoverageScore(10)
+	metrics = pp.generatePrometheusFormat(
+		map[string]workloadinterface.IMetadata{},
+		map[string]resourcesresults.Result{},
+		&reportsummary.SummaryDetails{},
+		degraded,
+	)
+	assert.Contains(t, metrics.String(), "kubescape_cluster_coverage_score{} 90")
 }

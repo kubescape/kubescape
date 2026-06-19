@@ -58,10 +58,8 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			if len(args) > 0 {
 				frameworks := strings.Split(args[0], ",")
 				if len(frameworks) > 1 {
-					for _, framework := range frameworks {
-						if framework == "" {
-							return fmt.Errorf("usage: <framework-0>,<framework-1>")
-						}
+					if slices.Contains(frameworks, "") {
+						return fmt.Errorf("usage: <framework-0>,<framework-1>")
 					}
 				}
 			} else {
@@ -191,9 +189,11 @@ func terminateOnExceedingSeverity(scanInfo *cautils.ScanInfo, l helpers.ILogger)
 	l.Fatal("compliance result exceeds severity threshold", helpers.String("set severity threshold", scanInfo.FailThresholdSeverity))
 }
 
-// enforceCoverageThreshold fails the scan if the percentage of evaluated controls
-// is below scanInfo.FailCoverageThreshold. Coverage = (total - notEvaluated) / total * 100.
-// A threshold of 0 disables the check.
+// enforceCoverageThreshold fails the scan if the scan coverage score is below
+// scanInfo.FailCoverageThreshold. The score is computed once in the scan
+// pipeline (ScanCoverage.ComputeCoverageScore) so this gate agrees with what
+// the JSON, Prometheus and pretty-printer outputs report. A threshold of 0
+// disables the check.
 func enforceCoverageThreshold(coverage cautils.ScanCoverage, totalControls int, scanInfo *cautils.ScanInfo) {
 	if scanInfo.FailCoverageThreshold <= 0 {
 		return
@@ -201,11 +201,9 @@ func enforceCoverageThreshold(coverage cautils.ScanCoverage, totalControls int, 
 	if totalControls == 0 {
 		return
 	}
-	notEvaluated := len(coverage.NotEvaluatedControls)
-	coveragePct := float32(totalControls-notEvaluated) / float32(totalControls) * 100
-	if coveragePct < scanInfo.FailCoverageThreshold {
+	if coverage.CoverageScore < scanInfo.FailCoverageThreshold {
 		logger.L().Fatal("scan coverage is below permitted threshold",
-			helpers.String("coverage", fmt.Sprintf("%.2f%%", coveragePct)),
+			helpers.String("coverage", fmt.Sprintf("%.2f%%", coverage.CoverageScore)),
 			helpers.String("fail-coverage-below", fmt.Sprintf("%.2f%%", scanInfo.FailCoverageThreshold)),
 		)
 	}

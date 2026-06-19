@@ -3,6 +3,7 @@ package patch
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -46,13 +47,7 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 			}
 			if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && scanInfo.Format != "" {
 				supported := []string{"pretty-printer", "json", "sarif"}
-				valid := false
-				for _, s := range supported {
-					if scanInfo.Format == s {
-						valid = true
-						break
-					}
-				}
+				valid := slices.Contains(supported, scanInfo.Format)
 				if !valid {
 					return fmt.Errorf("invalid format %q, supported formats: pretty-printer, json, sarif", scanInfo.Format)
 				}

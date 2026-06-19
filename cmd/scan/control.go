@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -43,10 +44,8 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if len(args) > 0 {
 				controls := strings.Split(args[0], ",")
 				if len(controls) > 1 {
-					for _, control := range controls {
-						if control == "" {
-							return fmt.Errorf("usage: <control-0>,<control-1>")
-						}
+					if slices.Contains(controls, "") {
+						return fmt.Errorf("usage: <control-0>,<control-1>")
 					}
 				}
 			} else {

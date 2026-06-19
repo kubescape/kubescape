@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -12,6 +14,10 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+)
+
+const (
+	prometheusOutputFile = "report"
 )
 
 var _ printer.IPrinter = &PrometheusPrinter{}
@@ -32,6 +38,15 @@ func (pp *PrometheusPrinter) PrintNextSteps() {
 }
 
 func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) {
+	if outputFile != "" {
+		outputFile = strings.TrimSpace(outputFile)
+		if outputFile == "" {
+			outputFile = prometheusOutputFile
+		}
+		if filepath.Ext(outputFile) != printer.PrometheusOutputExt {
+			outputFile = outputFile + printer.PrometheusOutputExt
+		}
+	}
 	pp.writer = printer.GetWriter(ctx, outputFile)
 }
 
@@ -51,11 +66,13 @@ func (pp *PrometheusPrinter) Score(score float32) {
 func (pp *PrometheusPrinter) generatePrometheusFormat(
 	resources map[string]workloadinterface.IMetadata,
 	results map[string]resourcesresults.Result,
-	summaryDetails *reportsummary.SummaryDetails) *Metrics {
+	summaryDetails *reportsummary.SummaryDetails,
+	coverage cautils.ScanCoverage) *Metrics {
 
 	m := &Metrics{}
 	m.setComplianceScores(summaryDetails)
 	m.setResourcesCounters(resources, results)
+	m.setCoverageScore(coverage)
 
 	return m
 }
@@ -66,7 +83,7 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 		return
 	}
 
-	metrics := pp.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails)
+	metrics := pp.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails, opaSessionObj.ScanCoverage)
 
 	if _, err := pp.writer.Write([]byte(metrics.String())); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
