@@ -33,17 +33,26 @@ func newEnv() (*cel.Env, error) {
 	// Declare the VAP variables. They are declared dynamic because objects are
 	// bound from YAML as map[string]any rather than custom Go types.
 	//
-	//   - object    : the K8s resource being scanned.
-	//   - oldObject : declared here and bound to null offline, so a CREATE
-	//                 (request.operation=CREATE) has the same null oldObject it
-	//                 would have at live admission.
-	//   - params    : resolved from the control configuration; declared here so
-	//                 params.* references compile.
-	//   - request   : stubbed offline (operation=CREATE, empty userInfo);
-	//                 declared here so request.* references compile.
-	//   - variables : a dynamic selector so validations referencing
-	//                 variables.<name> compile; values are injected per-object
-	//                 at eval time.
+	//   - object          : the K8s resource being scanned.
+	//   - oldObject       : declared here and bound to null offline, so a CREATE
+	//                       (request.operation=CREATE) has the same null
+	//                       oldObject it would have at live admission.
+	//   - namespaceObject : the Namespace object the scanned resource lives in.
+	//                       A standard, first-class VAP variable; the apiserver
+	//                       binds it to the resource's namespace (null for
+	//                       cluster-scoped resources). Declared here so policies
+	//                       referencing namespaceObject.* compile; bound at eval
+	//                       time (the scanned resource's namespace object, or
+	//                       null when cluster-scoped). It is resolvable offline
+	//                       (unlike authorizer), so omitting it would silently
+	//                       skip common policies and break the parity guarantee.
+	//   - params          : resolved from the control configuration; declared
+	//                       here so params.* references compile.
+	//   - request         : stubbed offline (operation=CREATE, empty userInfo);
+	//                       declared here so request.* references compile.
+	//   - variables       : a dynamic selector so validations referencing
+	//                       variables.<name> compile; values are injected
+	//                       per-object at eval time.
 	//
 	// authorizer is deliberately NOT declared: it cannot be resolved offline, so
 	// a policy referencing authorizer should fail to compile and get skipped
@@ -56,6 +65,7 @@ func newEnv() (*cel.Env, error) {
 		EnvOptions: []cel.EnvOption{
 			cel.Variable("object", cel.DynType),
 			cel.Variable("oldObject", cel.DynType),
+			cel.Variable("namespaceObject", cel.DynType),
 			cel.Variable("params", cel.DynType),
 			cel.Variable("request", cel.DynType),
 			cel.Variable("variables", cel.DynType),
