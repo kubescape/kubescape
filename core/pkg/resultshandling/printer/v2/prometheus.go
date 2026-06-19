@@ -66,11 +66,13 @@ func (pp *PrometheusPrinter) Score(score float32) {
 func (pp *PrometheusPrinter) generatePrometheusFormat(
 	resources map[string]workloadinterface.IMetadata,
 	results map[string]resourcesresults.Result,
-	summaryDetails *reportsummary.SummaryDetails) *Metrics {
+	summaryDetails *reportsummary.SummaryDetails,
+	coverage cautils.ScanCoverage) *Metrics {
 
 	m := &Metrics{}
 	m.setComplianceScores(summaryDetails)
 	m.setResourcesCounters(resources, results)
+	m.setCoverageScore(coverage)
 
 	return m
 }
@@ -81,7 +83,7 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 		return
 	}
 
-	metrics := pp.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails)
+	metrics := pp.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails, opaSessionObj.ScanCoverage)
 
 	if _, err := pp.writer.Write([]byte(metrics.String())); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))

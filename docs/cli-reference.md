@@ -42,6 +42,7 @@ kubescape scan [target] [flags]
 | `--controls-config <path>` | Path to controls configuration file | - |
 | `-e, --exclude-namespaces <ns>` | Namespaces to exclude (comma-separated) | - |
 | `--exceptions <path>` | Path to exceptions file | - |
+| `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `sarif`, `html`, `pdf`, `prometheus` | `pretty-printer` |
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
 | `--keep-local` | Don't report results to backend | `false` |
@@ -100,6 +101,19 @@ The default `kubescape scan [path]` uses `--view security`, which does
 not evaluate against a score threshold. To gate a pipeline on the
 compliance or risk score, use one of the forms above.
 `--severity-threshold` and `--fail-coverage-below` apply in every view.
+
+`--fail-coverage-below` gates on the **scan coverage score**, not the raw
+ratio of evaluated controls. The score starts from the percentage of controls
+that were evaluated and then subtracts a fixed penalty for each runtime gap:
+**2 points per partial GVR pull** and **5 points per degraded policy input**
+(control configurations or exceptions served from a fallback source). As a
+result a scan in which 100% of controls were evaluated can still drop below the
+threshold — for example, a single partial resource pull yields a score of 98.
+
+> **Behavior change:** earlier releases compared only the ratio of evaluated
+> controls. Pipelines that tuned `--fail-coverage-below` against that narrower
+> meaning may now fail on scans that previously passed. Re-check your threshold
+> if you rely on this flag in CI.
 
 ---
 

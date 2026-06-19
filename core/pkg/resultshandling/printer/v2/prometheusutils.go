@@ -17,6 +17,7 @@ const (
 	ksMetrics        metricsName = "kubescape"
 	metricsCluster   metricsName = "cluster"
 	metricsScore     metricsName = "complianceScore"
+	metricsCoverage  metricsName = "coverage_score"
 	metricsCount     metricsName = "count"
 	metricsFailed    metricsName = "failed"
 	metricsSkipped   metricsName = "skipped"
@@ -66,6 +67,25 @@ func (mrs *mComplianceScore) labels() string {
 }
 
 func (mrs *mComplianceScore) prefix() string {
+	return fmt.Sprintf("%s_%s", ksMetrics, metricsCluster)
+}
+
+// ============================================ COVERAGE ============================================================
+func (mcs *mScanCoverage) metrics() []string {
+	/*
+		##### Scan coverage score (how complete the scan was, 100 = full coverage)
+		kubescape_cluster_coverage_score{} <coverage score>
+	*/
+	return []string{
+		toRowInMetrics(fmt.Sprintf("%s_%s", mcs.prefix(), metricsCoverage), mcs.labels(), mcs.coverageScore),
+	}
+}
+
+func (mcs *mScanCoverage) labels() string {
+	return ""
+}
+
+func (mcs *mScanCoverage) prefix() string {
 	return fmt.Sprintf("%s_%s", ksMetrics, metricsCluster)
 }
 
@@ -209,6 +229,7 @@ func (m *Metrics) String() string {
 	// collect all metric lines first, then emit headers once per family
 	var all []string
 	all = append(all, m.rs.metrics()...)
+	all = append(all, m.coverage.metrics()...)
 	for i := range m.listFrameworks {
 		all = append(all, m.listFrameworks[i].metrics()...)
 	}
@@ -229,6 +250,10 @@ type mComplianceScore struct {
 	controlsCountFailed   int
 	controlsCountSkipped  int
 	complianceScore       int
+}
+
+type mScanCoverage struct {
+	coverageScore int
 }
 
 type mControlComplianceScore struct {
@@ -265,6 +290,7 @@ type mResources struct {
 }
 type Metrics struct {
 	rs             mComplianceScore
+	coverage       mScanCoverage
 	listFrameworks []mFrameworkComplianceScore
 	listControls   []mControlComplianceScore
 	listResources  []mResources
@@ -318,6 +344,10 @@ func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetai
 		mcrs.set(control.NumberOfResources())
 		m.listControls = append(m.listControls, mcrs)
 	}
+}
+
+func (m *Metrics) setCoverageScore(coverage cautils.ScanCoverage) {
+	m.coverage.coverageScore = cautils.Float32ToIntFloor(coverage.CoverageScore)
 }
 
 // return -> (passed, skipped, failed)
