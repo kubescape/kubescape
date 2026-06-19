@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -381,4 +384,225 @@ func TestPrintConfigurationScan_InvocationStartTimeUsesReportGenerationTime(t *t
 	require.NotNil(t, inv.StartTimeUTC)
 	assert.True(t, inv.StartTimeUTC.Equal(preset),
 		"startTimeUtc must reuse ReportGenerationTime, got %s want %s", inv.StartTimeUTC, preset)
+}
+
+func TestGetBasePathFromMetadata(t *testing.T) {
+	tempDir := t.TempDir()
+	absFilePath := filepath.Join(tempDir, "deploy.yaml")
+
+	tests := []struct {
+		name    string
+		session cautils.OPASessionObj
+		want    string
+	}{
+		{
+			name: "GitLocal",
+			session: cautils.OPASessionObj{
+				Metadata: &reporthandlingv2.Metadata{
+					ScanMetadata: reporthandlingv2.ScanMetadata{
+						ScanningTarget: reporthandlingv2.GitLocal,
+					},
+					ContextMetadata: reporthandlingv2.ContextMetadata{
+						RepoContextMetadata: &reporthandlingv2.RepoContextMetadata{
+							LocalRootPath: tempDir,
+						},
+					},
+				},
+			},
+			want: tempDir,
+		},
+		{
+			name: "Directory",
+			session: cautils.OPASessionObj{
+				Metadata: &reporthandlingv2.Metadata{
+					ScanMetadata: reporthandlingv2.ScanMetadata{
+						ScanningTarget: reporthandlingv2.Directory,
+					},
+					ContextMetadata: reporthandlingv2.ContextMetadata{
+						DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{
+							BasePath: tempDir,
+						},
+					},
+				},
+			},
+			want: tempDir,
+		},
+		{
+			name: "File",
+			session: cautils.OPASessionObj{
+				Metadata: &reporthandlingv2.Metadata{
+					ScanMetadata: reporthandlingv2.ScanMetadata{
+						ScanningTarget: reporthandlingv2.File,
+					},
+					ContextMetadata: reporthandlingv2.ContextMetadata{
+						FileContextMetadata: &reporthandlingv2.FileContextMetadata{
+							FilePath: absFilePath,
+						},
+					},
+				},
+			},
+			want: tempDir,
+		},
+		{
+			name: "File without metadata",
+			session: cautils.OPASessionObj{
+				Metadata: &reporthandlingv2.Metadata{
+					ScanMetadata: reporthandlingv2.ScanMetadata{
+						ScanningTarget: reporthandlingv2.File,
+					},
+				},
+			},
+			want: "",
+		},
+		{
+			name: "Cluster",
+			session: cautils.OPASessionObj{
+				Metadata: &reporthandlingv2.Metadata{
+					ScanMetadata: reporthandlingv2.ScanMetadata{
+						ScanningTarget: reporthandlingv2.Cluster,
+					},
+				},
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, getBasePathFromMetadata(tt.session))
+		})
+	}
+}
+
+// TestPrintConfigurationScan_FileScanResolvesLineNumbers is the regression test
+// for absolute-path single-file scans: SARIF must resolve real line numbers even
+// when cwd differs from the manifest directory (common in CI).
+func TestPrintConfigurationScan_FileScanResolvesLineNumbers(t *testing.T) {
+	const privilegedLine = 13
+
+	manifestDir := t.TempDir()
+	manifestPath := filepath.Join(manifestDir, "deploy.yaml")
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata: {name: demo, namespace: default}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: demo}}
+  template:
+    metadata: {labels: {app: demo}}
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.23
+        securityContext: {privileged: true}
+`
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0600))
+
+	resourceID := "apps/v1/Deployment/default/demo"
+	obj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "demo",
+			"namespace": "default",
+		},
+		"spec": map[string]interface{}{},
+	}
+	lw := localworkload.NewLocalWorkload(obj)
+	lw.SetPath("deploy.yaml:0")
+
+	controlID := "C-0001"
+	ac := resourcesresults.ResourceAssociatedControl{
+		ControlID: controlID,
+		Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+			{
+				Name:   "privileged-container",
+				Status: apis.StatusFailed,
+				Paths: []armotypes.PosturePaths{
+					{
+						FixPath: armotypes.FixPath{
+							Path:  "spec.template.spec.containers[0].securityContext.privileged",
+							Value: "false",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	session := cautils.NewOPASessionObjMock()
+	session.Metadata = &reporthandlingv2.Metadata{
+		ScanMetadata: reporthandlingv2.ScanMetadata{
+			ScanningTarget: reporthandlingv2.File,
+		},
+		ContextMetadata: reporthandlingv2.ContextMetadata{
+			FileContextMetadata: &reporthandlingv2.FileContextMetadata{
+				FilePath: manifestPath,
+			},
+		},
+	}
+	session.ResourcesResult[resourceID] = resourcesresults.Result{
+		ResourceID:         resourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{ac},
+	}
+	session.ResourceSource = map[string]reporthandling.Source{
+		resourceID: {
+			Path:         manifestDir,
+			RelativePath: "deploy.yaml",
+			FileType:     reporthandling.SourceTypeYaml,
+		},
+	}
+	session.AllResources[resourceID] = lw
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				controlID: reportsummary.ControlSummary{
+					ControlID:   controlID,
+					Name:        "Privileged container",
+					Description: "Do not run privileged containers",
+					Remediation: "Set privileged to false",
+					ScoreFactor: 8.0,
+				},
+			},
+		},
+	}
+
+	tmp, err := os.CreateTemp("", "sarif-file-scan-*.sarif")
+	require.NoError(t, err)
+	defer func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	}()
+
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	otherWD := t.TempDir()
+	require.NoError(t, os.Chdir(otherWD))
+
+	sp := NewSARIFPrinter()
+	sp.writer = tmp
+	require.NoError(t, sp.printConfigurationScan(context.Background(), session))
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 1)
+	require.NotEmpty(t, report.Runs[0].Results)
+
+	var startLines []int
+	for _, result := range report.Runs[0].Results {
+		require.NotEmpty(t, result.Locations)
+		require.NotNil(t, result.Locations[0].PhysicalLocation)
+		require.NotNil(t, result.Locations[0].PhysicalLocation.Region)
+		startLines = append(startLines, *result.Locations[0].PhysicalLocation.Region.StartLine)
+	}
+
+	assert.Contains(t, startLines, privilegedLine,
+		"SARIF must resolve the privileged field to line %d, got startLines=%v", privilegedLine, startLines)
+	assert.NotEqual(t, []int{1}, startLines,
+		"all findings must not collapse to line 1 for absolute-path file scans")
 }
