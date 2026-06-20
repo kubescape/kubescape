@@ -730,6 +730,7 @@ type mockCounters struct {
 
 func (m mockCounters) Failed() int   { return m.failed }
 func (m mockCounters) Skipped() int  { return m.skipped }
+func (m mockCounters) Passed() int   { return m.passed + m.excluded } // mirrors StatusCounters.Passed() which includes ExcludedResources
 func (m mockCounters) Passed() int   { return m.passed + m.excluded }
 func (m mockCounters) Excluded() int { return m.excluded }
 func (m mockCounters) All() int      { return m.failed + m.skipped + m.passed + m.excluded }
@@ -761,6 +762,7 @@ func TestIsEmptyResources(t *testing.T) {
 			want:     false,
 		},
 		{
+			name:     "one excluded — not empty (Passed() includes ExcludedResources per StatusCounters)",
 			name:     "one excluded — not empty (excluded counts as passed)",
 			counters: mockCounters{excluded: 1},
 			want:     false,
@@ -790,6 +792,7 @@ func TestMapControlToInfo(t *testing.T) {
 		},
 		"resource-with-excluded-results": {
 			InnerStatus: apis.StatusPassed,
+			InnerInfo:   "excluded resources count as non-empty (StatusCounters.Passed includes ExcludedResources)",
 			InnerInfo:   "excluded resources count as non-empty",
 		},
 		"resource-with-missing-control": {
@@ -830,6 +833,10 @@ func TestMapControlToInfo(t *testing.T) {
 	)
 
 	assert.Equal(t, map[string]apis.StatusInfo{
+		// C-0001: no resource counters at all — isEmptyResources returns true, so info is propagated
+		// C-0002: FailedResources=1 — isEmptyResources returns false, not included
+		// C-0003: ExcludedResources=2 — StatusCounters.Passed() includes ExcludedResources,
+		//         so isEmptyResources returns false and C-0003 is also not included
 		"C-0001": infoMap["resource-with-empty-control"],
 	}, got)
 }
