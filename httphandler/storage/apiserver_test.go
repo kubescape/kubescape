@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"testing"
@@ -641,4 +642,102 @@ func TestMergeMaps(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+func TestGetRoleAndRoleBindingFromRelatedObjects_SameCategory(t *testing.T) {
+	testCases := []struct {
+		name           string
+		relatedObjects []workloadinterface.IMetadata
+	}{
+		{
+			name: "two Role objects",
+			relatedObjects: []workloadinterface.IMetadata{
+				&FakeMetadata{Kind: "Role", Name: "role-a", Namespace: "ns"},
+				&FakeMetadata{Kind: "Role", Name: "role-b", Namespace: "ns"},
+			},
+		},
+		{
+			name: "two RoleBinding objects",
+			relatedObjects: []workloadinterface.IMetadata{
+				&FakeMetadata{Kind: "RoleBinding", Name: "rb-a", Namespace: "ns"},
+				&FakeMetadata{Kind: "RoleBinding", Name: "rb-b", Namespace: "ns"},
+			},
+		},
+		{
+			name: "two ClusterRole objects",
+			relatedObjects: []workloadinterface.IMetadata{
+				&FakeMetadata{Kind: "ClusterRole", Name: "cr-a"},
+				&FakeMetadata{Kind: "ClusterRole", Name: "cr-b"},
+			},
+		},
+		{
+			name: "two ClusterRoleBinding objects",
+			relatedObjects: []workloadinterface.IMetadata{
+				&FakeMetadata{Kind: "ClusterRoleBinding", Name: "crb-a"},
+				&FakeMetadata{Kind: "ClusterRoleBinding", Name: "crb-b"},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			role, roleBinding, err := getRoleAndRoleBindingFromRelatedObjects(tc.relatedObjects)
+			assert.True(t, errors.Is(err, ErrIncompleteRelatedObjects))
+			assert.Nil(t, role)
+			assert.Nil(t, roleBinding)
+		})
+	}
+}
+
+func TestStorePostureReportResults_SkipsSameCategoryRBACObjects(t *testing.T) {
+	store := NewFakeAPIServerStorage("kubescape")
+	ctx := context.Background()
+
+	sameCategoryObj := map[string]any{
+		"kind":      "ServiceAccount",
+		"name":      "my-sa",
+		"namespace": "default",
+		"relatedObjects": []any{
+			map[string]any{
+				"kind":       "Role",
+				"name":       "role-a",
+				"namespace":  "default",
+				"apiVersion": "rbac.authorization.k8s.io/v1",
+			},
+			map[string]any{
+				"kind":       "Role",
+				"name":       "role-b",
+				"namespace":  "default",
+				"apiVersion": "rbac.authorization.k8s.io/v1",
+			},
+		},
+	}
+
+	podObj := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "test-pod",
+			"namespace": "default",
+		},
+	}
+
+	pr := &v2.PostureReport{
+		Resources: []reporthandling.Resource{
+			{ResourceID: "same-category-resource-id", Object: sameCategoryObj},
+			{ResourceID: "pod-resource-id", Object: podObj},
+		},
+		Results: []resourcesresults.Result{
+			{ResourceID: "same-category-resource-id"},
+			{ResourceID: "pod-resource-id"},
+		},
+	}
+
+	err := store.StorePostureReportResults(ctx, pr)
+	assert.NoError(t, err)
+
+	summaries, listErr := store.StorageClient.WorkloadConfigurationScanSummaries("default").List(ctx, metav1.ListOptions{})
+	assert.NoError(t, listErr)
+	assert.Len(t, summaries.Items, 1)
+	assert.Equal(t, "pod-test-pod", summaries.Items[0].Name)
 }
