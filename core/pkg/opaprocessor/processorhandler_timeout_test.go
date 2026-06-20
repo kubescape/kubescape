@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/score"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/resources"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -139,4 +140,30 @@ func TestProcess_ControlTimeout(t *testing.T) {
 	assert.Equal(t, float32(0), coverage.CoverageScore)
 	assert.Equal(t, 0, coverage.EvaluatedControls)
 	assert.True(t, coverage.Degraded)
+}
+
+// TestReweightComplianceScores_TimedOutControlCountsAsFailed verifies that a
+// timed-out control is counted as 0 within a full denominator (fail-closed),
+// so it cannot inflate ComplianceScore above the value a genuine failure would
+// produce. A high per-control score on the timed-out control (e.g. from partial
+// data) must not leak into the aggregate.
+func TestReweightComplianceScores_TimedOutControlCountsAsFailed(t *testing.T) {
+	passScore := float32(100)
+	slowScore := float32(100)
+
+	opaSessionObj := cautils.NewOPASessionObjMock()
+	opaSessionObj.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+		"C-PASS": reportsummary.ControlSummary{ControlID: "C-PASS", ComplianceScore: &passScore},
+		"C-SLOW": reportsummary.ControlSummary{ControlID: "C-SLOW", ComplianceScore: &slowScore},
+	}
+
+	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	opap.TimedOutControls["C-SLOW"] = "control evaluation timed out"
+
+	opap.reweightComplianceScores()
+
+	// (100 + 0) / 2 == 50: identical to C-SLOW genuinely failing (score 0), and
+	// strictly below the 100 produced by excluding it from the denominator.
+	assert.Equal(t, float32(50), opaSessionObj.Report.SummaryDetails.ComplianceScore)
+	assert.Less(t, opaSessionObj.Report.SummaryDetails.ComplianceScore, float32(100))
 }
