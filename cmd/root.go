@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/cmd/completion"
 	"github.com/kubescape/kubescape/v3/cmd/config"
+	"github.com/kubescape/kubescape/v3/cmd/decrypt"
 	"github.com/kubescape/kubescape/v3/cmd/diff"
 	"github.com/kubescape/kubescape/v3/cmd/download"
 	"github.com/kubescape/kubescape/v3/cmd/fix"
@@ -91,6 +92,7 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.KubeContext, "kube-context", "", "", "Kube context. Default will use the current-context")
 	// Supported commands
 	rootCmd.AddCommand(scan.GetScanCommand(ks))
+	rootCmd.AddCommand(decrypt.GetDecryptCommand())
 	rootCmd.AddCommand(download.GetDownloadCmd(ks))
 	rootCmd.AddCommand(list.GetListCmd(ks))
 	rootCmd.AddCommand(completion.GetCompletionCmd())

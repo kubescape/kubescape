@@ -18,6 +18,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
 	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
 	"github.com/kubescape/kubescape/v3/core/pkg/policyhandler"
+	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
 	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
 	"github.com/kubescape/kubescape/v3/core/pkg/resourcesprioritization"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
@@ -279,9 +280,55 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// ========================= results handling =====================
 	resultsHandling.SetData(scanData)
 
-	if scanInfo.Hide {
-		if err := anonymizer.Apply(resultsHandling); err != nil {
-			return nil, fmt.Errorf("failed to hide sensitive fields: %w", err)
+	if scanInfo.EncryptionEnabled {
+
+		masterKey, err := reportcrypto.GetMasterKeyFromEnv()
+		if err != nil {
+			return nil, err
+		}
+
+		dek, err := reportcrypto.GenerateDEK()
+		if err != nil {
+			for i := range masterKey {
+				masterKey[i] = 0
+			}
+
+			return nil, fmt.Errorf(
+				"failed to generate encryption key",
+			)
+		}
+
+		err = anonymizer.ApplyEncrypted(
+			resultsHandling,
+			dek,
+			masterKey,
+		)
+
+		// best-effort memory cleanup
+		for i := range dek {
+			dek[i] = 0
+		}
+
+		for i := range masterKey {
+			masterKey[i] = 0
+		}
+
+		if err != nil {
+			return nil, fmt.Errorf(
+				"failed to encrypt sensitive fields: %w",
+				err,
+			)
+		}
+
+	} else if scanInfo.Hide {
+
+		if err := anonymizer.Apply(
+			resultsHandling,
+		); err != nil {
+			return nil, fmt.Errorf(
+				"failed to hide sensitive fields: %w",
+				err,
+			)
 		}
 	}
 

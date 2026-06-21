@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/meta"
+	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/spf13/cobra"
 )
@@ -48,33 +49,74 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Example: scanCmdExamples,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if scanInfo.FailThresholdSeverity != "" {
-				if err := shared.ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
+				if err := shared.ValidateSeverity(
+					scanInfo.FailThresholdSeverity,
+				); err != nil {
 					return err
 				}
 			}
-			if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif")
+
+			if f := cmd.Flags().Lookup("format"); f != nil &&
+				f.Changed &&
+				scanInfo.Format == "" {
+
+				return fmt.Errorf(
+					"format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif",
+				)
 			}
-			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ScanFormats); err != nil {
+
+			if err := shared.ValidateScanFormat(
+				scanInfo.Format,
+				shared.ScanFormats,
+			); err != nil {
 				return err
 			}
+
+			if scanInfo.EncryptionEnabled {
+
+				if _, err := reportcrypto.GetMasterKeyFromEnv(); err != nil {
+					return err
+				}
+			}
+
 			requestedView := scanInfo.View
+
 			if err := validateFrameworkScanInfo(&scanInfo); err != nil {
 				return err
 			}
+
 			scanInfo.View = requestedView
+
 			if scanInfo.View == string(cautils.SecurityViewType) {
 				setSecurityViewScanInfo(args, &scanInfo)
 
 				if err := securityScan(scanInfo, ks); err != nil {
 					logger.L().Fatal(err.Error())
 				}
-			} else if len(args) == 0 || (args[0] != "framework" && args[0] != "control") {
-				if err := getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{strings.Join(getter.NativeFrameworks, ",")}, args...)); err != nil {
+			} else if len(args) == 0 ||
+				(args[0] != "framework" && args[0] != "control") {
+
+				if err := getFrameworkCmd(
+					ks,
+					&scanInfo,
+				).RunE(
+					cmd,
+					append(
+						[]string{
+							strings.Join(
+								getter.NativeFrameworks,
+								",",
+							),
+						},
+						args...,
+					),
+				); err != nil {
 					logger.L().Fatal(err.Error())
 				}
 			} else {
-				return fmt.Errorf("kubescape did not do anything")
+				return fmt.Errorf(
+					"kubescape did not do anything",
+				)
 			}
 
 			return nil
@@ -116,7 +158,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.EnableRegoPrint, "enable-rego-prints", "", false, "Enable sending to rego prints to the logs (use with debug log level: -l debug)")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ScanImages, "scan-images", "", false, "Scan resources images")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.UseDefaultMatchers, "use-default-matchers", "", true, "Use default matchers (true) or CPE matchers (false) for image scanning")
-	scanCmd.PersistentFlags().BoolVar(&scanInfo.Hide, "hide", false, "Hide sensitive identifiers (namespace, resource names, container names, images) in results")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.Hide, "hide", false, "Hide sensitive identifiers using irreversible pseudonymization")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.EncryptionEnabled, "encrypt", false, "Use reversible encryption for repository metadata instead of pseudonymization")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.LabelsToCopy, "labels-to-copy", nil, "Labels to copy from workloads to scan reports for easy identification. e.g: --labels-to-copy=app,team,environment")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ListingURL, "grype-db-url", "", "Grype vulnerability database URL")
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ScanTimeout, "scan-timeout", 0, "Maximum duration for the scan (e.g. 5m, 30s, 1h). 0 means no timeout. When the timeout is reached the scan exits with a non-zero code.")
