@@ -11,118 +11,164 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDecryptCommand_PreservesUnknownFields(t *testing.T) {
-	dek, err := reportcrypto.GenerateDEK()
-	require.NoError(t, err)
-
-	masterKey := []byte("12345678901234567890123456789012")
-
-	encryptedRepo, err := reportcrypto.EncryptString(
-		"kubescape",
-		dek,
-	)
-	require.NoError(t, err)
-
-	wrappedDEK, err := reportcrypto.WrapDEK(
-		dek,
-		masterKey,
-	)
-	require.NoError(t, err)
-
-	report := map[string]any{
-		"resourceLabels": map[string]any{
-			"team": "platform",
-		},
-		"scanCoverage": map[string]any{
-			"all": true,
-		},
-		"metadata": map[string]any{
-			"targetMetadata": map[string]any{
-				"gitRepoContextMetadata": map[string]any{
-					"repo": encryptedRepo,
-				},
-			},
-			"encryptionMetadata": map[string]any{
-				"encryptedDEK": wrappedDEK,
-			},
+func TestDecryptCommand(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{
+			name: "preserves unknown fields",
 		},
 	}
 
-	data, err := json.Marshal(report)
-	require.NoError(t, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dek, err := reportcrypto.GenerateDEK()
+			require.NoError(t, err)
 
-	tmp, err := os.CreateTemp("", "encrypted-*.json")
-	require.NoError(t, err)
+			masterKey := []byte(
+				"12345678901234567890123456789012",
+			)
 
-	defer os.Remove(tmp.Name())
+			encryptedRepo, err :=
+				reportcrypto.EncryptString(
+					"kubescape",
+					dek,
+				)
+			require.NoError(t, err)
 
-	_, err = tmp.Write(data)
-	require.NoError(t, err)
+			wrappedDEK, err :=
+				reportcrypto.WrapDEK(
+					dek,
+					masterKey,
+				)
+			require.NoError(t, err)
 
-	require.NoError(t, tmp.Close())
+			report := map[string]any{
+				"resourceLabels": map[string]any{
+					"team": "platform",
+				},
+				"scanCoverage": map[string]any{
+					"all": true,
+				},
+				"metadata": map[string]any{
+					"targetMetadata": map[string]any{
+						"gitRepoContextMetadata": map[string]any{
+							"repo": encryptedRepo,
+						},
+					},
+					"encryptionMetadata": map[string]any{
+						"encryptedDEK": wrappedDEK,
+					},
+				},
+			}
 
-	t.Setenv(
-		"KUBESCAPE_MASTER_KEY",
-		string(masterKey),
-	)
+			data, err := json.Marshal(report)
+			require.NoError(t, err)
 
-	oldStdout := os.Stdout
+			tmp, err := os.CreateTemp(
+				"",
+				"encrypted-*.json",
+			)
+			require.NoError(t, err)
 
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
+			defer os.Remove(tmp.Name())
 
-	os.Stdout = w
+			_, err = tmp.Write(data)
+			require.NoError(t, err)
 
-	cmd := GetDecryptCommand()
+			require.NoError(
+				t,
+				tmp.Close(),
+			)
 
-	err = cmd.RunE(
-		cmd,
-		[]string{tmp.Name()},
-	)
+			t.Setenv(
+				"KUBESCAPE_MASTER_KEY",
+				string(masterKey),
+			)
 
-	require.NoError(t, err)
+			oldStdout := os.Stdout
 
-	require.NoError(t, w.Close())
+			r, w, err := os.Pipe()
+			require.NoError(t, err)
 
-	os.Stdout = oldStdout
+			os.Stdout = w
 
-	var buf bytes.Buffer
+			defer func() {
+				os.Stdout = oldStdout
+			}()
 
-	_, err = buf.ReadFrom(r)
-	require.NoError(t, err)
+			defer func() {
+				_ = w.Close()
+			}()
 
-	var output map[string]any
+			cmd := GetDecryptCommand()
 
-	err = json.Unmarshal(
-		buf.Bytes(),
-		&output,
-	)
-	require.NoError(t, err)
+			err = cmd.RunE(
+				cmd,
+				[]string{tmp.Name()},
+			)
 
-	assert.Contains(
-		t,
-		output,
-		"resourceLabels",
-	)
+			require.NoError(t, err)
 
-	assert.Contains(
-		t,
-		output,
-		"scanCoverage",
-	)
+			require.NoError(
+				t,
+				w.Close(),
+			)
 
-	metadata :=
-		output["metadata"].(map[string]any)
+			var buf bytes.Buffer
 
-	targetMetadata :=
-		metadata["targetMetadata"].(map[string]any)
+			_, err = buf.ReadFrom(r)
+			require.NoError(t, err)
 
-	repoMetadata :=
-		targetMetadata["gitRepoContextMetadata"].(map[string]any)
+			var output map[string]any
 
-	assert.Equal(
-		t,
-		"kubescape",
-		repoMetadata["repo"],
-	)
+			err = json.Unmarshal(
+				buf.Bytes(),
+				&output,
+			)
+			require.NoError(t, err)
+
+			assert.Contains(
+				t,
+				output,
+				"resourceLabels",
+			)
+
+			assert.Contains(
+				t,
+				output,
+				"scanCoverage",
+			)
+
+			metadata, ok :=
+				output["metadata"].(map[string]any)
+			require.True(
+				t,
+				ok,
+				"metadata should be an object",
+			)
+
+			targetMetadata, ok :=
+				metadata["targetMetadata"].(map[string]any)
+			require.True(
+				t,
+				ok,
+				"targetMetadata should be an object",
+			)
+
+			repoMetadata, ok :=
+				targetMetadata["gitRepoContextMetadata"].(map[string]any)
+			require.True(
+				t,
+				ok,
+				"gitRepoContextMetadata should be an object",
+			)
+
+			assert.Equal(
+				t,
+				"kubescape",
+				repoMetadata["repo"],
+			)
+		})
+	}
 }
