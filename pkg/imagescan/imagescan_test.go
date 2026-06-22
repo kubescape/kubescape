@@ -546,3 +546,26 @@ func TestFilterMatchesBasedOnSeverity(t *testing.T) {
 		assert.ElementsMatch(t, []string{"CVE-medium"}, matchIDs(filtered))
 	})
 }
+
+func TestGetMatchers(t *testing.T) {
+	t.Run("default matchers", func(t *testing.T) {
+		matchers := getMatchers(true)
+		assert.NotNil(t, matchers)
+		assert.NotEmpty(t, matchers)
+	})
+
+	t.Run("custom matchers", func(t *testing.T) {
+		matchers := getMatchers(false)
+		assert.NotNil(t, matchers)
+		assert.NotEmpty(t, matchers)
+	})
+}
+
+func TestNewScanServiceIntegration(t *testing.T) {
+	distCfg, installCfg, _, _ := NewDefaultDBConfig("")
+
+	svc, err := NewScanService(distCfg, installCfg)
+	require.NoError(t, err)
+	defer svc.Close()
+	assert.True(t, svc.useDefaultMatchers)
+}
