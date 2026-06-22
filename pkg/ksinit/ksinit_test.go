@@ -54,3 +54,31 @@ func TestCreateKsObjectConnectionReturnsKubeconfigErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateKsObjectConnectionSuccess(t *testing.T) {
+	validKubeconfig := `apiVersion: v1
+clusters:
+- cluster:
+    server: https://127.0.0.1:6443
+  name: test-cluster
+contexts:
+- context:
+    cluster: test-cluster
+    user: test-user
+  name: test-context
+current-context: test-context
+kind: Config
+preferences: {}
+users:
+- name: test-user
+  user: {}`
+
+	configPath := filepath.Join(t.TempDir(), "kubeconfig")
+	require.NoError(t, os.WriteFile(configPath, []byte(validKubeconfig), 0600))
+	t.Setenv("KUBECONFIG", configPath)
+
+	got, err := CreateKsObjectConnection("default", time.Second)
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+}
