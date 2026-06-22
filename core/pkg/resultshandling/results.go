@@ -77,7 +77,7 @@ func (rh *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
 
 // HandleResults handles all necessary actions for the scan results
 func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.ScanInfo) error {
-	if len(rh.ScanData.VAPPolicies) > 0 {
+	if rh.ScanData != nil && len(rh.ScanData.VAPPolicies) > 0 {
 		index := vapreconcile.BuildIndex(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings)
 		vapreconcile.EnrichSummary(rh.ScanData.Report.SummaryDetails.Controls, index)
 	}
