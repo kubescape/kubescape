@@ -26,8 +26,8 @@ type IKubescape interface {
 	// fix
 	Fix(fixInfo *metav1.FixInfo) error
 
-	// diff
-	Diff(diffInfo *metav1.DiffInfo) error
+	// diff returns the number of new failures at or above the configured severity threshold.
+	Diff(diffInfo *metav1.DiffInfo) (int, error)
 
 	// patch
 	Patch(patchInfo *metav1.PatchInfo, scanInfo *cautils.ScanInfo) (bool, error)

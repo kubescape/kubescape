@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -49,7 +50,17 @@ func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
 				}
 			}
 
-			return ks.Diff(&diffInfo)
+			newFailures, err := ks.Diff(&diffInfo)
+			if err != nil {
+				return err
+			}
+
+			if diffInfo.FailOnNew && newFailures > 0 {
+				logger.L().Fatal(fmt.Sprintf("found %d new failure(s) at or above severity threshold %q",
+					newFailures, severityLabel(diffInfo.SeverityThreshold)))
+			}
+
+			return nil
 		},
 	}
 
@@ -59,4 +70,11 @@ func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
 	diffCmd.Flags().StringVarP(&diffInfo.Output, "output", "o", "", "Output file; defaults to stdout")
 
 	return diffCmd
+}
+
+func severityLabel(s string) string {
+	if s == "" {
+		return "all"
+	}
+	return s
 }
