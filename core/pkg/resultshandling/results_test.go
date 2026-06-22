@@ -61,6 +61,33 @@ func TestResultsHandlerHandleResultsPrintsResultsToUI(t *testing.T) {
 	}
 }
 
+// TestResultsHandlerHandleResultsImageScanNilScanData reproduces issue #2430:
+// image scans construct the handler with a nil ScanData (only ImageScanData is
+// set), so HandleResults must not dereference ScanData. Before the fix this
+// panicked with a nil pointer dereference in the VAP-reconcile block.
+func TestResultsHandlerHandleResultsImageScanNilScanData(t *testing.T) {
+	uiPrinter := &SpyPrinter{}
+	outputPrinter := &SpyPrinter{}
+
+	// Mirror core.ScanImage: nil reporter, nil ScanData, only ImageScanData.
+	rh := NewResultsHandler(nil, []printer.IPrinter{outputPrinter}, uiPrinter)
+	rh.ImageScanData = []cautils.ImageScanData{{}}
+
+	assert.Nil(t, rh.ScanData)
+
+	var err error
+	assert.NotPanics(t, func() {
+		err = rh.HandleResults(context.Background(), &cautils.ScanInfo{})
+	})
+	assert.NoError(t, err)
+
+	// Results are still printed even though ScanData is nil...
+	assert.Equal(t, 1, uiPrinter.ActionPrintCalls)
+	assert.Equal(t, 1, outputPrinter.ActionPrintCalls)
+	// ...but the compliance score is skipped, as it requires ScanData.
+	assert.Equal(t, 0, outputPrinter.ScoreCalls)
+}
+
 func TestValidatePrinter(t *testing.T) {
 	tests := []struct {
 		name        string
