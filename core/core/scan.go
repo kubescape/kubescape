@@ -282,7 +282,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	if scanInfo.EncryptionEnabled {
 
-		masterKey, err := reportcrypto.GetMasterKeyFromEnv()
+		masterKey, err := reportcrypto.GetMasterKeyFromEnv("encryption")
 		if err != nil {
 			return nil, err
 		}
@@ -298,11 +298,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 			)
 		}
 
-		err = anonymizer.ApplyEncrypted(
-			resultsHandling,
-			dek,
-			masterKey,
-		)
+		err = anonymizer.ApplyEncrypted(resultsHandling, dek, masterKey)
 
 		// best-effort memory cleanup
 		for i := range dek {

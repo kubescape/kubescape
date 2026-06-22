@@ -74,7 +74,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 			if scanInfo.EncryptionEnabled {
 
-				if _, err := reportcrypto.GetMasterKeyFromEnv(); err != nil {
+				if _, err := reportcrypto.GetMasterKeyFromEnv("encryption"); err != nil {
 					return err
 				}
 			}

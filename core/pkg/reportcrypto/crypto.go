@@ -150,19 +150,25 @@ func ValidateMasterKey(masterKey []byte) error {
 
 // GetMasterKeyFromEnv loads and validates the master key
 // from the KUBESCAPE_MASTER_KEY environment variable.
-func GetMasterKeyFromEnv() ([]byte, error) {
-	masterKey := os.Getenv("KUBESCAPE_MASTER_KEY")
+func GetMasterKeyFromEnv(operation string) ([]byte, error) {
+
+	masterKey := os.Getenv(
+		"KUBESCAPE_MASTER_KEY",
+	)
 
 	if masterKey == "" {
-		return nil, errors.New(
-			"encryption enabled but KUBESCAPE_MASTER_KEY is not configured",
+		return nil, fmt.Errorf(
+			"%s requires KUBESCAPE_MASTER_KEY to be configured",
+			operation,
 		)
 	}
 
 	keyBytes := []byte(masterKey)
 
-	if err := ValidateMasterKey(keyBytes); err != nil {
-		return nil, errors.New(
+	if err := ValidateMasterKey(
+		keyBytes,
+	); err != nil {
+		return nil, fmt.Errorf(
 			"invalid KUBESCAPE_MASTER_KEY configuration",
 		)
 	}

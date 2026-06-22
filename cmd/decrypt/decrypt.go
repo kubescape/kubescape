@@ -26,20 +26,54 @@ func GetDecryptCommand() *cobra.Command {
 				)
 			}
 
-			var report reporthandlingv2.PostureReport
+			var report map[string]json.RawMessage
 
-			if err := json.Unmarshal(data, &report); err != nil {
+			if err := json.Unmarshal(
+				data,
+				&report,
+			); err != nil {
 				return fmt.Errorf(
 					"failed to parse report: %w",
 					err,
 				)
 			}
 
+			metadataRaw, ok := report["metadata"]
+			if !ok {
+				return fmt.Errorf(
+					"report metadata not found",
+				)
+			}
+
+			var metadata reporthandlingv2.Metadata
+
+			if err := json.Unmarshal(
+				metadataRaw,
+				&metadata,
+			); err != nil {
+				return fmt.Errorf(
+					"failed to parse metadata: %w",
+					err,
+				)
+			}
+
 			if err := reportcrypto.DecryptMetadataFromEnv(
-				&report.Metadata,
+				&metadata,
 			); err != nil {
 				return err
 			}
+
+			updatedMetadata, err := json.Marshal(
+				metadata,
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"failed to marshal metadata: %w",
+					err,
+				)
+			}
+
+			report["metadata"] = updatedMetadata
 
 			encoder := json.NewEncoder(os.Stdout)
 			encoder.SetIndent("", "  ")

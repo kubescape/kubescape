@@ -8,7 +8,7 @@ func DecryptMetadataFromEnv(
 	metadata *reporthandlingv2.Metadata,
 ) error {
 
-	masterKey, err := GetMasterKeyFromEnv()
+	masterKey, err := GetMasterKeyFromEnv("decryption")
 	if err != nil {
 		return err
 	}
