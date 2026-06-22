@@ -431,11 +431,10 @@ func (opap *OPAProcessor) reweightComplianceScores() {
 	var sum float32
 	var count int
 	for ctrlID := range opap.Report.SummaryDetails.Controls {
-		if _, ok := opap.TimedOutControls[ctrlID]; ok {
-			continue
+		if _, ok := opap.TimedOutControls[ctrlID]; !ok {
+			ctrl := opap.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ctrlID)
+			sum += ctrl.GetComplianceScore()
 		}
-		ctrl := opap.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ctrlID)
-		sum += ctrl.GetComplianceScore()
 		count++
 	}
 	if count > 0 {
@@ -447,11 +446,10 @@ func (opap *OPAProcessor) reweightComplianceScores() {
 		var fsum float32
 		var fcount int
 		for ctrlID := range opap.Report.SummaryDetails.Frameworks[i].Controls {
-			if _, ok := opap.TimedOutControls[ctrlID]; ok {
-				continue
+			if _, ok := opap.TimedOutControls[ctrlID]; !ok {
+				ctrl := opap.Report.SummaryDetails.Frameworks[i].Controls.GetControl(reportsummary.EControlCriteriaID, ctrlID)
+				fsum += ctrl.GetComplianceScore()
 			}
-			ctrl := opap.Report.SummaryDetails.Frameworks[i].Controls.GetControl(reportsummary.EControlCriteriaID, ctrlID)
-			fsum += ctrl.GetComplianceScore()
 			fcount++
 		}
 		if fcount > 0 {
