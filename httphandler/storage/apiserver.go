@@ -399,6 +399,9 @@ func getRoleAndRoleBindingFromRelatedObjects(relatedObjects []workloadinterface.
 			return nil, nil, fmt.Errorf("unknown related object kind %s", relatedObjects[i].GetKind())
 		}
 	}
+	if role == nil || roleBinding == nil {
+		return nil, nil, fmt.Errorf("%w: both related objects belong to the same RBAC category", ErrIncompleteRelatedObjects)
+	}
 	return role, roleBinding, nil
 }
 
