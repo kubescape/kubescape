@@ -100,16 +100,17 @@ type PolicyIdentifier struct {
 }
 
 type ScanInfo struct {
-	Getters                                            // TODO - remove from object
-	PolicyIdentifier      []PolicyIdentifier           // TODO - remove from object
-	UseExceptions         string                       // Load file with exceptions configuration
-	ControlsInputs        string                       // Load file with inputs for controls
-	AttackTracks          string                       // Load file with attack tracks
-	UseFrom               []string                     // Load framework from local file (instead of download). Use when running offline
-	UseDefault            bool                         // Load framework from cached file (instead of download). Use when running offline
-	UseArtifactsFrom      string                       // Load artifacts from local path. Use when running offline
-	VerboseMode           bool                         // Display all the input resources and not only failed resources
-	Hide                  bool                         // Hide sensitive identifiers (names, namespaces, images) in results
+	Getters                                  // TODO - remove from object
+	PolicyIdentifier      []PolicyIdentifier // TODO - remove from object
+	UseExceptions         string             // Load file with exceptions configuration
+	ControlsInputs        string             // Load file with inputs for controls
+	AttackTracks          string             // Load file with attack tracks
+	UseFrom               []string           // Load framework from local file (instead of download). Use when running offline
+	UseDefault            bool               // Load framework from cached file (instead of download). Use when running offline
+	UseArtifactsFrom      string             // Load artifacts from local path. Use when running offline
+	VerboseMode           bool               // Display all the input resources and not only failed resources
+	Hide                  bool               // Hide sensitive identifiers (names, namespaces, images) in results
+	EncryptionEnabled     bool
 	View                  string                       //
 	Format                string                       // Format results (table, json, junit ...)
 	Output                string                       // Store results in an output file, Output file name
