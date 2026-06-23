@@ -10,6 +10,10 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
+// statusAbsent marks a resource+control pair that is missing from one side of the diff
+// (it is not one of the apis.ScanningStatus values).
+const statusAbsent = "absent"
+
 // minimal structs for reading the v2 JSON scan output produced by jsonprinter.go
 type scanReport struct {
 	Results        []resultEntry  `json:"results"`
@@ -82,7 +86,7 @@ func Compute(basePath, headPath string) (*ChangeSet, error) {
 
 	// walk head: find new and unchanged failures
 	for k, hc := range headMap {
-		if hc.Status.InnerStatus != "failed" {
+		if hc.Status.InnerStatus != string(apis.StatusFailed) {
 			continue
 		}
 		change := ControlChange{
@@ -90,12 +94,13 @@ func Compute(basePath, headPath string) (*ChangeSet, error) {
 			ControlID:   k.controlID,
 			ControlName: hc.Name,
 			Severity:    headSev[k.controlID],
+			BaseStatus:  statusAbsent,
 			HeadStatus:  hc.Status.InnerStatus,
 		}
 		if bc, ok := baseMap[k]; ok {
 			change.BaseStatus = bc.Status.InnerStatus
 		}
-		if change.BaseStatus == "failed" {
+		if change.BaseStatus == string(apis.StatusFailed) {
 			cs.Unchanged = append(cs.Unchanged, change)
 		} else {
 			cs.New = append(cs.New, change)
@@ -104,12 +109,12 @@ func Compute(basePath, headPath string) (*ChangeSet, error) {
 
 	// walk base: find resolved (was failed, now not failed or absent)
 	for k, bc := range baseMap {
-		if bc.Status.InnerStatus != "failed" {
+		if bc.Status.InnerStatus != string(apis.StatusFailed) {
 			continue
 		}
 		hc, inHead := headMap[k]
-		if !inHead || hc.Status.InnerStatus != "failed" {
-			headStatus := "absent"
+		if !inHead || hc.Status.InnerStatus != string(apis.StatusFailed) {
+			headStatus := statusAbsent
 			if inHead {
 				headStatus = hc.Status.InnerStatus
 			}
@@ -118,7 +123,7 @@ func Compute(basePath, headPath string) (*ChangeSet, error) {
 				ControlID:   k.controlID,
 				ControlName: bc.Name,
 				Severity:    baseSev[k.controlID],
-				BaseStatus:  "failed",
+				BaseStatus:  string(apis.StatusFailed),
 				HeadStatus:  headStatus,
 			})
 		}

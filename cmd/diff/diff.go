@@ -1,7 +1,6 @@
 package diff
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/kubescape/go-logger"
@@ -9,6 +8,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/spf13/cobra"
 )
 
@@ -38,11 +38,12 @@ func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
 		Example: diffCmdExamples,
 		Args:    cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) < 2 {
-				return errors.New("two report files are required: <base-report.json> <head-report.json>")
-			}
 			diffInfo.BaseFile = args[0]
 			diffInfo.HeadFile = args[1]
+
+			if err := shared.ValidateScanFormat(diffInfo.Format, []string{printer.PrettyFormat, printer.JsonFormat}); err != nil {
+				return err
+			}
 
 			if diffInfo.SeverityThreshold != "" {
 				if err := shared.ValidateSeverity(diffInfo.SeverityThreshold); err != nil {
