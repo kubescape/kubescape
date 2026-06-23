@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"context"
 	"testing"
 
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -161,4 +162,21 @@ func TestSetTopWorkloads_Idempotent(t *testing.T) {
 	obj.SetTopWorkloads()
 
 	assert.Len(t, obj.TopWorkloadsByScore, firstLen)
+}
+
+func TestNewOPASessionObj(t *testing.T) {
+	ctx := context.Background()
+	frameworks := []reporthandling.Framework{}
+	k8sResources := K8SResources{"group/version/kind": []string{"id1", "id2"}}
+	scanInfo := &ScanInfo{
+		ScanID:           "test-scan-id",
+		OmitRawResources: true,
+		TriggeredByCLI:   true,
+	}
+	sessionObj := NewOPASessionObj(ctx, frameworks, k8sResources, scanInfo)
+	assert.NotNil(t, sessionObj)
+	assert.Equal(t, "test-scan-id", sessionObj.SessionID)
+	assert.Equal(t, true, sessionObj.OmitRawResources)
+	assert.Equal(t, true, sessionObj.TriggeredByCLI)
+	assert.Equal(t, k8sResources, sessionObj.K8SResources)
 }
