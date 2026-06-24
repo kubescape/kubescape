@@ -17,6 +17,7 @@ func TestGetDiffCmd_FormatValidation(t *testing.T) {
 		{"json", "json", false},
 		{"unsupported format is rejected", "yaml", true},
 		{"scan-only format is rejected", "sarif", true},
+		{"comma-separated multi-format is rejected", "json,pretty-printer", true},
 	}
 
 	for _, tt := range tests {

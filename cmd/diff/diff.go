@@ -2,6 +2,8 @@ package diff
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
@@ -41,8 +43,10 @@ func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
 			diffInfo.BaseFile = args[0]
 			diffInfo.HeadFile = args[1]
 
-			if err := shared.ValidateScanFormat(diffInfo.Format, []string{printer.PrettyFormat, printer.JsonFormat}); err != nil {
-				return err
+			// diff honors a single output format, so validate against the exact value rather than scan's comma-separated multi-format set.
+			supportedFormats := []string{printer.PrettyFormat, printer.JsonFormat}
+			if !slices.Contains(supportedFormats, diffInfo.Format) {
+				return fmt.Errorf("invalid format %q, supported formats: %s", diffInfo.Format, strings.Join(supportedFormats, ", "))
 			}
 
 			if diffInfo.SeverityThreshold != "" {

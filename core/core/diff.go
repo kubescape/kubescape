@@ -23,7 +23,7 @@ func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (int, error) {
 	}
 
 	switch diffInfo.Format {
-	case "json":
+	case printer.JsonFormat:
 		if err := diff.PrintJSON(w, cs); err != nil {
 			return 0, fmt.Errorf("writing JSON diff: %w", err)
 		}
