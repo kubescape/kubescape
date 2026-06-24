@@ -94,9 +94,17 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, repoTran
 	session.ResourcesResult = newResourcesResult
 
 	newResourceSource := make(map[string]reporthandling.Source, len(session.ResourceSource))
+
 	for oldID, source := range session.ResourceSource {
 		newID := resolveMappedID(mapping, idMapping, oldID, "ref")
-		anonymizeResourceSource(&source, mapping)
+
+		if err := transformResourceSource(
+			&source,
+			repoTransformer,
+		); err != nil {
+			return err
+		}
+
 		newResourceSource[newID] = source
 	}
 	session.ResourceSource = newResourceSource
@@ -503,6 +511,95 @@ func transformLastCommit(commit *reporthandling.LastCommit, transformer Transfor
 	}
 
 	*commit = commitCopy
+
+	return nil
+}
+
+func transformResourceSource(
+	source *reporthandling.Source,
+	transformer Transformer,
+) error {
+	if source == nil {
+		return nil
+	}
+
+	sourceCopy := *source
+
+	var err error
+
+	sourceCopy.Path, err = transformValue(
+		transformer,
+		"src",
+		sourceCopy.Path,
+	)
+	if err != nil {
+		return err
+	}
+
+	sourceCopy.RelativePath, err = transformValue(
+		transformer,
+		"src",
+		sourceCopy.RelativePath,
+	)
+	if err != nil {
+		return err
+	}
+
+	sourceCopy.HelmPath, err = transformValue(
+		transformer,
+		"src",
+		sourceCopy.HelmPath,
+	)
+	if err != nil {
+		return err
+	}
+
+	sourceCopy.HelmChartName, err = transformValue(
+		transformer,
+		"src",
+		sourceCopy.HelmChartName,
+	)
+	if err != nil {
+		return err
+	}
+
+	sourceCopy.HelmTemplateFile, err = transformValue(
+		transformer,
+		"src",
+		sourceCopy.HelmTemplateFile,
+	)
+	if err != nil {
+		return err
+	}
+
+	sourceCopy.KustomizeDirectoryName, err = transformValue(
+		transformer,
+		"src",
+		sourceCopy.KustomizeDirectoryName,
+	)
+	if err != nil {
+		return err
+	}
+
+	for i := range sourceCopy.HelmValuesPaths {
+		sourceCopy.HelmValuesPaths[i], err = transformValue(
+			transformer,
+			"src",
+			sourceCopy.HelmValuesPaths[i],
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := transformLastCommit(
+		&sourceCopy.LastCommit,
+		transformer,
+	); err != nil {
+		return err
+	}
+
+	*source = sourceCopy
 
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
+	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/spf13/cobra"
 )
@@ -74,6 +75,69 @@ func GetDecryptCommand() *cobra.Command {
 			}
 
 			report["metadata"] = updatedMetadata
+
+			resourcesRaw, ok := report["resources"]
+			if ok {
+				var resources []reporthandling.Resource
+
+				if err := json.Unmarshal(
+					resourcesRaw,
+					&resources,
+				); err != nil {
+					return fmt.Errorf(
+						"failed to parse resources: %w",
+						err,
+					)
+				}
+
+				masterKey, err := reportcrypto.GetMasterKeyFromEnv(
+					"decryption",
+				)
+				if err != nil {
+					return err
+				}
+
+				defer func() {
+					for i := range masterKey {
+						masterKey[i] = 0
+					}
+				}()
+
+				dek, err := reportcrypto.DEKFromMetadata(
+					&metadata,
+					masterKey,
+				)
+				if err != nil {
+					return err
+				}
+
+				defer func() {
+					for i := range dek {
+						dek[i] = 0
+					}
+				}()
+
+				for i := range resources {
+					if err := reportcrypto.DecryptResourceSource(
+						resources[i].Source,
+						dek,
+					); err != nil {
+						return err
+					}
+				}
+
+				updatedResources, err := json.Marshal(
+					resources,
+				)
+				if err != nil {
+					return fmt.Errorf(
+						"failed to marshal resources: %w",
+						err,
+					)
+				}
+
+				report["resources"] = updatedResources
+			}
 
 			encoder := json.NewEncoder(os.Stdout)
 			encoder.SetIndent("", "  ")
