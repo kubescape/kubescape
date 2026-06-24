@@ -66,7 +66,8 @@ func TestDecryptCommand(t *testing.T) {
 				},
 				"resources": []map[string]any{
 					{
-						"resourceID": "resource-1",
+						"resourceID":  "resource-1",
+						"customField": "must-survive",
 						"source": map[string]any{
 							"path":         encryptedPath,
 							"relativePath": encryptedRelativePath,
@@ -211,6 +212,11 @@ func TestDecryptCommand(t *testing.T) {
 				t,
 				ok,
 				"resource should be an object",
+			)
+			assert.Equal(
+				t,
+				"must-survive",
+				resource["customField"],
 			)
 
 			source, ok := resource["source"].(map[string]any)

@@ -525,6 +525,13 @@ func transformResourceSource(
 
 	sourceCopy := *source
 
+	if source.HelmValuesPaths != nil {
+		sourceCopy.HelmValuesPaths = append(
+			[]string(nil),
+			source.HelmValuesPaths...,
+		)
+	}
+
 	var err error
 
 	sourceCopy.Path, err = transformValue(

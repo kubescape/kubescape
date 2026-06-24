@@ -75,10 +75,9 @@ func GetDecryptCommand() *cobra.Command {
 			}
 
 			report["metadata"] = updatedMetadata
-
 			resourcesRaw, ok := report["resources"]
 			if ok {
-				var resources []reporthandling.Resource
+				var resources []map[string]json.RawMessage
 
 				if err := json.Unmarshal(
 					resourcesRaw,
@@ -118,12 +117,41 @@ func GetDecryptCommand() *cobra.Command {
 				}()
 
 				for i := range resources {
+					sourceRaw, ok := resources[i]["source"]
+					if !ok {
+						continue
+					}
+
+					var source reporthandling.Source
+
+					if err := json.Unmarshal(
+						sourceRaw,
+						&source,
+					); err != nil {
+						return fmt.Errorf(
+							"failed to parse resource source: %w",
+							err,
+						)
+					}
+
 					if err := reportcrypto.DecryptResourceSource(
-						resources[i].Source,
+						&source,
 						dek,
 					); err != nil {
 						return err
 					}
+
+					updatedSource, err := json.Marshal(
+						source,
+					)
+					if err != nil {
+						return fmt.Errorf(
+							"failed to marshal resource source: %w",
+							err,
+						)
+					}
+
+					resources[i]["source"] = updatedSource
 				}
 
 				updatedResources, err := json.Marshal(
@@ -138,7 +166,6 @@ func GetDecryptCommand() *cobra.Command {
 
 				report["resources"] = updatedResources
 			}
-
 			encoder := json.NewEncoder(os.Stdout)
 			encoder.SetIndent("", "  ")
 
