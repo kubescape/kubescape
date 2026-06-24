@@ -6,6 +6,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -294,4 +295,46 @@ func TestIsRuleKubescapeVersionCompatible(t *testing.T) {
 	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_132.Attributes, buildNumberMock))
 	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_133.Attributes, buildNumberMock))
 	assert.True(t, isRuleKubescapeVersionCompatible(rule_v1_0_134.Attributes, buildNumberMock))
+}
+
+func TestGetScanningScope(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata reporthandlingv2.ContextMetadata
+		expected reporthandling.ScanningScopeType
+	}{
+		{
+			name: "ScopeFile without cluster context",
+			metadata: reporthandlingv2.ContextMetadata{
+				ClusterContextMetadata: nil,
+			},
+			expected: reporthandling.ScopeFile,
+		},
+		{
+			name: "ScopeCluster with cluster context but no cloud metadata",
+			metadata: reporthandlingv2.ContextMetadata{
+				ClusterContextMetadata: &reporthandlingv2.ClusterMetadata{
+					CloudMetadata: nil,
+				},
+			},
+			expected: reporthandling.ScopeCluster,
+		},
+		{
+			name: "CloudProvider matching provider string",
+			metadata: reporthandlingv2.ContextMetadata{
+				ClusterContextMetadata: &reporthandlingv2.ClusterMetadata{
+					CloudMetadata: &reporthandlingv2.CloudMetadata{
+						CloudProvider: "gke",
+					},
+				},
+			},
+			expected: reporthandling.ScanningScopeType("gke"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, GetScanningScope(tt.metadata))
+		})
+	}
 }
