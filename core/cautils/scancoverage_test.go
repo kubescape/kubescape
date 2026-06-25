@@ -231,6 +231,52 @@ func TestComputeCoverageScore_ZeroControls(t *testing.T) {
 	assert.False(t, c.Degraded)
 }
 
+func TestComputeCoverageScore_SilentFailedGVRReducesScore(t *testing.T) {
+	// networkpolicies failed entirely, but C-0001 also depends on deployments
+	// which succeeded, so it stays evaluated and is NOT in NotEvaluatedControls.
+	// The failed GVR is therefore silent and must still reduce the score.
+	infoMap := map[string]apis.StatusInfo{
+		"networking.k8s.io/v1/networkpolicies": {InnerStatus: apis.StatusSkipped, InnerInfo: "RBAC denied"},
+	}
+	resourceToControlsMap := map[string][]string{
+		"networking.k8s.io/v1/networkpolicies": {"C-0001"},
+		"apps/v1/deployments":                  {"C-0001"},
+	}
+	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil)
+	assert.Len(t, coverage.FailedGVRPulls, 1)
+	assert.Empty(t, coverage.NotEvaluatedControls)
+
+	coverage.ComputeCoverageScore(10)
+	assert.Less(t, coverage.CoverageScore, float32(100))
+	assert.True(t, coverage.Degraded)
+}
+
+func TestComputeCoverageScore_MixedDependencyFailedGVRIsCharged(t *testing.T) {
+	// networkpolicies feeds C-0001 (alone) and C-0002 (alongside deployments).
+	// networkpolicies fails: C-0001 is NotEvaluated (only GVR failed), while
+	// C-0002 still evaluates via deployments. The failure is therefore silent
+	// for C-0002 and must incur the 3pp penalty, not just the ratio loss from
+	// C-0001 being NotEvaluated.
+	infoMap := map[string]apis.StatusInfo{
+		"networking.k8s.io/v1/networkpolicies": {InnerStatus: apis.StatusSkipped, InnerInfo: "RBAC denied"},
+	}
+	resourceToControlsMap := map[string][]string{
+		"networking.k8s.io/v1/networkpolicies": {"C-0001", "C-0002"},
+		"apps/v1/deployments":                  {"C-0002"},
+	}
+	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil)
+
+	assert.Len(t, coverage.FailedGVRPulls, 1)
+	assert.Len(t, coverage.NotEvaluatedControls, 1)
+	assert.Equal(t, "C-0001", coverage.NotEvaluatedControls[0].ControlID)
+	assert.Equal(t, 1, coverage.SilentFailedGVRCount)
+
+	coverage.ComputeCoverageScore(10)
+	// 9/10 evaluated = 90, minus 3pp for the silent failure on C-0002 = 87.
+	assert.Equal(t, float32(87), coverage.CoverageScore)
+	assert.True(t, coverage.Degraded)
+}
+
 func TestBuildScanCoverage_PartialGVRPullsPassedThrough(t *testing.T) {
 	// Partial failures (GVR has some data, specific selector failed) must flow
 	// into ScanCoverage.PartialGVRPulls so consumers can detect incomplete scans

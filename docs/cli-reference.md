@@ -105,10 +105,12 @@ compliance or risk score, use one of the forms above.
 `--fail-coverage-below` gates on the **scan coverage score**, not the raw
 ratio of evaluated controls. The score starts from the percentage of controls
 that were evaluated and then subtracts a fixed penalty for each runtime gap:
-**2 points per partial GVR pull** and **5 points per degraded policy input**
+**3 points per silent failed GVR pull** (a resource type that failed to collect
+entirely but whose dependent controls still evaluated via other resource types),
+**2 points per partial GVR pull**, and **5 points per degraded policy input**
 (control configurations or exceptions served from a fallback source). As a
 result a scan in which 100% of controls were evaluated can still drop below the
-threshold — for example, a single partial resource pull yields a score of 98.
+threshold — for example, a single silent failed GVR pull yields a score of 97.
 
 > **Behavior change:** earlier releases compared only the ratio of evaluated
 > controls. Pipelines that tuned `--fail-coverage-below` against that narrower
