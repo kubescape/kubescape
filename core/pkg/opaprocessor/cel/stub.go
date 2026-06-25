@@ -44,13 +44,11 @@ func stubBindings(obj, namespaceObject map[string]any) map[string]any {
 // key that is absent from this map is a runtime error rather than null. At
 // live admission every one of these fields is set, so a VAP reading e.g.
 // request.resource.resource passes on a cluster but would error offline if we
-// left the key out. We mirror apiserver's BuildRequestType field set exactly
-// (k8s.io/apiserver/pkg/admission/plugin/cel/compile.go): kind, resource,
+// left the key out. So every field a real AdmissionRequest exposes is present
+// here, with a zero value where we have nothing real, so any field a policy
+// selects resolves instead of blowing up at eval time: kind, resource,
 // subResource, requestKind, requestResource, requestSubResource, name,
-// namespace, operation, userInfo, dryRun, options. uid is intentionally
-// omitted because apiserver omits it too (its comment: "not needed for
-// in-process admission review"), so a VAP reading request.uid errors at
-// admission as well and we keep parity by not inventing it.
+// namespace, operation, userInfo, dryRun, options, uid.
 //
 // Known gaps (issue #2001), present-but-zero so selection never errors:
 //   - userInfo carries no identity (offline we don't know the requester), so
@@ -72,6 +70,7 @@ func stubRequest(obj map[string]any) map[string]any {
 	gvr := map[string]any{"group": group, "version": version, "resource": ""}
 
 	return map[string]any{
+		"uid":                "",
 		"kind":               gvk,
 		"resource":           gvr,
 		"subResource":        "",
@@ -89,7 +88,10 @@ func stubRequest(obj map[string]any) map[string]any {
 			"groups":   []any{},
 			"extra":    map[string]any{},
 		},
-		"dryRun":  true,
+		// dryRun is false: we model a real CREATE (e.g. kubectl apply), which
+		// is the case the scan/admission parity claim is about. A policy that
+		// gates on request.dryRun then sees what it would at a real admission.
+		"dryRun":  false,
 		"options": map[string]any{},
 	}
 }

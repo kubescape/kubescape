@@ -35,7 +35,8 @@ func TestStubRequest(t *testing.T) {
 	assert.Equal(t, operationCreate, req["operation"])
 	assert.Equal(t, "nginx", req["name"])
 	assert.Equal(t, "production", req["namespace"])
-	assert.Equal(t, true, req["dryRun"])
+	// dryRun models a real CREATE, not a dry run.
+	assert.Equal(t, false, req["dryRun"])
 
 	// userInfo must exist but carry no identity.
 	userInfo, ok := req["userInfo"].(map[string]any)
@@ -59,7 +60,7 @@ func TestStubRequestHasFullAdmissionRequestShape(t *testing.T) {
 	req := stubRequest(namespacedPod())
 
 	for _, key := range []string{
-		"kind", "resource", "subResource", "requestKind", "requestResource",
+		"uid", "kind", "resource", "subResource", "requestKind", "requestResource",
 		"requestSubResource", "name", "namespace", "operation", "userInfo",
 		"dryRun", "options",
 	} {
@@ -97,6 +98,7 @@ func TestStubRequestSelectableAgainstEnv(t *testing.T) {
 		"request.operation == 'CREATE'",
 		"request.name == 'nginx'",
 		"request.namespace == 'production'",
+		"request.uid == ''",
 		"request.kind.kind == 'Pod'",
 		"request.resource.resource == ''",
 		"request.resource.group == ''",
@@ -106,7 +108,7 @@ func TestStubRequestSelectableAgainstEnv(t *testing.T) {
 		"request.requestSubResource == ''",
 		"request.userInfo.username == ''",
 		"size(request.userInfo.groups) == 0",
-		"request.dryRun == true",
+		"request.dryRun == false",
 	}
 
 	for _, expr := range exprs {
