@@ -58,11 +58,18 @@ func GetDecryptCommand() *cobra.Command {
 				)
 			}
 
-			if err := reportcrypto.DecryptMetadataFromEnv(
+			dek, err := reportcrypto.DecryptMetadataFromEnv(
 				&metadata,
-			); err != nil {
+			)
+			if err != nil {
 				return err
 			}
+
+			defer func() {
+				for i := range dek {
+					dek[i] = 0
+				}
+			}()
 
 			updatedMetadata, err := json.Marshal(
 				metadata,
@@ -88,33 +95,6 @@ func GetDecryptCommand() *cobra.Command {
 						err,
 					)
 				}
-
-				masterKey, err := reportcrypto.GetMasterKeyFromEnv(
-					"decryption",
-				)
-				if err != nil {
-					return err
-				}
-
-				defer func() {
-					for i := range masterKey {
-						masterKey[i] = 0
-					}
-				}()
-
-				dek, err := reportcrypto.DEKFromMetadata(
-					&metadata,
-					masterKey,
-				)
-				if err != nil {
-					return err
-				}
-
-				defer func() {
-					for i := range dek {
-						dek[i] = 0
-					}
-				}()
 
 				for i := range resources {
 					sourceRaw, ok := resources[i]["source"]
