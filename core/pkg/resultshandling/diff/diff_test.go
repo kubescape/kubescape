@@ -85,6 +85,8 @@ func TestCompute_NewResourceInHead(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, cs.New, 1)
 	assert.Equal(t, "res-new", cs.New[0].ResourceID)
+	// new-to-head failures have no base counterpart: BaseStatus is "absent", symmetric with HeadStatus
+	assert.Equal(t, "absent", cs.New[0].BaseStatus)
 }
 
 func TestCompute_RemovedResourceFromBase(t *testing.T) {
