@@ -39,11 +39,25 @@ func stubBindings(obj, namespaceObject map[string]any) map[string]any {
 // than reacting to a live API call, operation is always CREATE and userInfo
 // is empty.
 //
-// Known gap (issue #2001): request.userInfo and authorizer cannot be
-// populated meaningfully offline. userInfo is present but empty so that
-// expressions referencing request.userInfo.* still evaluate; checks that
-// depend on the requesting user being known are a documented limitation, not
-// a correctness claim.
+// The whole AdmissionRequest shape is populated, not just the fields we have
+// real values for. request is declared cel.DynType on the env, so selecting a
+// key that is absent from this map is a runtime error rather than null. At
+// live admission every one of these fields is set, so a VAP reading e.g.
+// request.resource.resource passes on a cluster but would error offline if we
+// left the key out. We mirror apiserver's BuildRequestType field set exactly
+// (k8s.io/apiserver/pkg/admission/plugin/cel/compile.go): kind, resource,
+// subResource, requestKind, requestResource, requestSubResource, name,
+// namespace, operation, userInfo, dryRun, options. uid is intentionally
+// omitted because apiserver omits it too (its comment: "not needed for
+// in-process admission review"), so a VAP reading request.uid errors at
+// admission as well and we keep parity by not inventing it.
+//
+// Known gaps (issue #2001), present-but-zero so selection never errors:
+//   - userInfo carries no identity (offline we don't know the requester), so
+//     checks depending on the requesting user are a documented limitation.
+//   - resource/requestResource carry the group and version but an empty
+//     resource (plural) name: resolving the GVR plural offline needs a
+//     RESTMapper we don't have, so it stays the zero value.
 func stubRequest(obj map[string]any) map[string]any {
 	name, _, _ := unstructured.NestedString(obj, "metadata", "name")
 	namespace, _, _ := unstructured.NestedString(obj, "metadata", "namespace")
@@ -51,25 +65,32 @@ func stubRequest(obj map[string]any) map[string]any {
 	apiVersion, _, _ := unstructured.NestedString(obj, "apiVersion")
 	group, version := splitAPIVersion(apiVersion)
 
+	// kind is a GroupVersionKind; resource is a GroupVersionResource. They
+	// share group/version. requestKind/requestResource equal kind/resource
+	// when no API conversion is involved, which is always the case offline.
+	gvk := map[string]any{"group": group, "version": version, "kind": kind}
+	gvr := map[string]any{"group": group, "version": version, "resource": ""}
+
 	return map[string]any{
-		"operation": operationCreate,
-		"name":      name,
-		"namespace": namespace,
-		// kind is a GroupVersionKind; some VAPs read request.kind.kind.
-		"kind": map[string]any{
-			"group":   group,
-			"version": version,
-			"kind":    kind,
-		},
-		"dryRun": true,
-		// Empty UserInfo: present so request.userInfo.* compiles and
-		// evaluates, but carries no identity (see the doc note above).
+		"kind":               gvk,
+		"resource":           gvr,
+		"subResource":        "",
+		"requestKind":        gvk,
+		"requestResource":    gvr,
+		"requestSubResource": "",
+		"name":               name,
+		"namespace":          namespace,
+		"operation":          operationCreate,
+		// Empty UserInfo: present so request.userInfo.* evaluates, but
+		// carries no identity (see the doc note above).
 		"userInfo": map[string]any{
 			"username": "",
 			"uid":      "",
 			"groups":   []any{},
 			"extra":    map[string]any{},
 		},
+		"dryRun":  true,
+		"options": map[string]any{},
 	}
 }
 
