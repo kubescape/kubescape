@@ -999,3 +999,95 @@ func TestAnonymizeSession_ResourceSourceEncryption(
 
 	assert.Equal(t, "abc123", decryptedHash)
 }
+
+func TestTransformResourceMetadata_EncryptionTransformer(
+	t *testing.T,
+) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	transformer := NewEncryptionTransformer(dek)
+
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "payment-api",
+			"namespace": "production",
+		},
+	})
+
+	err = transformResourceMetadata(
+		resource,
+		transformer,
+	)
+	require.NoError(t, err)
+
+	assert.Contains(
+		t,
+		resource.GetName(),
+		"ENC[AES256_GCM,",
+	)
+
+	assert.Contains(
+		t,
+		resource.GetNamespace(),
+		"ENC[AES256_GCM,",
+	)
+
+	decryptedName, err := reportcrypto.DecryptString(
+		resource.GetName(),
+		dek,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		"payment-api",
+		decryptedName,
+	)
+
+	decryptedNamespace, err := reportcrypto.DecryptString(
+		resource.GetNamespace(),
+		dek,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		"production",
+		decryptedNamespace,
+	)
+}
+
+func TestTransformResourceMetadata_Error(
+	t *testing.T,
+) {
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "payment-api",
+			"namespace": "production",
+		},
+	})
+
+	err := transformResourceMetadata(
+		resource,
+		&failingTransformer{},
+	)
+
+	require.Error(t, err)
+
+	assert.Equal(
+		t,
+		"payment-api",
+		resource.GetName(),
+	)
+
+	assert.Equal(
+		t,
+		"production",
+		resource.GetNamespace(),
+	)
+}

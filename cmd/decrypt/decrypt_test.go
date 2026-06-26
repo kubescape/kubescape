@@ -50,6 +50,20 @@ func TestDecryptCommand(t *testing.T) {
 				)
 			require.NoError(t, err)
 
+			encryptedName, err :=
+				reportcrypto.EncryptString(
+					"nginx-deployment",
+					dek,
+				)
+			require.NoError(t, err)
+
+			encryptedNamespace, err :=
+				reportcrypto.EncryptString(
+					"production",
+					dek,
+				)
+			require.NoError(t, err)
+
 			wrappedDEK, err :=
 				reportcrypto.WrapDEK(
 					dek,
@@ -68,6 +82,14 @@ func TestDecryptCommand(t *testing.T) {
 					{
 						"resourceID":  "resource-1",
 						"customField": "must-survive",
+						"object": map[string]any{
+							"apiVersion": "apps/v1",
+							"kind":       "Deployment",
+							"metadata": map[string]any{
+								"name":      encryptedName,
+								"namespace": encryptedNamespace,
+							},
+						},
 						"source": map[string]any{
 							"path":         encryptedPath,
 							"relativePath": encryptedRelativePath,
@@ -217,6 +239,32 @@ func TestDecryptCommand(t *testing.T) {
 				t,
 				"must-survive",
 				resource["customField"],
+			)
+
+			object, ok := resource["object"].(map[string]any)
+			require.True(
+				t,
+				ok,
+				"object should be an object",
+			)
+
+			metadataObj, ok := object["metadata"].(map[string]any)
+			require.True(
+				t,
+				ok,
+				"metadata should be an object",
+			)
+
+			assert.Equal(
+				t,
+				"nginx-deployment",
+				metadataObj["name"],
+			)
+
+			assert.Equal(
+				t,
+				"production",
+				metadataObj["namespace"],
 			)
 
 			source, ok := resource["source"].(map[string]any)
