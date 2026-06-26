@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -97,6 +98,39 @@ func GetDecryptCommand() *cobra.Command {
 				}
 
 				for i := range resources {
+
+					objectRaw, ok := resources[i]["object"]
+					if ok {
+						resource, err := workloadinterface.NewWorkload(
+							objectRaw,
+						)
+						if err != nil {
+							return fmt.Errorf(
+								"failed to parse resource object: %w",
+								err,
+							)
+						}
+
+						if err := reportcrypto.DecryptResourceMetadata(
+							resource,
+							dek,
+						); err != nil {
+							return err
+						}
+
+						updatedObject, err := json.Marshal(
+							resource.GetWorkload(),
+						)
+						if err != nil {
+							return fmt.Errorf(
+								"failed to marshal resource object: %w",
+								err,
+							)
+						}
+
+						resources[i]["object"] = updatedObject
+					}
+
 					sourceRaw, ok := resources[i]["source"]
 					if !ok {
 						continue

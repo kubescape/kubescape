@@ -3,6 +3,7 @@ package reportcrypto
 import (
 	"testing"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	reporthandling "github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -469,6 +470,66 @@ func TestDecryptResourceSource_Nil(
 	t *testing.T,
 ) {
 	err := DecryptResourceSource(
+		nil,
+		make([]byte, 32),
+	)
+
+	require.NoError(t, err)
+}
+
+func TestDecryptResourceMetadata_RoundTrip(
+	t *testing.T,
+) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	encryptedName, err := EncryptString(
+		"payments-api",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedNamespace, err := EncryptString(
+		"production",
+		dek,
+	)
+	require.NoError(t, err)
+
+	resource := workloadinterface.NewWorkloadObj(
+		map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"name":      encryptedName,
+				"namespace": encryptedNamespace,
+			},
+		},
+	)
+
+	err = DecryptResourceMetadata(
+		resource,
+		dek,
+	)
+
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		"payments-api",
+		resource.GetName(),
+	)
+
+	assert.Equal(
+		t,
+		"production",
+		resource.GetNamespace(),
+	)
+}
+
+func TestDecryptResourceMetadata_Nil(
+	t *testing.T,
+) {
+	err := DecryptResourceMetadata(
 		nil,
 		make([]byte, 32),
 	)

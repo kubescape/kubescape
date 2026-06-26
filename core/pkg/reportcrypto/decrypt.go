@@ -3,6 +3,7 @@ package reportcrypto
 import (
 	"fmt"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
@@ -363,6 +364,58 @@ func DecryptResourceSource(
 		dek,
 	); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+// DecryptResourceMetadata decrypts resource identifiers previously
+// encrypted by transformResourceMetadata.
+//
+// This operation mutates the supplied resource metadata in place.
+//
+// Current coverage:
+//
+//   - Name
+//   - Namespace
+func DecryptResourceMetadata(
+	resource workloadinterface.IMetadata,
+	dek []byte,
+) error {
+	if resource == nil {
+		return nil
+	}
+
+	var err error
+
+	if name := resource.GetName(); name != "" {
+		name, err = DecryptString(
+			name,
+			dek,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to decrypt resource name: %w",
+				err,
+			)
+		}
+
+		resource.SetName(name)
+	}
+
+	if namespace := resource.GetNamespace(); namespace != "" {
+		namespace, err = DecryptString(
+			namespace,
+			dek,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to decrypt resource namespace: %w",
+				err,
+			)
+		}
+
+		resource.SetNamespace(namespace)
 	}
 
 	return nil
