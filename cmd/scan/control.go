@@ -146,5 +146,8 @@ func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 	if err := shared.ValidateSeverity(severity); severity != "" && err != nil {
 		return err
 	}
+	if err := validateThresholdsOnly(scanInfo); err != nil {
+		return err
+	}
 	return nil
 }
