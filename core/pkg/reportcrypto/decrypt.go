@@ -3,6 +3,7 @@ package reportcrypto
 import (
 	"fmt"
 
+	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
@@ -128,7 +129,10 @@ func DecryptRepoContextMetadata(
 
 	if repoMetadata.RemoteURL != "" {
 		repoMetadata.RemoteURL, err =
-			DecryptString(repoMetadata.RemoteURL, dek)
+			DecryptString(
+				repoMetadata.RemoteURL,
+				dek,
+			)
 		if err != nil {
 			return fmt.Errorf(
 				"failed to decrypt remoteURL: %w",
@@ -151,12 +155,35 @@ func DecryptRepoContextMetadata(
 		}
 	}
 
-	if repoMetadata.LastCommit.Hash != "" {
-		repoMetadata.LastCommit.Hash, err =
-			DecryptString(
-				repoMetadata.LastCommit.Hash,
-				dek,
-			)
+	if err := decryptLastCommit(
+		&repoMetadata.LastCommit,
+		dek,
+	); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// decryptLastCommit decrypts all commit metadata fields that may have
+// been encrypted by transformLastCommit.
+//
+// This operation mutates the supplied LastCommit object in place.
+func decryptLastCommit(
+	commit *reporthandling.LastCommit,
+	dek []byte,
+) error {
+	if commit == nil {
+		return nil
+	}
+
+	var err error
+
+	if commit.Hash != "" {
+		commit.Hash, err = DecryptString(
+			commit.Hash,
+			dek,
+		)
 		if err != nil {
 			return fmt.Errorf(
 				"failed to decrypt commit hash: %w",
@@ -165,12 +192,11 @@ func DecryptRepoContextMetadata(
 		}
 	}
 
-	if repoMetadata.LastCommit.CommitterName != "" {
-		repoMetadata.LastCommit.CommitterName, err =
-			DecryptString(
-				repoMetadata.LastCommit.CommitterName,
-				dek,
-			)
+	if commit.CommitterName != "" {
+		commit.CommitterName, err = DecryptString(
+			commit.CommitterName,
+			dek,
+		)
 		if err != nil {
 			return fmt.Errorf(
 				"failed to decrypt committer name: %w",
@@ -179,12 +205,11 @@ func DecryptRepoContextMetadata(
 		}
 	}
 
-	if repoMetadata.LastCommit.CommitterEmail != "" {
-		repoMetadata.LastCommit.CommitterEmail, err =
-			DecryptString(
-				repoMetadata.LastCommit.CommitterEmail,
-				dek,
-			)
+	if commit.CommitterEmail != "" {
+		commit.CommitterEmail, err = DecryptString(
+			commit.CommitterEmail,
+			dek,
+		)
 		if err != nil {
 			return fmt.Errorf(
 				"failed to decrypt committer email: %w",
@@ -193,18 +218,151 @@ func DecryptRepoContextMetadata(
 		}
 	}
 
-	if repoMetadata.LastCommit.Message != "" {
-		repoMetadata.LastCommit.Message, err =
-			DecryptString(
-				repoMetadata.LastCommit.Message,
-				dek,
-			)
+	if commit.Message != "" {
+		commit.Message, err = DecryptString(
+			commit.Message,
+			dek,
+		)
 		if err != nil {
 			return fmt.Errorf(
 				"failed to decrypt commit message: %w",
 				err,
 			)
 		}
+	}
+
+	return nil
+}
+
+// DecryptResourceSource decrypts source metadata previously encrypted
+// by transformResourceSource.
+//
+// This operation mutates the supplied Source object in place.
+//
+// Current coverage:
+//
+//   - Path
+//   - RelativePath
+//   - HelmPath
+//   - HelmChartName
+//   - HelmTemplateFile
+//   - HelmValuesPaths
+//   - KustomizeDirectoryName
+//   - LastCommit.Hash
+//   - LastCommit.CommitterName
+//   - LastCommit.CommitterEmail
+//   - LastCommit.Message
+func DecryptResourceSource(
+	source *reporthandling.Source,
+	dek []byte,
+) error {
+	if source == nil {
+		return nil
+	}
+
+	var err error
+
+	if source.Path != "" {
+		source.Path, err = DecryptString(
+			source.Path,
+			dek,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to decrypt path: %w",
+				err,
+			)
+		}
+	}
+
+	if source.RelativePath != "" {
+		source.RelativePath, err = DecryptString(
+			source.RelativePath,
+			dek,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to decrypt relative path: %w",
+				err,
+			)
+		}
+	}
+
+	if source.HelmPath != "" {
+		source.HelmPath, err = DecryptString(
+			source.HelmPath,
+			dek,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to decrypt helm path: %w",
+				err,
+			)
+		}
+	}
+
+	if source.HelmChartName != "" {
+		source.HelmChartName, err = DecryptString(
+			source.HelmChartName,
+			dek,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to decrypt helm chart name: %w",
+				err,
+			)
+		}
+	}
+
+	if source.HelmTemplateFile != "" {
+		source.HelmTemplateFile, err = DecryptString(
+			source.HelmTemplateFile,
+			dek,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to decrypt helm template file: %w",
+				err,
+			)
+		}
+	}
+
+	if source.KustomizeDirectoryName != "" {
+		source.KustomizeDirectoryName, err = DecryptString(
+			source.KustomizeDirectoryName,
+			dek,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to decrypt kustomize directory name: %w",
+				err,
+			)
+		}
+	}
+
+	for i := range source.HelmValuesPaths {
+		if source.HelmValuesPaths[i] == "" {
+			continue
+		}
+
+		source.HelmValuesPaths[i], err = DecryptString(
+			source.HelmValuesPaths[i],
+			dek,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to decrypt helm values path[%d]: %w",
+				i,
+				err,
+			)
+		}
+	}
+
+	if err := decryptLastCommit(
+		&source.LastCommit,
+		dek,
+	); err != nil {
+		return err
 	}
 
 	return nil

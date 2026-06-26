@@ -36,6 +36,20 @@ func TestDecryptCommand(t *testing.T) {
 				)
 			require.NoError(t, err)
 
+			encryptedPath, err :=
+				reportcrypto.EncryptString(
+					"/workspace/manifests/nginx/deployment.yaml",
+					dek,
+				)
+			require.NoError(t, err)
+
+			encryptedRelativePath, err :=
+				reportcrypto.EncryptString(
+					"manifests/nginx/deployment.yaml",
+					dek,
+				)
+			require.NoError(t, err)
+
 			wrappedDEK, err :=
 				reportcrypto.WrapDEK(
 					dek,
@@ -49,6 +63,16 @@ func TestDecryptCommand(t *testing.T) {
 				},
 				"scanCoverage": map[string]any{
 					"all": true,
+				},
+				"resources": []map[string]any{
+					{
+						"resourceID":  "resource-1",
+						"customField": "must-survive",
+						"source": map[string]any{
+							"path":         encryptedPath,
+							"relativePath": encryptedRelativePath,
+						},
+					},
 				},
 				"metadata": map[string]any{
 					"targetMetadata": map[string]any{
@@ -168,6 +192,50 @@ func TestDecryptCommand(t *testing.T) {
 				t,
 				"kubescape",
 				repoMetadata["repo"],
+			)
+
+			resources, ok := output["resources"].([]any)
+			require.True(
+				t,
+				ok,
+				"resources should be an array",
+			)
+
+			require.Len(
+				t,
+				resources,
+				1,
+			)
+
+			resource, ok := resources[0].(map[string]any)
+			require.True(
+				t,
+				ok,
+				"resource should be an object",
+			)
+			assert.Equal(
+				t,
+				"must-survive",
+				resource["customField"],
+			)
+
+			source, ok := resource["source"].(map[string]any)
+			require.True(
+				t,
+				ok,
+				"source should be an object",
+			)
+
+			assert.Equal(
+				t,
+				"/workspace/manifests/nginx/deployment.yaml",
+				source["path"],
+			)
+
+			assert.Equal(
+				t,
+				"manifests/nginx/deployment.yaml",
+				source["relativePath"],
 			)
 		})
 	}

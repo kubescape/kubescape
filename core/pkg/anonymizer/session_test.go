@@ -822,3 +822,180 @@ func TestTransformRepoContextMetadata_Error(
 		repo.LocalRootPath,
 	)
 }
+
+func TestTransformResourceSource(t *testing.T) {
+	source := &reporthandling.Source{
+		Path:             "/workspace/private/app.yaml",
+		RelativePath:     "services/payments/app.yaml",
+		HelmPath:         "charts/internal",
+		HelmChartName:    "payments-service",
+		HelmTemplateFile: "templates/deployment.yaml",
+		HelmValuesPaths: []string{
+			"database.password",
+			"redis.password",
+		},
+		KustomizeDirectoryName: "prod-overlay",
+		LastCommit: reporthandling.LastCommit{
+			Hash:           "abc123",
+			CommitterName:  "John Doe",
+			CommitterEmail: "john@example.com",
+			Message:        "internal change",
+		},
+	}
+
+	err := transformResourceSource(
+		source,
+		NewMappingTransformer(),
+	)
+	require.NoError(t, err)
+
+	assert.Contains(t, source.Path, "src-")
+	assert.Contains(t, source.RelativePath, "src-")
+	assert.Contains(t, source.HelmPath, "src-")
+	assert.Contains(t, source.HelmChartName, "src-")
+	assert.Contains(t, source.HelmTemplateFile, "src-")
+	assert.Contains(t, source.KustomizeDirectoryName, "src-")
+
+	assert.Contains(t, source.LastCommit.Hash, "git-")
+	assert.Contains(t, source.LastCommit.CommitterName, "git-")
+	assert.Contains(t, source.LastCommit.CommitterEmail, "git-")
+	assert.Contains(t, source.LastCommit.Message, "git-")
+
+	assert.Len(t, source.HelmValuesPaths, 2)
+
+	assert.Contains(t, source.HelmValuesPaths[0], "src-")
+	assert.Contains(t, source.HelmValuesPaths[1], "src-")
+
+	assert.NotEqual(t, "database.password", source.HelmValuesPaths[0])
+	assert.NotEqual(t, "redis.password", source.HelmValuesPaths[1])
+}
+
+func TestTransformResourceSource_EncryptionTransformer(
+	t *testing.T,
+) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	transformer := NewEncryptionTransformer(dek)
+
+	source := &reporthandling.Source{
+		Path: "/workspace/private/app.yaml",
+		LastCommit: reporthandling.LastCommit{
+			Hash: "abc123",
+		},
+	}
+
+	err = transformResourceSource(
+		source,
+		transformer,
+	)
+	require.NoError(t, err)
+
+	assert.Contains(t, source.Path, "ENC[AES256_GCM,")
+	assert.Contains(t, source.LastCommit.Hash, "ENC[AES256_GCM,")
+
+	decrypted, err := reportcrypto.DecryptString(
+		source.Path,
+		dek,
+	)
+
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		"/workspace/private/app.yaml",
+		decrypted,
+	)
+}
+
+func TestTransformResourceSource_Error(
+	t *testing.T,
+) {
+	source := &reporthandling.Source{
+		Path: "/workspace/private/app.yaml",
+	}
+
+	err := transformResourceSource(
+		source,
+		&failingTransformer{},
+	)
+
+	require.Error(t, err)
+
+	assert.Equal(t, "/workspace/private/app.yaml", source.Path)
+}
+
+func TestAnonymizeSession_ResourceSourceEncryption(
+	t *testing.T,
+) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	pod := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "payment-api",
+			"namespace": "production",
+		},
+	})
+
+	oldID := pod.GetID()
+
+	session := &cautils.OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{
+			oldID: pod,
+		},
+
+		ResourceSource: map[string]reporthandling.Source{
+			oldID: {
+				Path:         "/workspace/private/app.yaml",
+				RelativePath: "services/payments/app.yaml",
+				LastCommit: reporthandling.LastCommit{
+					Hash:           "abc123",
+					CommitterName:  "John Doe",
+					CommitterEmail: "john@example.com",
+					Message:        "internal change",
+				},
+			},
+		},
+
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+	}
+
+	err = anonymizeSession(
+		session,
+		NewMapping(),
+		NewEncryptionTransformer(dek),
+	)
+	require.NoError(t, err)
+
+	var source reporthandling.Source
+
+	for _, s := range session.ResourceSource {
+		source = s
+		break
+	}
+
+	assert.Contains(t, source.Path, "ENC[AES256_GCM,")
+	assert.Contains(t, source.RelativePath, "ENC[AES256_GCM,")
+	assert.Contains(t, source.LastCommit.Hash, "ENC[AES256_GCM,")
+
+	decryptedPath, err := reportcrypto.DecryptString(
+		source.Path,
+		dek,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, "/workspace/private/app.yaml", decryptedPath)
+
+	decryptedHash, err := reportcrypto.DecryptString(
+		source.LastCommit.Hash,
+		dek,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, "abc123", decryptedHash)
+}

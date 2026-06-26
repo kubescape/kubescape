@@ -94,9 +94,17 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, repoTran
 	session.ResourcesResult = newResourcesResult
 
 	newResourceSource := make(map[string]reporthandling.Source, len(session.ResourceSource))
+
 	for oldID, source := range session.ResourceSource {
 		newID := resolveMappedID(mapping, idMapping, oldID, "ref")
-		anonymizeResourceSource(&source, mapping)
+
+		if err := transformResourceSource(
+			&source,
+			repoTransformer,
+		); err != nil {
+			return err
+		}
+
 		newResourceSource[newID] = source
 	}
 	session.ResourceSource = newResourceSource
@@ -306,71 +314,6 @@ func anonymizeAnnotationMap(obj map[string]any, mapping *Mapping) {
 	}
 }
 
-// anonymizeResourceSource anonymizes source metadata that may expose local
-// filesystem structure, repository layout, Helm/Kustomize metadata, or git
-// commit identity in hidden scan output.
-func anonymizeResourceSource(source *reporthandling.Source, mapping *Mapping) {
-	if source == nil {
-		return
-	}
-
-	if source.Path != "" {
-		source.Path = mapping.GetOrCreate("src", source.Path)
-	}
-
-	if source.RelativePath != "" {
-		source.RelativePath = mapping.GetOrCreate("src", source.RelativePath)
-	}
-
-	if source.HelmPath != "" {
-		source.HelmPath = mapping.GetOrCreate("src", source.HelmPath)
-	}
-
-	if source.HelmChartName != "" {
-		source.HelmChartName = mapping.GetOrCreate("src", source.HelmChartName)
-	}
-
-	if source.HelmTemplateFile != "" {
-		source.HelmTemplateFile = mapping.GetOrCreate("src", source.HelmTemplateFile)
-	}
-
-	if source.KustomizeDirectoryName != "" {
-		source.KustomizeDirectoryName = mapping.GetOrCreate("src", source.KustomizeDirectoryName)
-	}
-
-	for i := range source.HelmValuesPaths {
-		if source.HelmValuesPaths[i] != "" {
-			source.HelmValuesPaths[i] = mapping.GetOrCreate("src", source.HelmValuesPaths[i])
-		}
-	}
-
-	anonymizeLastCommit(&source.LastCommit, mapping)
-}
-
-// anonymizeLastCommit anonymizes commit metadata that may reveal repository
-// identity or contributor information while preserving non-sensitive timestamps.
-func anonymizeLastCommit(commit *reporthandling.LastCommit, mapping *Mapping) {
-	if commit == nil {
-		return
-	}
-
-	if commit.Hash != "" {
-		commit.Hash = mapping.GetOrCreate("git", commit.Hash)
-	}
-
-	if commit.CommitterName != "" {
-		commit.CommitterName = mapping.GetOrCreate("git", commit.CommitterName)
-	}
-
-	if commit.CommitterEmail != "" {
-		commit.CommitterEmail = mapping.GetOrCreate("git", commit.CommitterEmail)
-	}
-
-	if commit.Message != "" {
-		commit.Message = mapping.GetOrCreate("git", commit.Message)
-	}
-}
-
 func transformValue(transformer Transformer, prefix string, value string) (string, error) {
 	if value == "" {
 		return value, nil
@@ -503,6 +446,102 @@ func transformLastCommit(commit *reporthandling.LastCommit, transformer Transfor
 	}
 
 	*commit = commitCopy
+
+	return nil
+}
+
+func transformResourceSource(
+	source *reporthandling.Source,
+	transformer Transformer,
+) error {
+	if source == nil {
+		return nil
+	}
+
+	sourceCopy := *source
+
+	if source.HelmValuesPaths != nil {
+		sourceCopy.HelmValuesPaths = append(
+			[]string(nil),
+			source.HelmValuesPaths...,
+		)
+	}
+
+	var err error
+
+	sourceCopy.Path, err = transformValue(
+		transformer,
+		"src",
+		sourceCopy.Path,
+	)
+	if err != nil {
+		return err
+	}
+
+	sourceCopy.RelativePath, err = transformValue(
+		transformer,
+		"src",
+		sourceCopy.RelativePath,
+	)
+	if err != nil {
+		return err
+	}
+
+	sourceCopy.HelmPath, err = transformValue(
+		transformer,
+		"src",
+		sourceCopy.HelmPath,
+	)
+	if err != nil {
+		return err
+	}
+
+	sourceCopy.HelmChartName, err = transformValue(
+		transformer,
+		"src",
+		sourceCopy.HelmChartName,
+	)
+	if err != nil {
+		return err
+	}
+
+	sourceCopy.HelmTemplateFile, err = transformValue(
+		transformer,
+		"src",
+		sourceCopy.HelmTemplateFile,
+	)
+	if err != nil {
+		return err
+	}
+
+	sourceCopy.KustomizeDirectoryName, err = transformValue(
+		transformer,
+		"src",
+		sourceCopy.KustomizeDirectoryName,
+	)
+	if err != nil {
+		return err
+	}
+
+	for i := range sourceCopy.HelmValuesPaths {
+		sourceCopy.HelmValuesPaths[i], err = transformValue(
+			transformer,
+			"src",
+			sourceCopy.HelmValuesPaths[i],
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := transformLastCommit(
+		&sourceCopy.LastCommit,
+		transformer,
+	); err != nil {
+		return err
+	}
+
+	*source = sourceCopy
 
 	return nil
 }

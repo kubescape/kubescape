@@ -34,6 +34,12 @@ func TestDecryptRepoContextMetadata_RoundTrip(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	encryptedDefaultBranch, err := EncryptString(
+		"main",
+		dek,
+	)
+	require.NoError(t, err)
+
 	encryptedRemoteURL, err := EncryptString(
 		"https://github.com/example/repo",
 		dek,
@@ -48,6 +54,18 @@ func TestDecryptRepoContextMetadata_RoundTrip(t *testing.T) {
 
 	encryptedCommitHash, err := EncryptString(
 		"abc123def456",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedCommitterName, err := EncryptString(
+		"John Doe",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedCommitterEmail, err := EncryptString(
+		"john@example.com",
 		dek,
 	)
 	require.NoError(t, err)
@@ -70,11 +88,14 @@ func TestDecryptRepoContextMetadata_RoundTrip(t *testing.T) {
 				Repo:          encryptedRepo,
 				Owner:         encryptedOwner,
 				Branch:        encryptedBranch,
+				DefaultBranch: encryptedDefaultBranch,
 				RemoteURL:     encryptedRemoteURL,
 				LocalRootPath: encryptedLocalRootPath,
 				LastCommit: reporthandling.LastCommit{
-					Hash:    encryptedCommitHash,
-					Message: encryptedCommitMessage,
+					Hash:           encryptedCommitHash,
+					CommitterName:  encryptedCommitterName,
+					CommitterEmail: encryptedCommitterEmail,
+					Message:        encryptedCommitMessage,
 				},
 			},
 		},
@@ -115,6 +136,12 @@ func TestDecryptRepoContextMetadata_RoundTrip(t *testing.T) {
 
 	assert.Equal(
 		t,
+		"main",
+		repoMetadata.DefaultBranch,
+	)
+
+	assert.Equal(
+		t,
 		"https://github.com/example/repo",
 		repoMetadata.RemoteURL,
 	)
@@ -129,6 +156,18 @@ func TestDecryptRepoContextMetadata_RoundTrip(t *testing.T) {
 		t,
 		"abc123def456",
 		repoMetadata.LastCommit.Hash,
+	)
+
+	assert.Equal(
+		t,
+		"John Doe",
+		repoMetadata.LastCommit.CommitterName,
+	)
+
+	assert.Equal(
+		t,
+		"john@example.com",
+		repoMetadata.LastCommit.CommitterEmail,
 	)
 
 	assert.Equal(
@@ -247,6 +286,191 @@ func TestDecryptRepoContextMetadata_NoRepoMetadata(t *testing.T) {
 	err = DecryptRepoContextMetadata(
 		metadata,
 		masterKey,
+	)
+
+	require.NoError(t, err)
+}
+
+func TestDecryptResourceSource_RoundTrip(
+	t *testing.T,
+) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	encryptedPath, err := EncryptString(
+		"/workspace/private/app.yaml",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedRelativePath, err := EncryptString(
+		"services/payments/app.yaml",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedHelmPath, err := EncryptString(
+		"charts/internal",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedChartName, err := EncryptString(
+		"payments-service",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedTemplateFile, err := EncryptString(
+		"templates/deployment.yaml",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedKustomizeDir, err := EncryptString(
+		"prod-overlay",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedValue1, err := EncryptString(
+		"database.password",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedValue2, err := EncryptString(
+		"redis.password",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedCommitHash, err := EncryptString(
+		"abc123",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedCommitterName, err := EncryptString(
+		"John Doe",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedCommitterEmail, err := EncryptString(
+		"john@example.com",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedCommitMessage, err := EncryptString(
+		"internal change",
+		dek,
+	)
+	require.NoError(t, err)
+
+	source := &reporthandling.Source{
+		Path:                   encryptedPath,
+		RelativePath:           encryptedRelativePath,
+		HelmPath:               encryptedHelmPath,
+		HelmChartName:          encryptedChartName,
+		HelmTemplateFile:       encryptedTemplateFile,
+		KustomizeDirectoryName: encryptedKustomizeDir,
+		HelmValuesPaths: []string{
+			encryptedValue1,
+			encryptedValue2,
+		},
+		LastCommit: reporthandling.LastCommit{
+			Hash:           encryptedCommitHash,
+			CommitterName:  encryptedCommitterName,
+			CommitterEmail: encryptedCommitterEmail,
+			Message:        encryptedCommitMessage,
+		},
+	}
+
+	err = DecryptResourceSource(
+		source,
+		dek,
+	)
+
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		"/workspace/private/app.yaml",
+		source.Path,
+	)
+
+	assert.Equal(
+		t,
+		"services/payments/app.yaml",
+		source.RelativePath,
+	)
+
+	assert.Equal(
+		t,
+		"charts/internal",
+		source.HelmPath,
+	)
+
+	assert.Equal(
+		t,
+		"payments-service",
+		source.HelmChartName,
+	)
+
+	assert.Equal(
+		t,
+		"templates/deployment.yaml",
+		source.HelmTemplateFile,
+	)
+
+	assert.Equal(
+		t,
+		"prod-overlay",
+		source.KustomizeDirectoryName,
+	)
+
+	assert.Equal(
+		t,
+		[]string{
+			"database.password",
+			"redis.password",
+		},
+		source.HelmValuesPaths,
+	)
+
+	assert.Equal(
+		t,
+		"abc123",
+		source.LastCommit.Hash,
+	)
+
+	assert.Equal(
+		t,
+		"John Doe",
+		source.LastCommit.CommitterName,
+	)
+
+	assert.Equal(
+		t,
+		"john@example.com",
+		source.LastCommit.CommitterEmail,
+	)
+
+	assert.Equal(
+		t,
+		"internal change",
+		source.LastCommit.Message,
+	)
+}
+
+func TestDecryptResourceSource_Nil(
+	t *testing.T,
+) {
+	err := DecryptResourceSource(
+		nil,
+		make([]byte, 32),
 	)
 
 	require.NoError(t, err)
