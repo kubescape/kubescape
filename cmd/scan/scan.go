@@ -181,7 +181,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmReleaseName, "release-name", "", "Helm release name made available as .Release.Name when rendering the chart")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmReleaseNamespace, "release-namespace", "", "Helm release namespace made available as .Release.Namespace when rendering the chart")
 
-	scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead. Flag will be removed at 1.Dec.2023")
+	scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead")
 	scanCmd.PersistentFlags().MarkDeprecated("create-account", "Create account is no longer supported. In case of a missing Account ID and a configured backend server, a new account id will be generated automatically by Kubescape. Feel free to contact the Kubescape maintainers for more information.")
 
 	// hidden flags
@@ -196,10 +196,10 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	hostF.NoOptDefVal = "true"
 	hostF.DefValue = "false, for no TTY in stdin"
 	scanCmd.PersistentFlags().MarkHidden("enable-host-scan")
-	scanCmd.PersistentFlags().MarkDeprecated("enable-host-scan", "To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator. The flag will be removed at 1.Dec.2023")
+	scanCmd.PersistentFlags().MarkDeprecated("enable-host-scan", "To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator")
 
 	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml") // this flag should be used very cautiously. We prefer users will not use it at all unless the DaemonSet can not run pods on the nodes
-	scanCmd.PersistentFlags().MarkDeprecated("host-scan-yaml", "To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator. The flag will be removed at 1.Dec.2023")
+	scanCmd.PersistentFlags().MarkDeprecated("host-scan-yaml", "To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator")
 
 	scanCmd.AddCommand(getControlCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))
