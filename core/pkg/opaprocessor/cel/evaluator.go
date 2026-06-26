@@ -6,7 +6,10 @@ import (
 	"strings"
 
 	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	celconfig "k8s.io/apiserver/pkg/apis/cel"
+	"k8s.io/apiserver/pkg/cel/lazy"
 )
 
 // Variable is one entry from a VAP's spec.variables. Each is a CEL expression
@@ -89,16 +92,20 @@ func NewEvaluator(opts ...Option) (*Evaluator, error) {
 //     fills them from real YAML; for now tests fill them by hand. Same structs
 //     either way, so the signature does not change when the loader lands.
 //
-// The activation is built once and reused. Variables are evaluated first, in
-// declared order, each written back so later variables and the validations can
-// read variables.<name>. Then every validation is evaluated against it, yielding
-// one ValidationResult per validation in order.
+// The activation is built once and reused. Variables are bound LAZILY, matching
+// the apiserver (pkg/admission/plugin/cel/composition.go): a variable is
+// evaluated only when a validation actually references variables.<name>, the
+// result (or its error) is memoized, and a variable error surfaces only to the
+// validation(s) that touched it. This is what keeps offline == admission:
 //
-// A variable failure is returned as a top-level error: if a variable cannot be
-// resolved, the validations that may depend on it cannot be trusted, so we do
-// not produce verdicts for this object. A validation failure, by contrast, is
-// captured per-result (see evaluateValidation), since the other validations are
-// still meaningful.
+//   - a variable that errors but is never referenced does not affect the object
+//     (at admission it never runs either);
+//   - a broken variable referenced by one validation only fails that validation;
+//     the rest still get verdicts.
+//
+// Each validation then yields one ValidationResult, in order. The error return is
+// reserved for setup failures; per-validation outcomes (including eval errors)
+// live on the result (see evaluateValidation).
 func (e *Evaluator) EvaluateOnObject(
 	ctx context.Context,
 	obj map[string]any,
@@ -113,26 +120,39 @@ func (e *Evaluator) EvaluateOnObject(
 	activation := stubBindings(obj, namespaceObject)
 	activation["object"] = obj
 	activation["params"] = params
-
-	// One inner map bound to "variables". Each evaluated variable is written into
-	// this same map, so variables.<name> resolves for both later variables and
-	// the validations. It is never rebuilt per variable.
-	vars := map[string]any{}
-	activation["variables"] = vars
-
-	for _, v := range variables {
-		out, err := e.evalExpression(ctx, v.Expression, activation)
-		if err != nil {
-			return nil, fmt.Errorf("evaluating variable %q: %w", v.Name, err)
-		}
-		vars[v.Name] = out
-	}
+	activation["variables"] = e.lazyVariables(ctx, variables, activation)
 
 	results := make([]ValidationResult, 0, len(validations))
 	for _, val := range validations {
 		results = append(results, e.evaluateValidation(ctx, val, activation))
 	}
 	return results, nil
+}
+
+// variablesTypeName is the CEL type name of the lazy variables map. It only
+// labels the map value; the env declares "variables" as a dynamic type, so field
+// access resolves through the map at runtime rather than against this type.
+const variablesTypeName = "kubescape.cel.variables"
+
+// lazyVariables builds the value bound to "variables": a lazy map where each
+// variable is evaluated on first access and memoized, mirroring the apiserver's
+// composition map. The callback evaluates against the same activation the map is
+// part of, so a variable referencing variables.<earlier> triggers that earlier
+// variable's callback on demand. An eval/compile failure becomes a CEL error
+// value, which propagates only to the validation that referenced the variable.
+func (e *Evaluator) lazyVariables(ctx context.Context, variables []Variable, activation map[string]any) *lazy.MapValue {
+	lazyVars := lazy.NewMapValue(types.NewObjectType(variablesTypeName))
+	for _, v := range variables {
+		v := v // capture per iteration for the callback
+		lazyVars.Append(v.Name, func(*lazy.MapValue) ref.Val {
+			out, err := e.evalExpression(ctx, v.Expression, activation)
+			if err != nil {
+				return types.NewErr("variable %q: %v", v.Name, err)
+			}
+			return out
+		})
+	}
+	return lazyVars
 }
 
 // evaluateValidation evaluates one validation against the prepared activation.
@@ -166,23 +186,40 @@ func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, acti
 // validator.go): messageExpression first, then the static Message, then a
 // "failed expression: <expr>" default. A failing messageExpression must NOT turn
 // the violation into an error: a real violation with a typo'd message is still a
-// violation, so we fall back rather than promote to Err. A non-string, empty, or
-// whitespace-only messageExpression result also falls back, as the apiserver does.
+// violation, so we fall back rather than promote to Err. A messageExpression
+// result that is non-string, empty/whitespace-only, multi-line, or longer than
+// the apiserver's limit also falls back, matching what admission would accept.
 func (e *Evaluator) resolveMessage(ctx context.Context, val Validation, activation map[string]any) string {
 	if val.MessageExpression != "" {
-		out, err := e.evalExpression(ctx, val.MessageExpression, activation)
-		if err == nil {
-			if msg, ok := out.Value().(string); ok {
-				if msg = strings.TrimSpace(msg); msg != "" {
-					return msg
-				}
-			}
+		if msg, ok := e.evalMessageExpression(ctx, val.MessageExpression, activation); ok {
+			return msg
 		}
 	}
 	if msg := strings.TrimSpace(val.Message); msg != "" {
 		return msg
 	}
 	return fmt.Sprintf("failed expression: %s", strings.TrimSpace(val.Expression))
+}
+
+// evalMessageExpression evaluates a messageExpression and reports whether its
+// result is usable. The apiserver rejects (and falls back on) a result that
+// errors, is non-string, is empty/whitespace, exceeds the size limit, or spans
+// multiple lines; we apply the same guards so the message we report offline is
+// one admission would actually use.
+func (e *Evaluator) evalMessageExpression(ctx context.Context, expr string, activation map[string]any) (string, bool) {
+	out, err := e.evalExpression(ctx, expr, activation)
+	if err != nil {
+		return "", false
+	}
+	msg, ok := out.Value().(string)
+	if !ok {
+		return "", false
+	}
+	msg = strings.TrimSpace(msg)
+	if msg == "" || len(msg) > celconfig.MaxEvaluatedMessageExpressionSizeBytes || strings.ContainsAny(msg, "\n") {
+		return "", false
+	}
+	return msg, true
 }
 
 // evalExpression compiles and evaluates a single CEL expression against the
@@ -209,6 +246,11 @@ func (e *Evaluator) evalExpression(ctx context.Context, expr string, activation 
 // program instantiates a runnable program from a compiled AST. The cost-limit
 // override is only applied when set; otherwise the base env's baked-in
 // PerCallLimit stands. InterruptCheckFrequency gets added here later too.
+//
+// Note for when the cost limit is turned on: this applies a fresh per-expression
+// budget. The apiserver instead shares one budget across all of a policy's
+// expressions (variables + validations) per evaluation, so that accounting, not
+// just the per-call value, is what needs to be matched then.
 func (e *Evaluator) program(ast *cel.Ast) (cel.Program, error) {
 	var opts []cel.ProgramOption
 	if e.costLimit > 0 {

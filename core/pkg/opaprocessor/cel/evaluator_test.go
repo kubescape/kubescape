@@ -229,21 +229,75 @@ func TestEvaluateOnObjectValidationEvalErrorSetsErr(t *testing.T) {
 	assert.False(t, results[0].Passed)
 }
 
-// TestEvaluateOnObjectVariableErrorIsTopLevel guards that a variable that fails
-// to evaluate aborts the whole object with a top-level error rather than
-// producing untrustworthy verdicts.
-func TestEvaluateOnObjectVariableErrorIsTopLevel(t *testing.T) {
+// TestEvaluateOnObjectUnreferencedBrokenVariableIsIgnored is a parity guard:
+// because variables are lazy, a variable that errors but is never referenced by
+// any validation must not affect the object, exactly as at admission where it
+// never runs.
+func TestEvaluateOnObjectUnreferencedBrokenVariableIsIgnored(t *testing.T) {
 	e, err := NewEvaluator()
 	require.NoError(t, err)
 
 	variables := []Variable{
 		{Name: "broken", Expression: "object.spec.thisKeyDoesNotExist.value"},
 	}
-	validations := []Validation{{Expression: "true"}}
+	validations := []Validation{{Expression: "object.metadata.name == 'nginx'"}}
 
 	results, err := e.EvaluateOnObject(context.Background(), hostNetworkPod(), nil, nil, variables, validations)
-	require.Error(t, err)
-	assert.Nil(t, results)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.True(t, results[0].Passed)
+	assert.NoError(t, results[0].Err)
+}
+
+// TestEvaluateOnObjectBrokenVariableFailsOnlyReferencingValidation is the other
+// parity guard: a broken variable referenced by one validation fails only that
+// validation; the others still get clean verdicts.
+func TestEvaluateOnObjectBrokenVariableFailsOnlyReferencingValidation(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	variables := []Variable{
+		{Name: "broken", Expression: "object.spec.thisKeyDoesNotExist.value"},
+	}
+	validations := []Validation{
+		{Expression: "object.metadata.name == 'nginx'"}, // does not touch the variable
+		{Expression: "variables.broken == 1"},           // touches the broken variable
+		{Expression: "object.metadata.namespace == 'production'"},
+	}
+
+	results, err := e.EvaluateOnObject(context.Background(), hostNetworkPod(), nil, nil, variables, validations)
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+
+	assert.True(t, results[0].Passed)
+	assert.NoError(t, results[0].Err)
+
+	assert.Error(t, results[1].Err, "the validation that touched the broken variable errors")
+	assert.False(t, results[1].Passed)
+
+	assert.True(t, results[2].Passed)
+	assert.NoError(t, results[2].Err)
+}
+
+// TestEvaluateOnObjectVariableMemoizedAcrossValidations checks a referenced
+// variable resolves and is usable by multiple validations.
+func TestEvaluateOnObjectVariableMemoizedAcrossValidations(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	variables := []Variable{
+		{Name: "containers", Expression: "object.spec.containers"},
+	}
+	validations := []Validation{
+		{Expression: "size(variables.containers) == 2"},
+		{Expression: "variables.containers[0].name == 'app'"},
+	}
+
+	results, err := e.EvaluateOnObject(context.Background(), hostNetworkPod(), nil, nil, variables, validations)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.True(t, results[0].Passed)
+	assert.True(t, results[1].Passed)
 }
 
 func TestEvaluateOnObjectResultsAreOneToOne(t *testing.T) {
