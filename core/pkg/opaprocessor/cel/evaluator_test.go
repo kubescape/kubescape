@@ -129,9 +129,32 @@ func TestEvaluateOnObjectMessageExpression(t *testing.T) {
 	assert.Equal(t, "pod nginx uses host network", results[0].Message)
 }
 
+// TestEvaluateOnObjectMessageExpressionWinsOverStatic pins the apiserver
+// precedence: when both are set and messageExpression succeeds, it is used, not
+// the static Message.
+func TestEvaluateOnObjectMessageExpressionWinsOverStatic(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	validations := []Validation{
+		{
+			Expression:        "object.spec.hostNetwork == false",
+			Message:           "static message",
+			MessageExpression: "'dynamic ' + object.metadata.name",
+		},
+	}
+
+	results, err := e.EvaluateOnObject(context.Background(), hostNetworkPod(), nil, nil, nil, validations)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.False(t, results[0].Passed)
+	assert.Equal(t, "dynamic nginx", results[0].Message)
+}
+
 // TestEvaluateOnObjectBrokenMessageExpressionStaysViolation is the key semantic
 // guard: a failing messageExpression must NOT turn a real violation into an
-// error. It falls back to the static Message instead.
+// error. messageExpression is tried first (per apiserver precedence), errors,
+// and falls back to the static Message while the violation stands.
 func TestEvaluateOnObjectBrokenMessageExpressionStaysViolation(t *testing.T) {
 	e, err := NewEvaluator()
 	require.NoError(t, err)
@@ -171,7 +194,7 @@ func TestEvaluateOnObjectBrokenMessageExpressionNoStaticFallsToDefault(t *testin
 	require.Len(t, results, 1)
 	assert.False(t, results[0].Passed)
 	assert.NoError(t, results[0].Err)
-	assert.Equal(t, defaultViolationMessage, results[0].Message)
+	assert.Equal(t, "failed expression: object.spec.hostNetwork == false", results[0].Message)
 }
 
 // TestEvaluateOnObjectNonBoolErrors guards that a validation expression that

@@ -3,6 +3,7 @@ package cel
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
@@ -40,11 +41,6 @@ type ValidationResult struct {
 	Message    string
 	Err        error
 }
-
-// defaultViolationMessage is what we report when a validation fails but neither
-// Message nor a working MessageExpression gives us anything, mirroring the
-// apiserver's generic "failed expression" fallback.
-const defaultViolationMessage = "failed validation"
 
 // Evaluator runs a VAP's variables and validations against scanned objects. The
 // CEL env is built once and reused for every object, since compiling the env is
@@ -166,22 +162,27 @@ func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, acti
 
 // resolveMessage produces the violation message for a failed validation.
 //
-// A failing messageExpression must NOT turn the violation into an error: a real
-// violation with a typo'd message is still a violation. So we fall back, never
-// promote to Err. Order: static Message, then messageExpression, then a default.
+// Order matches the apiserver (pkg/admission/plugin/policy/validating/
+// validator.go): messageExpression first, then the static Message, then a
+// "failed expression: <expr>" default. A failing messageExpression must NOT turn
+// the violation into an error: a real violation with a typo'd message is still a
+// violation, so we fall back rather than promote to Err. A non-string, empty, or
+// whitespace-only messageExpression result also falls back, as the apiserver does.
 func (e *Evaluator) resolveMessage(ctx context.Context, val Validation, activation map[string]any) string {
-	if val.Message != "" {
-		return val.Message
-	}
 	if val.MessageExpression != "" {
 		out, err := e.evalExpression(ctx, val.MessageExpression, activation)
 		if err == nil {
-			if msg, ok := out.Value().(string); ok && msg != "" {
-				return msg
+			if msg, ok := out.Value().(string); ok {
+				if msg = strings.TrimSpace(msg); msg != "" {
+					return msg
+				}
 			}
 		}
 	}
-	return defaultViolationMessage
+	if msg := strings.TrimSpace(val.Message); msg != "" {
+		return msg
+	}
+	return fmt.Sprintf("failed expression: %s", strings.TrimSpace(val.Expression))
 }
 
 // evalExpression compiles and evaluates a single CEL expression against the
