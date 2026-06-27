@@ -7,7 +7,7 @@ replace github.com/kubescape/kubescape/v3 => ../
 replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.0-20260322054632-16583c73e9b8
 
 require (
-	github.com/armosec/armoapi-go v0.0.693
+	github.com/armosec/armoapi-go v0.0.720
 	github.com/armosec/utils-go v0.0.58
 	github.com/armosec/utils-k8s-go v0.0.35
 	github.com/go-openapi/runtime v0.29.3
@@ -545,6 +545,7 @@ require (
 	github.com/zclconf/go-cty v1.17.0 // indirect
 	gitlab.com/gitlab-org/api/client-go v1.25.0 // indirect
 	go.etcd.io/bbolt v1.4.3 // indirect
+	go.mongodb.org/mongo-driver v1.17.6 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/bridges/otelslog v0.18.0 // indirect
