@@ -1,11 +1,18 @@
 package v1
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -73,6 +80,25 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	select {
 	case scanReq.resp <- response:
 	default:
+	}
+
+	if scanReq.callbackURL != "" {
+		payload := scanCallbackPayload{ID: scanReq.scanID, Status: callbackStatusCompleted}
+		if err != nil {
+			payload.Status = callbackStatusFailed
+			payload.Error = err.Error()
+		}
+		cbCtx := context.WithoutCancel(scanReq.ctx)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.L().Ctx(cbCtx).Error("scan completion callback panicked", helpers.String("ID", scanReq.scanID), helpers.Error(fmt.Errorf("%v", r)))
+				}
+			}()
+			if cbErr := postScanCallback(cbCtx, scanReq.callbackURL, payload); cbErr != nil {
+				logger.L().Ctx(cbCtx).Error("failed to deliver scan completion callback", helpers.String("ID", scanReq.scanID), helpers.Error(cbErr))
+			}
+		}()
 	}
 }
 
@@ -298,4 +324,213 @@ func writeScanErrorToFile(err error, scanID string) (e error) {
 func responseToBytes(res *utilsmetav1.Response) []byte {
 	b, _ := json.Marshal(res)
 	return b
+}
+
+const (
+	callbackStatusCompleted = "completed"
+	callbackStatusFailed    = "failed"
+
+	// callbackAllowlistEnv, when set, is an authoritative comma-separated list of
+	// CIDRs (or bare IPs) the resolved callback host must fall within.
+	callbackAllowlistEnv = "KS_CALLBACK_ALLOWED_CIDRS"
+
+	callbackRequestTimeout = 5 * time.Second
+	callbackWallTime       = 20 * time.Second
+	callbackBackoff        = 2 * time.Second
+	callbackMaxAttempts    = 3
+)
+
+// scanCallbackPayload is the completion signal POSTed to a caller-supplied
+// callback URL. It is intentionally a signal only - it carries the scan ID, not
+// the PostureReport, and receivers must GET /v1/results for the data. Delivery
+// is at-least-once and best-effort with no durability across server restarts,
+// so receivers must dedup on ID and keep a poll/reconcile fallback.
+type scanCallbackPayload struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+// ipResolver is the subset of net.Resolver used for callback host screening;
+// it is a package var so tests can simulate DNS responses.
+type ipResolver interface {
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+}
+
+var callbackResolver ipResolver = net.DefaultResolver
+
+// validateCallbackURL enforces the parse-time callback contract: http/https
+// only and no embedded credentials. Network-level SSRF screening happens later,
+// at dial time, in postScanCallback.
+func validateCallbackURL(rawURL string) (*url.URL, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid callback URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("callback URL scheme must be http or https")
+	}
+	if u.User != nil {
+		return nil, fmt.Errorf("callback URL must not contain userinfo")
+	}
+	if u.Hostname() == "" {
+		return nil, fmt.Errorf("callback URL must contain a host")
+	}
+	return u, nil
+}
+
+func postScanCallback(ctx context.Context, rawURL string, payload scanCallbackPayload) error {
+	u, err := validateCallbackURL(rawURL)
+	if err != nil {
+		return err
+	}
+
+	// Resolve and screen once, then dial that exact IP, so the address vetted
+	// here is the address connected to - closing the DNS-rebinding window.
+	ip, err := screenCallbackHost(ctx, u.Hostname())
+	if err != nil {
+		return err
+	}
+
+	port := u.Port()
+	if port == "" {
+		if u.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	pinnedAddr := net.JoinHostPort(ip.String(), port)
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	client := &http.Client{
+		Timeout: callbackRequestTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{Timeout: callbackRequestTimeout}).DialContext(ctx, network, pinnedAddr)
+			},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, callbackWallTime)
+	defer cancel()
+
+	var lastErr error
+	for attempt := 0; attempt < callbackMaxAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("callback delivery deadline exceeded: %w", ctx.Err())
+			case <-time.After(callbackBackoff * time.Duration(attempt)):
+			}
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return nil
+		}
+		lastErr = fmt.Errorf("callback endpoint returned status %d", resp.StatusCode)
+	}
+	return lastErr
+}
+
+// screenCallbackHost resolves host and returns one IP that is permitted to be
+// dialed. When callbackAllowlistEnv is set it is authoritative (the IP must fall
+// inside it); otherwise loopback, link-local, private and other non-routable
+// ranges are denied.
+func screenCallbackHost(ctx context.Context, host string) (net.IP, error) {
+	allowlist, err := callbackAllowlist()
+	if err != nil {
+		return nil, err
+	}
+
+	var candidates []net.IP
+	if literal := net.ParseIP(host); literal != nil {
+		candidates = []net.IP{literal}
+	} else {
+		addrs, err := callbackResolver.LookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve callback host: %w", err)
+		}
+		for i := range addrs {
+			candidates = append(candidates, addrs[i].IP)
+		}
+	}
+
+	for _, ip := range candidates {
+		if len(allowlist) > 0 {
+			if allowlistContains(allowlist, ip) {
+				return ip, nil
+			}
+			continue
+		}
+		if !isBlockedCallbackIP(ip) {
+			return ip, nil
+		}
+	}
+
+	if len(allowlist) > 0 {
+		return nil, fmt.Errorf("callback host is not within the configured allowlist")
+	}
+	return nil, fmt.Errorf("callback host resolves to a disallowed (loopback, link-local or private) address")
+}
+
+func isBlockedCallbackIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() ||
+		ip.IsUnspecified() || ip.IsMulticast()
+}
+
+func callbackAllowlist() ([]*net.IPNet, error) {
+	raw := envToString(callbackAllowlistEnv, "")
+	if raw == "" {
+		return nil, nil
+	}
+	var nets []*net.IPNet
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if !strings.Contains(entry, "/") {
+			if ip := net.ParseIP(entry); ip != nil && ip.To4() != nil {
+				entry += "/32"
+			} else {
+				entry += "/128"
+			}
+		}
+		_, n, err := net.ParseCIDR(entry)
+		if err != nil {
+			return nil, fmt.Errorf("invalid %s entry %q: %w", callbackAllowlistEnv, entry, err)
+		}
+		nets = append(nets, n)
+	}
+	return nets, nil
+}
+
+func allowlistContains(nets []*net.IPNet, ip net.IP) bool {
+	for _, n := range nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
