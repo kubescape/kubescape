@@ -19,13 +19,13 @@ const (
 
 var operatorRemediateExamples = fmt.Sprintf(`
   # Preview (dry-run) annotating a workload as remediated — no changes are made
-  %[1]s operator remediate annotate --kind Deployment --namespace payments --name api --reason "C-0016"
+  %[1]s operator remediate annotate --kind Deployment --target-namespace payments --name api --reason "C-0016"
 
   # Apply the annotation (the only flag that performs a real cluster write)
-  %[1]s operator remediate annotate --kind Deployment --namespace payments --name api --reason "C-0016" --confirm
+  %[1]s operator remediate annotate --kind Deployment --target-namespace payments --name api --reason "C-0016" --confirm
 
   # Revert a previously applied annotation
-  %[1]s operator remediate revert --kind Deployment --namespace payments --name api --confirm
+  %[1]s operator remediate revert --kind Deployment --target-namespace payments --name api --confirm
 
 `, cautils.ExecName())
 
@@ -57,6 +57,13 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 			}
 			remediationInfo.Action = args[0]
 			operatorInfo.OperatorScanInfo = remediationInfo
+
+			// Validate the input before touching the cluster so typos (bad action,
+			// missing target) fail instantly, instead of after connecting and
+			// locating the operator pod. OperatorScan validates again — harmless.
+			if err := remediationInfo.ValidatePayload(nil); err != nil {
+				return err
+			}
 
 			operatorAdapter, err := core.NewOperatorAdapter(operatorInfo.OperatorScanInfo, operatorInfo.Namespace)
 			if err != nil {

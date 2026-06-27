@@ -166,7 +166,7 @@ func (r *RemediationInfo) ValidatePayload(*apis.Commands) error {
 		return fmt.Errorf("unsupported target kind %q (supported: Deployment, StatefulSet, DaemonSet, Pod)", r.Kind)
 	}
 	if r.Namespace == "" {
-		return fmt.Errorf("target kind %q requires --namespace", r.Kind)
+		return fmt.Errorf("target kind %q requires --target-namespace", r.Kind)
 	}
 	return nil
 }
