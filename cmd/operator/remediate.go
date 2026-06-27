@@ -43,8 +43,8 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 		Example: operatorRemediateExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
 			operatorInfo.Subcommands = append(operatorInfo.Subcommands, cautils.RemediateCommand)
-			if len(args) < 1 {
-				return fmt.Errorf("for the operator remediate sub-command, you must pass an action (%s or %s). Refer to the examples above", annotateSubCommand, revertSubCommand)
+			if len(args) != 1 {
+				return fmt.Errorf("for the operator remediate sub-command, you must pass exactly one action (%s or %s). Refer to the examples above", annotateSubCommand, revertSubCommand)
 			}
 			if args[0] != annotateSubCommand && args[0] != revertSubCommand {
 				return fmt.Errorf("for the operator remediate sub-command, only %s and %s are supported. Refer to the examples above", annotateSubCommand, revertSubCommand)
@@ -52,8 +52,8 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) < 1 {
-				return errors.New("for the operator remediate sub-command, you must pass an action. Refer to the examples above")
+			if len(args) != 1 {
+				return errors.New("for the operator remediate sub-command, you must pass exactly one action. Refer to the examples above")
 			}
 			remediationInfo.Action = args[0]
 			operatorInfo.OperatorScanInfo = remediationInfo
@@ -98,8 +98,7 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 	remediateCmd.PersistentFlags().StringVar(&remediationInfo.Name, "name", "", "name of the target workload")
 	remediateCmd.PersistentFlags().StringVar(&remediationInfo.Reason, "reason", "", "human-readable justification recorded in the audit trail")
 	remediateCmd.PersistentFlags().StringVar(&remediationInfo.FindingRef, "finding-ref", "", "scan-result reference that justifies the action, e.g. workloadconfigurationscansummaries/payments/api")
-	remediateCmd.PersistentFlags().BoolVar(&remediationInfo.DryRun, "dry-run", true, "preview the action without applying it (server-side validated); use --confirm to apply")
-	remediateCmd.PersistentFlags().BoolVar(&remediationInfo.Confirm, "confirm", false, "perform the real cluster write (overrides --dry-run)")
+	remediateCmd.PersistentFlags().BoolVar(&remediationInfo.Confirm, "confirm", false, "perform the real cluster write; without it the action is a dry-run preview")
 
 	return remediateCmd
 }

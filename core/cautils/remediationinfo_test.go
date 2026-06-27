@@ -9,12 +9,12 @@ import (
 )
 
 func TestRemediationInfo_IsDryRun(t *testing.T) {
-	// default (dry-run true, not confirmed) -> dry-run
-	r := &RemediationInfo{DryRun: true}
+	// default (not confirmed) -> dry-run; --confirm is the only apply switch
+	r := &RemediationInfo{}
 	assert.True(t, r.IsDryRun())
 
-	// --confirm overrides dry-run -> real write
-	r = &RemediationInfo{DryRun: true, Confirm: true}
+	// --confirm -> real write
+	r = &RemediationInfo{Confirm: true}
 	assert.False(t, r.IsDryRun())
 }
 
@@ -52,7 +52,6 @@ func TestRemediationInfo_GetRequestPayload(t *testing.T) {
 		Name:       "api",
 		Reason:     "C-0016",
 		FindingRef: "workloadconfigurationscansummaries/payments/api",
-		DryRun:     true,
 	}
 
 	payload := r.GetRequestPayload()
@@ -90,7 +89,6 @@ func TestRemediationInfo_GetRequestPayload_Revert(t *testing.T) {
 		Kind:      "Pod",
 		Namespace: "default",
 		Name:      "nginx",
-		DryRun:    true,
 	}
 
 	args, err := apis.OperatorActionArgsFromMap(r.GetRequestPayload().Commands[0].Args)

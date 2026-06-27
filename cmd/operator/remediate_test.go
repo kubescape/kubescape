@@ -26,13 +26,17 @@ func TestGetOperatorRemediateCmd(t *testing.T) {
 	err = cmd.Args(&cobra.Command{}, []string{"quarantine"})
 	assert.Error(t, err)
 
+	// exactly one action is required: extra positional args are rejected
+	err = cmd.Args(&cobra.Command{}, []string{annotateSubCommand, "unexpected"})
+	assert.Error(t, err)
+
 	// expected flags are registered
-	for _, name := range []string{"namespace", "kind", "target-namespace", "name", "reason", "finding-ref", "dry-run", "confirm"} {
+	for _, name := range []string{"namespace", "kind", "target-namespace", "name", "reason", "finding-ref", "confirm"} {
 		assert.NotNil(t, cmd.PersistentFlags().Lookup(name), "flag --%s should be registered", name)
 	}
 
-	// dry-run defaults to true
-	dryRun, err := cmd.PersistentFlags().GetBool("dry-run")
+	// confirm defaults to false (dry-run is the default; --confirm is the only apply switch)
+	confirm, err := cmd.PersistentFlags().GetBool("confirm")
 	assert.NoError(t, err)
-	assert.True(t, dryRun)
+	assert.False(t, confirm)
 }

@@ -137,16 +137,17 @@ type RemediationInfo struct {
 	// Audit metadata.
 	Reason     string
 	FindingRef string
-	// DryRun defaults to true; Confirm (the --confirm flag) is the only way to
-	// perform a real cluster write. See IsDryRun.
-	DryRun  bool
+	// Confirm (the --confirm flag) is the only way to perform a real cluster
+	// write; absent it, the action is a dry-run. See IsDryRun.
 	Confirm bool
 }
 
 // IsDryRun reports whether the action should be sent as a plan-only dry-run.
-// Only an explicit --confirm flips it off, so a forgotten flag can never apply.
+// It is the inverse of --confirm, so an action is a dry-run unless the caller
+// explicitly confirms — a forgotten flag can never perform a real write, and
+// no caller can apply without setting Confirm.
 func (r *RemediationInfo) IsDryRun() bool {
-	return r.DryRun && !r.Confirm
+	return !r.Confirm
 }
 
 func (r *RemediationInfo) ValidatePayload(*apis.Commands) error {
