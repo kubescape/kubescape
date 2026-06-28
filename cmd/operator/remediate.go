@@ -65,6 +65,11 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 				return err
 			}
 
+			// annotate writes an audit trail; nudge (don't block) for a justification.
+			if remediationInfo.Action == annotateSubCommand && remediationInfo.Reason == "" {
+				logger.L().Warning("no --reason provided; annotate records an audit trail, consider adding --reason to justify the action")
+			}
+
 			operatorAdapter, err := core.NewOperatorAdapter(operatorInfo.OperatorScanInfo, operatorInfo.Namespace)
 			if err != nil {
 				return err
@@ -83,10 +88,11 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 			// endpoint acknowledges receipt and queues the work), so the outcome is
 			// not returned here. It is emitted as a "KubescapeRemediation" Kubernetes
 			// Event on the target namespace and recorded in the operator logs.
+			eventsHint := fmt.Sprintf("kubectl get events -n %s --field-selector reason=KubescapeRemediation", remediationInfo.Namespace)
 			if remediationInfo.IsDryRun() {
-				logger.L().StopSuccess("Submitted remediation (dry-run) — no changes are applied. Check the 'KubescapeRemediation' event (kubectl get events -n <namespace>) or the operator logs for the plan; re-run with --confirm to apply.")
+				logger.L().StopSuccess(fmt.Sprintf("Submitted remediation (dry-run) — no changes are applied. Check the plan via '%s' or the operator logs; re-run with --confirm to apply.", eventsHint))
 			} else {
-				logger.L().StopSuccess("Submitted remediation (apply). Check the 'KubescapeRemediation' event (kubectl get events -n <namespace>) or the operator logs for the result.")
+				logger.L().StopSuccess(fmt.Sprintf("Submitted remediation (apply). Check the result via '%s' or the operator logs.", eventsHint))
 			}
 			return nil
 		},
