@@ -86,7 +86,7 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 		payload := scanCallbackPayload{ID: scanReq.scanID, Status: callbackStatusCompleted}
 		if err != nil {
 			payload.Status = callbackStatusFailed
-			payload.Error = err.Error()
+			payload.Error = "scan failed"
 		}
 		cbCtx := context.WithoutCancel(scanReq.ctx)
 		go func() {
@@ -333,6 +333,10 @@ const (
 	// callbackAllowlistEnv, when set, is an authoritative comma-separated list of
 	// CIDRs (or bare IPs) the resolved callback host must fall within.
 	callbackAllowlistEnv = "KS_CALLBACK_ALLOWED_CIDRS"
+	// callbackEnabledEnv opts callbacks in when no allowlist is configured;
+	// without either, callbacks are disabled so the server cannot be used as an
+	// arbitrary outbound-request emitter.
+	callbackEnabledEnv = "KS_CALLBACK_ENABLED"
 
 	callbackRequestTimeout = 5 * time.Second
 	callbackWallTime       = 20 * time.Second
@@ -357,12 +361,24 @@ type ipResolver interface {
 	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
 }
 
+// callbackResolver is the resolver used for callback host screening; it is a
+// package var so tests can simulate DNS responses.
 var callbackResolver ipResolver = net.DefaultResolver
 
-// validateCallbackURL enforces the parse-time callback contract: http/https
-// only and no embedded credentials. Network-level SSRF screening happens later,
-// at dial time, in postScanCallback.
+// callbackEnabled reports whether scan-completion callbacks are turned on,
+// either explicitly via KS_CALLBACK_ENABLED or implicitly by configuring an
+// allowlist.
+func callbackEnabled() bool {
+	return envToString(callbackAllowlistEnv, "") != "" || boolutils.StringToBool(envToString(callbackEnabledEnv, ""))
+}
+
+// validateCallbackURL enforces the parse-time callback contract: callbacks must
+// be enabled, and the URL must be http/https with no embedded credentials.
+// Network-level SSRF screening happens later, at dial time, in postScanCallback.
 func validateCallbackURL(rawURL string) (*url.URL, error) {
+	if !callbackEnabled() {
+		return nil, fmt.Errorf("scan completion callbacks are disabled; set %s=true or configure %s", callbackEnabledEnv, callbackAllowlistEnv)
+	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid callback URL: %w", err)
@@ -379,11 +395,17 @@ func validateCallbackURL(rawURL string) (*url.URL, error) {
 	return u, nil
 }
 
+// postScanCallback delivers payload to rawURL, screening and pinning the
+// resolved IP against SSRF and retrying transport and 5xx failures within a
+// bounded wall-time deadline.
 func postScanCallback(ctx context.Context, rawURL string, payload scanCallbackPayload) error {
 	u, err := validateCallbackURL(rawURL)
 	if err != nil {
 		return err
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, callbackWallTime)
+	defer cancel()
 
 	// Resolve and screen once, then dial that exact IP, so the address vetted
 	// here is the address connected to - closing the DNS-rebinding window.
@@ -419,9 +441,6 @@ func postScanCallback(ctx context.Context, rawURL string, payload scanCallbackPa
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, callbackWallTime)
-	defer cancel()
-
 	var lastErr error
 	for attempt := 0; attempt < callbackMaxAttempts; attempt++ {
 		if attempt > 0 {
@@ -449,6 +468,9 @@ func postScanCallback(ctx context.Context, rawURL string, payload scanCallbackPa
 			return nil
 		}
 		lastErr = fmt.Errorf("callback endpoint returned status %d", resp.StatusCode)
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			return lastErr
+		}
 	}
 	return lastErr
 }
@@ -494,11 +516,35 @@ func screenCallbackHost(ctx context.Context, host string) (net.IP, error) {
 	return nil, fmt.Errorf("callback host resolves to a disallowed (loopback, link-local or private) address")
 }
 
+// extraBlockedCallbackCIDRs are non-routable ranges with no net.IP predicate:
+// CGNAT, the "this host" block, and the IPv4 limited broadcast address.
+var extraBlockedCallbackCIDRs = func() []*net.IPNet {
+	nets := make([]*net.IPNet, 0, 3)
+	for _, c := range []string{"100.64.0.0/10", "0.0.0.0/8", "255.255.255.255/32"} {
+		if _, n, err := net.ParseCIDR(c); err == nil {
+			nets = append(nets, n)
+		}
+	}
+	return nets
+}()
+
+// isBlockedCallbackIP reports whether ip falls in a loopback, link-local,
+// private, or otherwise non-routable range that must never be dialed by default.
 func isBlockedCallbackIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() ||
-		ip.IsUnspecified() || ip.IsMulticast()
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsPrivate() ||
+		ip.IsUnspecified() || ip.IsMulticast() {
+		return true
+	}
+	for _, n := range extraBlockedCallbackCIDRs {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
+// callbackAllowlist parses callbackAllowlistEnv into networks; bare IPs are
+// treated as single-host CIDRs. It returns nil when the env var is unset.
 func callbackAllowlist() ([]*net.IPNet, error) {
 	raw := envToString(callbackAllowlistEnv, "")
 	if raw == "" {
@@ -526,6 +572,7 @@ func callbackAllowlist() ([]*net.IPNet, error) {
 	return nets, nil
 }
 
+// allowlistContains reports whether ip is inside any of the given networks.
 func allowlistContains(nets []*net.IPNet, ip net.IP) bool {
 	for _, n := range nets {
 		if n.Contains(ip) {

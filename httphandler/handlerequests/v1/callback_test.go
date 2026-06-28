@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -91,13 +92,23 @@ func TestExecuteScan_CallbackOnFailure(t *testing.T) {
 	case p := <-received:
 		assert.Equal(t, "scan-failed", p.ID)
 		assert.Equal(t, callbackStatusFailed, p.Status)
-		assert.Contains(t, p.Error, "collection boom")
+		assert.Equal(t, "scan failed", p.Error)
+		assert.NotContains(t, p.Error, "collection boom")
 	case <-time.After(5 * time.Second):
 		t.Fatal("callback was not delivered within 5s")
 	}
 }
 
+func TestValidateCallbackURL_DisabledByDefault(t *testing.T) {
+	t.Setenv(callbackAllowlistEnv, "")
+	t.Setenv(callbackEnabledEnv, "")
+	_, err := validateCallbackURL("http://example.com/hook")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "disabled")
+}
+
 func TestValidateCallbackURL_Rejections(t *testing.T) {
+	t.Setenv(callbackEnabledEnv, "true")
 	for _, tc := range []struct {
 		name, url, contains string
 	}{
@@ -115,6 +126,7 @@ func TestValidateCallbackURL_Rejections(t *testing.T) {
 
 func TestPostScanCallback_SSRFBlockedByDefault(t *testing.T) {
 	t.Setenv(callbackAllowlistEnv, "")
+	t.Setenv(callbackEnabledEnv, "true")
 	for _, tc := range []struct {
 		name, url string
 	}{
@@ -122,6 +134,9 @@ func TestPostScanCallback_SSRFBlockedByDefault(t *testing.T) {
 		{"link-local-metadata", "http://169.254.169.254/latest/meta-data"},
 		{"rfc1918-10", "http://10.0.0.5/hook"},
 		{"rfc1918-192", "http://192.168.1.10/hook"},
+		{"cgnat", "http://100.64.0.1/hook"},
+		{"this-host", "http://0.1.2.3/hook"},
+		{"broadcast", "http://255.255.255.255/hook"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := postScanCallback(context.Background(), tc.url, scanCallbackPayload{ID: "x"})
@@ -131,8 +146,23 @@ func TestPostScanCallback_SSRFBlockedByDefault(t *testing.T) {
 	}
 }
 
+func TestPostScanCallback_NoRetryOn4xx(t *testing.T) {
+	t.Setenv(callbackAllowlistEnv, "127.0.0.1/32")
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	err := postScanCallback(context.Background(), srv.URL, scanCallbackPayload{ID: "x"})
+	require.Error(t, err)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "4xx must not be retried")
+}
+
 func TestPostScanCallback_DNSRebindToInternalIsRejected(t *testing.T) {
 	t.Setenv(callbackAllowlistEnv, "")
+	t.Setenv(callbackEnabledEnv, "true")
 	defer func(o ipResolver) { callbackResolver = o }(callbackResolver)
 	// A benign-looking host that resolves to the cloud metadata address: because
 	// screening runs on the resolved IP (and the dial is pinned to it), the
