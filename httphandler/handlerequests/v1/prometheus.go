@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -55,7 +56,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		},
 		scanInfo: scanInfo,
 		scanID:   scanID,
-		ctx:      r.Context(),
+		ctx:      context.WithoutCancel(r.Context()),
 		resp:     make(chan *utilsmetav1.Response, 1),
 	}
 
