@@ -36,17 +36,21 @@ func applyWithTransformer(
 }
 
 // ApplyEncrypted anonymizes a scan session while encrypting
-// RepoContextMetadata using the supplied DEK.
+// sensitive report metadata using the supplied DEK.
 //
 // The DEK is wrapped using the supplied master key (KEK)
 // and stored in EncryptionMetadata for future decryption
 // workflows.
 //
-// Resource identifiers, namespaces, annotations, source paths,
-// and other session data continue to use mapping-based
-// anonymization and remain irreversibly pseudonymized.
+// Repository context and resource metadata (for example,
+// resource names and namespaces) are reversibly encrypted.
+// Resource IDs are derived from the restored metadata during
+// decryption to preserve report referential integrity.
 //
-// Only repo context metadata is reversibly encrypted.
+// Other anonymized fields, such as annotations, source paths,
+// labels, and additional session data, continue to use
+// mapping-based anonymization and remain irreversibly
+// pseudonymized.
 func ApplyEncrypted(
 	resultsHandler *resultshandling.ResultsHandler,
 	dek []byte,
