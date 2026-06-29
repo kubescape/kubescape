@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	scanSubCommand string = "scan"
+	scanSubCommand      string = "scan"
+	remediateSubCommand string = "remediate"
 )
 
 var operatorExamples = fmt.Sprintf(`
@@ -20,6 +21,9 @@ var operatorExamples = fmt.Sprintf(`
 
   # Trigger a vulnerabilities scan
   %[1]s operator scan vulnerabilities
+
+  # Preview a post-scan remediation (dry-run by default)
+  %[1]s operator remediate annotate --kind Deployment --target-namespace payments --name api --reason "C-0016"
 
 `, cautils.ExecName())
 
@@ -42,14 +46,15 @@ func GetOperatorCmd(ks meta.IKubescape) *cobra.Command {
 			if len(args) < 2 {
 				return errors.New("for the operator sub-command, you need to provide at least one additional sub-command. Refer to the examples above")
 			}
-			if args[0] != scanSubCommand {
-				return fmt.Errorf("for the operator sub-command, only %s is supported. Refer to the examples above", scanSubCommand)
+			if args[0] != scanSubCommand && args[0] != remediateSubCommand {
+				return fmt.Errorf("for the operator sub-command, only %s and %s are supported. Refer to the examples above", scanSubCommand, remediateSubCommand)
 			}
 			return nil
 		},
 	}
 
 	operatorCmd.AddCommand(getOperatorScanCmd(ks, operatorInfo))
+	operatorCmd.AddCommand(getOperatorRemediateCmd(ks, operatorInfo))
 
 	return operatorCmd
 }

@@ -9,7 +9,7 @@ require (
 	github.com/anchore/stereoscope v0.1.22
 	github.com/anchore/syft v1.42.3
 	github.com/anubhav06/copa-grype v1.0.3-alpha.1
-	github.com/armosec/armoapi-go v0.0.693
+	github.com/armosec/armoapi-go v0.0.720
 	github.com/armosec/utils-go v0.0.58
 	github.com/armosec/utils-k8s-go v0.0.35
 	github.com/briandowns/spinner v1.23.2
@@ -544,6 +544,7 @@ require (
 	github.com/zclconf/go-cty v1.17.0 // indirect
 	gitlab.com/gitlab-org/api/client-go v1.25.0 // indirect
 	go.etcd.io/bbolt v1.4.3 // indirect
+	go.mongodb.org/mongo-driver v1.17.6 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/bridges/otelslog v0.18.0 // indirect
