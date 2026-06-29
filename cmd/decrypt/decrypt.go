@@ -97,7 +97,20 @@ func GetDecryptCommand() *cobra.Command {
 					)
 				}
 
+				idMapping := make(map[string]string)
+
 				for i := range resources {
+
+					var oldID string
+
+					if rawID, ok := resources[i]["resourceID"]; ok {
+						if err := json.Unmarshal(rawID, &oldID); err != nil {
+							return fmt.Errorf(
+								"failed to parse resourceID: %w",
+								err,
+							)
+						}
+					}
 
 					objectRaw, ok := resources[i]["object"]
 					if ok {
@@ -117,6 +130,22 @@ func GetDecryptCommand() *cobra.Command {
 						); err != nil {
 							return err
 						}
+
+						newID := resource.GetID()
+
+						if oldID != "" {
+							idMapping[oldID] = newID
+						}
+
+						updatedID, err := json.Marshal(newID)
+						if err != nil {
+							return fmt.Errorf(
+								"failed to marshal resourceID: %w",
+								err,
+							)
+						}
+
+						resources[i]["resourceID"] = updatedID
 
 						updatedObject, err := json.Marshal(
 							resource.GetWorkload(),
@@ -179,6 +208,65 @@ func GetDecryptCommand() *cobra.Command {
 				}
 
 				report["resources"] = updatedResources
+				resultsRaw, ok := report["results"]
+				if ok {
+					var results []map[string]json.RawMessage
+
+					if err := json.Unmarshal(
+						resultsRaw,
+						&results,
+					); err != nil {
+						return fmt.Errorf(
+							"failed to parse results: %w",
+							err,
+						)
+					}
+
+					for i := range results {
+						var resourceID string
+
+						resourceIDRaw, ok := results[i]["resourceID"]
+						if !ok {
+							continue
+						}
+
+						if err := json.Unmarshal(
+							resourceIDRaw,
+							&resourceID,
+						); err != nil {
+							return fmt.Errorf(
+								"failed to parse result resourceID: %w",
+								err,
+							)
+						}
+
+						newID := resourceID
+						if mappedID, ok := idMapping[resourceID]; ok {
+							newID = mappedID
+						}
+						updatedID, err := json.Marshal(newID)
+						if err != nil {
+							return fmt.Errorf(
+								"failed to marshal result resourceID: %w",
+								err,
+							)
+						}
+
+						results[i]["resourceID"] = updatedID
+					}
+
+					updatedResults, err := json.Marshal(
+						results,
+					)
+					if err != nil {
+						return fmt.Errorf(
+							"failed to marshal results: %w",
+							err,
+						)
+					}
+
+					report["results"] = updatedResults
+				}
 			}
 			encoder := json.NewEncoder(os.Stdout)
 			encoder.SetIndent("", "  ")

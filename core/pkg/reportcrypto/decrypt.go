@@ -2,6 +2,7 @@ package reportcrypto
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -83,7 +84,7 @@ func DecryptRepoContextMetadata(
 
 	if repoMetadata.Repo != "" {
 		repoMetadata.Repo, err =
-			DecryptString(repoMetadata.Repo, dek)
+			decryptIfEncrypted(repoMetadata.Repo, dek)
 		if err != nil {
 			return fmt.Errorf(
 				"failed to decrypt repo: %w",
@@ -94,7 +95,7 @@ func DecryptRepoContextMetadata(
 
 	if repoMetadata.Owner != "" {
 		repoMetadata.Owner, err =
-			DecryptString(repoMetadata.Owner, dek)
+			decryptIfEncrypted(repoMetadata.Owner, dek)
 		if err != nil {
 			return fmt.Errorf(
 				"failed to decrypt owner: %w",
@@ -105,7 +106,7 @@ func DecryptRepoContextMetadata(
 
 	if repoMetadata.Branch != "" {
 		repoMetadata.Branch, err =
-			DecryptString(repoMetadata.Branch, dek)
+			decryptIfEncrypted(repoMetadata.Branch, dek)
 		if err != nil {
 			return fmt.Errorf(
 				"failed to decrypt branch: %w",
@@ -116,7 +117,7 @@ func DecryptRepoContextMetadata(
 
 	if repoMetadata.DefaultBranch != "" {
 		repoMetadata.DefaultBranch, err =
-			DecryptString(
+			decryptIfEncrypted(
 				repoMetadata.DefaultBranch,
 				dek,
 			)
@@ -130,7 +131,7 @@ func DecryptRepoContextMetadata(
 
 	if repoMetadata.RemoteURL != "" {
 		repoMetadata.RemoteURL, err =
-			DecryptString(
+			decryptIfEncrypted(
 				repoMetadata.RemoteURL,
 				dek,
 			)
@@ -144,7 +145,7 @@ func DecryptRepoContextMetadata(
 
 	if repoMetadata.LocalRootPath != "" {
 		repoMetadata.LocalRootPath, err =
-			DecryptString(
+			decryptIfEncrypted(
 				repoMetadata.LocalRootPath,
 				dek,
 			)
@@ -181,7 +182,7 @@ func decryptLastCommit(
 	var err error
 
 	if commit.Hash != "" {
-		commit.Hash, err = DecryptString(
+		commit.Hash, err = decryptIfEncrypted(
 			commit.Hash,
 			dek,
 		)
@@ -194,7 +195,7 @@ func decryptLastCommit(
 	}
 
 	if commit.CommitterName != "" {
-		commit.CommitterName, err = DecryptString(
+		commit.CommitterName, err = decryptIfEncrypted(
 			commit.CommitterName,
 			dek,
 		)
@@ -207,7 +208,7 @@ func decryptLastCommit(
 	}
 
 	if commit.CommitterEmail != "" {
-		commit.CommitterEmail, err = DecryptString(
+		commit.CommitterEmail, err = decryptIfEncrypted(
 			commit.CommitterEmail,
 			dek,
 		)
@@ -220,7 +221,7 @@ func decryptLastCommit(
 	}
 
 	if commit.Message != "" {
-		commit.Message, err = DecryptString(
+		commit.Message, err = decryptIfEncrypted(
 			commit.Message,
 			dek,
 		)
@@ -264,7 +265,7 @@ func DecryptResourceSource(
 	var err error
 
 	if source.Path != "" {
-		source.Path, err = DecryptString(
+		source.Path, err = decryptIfEncrypted(
 			source.Path,
 			dek,
 		)
@@ -277,7 +278,7 @@ func DecryptResourceSource(
 	}
 
 	if source.RelativePath != "" {
-		source.RelativePath, err = DecryptString(
+		source.RelativePath, err = decryptIfEncrypted(
 			source.RelativePath,
 			dek,
 		)
@@ -290,7 +291,7 @@ func DecryptResourceSource(
 	}
 
 	if source.HelmPath != "" {
-		source.HelmPath, err = DecryptString(
+		source.HelmPath, err = decryptIfEncrypted(
 			source.HelmPath,
 			dek,
 		)
@@ -303,7 +304,7 @@ func DecryptResourceSource(
 	}
 
 	if source.HelmChartName != "" {
-		source.HelmChartName, err = DecryptString(
+		source.HelmChartName, err = decryptIfEncrypted(
 			source.HelmChartName,
 			dek,
 		)
@@ -316,7 +317,7 @@ func DecryptResourceSource(
 	}
 
 	if source.HelmTemplateFile != "" {
-		source.HelmTemplateFile, err = DecryptString(
+		source.HelmTemplateFile, err = decryptIfEncrypted(
 			source.HelmTemplateFile,
 			dek,
 		)
@@ -329,7 +330,7 @@ func DecryptResourceSource(
 	}
 
 	if source.KustomizeDirectoryName != "" {
-		source.KustomizeDirectoryName, err = DecryptString(
+		source.KustomizeDirectoryName, err = decryptIfEncrypted(
 			source.KustomizeDirectoryName,
 			dek,
 		)
@@ -346,7 +347,7 @@ func DecryptResourceSource(
 			continue
 		}
 
-		source.HelmValuesPaths[i], err = DecryptString(
+		source.HelmValuesPaths[i], err = decryptIfEncrypted(
 			source.HelmValuesPaths[i],
 			dek,
 		)
@@ -389,7 +390,7 @@ func DecryptResourceMetadata(
 	var err error
 
 	if name := resource.GetName(); name != "" {
-		name, err = DecryptString(
+		name, err = decryptIfEncrypted(
 			name,
 			dek,
 		)
@@ -404,7 +405,7 @@ func DecryptResourceMetadata(
 	}
 
 	if namespace := resource.GetNamespace(); namespace != "" {
-		namespace, err = DecryptString(
+		namespace, err = decryptIfEncrypted(
 			namespace,
 			dek,
 		)
@@ -419,4 +420,18 @@ func DecryptResourceMetadata(
 	}
 
 	return nil
+}
+
+func decryptIfEncrypted(value string, dek []byte) (string, error) {
+	if value == "" {
+		return value, nil
+	}
+
+	value = strings.TrimSpace(value)
+
+	if !strings.HasPrefix(value, "ENC[") {
+		return value, nil
+	}
+
+	return DecryptString(value, dek)
 }

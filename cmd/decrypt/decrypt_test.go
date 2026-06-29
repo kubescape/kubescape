@@ -96,6 +96,11 @@ func TestDecryptCommand(t *testing.T) {
 						},
 					},
 				},
+				"results": []map[string]any{
+					{
+						"resourceID": "resource-1",
+					},
+				},
 				"metadata": map[string]any{
 					"targetMetadata": map[string]any{
 						"gitRepoContextMetadata": map[string]any{
@@ -122,10 +127,7 @@ func TestDecryptCommand(t *testing.T) {
 			_, err = tmp.Write(data)
 			require.NoError(t, err)
 
-			require.NoError(
-				t,
-				tmp.Close(),
-			)
+			require.NoError(t, tmp.Close())
 
 			t.Setenv(
 				"KUBESCAPE_MASTER_KEY",
@@ -156,10 +158,7 @@ func TestDecryptCommand(t *testing.T) {
 
 			require.NoError(t, err)
 
-			require.NoError(
-				t,
-				w.Close(),
-			)
+			require.NoError(t, w.Close())
 
 			var buf bytes.Buffer
 
@@ -174,117 +173,61 @@ func TestDecryptCommand(t *testing.T) {
 			)
 			require.NoError(t, err)
 
-			assert.Contains(
-				t,
-				output,
-				"resourceLabels",
-			)
+			assert.Contains(t, output, "resourceLabels")
 
-			assert.Contains(
-				t,
-				output,
-				"scanCoverage",
-			)
+			assert.Contains(t, output, "scanCoverage")
 
 			metadata, ok :=
 				output["metadata"].(map[string]any)
-			require.True(
-				t,
-				ok,
-				"metadata should be an object",
-			)
+			require.True(t, ok, "metadata should be an object")
 
 			targetMetadata, ok :=
 				metadata["targetMetadata"].(map[string]any)
-			require.True(
-				t,
-				ok,
-				"targetMetadata should be an object",
-			)
+			require.True(t, ok, "targetMetadata should be an object")
 
 			repoMetadata, ok :=
 				targetMetadata["gitRepoContextMetadata"].(map[string]any)
-			require.True(
-				t,
-				ok,
-				"gitRepoContextMetadata should be an object",
-			)
+			require.True(t, ok, "gitRepoContextMetadata should be an object")
 
-			assert.Equal(
-				t,
-				"kubescape",
-				repoMetadata["repo"],
-			)
+			assert.Equal(t, "kubescape", repoMetadata["repo"])
 
 			resources, ok := output["resources"].([]any)
-			require.True(
-				t,
-				ok,
-				"resources should be an array",
-			)
+			require.True(t, ok, "resources should be an array")
 
-			require.Len(
-				t,
-				resources,
-				1,
-			)
+			require.Len(t, resources, 1)
 
 			resource, ok := resources[0].(map[string]any)
-			require.True(
-				t,
-				ok,
-				"resource should be an object",
-			)
-			assert.Equal(
-				t,
-				"must-survive",
-				resource["customField"],
-			)
+			require.True(t, ok, "resource should be an object")
 
+			resourceID, ok := resource["resourceID"].(string)
+			require.True(t, ok, "resourceID should be a string")
+
+			assert.Equal(t, "apps/v1/production/Deployment/nginx-deployment", resourceID)
+
+			assert.Equal(t, "must-survive", resource["customField"])
+			results, ok := output["results"].([]any)
+			require.True(t, ok, "results should be an array")
+
+			require.Len(t, results, 1)
+
+			result, ok := results[0].(map[string]any)
+			require.True(t, ok, "result should be an object")
+
+			assert.Equal(t, resourceID, result["resourceID"])
 			object, ok := resource["object"].(map[string]any)
-			require.True(
-				t,
-				ok,
-				"object should be an object",
-			)
+			require.True(t, ok, "object should be an object")
 
 			metadataObj, ok := object["metadata"].(map[string]any)
-			require.True(
-				t,
-				ok,
-				"metadata should be an object",
-			)
+			require.True(t, ok, "metadata should be an object")
 
-			assert.Equal(
-				t,
-				"nginx-deployment",
-				metadataObj["name"],
-			)
-
-			assert.Equal(
-				t,
-				"production",
-				metadataObj["namespace"],
-			)
+			assert.Equal(t, "nginx-deployment", metadataObj["name"])
+			assert.Equal(t, "production", metadataObj["namespace"])
 
 			source, ok := resource["source"].(map[string]any)
-			require.True(
-				t,
-				ok,
-				"source should be an object",
-			)
+			require.True(t, ok, "source should be an object")
 
-			assert.Equal(
-				t,
-				"/workspace/manifests/nginx/deployment.yaml",
-				source["path"],
-			)
-
-			assert.Equal(
-				t,
-				"manifests/nginx/deployment.yaml",
-				source["relativePath"],
-			)
+			assert.Equal(t, "/workspace/manifests/nginx/deployment.yaml", source["path"])
+			assert.Equal(t, "manifests/nginx/deployment.yaml", source["relativePath"])
 		})
 	}
 }
