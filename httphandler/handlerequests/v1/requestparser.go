@@ -24,6 +24,9 @@ type ScanQueryParams struct {
 	// Do not persist data after scanning
 	//default: false
 	SkipPersistence bool `schema:"skipPersistence" json:"skipPersistence"`
+	// URL to POST a scan-completion signal to when the scan finishes.
+	// The callback carries the scan ID only; results must be fetched via GET /v1/results.
+	CallbackURL string `schema:"callback" json:"callback"`
 }
 
 // swagger:parameters getScanResults
@@ -67,6 +70,7 @@ type scanRequestParams struct {
 	scanID          string            // generated scan ID
 	ctx             context.Context
 	resp            chan *utilsmetav1.Response // Respose chan; nil if not interested.
+	callbackURL     string                     // validated scan-completion callback URL; empty if not requested.
 }
 
 // swagger:parameters triggerScan
@@ -103,6 +107,12 @@ func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParam
 	}
 	if p.scanQueryParams.ReturnResults {
 		p.resp = make(chan *utilsmetav1.Response, 1)
+	}
+	if p.scanQueryParams.CallbackURL != "" {
+		if _, err := validateCallbackURL(p.scanQueryParams.CallbackURL); err != nil {
+			return p, err
+		}
+		p.callbackURL = p.scanQueryParams.CallbackURL
 	}
 
 	return p, nil
