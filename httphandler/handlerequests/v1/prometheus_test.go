@@ -71,13 +71,24 @@ func TestMetrics_ScanContextDecoupledFromRequest(t *testing.T) {
 	h := NewHTTPHandler(false)
 	rq := httptest.NewRequest(http.MethodGet, "/v1/metrics", nil).WithContext(reqCtx)
 	w := httptest.NewRecorder()
-	h.Metrics(w, rq)
+
+	handlerDone := make(chan struct{})
+	go func() {
+		h.Metrics(w, rq)
+		close(handlerDone)
+	}()
 
 	select {
 	case err := <-scanCtxErr:
 		assert.NoError(t, err, "scan context must not be cancelled when the request context is")
 	case <-time.After(5 * time.Second):
 		t.Fatal("scan was not invoked")
+	}
+
+	select {
+	case <-handlerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler did not complete")
 	}
 }
 
