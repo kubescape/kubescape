@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"os"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
@@ -25,7 +26,7 @@ import (
 
 // getKubernetesApi
 func getKubernetesApi() *k8sinterface.KubernetesApi {
-	if !k8sinterface.IsConnectedToCluster() {
+	if !isConnectedToCluster() {
 		return nil
 	}
 	return k8sinterface.NewKubernetesApi()
@@ -131,6 +132,17 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 	return resourcehandler.NewK8sResourceHandler(ctx, k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
 }
 
+// ksConfigMu guards all calls to k8sinterface.IsConnectedToCluster,
+// which accesses package-level globals without internal synchronization.
+var ksConfigMu sync.Mutex
+
+// isConnectedToCluster is a thread-safe wrapper around k8sinterface.IsConnectedToCluster.
+func isConnectedToCluster() bool {
+	ksConfigMu.Lock()
+	defer ksConfigMu.Unlock()
+	return k8sinterface.IsConnectedToCluster()
+}
+
 // getHostSensorHandler yields a IHostSensor that knows how to collect a host's scanned resources.
 //
 // A noop sensor is returned whenever host scanning is disabled or an error prevented the scanner to properly deploy.
@@ -139,7 +151,7 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 	hostSensorVal := scanInfo.HostSensorEnabled.Get()
 
 	switch {
-	case !k8sinterface.IsConnectedToCluster() || k8s == nil: // TODO(fred): fix race condition on global KSConfig there
+	case !isConnectedToCluster() || k8s == nil:
 		return hostsensorutils.NewHostSensorHandlerMock()
 
 	case hostSensorVal != nil && *hostSensorVal:
