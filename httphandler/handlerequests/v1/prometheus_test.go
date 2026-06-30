@@ -1,10 +1,16 @@
 package v1
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -46,6 +52,44 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 		assert.Equal(t, "mitre", scanInfo.PolicyIdentifier[1].Identifier)
 		assert.Equal(t, "cis-v1.10.0", scanInfo.PolicyIdentifier[2].Identifier)
 	})
+}
+
+// TestMetrics_ScanContextDecoupledFromRequest ensures the metrics scan is not
+// aborted when the scrape request context is cancelled (e.g. a Prometheus
+// scrape timeout): the scan must keep running to completion.
+func TestMetrics_ScanContextDecoupledFromRequest(t *testing.T) {
+	defer func(o scanner) { scanImpl = o }(scanImpl)
+	scanCtxErr := make(chan error, 1)
+
+	reqCtx, cancel := context.WithCancel(context.Background())
+	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+		cancel() // simulate the scrape connection going away mid-scan
+		scanCtxErr <- ctx.Err()
+		return nil, nil
+	}
+
+	h := NewHTTPHandler(false)
+	rq := httptest.NewRequest(http.MethodGet, "/v1/metrics", nil).WithContext(reqCtx)
+	w := httptest.NewRecorder()
+
+	handlerDone := make(chan struct{})
+	go func() {
+		h.Metrics(w, rq)
+		close(handlerDone)
+	}()
+
+	select {
+	case err := <-scanCtxErr:
+		assert.NoError(t, err, "scan context must not be cancelled when the request context is")
+	case <-time.After(5 * time.Second):
+		t.Fatal("scan was not invoked")
+	}
+
+	select {
+	case <-handlerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler did not complete")
+	}
 }
 
 func TestSplitAndTrim(t *testing.T) {
