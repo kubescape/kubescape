@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/spf13/cobra"
 )
@@ -123,16 +124,13 @@ func GetDecryptCommand() *cobra.Command {
 								err,
 							)
 						}
-
 						if err := reportcrypto.DecryptResourceMetadata(
 							resource,
 							dek,
 						); err != nil {
 							return err
 						}
-
 						newID := resource.GetID()
-
 						if oldID != "" {
 							idMapping[oldID] = newID
 						}
@@ -210,8 +208,7 @@ func GetDecryptCommand() *cobra.Command {
 				report["resources"] = updatedResources
 				resultsRaw, ok := report["results"]
 				if ok {
-					var results []map[string]json.RawMessage
-
+					var results []resourcesresults.Result
 					if err := json.Unmarshal(
 						resultsRaw,
 						&results,
@@ -222,39 +219,7 @@ func GetDecryptCommand() *cobra.Command {
 						)
 					}
 
-					for i := range results {
-						var resourceID string
-
-						resourceIDRaw, ok := results[i]["resourceID"]
-						if !ok {
-							continue
-						}
-
-						if err := json.Unmarshal(
-							resourceIDRaw,
-							&resourceID,
-						); err != nil {
-							return fmt.Errorf(
-								"failed to parse result resourceID: %w",
-								err,
-							)
-						}
-
-						newID := resourceID
-						if mappedID, ok := idMapping[resourceID]; ok {
-							newID = mappedID
-						}
-						updatedID, err := json.Marshal(newID)
-						if err != nil {
-							return fmt.Errorf(
-								"failed to marshal result resourceID: %w",
-								err,
-							)
-						}
-
-						results[i]["resourceID"] = updatedID
-					}
-
+					remapResults(results, idMapping)
 					updatedResults, err := json.Marshal(
 						results,
 					)
@@ -274,4 +239,60 @@ func GetDecryptCommand() *cobra.Command {
 			return encoder.Encode(report)
 		},
 	}
+}
+
+// remapResults restores all resource ID references that were rewritten
+// during encryption so they remain consistent with the decrypted resources.
+func remapResults(results []resourcesresults.Result, idMapping map[string]string) {
+	for i := range results {
+		results[i].ResourceID = remapResourceID(
+			results[i].ResourceID,
+			idMapping,
+		)
+
+		if results[i].PrioritizedResource != nil {
+			results[i].PrioritizedResource.ResourceID =
+				remapResourceID(
+					results[i].PrioritizedResource.ResourceID,
+					idMapping,
+				)
+		}
+
+		for controlIndex := range results[i].AssociatedControls {
+			for ruleIndex := range results[i].AssociatedControls[controlIndex].ResourceAssociatedRules {
+
+				rule := &results[i].AssociatedControls[controlIndex].ResourceAssociatedRules[ruleIndex]
+
+				for pathIndex := range rule.Paths {
+					rule.Paths[pathIndex].ResourceID =
+						remapResourceID(
+							rule.Paths[pathIndex].ResourceID,
+							idMapping,
+						)
+				}
+
+				for relatedIndex := range rule.RelatedResourcesIDs {
+					rule.RelatedResourcesIDs[relatedIndex] =
+						remapResourceID(
+							rule.RelatedResourcesIDs[relatedIndex],
+							idMapping,
+						)
+				}
+			}
+		}
+	}
+}
+
+// remapResourceID restores a resource ID if it was rewritten during
+// encryption. Unknown IDs are returned unchanged.
+func remapResourceID(
+	id string,
+	idMapping map[string]string,
+) string {
+
+	if mappedID, ok := idMapping[id]; ok {
+		return mappedID
+	}
+
+	return id
 }

@@ -99,6 +99,25 @@ func TestDecryptCommand(t *testing.T) {
 				"results": []map[string]any{
 					{
 						"resourceID": "resource-1",
+						"prioritizedResource": map[string]any{
+							"resourceID": "resource-1",
+						},
+						"controls": []map[string]any{
+							{
+								"rules": []map[string]any{
+									{
+										"paths": []map[string]any{
+											{
+												"resourceID": "resource-1",
+											},
+										},
+										"relatedResourcesIDs": []string{
+											"resource-1",
+										},
+									},
+								},
+							},
+						},
 					},
 				},
 				"metadata": map[string]any{
@@ -212,8 +231,24 @@ func TestDecryptCommand(t *testing.T) {
 
 			result, ok := results[0].(map[string]any)
 			require.True(t, ok, "result should be an object")
-
 			assert.Equal(t, resourceID, result["resourceID"])
+
+			prioritized, ok := result["prioritizedResource"].(map[string]any)
+			require.True(t, ok, "prioritizedResource should be an object")
+			assert.Equal(t, resourceID, prioritized["resourceID"])
+
+			controls, ok := result["controls"].([]any)
+			require.True(t, ok, "controls should be an array")
+			require.Len(t, controls, 1)
+
+			control, ok := controls[0].(map[string]any)
+			require.True(t, ok, "control should be an object")
+
+			rules, ok := control["rules"].([]any)
+			require.True(t, ok, "rules should be an array")
+
+			require.Len(t, rules, 1)
+
 			object, ok := resource["object"].(map[string]any)
 			require.True(t, ok, "object should be an object")
 
@@ -228,6 +263,23 @@ func TestDecryptCommand(t *testing.T) {
 
 			assert.Equal(t, "/workspace/manifests/nginx/deployment.yaml", source["path"])
 			assert.Equal(t, "manifests/nginx/deployment.yaml", source["relativePath"])
+
+			rule, ok := rules[0].(map[string]any)
+			require.True(t, ok, "rule should be an object")
+
+			paths, ok := rule["paths"].([]any)
+			require.True(t, ok, "paths should be an array")
+			require.Len(t, paths, 1)
+
+			path, ok := paths[0].(map[string]any)
+			require.True(t, ok, "path should be an object")
+			assert.Equal(t, resourceID, path["resourceID"])
+
+			related, ok := rule["relatedResourcesIDs"].([]any)
+			require.True(t, ok, "relatedResourcesIDs should be an array")
+
+			require.Len(t, related, 1)
+			assert.Equal(t, resourceID, related[0])
 		})
 	}
 }

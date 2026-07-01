@@ -171,10 +171,13 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, repoTran
 // resolveMappedID preserves referential integrity when IDs are rewritten during
 // anonymization, ensuring cross-references remain valid.
 func resolveMappedID(mapping *Mapping, idMapping map[string]string, originalID, prefix string) string {
+
+	// Exact match (most common case)
 	if mappedID, ok := idMapping[originalID]; ok {
 		return mappedID
 	}
 
+	// Fallback for IDs that are not backed by a resource object.
 	return mapping.GetOrCreate(prefix, originalID)
 }
 
