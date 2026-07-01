@@ -543,7 +543,7 @@ func (opap *OPAProcessor) Print(ctx opaprint.Context, str string) error {
 
 func (opap *OPAProcessor) regoEval(ctx context.Context, inputObj []map[string]any, compiledRego *ast.Compiler, store *storage.Store) ([]reporthandling.RuleResponse, error) {
 	rego := rego.New(
-		rego.SetRegoVersion(ast.RegoV0),
+		rego.SetRegoVersion(ast.RegoV1),
 		rego.Query("data.armo_builtins"), // get package name from rule
 		rego.Compiler(compiledRego),
 		rego.Input(inputObj),
@@ -672,7 +672,7 @@ func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleDat
 
 	compiled, err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
 		EnablePrintStatements: printEnabled,
-		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV0},
+		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV1},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile rule '%s': %w", ruleName, err)
