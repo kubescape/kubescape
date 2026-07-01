@@ -132,7 +132,12 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 		return nil, writeScanErrorToFile(err, scanID)
 	}
 	if err := result.HandleResults(ctx, scanInfo); err != nil {
-		return nil, writeScanErrorToFile(err, scanID)
+		// Submission to the ARMO backend failed. This is non-fatal: the valid
+		// scan output has already been written to OutputDir by HandleResults
+		// before submission was attempted. Log a warning and continue so that
+		// in-cluster CRD persistence (StorePostureReportResults) still runs.
+		// See: https://github.com/kubescape/kubescape/issues/2449
+		logger.L().Ctx(ctx).Warning("failed to submit scan results to backend, continuing with local persistence", helpers.Error(err))
 	}
 
 	if !skipPersistence {
