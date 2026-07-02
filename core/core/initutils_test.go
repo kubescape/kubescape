@@ -138,6 +138,22 @@ func TestGetExceptionsGetter(t *testing.T) {
 	}
 }
 
+func TestGettersAirGappedUseCache(t *testing.T) {
+	ctx := context.Background()
+	for _, accountID := range []string{"", "123456789012"} {
+		t.Run("accountID="+accountID, func(t *testing.T) {
+			assert.Equal(t, "*getter.LoadPolicy",
+				reflect.TypeOf(getPolicyGetter(ctx, nil, accountID, true, nil, true)).String())
+			assert.Equal(t, "*getter.LoadPolicy",
+				reflect.TypeOf(getConfigInputsGetter(ctx, "", accountID, nil, false, true)).String())
+			assert.Equal(t, "*getter.LoadPolicy",
+				reflect.TypeOf(getAttackTracksGetter(ctx, "", accountID, nil, true)).String())
+			assert.Equal(t, "*getter.MergedExceptionsGetter",
+				reflect.TypeOf(getExceptionsGetter(ctx, "", accountID, nil, true)).String())
+		})
+	}
+}
+
 func TestPolicyIdentifierIdentities(t *testing.T) {
 	type args struct {
 		pi []cautils.PolicyIdentifier

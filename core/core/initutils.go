@@ -60,15 +60,14 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 		primary = getter.NewLoadPolicy([]string{useExceptions})
 		return primary
 	}
-	if accountID != "" {
-		// download exceptions from Kubescape Cloud backend
-		primary = getter.GetKSCloudAPIConnector()
+	if airGapped {
+		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
 		k8sClient := getExceptionsK8sClient(ctx)
 		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
 	}
-	if airGapped {
-		// air-gapped: load exceptions from cache instead of reaching the network
-		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
+	if accountID != "" {
+		// download exceptions from Kubescape Cloud backend
+		primary = getter.GetKSCloudAPIConnector()
 		k8sClient := getExceptionsK8sClient(ctx)
 		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
 	}
@@ -244,6 +243,9 @@ func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, account
 	if len(loadPoliciesFromFile) > 0 {
 		return getter.NewLoadPolicy(loadPoliciesFromFile)
 	}
+	if airGapped {
+		return getter.NewLoadPolicy(getDefaultFrameworksPaths())
+	}
 	if accountID != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() != "" && frameworkScope {
 		g := getter.GetKSCloudAPIConnector() // download policy from Kubescape Cloud backend
 		return g
@@ -251,10 +253,6 @@ func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, account
 		logger.L().Ctx(ctx).Warning("Kubescape Cloud API URL is not set, loading policies from cache")
 	}
 
-	if airGapped {
-		// air-gapped: load frameworks from cache instead of reaching the network
-		return getter.NewLoadPolicy(getDefaultFrameworksPaths())
-	}
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
@@ -270,6 +268,9 @@ func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, account
 func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool, airGapped bool) getter.IControlsInputsGetter {
 	if len(ControlsInputs) > 0 {
 		return getter.NewLoadPolicy([]string{ControlsInputs})
+	}
+	if airGapped {
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalControlInputsFilename)})
 	}
 	if accountID != "" {
 		g := getter.GetKSCloudAPIConnector() // download config from Kubescape Cloud backend
@@ -287,10 +288,6 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 		}
 	}
 
-	if airGapped {
-		// air-gapped: load config inputs from cache instead of reaching the network
-		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(TargetControlsInputs + ".json")})
-	}
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
@@ -331,13 +328,12 @@ func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, 
 	if len(attackTracks) > 0 {
 		return getter.NewLoadPolicy([]string{attackTracks})
 	}
+	if airGapped {
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)})
+	}
 	if accountID != "" {
 		g := getter.GetKSCloudAPIConnector() // download attack tracks from Kubescape Cloud backend
 		return g
-	}
-	if airGapped {
-		// air-gapped: load attack tracks from cache instead of reaching the network
-		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)})
 	}
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
