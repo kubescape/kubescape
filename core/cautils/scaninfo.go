@@ -37,7 +37,7 @@ const ( // deprecated
 	ScopeCluster = "cluster"
 )
 const (
-	localControlInputsFilename string = "controls-inputs.json"
+	LocalControlInputsFilename string = "controls-inputs.json"
 	LocalExceptionsFilename    string = "exceptions.json"
 	LocalAttackTracksFilename  string = "attack-tracks.json"
 )
@@ -212,7 +212,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 		}
 	}
 	// set config-inputs file
-	scanInfo.ControlsInputs = filepath.Join(scanInfo.UseArtifactsFrom, localControlInputsFilename)
+	scanInfo.ControlsInputs = filepath.Join(scanInfo.UseArtifactsFrom, LocalControlInputsFilename)
 	// set exceptions
 	scanInfo.UseExceptions = filepath.Join(scanInfo.UseArtifactsFrom, LocalExceptionsFilename)
 

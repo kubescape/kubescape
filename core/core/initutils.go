@@ -52,13 +52,18 @@ func getExceptionsK8sClient(ctx context.Context) client.Client {
 	return k8sClient
 }
 
-func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IExceptionsGetter {
+func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) getter.IExceptionsGetter {
 	var primary getter.IExceptionsGetter
 
 	if useExceptions != "" {
 		// load exceptions from file
 		primary = getter.NewLoadPolicy([]string{useExceptions})
 		return primary
+	}
+	if airGapped {
+		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
+		k8sClient := getExceptionsK8sClient(ctx)
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
 	}
 	if accountID != "" {
 		// download exceptions from Kubescape Cloud backend
@@ -234,9 +239,12 @@ func isScanTypeForSubmission(scanType cautils.ScanTypes) bool {
 }
 
 // setPolicyGetter set the policy getter - local file/github release/Kubescape Cloud API
-func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, accountID string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
+func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, accountID string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) getter.IPolicyGetter {
 	if len(loadPoliciesFromFile) > 0 {
 		return getter.NewLoadPolicy(loadPoliciesFromFile)
+	}
+	if airGapped {
+		return getter.NewLoadPolicy(getDefaultFrameworksPaths())
 	}
 	if accountID != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() != "" && frameworkScope {
 		g := getter.GetKSCloudAPIConnector() // download policy from Kubescape Cloud backend
@@ -257,9 +265,12 @@ func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, account
 //  2. Kubescape Cloud API (if accountID configured)
 //  3. ControlInput CRD in-cluster (if connected to cluster and CRD exists)
 //  4. Defaults from regolibrary GitHub releases
-func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool) getter.IControlsInputsGetter {
+func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool, airGapped bool) getter.IControlsInputsGetter {
 	if len(ControlsInputs) > 0 {
 		return getter.NewLoadPolicy([]string{ControlsInputs})
+	}
+	if airGapped {
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalControlInputsFilename)})
 	}
 	if accountID != "" {
 		g := getter.GetKSCloudAPIConnector() // download config from Kubescape Cloud backend
@@ -313,9 +324,12 @@ func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
 	return getter.NativeFrameworks
 }
 
-func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IAttackTracksGetter {
+func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) getter.IAttackTracksGetter {
 	if len(attackTracks) > 0 {
 		return getter.NewLoadPolicy([]string{attackTracks})
+	}
+	if airGapped {
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)})
 	}
 	if accountID != "" {
 		g := getter.GetKSCloudAPIConnector() // download attack tracks from Kubescape Cloud backend

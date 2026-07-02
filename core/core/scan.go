@@ -196,8 +196,9 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	interfaces.report.SetTenantConfig(interfaces.tenantConfig)
 
 	// Only create DownloadReleasedPolicy if not in air-gapped mode
+	airGapped := isAirGappedMode(scanInfo)
 	var downloadReleasedPolicy *getter.DownloadReleasedPolicy
-	if isAirGappedMode(scanInfo) {
+	if airGapped {
 		// In air-gapped mode (--keep-local or using local files via --use-from, --controls-config, --exceptions, or attack tracks),
 		// don't initialize the downloader to prevent network access
 		downloadReleasedPolicy = nil
@@ -206,10 +207,10 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	}
 
 	// set policy getter only after setting the customerGUID
-	scanInfo.PolicyGetter = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
-	scanInfo.ControlsInputsGetter = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster)
-	scanInfo.ExceptionsGetter = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
-	scanInfo.AttackTracksGetter = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
+	scanInfo.PolicyGetter = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy, airGapped)
+	scanInfo.ControlsInputsGetter = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped)
+	scanInfo.ExceptionsGetter = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	scanInfo.AttackTracksGetter = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
 
 	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {

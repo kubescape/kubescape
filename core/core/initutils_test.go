@@ -132,8 +132,24 @@ func TestGetExceptionsGetter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := getExceptionsGetter(tt.args.ctx, tt.args.useExceptions, tt.args.accountID, tt.args.downloadReleasedPolicy)
+			got := getExceptionsGetter(tt.args.ctx, tt.args.useExceptions, tt.args.accountID, tt.args.downloadReleasedPolicy, false)
 			assert.Equal(t, tt.want, reflect.TypeOf(got).String())
+		})
+	}
+}
+
+func TestGettersAirGappedUseCache(t *testing.T) {
+	ctx := context.Background()
+	for _, accountID := range []string{"", "123456789012"} {
+		t.Run("accountID="+accountID, func(t *testing.T) {
+			assert.Equal(t, "*getter.LoadPolicy",
+				reflect.TypeOf(getPolicyGetter(ctx, nil, accountID, true, nil, true)).String())
+			assert.Equal(t, "*getter.LoadPolicy",
+				reflect.TypeOf(getConfigInputsGetter(ctx, "", accountID, nil, false, true)).String())
+			assert.Equal(t, "*getter.LoadPolicy",
+				reflect.TypeOf(getAttackTracksGetter(ctx, "", accountID, nil, true)).String())
+			assert.Equal(t, "*getter.MergedExceptionsGetter",
+				reflect.TypeOf(getExceptionsGetter(ctx, "", accountID, nil, true)).String())
 		})
 	}
 }
