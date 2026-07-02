@@ -25,14 +25,10 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, repoTran
 
 	newAllResources := make(map[string]workloadinterface.IMetadata, len(session.AllResources))
 	for oldID, resource := range session.AllResources {
-		if name := resource.GetName(); name != "" {
-			resource.SetName(mapping.GetOrCreate("res", name))
-		}
 
-		if namespace := resource.GetNamespace(); namespace != "" {
-			resource.SetNamespace(mapping.GetOrCreate("ns", namespace))
+		if err := transformResourceMetadata(resource, repoTransformer); err != nil {
+			return err
 		}
-
 		// sourcePath leaks manifest filenames/line references in hidden output
 		// (for example test-anonymize.yaml:1), so anonymize it alongside other
 		// resource-local metadata.
@@ -175,10 +171,13 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, repoTran
 // resolveMappedID preserves referential integrity when IDs are rewritten during
 // anonymization, ensuring cross-references remain valid.
 func resolveMappedID(mapping *Mapping, idMapping map[string]string, originalID, prefix string) string {
+
+	// Exact match (most common case)
 	if mappedID, ok := idMapping[originalID]; ok {
 		return mappedID
 	}
 
+	// Fallback for IDs that are not backed by a resource object.
 	return mapping.GetOrCreate(prefix, originalID)
 }
 
@@ -319,10 +318,39 @@ func transformValue(transformer Transformer, prefix string, value string) (strin
 		return value, nil
 	}
 
-	return transformer.Transform(
-		prefix,
-		value,
-	)
+	return transformer.Transform(prefix, value)
+}
+
+func transformResourceMetadata(
+	resource workloadinterface.IMetadata,
+	transformer Transformer,
+) error {
+
+	if resource == nil {
+		return nil
+	}
+
+	var err error
+
+	if name := resource.GetName(); name != "" {
+		name, err = transformValue(transformer, "res", name)
+		if err != nil {
+			return err
+		}
+
+		resource.SetName(name)
+	}
+
+	if namespace := resource.GetNamespace(); namespace != "" {
+		namespace, err = transformValue(transformer, "ns", namespace)
+		if err != nil {
+			return err
+		}
+
+		resource.SetNamespace(namespace)
+	}
+
+	return nil
 }
 
 func transformRepoContextMetadata(repo *reporthandlingv2.RepoContextMetadata, transformer Transformer) error {
@@ -334,64 +362,37 @@ func transformRepoContextMetadata(repo *reporthandlingv2.RepoContextMetadata, tr
 
 	var err error
 
-	repoCopy.Repo, err = transformValue(
-		transformer,
-		"git",
-		repoCopy.Repo,
-	)
+	repoCopy.Repo, err = transformValue(transformer, "git", repoCopy.Repo)
 	if err != nil {
 		return err
 	}
 
-	repoCopy.Owner, err = transformValue(
-		transformer,
-		"git",
-		repoCopy.Owner,
-	)
+	repoCopy.Owner, err = transformValue(transformer, "git", repoCopy.Owner)
 	if err != nil {
 		return err
 	}
 
-	repoCopy.Branch, err = transformValue(
-		transformer,
-		"git",
-		repoCopy.Branch,
-	)
+	repoCopy.Branch, err = transformValue(transformer, "git", repoCopy.Branch)
 	if err != nil {
 		return err
 	}
 
-	repoCopy.DefaultBranch, err = transformValue(
-		transformer,
-		"git",
-		repoCopy.DefaultBranch,
-	)
+	repoCopy.DefaultBranch, err = transformValue(transformer, "git", repoCopy.DefaultBranch)
 	if err != nil {
 		return err
 	}
 
-	repoCopy.RemoteURL, err = transformValue(
-		transformer,
-		"git",
-		repoCopy.RemoteURL,
-	)
+	repoCopy.RemoteURL, err = transformValue(transformer, "git", repoCopy.RemoteURL)
 	if err != nil {
 		return err
 	}
 
-	repoCopy.LocalRootPath, err = transformValue(
-		transformer,
-		"git",
-		repoCopy.LocalRootPath,
-	)
+	repoCopy.LocalRootPath, err = transformValue(transformer, "git", repoCopy.LocalRootPath)
 	if err != nil {
 		return err
 	}
 
-	if err := transformLastCommit(
-		&repoCopy.LastCommit,
-		transformer,
-	); err != nil {
+	if err := transformLastCommit(&repoCopy.LastCommit, transformer); err != nil {
 		return err
 	}
 
@@ -409,38 +410,22 @@ func transformLastCommit(commit *reporthandling.LastCommit, transformer Transfor
 
 	var err error
 
-	commitCopy.Hash, err = transformValue(
-		transformer,
-		"git",
-		commitCopy.Hash,
-	)
+	commitCopy.Hash, err = transformValue(transformer, "git", commitCopy.Hash)
 	if err != nil {
 		return err
 	}
 
-	commitCopy.CommitterName, err = transformValue(
-		transformer,
-		"git",
-		commitCopy.CommitterName,
-	)
+	commitCopy.CommitterName, err = transformValue(transformer, "git", commitCopy.CommitterName)
 	if err != nil {
 		return err
 	}
 
-	commitCopy.CommitterEmail, err = transformValue(
-		transformer,
-		"git",
-		commitCopy.CommitterEmail,
-	)
+	commitCopy.CommitterEmail, err = transformValue(transformer, "git", commitCopy.CommitterEmail)
 	if err != nil {
 		return err
 	}
 
-	commitCopy.Message, err = transformValue(
-		transformer,
-		"git",
-		commitCopy.Message,
-	)
+	commitCopy.Message, err = transformValue(transformer, "git", commitCopy.Message)
 	if err != nil {
 		return err
 	}
@@ -469,66 +454,38 @@ func transformResourceSource(
 
 	var err error
 
-	sourceCopy.Path, err = transformValue(
-		transformer,
-		"src",
-		sourceCopy.Path,
-	)
+	sourceCopy.Path, err = transformValue(transformer, "src", sourceCopy.Path)
 	if err != nil {
 		return err
 	}
 
-	sourceCopy.RelativePath, err = transformValue(
-		transformer,
-		"src",
-		sourceCopy.RelativePath,
-	)
+	sourceCopy.RelativePath, err = transformValue(transformer, "src", sourceCopy.RelativePath)
 	if err != nil {
 		return err
 	}
 
-	sourceCopy.HelmPath, err = transformValue(
-		transformer,
-		"src",
-		sourceCopy.HelmPath,
-	)
+	sourceCopy.HelmPath, err = transformValue(transformer, "src", sourceCopy.HelmPath)
 	if err != nil {
 		return err
 	}
 
-	sourceCopy.HelmChartName, err = transformValue(
-		transformer,
-		"src",
-		sourceCopy.HelmChartName,
-	)
+	sourceCopy.HelmChartName, err = transformValue(transformer, "src", sourceCopy.HelmChartName)
 	if err != nil {
 		return err
 	}
 
-	sourceCopy.HelmTemplateFile, err = transformValue(
-		transformer,
-		"src",
-		sourceCopy.HelmTemplateFile,
-	)
+	sourceCopy.HelmTemplateFile, err = transformValue(transformer, "src", sourceCopy.HelmTemplateFile)
 	if err != nil {
 		return err
 	}
 
-	sourceCopy.KustomizeDirectoryName, err = transformValue(
-		transformer,
-		"src",
-		sourceCopy.KustomizeDirectoryName,
-	)
+	sourceCopy.KustomizeDirectoryName, err = transformValue(transformer, "src", sourceCopy.KustomizeDirectoryName)
 	if err != nil {
 		return err
 	}
 
 	for i := range sourceCopy.HelmValuesPaths {
-		sourceCopy.HelmValuesPaths[i], err = transformValue(
-			transformer,
-			"src",
-			sourceCopy.HelmValuesPaths[i],
-		)
+		sourceCopy.HelmValuesPaths[i], err = transformValue(transformer, "src", sourceCopy.HelmValuesPaths[i])
 		if err != nil {
 			return err
 		}

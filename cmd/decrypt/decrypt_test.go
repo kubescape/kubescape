@@ -50,6 +50,20 @@ func TestDecryptCommand(t *testing.T) {
 				)
 			require.NoError(t, err)
 
+			encryptedName, err :=
+				reportcrypto.EncryptString(
+					"nginx-deployment",
+					dek,
+				)
+			require.NoError(t, err)
+
+			encryptedNamespace, err :=
+				reportcrypto.EncryptString(
+					"production",
+					dek,
+				)
+			require.NoError(t, err)
+
 			wrappedDEK, err :=
 				reportcrypto.WrapDEK(
 					dek,
@@ -68,9 +82,41 @@ func TestDecryptCommand(t *testing.T) {
 					{
 						"resourceID":  "resource-1",
 						"customField": "must-survive",
+						"object": map[string]any{
+							"apiVersion": "apps/v1",
+							"kind":       "Deployment",
+							"metadata": map[string]any{
+								"name":      encryptedName,
+								"namespace": encryptedNamespace,
+							},
+						},
 						"source": map[string]any{
 							"path":         encryptedPath,
 							"relativePath": encryptedRelativePath,
+						},
+					},
+				},
+				"results": []map[string]any{
+					{
+						"resourceID": "resource-1",
+						"prioritizedResource": map[string]any{
+							"resourceID": "resource-1",
+						},
+						"controls": []map[string]any{
+							{
+								"rules": []map[string]any{
+									{
+										"paths": []map[string]any{
+											{
+												"resourceID": "resource-1",
+											},
+										},
+										"relatedResourcesIDs": []string{
+											"resource-1",
+										},
+									},
+								},
+							},
 						},
 					},
 				},
@@ -100,10 +146,7 @@ func TestDecryptCommand(t *testing.T) {
 			_, err = tmp.Write(data)
 			require.NoError(t, err)
 
-			require.NoError(
-				t,
-				tmp.Close(),
-			)
+			require.NoError(t, tmp.Close())
 
 			t.Setenv(
 				"KUBESCAPE_MASTER_KEY",
@@ -134,10 +177,7 @@ func TestDecryptCommand(t *testing.T) {
 
 			require.NoError(t, err)
 
-			require.NoError(
-				t,
-				w.Close(),
-			)
+			require.NoError(t, w.Close())
 
 			var buf bytes.Buffer
 
@@ -152,91 +192,94 @@ func TestDecryptCommand(t *testing.T) {
 			)
 			require.NoError(t, err)
 
-			assert.Contains(
-				t,
-				output,
-				"resourceLabels",
-			)
+			assert.Contains(t, output, "resourceLabels")
 
-			assert.Contains(
-				t,
-				output,
-				"scanCoverage",
-			)
+			assert.Contains(t, output, "scanCoverage")
 
 			metadata, ok :=
 				output["metadata"].(map[string]any)
-			require.True(
-				t,
-				ok,
-				"metadata should be an object",
-			)
+			require.True(t, ok, "metadata should be an object")
 
 			targetMetadata, ok :=
 				metadata["targetMetadata"].(map[string]any)
-			require.True(
-				t,
-				ok,
-				"targetMetadata should be an object",
-			)
+			require.True(t, ok, "targetMetadata should be an object")
 
 			repoMetadata, ok :=
 				targetMetadata["gitRepoContextMetadata"].(map[string]any)
-			require.True(
-				t,
-				ok,
-				"gitRepoContextMetadata should be an object",
-			)
+			require.True(t, ok, "gitRepoContextMetadata should be an object")
 
-			assert.Equal(
-				t,
-				"kubescape",
-				repoMetadata["repo"],
-			)
+			assert.Equal(t, "kubescape", repoMetadata["repo"])
 
 			resources, ok := output["resources"].([]any)
-			require.True(
-				t,
-				ok,
-				"resources should be an array",
-			)
+			require.True(t, ok, "resources should be an array")
 
-			require.Len(
-				t,
-				resources,
-				1,
-			)
+			require.Len(t, resources, 1)
 
 			resource, ok := resources[0].(map[string]any)
-			require.True(
-				t,
-				ok,
-				"resource should be an object",
-			)
-			assert.Equal(
-				t,
-				"must-survive",
-				resource["customField"],
-			)
+			require.True(t, ok, "resource should be an object")
+
+			resourceID, ok := resource["resourceID"].(string)
+			require.True(t, ok, "resourceID should be a string")
+
+			assert.Equal(t, "apps/v1/production/Deployment/nginx-deployment", resourceID)
+
+			assert.Equal(t, "must-survive", resource["customField"])
+			results, ok := output["results"].([]any)
+			require.True(t, ok, "results should be an array")
+
+			require.Len(t, results, 1)
+
+			result, ok := results[0].(map[string]any)
+			require.True(t, ok, "result should be an object")
+			assert.Equal(t, resourceID, result["resourceID"])
+
+			prioritized, ok := result["prioritizedResource"].(map[string]any)
+			require.True(t, ok, "prioritizedResource should be an object")
+			assert.Equal(t, resourceID, prioritized["resourceID"])
+
+			controls, ok := result["controls"].([]any)
+			require.True(t, ok, "controls should be an array")
+			require.Len(t, controls, 1)
+
+			control, ok := controls[0].(map[string]any)
+			require.True(t, ok, "control should be an object")
+
+			rules, ok := control["rules"].([]any)
+			require.True(t, ok, "rules should be an array")
+
+			require.Len(t, rules, 1)
+
+			object, ok := resource["object"].(map[string]any)
+			require.True(t, ok, "object should be an object")
+
+			metadataObj, ok := object["metadata"].(map[string]any)
+			require.True(t, ok, "metadata should be an object")
+
+			assert.Equal(t, "nginx-deployment", metadataObj["name"])
+			assert.Equal(t, "production", metadataObj["namespace"])
 
 			source, ok := resource["source"].(map[string]any)
-			require.True(
-				t,
-				ok,
-				"source should be an object",
-			)
+			require.True(t, ok, "source should be an object")
 
-			assert.Equal(
-				t,
-				"/workspace/manifests/nginx/deployment.yaml",
-				source["path"],
-			)
+			assert.Equal(t, "/workspace/manifests/nginx/deployment.yaml", source["path"])
+			assert.Equal(t, "manifests/nginx/deployment.yaml", source["relativePath"])
 
-			assert.Equal(
-				t,
-				"manifests/nginx/deployment.yaml",
-				source["relativePath"],
-			)
+			rule, ok := rules[0].(map[string]any)
+			require.True(t, ok, "rule should be an object")
+
+			paths, ok := rule["paths"].([]any)
+			require.True(t, ok, "paths should be an array")
+			require.Len(t, paths, 1)
+
+			path, ok := paths[0].(map[string]any)
+			require.True(t, ok, "path should be an object")
+			assert.Equal(t, resourceID, path["resourceID"])
+
+			related, ok := rule["relatedResourcesIDs"].([]any)
+			require.True(t, ok, "relatedResourcesIDs should be an array")
+
+			require.Len(t, related, 1)
+			assert.Equal(t, resourceID, related[0])
 		})
 	}
 }
