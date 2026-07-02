@@ -132,7 +132,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := getExceptionsGetter(tt.args.ctx, tt.args.useExceptions, tt.args.accountID, tt.args.downloadReleasedPolicy)
+			got := getExceptionsGetter(tt.args.ctx, tt.args.useExceptions, tt.args.accountID, tt.args.downloadReleasedPolicy, false)
 			assert.Equal(t, tt.want, reflect.TypeOf(got).String())
 		})
 	}
