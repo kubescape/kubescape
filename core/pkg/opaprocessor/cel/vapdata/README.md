@@ -4,8 +4,8 @@ Vendored copy of the [cel-admission-library](https://github.com/kubescape/cel-ad
 release bundle. The CEL engine embeds these files with `//go:embed` so the
 policies are baked into the binary and there are no runtime file-path issues.
 
-Do not edit these files by hand. They are a verbatim copy of the latest release
-and are refreshed with:
+Do not edit these files by hand. They are a verbatim copy of a pinned release
+(see `CEL_LIBRARY_VERSION` in the Makefile) and are refreshed with:
 
 ```sh
 make sync-vap

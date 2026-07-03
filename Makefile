@@ -12,10 +12,12 @@ test:
 	go test -v ./...
 
 # cel-admission-library bundle vendored under the cel package so //go:embed can
-# bake it into the binary. sync-vap refreshes that copy from the latest release
-# so it stays reproducible instead of hand-maintained.
+# bake it into the binary. sync-vap refreshes that copy from a pinned release so
+# it stays reproducible instead of hand-maintained. Bump CEL_LIBRARY_VERSION to
+# vendor a newer bundle.
 CEL_VAPDATA_DIR := core/pkg/opaprocessor/cel/vapdata
-CEL_LIBRARY_BASE_URL := https://github.com/kubescape/cel-admission-library/releases/latest/download
+CEL_LIBRARY_VERSION := v0.11
+CEL_LIBRARY_BASE_URL := https://github.com/kubescape/cel-admission-library/releases/download/$(CEL_LIBRARY_VERSION)
 CEL_VAP_FILES := \
 	kubescape-validating-admission-policies.yaml \
 	basic-control-configuration.yaml \
