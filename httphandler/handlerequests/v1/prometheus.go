@@ -34,6 +34,8 @@ type MetricsQueryParams struct {
 func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 
 	scanID := uuid.NewString()
+	defer handler.recover(r.Context(), w, scanID)
+
 	handler.state.setBusy(scanID)
 	defer handler.state.setNotBusy(scanID)
 
