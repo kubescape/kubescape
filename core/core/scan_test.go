@@ -81,11 +81,11 @@ func TestIsAirGappedMode(t *testing.T) {
 		want     bool
 	}{
 		{
-			name: "air-gapped with Local flag",
+			name: "not air-gapped with Local flag",
 			scanInfo: &cautils.ScanInfo{
 				Local: true,
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name: "air-gapped with UseFrom",
