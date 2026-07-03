@@ -396,8 +396,7 @@ func isPrioritizationScanType(scanType cautils.ScanTypes) bool {
 // isAirGappedMode returns true if the scan is configured to run in air-gapped mode
 // (i.e., without any network access to download policies, exceptions, or other artifacts)
 func isAirGappedMode(scanInfo *cautils.ScanInfo) bool {
-	return scanInfo.Local ||
-		len(scanInfo.UseFrom) > 0 ||
+	return len(scanInfo.UseFrom) > 0 ||
 		scanInfo.ControlsInputs != "" ||
 		scanInfo.UseExceptions != "" ||
 		scanInfo.AttackTracks != ""
