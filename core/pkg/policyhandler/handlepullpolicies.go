@@ -197,7 +197,9 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 			}
 			if receivedControl != nil {
 				f.Controls = append(f.Controls, *receivedControl)
-
+				if _, ok := policyHandler.getters.PolicyGetter.(*getter.LoadPolicy); ok {
+					continue // skip caching for local files
+				}
 				cache, err := getter.PolicyCachePath(policy.Identifier)
 				if err != nil {
 					logger.L().Ctx(ctx).Warning("skipping control cache write", helpers.String("identifier", policy.Identifier), helpers.Error(err))
@@ -209,7 +211,6 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 			}
 		}
 		frameworks = append(frameworks, f)
-		// TODO: add case for control from file
 	default:
 		return frameworks, fmt.Errorf("unknown policy kind")
 	}
