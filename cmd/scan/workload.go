@@ -123,32 +123,24 @@ func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string) {
 }
 
 func validateWorkloadIdentifier(workloadIdentifier string) error {
-	// workloadIdentifier is in the form of kind/name or namespace/kind/name
-	x := strings.Split(workloadIdentifier, "/")
-	if len(x) == 2 {
-		if x[0] == "" || x[1] == "" {
-			return ErrInvalidWorkloadIdentifier
-		}
-		return nil
-	}
-	if len(x) == 3 {
-		if x[0] == "" || x[1] == "" || x[2] == "" {
-			return ErrInvalidWorkloadIdentifier
-		}
-		return nil
-	}
-
-	return ErrInvalidWorkloadIdentifier
+	_, _, _, err := parseWorkloadIdentifierString(workloadIdentifier)
+	return err
 }
 
 func parseWorkloadIdentifierString(workloadIdentifier string) (namespace, kind, name string, err error) {
-	// workloadIdentifier is in the form of namespace/kind/name
+	// workloadIdentifier is in the form of kind/name or namespace/kind/name
 	// example: default/Deployment/nginx-deployment
 	x := strings.Split(workloadIdentifier, "/")
 	if len(x) == 2 {
+		if x[0] == "" || x[1] == "" {
+			return "", "", "", ErrInvalidWorkloadIdentifier
+		}
 		return "", x[0], x[1], nil
 	}
 	if len(x) == 3 {
+		if x[0] == "" || x[1] == "" || x[2] == "" {
+			return "", "", "", ErrInvalidWorkloadIdentifier
+		}
 		return x[0], x[1], x[2], nil
 	}
 

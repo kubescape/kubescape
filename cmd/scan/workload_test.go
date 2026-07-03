@@ -162,7 +162,11 @@ func Test_parseWorkloadIdentifierString_Invalid(t *testing.T) {
 		},
 		{
 			name:  "too many segments",
-			input: "default/Deployment/nginx",
+			input: "cluster/default/Deployment/nginx",
+		},
+		{
+			name:  "empty segment",
+			input: "default//nginx",
 		},
 	}
 
