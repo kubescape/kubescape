@@ -124,13 +124,13 @@ var remediationTargetKinds = map[string]bool{
 // OperatorAdapter transport (POST apis.Commands to v1/triggerAction) — a
 // remediation is a new verb on that pipeline, not a new endpoint.
 //
-// Phase 1 supports the lowest-blast-radius actions only: `annotate` and its
-// `revert`, on an explicit target. Findings-driven targeting (--control /
-// --min-severity) and the quarantine/cordon actions arrive in later phases.
+// Supported actions: `annotate` + `revert` (Phase 1) and `quarantine` (Phase 2),
+// all on an explicit target. Findings-driven targeting (--control /
+// --min-severity) and the `cordon` action arrive in later phases.
 type RemediationInfo struct {
-	// Action is the operation to perform: "annotate" or "revert".
+	// Action is the operation to perform: "annotate", "quarantine" or "revert".
 	Action string
-	// Target (explicit, Phase 1).
+	// Target (explicit).
 	Kind      string
 	Namespace string
 	Name      string
@@ -152,12 +152,12 @@ func (r *RemediationInfo) IsDryRun() bool {
 
 func (r *RemediationInfo) ValidatePayload(*apis.Commands) error {
 	switch apis.OperatorActionType(r.Action) {
-	case apis.OperatorActionAnnotate, apis.OperatorActionRevert:
-		// supported in Phase 1
-	case apis.OperatorActionQuarantine, apis.OperatorActionCordon:
-		return fmt.Errorf("remediation action %q is not supported yet (planned for a later phase); supported: annotate, revert", r.Action)
+	case apis.OperatorActionAnnotate, apis.OperatorActionQuarantine, apis.OperatorActionRevert:
+		// supported: annotate + revert (Phase 1), quarantine (Phase 2)
+	case apis.OperatorActionCordon:
+		return fmt.Errorf("remediation action %q is not supported yet (planned for a later phase); supported: annotate, quarantine, revert", r.Action)
 	default:
-		return fmt.Errorf("unknown remediation action %q (supported: annotate, revert)", r.Action)
+		return fmt.Errorf("unknown remediation action %q (supported: annotate, quarantine, revert)", r.Action)
 	}
 
 	if r.Kind == "" || r.Name == "" {

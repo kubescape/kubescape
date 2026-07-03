@@ -20,10 +20,11 @@ func TestGetOperatorRemediateCmd(t *testing.T) {
 
 	// supported actions pass arg validation
 	assert.Nil(t, cmd.Args(&cobra.Command{}, []string{annotateSubCommand}))
+	assert.Nil(t, cmd.Args(&cobra.Command{}, []string{quarantineSubCommand}))
 	assert.Nil(t, cmd.Args(&cobra.Command{}, []string{revertSubCommand}))
 
 	// unknown action is rejected
-	err = cmd.Args(&cobra.Command{}, []string{"quarantine"})
+	err = cmd.Args(&cobra.Command{}, []string{"explode"})
 	assert.Error(t, err)
 
 	// exactly one action is required: extra positional args are rejected

@@ -3,6 +3,7 @@ package operator
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -13,9 +14,22 @@ import (
 )
 
 const (
-	annotateSubCommand string = "annotate"
-	revertSubCommand   string = "revert"
+	annotateSubCommand   string = "annotate"
+	quarantineSubCommand string = "quarantine"
+	revertSubCommand     string = "revert"
 )
+
+// remediateActions is the set of actions the CLI accepts, in help/error order.
+var remediateActions = []string{annotateSubCommand, quarantineSubCommand, revertSubCommand}
+
+func isSupportedRemediateAction(action string) bool {
+	for _, a := range remediateActions {
+		if a == action {
+			return true
+		}
+	}
+	return false
+}
 
 var operatorRemediateExamples = fmt.Sprintf(`
   # Preview (dry-run) annotating a workload as remediated — no changes are made
@@ -24,7 +38,13 @@ var operatorRemediateExamples = fmt.Sprintf(`
   # Apply the annotation (the only flag that performs a real cluster write)
   %[1]s operator remediate annotate --kind Deployment --target-namespace payments --name api --reason "C-0016" --confirm
 
-  # Revert a previously applied annotation
+  # Preview (dry-run) quarantining a workload — creates a deny-all NetworkPolicy isolating its pods
+  %[1]s operator remediate quarantine --kind Deployment --target-namespace payments --name api --reason "C-0016"
+
+  # Apply the quarantine
+  %[1]s operator remediate quarantine --kind Deployment --target-namespace payments --name api --reason "C-0016" --confirm
+
+  # Revert a previously applied action (removes the annotation and/or NetworkPolicy on the target)
   %[1]s operator remediate revert --kind Deployment --target-namespace payments --name api --confirm
 
 `, cautils.ExecName())
@@ -38,16 +58,16 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 
 	remediateCmd := &cobra.Command{
 		Use:     "remediate <action>",
-		Short:   "Act on scan findings via the Kubescape Operator (Phase 1: annotate, revert — dry-run by default)",
+		Short:   "Act on scan findings via the Kubescape Operator (annotate, quarantine, revert — dry-run by default)",
 		Long:    ``,
 		Example: operatorRemediateExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
 			operatorInfo.Subcommands = append(operatorInfo.Subcommands, cautils.RemediateCommand)
 			if len(args) != 1 {
-				return fmt.Errorf("for the operator remediate sub-command, you must pass exactly one action (%s or %s). Refer to the examples above", annotateSubCommand, revertSubCommand)
+				return fmt.Errorf("for the operator remediate sub-command, you must pass exactly one action (%s). Refer to the examples above", strings.Join(remediateActions, ", "))
 			}
-			if args[0] != annotateSubCommand && args[0] != revertSubCommand {
-				return fmt.Errorf("for the operator remediate sub-command, only %s and %s are supported. Refer to the examples above", annotateSubCommand, revertSubCommand)
+			if !isSupportedRemediateAction(args[0]) {
+				return fmt.Errorf("for the operator remediate sub-command, only %s are supported. Refer to the examples above", strings.Join(remediateActions, ", "))
 			}
 			return nil
 		},
@@ -65,9 +85,9 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 				return err
 			}
 
-			// annotate writes an audit trail; nudge (don't block) for a justification.
-			if remediationInfo.Action == annotateSubCommand && remediationInfo.Reason == "" {
-				logger.L().Warning("no --reason provided; annotate records an audit trail, consider adding --reason to justify the action")
+			// annotate and quarantine write an audit trail; nudge (don't block) for a justification.
+			if (remediationInfo.Action == annotateSubCommand || remediationInfo.Action == quarantineSubCommand) && remediationInfo.Reason == "" {
+				logger.L().Warning(fmt.Sprintf("no --reason provided; %s records an audit trail, consider adding --reason to justify the action", remediationInfo.Action))
 			}
 
 			operatorAdapter, err := core.NewOperatorAdapter(operatorInfo.OperatorScanInfo, operatorInfo.Namespace)
