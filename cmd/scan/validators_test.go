@@ -215,7 +215,8 @@ func Test_validateWorkloadIdentifier(t *testing.T) {
 	}{
 		{"valid workload identifier should be valid", "deployment/test", nil},
 		{"invalid workload identifier missing kind", "deployment", ErrInvalidWorkloadIdentifier},
-		{"invalid workload identifier with namespace", "ns/deployment/name", ErrInvalidWorkloadIdentifier},
+		{"valid workload identifier with namespace", "ns/deployment/name", nil},
+		{"invalid workload identifier with too many segments", "cluster/ns/deployment/name", ErrInvalidWorkloadIdentifier},
 	}
 
 	for _, testCase := range testCases {
