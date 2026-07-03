@@ -25,9 +25,10 @@ func TestRemediationInfo_ValidatePayload(t *testing.T) {
 		wantErr bool
 	}{
 		{"valid annotate", RemediationInfo{Action: "annotate", Kind: "Deployment", Namespace: "payments", Name: "api"}, false},
+		{"valid quarantine", RemediationInfo{Action: "quarantine", Kind: "Deployment", Namespace: "payments", Name: "api"}, false},
 		{"valid revert", RemediationInfo{Action: "revert", Kind: "Pod", Namespace: "default", Name: "p"}, false},
 		{"unknown action", RemediationInfo{Action: "explode", Kind: "Deployment", Namespace: "ns", Name: "a"}, true},
-		{"later-phase action", RemediationInfo{Action: "quarantine", Kind: "Deployment", Namespace: "ns", Name: "a"}, true},
+		{"later-phase action", RemediationInfo{Action: "cordon", Kind: "Deployment", Namespace: "ns", Name: "a"}, true},
 		{"missing name", RemediationInfo{Action: "annotate", Kind: "Deployment", Namespace: "ns"}, true},
 		{"unsupported kind", RemediationInfo{Action: "annotate", Kind: "Service", Namespace: "ns", Name: "a"}, true},
 		{"missing namespace", RemediationInfo{Action: "annotate", Kind: "Deployment", Name: "a"}, true},
@@ -75,6 +76,37 @@ func TestRemediationInfo_GetRequestPayload(t *testing.T) {
 
 	// the wire verb is exactly "operatorAction" (the constant the operator switches on)
 	assert.Equal(t, "operatorAction", string(cmd.CommandName))
+
+	// --confirm produces an explicit dryRun=false the operator treats as apply
+	r.Confirm = true
+	args, err = apis.OperatorActionArgsFromMap(r.GetRequestPayload().Commands[0].Args)
+	require.NoError(t, err)
+	assert.False(t, args.IsDryRun())
+}
+
+func TestRemediationInfo_GetRequestPayload_Quarantine(t *testing.T) {
+	r := &RemediationInfo{
+		Action:     "quarantine",
+		Kind:       "Deployment",
+		Namespace:  "payments",
+		Name:       "api",
+		Reason:     "C-0016",
+		FindingRef: "workloadconfigurationscansummaries/payments/api",
+	}
+
+	args, err := apis.OperatorActionArgsFromMap(r.GetRequestPayload().Commands[0].Args)
+	require.NoError(t, err)
+	assert.Equal(t, apis.OperatorActionQuarantine, args.Action)
+	require.NotNil(t, args.Target)
+	assert.Equal(t, "Deployment", args.Target.Kind)
+	assert.Equal(t, "payments", args.Target.Namespace)
+	assert.Equal(t, "api", args.Target.Name)
+	assert.Equal(t, "C-0016", args.Reason)
+	// dry-run by default; only --confirm applies
+	assert.True(t, args.IsDryRun())
+	// the Phase-1 CLI never sends findings-driven selectors/ttl (operator rejects those)
+	assert.Nil(t, args.Selector)
+	assert.Empty(t, args.TTL)
 
 	// --confirm produces an explicit dryRun=false the operator treats as apply
 	r.Confirm = true
