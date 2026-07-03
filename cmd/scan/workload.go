@@ -71,9 +71,13 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if err := validateThresholdsOnly(scanInfo); err != nil {
 				return err
 			}
-			kind, name, err := parseWorkloadIdentifierString(args[0])
+			namespace, kind, name, err := parseWorkloadIdentifierString(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid input: %w", err)
+			}
+
+			if namespace != "" && scanInfo.Namespace == "" {
+				scanInfo.Namespace = namespace
 			}
 
 			setWorkloadScanInfo(scanInfo, kind, name)
@@ -119,22 +123,34 @@ func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string) {
 }
 
 func validateWorkloadIdentifier(workloadIdentifier string) error {
-	// workloadIdentifier is in the form of kind/name
+	// workloadIdentifier is in the form of kind/name or namespace/kind/name
 	x := strings.Split(workloadIdentifier, "/")
-	if len(x) != 2 || x[0] == "" || x[1] == "" {
-		return ErrInvalidWorkloadIdentifier
+	if len(x) == 2 {
+		if x[0] == "" || x[1] == "" {
+			return ErrInvalidWorkloadIdentifier
+		}
+		return nil
+	}
+	if len(x) == 3 {
+		if x[0] == "" || x[1] == "" || x[2] == "" {
+			return ErrInvalidWorkloadIdentifier
+		}
+		return nil
 	}
 
-	return nil
+	return ErrInvalidWorkloadIdentifier
 }
 
-func parseWorkloadIdentifierString(workloadIdentifier string) (kind, name string, err error) {
+func parseWorkloadIdentifierString(workloadIdentifier string) (namespace, kind, name string, err error) {
 	// workloadIdentifier is in the form of namespace/kind/name
 	// example: default/Deployment/nginx-deployment
 	x := strings.Split(workloadIdentifier, "/")
-	if len(x) != 2 {
-		return "", "", ErrInvalidWorkloadIdentifier
+	if len(x) == 2 {
+		return "", x[0], x[1], nil
+	}
+	if len(x) == 3 {
+		return x[0], x[1], x[2], nil
 	}
 
-	return x[0], x[1], nil
+	return "", "", "", ErrInvalidWorkloadIdentifier
 }
