@@ -126,13 +126,18 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 
 	// ===================== Re-scan the image =====================
 
-	logger.L().Start(fmt.Sprintf("Re-scanning image: %s", patchedImageName))
-
-	scanResultsPatched, err := svc.Scan(ks.Context(), patchedImageName, creds, nil, nil)
-	if err != nil {
-		return false, err
+	var scanResultsPatched *cautils.ImageScanData
+	if patchInfo.OutputMode == "image" || patchInfo.OutputMode == "docker" {
+		logger.L().Start(fmt.Sprintf("Re-scanning image: %s", patchedImageName))
+		scanResultsPatched, err = svc.Scan(ks.Context(), patchedImageName, creds, nil, nil)
+		if err != nil {
+			return false, err
+		}
+		logger.L().StopSuccess(fmt.Sprintf("Successfully re-scanned image: %s", patchedImageName))
+	} else {
+		logger.L().Warning("Re-scan not applicable for OCI/Local exports")
+		scanResultsPatched = &cautils.ImageScanData{}
 	}
-	logger.L().StopSuccess(fmt.Sprintf("Successfully re-scanned image: %s", patchedImageName))
 
 	// ===================== Clean up =====================
 	// Remove the scan results file, which was used to patch the image

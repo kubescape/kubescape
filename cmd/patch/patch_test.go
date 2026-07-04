@@ -122,3 +122,34 @@ func Test_validateImagePatchInfo_DigestOnlyReturnsError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, "unexpected error while parsing image tag", err.Error())
 }
+
+func Test_validateImagePatchInfo_OutputModeValidation(t *testing.T) {
+	// Invalid output mode
+	patchInfoInvalid := &metav1.PatchInfo{
+		Image:      "nginx",
+		OutputMode: "invalid-mode",
+	}
+	err := validateImagePatchInfo(patchInfoInvalid)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid output mode")
+
+	// Missing output-path for oci
+	patchInfoOciNoPath := &metav1.PatchInfo{
+		Image:      "nginx",
+		OutputMode: "oci",
+	}
+	err = validateImagePatchInfo(patchInfoOciNoPath)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "output-path is required when output-mode is oci")
+
+	// Push overrides to image
+	patchInfoPush := &metav1.PatchInfo{
+		Image:      "nginx",
+		OutputMode: "docker", // should be overridden
+		Push:       true,
+	}
+	err = validateImagePatchInfo(patchInfoPush)
+	assert.NoError(t, err)
+	assert.Equal(t, "image", patchInfoPush.OutputMode)
+}
+
