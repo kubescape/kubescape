@@ -13,6 +13,8 @@ type PatchInfo struct {
 	Timeout         time.Duration // timeout for patching an image
 	IgnoreError     bool          // ignore errors and continue patching
 	Push            bool          // push the patched image to the registry (default: false)
+	OutputMode      string        // output mode for patched image (docker, image, oci, local)
+	OutputPath      string        // destination path for oci or local export
 	BuildKitOpts    buildkit.Opts //build kit options
 
 	// Image registry credentials

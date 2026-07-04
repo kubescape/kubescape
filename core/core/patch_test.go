@@ -71,7 +71,7 @@ func TestBuildPatchedImageName(t *testing.T) {
 // ExporterImage with the buildkit "push" attribute set. Without that attr
 // nothing reaches the source registry.
 func TestBuildPatchExport_PushTrue(t *testing.T) {
-	entry, pipeR, err := buildPatchExport(true, "docker.io/library/nginx:1.23-patched")
+	entry, pipeR, err := buildPatchExport("image", "", "docker.io/library/nginx:1.23-patched")
 
 	require.NoError(t, err)
 	assert.Nil(t, pipeR, "pipe reader must be unused in push mode")
@@ -96,7 +96,7 @@ func TestBuildPatchExport_PushFalse(t *testing.T) {
 	}
 	t.Cleanup(func() { lookPath = origLookPath })
 
-	entry, pipeR, err := buildPatchExport(false, "docker.io/library/nginx:1.23-patched")
+	entry, pipeR, err := buildPatchExport("docker", "", "docker.io/library/nginx:1.23-patched")
 
 	require.NoError(t, err)
 	require.NotNil(t, pipeR, "no-push path must hand back a pipe reader for docker load")
@@ -124,7 +124,7 @@ func TestBuildPatchExport_PushFalseDockerMissing(t *testing.T) {
 	lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
 	t.Cleanup(func() { lookPath = origLookPath })
 
-	_, _, err := buildPatchExport(false, "nginx:1.23-patched")
+	_, _, err := buildPatchExport("docker", "", "nginx:1.23-patched")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "docker CLI",
