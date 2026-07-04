@@ -267,4 +267,3 @@ func TestDownloadScanPolicies_LocalCacheBypass(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, files)
 }
-
