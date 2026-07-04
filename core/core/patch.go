@@ -115,11 +115,12 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	// Restore the output streams
 	os.Stdout, os.Stderr = sout, serr
 
-	if patchInfo.OutputMode == "image" {
+	switch patchInfo.OutputMode {
+	case "image":
 		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Pushed: %s", patchedImageName))
-	} else if patchInfo.OutputMode == "docker" {
+	case "docker":
 		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Loaded locally: %s", patchedImageName))
-	} else if patchInfo.OutputMode == "oci" || patchInfo.OutputMode == "local" {
+	case "oci", "local":
 		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Exported to: %s", patchInfo.OutputPath))
 	}
 
