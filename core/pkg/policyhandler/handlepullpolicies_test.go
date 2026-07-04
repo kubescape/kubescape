@@ -242,7 +242,7 @@ func TestGetControlInputs(t *testing.T) {
 func TestDownloadScanPolicies_LocalCacheBypass(t *testing.T) {
 	// Create a dummy control file
 	tempFile := filepath.Join(t.TempDir(), "control1.json")
-	err := os.WriteFile(tempFile, []byte(`{"controlID": "control1", "name": "mock-control"}`), 0644)
+	err := os.WriteFile(tempFile, []byte(`{"controlID": "control1", "name": "mock-control"}`), 0600)
 	assert.NoError(t, err)
 
 	lp := getter.NewLoadPolicy([]string{tempFile})
