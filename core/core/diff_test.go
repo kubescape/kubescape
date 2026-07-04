@@ -79,3 +79,27 @@ func TestDiff_ReturnsNewFailureCount(t *testing.T) {
 		assert.Equal(t, 0, count)
 	})
 }
+
+// TestDiff_PrettyFormatWritesOutput verifies the pretty-printer output path.
+func TestDiff_PrettyFormatWritesOutput(t *testing.T) {
+	base := writeReport(t, `{"results":[],"summaryDetails":{"controls":{}}}`)
+	head := writeReport(t, `{
+		"results":[{"resourceID":"res1","controls":[
+			{"controlID":"C-HIGH","name":"High","status":{"status":"failed"}}
+		]}],
+		"summaryDetails":{"controls":{"C-HIGH":{"scoreFactor":7.0}}}
+	}`)
+	ks := NewKubescape(context.Background())
+	out := filepath.Join(t.TempDir(), "pretty.out")
+	count, err := ks.Diff(&metav1.DiffInfo{
+		BaseFile: base,
+		HeadFile: head,
+		Format:   "pretty-printer",
+		Output:   out,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+	data, err := os.ReadFile(out)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "New failures")
+}
