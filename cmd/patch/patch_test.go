@@ -63,7 +63,8 @@ func Test_validateImagePatchInfo_EmptyImage(t *testing.T) {
 
 func Test_validateImagePatchInfo_Image(t *testing.T) {
 	patchInfo := &metav1.PatchInfo{
-		Image: "testing",
+		Image:      "testing",
+		OutputMode: "docker",
 	}
 	err := validateImagePatchInfo(patchInfo)
 	assert.Nil(t, err)
@@ -97,7 +98,8 @@ func TestPatchCmd_OutputModeFlags(t *testing.T) {
 
 func Test_validateImagePatchInfo_DefaultsTagAndPatchedTag(t *testing.T) {
 	patchInfo := &metav1.PatchInfo{
-		Image: "nginx",
+		Image:      "nginx",
+		OutputMode: "docker",
 	}
 
 	err := validateImagePatchInfo(patchInfo)
@@ -111,7 +113,8 @@ func Test_validateImagePatchInfo_DefaultsTagAndPatchedTag(t *testing.T) {
 
 func Test_validateImagePatchInfo_DigestOnlyReturnsError(t *testing.T) {
 	patchInfo := &metav1.PatchInfo{
-		Image: "nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Image:      "nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		OutputMode: "docker",
 	}
 
 	err := validateImagePatchInfo(patchInfo)
