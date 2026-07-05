@@ -1,0 +1,88 @@
+# Example ICS/OT workload: OPC-UA server with a legacy COM bridge.
+#
+# Like the Modbus example, this manifest deliberately violates
+# Kubescape controls to mirror real OT deployment patterns. Do NOT
+# run unmodified in production without a formal risk acceptance.
+# See docs/ics-ot-workloads.md for the full guidance.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ot-opcua
+  labels:
+    sector: ics-ot
+    environment: ot
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opcua-server
+  namespace: ot-opcua
+  labels:
+    app: opcua-server
+    sector: ics-ot
+    protocol: opc-ua
+  annotations:
+    # C-0057: vendor COM bridge mounts /dev/mem; privileged profile required.
+    kubescape.io/control-C-0057: "privileged mode required by vendor COM bridge"
+    # C-0016: setuid helper binds TCP/4840 below 1024. Track for replacement.
+    kubescape.io/control-C-0016: "setuid helper requires privilege escalation"
+    # C-0038: COM bridge inspects host process state to mirror SCADA process table.
+    kubescape.io/control-C-0038: "hostPID required for COM process-table bridge"
+    # C-0046: multicast OPC-UA discovery sockets need NET_ADMIN.
+    kubescape.io/control-C-0046: "CAP_NET_ADMIN for multicast discovery sockets"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opcua-server
+  template:
+    metadata:
+      labels:
+        app: opcua-server
+        sector: ics-ot
+        protocol: opc-ua
+    spec:
+      hostPID: true                    # C-0038
+      automountServiceAccountToken: false
+      containers:
+        - name: opcua-server
+          image: openplc/openplc-v3:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: opc-ua-tcp
+              containerPort: 4840
+              protocol: TCP
+          securityContext:
+            privileged: true           # C-0057
+            allowPrivilegeEscalation: true  # C-0016
+            runAsNonRoot: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              add:
+                - NET_ADMIN            # C-0046
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opcua-server
+  namespace: ot-opcua
+  labels:
+    app: opcua-server
+    sector: ics-ot
+    protocol: opc-ua
+spec:
+  type: ClusterIP
+  selector:
+    app: opcua-server
+  ports:
+    - name: opc-ua-tcp
+      port: 4840
+      targetPort: 4840
+      protocol: TCP

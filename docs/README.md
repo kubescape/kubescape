@@ -82,6 +82,7 @@ We welcome contributions to improve our documentation! Please see the [Contribut
 | [troubleshooting.md](troubleshooting.md) | ✅ Current | Common issues and solutions |
 | [providers.md](providers.md) | ✅ Current | Backend service providers |
 | [environment-dependencies-policy.md](environment-dependencies-policy.md) | ✅ Current | Dependency policies |
+| [ics-ot-workloads.md](ics-ot-workloads.md) | ✅ Current | Scanning ICS/OT workloads on Kubernetes |
 
 ---
 
