@@ -3,10 +3,13 @@ package policyhandler
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/mocks"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
@@ -234,4 +237,33 @@ func TestGetControlInputs(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, cachedControlInputs, controlInputs)
+}
+
+func TestDownloadScanPolicies_LocalCacheBypass(t *testing.T) {
+	// Create a dummy control file
+	tempFile := filepath.Join(t.TempDir(), "control1.json")
+	err := os.WriteFile(tempFile, []byte(`{"controlID": "control1", "name": "mock-control"}`), 0600)
+	assert.NoError(t, err)
+
+	lp := getter.NewLoadPolicy([]string{tempFile})
+
+	policyHandler := NewPolicyHandler("test-cluster-bypass")
+	policyHandler.getters = &cautils.Getters{
+		PolicyGetter: lp,
+	}
+	policyIdent := []cautils.PolicyIdentifier{{Identifier: "control1", Kind: "Control"}}
+
+	// Mock the local cache directory
+	cacheDir := t.TempDir()
+	originalLocalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = cacheDir
+	defer func() { getter.DefaultLocalStore = originalLocalStore }()
+
+	_, err = policyHandler.downloadScanPolicies(context.Background(), policyIdent)
+	assert.NoError(t, err)
+
+	// Verify that the cache dir is empty (cache bypassed)
+	files, err := os.ReadDir(cacheDir)
+	assert.NoError(t, err)
+	assert.Empty(t, files)
 }
