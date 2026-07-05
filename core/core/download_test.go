@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Returns a list of all available download commands when 'DownloadSupportCommands' is called.
@@ -156,183 +157,13 @@ func TestSetPathAndFilename(t *testing.T) {
 	}
 }
 
-// ========================= Unstable tests =========================
-
-// func TestDownloadConfigInputs(t *testing.T) {
-// 	ctx := context.Background()
-// 	tests := []struct {
-// 		downloadInfo *metav1.DownloadInfo
-// 	}{
-// 		{
-// 			downloadInfo: &metav1.DownloadInfo{
-// 				AccountID:  "Test-Id",
-// 				AccessKey:  "Random-value",
-// 				Identifier: "Unique-Id",
-// 				FileName:   "",
-// 				Target:     "Temp",
-// 				Path:       filepath.Join("path", "to"),
-// 			},
-// 		},
-// 	}
-
-// 	for _, tt := range tests {
-// 		t.Run(tt.downloadInfo.Path, func(t *testing.T) {
-// 			err := downloadConfigInputs(ctx, tt.downloadInfo)
-// 			assert.NotNil(t, err)
-// 		})
-// 	}
-// }
-
-// func TestDownloadExceptions(t *testing.T) {
-// 	ctx := context.Background()
-// 	tests := []struct {
-// 		downloadInfo *metav1.DownloadInfo
-// 	}{
-// 		{
-// 			downloadInfo: &metav1.DownloadInfo{
-// 				AccountID:  "Test-Id",
-// 				AccessKey:  "Random-value",
-// 				Identifier: "Unique-Id",
-// 				FileName:   "",
-// 				Target:     "Temp",
-// 				Path:       filepath.Join("path", "to"),
-// 			},
-// 		},
-// 	}
-
-// 	for _, tt := range tests {
-// 		t.Run(tt.downloadInfo.Path, func(t *testing.T) {
-// 			err := downloadExceptions(ctx, tt.downloadInfo)
-// 			assert.NotNil(t, err)
-// 		})
-// 	}
-// }
-
-// func TestDownloadAttackTracks(t *testing.T) {
-// 	ctx := context.Background()
-// 	tests := []struct {
-// 		downloadInfo *metav1.DownloadInfo
-// 		isErrNil     bool
-// 	}{
-// 		{
-// 			downloadInfo: &metav1.DownloadInfo{
-// 				AccountID:  "00000000-0000-0000-0000-000000000000",
-// 				AccessKey:  "00000000-0000-0000-0000-000000000000",
-// 				Identifier: "id",
-// 				FileName:   "",
-// 				Target:     "temp",
-// 				Path:       filepath.Join("path", "to"),
-// 			},
-// 			isErrNil: false,
-// 		},
-// 		{
-// 			downloadInfo: &metav1.DownloadInfo{
-// 				AccountID:  "",
-// 				AccessKey:  "",
-// 				Identifier: "",
-// 				FileName:   "",
-// 				Target:     "temp",
-// 				Path:       filepath.Join("path", "to"),
-// 			},
-// 			isErrNil: false,
-// 		},
-// 	}
-
-// 	for _, tt := range tests {
-// 		t.Run(tt.downloadInfo.Path, func(t *testing.T) {
-// 			err := downloadAttackTracks(ctx, tt.downloadInfo)
-// 			if tt.isErrNil {
-// 				assert.Nil(t, err)
-// 			} else {
-// 				assert.NotNil(t, err)
-// 				t.Error(err)
-// 			}
-// 		})
-// 	}
-// }
-
-// func TestDownloadFramework(t *testing.T) {
-// 	ctx := context.Background()
-// 	tests := []struct {
-// 		downloadInfo *metav1.DownloadInfo
-// 		isErrNil     bool
-// 	}{
-// 		{
-// 			downloadInfo: &metav1.DownloadInfo{
-// 				AccountID:  "Test-Id",
-// 				AccessKey:  "Random-value",
-// 				Identifier: "Id",
-// 				FileName:   "",
-// 				Target:     "Temp",
-// 				Path:       filepath.Join("path", "to"),
-// 			},
-// 			isErrNil: false,
-// 		},
-// 		{
-// 			downloadInfo: &metav1.DownloadInfo{
-// 				AccountID:  "",
-// 				AccessKey:  "",
-// 				Identifier: "",
-// 				FileName:   "",
-// 				Target:     "Temp",
-// 				Path:       filepath.Join("path", "to"),
-// 			},
-// 			isErrNil: false,
-// 		},
-// 	}
-
-// 	for _, tt := range tests {
-// 		t.Run(tt.downloadInfo.Path, func(t *testing.T) {
-// 			err := downloadFramework(ctx, tt.downloadInfo)
-// 			if tt.isErrNil {
-// 				assert.Nil(t, err)
-// 			} else {
-
-// 				assert.NotNil(t, err)
-// 			}
-// 		})
-// 	}
-// }
-
-// func TestDownloadControl(t *testing.T) {
-// 	ctx := context.Background()
-// 	tests := []struct {
-// 		downloadInfo *metav1.DownloadInfo
-// 		isErrNil     bool
-// 	}{
-// 		{
-// 			downloadInfo: &metav1.DownloadInfo{
-// 				AccountID:  "Test-Id",
-// 				AccessKey:  "Random-value",
-// 				Identifier: "Id",
-// 				FileName:   "",
-// 				Target:     "Temp",
-// 				Path:       filepath.Join("path", "to"),
-// 			},
-// 			isErrNil: false,
-// 		},
-// 		{
-// 			downloadInfo: &metav1.DownloadInfo{
-// 				AccountID:  "",
-// 				AccessKey:  "",
-// 				Identifier: "",
-// 				FileName:   "",
-// 				Target:     "Temp",
-// 				Path:       filepath.Join("path", "to"),
-// 			},
-// 			isErrNil: false,
-// 		},
-// 	}
-
-// 	for _, tt := range tests {
-// 		t.Run(tt.downloadInfo.Path, func(t *testing.T) {
-// 			err := downloadControl(ctx, tt.downloadInfo)
-// 			if tt.isErrNil {
-// 				assert.Nil(t, err)
-// 			} else {
-
-// 				assert.NotNil(t, err)
-// 			}
-// 		})
-// 	}
-// }
+// TestDownload_UnknownTargetReturnsError verifies Kubescape.Download surfaces unknown targets.
+func TestDownload_UnknownTargetReturnsError(t *testing.T) {
+	ks := NewKubescape(context.Background())
+	err := ks.Download(&metav1.DownloadInfo{
+		Target: "unknown",
+		Path:   t.TempDir(),
+	})
+	require.Error(t, err)
+	assert.EqualError(t, err, "unknown command to download")
+}
