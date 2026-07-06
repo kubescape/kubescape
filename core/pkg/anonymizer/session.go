@@ -38,9 +38,12 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, repoTran
 		// other sensitive metadata at both top-level and nested workload templates.
 		anonymizeResourceAnnotations(resource, mapping)
 
-		// Container-related anonymization is handled separately to preserve the
-		// existing typed/unstructured traversal behavior.
-		anonymizeContainerMetadata(resource, mapping)
+		// Container-related metadata is transformed separately to preserve the
+		// existing typed/unstructured traversal behavior while supporting
+		// multiple transformation strategies.
+		if err := transformContainerMetadata(resource, repoTransformer); err != nil {
+			return err
+		}
 
 		if len(session.LabelsToCopy) > 0 {
 			anonymizeResourceLabels(resource, session.LabelsToCopy, mapping)

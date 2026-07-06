@@ -8,7 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-func TestAnonymizeContainerMetadata(t *testing.T) {
+func TestTransformContainerMetadata(t *testing.T) {
 	tests := []struct {
 		name     string
 		object   map[string]any
@@ -714,54 +714,44 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			mapping := NewMapping()
+			transformer := NewMappingTransformer()
 			resource := workloadinterface.NewWorkloadObj(test.object)
 
-			anonymizeContainerMetadata(resource, mapping)
+			assert.NoError(
+				t,
+				transformContainerMetadata(resource, transformer),
+			)
 
 			spec, ok := resource.GetObject()["spec"].(map[string]any)
-			assert.True(t, ok, "expected spec to be a map[string]interface{}")
+			assert.True(t, ok, "expected spec to be a map[string]any")
 
 			test.validate(t, spec)
 		})
 	}
 }
 
-func TestAnonymizeContainerMetadata_NilResource(t *testing.T) {
-	assert.NotPanics(t, func() {
-		anonymizeContainerMetadata(nil, NewMapping())
-	})
+func TestTransformContainerMetadata_NilResource(t *testing.T) {
+	assert.NoError(t, transformContainerMetadata(nil, NewMappingTransformer()))
 }
 
-func TestAnonymizeContainerList_MissingKey(t *testing.T) {
+func TestTransformContainerList_MissingKey(t *testing.T) {
 	obj := map[string]any{}
-	mapping := NewMapping()
 
-	assert.NotPanics(t, func() {
-		anonymizeContainerList(obj, "containers", mapping)
-	})
+	assert.NoError(t, transformContainerList(obj, "containers", NewMappingTransformer()))
 }
 
-func TestAnonymizeContainerList_NilValue(t *testing.T) {
-	obj := map[string]any{
-		"containers": nil,
-	}
-	mapping := NewMapping()
+func TestTransformContainerList_NilValue(t *testing.T) {
+	obj := map[string]any{"containers": nil}
 
-	assert.NotPanics(t, func() {
-		anonymizeContainerList(obj, "containers", mapping)
-	})
+	assert.NoError(t, transformContainerList(obj, "containers", NewMappingTransformer()))
 }
 
-func TestAnonymizeContainerList_InvalidType(t *testing.T) {
+func TestTransformContainerList_InvalidType(t *testing.T) {
 	obj := map[string]any{
 		"containers": "invalid",
 	}
-	mapping := NewMapping()
 
-	assert.NotPanics(t, func() {
-		anonymizeContainerList(obj, "containers", mapping)
-	})
+	assert.NoError(t, transformContainerList(obj, "containers", NewMappingTransformer()))
 }
 
 func TestIsSensitiveEnvName_SeparatorlessVariants(t *testing.T) {
@@ -792,8 +782,8 @@ func TestIsSensitiveEnvName_SeparatorlessVariants(t *testing.T) {
 	}
 }
 
-func TestAnonymizeUnstructuredEnv_LeaksApiKeyValue(t *testing.T) {
-	const secret = "AKIAIOSFODNN7EXAMPLE" //nolint:gosec // G101: AWS example access key ID, test fixture, not a real credential
+func TestTransformUnstructuredEnv_LeaksAPIKeyValue(t *testing.T) {
+	const secret = "AKIAIOSFODNN7EXAMPLE" //nolint:gosec
 
 	container := map[string]any{
 		"env": []any{
@@ -804,11 +794,10 @@ func TestAnonymizeUnstructuredEnv_LeaksApiKeyValue(t *testing.T) {
 		},
 	}
 
-	mapping := NewMapping()
-	anonymizeUnstructuredEnv(container, mapping)
+	assert.NoError(t, transformUnstructuredEnv(container, NewMappingTransformer()))
 
 	got := container["env"].([]any)[0].(map[string]any)["value"].(string)
 	if got == secret {
-		t.Fatalf("env var APIKEY value was not anonymized; secret leaked into output")
+		t.Fatalf("env var APIKEY value was not transformed; secret leaked into output")
 	}
 }
