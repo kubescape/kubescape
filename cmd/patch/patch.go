@@ -107,6 +107,9 @@ func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 	}
 
 	if patchInfo.Push {
+		if patchInfo.OutputMode != "" && patchInfo.OutputMode != "docker" && patchInfo.OutputMode != "image" {
+			return fmt.Errorf("--push and --output-mode %q are mutually exclusive; --push always pushes to the registry (output-mode=image)", patchInfo.OutputMode)
+		}
 		patchInfo.OutputMode = "image"
 	}
 

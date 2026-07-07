@@ -142,7 +142,7 @@ func Test_validateImagePatchInfo_OutputModeValidation(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "output-path is required when output-mode is oci")
 
-	// Push overrides to image
+	// Push overrides to image when output-mode is default (docker)
 	patchInfoPush := &metav1.PatchInfo{
 		Image:      "nginx",
 		OutputMode: "docker", // should be overridden
@@ -151,4 +151,14 @@ func Test_validateImagePatchInfo_OutputModeValidation(t *testing.T) {
 	err = validateImagePatchInfo(patchInfoPush)
 	assert.NoError(t, err)
 	assert.Equal(t, "image", patchInfoPush.OutputMode)
+
+	// Push with explicit non-image output-mode should error
+	patchInfoPushConflict := &metav1.PatchInfo{
+		Image:      "nginx",
+		OutputMode: "oci",
+		Push:       true,
+	}
+	err = validateImagePatchInfo(patchInfoPushConflict)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive")
 }
