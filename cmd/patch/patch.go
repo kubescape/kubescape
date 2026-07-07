@@ -81,7 +81,9 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.BuildkitAddress, "address", "a", "unix:///run/buildkit/buildkitd.sock", "Address of buildkitd service, defaults to local buildkitd.sock")
 	patchCmd.PersistentFlags().DurationVar(&patchInfo.Timeout, "timeout", 5*time.Minute, "Timeout for the operation, defaults to '5m'")
 	patchCmd.PersistentFlags().BoolVar(&patchInfo.IgnoreError, "ignore-errors", false, "Ignore errors and continue patching other images. Default to false")
-	patchCmd.PersistentFlags().BoolVar(&patchInfo.Push, "push", false, "Push the patched image to the source registry. Default to false (the patched image is only loaded into the local image store)")
+	patchCmd.PersistentFlags().BoolVar(&patchInfo.Push, "push", false, "Push the patched image to the source registry. Default to false (the patched image is only loaded into the local image store). If set, this overrides output-mode to 'image'.")
+	patchCmd.PersistentFlags().StringVar(&patchInfo.OutputMode, "output-mode", "docker", "Output mode for the patched image (docker, image, oci, local)")
+	patchCmd.PersistentFlags().StringVar(&patchInfo.OutputPath, "output-path", "", "Destination path for oci or local output mode")
 
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.Username, "username", "u", "", "Username for registry login")
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.Password, "password", "p", "", "Password for registry login")
@@ -102,6 +104,22 @@ func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 
 	if patchInfo.Image == "" {
 		return errors.New("image tag is required")
+	}
+
+	if patchInfo.Push {
+		if patchInfo.OutputMode != "" && patchInfo.OutputMode != "docker" && patchInfo.OutputMode != "image" {
+			return fmt.Errorf("--push and --output-mode %q are mutually exclusive; --push always pushes to the registry (output-mode=image)", patchInfo.OutputMode)
+		}
+		patchInfo.OutputMode = "image"
+	}
+
+	supportedModes := []string{"docker", "image", "oci", "local"}
+	if !slices.Contains(supportedModes, patchInfo.OutputMode) {
+		return fmt.Errorf("invalid output mode %q, supported modes: docker, image, oci, local", patchInfo.OutputMode)
+	}
+
+	if (patchInfo.OutputMode == "oci" || patchInfo.OutputMode == "local") && patchInfo.OutputPath == "" {
+		return fmt.Errorf("output-path is required when output-mode is %s", patchInfo.OutputMode)
 	}
 
 	// Convert image to canonical format (required by copacetic for patching images)

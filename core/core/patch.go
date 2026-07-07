@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -108,34 +109,45 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		disableCopaLogger()
 	}
 
-	if err = copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.Push, patchInfo.BuildKitOpts); err != nil {
+	if err = copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.OutputMode, patchInfo.OutputPath, patchInfo.BuildKitOpts); err != nil {
 		return false, err
 	}
 
 	// Restore the output streams
 	os.Stdout, os.Stderr = sout, serr
 
-	if patchInfo.Push {
+	switch patchInfo.OutputMode {
+	case "image":
 		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Pushed: %s", patchedImageName))
-	} else {
+	case "docker":
 		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Loaded locally: %s", patchedImageName))
+	case "oci", "local":
+		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Exported to: %s", patchInfo.OutputPath))
 	}
-
-	// ===================== Re-scan the image =====================
-
-	logger.L().Start(fmt.Sprintf("Re-scanning image: %s", patchedImageName))
-
-	scanResultsPatched, err := svc.Scan(ks.Context(), patchedImageName, creds, nil, nil)
-	if err != nil {
-		return false, err
-	}
-	logger.L().StopSuccess(fmt.Sprintf("Successfully re-scanned image: %s", patchedImageName))
 
 	// ===================== Clean up =====================
 	// Remove the scan results file, which was used to patch the image
 	if err := os.Remove(fileName); err != nil {
 		logger.L().Warning(fmt.Sprintf("failed to remove residual file: %v", fileName), helpers.Error(err))
 	}
+
+	// ===================== Early return for OCI/Local exports =====================
+	// Re-scan and vulnerability report are not applicable for these output modes.
+	// Skipping them avoids a nil-pointer panic in JSON/SARIF printers and prevents
+	// a misleading empty vulnerability report with default formatting.
+	if patchInfo.OutputMode == "oci" || patchInfo.OutputMode == "local" {
+		logger.L().Warning("Re-scan not applicable for OCI/Local exports; skipping vulnerability report")
+		return false, nil
+	}
+
+	// ===================== Re-scan the image =====================
+
+	logger.L().Start(fmt.Sprintf("Re-scanning image: %s", patchedImageName))
+	scanResultsPatched, err := svc.Scan(ks.Context(), patchedImageName, creds, nil, nil)
+	if err != nil {
+		return false, err
+	}
+	logger.L().StopSuccess(fmt.Sprintf("Successfully re-scanned image: %s", patchedImageName))
 
 	// ===================== Results Handling =====================
 
@@ -172,13 +184,13 @@ func disableCopaLogger() {
 
 // copaPatch is a slightly modified copy of the Patch function from the original "project-copacetic/copacetic" repo
 // https://github.com/project-copacetic/copacetic/blob/main/pkg/patch/patch.go
-func copaPatch(ctx context.Context, timeout time.Duration, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, ignoreError, push bool, bkOpts buildkit.Opts) error {
+func copaPatch(ctx context.Context, timeout time.Duration, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, ignoreError bool, outputMode, outputPath string, bkOpts buildkit.Opts) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	ch := make(chan error, 1)
 	go func() {
-		ch <- patchWithContext(timeoutCtx, buildkitAddr, image, reportFile, patchedImageName, workingFolder, ignoreError, push, bkOpts)
+		ch <- patchWithContext(timeoutCtx, buildkitAddr, image, reportFile, patchedImageName, workingFolder, ignoreError, outputMode, outputPath, bkOpts)
 	}()
 
 	select {
@@ -194,7 +206,7 @@ func copaPatch(ctx context.Context, timeout time.Duration, buildkitAddr, image, 
 	}
 }
 
-func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, ignoreError, push bool, bkOpts buildkit.Opts) error {
+func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, ignoreError bool, outputMode, outputPath string, bkOpts buildkit.Opts) error {
 	// Ensure working folder exists for call to InstallUpdates
 	if workingFolder == "" {
 		var err error
@@ -232,7 +244,7 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 	cfg := authprovider.DockerAuthProviderConfig{AuthConfigProvider: authprovider.LoadAuthConfig(dockerConfig)}
 	attachable := []session.Attachable{authprovider.NewDockerAuthProvider(cfg)}
 
-	exportEntry, pipeR, err := buildPatchExport(push, patchedImageName)
+	exportEntry, pipeR, err := buildPatchExport(outputMode, outputPath, patchedImageName)
 	if err != nil {
 		return err
 	}
@@ -288,8 +300,6 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 			}
 		}
 
-		// Export the patched image state to Docker
-		// TODO: Add support for other output modes as buildctl does.
 		log.Infof("Patching %d vulnerabilities", len(updates.Updates))
 		patchedImageState, errPkgs, err := manager.InstallUpdates(ctx, updates, ignoreError)
 		log.Infof("Error is: %v", err)
@@ -366,23 +376,21 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 // test host's PATH.
 var lookPath = exec.LookPath
 
-// buildPatchExport selects the buildkit export entry for the patched image.
+// buildPatchExport selects the buildkit export entry for the patched image
+// based on the requested outputMode:
 //
-// When push is true, the patched image is pushed directly to the source
-// registry via ExporterImage with the buildkit "push" attribute. When push
-// is false (the default), the image is streamed through `docker load` via
-// ExporterDocker so it lands in the user's docker image store — this is the
-// only path that holds the "loaded into the local image store" contract
-// regardless of whether dockerd is configured to share a containerd store
-// with buildkit; ExporterImage would otherwise land in buildkit's worker
-// namespace and be invisible to dockerd on the standalone `sudo buildkitd`
-// flow. See:
-// https://github.com/moby/buildkit?tab=readme-ov-file#containerd-image-store
-//
-// In the no-push branch the caller is expected to read the returned pipeR
-// concurrently (via dockerLoad). If push is true the pipeR is nil.
-func buildPatchExport(push bool, patchedImageName string) (client.ExportEntry, *io.PipeReader, error) {
-	if push {
+//   - "image": pushes the patched image directly to the source registry via
+//     ExporterImage with the buildkit "push" attribute. pipeR is nil.
+//   - "oci": writes the patched image as an OCI tarball to outputPath via
+//     ExporterOCI. pipeR is nil.
+//   - "local": extracts the patched image filesystem to the directory at
+//     outputPath via ExporterLocal. pipeR is nil.
+//   - "docker" (default): streams the image through `docker load` via
+//     ExporterDocker so it lands in the user's docker image store. The caller
+//     is expected to read the returned pipeR concurrently (via dockerLoad).
+func buildPatchExport(outputMode, outputPath, patchedImageName string) (client.ExportEntry, *io.PipeReader, error) {
+	switch outputMode {
+	case "image":
 		return client.ExportEntry{
 			Type: client.ExporterImage,
 			Attrs: map[string]string{
@@ -390,20 +398,49 @@ func buildPatchExport(push bool, patchedImageName string) (client.ExportEntry, *
 				"push": "true",
 			},
 		}, nil, nil
+	case "oci":
+		if outputPath == "" {
+			return client.ExportEntry{}, nil, fmt.Errorf("output-path must be provided for oci export")
+		}
+		return client.ExportEntry{
+			Type: client.ExporterOCI,
+			Attrs: map[string]string{
+				"name": patchedImageName,
+			},
+			Output: func(_ map[string]string) (io.WriteCloser, error) {
+				if dir := filepath.Dir(outputPath); dir != "." {
+					if err := os.MkdirAll(dir, 0o755); err != nil {
+						return nil, fmt.Errorf("failed to create parent directory for output-path %q: %w", outputPath, err)
+					}
+				}
+				return os.Create(outputPath)
+			},
+		}, nil, nil
+	case "local":
+		if outputPath == "" {
+			return client.ExportEntry{}, nil, fmt.Errorf("output-path must be provided for local export")
+		}
+		return client.ExportEntry{
+			Type:      client.ExporterLocal,
+			OutputDir: outputPath,
+		}, nil, nil
+	case "docker":
+		fallthrough
+	default:
+		if _, err := lookPath("docker"); err != nil {
+			return client.ExportEntry{}, nil, fmt.Errorf(
+				"docker CLI not found on PATH: required to load the patched image locally; "+
+					"pass --push to push to a registry instead: %w", err)
+		}
+		pipeR, pipeW := io.Pipe()
+		return client.ExportEntry{
+			Type:  client.ExporterDocker,
+			Attrs: map[string]string{"name": patchedImageName},
+			Output: func(_ map[string]string) (io.WriteCloser, error) {
+				return pipeW, nil
+			},
+		}, pipeR, nil
 	}
-	if _, err := lookPath("docker"); err != nil {
-		return client.ExportEntry{}, nil, fmt.Errorf(
-			"docker CLI not found on PATH: required to load the patched image locally; "+
-				"pass --push to push to a registry instead: %w", err)
-	}
-	pipeR, pipeW := io.Pipe()
-	return client.ExportEntry{
-		Type:  client.ExporterDocker,
-		Attrs: map[string]string{"name": patchedImageName},
-		Output: func(_ map[string]string) (io.WriteCloser, error) {
-			return pipeW, nil
-		},
-	}, pipeR, nil
 }
 
 // dockerLoad streams an OCI tarball from r into `docker load`. Used for the
