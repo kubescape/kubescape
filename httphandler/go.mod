@@ -7,7 +7,7 @@ replace github.com/kubescape/kubescape/v3 => ../
 replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.0-20260322054632-16583c73e9b8
 
 require (
-	github.com/armosec/armoapi-go v0.0.720
+	github.com/armosec/armoapi-go v0.0.730
 	github.com/armosec/utils-go v0.0.58
 	github.com/armosec/utils-k8s-go v0.0.35
 	github.com/go-openapi/runtime v0.29.3
@@ -18,7 +18,7 @@ require (
 	github.com/kubescape/go-logger v0.0.28
 	github.com/kubescape/k8s-interface v0.0.209
 	github.com/kubescape/kubescape/v3 v3.0.4
-	github.com/kubescape/opa-utils v0.0.300
+	github.com/kubescape/opa-utils v0.0.301
 	github.com/kubescape/storage v0.0.258
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
