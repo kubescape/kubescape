@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"regexp"
 	"sort"
 	"time"
 
@@ -151,6 +150,13 @@ func convertCRDObjectToPosturePolicies(
 	if err != nil {
 		return nil, err
 	}
+	// objectSelector (matchLabels + matchExpressions) is carried as a policy-level
+	// LabelSelector and evaluated by the exception processor with labels.Selector
+	// semantics, ANDed against the resource designators above.
+	objectSelector, err := decodeObjectSelector(obj)
+	if err != nil {
+		return nil, err
+	}
 
 	policies := make([]armotypes.PostureExceptionPolicy, 0, len(postureItems))
 	for _, raw := range postureItems {
@@ -169,7 +175,7 @@ func convertCRDObjectToPosturePolicies(
 		// frameworkName scopes the exception to a single framework; an empty value
 		// (field omitted) applies the exception framework-wide.
 		frameworkName, _ := item["frameworkName"].(string)
-		policy, err := convertSecurityExceptionToPosturePolicy(name, controlID, frameworkName, action, expiresAt, reason, resources)
+		policy, err := convertSecurityExceptionToPosturePolicy(name, controlID, frameworkName, action, expiresAt, reason, resources, objectSelector)
 		if err != nil {
 			continue
 		}
@@ -203,18 +209,9 @@ func buildResourceDesignators(
 	// exception back to the whole namespace.
 	namespace := obj.GetNamespace()
 
-	// objectSelector constrains the exception to workloads carrying matching labels.
-	// matchLabels are flattened into every resource designator so the existing label
-	// comparator (opa-utils compareLabels) enforces them, AND-combined with the other
-	// match fields per the design doc. Note: matchLabels are matched against the
-	// resource's own top-level metadata.labels (workload.GetLabels()), not the
-	// pod-template/selector labels. matchExpressions cannot be represented as
-	// key->value attributes, so they are best-effort for v1beta1: a warning is emitted
-	// and the rest of the exception still applies (partial application, never fail-closed).
-	objectSelectorLabels, err := objectSelectorMatchLabels(obj, kind)
-	if err != nil {
-		return nil, err
-	}
+	// objectSelector is handled separately as a policy-level LabelSelector (see
+	// decodeObjectSelector); this function only builds the resource/namespace-scoped
+	// designators, which the exception processor ANDs with that selector.
 
 	namespaceSelectorFound := false
 	var namespaceNames []string
@@ -304,21 +301,17 @@ func buildResourceDesignators(
 		}
 	}
 
-	// AND objectSelector.matchLabels into every designator produced above.
-	if len(objectSelectorLabels) > 0 {
-		for _, designator := range designators {
-			maps.Copy(designator, objectSelectorLabels)
-		}
-	}
-
 	return designators, nil
 }
 
-// objectSelectorMatchLabels decodes spec.match.objectSelector and returns its
-// matchLabels as regex-escaped designator attributes (the label comparator treats
-// values as regexes). matchExpressions are not representable as key->value attributes
-// and are logged as best-effort rather than failing the exception.
-func objectSelectorMatchLabels(obj *unstructured.Unstructured, kind string) (map[string]string, error) {
+// decodeObjectSelector decodes spec.match.objectSelector into an armotypes.LabelSelector
+// carrying the full selector (matchLabels + matchExpressions). It returns nil when the
+// selector is absent OR present-but-empty: an empty selector must impose no label
+// constraint (the exception is scoped by its other match fields), it must not silently
+// widen to match every workload. The exception processor (opa-utils) evaluates a non-nil
+// selector with labels.Selector semantics and ANDs it with the resource designators, so
+// both matchLabels and matchExpressions are honored.
+func decodeObjectSelector(obj *unstructured.Unstructured) (*armotypes.LabelSelector, error) {
 	selectorRaw, found, err := unstructured.NestedFieldCopy(obj.Object, "spec", "match", "objectSelector")
 	if err != nil {
 		return nil, fmt.Errorf("read objectSelector: %w", err)
@@ -334,23 +327,27 @@ func objectSelectorMatchLabels(obj *unstructured.Unstructured, kind string) (map
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(selectorMap, &labelSelector); err != nil {
 		return nil, fmt.Errorf("decode objectSelector: %w", err)
 	}
+	if len(labelSelector.MatchLabels) == 0 && len(labelSelector.MatchExpressions) == 0 {
+		return nil, nil // empty selector: no label constraint
+	}
+	return toArmoLabelSelector(labelSelector), nil
+}
 
-	if len(labelSelector.MatchExpressions) > 0 {
-		logger.L().Warning("SecurityException spec.match.objectSelector.matchExpressions is best-effort for v1beta1 and is not applied; matchLabels (if any) still apply",
-			helpers.String("name", obj.GetName()),
-			helpers.String("namespace", obj.GetNamespace()),
-			helpers.String("kind", kind),
-		)
+// toArmoLabelSelector converts a metav1.LabelSelector to the armotypes.LabelSelector
+// shape consumed by PostureExceptionPolicy.ObjectSelector.
+func toArmoLabelSelector(sel metav1.LabelSelector) *armotypes.LabelSelector {
+	out := &armotypes.LabelSelector{MatchLabels: sel.MatchLabels}
+	if len(sel.MatchExpressions) > 0 {
+		out.MatchExpressions = make([]armotypes.LabelSelectorRequirement, len(sel.MatchExpressions))
+		for i, r := range sel.MatchExpressions {
+			out.MatchExpressions[i] = armotypes.LabelSelectorRequirement{
+				Key:      r.Key,
+				Operator: r.Operator,
+				Values:   r.Values,
+			}
+		}
 	}
-
-	if len(labelSelector.MatchLabels) == 0 {
-		return nil, nil
-	}
-	escaped := make(map[string]string, len(labelSelector.MatchLabels))
-	for k, v := range labelSelector.MatchLabels {
-		escaped[k] = regexp.QuoteMeta(v)
-	}
-	return escaped, nil
+	return out
 }
 
 // resolveNamespaceSelector returns namespace names matching a label selector.
@@ -389,6 +386,7 @@ func convertSecurityExceptionToPosturePolicy(
 	expiresAt string,
 	reason string,
 	resources []map[string]string,
+	objectSelector *armotypes.LabelSelector,
 ) (armotypes.PostureExceptionPolicy, error) {
 	var actions []armotypes.PostureExceptionPolicyActions
 	switch action {
@@ -426,9 +424,10 @@ func convertSecurityExceptionToPosturePolicy(
 	}
 
 	policy := armotypes.PostureExceptionPolicy{
-		PolicyType: string(armotypes.PostureExceptionPolicyType),
-		Actions:    actions,
-		Resources:  designators,
+		PolicyType:     string(armotypes.PostureExceptionPolicyType),
+		Actions:        actions,
+		Resources:      designators,
+		ObjectSelector: objectSelector,
 		PosturePolicies: []armotypes.PosturePolicy{
 			{
 				ControlID:     controlID,

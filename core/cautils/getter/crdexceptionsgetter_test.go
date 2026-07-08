@@ -156,7 +156,7 @@ func TestCRDExceptionsGetter_PartialApplicationOnConversionError(t *testing.T) {
 	assert.Equal(t, "C-0001", exceptions[0].PosturePolicies[0].ControlID)
 }
 
-func TestBuildResourceDesignators_ObjectSelectorWithNamespaceSelector(t *testing.T) {
+func TestConvertCRDObjectToPosturePolicies_ObjectSelectorWithNamespaceSelector(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 	k8sClient := crfake.NewClientBuilder().WithScheme(scheme).WithObjects(
@@ -179,14 +179,24 @@ func TestBuildResourceDesignators_ObjectSelectorWithNamespaceSelector(t *testing
 		},
 	}}
 
-	// objectSelector.matchLabels must merge into the namespace x resource cross product,
-	// AND-combined with both the resolved namespaces and the resource scope.
-	got, err := buildResourceDesignators(obj, "ClusterSecurityException", k8sClient)
+	// namespaceSelector x resources builds the designator cross product; objectSelector
+	// is carried separately as a policy-level LabelSelector (not flattened into the
+	// designators) and ANDed against it by the exception processor.
+	policies, err := convertCRDObjectToPosturePolicies(obj, "ClusterSecurityException", k8sClient)
 	require.NoError(t, err)
+	require.Len(t, policies, 1)
+
+	designators := make([]map[string]string, 0, len(policies[0].Resources))
+	for _, d := range policies[0].Resources {
+		designators = append(designators, d.Attributes)
+	}
 	assert.ElementsMatch(t, []map[string]string{
-		{identifiers.AttributeNamespace: "staging", identifiers.AttributeKind: "Deployment", identifiers.AttributeName: "web", "app": "nginx"},
-		{identifiers.AttributeNamespace: "staging-2", identifiers.AttributeKind: "Deployment", identifiers.AttributeName: "web", "app": "nginx"},
-	}, got)
+		{identifiers.AttributeNamespace: "staging", identifiers.AttributeKind: "Deployment", identifiers.AttributeName: "web"},
+		{identifiers.AttributeNamespace: "staging-2", identifiers.AttributeKind: "Deployment", identifiers.AttributeName: "web"},
+	}, designators)
+	require.NotNil(t, policies[0].ObjectSelector)
+	assert.Equal(t, map[string]string{"app": "nginx"}, policies[0].ObjectSelector.MatchLabels)
+	assert.Empty(t, policies[0].ObjectSelector.MatchExpressions)
 }
 
 func TestConvertCRDObjectToPosturePolicies_DefaultScope(t *testing.T) {
@@ -245,7 +255,6 @@ func TestBuildResourceDesignators_NamespacedScopeIsNotWidened(t *testing.T) {
 	tests := []struct {
 		name      string
 		resources []map[string]any
-		selector  map[string]any
 		want      []map[string]string
 	}{
 		{
@@ -263,27 +272,11 @@ func TestBuildResourceDesignators_NamespacedScopeIsNotWidened(t *testing.T) {
 			name: "no narrowing falls back to the whole namespace",
 			want: []map[string]string{{identifiers.AttributeNamespace: "team-a"}},
 		},
-		{
-			name:      "objectSelector AND resources is a strict intersection",
-			resources: []map[string]any{{"kind": "Deployment", "name": "web"}},
-			selector:  map[string]any{"matchLabels": map[string]any{"app": "nginx"}},
-			want: []map[string]string{
-				{
-					identifiers.AttributeNamespace: "team-a",
-					identifiers.AttributeKind:      "Deployment",
-					identifiers.AttributeName:      "web",
-					"app":                          "nginx",
-				},
-			},
-		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			match := map[string]any{}
-			if tc.selector != nil {
-				match["objectSelector"] = tc.selector
-			}
 			if len(tc.resources) > 0 {
 				resources := make([]any, 0, len(tc.resources))
 				for _, res := range tc.resources {
@@ -308,48 +301,42 @@ func TestBuildResourceDesignators_NamespacedScopeIsNotWidened(t *testing.T) {
 	}
 }
 
-func TestBuildResourceDesignators_ObjectSelector(t *testing.T) {
+func TestConvertCRDObjectToPosturePolicies_ObjectSelector(t *testing.T) {
 	tests := []struct {
-		name      string
-		kind      string
-		namespace string
-		selector  map[string]any
-		resources []map[string]any
-		want      []map[string]string
+		name            string
+		kind            string
+		namespace       string
+		selector        map[string]any
+		resources       []map[string]any
+		wantDesignators []map[string]string
+		wantSelector    *armotypes.LabelSelector
 	}{
 		{
-			name:      "matchLabels on namespaced SecurityException ANDs labels into the namespace scope",
-			kind:      "SecurityException",
-			namespace: "team-a",
-			selector:  map[string]any{"matchLabels": map[string]any{"app": "nginx"}},
-			want: []map[string]string{
-				{identifiers.AttributeNamespace: "team-a", "app": "nginx"},
-			},
+			name:            "matchLabels are carried on ObjectSelector, not flattened into the namespace scope",
+			kind:            "SecurityException",
+			namespace:       "team-a",
+			selector:        map[string]any{"matchLabels": map[string]any{"app": "nginx"}},
+			wantDesignators: []map[string]string{{identifiers.AttributeNamespace: "team-a"}},
+			wantSelector:    &armotypes.LabelSelector{MatchLabels: map[string]string{"app": "nginx"}},
 		},
 		{
-			name:      "matchLabels AND resources merge into the resource designator",
-			kind:      "ClusterSecurityException",
-			selector:  map[string]any{"matchLabels": map[string]any{"app": "nginx"}},
-			resources: []map[string]any{{"kind": "Deployment", "name": "web"}},
-			want: []map[string]string{
-				{
-					identifiers.AttributeKind: "Deployment",
-					identifiers.AttributeName: "web",
-					"app":                     "nginx",
-				},
-			},
+			name:            "matchLabels alongside a resource keep the designator label-free",
+			kind:            "ClusterSecurityException",
+			selector:        map[string]any{"matchLabels": map[string]any{"app": "nginx"}},
+			resources:       []map[string]any{{"kind": "Deployment", "name": "web"}},
+			wantDesignators: []map[string]string{{identifiers.AttributeKind: "Deployment", identifiers.AttributeName: "web"}},
+			wantSelector:    &armotypes.LabelSelector{MatchLabels: map[string]string{"app": "nginx"}},
 		},
 		{
-			name:      "label values are regex-escaped",
-			kind:      "SecurityException",
-			namespace: "team-a",
-			selector:  map[string]any{"matchLabels": map[string]any{"version": "1.25"}},
-			want: []map[string]string{
-				{identifiers.AttributeNamespace: "team-a", "version": `1\.25`},
-			},
+			name:            "label values are not regex-escaped (labels.Selector uses exact match)",
+			kind:            "SecurityException",
+			namespace:       "team-a",
+			selector:        map[string]any{"matchLabels": map[string]any{"version": "1.25"}},
+			wantDesignators: []map[string]string{{identifiers.AttributeNamespace: "team-a"}},
+			wantSelector:    &armotypes.LabelSelector{MatchLabels: map[string]string{"version": "1.25"}},
 		},
 		{
-			name:      "matchExpressions are best-effort and do not fail or constrain the exception",
+			name:      "matchExpressions are honored and carried on ObjectSelector",
 			kind:      "SecurityException",
 			namespace: "team-a",
 			selector: map[string]any{
@@ -357,10 +344,15 @@ func TestBuildResourceDesignators_ObjectSelector(t *testing.T) {
 					map[string]any{"key": "env", "operator": "In", "values": []any{"prod"}},
 				},
 			},
-			want: []map[string]string{{identifiers.AttributeNamespace: "team-a"}},
+			wantDesignators: []map[string]string{{identifiers.AttributeNamespace: "team-a"}},
+			wantSelector: &armotypes.LabelSelector{
+				MatchExpressions: []armotypes.LabelSelectorRequirement{
+					{Key: "env", Operator: metav1.LabelSelectorOpIn, Values: []string{"prod"}},
+				},
+			},
 		},
 		{
-			name:      "matchLabels apply alongside ignored matchExpressions",
+			name:      "matchLabels and matchExpressions are both carried on ObjectSelector",
 			kind:      "SecurityException",
 			namespace: "team-a",
 			selector: map[string]any{
@@ -369,42 +361,61 @@ func TestBuildResourceDesignators_ObjectSelector(t *testing.T) {
 					map[string]any{"key": "env", "operator": "In", "values": []any{"prod"}},
 				},
 			},
-			want: []map[string]string{
-				{identifiers.AttributeNamespace: "team-a", "app": "nginx"},
+			wantDesignators: []map[string]string{{identifiers.AttributeNamespace: "team-a"}},
+			wantSelector: &armotypes.LabelSelector{
+				MatchLabels: map[string]string{"app": "nginx"},
+				MatchExpressions: []armotypes.LabelSelectorRequirement{
+					{Key: "env", Operator: metav1.LabelSelectorOpIn, Values: []string{"prod"}},
+				},
 			},
 		},
 		{
-			name:     "matchLabels merge into the default cluster-wide scope",
-			kind:     "ClusterSecurityException",
-			selector: map[string]any{"matchLabels": map[string]any{"app": "nginx"}},
-			want: []map[string]string{
-				{identifiers.AttributeKind: "*", "app": "nginx"},
-			},
+			name:            "objectSelector on the default cluster-wide scope keeps a bare kind designator",
+			kind:            "ClusterSecurityException",
+			selector:        map[string]any{"matchLabels": map[string]any{"app": "nginx"}},
+			wantDesignators: []map[string]string{{identifiers.AttributeKind: "*"}},
+			wantSelector:    &armotypes.LabelSelector{MatchLabels: map[string]string{"app": "nginx"}},
+		},
+		{
+			name:            "empty objectSelector imposes no label constraint (nil ObjectSelector)",
+			kind:            "SecurityException",
+			namespace:       "team-a",
+			selector:        map[string]any{},
+			wantDesignators: []map[string]string{{identifiers.AttributeNamespace: "team-a"}},
+			wantSelector:    nil,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			obj := &unstructured.Unstructured{Object: map[string]any{
-				"apiVersion": "kubescape.io/v1beta1",
-				"kind":       tc.kind,
-				"metadata":   map[string]any{"name": "exception-a", "namespace": tc.namespace},
-				"spec": map[string]any{
-					"match":   map[string]any{"objectSelector": tc.selector},
-					"posture": []any{map[string]any{"controlID": "C-0001", "action": "ignore"}},
-				},
-			}}
+			match := map[string]any{"objectSelector": tc.selector}
 			if len(tc.resources) > 0 {
 				resources := make([]any, 0, len(tc.resources))
 				for _, res := range tc.resources {
 					resources = append(resources, res)
 				}
-				obj.Object["spec"].(map[string]any)["match"].(map[string]any)["resources"] = resources
+				match["resources"] = resources
 			}
+			obj := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "kubescape.io/v1beta1",
+				"kind":       tc.kind,
+				"metadata":   map[string]any{"name": "exception-a", "namespace": tc.namespace},
+				"spec": map[string]any{
+					"match":   match,
+					"posture": []any{map[string]any{"controlID": "C-0001", "action": "ignore"}},
+				},
+			}}
 
-			got, err := buildResourceDesignators(obj, tc.kind, nil)
+			policies, err := convertCRDObjectToPosturePolicies(obj, tc.kind, nil)
 			require.NoError(t, err)
-			assert.ElementsMatch(t, tc.want, got)
+			require.Len(t, policies, 1)
+
+			designators := make([]map[string]string, 0, len(policies[0].Resources))
+			for _, d := range policies[0].Resources {
+				designators = append(designators, d.Attributes)
+			}
+			assert.ElementsMatch(t, tc.wantDesignators, designators)
+			assert.Equal(t, tc.wantSelector, policies[0].ObjectSelector)
 		})
 	}
 }
