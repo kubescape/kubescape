@@ -69,7 +69,8 @@ func SetupHTTPListener() error {
 	v1SubRouter.HandleFunc(v1PrometheusMetricsPath, httpHandler.Metrics) // deprecated
 	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.Scan)
 	v1SubRouter.HandleFunc(v1StatusPath, httpHandler.Status)
-	v1SubRouter.HandleFunc(v1ResultsPath, httpHandler.Results)
+	v1SubRouter.HandleFunc(v1ResultsPath, httpHandler.GetResults).Methods(http.MethodGet)
+	v1SubRouter.HandleFunc(v1ResultsPath, httpHandler.DeleteResults).Methods(http.MethodDelete)
 
 	// OpenTelemetry metrics initialization
 	metrics.Init()

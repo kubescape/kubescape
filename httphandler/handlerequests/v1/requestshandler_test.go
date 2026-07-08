@@ -94,7 +94,7 @@ func TestResultsDeleteAll(t *testing.T) {
 	rq := httptest.NewRequest("DELETE", "/results?all=true", nil)
 	w := httptest.NewRecorder()
 
-	h.Results(w, rq)
+	h.DeleteResults(w, rq)
 	rs := w.Result()
 
 	if rs.StatusCode != http.StatusOK {
@@ -105,7 +105,7 @@ func TestResultsDeleteAll(t *testing.T) {
 	rq = httptest.NewRequest("DELETE", "/results", nil)
 	w = httptest.NewRecorder()
 
-	h.Results(w, rq)
+	h.DeleteResults(w, rq)
 	rs = w.Result()
 
 	if rs.StatusCode != http.StatusBadRequest {
