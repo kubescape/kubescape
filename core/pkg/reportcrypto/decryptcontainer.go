@@ -398,9 +398,9 @@ func decryptTypedEnvFrom(envFrom []corev1.EnvFromSource, dek []byte) error {
 func decryptUnstructuredEnvFrom(container map[string]any, dek []byte) error {
 
 	rawEnvFrom, ok := container["envFrom"].([]any)
-if !ok {
-    return nil
-}
+	if !ok {
+		return nil
+	}
 
 	for _, item := range rawEnvFrom {
 		envFrom, ok := item.(map[string]any)
