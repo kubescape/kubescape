@@ -163,3 +163,61 @@ func TestReadConfigurationResource_URIParsing(t *testing.T) {
 		})
 	}
 }
+
+func TestReadContainerProfileResource_URIParsing(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+
+	tests := []struct {
+		name      string
+		uri       string
+		wantErr   string
+		passParse bool
+	}{
+		{
+			name:    "wrong scheme",
+			uri:     "other://container-profiles/ns/manifest",
+			wantErr: "invalid URI",
+		},
+		{
+			name:      "valid URI",
+			uri:       "kubescape://container-profiles/default/my-profile",
+			passParse: true,
+		},
+		{
+			name:    "too few parts",
+			uri:     "kubescape://container-profiles/ns",
+			wantErr: "invalid URI",
+		},
+		{
+			name:    "too many parts",
+			uri:     "kubescape://container-profiles/ns/manifest/extra",
+			wantErr: "invalid URI",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := mcp.ReadResourceRequest{}
+			req.Params.URI = tt.uri
+
+			if tt.passParse {
+				defer func() {
+					r := recover()
+					if r == nil {
+						t.Fatal("expected panic from nil ksClient after successful URI parse, got none")
+					}
+				}()
+				_, _ = ksServer.ReadContainerProfileResource(context.Background(), req)
+				t.Fatal("expected panic, but call returned normally")
+			} else {
+				_, err := ksServer.ReadContainerProfileResource(context.Background(), req)
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("expected error containing %q, got: %v", tt.wantErr, err)
+				}
+			}
+		})
+	}
+}
