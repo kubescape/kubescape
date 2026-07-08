@@ -94,7 +94,7 @@ func TestResults_DeleteAll_RefusedWhileScanInProgress(t *testing.T) {
 
 	rq := httptest.NewRequest(http.MethodDelete, "/results?all=true", nil)
 	w := httptest.NewRecorder()
-	h.Results(w, rq)
+	h.DeleteResults(w, rq)
 
 	// writeError() returns 400; the exact code matters less than the fact
 	// that the request did NOT succeed (200) — a 200 would mean the guard
@@ -140,7 +140,7 @@ func TestResults_GetWhileBusy_ReturnsBusyResponse(t *testing.T) {
 
 	rq := httptest.NewRequest(http.MethodGet, "/results?id="+id, nil)
 	w := httptest.NewRecorder()
-	h.Results(w, rq)
+	h.GetResults(w, rq)
 
 	if w.Result().StatusCode != http.StatusOK {
 		t.Errorf("GET /results?id=<busy> = HTTP %d; want %d "+
@@ -176,7 +176,7 @@ func TestResults_GetEmptyID_NonOfflineReturns400(t *testing.T) {
 
 	rq := httptest.NewRequest(http.MethodGet, "/results", nil)
 	w := httptest.NewRecorder()
-	h.Results(w, rq)
+	h.GetResults(w, rq)
 
 	if w.Result().StatusCode != http.StatusBadRequest {
 		t.Errorf("GET /results (empty id, non-offline) = HTTP %d; want %d "+
@@ -270,7 +270,7 @@ func TestResults_GetEmptyID_OfflineFallback_TableDriven(t *testing.T) {
 
 			rq := httptest.NewRequest(http.MethodGet, "/results"+c.query, nil)
 			w := httptest.NewRecorder()
-			h.Results(w, rq)
+			h.GetResults(w, rq)
 
 			if w.Result().StatusCode != c.wantStatus {
 				t.Errorf("status = %d; want %d (body=%q)",
@@ -326,7 +326,7 @@ func TestResults_DeleteEmptyID_OfflineRejected(t *testing.T) {
 
 	rq := httptest.NewRequest(http.MethodDelete, "/results", nil)
 	w := httptest.NewRecorder()
-	h.Results(w, rq)
+	h.DeleteResults(w, rq)
 
 	// writeError() short-circuits with 400; what matters is that the file
 	// survives. A regression where the isLatestFallback check is dropped

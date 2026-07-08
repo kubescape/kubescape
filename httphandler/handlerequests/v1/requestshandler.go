@@ -145,23 +145,124 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 // ============================================== RESULTS ========================================================
 
-// Results API - TODO: break down to functions
-func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
-	response := utilsmetav1.Response{}
-	w.Header().Set("Content-Type", "application/json")
-
-	defer handler.recover(r.Context(), w, "")
-
-	defer r.Body.Close()
-
+// parseResultsQueryParams extracts query parameters and validates them
+func (handler *HTTPHandler) parseResultsQueryParams(w http.ResponseWriter, r *http.Request) (*ResultsQueryParams, bool) {
 	resultsQueryParams := &ResultsQueryParams{}
 	if err := schema.NewDecoder().Decode(resultsQueryParams, r.URL.Query()); err != nil {
 		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
-		return
+		return nil, false
 	}
 	logger.L().Info("requesting results", helpers.String("scanID", resultsQueryParams.ScanID), helpers.String("api", "v1/results"), helpers.String("method", r.Method))
+	return resultsQueryParams, true
+}
 
-	if r.Method == http.MethodDelete && resultsQueryParams.AllResults {
+func (handler *HTTPHandler) validateScanID(w http.ResponseWriter, resultsQueryParams *ResultsQueryParams) (bool, bool) {
+	isLatestFallback := false
+	if resultsQueryParams.ScanID == "" {
+		if handler.offline {
+			resultsQueryParams.ScanID = handler.state.getLatestID()
+			isLatestFallback = true
+		} else {
+			logger.L().Info("empty scan ID")
+			w.WriteHeader(http.StatusBadRequest)
+			response := utilsmetav1.Response{
+				Response: "scan ID is required",
+				Type:     utilsapisv1.ErrorScanResponseType,
+			}
+			w.Write(responseToBytes(&response))
+			return false, false
+		}
+	}
+
+	if resultsQueryParams.ScanID == "" { // if no scan found
+		logger.L().Info("empty scan ID")
+		w.WriteHeader(http.StatusBadRequest)
+		response := utilsmetav1.Response{
+			Response: "latest scan not found",
+			Type:     utilsapisv1.ErrorScanResponseType,
+		}
+		w.Write(responseToBytes(&response))
+		return false, false
+	}
+
+	if handler.state.isBusy(resultsQueryParams.ScanID) { // if requested ID is still scanning
+		logger.L().Info("scan in process", helpers.String("ID", resultsQueryParams.ScanID))
+		w.WriteHeader(http.StatusOK)
+		response := utilsmetav1.Response{
+			Type:     utilsapisv1.BusyScanResponseType,
+			Response: fmt.Sprintf("scanning '%s' in progress", resultsQueryParams.ScanID),
+			ID:       resultsQueryParams.ScanID,
+		}
+		w.Write(responseToBytes(&response))
+		return false, false
+	}
+
+	return isLatestFallback, true
+}
+
+// GetResults handles GET /v1/results
+func (handler *HTTPHandler) GetResults(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	defer handler.recover(r.Context(), w, "")
+	defer r.Body.Close()
+
+	resultsQueryParams, ok := handler.parseResultsQueryParams(w, r)
+	if !ok {
+		return
+	}
+
+	isLatestFallback, ok := handler.validateScanID(w, resultsQueryParams)
+	if !ok {
+		return
+	}
+
+	response := utilsmetav1.Response{ID: resultsQueryParams.ScanID}
+	logger.L().Info("requesting results", helpers.String("ID", resultsQueryParams.ScanID))
+
+	if res, err := readResultsFile(resultsQueryParams.ScanID); err != nil {
+		if scanFailed, isScanFailed := errors.AsType[*ScanFailedError](err); isScanFailed {
+			logger.L().Info("scan failed", helpers.String("ID", resultsQueryParams.ScanID), helpers.String("reason", scanFailed.Message))
+			w.WriteHeader(http.StatusInternalServerError)
+			response.Type = utilsapisv1.ErrorScanResponseType
+			response.Response = scanFailed.Message
+			if !resultsQueryParams.KeepResults && !isLatestFallback {
+				defer removeResultsFile(resultsQueryParams.ScanID)
+			}
+		} else {
+			logger.L().Info("scan result not found", helpers.String("ID", resultsQueryParams.ScanID))
+			w.WriteHeader(http.StatusNoContent)
+			response.Response = err.Error()
+		}
+	} else {
+		logger.L().Info("scan result found", helpers.String("ID", resultsQueryParams.ScanID))
+		w.WriteHeader(http.StatusOK)
+		response.Type = utilsapisv1.ResultsV1ScanResponseType
+		response.Response = res
+
+		if !resultsQueryParams.KeepResults {
+			if isLatestFallback {
+				logger.L().Info("keeping results for latest scan fallback to prevent unintended deletion", helpers.String("ID", resultsQueryParams.ScanID))
+			} else {
+				logger.L().Info("deleting results", helpers.String("ID", resultsQueryParams.ScanID))
+				defer removeResultsFile(resultsQueryParams.ScanID)
+			}
+		}
+	}
+	w.Write(responseToBytes(&response))
+}
+
+// DeleteResults handles DELETE /v1/results
+func (handler *HTTPHandler) DeleteResults(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	defer handler.recover(r.Context(), w, "")
+	defer r.Body.Close()
+
+	resultsQueryParams, ok := handler.parseResultsQueryParams(w, r)
+	if !ok {
+		return
+	}
+
+	if resultsQueryParams.AllResults {
 		logger.L().Info("deleting all results")
 		if err := handler.state.removeAllIfIdle(removeResultDirs); err != nil {
 			handler.writeError(w, err, resultsQueryParams.ScanID)
@@ -171,89 +272,19 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isLatestFallback := false
-	if resultsQueryParams.ScanID == "" {
-		if handler.offline {
-			resultsQueryParams.ScanID = handler.state.getLatestID()
-			isLatestFallback = true
-		} else {
-			logger.L().Info("empty scan ID")
-			w.WriteHeader(http.StatusBadRequest)
-			response.Response = "scan ID is required"
-			response.Type = utilsapisv1.ErrorScanResponseType
-			w.Write(responseToBytes(&response))
-			return
-		}
-	}
-
-	if resultsQueryParams.ScanID == "" { // if no scan found
-		logger.L().Info("empty scan ID")
-		w.WriteHeader(http.StatusBadRequest)
-		response.Response = "latest scan not found"
-		response.Type = utilsapisv1.ErrorScanResponseType
-		w.Write(responseToBytes(&response))
+	isLatestFallback, ok := handler.validateScanID(w, resultsQueryParams)
+	if !ok {
 		return
 	}
-	response.ID = resultsQueryParams.ScanID
 
-	if handler.state.isBusy(resultsQueryParams.ScanID) { // if requested ID is still scanning
-		logger.L().Info("scan in process", helpers.String("ID", resultsQueryParams.ScanID))
-		w.WriteHeader(http.StatusOK)
-		response.Type = utilsapisv1.BusyScanResponseType
-		response.Response = fmt.Sprintf("scanning '%s' in progress", resultsQueryParams.ScanID)
-		w.Write(responseToBytes(&response))
+	logger.L().Info("deleting results", helpers.String("ID", resultsQueryParams.ScanID))
+
+	if isLatestFallback {
+		handler.writeError(w, fmt.Errorf("scan ID must be provided for deletion"), resultsQueryParams.ScanID)
 		return
-
 	}
-
-	switch r.Method {
-	case http.MethodGet:
-		logger.L().Info("requesting results", helpers.String("ID", resultsQueryParams.ScanID))
-
-		if res, err := readResultsFile(resultsQueryParams.ScanID); err != nil {
-			if scanFailed, ok := errors.AsType[*ScanFailedError](err); ok {
-				logger.L().Info("scan failed", helpers.String("ID", resultsQueryParams.ScanID), helpers.String("reason", scanFailed.Message))
-				w.WriteHeader(http.StatusInternalServerError)
-				response.Type = utilsapisv1.ErrorScanResponseType
-				response.Response = scanFailed.Message
-				if !resultsQueryParams.KeepResults && !isLatestFallback {
-					defer removeResultsFile(resultsQueryParams.ScanID)
-				}
-			} else {
-				logger.L().Info("scan result not found", helpers.String("ID", resultsQueryParams.ScanID))
-				w.WriteHeader(http.StatusNoContent)
-				response.Response = err.Error()
-			}
-		} else {
-			logger.L().Info("scan result found", helpers.String("ID", resultsQueryParams.ScanID))
-			w.WriteHeader(http.StatusOK)
-			response.Type = utilsapisv1.ResultsV1ScanResponseType
-			response.Response = res
-
-			if !resultsQueryParams.KeepResults {
-				if isLatestFallback {
-					logger.L().Info("keeping results for latest scan fallback to prevent unintended deletion", helpers.String("ID", resultsQueryParams.ScanID))
-				} else {
-					logger.L().Info("deleting results", helpers.String("ID", resultsQueryParams.ScanID))
-					defer removeResultsFile(resultsQueryParams.ScanID)
-				}
-			}
-
-		}
-		w.Write(responseToBytes(&response))
-	case http.MethodDelete:
-		logger.L().Info("deleting results", helpers.String("ID", resultsQueryParams.ScanID))
-
-		if isLatestFallback {
-			handler.writeError(w, fmt.Errorf("scan ID must be provided for deletion"), resultsQueryParams.ScanID)
-			return
-		}
-		removeResultsFile(resultsQueryParams.ScanID)
-		w.WriteHeader(http.StatusOK)
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
-
+	removeResultsFile(resultsQueryParams.ScanID)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (handler *HTTPHandler) Live(w http.ResponseWriter, r *http.Request) {
