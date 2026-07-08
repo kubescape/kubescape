@@ -717,10 +717,7 @@ func TestTransformContainerMetadata(t *testing.T) {
 			transformer := NewMappingTransformer()
 			resource := workloadinterface.NewWorkloadObj(test.object)
 
-			assert.NoError(
-				t,
-				transformContainerMetadata(resource, transformer),
-			)
+			assert.NoError(t, transformContainerMetadata(resource, transformer))
 
 			spec, ok := resource.GetObject()["spec"].(map[string]any)
 			assert.True(t, ok, "expected spec to be a map[string]any")

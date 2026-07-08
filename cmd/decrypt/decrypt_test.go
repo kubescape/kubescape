@@ -64,6 +64,69 @@ func TestDecryptCommand(t *testing.T) {
 				)
 			require.NoError(t, err)
 
+			encryptedContainerName, err :=
+				reportcrypto.EncryptString(
+					"api",
+					dek,
+				)
+			require.NoError(t, err)
+
+			encryptedImage, err :=
+				reportcrypto.EncryptString(
+					"nginx:latest",
+					dek,
+				)
+			require.NoError(t, err)
+
+			encryptedEnvValue, err :=
+				reportcrypto.EncryptString(
+					"super-secret-password",
+					dek,
+				)
+			require.NoError(t, err)
+
+			encryptedSecretRef, err :=
+				reportcrypto.EncryptString(
+					"payment-secret",
+					dek,
+				)
+			require.NoError(t, err)
+
+			encryptedConfigMapRef, err :=
+				reportcrypto.EncryptString(
+					"payment-config",
+					dek,
+				)
+			require.NoError(t, err)
+
+			encryptedEnvFromSecret, err :=
+				reportcrypto.EncryptString(
+					"application-secret",
+					dek,
+				)
+			require.NoError(t, err)
+
+			encryptedEnvFromConfigMap, err :=
+				reportcrypto.EncryptString(
+					"application-config",
+					dek,
+				)
+			require.NoError(t, err)
+
+			encryptedImagePullSecret, err :=
+				reportcrypto.EncryptString(
+					"registry-secret",
+					dek,
+				)
+			require.NoError(t, err)
+
+			encryptedServiceAccount, err :=
+				reportcrypto.EncryptString(
+					"payment-service-account",
+					dek,
+				)
+			require.NoError(t, err)
+
 			wrappedDEK, err :=
 				reportcrypto.WrapDEK(
 					dek,
@@ -88,6 +151,54 @@ func TestDecryptCommand(t *testing.T) {
 							"metadata": map[string]any{
 								"name":      encryptedName,
 								"namespace": encryptedNamespace,
+							},
+							"spec": map[string]any{
+								"serviceAccountName": encryptedServiceAccount,
+								"imagePullSecrets": []any{
+									map[string]any{
+										"name": encryptedImagePullSecret,
+									},
+								},
+								"containers": []any{
+									map[string]any{
+										"name":  encryptedContainerName,
+										"image": encryptedImage,
+										"env": []any{
+											map[string]any{
+												"name":  "DB_PASSWORD",
+												"value": encryptedEnvValue,
+											},
+											map[string]any{
+												"name": "SECRET_TOKEN",
+												"valueFrom": map[string]any{
+													"secretKeyRef": map[string]any{
+														"name": encryptedSecretRef,
+													},
+												},
+											},
+											map[string]any{
+												"name": "CONFIG_PATH",
+												"valueFrom": map[string]any{
+													"configMapKeyRef": map[string]any{
+														"name": encryptedConfigMapRef,
+													},
+												},
+											},
+										},
+										"envFrom": []any{
+											map[string]any{
+												"secretRef": map[string]any{
+													"name": encryptedEnvFromSecret,
+												},
+											},
+											map[string]any{
+												"configMapRef": map[string]any{
+													"name": encryptedEnvFromConfigMap,
+												},
+											},
+										},
+									},
+								},
 							},
 						},
 						"source": map[string]any{
@@ -257,6 +368,65 @@ func TestDecryptCommand(t *testing.T) {
 
 			assert.Equal(t, "nginx-deployment", metadataObj["name"])
 			assert.Equal(t, "production", metadataObj["namespace"])
+
+			spec, ok := object["spec"].(map[string]any)
+			require.True(t, ok)
+
+			assert.Equal(t, "payment-service-account", spec["serviceAccountName"])
+
+			pullSecrets := spec["imagePullSecrets"].([]any)
+			require.Len(t, pullSecrets, 1)
+
+			pullSecret := pullSecrets[0].(map[string]any)
+
+			assert.Equal(t, "registry-secret", pullSecret["name"])
+
+			containers := spec["containers"].([]any)
+			require.Len(t, containers, 1)
+
+			container := containers[0].(map[string]any)
+
+			assert.Equal(t, "api", container["name"])
+
+			assert.Equal(t, "nginx:latest", container["image"])
+
+			env := container["env"].([]any)
+			require.Len(t, env, 3)
+
+			db := env[0].(map[string]any)
+
+			assert.Equal(t, "super-secret-password", db["value"])
+
+			secret := env[1].(map[string]any)
+
+			valueFrom := secret["valueFrom"].(map[string]any)
+
+			secretKey := valueFrom["secretKeyRef"].(map[string]any)
+
+			assert.Equal(t, "payment-secret", secretKey["name"])
+
+			config := env[2].(map[string]any)
+
+			valueFrom = config["valueFrom"].(map[string]any)
+
+			configMap := valueFrom["configMapKeyRef"].(map[string]any)
+
+			assert.Equal(t, "payment-config", configMap["name"])
+
+			envFrom := container["envFrom"].([]any)
+			require.Len(t, envFrom, 2)
+
+			secretRef := envFrom[0].(map[string]any)
+
+			secretObj := secretRef["secretRef"].(map[string]any)
+
+			assert.Equal(t, "application-secret", secretObj["name"])
+
+			configRef := envFrom[1].(map[string]any)
+
+			configObj := configRef["configMapRef"].(map[string]any)
+
+			assert.Equal(t, "application-config", configObj["name"])
 
 			source, ok := resource["source"].(map[string]any)
 			require.True(t, ok, "source should be an object")

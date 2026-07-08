@@ -7,6 +7,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+// TransformContainerMetadata applies the supplied Transformer to
+// sensitive container-related metadata contained within a workload.
+//
+// The traversal logic is shared across all transformation modes,
+// allowing callers to perform deterministic pseudonymization,
+// reversible encryption, or decryption using different Transformer
+// implementations.
+
 func transformContainerMetadata(resource workloadinterface.IMetadata, transformer Transformer) error {
 
 	if resource == nil {
@@ -102,10 +110,13 @@ func transformPodSpecs(node any, transformer Transformer) error {
 // transformContainerFields applies the supplied Transformer to sensitive
 // fields within an unstructured container represented as a
 // map[string]any.
+
+// This helper preserves the existing traversal behavior while delegating
+// sensitive value transformation to the supplied Transformer.
 //
-// This helper preserves the existing traversal behavior while allowing
-// callers to choose between deterministic pseudonymization
-// (MappingTransformer) and (EncryptionTransformer) provided with a Transformer abstraction above .
+// Different Transformer implementations can provide pseudonymization,
+// encryption, or decryption while sharing the same traversal logic.
+
 func transformContainerFields(container map[string]any, transformer Transformer) error {
 
 	var err error
@@ -138,6 +149,13 @@ func transformContainerFields(container map[string]any, transformer Transformer)
 
 	return nil
 }
+
+// transformContainerList applies the supplied Transformer to all
+// containers contained within a typed or unstructured pod specification.
+//
+// Container names, image references, environment variables, and
+// referenced Kubernetes resources are transformed while preserving the
+// original workload structure.
 
 func transformContainerList(obj map[string]any, key string, transformer Transformer) error {
 
@@ -524,8 +542,10 @@ func isSensitiveEnvName(name string) bool {
 // transformImagePullSecrets applies the supplied Transformer to pod image
 // pull secret references across both typed and unstructured workload
 // representations.
+//
 // Image pull secret names are transformed while preserving the original
 // workload structure.
+
 func transformImagePullSecrets(obj map[string]any, transformer Transformer) error {
 
 	rawRefs, ok := obj["imagePullSecrets"]
@@ -591,6 +611,7 @@ func transformImagePullSecrets(obj map[string]any, transformer Transformer) erro
 //
 // Service account names are transformed while preserving the workload
 // structure.
+
 func transformServiceAccountName(obj map[string]any, transformer Transformer) error {
 
 	var err error
