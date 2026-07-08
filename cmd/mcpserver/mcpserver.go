@@ -127,6 +127,46 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 	ksServer.s.AddResourceTemplate(configManifestTemplate, ksServer.ReadConfigurationResource)
 }
 
+func createRuntimeToolsAndResources(ksServer *KubescapeMcpserver) {
+	// Tool to list container profiles
+	listContainerProfilesTool := mcp.NewTool(
+		"list_container_profiles",
+		mcp.WithDescription("Discover available container profiles at workload level (this returns a list of profiles, not the profile results themselves, to get the profile results, use the get_container_profile tool)"),
+		mcp.WithString("namespace",
+			mcp.Description("Filter by namespace (optional)"),
+		),
+	)
+
+	ksServer.s.AddTool(listContainerProfilesTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return ksServer.CallTool(ctx, "list_container_profiles", request.Params.Arguments.(map[string]any))
+	})
+
+	getContainerProfileTool := mcp.NewTool(
+		"get_container_profile",
+		mcp.WithDescription("Get details of a specific container profile"),
+		mcp.WithString("namespace",
+			mcp.Description("Namespace of the profile (optional, defaults to 'kubescape')"),
+		),
+		mcp.WithString("profile_name",
+			mcp.Required(),
+			mcp.Description("Name of the container profile to get details for (get this from the list_container_profiles tool)"),
+		),
+	)
+
+	ksServer.s.AddTool(getContainerProfileTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return ksServer.CallTool(ctx, "get_container_profile", request.Params.Arguments.(map[string]any))
+	})
+
+	containerProfileTemplate := mcp.NewResourceTemplate(
+		"kubescape://container-profiles/{namespace}/{profile_name}",
+		"Container Profile",
+		mcp.WithTemplateDescription("Complete container profile for a specific workload. Use 'list_container_profiles' tool to discover available profiles."),
+		mcp.WithTemplateMIMEType("application/json"),
+	)
+
+	ksServer.s.AddResourceTemplate(containerProfileTemplate, ksServer.ReadContainerProfileResource)
+}
+
 // vulnManifestURI holds the parsed components of a vulnerability manifest resource URI.
 type vulnManifestURI struct {
 	namespace    string
@@ -246,6 +286,31 @@ func (ksServer *KubescapeMcpserver) ReadConfigurationResource(ctx context.Contex
 	responseJson, err := json.Marshal(manifest)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal configuration manifest: %w", err)
+	}
+	return []mcp.ResourceContents{mcp.TextResourceContents{
+		URI:  uri,
+		Text: string(responseJson),
+	}}, nil
+}
+
+func (ksServer *KubescapeMcpserver) ReadContainerProfileResource(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+	uri := request.Params.URI
+	if !strings.HasPrefix(uri, "kubescape://container-profiles/") {
+		return nil, fmt.Errorf("invalid URI: %s", uri)
+	}
+	parts := strings.Split(uri[len("kubescape://container-profiles/"):], "/")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid URI: %s", uri)
+	}
+	namespace := parts[0]
+	profileName := parts[1]
+	profile, err := ksServer.ksClient.ContainerProfiles(namespace).Get(ctx, profileName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container profile: %w", err)
+	}
+	responseJson, err := json.Marshal(profile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal container profile: %w", err)
 	}
 	return []mcp.ResourceContents{mcp.TextResourceContents{
 		URI:  uri,
@@ -497,6 +562,84 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 				},
 			},
 		}, nil
+	case "list_container_profiles":
+		namespace := metav1.NamespaceAll
+		if ns, ok := arguments["namespace"]; ok {
+			nsStr, ok := ns.(string)
+			if !ok {
+				return nil, fmt.Errorf("namespace must be a string")
+			}
+			if nsStr != "" {
+				namespace = nsStr
+			}
+		}
+		profiles, err := ksServer.ksClient.ContainerProfiles(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return nil, err
+		}
+		logger.L().Info(fmt.Sprintf("Found %d container profiles", len(profiles.Items)))
+		containerProfilesList := []map[string]any{}
+		for _, profile := range profiles.Items {
+			item := map[string]any{
+				"namespace":    profile.Namespace,
+				"profile_name": profile.Name,
+				"resource_uri": fmt.Sprintf("kubescape://container-profiles/%s/%s", profile.Namespace, profile.Name),
+			}
+			containerProfilesList = append(containerProfilesList, item)
+		}
+		result := map[string]any{
+			"container_profiles": map[string]any{
+				"profiles": containerProfilesList,
+			},
+			"available_templates": map[string]string{
+				"container_profile_details": "kubescape://container-profiles/{namespace}/{profile_name}",
+			},
+		}
+		content, err := json.Marshal(result)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: string(content),
+				},
+			},
+		}, nil
+	case "get_container_profile":
+		namespace, ok := arguments["namespace"]
+		if !ok {
+			namespace = "kubescape"
+		}
+		namespaceStr, ok := namespace.(string)
+		if !ok {
+			return nil, fmt.Errorf("namespace must be a string")
+		}
+		profileName, ok := arguments["profile_name"]
+		if !ok {
+			return nil, fmt.Errorf("profile_name is required")
+		}
+		profileNameStr, ok := profileName.(string)
+		if !ok {
+			return nil, fmt.Errorf("profile_name must be a string")
+		}
+		profile, err := ksServer.ksClient.ContainerProfiles(namespaceStr).Get(ctx, profileNameStr, metav1.GetOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get container profile: %w", err)
+		}
+		responseJson, err := json.Marshal(profile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal container profile: %w", err)
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: string(responseJson),
+				},
+			},
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -528,6 +671,7 @@ func mcpServerEntrypoint() error {
 
 	createVulnerabilityToolsAndResources(ksServer)
 	createConfigurationsToolsAndResources(ksServer)
+	createRuntimeToolsAndResources(ksServer)
 
 	// Start the server
 	if err := server.ServeStdio(s); err != nil {
