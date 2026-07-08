@@ -315,8 +315,8 @@ github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj
 github.com/armon/go-radix v1.0.0/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 h1:0CwZNZbxp69SHPdPJAN/hZIm0C4OItdklCFmMRWYpio=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5/go.mod h1:wHh0iHkYZB8zMSxRWpUBQtwG5a7fFgvEO+odwuTv2gs=
-github.com/armosec/armoapi-go v0.0.720 h1:mtxUw2wWPRSQWcUf89Eoc9J81SBIC0YaK66XqAXuhCQ=
-github.com/armosec/armoapi-go v0.0.720/go.mod h1:9jAH0g8ZsryhiBDd/aNMX4+n10bGwTx/doWCyyjSxts=
+github.com/armosec/armoapi-go v0.0.730 h1:nz0pNP7gstPzSaHPi2o+5SzTu1tr711Uq+YBOg8jOWM=
+github.com/armosec/armoapi-go v0.0.730/go.mod h1:1l+70fBK09F7zI2jArrPUWVHaLkijg+sQutFTmE6HRs=
 github.com/armosec/gojay v1.2.17 h1:VSkLBQzD1c2V+FMtlGFKqWXNsdNvIKygTKJI9ysY8eM=
 github.com/armosec/gojay v1.2.17/go.mod h1:vuvX3DlY0nbVrJ0qCklSS733AWMoQboq3cFyuQW9ybc=
 github.com/armosec/utils-go v0.0.58 h1:g9RnRkxZAmzTfPe2ruMo2OXSYLwVSegQSkSavOfmaIE=
@@ -1204,8 +1204,8 @@ github.com/kubescape/go-logger v0.0.28 h1:xulKTp9kOg3rD98sopFELQ6yZCHQoQXMDzteoS
 github.com/kubescape/go-logger v0.0.28/go.mod h1:YZHFjwGCDar1hP9OyBLE46oR7a0Y/Z/0FperDo8+9D0=
 github.com/kubescape/k8s-interface v0.0.209 h1:icdBpzSZsfBE4HYmKPbJuxIMWnhIGkixocbIQT4If7k=
 github.com/kubescape/k8s-interface v0.0.209/go.mod h1:WNYUG93aZ5kDmuaRKFLtVhp18Yc6EfaHdD1gLYtVTN4=
-github.com/kubescape/opa-utils v0.0.300 h1:dFO06j10NJUUMlAy4032yy8SVlvaOyOk3jYWQwlyaFg=
-github.com/kubescape/opa-utils v0.0.300/go.mod h1:v+ZV4gEaP2Tpwv1ev1kJM7+habuNUUeC1BO2XvnrUfY=
+github.com/kubescape/opa-utils v0.0.301 h1:SK+/O2ORWD07q75zEYoc0hhtXpWA5/OPvSEudAZTpQg=
+github.com/kubescape/opa-utils v0.0.301/go.mod h1:uBft9WOfZRwQBzrJNjHklMnZv7ipgChrMTUd3Eapi3Y=
 github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 h1:SqlwF8G+oFazeYmZQKoPczLEflBQpwpHCU8DoLLyfj8=
 github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520/go.mod h1:wuxMUSDzGUyWd25IJfBzEJ/Udmw2Vy7npj+MV3u3GrU=
 github.com/kubescape/regolibrary/v2 v2.0.1 h1:7lKj171gslgTbbcmmGVHk34AZNqxForOXZIINoQfdzQ=
