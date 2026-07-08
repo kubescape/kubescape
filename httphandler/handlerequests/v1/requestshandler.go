@@ -265,7 +265,7 @@ func (handler *HTTPHandler) DeleteResults(w http.ResponseWriter, r *http.Request
 	if resultsQueryParams.AllResults {
 		logger.L().Info("deleting all results")
 		if err := handler.state.removeAllIfIdle(removeResultDirs); err != nil {
-			handler.writeError(w, err, resultsQueryParams.ScanID)
+			handler.writeError(w, err, "")
 			return
 		}
 		w.WriteHeader(http.StatusOK)
