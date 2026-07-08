@@ -138,7 +138,11 @@ func createRuntimeToolsAndResources(ksServer *KubescapeMcpserver) {
 	)
 
 	ksServer.s.AddTool(listContainerProfilesTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return ksServer.CallTool(ctx, "list_container_profiles", request.Params.Arguments.(map[string]any))
+		args, ok := request.Params.Arguments.(map[string]any)
+		if !ok {
+			args = map[string]any{}
+		}
+		return ksServer.CallTool(ctx, "list_container_profiles", args)
 	})
 
 	getContainerProfileTool := mcp.NewTool(
@@ -154,7 +158,11 @@ func createRuntimeToolsAndResources(ksServer *KubescapeMcpserver) {
 	)
 
 	ksServer.s.AddTool(getContainerProfileTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return ksServer.CallTool(ctx, "get_container_profile", request.Params.Arguments.(map[string]any))
+		args, ok := request.Params.Arguments.(map[string]any)
+		if !ok {
+			args = map[string]any{}
+		}
+		return ksServer.CallTool(ctx, "get_container_profile", args)
 	})
 
 	containerProfileTemplate := mcp.NewResourceTemplate(
