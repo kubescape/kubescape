@@ -16,7 +16,7 @@ import (
 
 // anonymizeSession rewrites sensitive resource identifiers and metadata while
 // preserving internal referential integrity across the full OPA session.
-func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, repoTransformer Transformer) error {
+func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, transformer Transformer) error {
 	if session == nil {
 		return nil
 	}
@@ -26,7 +26,7 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, repoTran
 	newAllResources := make(map[string]workloadinterface.IMetadata, len(session.AllResources))
 	for oldID, resource := range session.AllResources {
 
-		if err := transformResourceMetadata(resource, repoTransformer); err != nil {
+		if err := transformResourceMetadata(resource, transformer); err != nil {
 			return err
 		}
 		// sourcePath leaks manifest filenames/line references in hidden output
@@ -38,9 +38,12 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, repoTran
 		// other sensitive metadata at both top-level and nested workload templates.
 		anonymizeResourceAnnotations(resource, mapping)
 
-		// Container-related anonymization is handled separately to preserve the
-		// existing typed/unstructured traversal behavior.
-		anonymizeContainerMetadata(resource, mapping)
+		// Container-related metadata is transformed separately to preserve the
+		// existing typed/unstructured traversal behavior while supporting
+		// multiple transformation strategies.
+		if err := transformContainerMetadata(resource, transformer); err != nil {
+			return err
+		}
 
 		if len(session.LabelsToCopy) > 0 {
 			anonymizeResourceLabels(resource, session.LabelsToCopy, mapping)
@@ -96,7 +99,7 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, repoTran
 
 		if err := transformResourceSource(
 			&source,
-			repoTransformer,
+			transformer,
 		); err != nil {
 			return err
 		}
@@ -121,17 +124,14 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, repoTran
 	session.ResourceAttackTracks = newResourceAttackTracks
 
 	if session.Metadata != nil {
-		if err := transformRepoContextMetadata(session.Metadata.ContextMetadata.RepoContextMetadata, repoTransformer); err != nil {
+		if err := transformRepoContextMetadata(session.Metadata.ContextMetadata.RepoContextMetadata, transformer); err != nil {
 			return err
 		}
 	}
 
 	if session.Report != nil {
 
-		if err := transformRepoContextMetadata(
-			session.Report.Metadata.ContextMetadata.RepoContextMetadata,
-			repoTransformer,
-		); err != nil {
+		if err := transformRepoContextMetadata(session.Report.Metadata.ContextMetadata.RepoContextMetadata, transformer); err != nil {
 			return err
 		}
 

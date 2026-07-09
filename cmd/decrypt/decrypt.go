@@ -124,10 +124,11 @@ func GetDecryptCommand() *cobra.Command {
 								err,
 							)
 						}
-						if err := reportcrypto.DecryptResourceMetadata(
-							resource,
-							dek,
-						); err != nil {
+						if err := reportcrypto.DecryptResourceMetadata(resource, dek); err != nil {
+							return err
+						}
+
+						if err := reportcrypto.DecryptContainerMetadata(resource, dek); err != nil {
 							return err
 						}
 						newID := resource.GetID()
