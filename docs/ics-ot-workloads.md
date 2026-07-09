@@ -6,7 +6,7 @@ This guide explains how to use Kubescape to scan Industrial Control System (ICS)
 
 - The `kubescape` CLI installed
 - The example manifests under `examples/ics-ot/` in this repository
-- (Optional) A kubeconfig pointing at a target cluster. The walkthrough uses `--keep-local`, so no cluster is required
+- (Optional) A kubeconfig pointing at a target cluster. No cluster is required for the walkthrough because the scan target is a manifest file. `--keep-local` additionally prevents results from being sent to the configured backend
 - (Optional) `jq` for slicing the JSON output
 
 ## How It Works
@@ -168,7 +168,7 @@ In a plant-network deployment, combine this with upstream firewall rules at the 
 
 ## Framework Mappings
 
-NIST SP 800-82 Rev. 3 and IEC 62443-4-2 both acknowledge that OT systems have legitimate deviations from IT hardening baselines, as long as those deviations are documented, scoped, and compensated for with network segmentation. The Kubescape controls listed above map most naturally to the network integrity and least-functionality families of those frameworks (PR.AC-5 and PR.PT-3 in 800-82 r3; SR 5.1, SR 5.2, and SR 7.6 in 24443-4-2). Treat these as "maps to" relationships rather than one-to-one equivalences. Always confirm the identifiers against the current source publication before including them in a compliance report; Kubescape findings are an input to the protective-requirement analysis, not a substitute for it.
+NIST SP 800-82 Rev. 3 and IEC 62443-4-2 both acknowledge that OT systems have legitimate deviations from IT hardening baselines, as long as those deviations are documented, scoped, and compensated for with network segmentation. The Kubescape controls listed above map most naturally to the network integrity and least-functionality families of those frameworks (PR.AC-5 and PR.PT-3 in 800-82 r3; SR 5.1, SR 5.2, and SR 7.6 in 62443-4-2). Treat these as "maps to" relationships rather than one-to-one equivalences. Always confirm the identifiers against the current source publication before including them in a compliance report; Kubescape findings are an input to the protective-requirement analysis, not a substitute for it.
 
 ## Troubleshooting
 
