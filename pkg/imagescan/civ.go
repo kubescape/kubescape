@@ -20,7 +20,7 @@ type ContainerImageScanStatus struct {
 
 // ContainerImageVulnerabilityReport contains the vulnerabilities found in an image
 type ContainerImageVulnerabilityReport struct {
-	ImageID       ContainerImageIdentifier `json:"imageID"`
+	ImageID         ContainerImageIdentifier `json:"imageID"`
 	Vulnerabilities []any                    `json:"vulnerabilities,omitempty"` // TBD: Map to appropriate vulnerability struct
 }
 
