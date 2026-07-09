@@ -100,7 +100,7 @@ metadata:
 spec:
   policyName: kubescape-c-1000
 `
-	index, err := parseVAPBundle([]byte(bundle))
+	index, _, err := parseVAPBundle([]byte(bundle))
 	require.NoError(t, err)
 	assert.Len(t, index, 1)
 	assert.Contains(t, index, "C-1000")
@@ -111,18 +111,55 @@ spec:
 // an empty key.
 func TestParseVAPBundleSkipsNoControlID(t *testing.T) {
 	bundle := vapDoc("cluster-policy-helper", "") + "---\n" + vapDoc("kubescape-c-1000", "C-1000")
-	index, err := parseVAPBundle([]byte(bundle))
+	index, _, err := parseVAPBundle([]byte(bundle))
 	require.NoError(t, err)
 	assert.Len(t, index, 1)
 	assert.Contains(t, index, "C-1000")
 	assert.NotContains(t, index, "")
 }
 
-// TestParseVAPBundleDuplicateControl proves two policies claiming the same control
-// is a hard error, not a silent last-one-wins.
+// TestParseVAPBundleDuplicateControl proves a duplicated control poisons only
+// itself: neither copy silently wins (it is dropped from the index and returned
+// in the duplicates set), while the rest of the bundle still indexes. One bad
+// control must not take the whole engine offline.
 func TestParseVAPBundleDuplicateControl(t *testing.T) {
-	bundle := vapDoc("kubescape-c-1000-a", "C-1000") + "---\n" + vapDoc("kubescape-c-1000-b", "C-1000")
-	_, err := parseVAPBundle([]byte(bundle))
+	bundle := vapDoc("kubescape-c-1000-a", "C-1000") +
+		"---\n" + vapDoc("kubescape-c-1000-b", "C-1000") +
+		"---\n" + vapDoc("kubescape-c-2000", "C-2000")
+	index, duplicates, err := parseVAPBundle([]byte(bundle))
+	require.NoError(t, err)
+
+	assert.NotContains(t, index, "C-1000", "a duplicated control must not silently win")
+	assert.Contains(t, duplicates, "C-1000")
+	assert.Contains(t, index, "C-2000", "an unrelated control must still index")
+}
+
+// TestLoadVAPRefusesMatchConditions proves a policy with a matchConditions gate is
+// captured but refused, rather than having its validations run unconditionally.
+// Today's bundle ships none, but a future sync could, and running one offline
+// would emit violations live admission (which honors the gate) never would.
+func TestLoadVAPRefusesMatchConditions(t *testing.T) {
+	bundle := `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kubescape-c-1001
+  labels:
+    controlId: C-1001
+spec:
+  matchConditions:
+  - name: only-kube-system
+    expression: "object.metadata.namespace == 'kube-system'"
+  validations:
+  - expression: "false"
+`
+	index, _, err := parseVAPBundle([]byte(bundle))
+	require.NoError(t, err)
+
+	vap := index["C-1001"]
+	require.NotNil(t, vap)
+	require.NotEmpty(t, vap.matchConditions, "matchConditions must be captured, not dropped")
+
+	err = vap.requireSupported()
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "C-1000")
+	assert.Contains(t, err.Error(), "matchConditions")
 }
