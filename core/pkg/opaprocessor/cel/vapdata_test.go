@@ -10,12 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The loader (a later PR) will //go:embed this directory. These tests guard the
-// prerequisite: the vendored bundle is actually in the tree and looks like the
-// cel-admission-library release, so `make sync-vap` populated it and did not,
-// say, leave an empty directory or an HTML error page.
-
-const vapdataDir = "vapdata"
+// These tests guard the prerequisite the loader (loader.go) //go:embeds: the
+// vendored bundle is actually in the tree and looks like the cel-admission-library
+// release, so `make sync-vap` populated it and did not, say, leave an empty
+// directory or an HTML error page. (vapdataDir is declared in loader.go.)
 
 // TestVapdataBundlePresent checks the three files the engine relies on exist and
 // are non-empty.
