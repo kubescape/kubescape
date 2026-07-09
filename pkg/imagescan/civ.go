@@ -1,6 +1,11 @@
 package imagescan
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"github.com/docker/distribution/manifest/schema2"
+)
 
 // ContainerImageIdentifier uniquely identifies a container image
 type ContainerImageIdentifier struct {
@@ -18,36 +23,43 @@ type ContainerImageScanStatus struct {
 	LastScanDate    time.Time                `json:"lastScanDate"`
 }
 
+// Vulnerability represents a single container vulnerability
+type Vulnerability struct {
+	ID          string   `json:"id"`
+	Severity    string   `json:"severity"`
+	Description string   `json:"description,omitempty"`
+	Links       []string `json:"links,omitempty"`
+}
+
 // ContainerImageVulnerabilityReport contains the vulnerabilities found in an image
 type ContainerImageVulnerabilityReport struct {
 	ImageID         ContainerImageIdentifier `json:"imageID"`
-	Vulnerabilities []any                    `json:"vulnerabilities,omitempty"` // TBD: Map to appropriate vulnerability struct
+	Vulnerabilities []Vulnerability          `json:"vulnerabilities,omitempty"`
 }
 
 // ContainerImageInformation contains the metadata and bill of materials for an image
 type ContainerImageInformation struct {
 	ImageID       ContainerImageIdentifier `json:"imageID"`
 	Bom           []string                 `json:"bom"`
-	ImageManifest any                      `json:"imageManifest"` // Docker package definition (e.g. github.com/docker/distribution/manifest/schema2.Manifest)
+	ImageManifest schema2.Manifest         `json:"imageManifest"`
 }
 
 // IContainerImageVulnerabilityAdaptor defines the unified interface for interacting with
 // external container image registries and vulnerability scanners (e.g. Harbor, ECR).
 type IContainerImageVulnerabilityAdaptor interface {
 	// Login authenticates with the external provider.
-	// Credentials are coming from user input (CLI or configuration file) and they are abstracted at string to string map level
-	// so an example use would be like registry: "simpledockerregistry:80" and credentials like {"username":"joedoe","password":"abcd1234"}
-	Login(registry string, credentials map[string]string) error
+	// Credentials use the standard RegistryCredentials struct for compile-checked auth.
+	Login(ctx context.Context, registry string, credentials RegistryCredentials) error
 
 	// DescribeAdaptor provides a string description of the adaptor for help purposes.
 	DescribeAdaptor() string
 
 	// GetImagesScanStatus retrieves the scan status for a list of image identifiers.
-	GetImagesScanStatus(imageIDs []ContainerImageIdentifier) ([]ContainerImageScanStatus, error)
+	GetImagesScanStatus(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageScanStatus, error)
 
 	// GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
-	GetImagesVulnerabilities(imageIDs []ContainerImageIdentifier) ([]ContainerImageVulnerabilityReport, error)
+	GetImagesVulnerabilities(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageVulnerabilityReport, error)
 
 	// GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
-	GetImagesInformation(imageIDs []ContainerImageIdentifier) ([]ContainerImageInformation, error)
+	GetImagesInformation(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageInformation, error)
 }

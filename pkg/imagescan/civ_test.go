@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/docker/distribution/manifest/schema2"
 )
 
 func TestContainerImageIdentifierJSON(t *testing.T) {
@@ -65,8 +67,8 @@ func TestContainerImageVulnerabilityReportJSON(t *testing.T) {
 			Repository: "library/nginx",
 			Tag:        "latest",
 		},
-		Vulnerabilities: []any{
-			map[string]any{"id": "CVE-2023-1234", "severity": "HIGH"},
+		Vulnerabilities: []Vulnerability{
+			{ID: "CVE-2023-1234", Severity: "HIGH"},
 		},
 	}
 
@@ -93,8 +95,8 @@ func TestContainerImageInformationJSON(t *testing.T) {
 			Tag:        "latest",
 		},
 		Bom: []string{"pkg1", "pkg2"},
-		ImageManifest: map[string]any{
-			"schemaVersion": float64(2),
+		ImageManifest: schema2.Manifest{
+			Versioned: schema2.SchemaVersion,
 		},
 	}
 
