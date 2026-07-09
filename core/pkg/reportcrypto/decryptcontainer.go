@@ -2,7 +2,6 @@ package reportcrypto
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	corev1 "k8s.io/api/core/v1"
@@ -257,10 +256,7 @@ func decryptTypedEnv(envVars []corev1.EnvVar, dek []byte) error {
 	for i := range envVars {
 		envVar := &envVars[i]
 
-		if envVar.Value != "" &&
-			(isSensitiveEnvName(envVar.Name) ||
-				isSensitiveEnvValue(envVar.Value)) {
-
+		if envVar.Value != "" {
 			envVar.Value, err = decryptIfEncrypted(envVar.Value, dek)
 			if err != nil {
 				return err
@@ -321,13 +317,7 @@ func decryptUnstructuredEnv(container map[string]any, dek []byte) error {
 			continue
 		}
 
-		name, _ := envVar["name"].(string)
-
-		if value, ok := envVar["value"].(string); ok &&
-			value != "" &&
-			(isSensitiveEnvName(name) ||
-				isSensitiveEnvValue(value)) {
-
+		if value, ok := envVar["value"].(string); ok && value != "" {
 			value, err = decryptIfEncrypted(value, dek)
 			if err != nil {
 				return err
@@ -548,76 +538,4 @@ func decryptServiceAccountName(obj map[string]any, dek []byte) error {
 	}
 
 	return nil
-}
-
-// isSensitiveEnvValue reports whether an env var value looks like a secret.
-func isSensitiveEnvValue(value string) bool {
-	value = strings.ToLower(value)
-
-	sensitivePatterns := []string{
-		"://",
-		"password=",
-		"pwd=",
-		"user id=",
-		"userid=",
-		"dsn=",
-		"sslmode=",
-	}
-
-	for _, pattern := range sensitivePatterns {
-		if strings.Contains(value, pattern) {
-			return true
-		}
-	}
-
-	return false
-}
-
-// isSensitiveEnvName reports whether an env var name looks like a credential.
-func isSensitiveEnvName(name string) bool {
-	name = strings.ToLower(name)
-
-	normalized := name
-	for _, sep := range []string{
-		"_",
-		"-",
-		".",
-		" ",
-	} {
-		normalized = strings.ReplaceAll(
-			normalized,
-			sep,
-			"",
-		)
-	}
-
-	sensitivePatterns := []string{
-		"password",
-		"passwd",
-		"pwd",
-		"secret",
-		"token",
-		"apikey",
-		"accesskey",
-		"privatekey",
-		"credential",
-		"databaseurl",
-		"dburl",
-		"redisurl",
-		"mongouri",
-		"mongodburi",
-		"dsn",
-		"connectionstring",
-	}
-
-	for _, pattern := range sensitivePatterns {
-		if strings.Contains(
-			normalized,
-			pattern,
-		) {
-			return true
-		}
-	}
-
-	return false
 }

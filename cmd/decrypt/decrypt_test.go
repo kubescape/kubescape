@@ -80,11 +80,10 @@ func TestDecryptCommand(t *testing.T) {
 
 			encryptedEnvValue, err :=
 				reportcrypto.EncryptString(
-					"super-secret-password",
+					"postgres://user:s3cret@db:5432/app",
 					dek,
 				)
 			require.NoError(t, err)
-
 			encryptedSecretRef, err :=
 				reportcrypto.EncryptString(
 					"payment-secret",
@@ -165,7 +164,7 @@ func TestDecryptCommand(t *testing.T) {
 										"image": encryptedImage,
 										"env": []any{
 											map[string]any{
-												"name":  "DB_PASSWORD",
+												"name":  "DATABASE_CONN",
 												"value": encryptedEnvValue,
 											},
 											map[string]any{
@@ -395,7 +394,7 @@ func TestDecryptCommand(t *testing.T) {
 
 			db := env[0].(map[string]any)
 
-			assert.Equal(t, "super-secret-password", db["value"])
+			assert.Equal(t, "postgres://user:s3cret@db:5432/app", db["value"])
 
 			secret := env[1].(map[string]any)
 

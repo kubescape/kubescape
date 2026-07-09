@@ -780,7 +780,9 @@ func TestIsSensitiveEnvName_SeparatorlessVariants(t *testing.T) {
 }
 
 func TestTransformUnstructuredEnv_LeaksAPIKeyValue(t *testing.T) {
-	const secret = "AKIAIOSFODNN7EXAMPLE" //nolint:gosec
+
+	//nolint:gosec // Hardcoded test credential is intentional for transformation regression tests.
+	const secret = "AKIAIOSFODNN7EXAMPLE"
 
 	container := map[string]any{
 		"env": []any{
