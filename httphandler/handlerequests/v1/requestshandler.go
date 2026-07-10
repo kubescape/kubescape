@@ -127,6 +127,16 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		// wait for scan to complete
 		response = <-scanRequestParams.resp
 
+		if response.Type == utilsapisv1.ResultsV1ScanResponseType {
+			// populate the response with the report before it is deleted below
+			if res, err := readResultsFile(scanID); err != nil {
+				response.Type = utilsapisv1.ErrorScanResponseType
+				response.Response = err.Error()
+			} else {
+				response.Response = res
+			}
+		}
+
 		if !scanRequestParams.scanQueryParams.KeepResults {
 			// delete results after returning
 			logger.L().Debug("deleting results", helpers.String("ID", scanID))
