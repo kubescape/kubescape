@@ -27,6 +27,8 @@ func NewAWSECRAdaptor() *AWSECRAdaptor {
 }
 
 // Login authenticates with AWS. It prioritizes the default credential chain.
+// Explicit credentials passed via RegistryCredentials are intentionally unsupported
+// as AWS SDK v2 relies heavily on IAM Roles for Service Accounts (IRSA) and default configuration.
 func (a *AWSECRAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
@@ -75,8 +77,7 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 
 		out, err := a.client.DescribeImageScanFindings(ctx, input)
 		if err != nil {
-			statuses = append(statuses, status)
-			continue
+			return nil, fmt.Errorf("failed to describe image scan findings for repository %s: %w", imageID.Repository, err)
 		}
 
 		if out.ImageScanStatus != nil && out.ImageScanStatus.Status == types.ScanStatusComplete {
@@ -113,9 +114,13 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			},
 		}
 
-		for {
+		var fetchErr error
+		const maxPages = 1000
+
+		for page := 0; ; page++ {
 			out, err := a.client.DescribeImageScanFindings(ctx, input)
 			if err != nil {
+				fetchErr = err
 				break
 			}
 			if out.ImageScanFindings != nil {
@@ -132,7 +137,15 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			if out.NextToken == nil {
 				break
 			}
+			if page >= maxPages {
+				fetchErr = fmt.Errorf("exceeded max pages (%d) fetching vulnerabilities for image %s", maxPages, imageID.Repository)
+				break
+			}
 			input.NextToken = out.NextToken
+		}
+
+		if fetchErr != nil {
+			return nil, fmt.Errorf("failed to fetch vulnerabilities for repository %s: %w", imageID.Repository, fetchErr)
 		}
 
 		reports = append(reports, report)
@@ -153,29 +166,6 @@ func (a *AWSECRAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Con
 		info := ContainerImageInformation{
 			ImageID: imageID,
 			Bom:     []string{},
-		}
-
-		input := &ecr.BatchGetImageInput{
-			RepositoryName: aws.String(imageID.Repository),
-			ImageIds: []types.ImageIdentifier{
-				{
-					ImageDigest: aws.String(imageID.Hash),
-					ImageTag:    aws.String(imageID.Tag),
-				},
-			},
-		}
-
-		if imageID.Tag == "" {
-			input.ImageIds[0].ImageTag = nil
-		}
-		if imageID.Hash == "" {
-			input.ImageIds[0].ImageDigest = nil
-		}
-
-		out, err := a.client.BatchGetImage(ctx, input)
-		if err != nil || len(out.Images) == 0 {
-			infos = append(infos, info)
-			continue
 		}
 
 		infos = append(infos, info)
