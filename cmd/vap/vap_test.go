@@ -473,11 +473,32 @@ func TestCreatePolicyBindingCmdValidation(t *testing.T) {
 	})
 
 	t.Run("known parameterized control requires parameter reference", func(t *testing.T) {
+		// C-0009 declares a paramKind in the bundle but was missing from the
+		// retired hand-typed params map, so this exact invocation used to emit
+		// a broken binding silently.
 		cmd := getCreatePolicyBindingCmd()
-		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0012"})
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0009"})
 		err := cmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "requires --parameter-reference")
+	})
+
+	t.Run("parameterized policy by name requires parameter reference", func(t *testing.T) {
+		// The params check used to fire only on the --control path; --policy
+		// could silently generate a broken binding for the same policy. Also
+		// covers a cluster helper policy that no control lookup can reach.
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "cluster-policy-deny-insecure-capabilities"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires --parameter-reference")
+	})
+
+	t.Run("policy name outside the bundle skips the params check", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "some-custom-policy"})
+		err := cmd.Execute()
+		assert.NoError(t, err)
 	})
 
 	t.Run("known parameterized control accepts parameter reference", func(t *testing.T) {
@@ -586,19 +607,18 @@ func TestResolvePolicyName(t *testing.T) {
 			wantErr:   "unsupported control ID",
 		},
 		{
-			name:      "C-0199 resolves",
+			name:       "policy name is lowercased like control IDs are uppercased",
+			policyName: "KUBESCAPE-C-0016-Allow-Privilege-Escalation",
+			want:       "kubescape-c-0016-allow-privilege-escalation",
+		},
+		{
+			// The retired hand-typed map listed controls (e.g. C-0199) that no
+			// released bundle ships; resolution now matches what deploy-library
+			// actually deploys, so those fail instead of producing a binding to
+			// a policy that does not exist on the cluster.
+			name:      "control absent from the released bundle",
 			controlID: "C-0199",
-			want:      "kubescape-c-0199-deny-net-raw-capability",
-		},
-		{
-			name:      "C-0200 resolves",
-			controlID: "C-0200",
-			want:      "kubescape-c-0200-deny-added-capabilities",
-		},
-		{
-			name:      "C-0201 resolves",
-			controlID: "C-0201",
-			want:      "kubescape-c-0201-deny-capabilities-assigned",
+			wantErr:   "unsupported control ID",
 		},
 	}
 
