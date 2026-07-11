@@ -29,7 +29,7 @@ func (m *mockECRClient) BatchGetImage(ctx context.Context, params *ecr.BatchGetI
 
 func TestAWSECRAdaptor_GetImagesScanStatus(t *testing.T) {
 	now := time.Now()
-	
+
 	tests := []struct {
 		name          string
 		mockOut       *ecr.DescribeImageScanFindingsOutput

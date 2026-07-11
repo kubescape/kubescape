@@ -154,7 +154,7 @@ func (a *AWSECRAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Con
 			ImageID: imageID,
 			Bom:     []string{},
 		}
-		
+
 		input := &ecr.BatchGetImageInput{
 			RepositoryName: aws.String(imageID.Repository),
 			ImageIds: []types.ImageIdentifier{
