@@ -11,6 +11,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor/cel"
 	"github.com/spf13/cobra"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -95,9 +96,30 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// A policy that declares a paramKind needs a ParamRef on its binding
+			// to be functional, so refuse to emit a silently broken binding. The
+			// check covers both flags: --control reads the paramKind off the
+			// control's policy, --policy off the named policy (a name outside
+			// the embedded bundle is left unchecked — we know nothing about it).
 			normalizedControlID := strings.ToUpper(strings.TrimSpace(controlID))
-			if normalizedControlID != "" && parameterReference == "" && celAdmissionControlsRequiringParams[normalizedControlID] {
-				return fmt.Errorf("control %s requires --parameter-reference because its CEL policy uses params", normalizedControlID)
+			if parameterReference == "" {
+				if normalizedControlID != "" {
+					paramKind, err := cel.ParamKindForControl(normalizedControlID)
+					if err != nil {
+						return err
+					}
+					if paramKind != nil {
+						return fmt.Errorf("control %s requires --parameter-reference because its CEL policy uses params", normalizedControlID)
+					}
+				} else {
+					paramKind, found, err := cel.ParamKindForPolicy(resolvedPolicyName)
+					if err != nil {
+						return err
+					}
+					if found && paramKind != nil {
+						return fmt.Errorf("policy %s requires --parameter-reference because it uses params", resolvedPolicyName)
+					}
+				}
 			}
 			if err := isValidK8sObjectName(resolvedPolicyName); err != nil {
 				return fmt.Errorf("invalid policy name %s: %w", resolvedPolicyName, err)
@@ -149,67 +171,13 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 	return createPolicyBindingCmd
 }
 
-var celAdmissionPolicyByControlID = map[string]string{
-	"C-0001": "kubescape-c-0001-deny-forbidden-container-registries",
-	"C-0004": "kubescape-c-0004-deny-resources-with-memory-limit-or-request-not-set",
-	"C-0009": "kubescape-c-0009-deny-resources-with-memory-or-cpu-limit-not-set",
-	"C-0012": "kubescape-c-0012-deny-resources-with-sensitive-information-in-environment-variables",
-	"C-0013": "kubescape-c-0013-deny-resources-with-capability-to-run-as-root",
-	"C-0016": "kubescape-c-0016-allow-privilege-escalation",
-	"C-0017": "kubescape-c-0017-deny-resources-with-mutable-container-filesystem",
-	"C-0018": "kubescape-c-0018-deny-resources-without-configured-readiness-probes",
-	"C-0020": "kubescape-c-0020-deny-resources-having-volumes-with-potential-access-to-known-cloud-credentials",
-	"C-0026": "kubescape-c-0026-deny-cronjobs",
-	"C-0034": "kubescape-c-0034-deny-resources-with-automount-service-account-token-enabled",
-	"C-0038": "kubescape-c-0038-deny-resources-with-host-ipc-or-pid-privileges",
-	"C-0041": "kubescape-c-0041-deny-resources-with-host-network-access",
-	"C-0042": "kubescape-c-0042-deny-resources-with-ssh-server-running",
-	"C-0044": "kubescape-c-0044-deny-resources-with-host-port",
-	"C-0045": "kubescape-c-0045-deny-workloads-with-hostpath-volumes-readonly-not-false",
-	"C-0046": "kubescape-c-0046-deny-resources-with-insecure-capabilities",
-	"C-0048": "kubescape-c-0048-deny-workloads-with-hostpath-mounts",
-	"C-0050": "kubescape-c-0050-deny-resources-with-cpu-limit-or-request-not-set",
-	"C-0055": "kubescape-c-0055-linux-hardening",
-	"C-0056": "kubescape-c-0056-deny-resources-without-configured-liveliness-probes",
-	"C-0057": "kubescape-c-0057-privileged-container-denied",
-	"C-0061": "kubescape-c-0061-deny-workloads-in-default-namespace",
-	"C-0062": "kubescape-c-0062-deny-resources-having-containers-with-sudo-in-entrypoint",
-	"C-0073": "kubescape-c-0073-deny-naked-pods",
-	"C-0074": "kubescape-c-0074-resources-mounting-docker-socket-denied",
-	"C-0075": "kubescape-c-0075-deny-resources-with-image-pull-policy-not-set-to-always-for-latest-tag",
-	"C-0076": "kubescape-c-0076-deny-resources-without-configured-list-of-labels-not-set",
-	"C-0077": "kubescape-c-0077-deny-resources-without-configured-list-of-k8s-common-labels-not-set",
-	"C-0078": "kubescape-c-0078-only-allow-images-from-allowed-registry",
-	"C-0198": "kubescape-c-0198-deny-root-containers",
-	"C-0199": "kubescape-c-0199-deny-net-raw-capability",
-	"C-0200": "kubescape-c-0200-deny-added-capabilities",
-	"C-0201": "kubescape-c-0201-deny-capabilities-assigned",
-	"C-0210": "kubescape-c-0210-deny-seccomp-profile-unconfined",
-	"C-0268": "kubescape-c-0268-deny-resources-with-cpu-request-not-set",
-	"C-0269": "kubescape-c-0269-deny-resources-with-memory-request-not-set",
-	"C-0270": "kubescape-c-0270-deny-resources-with-cpu-limit-not-set",
-	"C-0271": "kubescape-c-0271-deny-resources-with-memory-limit-not-set",
-	"C-0280": "kubescape-c-0280-deny-access-to-csr-approval-subresource",
-}
-
-var celAdmissionControlsRequiringParams = map[string]bool{
-	"C-0001": true,
-	"C-0004": true,
-	"C-0012": true,
-	"C-0020": true,
-	"C-0046": true,
-	"C-0050": true,
-	"C-0076": true,
-	"C-0077": true,
-	"C-0078": true,
-	"C-0268": true,
-	"C-0269": true,
-	"C-0270": true,
-	"C-0271": true,
-}
-
+// resolvePolicyName resolves the --policy/--control pair to a policy name.
+// Control IDs resolve against the VAP bundle embedded in the CEL engine, so the
+// answer always matches the deployable YAML instead of a hand-maintained copy.
+// Policy names are lowercased like control IDs are uppercased: both flags then
+// accept any casing of their canonical form.
 func resolvePolicyName(policyName, controlID string) (string, error) {
-	policyName = strings.TrimSpace(policyName)
+	policyName = strings.ToLower(strings.TrimSpace(policyName))
 	controlID = strings.ToUpper(strings.TrimSpace(controlID))
 
 	if policyName == "" && controlID == "" {
@@ -222,9 +190,9 @@ func resolvePolicyName(policyName, controlID string) (string, error) {
 		return policyName, nil
 	}
 
-	resolved, ok := celAdmissionPolicyByControlID[controlID]
-	if !ok {
-		return "", fmt.Errorf("unsupported control ID %s", controlID)
+	resolved, err := cel.PolicyNameForControl(controlID)
+	if err != nil {
+		return "", fmt.Errorf("unsupported control ID %s: %w", controlID, err)
 	}
 	return resolved, nil
 }

@@ -76,36 +76,78 @@ func (v *VAP) requireSupported() error {
 	return nil
 }
 
-// vapIndex is built once from the embedded bundle and reused. Parsing every
-// document on each lookup would be wasteful, and the bundle never changes at
-// runtime, so a lazily-built controlID -> VAP map is enough.
-//
-// vapIndexErr is reserved for whole-bundle failures (the embed cannot be read or
-// decoded) — the engine genuinely cannot function then. A per-control problem
-// like a duplicate never lands here: it poisons only its own control (see
-// vapDuplicates) so one bad policy cannot take the whole engine offline.
+// vapCatalog is everything indexed out of the embedded bundle. It is built once
+// and reused: parsing every document on each lookup would be wasteful, and the
+// bundle never changes at runtime.
+type vapCatalog struct {
+	// byControl maps the controlId label -> policy, for the scan path.
+	byControl map[string]*VAP
+	// dupControls poisons controls claimed by more than one policy: neither
+	// copy silently wins, and only that control is refused (the rest of the
+	// bundle keeps working).
+	dupControls map[string]struct{}
+	// byName maps metadata.name -> policy. Unlike byControl it covers every
+	// policy in the bundle, including the cluster-scoped helpers that carry no
+	// controlId, so name-keyed callers (cmd/vap --policy) can look them up.
+	byName map[string]*VAP
+	// dupNames poisons names used by more than one policy, same scheme as
+	// dupControls.
+	dupNames map[string]struct{}
+}
+
+// vapCatalogErr is reserved for whole-bundle failures (the embed cannot be read
+// or decoded) — the engine genuinely cannot function then. A per-policy problem
+// like a duplicate never lands here: it poisons only its own key (see the dup
+// sets on vapCatalog) so one bad policy cannot take the whole engine offline.
 var (
-	vapIndexOnce  sync.Once
-	vapIndex      map[string]*VAP
-	vapDuplicates map[string]struct{}
-	vapIndexErr   error
+	vapCatalogOnce sync.Once
+	vapCatalogVal  *vapCatalog
+	vapCatalogErr  error
 )
 
-// loadVAP returns the policy for a control ID (threaded in from processControl,
-// never read off a rule). It fails when the control is absent from the embedded
-// bundle rather than silently returning nothing, so a scan cannot quietly skip a
-// control it thinks it covers.
-func loadVAP(controlID string) (*VAP, error) {
-	vapIndexOnce.Do(buildVAPIndex)
-	if vapIndexErr != nil {
-		return nil, vapIndexErr
+// getVAPCatalog reads the embedded bundle once and hands the bytes to
+// parseVAPBundle. Splitting the two keeps the parsing logic testable with
+// in-memory bundles.
+func getVAPCatalog() (*vapCatalog, error) {
+	vapCatalogOnce.Do(func() {
+		data, err := vapdataFS.ReadFile(vapdataDir + "/" + vapBundleFile)
+		if err != nil {
+			vapCatalogErr = fmt.Errorf("read embedded VAP bundle: %w", err)
+			return
+		}
+		vapCatalogVal, vapCatalogErr = parseVAPBundle(data)
+	})
+	return vapCatalogVal, vapCatalogErr
+}
+
+// lookupVAP resolves a control ID to its policy without the requireSupported
+// gate. It fails when the control is absent from the embedded bundle rather
+// than silently returning nothing, so a caller cannot quietly skip a control it
+// thinks it covers. Callers that evaluate the policy offline go through loadVAP
+// instead; this seam exists for metadata lookups (see catalog.go) where a
+// gated policy is still a valid answer.
+func lookupVAP(controlID string) (*VAP, error) {
+	catalog, err := getVAPCatalog()
+	if err != nil {
+		return nil, err
 	}
-	if _, dup := vapDuplicates[controlID]; dup {
+	if _, dup := catalog.dupControls[controlID]; dup {
 		return nil, fmt.Errorf("control %q is defined by more than one policy in the VAP bundle; refusing it rather than pick one", controlID)
 	}
-	vap, ok := vapIndex[controlID]
+	vap, ok := catalog.byControl[controlID]
 	if !ok {
 		return nil, fmt.Errorf("no %s for control %q in embedded bundle", vapKind, controlID)
+	}
+	return vap, nil
+}
+
+// loadVAP returns the policy for a control ID (threaded in from processControl,
+// never read off a rule), refusing policies the offline engine cannot evaluate
+// with scan/admission parity (see requireSupported).
+func loadVAP(controlID string) (*VAP, error) {
+	vap, err := lookupVAP(controlID)
+	if err != nil {
+		return nil, err
 	}
 	if err := vap.requireSupported(); err != nil {
 		return nil, err
@@ -113,35 +155,30 @@ func loadVAP(controlID string) (*VAP, error) {
 	return vap, nil
 }
 
-// buildVAPIndex reads the embedded bundle and hands the bytes to parseVAPBundle.
-// Splitting the two keeps the parsing logic testable with in-memory bundles.
-func buildVAPIndex() {
-	data, err := vapdataFS.ReadFile(vapdataDir + "/" + vapBundleFile)
-	if err != nil {
-		vapIndexErr = fmt.Errorf("read embedded VAP bundle: %w", err)
-		return
-	}
-	vapIndex, vapDuplicates, vapIndexErr = parseVAPBundle(data)
-}
-
-// parseVAPBundle turns a multi-document bundle into the controlID -> VAP map.
+// parseVAPBundle turns a multi-document bundle into a vapCatalog.
 //
 // It consumes only v1 ValidatingAdmissionPolicy documents and skips everything
 // else. The bundle is a mixed stream synced from cel-admission-library, which
 // also ships ValidatingAdmissionPolicyBinding (and blank) documents; failing the
-// whole index over one document we do not consume would take the entire engine
+// whole catalog over one document we do not consume would take the entire engine
 // down on a routine `make sync-vap`, so a foreign kind is skipped, not fatal.
-// Policies with no controlId label (cluster-scoped helper policies) are skipped
-// too: they are not addressable by control and the scan never asks for them.
+// Policies with no controlId label (cluster-scoped helper policies) land only in
+// byName: they are not addressable by control and the scan never asks for them,
+// but name-keyed callers still need them.
 //
-// A duplicate control ID poisons only that control: two policies fighting over one
-// control is a real bundle bug, so neither silently wins — the control is dropped
-// from the index and returned in the duplicates set, and loadVAP refuses it. The
-// rest of the bundle still indexes, so one bad control cannot take the whole
-// engine offline. Only an unreadable/undecodable bundle is a whole-bundle error.
-func parseVAPBundle(data []byte) (map[string]*VAP, map[string]struct{}, error) {
-	index := make(map[string]*VAP)
-	duplicates := make(map[string]struct{})
+// A duplicate key (controlId or name) poisons only that key: two policies
+// fighting over one control or name is a real bundle bug, so neither silently
+// wins — the key is dropped from its index and recorded in the matching dup set,
+// and lookups refuse it. The rest of the bundle still indexes, so one bad policy
+// cannot take the whole engine offline. Only an unreadable/undecodable bundle is
+// a whole-bundle error.
+func parseVAPBundle(data []byte) (*vapCatalog, error) {
+	catalog := &vapCatalog{
+		byControl:   make(map[string]*VAP),
+		dupControls: make(map[string]struct{}),
+		byName:      make(map[string]*VAP),
+		dupNames:    make(map[string]struct{}),
+	}
 	decoder := k8syaml.NewYAMLOrJSONDecoder(bytes.NewReader(data), 4096)
 	for {
 		var policy admissionregistrationv1.ValidatingAdmissionPolicy
@@ -149,30 +186,38 @@ func parseVAPBundle(data []byte) (map[string]*VAP, map[string]struct{}, error) {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return nil, nil, fmt.Errorf("decode VAP bundle: %w", err)
+			return nil, fmt.Errorf("decode VAP bundle: %w", err)
 		}
 
 		if policy.Kind != vapKind || policy.APIVersion != vapAPIVersion {
 			continue
 		}
 
-		controlID := policy.Labels[controlIDLabel]
-		if controlID == "" {
-			continue
-		}
-		if _, poisoned := duplicates[controlID]; poisoned {
-			// Already seen twice; stay poisoned for any further occurrences.
-			continue
-		}
-		if _, seen := index[controlID]; seen {
-			duplicates[controlID] = struct{}{}
-			delete(index, controlID)
-			continue
-		}
-		index[controlID] = newVAP(&policy)
+		vap := newVAP(&policy)
+		indexUnique(catalog.byName, catalog.dupNames, vap.PolicyName, vap)
+		indexUnique(catalog.byControl, catalog.dupControls, vap.ControlID, vap)
 	}
 
-	return index, duplicates, nil
+	return catalog, nil
+}
+
+// indexUnique adds one policy under one key, enforcing the duplicate-poisoning
+// scheme: the first occurrence indexes, a second drops the key from the index
+// and marks it duplicated, and further occurrences stay poisoned. An empty key
+// (a helper policy with no controlId) is simply not indexed.
+func indexUnique(index map[string]*VAP, duplicates map[string]struct{}, key string, vap *VAP) {
+	if key == "" {
+		return
+	}
+	if _, poisoned := duplicates[key]; poisoned {
+		return
+	}
+	if _, seen := index[key]; seen {
+		duplicates[key] = struct{}{}
+		delete(index, key)
+		return
+	}
+	index[key] = vap
 }
 
 // newVAP flattens a parsed policy into the evaluator's structs. The message and
