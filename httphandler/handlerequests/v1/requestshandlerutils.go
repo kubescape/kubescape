@@ -69,7 +69,6 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	} else {
 		logger.L().Ctx(scanReq.ctx).Success("done scanning", helpers.String("ID", scanReq.scanID))
 		if scanReq.scanQueryParams.ReturnResults {
-			//TODO(ttimonen) should we actually pass the PostureReport here somehow?
 			response.Type = utilsapisv1.ResultsV1ScanResponseType
 		}
 	}
