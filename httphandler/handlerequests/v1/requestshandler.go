@@ -131,7 +131,11 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 			// populate the response with the report before it is deleted below
 			if res, err := readResultsFile(scanID); err != nil {
 				response.Type = utilsapisv1.ErrorScanResponseType
-				response.Response = err.Error()
+				if scanFailed, ok := errors.AsType[*ScanFailedError](err); ok {
+					response.Response = scanFailed.Message
+				} else {
+					response.Response = err.Error()
+				}
 			} else {
 				response.Response = res
 			}
