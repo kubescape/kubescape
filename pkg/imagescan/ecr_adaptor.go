@@ -3,6 +3,7 @@ package imagescan
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -13,7 +14,6 @@ import (
 // ECRAPI defines the interface for the ECR functions we use, enabling mocking in tests.
 type ECRAPI interface {
 	DescribeImageScanFindings(ctx context.Context, params *ecr.DescribeImageScanFindingsInput, optFns ...func(*ecr.Options)) (*ecr.DescribeImageScanFindingsOutput, error)
-	BatchGetImage(ctx context.Context, params *ecr.BatchGetImageInput, optFns ...func(*ecr.Options)) (*ecr.BatchGetImageOutput, error)
 }
 
 // AWSECRAdaptor implements IContainerImageVulnerabilityAdaptor for AWS ECR.
@@ -30,7 +30,19 @@ func NewAWSECRAdaptor() *AWSECRAdaptor {
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as AWS SDK v2 relies heavily on IAM Roles for Service Accounts (IRSA) and default configuration.
 func (a *AWSECRAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
-	cfg, err := config.LoadDefaultConfig(ctx)
+	if credentials.Username != "" || credentials.Password != "" {
+		return fmt.Errorf("explicit credentials are intentionally unsupported for AWS ECR; use AWS IRSA or default credential chain")
+	}
+
+	var opts []func(*config.LoadOptions) error
+
+	// Extract region from registry URL (e.g., <account>.dkr.ecr.<region>.amazonaws.com)
+	parts := strings.Split(registry, ".")
+	if len(parts) >= 6 && parts[1] == "dkr" && parts[2] == "ecr" && parts[4] == "amazonaws" && parts[5] == "com" {
+		opts = append(opts, config.WithRegion(parts[3]))
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return fmt.Errorf("unable to load AWS SDK config: %w", err)
 	}
@@ -53,20 +65,17 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 	var statuses []ContainerImageScanStatus
 
 	for _, imageID := range imageIDs {
-		input := &ecr.DescribeImageScanFindingsInput{
-			RepositoryName: aws.String(imageID.Repository),
-			ImageId: &types.ImageIdentifier{
-				ImageDigest: aws.String(imageID.Hash),
-				ImageTag:    aws.String(imageID.Tag),
-			},
-			MaxResults: aws.Int32(1),
+		var ecrImageID types.ImageIdentifier
+		if imageID.Hash != "" {
+			ecrImageID.ImageDigest = aws.String(imageID.Hash)
+		} else if imageID.Tag != "" {
+			ecrImageID.ImageTag = aws.String(imageID.Tag)
 		}
 
-		if imageID.Tag == "" {
-			input.ImageId.ImageTag = nil
-		}
-		if imageID.Hash == "" {
-			input.ImageId.ImageDigest = nil
+		input := &ecr.DescribeImageScanFindingsInput{
+			RepositoryName: aws.String(imageID.Repository),
+			ImageId:        &ecrImageID,
+			MaxResults:     aws.Int32(1),
 		}
 
 		status := ContainerImageScanStatus{
@@ -92,6 +101,26 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 	return statuses, nil
 }
 
+// Helper to normalize ECR severity to Kubescape expected severity
+func normalizeSeverity(ecrSeverity string) string {
+	switch ecrSeverity {
+	case "CRITICAL":
+		return "Critical"
+	case "HIGH":
+		return "High"
+	case "MEDIUM":
+		return "Medium"
+	case "LOW":
+		return "Low"
+	case "INFORMATIONAL":
+		return "Negligible"
+	case "UNDEFINED":
+		fallthrough
+	default:
+		return "Unknown"
+	}
+}
+
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
 func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageVulnerabilityReport, error) {
 	if a.client == nil {
@@ -106,12 +135,16 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			Vulnerabilities: []Vulnerability{},
 		}
 
+		var ecrImageID types.ImageIdentifier
+		if imageID.Hash != "" {
+			ecrImageID.ImageDigest = aws.String(imageID.Hash)
+		} else if imageID.Tag != "" {
+			ecrImageID.ImageTag = aws.String(imageID.Tag)
+		}
+
 		input := &ecr.DescribeImageScanFindingsInput{
 			RepositoryName: aws.String(imageID.Repository),
-			ImageId: &types.ImageIdentifier{
-				ImageDigest: aws.String(imageID.Hash),
-				ImageTag:    aws.String(imageID.Tag),
-			},
+			ImageId:        &ecrImageID,
 		}
 
 		var fetchErr error
@@ -127,7 +160,7 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 				for _, finding := range out.ImageScanFindings.Findings {
 					report.Vulnerabilities = append(report.Vulnerabilities, Vulnerability{
 						ID:          aws.ToString(finding.Name),
-						Severity:    string(finding.Severity),
+						Severity:    normalizeSeverity(string(finding.Severity)),
 						Description: aws.ToString(finding.Description),
 						Links:       []string{aws.ToString(finding.Uri)},
 					})

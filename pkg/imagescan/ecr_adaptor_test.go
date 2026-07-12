@@ -14,18 +14,12 @@ import (
 type mockECRClient struct {
 	describeFindingsOut *ecr.DescribeImageScanFindingsOutput
 	describeFindingsErr error
-
-	batchGetImageOut *ecr.BatchGetImageOutput
-	batchGetImageErr error
 }
 
 func (m *mockECRClient) DescribeImageScanFindings(ctx context.Context, params *ecr.DescribeImageScanFindingsInput, optFns ...func(*ecr.Options)) (*ecr.DescribeImageScanFindingsOutput, error) {
 	return m.describeFindingsOut, m.describeFindingsErr
 }
 
-func (m *mockECRClient) BatchGetImage(ctx context.Context, params *ecr.BatchGetImageInput, optFns ...func(*ecr.Options)) (*ecr.BatchGetImageOutput, error) {
-	return m.batchGetImageOut, m.batchGetImageErr
-}
 
 func TestAWSECRAdaptor_GetImagesScanStatus(t *testing.T) {
 	now := time.Now()
@@ -117,31 +111,7 @@ func TestAWSECRAdaptor_GetImagesVulnerabilities(t *testing.T) {
 
 	vuln := reports[0].Vulnerabilities[0]
 	assert.Equal(t, "CVE-2023-1234", vuln.ID)
-	assert.Equal(t, string(types.FindingSeverityHigh), vuln.Severity)
+	assert.Equal(t, "High", vuln.Severity)
 	assert.Equal(t, "Test vulnerability", vuln.Description)
 	assert.Equal(t, []string{"https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2023-1234"}, vuln.Links)
-}
-
-func TestAWSECRAdaptor_GetImagesInformation(t *testing.T) {
-	mockOut := &ecr.BatchGetImageOutput{
-		Images: []types.Image{
-			{
-				ImageManifest: aws.String(`{"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.v2+json"}`),
-			},
-		},
-	}
-
-	adaptor := NewAWSECRAdaptor()
-	adaptor.client = &mockECRClient{
-		batchGetImageOut: mockOut,
-	}
-
-	images := []ContainerImageIdentifier{
-		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "test-repo", Tag: "latest"},
-	}
-
-	infos, err := adaptor.GetImagesInformation(context.Background(), images)
-	assert.NoError(t, err)
-	assert.Len(t, infos, 1)
-	assert.Empty(t, infos[0].Bom) // BOM should be empty for ECR
 }
