@@ -20,7 +20,6 @@ func (m *mockECRClient) DescribeImageScanFindings(ctx context.Context, params *e
 	return m.describeFindingsOut, m.describeFindingsErr
 }
 
-
 func TestAWSECRAdaptor_GetImagesScanStatus(t *testing.T) {
 	now := time.Now()
 
