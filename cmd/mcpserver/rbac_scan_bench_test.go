@@ -47,7 +47,7 @@ func BenchmarkRBACScan_Isolation(b *testing.B) {
 		// Instantiate a fresh OPA Processor
 		deps := resources.NewRegoDependenciesData(nil, "")
 		opap := opaprocessor.NewOPAProcessor(scanData, deps, "", "", "", false, nil)
-		
+
 		// In a real environment, resource handler would pull resources here.
 		// Since we have no resources loaded in the mock scanData, this tests the raw engine overhead.
 		err := opap.ProcessRulesListener(ctx, cautils.NewProgressHandler(""))

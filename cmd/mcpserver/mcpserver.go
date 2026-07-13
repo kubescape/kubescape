@@ -335,7 +335,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 				namespace = nsStr
 			}
 		}
-		
+
 		responseBytes, err := ksServer.RunRBACScan(ctx, namespace)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run RBAC scan: %v", err)), nil

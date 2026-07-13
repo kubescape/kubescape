@@ -57,7 +57,7 @@ func (ksServer *KubescapeMcpserver) RunRBACScan(ctx context.Context, namespace s
 	// 4. Run the core OPA Processor engine
 	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), "")
 	opap := opaprocessor.NewOPAProcessor(scanData, deps, "", scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, false, nil)
-	
+
 	// Execute the evaluation logic
 	if err := opap.ProcessRulesListener(ctx, cautils.NewProgressHandler("")); err != nil {
 		return nil, fmt.Errorf("failed to process RBAC rules: %w", err)
