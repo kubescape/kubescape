@@ -328,6 +328,19 @@ func (ksServer *KubescapeMcpserver) ReadContainerProfileResource(ctx context.Con
 
 func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, arguments map[string]any) (*mcp.CallToolResult, error) {
 	switch name {
+	case "run_rbac_security_scan":
+		namespace := ""
+		if ns, ok := arguments["namespace"]; ok {
+			if nsStr, ok := ns.(string); ok {
+				namespace = nsStr
+			}
+		}
+		
+		responseBytes, err := ksServer.RunRBACScan(ctx, namespace)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to run RBAC scan: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "list_vulnerability_manifests":
 		namespace := metav1.NamespaceAll
 		if ns, ok := arguments["namespace"]; ok {
@@ -680,12 +693,27 @@ func mcpServerEntrypoint() error {
 	createVulnerabilityToolsAndResources(ksServer)
 	createConfigurationsToolsAndResources(ksServer)
 	createRuntimeToolsAndResources(ksServer)
+	createRBACScanningTools(ksServer)
 
 	// Start the server
 	if err := server.ServeStdio(s); err != nil {
 		return fmt.Errorf("server error: %w", err)
 	}
 	return nil
+}
+
+func createRBACScanningTools(ksServer *KubescapeMcpserver) {
+	runRBACScanTool := mcp.NewTool(
+		"run_rbac_security_scan",
+		mcp.WithDescription("Run an on-demand, live RBAC security scan (evaluating only over-permissive cluster bindings) and return the failed resources."),
+		mcp.WithString("namespace",
+			mcp.Description("Namespace to scope the RBAC scan (optional, defaults to cluster-wide if omitted)"),
+		),
+	)
+
+	ksServer.s.AddTool(runRBACScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return ksServer.CallTool(ctx, "run_rbac_security_scan", request.Params.Arguments.(map[string]any))
+	})
 }
 
 func GetMCPServerCmd() *cobra.Command {
