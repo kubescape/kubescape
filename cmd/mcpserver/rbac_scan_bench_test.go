@@ -18,7 +18,7 @@ import (
 func BenchmarkRBACScan_Isolation(b *testing.B) {
 	// We run this outside the loop to mimic the one-time policy download overhead
 	ctx := context.Background()
-	policyHandler := policyhandler.NewPolicyHandler("")
+	policyHandler := policyhandler.NewRequestScopedPolicyHandler("")
 
 	scanInfo := &cautils.ScanInfo{
 		Getters: cautils.Getters{

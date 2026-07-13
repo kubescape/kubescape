@@ -44,7 +44,7 @@ func (ksServer *KubescapeMcpserver) RunRBACScan(ctx context.Context, namespace s
 	scanCtx, cancel := context.WithTimeout(ctx, scanInfo.ScanTimeout)
 	defer cancel()
 
-	policyHandler := policyhandler.NewPolicyHandler("")
+	policyHandler := policyhandler.NewRequestScopedPolicyHandler("")
 	scanData, err := policyHandler.CollectPolicies(scanCtx, scanInfo.PolicyIdentifier, scanInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect RBAC policies: %w", err)

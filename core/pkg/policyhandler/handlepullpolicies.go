@@ -36,16 +36,22 @@ type PolicyHandler struct {
 // The PolicyHandler supports caching of downloaded policies and exceptions by setting the `POLICIES_CACHE_TTL` environment variable (default is no caching).
 func NewPolicyHandler(clusterName string) *PolicyHandler {
 	if policyHandlerInstance == nil {
-		cacheTtl := getPoliciesCacheTtl()
-		policyHandlerInstance = &PolicyHandler{
-			clusterName:             clusterName,
-			cachedPolicyIdentifiers: NewTimedCache[[]string](cacheTtl),
-			cachedFrameworks:        NewTimedCache[[]reporthandling.Framework](cacheTtl),
-			cachedExceptions:        NewTimedCache[[]armotypes.PostureExceptionPolicy](cacheTtl),
-			cachedControlInputs:     NewTimedCache[map[string][]string](cacheTtl),
-		}
+		policyHandlerInstance = NewRequestScopedPolicyHandler(clusterName)
 	}
 	return policyHandlerInstance
+}
+
+// NewRequestScopedPolicyHandler creates and returns a new, independent instance of the `PolicyHandler`.
+// This is required for concurrent use cases (like MCP servers) to prevent race conditions on shared state.
+func NewRequestScopedPolicyHandler(clusterName string) *PolicyHandler {
+	cacheTtl := getPoliciesCacheTtl()
+	return &PolicyHandler{
+		clusterName:             clusterName,
+		cachedPolicyIdentifiers: NewTimedCache[[]string](cacheTtl),
+		cachedFrameworks:        NewTimedCache[[]reporthandling.Framework](cacheTtl),
+		cachedExceptions:        NewTimedCache[[]armotypes.PostureExceptionPolicy](cacheTtl),
+		cachedControlInputs:     NewTimedCache[map[string][]string](cacheTtl),
+	}
 }
 
 func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo) (*cautils.OPASessionObj, error) {
