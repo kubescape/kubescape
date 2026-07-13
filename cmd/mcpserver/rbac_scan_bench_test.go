@@ -35,22 +35,23 @@ func BenchmarkRBACScan_Isolation(b *testing.B) {
 		ScanTimeout: 10 * time.Second,
 	}
 
-	// Pre-fetch policies so network overhead doesn't skew the benchmark
-	scanData, err := policyHandler.CollectPolicies(ctx, scanInfo.PolicyIdentifier, scanInfo)
-	if err != nil {
-		b.Fatalf("failed to collect policies: %v", err)
-	}
-
 	b.ResetTimer() // Only benchmark the actual OPA processor initialization and rule processing
 
 	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		scanData, err := policyHandler.CollectPolicies(ctx, scanInfo.PolicyIdentifier, scanInfo)
+		if err != nil {
+			b.Fatalf("failed to collect policies: %v", err)
+		}
+		b.StartTimer()
+
 		// Instantiate a fresh OPA Processor
 		deps := resources.NewRegoDependenciesData(nil, "")
 		opap := opaprocessor.NewOPAProcessor(scanData, deps, "", "", "", false, nil)
 
 		// In a real environment, resource handler would pull resources here.
 		// Since we have no resources loaded in the mock scanData, this tests the raw engine overhead.
-		err := opap.ProcessRulesListener(ctx, cautils.NewProgressHandler(""))
+		err = opap.ProcessRulesListener(ctx, cautils.NewProgressHandler(""))
 		if err != nil {
 			b.Fatalf("ProcessRulesListener failed: %v", err)
 		}

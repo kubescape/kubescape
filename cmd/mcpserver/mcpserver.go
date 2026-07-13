@@ -15,11 +15,14 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 )
 
 type KubescapeMcpserver struct {
-	s        *server.MCPServer
-	ksClient spdxv1beta1.SpdxV1beta1Interface
+	s            *server.MCPServer
+	ksClient     spdxv1beta1.SpdxV1beta1Interface
+	policyGetter getter.PolicyGetter
 }
 
 func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
@@ -684,8 +687,9 @@ func mcpServerEntrypoint() error {
 	)
 
 	ksServer := &KubescapeMcpserver{
-		s:        s,
-		ksClient: client,
+		s:            s,
+		ksClient:     client,
+		policyGetter: getter.NewDownloadReleasedPolicy(),
 	}
 
 	// Creating Kubescape tools and resources

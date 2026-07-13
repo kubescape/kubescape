@@ -24,13 +24,12 @@ func (ksServer *KubescapeMcpserver) RunRBACScan(ctx context.Context, namespace s
 	logger.L().Ctx(ctx).Info("Initiating on-demand MCP RBAC security scan", helpers.String("namespace", namespace))
 
 	// 1. Initialize custom ScanInfo isolated to RBAC controls to guarantee speed
-	drp := getter.NewDownloadReleasedPolicy()
 	scanInfo := &cautils.ScanInfo{
 		Getters: cautils.Getters{
-			PolicyGetter:         drp,
-			ExceptionsGetter:     drp,
-			ControlsInputsGetter: drp,
-			AttackTracksGetter:   drp,
+			PolicyGetter:         ksServer.policyGetter,
+			ExceptionsGetter:     ksServer.policyGetter,
+			ControlsInputsGetter: ksServer.policyGetter,
+			AttackTracksGetter:   ksServer.policyGetter,
 		},
 		ScanAll: false,
 		PolicyIdentifier: []cautils.PolicyIdentifier{
@@ -42,15 +41,18 @@ func (ksServer *KubescapeMcpserver) RunRBACScan(ctx context.Context, namespace s
 	}
 
 	// 2. Fetch the specific Policies
+	scanCtx, cancel := context.WithTimeout(ctx, scanInfo.ScanTimeout)
+	defer cancel()
+
 	policyHandler := policyhandler.NewPolicyHandler("")
-	scanData, err := policyHandler.CollectPolicies(ctx, scanInfo.PolicyIdentifier, scanInfo)
+	scanData, err := policyHandler.CollectPolicies(scanCtx, scanInfo.PolicyIdentifier, scanInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect RBAC policies: %w", err)
 	}
 
 	// 3. Pull required K8s resources (only pulls resources defined by C-0015 and C-0016)
-	k8sHandler := resourcehandler.NewK8sResourceHandler(ctx, k8sinterface.NewKubernetesApi(), nil, nil, "")
-	if err := resourcehandler.CollectResources(ctx, k8sHandler, scanData, scanInfo); err != nil {
+	k8sHandler := resourcehandler.NewK8sResourceHandler(scanCtx, k8sinterface.NewKubernetesApi(), nil, nil, "")
+	if err := resourcehandler.CollectResources(scanCtx, k8sHandler, scanData, scanInfo); err != nil {
 		return nil, fmt.Errorf("failed to collect RBAC resources: %w", err)
 	}
 
@@ -59,7 +61,7 @@ func (ksServer *KubescapeMcpserver) RunRBACScan(ctx context.Context, namespace s
 	opap := opaprocessor.NewOPAProcessor(scanData, deps, "", scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, false, nil)
 
 	// Execute the evaluation logic
-	if err := opap.ProcessRulesListener(ctx, cautils.NewProgressHandler("")); err != nil {
+	if err := opap.ProcessRulesListener(scanCtx, cautils.NewProgressHandler("")); err != nil {
 		return nil, fmt.Errorf("failed to process RBAC rules: %w", err)
 	}
 
