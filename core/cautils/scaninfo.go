@@ -212,12 +212,18 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 		}
 	}
 	// set config-inputs file
-	scanInfo.ControlsInputs = filepath.Join(scanInfo.UseArtifactsFrom, LocalControlInputsFilename)
+	if scanInfo.ControlsInputs == "" {
+		scanInfo.ControlsInputs = filepath.Join(scanInfo.UseArtifactsFrom, LocalControlInputsFilename)
+	}
 	// set exceptions
-	scanInfo.UseExceptions = filepath.Join(scanInfo.UseArtifactsFrom, LocalExceptionsFilename)
+	if scanInfo.UseExceptions == "" {
+		scanInfo.UseExceptions = filepath.Join(scanInfo.UseArtifactsFrom, LocalExceptionsFilename)
+	}
 
 	// set attack tracks
-	scanInfo.AttackTracks = filepath.Join(scanInfo.UseArtifactsFrom, LocalAttackTracksFilename)
+	if scanInfo.AttackTracks == "" {
+		scanInfo.AttackTracks = filepath.Join(scanInfo.UseArtifactsFrom, LocalAttackTracksFilename)
+	}
 }
 
 func (scanInfo *ScanInfo) setUseFrom() {
