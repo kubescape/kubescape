@@ -22,7 +22,7 @@ import (
 type KubescapeMcpserver struct {
 	s            *server.MCPServer
 	ksClient     spdxv1beta1.SpdxV1beta1Interface
-	policyGetter getter.PolicyGetter
+	policyGetter *getter.DownloadReleasedPolicy
 }
 
 func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
