@@ -10,7 +10,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
 	"github.com/kubescape/kubescape/v3/core/pkg/policyhandler"
 	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
@@ -45,6 +44,7 @@ func (ksServer *KubescapeMcpserver) RunRBACScan(ctx context.Context, namespace s
 	defer cancel()
 
 	policyHandler := policyhandler.NewRequestScopedPolicyHandler("")
+	defer policyHandler.Close()
 	scanData, err := policyHandler.CollectPolicies(scanCtx, scanInfo.PolicyIdentifier, scanInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect RBAC policies: %w", err)

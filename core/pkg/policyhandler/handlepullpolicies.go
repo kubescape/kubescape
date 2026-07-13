@@ -54,6 +54,22 @@ func NewRequestScopedPolicyHandler(clusterName string) *PolicyHandler {
 	}
 }
 
+// Close stops all internal caches and background goroutines to prevent leaks.
+func (policyHandler *PolicyHandler) Close() {
+	if policyHandler.cachedPolicyIdentifiers != nil {
+		policyHandler.cachedPolicyIdentifiers.Stop()
+	}
+	if policyHandler.cachedFrameworks != nil {
+		policyHandler.cachedFrameworks.Stop()
+	}
+	if policyHandler.cachedExceptions != nil {
+		policyHandler.cachedExceptions.Stop()
+	}
+	if policyHandler.cachedControlInputs != nil {
+		policyHandler.cachedControlInputs.Stop()
+	}
+}
+
 func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo) (*cautils.OPASessionObj, error) {
 	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo)
 
