@@ -58,7 +58,8 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 	if useExceptions != "" {
 		// load exceptions from file
 		primary = getter.NewLoadPolicy([]string{useExceptions})
-		return primary
+		k8sClient := getExceptionsK8sClient(ctx)
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
 	}
 	if airGapped {
 		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})

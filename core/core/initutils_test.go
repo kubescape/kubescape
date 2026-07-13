@@ -106,7 +106,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 				accountID:              "",
 				downloadReleasedPolicy: getter.NewDownloadReleasedPolicy(),
 			},
-			want: "*getter.LoadPolicy",
+			want: "*getter.MergedExceptionsGetter",
 		},
 		{
 			name: "Test GetExceptionsGetter with useExceptions and filled accountID",
@@ -116,7 +116,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 				accountID:              "123456789012",
 				downloadReleasedPolicy: getter.NewDownloadReleasedPolicy(),
 			},
-			want: "*getter.LoadPolicy",
+			want: "*getter.MergedExceptionsGetter",
 		},
 		{
 			name: "Test GetExceptionsGetter with accountID",
