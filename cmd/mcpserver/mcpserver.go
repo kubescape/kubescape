@@ -9,6 +9,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -22,6 +23,7 @@ import (
 type KubescapeMcpserver struct {
 	s            *server.MCPServer
 	ksClient     spdxv1beta1.SpdxV1beta1Interface
+	k8sClient    *k8sinterface.KubernetesApi
 	policyGetter *getter.DownloadReleasedPolicy
 }
 
@@ -686,9 +688,17 @@ func mcpServerEntrypoint() error {
 		server.WithRecovery(),
 	)
 
+	// Build the k8s API client once at startup. IsConnectedToCluster() is checked
+	// inside RunRBACScan before this is used, so it is safe to store here.
+	var k8sApi *k8sinterface.KubernetesApi
+	if k8sinterface.IsConnectedToCluster() {
+		k8sApi = k8sinterface.NewKubernetesApi()
+	}
+
 	ksServer := &KubescapeMcpserver{
 		s:            s,
 		ksClient:     client,
+		k8sClient:    k8sApi,
 		policyGetter: getter.NewDownloadReleasedPolicy(),
 	}
 
@@ -716,7 +726,13 @@ func createRBACScanningTools(ksServer *KubescapeMcpserver) {
 	)
 
 	ksServer.s.AddTool(runRBACScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return ksServer.CallTool(ctx, "run_rbac_security_scan", request.Params.Arguments.(map[string]any))
+		// Blocker 3 fix: use comma-ok pattern to prevent panic when namespace is
+		// omitted (tool is callable with no arguments since namespace is optional).
+		args, ok := request.Params.Arguments.(map[string]any)
+		if !ok {
+			args = map[string]any{}
+		}
+		return ksServer.CallTool(ctx, "run_rbac_security_scan", args)
 	})
 }
 
