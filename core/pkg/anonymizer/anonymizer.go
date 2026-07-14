@@ -24,7 +24,7 @@ func applyWithTransformer(
 
 	mapping := NewMapping()
 
-	if err := anonymizeSession(
+	if err := transformSession(
 		resultsHandler.ScanData,
 		mapping,
 		transformer,
@@ -51,6 +51,7 @@ func applyWithTransformer(
 // labels, and additional session data, continue to use
 // mapping-based anonymization and remain irreversibly
 // pseudonymized.
+
 func ApplyEncrypted(
 	resultsHandler *resultshandling.ResultsHandler,
 	dek []byte,
