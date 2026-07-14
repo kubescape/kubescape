@@ -31,6 +31,18 @@ func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	}
 }
 
+// NewDownloadReleasedPolicyWithVersion returns a DownloadReleasedPolicy pinned
+// to a specific regolibrary release tag (e.g. "v2.0.301"). An empty version
+// falls back to the latest release, matching NewDownloadReleasedPolicy.
+func NewDownloadReleasedPolicyWithVersion(version string) *DownloadReleasedPolicy {
+	if version == "" {
+		return NewDownloadReleasedPolicy()
+	}
+	return &DownloadReleasedPolicy{
+		gs: gitregostore.NewGitRegoStore("https://github.com", "kubescape", "regolibrary", "releases", "download/"+version, "", -1),
+	}
+}
+
 func (drp *DownloadReleasedPolicy) GetControl(ID string) (*reporthandling.Control, error) {
 	var control *reporthandling.Control
 	var err error

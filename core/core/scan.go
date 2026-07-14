@@ -205,7 +205,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 		// don't initialize the downloader to prevent network access
 		downloadReleasedPolicy = nil
 	} else {
-		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy() // download config inputs from github release
+		downloadReleasedPolicy = getter.NewDownloadReleasedPolicyWithVersion(scanInfo.ControlsVersion) // download config inputs from github release
 	}
 
 	// set policy getter only after setting the customerGUID
