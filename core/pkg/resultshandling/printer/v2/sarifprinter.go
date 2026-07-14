@@ -250,7 +250,10 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 
 	report.AddRun(run)
 
-	report.PrettyWrite(sp.writer)
+	// Surface write failures instead of silently leaving an empty/partial file.
+	if err := report.PrettyWrite(sp.writer); err != nil {
+		return fmt.Errorf("failed to write SARIF report: %w", err)
+	}
 
 	return nil
 }
