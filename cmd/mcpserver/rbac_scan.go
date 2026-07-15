@@ -34,6 +34,14 @@ func (ksServer *KubescapeMcpserver) RunRBACScan(ctx context.Context, namespace s
 		return nil, fmt.Errorf("no reachable kubernetes cluster: ensure KUBECONFIG is set or the server is running inside a cluster")
 	}
 
+	// Maintainer edge-case fix: If the server started while no cluster was reachable,
+	// ksServer.k8sClient will be nil. If a cluster becomes reachable later,
+	// IsConnectedToCluster() passes but ksServer.k8sClient is still nil.
+	// Lazily build it here to recover gracefully.
+	if ksServer.k8sClient == nil {
+		ksServer.k8sClient = k8sinterface.NewKubernetesApi()
+	}
+
 	// 1. Initialize custom ScanInfo isolated to RBAC controls to guarantee speed
 	scanInfo := &cautils.ScanInfo{
 		Getters: cautils.Getters{
