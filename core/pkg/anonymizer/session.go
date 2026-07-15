@@ -17,7 +17,6 @@ import (
 // transformSession applies the supplied Transformer to sensitive resource
 // identifiers and metadata while preserving referential integrity across
 // the full OPA session.
-
 func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transformer Transformer) error {
 	if session == nil {
 		return nil
@@ -35,14 +34,12 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 		// sourcePath may expose manifest filenames and line references
 		// (for example test-anonymize.yaml:1), so transform it alongside
 		// other resource-local metadata.
-
 		if err := transformResourceObjectSourcePath(resource, transformer); err != nil {
 			return err
 		}
 
 		// Annotations may contain infrastructure identifiers, secret paths, or
 		// other sensitive metadata at both top-level and nested workload templates.
-
 		if err := transformResourceAnnotations(resource, transformer); err != nil {
 			return err
 		}
@@ -195,7 +192,6 @@ func resolveMappedID(mapping *Mapping, idMapping map[string]string, originalID, 
 // transformResourceLabels applies the supplied Transformer to labels
 // explicitly configured for copying into reports while preserving the
 // existing label selection behavior.
-
 func transformResourceLabels(resource workloadinterface.IMetadata, labelsToCopy []string, transformer Transformer) error {
 
 	bw, ok := resource.(workloadinterface.IWorkload)
@@ -233,7 +229,6 @@ func transformResourceLabels(resource workloadinterface.IMetadata, labelsToCopy 
 // transformResourceAnnotations applies the supplied Transformer to
 // annotation values throughout a resource object, including nested
 // workload templates such as Deployment pod specs.
-
 func transformResourceAnnotations(resource workloadinterface.IMetadata, transformer Transformer) error {
 
 	if resource == nil {
@@ -257,7 +252,6 @@ func transformResourceAnnotations(resource workloadinterface.IMetadata, transfor
 // transformResourceObjectSourcePath applies the supplied Transformer to
 // object.sourcePath while preserving trailing line-number context (for
 // example src-xxxx:12).
-
 func transformResourceObjectSourcePath(resource workloadinterface.IMetadata, transformer Transformer) error {
 
 	if resource == nil {
@@ -296,7 +290,6 @@ func transformResourceObjectSourcePath(resource workloadinterface.IMetadata, tra
 // transformSourcePath applies the supplied Transformer to the path portion
 // of a sourcePath while preserving any trailing line number (for example
 // src-xxxx:12).
-
 func transformSourcePath(sourcePath string, transformer Transformer) (string, error) {
 
 	lastColon := strings.LastIndex(sourcePath, ":")
@@ -322,7 +315,6 @@ func transformSourcePath(sourcePath string, transformer Transformer) (string, er
 // transformAnnotationNodes recursively traverses unstructured resource
 // objects, applying the supplied Transformer to annotation values
 // wherever metadata.annotations appears regardless of workload nesting.
-
 func transformAnnotationNodes(node any, transformer Transformer) error {
 
 	switch v := node.(type) {
@@ -351,7 +343,6 @@ func transformAnnotationNodes(node any, transformer Transformer) error {
 // transformAnnotationMap applies the supplied Transformer to annotation
 // values while preserving annotation keys, which remain meaningful
 // Kubernetes identifiers.
-
 func transformAnnotationMap(obj map[string]any, transformer Transformer) error {
 
 	rawMetadata, ok := obj["metadata"]
@@ -399,7 +390,10 @@ func transformValue(transformer Transformer, prefix string, value string) (strin
 	return transformer.Transform(prefix, value)
 }
 
-func transformResourceMetadata(resource workloadinterface.IMetadata, transformer Transformer) error {
+func transformResourceMetadata(
+	resource workloadinterface.IMetadata,
+	transformer Transformer,
+) error {
 
 	if resource == nil {
 		return nil
@@ -510,7 +504,10 @@ func transformLastCommit(commit *reporthandling.LastCommit, transformer Transfor
 	return nil
 }
 
-func transformResourceSource(source *reporthandling.Source, transformer Transformer) error {
+func transformResourceSource(
+	source *reporthandling.Source,
+	transformer Transformer,
+) error {
 	if source == nil {
 		return nil
 	}

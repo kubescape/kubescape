@@ -257,7 +257,6 @@ func GetDecryptCommand() *cobra.Command {
 
 // remapResults restores all resource ID references that were rewritten
 // during encryption so they remain consistent with the decrypted resources.
-
 func remapResults(results []resourcesresults.Result, idMapping map[string]string) {
 	for i := range results {
 		results[i].ResourceID = remapResourceID(
@@ -300,8 +299,10 @@ func remapResults(results []resourcesresults.Result, idMapping map[string]string
 
 // remapResourceID restores a resource ID if it was rewritten during
 // encryption. Unknown IDs are returned unchanged.
-
-func remapResourceID(id string, idMapping map[string]string) string {
+func remapResourceID(
+	id string,
+	idMapping map[string]string,
+) string {
 
 	if mappedID, ok := idMapping[id]; ok {
 		return mappedID
