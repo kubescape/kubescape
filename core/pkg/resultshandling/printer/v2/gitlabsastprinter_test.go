@@ -230,52 +230,89 @@ func TestGitLabSASTPrintConfigurationScan_MissingControl(t *testing.T) {
 	assert.Empty(t, report.Vulnerabilities)
 }
 
-// TestGitLabSASTPrintConfigurationScan_SkipsResourceWithoutRelativePath covers a failed resource with no relative path but a non-empty base path: GitLab gets no file to anchor the finding to, so it must be skipped
-func TestGitLabSASTPrintConfigurationScan_SkipsResourceWithoutRelativePath(t *testing.T) {
+// TestGitLabSASTPrintConfigurationScan_SkipsUnanchorablePaths covers resource paths GitLab cannot anchor to a repository file: filepath.Rel yields "../" paths for files outside the repo root, and Helm/Kustomize sources keep an absolute path when it fails
+func TestGitLabSASTPrintConfigurationScan_SkipsUnanchorablePaths(t *testing.T) {
 	const controlID = "C-0057"
 	resourceID := "apps/v1/Deployment/default/demo"
 
-	session := cautils.NewOPASessionObjMock()
-	session.Metadata = &reporthandlingv2.Metadata{
-		ScanMetadata: reporthandlingv2.ScanMetadata{
-			ScanningTarget: reporthandlingv2.Directory,
-		},
-		ContextMetadata: reporthandlingv2.ContextMetadata{
-			DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{
-				BasePath: t.TempDir(),
-			},
-		},
+	tests := []struct {
+		name    string
+		relPath string
+	}{
+		{name: "empty path", relPath: ""},
+		{name: "path escaping the repository root", relPath: "../outside/deploy.yaml"},
+		{name: "absolute path", relPath: "/etc/manifests/deploy.yaml"},
 	}
-	session.ResourcesResult[resourceID] = resourcesresults.Result{
-		ResourceID: resourceID,
-		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
-			{
-				ControlID: controlID,
-				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
-			},
-		},
-	}
-	session.ResourceSource = map[string]reporthandling.Source{
-		resourceID: {RelativePath: ""},
-	}
-	session.Report = &reporthandlingv2.PostureReport{
-		SummaryDetails: reportsummary.SummaryDetails{
-			Controls: reportsummary.ControlSummaries{
-				controlID: reportsummary.ControlSummary{
-					ControlID:   controlID,
-					Name:        "Privileged container",
-					Description: "Do not run privileged containers",
-					ScoreFactor: 8.0,
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session := cautils.NewOPASessionObjMock()
+			session.Metadata = &reporthandlingv2.Metadata{
+				ScanMetadata: reporthandlingv2.ScanMetadata{
+					ScanningTarget: reporthandlingv2.Directory,
 				},
-			},
-		},
+				ContextMetadata: reporthandlingv2.ContextMetadata{
+					DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{
+						BasePath: t.TempDir(),
+					},
+				},
+			}
+			session.ResourcesResult[resourceID] = resourcesresults.Result{
+				ResourceID: resourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: controlID,
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+					},
+				},
+			}
+			session.ResourceSource = map[string]reporthandling.Source{
+				resourceID: {RelativePath: tt.relPath},
+			}
+			session.Report = &reporthandlingv2.PostureReport{
+				SummaryDetails: reportsummary.SummaryDetails{
+					Controls: reportsummary.ControlSummaries{
+						controlID: reportsummary.ControlSummary{
+							ControlID:   controlID,
+							Name:        "Privileged container",
+							Description: "Do not run privileged containers",
+							ScoreFactor: 8.0,
+						},
+					},
+				},
+			}
+
+			// the base path is non-empty, so only the path check can skip this finding
+			require.NotEmpty(t, getBasePathFromMetadata(*session))
+
+			report := gitLabReportFor(t, session)
+			assert.Empty(t, report.Vulnerabilities, "a finding GitLab cannot anchor to a repository file must not be emitted")
+		})
+	}
+}
+
+func TestIsRepositoryRelative(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{path: "deploy.yaml", want: true},
+		{path: "manifests/deploy.yaml", want: true},
+		{path: "./manifests/deploy.yaml", want: true},
+		{path: "manifests/../deploy.yaml", want: true},
+		{path: "", want: false},
+		{path: "..", want: false},
+		{path: "../deploy.yaml", want: false},
+		{path: "../../outside/deploy.yaml", want: false},
+		{path: "manifests/../../deploy.yaml", want: false},
+		{path: "/etc/manifests/deploy.yaml", want: false},
 	}
 
-	// the base path is non-empty, so only the relative-path check can skip this finding
-	require.NotEmpty(t, getBasePathFromMetadata(*session))
-
-	report := gitLabReportFor(t, session)
-	assert.Empty(t, report.Vulnerabilities, "a finding with no file path must not be emitted")
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			assert.Equal(t, tt.want, isRepositoryRelative(tt.path))
+		})
+	}
 }
 
 // TestGitLabSASTSeverityIsValid guards the score-factor mapping onto GitLab's severity enum: an unlisted value makes GitLab reject the whole report

@@ -156,8 +156,9 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 		resourceSource := opaSessionObj.ResourceSource[resourceID]
 		relPath := resourceSource.RelativePath
 
-		// location.file is built from the relative path alone, and GitLab cannot render or triage a finding without one
-		if relPath == "" {
+		// location.file is built from the relative path alone, and GitLab can only anchor a finding to a file inside the repository
+		if !isRepositoryRelative(relPath) {
+			logger.L().Debug("resource path is not repository-relative, skipping", helpers.String("path", relPath), helpers.String("resourceID", resourceID))
 			continue
 		}
 
@@ -243,6 +244,15 @@ func toGitLabVulnerability(ctl reportsummary.IControlSummary, resourceID, filePa
 			},
 		},
 	}
+}
+
+// isRepositoryRelative reports whether path is a repository-relative file path, i.e. not empty, absolute, or escaping the repository root via ".."
+func isRepositoryRelative(path string) bool {
+	if path == "" || filepath.IsAbs(path) {
+		return false
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(path))
+	return cleaned != ".." && !strings.HasPrefix(cleaned, "../")
 }
 
 // gitLabVulnerabilityID returns a stable id so GitLab can track a finding across scans for triage and dismissal
