@@ -258,9 +258,7 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 	return nil
 }
 
-// resolveFixLocation resolves the file location of a failed control on a resource,
-// falling back to line 1 when the manifest path cannot be resolved. Shared by the
-// SARIF and GitLab SAST printers.
+// resolveFixLocation resolves a failed control's location in the manifest, falling back to line 1. Shared by the SARIF and GitLab SAST printers
 func resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {
 	defaultLocation := locationresolver.Location{Line: 1, Column: 1}
 	if locationResolver == nil {

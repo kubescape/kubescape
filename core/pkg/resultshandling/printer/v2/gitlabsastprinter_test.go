@@ -20,8 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// gitLabSessionFixture builds a session with a single failed control on a real manifest
-// written to disk, so the location resolver can resolve the failing field to a line.
+// gitLabSessionFixture builds a session with one failed control on a real manifest, so the location resolver has a file to read
 func gitLabSessionFixture(t *testing.T, controlID string, scoreFactor float32) *cautils.OPASessionObj {
 	t.Helper()
 
@@ -114,7 +113,7 @@ spec:
 	return session
 }
 
-// gitLabReportFor runs the printer against a session and returns the decoded report.
+// gitLabReportFor runs the printer against a session and returns the decoded report
 func gitLabReportFor(t *testing.T, session *cautils.OPASessionObj) gitLabSASTReport {
 	t.Helper()
 
@@ -137,8 +136,7 @@ func gitLabReportFor(t *testing.T, session *cautils.OPASessionObj) gitLabSASTRep
 	return report
 }
 
-// TestGitLabSASTPrintConfigurationScan_MapsControlToVulnerability verifies the fields
-// GitLab needs to render a finding in the Security dashboard are all populated.
+// TestGitLabSASTPrintConfigurationScan_MapsControlToVulnerability verifies the fields GitLab needs to render a finding are all populated
 func TestGitLabSASTPrintConfigurationScan_MapsControlToVulnerability(t *testing.T) {
 	const controlID = "C-0057"
 
@@ -172,8 +170,7 @@ func TestGitLabSASTPrintConfigurationScan_MapsControlToVulnerability(t *testing.
 	assert.NotEmpty(t, vuln.Identifiers[0].URL)
 }
 
-// TestGitLabSASTPrintConfigurationScan_ResolvesLineNumbers is the point of reusing the
-// SARIF location resolver: findings must anchor at the offending line, not collapse to line 1.
+// TestGitLabSASTPrintConfigurationScan_ResolvesLineNumbers is the point of reusing the SARIF resolver: findings must anchor at the offending line, not collapse to line 1
 func TestGitLabSASTPrintConfigurationScan_ResolvesLineNumbers(t *testing.T) {
 	const privilegedLine = 13
 
@@ -189,8 +186,7 @@ func TestGitLabSASTPrintConfigurationScan_ResolvesLineNumbers(t *testing.T) {
 		"the privileged field must resolve to line %d", privilegedLine)
 }
 
-// TestGitLabSASTPrintConfigurationScan_ScanTimeFormat guards the schema's timestamp
-// pattern, which rejects timezone offsets and fractional seconds.
+// TestGitLabSASTPrintConfigurationScan_ScanTimeFormat guards the schema's timestamp pattern, which rejects timezone offsets and fractional seconds
 func TestGitLabSASTPrintConfigurationScan_ScanTimeFormat(t *testing.T) {
 	session := gitLabSessionFixture(t, "C-0057", 8.0)
 	preset := time.Date(2024, 3, 14, 9, 15, 26, 0, time.UTC)
@@ -204,8 +200,7 @@ func TestGitLabSASTPrintConfigurationScan_ScanTimeFormat(t *testing.T) {
 	assert.NoError(t, err, "end_time must match the schema's timestamp format")
 }
 
-// TestGitLabSASTPrintConfigurationScan_MissingControl covers a control that failed on a
-// resource but is absent from the summary: it must be skipped rather than panic.
+// TestGitLabSASTPrintConfigurationScan_MissingControl covers a failed control absent from the summary: skip it rather than panic
 func TestGitLabSASTPrintConfigurationScan_MissingControl(t *testing.T) {
 	resourceID := "apps/v1/Deployment/default/my-deployment"
 
@@ -235,8 +230,55 @@ func TestGitLabSASTPrintConfigurationScan_MissingControl(t *testing.T) {
 	assert.Empty(t, report.Vulnerabilities)
 }
 
-// TestGitLabSASTSeverityIsValid guards the mapping from Kubescape score factors onto
-// GitLab's severity enum: an unlisted value makes GitLab reject the whole report.
+// TestGitLabSASTPrintConfigurationScan_SkipsResourceWithoutRelativePath covers a failed resource with no relative path but a non-empty base path: GitLab gets no file to anchor the finding to, so it must be skipped
+func TestGitLabSASTPrintConfigurationScan_SkipsResourceWithoutRelativePath(t *testing.T) {
+	const controlID = "C-0057"
+	resourceID := "apps/v1/Deployment/default/demo"
+
+	session := cautils.NewOPASessionObjMock()
+	session.Metadata = &reporthandlingv2.Metadata{
+		ScanMetadata: reporthandlingv2.ScanMetadata{
+			ScanningTarget: reporthandlingv2.Directory,
+		},
+		ContextMetadata: reporthandlingv2.ContextMetadata{
+			DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{
+				BasePath: t.TempDir(),
+			},
+		},
+	}
+	session.ResourcesResult[resourceID] = resourcesresults.Result{
+		ResourceID: resourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: controlID,
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		},
+	}
+	session.ResourceSource = map[string]reporthandling.Source{
+		resourceID: {RelativePath: ""},
+	}
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				controlID: reportsummary.ControlSummary{
+					ControlID:   controlID,
+					Name:        "Privileged container",
+					Description: "Do not run privileged containers",
+					ScoreFactor: 8.0,
+				},
+			},
+		},
+	}
+
+	// the base path is non-empty, so only the relative-path check can skip this finding
+	require.NotEmpty(t, getBasePathFromMetadata(*session))
+
+	report := gitLabReportFor(t, session)
+	assert.Empty(t, report.Vulnerabilities, "a finding with no file path must not be emitted")
+}
+
+// TestGitLabSASTSeverityIsValid guards the score-factor mapping onto GitLab's severity enum: an unlisted value makes GitLab reject the whole report
 func TestGitLabSASTSeverityIsValid(t *testing.T) {
 	gitLabSeverities := []string{"Info", "Unknown", "Low", "Medium", "High", "Critical"}
 

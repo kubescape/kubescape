@@ -23,10 +23,9 @@ import (
 const (
 	gitLabSASTOutputFile = "report"
 
-	// gitLabSASTReportVersion is the GitLab security report schema version we emit.
-	// See https://gitlab.com/gitlab-org/security-products/security-report-schemas
+	// gitLabSASTReportVersion is the schema version we emit: https://gitlab.com/gitlab-org/security-products/security-report-schemas
 	gitLabSASTReportVersion = "15.2.4"
-	// gitLabTimeFormat is the timestamp format required by the GitLab schema (no timezone).
+	// gitLabTimeFormat is the timestamp format required by the GitLab schema (no timezone)
 	gitLabTimeFormat = "2006-01-02T15:04:05"
 
 	gitLabScannerID     = "kubescape"
@@ -38,15 +37,12 @@ const (
 
 var _ printer.IPrinter = &GitLabSASTPrinter{}
 
-// GitLabSASTPrinter emits configuration-scan results in the GitLab SAST report format,
-// so findings surface in GitLab's Security dashboard and MR approval policies rather than
-// only in the test widget (as the JUnit format does). See issue #2496.
+// GitLabSASTPrinter emits configuration-scan results as a GitLab SAST report, so findings reach the Security dashboard and MR approval policies rather than the test widget (#2496)
 type GitLabSASTPrinter struct {
 	writer *os.File
 }
 
-// gitLabSASTReport mirrors the GitLab SAST report schema. Only the fields Kubescape
-// can populate are modelled; optional fields are omitted when empty.
+// gitLabSASTReport mirrors the GitLab SAST report schema; only the fields Kubescape can populate are modelled
 type gitLabSASTReport struct {
 	Version         string                `json:"version"`
 	Scan            gitLabScan            `json:"scan"`
@@ -160,8 +156,8 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 		resourceSource := opaSessionObj.ResourceSource[resourceID]
 		relPath := resourceSource.RelativePath
 
-		// A finding with no file path is meaningless in GitLab's Security dashboard
-		if relPath == "" && basePath == "" {
+		// location.file is built from the relative path alone, and GitLab cannot render or triage a finding without one
+		if relPath == "" {
 			continue
 		}
 
@@ -249,13 +245,12 @@ func toGitLabVulnerability(ctl reportsummary.IControlSummary, resourceID, filePa
 	}
 }
 
-// gitLabVulnerabilityID returns a stable, unique identifier for a finding so GitLab can
-// track it across scans for triage and dismissal.
+// gitLabVulnerabilityID returns a stable id so GitLab can track a finding across scans for triage and dismissal
 func gitLabVulnerabilityID(controlID, resourceID, filePath string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(controlID+"/"+resourceID+"/"+filePath)))
 }
 
-// kubescapeVersion returns the current build version, or "unknown" for local builds.
+// kubescapeVersion returns the current build version, or "unknown" for local builds
 func kubescapeVersion() string {
 	if versioncheck.BuildNumber == "" {
 		return versioncheck.UnknownBuildNumber
