@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -125,4 +126,44 @@ func TestPrintScanCoverage_AllSectionsRendered(t *testing.T) {
 	assert.Contains(t, out, "clusterroles")
 	assert.Contains(t, out, "C-0001")
 	assert.Contains(t, out, "/v1/pods")
+}
+
+func TestSetWriter_Pretty(t *testing.T) {
+	tests := []struct {
+		name       string
+		outputFile string
+		expected   string
+	}{
+		{
+			name:       "Output file name doesn't contain any extension",
+			outputFile: "customFilename",
+			expected:   "customFilename.txt",
+		},
+		{
+			name:       "Output file name contains .txt",
+			outputFile: "customFilename.txt",
+			expected:   "customFilename.txt",
+		},
+		{
+			name:       "Output file name is empty",
+			outputFile: "",
+			expected:   "/dev/stdout",
+		},
+		{
+			name:       "Output file is os.DevNull",
+			outputFile: os.DevNull,
+			expected:   os.DevNull,
+		},
+	}
+
+	ctx := context.Background()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pp := NewPrettyPrinter(false, "v2", false, cautils.ViewTypes("control"), cautils.ScanTypes("cluster"), []string{}, "")
+
+			pp.SetWriter(ctx, tt.outputFile)
+			assert.Equal(t, tt.expected, pp.writer.Name())
+		})
+	}
 }
