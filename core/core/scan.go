@@ -169,6 +169,8 @@ func fileExtForFormat(format string) string {
 		return printer.JunitOutputExt
 	case printer.SARIFFormat:
 		return printer.SARIFOutputExt
+	case printer.GitLabSASTFormat:
+		return printer.JsonOutputExt
 	case printer.HtmlFormat:
 		return printer.HtmlOutputExt
 	case printer.PdfFormat:

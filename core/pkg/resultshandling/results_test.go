@@ -195,6 +195,36 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr:   nil,
 		},
 		{
+			name:        "gitlab-sast format for cluster context should return error",
+			scanContext: cautils.ContextCluster,
+			format:      printer.GitLabSASTFormat,
+			expectErr:   errors.New("format \"gitlab-sast\" is only supported when scanning local files"),
+		},
+		{
+			name:        "gitlab-sast format for local dir context should not return error",
+			scanContext: cautils.ContextDir,
+			format:      printer.GitLabSASTFormat,
+			expectErr:   nil,
+		},
+		{
+			name:        "gitlab-sast format for local file context should not return error",
+			scanContext: cautils.ContextFile,
+			format:      printer.GitLabSASTFormat,
+			expectErr:   nil,
+		},
+		{
+			name:        "gitlab-sast format for local git context should not return error",
+			scanContext: cautils.ContextGitLocal,
+			format:      printer.GitLabSASTFormat,
+			expectErr:   nil,
+		},
+		{
+			name:      "gitlab-sast format for image scan should return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.GitLabSASTFormat,
+			expectErr: errors.New("format \"gitlab-sast\" is not supported for image scanning"),
+		},
+		{
 			name:      "pdf format for image scan should return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.PdfFormat,
@@ -271,6 +301,12 @@ func TestNewPrinter(t *testing.T) {
 		{
 			name:     "Sarif printer",
 			format:   "sarif",
+			viewType: "resource",
+			version:  defaultVersion,
+		},
+		{
+			name:     "GitLab SAST printer",
+			format:   "gitlab-sast",
 			viewType: "resource",
 			version:  defaultVersion,
 		},
