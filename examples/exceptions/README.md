@@ -303,6 +303,35 @@ You can combine multiple exceptions in a single file:
 ]
 ```
 
+### Exclude ICS/OT Namespaces from a Specific Control
+
+Industrial Control System / Operational Technology (ICS/OT) workloads frequently require deviations from standard Kubernetes hardening, for example `hostNetwork: true` for Modbus/DNP3 protocol bridges that need direct reachability to PLC subnets. See [`docs/ics-ot-workloads.md`](../../docs/ics-ot-workloads.md) for the full guidance on scanning OT workloads with Kubescape.
+
+The example below scopes the exception narrowly: it suppresses only C-0041 (`hostNetwork`) for resources carrying the label `sector: ics-ot`, leaving every other control in the failed state so genuinely new misconfigurations still surface. Pair every exception with a compensating control (typically a NetworkPolicy that default-denies ingress to the OT namespace) and document the risk acceptance in your change-management system.
+
+```json
+[
+    {
+        "name": "exclude-ot-sector-host-network",
+        "policyType": "postureExceptionPolicy",
+        "actions": ["alertOnly"],
+        "resources": [
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "sector": "ics-ot"
+                }
+            }
+        ],
+        "posturePolicies": [
+            {
+                "controlID": "C-0041"
+            }
+        ]
+    }
+]
+```
+
 ---
 
 ## Related Documentation

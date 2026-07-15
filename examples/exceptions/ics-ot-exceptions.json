@@ -1,0 +1,22 @@
+[
+    {
+        "name": "exclude-ot-sector-host-network",
+        "policyType": "postureExceptionPolicy",
+        "actions": [
+            "alertOnly"
+        ],
+        "resources": [
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "sector": "ics-ot"
+                }
+            }
+        ],
+        "posturePolicies": [
+            {
+                "controlID": "C-0041"
+            }
+        ]
+    }
+]
