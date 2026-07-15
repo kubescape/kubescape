@@ -121,17 +121,19 @@ func enocodeIntoYaml(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) (
 	return fmt.Sprintf(`%v`, buf.String()), nil
 }
 
-func getContent(ctx context.Context, parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) string {
+func getContent(ctx context.Context, parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) (string, error) {
 	content, err := enocodeIntoYaml(parentNode, nodeList, tracker)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("Cannot Encode into YAML")
+		// Best-effort remediation rendering must not kill the process; let the
+		// caller skip this fix and still write the report.
+		return "", fmt.Errorf("cannot encode fix into YAML: %w", err)
 	}
 
 	indentationSpaces := parentNode.Column - 1
 
 	content = indentContent(content, indentationSpaces)
 
-	return strings.TrimSuffix(content, "\n")
+	return strings.TrimSuffix(content, "\n"), nil
 }
 
 func indentContent(content string, indentationSpaces int) string {
@@ -337,12 +339,15 @@ func safelyCloseFile(ctx context.Context, file *os.File) {
 
 // Remove the entire line and replace it with the sequence node in fixed info. This way,
 // the original formatting is lost.
-func replaceSingleLineSequence(ctx context.Context, fixInfoMetadata *fixInfoMetadata, line int) (int, int) {
+func replaceSingleLineSequence(ctx context.Context, fixInfoMetadata *fixInfoMetadata, line int) (int, int, error) {
 	originalListTracker := getFirstNodeInLine(fixInfoMetadata.originalList, line)
 	fixedListTracker := getFirstNodeInLine(fixInfoMetadata.fixedList, line)
 
 	currentDFSNode := (*fixInfoMetadata.fixedList)[fixedListTracker]
-	contentToInsert := getContent(ctx, currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
+	contentToInsert, err := getContent(ctx, currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
+	if err != nil {
+		return 0, 0, err
+	}
 
 	// Remove the Single line
 	*fixInfoMetadata.linesToRemove = append(*fixInfoMetadata.linesToRemove, linesToRemove{
@@ -359,7 +364,7 @@ func replaceSingleLineSequence(ctx context.Context, fixInfoMetadata *fixInfoMeta
 	originalListTracker = updateTracker(fixInfoMetadata.originalList, originalListTracker)
 	fixedListTracker = updateTracker(fixInfoMetadata.fixedList, fixedListTracker)
 
-	return originalListTracker, fixedListTracker
+	return originalListTracker, fixedListTracker, nil
 }
 
 // Returns the first node in the given line that is not mapping node
