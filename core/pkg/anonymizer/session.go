@@ -14,9 +14,10 @@ import (
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
-// anonymizeSession rewrites sensitive resource identifiers and metadata while
-// preserving internal referential integrity across the full OPA session.
-func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, transformer Transformer) error {
+// transformSession applies the supplied Transformer to sensitive resource
+// identifiers and metadata while preserving referential integrity across
+// the full OPA session.
+func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transformer Transformer) error {
 	if session == nil {
 		return nil
 	}
@@ -29,14 +30,19 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 		if err := transformResourceMetadata(resource, transformer); err != nil {
 			return err
 		}
-		// sourcePath leaks manifest filenames/line references in hidden output
-		// (for example test-anonymize.yaml:1), so anonymize it alongside other
-		// resource-local metadata.
-		anonymizeResourceObjectSourcePath(resource, mapping)
+
+		// sourcePath may expose manifest filenames and line references
+		// (for example test-anonymize.yaml:1), so transform it alongside
+		// other resource-local metadata.
+		if err := transformResourceObjectSourcePath(resource, transformer); err != nil {
+			return err
+		}
 
 		// Annotations may contain infrastructure identifiers, secret paths, or
 		// other sensitive metadata at both top-level and nested workload templates.
-		anonymizeResourceAnnotations(resource, mapping)
+		if err := transformResourceAnnotations(resource, transformer); err != nil {
+			return err
+		}
 
 		// Container-related metadata is transformed separately to preserve the
 		// existing typed/unstructured traversal behavior while supporting
@@ -46,7 +52,9 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 		}
 
 		if len(session.LabelsToCopy) > 0 {
-			anonymizeResourceLabels(resource, session.LabelsToCopy, mapping)
+			if err := transformResourceLabels(resource, session.LabelsToCopy, transformer); err != nil {
+				return err
+			}
 		}
 
 		newID := resource.GetID()
@@ -181,126 +189,180 @@ func resolveMappedID(mapping *Mapping, idMapping map[string]string, originalID, 
 	return mapping.GetOrCreate(prefix, originalID)
 }
 
-// anonymizeResourceLabels anonymizes only labels explicitly configured for
-// copying into reports, preserving existing --hide behavior.
-func anonymizeResourceLabels(resource workloadinterface.IMetadata, labelsToCopy []string, mapping *Mapping) {
+// transformResourceLabels applies the supplied Transformer to labels
+// explicitly configured for copying into reports while preserving the
+// existing label selection behavior.
+func transformResourceLabels(resource workloadinterface.IMetadata, labelsToCopy []string, transformer Transformer) error {
+
 	bw, ok := resource.(workloadinterface.IWorkload)
 	if !ok {
-		return
+		return nil
 	}
 
 	labels := bw.GetLabels()
 	if len(labels) == 0 {
-		return
+		return nil
 	}
 
 	for _, key := range labelsToCopy {
 		if val, exists := labels[key]; exists && val != "" {
-			bw.SetLabel(key, mapping.GetOrCreate("lbl", val))
+
+			transformedValue, err := transformValue(
+				transformer,
+				"lbl",
+				val,
+			)
+			if err != nil {
+				return err
+			}
+
+			bw.SetLabel(
+				key,
+				transformedValue,
+			)
 		}
 	}
+
+	return nil
 }
 
-// anonymizeResourceAnnotations walks the full resource object and anonymizes
-// annotation values anywhere metadata.annotations appears, including nested
+// transformResourceAnnotations applies the supplied Transformer to
+// annotation values throughout a resource object, including nested
 // workload templates such as Deployment pod specs.
-func anonymizeResourceAnnotations(resource workloadinterface.IMetadata, mapping *Mapping) {
+func transformResourceAnnotations(resource workloadinterface.IMetadata, transformer Transformer) error {
+
 	if resource == nil {
-		return
+		return nil
 	}
 
 	obj := resource.GetObject()
 	if obj == nil {
-		return
+		return nil
 	}
 
-	anonymizeAnnotationNodes(obj, mapping)
+	if err := transformAnnotationNodes(obj, transformer); err != nil {
+		return err
+	}
+
 	resource.SetObject(obj)
+
+	return nil
 }
 
-// anonymizeResourceObjectSourcePath anonymizes object.sourcePath while
-// preserving line number context (e.g. src-xxxx:12).
-func anonymizeResourceObjectSourcePath(resource workloadinterface.IMetadata, mapping *Mapping) {
+// transformResourceObjectSourcePath applies the supplied Transformer to
+// object.sourcePath while preserving trailing line-number context (for
+// example src-xxxx:12).
+func transformResourceObjectSourcePath(resource workloadinterface.IMetadata, transformer Transformer) error {
+
 	if resource == nil {
-		return
+		return nil
 	}
 
 	obj := resource.GetObject()
 	if obj == nil {
-		return
+		return nil
 	}
 
 	rawSourcePath, ok := obj["sourcePath"]
 	if !ok {
-		return
+		return nil
 	}
 
 	sourcePath, ok := rawSourcePath.(string)
 	if !ok || sourcePath == "" {
-		return
+		return nil
 	}
 
-	obj["sourcePath"] = anonymizeSourcePath(sourcePath, mapping)
+	transformedSourcePath, err := transformSourcePath(
+		sourcePath,
+		transformer,
+	)
+	if err != nil {
+		return err
+	}
+
+	obj["sourcePath"] = transformedSourcePath
 	resource.SetObject(obj)
+
+	return nil
 }
 
-// anonymizeSourcePath preserves trailing line numbers while anonymizing the
-// underlying file path.
-func anonymizeSourcePath(sourcePath string, mapping *Mapping) string {
+// transformSourcePath applies the supplied Transformer to the path portion
+// of a sourcePath while preserving any trailing line number (for example
+// src-xxxx:12).
+func transformSourcePath(sourcePath string, transformer Transformer) (string, error) {
+
 	lastColon := strings.LastIndex(sourcePath, ":")
 	if lastColon == -1 {
-		return mapping.GetOrCreate("src", sourcePath)
+		return transformValue(transformer, "src", sourcePath)
 	}
 
 	pathPart := sourcePath[:lastColon]
 	linePart := sourcePath[lastColon:]
 
 	if pathPart == "" {
-		return mapping.GetOrCreate("src", sourcePath)
+		return transformValue(transformer, "src", sourcePath)
 	}
 
-	return mapping.GetOrCreate("src", pathPart) + linePart
+	transformedPath, err := transformValue(transformer, "src", pathPart)
+	if err != nil {
+		return "", err
+	}
+
+	return transformedPath + linePart, nil
 }
 
-// anonymizeAnnotationNodes recursively traverses unstructured resource objects
-// to locate metadata blocks regardless of workload nesting depth.
-func anonymizeAnnotationNodes(node any, mapping *Mapping) {
+// transformAnnotationNodes recursively traverses unstructured resource
+// objects, applying the supplied Transformer to annotation values
+// wherever metadata.annotations appears regardless of workload nesting.
+func transformAnnotationNodes(node any, transformer Transformer) error {
+
 	switch v := node.(type) {
 	case map[string]any:
-		anonymizeAnnotationMap(v, mapping)
+		if err := transformAnnotationMap(v, transformer); err != nil {
+			return err
+		}
 
 		for _, child := range v {
-			anonymizeAnnotationNodes(child, mapping)
+			if err := transformAnnotationNodes(child, transformer); err != nil {
+				return err
+			}
 		}
 
 	case []any:
 		for _, item := range v {
-			anonymizeAnnotationNodes(item, mapping)
+			if err := transformAnnotationNodes(item, transformer); err != nil {
+				return err
+			}
 		}
 	}
+
+	return nil
 }
 
-// anonymizeAnnotationMap anonymizes string annotation values while preserving
-// annotation keys, which remain meaningful Kubernetes identifiers.
-func anonymizeAnnotationMap(obj map[string]any, mapping *Mapping) {
+// transformAnnotationMap applies the supplied Transformer to annotation
+// values while preserving annotation keys, which remain meaningful
+// Kubernetes identifiers.
+func transformAnnotationMap(obj map[string]any, transformer Transformer) error {
+
 	rawMetadata, ok := obj["metadata"]
 	if !ok || rawMetadata == nil {
-		return
+		return nil
 	}
 
 	metadata, ok := rawMetadata.(map[string]any)
 	if !ok {
-		return
+		return nil
 	}
 
 	rawAnnotations, ok := metadata["annotations"]
 	if !ok || rawAnnotations == nil {
-		return
+		return nil
 	}
 
 	annotations, ok := rawAnnotations.(map[string]any)
 	if !ok {
-		return
+		return nil
 	}
 
 	for key, val := range annotations {
@@ -309,8 +371,15 @@ func anonymizeAnnotationMap(obj map[string]any, mapping *Mapping) {
 			continue
 		}
 
-		annotations[key] = mapping.GetOrCreate("ann", str)
+		transformedValue, err := transformValue(transformer, "ann", str)
+		if err != nil {
+			return err
+		}
+
+		annotations[key] = transformedValue
 	}
+
+	return nil
 }
 
 func transformValue(transformer Transformer, prefix string, value string) (string, error) {

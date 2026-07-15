@@ -128,9 +128,22 @@ func GetDecryptCommand() *cobra.Command {
 							return err
 						}
 
+						if err := reportcrypto.DecryptResourceLabels(resource, dek); err != nil {
+							return err
+						}
+
+						if err := reportcrypto.DecryptResourceAnnotations(resource, dek); err != nil {
+							return err
+						}
+
+						if err := reportcrypto.DecryptResourceObjectSourcePath(resource, dek); err != nil {
+							return err
+						}
+
 						if err := reportcrypto.DecryptContainerMetadata(resource, dek); err != nil {
 							return err
 						}
+
 						newID := resource.GetID()
 						if oldID != "" {
 							idMapping[oldID] = newID

@@ -24,7 +24,7 @@ func applyWithTransformer(
 
 	mapping := NewMapping()
 
-	if err := anonymizeSession(
+	if err := transformSession(
 		resultsHandler.ScanData,
 		mapping,
 		transformer,

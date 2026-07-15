@@ -18,7 +18,7 @@ import (
 //	          ↓
 //	     UnwrapDEK()
 //	          ↓
-//	           DEK
+//	          DEK
 func DEKFromMetadata(
 	metadata *reporthandlingv2.Metadata,
 	masterKey []byte,
@@ -54,6 +54,11 @@ func DEKFromMetadata(
 //   - Branch
 //   - RemoteURL
 //   - LastCommit.Message
+//   - DefaultBranch
+//   - LocalRootPath
+//   - LastCommit.Hash
+//   - LastCommit.CommitterName
+//   - LastCommit.CommitterEmail
 //
 // Additional fields can be added as encryption coverage expands.
 func DecryptRepoContextMetadata(
@@ -434,4 +439,242 @@ func decryptIfEncrypted(value string, dek []byte) (string, error) {
 	}
 
 	return DecryptString(value, dek)
+}
+
+// DecryptResourceLabels restores encrypted resource label values.
+//
+// Every label value is passed through decryptIfEncrypted, which leaves
+// plaintext values unchanged while restoring encrypted values.
+func DecryptResourceLabels(resource workloadinterface.IMetadata, dek []byte) error {
+
+	if resource == nil {
+		return nil
+	}
+
+	bw, ok := resource.(workloadinterface.IWorkload)
+	if !ok {
+		return nil
+	}
+
+	labels := bw.GetLabels()
+	if len(labels) == 0 {
+		return nil
+	}
+
+	for key, value := range labels {
+		if value == "" {
+			continue
+		}
+
+		decryptedValue, err := decryptIfEncrypted(
+			value,
+			dek,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to decrypt label %q: %w",
+				key,
+				err,
+			)
+		}
+
+		bw.SetLabel(
+			key,
+			decryptedValue,
+		)
+	}
+
+	return nil
+}
+
+// DecryptResourceAnnotations restores encrypted annotation values
+// throughout a workload object, including nested workload templates.
+func DecryptResourceAnnotations(resource workloadinterface.IMetadata, dek []byte) error {
+
+	if resource == nil {
+		return nil
+	}
+
+	obj := resource.GetObject()
+	if obj == nil {
+		return nil
+	}
+
+	if err := decryptAnnotationNodes(
+		obj,
+		dek,
+	); err != nil {
+		return err
+	}
+
+	resource.SetObject(obj)
+
+	return nil
+}
+
+// decryptAnnotationNodes recursively traverses resource objects to
+// locate metadata.annotations blocks regardless of workload nesting
+// depth.
+func decryptAnnotationNodes(node any, dek []byte) error {
+
+	switch v := node.(type) {
+
+	case map[string]any:
+
+		if err := decryptAnnotationMap(
+			v,
+			dek,
+		); err != nil {
+			return err
+		}
+
+		for _, child := range v {
+			if err := decryptAnnotationNodes(
+				child,
+				dek,
+			); err != nil {
+				return err
+			}
+		}
+
+	case []any:
+
+		for _, item := range v {
+			if err := decryptAnnotationNodes(
+				item,
+				dek,
+			); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// decryptAnnotationMap restores encrypted annotation values while
+// preserving annotation keys.
+func decryptAnnotationMap(obj map[string]any, dek []byte) error {
+
+	rawMetadata, ok := obj["metadata"]
+	if !ok || rawMetadata == nil {
+		return nil
+	}
+
+	metadata, ok := rawMetadata.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	rawAnnotations, ok := metadata["annotations"]
+	if !ok || rawAnnotations == nil {
+		return nil
+	}
+
+	annotations, ok := rawAnnotations.(map[string]any)
+	if !ok {
+		return nil
+	}
+
+	for key, value := range annotations {
+
+		str, ok := value.(string)
+		if !ok || str == "" {
+			continue
+		}
+
+		decryptedValue, err := decryptIfEncrypted(
+			str,
+			dek,
+		)
+		if err != nil {
+			return fmt.Errorf(
+				"failed to decrypt annotation %q: %w",
+				key,
+				err,
+			)
+		}
+
+		annotations[key] = decryptedValue
+	}
+
+	return nil
+}
+
+// DecryptResourceObjectSourcePath restores object.sourcePath while
+// preserving trailing line-number context.
+func DecryptResourceObjectSourcePath(resource workloadinterface.IMetadata, dek []byte) error {
+
+	if resource == nil {
+		return nil
+	}
+
+	obj := resource.GetObject()
+	if obj == nil {
+		return nil
+	}
+
+	rawSourcePath, ok := obj["sourcePath"]
+	if !ok {
+		return nil
+	}
+
+	sourcePath, ok := rawSourcePath.(string)
+	if !ok || sourcePath == "" {
+		return nil
+	}
+
+	decryptedPath, err := decryptSourcePath(
+		sourcePath,
+		dek,
+	)
+	if err != nil {
+		return err
+	}
+
+	obj["sourcePath"] = decryptedPath
+	resource.SetObject(obj)
+
+	return nil
+}
+
+// decryptSourcePath restores the path portion of a sourcePath while
+// preserving any trailing line-number suffix.
+func decryptSourcePath(sourcePath string, dek []byte) (string, error) {
+
+	lastColon := strings.LastIndex(
+		sourcePath,
+		":",
+	)
+
+	if lastColon == -1 {
+		return decryptIfEncrypted(
+			sourcePath,
+			dek,
+		)
+	}
+
+	pathPart := sourcePath[:lastColon]
+	linePart := sourcePath[lastColon:]
+
+	if pathPart == "" {
+		return decryptIfEncrypted(
+			sourcePath,
+			dek,
+		)
+	}
+
+	decryptedPath, err := decryptIfEncrypted(
+		pathPart,
+		dek,
+	)
+	if err != nil {
+		return "",
+			fmt.Errorf(
+				"failed to decrypt source path: %w",
+				err,
+			)
+	}
+
+	return decryptedPath + linePart, nil
 }

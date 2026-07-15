@@ -126,6 +126,26 @@ func TestDecryptCommand(t *testing.T) {
 				)
 			require.NoError(t, err)
 
+			encryptedLabel, err :=
+				reportcrypto.EncryptString(
+					"backend",
+					dek,
+				)
+			require.NoError(t, err)
+
+			encryptedAnnotation, err :=
+				reportcrypto.EncryptString(
+					"payments-service",
+					dek,
+				)
+			require.NoError(t, err)
+
+			encryptedSourcePath, err :=
+				reportcrypto.EncryptString(
+					"/workspace/manifests/nginx/deployment.yaml",
+					dek,
+				)
+			require.NoError(t, err)
 			wrappedDEK, err :=
 				reportcrypto.WrapDEK(
 					dek,
@@ -147,9 +167,16 @@ func TestDecryptCommand(t *testing.T) {
 						"object": map[string]any{
 							"apiVersion": "apps/v1",
 							"kind":       "Deployment",
+							"sourcePath": encryptedSourcePath + ":27",
 							"metadata": map[string]any{
 								"name":      encryptedName,
 								"namespace": encryptedNamespace,
+								"labels": map[string]any{
+									"app": encryptedLabel,
+								},
+								"annotations": map[string]any{
+									"owner": encryptedAnnotation,
+								},
 							},
 							"spec": map[string]any{
 								"serviceAccountName": encryptedServiceAccount,
@@ -158,6 +185,7 @@ func TestDecryptCommand(t *testing.T) {
 										"name": encryptedImagePullSecret,
 									},
 								},
+
 								"containers": []any{
 									map[string]any{
 										"name":  encryptedContainerName,
@@ -367,6 +395,16 @@ func TestDecryptCommand(t *testing.T) {
 
 			assert.Equal(t, "nginx-deployment", metadataObj["name"])
 			assert.Equal(t, "production", metadataObj["namespace"])
+
+			labels := metadataObj["labels"].(map[string]any)
+
+			assert.Equal(t, "backend", labels["app"])
+
+			annotations := metadataObj["annotations"].(map[string]any)
+
+			assert.Equal(t, "payments-service", annotations["owner"])
+
+			assert.Equal(t, "/workspace/manifests/nginx/deployment.yaml:27", object["sourcePath"])
 
 			spec, ok := object["spec"].(map[string]any)
 			require.True(t, ok)
