@@ -39,7 +39,11 @@ func (ksServer *KubescapeMcpserver) RunRBACScan(ctx context.Context, namespace s
 	// IsConnectedToCluster() passes but ksServer.k8sClient is still nil.
 	// Lazily build it here to recover gracefully.
 	if ksServer.k8sClient == nil {
-		ksServer.k8sClient = k8sinterface.NewKubernetesApi()
+		ksServer.k8sClientMu.Lock()
+		if ksServer.k8sClient == nil {
+			ksServer.k8sClient = k8sinterface.NewKubernetesApi()
+		}
+		ksServer.k8sClientMu.Unlock()
 	}
 
 	// 1. Initialize custom ScanInfo isolated to RBAC controls to guarantee speed

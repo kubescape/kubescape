@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -24,6 +25,7 @@ type KubescapeMcpserver struct {
 	s            *server.MCPServer
 	ksClient     spdxv1beta1.SpdxV1beta1Interface
 	k8sClient    *k8sinterface.KubernetesApi
+	k8sClientMu  sync.Mutex
 	policyGetter *getter.DownloadReleasedPolicy
 }
 
