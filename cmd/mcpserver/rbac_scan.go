@@ -37,14 +37,9 @@ func (ksServer *KubescapeMcpserver) RunRBACScan(ctx context.Context, namespace s
 	// Maintainer edge-case fix: If the server started while no cluster was reachable,
 	// ksServer.k8sClient will be nil. If a cluster becomes reachable later,
 	// IsConnectedToCluster() passes but ksServer.k8sClient is still nil.
-	// Lazily build it here to recover gracefully.
-	if ksServer.k8sClient == nil {
-		ksServer.k8sClientMu.Lock()
-		if ksServer.k8sClient == nil {
-			ksServer.k8sClient = k8sinterface.NewKubernetesApi()
-		}
-		ksServer.k8sClientMu.Unlock()
-	}
+	// Lazily build it here to recover gracefully. All access routed through getK8sClient
+	// to ensure perfectly synchronized sync.Once behavior.
+	client := ksServer.getK8sClient()
 
 	// 1. Initialize custom ScanInfo isolated to RBAC controls to guarantee speed
 	scanInfo := &cautils.ScanInfo{
@@ -76,13 +71,13 @@ func (ksServer *KubescapeMcpserver) RunRBACScan(ctx context.Context, namespace s
 
 	// 3. Pull required K8s resources (only pulls resources defined by C-0015 and C-0016)
 	// Reuse the cached k8sClient from the server struct to avoid per-scan re-initialization overhead.
-	k8sHandler := resourcehandler.NewK8sResourceHandler(scanCtx, ksServer.k8sClient, nil, nil, "")
+	k8sHandler := resourcehandler.NewK8sResourceHandler(scanCtx, client, nil, nil, "")
 	if err := resourcehandler.CollectResources(scanCtx, k8sHandler, scanData, scanInfo); err != nil {
 		return nil, fmt.Errorf("failed to collect RBAC resources: %w", err)
 	}
 
 	// 4. Run the core OPA Processor engine
-	deps := resources.NewRegoDependenciesData(ksServer.k8sClient.K8SConfig, "")
+	deps := resources.NewRegoDependenciesData(client.K8SConfig, "")
 	opap := opaprocessor.NewOPAProcessor(scanData, deps, "", scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, false, nil)
 
 	// Execute the evaluation logic
