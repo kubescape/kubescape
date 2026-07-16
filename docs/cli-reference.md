@@ -41,9 +41,11 @@ kubescape scan [target] [flags]
 | `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, and `--view resource\|control` — see [score thresholds](#score-thresholds). | `0` |
 | `--controls-config <path>` | Path to controls configuration file | - |
 | `-e, --exclude-namespaces <ns>` | Namespaces to exclude (comma-separated) | - |
+| `--encrypt` | Encrypt sensitive report metadata using the master key provided through the `KUBESCAPE_MASTER_KEY` environment variable. Encrypted reports can later be restored using `kubescape decrypt`. | `false` |
 | `--exceptions <path>` | Path to exceptions file | - |
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `sarif`, `html`, `pdf`, `prometheus` | `pretty-printer` |
+| `--hide` | Replace sensitive report metadata with anonymized values in the generated report. | `false` |
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
 | `--keep-local` | Don't report results to backend | `false` |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
@@ -55,7 +57,6 @@ kubescape scan [target] [flags]
 | `--use-from <path>` | Load specific policy from path | - |
 | `-v, --verbose` | Display all resources, not just failed ones | `false` |
 | `--view <type>` | View type: `security`, `control`, `resource` | `security` |
-
 ### Examples
 
 ```bash
@@ -76,6 +77,20 @@ kubescape scan /path/to/manifests/
 # Scan Git repository
 kubescape scan https://github.com/org/repo
 
+# Anonymize sensitive report metadata
+kubescape scan --hide
+
+# Generate an anonymized JSON report
+kubescape scan --hide --format json --output report.json
+
+# Generate an encrypted JSON report
+export KUBESCAPE_MASTER_KEY=<32-byte-master-key>
+kubescape scan --encrypt --format json --output encrypted-report.json
+
+# Decrypt an encrypted report
+export KUBESCAPE_MASTER_KEY=<32-byte-master-key>
+kubescape decrypt encrypted-report.json > decrypted-report.json
+
 # Output to JSON file
 kubescape scan --format json --output results.json
 
@@ -87,7 +102,6 @@ kubescape scan --view resource --compliance-threshold 80
 # Exclude namespaces
 kubescape scan --exclude-namespaces kube-system,kube-public
 ```
-
 ### Score thresholds
 
 `--compliance-threshold` (compliance score) and the deprecated
@@ -316,6 +330,116 @@ sudo kubescape patch --image myregistry.example.com/team/app:1.2.3 --push
 
 ---
 
+## kubescape scan --hide
+
+Generate a report with anonymized sensitive report metadata.
+
+### Synopsis
+
+```bash
+kubescape scan [target] --hide [flags]
+```
+
+### Description
+
+Anonymizes sensitive report metadata by replacing values with deterministic
+pseudonyms. This helps safely share scan results without exposing sensitive
+resource information.
+
+### Examples
+
+```bash
+# Scan the current cluster and generate an anonymized report
+kubescape scan --hide --format json --output report.json
+
+# Scan local manifests and save an anonymized report
+kubescape scan /path/to/manifests \
+  --hide \
+  --format json \
+  --output report.json
+```
+
+> `--hide` anonymizes sensitive report metadata. The original values cannot be restored.
+
+---
+
+## kubescape scan --encrypt
+
+Generate a report with encrypted sensitive report metadata.
+
+### Synopsis
+
+```bash
+kubescape scan [target] --encrypt [flags]
+```
+
+### Description
+
+Encrypts sensitive report metadata using the master key supplied through the
+`KUBESCAPE_MASTER_KEY` environment variable. Encrypted reports can later be
+restored using `kubescape decrypt`.
+
+### Examples
+
+```bash
+# Export a 32-byte master key
+export KUBESCAPE_MASTER_KEY=<32-byte-master-key>
+
+# Scan the current cluster and generate an encrypted report
+kubescape scan \
+  --encrypt \
+  --format json \
+  --output encrypted-report.json
+
+# Scan local manifests and generate an encrypted report
+kubescape scan /path/to/manifests \
+  --encrypt \
+  --format json \
+  --output encrypted-report.json
+```
+
+> `--encrypt` requires the `KUBESCAPE_MASTER_KEY` environment variable. The same master key must be supplied when decrypting the report.
+
+---
+
+## kubescape decrypt
+
+Decrypt an encrypted Kubescape report.
+
+### Synopsis
+
+```bash
+kubescape decrypt <report-file>
+```
+
+### Description
+
+Decrypts an encrypted Kubescape report using the
+`KUBESCAPE_MASTER_KEY` environment variable. The decrypted report is written to
+standard output and can be redirected to a file.
+
+### Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-h, --help` | Help for decrypt | - |
+
+### Examples
+
+```bash
+# Export the master key used during encryption
+export KUBESCAPE_MASTER_KEY=<32-byte-master-key>
+
+# Decrypt an encrypted report
+kubescape decrypt encrypted-report.json
+
+# Save the decrypted report to a file
+kubescape decrypt encrypted-report.json > decrypted-report.json
+```
+
+> `kubescape decrypt` restores sensitive report metadata encrypted with `kubescape scan --encrypt`. The same `KUBESCAPE_MASTER_KEY` used during encryption must be provided for successful decryption.
+
+---
 ## kubescape list
 
 List available frameworks and controls.
