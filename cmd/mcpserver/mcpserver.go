@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -21,10 +22,20 @@ import (
 )
 
 type KubescapeMcpserver struct {
-	s            *server.MCPServer
-	ksClient     spdxv1beta1.SpdxV1beta1Interface
-	k8sClient    *k8sinterface.KubernetesApi
-	policyGetter *getter.DownloadReleasedPolicy
+	s             *server.MCPServer
+	ksClient      spdxv1beta1.SpdxV1beta1Interface
+	k8sClient     *k8sinterface.KubernetesApi
+	k8sClientOnce sync.Once
+	policyGetter  *getter.DownloadReleasedPolicy
+}
+
+func (ksServer *KubescapeMcpserver) getK8sClient() *k8sinterface.KubernetesApi {
+	ksServer.k8sClientOnce.Do(func() {
+		if ksServer.k8sClient == nil {
+			ksServer.k8sClient = k8sinterface.NewKubernetesApi()
+		}
+	})
+	return ksServer.k8sClient
 }
 
 func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
