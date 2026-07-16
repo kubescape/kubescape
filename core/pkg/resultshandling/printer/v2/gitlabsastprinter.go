@@ -104,9 +104,11 @@ func NewGitLabSASTPrinter() *GitLabSASTPrinter {
 	return &GitLabSASTPrinter{}
 }
 
+// Score is a no-op: the GitLab SAST report has no field for the overall risk score
 func (gp *GitLabSASTPrinter) Score(score float32) {
 }
 
+// SetWriter opens outputFile for writing, defaulting the name and forcing a .json extension
 func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) {
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
@@ -119,9 +121,11 @@ func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) {
 	gp.writer = printer.GetWriter(ctx, outputFile)
 }
 
+// PrintNextSteps is a no-op: machine-readable output carries no human-facing guidance
 func (gp *GitLabSASTPrinter) PrintNextSteps() {
 }
 
+// ActionPrint writes the GitLab SAST report for a configuration scan; image scanning is not supported by this format
 func (gp *GitLabSASTPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	if opaSessionObj == nil {
 		logger.L().Ctx(ctx).Error("failed to write results in GitLab SAST format: image scanning is not supported")
@@ -135,6 +139,7 @@ func (gp *GitLabSASTPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 	printer.LogOutputFile(gp.writer.Name())
 }
 
+// printConfigurationScan maps each failed control on each failed resource to a GitLab SAST vulnerability and writes the report
 func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
 	startedAt := opaSessionObj.Report.ReportGenerationTime
 	if startedAt.IsZero() {
@@ -268,6 +273,7 @@ func kubescapeVersion() string {
 	return versioncheck.BuildNumber
 }
 
+// CloseWriter closes the output file, unless it is stdout, satisfying the optional printerCloser interface
 func (gp *GitLabSASTPrinter) CloseWriter() {
 	if gp.writer != nil && gp.writer != os.Stdout {
 		gp.writer.Close()
