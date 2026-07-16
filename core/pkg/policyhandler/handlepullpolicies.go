@@ -36,16 +36,38 @@ type PolicyHandler struct {
 // The PolicyHandler supports caching of downloaded policies and exceptions by setting the `POLICIES_CACHE_TTL` environment variable (default is no caching).
 func NewPolicyHandler(clusterName string) *PolicyHandler {
 	if policyHandlerInstance == nil {
-		cacheTtl := getPoliciesCacheTtl()
-		policyHandlerInstance = &PolicyHandler{
-			clusterName:             clusterName,
-			cachedPolicyIdentifiers: NewTimedCache[[]string](cacheTtl),
-			cachedFrameworks:        NewTimedCache[[]reporthandling.Framework](cacheTtl),
-			cachedExceptions:        NewTimedCache[[]armotypes.PostureExceptionPolicy](cacheTtl),
-			cachedControlInputs:     NewTimedCache[map[string][]string](cacheTtl),
-		}
+		policyHandlerInstance = NewRequestScopedPolicyHandler(clusterName)
 	}
 	return policyHandlerInstance
+}
+
+// NewRequestScopedPolicyHandler creates and returns a new, independent instance of the `PolicyHandler`.
+// This is required for concurrent use cases (like MCP servers) to prevent race conditions on shared state.
+func NewRequestScopedPolicyHandler(clusterName string) *PolicyHandler {
+	cacheTtl := getPoliciesCacheTtl()
+	return &PolicyHandler{
+		clusterName:             clusterName,
+		cachedPolicyIdentifiers: NewTimedCache[[]string](cacheTtl),
+		cachedFrameworks:        NewTimedCache[[]reporthandling.Framework](cacheTtl),
+		cachedExceptions:        NewTimedCache[[]armotypes.PostureExceptionPolicy](cacheTtl),
+		cachedControlInputs:     NewTimedCache[map[string][]string](cacheTtl),
+	}
+}
+
+// Close stops all internal caches and background goroutines to prevent leaks.
+func (policyHandler *PolicyHandler) Close() {
+	if policyHandler.cachedPolicyIdentifiers != nil {
+		policyHandler.cachedPolicyIdentifiers.Stop()
+	}
+	if policyHandler.cachedFrameworks != nil {
+		policyHandler.cachedFrameworks.Stop()
+	}
+	if policyHandler.cachedExceptions != nil {
+		policyHandler.cachedExceptions.Stop()
+	}
+	if policyHandler.cachedControlInputs != nil {
+		policyHandler.cachedControlInputs.Stop()
+	}
 }
 
 func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo) (*cautils.OPASessionObj, error) {
