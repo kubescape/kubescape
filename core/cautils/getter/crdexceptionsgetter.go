@@ -67,15 +67,31 @@ func NewCRDExceptionsGetter(k8sClient client.Client) *CRDExceptionsGetter {
 	return getter
 }
 
-func (g *CRDExceptionsGetter) GetExceptions(_ string) ([]armotypes.PostureExceptionPolicy, error) {
-	if g == nil || g.client == nil {
+func (g *CRDExceptionsGetter) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+	if g == nil {
 		return []armotypes.PostureExceptionPolicy{}, nil
 	}
 
-	var out []armotypes.PostureExceptionPolicy
+	var cloudExceptions []armotypes.PostureExceptionPolicy
+	if g.primary != nil {
+		var err error
+		cloudExceptions, err = g.primary.GetExceptions(clusterName)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if g.client == nil {
+		return deduplicateExceptions(cloudExceptions, nil), nil
+	}
+
+	var crdExceptions []armotypes.PostureExceptionPolicy
 
 	seList, err := g.client.Resource(securityExceptionGVR).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
+		if g.primary != nil {
+			return deduplicateExceptions(cloudExceptions, nil), nil
+		}
 		return nil, err
 	}
 	for i := range seList.Items {
@@ -89,11 +105,14 @@ func (g *CRDExceptionsGetter) GetExceptions(_ string) ([]armotypes.PostureExcept
 				helpers.Error(convErr))
 			continue
 		}
-		out = append(out, policies...)
+		crdExceptions = append(crdExceptions, policies...)
 	}
 
 	cseList, err := g.client.Resource(clusterSecurityExceptionGVR).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
+		if g.primary != nil {
+			return deduplicateExceptions(cloudExceptions, nil), nil
+		}
 		return nil, err
 	}
 	for i := range cseList.Items {
@@ -106,10 +125,10 @@ func (g *CRDExceptionsGetter) GetExceptions(_ string) ([]armotypes.PostureExcept
 				helpers.Error(convErr))
 			continue
 		}
-		out = append(out, policies...)
+		crdExceptions = append(crdExceptions, policies...)
 	}
 
-	return out, nil
+	return deduplicateExceptions(cloudExceptions, crdExceptions), nil
 }
 
 func convertCRDObjectToPosturePolicies(
@@ -440,4 +459,81 @@ func convertSecurityExceptionToPosturePolicy(
 	policy.Name = fmt.Sprintf("%s/%s", name, controlID)
 
 	return policy, nil
+}
+
+const exceptionKeySeparator = "\x1f"
+
+func deduplicateExceptions(
+	cloudExceptions []armotypes.PostureExceptionPolicy,
+	crdExceptions []armotypes.PostureExceptionPolicy,
+) []armotypes.PostureExceptionPolicy {
+	if len(cloudExceptions) == 0 && len(crdExceptions) == 0 {
+		return []armotypes.PostureExceptionPolicy{}
+	}
+
+	covered := make(map[string]struct{}, len(cloudExceptions))
+	for _, cloud := range cloudExceptions {
+		for _, policy := range cloud.PosturePolicies {
+			if policy.ControlID == "" {
+				continue
+			}
+			for _, resource := range cloud.Resources {
+				key := exceptionDedupKey(policy.ControlID, resource)
+				covered[key] = struct{}{}
+			}
+		}
+	}
+
+	merged := make([]armotypes.PostureExceptionPolicy, 0, len(cloudExceptions)+len(crdExceptions))
+	merged = append(merged, cloudExceptions...)
+	if len(crdExceptions) == 0 {
+		return merged
+	}
+
+	for _, crd := range crdExceptions {
+		if len(crd.Resources) == 0 || len(crd.PosturePolicies) == 0 {
+			merged = append(merged, crd)
+			continue
+		}
+		filteredResources := make([]identifiers.PortalDesignator, 0, len(crd.Resources))
+		for _, resource := range crd.Resources {
+			if !isResourceCovered(crd.PosturePolicies, resource, covered) {
+				filteredResources = append(filteredResources, resource)
+			}
+		}
+		if len(filteredResources) == 0 {
+			continue
+		}
+		filteredPolicy := crd
+		filteredPolicy.Resources = filteredResources
+		merged = append(merged, filteredPolicy)
+	}
+
+	return merged
+}
+
+func isResourceCovered(
+	policies []armotypes.PosturePolicy,
+	resource identifiers.PortalDesignator,
+	covered map[string]struct{},
+) bool {
+	for _, policy := range policies {
+		if policy.ControlID == "" {
+			continue
+		}
+		key := exceptionDedupKey(policy.ControlID, resource)
+		if _, found := covered[key]; found {
+			return true
+		}
+	}
+	return false
+}
+
+// exceptionDedupKey builds a deterministic key using a separator not valid in Kubernetes names, kinds, or API groups.
+func exceptionDedupKey(controlID string, designator identifiers.PortalDesignator) string {
+	apiGroup := ""
+	if designator.Attributes != nil {
+		apiGroup = designator.Attributes[identifiers.AttributeApiGroup]
+	}
+	return controlID + exceptionKeySeparator + designator.GetNamespace() + exceptionKeySeparator + designator.GetName() + exceptionKeySeparator + designator.GetKind() + exceptionKeySeparator + apiGroup
 }

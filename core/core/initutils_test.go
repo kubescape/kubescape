@@ -126,7 +126,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 				accountID:              "123456789012",
 				downloadReleasedPolicy: getter.NewDownloadReleasedPolicy(),
 			},
-			want: "*getter.MergedExceptionsGetter",
+			want: "*getter.CRDExceptionsGetter",
 		},
 	}
 
