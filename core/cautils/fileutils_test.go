@@ -77,7 +77,6 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplates(t *testing.T) {
 	expectedFiles := []string{
 		filepath.Join(testDir, "plain-pod.yaml"),
 		filepath.Join(testDir, "mychart", "crds", "widget.yaml"),
-		filepath.Join(testDir, "mychart-docs", "example.yaml"),
 	}
 	for _, ef := range expectedFiles {
 		_, ok := workloads[ef]

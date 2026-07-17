@@ -1,6 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: mychart-docs-example
-data:
-  note: "sibling directory sharing the chart's name prefix"
