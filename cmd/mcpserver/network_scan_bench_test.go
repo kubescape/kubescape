@@ -41,7 +41,6 @@ func BenchmarkNetworkScan_Isolation(b *testing.B) {
 	}
 
 	// A representative NetworkPolicy resource.
-	// Gives the OPA engine a real payload to evaluate rather than an empty no-op.
 	networkResource := workloadinterface.NewWorkloadObj(map[string]interface{}{
 		"apiVersion": "networking.k8s.io/v1",
 		"kind":       "NetworkPolicy",
@@ -70,6 +69,27 @@ func BenchmarkNetworkScan_Isolation(b *testing.B) {
 		},
 	})
 
+	// A representative Pod resource that matches the NetworkPolicy podSelector
+	podResource := workloadinterface.NewWorkloadObj(map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]interface{}{
+			"name":      "test-db-pod",
+			"namespace": "default",
+			"labels": map[string]interface{}{
+				"role": "db",
+			},
+		},
+		"spec": map[string]interface{}{
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name":  "postgres",
+					"image": "postgres:13",
+				},
+			},
+		},
+	})
+
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -82,10 +102,11 @@ func BenchmarkNetworkScan_Isolation(b *testing.B) {
 			b.Fatalf("failed to collect policies: %v", err)
 		}
 
-		// Populate AllResources with the representative NetworkPolicy object so the engine
-		// evaluates the full rule path — not an empty no-op.
+		// Populate AllResources with the representative objects so the engine
+		// evaluates the full rule path.
 		scanData.AllResources = map[string]workloadinterface.IMetadata{
 			networkResource.GetID(): networkResource,
+			podResource.GetID():     podResource,
 		}
 
 		b.StartTimer()

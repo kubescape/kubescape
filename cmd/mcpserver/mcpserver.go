@@ -360,9 +360,11 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 	case "run_network_security_scan":
 		namespace := ""
 		if ns, ok := arguments["namespace"]; ok {
-			if nsStr, ok := ns.(string); ok {
-				namespace = nsStr
+			nsStr, ok := ns.(string)
+			if !ok {
+				return mcp.NewToolResultError("namespace argument must be a string"), nil
 			}
+			namespace = nsStr
 		}
 
 		responseBytes, err := ksServer.RunNetworkScan(ctx, namespace)
