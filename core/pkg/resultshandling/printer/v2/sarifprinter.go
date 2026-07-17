@@ -231,7 +231,7 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 						logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
 						continue
 					}
-					location := sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
+					location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
 					sp.addRule(run, ctl)
 					r := sp.addResult(run, ctl, relPath, location)
 					collectFixes(ctx, r, ac, opaSessionObj, resourceID, relPath, rsrcAbsPath)
@@ -258,7 +258,8 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 	return nil
 }
 
-func (sp *SARIFPrinter) resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {
+// resolveFixLocation resolves a failed control's location in the manifest, falling back to line 1. Shared by the SARIF and GitLab SAST printers
+func resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {
 	defaultLocation := locationresolver.Location{Line: 1, Column: 1}
 	if locationResolver == nil {
 		return defaultLocation

@@ -2,6 +2,8 @@ package resourcehandler
 
 import (
 	"context"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -15,6 +17,26 @@ import (
 func TestNewFileResourceHandler_InitializesNewInstance(t *testing.T) {
 	fileHandler := NewFileResourceHandler()
 	assert.NotNil(t, fileHandler)
+}
+
+// A single-file scan must yield a repository-relative RelativePath: the SARIF and GitLab SAST printers build the finding's file location from it, and the GitLab printer drops findings whose path is empty, absolute, or escaping the repo root. See #2496.
+func TestGetResourcesFromPath_SingleFileRelativePathIsRepositoryRelative(t *testing.T) {
+	workloadIDToSource, workloads, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/mixed_extensions/pod.yaml", cautils.HelmValueOptions{})
+	require.NoError(t, err)
+	require.NotEmpty(t, workloads, "the single-file scan must discover the pod")
+
+	for _, w := range workloads {
+		src, ok := workloadIDToSource[w.GetID()]
+		require.True(t, ok, "every workload must have a source")
+
+		rel := src.RelativePath
+		assert.NotEmpty(t, rel, "RelativePath must be set or the finding has no file to anchor to")
+		assert.False(t, filepath.IsAbs(rel), "RelativePath must be repository-relative, not absolute: %q", rel)
+		cleaned := filepath.ToSlash(filepath.Clean(rel))
+		assert.False(t, cleaned == ".." || strings.HasPrefix(cleaned, "../"),
+			"RelativePath must not escape the repository root: %q", rel)
+		assert.Equal(t, "pod.yaml", filepath.Base(rel))
+	}
 }
 
 // Deduplicates resources discovered by both kustomize render and the plain-YAML glob.
