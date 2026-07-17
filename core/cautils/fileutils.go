@@ -50,13 +50,7 @@ type Chart struct {
 // --set-file path, etc.) the error is returned to the caller. We deliberately do not silently
 // fall back to chart defaults — scanning the wrong manifests is worse than failing fast.
 func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions) (map[string][]workloadinterface.IMetadata, map[string]Chart, error) {
-	directories, _ := listDirs(basePath)
-	helmDirectories := make([]string, 0)
-	for _, dir := range directories {
-		if ok, _ := IsHelmDirectory(dir); ok {
-			helmDirectories = append(helmDirectories, dir)
-		}
-	}
+	helmDirectories := listHelmChartDirs(basePath)
 
 	// Parse user-supplied value overrides once; reuse for every chart we render.
 	var userValues map[string]any
@@ -96,6 +90,59 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		}
 	}
 	return sourceToWorkloads, sourceToChart, nil
+}
+
+// listHelmChartDirs scans a given path (recursively) and returns the directories holding a helm chart.
+// Subcharts are picked up by the same walk, since each carries its own Chart.yaml.
+func listHelmChartDirs(basePath string) []string {
+	directories, _ := listDirs(basePath)
+	helmDirectories := make([]string, 0)
+	for _, dir := range directories {
+		if ok, _ := IsHelmDirectory(dir); ok {
+			helmDirectories = append(helmDirectories, dir)
+		}
+	}
+	return helmDirectories
+}
+
+// excludeHelmTemplateFiles drops the files living under the templates/ directory of a helm chart.
+// LoadResourcesFromHelmCharts renders those templates, so passing them to the plain-YAML loader
+// as well duplicates the workloads it already renders, and warns on every raw template whose
+// "{{ ... }}" actions are not valid YAML. Only templates/ is excluded: helm renders nothing else,
+// so the rest of the chart (crds/ in particular, which helm does apply) stays plainly scanned.
+func excludeHelmTemplateFiles(files, helmDirectories []string) []string {
+	if len(helmDirectories) == 0 {
+		return files
+	}
+
+	templateDirs := make([]string, 0, len(helmDirectories))
+	for _, helmDir := range helmDirectories {
+		templateDirs = append(templateDirs, filepath.Join(helmDir, "templates"))
+	}
+
+	remaining := make([]string, 0, len(files))
+	for _, file := range files {
+		if !isUnderAnyDir(file, templateDirs) {
+			remaining = append(remaining, file)
+		}
+	}
+	return remaining
+}
+
+// isUnderAnyDir reports whether path is inside one of dirs. Both are expected to be absolute,
+// as returned by listFiles and listDirs.
+func isUnderAnyDir(path string, dirs []string) bool {
+	for _, dir := range dirs {
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			continue
+		}
+		// a sibling merely sharing a prefix (e.g. "templates-docs" next to "templates") escapes with ".."
+		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // mergeMaps performs a deep merge of override into a copy of base, with override winning on conflicts.
@@ -163,6 +210,11 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) map[str
 		logger.L().Ctx(ctx).Error("no files found to scan", helpers.String("input", input))
 		return nil
 	}
+
+	// skip the plain-YAML glob for helm templates; the helm render handles them. Charts are looked
+	// up under the same input LoadResourcesFromHelmCharts renders, so a template is only skipped
+	// here when a chart claims it there.
+	files = excludeHelmTemplateFiles(files, listHelmChartDirs(input))
 
 	workloads, errs := loadFiles(rootPath, files)
 	if len(errs) > 0 {
