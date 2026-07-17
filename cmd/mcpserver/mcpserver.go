@@ -357,6 +357,19 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run RBAC scan: %v", err)), nil
 		}
 		return mcp.NewToolResultText(string(responseBytes)), nil
+	case "run_network_security_scan":
+		namespace := ""
+		if ns, ok := arguments["namespace"]; ok {
+			if nsStr, ok := ns.(string); ok {
+				namespace = nsStr
+			}
+		}
+
+		responseBytes, err := ksServer.RunNetworkScan(ctx, namespace)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to run Network scan: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "list_vulnerability_manifests":
 		namespace := metav1.NamespaceAll
 		if ns, ok := arguments["namespace"]; ok {
@@ -719,6 +732,7 @@ func mcpServerEntrypoint() error {
 	createConfigurationsToolsAndResources(ksServer)
 	createRuntimeToolsAndResources(ksServer)
 	createRBACScanningTools(ksServer)
+	createNetworkScanningTools(ksServer)
 
 	// Start the server
 	if err := server.ServeStdio(s); err != nil {
@@ -744,6 +758,24 @@ func createRBACScanningTools(ksServer *KubescapeMcpserver) {
 			args = map[string]any{}
 		}
 		return ksServer.CallTool(ctx, "run_rbac_security_scan", args)
+	})
+}
+
+func createNetworkScanningTools(ksServer *KubescapeMcpserver) {
+	runNetworkScanTool := mcp.NewTool(
+		"run_network_security_scan",
+		mcp.WithDescription("Run an on-demand, live Network security scan (evaluating only ingress and egress block policies) and return the failed resources."),
+		mcp.WithString("namespace",
+			mcp.Description("Namespace to scope the Network scan (optional, defaults to cluster-wide if omitted)"),
+		),
+	)
+
+	ksServer.s.AddTool(runNetworkScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, ok := request.Params.Arguments.(map[string]any)
+		if !ok {
+			args = map[string]any{}
+		}
+		return ksServer.CallTool(ctx, "run_network_security_scan", args)
 	})
 }
 
