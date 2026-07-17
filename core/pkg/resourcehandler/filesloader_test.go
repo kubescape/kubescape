@@ -39,6 +39,44 @@ func TestGetResourcesFromPath_SingleFileRelativePathIsRepositoryRelative(t *test
 	}
 }
 
+// A chart whose helm render fails must still have its static templates plain-scanned. The render is
+// best-effort and drops the whole chart on any template error, so excluding templates/ unconditionally
+// would make those resources reach neither loader and vanish silently. Regression guard for the #2501
+// review: templates/ is excluded only for charts that rendered without errors.
+func TestGetResourcesFromPath_ScansTemplatesOfChartThatFailedToRender(t *testing.T) {
+	_, workloads, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/helm_chart_broken", cautils.HelmValueOptions{})
+	require.NoError(t, err)
+
+	var found bool
+	for _, w := range workloads {
+		if w.GetKind() == "ServiceAccount" && w.GetName() == "important-sa" {
+			found = true
+		}
+	}
+	assert.True(t, found, "a static template of a chart that failed to render must still be scanned")
+}
+
+// A chart that renders cleanly has its templates covered by the render, so the plain-YAML loader must
+// not scan them again (no duplicate, no malformed-template warnings), while crds/ and files outside
+// templates/ stay plainly scanned.
+func TestGetResourcesFromPath_RenderedChartTemplatesLoadedOnce(t *testing.T) {
+	_, workloads, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/helm_chart_layout", cautils.HelmValueOptions{})
+	require.NoError(t, err)
+
+	counts := map[string]int{}
+	for _, w := range workloads {
+		counts[w.GetKind()+"/"+w.GetName()]++
+	}
+
+	// rendered exactly once by helm, never re-scanned as a raw template
+	assert.Equal(t, 1, counts["ServiceAccount/mychart-static"], "static template must be loaded once, by the render")
+	assert.Equal(t, 1, counts["Deployment/-mychart"], "templated deployment must come from the render")
+	assert.Equal(t, 1, counts["Service/-mysubchart"], "subchart template must come from the render")
+	// not rendered by helm, so still plainly scanned
+	assert.Equal(t, 1, counts["CustomResourceDefinition/widgets.example.com"], "crds/ must stay plainly scanned")
+	assert.Equal(t, 1, counts["Pod/plain-outside-chart"], "files outside the chart must stay plainly scanned")
+}
+
 // Deduplicates resources discovered by both kustomize render and the plain-YAML glob.
 func TestGetResourcesFromPath_DeduplicatesKustomizeAndPlainYaml(t *testing.T) {
 	workloadIDToSource, workloads, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/kustomize/base", cautils.HelmValueOptions{})
