@@ -62,14 +62,14 @@ func TestLoadResourcesFromFiles_SupportsMixedCaseExtensions(t *testing.T) {
 	}
 }
 
+// helmChartLayoutPath returns the fixture holding a chart with templates, crds and a subchart.
 func helmChartLayoutPath() string {
 	o, _ := os.Getwd()
 	return filepath.Join(o, "testdata", "helm_chart_layout")
 }
 
-// The helm render owns the templates, so the plain-YAML loader must leave them alone: they would
-// otherwise duplicate the rendered workloads and warn on every "{{ ... }}" action. Everything else
-// under the chart is not rendered by helm and stays plainly scanned.
+// TestLoadResourcesFromFiles_SkipsHelmTemplates asserts that the plain-YAML loader leaves the
+// templates to the helm render, which owns them, and keeps loading the rest of the chart.
 func TestLoadResourcesFromFiles_SkipsHelmTemplates(t *testing.T) {
 	testDir := helmChartLayoutPath()
 	workloads := LoadResourcesFromFiles(context.Background(), testDir, testDir)
@@ -85,8 +85,8 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplates(t *testing.T) {
 	assert.Equal(t, len(expectedFiles), len(workloads))
 }
 
-// Scanning a chart directly must skip its templates the same way, since charts are detected
-// recursively rather than only at the scanned path.
+// TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart asserts that scanning a chart
+// directly skips its templates too, since charts are detected recursively rather than at the input.
 func TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart(t *testing.T) {
 	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
 	workloads := LoadResourcesFromFiles(context.Background(), testDir, testDir)
@@ -97,6 +97,7 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart(t *testing.T) {
 	assert.Equal(t, 1, len(workloads))
 }
 
+// TestExcludeHelmTemplateFiles asserts that only the templates of a detected chart are excluded.
 func TestExcludeHelmTemplateFiles(t *testing.T) {
 	chart := filepath.Join("repo", "mychart")
 	subchart := filepath.Join(chart, "charts", "mysubchart")
@@ -161,6 +162,7 @@ func TestExcludeHelmTemplateFiles(t *testing.T) {
 	}
 }
 
+// TestExcludeHelmTemplateFiles_NoCharts asserts that a scan without charts keeps every file.
 func TestExcludeHelmTemplateFiles_NoCharts(t *testing.T) {
 	files := []string{filepath.Join("repo", "templates", "pod.yaml")}
 	assert.Equal(t, files, excludeHelmTemplateFiles(files, nil))
