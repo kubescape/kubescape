@@ -81,7 +81,7 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 	}
 	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
 		// pinned version: hard error, do not silently serve cached exceptions
-		logger.L().Ctx(ctx).Error("failed to get exceptions for the pinned controls version from github release", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("failed to get exceptions for the pinned controls version from github release", helpers.Error(err))
 		primary = downloadReleasedPolicy
 		k8sClient := getExceptionsK8sClient(ctx)
 		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
@@ -309,7 +309,7 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 	}
 	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
 		// pinned version: hard error, surface it instead of silently degrading
-		logger.L().Ctx(ctx).Error("failed to get config inputs for the pinned controls version from github release", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("failed to get config inputs for the pinned controls version from github release", helpers.Error(err))
 	} else if fallback { // if failed to pull config inputs, this may affect the scanning results
 		logger.L().Ctx(ctx).Warning("failed to get config inputs from github release, this may affect the scanning results")
 	}
@@ -319,7 +319,7 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 func getDownloadReleasedPolicy(ctx context.Context, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
 	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
 		// pinned version: hard error, do not silently serve cached policies
-		logger.L().Ctx(ctx).Error("failed to get policies for the pinned controls version from github release", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("failed to get policies for the pinned controls version from github release", helpers.Error(err))
 		return downloadReleasedPolicy
 	} else if fallback { // if failed to pull policy, fallback to cache
 		logger.L().Ctx(ctx).Warning("failed to get policies from github release, loading policies from cache")
@@ -366,7 +366,7 @@ func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, 
 
 	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
 		// pinned version: hard error, do not silently serve cached attack tracks
-		logger.L().Ctx(ctx).Error("failed to get attack tracks for the pinned controls version from github release", helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("failed to get attack tracks for the pinned controls version from github release", helpers.Error(err))
 		return downloadReleasedPolicy
 	} else if fallback { // if failed to pull attack tracks, fallback to cache
 		logger.L().Ctx(ctx).Warning("failed to get attack tracks from github release, loading attack tracks from cache")
