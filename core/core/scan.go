@@ -197,6 +197,13 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	}
 	interfaces.report.SetTenantConfig(interfaces.tenantConfig)
 
+	// remove host scanner components
+	defer func() {
+		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
+			logger.L().Ctx(ks.Context()).StopError("Failed to tear down host scanner", helpers.Error(err))
+		}
+	}()
+
 	// Only create DownloadReleasedPolicy if not in air-gapped mode
 	airGapped := isAirGappedMode(scanInfo)
 	var downloadReleasedPolicy *getter.DownloadReleasedPolicy
@@ -234,13 +241,6 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	if scanInfo.ScanAll {
 		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.PolicyGetter), apisv1.KindFramework)
 	}
-
-	// remove host scanner components
-	defer func() {
-		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
-			logger.L().Ctx(ks.Context()).StopError("Failed to tear down host scanner", helpers.Error(err))
-		}
-	}()
 
 	logger.L().StopSuccess("Initialized scanner")
 
