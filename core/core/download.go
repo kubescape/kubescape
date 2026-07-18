@@ -100,7 +100,10 @@ func downloadArtifacts(ctx context.Context, downloadInfo *metav1.DownloadInfo) e
 func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 	tenant := cautils.GetTenantConfig(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", getKubernetesApi())
 
-	controlsInputsGetter := getConfigInputsGetter(ctx, downloadInfo.Identifier, tenant.GetAccountID(), nil, false, false)
+	controlsInputsGetter, err := getConfigInputsGetter(ctx, downloadInfo.Identifier, tenant.GetAccountID(), nil, false, false)
+	if err != nil {
+		return err
+	}
 	controlInputs, err := controlsInputsGetter.GetControlsInputs(tenant.GetContextName())
 	if err != nil {
 		return err
@@ -122,7 +125,10 @@ func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo
 
 func downloadExceptions(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 	tenant := cautils.GetTenantConfig(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", getKubernetesApi())
-	exceptionsGetter := getExceptionsGetter(ctx, "", tenant.GetAccountID(), nil, false)
+	exceptionsGetter, err := getExceptionsGetter(ctx, "", tenant.GetAccountID(), nil, false)
+	if err != nil {
+		return err
+	}
 
 	exceptions, err := exceptionsGetter.GetExceptions(tenant.GetContextName())
 	if err != nil {
@@ -145,7 +151,10 @@ func downloadAttackTracks(ctx context.Context, downloadInfo *metav1.DownloadInfo
 	var err error
 	tenant := cautils.GetTenantConfig(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", getKubernetesApi())
 
-	attackTracksGetter := getAttackTracksGetter(ctx, "", tenant.GetAccountID(), nil, false)
+	attackTracksGetter, err := getAttackTracksGetter(ctx, "", tenant.GetAccountID(), nil, false)
+	if err != nil {
+		return err
+	}
 
 	attackTracks, err := attackTracksGetter.GetAttackTracks()
 	if err != nil {
@@ -169,7 +178,10 @@ func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) e
 
 	tenant := cautils.GetTenantConfig(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", getKubernetesApi())
 
-	g := getPolicyGetter(ctx, nil, tenant.GetAccountID(), true, nil, false)
+	g, err := getPolicyGetter(ctx, nil, tenant.GetAccountID(), true, nil, false)
+	if err != nil {
+		return err
+	}
 
 	if downloadInfo.Identifier == "" {
 		// if framework name not specified - download all frameworks
@@ -220,7 +232,10 @@ func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) err
 
 	tenant := cautils.GetTenantConfig(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", getKubernetesApi())
 
-	g := getPolicyGetter(ctx, nil, tenant.GetAccountID(), false, nil, false)
+	g, err := getPolicyGetter(ctx, nil, tenant.GetAccountID(), false, nil, false)
+	if err != nil {
+		return err
+	}
 
 	if downloadInfo.Identifier == "" {
 		// TODO - support

@@ -52,19 +52,19 @@ func getExceptionsK8sClient(ctx context.Context) client.Client {
 	return k8sClient
 }
 
-func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) getter.IExceptionsGetter {
+func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) (getter.IExceptionsGetter, error) {
 	var primary getter.IExceptionsGetter
 
 	if useExceptions != "" {
 		// load exceptions from file
 		primary = getter.NewLoadPolicy([]string{useExceptions})
 		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
 	}
 	if airGapped {
 		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
 		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
 	}
 	if accountID != "" {
 		if downloadReleasedPolicy != nil && downloadReleasedPolicy.IsVersionPinned() {
@@ -73,7 +73,7 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 		// download exceptions from Kubescape Cloud backend
 		primary = getter.GetKSCloudAPIConnector()
 		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
 	}
 	// download exceptions from GitHub
 	if downloadReleasedPolicy == nil {
@@ -81,19 +81,16 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 	}
 	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
 		// pinned version: hard error, do not silently serve cached exceptions
-		logger.L().Ctx(ctx).Fatal("failed to get exceptions for the pinned controls version from github release", helpers.Error(err))
-		primary = downloadReleasedPolicy
-		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
+		return nil, err
 	} else if fallback { // if failed to pull exceptions, fallback to cache
 		logger.L().Ctx(ctx).Warning("failed to get exceptions from github release, loading exceptions from cache")
 		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
 		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
 	}
 	primary = downloadReleasedPolicy
 	k8sClient := getExceptionsK8sClient(ctx)
-	return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
+	return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
 
 }
 
@@ -249,19 +246,19 @@ func isScanTypeForSubmission(scanType cautils.ScanTypes) bool {
 }
 
 // setPolicyGetter set the policy getter - local file/github release/Kubescape Cloud API
-func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, accountID string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) getter.IPolicyGetter {
+func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, accountID string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) (getter.IPolicyGetter, error) {
 	if len(loadPoliciesFromFile) > 0 {
-		return getter.NewLoadPolicy(loadPoliciesFromFile)
+		return getter.NewLoadPolicy(loadPoliciesFromFile), nil
 	}
 	if airGapped {
-		return getter.NewLoadPolicy(getDefaultFrameworksPaths())
+		return getter.NewLoadPolicy(getDefaultFrameworksPaths()), nil
 	}
 	if accountID != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() != "" && frameworkScope {
 		if downloadReleasedPolicy != nil && downloadReleasedPolicy.IsVersionPinned() {
 			logger.L().Ctx(ctx).Warning("--controls-version is ignored when an account ID is set; policies are downloaded from the Kubescape Cloud backend")
 		}
 		g := getter.GetKSCloudAPIConnector() // download policy from Kubescape Cloud backend
-		return g
+		return g, nil
 	} else if accountID != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() == "" && frameworkScope {
 		logger.L().Ctx(ctx).Warning("Kubescape Cloud API URL is not set, loading policies from cache")
 	}
@@ -278,19 +275,19 @@ func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, account
 //  2. Kubescape Cloud API (if accountID configured)
 //  3. ControlInput CRD in-cluster (if connected to cluster and CRD exists)
 //  4. Defaults from regolibrary GitHub releases
-func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool, airGapped bool) getter.IControlsInputsGetter {
+func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool, airGapped bool) (getter.IControlsInputsGetter, error) {
 	if len(ControlsInputs) > 0 {
-		return getter.NewLoadPolicy([]string{ControlsInputs})
+		return getter.NewLoadPolicy([]string{ControlsInputs}), nil
 	}
 	if airGapped {
-		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalControlInputsFilename)})
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalControlInputsFilename)}), nil
 	}
 	if accountID != "" {
 		if downloadReleasedPolicy != nil && downloadReleasedPolicy.IsVersionPinned() {
 			logger.L().Ctx(ctx).Warning("--controls-version is ignored for control config when an account ID is set; control config is downloaded from the Kubescape Cloud backend")
 		}
 		g := getter.GetKSCloudAPIConnector() // download config from Kubescape Cloud backend
-		return g
+		return g, nil
 	}
 
 	// Try to read control inputs from the ControlInput CRD in-cluster (live cluster scans only)
@@ -298,7 +295,7 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 		if crdInputs, err := getter.NewCRDControlInputs(); err == nil {
 			if _, crdErr := crdInputs.GetControlsInputs(""); crdErr == nil {
 				logger.L().Ctx(ctx).Info("using ControlInput CRD for control configuration")
-				return crdInputs
+				return crdInputs, nil
 			}
 			logger.L().Ctx(ctx).Debug("ControlInput CRD found but default resource not available, falling back")
 		}
@@ -309,23 +306,22 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 	}
 	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
 		// pinned version: hard error, surface it instead of silently degrading
-		logger.L().Ctx(ctx).Fatal("failed to get config inputs for the pinned controls version from github release", helpers.Error(err))
+		return nil, err
 	} else if fallback { // if failed to pull config inputs, this may affect the scanning results
 		logger.L().Ctx(ctx).Warning("failed to get config inputs from github release, this may affect the scanning results")
 	}
-	return downloadReleasedPolicy
+	return downloadReleasedPolicy, nil
 }
 
-func getDownloadReleasedPolicy(ctx context.Context, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
+func getDownloadReleasedPolicy(ctx context.Context, downloadReleasedPolicy *getter.DownloadReleasedPolicy) (getter.IPolicyGetter, error) {
 	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
 		// pinned version: hard error, do not silently serve cached policies
-		logger.L().Ctx(ctx).Fatal("failed to get policies for the pinned controls version from github release", helpers.Error(err))
-		return downloadReleasedPolicy
+		return nil, err
 	} else if fallback { // if failed to pull policy, fallback to cache
 		logger.L().Ctx(ctx).Warning("failed to get policies from github release, loading policies from cache")
-		return getter.NewLoadPolicy(getDefaultFrameworksPaths())
+		return getter.NewLoadPolicy(getDefaultFrameworksPaths()), nil
 	}
-	return downloadReleasedPolicy
+	return downloadReleasedPolicy, nil
 }
 
 func getDefaultFrameworksPaths() []string {
@@ -346,19 +342,19 @@ func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
 	return getter.NativeFrameworks
 }
 
-func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) getter.IAttackTracksGetter {
+func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) (getter.IAttackTracksGetter, error) {
 	if len(attackTracks) > 0 {
-		return getter.NewLoadPolicy([]string{attackTracks})
+		return getter.NewLoadPolicy([]string{attackTracks}), nil
 	}
 	if airGapped {
-		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)})
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)}), nil
 	}
 	if accountID != "" {
 		if downloadReleasedPolicy != nil && downloadReleasedPolicy.IsVersionPinned() {
 			logger.L().Ctx(ctx).Warning("--controls-version is ignored for attack tracks when an account ID is set; attack tracks are downloaded from the Kubescape Cloud backend")
 		}
 		g := getter.GetKSCloudAPIConnector() // download attack tracks from Kubescape Cloud backend
-		return g
+		return g, nil
 	}
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
@@ -366,13 +362,12 @@ func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, 
 
 	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
 		// pinned version: hard error, do not silently serve cached attack tracks
-		logger.L().Ctx(ctx).Fatal("failed to get attack tracks for the pinned controls version from github release", helpers.Error(err))
-		return downloadReleasedPolicy
+		return nil, err
 	} else if fallback { // if failed to pull attack tracks, fallback to cache
 		logger.L().Ctx(ctx).Warning("failed to get attack tracks from github release, loading attack tracks from cache")
-		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)})
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)}), nil
 	}
-	return downloadReleasedPolicy
+	return downloadReleasedPolicy, nil
 }
 
 // GetUIPrinter returns a printer that will be used to print to the program’s UI (terminal)

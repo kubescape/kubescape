@@ -95,7 +95,10 @@ func naturalSortControls(entries []metav1.ControlListEntry) []metav1.ControlList
 
 func listFrameworks(ctx context.Context, listPolicies *metav1.ListPolicies) ([]string, error) {
 	tenant := cautils.GetTenantConfig(listPolicies.AccountID, listPolicies.AccessKey, "", "", getKubernetesApi()) // change k8sinterface
-	policyGetter := getPolicyGetter(ctx, nil, tenant.GetAccountID(), true, nil, false)
+	policyGetter, err := getPolicyGetter(ctx, nil, tenant.GetAccountID(), true, nil, false)
+	if err != nil {
+		return nil, err
+	}
 
 	return listFrameworksNames(policyGetter), nil
 }
@@ -103,7 +106,10 @@ func listFrameworks(ctx context.Context, listPolicies *metav1.ListPolicies) ([]s
 func listControls(ctx context.Context, listPolicies *metav1.ListPolicies) ([]metav1.ControlListEntry, error) {
 	tenant := cautils.GetTenantConfig(listPolicies.AccountID, listPolicies.AccessKey, "", "", getKubernetesApi()) // change k8sinterface
 
-	policyGetter := getPolicyGetter(ctx, nil, tenant.GetAccountID(), false, nil, false)
+	policyGetter, err := getPolicyGetter(ctx, nil, tenant.GetAccountID(), false, nil, false)
+	if err != nil {
+		return nil, err
+	}
 	pipes, err := policyGetter.ListControls()
 	if err != nil {
 		return nil, err
@@ -153,7 +159,10 @@ func listExceptions(ctx context.Context, listPolicies *metav1.ListPolicies) ([]s
 	tenant := cautils.GetTenantConfig(listPolicies.AccountID, listPolicies.AccessKey, "", "", getKubernetesApi())
 
 	var exceptionsNames []string
-	ksCloudAPI := getExceptionsGetter(ctx, "", tenant.GetAccountID(), nil, false)
+	ksCloudAPI, err := getExceptionsGetter(ctx, "", tenant.GetAccountID(), nil, false)
+	if err != nil {
+		return exceptionsNames, err
+	}
 	exceptions, err := ksCloudAPI.GetExceptions("")
 	if err != nil {
 		return exceptionsNames, err
