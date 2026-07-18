@@ -347,9 +347,11 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 	case "run_rbac_security_scan":
 		namespace := ""
 		if ns, ok := arguments["namespace"]; ok {
-			if nsStr, ok := ns.(string); ok {
-				namespace = nsStr
+			nsStr, ok := ns.(string)
+			if !ok {
+				return mcp.NewToolResultError("namespace argument must be a string"), nil
 			}
+			namespace = nsStr
 		}
 
 		responseBytes, err := ksServer.RunRBACScan(ctx, namespace)
@@ -756,7 +758,10 @@ func createRBACScanningTools(ksServer *KubescapeMcpserver) {
 		// Blocker 3 fix: use comma-ok pattern to prevent panic when namespace is
 		// omitted (tool is callable with no arguments since namespace is optional).
 		args, ok := request.Params.Arguments.(map[string]any)
-		if !ok {
+		if !ok && request.Params.Arguments != nil {
+			return mcp.NewToolResultError("arguments must be a JSON object"), nil
+		}
+		if args == nil {
 			args = map[string]any{}
 		}
 		return ksServer.CallTool(ctx, "run_rbac_security_scan", args)
@@ -774,7 +779,10 @@ func createNetworkScanningTools(ksServer *KubescapeMcpserver) {
 
 	ksServer.s.AddTool(runNetworkScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, ok := request.Params.Arguments.(map[string]any)
-		if !ok {
+		if !ok && request.Params.Arguments != nil {
+			return mcp.NewToolResultError("arguments must be a JSON object"), nil
+		}
+		if args == nil {
 			args = map[string]any{}
 		}
 		return ksServer.CallTool(ctx, "run_network_security_scan", args)

@@ -69,7 +69,6 @@ func BenchmarkNetworkScan_Isolation(b *testing.B) {
 		},
 	})
 
-	// A representative Pod resource that matches the NetworkPolicy podSelector
 	podResource := workloadinterface.NewWorkloadObj(map[string]interface{}{
 		"apiVersion": "v1",
 		"kind":       "Pod",
