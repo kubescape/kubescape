@@ -98,10 +98,8 @@ func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace
 }
 
 func buildScanResponse(results map[string]resourcesresults.Result) scanResponse {
-	var failedResources []interface{}
+	failedResources := make([]interface{}, 0)
 	totalFailed := 0
-
-	failedResources = make([]interface{}, 0)
 
 	keys := make([]string, 0, len(results))
 	for k := range results {
