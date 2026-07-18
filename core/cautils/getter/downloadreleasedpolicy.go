@@ -22,7 +22,8 @@ var (
 
 // Use gitregostore to get policies from github release
 type DownloadReleasedPolicy struct {
-	gs *gitregostore.GitRegoStore
+	gs      *gitregostore.GitRegoStore
+	version string
 }
 
 func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
@@ -39,8 +40,33 @@ func NewDownloadReleasedPolicyWithVersion(version string) *DownloadReleasedPolic
 		return NewDownloadReleasedPolicy()
 	}
 	return &DownloadReleasedPolicy{
-		gs: gitregostore.NewGitRegoStore("https://github.com", "kubescape", "regolibrary", "releases", "download/"+version, "", -1),
+		gs:      gitregostore.NewGitRegoStore("https://github.com", "kubescape", "regolibrary", "releases", "download/"+version, "", -1),
+		version: version,
 	}
+}
+
+// IsVersionPinned reports whether this getter targets a specific, user-selected
+// regolibrary release tag rather than the latest release.
+func (drp *DownloadReleasedPolicy) IsVersionPinned() bool {
+	return drp.version != ""
+}
+
+// SetRegoObjectsWithFallback downloads the policy objects and reports whether
+// the caller should fall back to the bundled cache on failure.
+//
+// When a version is pinned, a download failure is a hard error (fallback=false,
+// err!=nil): the user explicitly asked for a specific release, so silently
+// serving a different, cached policy set would be misleading. When no version
+// is pinned, a download failure is not an error but requests a fallback
+// (fallback=true, err=nil), preserving the existing latest-release behavior.
+func (drp *DownloadReleasedPolicy) SetRegoObjectsWithFallback() (fallback bool, err error) {
+	if err := drp.SetRegoObjects(); err != nil {
+		if drp.version != "" {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 func (drp *DownloadReleasedPolicy) GetControl(ID string) (*reporthandling.Control, error) {
@@ -136,7 +162,13 @@ func (drp *DownloadReleasedPolicy) SetRegoObjects() error {
 	if len(fwNames) != 0 && err == nil {
 		return nil
 	}
-	return drp.gs.SetRegoObjects()
+	if err := drp.gs.SetRegoObjects(); err != nil {
+		if drp.version != "" {
+			return fmt.Errorf("failed to download controls for pinned version %q: %w", drp.version, err)
+		}
+		return err
+	}
+	return nil
 }
 
 func (drp *DownloadReleasedPolicy) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {

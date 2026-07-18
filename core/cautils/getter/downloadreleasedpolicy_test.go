@@ -181,3 +181,35 @@ func TestNewDownloadReleasedPolicyWithVersion(t *testing.T) {
 		require.Contains(t, p.gs.URL, "download/v2.0.301")
 	})
 }
+
+func TestSetRegoObjectsWithFallback(t *testing.T) {
+	t.Parallel()
+
+	// unroutable URL (port 0) so the download fails deterministically offline
+	const unreachableURL = "http://127.0.0.1:0/download"
+
+	t.Run("empty version keeps cache fallback on download failure", func(t *testing.T) {
+		t.Parallel()
+
+		p := NewDownloadReleasedPolicyWithVersion("")
+		require.False(t, p.IsVersionPinned())
+		p.gs.URL = unreachableURL
+
+		fallback, err := p.SetRegoObjectsWithFallback()
+		require.NoError(t, err)
+		require.True(t, fallback)
+	})
+
+	t.Run("pinned version returns a hard error on download failure", func(t *testing.T) {
+		t.Parallel()
+
+		p := NewDownloadReleasedPolicyWithVersion("v0.0.0-does-not-exist")
+		require.True(t, p.IsVersionPinned())
+		p.gs.URL = unreachableURL
+
+		fallback, err := p.SetRegoObjectsWithFallback()
+		require.Error(t, err)
+		require.False(t, fallback)
+		require.Contains(t, err.Error(), "v0.0.0-does-not-exist")
+	})
+}
