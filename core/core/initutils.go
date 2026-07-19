@@ -275,19 +275,22 @@ func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, account
 //  2. Kubescape Cloud API (if accountID configured)
 //  3. ControlInput CRD in-cluster (if connected to cluster and CRD exists)
 //  4. Defaults from regolibrary GitHub releases
-func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool, airGapped bool) (getter.IControlsInputsGetter, error) {
+// getConfigInputsGetter returns the control inputs getter and a bool reporting
+// whether the inputs are served from the local cache fallback (GitHub download
+// failed) rather than fetched fresh, so the caller can record a PolicyDegradation.
+func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool, airGapped bool) (getter.IControlsInputsGetter, bool, error) {
 	if len(ControlsInputs) > 0 {
-		return getter.NewLoadPolicy([]string{ControlsInputs}), nil
+		return getter.NewLoadPolicy([]string{ControlsInputs}), false, nil
 	}
 	if airGapped {
-		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalControlInputsFilename)}), nil
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalControlInputsFilename)}), false, nil
 	}
 	if accountID != "" {
 		if downloadReleasedPolicy != nil && downloadReleasedPolicy.IsVersionPinned() {
 			logger.L().Ctx(ctx).Warning("--controls-version is ignored for control config when an account ID is set; control config is downloaded from the Kubescape Cloud backend")
 		}
 		g := getter.GetKSCloudAPIConnector() // download config from Kubescape Cloud backend
-		return g, nil
+		return g, false, nil
 	}
 
 	// Try to read control inputs from the ControlInput CRD in-cluster (live cluster scans only)
@@ -295,7 +298,7 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 		if crdInputs, err := getter.NewCRDControlInputs(); err == nil {
 			if _, crdErr := crdInputs.GetControlsInputs(""); crdErr == nil {
 				logger.L().Ctx(ctx).Info("using ControlInput CRD for control configuration")
-				return crdInputs, nil
+				return crdInputs, false, nil
 			}
 			logger.L().Ctx(ctx).Debug("ControlInput CRD found but default resource not available, falling back")
 		}
@@ -306,11 +309,12 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 	}
 	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
 		// pinned version: hard error, surface it instead of silently degrading
-		return nil, err
-	} else if fallback { // if failed to pull config inputs, this may affect the scanning results
-		logger.L().Ctx(ctx).Warning("failed to get config inputs from github release, this may affect the scanning results")
+		return nil, false, err
+	} else if fallback { // if failed to pull config inputs, fallback to cache
+		logger.L().Ctx(ctx).Warning("failed to get config inputs from github release, loading config inputs from cache")
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalControlInputsFilename)}), true, nil
 	}
-	return downloadReleasedPolicy, nil
+	return downloadReleasedPolicy, false, nil
 }
 
 func getDownloadReleasedPolicy(ctx context.Context, downloadReleasedPolicy *getter.DownloadReleasedPolicy) (getter.IPolicyGetter, error) {
