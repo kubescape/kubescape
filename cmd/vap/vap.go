@@ -27,8 +27,10 @@ var vapHelperCmdExamples = fmt.Sprintf(`
 
   Examples:
 
-  # Install Kubescape CEL admission policy library
+  # Install Kubescape CEL admission policy library (the copy embedded in this binary)
   %[1]s vap deploy-library | kubectl apply -f -
+  # Install a specific cel-admission-library release instead of the embedded copy
+  %[1]s vap deploy-library --from-release v0.11 | kubectl apply -f -
   # Create a policy binding by Kubescape control ID
   %[1]s vap create-policy-binding --name my-policy-binding --control C-0016 --namespace=my-namespace | kubectl apply -f -
   # Create a policy binding by ValidatingAdmissionPolicy name
@@ -53,6 +55,7 @@ func GetVapHelperCmd() *cobra.Command {
 
 func getDeployLibraryCmd() *cobra.Command {
 	var outputFile string
+	var fromRelease string
 	var timeout time.Duration
 
 	cmd := &cobra.Command{
@@ -60,7 +63,7 @@ func getDeployLibraryCmd() *cobra.Command {
 		Short: "Install Kubescape CEL admission policy library",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			content, err := deployLibrary(timeout)
+			content, err := deployLibrary(fromRelease, timeout)
 			if err != nil {
 				return err
 			}
@@ -68,7 +71,8 @@ func getDeployLibraryCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file instead of stdout")
-	cmd.Flags().DurationVar(&timeout, "timeout", 0, "HTTP request timeout per download (e.g. 30s, 1m)")
+	cmd.Flags().StringVar(&fromRelease, "from-release", "", "Download the library from this cel-admission-library release tag (e.g. v0.11) instead of using the embedded copy")
+	cmd.Flags().DurationVar(&timeout, "timeout", 0, "HTTP request timeout per download, only used with --from-release (e.g. 30s, 1m)")
 
 	return cmd
 }
@@ -199,41 +203,48 @@ func resolvePolicyName(policyName, controlID string) (string, error) {
 
 // Implementation of the VAP helper commands
 // deploy-library
-func deployLibrary(timeout time.Duration) (string, error) {
-	logger.L().Info("Downloading the Kubescape CEL admission policy library")
-	// Download the policy-configuration-definition.yaml from the latest release URL
-	policyConfigurationDefinitionURL := "https://github.com/kubescape/cel-admission-library/releases/latest/download/policy-configuration-definition.yaml"
-	policyConfigurationDefinition, err := downloadFileToString(policyConfigurationDefinitionURL, timeout)
-	if err != nil {
-		return "", err
+//
+// By default the library comes from the bundle embedded in this binary: the
+// same copy the scan engine evaluates and create-policy-binding resolves
+// metadata from, so what gets deployed is exactly what this build was tested
+// against. Downloading a release instead is an explicit opt-in via
+// --from-release; it can serve a library this binary knows nothing about, so
+// it is never the silent default (issue #2507).
+func deployLibrary(fromRelease string, timeout time.Duration) (string, error) {
+	if fromRelease != "" {
+		return downloadLibrary(fromRelease, timeout)
 	}
+	return cel.EmbeddedLibraryYAML()
+}
 
-	// Download the basic-control-configuration.yaml from the latest release URL
-	basicControlConfigurationURL := "https://github.com/kubescape/cel-admission-library/releases/latest/download/basic-control-configuration.yaml"
-	basicControlConfiguration, err := downloadFileToString(basicControlConfigurationURL, timeout)
-	if err != nil {
-		return "", err
-	}
+// libraryReleaseFiles are the release assets that make up the deployable
+// library, in apply order (the CRD first, then the configuration, then the
+// policies). Must stay in sync with the assets `make sync-vap` vendors.
+var libraryReleaseFiles = []string{
+	"policy-configuration-definition.yaml",
+	"basic-control-configuration.yaml",
+	"kubescape-validating-admission-policies.yaml",
+}
 
-	// Download the kubescape-validating-admission-policies.yaml from the latest release URL
-	kubescapeValidatingAdmissionPoliciesURL := "https://github.com/kubescape/cel-admission-library/releases/latest/download/kubescape-validating-admission-policies.yaml"
-	kubescapeValidatingAdmissionPolicies, err := downloadFileToString(kubescapeValidatingAdmissionPoliciesURL, timeout)
-	if err != nil {
-		return "", err
+// downloadLibrary fetches the library files from one pinned release tag and
+// concatenates them into a single multi-document YAML stream. The tag is
+// always explicit — downloading whatever "latest" points at would reintroduce
+// the skew deployLibrary's embedded default exists to prevent.
+func downloadLibrary(tag string, timeout time.Duration) (string, error) {
+	logger.L().Info(fmt.Sprintf("Downloading the Kubescape CEL admission policy library release %s", tag))
+
+	parts := make([]string, 0, len(libraryReleaseFiles))
+	for _, file := range libraryReleaseFiles {
+		url := fmt.Sprintf("https://github.com/kubescape/cel-admission-library/releases/download/%s/%s", tag, file)
+		content, err := downloadFileToString(url, timeout)
+		if err != nil {
+			return "", fmt.Errorf("download %s from release %s: %w", file, tag, err)
+		}
+		parts = append(parts, content)
 	}
 
 	logger.L().Info("Successfully downloaded admission policy library")
-
-	// Concatenate the downloaded files into a single YAML document with --- separators
-	var result strings.Builder
-	result.WriteString(policyConfigurationDefinition)
-	result.WriteString("\n---\n")
-	result.WriteString(basicControlConfiguration)
-	result.WriteString("\n---\n")
-	result.WriteString(kubescapeValidatingAdmissionPolicies)
-	result.WriteString("\n")
-
-	return result.String(), nil
+	return strings.Join(parts, "\n---\n") + "\n", nil
 }
 
 func downloadFileToString(url string, timeout time.Duration) (string, error) {
