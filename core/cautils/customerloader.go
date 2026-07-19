@@ -183,8 +183,9 @@ KS_DEFAULT_CONFIGMAP_NAMESPACE   // configmap namespace, if not set default is '
 
 KS_ACCOUNT_ID
 
-TODO - support:
-KS_CACHE // path to cached files
+The cache directory (where this config file is stored, see ConfigFileFullPath) is
+configurable via the --cache-dir flag or the KS_CACHE_DIR environment variable; see
+initCacheDir in cmd/rootutils.go. It defaults to getter.DefaultLocalStore ($HOME/.kubescape).
 */
 var _ ITenantConfig = &ClusterConfig{}
 
