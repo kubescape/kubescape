@@ -89,7 +89,7 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		model, err2 := models.NewDocument(clio.Identification{}, imageScanData[0].Packages, imageScanData[0].Context,
 			imageScanData[0].Matches, imageScanData[0].IgnoredMatches, imageScanData[0].VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
 		if err2 != nil {
-			logger.L().Ctx(ctx).Error("failed to create document: %w", helpers.Error(err))
+			logger.L().Ctx(ctx).Error("failed to create document", helpers.Error(err2))
 			return
 		}
 		err = grypejson.NewPresenter(models.PresenterConfig{Document: model, SBOM: imageScanData[0].SBOM}).Present(jp.writer)

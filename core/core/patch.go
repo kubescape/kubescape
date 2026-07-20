@@ -74,6 +74,10 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		return false, err
 	}
 
+	// svc.Scan is called above with no vulnerability/severity exceptions, so scanResults.Matches
+	// is currently the full unfiltered set copa patches against. If exceptions are ever wired into
+	// this flow, keep them out of scanResults.Matches here - the patch document must still see every
+	// CVE so copa can patch it, even ones excepted from the posture report.
 	model, err := models.NewDocument(clio.Identification{}, scanResults.Packages, scanResults.Context,
 		scanResults.Matches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
 	if err != nil {

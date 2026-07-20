@@ -234,7 +234,6 @@ func (s *Service) Scan(_ context.Context, userInput string, creds RegistryCreden
 		Image:                 userInput,
 		Matches:               filteredMatches,
 		Packages:              packages,
-		RemainingMatches:      remainingMatches,
 		SBOM:                  sbom,
 		VulnerabilityProvider: s.vp,
 	}
