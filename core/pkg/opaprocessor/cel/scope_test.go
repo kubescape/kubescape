@@ -1,9 +1,11 @@
 package cel
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 )
 
@@ -66,6 +68,70 @@ func TestVAPAppliesToNoConstraintsEvaluates(t *testing.T) {
 	// evaluating rather than silently skipping everything.
 	v := &VAP{}
 	assert.True(t, v.appliesTo(obj("v1", "Pod")))
+}
+
+// canonicalKinds maps a matchConstraints resource to the Kind the scanner feeds
+// for it. The one silent-failure mode of appliesTo is UnsafeGuessKindToResource
+// mis-guessing a plural (irregular kind or a CRD), which would quietly drop a
+// resource the control should evaluate. This table is the ground truth the guess
+// is checked against.
+var canonicalKinds = map[string]string{
+	"pods":            "Pod",
+	"deployments":     "Deployment",
+	"replicasets":     "ReplicaSet",
+	"daemonsets":      "DaemonSet",
+	"statefulsets":    "StatefulSet",
+	"jobs":            "Job",
+	"cronjobs":        "CronJob",
+	"serviceaccounts": "ServiceAccount",
+	"services":        "Service",
+}
+
+// TestVAPAppliesToCoversEveryBundleKind walks every policy in the embedded bundle
+// and asserts appliesTo accepts an object of the Kind each constrained resource
+// stands for. It is driven by the bundle, so a `make sync-vap` that introduces a
+// policy for a new kind fails here (unknown resource -> add it to canonicalKinds)
+// rather than silently dropping that kind at scan time once the guess is wrong.
+func TestVAPAppliesToCoversEveryBundleKind(t *testing.T) {
+	catalog, err := getVAPCatalog()
+	require.NoError(t, err)
+	require.NotEmpty(t, catalog.byName, "bundle parsed to no policies")
+
+	for name, vap := range catalog.byName {
+		if vap.matchConstraints == nil {
+			continue
+		}
+		for _, rr := range vap.matchConstraints.ResourceRules {
+			group := firstOr(rr.APIGroups, "")
+			if group == "*" {
+				group = ""
+			}
+			version := firstOr(rr.APIVersions, "v1")
+			if version == "*" {
+				version = "v1"
+			}
+			apiVersion := version
+			if group != "" {
+				apiVersion = group + "/" + version
+			}
+			for _, res := range rr.Resources {
+				if res == "*" || strings.Contains(res, "/") {
+					continue // wildcard or subresource: not a scanned top-level kind
+				}
+				kind, ok := canonicalKinds[res]
+				require.Truef(t, ok, "policy %q constrains resource %q with no canonical Kind in the test; add it to canonicalKinds and confirm UnsafeGuessKindToResource maps that Kind back to %q", name, res, res)
+				assert.Truef(t, vap.appliesTo(obj(apiVersion, kind)),
+					"policy %q constrains %q but appliesTo rejects a %s %s; UnsafeGuessKindToResource likely mis-guessed the plural", name, res, apiVersion, kind)
+			}
+		}
+	}
+}
+
+func firstOr(xs []string, fallback string) string {
+	if len(xs) > 0 {
+		return xs[0]
+	}
+	return fallback
 }
 
 func TestVAPAppliesToExcludeRules(t *testing.T) {

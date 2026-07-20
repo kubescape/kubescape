@@ -580,7 +580,14 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 		}
 
 		if !eval.Applicable {
-			outcome.excluded[celResourceID(obj)] = struct{}{}
+			// Exclusions are silent in the results (the resource is out of scope,
+			// as at admission), but log one so a wrong GVR guess that quietly drops
+			// a resource the control should have seen stays diagnosable.
+			resID := celResourceID(obj)
+			logger.L().Debug("CEL control does not apply to resource, excluding it",
+				helpers.String("rule", rule.Name),
+				helpers.String("resource", resID))
+			outcome.excluded[resID] = struct{}{}
 			continue
 		}
 
