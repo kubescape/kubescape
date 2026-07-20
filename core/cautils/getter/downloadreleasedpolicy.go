@@ -146,6 +146,11 @@ func (drp *DownloadReleasedPolicy) GetControlsInputs(clusterName string) (map[st
 	if err != nil {
 		return nil, err
 	}
+	if defaultConfigInputs.Settings.PostureControlInputs == nil {
+		// the rego store failed to load, so no control inputs are available;
+		// report it as an error instead of silently returning empty inputs
+		return nil, fmt.Errorf("no control configuration inputs available")
+	}
 	return defaultConfigInputs.Settings.PostureControlInputs, err
 }
 
