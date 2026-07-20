@@ -195,6 +195,7 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 	for m := range remainingMatches.Enumerate() {
 		metadata, err := vp.VulnerabilityMetadata(m.Vulnerability.Reference)
 		if err != nil {
+			filteredMatches.Add(m)
 			continue
 		}
 

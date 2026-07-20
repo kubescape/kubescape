@@ -541,9 +541,9 @@ func TestFilterMatchesBasedOnSeverity(t *testing.T) {
 		assert.ElementsMatch(t, []string{"CVE-high", "CVE-medium", "CVE-error"}, matchIDs(filtered))
 	})
 
-	t.Run("excluded severities are removed and metadata errors are skipped", func(t *testing.T) {
+	t.Run("metadata lookup errors preserve matches", func(t *testing.T) {
 		filtered := filterMatchesBasedOnSeverity([]string{"HIGH"}, remainingMatches, provider)
-		assert.ElementsMatch(t, []string{"CVE-medium"}, matchIDs(filtered))
+		assert.ElementsMatch(t, []string{"CVE-medium", "CVE-error"}, matchIDs(filtered))
 	})
 }
 
