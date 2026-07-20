@@ -47,6 +47,16 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Short:   "Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations",
 		Long:    `Scan a Kubernetes cluster, YAML files, Helm charts, Kustomize directories, Git repositories, or container images for security misconfigurations and vulnerabilities.`,
 		Example: scanCmdExamples,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// runs for the bare scan command and all subcommands (framework, control, workload, image)
+			if strings.Contains(scanInfo.ControlsVersion, "/") {
+				return fmt.Errorf(
+					"invalid --controls-version %q: must be a regolibrary release tag and cannot contain '/'",
+					scanInfo.ControlsVersion,
+				)
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if scanInfo.FailThresholdSeverity != "" {
 				if err := shared.ValidateSeverity(
@@ -70,13 +80,6 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				shared.ScanFormats,
 			); err != nil {
 				return err
-			}
-
-			if strings.Contains(scanInfo.ControlsVersion, "/") {
-				return fmt.Errorf(
-					"invalid --controls-version %q: must be a regolibrary release tag and cannot contain '/'",
-					scanInfo.ControlsVersion,
-				)
 			}
 
 			if scanInfo.EncryptionEnabled {
@@ -156,7 +159,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.View, "view", string(cautils.SecurityViewType), fmt.Sprintf("View results based on the %s/%s/%s. default is --view=%s", cautils.ResourceViewType, cautils.ControlViewType, cautils.SecurityViewType, cautils.SecurityViewType))
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.UseDefault, "use-default", false, "Load local policy object from default path. If not used will download latest")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.UseFrom, "use-from", nil, "Load local policy object from specified path. If not used will download latest")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsVersion, "controls-version", "", "Pin the regolibrary release tag used to download controls (see https://github.com/kubescape/regolibrary/releases). If not used will download the latest release")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsVersion, "controls-version", "", "Pin the regolibrary release tag used to download controls (see https://github.com/kubescape/regolibrary/releases). If not used will download the latest release. Has no effect when --account is set (cloud backend is used instead)")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HostSensorYamlPath, "host-scan-yaml", "", "Override default host scanner DaemonSet. Use this flag cautiously")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FormatVersion, "format-version", "v2", "Output object can be different between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.CustomClusterName, "cluster-name", "", "Set the custom name of the cluster. Not same as the kube-context flag")
