@@ -171,6 +171,48 @@ func TestLoadConfigFromData(t *testing.T) {
 
 }
 
+// TestLoadConfigFromData_CorruptedConfigJsonReturnsError is a regression test for
+// the bug where a parse error from the "config.json" key was silently swallowed
+// when the subsequent flat-key marshal+unmarshal succeeded.
+// After the fix, a corrupt config.json must propagate as an error.
+func TestLoadConfigFromData_CorruptedConfigJsonReturnsError(t *testing.T) {
+	co := &ConfigObj{}
+	data := map[string]string{
+		"config.json": `{this is not valid JSON`,
+		"accountID":   "fallback-account",
+	}
+	err := loadConfigFromData(co, data)
+	require.Error(t, err, "expected an error for corrupted config.json, got nil")
+	// The config object must not have been partially populated with the fallback.
+	assert.Empty(t, co.AccountID, "AccountID should remain empty when config.json parse fails")
+}
+
+// TestLoadConfigFromData_FlatKeysTakePrecedenceOverConfigJson verifies that when
+// both "config.json" and individual flat keys exist in the data map, the flat keys
+// always win (they are applied second, on top of the config.json base).
+func TestLoadConfigFromData_FlatKeysTakePrecedenceOverConfigJson(t *testing.T) {
+	base := &ConfigObj{
+		AccountID:   "base-account",
+		CloudAPIURL: "https://base-api.example.com",
+	}
+	baseJSON, err := json.Marshal(base)
+	require.NoError(t, err)
+
+	data := map[string]string{
+		"config.json": string(baseJSON),
+		"accountID":   "override-account", // flat key should win
+	}
+
+	co := &ConfigObj{}
+	require.NoError(t, loadConfigFromData(co, data))
+
+	assert.Equal(t, "override-account", co.AccountID, "flat key accountID must override config.json value")
+	// Fields only in config.json (not overridden) should still be populated.
+	assert.Equal(t, "https://base-api.example.com", co.CloudAPIURL)
+}
+
+
+
 func TestAdoptClusterName(t *testing.T) {
 	tests := []struct {
 		name        string
