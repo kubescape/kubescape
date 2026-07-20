@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -664,7 +665,7 @@ func TestRunOPAOnSingleRuleDispatch(t *testing.T) {
 			"metadata":   map[string]any{"name": "p", "namespace": "default"},
 			"spec":       map[string]any{},
 		}
-		_, err := opap.runOPAOnSingleRule(context.Background(), rule, []map[string]any{obj}, getRuleData, resources.RegoDependenciesData{}, "C-9999")
+		_, _, err := opap.runOPAOnSingleRule(context.Background(), rule, []map[string]any{obj}, getRuleData, resources.RegoDependenciesData{}, "C-9999")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "cel-test-rule")
 		assert.Contains(t, err.Error(), "C-9999")
@@ -675,7 +676,7 @@ func TestRunOPAOnSingleRuleDispatch(t *testing.T) {
 			PortalBase:   armotypes.PortalBase{Name: "mystery-rule"},
 			RuleLanguage: reporthandling.RuleLanguages("Mystery"),
 		}
-		_, err := opap.runOPAOnSingleRule(context.Background(), rule, nil, getRuleData, resources.RegoDependenciesData{}, "")
+		_, _, err := opap.runOPAOnSingleRule(context.Background(), rule, nil, getRuleData, resources.RegoDependenciesData{}, "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not supported")
 		assert.Contains(t, err.Error(), "mystery-rule")
@@ -711,10 +712,27 @@ func TestRunCELOnK8s(t *testing.T) {
 		},
 	}
 
+	// brokenPod has no spec, so object.spec.containers errors at eval time: its
+	// verdict is unknown.
+	brokenPod := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "broken", "namespace": "default"},
+	}
+	// configMap is outside C-0017's matchConstraints.
+	configMap := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "cm", "namespace": "default"},
+		"data":       map[string]any{"k": "v"},
+	}
+
 	t.Run("violation produces a failure response carrying the object", func(t *testing.T) {
-		responses, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{violatingPod}, nil, "C-0017")
+		responses, outcome, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{violatingPod}, nil, "C-0017")
 		require.NoError(t, err)
 		require.Len(t, responses, 1)
+		assert.Empty(t, outcome.skipped)
+		assert.Empty(t, outcome.excluded)
 
 		assert.Equal(t, rule.Name, responses[0].Rulename)
 		assert.NotEmpty(t, responses[0].AlertMessage)
@@ -723,31 +741,53 @@ func TestRunCELOnK8s(t *testing.T) {
 		assert.Equal(t, "mutable", failed[0]["metadata"].(map[string]any)["name"])
 	})
 
-	t.Run("compliant object produces no response", func(t *testing.T) {
-		responses, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{compliantPod}, nil, "C-0017")
+	t.Run("compliant object produces no response and no skip", func(t *testing.T) {
+		responses, outcome, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{compliantPod}, nil, "C-0017")
 		require.NoError(t, err)
 		assert.Empty(t, responses)
+		assert.Empty(t, outcome.skipped)
+		assert.Empty(t, outcome.excluded)
 	})
 
-	t.Run("only the violating object is reported in a mixed batch", func(t *testing.T) {
-		responses, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{compliantPod, violatingPod}, nil, "C-0017")
+	// Blocker 1: a single object whose expression errors must NOT bury a
+	// confirmed violation on another object in the same batch.
+	t.Run("a broken object does not erase a sibling violation", func(t *testing.T) {
+		responses, outcome, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{violatingPod, brokenPod}, nil, "C-0017")
+		require.NoError(t, err, "an eval error on one object must not fail the whole rule")
+		require.Len(t, responses, 1, "the confirmed violation must survive")
+		assert.Equal(t, "mutable", responses[0].GetFailedResources()[0]["metadata"].(map[string]any)["name"])
+
+		require.Len(t, outcome.skipped, 1, "the broken object must be reported as an unknown-verdict skip")
+		skippedMeta := objectsenvelopes.NewObject(outcome.skipped[0].obj)
+		require.NotNil(t, skippedMeta)
+		assert.Equal(t, "broken", skippedMeta.GetName())
+	})
+
+	// Blocker 2: an out-of-scope object must be excluded, not left to be
+	// inferred as passed.
+	t.Run("out-of-scope object is excluded, not passed", func(t *testing.T) {
+		responses, outcome, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{configMap}, nil, "C-0017")
 		require.NoError(t, err)
-		require.Len(t, responses, 1)
-		failed := responses[0].GetFailedResources()
-		require.Len(t, failed, 1)
-		assert.Equal(t, "mutable", failed[0]["metadata"].(map[string]any)["name"])
+		assert.Empty(t, responses)
+		assert.Empty(t, outcome.skipped)
+
+		id := objectsenvelopes.NewObject(configMap).GetID()
+		_, excluded := outcome.excluded[id]
+		assert.True(t, excluded, "a ConfigMap must be excluded from C-0017")
 	})
 
-	t.Run("unknown control skips the rule via an error", func(t *testing.T) {
-		_, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{violatingPod}, nil, "C-9999")
+	t.Run("unknown control skips the whole rule via an error", func(t *testing.T) {
+		_, _, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{violatingPod}, nil, "C-9999")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "cel-c-0017")
 		assert.Contains(t, err.Error(), "C-9999")
 	})
 
 	t.Run("empty batch is a clean no-op", func(t *testing.T) {
-		responses, err := opap.runCELOnK8s(context.Background(), rule, nil, nil, "C-0017")
+		responses, outcome, err := opap.runCELOnK8s(context.Background(), rule, nil, nil, "C-0017")
 		require.NoError(t, err)
 		assert.Empty(t, responses)
+		assert.Empty(t, outcome.skipped)
+		assert.Empty(t, outcome.excluded)
 	})
 }

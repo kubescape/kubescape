@@ -49,12 +49,13 @@ func TestEvaluateControlLoadsAndEvaluatesFromBundle(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("violating object fails the policy", func(t *testing.T) {
-		results, err := e.EvaluateControl(context.Background(), "C-0017", mutableFilesystemPod(), nil)
+		eval, err := e.EvaluateControl(context.Background(), "C-0017", mutableFilesystemPod(), nil)
 		require.NoError(t, err)
-		require.NotEmpty(t, results)
+		require.True(t, eval.Applicable)
+		require.NotEmpty(t, eval.Results)
 
 		violated := false
-		for _, res := range results {
+		for _, res := range eval.Results {
 			require.NoError(t, res.Err)
 			if !res.Passed {
 				violated = true
@@ -65,14 +66,30 @@ func TestEvaluateControlLoadsAndEvaluatesFromBundle(t *testing.T) {
 	})
 
 	t.Run("compliant object passes every validation", func(t *testing.T) {
-		results, err := e.EvaluateControl(context.Background(), "C-0017", readOnlyFilesystemPod(), nil)
+		eval, err := e.EvaluateControl(context.Background(), "C-0017", readOnlyFilesystemPod(), nil)
 		require.NoError(t, err)
-		require.NotEmpty(t, results)
+		require.True(t, eval.Applicable)
+		require.NotEmpty(t, eval.Results)
 
-		for _, res := range results {
+		for _, res := range eval.Results {
 			require.NoError(t, res.Err)
 			assert.True(t, res.Passed)
 		}
+	})
+
+	t.Run("object outside matchConstraints is not applicable", func(t *testing.T) {
+		// C-0017 constrains pods and workload kinds, not ConfigMaps. At admission
+		// a ConfigMap is never matched, so the scan must not evaluate it.
+		configMap := map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata":   map[string]any{"name": "cm", "namespace": "default"},
+			"data":       map[string]any{"k": "v"},
+		}
+		eval, err := e.EvaluateControl(context.Background(), "C-0017", configMap, nil)
+		require.NoError(t, err)
+		assert.False(t, eval.Applicable, "a ConfigMap is outside C-0017's matchConstraints")
+		assert.Empty(t, eval.Results)
 	})
 }
 

@@ -60,6 +60,13 @@ type VAP struct {
 
 	// paramKind mirrors spec.paramKind; nil when the policy declares no params.
 	paramKind *admissionregistrationv1.ParamKind
+
+	// matchConstraints mirrors spec.matchConstraints: the GVKs the policy
+	// applies to. Offline we use it to scope evaluation (see appliesTo), because
+	// the validations self-guard by object.kind and evaluate to true for a
+	// non-matching kind, which the scan would otherwise record as a pass live
+	// admission never made (the object would not be matched at all).
+	matchConstraints *admissionregistrationv1.MatchResources
 }
 
 // requireSupported reports whether the offline engine can honor this policy with
@@ -225,17 +232,18 @@ func indexUnique(index map[string]*VAP, duplicates map[string]struct{}, key stri
 // violation message the same way the apiserver does. matchConditions is carried
 // so loadVAP can refuse a gated policy (see requireSupported).
 //
-// spec.matchConstraints and spec.failurePolicy are intentionally dropped:
-// offline resource selection is the caller's job (and the bundle's validations
-// already self-guard by object.kind), and eval errors are always mapped to an
-// errored/skipped status regardless of failurePolicy, which is the parity-safe
-// direction.
+// spec.matchConstraints is kept so the scan can scope evaluation to the kinds
+// the policy actually applies to (see appliesTo); without it a non-matching
+// object slips through the validations' self-guards as a pass. spec.failurePolicy
+// is still dropped: eval errors are always mapped to an errored/skipped status
+// regardless of failurePolicy, which is the parity-safe direction.
 func newVAP(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *VAP {
 	vap := &VAP{
-		ControlID:       policy.Labels[controlIDLabel],
-		PolicyName:      policy.Name,
-		matchConditions: policy.Spec.MatchConditions,
-		paramKind:       policy.Spec.ParamKind,
+		ControlID:        policy.Labels[controlIDLabel],
+		PolicyName:       policy.Name,
+		matchConditions:  policy.Spec.MatchConditions,
+		paramKind:        policy.Spec.ParamKind,
+		matchConstraints: policy.Spec.MatchConstraints,
 	}
 	for _, v := range policy.Spec.Variables {
 		vap.Variables = append(vap.Variables, Variable{Name: v.Name, Expression: v.Expression})
