@@ -102,36 +102,44 @@ func TestVAPAppliesToCoversEveryBundleKind(t *testing.T) {
 			continue
 		}
 		for _, rr := range vap.matchConstraints.ResourceRules {
-			group := firstOr(rr.APIGroups, "")
-			if group == "*" {
-				group = ""
-			}
-			version := firstOr(rr.APIVersions, "v1")
-			if version == "*" {
-				version = "v1"
-			}
-			apiVersion := version
-			if group != "" {
-				apiVersion = group + "/" + version
-			}
-			for _, res := range rr.Resources {
-				if res == "*" || strings.Contains(res, "/") {
-					continue // wildcard or subresource: not a scanned top-level kind
+			// A resource rule is a cross-product: every apiGroup x apiVersion x
+			// resource it lists is in scope. Check all of them, so a rule that
+			// ever lists more than one group or version is fully covered rather
+			// than asserted on one arbitrary combination.
+			for _, group := range defaultIfEmpty(rr.APIGroups, "") {
+				if group == "*" {
+					group = ""
 				}
-				kind, ok := canonicalKinds[res]
-				require.Truef(t, ok, "policy %q constrains resource %q with no canonical Kind in the test; add it to canonicalKinds and confirm UnsafeGuessKindToResource maps that Kind back to %q", name, res, res)
-				assert.Truef(t, vap.appliesTo(obj(apiVersion, kind)),
-					"policy %q constrains %q but appliesTo rejects a %s %s; UnsafeGuessKindToResource likely mis-guessed the plural", name, res, apiVersion, kind)
+				for _, version := range defaultIfEmpty(rr.APIVersions, "v1") {
+					if version == "*" {
+						version = "v1"
+					}
+					apiVersion := version
+					if group != "" {
+						apiVersion = group + "/" + version
+					}
+					for _, res := range rr.Resources {
+						if res == "*" || strings.Contains(res, "/") {
+							continue // wildcard or subresource: not a scanned top-level kind
+						}
+						kind, ok := canonicalKinds[res]
+						require.Truef(t, ok, "policy %q constrains resource %q with no canonical Kind in the test; add it to canonicalKinds and confirm UnsafeGuessKindToResource maps that Kind back to %q", name, res, res)
+						assert.Truef(t, vap.appliesTo(obj(apiVersion, kind)),
+							"policy %q constrains %q but appliesTo rejects a %s %s; UnsafeGuessKindToResource likely mis-guessed the plural", name, res, apiVersion, kind)
+					}
+				}
 			}
 		}
 	}
 }
 
-func firstOr(xs []string, fallback string) string {
+// defaultIfEmpty keeps the loop above total: a rule that omits apiGroups or
+// apiVersions still yields one combination to assert on.
+func defaultIfEmpty(xs []string, fallback string) []string {
 	if len(xs) > 0 {
-		return xs[0]
+		return xs
 	}
-	return fallback
+	return []string{fallback}
 }
 
 func TestVAPAppliesToExcludeRules(t *testing.T) {
