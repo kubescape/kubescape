@@ -321,17 +321,34 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromCredentialsSecret() error {
 	return nil
 }
 
+// loadConfigFromData populates co from a ConfigMap data map.
+// The data map may contain:
+//   - A "config.json" key whose value is a JSON-encoded ConfigObj (written by older versions).
+//   - Individual flat keys (accountID, cloudAPIURL, etc.) that match ConfigObj's JSON field names.
+//
+// Both sources are applied: config.json is read first as a base, then individual
+// keys are overlaid on top, so flat-key values always take precedence.
+// If reading config.json fails (e.g. corrupted data), that error is returned
+// immediately without attempting the flat-key overlay.
 func loadConfigFromData(co *ConfigObj, data map[string]string) error {
-	var e error
 	if jsonConf, ok := data["config.json"]; ok {
-		e = readConfig([]byte(jsonConf), co)
-	}
-	if bData, err := json.Marshal(data); err == nil {
-		e = readConfig(bData, co)
+		if err := readConfig([]byte(jsonConf), co); err != nil {
+			return err
+		}
 	}
 
-	return e
+	// Apply individual flat keys on top of whatever config.json provided.
+	// json.Marshal on a map[string]string produces {"accountID":"...", ...}
+	// which json.Unmarshal maps directly onto ConfigObj's tagged fields.
+	if bData, err := json.Marshal(data); err == nil {
+		if err := readConfig(bData, co); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
+
 
 func existsConfigFile() bool {
 	_, err := os.ReadFile(ConfigFileFullPath())
