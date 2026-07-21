@@ -73,6 +73,12 @@ func buildSeverityExceptionImageScanData() cautils.ImageScanData {
 
 	return cautils.ImageScanData{
 		Image: "test-image:latest",
+		IgnoredMatches: []match.IgnoredMatch{
+			{
+				Match:              makeSeverityRegressionMatch("CVE-EXCEPTED"),
+				AppliedIgnoreRules: []match.IgnoreRule{{Vulnerability: "CVE-EXCEPTED"}},
+			},
+		},
 		Packages: []grypepkg.Package{
 			{ID: grypepkg.ID("pkg-CVE-KEPT"), Name: "pkg-CVE-KEPT", Version: "1.0.0"},
 			{ID: grypepkg.ID("pkg-CVE-EXCEPTED"), Name: "pkg-CVE-EXCEPTED", Version: "1.0.0"},
