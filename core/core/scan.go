@@ -197,6 +197,13 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	}
 	interfaces.report.SetTenantConfig(interfaces.tenantConfig)
 
+	// remove host scanner components
+	defer func() {
+		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
+			logger.L().Ctx(ks.Context()).StopError("Failed to tear down host scanner", helpers.Error(err))
+		}
+	}()
+
 	// Only create DownloadReleasedPolicy if not in air-gapped mode
 	airGapped := isAirGappedMode(scanInfo)
 	var downloadReleasedPolicy *getter.DownloadReleasedPolicy
@@ -205,26 +212,36 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 		// don't initialize the downloader to prevent network access
 		downloadReleasedPolicy = nil
 	} else {
-		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy() // download config inputs from github release
+		downloadReleasedPolicy = getter.NewDownloadReleasedPolicyWithVersion(scanInfo.ControlsVersion) // download config inputs from github release
 	}
 
 	// set policy getter only after setting the customerGUID
-	scanInfo.PolicyGetter = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy, airGapped)
-	scanInfo.ControlsInputsGetter = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped)
-	scanInfo.ExceptionsGetter = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
-	scanInfo.AttackTracksGetter = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	scanInfo.PolicyGetter, err = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy, airGapped)
+	if err != nil {
+		spanInit.End()
+		return nil, err
+	}
+	var controlInputsFromCache bool
+	scanInfo.ControlsInputsGetter, controlInputsFromCache, err = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped)
+	if err != nil {
+		spanInit.End()
+		return nil, err
+	}
+	scanInfo.ExceptionsGetter, err = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	if err != nil {
+		spanInit.End()
+		return nil, err
+	}
+	scanInfo.AttackTracksGetter, err = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	if err != nil {
+		spanInit.End()
+		return nil, err
+	}
 
 	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {
 		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.PolicyGetter), apisv1.KindFramework)
 	}
-
-	// remove host scanner components
-	defer func() {
-		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
-			logger.L().Ctx(ks.Context()).StopError("Failed to tear down host scanner", helpers.Error(err))
-		}
-	}()
 
 	logger.L().StopSuccess("Initialized scanner")
 
@@ -237,6 +254,9 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	if err != nil {
 		spanInit.End()
 		return resultsHandling, err
+	}
+	if controlInputsFromCache {
+		scanData.PolicyDegradations = append(scanData.PolicyDegradations, cautils.PolicyDegradation{Component: "controlInputs", Reason: "failed to fetch from GitHub, loaded from local cache"})
 	}
 	spanPolicies.End()
 

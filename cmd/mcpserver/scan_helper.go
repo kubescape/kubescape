@@ -19,6 +19,8 @@ import (
 	"github.com/kubescape/opa-utils/resources"
 )
 
+const maxFailedResources = 100
+
 type scanResponse struct {
 	ComplianceScore float32       `json:"compliance_score,omitempty"`
 	TotalFailed     int           `json:"total_failed"`

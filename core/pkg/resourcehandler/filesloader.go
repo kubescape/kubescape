@@ -130,7 +130,7 @@ func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath 
 	// Get repo root
 	repoRoot, gitRepo := extractGitRepo(clonedRepo)
 
-	helmSourceToWorkloads, helmSourceToChart, err := cautils.LoadResourcesFromHelmCharts(ctx, helmPath, helmValueOpts)
+	helmSourceToWorkloads, helmSourceToChart, _, err := cautils.LoadResourcesFromHelmCharts(ctx, helmPath, helmValueOpts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -213,8 +213,16 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		repoRoot = filepath.Dir(repoRoot)
 	}
 
+	// render helm charts first, so the plain-YAML loader knows which charts' templates the render
+	// already covered and can skip only those. A chart whose render failed is dropped whole here, so
+	// its templates must stay plainly scanned rather than vanish from the scan.
+	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmCharts(ctx, path, helmValueOpts)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// load resource from local file system
-	sourceToWorkloads := cautils.LoadResourcesFromFiles(ctx, path, repoRoot)
+	sourceToWorkloads := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, renderedCharts)
 
 	// update workloads and workloadIDToSource
 	var warnIssued bool
@@ -281,11 +289,7 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		logger.L().Debug("files found in local storage", helpers.Int("files", len(sourceToWorkloads)), helpers.Int("workloads", len(workloads)))
 	}
 
-	// load resources from helm charts
-	helmSourceToWorkloads, helmSourceToChart, err := cautils.LoadResourcesFromHelmCharts(ctx, path, helmValueOpts)
-	if err != nil {
-		return nil, nil, err
-	}
+	// process the helm charts rendered above
 	for source, ws := range helmSourceToWorkloads {
 		workloads = append(workloads, ws...)
 		helmChart := helmSourceToChart[source]

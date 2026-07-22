@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor/cel"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -173,9 +174,37 @@ func (rt *redirectTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return rt.originalTransport.RoundTrip(req)
 }
 
-func TestDeployLibrary(t *testing.T) {
+func TestDeployLibraryServesEmbeddedBundleByDefault(t *testing.T) {
+	// Any HTTP request would land on this failing server, so a pass proves the
+	// default path never touches the network.
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	origTransport := http.DefaultTransport
+	http.DefaultTransport = &redirectTransport{
+		baseURL:           strings.TrimPrefix(server.URL, "http://"),
+		originalTransport: server.Client().Transport,
+	}
+	defer func() { http.DefaultTransport = origTransport }()
+
+	content, err := deployLibrary("", 0)
+	require.NoError(t, err)
+	assert.Zero(t, requests, "the embedded default must not touch the network")
+
+	embedded, err := cel.EmbeddedLibraryYAML()
+	require.NoError(t, err)
+	assert.Equal(t, embedded, content, "deploy-library must serve the bundle embedded in the binary")
+}
+
+func TestDeployLibraryFromRelease(t *testing.T) {
 	t.Run("all downloads succeed with concatenation", func(t *testing.T) {
+		var paths []string
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			paths = append(paths, r.URL.Path)
 			w.WriteHeader(http.StatusOK)
 			switch {
 			case strings.Contains(r.URL.Path, "policy-configuration-definition"):
@@ -198,8 +227,7 @@ func TestDeployLibrary(t *testing.T) {
 		}
 		defer func() { http.DefaultTransport = origTransport }()
 
-		// Capture stdout
-		content, err := deployLibrary(0)
+		content, err := deployLibrary("v0.11", 0)
 		require.NoError(t, err)
 
 		parts := strings.Split(content, "\n---\n")
@@ -207,6 +235,13 @@ func TestDeployLibrary(t *testing.T) {
 		assert.Equal(t, "policy-config-content", strings.TrimSpace(parts[0]))
 		assert.Equal(t, "basic-control-content", strings.TrimSpace(parts[1]))
 		assert.Contains(t, parts[2], "kubescape-policies-content")
+
+		// The tag must be pinned in every URL: no releases/latest.
+		require.Len(t, paths, 3)
+		for _, path := range paths {
+			assert.Contains(t, path, "/releases/download/v0.11/")
+			assert.NotContains(t, path, "latest")
+		}
 	})
 
 	t.Run("first download fails", func(t *testing.T) {
@@ -226,9 +261,10 @@ func TestDeployLibrary(t *testing.T) {
 		}
 		defer func() { http.DefaultTransport = origTransport }()
 
-		_, err := deployLibrary(0)
+		_, err := deployLibrary("v0.11", 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to download file")
+		assert.Contains(t, err.Error(), "policy-configuration-definition.yaml")
 	})
 
 	t.Run("second download fails", func(t *testing.T) {
@@ -248,7 +284,7 @@ func TestDeployLibrary(t *testing.T) {
 		}
 		defer func() { http.DefaultTransport = origTransport }()
 
-		_, err := deployLibrary(0)
+		_, err := deployLibrary("v0.11", 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to download file")
 	})
@@ -270,7 +306,7 @@ func TestDeployLibrary(t *testing.T) {
 		}
 		defer func() { http.DefaultTransport = origTransport }()
 
-		_, err := deployLibrary(0)
+		_, err := deployLibrary("v0.11", 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to download file")
 	})
@@ -531,6 +567,10 @@ func TestGetDeployLibraryCmd(t *testing.T) {
 	timeoutFlag := cmd.Flags().Lookup("timeout")
 	require.NotNil(t, timeoutFlag)
 	assert.Equal(t, "0s", timeoutFlag.DefValue)
+
+	fromReleaseFlag := cmd.Flags().Lookup("from-release")
+	require.NotNil(t, fromReleaseFlag)
+	assert.Empty(t, fromReleaseFlag.DefValue, "embedded bundle must be the default")
 }
 
 func TestGetCreatePolicyBindingCmd(t *testing.T) {

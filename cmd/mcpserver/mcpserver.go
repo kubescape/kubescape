@@ -347,14 +347,31 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 	case "run_rbac_security_scan":
 		namespace := ""
 		if ns, ok := arguments["namespace"]; ok {
-			if nsStr, ok := ns.(string); ok {
-				namespace = nsStr
+			nsStr, ok := ns.(string)
+			if !ok {
+				return mcp.NewToolResultError("namespace argument must be a string"), nil
 			}
+			namespace = nsStr
 		}
 
 		responseBytes, err := ksServer.RunRBACScan(ctx, namespace)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run RBAC scan: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(responseBytes)), nil
+	case "run_network_security_scan":
+		namespace := ""
+		if ns, ok := arguments["namespace"]; ok {
+			nsStr, ok := ns.(string)
+			if !ok {
+				return mcp.NewToolResultError("namespace argument must be a string"), nil
+			}
+			namespace = nsStr
+		}
+
+		responseBytes, err := ksServer.RunNetworkScan(ctx, namespace)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to run Network scan: %v", err)), nil
 		}
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "list_vulnerability_manifests":
@@ -742,6 +759,7 @@ func mcpServerEntrypoint() error {
 	createConfigurationsToolsAndResources(ksServer)
 	createRuntimeToolsAndResources(ksServer)
 	createRBACScanningTools(ksServer)
+	createNetworkScanningTools(ksServer)
 
 	createFrameworkScanningTools(ksServer)
 
@@ -765,10 +783,34 @@ func createRBACScanningTools(ksServer *KubescapeMcpserver) {
 		// Blocker 3 fix: use comma-ok pattern to prevent panic when namespace is
 		// omitted (tool is callable with no arguments since namespace is optional).
 		args, ok := request.Params.Arguments.(map[string]any)
-		if !ok {
+		if !ok && request.Params.Arguments != nil {
+			return mcp.NewToolResultError("arguments must be a JSON object"), nil
+		}
+		if args == nil {
 			args = map[string]any{}
 		}
 		return ksServer.CallTool(ctx, "run_rbac_security_scan", args)
+	})
+}
+
+func createNetworkScanningTools(ksServer *KubescapeMcpserver) {
+	runNetworkScanTool := mcp.NewTool(
+		"run_network_security_scan",
+		mcp.WithDescription("Run an on-demand, live Network security scan (evaluating only ingress and egress block policies) and return the failed resources."),
+		mcp.WithString("namespace",
+			mcp.Description("Namespace to scope the Network scan (optional, defaults to cluster-wide if omitted)"),
+		),
+	)
+
+	ksServer.s.AddTool(runNetworkScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, ok := request.Params.Arguments.(map[string]any)
+		if !ok && request.Params.Arguments != nil {
+			return mcp.NewToolResultError("arguments must be a JSON object"), nil
+		}
+		if args == nil {
+			args = map[string]any{}
+		}
+		return ksServer.CallTool(ctx, "run_network_security_scan", args)
 	})
 }
 

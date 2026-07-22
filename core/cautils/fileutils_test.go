@@ -32,7 +32,7 @@ func TestListFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
-	workloads := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "")
+	workloads := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "", nil)
 	assert.Equal(t, 12, len(workloads))
 
 	for i, w := range workloads {
@@ -48,7 +48,7 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 func TestLoadResourcesFromFiles_SupportsMixedCaseExtensions(t *testing.T) {
 	o, _ := os.Getwd()
 	testDir := filepath.Join(o, "testdata", "mixed_extensions")
-	workloads := LoadResourcesFromFiles(context.Background(), testDir, "")
+	workloads := LoadResourcesFromFiles(context.Background(), testDir, "", nil)
 	assert.Equal(t, 2, len(workloads))
 
 	expectedFiles := []string{
@@ -62,8 +62,132 @@ func TestLoadResourcesFromFiles_SupportsMixedCaseExtensions(t *testing.T) {
 	}
 }
 
+// helmChartLayoutPath returns the fixture holding a chart with templates, crds and a subchart.
+func helmChartLayoutPath() string {
+	o, _ := os.Getwd()
+	return filepath.Join(o, "testdata", "helm_chart_layout")
+}
+
+// TestLoadResourcesFromFiles_SkipsHelmTemplates asserts that, for a chart the render covered, the
+// plain-YAML loader leaves the templates to the helm render and keeps loading the rest of the chart.
+func TestLoadResourcesFromFiles_SkipsHelmTemplates(t *testing.T) {
+	testDir := helmChartLayoutPath()
+	renderedCharts := []string{
+		filepath.Join(testDir, "mychart"),
+		filepath.Join(testDir, "mychart", "charts", "mysubchart"),
+	}
+	workloads := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
+
+	expectedFiles := []string{
+		filepath.Join(testDir, "plain-pod.yaml"),
+		filepath.Join(testDir, "mychart", "crds", "widget.yaml"),
+	}
+	for _, ef := range expectedFiles {
+		_, ok := workloads[ef]
+		assert.Truef(t, ok, "expected workload for file %s", ef)
+	}
+	assert.Equal(t, len(expectedFiles), len(workloads))
+}
+
+// TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart asserts that scanning a chart
+// directly skips its templates too, since charts are detected recursively rather than at the input.
+func TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart(t *testing.T) {
+	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
+	renderedCharts := []string{testDir, filepath.Join(testDir, "charts", "mysubchart")}
+	workloads := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
+
+	expectedFile := filepath.Join(testDir, "crds", "widget.yaml")
+	_, ok := workloads[expectedFile]
+	assert.Truef(t, ok, "expected workload for file %s", expectedFile)
+	assert.Equal(t, 1, len(workloads))
+}
+
+// TestLoadResourcesFromFiles_ScansTemplatesOfUnrenderedChart asserts the safety net: when a chart
+// is absent from renderedCharts (its helm render failed), its templates are plainly scanned rather
+// than dropped, so its static manifests still reach the scan.
+func TestLoadResourcesFromFiles_ScansTemplatesOfUnrenderedChart(t *testing.T) {
+	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
+	// no charts rendered successfully, so nothing may be excluded
+	workloads := LoadResourcesFromFiles(context.Background(), testDir, testDir, nil)
+
+	staticTemplate := filepath.Join(testDir, "templates", "serviceaccount.yaml")
+	_, ok := workloads[staticTemplate]
+	assert.Truef(t, ok, "expected the static template %s to be scanned when its chart did not render", staticTemplate)
+}
+
+// TestExcludeHelmTemplateFiles asserts that only the templates of a detected chart are excluded.
+func TestExcludeHelmTemplateFiles(t *testing.T) {
+	chart := filepath.Join("repo", "mychart")
+	subchart := filepath.Join(chart, "charts", "mysubchart")
+	helmDirectories := []string{chart, subchart}
+
+	tests := []struct {
+		name     string
+		file     string
+		excluded bool
+	}{
+		{
+			name:     "chart template is excluded",
+			file:     filepath.Join(chart, "templates", "deployment.yaml"),
+			excluded: true,
+		},
+		{
+			name:     "nested chart template is excluded",
+			file:     filepath.Join(chart, "templates", "rbac", "role.yaml"),
+			excluded: true,
+		},
+		{
+			name:     "subchart template is excluded",
+			file:     filepath.Join(subchart, "templates", "service.yaml"),
+			excluded: true,
+		},
+		{
+			name:     "crd is kept, helm does not render it",
+			file:     filepath.Join(chart, "crds", "widget.yaml"),
+			excluded: false,
+		},
+		{
+			name:     "chart metadata is kept",
+			file:     filepath.Join(chart, "values.yaml"),
+			excluded: false,
+		},
+		{
+			name:     "file outside a chart is kept",
+			file:     filepath.Join("repo", "plain-pod.yaml"),
+			excluded: false,
+		},
+		{
+			name:     "directory sharing the templates prefix is kept",
+			file:     filepath.Join(chart, "templates-docs", "example.yaml"),
+			excluded: false,
+		},
+		{
+			name:     "chart sharing a name prefix is kept",
+			file:     filepath.Join("repo", "mychart-docs", "templates", "example.yaml"),
+			excluded: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			remaining := excludeHelmTemplateFiles([]string{tt.file}, helmDirectories)
+			if tt.excluded {
+				assert.Empty(t, remaining)
+			} else {
+				assert.Equal(t, []string{tt.file}, remaining)
+			}
+		})
+	}
+}
+
+// TestExcludeHelmTemplateFiles_NoCharts asserts that a scan without charts keeps every file.
+func TestExcludeHelmTemplateFiles_NoCharts(t *testing.T) {
+	files := []string{filepath.Join("repo", "templates", "pod.yaml")}
+	assert.Equal(t, files, excludeHelmTemplateFiles(files, nil))
+}
+
 func TestLoadResourcesFromHelmCharts(t *testing.T) {
-	sourceToWorkloads, sourceToChartName, err := LoadResourcesFromHelmCharts(context.Background(), helmChartPath(), HelmValueOptions{})
+	sourceToWorkloads, sourceToChartName, _, err := LoadResourcesFromHelmCharts(context.Background(), helmChartPath(), HelmValueOptions{})
 	assert.NoError(t, err)
 	assert.Equal(t, 6, len(sourceToWorkloads))
 

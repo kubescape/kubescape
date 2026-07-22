@@ -49,14 +49,8 @@ type Chart struct {
 // If user-supplied overrides cannot be parsed (bad --set syntax, missing -f file, unreadable
 // --set-file path, etc.) the error is returned to the caller. We deliberately do not silently
 // fall back to chart defaults — scanning the wrong manifests is worse than failing fast.
-func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions) (map[string][]workloadinterface.IMetadata, map[string]Chart, error) {
-	directories, _ := listDirs(basePath)
-	helmDirectories := make([]string, 0)
-	for _, dir := range directories {
-		if ok, _ := IsHelmDirectory(dir); ok {
-			helmDirectories = append(helmDirectories, dir)
-		}
-	}
+func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
+	helmDirectories := listHelmChartDirs(basePath)
 
 	// Parse user-supplied value overrides once; reuse for every chart we render.
 	var userValues map[string]any
@@ -64,13 +58,17 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		var err error
 		userValues, err = valueOpts.MergeValues()
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to parse Helm value overrides: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to parse Helm value overrides: %w", err)
 		}
 	}
 	releaseOpts := valueOpts.ReleaseOptions()
 
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
 	sourceToChart := make(map[string]Chart, 0)
+	// renderedCharts holds the chart directories that rendered without errors. Rendering is
+	// best-effort: a chart that fails is dropped whole (see the continue below), so callers must
+	// keep plain-scanning its files rather than assume this loader covered them.
+	renderedCharts := make([]string, 0, len(helmDirectories))
 	for _, helmDir := range helmDirectories {
 		chart, err := NewHelmChart(helmDir)
 		if err == nil {
@@ -83,6 +81,7 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 				logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
 				continue
 			}
+			renderedCharts = append(renderedCharts, helmDir)
 			chartName := chart.GetName()
 			prov := chart.Provenance()
 			for k, v := range wls {
@@ -95,7 +94,64 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 			}
 		}
 	}
-	return sourceToWorkloads, sourceToChart, nil
+	return sourceToWorkloads, sourceToChart, renderedCharts, nil
+}
+
+// listHelmChartDirs scans a given path (recursively) and returns the directories holding a helm chart.
+// Subcharts are picked up by the same walk, since each carries its own Chart.yaml.
+func listHelmChartDirs(basePath string) []string {
+	directories, _ := listDirs(basePath)
+	helmDirectories := make([]string, 0)
+	for _, dir := range directories {
+		if ok, _ := IsHelmDirectory(dir); ok {
+			helmDirectories = append(helmDirectories, dir)
+		}
+	}
+	return helmDirectories
+}
+
+// excludeHelmTemplateFiles drops the files living under the templates/ directory of a helm chart.
+// LoadResourcesFromHelmCharts renders those templates, so passing them to the plain-YAML loader
+// as well duplicates the workloads it already renders, and warns on every raw template whose
+// "{{ ... }}" actions are not valid YAML. Only templates/ is excluded: helm renders nothing else,
+// so the rest of the chart (crds/ in particular, which helm does apply) stays plainly scanned.
+//
+// renderedCharts must be the chart directories that rendered without errors. A chart that failed
+// to render is dropped whole by LoadResourcesFromHelmCharts, so its templates must NOT be excluded
+// here — otherwise its resources reach neither loader and vanish from the scan silently.
+func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
+	if len(renderedCharts) == 0 {
+		return files
+	}
+
+	templateDirs := make([]string, 0, len(renderedCharts))
+	for _, helmDir := range renderedCharts {
+		templateDirs = append(templateDirs, filepath.Join(helmDir, "templates"))
+	}
+
+	remaining := make([]string, 0, len(files))
+	for _, file := range files {
+		if !isUnderAnyDir(file, templateDirs) {
+			remaining = append(remaining, file)
+		}
+	}
+	return remaining
+}
+
+// isUnderAnyDir reports whether path is inside one of dirs. Both are expected to be absolute,
+// as returned by listFiles and listDirs.
+func isUnderAnyDir(path string, dirs []string) bool {
+	for _, dir := range dirs {
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			continue
+		}
+		// a sibling merely sharing a prefix (e.g. "templates-docs" next to "templates") escapes with ".."
+		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // mergeMaps performs a deep merge of override into a copy of base, with override winning on conflicts.
@@ -149,7 +205,10 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 	return sourceToWorkloads, kustomizeDirectoryName
 }
 
-func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) map[string][]workloadinterface.IMetadata {
+// LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts
+// are the chart directories LoadResourcesFromHelmCharts already rendered; their templates are left
+// to that render and skipped here. Pass nil to scan everything (e.g. when no charts were rendered).
+func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, renderedCharts []string) map[string][]workloadinterface.IMetadata {
 	// skip the plain-YAML glob for a kustomize directory; the kustomize render handles it
 	if isKustomizeDirectory(input) {
 		return nil
@@ -163,6 +222,10 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) map[str
 		logger.L().Ctx(ctx).Error("no files found to scan", helpers.String("input", input))
 		return nil
 	}
+
+	// skip the plain-YAML glob for the templates of charts the helm render already covered; a chart
+	// whose render failed is absent from renderedCharts, so its templates stay plainly scanned.
+	files = excludeHelmTemplateFiles(files, renderedCharts)
 
 	workloads, errs := loadFiles(rootPath, files)
 	if len(errs) > 0 {
