@@ -22,6 +22,7 @@ func TestBuildScanResponse(t *testing.T) {
 		frameworkName        string
 		degraded             bool
 		notEvaluatedControls int
+		totalControls        int
 		wantTotal            int
 		wantReturned         int
 		wantTruncated        bool
@@ -43,6 +44,7 @@ func TestBuildScanResponse(t *testing.T) {
 			frameworkName:        "nsa",
 			degraded:             true,
 			notEvaluatedControls: 2,
+			totalControls:        10,
 			wantTotal:            5,
 			wantReturned:         5,
 			wantTruncated:        false,
@@ -103,7 +105,7 @@ func TestBuildScanResponse(t *testing.T) {
 					},
 				}
 			}
-			resp := buildScanResponse(results, tt.complianceScore, tt.frameworkName, tt.degraded, tt.notEvaluatedControls)
+			resp := buildScanResponse(results, tt.complianceScore, tt.frameworkName, tt.degraded, tt.notEvaluatedControls, tt.totalControls)
 
 			if resp.TotalFailed != tt.wantTotal {
 				t.Errorf("TotalFailed = %d, want %d", resp.TotalFailed, tt.wantTotal)
@@ -117,7 +119,10 @@ func TestBuildScanResponse(t *testing.T) {
 			if len(resp.FailedResources) != tt.wantReturned {
 				t.Errorf("len(FailedResources) = %d, want %d", len(resp.FailedResources), tt.wantReturned)
 			}
-			if tt.complianceScore != nil && resp.ComplianceScore != nil {
+			if tt.complianceScore != nil {
+				if resp.ComplianceScore == nil {
+					t.Fatalf("ComplianceScore = nil, want %f", *tt.complianceScore)
+				}
 				if *resp.ComplianceScore != *tt.complianceScore {
 					t.Errorf("ComplianceScore = %f, want %f", *resp.ComplianceScore, *tt.complianceScore)
 				}
@@ -169,9 +174,13 @@ func TestBuildScanResponse(t *testing.T) {
 
 			if tt.complianceScore != nil {
 				jsonStr := string(jsonBytes)
-				// Ensure that even 0.0 is marshalled as compliance_score: 0
 				if !strings.Contains(jsonStr, `"compliance_score"`) {
 					t.Errorf("Expected compliance_score to be marshaled, got JSON: %s", jsonStr)
+				}
+			} else {
+				jsonStr := string(jsonBytes)
+				if strings.Contains(jsonStr, `"compliance_score"`) {
+					t.Errorf("Expected compliance_score to be omitted, got JSON: %s", jsonStr)
 				}
 			}
 		})

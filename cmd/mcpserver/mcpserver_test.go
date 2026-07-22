@@ -257,6 +257,13 @@ func TestCallTool_RunFrameworkScan(t *testing.T) {
 			wantErrString: "framework_name argument must not be empty",
 		},
 		{
+			name: "allcontrols framework_name rejected (case-insensitive)",
+			arguments: map[string]any{
+				"framework_name": "AllControls",
+			},
+			wantErrString: "is exceptionally heavy and is not supported in the headless MCP scanner",
+		},
+		{
 			name: "namespace not a string",
 			arguments: map[string]any{
 				"framework_name": "nsa",
