@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 )
@@ -99,12 +101,14 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framew
 	for _, filePath := range lp.filePaths {
 		buf, err := os.ReadFile(filePath)
 		if err != nil {
-			return nil, err
+			logger.L().Debug("skipping unreadable policy file", helpers.String("path", filePath), helpers.Error(err))
+			continue
 		}
 
 		var framework reporthandling.Framework
 		if err = json.Unmarshal(buf, &framework); err != nil {
-			return nil, err
+			logger.L().Debug("skipping unparsable policy file", helpers.String("path", filePath), helpers.Error(err))
+			continue
 		}
 
 		if strings.EqualFold(frameworkName, framework.Name) {
@@ -123,7 +127,8 @@ func (lp *LoadPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
 	for _, f := range lp.filePaths {
 		buf, err := os.ReadFile(f)
 		if err != nil {
-			return nil, err
+			logger.L().Debug("skipping unreadable policy file", helpers.String("path", f), helpers.Error(err))
+			continue
 		}
 
 		var framework reporthandling.Framework
@@ -152,7 +157,8 @@ func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
 	for _, f := range lp.filePaths {
 		buf, err := os.ReadFile(f)
 		if err != nil {
-			return nil, err
+			logger.L().Debug("skipping unreadable policy file", helpers.String("path", f), helpers.Error(err))
+			continue
 		}
 
 		var framework reporthandling.Framework
