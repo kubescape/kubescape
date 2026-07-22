@@ -764,7 +764,6 @@ func mcpServerEntrypoint() error {
 	createRuntimeToolsAndResources(ksServer)
 	createRBACScanningTools(ksServer)
 	createNetworkScanningTools(ksServer)
-
 	createFrameworkScanningTools(ksServer)
 
 	// Start the server
@@ -818,18 +817,6 @@ func createNetworkScanningTools(ksServer *KubescapeMcpserver) {
 	})
 }
 
-func GetMCPServerCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "mcpserver",
-		Short: "Start the Kubescape MCP server",
-		Long:  `Start the Kubescape MCP server`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return mcpServerEntrypoint()
-		},
-	}
-	return cmd
-}
-
 func createFrameworkScanningTools(ksServer *KubescapeMcpserver) {
 	runFrameworkScanTool := mcp.NewTool(
 		"run_framework_security_scan",
@@ -853,4 +840,16 @@ func createFrameworkScanningTools(ksServer *KubescapeMcpserver) {
 		}
 		return ksServer.CallTool(ctx, "run_framework_security_scan", args)
 	})
+}
+
+func GetMCPServerCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "mcpserver",
+		Short: "Start the Kubescape MCP server",
+		Long:  `Start the Kubescape MCP server`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return mcpServerEntrypoint()
+		},
+	}
+	return cmd
 }

@@ -155,6 +155,18 @@ Get detailed configuration scan results for a specific workload, including faile
 | `namespace` | string | No | Namespace of the manifest (default: `"kubescape"`) |
 | `manifest_name` | string | Yes | Name of the configuration manifest |
 
+### Live Scanning Tools
+
+#### `run_framework_security_scan`
+
+Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the failed resources along with the compliance score.
+
+**Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `framework_name` | string | Yes | Name of the framework to scan (e.g. nsa, mitre, cis-v1.23-t1.0.1) |
+| `namespace` | string | No | Namespace to scope the Framework scan (optional, defaults to cluster-wide if omitted) |
+
 ## Resource Templates
 
 The MCP server also exposes resource templates for direct access to data:
