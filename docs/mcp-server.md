@@ -159,7 +159,7 @@ Get detailed configuration scan results for a specific workload, including faile
 
 #### `run_framework_security_scan`
 
-Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the failed resources along with the compliance score. Check the `degraded` flag in the response to ensure the scan fully completed (e.g. no control timeouts).
+Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the failed resources along with the compliance score. Check the `degraded` flag in the response to ensure the scan fully completed (e.g. no control timeouts). Note that `compliance_score` is optional and may be omitted if the scan produces no framework summary. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
 
 **Parameters:**
 
@@ -179,13 +179,13 @@ Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the 
   "total_failed": 5,
   "returned_failed": 5,
   "truncated": false,
-  "failed_resources": [ ... ]
+  "failed_resources": [{}]
 }
 ```
 
 #### `run_rbac_security_scan`
 
-Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and return the failed resources.
+Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and return the failed resources. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
 
 **Parameters:**
 
@@ -202,13 +202,13 @@ Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and
   "total_failed": 1,
   "returned_failed": 1,
   "truncated": false,
-  "failed_resources": [ ... ]
+  "failed_resources": [{}]
 }
 ```
 
 #### `run_network_security_scan`
 
-Run an on-demand, live Network security scan (evaluating network-related controls) and return the failed resources.
+Run an on-demand, live Network security scan (evaluating network-related controls) and return the failed resources. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
 
 **Parameters:**
 

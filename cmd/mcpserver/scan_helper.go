@@ -24,9 +24,9 @@ const maxFailedResources = 100
 type scanResponse struct {
 	ComplianceScore      *float32      `json:"compliance_score,omitempty"`
 	FrameworkName        string        `json:"framework_name,omitempty"`
-	Degraded             bool          `json:"degraded,omitempty"`
-	NotEvaluatedControls int           `json:"not_evaluated_controls,omitempty"`
-	TotalControls        int           `json:"total_controls,omitempty"`
+	Degraded             bool          `json:"degraded"`
+	NotEvaluatedControls int           `json:"not_evaluated_controls"`
+	TotalControls        int           `json:"total_controls"`
 	TotalFailed          int           `json:"total_failed"`
 	ReturnedFailed       int           `json:"returned_failed"`
 	Truncated            bool          `json:"truncated"`
