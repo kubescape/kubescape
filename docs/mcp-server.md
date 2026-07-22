@@ -179,7 +179,7 @@ Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the 
   "total_failed": 5,
   "returned_failed": 5,
   "truncated": false,
-  "failed_resources": [{}]
+  "failed_resources": [{}, {}, {}, {}, {}]
 }
 ```
 
