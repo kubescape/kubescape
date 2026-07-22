@@ -208,8 +208,9 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	airGapped := isAirGappedMode(scanInfo)
 	var downloadReleasedPolicy *getter.DownloadReleasedPolicy
 	if airGapped {
-		// In air-gapped mode (--keep-local or using local files via --use-from, --controls-config, --exceptions, or attack tracks),
-		// don't initialize the downloader to prevent network access
+		// In air-gapped mode (--use-from is set — the user explicitly wants to load everything
+		// from local files with no network access), don't initialize the downloader to prevent
+		// network access
 		downloadReleasedPolicy = nil
 	} else {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicyWithVersion(scanInfo.ControlsVersion) // download config inputs from github release
@@ -415,11 +416,12 @@ func isPrioritizationScanType(scanType cautils.ScanTypes) bool {
 	return scanType == cautils.ScanTypeCluster || scanType == cautils.ScanTypeRepo
 }
 
-// isAirGappedMode returns true if the scan is configured to run in air-gapped mode
-// (i.e., without any network access to download policies, exceptions, or other artifacts)
+// isAirGappedMode returns true if the scan is configured to run in air-gapped mode,
+// i.e. the user explicitly wants to load everything from local files via --use-from,
+// with no network access to download the framework/policy at all. The other local-file
+// flags (--controls-config, --exceptions, --attack-tracks) each have their own
+// dedicated local-file-first branch in their respective getter functions in
+// initutils.go and don't need to disable the network downloader entirely.
 func isAirGappedMode(scanInfo *cautils.ScanInfo) bool {
-	return len(scanInfo.UseFrom) > 0 ||
-		scanInfo.ControlsInputs != "" ||
-		scanInfo.UseExceptions != "" ||
-		scanInfo.AttackTracks != ""
+	return len(scanInfo.UseFrom) > 0
 }
