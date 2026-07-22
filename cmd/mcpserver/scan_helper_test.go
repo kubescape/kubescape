@@ -90,7 +90,7 @@ func TestBuildScanResponse(t *testing.T) {
 					},
 				}
 			}
-			resp := buildScanResponse(results, 0.0)
+			resp := buildScanResponse(results, nil)
 
 			if resp.TotalFailed != tt.wantTotal {
 				t.Errorf("TotalFailed = %d, want %d", resp.TotalFailed, tt.wantTotal)

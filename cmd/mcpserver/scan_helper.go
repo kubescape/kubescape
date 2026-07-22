@@ -22,7 +22,7 @@ import (
 const maxFailedResources = 100
 
 type scanResponse struct {
-	ComplianceScore float32       `json:"compliance_score,omitempty"`
+	ComplianceScore *float32      `json:"compliance_score,omitempty"`
 	TotalFailed     int           `json:"total_failed"`
 	ReturnedFailed  int           `json:"returned_failed"`
 	Truncated       bool          `json:"truncated"`
@@ -94,9 +94,10 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 		return nil, fmt.Errorf("failed to process %s rules: %w", label, err)
 	}
 
-	complianceScore := float32(0.0)
+	var complianceScore *float32
 	if scanData.Report != nil {
-		complianceScore = scanData.Report.SummaryDetails.ComplianceScore
+		score := scanData.Report.SummaryDetails.ComplianceScore
+		complianceScore = &score
 	}
 
 	response := buildScanResponse(scanData.ResourcesResult, complianceScore)
@@ -114,7 +115,7 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 	return responseJSON, nil
 }
 
-func buildScanResponse(results map[string]resourcesresults.Result, complianceScore float32) scanResponse {
+func buildScanResponse(results map[string]resourcesresults.Result, complianceScore *float32) scanResponse {
 	failedResources := make([]interface{}, 0)
 	totalFailed := 0
 

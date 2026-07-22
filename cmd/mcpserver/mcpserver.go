@@ -711,6 +711,10 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if !ok {
 			return mcp.NewToolResultError("framework_name argument must be a string"), nil
 		}
+		frameworkNameStr = strings.TrimSpace(frameworkNameStr)
+		if frameworkNameStr == "" {
+			return mcp.NewToolResultError("framework_name argument must not be empty"), nil
+		}
 
 		responseBytes, err := ksServer.RunFrameworkScan(ctx, namespace, frameworkNameStr)
 		if err != nil {
