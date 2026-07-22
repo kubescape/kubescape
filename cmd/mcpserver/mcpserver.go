@@ -677,6 +677,29 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 				},
 			},
 		}, nil
+	case "run_framework_security_scan":
+		namespace := ""
+		if ns, ok := arguments["namespace"]; ok {
+			nsStr, ok := ns.(string)
+			if !ok {
+				return mcp.NewToolResultError("namespace argument must be a string"), nil
+			}
+			namespace = nsStr
+		}
+		frameworkName, ok := arguments["framework_name"]
+		if !ok {
+			return mcp.NewToolResultError("framework_name argument is required"), nil
+		}
+		frameworkNameStr, ok := frameworkName.(string)
+		if !ok {
+			return mcp.NewToolResultError("framework_name argument must be a string"), nil
+		}
+
+		responseBytes, err := ksServer.RunFrameworkScan(ctx, namespace, frameworkNameStr)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to run framework scan: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(responseBytes)), nil
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -720,6 +743,8 @@ func mcpServerEntrypoint() error {
 	createRuntimeToolsAndResources(ksServer)
 	createRBACScanningTools(ksServer)
 
+	createFrameworkScanningTools(ksServer)
+
 	// Start the server
 	if err := server.ServeStdio(s); err != nil {
 		return fmt.Errorf("server error: %w", err)
@@ -757,4 +782,29 @@ func GetMCPServerCmd() *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+func createFrameworkScanningTools(ksServer *KubescapeMcpserver) {
+	runFrameworkScanTool := mcp.NewTool(
+		"run_framework_security_scan",
+		mcp.WithDescription("Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the failed resources along with the compliance score."),
+		mcp.WithString("namespace",
+			mcp.Description("Namespace to scope the Framework scan (optional, defaults to cluster-wide if omitted)"),
+		),
+		mcp.WithString("framework_name",
+			mcp.Required(),
+			mcp.Description("Name of the framework to scan (e.g. nsa, mitre, cis-v1.23-t1.0.1)"),
+		),
+	)
+
+	ksServer.s.AddTool(runFrameworkScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, ok := request.Params.Arguments.(map[string]any)
+		if !ok && request.Params.Arguments != nil {
+			return mcp.NewToolResultError("arguments must be a JSON object"), nil
+		}
+		if args == nil {
+			args = map[string]any{}
+		}
+		return ksServer.CallTool(ctx, "run_framework_security_scan", args)
+	})
 }
