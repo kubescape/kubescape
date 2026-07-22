@@ -12,21 +12,42 @@ import (
 )
 
 func TestBuildScanResponse(t *testing.T) {
+	floatPtr := func(v float32) *float32 { return &v }
+
 	tests := []struct {
-		name          string
-		numPassing    int
-		numFailing    int
-		wantTotal     int
-		wantReturned  int
-		wantTruncated bool
+		name                 string
+		numPassing           int
+		numFailing           int
+		complianceScore      *float32
+		frameworkName        string
+		degraded             bool
+		notEvaluatedControls int
+		totalControls        int
+		wantTotal            int
+		wantReturned         int
+		wantTruncated        bool
 	}{
 		{
-			name:          "No resources",
-			numPassing:    0,
-			numFailing:    0,
-			wantTotal:     0,
-			wantReturned:  0,
-			wantTruncated: false,
+			name:            "No resources",
+			numPassing:      0,
+			numFailing:      0,
+			complianceScore: nil,
+			wantTotal:       0,
+			wantReturned:    0,
+			wantTruncated:   false,
+		},
+		{
+			name:                 "With 0.0 score",
+			numPassing:           0,
+			numFailing:           5,
+			complianceScore:      floatPtr(0.0),
+			frameworkName:        "nsa",
+			degraded:             true,
+			notEvaluatedControls: 2,
+			totalControls:        10,
+			wantTotal:            5,
+			wantReturned:         5,
+			wantTruncated:        false,
 		},
 		{
 			name:          "Only passing resources",
@@ -37,20 +58,14 @@ func TestBuildScanResponse(t *testing.T) {
 			wantTruncated: false,
 		},
 		{
-			name:          "Under cap (5 failing)",
-			numPassing:    5,
-			numFailing:    5,
-			wantTotal:     5,
-			wantReturned:  5,
-			wantTruncated: false,
-		},
-		{
-			name:          "Exactly at cap (100 failing)",
-			numPassing:    10,
-			numFailing:    100,
-			wantTotal:     100,
-			wantReturned:  100,
-			wantTruncated: false,
+			name:            "Exactly at cap (100 failing)",
+			numPassing:      10,
+			numFailing:      100,
+			complianceScore: floatPtr(95.5),
+			frameworkName:   "mitre",
+			wantTotal:       100,
+			wantReturned:    100,
+			wantTruncated:   false,
 		},
 		{
 			name:          "Over cap (105 failing)",
@@ -90,8 +105,7 @@ func TestBuildScanResponse(t *testing.T) {
 					},
 				}
 			}
-
-			resp := buildScanResponse(results)
+			resp := buildScanResponse(results, tt.complianceScore, tt.frameworkName, tt.degraded, tt.notEvaluatedControls, tt.totalControls)
 
 			if resp.TotalFailed != tt.wantTotal {
 				t.Errorf("TotalFailed = %d, want %d", resp.TotalFailed, tt.wantTotal)
@@ -104,6 +118,14 @@ func TestBuildScanResponse(t *testing.T) {
 			}
 			if len(resp.FailedResources) != tt.wantReturned {
 				t.Errorf("len(FailedResources) = %d, want %d", len(resp.FailedResources), tt.wantReturned)
+			}
+			if tt.complianceScore != nil {
+				if resp.ComplianceScore == nil {
+					t.Fatalf("ComplianceScore = nil, want %f", *tt.complianceScore)
+				}
+				if *resp.ComplianceScore != *tt.complianceScore {
+					t.Errorf("ComplianceScore = %f, want %f", *resp.ComplianceScore, *tt.complianceScore)
+				}
 			}
 
 			if tt.wantTruncated {
@@ -147,6 +169,18 @@ func TestBuildScanResponse(t *testing.T) {
 				jsonStr := string(jsonBytes)
 				if !strings.Contains(jsonStr, `"failed_resources": []`) && !strings.Contains(jsonStr, `"failed_resources":[]`) {
 					t.Errorf("Expected empty array for failed_resources, got JSON: %s", jsonStr)
+				}
+			}
+
+			if tt.complianceScore != nil {
+				jsonStr := string(jsonBytes)
+				if !strings.Contains(jsonStr, `"compliance_score"`) {
+					t.Errorf("Expected compliance_score to be marshaled, got JSON: %s", jsonStr)
+				}
+			} else {
+				jsonStr := string(jsonBytes)
+				if strings.Contains(jsonStr, `"compliance_score"`) {
+					t.Errorf("Expected compliance_score to be omitted, got JSON: %s", jsonStr)
 				}
 			}
 		})

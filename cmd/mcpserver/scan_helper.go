@@ -22,13 +22,26 @@ import (
 const maxFailedResources = 100
 
 type scanResponse struct {
-	TotalFailed     int           `json:"total_failed"`
-	ReturnedFailed  int           `json:"returned_failed"`
-	Truncated       bool          `json:"truncated"`
-	FailedResources []interface{} `json:"failed_resources"`
+	ComplianceScore      *float32      `json:"compliance_score,omitempty"`
+	FrameworkName        string        `json:"framework_name,omitempty"`
+	Degraded             bool          `json:"degraded"`
+	NotEvaluatedControls int           `json:"not_evaluated_controls"`
+	TotalControls        int           `json:"total_controls"`
+	TotalFailed          int           `json:"total_failed"`
+	ReturnedFailed       int           `json:"returned_failed"`
+	Truncated            bool          `json:"truncated"`
+	FailedResources      []interface{} `json:"failed_resources"`
 }
 
 func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, controlIDs []string, label string) ([]byte, error) {
+	policyIdentifiers := make([]cautils.PolicyIdentifier, len(controlIDs))
+	for i, id := range controlIDs {
+		policyIdentifiers[i] = cautils.PolicyIdentifier{Kind: apisv1.KindControl, Identifier: id}
+	}
+	return runScan(ctx, ksServer, namespace, policyIdentifiers, label, false)
+}
+
+func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, policyIdentifiers []cautils.PolicyIdentifier, label string, wantComplianceScore bool) ([]byte, error) {
 	logger.L().Ctx(ctx).Info(fmt.Sprintf("Initiating on-demand MCP %s security scan", label), helpers.String("namespace", namespace))
 
 	if !k8sinterface.IsConnectedToCluster() {
@@ -37,14 +50,16 @@ func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace
 
 	client := ksServer.getK8sClient()
 
-	policyIdentifiers := make([]cautils.PolicyIdentifier, len(controlIDs))
-	for i, id := range controlIDs {
-		policyIdentifiers[i] = cautils.PolicyIdentifier{Kind: apisv1.KindControl, Identifier: id}
-	}
-
 	timeout := 10 * time.Second
+	if wantComplianceScore {
+		timeout = 30 * time.Second
+	}
 	if namespace == "" || namespace == "*" {
-		timeout = 60 * time.Second
+		if wantComplianceScore {
+			timeout = 120 * time.Second
+		} else {
+			timeout = 60 * time.Second
+		}
 	}
 
 	scanInfo := &cautils.ScanInfo{
@@ -77,12 +92,36 @@ func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace
 
 	deps := resources.NewRegoDependenciesData(client.K8SConfig, "")
 	opap := opaprocessor.NewOPAProcessor(scanData, deps, "", scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, false, nil)
-
-	if err := opap.ProcessRulesListener(scanCtx, cautils.NewProgressHandler("")); err != nil {
-		return nil, fmt.Errorf("failed to process %s rules: %w", label, err)
+	if wantComplianceScore {
+		opap.ControlTimeout = timeout / 4
 	}
 
-	response := buildScanResponse(scanData.ResourcesResult)
+	err = opap.ProcessRulesListener(scanCtx, cautils.NewProgressHandler(""))
+	if err != nil {
+		logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to fully process %s rules (partial results will be returned)", label), helpers.Error(err))
+	}
+
+	var complianceScore *float32
+	var frameworkName string
+	degraded := false
+	notEvaluated := 0
+	totalControls := 0
+
+	if scanData.Report != nil {
+		degraded = scanData.ScanCoverage.Degraded || err != nil
+		notEvaluated = len(scanData.ScanCoverage.NotEvaluatedControls)
+		totalControls = len(scanData.Report.SummaryDetails.Controls)
+
+		if wantComplianceScore && len(scanData.Report.SummaryDetails.Frameworks) > 0 {
+			score := scanData.Report.SummaryDetails.Frameworks[0].ComplianceScore
+			complianceScore = &score
+			frameworkName = scanData.Report.SummaryDetails.Frameworks[0].Name
+		} else if wantComplianceScore {
+			logger.L().Ctx(ctx).Warning("framework scan produced no framework summary")
+		}
+	}
+
+	response := buildScanResponse(scanData.ResourcesResult, complianceScore, frameworkName, degraded, notEvaluated, totalControls)
 
 	logger.L().Ctx(ctx).Info(fmt.Sprintf("Completed on-demand MCP %s security scan", label),
 		helpers.Int("failed_resources", response.TotalFailed),
@@ -97,7 +136,7 @@ func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace
 	return responseJSON, nil
 }
 
-func buildScanResponse(results map[string]resourcesresults.Result) scanResponse {
+func buildScanResponse(results map[string]resourcesresults.Result, complianceScore *float32, frameworkName string, degraded bool, notEvaluated int, totalControls int) scanResponse {
 	failedResources := make([]interface{}, 0)
 	totalFailed := 0
 
@@ -118,9 +157,14 @@ func buildScanResponse(results map[string]resourcesresults.Result) scanResponse 
 	}
 
 	return scanResponse{
-		TotalFailed:     totalFailed,
-		ReturnedFailed:  len(failedResources),
-		Truncated:       totalFailed > maxFailedResources,
-		FailedResources: failedResources,
+		ComplianceScore:      complianceScore,
+		FrameworkName:        frameworkName,
+		Degraded:             degraded,
+		NotEvaluatedControls: notEvaluated,
+		TotalControls:        totalControls,
+		TotalFailed:          totalFailed,
+		ReturnedFailed:       len(failedResources),
+		Truncated:            totalFailed > maxFailedResources,
+		FailedResources:      failedResources,
 	}
 }
