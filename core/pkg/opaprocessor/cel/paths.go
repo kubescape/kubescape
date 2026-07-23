@@ -375,10 +375,15 @@ func negated(node celast.NavigableExpr) bool {
 //     just tests presence (`!has(x)`) or the resource kind is not a fix a user
 //     would make, so `!has(hostNetwork) || hostNetwork == false` stays a
 //     requirement while `namespace == 'kube-system' || hostNetwork == false`
-//     does not. For an element predicate (ident is the loop variable) any
-//     disjunction is treated as disqualifying: element fix values in the bundle
-//     are all conjunctive, and reasoning about element-level alternatives is
-//     not worth the risk of writing a wrong value.
+//     does not.
+//   - crossing out of an element predicate (ident is the loop variable) into the
+//     object level does not end the walk: the comprehension is itself a term of
+//     the outer expression, so an outer disjunction can still make an element
+//     value an alternative. `namespace == 'x' || containers.all(c, c.name == 'v')`
+//     must not write name='v' as a fix, exactly as the direct-field case must
+//     not. Inside the element predicate a disjunction is disqualifying outright
+//     (the exists accumulator is a `||`, and element-level alternatives are not
+//     worth reasoning about); once at the object level the sibling check applies.
 //   - anything else (a bare function wrapping the boolean, a ternary) is not
 //     something we reason about, so the value is dropped.
 func valueIsRequirement(native *celast.AST, node celast.NavigableExpr, ident string) bool {
@@ -389,7 +394,9 @@ func valueIsRequirement(native *celast.AST, node celast.NavigableExpr, ident str
 		}
 		switch parent.Kind() {
 		case celast.ComprehensionKind:
-			return true
+			// Leaving the element predicate; judge the rest of the walk as an
+			// object-level term, so an outer disjunction is still accounted for.
+			ident = "object"
 		case celast.CallKind:
 			switch parent.AsCall().FunctionName() {
 			case operators.LogicalAnd:

@@ -163,6 +163,31 @@ func TestPathPlanDropsValueForDisjunctiveAlternatives(t *testing.T) {
 	}
 }
 
+func TestPathPlanDropsElementValueUnderOuterDisjunction(t *testing.T) {
+	// The element equality is conjunctive WITHIN the predicate, but the whole
+	// comprehension is one branch of an outer disjunction whose other branch is
+	// an independent object field. Setting the element value is then an
+	// alternative to satisfying that other branch, not a requirement - and for a
+	// field like name, writing it onto every failing element would make the API
+	// reject duplicate names. The path is still reported, the value is not.
+	plan := planFor(t, "object.metadata.namespace == 'kube-system' || object.spec.containers.all(c, c.name == 'sidecar')")
+	require.NotNil(t, plan.elements)
+	require.Len(t, plan.elements.fields, 1)
+	assert.Equal(t, "name", plan.elements.fields[0].path)
+	assert.Empty(t, plan.elements.fields[0].value, "an element value under an outer disjunction is an alternative, not a fix")
+}
+
+func TestPathPlanKeepsElementValueUnderScopeGuardDisjunction(t *testing.T) {
+	// The shape the bundle actually uses: the comprehension sits under a kind
+	// guard disjunction, whose only other branch reads object.kind. That is not
+	// a competing fix, so the element value survives.
+	plan := planFor(t, "object.kind != 'Pod' || object.spec.containers.all(c, has(c.securityContext) && c.securityContext.readOnlyRootFilesystem == true)")
+	require.NotNil(t, plan.elements)
+	require.Len(t, plan.elements.fields, 1)
+	assert.Equal(t, "securityContext.readOnlyRootFilesystem", plan.elements.fields[0].path)
+	assert.Equal(t, "true", plan.elements.fields[0].value, "a kind guard is not a competing alternative to the element requirement")
+}
+
 func TestPathPlanKeepsValueGuardedByPresenceTest(t *testing.T) {
 	// The safe disjunction the bundle actually uses: the only other branch is a
 	// presence test (and a scope guard) on the same field, neither of which is a
@@ -335,6 +360,15 @@ func TestPassingResultsCarryNoPaths(t *testing.T) {
 // regression in derivation or an upstream rewrite into a shape we cannot read,
 // and TestEveryBundleValidationYieldsAPath turns that into a `make sync-vap`
 // failure instead of findings that quietly lose their remediation paths.
+//
+// KNOWN LIMITATION for a future sync: the plan is derived from the validation
+// expression's AST only, not from any `variables:` block it references. The
+// embedded bundle inlines its object access today, but upstream controls are
+// moving to the variables pattern; a validation whose object access lives in a
+// variable (validation is just `variables.foo`) derives no path and will fail
+// this test at sync time. That failure is the signal to either teach the
+// derivation to inline variable definitions or exempt the policy here - not a
+// silent loss of paths.
 var pathlessPolicies = map[string]string{
 	"cluster-policy-deny-attach":      "denies outright (the expression is the constant false), so there is no field to point at",
 	"cluster-policy-deny-exec":        "denies outright, same as attach",
