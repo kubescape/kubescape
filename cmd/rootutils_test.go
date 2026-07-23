@@ -253,6 +253,76 @@ func TestInitCacheDir_KSCacheDirPrecedence(t *testing.T) {
 
 		assert.Equal(t, defaultVal, getter.DefaultLocalStore)
 	})
+
+	t.Run("KS_CACHE applies when --cache-dir flag not set", func(t *testing.T) {
+		prevStore := getter.DefaultLocalStore
+		prevCacheDir := rootInfo.CacheDir
+		t.Cleanup(func() {
+			getter.DefaultLocalStore = prevStore
+			rootInfo.CacheDir = prevCacheDir
+		})
+
+		t.Setenv("KS_CACHE", "/tmp/ks-cache")
+		cmd := testCmdWithCacheDirFlag(t)
+		assert.NoError(t, cmd.ParseFlags([]string{}))
+
+		initCacheDir(cmd)
+
+		assert.Equal(t, "/tmp/ks-cache", getter.DefaultLocalStore)
+	})
+
+	t.Run("KS_CACHE takes precedence over KS_CACHE_DIR", func(t *testing.T) {
+		prevStore := getter.DefaultLocalStore
+		prevCacheDir := rootInfo.CacheDir
+		t.Cleanup(func() {
+			getter.DefaultLocalStore = prevStore
+			rootInfo.CacheDir = prevCacheDir
+		})
+
+		t.Setenv("KS_CACHE", "/tmp/ks-cache")
+		t.Setenv("KS_CACHE_DIR", "/tmp/ks-cache-dir")
+		cmd := testCmdWithCacheDirFlag(t)
+		assert.NoError(t, cmd.ParseFlags([]string{}))
+
+		initCacheDir(cmd)
+
+		assert.Equal(t, "/tmp/ks-cache", getter.DefaultLocalStore)
+	})
+
+	t.Run("KS_CACHE_DIR applies when KS_CACHE is not set", func(t *testing.T) {
+		prevStore := getter.DefaultLocalStore
+		prevCacheDir := rootInfo.CacheDir
+		t.Cleanup(func() {
+			getter.DefaultLocalStore = prevStore
+			rootInfo.CacheDir = prevCacheDir
+		})
+
+		t.Setenv("KS_CACHE", "")
+		t.Setenv("KS_CACHE_DIR", "/tmp/ks-cache-dir")
+		cmd := testCmdWithCacheDirFlag(t)
+		assert.NoError(t, cmd.ParseFlags([]string{}))
+
+		initCacheDir(cmd)
+
+		assert.Equal(t, "/tmp/ks-cache-dir", getter.DefaultLocalStore)
+	})
+
+	t.Run("explicit --cache-dir wins over KS_CACHE", func(t *testing.T) {
+		prevStore := getter.DefaultLocalStore
+		prevCacheDir := rootInfo.CacheDir
+		t.Cleanup(func() {
+			getter.DefaultLocalStore = prevStore
+			rootInfo.CacheDir = prevCacheDir
+		})
+
+		t.Setenv("KS_CACHE", "/tmp/ks-cache")
+		cmd := testCmdWithCacheDirFlag(t)
+		assert.NoError(t, cmd.ParseFlags([]string{"--cache-dir", "/tmp/explicit-cache"}))
+
+		initCacheDir(cmd)
+
+		assert.Equal(t, "/tmp/explicit-cache", getter.DefaultLocalStore)
+	})
 }
 
 func TestInitLogger_KSLoggerNameEnv(t *testing.T) {

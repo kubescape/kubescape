@@ -182,9 +182,8 @@ KS_DEFAULT_CONFIGMAP_NAME  // name of configmap, if not set default is 'kubescap
 KS_DEFAULT_CONFIGMAP_NAMESPACE   // configmap namespace, if not set default is 'default'
 
 KS_ACCOUNT_ID
-
-TODO - support:
-KS_CACHE // path to cached files
+KS_CACHE // path to cached files (alias for KS_CACHE_DIR)
+KS_CACHE_DIR // path to cached files
 */
 var _ ITenantConfig = &ClusterConfig{}
 
