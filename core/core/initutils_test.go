@@ -146,6 +146,7 @@ func TestGettersAirGappedUseCache(t *testing.T) {
 			policyGetter, err := getPolicyGetter(ctx, nil, accountID, true, nil, true)
 			assert.NoError(t, err)
 			assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(policyGetter).String())
+			configInputsGetter, err := getConfigInputsGetter(ctx, "", accountID, nil, false, true)
 			configInputsGetter, _, err := getConfigInputsGetter(ctx, "", accountID, nil, false, true)
 			assert.NoError(t, err)
 			assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(configInputsGetter).String())
@@ -609,6 +610,7 @@ func TestPinnedVersionGettersReturnHardError(t *testing.T) {
 	})
 
 	t.Run("getConfigInputsGetter", func(t *testing.T) {
+		g, err := getConfigInputsGetter(ctx, "", "", newPinned(), false, false)
 		g, _, err := getConfigInputsGetter(ctx, "", "", newPinned(), false, false)
 		require.Error(t, err)
 		require.Nil(t, g)
