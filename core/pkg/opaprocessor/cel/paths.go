@@ -121,21 +121,18 @@ func newPathPlan(ast *cel.Ast) pathPlan {
 		comprehension := iterated[0].AsComprehension()
 		collection, _ := selectPath(comprehension.IterRange(), "object")
 
-		// A comprehension nested inside this one iterates a list on the element,
-		// not on the element's own fields; excluding its range keeps that inner
-		// collection from being reported as the element's fix path (the same
-		// reason the object-level ranges are excluded from direct fields below).
+		// A field the element predicate reads is element-relative and joined to
+		// the pinned index. This includes a collection the predicate iterates in
+		// turn (a container's ports, a container's command): we cannot pin the
+		// inner index without a second level of re-checking, so that inner
+		// collection stays a review path pointing at the offending element's
+		// list - which still tells the user the container and the field to look
+		// at, unlike the object-level list we index into, which is not a hint
+		// because we are about to point at one of its elements instead.
 		loopStep := celast.NavigateExpr(native, comprehension.LoopStep())
-		nestedRanges := map[string]bool{}
-		for _, node := range celast.MatchDescendants(loopStep, celast.KindMatcher(celast.ComprehensionKind)) {
-			if path, ok := selectPath(node.AsComprehension().IterRange(), comprehension.IterVar()); ok {
-				nestedRanges[path] = true
-			}
-		}
-
 		plan.elements = &elementPlan{
 			collection: collection,
-			fields:     fieldsRootedAt(native, loopStep, comprehension.IterVar(), nestedRanges),
+			fields:     fieldsRootedAt(native, loopStep, comprehension.IterVar(), nil),
 		}
 	}
 
@@ -165,6 +162,14 @@ func newPathPlan(ast *cel.Ast) pathPlan {
 // number, is exact; the other two combinations are not. A ternary between the
 // comprehension and the root is not something we reason about, so it is treated
 // as not exact.
+//
+// This is necessary but not sufficient: re-running the WHOLE validation is only
+// a test of the element when the comprehension is also the sole reason the
+// validation failed. A conjunctive sibling that reads the object
+// (`hostNetwork == false && containers.all(...)`) fails on every singleton too,
+// which would blame every element. resolve guards that separately, by checking
+// the validation passes once the list is emptied before it attributes any
+// element (see resolve).
 func narrowingIsExact(comprehension celast.NavigableExpr) bool {
 	all, ok := quantifierIsAll(comprehension.AsComprehension())
 	if !ok {
@@ -474,6 +479,16 @@ func (p pathPlan) resolve(obj map[string]any, violates func(map[string]any) bool
 	segments := strings.Split(p.elements.collection, ".")
 	list, ok := lookupList(obj, segments)
 	if !ok {
+		return hints
+	}
+
+	// narrowingIsExact establishes the element is conjunctive with the verdict,
+	// but re-running the whole validation is only a test of an element when the
+	// comprehension is also the reason it failed. Emptying the list makes the
+	// comprehension satisfied (all over nothing is vacuously true, and so is the
+	// !exists we also attribute); if the validation still fails then, the cause
+	// is a sibling reading the object, not any element, so none is blamed.
+	if emptied, ok := narrow(obj, segments, []any{}); ok && violates(emptied) {
 		return hints
 	}
 

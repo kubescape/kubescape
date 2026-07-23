@@ -98,6 +98,15 @@ func TestPathPlanElementFields(t *testing.T) {
 			collection: "spec.containers",
 			want:       []fieldRef{{path: "image"}},
 		},
+		{
+			// A collection the element iterates in turn cannot be pinned to an
+			// inner index, but it is still reported: it names the offending
+			// element's field to look at, unlike the object-level list we index.
+			name:       "a collection iterated inside the element stays a review path",
+			expr:       "object.spec.containers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort)))",
+			collection: "spec.containers",
+			want:       []fieldRef{{path: "ports"}},
+		},
 	}
 
 	for _, tc := range cases {
@@ -229,6 +238,70 @@ func TestViolationPathsPinTheFailingElements(t *testing.T) {
 	}, failingPaths(t, "C-0017", mixedFilesystemPod()))
 }
 
+// resolvePlan drives a plan's resolve against obj, re-evaluating expr for the
+// per-element re-check the way the evaluator does at scan time.
+func resolvePlan(t *testing.T, expr string, obj map[string]any) []PathHint {
+	t.Helper()
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	violates := func(candidate map[string]any) bool {
+		activation := e.activationFor(context.Background(), candidate, nil, nil, nil)
+		out, err := e.evalExpression(context.Background(), expr, activation)
+		require.NoError(t, err)
+		passed, ok := out.Value().(bool)
+		require.True(t, ok)
+		return !passed
+	}
+	return e.buildPathPlan(expr).resolve(obj, violates)
+}
+
+func TestViolationPathsBlameNoElementWhenAConjunctiveSiblingFails(t *testing.T) {
+	// The comprehension is exact on its own, but a conjunctive sibling reads the
+	// object and fails independently, so re-checking any single container still
+	// fails. Emptying the list must reveal the sibling as the real cause and stop
+	// every container from being blamed for a fix (readOnlyRootFilesystem) that
+	// is not why the object failed.
+	expr := "object.spec.hostNetwork == false && object.spec.containers.all(c, has(c.securityContext) && c.securityContext.readOnlyRootFilesystem == true)"
+	obj := map[string]any{
+		"apiVersion": "v1", "kind": "Pod",
+		"metadata": map[string]any{"name": "p"},
+		"spec": map[string]any{
+			"hostNetwork": true, // the real failure, independent of any container
+			"containers": []any{
+				map[string]any{"name": "a", "securityContext": map[string]any{"readOnlyRootFilesystem": true}},
+				map[string]any{"name": "b", "securityContext": map[string]any{"readOnlyRootFilesystem": true}},
+			},
+		},
+	}
+
+	hints := resolvePlan(t, expr, obj)
+	for _, h := range hints {
+		assert.NotContainsf(t, h.Path, "containers[", "a compliant container was blamed for a failure caused by hostNetwork: %s", h.Path)
+	}
+	assert.Contains(t, hints, PathHint{Path: "spec.hostNetwork", Value: "false"}, "the real cause is still reported")
+}
+
+func TestViolationPathsStillPinElementsWhenTheSiblingPasses(t *testing.T) {
+	// Same shape, but the sibling (hostNetwork) is compliant, so the container is
+	// the genuine cause and the empty-list guard must not suppress it.
+	expr := "object.spec.hostNetwork == false && object.spec.containers.all(c, has(c.securityContext) && c.securityContext.readOnlyRootFilesystem == true)"
+	obj := map[string]any{
+		"apiVersion": "v1", "kind": "Pod",
+		"metadata": map[string]any{"name": "p"},
+		"spec": map[string]any{
+			"hostNetwork": false,
+			"containers": []any{
+				map[string]any{"name": "a", "securityContext": map[string]any{"readOnlyRootFilesystem": true}},
+				map[string]any{"name": "b"}, // the offender
+			},
+		},
+	}
+
+	assert.Contains(t, resolvePlan(t, expr, obj),
+		PathHint{Path: "spec.containers[1].securityContext.readOnlyRootFilesystem", Value: "true"})
+}
+
 func TestViolationPathsBlameNoElementWhenTheFailureIsElsewhere(t *testing.T) {
 	// C-0034 fails on the pod's own automountServiceAccountToken. Its
 	// containers have nothing to do with the verdict and none is named.
@@ -270,15 +343,6 @@ var pathlessPolicies = map[string]string{
 	"kubescape-c-0045-deny-workloads-with-hostpath-volumes-readonly-not-false":             "iterates both volumes and containers, so a failure cannot be attributed to either list",
 	"kubescape-c-0076-deny-resources-without-configured-list-of-labels-not-set":            "iterates two label maps, and a map key is not a field path",
 	"kubescape-c-0077-deny-resources-without-configured-list-of-k8s-common-labels-not-set": "iterates two label maps, same as C-0076",
-
-	// The offending value in these three is two lists deep (a port inside a
-	// container, a command word inside a container): pinning the outer element
-	// is exact, but the inner collection is excluded rather than reported whole,
-	// so nothing above the element level is left to point at. Two-level pinning
-	// is a later PR.
-	"kubescape-c-0042-deny-resources-with-ssh-server-running":                   "the container variant iterates ports inside containers; the outer container carries no field of its own",
-	"kubescape-c-0044-deny-resources-with-host-port":                            "iterates hostPort inside a container's ports, two lists deep",
-	"kubescape-c-0062-deny-resources-having-containers-with-sudo-in-entrypoint": "iterates command words inside a container's command list, two lists deep",
 }
 
 func TestEveryBundleValidationYieldsAPath(t *testing.T) {
@@ -347,9 +411,18 @@ func TestEveryDerivedBundlePathIsWellFormed(t *testing.T) {
 // field set to the one value that satisfies its control; if this list grows a
 // path with a surprising value, that is the signal to look.
 //
-// (The absence of spec.template.spec.hostIPC=false is not a gap in the test: it
-// is the upstream C-0038 workload bug, which checks hostPID twice and never
-// hostIPC. The derivation reports exactly what the expression says.)
+// Two absences are worth naming so a reader does not read them as bugs:
+//   - spec.template.spec.hostIPC=false is missing because of the upstream C-0038
+//     workload bug, which checks hostPID twice and never hostIPC. The derivation
+//     reports exactly what the expression says.
+//   - C-0075's imagePullPolicy=Always is missing by this analysis's own choice,
+//     not the bundle's. Its element predicate
+//     `!c.image.endsWith(':latest') || c.imagePullPolicy == 'Always'` puts the
+//     equality under a disjunction, and element-level values under a disjunction
+//     are dropped rather than reasoned about (see valueIsRequirement). So a
+//     C-0075 finding carries image and imagePullPolicy as review paths where the
+//     Rego rule offers a writable fix - a deliberate parity gap on the side of
+//     not writing a value we are unsure of.
 var bundleFixValues = []string{
 	"automountServiceAccountToken=false",
 	"spec.automountServiceAccountToken=false",
