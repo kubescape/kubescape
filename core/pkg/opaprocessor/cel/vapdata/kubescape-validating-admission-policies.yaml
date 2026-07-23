@@ -1128,7 +1128,7 @@ spec:
       - cronjobs
   validations:
   - expression: |
-      object.kind != 'Pod' || object.spec.volumes.all(vol, !(has(vol.hostPath)) || object.spec.containers.all(container, !(has(container.volumeMounts)) || container.volumeMounts.all(
+      object.kind != 'Pod' || (!has(object.spec.volumes)) || object.spec.volumes.all(vol, !(has(vol.hostPath)) || object.spec.containers.all(container, !(has(container.volumeMounts)) || container.volumeMounts.all(
 
         containerVol, containerVol.name != vol.name ||
         (has(containerVol.readOnly) && containerVol.readOnly == true)
@@ -1136,7 +1136,7 @@ spec:
     message: One or more hostPath Volumes in the Pod has readOnly not set to false!
       (see more at https://hub.armosec.io/docs/c-0045)
   - expression: |
-      ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'].all(kind, object.kind != kind) || object.spec.template.spec.volumes.all(vol, !(has(vol.hostPath)) || object.spec.template.spec.containers.all(container, !(has(container.volumeMounts)) || container.volumeMounts.all(
+      ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'].all(kind, object.kind != kind) || (!has(object.spec.template.spec.volumes)) || object.spec.template.spec.volumes.all(vol, !(has(vol.hostPath)) || object.spec.template.spec.containers.all(container, !(has(container.volumeMounts)) || container.volumeMounts.all(
 
         containerVol, containerVol.name != vol.name ||
         (has(containerVol.readOnly) && containerVol.readOnly == true)
@@ -1144,7 +1144,7 @@ spec:
     message: One or more hostPath Volumes in the Workload has readOnly not set to
       false! (see more at https://hub.armosec.io/docs/c-0045)
   - expression: |
-      object.kind != 'CronJob' || object.spec.jobTemplate.spec.template.spec.volumes.all(vol, !(has(vol.hostPath)) || object.spec.jobTemplate.spec.template.spec.containers.all(container, !(has(container.volumeMounts)) || container.volumeMounts.all(
+      object.kind != 'CronJob' || (!has(object.spec.jobTemplate.spec.template.spec.volumes)) || object.spec.jobTemplate.spec.template.spec.volumes.all(vol, !(has(vol.hostPath)) || object.spec.jobTemplate.spec.template.spec.containers.all(container, !(has(container.volumeMounts)) || container.volumeMounts.all(
 
         containerVol, containerVol.name != vol.name ||
         (has(containerVol.readOnly) && containerVol.readOnly == true)
@@ -1263,7 +1263,7 @@ spec:
       object.kind != kind) || !has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(vol,
       !(has(vol.hostPath)))'
     message: There are one or more hostPath mounts in the Workload! (see more at https://hub.armosec.io/docs/c-0048)
-  - expression: object.kind != 'CronJob' || !has(object.spec.jobTemplate.spec.volumes)
+  - expression: object.kind != 'CronJob' || !has(object.spec.jobTemplate.spec.template.spec.volumes)
       || object.spec.jobTemplate.spec.template.spec.volumes.all(vol, !(has(vol.hostPath)))
     message: There are one or more hostPath mounts in the CronJob! (see more at https://hub.armosec.io/docs/c-0048)
 ---
@@ -1375,10 +1375,10 @@ spec:
       object.kind != 'Pod' || (has(object.metadata.annotations) && object.metadata.annotations.exists(annotation, annotation.startsWith("container.apparmor.security.beta.kubernetes.io"))) || (has(object.spec.securityContext) && (has(object.spec.securityContext.seccompProfile) || has(object.spec.securityContext.seLinuxOptions))) || object.spec.containers.all(container, has(container.securityContext) && (has(container.securityContext.seccompProfile) || has(container.securityContext.seLinuxOptions) || (has(container.securityContext.capabilities) && has(container.securityContext.capabilities.drop))))
     message: Pods could have more security hardening! (see more at https://hub.armosec.io/docs/c-0055)
   - expression: |
-      ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'].all(kind, object.kind != kind) || (has(object.spec.template.metadata.annotations) && object.spec.template.metadata.annotations.exists(annotation, annotation.startsWith("container.apparmor.security.beta.kubernetes.io"))) || (has(object.spec.template.spec.securityContext) && (has(object.spec.template.spec.securityContext.seccompProfile) || has(object.spec.template.spec.securityContext.seLinuxOptions))) || object.spec.template.spec.containers.all(container, has(container.securityContext) && (has(container.securityContext.seccompProfile) || has(container.securityContext.seLinuxOptions) || (has(container.securityContext.capabilities) && has(container.securityContext.capabilities.drop))))
+      ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'].all(kind, object.kind != kind) || (has(object.spec.template.metadata) && has(object.spec.template.metadata.annotations) && object.spec.template.metadata.annotations.exists(annotation, annotation.startsWith("container.apparmor.security.beta.kubernetes.io"))) || (has(object.spec.template.spec.securityContext) && (has(object.spec.template.spec.securityContext.seccompProfile) || has(object.spec.template.spec.securityContext.seLinuxOptions))) || object.spec.template.spec.containers.all(container, has(container.securityContext) && (has(container.securityContext.seccompProfile) || has(container.securityContext.seLinuxOptions) || (has(container.securityContext.capabilities) && has(container.securityContext.capabilities.drop))))
     message: Workloads could have more security hardening! (see more at https://hub.armosec.io/docs/c-0055)
   - expression: |
-      object.kind != 'CronJob' || (has(object.spec.jobTemplate.metadata.annotations) && object.spec.jobTemplate.metadata.annotations.exists(annotation, annotation.startsWith("container.apparmor.security.beta.kubernetes.io"))) || (has(object.spec.jobTemplate.spec.securityContext) && (has(object.spec.jobTemplate.spec.securityContext.seccompProfile) || has(object.spec.jobTemplate.spec.securityContext.seLinuxOptions))) || object.spec.jobTemplate.spec.template.spec.containers.all(container, has(container.securityContext) && (has(container.securityContext.seccompProfile) || has(container.securityContext.seLinuxOptions) || (has(container.securityContext.capabilities) && has(container.securityContext.capabilities.drop))))
+      object.kind != 'CronJob' || (has(object.spec.jobTemplate.metadata) && has(object.spec.jobTemplate.metadata.annotations) && object.spec.jobTemplate.metadata.annotations.exists(annotation, annotation.startsWith("container.apparmor.security.beta.kubernetes.io"))) || (has(object.spec.jobTemplate.spec.template.spec.securityContext) && (has(object.spec.jobTemplate.spec.template.spec.securityContext.seccompProfile) || has(object.spec.jobTemplate.spec.template.spec.securityContext.seLinuxOptions))) || object.spec.jobTemplate.spec.template.spec.containers.all(container, has(container.securityContext) && (has(container.securityContext.seccompProfile) || has(container.securityContext.seLinuxOptions) || (has(container.securityContext.capabilities) && has(container.securityContext.capabilities.drop))))
     message: CronJob could have more security hardening! (see more at https://hub.armosec.io/docs/c-0055)
 ---
 apiVersion: admissionregistration.k8s.io/v1
