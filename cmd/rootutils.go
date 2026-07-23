@@ -74,9 +74,13 @@ func initCacheDir(cmd *cobra.Command) {
 		}
 	}
 	if !cacheDirExplicit {
-		if cacheDir := os.Getenv("KS_CACHE_DIR"); cacheDir != "" {
+		// Check KS_CACHE first, then fall back to KS_CACHE_DIR
+		if cacheDir := os.Getenv("KS_CACHE"); cacheDir != "" {
 			getter.DefaultLocalStore = cacheDir
-			logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
+			logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore), helpers.String("source", "KS_CACHE"))
+		} else if cacheDir := os.Getenv("KS_CACHE_DIR"); cacheDir != "" {
+			getter.DefaultLocalStore = cacheDir
+			logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore), helpers.String("source", "KS_CACHE_DIR"))
 		}
 	} else {
 		getter.DefaultLocalStore = rootInfo.CacheDir
