@@ -700,6 +700,27 @@ func TestCELRemediation(t *testing.T) {
 		"a hint without a value names the field but not what to put there")
 }
 
+func TestCELRemediationSamePathValuedAndBare(t *testing.T) {
+	// The same path can be read as a bare presence test by one validation and as
+	// an equality by another. It must land in exactly one bucket: the valued
+	// hint wins, so it is a FixPath and never also a ReviewPath. Order of arrival
+	// must not matter.
+	valuedFirst := celRemediation([]cel.PathHint{
+		{Path: "spec.hostNetwork", Value: "false"},
+		{Path: "spec.hostNetwork"},
+	})
+	bareFirst := celRemediation([]cel.PathHint{
+		{Path: "spec.hostNetwork"},
+		{Path: "spec.hostNetwork", Value: "false"},
+	})
+
+	want := reporthandling.AssistedRemediation{FixPaths: []armotypes.FixPath{{Path: "spec.hostNetwork", Value: "false"}}}
+	assert.Equal(t, want, valuedFirst)
+	assert.Equal(t, want, bareFirst)
+	assert.Empty(t, valuedFirst.ReviewPaths, "a path that has a fix value must not also be listed for review")
+	assert.Empty(t, bareFirst.ReviewPaths)
+}
+
 func TestRunCELOnK8s(t *testing.T) {
 	opap := &OPAProcessor{}
 	rule := &reporthandling.PolicyRule{

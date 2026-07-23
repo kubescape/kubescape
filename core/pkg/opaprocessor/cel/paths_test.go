@@ -2,6 +2,7 @@ package cel
 
 import (
 	"context"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -119,6 +120,50 @@ func TestPathPlanIgnoresElementsWhenTwoObjectListsAreIterated(t *testing.T) {
 	assert.Empty(t, plan.direct)
 }
 
+func TestPathPlanNoElementsForBareExists(t *testing.T) {
+	// exists fails when NO element satisfies the predicate, so narrowing to one
+	// element and re-checking would flag every element as the offender. There is
+	// no sound way to attribute the failure, so no element is attributed.
+	plan := planFor(t, "object.kind != 'Pod' || object.spec.containers.exists(c, c.name == 'sidecar')")
+	assert.Nil(t, plan.elements, "a bare exists cannot pin a failing element")
+	assert.Empty(t, plan.direct)
+}
+
+func TestPathPlanAttributesElementsForNegatedExists(t *testing.T) {
+	// !exists(e, p) is all(e, !p): re-checking a single element is exact again,
+	// so the element that satisfies p (the one causing the violation) can be
+	// named. But the equality lives under the exists accumulator's disjunction,
+	// so its literal is not a value to write.
+	plan := planFor(t, "object.kind != 'Pod' || !object.spec.containers.exists(c, c.name == 'bad')")
+	require.NotNil(t, plan.elements)
+	assert.Equal(t, "spec.containers", plan.elements.collection)
+	require.Len(t, plan.elements.fields, 1)
+	assert.Equal(t, "name", plan.elements.fields[0].path)
+	assert.Empty(t, plan.elements.fields[0].value, "an exists alternative is not a fix value")
+}
+
+func TestPathPlanDropsValueForDisjunctiveAlternatives(t *testing.T) {
+	// The heart of the disjunction blocker: two independent object fields, either
+	// of which satisfies the policy. Writing both as fixes would move the
+	// workload into kube-system to satisfy a host-network policy, so neither
+	// carries a value.
+	plan := planFor(t, "object.metadata.namespace == 'kube-system' || object.spec.hostNetwork == false")
+	require.Len(t, plan.direct, 2)
+	for _, ref := range plan.direct {
+		assert.Emptyf(t, ref.value, "%s is one of two alternatives, not a required value", ref.path)
+	}
+}
+
+func TestPathPlanKeepsValueGuardedByPresenceTest(t *testing.T) {
+	// The safe disjunction the bundle actually uses: the only other branch is a
+	// presence test (and a scope guard) on the same field, neither of which is a
+	// competing fix, so the equality stays a genuine requirement.
+	plan := planFor(t, "object.kind != 'Pod' || !has(object.spec.hostNetwork) || object.spec.hostNetwork == false")
+	require.Len(t, plan.direct, 1)
+	assert.Equal(t, "spec.hostNetwork", plan.direct[0].path)
+	assert.Equal(t, "false", plan.direct[0].value, "!has(x) || x == v is a requirement, not an alternative")
+}
+
 func TestPathPlanDropsValueUnderNegation(t *testing.T) {
 	// The literal in `x == true` says what makes the expression true, not what
 	// makes the policy pass, once a negation sits between the two.
@@ -225,6 +270,15 @@ var pathlessPolicies = map[string]string{
 	"kubescape-c-0045-deny-workloads-with-hostpath-volumes-readonly-not-false":             "iterates both volumes and containers, so a failure cannot be attributed to either list",
 	"kubescape-c-0076-deny-resources-without-configured-list-of-labels-not-set":            "iterates two label maps, and a map key is not a field path",
 	"kubescape-c-0077-deny-resources-without-configured-list-of-k8s-common-labels-not-set": "iterates two label maps, same as C-0076",
+
+	// The offending value in these three is two lists deep (a port inside a
+	// container, a command word inside a container): pinning the outer element
+	// is exact, but the inner collection is excluded rather than reported whole,
+	// so nothing above the element level is left to point at. Two-level pinning
+	// is a later PR.
+	"kubescape-c-0042-deny-resources-with-ssh-server-running":                   "the container variant iterates ports inside containers; the outer container carries no field of its own",
+	"kubescape-c-0044-deny-resources-with-host-port":                            "iterates hostPort inside a container's ports, two lists deep",
+	"kubescape-c-0062-deny-resources-having-containers-with-sudo-in-entrypoint": "iterates command words inside a container's command list, two lists deep",
 }
 
 func TestEveryBundleValidationYieldsAPath(t *testing.T) {
@@ -280,4 +334,76 @@ func TestEveryDerivedBundlePathIsWellFormed(t *testing.T) {
 			}
 		}
 	}
+}
+
+// bundleFixValues is every (path, value) pair the current bundle produces a fix
+// value for, as "path=value" (element paths written "collection[].field=value").
+// It is golden data on purpose. TestEveryBundleValidationYieldsAPath guards
+// against LOSING a path; this guards against GAINING a wrong value, which is the
+// direction the whole PR's risk argument points: a value is written into a
+// user's YAML, so a make sync-vap that turns `== true` into `== false`, or
+// introduces a fix for a field that is really one of several alternatives, has
+// to fail a test rather than ship silently. Every entry here is a security
+// field set to the one value that satisfies its control; if this list grows a
+// path with a surprising value, that is the signal to look.
+//
+// (The absence of spec.template.spec.hostIPC=false is not a gap in the test: it
+// is the upstream C-0038 workload bug, which checks hostPID twice and never
+// hostIPC. The derivation reports exactly what the expression says.)
+var bundleFixValues = []string{
+	"automountServiceAccountToken=false",
+	"spec.automountServiceAccountToken=false",
+	"spec.containers[].securityContext.allowPrivilegeEscalation=false",
+	"spec.containers[].securityContext.readOnlyRootFilesystem=true",
+	"spec.hostIPC=false",
+	"spec.hostNetwork=false",
+	"spec.hostPID=false",
+	"spec.jobTemplate.spec.automountServiceAccountToken=false",
+	"spec.jobTemplate.spec.template.spec.containers[].securityContext.allowPrivilegeEscalation=false",
+	"spec.jobTemplate.spec.template.spec.containers[].securityContext.readOnlyRootFilesystem=true",
+	"spec.jobTemplate.spec.template.spec.hostIPC=false",
+	"spec.jobTemplate.spec.template.spec.hostNetwork=false",
+	"spec.jobTemplate.spec.template.spec.hostPID=false",
+	"spec.template.spec.automountServiceAccountToken=false",
+	"spec.template.spec.containers[].securityContext.allowPrivilegeEscalation=false",
+	"spec.template.spec.containers[].securityContext.readOnlyRootFilesystem=true",
+	"spec.template.spec.hostNetwork=false",
+	"spec.template.spec.hostPID=false",
+}
+
+func TestEveryBundleFixValueIsExpected(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	catalog, err := getVAPCatalog()
+	require.NoError(t, err)
+
+	seen := map[string]bool{}
+	for _, vap := range catalog.byName {
+		for _, val := range vap.Validations {
+			plan := e.buildPathPlan(val.Expression)
+			for _, ref := range plan.direct {
+				if ref.value != "" {
+					seen[ref.path+"="+ref.value] = true
+				}
+			}
+			if plan.elements == nil {
+				continue
+			}
+			for _, ref := range plan.elements.fields {
+				if ref.value != "" {
+					seen[plan.elements.collection+"[]."+ref.path+"="+ref.value] = true
+				}
+			}
+		}
+	}
+
+	got := make([]string, 0, len(seen))
+	for pair := range seen {
+		got = append(got, pair)
+	}
+	sort.Strings(got)
+
+	assert.Equal(t, bundleFixValues, got,
+		"the set of fix values the bundle produces changed; if a make sync-vap added or altered a value, confirm it is a genuine requirement (not one of several alternatives) before updating bundleFixValues")
 }

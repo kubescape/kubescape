@@ -21,10 +21,9 @@ import (
 // specific list element: "spec.containers[0].securityContext.readOnlyRootFilesystem".
 //
 // Value is the literal the expression requires at that path, and is only set
-// when the requirement is an unambiguous equality. It is empty whenever the
-// expression asks for something we cannot turn into a single value (a prefix
-// check, a range comparison, a plain presence test), because a caller may write
-// a non-empty Value straight into the user's YAML.
+// when the requirement is unambiguous: an equality the policy demands, not one
+// of several alternatives. It is empty whenever the expression asks for
+// something we cannot turn into a single value a caller could safely write.
 type PathHint struct {
 	Path  string
 	Value string
@@ -45,9 +44,14 @@ type PathHint struct {
 //
 // Stage 2 only ever runs for an object that already failed, so the extra
 // evaluations cost nothing on a clean scan.
+//
+// The rule running through both stages is that a wrong path is worse than no
+// path, because `kubescape fix` writes a hint's value straight into a user's
+// YAML. Every place the analysis cannot be sure it drops the value, or the
+// path, rather than guess.
 
-// fieldRef is one field an expression reads, with the literal it is required to
-// equal when the expression makes that unambiguous.
+// fieldRef is one field an expression reads, with the literal the policy
+// requires it to equal, when the expression makes that requirement unambiguous.
 type fieldRef struct {
 	path  string
 	value string
@@ -69,9 +73,12 @@ type pathPlan struct {
 	// direct are fields read straight off the object.
 	direct []fieldRef
 	// elements is set only when the expression iterates exactly one list on the
-	// object. With none there is nothing to index; with more than one we cannot
-	// tell which list a failure came from, and blaming the wrong one is worse
-	// than staying quiet, so both cases fall back to direct paths only.
+	// object AND narrowing that list to one element and re-checking is an exact
+	// test of that element (see narrowingIsExact). With no such list there is
+	// nothing to index; with more than one we cannot tell which list a failure
+	// came from; with a list whose quantifier makes the elements alternatives
+	// rather than requirements, blaming one would be a guess. All three fall
+	// back to direct paths only.
 	elements *elementPlan
 }
 
@@ -79,7 +86,8 @@ type pathPlan struct {
 // the policy covers this kind at all - every policy in the bundle opens with
 // `object.kind != 'Pod' || ...`. They are never what a user has to fix, and
 // appliesTo has already made that decision before we get here, so they never
-// become a hint.
+// become a hint (and a disjunct that only tests them is not a real alternative
+// to a fix, see siblingHasObjectAlternative).
 var scopeGuardFields = map[string]bool{
 	"kind":       true,
 	"apiVersion": true,
@@ -105,34 +113,125 @@ func newPathPlan(ast *cel.Ast) pathPlan {
 	}
 
 	plan := pathPlan{}
-	if len(iterated) == 1 {
+	// Exactly one object-rooted list, and only when re-checking a single element
+	// against the whole validation is a faithful test of that element. Anything
+	// else and we cannot attribute a failure to a specific element without
+	// guessing, so we do not try.
+	if len(iterated) == 1 && narrowingIsExact(iterated[0]) {
 		comprehension := iterated[0].AsComprehension()
 		collection, _ := selectPath(comprehension.IterRange(), "object")
+
+		// A comprehension nested inside this one iterates a list on the element,
+		// not on the element's own fields; excluding its range keeps that inner
+		// collection from being reported as the element's fix path (the same
+		// reason the object-level ranges are excluded from direct fields below).
+		loopStep := celast.NavigateExpr(native, comprehension.LoopStep())
+		nestedRanges := map[string]bool{}
+		for _, node := range celast.MatchDescendants(loopStep, celast.KindMatcher(celast.ComprehensionKind)) {
+			if path, ok := selectPath(node.AsComprehension().IterRange(), comprehension.IterVar()); ok {
+				nestedRanges[path] = true
+			}
+		}
+
 		plan.elements = &elementPlan{
 			collection: collection,
-			fields:     fieldsRootedAt(celast.NavigateExpr(native, comprehension.LoopStep()), comprehension.IterVar()),
+			fields:     fieldsRootedAt(native, loopStep, comprehension.IterVar(), nestedRanges),
 		}
 	}
 
-	for _, ref := range fieldsRootedAt(root, "object") {
-		// The iterated list itself is not a hint: either we are about to point
-		// at one of its elements, or we could not tell which list failed and
-		// naming them all would just be noise.
-		if scopeGuardFields[ref.path] || ranges[ref.path] {
-			continue
-		}
-		plan.direct = append(plan.direct, ref)
-	}
+	// The iterated list itself is not a direct hint: either we are about to
+	// point at one of its elements, or we could not tell which list failed and
+	// naming them all would just be noise.
+	plan.direct = fieldsRootedAt(native, root, "object", ranges)
 	return plan
 }
 
-// fieldsRootedAt collects the fields an expression reads off a given variable.
+// narrowingIsExact reports whether resolve may attribute a failure to a single
+// element of an object-rooted comprehension.
+//
+// resolve narrows the list to one element and re-runs the WHOLE validation. For
+// that to be a faithful test of the one element, the element's contribution has
+// to be conjunctive with the verdict:
+//
+//   - `all(e, p)`  fails because some element fails p. Re-run on a singleton is
+//     p(e): fails exactly for the offenders. Exact.
+//   - `!exists(e, p)` (equivalently `all(e, !p)`) fails because some element
+//     satisfies p. Re-run is !p(e): fails exactly for those. Also exact.
+//   - bare `exists(e, p)` fails because NO element satisfies p. Re-run is p(e),
+//     which fails for every element, so it would blame them all. Not exact.
+//   - `!all(e, p)` is the mirror image and equally not exact.
+//
+// So an `all` under an even number of negations, or an `exists` under an odd
+// number, is exact; the other two combinations are not. A ternary between the
+// comprehension and the root is not something we reason about, so it is treated
+// as not exact.
+func narrowingIsExact(comprehension celast.NavigableExpr) bool {
+	all, ok := quantifierIsAll(comprehension.AsComprehension())
+	if !ok {
+		return false
+	}
+
+	negations := 0
+	for node := comprehension; ; {
+		parent, ok := node.Parent()
+		if !ok {
+			break
+		}
+		if parent.Kind() == celast.CallKind {
+			switch parent.AsCall().FunctionName() {
+			case operators.LogicalNot:
+				negations++
+			case operators.Conditional:
+				return false
+			}
+		}
+		node = parent
+	}
+
+	even := negations%2 == 0
+	if all {
+		return even
+	}
+	return !even
+}
+
+// quantifierIsAll classifies a comprehension as the all macro (true) or the
+// exists macro (false), reporting false in the second return for anything else
+// (exists_one, map, filter), which we do not attribute elements from. The two
+// macros are told apart by how the standard library expands them: all seeds the
+// accumulator true and folds with &&, exists seeds false and folds with ||.
+func quantifierIsAll(c celast.ComprehensionExpr) (isAll bool, ok bool) {
+	init := c.AccuInit()
+	if init.Kind() != celast.LiteralKind {
+		return false, false
+	}
+	seed, isBool := init.AsLiteral().Value().(bool)
+	if !isBool {
+		return false, false
+	}
+	step := c.LoopStep()
+	if step.Kind() != celast.CallKind {
+		return false, false
+	}
+	switch {
+	case seed && step.AsCall().FunctionName() == operators.LogicalAnd:
+		return true, true
+	case !seed && step.AsCall().FunctionName() == operators.LogicalOr:
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// fieldsRootedAt collects the fields an expression reads off a given variable,
+// with the value each field is required to hold where that is unambiguous.
 //
 // Only the longest chain of each read counts: `has(c.securityContext) &&
 // c.securityContext.readOnlyRootFilesystem == true` reads two nested paths but
 // describes one requirement, and pointing a user at the parent as well as the
-// leaf is noise. So chains that another chain extends are dropped.
-func fieldsRootedAt(root celast.NavigableExpr, ident string) []fieldRef {
+// leaf is noise. So chains that another chain extends are dropped. Scope guards
+// and the excluded paths (an iterated collection) never become fields.
+func fieldsRootedAt(native *celast.AST, root celast.NavigableExpr, ident string, exclude map[string]bool) []fieldRef {
 	var refs []fieldRef
 	for _, node := range celast.MatchDescendants(root, celast.KindMatcher(celast.SelectKind)) {
 		// A select whose parent is a select is the operand of a longer chain;
@@ -141,10 +240,10 @@ func fieldsRootedAt(root celast.NavigableExpr, ident string) []fieldRef {
 			continue
 		}
 		path, ok := selectPath(node, ident)
-		if !ok || path == "" {
+		if !ok || path == "" || scopeGuardFields[path] || exclude[path] {
 			continue
 		}
-		refs = append(refs, fieldRef{path: path, value: requiredValue(node)})
+		refs = append(refs, fieldRef{path: path, value: requiredValue(native, node, ident)})
 	}
 	return dedupeRefs(refs)
 }
@@ -200,17 +299,21 @@ func selectPath(expr celast.Expr, ident string) (string, bool) {
 	return strings.Join(parts, "."), true
 }
 
-// requiredValue returns the literal a field read is compared against, when the
-// comparison is an equality the field has to satisfy for the policy to pass -
+// requiredValue returns the literal a field read is compared against, but only
+// when the policy genuinely REQUIRES the field to hold that value -
 // `container.securityContext.readOnlyRootFilesystem == true` means the fix is
 // to set that path to true.
 //
-// Everything else yields no value, on purpose. `!=` says what the field must
-// not be, which is not a value to write. And an equality reached through a
-// negation or a ternary may be inverted by the time it reaches the result, so
-// the literal there is not necessarily what the policy wants. A caller may
-// write a value into a user's file, so anything short of certain is empty.
-func requiredValue(node celast.NavigableExpr) string {
+// Everything short of a required value yields none, on purpose, because the
+// value is written into a user's file:
+//   - `!=` says what the field must not be, which is not a value to write.
+//   - an equality reached through a negation or a ternary may be inverted by
+//     the time it reaches the verdict (see negated).
+//   - an equality that is one branch of a disjunction is an ALTERNATIVE, not a
+//     requirement: `namespace == 'kube-system' || hostNetwork == false` is
+//     satisfied by either, so writing both would move a workload into
+//     kube-system to satisfy a host-network policy (see valueIsRequirement).
+func requiredValue(native *celast.AST, node celast.NavigableExpr, ident string) string {
 	parent, ok := node.Parent()
 	if !ok || parent.Kind() != celast.CallKind {
 		return ""
@@ -229,7 +332,7 @@ func requiredValue(node celast.NavigableExpr) string {
 	if literal == nil || literal.Kind() != celast.LiteralKind {
 		return ""
 	}
-	if negated(parent) {
+	if negated(parent) || !valueIsRequirement(native, parent, ident) {
 		return ""
 	}
 	value, ok := literalString(literal.AsLiteral())
@@ -257,6 +360,81 @@ func negated(node celast.NavigableExpr) bool {
 	}
 }
 
+// valueIsRequirement reports whether an equality is a value the policy requires
+// rather than one of several alternatives. Walking from the equality up to the
+// root (or the enclosing comprehension, which bounds an element predicate):
+//
+//   - a conjunction (&&) passes a requirement through unchanged.
+//   - a disjunction (||) makes its branches alternatives. It is only safe when
+//     no OTHER branch offers a competing object field to write: a branch that
+//     just tests presence (`!has(x)`) or the resource kind is not a fix a user
+//     would make, so `!has(hostNetwork) || hostNetwork == false` stays a
+//     requirement while `namespace == 'kube-system' || hostNetwork == false`
+//     does not. For an element predicate (ident is the loop variable) any
+//     disjunction is treated as disqualifying: element fix values in the bundle
+//     are all conjunctive, and reasoning about element-level alternatives is
+//     not worth the risk of writing a wrong value.
+//   - anything else (a bare function wrapping the boolean, a ternary) is not
+//     something we reason about, so the value is dropped.
+func valueIsRequirement(native *celast.AST, node celast.NavigableExpr, ident string) bool {
+	for {
+		parent, ok := node.Parent()
+		if !ok {
+			return true
+		}
+		switch parent.Kind() {
+		case celast.ComprehensionKind:
+			return true
+		case celast.CallKind:
+			switch parent.AsCall().FunctionName() {
+			case operators.LogicalAnd:
+			case operators.LogicalOr:
+				if ident != "object" {
+					return false
+				}
+				for _, arg := range parent.AsCall().Args() {
+					if arg.ID() == node.ID() {
+						continue
+					}
+					if siblingHasObjectAlternative(native, arg) {
+						return false
+					}
+				}
+			default:
+				return false
+			}
+		default:
+			return false
+		}
+		node = parent
+	}
+}
+
+// siblingHasObjectAlternative reports whether a disjunction branch reads a real
+// object field as a condition - one that would itself be offered as a competing
+// fix. A presence test (`has(...)`, a test-only select) and a scope-guard read
+// (object.kind) do not count: neither is a value a user would write to satisfy
+// the policy, so a disjunct built only from those leaves the sibling equality a
+// genuine requirement.
+func siblingHasObjectAlternative(native *celast.AST, branch celast.Expr) bool {
+	for _, node := range celast.MatchDescendants(celast.NavigateExpr(native, branch), celast.KindMatcher(celast.SelectKind)) {
+		// Only the outermost select of a chain carries the path; an inner link
+		// (including every link of a presence test's chain) has a select parent.
+		if parent, ok := node.Parent(); ok && parent.Kind() == celast.SelectKind {
+			continue
+		}
+		if node.AsSelect().IsTestOnly() {
+			continue // presence test: not a value to write
+		}
+		path, ok := selectPath(node, "object")
+		if !ok || scopeGuardFields[path] {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // literalString renders a CEL literal as the string form a YAML fix would
 // write. Types with no unambiguous rendering yield false and no hint value.
 func literalString(val ref.Val) (string, bool) {
@@ -279,11 +457,11 @@ func literalString(val ref.Val) (string, bool) {
 // resolve turns a plan into hints for one object that failed the validation.
 //
 // violates re-runs the same validation against a modified object and reports
-// whether it still fails. That is how a list index gets pinned: the policy says
-// every container must satisfy something, so replacing the list with a single
-// container and re-checking says whether that container is one of the offenders.
-// Elements that pass on their own are not blamed, and if the failure came from
-// somewhere else entirely no element is blamed at all.
+// whether it still fails. That is how a list index gets pinned: for a list
+// whose narrowing is exact (see narrowingIsExact), replacing the list with a
+// single element and re-checking says whether that element is one of the
+// offenders. Elements that pass on their own are not blamed, and if the failure
+// came from somewhere else entirely no element is blamed at all.
 func (p pathPlan) resolve(obj map[string]any, violates func(map[string]any) bool) []PathHint {
 	hints := make([]PathHint, 0, len(p.direct))
 	for _, ref := range p.direct {
@@ -300,7 +478,8 @@ func (p pathPlan) resolve(obj map[string]any, violates func(map[string]any) bool
 	}
 
 	for i, element := range list {
-		if !violates(narrow(obj, segments, []any{element})) {
+		candidate, ok := narrow(obj, segments, []any{element})
+		if !ok || !violates(candidate) {
 			continue
 		}
 		prefix := p.elements.collection + "[" + strconv.Itoa(i) + "]."
@@ -329,24 +508,31 @@ func lookupList(obj map[string]any, segments []string) ([]any, bool) {
 	return list, ok
 }
 
-// narrow returns a copy of obj with the value at a dotted path replaced. Only
-// the maps along that path are copied and everything else is shared, so
-// narrowing a pod's container list once per container stays cheap.
-func narrow(obj map[string]any, segments []string, value any) map[string]any {
+// narrow returns a copy of obj with the value at a dotted path replaced,
+// reporting false when the path does not run through maps all the way down.
+// Only the maps along that path are copied and everything else is shared, so
+// narrowing a pod's container list once per container stays cheap. The bool
+// keeps a path that does not resolve from silently returning an unchanged copy,
+// which resolve would then read as every element violating.
+func narrow(obj map[string]any, segments []string, value any) (map[string]any, bool) {
 	out := make(map[string]any, len(obj))
 	for key, val := range obj {
 		out[key] = val
 	}
 	if len(segments) == 1 {
 		out[segments[0]] = value
-		return out
+		return out, true
 	}
 	child, ok := obj[segments[0]].(map[string]any)
 	if !ok {
-		return out
+		return nil, false
 	}
-	out[segments[0]] = narrow(child, segments[1:], value)
-	return out
+	narrowed, ok := narrow(child, segments[1:], value)
+	if !ok {
+		return nil, false
+	}
+	out[segments[0]] = narrowed
+	return out, true
 }
 
 // pathPlanCache memoizes path plans by expression text, for the same reason

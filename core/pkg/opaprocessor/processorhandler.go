@@ -699,21 +699,29 @@ func celRuleResponse(rule *reporthandling.PolicyRule, obj map[string]any, messag
 //
 // Paths repeat across a policy's validations (the bundle guards each kind with
 // its own validation, and several can name the same field), so they are
-// deduplicated to keep one finding from listing the same path twice.
+// deduplicated by path to keep one finding from listing the same path twice.
+// The dedup is keyed on the path alone, not the whole hint: if the same path
+// arrives once with a value and once without, it must land in exactly one of
+// FixPaths or ReviewPaths, so the valued hint wins and the bare one is dropped.
 func celRemediation(hints []cel.PathHint) reporthandling.AssistedRemediation {
-	var remediation reporthandling.AssistedRemediation
-	seen := make(map[cel.PathHint]struct{}, len(hints))
+	byPath := make(map[string]string, len(hints))
+	order := make([]string, 0, len(hints))
 	for _, hint := range hints {
-		if _, dup := seen[hint]; dup {
-			continue
+		if existing, seen := byPath[hint.Path]; !seen {
+			byPath[hint.Path] = hint.Value
+			order = append(order, hint.Path)
+		} else if existing == "" {
+			byPath[hint.Path] = hint.Value // a valued hint supersedes a bare one
 		}
-		seen[hint] = struct{}{}
+	}
 
-		if hint.Value != "" {
-			remediation.FixPaths = append(remediation.FixPaths, armotypes.FixPath{Path: hint.Path, Value: hint.Value})
+	var remediation reporthandling.AssistedRemediation
+	for _, path := range order {
+		if value := byPath[path]; value != "" {
+			remediation.FixPaths = append(remediation.FixPaths, armotypes.FixPath{Path: path, Value: value})
 			continue
 		}
-		remediation.ReviewPaths = append(remediation.ReviewPaths, hint.Path)
+		remediation.ReviewPaths = append(remediation.ReviewPaths, path)
 	}
 	return remediation
 }
