@@ -155,6 +155,80 @@ Get detailed configuration scan results for a specific workload, including faile
 | `namespace` | string | No | Namespace of the manifest (default: `"kubescape"`) |
 | `manifest_name` | string | Yes | Name of the configuration manifest |
 
+### Live Scanning Tools
+
+#### `run_framework_security_scan`
+
+Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the failed resources along with the compliance score. Check the `degraded` flag in the response to ensure the scan fully completed (e.g. no control timeouts). Note that `compliance_score` is optional and may be omitted if the scan produces no framework summary. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `framework_name` | string | Yes | Name of the framework to scan (e.g. nsa, mitre, cis-v1.23-t1.0.1) |
+| `namespace` | string | No | Namespace to scope the Framework scan (optional, defaults to cluster-wide if omitted) |
+
+**Example Response:**
+```json
+{
+  "compliance_score": 0,
+  "framework_name": "nsa",
+  "degraded": true,
+  "not_evaluated_controls": 8,
+  "total_controls": 24,
+  "total_failed": 5,
+  "returned_failed": 5,
+  "truncated": false,
+  "failed_resources": [{}, {}, {}, {}, {}]
+}
+```
+
+#### `run_rbac_security_scan`
+
+Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and return the failed resources. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `namespace` | string | No | Namespace to scope the RBAC scan (optional, defaults to cluster-wide if omitted) |
+
+**Example Response:**
+```json
+{
+  "degraded": false,
+  "not_evaluated_controls": 0,
+  "total_controls": 2,
+  "total_failed": 1,
+  "returned_failed": 1,
+  "truncated": false,
+  "failed_resources": [{}]
+}
+```
+
+#### `run_network_security_scan`
+
+Run an on-demand, live Network security scan (evaluating network-related controls) and return the failed resources. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `namespace` | string | No | Namespace to scope the Network scan (optional, defaults to cluster-wide if omitted) |
+
+**Example Response:**
+```json
+{
+  "degraded": false,
+  "not_evaluated_controls": 0,
+  "total_controls": 1,
+  "total_failed": 0,
+  "returned_failed": 0,
+  "truncated": false,
+  "failed_resources": []
+}
+```
+
 ## Resource Templates
 
 The MCP server also exposes resource templates for direct access to data:

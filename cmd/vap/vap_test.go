@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor/cel"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -173,9 +174,37 @@ func (rt *redirectTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return rt.originalTransport.RoundTrip(req)
 }
 
-func TestDeployLibrary(t *testing.T) {
+func TestDeployLibraryServesEmbeddedBundleByDefault(t *testing.T) {
+	// Any HTTP request would land on this failing server, so a pass proves the
+	// default path never touches the network.
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	origTransport := http.DefaultTransport
+	http.DefaultTransport = &redirectTransport{
+		baseURL:           strings.TrimPrefix(server.URL, "http://"),
+		originalTransport: server.Client().Transport,
+	}
+	defer func() { http.DefaultTransport = origTransport }()
+
+	content, err := deployLibrary("", 0)
+	require.NoError(t, err)
+	assert.Zero(t, requests, "the embedded default must not touch the network")
+
+	embedded, err := cel.EmbeddedLibraryYAML()
+	require.NoError(t, err)
+	assert.Equal(t, embedded, content, "deploy-library must serve the bundle embedded in the binary")
+}
+
+func TestDeployLibraryFromRelease(t *testing.T) {
 	t.Run("all downloads succeed with concatenation", func(t *testing.T) {
+		var paths []string
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			paths = append(paths, r.URL.Path)
 			w.WriteHeader(http.StatusOK)
 			switch {
 			case strings.Contains(r.URL.Path, "policy-configuration-definition"):
@@ -198,8 +227,7 @@ func TestDeployLibrary(t *testing.T) {
 		}
 		defer func() { http.DefaultTransport = origTransport }()
 
-		// Capture stdout
-		content, err := deployLibrary(0)
+		content, err := deployLibrary("v0.11", 0)
 		require.NoError(t, err)
 
 		parts := strings.Split(content, "\n---\n")
@@ -207,6 +235,13 @@ func TestDeployLibrary(t *testing.T) {
 		assert.Equal(t, "policy-config-content", strings.TrimSpace(parts[0]))
 		assert.Equal(t, "basic-control-content", strings.TrimSpace(parts[1]))
 		assert.Contains(t, parts[2], "kubescape-policies-content")
+
+		// The tag must be pinned in every URL: no releases/latest.
+		require.Len(t, paths, 3)
+		for _, path := range paths {
+			assert.Contains(t, path, "/releases/download/v0.11/")
+			assert.NotContains(t, path, "latest")
+		}
 	})
 
 	t.Run("first download fails", func(t *testing.T) {
@@ -226,9 +261,10 @@ func TestDeployLibrary(t *testing.T) {
 		}
 		defer func() { http.DefaultTransport = origTransport }()
 
-		_, err := deployLibrary(0)
+		_, err := deployLibrary("v0.11", 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to download file")
+		assert.Contains(t, err.Error(), "policy-configuration-definition.yaml")
 	})
 
 	t.Run("second download fails", func(t *testing.T) {
@@ -248,7 +284,7 @@ func TestDeployLibrary(t *testing.T) {
 		}
 		defer func() { http.DefaultTransport = origTransport }()
 
-		_, err := deployLibrary(0)
+		_, err := deployLibrary("v0.11", 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to download file")
 	})
@@ -270,7 +306,7 @@ func TestDeployLibrary(t *testing.T) {
 		}
 		defer func() { http.DefaultTransport = origTransport }()
 
-		_, err := deployLibrary(0)
+		_, err := deployLibrary("v0.11", 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to download file")
 	})
@@ -473,11 +509,32 @@ func TestCreatePolicyBindingCmdValidation(t *testing.T) {
 	})
 
 	t.Run("known parameterized control requires parameter reference", func(t *testing.T) {
+		// C-0009 declares a paramKind in the bundle but was missing from the
+		// retired hand-typed params map, so this exact invocation used to emit
+		// a broken binding silently.
 		cmd := getCreatePolicyBindingCmd()
-		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0012"})
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0009"})
 		err := cmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "requires --parameter-reference")
+	})
+
+	t.Run("parameterized policy by name requires parameter reference", func(t *testing.T) {
+		// The params check used to fire only on the --control path; --policy
+		// could silently generate a broken binding for the same policy. Also
+		// covers a cluster helper policy that no control lookup can reach.
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "cluster-policy-deny-insecure-capabilities"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires --parameter-reference")
+	})
+
+	t.Run("policy name outside the bundle skips the params check", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "some-custom-policy"})
+		err := cmd.Execute()
+		assert.NoError(t, err)
 	})
 
 	t.Run("known parameterized control accepts parameter reference", func(t *testing.T) {
@@ -510,6 +567,10 @@ func TestGetDeployLibraryCmd(t *testing.T) {
 	timeoutFlag := cmd.Flags().Lookup("timeout")
 	require.NotNil(t, timeoutFlag)
 	assert.Equal(t, "0s", timeoutFlag.DefValue)
+
+	fromReleaseFlag := cmd.Flags().Lookup("from-release")
+	require.NotNil(t, fromReleaseFlag)
+	assert.Empty(t, fromReleaseFlag.DefValue, "embedded bundle must be the default")
 }
 
 func TestGetCreatePolicyBindingCmd(t *testing.T) {
@@ -586,19 +647,18 @@ func TestResolvePolicyName(t *testing.T) {
 			wantErr:   "unsupported control ID",
 		},
 		{
-			name:      "C-0199 resolves",
+			name:       "policy name is lowercased like control IDs are uppercased",
+			policyName: "KUBESCAPE-C-0016-Allow-Privilege-Escalation",
+			want:       "kubescape-c-0016-allow-privilege-escalation",
+		},
+		{
+			// The retired hand-typed map listed controls (e.g. C-0199) that no
+			// released bundle ships; resolution now matches what deploy-library
+			// actually deploys, so those fail instead of producing a binding to
+			// a policy that does not exist on the cluster.
+			name:      "control absent from the released bundle",
 			controlID: "C-0199",
-			want:      "kubescape-c-0199-deny-net-raw-capability",
-		},
-		{
-			name:      "C-0200 resolves",
-			controlID: "C-0200",
-			want:      "kubescape-c-0200-deny-added-capabilities",
-		},
-		{
-			name:      "C-0201 resolves",
-			controlID: "C-0201",
-			want:      "kubescape-c-0201-deny-capabilities-assigned",
+			wantErr:   "unsupported control ID",
 		},
 	}
 

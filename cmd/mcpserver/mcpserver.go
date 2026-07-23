@@ -5,21 +5,37 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kubescape/go-logger"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 )
 
 type KubescapeMcpserver struct {
-	s        *server.MCPServer
-	ksClient spdxv1beta1.SpdxV1beta1Interface
+	s             *server.MCPServer
+	ksClient      spdxv1beta1.SpdxV1beta1Interface
+	k8sClient     *k8sinterface.KubernetesApi
+	k8sClientOnce sync.Once
+	policyGetter  *getter.DownloadReleasedPolicy
+}
+
+func (ksServer *KubescapeMcpserver) getK8sClient() *k8sinterface.KubernetesApi {
+	ksServer.k8sClientOnce.Do(func() {
+		if ksServer.k8sClient == nil {
+			ksServer.k8sClient = k8sinterface.NewKubernetesApi()
+		}
+	})
+	return ksServer.k8sClient
 }
 
 func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
@@ -328,6 +344,36 @@ func (ksServer *KubescapeMcpserver) ReadContainerProfileResource(ctx context.Con
 
 func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, arguments map[string]any) (*mcp.CallToolResult, error) {
 	switch name {
+	case "run_rbac_security_scan":
+		namespace := ""
+		if ns, ok := arguments["namespace"]; ok {
+			nsStr, ok := ns.(string)
+			if !ok {
+				return mcp.NewToolResultError("namespace argument must be a string"), nil
+			}
+			namespace = nsStr
+		}
+
+		responseBytes, err := ksServer.RunRBACScan(ctx, namespace)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to run RBAC scan: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(responseBytes)), nil
+	case "run_network_security_scan":
+		namespace := ""
+		if ns, ok := arguments["namespace"]; ok {
+			nsStr, ok := ns.(string)
+			if !ok {
+				return mcp.NewToolResultError("namespace argument must be a string"), nil
+			}
+			namespace = nsStr
+		}
+
+		responseBytes, err := ksServer.RunNetworkScan(ctx, namespace)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to run Network scan: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "list_vulnerability_manifests":
 		namespace := metav1.NamespaceAll
 		if ns, ok := arguments["namespace"]; ok {
@@ -648,6 +694,33 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 				},
 			},
 		}, nil
+	case "run_framework_security_scan":
+		namespace := ""
+		if ns, ok := arguments["namespace"]; ok {
+			nsStr, ok := ns.(string)
+			if !ok {
+				return mcp.NewToolResultError("namespace argument must be a string"), nil
+			}
+			namespace = nsStr
+		}
+		frameworkName, ok := arguments["framework_name"]
+		if !ok {
+			return mcp.NewToolResultError("framework_name argument is required"), nil
+		}
+		frameworkNameStr, ok := frameworkName.(string)
+		if !ok {
+			return mcp.NewToolResultError("framework_name argument must be a string"), nil
+		}
+		frameworkNameStr = strings.TrimSpace(frameworkNameStr)
+		if frameworkNameStr == "" {
+			return mcp.NewToolResultError("framework_name argument must not be empty"), nil
+		}
+
+		responseBytes, err := ksServer.RunFrameworkScan(ctx, namespace, frameworkNameStr)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to run framework scan: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(responseBytes)), nil
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -670,9 +743,18 @@ func mcpServerEntrypoint() error {
 		server.WithRecovery(),
 	)
 
+	// Build the k8s API client once at startup. IsConnectedToCluster() is checked
+	// inside RunRBACScan before this is used, so it is safe to store here.
+	var k8sApi *k8sinterface.KubernetesApi
+	if k8sinterface.IsConnectedToCluster() {
+		k8sApi = k8sinterface.NewKubernetesApi()
+	}
+
 	ksServer := &KubescapeMcpserver{
-		s:        s,
-		ksClient: client,
+		s:            s,
+		ksClient:     client,
+		k8sClient:    k8sApi,
+		policyGetter: getter.NewDownloadReleasedPolicy(),
 	}
 
 	// Creating Kubescape tools and resources
@@ -680,12 +762,84 @@ func mcpServerEntrypoint() error {
 	createVulnerabilityToolsAndResources(ksServer)
 	createConfigurationsToolsAndResources(ksServer)
 	createRuntimeToolsAndResources(ksServer)
+	createRBACScanningTools(ksServer)
+	createNetworkScanningTools(ksServer)
+	createFrameworkScanningTools(ksServer)
 
 	// Start the server
 	if err := server.ServeStdio(s); err != nil {
 		return fmt.Errorf("server error: %w", err)
 	}
 	return nil
+}
+
+func createRBACScanningTools(ksServer *KubescapeMcpserver) {
+	runRBACScanTool := mcp.NewTool(
+		"run_rbac_security_scan",
+		mcp.WithDescription("Run an on-demand, live RBAC security scan (evaluating only over-permissive cluster bindings) and return the failed resources."),
+		mcp.WithString("namespace",
+			mcp.Description("Namespace to scope the RBAC scan (optional, defaults to cluster-wide if omitted)"),
+		),
+	)
+
+	ksServer.s.AddTool(runRBACScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Blocker 3 fix: use comma-ok pattern to prevent panic when namespace is
+		// omitted (tool is callable with no arguments since namespace is optional).
+		args, ok := request.Params.Arguments.(map[string]any)
+		if !ok && request.Params.Arguments != nil {
+			return mcp.NewToolResultError("arguments must be a JSON object"), nil
+		}
+		if args == nil {
+			args = map[string]any{}
+		}
+		return ksServer.CallTool(ctx, "run_rbac_security_scan", args)
+	})
+}
+
+func createNetworkScanningTools(ksServer *KubescapeMcpserver) {
+	runNetworkScanTool := mcp.NewTool(
+		"run_network_security_scan",
+		mcp.WithDescription("Run an on-demand, live Network security scan (evaluating only ingress and egress block policies) and return the failed resources."),
+		mcp.WithString("namespace",
+			mcp.Description("Namespace to scope the Network scan (optional, defaults to cluster-wide if omitted)"),
+		),
+	)
+
+	ksServer.s.AddTool(runNetworkScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, ok := request.Params.Arguments.(map[string]any)
+		if !ok && request.Params.Arguments != nil {
+			return mcp.NewToolResultError("arguments must be a JSON object"), nil
+		}
+		if args == nil {
+			args = map[string]any{}
+		}
+		return ksServer.CallTool(ctx, "run_network_security_scan", args)
+	})
+}
+
+func createFrameworkScanningTools(ksServer *KubescapeMcpserver) {
+	runFrameworkScanTool := mcp.NewTool(
+		"run_framework_security_scan",
+		mcp.WithDescription("Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the failed resources along with the compliance score."),
+		mcp.WithString("namespace",
+			mcp.Description("Namespace to scope the Framework scan (optional, defaults to cluster-wide if omitted)"),
+		),
+		mcp.WithString("framework_name",
+			mcp.Required(),
+			mcp.Description("Name of the framework to scan (e.g. nsa, mitre, cis-v1.23-t1.0.1)"),
+		),
+	)
+
+	ksServer.s.AddTool(runFrameworkScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, ok := request.Params.Arguments.(map[string]any)
+		if !ok && request.Params.Arguments != nil {
+			return mcp.NewToolResultError("arguments must be a JSON object"), nil
+		}
+		if args == nil {
+			args = map[string]any{}
+		}
+		return ksServer.CallTool(ctx, "run_framework_security_scan", args)
+	})
 }
 
 func GetMCPServerCmd() *cobra.Command {

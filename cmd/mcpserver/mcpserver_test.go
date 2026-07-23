@@ -221,3 +221,70 @@ func TestReadContainerProfileResource_URIParsing(t *testing.T) {
 		})
 	}
 }
+
+func TestCallTool_RunFrameworkScan(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+
+	tests := []struct {
+		name          string
+		arguments     map[string]any
+		wantErrString string
+	}{
+		{
+			name:          "missing framework_name",
+			arguments:     map[string]any{},
+			wantErrString: "framework_name argument is required",
+		},
+		{
+			name: "framework_name not a string",
+			arguments: map[string]any{
+				"framework_name": 123,
+			},
+			wantErrString: "framework_name argument must be a string",
+		},
+		{
+			name: "empty framework_name",
+			arguments: map[string]any{
+				"framework_name": "",
+			},
+			wantErrString: "framework_name argument must not be empty",
+		},
+		{
+			name: "whitespace framework_name",
+			arguments: map[string]any{
+				"framework_name": "   ",
+			},
+			wantErrString: "framework_name argument must not be empty",
+		},
+		{
+			name: "allcontrols framework_name rejected (case-insensitive)",
+			arguments: map[string]any{
+				"framework_name": "AllControls",
+			},
+			wantErrString: "is exceptionally heavy and is not supported in the headless MCP scanner",
+		},
+		{
+			name: "namespace not a string",
+			arguments: map[string]any{
+				"framework_name": "nsa",
+				"namespace":      123,
+			},
+			wantErrString: "namespace argument must be a string",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := ksServer.CallTool(context.Background(), "run_framework_security_scan", tt.arguments)
+			if err != nil {
+				t.Fatalf("unexpected error from CallTool itself: %v", err)
+			}
+			if res.IsError == false {
+				t.Fatalf("expected error result, got success")
+			}
+			if !strings.Contains(res.Content[0].(mcp.TextContent).Text, tt.wantErrString) {
+				t.Errorf("expected error containing %q, got %q", tt.wantErrString, res.Content[0].(mcp.TextContent).Text)
+			}
+		})
+	}
+}

@@ -1,0 +1,5 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # references a value with no default, so the helm render fails and this chart is dropped whole
+  name: {{ .Values.doesnotexist.name }}

@@ -22,6 +22,7 @@ const (
 	PdfFormat         string = "pdf"
 	HtmlFormat        string = "html"
 	SARIFFormat       string = "sarif"
+	GitLabSASTFormat  string = "gitlab-sast"
 )
 
 const (

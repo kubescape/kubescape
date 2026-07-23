@@ -24,7 +24,7 @@ func applyWithTransformer(
 
 	mapping := NewMapping()
 
-	if err := anonymizeSession(
+	if err := transformSession(
 		resultsHandler.ScanData,
 		mapping,
 		transformer,
@@ -41,16 +41,6 @@ func applyWithTransformer(
 // The DEK is wrapped using the supplied master key (KEK)
 // and stored in EncryptionMetadata for future decryption
 // workflows.
-//
-// Repository context and resource metadata (for example,
-// resource names and namespaces) are reversibly encrypted.
-// Resource IDs are derived from the restored metadata during
-// decryption to preserve report referential integrity.
-//
-// Other anonymized fields, such as annotations, source paths,
-// labels, and additional session data, continue to use
-// mapping-based anonymization and remain irreversibly
-// pseudonymized.
 func ApplyEncrypted(
 	resultsHandler *resultshandling.ResultsHandler,
 	dek []byte,

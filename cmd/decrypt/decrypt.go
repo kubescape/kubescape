@@ -13,11 +13,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var decryptCmdExamples = `
+  # The key is used as raw bytes and must be exactly 32 characters long.
+  # Note: openssl rand -base64 32 (44 chars) and openssl rand -hex 32 (64 chars)
+  # are NOT valid — they exceed 32 bytes once passed through as raw text.
+  export KUBESCAPE_MASTER_KEY="01234567890123456789012345678901"
+
+  # Decrypt an encrypted report
+  kubescape decrypt encrypted-report.json
+
+  # Save the decrypted report to a file
+  kubescape decrypt encrypted-report.json > decrypted-report.json
+`
+
 func GetDecryptCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "decrypt <report.json>",
-		Short: "Decrypt encrypted Kubescape reports",
-		Args:  cobra.ExactArgs(1),
+		Short: "Decrypt report metadata encrypted with kubescape scan --encrypt",
+		Long: `Decrypt report metadata using the KUBESCAPE_MASTER_KEY
+environment variable.
+
+The decrypted report is written to standard output and can be redirected
+to a file.`,
+		Example: decryptCmdExamples,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			data, err := os.ReadFile(args[0])
@@ -128,9 +147,22 @@ func GetDecryptCommand() *cobra.Command {
 							return err
 						}
 
+						if err := reportcrypto.DecryptResourceLabels(resource, dek); err != nil {
+							return err
+						}
+
+						if err := reportcrypto.DecryptResourceAnnotations(resource, dek); err != nil {
+							return err
+						}
+
+						if err := reportcrypto.DecryptResourceObjectSourcePath(resource, dek); err != nil {
+							return err
+						}
+
 						if err := reportcrypto.DecryptContainerMetadata(resource, dek); err != nil {
 							return err
 						}
+
 						newID := resource.GetID()
 						if oldID != "" {
 							idMapping[oldID] = newID

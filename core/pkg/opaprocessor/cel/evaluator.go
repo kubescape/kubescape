@@ -50,6 +50,10 @@ type ValidationResult struct {
 // far more expensive than evaluating against it.
 type Evaluator struct {
 	env *cel.Env
+	// programs caches compiled programs by expression text, so each bundle
+	// expression is compiled once per Evaluator rather than once per scanned
+	// object (see cache.go).
+	programs *programCache
 	// costLimit overrides the per-evaluation CEL cost budget. Zero means "do not
 	// override", which leaves the budget the base env already bakes in
 	// (apiserver's PerCallLimit). When cost limits are wired up the real value
@@ -77,6 +81,9 @@ func NewEvaluator(opts ...Option) (*Evaluator, error) {
 	for _, opt := range opts {
 		opt(e)
 	}
+	// The cache closes over e so compiles pick up option-set state (costLimit);
+	// options are applied above, before anything can trigger a compile.
+	e.programs = newProgramCache(e.compileProgram)
 	return e, nil
 }
 
@@ -222,18 +229,14 @@ func (e *Evaluator) evalMessageExpression(ctx context.Context, expr string, acti
 	return msg, true
 }
 
-// evalExpression compiles and evaluates a single CEL expression against the
-// activation. When compile caching is added it wraps the compile step here, and
-// when cost reporting is added it surfaces the EvalDetails this currently discards.
+// evalExpression evaluates a single CEL expression against the activation. The
+// compiled program comes from the cache (compiled on first use, reused for
+// every later object; see cache.go). When cost reporting is added it surfaces
+// the EvalDetails this currently discards.
 func (e *Evaluator) evalExpression(ctx context.Context, expr string, activation map[string]any) (ref.Val, error) {
-	ast, issues := e.env.Compile(expr)
-	if issues != nil && issues.Err() != nil {
-		return nil, fmt.Errorf("compile: %w", issues.Err())
-	}
-
-	prog, err := e.program(ast)
+	prog, err := e.programs.get(expr)
 	if err != nil {
-		return nil, fmt.Errorf("program: %w", err)
+		return nil, err
 	}
 
 	out, _, err := prog.ContextEval(ctx, activation)
@@ -243,18 +246,29 @@ func (e *Evaluator) evalExpression(ctx context.Context, expr string, activation 
 	return out, nil
 }
 
-// program instantiates a runnable program from a compiled AST. The cost-limit
-// override is only applied when set; otherwise the base env's baked-in
-// PerCallLimit stands. InterruptCheckFrequency gets added here later too.
+// compileProgram compiles one expression into a runnable program. Callers go
+// through the program cache, never here directly, so each expression compiles
+// once. The cost-limit override is only applied when set; otherwise the base
+// env's baked-in PerCallLimit stands. InterruptCheckFrequency gets added here
+// later too.
 //
 // Note for when the cost limit is turned on: this applies a fresh per-expression
 // budget. The apiserver instead shares one budget across all of a policy's
 // expressions (variables + validations) per evaluation, so that accounting, not
 // just the per-call value, is what needs to be matched then.
-func (e *Evaluator) program(ast *cel.Ast) (cel.Program, error) {
+func (e *Evaluator) compileProgram(expr string) (cel.Program, error) {
+	ast, issues := e.env.Compile(expr)
+	if issues != nil && issues.Err() != nil {
+		return nil, fmt.Errorf("compile: %w", issues.Err())
+	}
+
 	var opts []cel.ProgramOption
 	if e.costLimit > 0 {
 		opts = append(opts, cel.CostLimit(e.costLimit))
 	}
-	return e.env.Program(ast, opts...)
+	prog, err := e.env.Program(ast, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("program: %w", err)
+	}
+	return prog, nil
 }
