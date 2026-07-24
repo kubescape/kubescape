@@ -474,6 +474,26 @@ func literalString(val ref.Val) (string, bool) {
 // single element and re-checking says whether that element is one of the
 // offenders. Elements that pass on their own are not blamed, and if the failure
 // came from somewhere else entirely no element is blamed at all.
+//
+// KNOWN IMPRECISION, deliberate: which ELEMENT failed is pinned, which of
+// several CONJUNCTIVE FIELDS failed is not. A validation requiring both
+// `hostPID == false` and `hostIPC == false` reports both paths even when only
+// one of them is actually set, where the Rego equivalent has a separate rule per
+// field and names only the failing one.
+//
+// This is a precision gap, not a soundness one, and the distinction is what
+// makes it acceptable to ship: every value emitted here is the value the policy
+// REQUIRES at that path (see requiredValue), so applying a redundant one can
+// never make the object less compliant - worst case it writes a field that
+// already held that value. That is categorically different from the
+// alternatives-under-a-disjunction case, where applying the fix could satisfy
+// the wrong branch or produce invalid YAML, and which is therefore refused
+// outright rather than merely imprecise.
+//
+// Pinning the field too would mean evaluating each conjunct separately against
+// the object, which needs the plan to track which conjunct each field came from
+// and whether absence satisfies it (`!has(x) || x == v` vs `has(x) && x == v`
+// differ). Worth doing, but as its own change.
 func (p pathPlan) resolve(obj map[string]any, violates func(map[string]any) bool) []PathHint {
 	hints := make([]PathHint, 0, len(p.direct))
 	for _, ref := range p.direct {

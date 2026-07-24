@@ -338,6 +338,33 @@ func TestViolationPathsBlameNoElementWhenTheFailureIsElsewhere(t *testing.T) {
 	}, failingPaths(t, "C-0034", pod))
 }
 
+func TestConjunctiveFieldsAreAllReportedNotJustTheFailingOne(t *testing.T) {
+	// Documents the known imprecision in resolve: the failing ELEMENT is pinned,
+	// the failing FIELD among several conjunctive requirements is not. C-0038
+	// requires both hostPID and hostIPC to be false; a Pod that sets only
+	// hostPID still gets both paths, where Rego's host-pid-ipc-privileges has a
+	// separate deny block per field and names only the one that failed.
+	//
+	// This is safe rather than merely tolerated: the value reported for hostIPC
+	// is the value the policy requires there, so applying it cannot make the Pod
+	// less compliant. If field-level pinning is added later this test should
+	// change to expect only spec.hostPID.
+	pod := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "hostpid", "namespace": "default"},
+		"spec": map[string]any{
+			"hostPID":    true, // the only violation; hostIPC is absent, so compliant
+			"containers": []any{map[string]any{"name": "c", "image": "nginx"}},
+		},
+	}
+
+	assert.Equal(t, []PathHint{
+		{Path: "spec.hostIPC", Value: "false"},
+		{Path: "spec.hostPID", Value: "false"},
+	}, failingPaths(t, "C-0038", pod))
+}
+
 func TestPassingResultsCarryNoPaths(t *testing.T) {
 	e, err := NewEvaluator()
 	require.NoError(t, err)
@@ -446,9 +473,12 @@ func TestEveryDerivedBundlePathIsWellFormed(t *testing.T) {
 // path with a surprising value, that is the signal to look.
 //
 // Two absences are worth naming so a reader does not read them as bugs:
-//   - spec.template.spec.hostIPC=false is missing because of the upstream C-0038
-//     workload bug, which checks hostPID twice and never hostIPC. The derivation
-//     reports exactly what the expression says.
+//   - spec.template.spec.hostIPC=false is missing because C-0038's workload
+//     validation in this vendored bundle checks hostPID twice and never hostIPC.
+//     The derivation reports exactly what the expression says. That policy bug is
+//     already fixed on cel-admission-library main and only survives here because
+//     the pinned release predates the fix, so this entry comes back on its own
+//     once CEL_LIBRARY_VERSION is bumped - no upstream issue to chase.
 //   - C-0075's imagePullPolicy=Always is missing because its element predicate
 //     `!c.image.endsWith(':latest') || c.imagePullPolicy == 'Always'` puts the
 //     equality under a disjunction: retagging the image satisfies the policy
