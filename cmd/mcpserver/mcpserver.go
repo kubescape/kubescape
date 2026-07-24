@@ -359,6 +359,29 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run RBAC scan: %v", err)), nil
 		}
 		return mcp.NewToolResultText(string(responseBytes)), nil
+	case "scan_local_iac":
+		path := ""
+		if p, ok := arguments["path"]; ok {
+			pStr, ok := p.(string)
+			if !ok {
+				return mcp.NewToolResultError("path argument must be a string"), nil
+			}
+			path = pStr
+		}
+		framework := ""
+		if fw, ok := arguments["framework"]; ok {
+			fwStr, ok := fw.(string)
+			if !ok {
+				return mcp.NewToolResultError("framework argument must be a string"), nil
+			}
+			framework = fwStr
+		}
+
+		responseBytes, err := ksServer.runIaCScan(ctx, path, framework)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to run IaC scan: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "run_network_security_scan":
 		namespace := ""
 		if ns, ok := arguments["namespace"]; ok {
@@ -765,6 +788,7 @@ func mcpServerEntrypoint() error {
 	createRBACScanningTools(ksServer)
 	createNetworkScanningTools(ksServer)
 	createFrameworkScanningTools(ksServer)
+	createIaCScanningTools(ksServer)
 
 	// Start the server
 	if err := server.ServeStdio(s); err != nil {
@@ -839,6 +863,31 @@ func createFrameworkScanningTools(ksServer *KubescapeMcpserver) {
 			args = map[string]any{}
 		}
 		return ksServer.CallTool(ctx, "run_framework_security_scan", args)
+	})
+}
+
+func createIaCScanningTools(ksServer *KubescapeMcpserver) {
+	iacScanTool := mcp.NewTool(
+		"scan_local_iac",
+		mcp.WithDescription("Scan local Infrastructure-as-Code (Helm charts, Kustomize, YAML) for security misconfigurations"),
+		mcp.WithString("path",
+			mcp.Required(),
+			mcp.Description("Absolute or relative path to the local directory (e.g., /path/to/helm-chart)"),
+		),
+		mcp.WithString("framework",
+			mcp.Description("Framework to scan against (optional, defaults to allcontrols)"),
+		),
+	)
+
+	ksServer.s.AddTool(iacScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, ok := request.Params.Arguments.(map[string]any)
+		if !ok && request.Params.Arguments != nil {
+			return mcp.NewToolResultError("arguments must be a JSON object"), nil
+		}
+		if args == nil {
+			args = map[string]any{}
+		}
+		return ksServer.CallTool(ctx, "scan_local_iac", args)
 	})
 }
 

@@ -18,5 +18,5 @@ func (ksServer *KubescapeMcpserver) RunFrameworkScan(ctx context.Context, namesp
 	policyIdentifiers := []cautils.PolicyIdentifier{
 		{Kind: apisv1.KindFramework, Identifier: frameworkName},
 	}
-	return runScan(ctx, ksServer, namespace, policyIdentifiers, "Framework", true)
+	return runScan(ctx, ksServer, namespace, policyIdentifiers, "Framework", true, nil, nil)
 }
