@@ -38,10 +38,10 @@ func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace
 	for i, id := range controlIDs {
 		policyIdentifiers[i] = cautils.PolicyIdentifier{Kind: apisv1.KindControl, Identifier: id}
 	}
-	return runScan(ctx, ksServer, namespace, policyIdentifiers, label, false, nil, nil)
+	return runScan(ctx, ksServer, namespace, policyIdentifiers, label, false, nil, nil, nil)
 }
 
-func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, policyIdentifiers []cautils.PolicyIdentifier, label string, wantComplianceScore bool, rsrcHandler resourcehandler.IResourceHandler, inputPatterns []string) ([]byte, error) {
+func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, policyIdentifiers []cautils.PolicyIdentifier, label string, wantComplianceScore bool, rsrcHandler resourcehandler.IResourceHandler, inputPatterns []string, customGetters *cautils.Getters) ([]byte, error) {
 	logger.L().Ctx(ctx).Info(fmt.Sprintf("Initiating on-demand MCP %s security scan", label), helpers.String("namespace", namespace))
 
 	var client *k8sinterface.KubernetesApi
@@ -64,13 +64,18 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 		}
 	}
 
+	getters := cautils.Getters{
+		PolicyGetter:         ksServer.policyGetter,
+		ExceptionsGetter:     ksServer.policyGetter,
+		ControlsInputsGetter: ksServer.policyGetter,
+		AttackTracksGetter:   ksServer.policyGetter,
+	}
+	if customGetters != nil {
+		getters = *customGetters
+	}
+
 	scanInfo := &cautils.ScanInfo{
-		Getters: cautils.Getters{
-			PolicyGetter:         ksServer.policyGetter,
-			ExceptionsGetter:     ksServer.policyGetter,
-			ControlsInputsGetter: ksServer.policyGetter,
-			AttackTracksGetter:   ksServer.policyGetter,
-		},
+		Getters:           getters,
 		ScanAll:           false,
 		PolicyIdentifier:  policyIdentifiers,
 		IncludeNamespaces: namespace,

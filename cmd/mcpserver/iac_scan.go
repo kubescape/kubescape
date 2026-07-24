@@ -11,7 +11,7 @@ import (
 // runIaCScan executes a scan against local Infrastructure-as-Code files using the FileResourceHandler.
 func (ksServer *KubescapeMcpserver) runIaCScan(ctx context.Context, path string, frameworkName string) ([]byte, error) {
 	if frameworkName == "" {
-		frameworkName = "allcontrols" // user mentioned safe default
+		frameworkName = "nsa" // default to nsa as allcontrols is too heavy
 	}
 
 	policyIdentifiers := []cautils.PolicyIdentifier{
@@ -20,5 +20,5 @@ func (ksServer *KubescapeMcpserver) runIaCScan(ctx context.Context, path string,
 
 	fileHandler := resourcehandler.NewFileResourceHandler()
 
-	return runScan(ctx, ksServer, "", policyIdentifiers, "Local IaC", true, fileHandler, []string{path})
+	return runScan(ctx, ksServer, "", policyIdentifiers, "Local IaC", true, fileHandler, []string{path}, nil)
 }

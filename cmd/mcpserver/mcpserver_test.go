@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -107,7 +108,11 @@ func TestParseVulnManifestURI(t *testing.T) {
 }
 
 func TestReadConfigurationResource_URIParsing(t *testing.T) {
-	ksServer := &KubescapeMcpserver{}
+	expectedErr := fmt.Errorf("sentinel connection error")
+	ksServer := &KubescapeMcpserver{
+		ksClientErr: expectedErr,
+	}
+	ksServer.ksClientOnce.Do(func() {}) // Mark as done to prevent real connection
 
 	tests := []struct {
 		name      string
@@ -143,14 +148,13 @@ func TestReadConfigurationResource_URIParsing(t *testing.T) {
 			req.Params.URI = tt.uri
 
 			if tt.passParse {
-				defer func() {
-					r := recover()
-					if r == nil {
-						t.Fatal("expected panic from nil ksClient after successful URI parse, got none")
-					}
-				}()
-				_, _ = ksServer.ReadConfigurationResource(context.Background(), req)
-				t.Fatal("expected panic, but call returned normally")
+				_, err := ksServer.ReadConfigurationResource(context.Background(), req)
+				if err == nil {
+					t.Fatal("expected error from ksClient, got nil")
+				}
+				if !strings.Contains(err.Error(), "sentinel connection error") {
+					t.Errorf("expected error containing 'sentinel connection error', got %v", err)
+				}
 			} else {
 				_, err := ksServer.ReadConfigurationResource(context.Background(), req)
 				if err == nil {
@@ -165,7 +169,11 @@ func TestReadConfigurationResource_URIParsing(t *testing.T) {
 }
 
 func TestReadContainerProfileResource_URIParsing(t *testing.T) {
-	ksServer := &KubescapeMcpserver{}
+	expectedErr := fmt.Errorf("sentinel connection error")
+	ksServer := &KubescapeMcpserver{
+		ksClientErr: expectedErr,
+	}
+	ksServer.ksClientOnce.Do(func() {}) // Mark as done to prevent real connection
 
 	tests := []struct {
 		name      string
@@ -201,14 +209,13 @@ func TestReadContainerProfileResource_URIParsing(t *testing.T) {
 			req.Params.URI = tt.uri
 
 			if tt.passParse {
-				defer func() {
-					r := recover()
-					if r == nil {
-						t.Fatal("expected panic from nil ksClient after successful URI parse, got none")
-					}
-				}()
-				_, _ = ksServer.ReadContainerProfileResource(context.Background(), req)
-				t.Fatal("expected panic, but call returned normally")
+				_, err := ksServer.ReadContainerProfileResource(context.Background(), req)
+				if err == nil {
+					t.Fatal("expected error from ksClient, got nil")
+				}
+				if !strings.Contains(err.Error(), "sentinel connection error") {
+					t.Errorf("expected error containing 'sentinel connection error', got %v", err)
+				}
 			} else {
 				_, err := ksServer.ReadContainerProfileResource(context.Background(), req)
 				if err == nil {
