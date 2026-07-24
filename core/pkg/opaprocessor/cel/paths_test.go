@@ -323,8 +323,15 @@ func TestViolationPathsStillPinElementsWhenTheSiblingPasses(t *testing.T) {
 		},
 	}
 
-	assert.Contains(t, resolvePlan(t, expr, obj),
-		PathHint{Path: "spec.containers[1].securityContext.readOnlyRootFilesystem", Value: "true"})
+	// Pinned exactly rather than by containment, so the direct hint is visible
+	// too: spec.hostNetwork is reported even though it is already compliant here,
+	// which is the conjunctive-field imprecision documented on resolve and in
+	// TestConjunctiveFieldsAreAllReportedNotJustTheFailingOne. Only container[1]
+	// is blamed; the compliant container[0] is not.
+	assert.Equal(t, []PathHint{
+		{Path: "spec.hostNetwork", Value: "false"},
+		{Path: "spec.containers[1].securityContext.readOnlyRootFilesystem", Value: "true"},
+	}, resolvePlan(t, expr, obj))
 }
 
 func TestViolationPathsBlameNoElementWhenTheFailureIsElsewhere(t *testing.T) {
