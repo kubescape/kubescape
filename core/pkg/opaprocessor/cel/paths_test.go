@@ -449,14 +449,17 @@ func TestEveryDerivedBundlePathIsWellFormed(t *testing.T) {
 //   - spec.template.spec.hostIPC=false is missing because of the upstream C-0038
 //     workload bug, which checks hostPID twice and never hostIPC. The derivation
 //     reports exactly what the expression says.
-//   - C-0075's imagePullPolicy=Always is missing by this analysis's own choice,
-//     not the bundle's. Its element predicate
+//   - C-0075's imagePullPolicy=Always is missing because its element predicate
 //     `!c.image.endsWith(':latest') || c.imagePullPolicy == 'Always'` puts the
-//     equality under a disjunction, and element-level values under a disjunction
-//     are dropped rather than reasoned about (see valueIsRequirement). So a
-//     C-0075 finding carries image and imagePullPolicy as review paths where the
-//     Rego rule offers a writable fix - a deliberate parity gap on the side of
-//     not writing a value we are unsure of.
+//     equality under a disjunction: retagging the image satisfies the policy
+//     just as well as setting the pull policy, so neither is a value to write
+//     (see valueIsRequirement). This is NOT a parity gap. The Rego rule
+//     (regolibrary image-pull-policy-is-not-set-to-always) reaches the same
+//     conclusion by hand: all three of its deny blocks emit image and
+//     imagePullPolicy as reviewPaths with an empty fixPaths. So a CEL finding
+//     and its Rego equivalent flag the same two fields for review, neither
+//     offering a value, which is the behaviour a human rule author chose for
+//     this shape too.
 var bundleFixValues = []string{
 	"automountServiceAccountToken=false",
 	"spec.automountServiceAccountToken=false",
