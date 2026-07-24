@@ -143,14 +143,11 @@ func TestReadConfigurationResource_URIParsing(t *testing.T) {
 			req.Params.URI = tt.uri
 
 			if tt.passParse {
-				defer func() {
-					r := recover()
-					if r == nil {
-						t.Fatal("expected panic from nil ksClient after successful URI parse, got none")
-					}
-				}()
-				_, _ = ksServer.ReadConfigurationResource(context.Background(), req)
-				t.Fatal("expected panic, but call returned normally")
+				_, err := ksServer.ReadConfigurationResource(context.Background(), req)
+				if err == nil {
+					t.Fatal("expected error from nil ksClient, got nil")
+				}
+				// We don't care about the specific connection refused error, just that it didn't panic
 			} else {
 				_, err := ksServer.ReadConfigurationResource(context.Background(), req)
 				if err == nil {
@@ -201,14 +198,11 @@ func TestReadContainerProfileResource_URIParsing(t *testing.T) {
 			req.Params.URI = tt.uri
 
 			if tt.passParse {
-				defer func() {
-					r := recover()
-					if r == nil {
-						t.Fatal("expected panic from nil ksClient after successful URI parse, got none")
-					}
-				}()
-				_, _ = ksServer.ReadContainerProfileResource(context.Background(), req)
-				t.Fatal("expected panic, but call returned normally")
+				_, err := ksServer.ReadContainerProfileResource(context.Background(), req)
+				if err == nil {
+					t.Fatal("expected error from nil ksClient, got nil")
+				}
+				// We don't care about the specific connection refused error, just that it didn't panic
 			} else {
 				_, err := ksServer.ReadContainerProfileResource(context.Background(), req)
 				if err == nil {

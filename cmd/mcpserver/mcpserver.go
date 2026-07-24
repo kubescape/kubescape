@@ -24,9 +24,26 @@ import (
 type KubescapeMcpserver struct {
 	s             *server.MCPServer
 	ksClient      spdxv1beta1.SpdxV1beta1Interface
+	ksClientOnce  sync.Once
+	ksClientErr   error
 	k8sClient     *k8sinterface.KubernetesApi
 	k8sClientOnce sync.Once
 	policyGetter  *getter.DownloadReleasedPolicy
+}
+
+func (ksServer *KubescapeMcpserver) getKsClient() (spdxv1beta1.SpdxV1beta1Interface, error) {
+	ksServer.ksClientOnce.Do(func() {
+		if ksServer.ksClient == nil {
+			ksServer.ksClient, ksServer.ksClientErr = CreateKsObjectConnection("default", 10*time.Second)
+		}
+	})
+	if ksServer.ksClientErr != nil {
+		return nil, ksServer.ksClientErr
+	}
+	if ksServer.ksClient == nil {
+		return nil, fmt.Errorf("kubernetes client initialization returned nil")
+	}
+	return ksServer.ksClient, nil
 }
 
 func (ksServer *KubescapeMcpserver) getK8sClient() *k8sinterface.KubernetesApi {
@@ -256,7 +273,11 @@ func (ksServer *KubescapeMcpserver) ReadResource(ctx context.Context, request mc
 	cveID := parsed.cveID
 
 	// Get the vulnerability manifest
-	manifest, err := ksServer.ksClient.VulnerabilityManifests(namespace).Get(ctx, manifestName, metav1.GetOptions{})
+	client, ksErr := ksServer.getKsClient()
+	if ksErr != nil {
+		return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+	}
+	manifest, err := client.VulnerabilityManifests(namespace).Get(ctx, manifestName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get vulnerability manifest: %w", err)
 	}
@@ -303,7 +324,11 @@ func (ksServer *KubescapeMcpserver) ReadConfigurationResource(ctx context.Contex
 	}
 	namespace := parts[0]
 	manifestName := parts[1]
-	manifest, err := ksServer.ksClient.WorkloadConfigurationScans(namespace).Get(ctx, manifestName, metav1.GetOptions{})
+	client, ksErr := ksServer.getKsClient()
+	if ksErr != nil {
+		return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+	}
+	manifest, err := client.WorkloadConfigurationScans(namespace).Get(ctx, manifestName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get configuration manifest: %w", err)
 	}
@@ -328,7 +353,11 @@ func (ksServer *KubescapeMcpserver) ReadContainerProfileResource(ctx context.Con
 	}
 	namespace := parts[0]
 	profileName := parts[1]
-	profile, err := ksServer.ksClient.ContainerProfiles(namespace).Get(ctx, profileName, metav1.GetOptions{})
+	client, ksErr := ksServer.getKsClient()
+	if ksErr != nil {
+		return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+	}
+	profile, err := client.ContainerProfiles(namespace).Get(ctx, profileName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get container profile: %w", err)
 	}
@@ -357,6 +386,32 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		responseBytes, err := ksServer.RunRBACScan(ctx, namespace)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run RBAC scan: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(responseBytes)), nil
+	case "scan_local_iac":
+		path := ""
+		if p, ok := arguments["path"]; ok {
+			pStr, ok := p.(string)
+			if !ok {
+				return mcp.NewToolResultError("path argument must be a string"), nil
+			}
+			path = strings.TrimSpace(pStr)
+		}
+		if path == "" {
+			return mcp.NewToolResultError("path argument is required and cannot be empty"), nil
+		}
+		framework := ""
+		if fw, ok := arguments["framework"]; ok {
+			fwStr, ok := fw.(string)
+			if !ok {
+				return mcp.NewToolResultError("framework argument must be a string"), nil
+			}
+			framework = strings.TrimSpace(fwStr)
+		}
+
+		responseBytes, err := ksServer.runIaCScan(ctx, path, framework)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to run IaC scan: %v", err)), nil
 		}
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "run_network_security_scan":
@@ -406,9 +461,17 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		var manifests *v1beta1.VulnerabilityManifestList
 		var err error
 		if labelSelector == "" {
-			manifests, err = ksServer.ksClient.VulnerabilityManifests(namespace).List(ctx, metav1.ListOptions{})
+			client, ksErr := ksServer.getKsClient()
+			if ksErr != nil {
+				return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+			}
+			manifests, err = client.VulnerabilityManifests(namespace).List(ctx, metav1.ListOptions{})
 		} else {
-			manifests, err = ksServer.ksClient.VulnerabilityManifests(namespace).List(ctx, metav1.ListOptions{
+			client, ksErr := ksServer.getKsClient()
+			if ksErr != nil {
+				return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+			}
+			manifests, err = client.VulnerabilityManifests(namespace).List(ctx, metav1.ListOptions{
 				LabelSelector: labelSelector,
 			})
 		}
@@ -473,7 +536,11 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if !ok {
 			return nil, fmt.Errorf("manifest_name must be a string")
 		}
-		manifest, err := ksServer.ksClient.VulnerabilityManifests(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
+		client, ksErr := ksServer.getKsClient()
+		if ksErr != nil {
+			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+		}
+		manifest, err := client.VulnerabilityManifests(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get vulnerability manifest: %w", err)
 		}
@@ -518,7 +585,11 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if !ok {
 			return nil, fmt.Errorf("cve_id must be a string")
 		}
-		manifest, err := ksServer.ksClient.VulnerabilityManifests(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
+		client, ksErr := ksServer.getKsClient()
+		if ksErr != nil {
+			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+		}
+		manifest, err := client.VulnerabilityManifests(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get vulnerability manifest: %w", err)
 		}
@@ -549,7 +620,11 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if !ok {
 			return nil, fmt.Errorf("namespace must be a string")
 		}
-		manifests, err := ksServer.ksClient.WorkloadConfigurationScans(namespaceStr).List(ctx, metav1.ListOptions{})
+		client, ksErr := ksServer.getKsClient()
+		if ksErr != nil {
+			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+		}
+		manifests, err := client.WorkloadConfigurationScans(namespaceStr).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -600,7 +675,11 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if !ok {
 			return nil, fmt.Errorf("manifest_name must be a string")
 		}
-		manifest, err := ksServer.ksClient.WorkloadConfigurationScans(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
+		client, ksErr := ksServer.getKsClient()
+		if ksErr != nil {
+			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+		}
+		manifest, err := client.WorkloadConfigurationScans(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get configuration manifest: %w", err)
 		}
@@ -627,7 +706,11 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 				namespace = nsStr
 			}
 		}
-		profiles, err := ksServer.ksClient.ContainerProfiles(namespace).List(ctx, metav1.ListOptions{})
+		client, ksErr := ksServer.getKsClient()
+		if ksErr != nil {
+			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+		}
+		profiles, err := client.ContainerProfiles(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -678,7 +761,11 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if !ok {
 			return nil, fmt.Errorf("profile_name must be a string")
 		}
-		profile, err := ksServer.ksClient.ContainerProfiles(namespaceStr).Get(ctx, profileNameStr, metav1.GetOptions{})
+		client, ksErr := ksServer.getKsClient()
+		if ksErr != nil {
+			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+		}
+		profile, err := client.ContainerProfiles(namespaceStr).Get(ctx, profileNameStr, metav1.GetOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get container profile: %w", err)
 		}
@@ -729,12 +816,6 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 func mcpServerEntrypoint() error {
 	logger.L().Info("Starting MCP server...")
 
-	// Create a kubernetes client and verify it's working
-	client, err := CreateKsObjectConnection("default", 10*time.Second)
-	if err != nil {
-		return fmt.Errorf("failed to create kubernetes client: %w", err)
-	}
-
 	// Create a new MCP server
 	s := server.NewMCPServer(
 		"Kubescape MCP Server",
@@ -751,8 +832,8 @@ func mcpServerEntrypoint() error {
 	}
 
 	ksServer := &KubescapeMcpserver{
-		s:            s,
-		ksClient:     client,
+		s: s,
+
 		k8sClient:    k8sApi,
 		policyGetter: getter.NewDownloadReleasedPolicy(),
 	}
@@ -765,6 +846,7 @@ func mcpServerEntrypoint() error {
 	createRBACScanningTools(ksServer)
 	createNetworkScanningTools(ksServer)
 	createFrameworkScanningTools(ksServer)
+	createIaCScanningTools(ksServer)
 
 	// Start the server
 	if err := server.ServeStdio(s); err != nil {
@@ -839,6 +921,31 @@ func createFrameworkScanningTools(ksServer *KubescapeMcpserver) {
 			args = map[string]any{}
 		}
 		return ksServer.CallTool(ctx, "run_framework_security_scan", args)
+	})
+}
+
+func createIaCScanningTools(ksServer *KubescapeMcpserver) {
+	iacScanTool := mcp.NewTool(
+		"scan_local_iac",
+		mcp.WithDescription("Scan local Infrastructure-as-Code (Helm charts, Kustomize, YAML) for security misconfigurations"),
+		mcp.WithString("path",
+			mcp.Required(),
+			mcp.Description("Absolute or relative path to the local directory or file (e.g., /path/to/helm-chart or /path/to/manifest.yaml)"),
+		),
+		mcp.WithString("framework",
+			mcp.Description("Framework to scan against (optional, defaults to allcontrols)"),
+		),
+	)
+
+	ksServer.s.AddTool(iacScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, ok := request.Params.Arguments.(map[string]any)
+		if !ok && request.Params.Arguments != nil {
+			return mcp.NewToolResultError("arguments must be a JSON object"), nil
+		}
+		if args == nil {
+			args = map[string]any{}
+		}
+		return ksServer.CallTool(ctx, "scan_local_iac", args)
 	})
 }
 
