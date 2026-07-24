@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor/cel"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -683,6 +684,43 @@ func TestRunOPAOnSingleRuleDispatch(t *testing.T) {
 	})
 }
 
+func TestCELRemediation(t *testing.T) {
+	remediation := celRemediation([]cel.PathHint{
+		{Path: "spec.hostNetwork", Value: "false"},
+		{Path: "spec.containers[0].image"},
+		// The bundle guards each kind with its own validation, so the same
+		// path can arrive from more than one of them.
+		{Path: "spec.hostNetwork", Value: "false"},
+		{Path: "spec.containers[0].image"},
+	})
+
+	assert.Equal(t, []armotypes.FixPath{{Path: "spec.hostNetwork", Value: "false"}}, remediation.FixPaths,
+		"a hint with a value is a fix kubescape fix can write")
+	assert.Equal(t, []string{"spec.containers[0].image"}, remediation.ReviewPaths,
+		"a hint without a value names the field but not what to put there")
+}
+
+func TestCELRemediationSamePathValuedAndBare(t *testing.T) {
+	// The same path can be read as a bare presence test by one validation and as
+	// an equality by another. It must land in exactly one bucket: the valued
+	// hint wins, so it is a FixPath and never also a ReviewPath. Order of arrival
+	// must not matter.
+	valuedFirst := celRemediation([]cel.PathHint{
+		{Path: "spec.hostNetwork", Value: "false"},
+		{Path: "spec.hostNetwork"},
+	})
+	bareFirst := celRemediation([]cel.PathHint{
+		{Path: "spec.hostNetwork"},
+		{Path: "spec.hostNetwork", Value: "false"},
+	})
+
+	want := reporthandling.AssistedRemediation{FixPaths: []armotypes.FixPath{{Path: "spec.hostNetwork", Value: "false"}}}
+	assert.Equal(t, want, valuedFirst)
+	assert.Equal(t, want, bareFirst)
+	assert.Empty(t, valuedFirst.ReviewPaths, "a path that has a fix value must not also be listed for review")
+	assert.Empty(t, bareFirst.ReviewPaths)
+}
+
 func TestRunCELOnK8s(t *testing.T) {
 	opap := &OPAProcessor{}
 	rule := &reporthandling.PolicyRule{
@@ -739,6 +777,24 @@ func TestRunCELOnK8s(t *testing.T) {
 		failed := responses[0].GetFailedResources()
 		require.Len(t, failed, 1)
 		assert.Equal(t, "mutable", failed[0]["metadata"].(map[string]any)["name"])
+	})
+
+	t.Run("failure carries the remediation paths appendPaths needs", func(t *testing.T) {
+		// The gap this closes: without paths on the response, appendPaths has
+		// nothing to contribute and the finding reaches the printers and
+		// `kubescape fix` with an empty Paths list.
+		responses, _, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{violatingPod}, nil, "C-0017")
+		require.NoError(t, err)
+		require.Len(t, responses, 1)
+
+		assert.Equal(t, []armotypes.FixPath{
+			{Path: "spec.containers[0].securityContext.readOnlyRootFilesystem", Value: "true"},
+		}, responses[0].FixPaths)
+
+		paths := appendPaths(nil, responses[0].AssistedRemediation, "resource-id")
+		require.Len(t, paths, 1)
+		assert.Equal(t, "spec.containers[0].securityContext.readOnlyRootFilesystem", paths[0].FixPath.Path)
+		assert.Equal(t, "resource-id", paths[0].ResourceID)
 	})
 
 	t.Run("compliant object produces no response and no skip", func(t *testing.T) {
