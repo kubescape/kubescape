@@ -100,30 +100,25 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 }
 
 func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata, paths *[]string) {
+	wl := workloadinterface.NewWorkloadObj(resource.GetObject())
+	containers, err := wl.GetContainers()
+	if err != nil {
+		return
+	}
+
 	for i := range *paths {
 		match := specContainerRegex.FindStringSubmatch((*paths)[i])
 		if len(match) != 2 {
 			continue
 		}
-
 		index, err := strconv.Atoi(match[1])
 		if err != nil {
 			continue
 		}
-
-		wl := workloadinterface.NewWorkloadObj(resource.GetObject())
-
-		containers, err := wl.GetContainers()
-		if err != nil {
-			continue
-		}
-
 		if index >= len(containers) {
 			continue
 		}
-
-		containerName := containers[index].Name
-		(*paths)[i] += " (" + containerName + ")"
+		(*paths)[i] += " (" + containers[index].Name + ")"
 	}
 }
 
