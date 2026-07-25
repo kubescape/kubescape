@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -53,7 +54,7 @@ func TestLoadResourcesFromFilesReturnsJSONParseErrorWithPath(t *testing.T) {
 	dir := t.TempDir()
 	broken := writeManifestFixture(t, dir, "broken.json", `{"apiVersion":`)
 
-	workloads, err := LoadResourcesFromFiles(context.Background(), dir, dir, nil)
+	workloads, err := LoadResourcesFromFiles(context.Background(), broken, dir, nil)
 
 	require.Error(t, err)
 	assert.Empty(t, workloads)
@@ -66,7 +67,7 @@ func TestLoadResourcesFromFilesReturnsYAMLDocumentNumber(t *testing.T) {
 	manifest := validPodManifest + "---\nmetadata: [unterminated\n"
 	path := writeManifestFixture(t, dir, "mixed.yaml", manifest)
 
-	workloads, err := LoadResourcesFromFiles(context.Background(), dir, dir, nil)
+	workloads, err := LoadResourcesFromFiles(context.Background(), path, dir, nil)
 
 	require.Error(t, err)
 	require.Contains(t, workloads, path)
@@ -75,17 +76,74 @@ func TestLoadResourcesFromFilesReturnsYAMLDocumentNumber(t *testing.T) {
 	assert.Contains(t, err.Error(), path)
 }
 
-func TestLoadResourcesFromFilesDoesNotHidePartialDirectoryFailure(t *testing.T) {
+func TestLoadResourcesFromFilesKeepsValidResourcesFromMixedDirectory(t *testing.T) {
 	dir := t.TempDir()
 	valid := writeManifestFixture(t, dir, "valid.yaml", validPodManifest)
 	broken := writeManifestFixture(t, dir, "broken.yaml", "apiVersion: v1\nmetadata: [unterminated\n")
 
 	workloads, err := LoadResourcesFromFiles(context.Background(), dir, dir, nil)
 
-	require.Error(t, err)
+	require.NoError(t, err)
 	require.Contains(t, workloads, valid)
 	assert.Len(t, workloads[valid], 1)
-	assert.Contains(t, err.Error(), broken)
+	assert.NotContains(t, workloads, broken)
+}
+
+func TestLoadResourcesFromFilesKeepsFilesFoundBeforeDirectoryReadError(t *testing.T) {
+	dir := t.TempDir()
+	valid := writeManifestFixture(t, dir, "a-valid.yaml", validPodManifest)
+	unreadable := filepath.Join(dir, "z-unreadable")
+	require.NoError(t, os.Mkdir(unreadable, 0o700))
+	writeManifestFixture(t, unreadable, "hidden.yaml", validPodManifest)
+	require.NoError(t, os.Chmod(unreadable, 0))
+	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o700) })
+	if _, err := os.ReadDir(unreadable); err == nil {
+		t.Skip("filesystem permissions are not enforced for the test user")
+	}
+
+	workloads, err := LoadResourcesFromFiles(context.Background(), dir, dir, nil)
+
+	require.NoError(t, err)
+	require.Contains(t, workloads, valid)
+	assert.Len(t, workloads[valid], 1)
+}
+
+func TestListHelmChartDirsReportsMetadataIOErrorsAndKeepsValidCharts(t *testing.T) {
+	dir := t.TempDir()
+	validChart := filepath.Join(dir, "a-valid")
+	require.NoError(t, os.Mkdir(validChart, 0o700))
+	writeManifestFixture(t, validChart, "Chart.yaml", "apiVersion: v2\nname: valid\nversion: 0.1.0\n")
+
+	brokenChart := filepath.Join(dir, "z-broken")
+	require.NoError(t, os.Mkdir(brokenChart, 0o700))
+	chartFile := filepath.Join(brokenChart, "Chart.yaml")
+	require.NoError(t, os.Symlink("Chart.yaml", chartFile))
+
+	charts, errs := listHelmChartDirs(dir)
+
+	assert.Contains(t, charts, validChart)
+	require.NotEmpty(t, errs)
+	assert.Contains(t, errors.Join(errs...).Error(), chartFile)
+}
+
+func TestHelmRenderedYAMLParseFailureMarksChartUnrendered(t *testing.T) {
+	dir := t.TempDir()
+	writeManifestFixture(t, dir, "Chart.yaml", "apiVersion: v2\nname: broken\nversion: 0.1.0\n")
+	templates := filepath.Join(dir, "templates")
+	require.NoError(t, os.Mkdir(templates, 0o700))
+	writeManifestFixture(t, templates, "broken.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata: [unterminated\n")
+
+	chart, err := NewHelmChart(dir)
+	require.NoError(t, err)
+	workloads, renderErrs := chart.GetWorkloadsWithOptions(chart.GetDefaultValues(), HelmValueOptions{}.ReleaseOptions())
+
+	assert.Empty(t, workloads)
+	require.NotEmpty(t, renderErrs)
+	assert.Contains(t, errors.Join(renderErrs...).Error(), "failed to parse rendered Helm template")
+
+	_, _, renderedCharts, err := LoadResourcesFromHelmCharts(context.Background(), dir, HelmValueOptions{})
+	require.NoError(t, err)
+	assert.Empty(t, renderedCharts, "a chart with invalid rendered YAML must remain available to the plain-file fallback")
 }
 
 func TestLoadResourcesFromKustomizeDirectoryPropagatesBuildFailure(t *testing.T) {

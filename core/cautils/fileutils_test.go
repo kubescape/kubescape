@@ -33,8 +33,7 @@ func TestListFiles(t *testing.T) {
 
 func TestLoadResourcesFromFiles(t *testing.T) {
 	workloads, err := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "", nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "invalid.yaml")
+	require.NoError(t, err)
 	assert.Equal(t, 12, len(workloads))
 
 	for i, w := range workloads {
@@ -511,6 +510,7 @@ metadata:
 ---
 {not: valid: yaml: [`,
 			wantCount: 1, // the malformed doc is skipped, the good one is kept
+			wantErr:   true,
 		},
 		{
 			name:      "non-Kubernetes object (no kind) returns no results",

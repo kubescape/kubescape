@@ -51,9 +51,9 @@ type Chart struct {
 // --set-file path, etc.) the error is returned to the caller. We deliberately do not silently
 // fall back to chart defaults — scanning the wrong manifests is worse than failing fast.
 func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
-	helmDirectories, err := listHelmChartDirs(basePath)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to discover Helm charts under %q: %w", basePath, err)
+	helmDirectories, discoveryErrs := listHelmChartDirs(basePath)
+	for _, err := range discoveryErrs {
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(err))
 	}
 
 	// Parse user-supplied value overrides once; reuse for every chart we render.
@@ -105,25 +105,27 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 
 // listHelmChartDirs scans a given path (recursively) and returns the directories holding a helm chart.
 // Subcharts are picked up by the same walk, since each carries its own Chart.yaml.
-func listHelmChartDirs(basePath string) ([]string, error) {
+func listHelmChartDirs(basePath string) ([]string, []error) {
 	directories, errs := listDirs(basePath)
-	if len(errs) > 0 {
-		return nil, errors.Join(errs...)
-	}
 	helmDirectories := make([]string, 0)
 	for _, dir := range directories {
-		if _, err := os.Stat(filepath.Join(dir, "Chart.yaml")); err != nil {
+		chartFile := filepath.Join(dir, "Chart.yaml")
+		if _, err := os.Stat(chartFile); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			errs = append(errs, fmt.Errorf("failed to inspect Helm chart metadata %q: %w", chartFile, err))
 			continue
 		}
 		ok, err := IsHelmDirectory(dir)
 		if err != nil {
-			return nil, fmt.Errorf("failed to inspect %q as a Helm chart: %w", dir, err)
+			errs = append(errs, fmt.Errorf("failed to inspect %q as a Helm chart: %w", dir, err))
+			continue
 		}
 		if ok {
 			helmDirectories = append(helmDirectories, dir)
 		}
 	}
-	return helmDirectories, nil
+	return helmDirectories, errs
 }
 
 // excludeHelmTemplateFiles drops the files living under the templates/ directory of a helm chart.
@@ -234,7 +236,11 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, rendere
 
 	files, errs := listFiles(input)
 	if len(errs) > 0 {
-		return nil, fmt.Errorf("failed to discover manifest files for %q: %w", input, errors.Join(errs...))
+		discoveryErr := fmt.Errorf("failed to discover all manifest files for %q: %w", input, errors.Join(errs...))
+		if len(files) == 0 {
+			return nil, discoveryErr
+		}
+		logger.L().Ctx(ctx).Warning("Continuing with manifest files found before a discovery error", helpers.Error(discoveryErr))
 	}
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no YAML or JSON manifest files found for input %q", input)
@@ -246,7 +252,16 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, rendere
 
 	workloads, errs := loadFiles(rootPath, files)
 	if len(errs) > 0 {
-		return workloads, fmt.Errorf("failed to load one or more manifests from %q: %w", input, errors.Join(errs...))
+		loadErr := fmt.Errorf("failed to load one or more manifests from %q: %w", input, errors.Join(errs...))
+		// Directory and glob scans have historically been best effort. Keep the
+		// valid resources from mixed inputs, but make the skipped files visible.
+		// An explicitly requested file, or an input with no usable resources,
+		// remains a hard failure because returning success would scan nothing or
+		// conceal corruption in the exact file the user requested.
+		if isFile(input) || len(workloads) == 0 {
+			return workloads, loadErr
+		}
+		logger.L().Ctx(ctx).Warning("Skipping invalid manifest files", helpers.Error(loadErr))
 	}
 
 	return workloads, nil
@@ -346,10 +361,9 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool) ([]string, []e
 	}
 
 	f, err := glob(root, shouldMatch, onlyDirectories)
+	paths = append(paths, f...)
 	if err != nil {
 		errs = append(errs, err)
-	} else {
-		paths = append(paths, f...)
 	}
 
 	return paths, errs
@@ -513,7 +527,7 @@ func glob(root, pattern string, onlyDirectories bool) ([]string, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return matches, err
 	}
 	return matches, nil
 }
