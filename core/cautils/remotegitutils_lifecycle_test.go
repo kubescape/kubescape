@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -122,6 +123,40 @@ func TestCloneRepoDeduplicatesConcurrentClonesAndReferenceCountsUsers(t *testing
 	require.NoError(t, ReleaseClonedRepo("https://github.com/example/project"))
 	assert.NoDirExists(t, workspace)
 	assert.Empty(t, GetClonedPath("https://github.com/example/project"))
+}
+
+func TestCloneRepoClonesDifferentRepositoriesConcurrently(t *testing.T) {
+	resetRepoWorkspaceState(t)
+	const repositories = 4
+	cloneStarted := make(chan struct{}, repositories)
+	releaseClones := make(chan struct{})
+	useFakeClone(t, func(_ string, _ bool, _ *git.CloneOptions) (*git.Repository, error) {
+		cloneStarted <- struct{}{}
+		<-releaseClones
+		return &git.Repository{}, nil
+	})
+
+	errs := make(chan error, repositories)
+	urls := make([]string, repositories)
+	for i := range repositories {
+		urls[i] = fmt.Sprintf("https://github.com/example/project-%d", i)
+		gitURL := authenticatedGitURL(t, urls[i])
+		go func() {
+			_, err := cloneRepo(gitURL)
+			errs <- err
+		}()
+	}
+
+	for range repositories {
+		<-cloneStarted
+	}
+	close(releaseClones)
+	for range repositories {
+		require.NoError(t, <-errs)
+	}
+	for _, url := range urls {
+		require.NoError(t, ReleaseClonedRepo(url))
+	}
 }
 
 func TestCloneRepoDoesNotPublishOrLeakFailedWorkspace(t *testing.T) {

@@ -23,11 +23,12 @@ import (
 const gitVisibilityCheckTimeout = 10 * time.Second
 
 var (
-	tmpDirPaths   = make(map[string]string)
-	tmpDirRefs    = make(map[string]int)
-	tmpDirPathsMu sync.Mutex
-	cloneGroup    singleflight.Group
-	plainClone    = git.PlainClone
+	tmpDirPaths      = make(map[string]string)
+	tmpDirRefs       = make(map[string]int)
+	tmpDirPathsMu    sync.Mutex
+	cloneGroup       singleflight.Group
+	plainClone       = git.PlainClone
+	gitTransportOnce sync.Once
 )
 
 func hashRepoURL(repoURL string) string {
@@ -105,7 +106,7 @@ func createTempDir() (string, error) {
 // If response code is 200, the repository is Public.
 func isGitRepoPublic(u string) bool {
 	client := &nethttp.Client{Timeout: gitVisibilityCheckTimeout}
-	resp, err := client.Get(u) //nolint:gosec
+	resp, err := client.Get(u)
 	if err != nil {
 		return false
 	}
@@ -143,6 +144,15 @@ func getProviderError(gitURL giturl.IGitAPI) error {
 
 // cloneRepo clones a repository to a local temporary directory and returns the directory
 func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
+	// This is a process-wide go-git setting. Configure it once before any
+	// clone starts so different repositories can be cloned concurrently
+	// without racing on transport.UnsupportedCapabilities.
+	gitTransportOnce.Do(func() {
+		transport.UnsupportedCapabilities = []capability.Capability{
+			capability.ThinPack,
+		}
+	})
+
 	cloneURL := gitURL.GetHttpCloneURL()
 	key := repoWorkspaceKey(gitURL)
 	if path := reserveWorkspace(key); path != "" {
@@ -182,11 +192,6 @@ func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 			} else {
 				return "", getProviderError(gitURL)
 			}
-		}
-
-		// For Azure repo cloning
-		transport.UnsupportedCapabilities = []capability.Capability{
-			capability.ThinPack,
 		}
 
 		// Clone option
