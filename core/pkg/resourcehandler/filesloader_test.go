@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -111,4 +112,33 @@ func TestGetResourcesFromPath_KustomizeTransformersDoNotDuplicate(t *testing.T) 
 	assert.Equal(t, reporthandling.SourceTypeKustomizeDirectory, workloadIDToSource[deploymentIDs[0]].FileType)
 	assert.Equal(t, "production", deployment.GetNamespace())
 	assert.Equal(t, "prod-test-app", deployment.GetName())
+}
+
+func TestGetResourcesFromPathRejectsDirectoryWithoutKubernetesResources(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "values.yaml"), []byte("replicas: 3\n"), 0o600))
+
+	sources, workloads, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
+
+	require.Error(t, err)
+	assert.Nil(t, sources)
+	assert.Nil(t, workloads)
+	assert.Contains(t, err.Error(), "no scannable Kubernetes resources")
+}
+
+func TestGetResourcesFromPathPropagatesKustomizeFailure(t *testing.T) {
+	dir := t.TempDir()
+	kustomization := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - missing.yaml
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(kustomization), 0o600))
+
+	sources, workloads, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
+
+	require.Error(t, err)
+	assert.Nil(t, sources)
+	assert.Nil(t, workloads)
+	assert.Contains(t, err.Error(), "failed to render Kustomize resources")
 }

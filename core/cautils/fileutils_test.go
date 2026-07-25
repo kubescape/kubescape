@@ -32,7 +32,9 @@ func TestListFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
-	workloads := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "", nil)
+	workloads, err := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid.yaml")
 	assert.Equal(t, 12, len(workloads))
 
 	for i, w := range workloads {
@@ -48,7 +50,8 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 func TestLoadResourcesFromFiles_SupportsMixedCaseExtensions(t *testing.T) {
 	o, _ := os.Getwd()
 	testDir := filepath.Join(o, "testdata", "mixed_extensions")
-	workloads := LoadResourcesFromFiles(context.Background(), testDir, "", nil)
+	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, "", nil)
+	require.NoError(t, err)
 	assert.Equal(t, 2, len(workloads))
 
 	expectedFiles := []string{
@@ -76,7 +79,8 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplates(t *testing.T) {
 		filepath.Join(testDir, "mychart"),
 		filepath.Join(testDir, "mychart", "charts", "mysubchart"),
 	}
-	workloads := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
+	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
+	require.NoError(t, err)
 
 	expectedFiles := []string{
 		filepath.Join(testDir, "plain-pod.yaml"),
@@ -94,7 +98,8 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplates(t *testing.T) {
 func TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart(t *testing.T) {
 	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
 	renderedCharts := []string{testDir, filepath.Join(testDir, "charts", "mysubchart")}
-	workloads := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
+	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
+	require.NoError(t, err)
 
 	expectedFile := filepath.Join(testDir, "crds", "widget.yaml")
 	_, ok := workloads[expectedFile]
@@ -108,7 +113,8 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart(t *testing.T) {
 func TestLoadResourcesFromFiles_ScansTemplatesOfUnrenderedChart(t *testing.T) {
 	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
 	// no charts rendered successfully, so nothing may be excluded
-	workloads := LoadResourcesFromFiles(context.Background(), testDir, testDir, nil)
+	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, nil)
+	require.NoError(t, err)
 
 	staticTemplate := filepath.Join(testDir, "templates", "serviceaccount.yaml")
 	_, ok := workloads[staticTemplate]
@@ -221,8 +227,9 @@ func TestLoadResourcesFromHelmCharts(t *testing.T) {
 
 func TestLoadFiles(t *testing.T) {
 	files, _ := listFiles(onlineBoutiquePath())
-	_, err := loadFiles("", files)
-	assert.Equal(t, 0, len(err))
+	_, errs := loadFiles("", files)
+	assert.Len(t, errs, 1)
+	assert.Contains(t, errs[0].Error(), "invalid.yaml")
 }
 
 func TestListDirs(t *testing.T) {

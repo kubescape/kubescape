@@ -222,7 +222,10 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	}
 
 	// load resource from local file system
-	sourceToWorkloads := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, renderedCharts)
+	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, renderedCharts)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// update workloads and workloadIDToSource
 	var warnIssued bool
@@ -318,7 +321,10 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 
 	//patch, get value from env
 	// Load resources from Kustomize directory
-	kustomizeSourceToWorkloads, kustomizeDirectoryName := cautils.LoadResourcesFromKustomizeDirectory(ctx, path) //?
+	kustomizeSourceToWorkloads, kustomizeDirectoryName, err := cautils.LoadResourcesFromKustomizeDirectory(ctx, path)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// update workloads and workloadIDToSource with workloads from Kustomize Directory
 	for source, ws := range kustomizeSourceToWorkloads {
@@ -357,6 +363,9 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 
 	// backstop: drop cross-provider identity collisions the path-level kustomize skip can't see (e.g. helm + raw YAML)
 	workloads, workloadIDToSource = dedupWorkloads(workloads, workloadIDToSource)
+	if len(workloads) == 0 {
+		return nil, nil, fmt.Errorf("no scannable Kubernetes resources found for input %q", path)
+	}
 
 	return workloadIDToSource, workloads, nil
 }
