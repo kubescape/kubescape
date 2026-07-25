@@ -395,12 +395,19 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 
 	// git url
 	if _, err := giturl.NewGitURL(input); err == nil {
+		originalInput := input
 		if repo, err := CloneGitRepo(&input); err == nil {
 			if _, err := NewLocalGitRepository(repo); err == nil {
-				scanInfo.cleanups = append(scanInfo.cleanups, func() {
-					_ = os.RemoveAll(repo)
+				scanInfo.AddCleanup(func() {
+					if err := ReleaseClonedRepo(originalInput); err != nil {
+						logger.L().Warning("failed to clean up cloned repository", helpers.String("url", originalInput), helpers.Error(err))
+					}
 				})
+				scanInfo.cloneAdditionalRemoteInputs(originalInput)
 				return ContextGitRemote
+			}
+			if err := ReleaseClonedRepo(originalInput); err != nil {
+				logger.L().Warning("failed to clean up invalid cloned repository", helpers.String("url", originalInput), helpers.Error(err))
 			}
 		}
 		// If giturl.NewGitURL succeeded but cloning failed, the input is a git URL
@@ -435,6 +442,31 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 
 	//  dir/glob
 	return ContextDir
+}
+
+// cloneAdditionalRemoteInputs prepares every remote input before file loading.
+// Previously only the first URL was cloned, so later URL inputs were interpreted
+// as local filesystem paths and silently skipped.
+func (scanInfo *ScanInfo) cloneAdditionalRemoteInputs(firstInput string) {
+	for _, candidate := range scanInfo.InputPatterns {
+		if candidate == firstInput {
+			continue
+		}
+		if _, err := giturl.NewGitURL(candidate); err != nil {
+			continue
+		}
+
+		originalInput := candidate
+		if _, err := CloneGitRepo(&candidate); err != nil {
+			logger.L().Error("failed to clone additional git input", helpers.String("url", originalInput), helpers.Error(err))
+			continue
+		}
+		scanInfo.AddCleanup(func() {
+			if err := ReleaseClonedRepo(originalInput); err != nil {
+				logger.L().Warning("failed to clean up cloned repository", helpers.String("url", originalInput), helpers.Error(err))
+			}
+		})
+	}
 }
 
 func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadata *reporthandlingv2.ContextMetadata) {

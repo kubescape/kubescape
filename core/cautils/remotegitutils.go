@@ -6,6 +6,8 @@ import (
 	"fmt"
 	nethttp "net/http"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -15,9 +17,18 @@ import (
 	giturl "github.com/kubescape/go-git-url"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"golang.org/x/sync/singleflight"
 )
 
-var tmpDirPaths map[string]string
+const gitVisibilityCheckTimeout = 10 * time.Second
+
+var (
+	tmpDirPaths   = make(map[string]string)
+	tmpDirRefs    = make(map[string]int)
+	tmpDirPathsMu sync.Mutex
+	cloneGroup    singleflight.Group
+	plainClone    = git.PlainClone
+)
 
 func hashRepoURL(repoURL string) string {
 	h := sha256.New()
@@ -25,36 +36,76 @@ func hashRepoURL(repoURL string) string {
 	return string(h.Sum(nil))
 }
 
-func getDirPath(repoURL string) string {
-	if tmpDirPaths == nil {
-		return ""
+func repoWorkspaceKey(gitURL giturl.IGitAPI) string {
+	cloneURL := gitURL.GetHttpCloneURL()
+	if gitURL.GetBranchName() == "" {
+		return hashRepoURL(cloneURL)
 	}
-	return tmpDirPaths[hashRepoURL(repoURL)]
+	return hashRepoURL(cloneURL + "\x00" + gitURL.GetBranchName())
 }
 
-// Create a temporary directory this function is called once
-func createTempDir(repoURL string) (string, error) {
-	tmpDirPath := getDirPath(repoURL)
-	if tmpDirPath != "" {
-		return tmpDirPath, nil
+func getDirPath(repoURL string) string {
+	return getDirPathByKey(hashRepoURL(repoURL))
+}
+
+func getDirPathByKey(key string) string {
+	tmpDirPathsMu.Lock()
+	defer tmpDirPathsMu.Unlock()
+
+	path := tmpDirPaths[key]
+	if path == "" {
+		return ""
 	}
+	if info, err := os.Stat(path); err != nil || !info.IsDir() {
+		delete(tmpDirPaths, key)
+		delete(tmpDirRefs, key)
+		return ""
+	}
+	return path
+}
+
+func reserveWorkspace(key string) string {
+	tmpDirPathsMu.Lock()
+	defer tmpDirPathsMu.Unlock()
+	path := tmpDirPaths[key]
+	if path != "" {
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			tmpDirRefs[key]++
+			return path
+		}
+		delete(tmpDirPaths, key)
+		delete(tmpDirRefs, key)
+	}
+	tmpDirRefs[key]++
+	return ""
+}
+
+func cancelWorkspaceReservation(key string) {
+	tmpDirPathsMu.Lock()
+	defer tmpDirPathsMu.Unlock()
+	if tmpDirRefs[key] <= 1 {
+		delete(tmpDirRefs, key)
+		return
+	}
+	tmpDirRefs[key]--
+}
+
+// createTempDir creates an unregistered workspace. A path is published only
+// after the clone succeeds, so callers can never observe a partial repository.
+func createTempDir() (string, error) {
 	// create temp directory
-	tmpDir, err := os.MkdirTemp("", "")
+	tmpDir, err := os.MkdirTemp("", "kubescape-git-*")
 	if err != nil {
 		return "", fmt.Errorf("failed to create temporary directory: %w", err)
 	}
-	if tmpDirPaths == nil {
-		tmpDirPaths = make(map[string]string)
-	}
-	tmpDirPaths[hashRepoURL(repoURL)] = tmpDir
-
 	return tmpDir, nil
 }
 
 // To Check if the given repository is Public(No Authentication needed), send a HTTP GET request to the URL
 // If response code is 200, the repository is Public.
 func isGitRepoPublic(u string) bool {
-	resp, err := nethttp.Get(u) //nolint:gosec
+	client := &nethttp.Client{Timeout: gitVisibilityCheckTimeout}
+	resp, err := client.Get(u) //nolint:gosec
 	if err != nil {
 		return false
 	}
@@ -93,60 +144,105 @@ func getProviderError(gitURL giturl.IGitAPI) error {
 // cloneRepo clones a repository to a local temporary directory and returns the directory
 func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 	cloneURL := gitURL.GetHttpCloneURL()
-
-	// Check if directory exists
-	if p := getDirPath(cloneURL); p != "" {
-		// directory exists, meaning this repo was cloned
-		return p, nil
+	key := repoWorkspaceKey(gitURL)
+	if path := reserveWorkspace(key); path != "" {
+		return path, nil
 	}
-	// Get the URL to clone
 
-	// Create temp directory
-	tmpDir, err := createTempDir(cloneURL)
+	value, err, _ := cloneGroup.Do(key, func() (interface{}, error) {
+		if path := getDirPathByKey(key); path != "" {
+			return path, nil
+		}
+
+		tmpDir, err := createTempDir()
+		if err != nil {
+			return "", err
+		}
+		keepWorkspace := false
+		defer func() {
+			if !keepWorkspace {
+				_ = os.RemoveAll(tmpDir)
+			}
+		}()
+
+		isGitTokenPresent := isGitTokenPresent(gitURL)
+
+		// Declare the authentication variable required for cloneOptions
+		var auth transport.AuthMethod
+
+		if isGitTokenPresent {
+			auth = &http.BasicAuth{
+				Username: "x-token-auth",
+				Password: gitURL.GetToken(),
+			}
+		} else {
+			// If the repository is public, no authentication is needed
+			if isGitRepoPublic(cloneURL) {
+				auth = nil
+			} else {
+				return "", getProviderError(gitURL)
+			}
+		}
+
+		// For Azure repo cloning
+		transport.UnsupportedCapabilities = []capability.Capability{
+			capability.ThinPack,
+		}
+
+		// Clone option
+		cloneOpts := git.CloneOptions{URL: cloneURL, Auth: auth}
+		if gitURL.GetBranchName() != "" {
+			cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(gitURL.GetBranchName())
+			cloneOpts.SingleBranch = true
+		}
+
+		// Actual clone
+		if _, err = plainClone(tmpDir, false, &cloneOpts); err != nil {
+			return "", fmt.Errorf("failed to clone %s: %w", gitURL.GetRepoName(), err)
+		}
+
+		tmpDirPathsMu.Lock()
+		tmpDirPaths[key] = tmpDir
+		tmpDirPathsMu.Unlock()
+		keepWorkspace = true
+		return tmpDir, nil
+	})
 	if err != nil {
+		cancelWorkspaceReservation(key)
 		return "", err
 	}
 
-	isGitTokenPresent := isGitTokenPresent(gitURL)
+	return value.(string), nil
+}
 
-	// Declare the authentication variable required for cloneOptions
-	var auth transport.AuthMethod
-
-	if isGitTokenPresent {
-		auth = &http.BasicAuth{
-			Username: "x-token-auth",
-			Password: gitURL.GetToken(),
-		}
-	} else {
-		// If the repository is public, no authentication is needed
-		if isGitRepoPublic(cloneURL) {
-			auth = nil
-		} else {
-			return "", getProviderError(gitURL)
-		}
-	}
-
-	// For Azure repo cloning
-	transport.UnsupportedCapabilities = []capability.Capability{
-		capability.ThinPack,
-	}
-
-	// Clone option
-	cloneOpts := git.CloneOptions{URL: cloneURL, Auth: auth}
-	if gitURL.GetBranchName() != "" {
-		cloneOpts.ReferenceName = plumbing.NewBranchReferenceName(gitURL.GetBranchName())
-		cloneOpts.SingleBranch = true
-	}
-
-	// Actual clone
-	_, err = git.PlainClone(tmpDir, false, &cloneOpts)
+// ReleaseClonedRepo releases one scan's ownership of a cloned repository. The
+// workspace is deleted only after the last scan using it has finished.
+func ReleaseClonedRepo(path string) error {
+	gitURL, err := giturl.NewGitAPI(path)
 	if err != nil {
-		return "", fmt.Errorf("failed to clone %s. %w", gitURL.GetRepoName(), err)
+		return err
 	}
-	// tmpDir = filepath.Join(tmpDir, gitURL.GetRepoName())
-	tmpDirPaths[hashRepoURL(cloneURL)] = tmpDir
+	key := repoWorkspaceKey(gitURL)
 
-	return tmpDir, nil
+	tmpDirPathsMu.Lock()
+	workspace := tmpDirPaths[key]
+	if workspace == "" {
+		tmpDirPathsMu.Unlock()
+		return nil
+	}
+	if tmpDirRefs[key] > 1 {
+		tmpDirRefs[key]--
+		tmpDirPathsMu.Unlock()
+		return nil
+	}
+	delete(tmpDirPaths, key)
+	delete(tmpDirRefs, key)
+	tmpDirPathsMu.Unlock()
+
+	if err := os.RemoveAll(workspace); err != nil {
+		return fmt.Errorf("failed to remove cloned repository %s: %w", workspace, err)
+	}
+	return nil
 }
 
 // CloneGitRepo clone git repository
@@ -180,5 +276,5 @@ func GetClonedPath(path string) string {
 		return ""
 	}
 
-	return getDirPath(gitURL.GetHttpCloneURL())
+	return getDirPathByKey(repoWorkspaceKey(gitURL))
 }
