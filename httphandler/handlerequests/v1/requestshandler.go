@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/schema"
@@ -19,6 +20,13 @@ import (
 var OutputDir = "./results/"
 var FailedOutputDir = "./failed/"
 
+const (
+	defaultScanQueueCapacity       = 10
+	defaultMaxScanRequestBodyBytes = int64(1 << 20) // 1 MiB
+	scanQueueCapacityEnv           = "KS_SCAN_QUEUE_CAPACITY"
+	scanRequestMaxBytesEnv         = "KS_SCAN_REQUEST_MAX_BYTES"
+)
+
 // A Scan Response object
 //
 // swagger:response scanResponse
@@ -28,19 +36,41 @@ type ScanResponse struct {
 }
 
 type HTTPHandler struct {
-	offline         bool
-	state           *serverState
-	scanRequestChan chan *scanRequestParams
+	offline             bool
+	state               *serverState
+	scanRequestChan     chan *scanRequestParams
+	maxRequestBodyBytes int64
 }
 
 func NewHTTPHandler(offline bool) *HTTPHandler {
+	return newHTTPHandler(offline, configuredPositiveInt(scanQueueCapacityEnv, defaultScanQueueCapacity), int64(configuredPositiveInt(scanRequestMaxBytesEnv, int(defaultMaxScanRequestBodyBytes))))
+}
+
+func newHTTPHandler(offline bool, queueCapacity int, maxRequestBodyBytes int64) *HTTPHandler {
 	handler := &HTTPHandler{
-		offline:         offline,
-		state:           newServerState(),
-		scanRequestChan: make(chan *scanRequestParams),
+		offline:             offline,
+		state:               newServerState(),
+		scanRequestChan:     make(chan *scanRequestParams, queueCapacity),
+		maxRequestBodyBytes: maxRequestBodyBytes,
 	}
 	go handler.watchForScan()
 	return handler
+}
+
+func configuredPositiveInt(name string, fallback int) int {
+	raw := envToString(name, "")
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		logger.L().Warning("invalid positive integer configuration; using default",
+			helpers.String("environmentVariable", name),
+			helpers.String("value", raw),
+			helpers.Int("default", fallback))
+		return fallback
+	}
+	return value
 }
 
 // ============================================== STATUS ========================================================
@@ -97,8 +127,16 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	r.Body = http.MaxBytesReader(w, r.Body, handler.maxRequestBodyBytes)
 	scanRequestParams, err := getScanParamsFromRequest(r, scanID)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			handler.writeErrorWithStatus(w,
+				fmt.Errorf("scan request body exceeds the %d byte limit", handler.maxRequestBodyBytes),
+				"", http.StatusRequestEntityTooLarge)
+			return
+		}
 		handler.writeError(w, err, "")
 		return
 	}
@@ -111,12 +149,17 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 	handler.state.setBusy(scanID)
 
-	// you must use a goroutine since the executeScan function is not always listening to the channel
-	go func() {
-		// send to scanning handler
+	select {
+	case handler.scanRequestChan <- scanRequestParams:
 		logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
-		handler.scanRequestChan <- scanRequestParams
-	}()
+	default:
+		handler.state.setNotBusy(scanID)
+		w.Header().Set("Retry-After", "1")
+		handler.writeErrorWithStatus(w,
+			fmt.Errorf("scan queue is full; retry the request later"),
+			"", http.StatusTooManyRequests)
+		return
+	}
 
 	response := &utilsmetav1.Response{
 		ID:       scanID,
@@ -322,8 +365,12 @@ func (handler *HTTPHandler) recover(ctx context.Context, w http.ResponseWriter, 
 }
 
 func (handler *HTTPHandler) writeError(w http.ResponseWriter, err error, scanID string) {
+	handler.writeErrorWithStatus(w, err, scanID, http.StatusBadRequest)
+}
+
+func (handler *HTTPHandler) writeErrorWithStatus(w http.ResponseWriter, err error, scanID string, status int) {
 	response := utilsmetav1.Response{}
-	w.WriteHeader(http.StatusBadRequest)
+	w.WriteHeader(status)
 	response.Response = err.Error()
 	response.Type = utilsapisv1.ErrorScanResponseType
 	w.Write(responseToBytes(&response))
