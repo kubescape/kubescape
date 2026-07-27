@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anchore/clio"
 	"github.com/anchore/grype/grype/presenter/models"
@@ -327,8 +328,8 @@ func calculateMove(str string, file []string, endColumn int, endLine int) (int, 
 	if endLine > len(file) {
 		return 0, 0, false
 	}
-	for num+endColumn-1 > len(file[endLine-1]) {
-		num -= len(file[endLine-1]) - endColumn + 2
+	for num+endColumn-1 > utf8.RuneCountInString(file[endLine-1]) {
+		num -= utf8.RuneCountInString(file[endLine-1]) - endColumn + 2
 		endLine++
 		endColumn = 1
 	}
