@@ -76,15 +76,18 @@ func TestVAPAppliesToNoConstraintsEvaluates(t *testing.T) {
 // resource the control should evaluate. This table is the ground truth the guess
 // is checked against.
 var canonicalKinds = map[string]string{
-	"pods":            "Pod",
-	"deployments":     "Deployment",
-	"replicasets":     "ReplicaSet",
-	"daemonsets":      "DaemonSet",
-	"statefulsets":    "StatefulSet",
-	"jobs":            "Job",
+	"clusterroles":    "ClusterRole",
+	"configmaps":      "ConfigMap",
 	"cronjobs":        "CronJob",
+	"daemonsets":      "DaemonSet",
+	"deployments":     "Deployment",
+	"jobs":            "Job",
+	"pods":            "Pod",
+	"replicasets":     "ReplicaSet",
+	"roles":           "Role",
 	"serviceaccounts": "ServiceAccount",
 	"services":        "Service",
+	"statefulsets":    "StatefulSet",
 }
 
 // TestVAPAppliesToCoversEveryBundleKind walks every policy in the embedded bundle
