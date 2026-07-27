@@ -170,7 +170,7 @@ func (e *Evaluator) activationFor(ctx context.Context, obj, namespaceObject map[
 // object tells us nothing, and blaming an element on a guess would put a wrong
 // path in front of the user.
 func (e *Evaluator) violationPaths(ctx context.Context, expr string, obj, namespaceObject map[string]any, params any, variables []Variable) []PathHint {
-	return e.plans.get(expr).resolve(obj, func(narrowed map[string]any) bool {
+	return e.plans.get(expr, variables).resolve(obj, func(narrowed map[string]any) bool {
 		out, err := e.evalExpression(ctx, expr, e.activationFor(ctx, narrowed, namespaceObject, params, variables))
 		if err != nil {
 			return false
@@ -180,12 +180,15 @@ func (e *Evaluator) violationPaths(ctx context.Context, expr string, obj, namesp
 	})
 }
 
-// buildPathPlan compiles an expression and reads its path plan off the AST.
-// Callers go through the plan cache. An expression that will not compile never
-// reached evaluation either, so an empty plan (no paths) is the right answer
-// rather than an error to propagate.
-func (e *Evaluator) buildPathPlan(expr string) pathPlan {
-	ast, issues := e.env.Compile(expr)
+// buildPathPlan compiles an expression - after expanding any `variables.<name>`
+// references it makes into the referenced variable's own expression (see
+// inlineVariables), so the AST walk sees the object access those variables
+// wrap - and reads its path plan off the result. Callers go through the plan
+// cache. An expression that will not compile never reached evaluation either,
+// so an empty plan (no paths) is the right answer rather than an error to
+// propagate.
+func (e *Evaluator) buildPathPlan(expr string, variables []Variable) pathPlan {
+	ast, issues := e.env.Compile(inlineVariables(expr, variables))
 	if issues != nil && issues.Err() != nil {
 		return pathPlan{}
 	}

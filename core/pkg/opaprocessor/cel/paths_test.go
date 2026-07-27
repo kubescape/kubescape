@@ -13,7 +13,7 @@ func planFor(t *testing.T, expr string) pathPlan {
 	t.Helper()
 	e, err := NewEvaluator()
 	require.NoError(t, err)
-	return e.buildPathPlan(expr)
+	return e.buildPathPlan(expr, nil)
 }
 
 func TestPathPlanDirectFields(t *testing.T) {
@@ -278,7 +278,7 @@ func resolvePlan(t *testing.T, expr string, obj map[string]any) []PathHint {
 		require.True(t, ok)
 		return !passed
 	}
-	return e.buildPathPlan(expr).resolve(obj, violates)
+	return e.buildPathPlan(expr, nil).resolve(obj, violates)
 }
 
 func TestViolationPathsBlameNoElementWhenAConjunctiveSiblingFails(t *testing.T) {
@@ -411,6 +411,18 @@ var pathlessPolicies = map[string]string{
 	"kubescape-c-0045-deny-workloads-with-hostpath-volumes-readonly-not-false":             "iterates both volumes and containers, so a failure cannot be attributed to either list",
 	"kubescape-c-0076-deny-resources-without-configured-list-of-labels-not-set":            "iterates two label maps, and a map key is not a field path",
 	"kubescape-c-0077-deny-resources-without-configured-list-of-k8s-common-labels-not-set": "iterates two label maps, same as C-0076",
+	"kubescape-c-0026-deny-cronjobs": "the whole validation is `object.kind != 'CronJob'`; matchConstraints already " +
+		"scopes the policy to cronjobs, so this denies every matched object outright, same as the constant-false " +
+		"cluster policies - there is no field to point at",
+	"kubescape-c-0012-deny-resources-with-sensitive-information-in-environment-variables": "one of its two validations " +
+		"iterates the ConfigMap data/binaryData maps by key, same as C-0076: a map key is not a field path. The " +
+		"other validation (container env vars) still derives normally",
+
+	"kubescape-c-0198-deny-root-containers":            "iterates object.spec.containers + initContainers + ephemeralContainers concatenated with `+`, same reason as C-0210",
+	"kubescape-c-0210-deny-seccomp-profile-unconfined": "the container list is a `+` concatenation of containers, initContainers and ephemeralContainers; which of the three a failing index came from cannot be recovered from the concatenated list alone",
+	"kubescape-c-0199-deny-net-raw-capability":         "same `+`-concatenated container list as C-0210, hand-inlined per kind rather than through a variable",
+	"kubescape-c-0200-deny-added-capabilities":         "same `+`-concatenated container list as C-0210, hand-inlined per kind rather than through a variable",
+	"kubescape-c-0201-deny-capabilities-assigned":      "same `+`-concatenated container list as C-0210, hand-inlined per kind rather than through a variable",
 }
 
 func TestEveryBundleValidationYieldsAPath(t *testing.T) {
@@ -423,7 +435,7 @@ func TestEveryBundleValidationYieldsAPath(t *testing.T) {
 
 	for name, vap := range catalog.byName {
 		for _, val := range vap.Validations {
-			plan := e.buildPathPlan(val.Expression)
+			plan := e.buildPathPlan(val.Expression, vap.Variables)
 			if len(plan.direct) > 0 || (plan.elements != nil && len(plan.elements.fields) > 0) {
 				continue
 			}
@@ -450,7 +462,7 @@ func TestEveryDerivedBundlePathIsWellFormed(t *testing.T) {
 
 	for name, vap := range catalog.byName {
 		for _, val := range vap.Validations {
-			plan := e.buildPathPlan(val.Expression)
+			plan := e.buildPathPlan(val.Expression, vap.Variables)
 			for _, ref := range plan.direct {
 				assertPath(name, ref.path)
 				// Object paths are what a user edits; the fields a policy reads
@@ -460,7 +472,13 @@ func TestEveryDerivedBundlePathIsWellFormed(t *testing.T) {
 			if plan.elements == nil {
 				continue
 			}
-			assertPath(name, plan.elements.collection)
+			collections := plan.elements.collections
+			if len(collections) == 0 {
+				collections = []string{plan.elements.collection}
+			}
+			for _, collection := range collections {
+				assertPath(name, collection)
+			}
 			for _, ref := range plan.elements.fields {
 				assertPath(name, ref.path)
 			}
@@ -479,13 +497,7 @@ func TestEveryDerivedBundlePathIsWellFormed(t *testing.T) {
 // field set to the one value that satisfies its control; if this list grows a
 // path with a surprising value, that is the signal to look.
 //
-// Two absences are worth naming so a reader does not read them as bugs:
-//   - spec.template.spec.hostIPC=false is missing because C-0038's workload
-//     validation in this vendored bundle checks hostPID twice and never hostIPC.
-//     The derivation reports exactly what the expression says. That policy bug is
-//     already fixed on cel-admission-library main and only survives here because
-//     the pinned release predates the fix, so this entry comes back on its own
-//     once CEL_LIBRARY_VERSION is bumped - no upstream issue to chase.
+// One absence is worth naming so a reader does not read it as a bug:
 //   - C-0075's imagePullPolicy=Always is missing because its element predicate
 //     `!c.image.endsWith(':latest') || c.imagePullPolicy == 'Always'` puts the
 //     equality under a disjunction: retagging the image satisfies the policy
@@ -505,7 +517,7 @@ var bundleFixValues = []string{
 	"spec.hostIPC=false",
 	"spec.hostNetwork=false",
 	"spec.hostPID=false",
-	"spec.jobTemplate.spec.automountServiceAccountToken=false",
+	"spec.jobTemplate.spec.template.spec.automountServiceAccountToken=false",
 	"spec.jobTemplate.spec.template.spec.containers[].securityContext.allowPrivilegeEscalation=false",
 	"spec.jobTemplate.spec.template.spec.containers[].securityContext.readOnlyRootFilesystem=true",
 	"spec.jobTemplate.spec.template.spec.hostIPC=false",
@@ -514,6 +526,7 @@ var bundleFixValues = []string{
 	"spec.template.spec.automountServiceAccountToken=false",
 	"spec.template.spec.containers[].securityContext.allowPrivilegeEscalation=false",
 	"spec.template.spec.containers[].securityContext.readOnlyRootFilesystem=true",
+	"spec.template.spec.hostIPC=false",
 	"spec.template.spec.hostNetwork=false",
 	"spec.template.spec.hostPID=false",
 }
@@ -528,7 +541,7 @@ func TestEveryBundleFixValueIsExpected(t *testing.T) {
 	seen := map[string]bool{}
 	for _, vap := range catalog.byName {
 		for _, val := range vap.Validations {
-			plan := e.buildPathPlan(val.Expression)
+			plan := e.buildPathPlan(val.Expression, vap.Variables)
 			for _, ref := range plan.direct {
 				if ref.value != "" {
 					seen[ref.path+"="+ref.value] = true
@@ -537,9 +550,15 @@ func TestEveryBundleFixValueIsExpected(t *testing.T) {
 			if plan.elements == nil {
 				continue
 			}
-			for _, ref := range plan.elements.fields {
-				if ref.value != "" {
-					seen[plan.elements.collection+"[]."+ref.path+"="+ref.value] = true
+			collections := plan.elements.collections
+			if len(collections) == 0 {
+				collections = []string{plan.elements.collection}
+			}
+			for _, collection := range collections {
+				for _, ref := range plan.elements.fields {
+					if ref.value != "" {
+						seen[collection+"[]."+ref.path+"="+ref.value] = true
+					}
 				}
 			}
 		}
