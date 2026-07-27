@@ -100,7 +100,7 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 
 	// We should submit only after printing results, so a user can see
 	// results at all times, even if submission fails
-	if rh.ReporterObj != nil && scanInfo.Submit {
+	if rh.ReporterObj != nil && scanInfo.Submit.GetBool() {
 		if err := rh.ReporterObj.Submit(ctx, rh.ScanData); err != nil {
 			return err
 		}

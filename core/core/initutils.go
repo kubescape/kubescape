@@ -139,7 +139,7 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 	if !isAirGappedMode(scanInfo) {
 		_ = getter.GetKSCloudAPIConnector()
 	}
-	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
+	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit.GetBool())
 	return resourcehandler.NewK8sResourceHandler(ctx, k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
 }
 
@@ -217,25 +217,24 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 	*/
 
 	// respect an explicit opt-out - never auto-submit against the caller's wishes
-	if scanInfo.SubmitExplicitlySet && !scanInfo.Submit {
-		scanInfo.Submit = false
+	if explicit := scanInfo.Submit.Get(); explicit != nil && !*explicit {
 		return
 	}
 
 	// do not submit control/workload scanning
 	if !isScanTypeForSubmission(scanInfo.ScanType) || scanInfo.Local {
-		scanInfo.Submit = false
+		scanInfo.Submit.SetBool(false)
 		return
 	}
 
 	if tenantConfig.GetCloudReportURL() == "" {
-		scanInfo.Submit = false
+		scanInfo.Submit.SetBool(false)
 		return
 	}
 
 	// a new account will be created if a report URL is set and there is no account ID
 	if tenantConfig.GetAccountID() == "" {
-		scanInfo.Submit = true
+		scanInfo.Submit.SetBool(true)
 		return
 	}
 
@@ -245,7 +244,7 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 	}
 
 	// submit if account is valid
-	scanInfo.Submit = err == nil
+	scanInfo.Submit.SetBool(err == nil)
 }
 
 func isScanTypeForSubmission(scanType cautils.ScanTypes) bool {

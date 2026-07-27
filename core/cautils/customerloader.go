@@ -338,30 +338,60 @@ func existsConfigFile() bool {
 	return err == nil
 }
 
+// chmod is a package-level indirection so tests can simulate a chmod failure
+// (e.g. EPERM on a restrictive mount) without needing real filesystem
+// permission tricks, which don't reliably fail for the owning user.
+var chmod = os.Chmod
+
 func updateConfigFile(configObj *ConfigObj) error {
 	fullPath := ConfigFileFullPath()
 	dir := filepath.Dir(fullPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	// Tighten permissions on pre-existing directory in case it was
+	// Tighten permissions on a pre-existing directory in case it was
 	// created with broader permissions by an older version. This is a
 	// best-effort hardening step: MkdirAll above already applies 0700 to
 	// directories it creates, so a failure here (e.g. chmod is rejected on
 	// some mounted volumes such as an emptyDir mounted as non-root) must
 	// not prevent the config from being persisted.
-	if err := os.Chmod(dir, 0700); err != nil {
-		logger.L().Warning("failed to tighten permissions on config directory", helpers.String("dir", dir), helpers.Error(err))
+	if err := chmod(dir, 0700); err != nil {
+		mode := "unknown"
+		if fi, statErr := os.Stat(dir); statErr == nil {
+			mode = fi.Mode().Perm().String()
+		}
+		logger.L().Warning("failed to tighten permissions on config directory", helpers.String("dir", dir), helpers.String("currentMode", mode), helpers.Error(err))
 	}
-	if err := os.WriteFile(fullPath, configObj.Config(), 0600); err != nil {
+
+	// Write via a temp file in the same directory, then rename it over the
+	// target. os.CreateTemp always creates the file at mode 0600, and rename
+	// replaces the destination's inode outright - so the final file always
+	// ends up at the correct permissions on a fresh inode, regardless of
+	// whatever mode a pre-existing config.json (e.g. from an older kubescape
+	// version) had, and without needing a chmod on the target path at all.
+	tmpFile, err := os.CreateTemp(dir, ".config-*.json.tmp")
+	if err != nil {
 		return err
 	}
-	// Tighten permissions on pre-existing file in case it was created
-	// with broader permissions by an older version. Same best-effort
-	// rationale as above: WriteFile already applies 0600 to files it creates.
-	if err := os.Chmod(fullPath, 0600); err != nil {
-		logger.L().Warning("failed to tighten permissions on config file", helpers.String("path", fullPath), helpers.Error(err))
+	tmpPath := tmpFile.Name()
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmpFile.Write(configObj.Config()); err != nil {
+		tmpFile.Close()
+		return err
 	}
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, fullPath); err != nil {
+		return err
+	}
+	removeTmp = false
 	return nil
 }
 

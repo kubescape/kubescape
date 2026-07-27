@@ -244,7 +244,7 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 		scanInfo.View = string(cautils.ResourceViewType)
 	}
 
-	if scanInfo.Submit && scanInfo.Local {
+	if scanInfo.Submit.GetBool() && scanInfo.Local {
 		return ErrKeepLocalOrSubmit
 	}
 	if 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
@@ -256,7 +256,7 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if 100 < scanInfo.FailCoverageThreshold || 0 > scanInfo.FailCoverageThreshold {
 		return ErrBadThreshold
 	}
-	if scanInfo.Submit && scanInfo.OmitRawResources {
+	if scanInfo.Submit.GetBool() && scanInfo.OmitRawResources {
 		return ErrOmitRawResourcesOrSubmit
 	}
 	if err := validateControlTimeout(scanInfo); err != nil {

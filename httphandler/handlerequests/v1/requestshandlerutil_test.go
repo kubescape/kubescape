@@ -8,9 +8,31 @@ import (
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
+// unsetEnvForTest ensures name is absent from the process environment for the
+// duration of the test, restoring whatever value (or absence) it had before.
+// Needed because t.Setenv can only set a value, not guarantee absence, and
+// defaultScanInfo's KS_SUBMIT handling is presence-sensitive.
+func unsetEnvForTest(t *testing.T, name string) {
+	t.Helper()
+	orig, ok := os.LookupEnv(name)
+	require.NoError(t, os.Unsetenv(name))
+	t.Cleanup(func() {
+		if ok {
+			os.Setenv(name, orig)
+		} else {
+			os.Unsetenv(name)
+		}
+	})
+}
+
 func TestDefaultScanInfo(t *testing.T) {
+	// KS_SUBMIT must not leak from the ambient environment (dev machine or CI
+	// runner) into this default-value assertion.
+	unsetEnvForTest(t, "KS_SUBMIT")
+
 	s := defaultScanInfo()
 
 	assert.Equal(t, "", s.AccountID)
@@ -19,8 +41,8 @@ func TestDefaultScanInfo(t *testing.T) {
 	assert.Equal(t, "", s.AccessKey)
 	assert.False(t, s.HostSensorEnabled.GetBool())
 	assert.False(t, s.Local)
-	assert.False(t, s.Submit)
-	assert.False(t, s.SubmitExplicitlySet)
+	assert.False(t, s.Submit.GetBool())
+	assert.Nil(t, s.Submit.Get(), "Submit must not be marked explicitly set by default")
 }
 
 func TestDefaultScanInfo_SubmitExplicitlySetFromEnv(t *testing.T) {
@@ -28,11 +50,48 @@ func TestDefaultScanInfo_SubmitExplicitlySetFromEnv(t *testing.T) {
 
 	s := defaultScanInfo()
 
-	assert.False(t, s.Submit)
-	assert.True(t, s.SubmitExplicitlySet)
+	assert.False(t, s.Submit.GetBool())
+	require.NotNil(t, s.Submit.Get())
+}
+
+func TestDefaultScanInfo_KS_SUBMIT_UnparsableValueIgnored(t *testing.T) {
+	// Regression test: KS_SUBMIT="" (a common Helm rendering for an unset
+	// value) or any other unparsable value must NOT be treated as an
+	// explicit opt-out - see https://github.com/kubescape/kubescape/issues/2555.
+	for _, v := range []string{"", "yes", "enabled", "no"} {
+		t.Run("value="+v, func(t *testing.T) {
+			t.Setenv("KS_SUBMIT", v)
+			s := defaultScanInfo()
+			assert.Nil(t, s.Submit.Get(), "unparsable KS_SUBMIT=%q must not mark Submit as explicitly set", v)
+		})
+	}
+}
+
+func TestDefaultScanInfo_KS_SUBMIT_ParsedValues(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want bool
+	}{
+		{"true", true},
+		{"1", true},
+		{"TRUE ", true}, // tolerated: case and surrounding whitespace
+		{"false", false},
+		{"0", false},
+		{" False", false},
+	}
+	for _, tt := range tests {
+		t.Run("value="+tt.raw, func(t *testing.T) {
+			t.Setenv("KS_SUBMIT", tt.raw)
+			s := defaultScanInfo()
+			require.NotNil(t, s.Submit.Get())
+			assert.Equal(t, tt.want, s.Submit.GetBool())
+		})
+	}
 }
 
 func TestGetScanCommand(t *testing.T) {
+	unsetEnvForTest(t, "KS_SUBMIT")
+
 	req := utilsmetav1.PostScanRequest{
 		TargetType: apisv1.KindFramework,
 	}
@@ -44,10 +103,11 @@ func TestGetScanCommand(t *testing.T) {
 	assert.Equal(t, "", s.AccessKey)
 	assert.False(t, s.HostSensorEnabled.GetBool())
 	assert.False(t, s.Local)
-	assert.False(t, s.Submit)
+	assert.False(t, s.Submit.GetBool())
 }
 
 func TestGetScanCommandWithAccessKey(t *testing.T) {
+	unsetEnvForTest(t, "KS_SUBMIT")
 	config.SetAccessKey("test-123")
 
 	req := utilsmetav1.PostScanRequest{
@@ -61,7 +121,7 @@ func TestGetScanCommandWithAccessKey(t *testing.T) {
 	assert.Equal(t, "test-123", s.AccessKey)
 	assert.False(t, s.HostSensorEnabled.GetBool())
 	assert.False(t, s.Local)
-	assert.False(t, s.Submit)
+	assert.False(t, s.Submit.GetBool())
 }
 
 func TestReadResultsFile(t *testing.T) {

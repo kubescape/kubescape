@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -269,9 +270,16 @@ func defaultScanInfo() *cautils.ScanInfo {
 	scanInfo.HostSensorYamlPath = envToString("KS_HOST_SCAN_YAML", "")       // path to host scan YAML
 	scanInfo.FormatVersion = envToString("KS_FORMAT_VERSION", "v2")          // output format version
 	scanInfo.Format = envToString("KS_FORMAT", "json")                       // default output should be json
-	scanInfo.Submit = envToBool("KS_SUBMIT", false)                          // publish results to Kubescape SaaS
-	if _, ok := os.LookupEnv("KS_SUBMIT"); ok {
-		scanInfo.SubmitExplicitlySet = true
+	// KS_SUBMIT is presence-checked (not just envToBool'd): its mere presence
+	// marks Submit as explicitly requested, so an unparsable value (including
+	// "", which Helm commonly renders for an unset value) must not silently
+	// become a permanent, unoverridable opt-out - warn and leave it unset instead.
+	if raw, ok := os.LookupEnv("KS_SUBMIT"); ok {
+		if v, err := strconv.ParseBool(strings.TrimSpace(raw)); err == nil {
+			scanInfo.Submit.SetBool(v)
+		} else {
+			logger.L().Warning("ignoring unparsable KS_SUBMIT value", helpers.String("value", raw))
+		}
 	}
 	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)                       // do not publish results to Kubescape SaaS
 	scanInfo.EnableRegoPrint = envToBool("KS_REGO_PRINT", false)             // print rego rules

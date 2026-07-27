@@ -515,10 +515,9 @@ func TestSetSubmitBehavior(t *testing.T) {
 			name: "Test SetSubmitBehavior explicit opt-out is respected despite CloudReportURL and no AccountID",
 			args: args{
 				scanInfo: &cautils.ScanInfo{
-					ScanType:            cautils.ScanTypeCluster,
-					Local:               false,
-					Submit:              false,
-					SubmitExplicitlySet: true,
+					ScanType: cautils.ScanTypeCluster,
+					Local:    false,
+					Submit:   cautils.NewBoolPtr(new(false)),
 				},
 				tenantConfig: &TenantConfigMock{
 					clusterName:    "test",
@@ -537,10 +536,9 @@ func TestSetSubmitBehavior(t *testing.T) {
 			name: "Test SetSubmitBehavior explicit opt-in does not bypass missing CloudReportURL",
 			args: args{
 				scanInfo: &cautils.ScanInfo{
-					ScanType:            cautils.ScanTypeCluster,
-					Local:               false,
-					Submit:              true,
-					SubmitExplicitlySet: true,
+					ScanType: cautils.ScanTypeCluster,
+					Local:    false,
+					Submit:   cautils.NewBoolPtr(new(true)),
 				},
 				tenantConfig: &TenantConfigMock{
 					clusterName: "test",
@@ -561,7 +559,7 @@ func TestSetSubmitBehavior(t *testing.T) {
 
 			setSubmitBehavior(tt.args.scanInfo, tt.args.tenantConfig)
 
-			assert.Equal(t, tt.want, tt.args.scanInfo.Submit)
+			assert.Equal(t, tt.want, tt.args.scanInfo.Submit.GetBool())
 		})
 	}
 }

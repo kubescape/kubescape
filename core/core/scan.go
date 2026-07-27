@@ -62,7 +62,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentIn
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
 
-	if scanInfo.Submit {
+	if scanInfo.Submit.GetBool() {
 		// submit - Create tenant & Submit report
 		if scanInfo.OmitRawResources {
 			logger.L().Ctx(ctx).Warning("omit-raw-resources flag will be ignored in submit mode")
@@ -93,7 +93,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentIn
 	// ================== setup reporter & printer objects ======================================
 
 	// reporting behavior - setup reporter
-	reportHandler := getReporter(ctx, tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, *scanInfo)
+	reportHandler := getReporter(ctx, tenantConfig, scanInfo.ScanID, scanInfo.Submit.GetBool(), scanInfo.FrameworkScan, *scanInfo)
 
 	// setup printers
 	outputPrinters, err := GetOutputPrinters(scanInfo, ctx, tenantConfig.GetContextName())

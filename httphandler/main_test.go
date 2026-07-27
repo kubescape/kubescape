@@ -46,8 +46,13 @@ func TestInitializeSaaSEnv_apiSuccess(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	// Ensure no file is found so the API path is exercised.
-	t.Setenv("KS_SERVICE_DISCOVERY_FILE_PATH", filepath.Join(t.TempDir(), "no-services.json"))
+	// Ensure no file is found, and that KS_SERVICE_DISCOVERY_FILE_PATH isn't
+	// explicitly set (which would now short-circuit before the API path),
+	// so the API path is genuinely exercised.
+	origDefaultPath := defaultServiceDiscoveryPath
+	defaultServiceDiscoveryPath = filepath.Join(t.TempDir(), "no-services.json")
+	t.Cleanup(func() { defaultServiceDiscoveryPath = origDefaultPath })
+	t.Setenv("KS_SERVICE_DISCOVERY_FILE_PATH", "")
 	// srv.URL is "http://127.0.0.1:PORT" — ParseHost preserves the http scheme.
 	t.Setenv("API_URL", srv.URL)
 
@@ -61,8 +66,13 @@ func TestInitializeSaaSEnv_apiSuccess(t *testing.T) {
 // TestInitializeSaaSEnv_networkFailure verifies that a transient network error
 // causes initializeSaaSEnv to log a warning and return instead of crashing.
 func TestInitializeSaaSEnv_networkFailure(t *testing.T) {
-	// Ensure no file is found so the API path is exercised.
-	t.Setenv("KS_SERVICE_DISCOVERY_FILE_PATH", filepath.Join(t.TempDir(), "no-services.json"))
+	// Ensure no file is found, and that KS_SERVICE_DISCOVERY_FILE_PATH isn't
+	// explicitly set (which would now short-circuit before the API path),
+	// so the API path is genuinely exercised.
+	origDefaultPath := defaultServiceDiscoveryPath
+	defaultServiceDiscoveryPath = filepath.Join(t.TempDir(), "no-services.json")
+	t.Cleanup(func() { defaultServiceDiscoveryPath = origDefaultPath })
+	t.Setenv("KS_SERVICE_DISCOVERY_FILE_PATH", "")
 	// Port 1 refuses connections immediately on loopback.
 	t.Setenv("API_URL", "http://127.0.0.1:1")
 
@@ -90,7 +100,12 @@ func TestInitializeSaaSEnv_noBackendConfigured(t *testing.T) {
 	getter.SetKSCloudAPIConnector(nil)
 	t.Cleanup(func() { getter.SetKSCloudAPIConnector(origConnector) })
 
-	t.Setenv("KS_SERVICE_DISCOVERY_FILE_PATH", filepath.Join(t.TempDir(), "no-services.json"))
+	// No explicit KS_SERVICE_DISCOVERY_FILE_PATH (an explicit-but-missing
+	// path is a different case - see TestInitializeSaaSEnv_explicitServiceDiscoveryFileMissing).
+	origDefaultPath := defaultServiceDiscoveryPath
+	defaultServiceDiscoveryPath = filepath.Join(t.TempDir(), "no-services.json")
+	t.Cleanup(func() { defaultServiceDiscoveryPath = origDefaultPath })
+	t.Setenv("KS_SERVICE_DISCOVERY_FILE_PATH", "")
 	t.Setenv("API_URL", "")
 
 	initializeSaaSEnv()
@@ -98,5 +113,36 @@ func TestInitializeSaaSEnv_noBackendConfigured(t *testing.T) {
 	conn := getter.GetKSCloudAPIConnector()
 	if conn.GetCloudAPIURL() != "" || conn.GetCloudReportURL() != "" {
 		t.Fatalf("expected no cloud connector URLs to be set when no backend is configured, got apiURL=%q reportURL=%q", conn.GetCloudAPIURL(), conn.GetCloudReportURL())
+	}
+}
+
+// TestInitializeSaaSEnv_explicitServiceDiscoveryFileMissing verifies that an
+// explicitly configured but missing KS_SERVICE_DISCOVERY_FILE_PATH is treated
+// as a configuration problem (skip + warn) rather than silently falling back
+// to network-based discovery, even when API_URL is also set.
+func TestInitializeSaaSEnv_explicitServiceDiscoveryFileMissing(t *testing.T) {
+	origAccount, origAccessKey := config.GetAccount(), config.GetAccessKey()
+	config.SetAccount("")
+	config.SetAccessKey("")
+	t.Cleanup(func() {
+		config.SetAccount(origAccount)
+		config.SetAccessKey(origAccessKey)
+	})
+
+	origConnector := getter.GetKSCloudAPIConnector()
+	getter.SetKSCloudAPIConnector(nil)
+	t.Cleanup(func() { getter.SetKSCloudAPIConnector(origConnector) })
+
+	t.Setenv("KS_SERVICE_DISCOVERY_FILE_PATH", filepath.Join(t.TempDir(), "missing-services.json"))
+	// Port 1 refuses connections immediately - if the code fell through to the
+	// network path despite the explicit file being missing, this would fail
+	// fast rather than silently succeed, making a wiring regression obvious.
+	t.Setenv("API_URL", "http://127.0.0.1:1")
+
+	initializeSaaSEnv()
+
+	conn := getter.GetKSCloudAPIConnector()
+	if conn.GetCloudAPIURL() != "" || conn.GetCloudReportURL() != "" {
+		t.Fatalf("expected no cloud connector URLs to be set when the explicit discovery file is missing, got apiURL=%q reportURL=%q", conn.GetCloudAPIURL(), conn.GetCloudReportURL())
 	}
 }
