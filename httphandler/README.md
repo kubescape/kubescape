@@ -58,6 +58,11 @@ Triggers a Kubescape scan. By default, scans run asynchronously and return a sca
 
 **Response (sync with `wait=true`):** Same as [Get Results](#get-results) response.
 
+The service accepts a bounded number of pending scans. If the queue is full,
+the endpoint returns `429 Too Many Requests` with a `Retry-After` header. A
+request body larger than the configured limit returns `413 Request Entity Too
+Large` before the scan is admitted.
+
 ---
 
 ### Get Results
@@ -284,6 +289,8 @@ Configure the HTTP handler using environment variables:
 | `KS_LOGGER_NAME` | Logger name | `kubescape` |
 | `KS_LOGGER_LEVEL` | Log level | `info`, `debug`, `warning`, `error` |
 | `KS_DOWNLOAD_ARTIFACTS` | Download artifacts on each scan | `true`, `false` |
+| `KS_SCAN_QUEUE_CAPACITY` | Maximum number of scans waiting behind the active scan | `10` |
+| `KS_SCAN_REQUEST_MAX_BYTES` | Maximum size in bytes of a `POST /v1/scan` request body | `1048576` |
 
 ---
 
