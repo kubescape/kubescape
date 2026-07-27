@@ -38,17 +38,19 @@ func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace
 	for i, id := range controlIDs {
 		policyIdentifiers[i] = cautils.PolicyIdentifier{Kind: apisv1.KindControl, Identifier: id}
 	}
-	return runScan(ctx, ksServer, namespace, policyIdentifiers, label, false)
+	return runScan(ctx, ksServer, namespace, policyIdentifiers, label, false, nil, nil, nil)
 }
 
-func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, policyIdentifiers []cautils.PolicyIdentifier, label string, wantComplianceScore bool) ([]byte, error) {
+func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, policyIdentifiers []cautils.PolicyIdentifier, label string, wantComplianceScore bool, rsrcHandler resourcehandler.IResourceHandler, inputPatterns []string, customGetters *cautils.Getters) ([]byte, error) {
 	logger.L().Ctx(ctx).Info(fmt.Sprintf("Initiating on-demand MCP %s security scan", label), helpers.String("namespace", namespace))
 
-	if !k8sinterface.IsConnectedToCluster() {
-		return nil, fmt.Errorf("no reachable kubernetes cluster: ensure KUBECONFIG is set or the server is running inside a cluster")
+	var client *k8sinterface.KubernetesApi
+	if rsrcHandler == nil {
+		if !k8sinterface.IsConnectedToCluster() {
+			return nil, fmt.Errorf("no reachable kubernetes cluster: ensure KUBECONFIG is set or the server is running inside a cluster")
+		}
+		client = ksServer.getK8sClient()
 	}
-
-	client := ksServer.getK8sClient()
 
 	timeout := 10 * time.Second
 	if wantComplianceScore {
@@ -62,17 +64,23 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 		}
 	}
 
+	getters := cautils.Getters{
+		PolicyGetter:         ksServer.policyGetter,
+		ExceptionsGetter:     ksServer.policyGetter,
+		ControlsInputsGetter: ksServer.policyGetter,
+		AttackTracksGetter:   ksServer.policyGetter,
+	}
+	if customGetters != nil {
+		getters = *customGetters
+	}
+
 	scanInfo := &cautils.ScanInfo{
-		Getters: cautils.Getters{
-			PolicyGetter:         ksServer.policyGetter,
-			ExceptionsGetter:     ksServer.policyGetter,
-			ControlsInputsGetter: ksServer.policyGetter,
-			AttackTracksGetter:   ksServer.policyGetter,
-		},
+		Getters:           getters,
 		ScanAll:           false,
 		PolicyIdentifier:  policyIdentifiers,
 		IncludeNamespaces: namespace,
 		ScanTimeout:       timeout,
+		InputPatterns:     inputPatterns,
 	}
 
 	scanCtx, cancel := context.WithTimeout(ctx, scanInfo.ScanTimeout)
@@ -85,12 +93,18 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 		return nil, fmt.Errorf("failed to collect %s policies: %w", label, err)
 	}
 
-	k8sHandler := resourcehandler.NewK8sResourceHandler(scanCtx, client, nil, nil, "")
-	if err := resourcehandler.CollectResources(scanCtx, k8sHandler, scanData, scanInfo); err != nil {
+	if rsrcHandler == nil {
+		rsrcHandler = resourcehandler.NewK8sResourceHandler(scanCtx, client, nil, nil, "")
+	}
+	if err := resourcehandler.CollectResources(scanCtx, rsrcHandler, scanData, scanInfo); err != nil {
 		return nil, fmt.Errorf("failed to collect %s resources: %w", label, err)
 	}
 
-	deps := resources.NewRegoDependenciesData(client.K8SConfig, "")
+	k8sConfig := k8sinterface.GetK8sConfig()
+	if client != nil {
+		k8sConfig = client.K8SConfig
+	}
+	deps := resources.NewRegoDependenciesData(k8sConfig, "")
 	opap := opaprocessor.NewOPAProcessor(scanData, deps, "", scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, false, nil)
 	if wantComplianceScore {
 		opap.ControlTimeout = timeout / 4
