@@ -1,6 +1,7 @@
 package cel
 
 import (
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,12 +60,22 @@ type fieldRef struct {
 
 // elementPlan describes a validation that iterates a list on the object, which
 // is the shape almost every workload policy in the bundle has
-// (`object.spec.containers.all(container, ...)`). collection is the list's
-// object-relative path and fields are element-relative, so the two are joined
-// with an index once we know which element failed.
+// (`object.spec.containers.all(container, ...)`). fields are element-relative,
+// joined to a collection path with an index once we know which element
+// failed.
+//
+// The list itself is usually one fixed path (collection). A validation that
+// goes through a variable inlined by inlineVariables can instead iterate a
+// ternary that picks the list by the object's kind (`object.kind == 'Pod' ?
+// object.spec.containers : ...`) - see objectRootedPaths. Which branch is real
+// depends on the object, not the expression, so that shape sets collections
+// instead: every candidate path, at most one of which is an actual list on any
+// given object (the bundle's matchConstraints already narrowed evaluation to
+// one kind). Exactly one of the two is ever set.
 type elementPlan struct {
-	collection string
-	fields     []fieldRef
+	collection  string
+	collections []string
+	fields      []fieldRef
 }
 
 // pathPlan is everything one validation expression can say about where it
@@ -93,6 +104,70 @@ var scopeGuardFields = map[string]bool{
 	"apiVersion": true,
 }
 
+// inlineVariables textually expands every `variables.<name>` reference in expr
+// with that variable's own expression, parenthesized so it composes safely
+// with whatever follows it (a field access, a comprehension, ...). Newer bundle
+// releases factor object access into a `variables:` block instead of inlining
+// it in the validation (`variables.containers.all(...)` rather than
+// `object.spec.containers.all(...)`), and the AST walk below only understands
+// paths rooted at `object`, so without this expansion those validations would
+// derive no path at all (see pathlessPolicies' KNOWN LIMITATION note).
+//
+// A variable's expression may only reference object/params/request and
+// variables declared before it (enforced by the bundle format), so expanding
+// left to right - each variable substituting the ones already expanded before
+// it is itself substituted into later expressions - reaches a fully
+// object-rooted form in one pass; no fixpoint loop is needed.
+func inlineVariables(expr string, variables []Variable) string {
+	expanded := make(map[string]string, len(variables))
+	for _, v := range variables {
+		body := maskVariableHasGuards(v.Expression)
+		for _, prior := range variables {
+			if prior.Name == v.Name {
+				break
+			}
+			if replacement, ok := expanded[prior.Name]; ok {
+				body = substituteVariableRef(body, prior.Name, replacement)
+			}
+		}
+		expanded[v.Name] = "(" + body + ")"
+	}
+	expr = maskVariableHasGuards(expr)
+	for _, v := range variables {
+		if replacement, ok := expanded[v.Name]; ok {
+			expr = substituteVariableRef(expr, v.Name, replacement)
+		}
+	}
+	return expr
+}
+
+// variableHasGuardPattern matches `has(variables.<chain>)`: a presence guard
+// on a variable reference. CEL's has() macro requires its argument to be a
+// literal select chain (has(1+1) is a compile error), so substituting a
+// variable's own expression - a ternary, once inlineVariables has expanded it
+// - into one, even just at the `variables.<name>` root, stops the whole
+// expression compiling. That guard exists only to protect a later, non-has()
+// read of the same field against a missing-field error, and that later read
+// is exactly the occurrence this file derives a path from - has() itself
+// never carries a value. So neutralizing every such guard to the constant
+// `true` before substitution costs no derivable path, and keeps a variable
+// reference inside `has()` from taking the whole validation's plan down with
+// it (see buildPathPlan: a compile failure here yields the empty plan).
+var variableHasGuardPattern = regexp.MustCompile(`has\(\s*variables(?:\.[A-Za-z_][A-Za-z0-9_]*)+\s*\)`)
+
+func maskVariableHasGuards(expr string) string {
+	return variableHasGuardPattern.ReplaceAllLiteralString(expr, "true")
+}
+
+// substituteVariableRef replaces every `variables.<name>` reference in expr
+// with replacement. \b on both ends keeps a name from matching as a prefix or
+// suffix of a longer identifier (`variables.containers2` must not match name
+// "containers").
+func substituteVariableRef(expr, name, replacement string) string {
+	pattern := regexp.MustCompile(`\bvariables\.` + regexp.QuoteMeta(name) + `\b`)
+	return pattern.ReplaceAllLiteralString(expr, replacement)
+}
+
 // newPathPlan derives the plan for one compiled validation expression.
 func newPathPlan(ast *cel.Ast) pathPlan {
 	native := ast.NativeRep()
@@ -102,14 +177,34 @@ func newPathPlan(ast *cel.Ast) pathPlan {
 	// params lists and inline kind lists too) tell us nothing about where the
 	// object is wrong, so only object-rooted ones count.
 	var iterated []celast.NavigableExpr
+	var iteratedPaths [][]string
 	ranges := map[string]bool{}
 	for _, node := range celast.MatchDescendants(root, celast.KindMatcher(celast.ComprehensionKind)) {
-		path, ok := selectPath(node.AsComprehension().IterRange(), "object")
+		rangeExpr := node.AsComprehension().IterRange()
+
+		// Every object-rooted select inside the range expression is plumbing
+		// that decides WHICH list to iterate (a fixed path, a per-kind ternary,
+		// a concatenation of several lists, ...), never a value the policy is
+		// asking the user to set - so none of them belong in plan.direct,
+		// whether or not the shape below resolves to an elementPlan. Without
+		// this a range objectRootedPaths cannot fully read (e.g. one that
+		// concatenates several lists with `+`) would otherwise leak its
+		// constituent paths as spurious direct fields.
+		for _, sel := range celast.MatchDescendants(celast.NavigateExpr(native, rangeExpr), celast.KindMatcher(celast.SelectKind)) {
+			if parent, ok := sel.Parent(); ok && parent.Kind() == celast.SelectKind {
+				continue
+			}
+			if path, ok := selectPath(sel, "object"); ok {
+				ranges[path] = true
+			}
+		}
+
+		paths, ok := objectRootedPaths(rangeExpr, "object")
 		if !ok {
 			continue
 		}
 		iterated = append(iterated, node)
-		ranges[path] = true
+		iteratedPaths = append(iteratedPaths, paths)
 	}
 
 	plan := pathPlan{}
@@ -119,7 +214,7 @@ func newPathPlan(ast *cel.Ast) pathPlan {
 	// guessing, so we do not try.
 	if len(iterated) == 1 && narrowingIsExact(iterated[0]) {
 		comprehension := iterated[0].AsComprehension()
-		collection, _ := selectPath(comprehension.IterRange(), "object")
+		paths := iteratedPaths[0]
 
 		// A field the element predicate reads is element-relative and joined to
 		// the pinned index. This includes a collection the predicate iterates in
@@ -130,10 +225,15 @@ func newPathPlan(ast *cel.Ast) pathPlan {
 		// at, unlike the object-level list we index into, which is not a hint
 		// because we are about to point at one of its elements instead.
 		loopStep := celast.NavigateExpr(native, comprehension.LoopStep())
-		plan.elements = &elementPlan{
-			collection: collection,
-			fields:     fieldsRootedAt(native, loopStep, comprehension.IterVar(), nil),
+		elements := &elementPlan{
+			fields: fieldsRootedAt(native, loopStep, comprehension.IterVar(), nil),
 		}
+		if len(paths) == 1 {
+			elements.collection = paths[0]
+		} else {
+			elements.collections = paths
+		}
+		plan.elements = elements
 	}
 
 	// The iterated list itself is not a direct hint: either we are about to
@@ -244,11 +344,17 @@ func fieldsRootedAt(native *celast.AST, root celast.NavigableExpr, ident string,
 		if parent, ok := node.Parent(); ok && parent.Kind() == celast.SelectKind {
 			continue
 		}
-		path, ok := selectPath(node, ident)
-		if !ok || path == "" || scopeGuardFields[path] || exclude[path] {
+		paths, ok := selectPaths(node, ident)
+		if !ok {
 			continue
 		}
-		refs = append(refs, fieldRef{path: path, value: requiredValue(native, node, ident)})
+		value := requiredValue(native, node, ident)
+		for _, path := range paths {
+			if path == "" || scopeGuardFields[path] || exclude[path] {
+				continue
+			}
+			refs = append(refs, fieldRef{path: path, value: value})
+		}
 	}
 	return dedupeRefs(refs)
 }
@@ -302,6 +408,103 @@ func selectPath(expr celast.Expr, ident string) (string, bool) {
 		parts = append(parts, reversed[i])
 	}
 	return strings.Join(parts, "."), true
+}
+
+// objectRootedPaths reads the list of straight ident-rooted paths a
+// comprehension's range expression could resolve to at runtime. The common
+// case is selectPath's single path; inlineVariables can also hand this a
+// ternary chain choosing among several kind-specific lists (the shape the
+// bundle's "containers" variable uses: `object.kind == 'Pod' ? object.spec.containers
+// : object.kind in [...] ? object.spec.template.spec.containers : ... : []`),
+// in which case every true-branch path is returned, in branch order.
+//
+// ok is false whenever a branch is neither a plain path nor another ternary of
+// the same shape: an opaque branch means we cannot enumerate every list the
+// range could be, and guessing which ones matter would risk missing the real
+// one, so the whole comprehension is left alone (falls back to no element
+// attribution) rather than reporting a partial candidate set.
+//
+// The final else of a kind-dispatch ternary is usually a catch-all that is not
+// itself a list on any object (an empty list literal, for a kind none of the
+// earlier branches matched); a bare final else that is not a path is treated
+// as that catch-all rather than disqualifying the whole chain, since resolve
+// only ever uses a candidate that actually is a list on the object it checks.
+func objectRootedPaths(expr celast.Expr, ident string) ([]string, bool) {
+	if path, ok := selectPath(expr, ident); ok {
+		return []string{path}, true
+	}
+	if expr.Kind() != celast.CallKind {
+		return nil, false
+	}
+	call := expr.AsCall()
+	if call.FunctionName() != operators.Conditional || len(call.Args()) != 3 {
+		return nil, false
+	}
+
+	truePaths, ok := objectRootedPaths(call.Args()[1], ident)
+	if !ok {
+		return nil, false
+	}
+
+	elseBranch := call.Args()[2]
+	if elseBranch.Kind() == celast.CallKind && elseBranch.AsCall().FunctionName() == operators.Conditional {
+		elsePaths, ok := objectRootedPaths(elseBranch, ident)
+		if !ok {
+			return nil, false
+		}
+		return append(truePaths, elsePaths...), true
+	}
+	if path, ok := selectPath(elseBranch, ident); ok {
+		return append(truePaths, path), true
+	}
+	return truePaths, true
+}
+
+// selectPaths generalizes selectPath to a select chain whose base does not
+// bottom out at ident directly but at an object-rooted ternary of paths (see
+// objectRootedPaths) - the shape inlineVariables leaves behind when a
+// variable's own expression picks the right object by kind
+// (`(object.kind == 'Pod' ? object.spec.securityContext : ...).runAsUser`).
+// Each candidate base contributes one path, base-plus-the-peeled-suffix; a
+// plain chain still resolves to its one path, same as selectPath.
+//
+// The bare base paths are not returned, only the composed ones - a caller
+// that (like fieldsRootedAt, walking every select in the tree) also visits
+// the base's own select nodes as their own chains gets the bare paths
+// separately, and dedupeRefs drops each one once the corresponding composed
+// path here makes it a prefix of something more specific. Without that, a
+// ternary base half-resolved through a further field select would report the
+// object it picks - "spec.securityContext" - as if that whole object were
+// the fix, instead of the one field the validation actually reads off it.
+func selectPaths(expr celast.Expr, ident string) ([]string, bool) {
+	if path, ok := selectPath(expr, ident); ok {
+		return []string{path}, true
+	}
+
+	var suffix []string
+	for expr.Kind() == celast.SelectKind {
+		sel := expr.AsSelect()
+		suffix = append(suffix, sel.FieldName())
+		expr = sel.Operand()
+	}
+	if len(suffix) == 0 {
+		return nil, false
+	}
+	bases, ok := objectRootedPaths(expr, ident)
+	if !ok {
+		return nil, false
+	}
+
+	for i, j := 0, len(suffix)-1; i < j; i, j = i+1, j-1 {
+		suffix[i], suffix[j] = suffix[j], suffix[i]
+	}
+	tail := strings.Join(suffix, ".")
+
+	paths := make([]string, len(bases))
+	for i, base := range bases {
+		paths[i] = base + "." + tail
+	}
+	return paths, true
 }
 
 // requiredValue returns the literal a field read is compared against, but only
@@ -503,8 +706,7 @@ func (p pathPlan) resolve(obj map[string]any, violates func(map[string]any) bool
 		return hints
 	}
 
-	segments := strings.Split(p.elements.collection, ".")
-	list, ok := lookupList(obj, segments)
+	collection, segments, list, ok := p.elements.resolveCollection(obj)
 	if !ok {
 		return hints
 	}
@@ -524,12 +726,32 @@ func (p pathPlan) resolve(obj map[string]any, violates func(map[string]any) bool
 		if !ok || !violates(candidate) {
 			continue
 		}
-		prefix := p.elements.collection + "[" + strconv.Itoa(i) + "]."
+		prefix := collection + "[" + strconv.Itoa(i) + "]."
 		for _, ref := range p.elements.fields {
 			hints = append(hints, PathHint{Path: prefix + ref.path, Value: ref.value})
 		}
 	}
 	return hints
+}
+
+// resolveCollection picks which candidate list path is a real list on obj. The
+// common case (collection set, collections nil) has exactly one candidate;
+// collections holds several kind-dependent candidates when the range came from
+// a ternary (see objectRootedPaths), of which at most one is ever an actual
+// list on a given object - matchConstraints already narrowed evaluation to one
+// kind, so the rest simply are not present. ok is false when none resolve.
+func (p *elementPlan) resolveCollection(obj map[string]any) (collection string, segments []string, list []any, ok bool) {
+	candidates := p.collections
+	if len(candidates) == 0 {
+		candidates = []string{p.collection}
+	}
+	for _, candidate := range candidates {
+		segs := strings.Split(candidate, ".")
+		if l, ok := lookupList(obj, segs); ok {
+			return candidate, segs, l, true
+		}
+	}
+	return "", nil, nil, false
 }
 
 // lookupList reads the list at a dotted path, reporting false when the path is
@@ -577,14 +799,15 @@ func narrow(obj map[string]any, segments []string, value any) (map[string]any, b
 	return out, true
 }
 
-// pathPlanCache memoizes path plans by expression text, for the same reason
-// programCache memoizes programs: deriving a plan means compiling the
-// expression and walking its AST, and the answer is the same for every object
-// the expression runs against. An expression that will not compile has no plan
-// and never will, so the empty plan is cached too rather than recompiled per
-// failing object.
+// pathPlanCache memoizes path plans by expression text plus the variables it
+// was expanded against (see inlineVariables), for the same reason programCache
+// memoizes programs: deriving a plan means compiling the expression and
+// walking its AST, and the answer is the same for every object the expression
+// runs against. An expression that will not compile has no plan and never
+// will, so the empty plan is cached too rather than recompiled per failing
+// object.
 type pathPlanCache struct {
-	build func(expr string) pathPlan
+	build func(expr string, variables []Variable) pathPlan
 
 	mu      sync.Mutex
 	entries map[string]*pathPlanCacheEntry
@@ -595,22 +818,40 @@ type pathPlanCacheEntry struct {
 	plan pathPlan
 }
 
-func newPathPlanCache(build func(expr string) pathPlan) *pathPlanCache {
+func newPathPlanCache(build func(expr string, variables []Variable) pathPlan) *pathPlanCache {
 	return &pathPlanCache{
 		build:   build,
 		entries: make(map[string]*pathPlanCacheEntry),
 	}
 }
 
-func (c *pathPlanCache) get(expr string) pathPlan {
+func (c *pathPlanCache) get(expr string, variables []Variable) pathPlan {
+	key := planCacheKey(expr, variables)
+
 	c.mu.Lock()
-	entry, ok := c.entries[expr]
+	entry, ok := c.entries[key]
 	if !ok {
 		entry = &pathPlanCacheEntry{}
-		c.entries[expr] = entry
+		c.entries[key] = entry
 	}
 	c.mu.Unlock()
 
-	entry.once.Do(func() { entry.plan = c.build(expr) })
+	entry.once.Do(func() { entry.plan = c.build(expr, variables) })
 	return entry.plan
+}
+
+// planCacheKey combines an expression with the variables it may reference into
+// one cache key. Two policies can share validation expression text while
+// declaring different variables (or the same names with different bodies), so
+// the expression text alone is not a safe key once variables are in play.
+func planCacheKey(expr string, variables []Variable) string {
+	var b strings.Builder
+	b.WriteString(expr)
+	for _, v := range variables {
+		b.WriteByte(0)
+		b.WriteString(v.Name)
+		b.WriteByte(0)
+		b.WriteString(v.Expression)
+	}
+	return b.String()
 }

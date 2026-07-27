@@ -652,12 +652,14 @@ func TestResolvePolicyName(t *testing.T) {
 			want:       "kubescape-c-0016-allow-privilege-escalation",
 		},
 		{
-			// The retired hand-typed map listed controls (e.g. C-0199) that no
-			// released bundle ships; resolution now matches what deploy-library
-			// actually deploys, so those fail instead of producing a binding to
-			// a policy that does not exist on the cluster.
+			// The retired hand-typed map listed controls (e.g. C-0012) that the
+			// released bundle ships as a policy but without a controlId label, so
+			// PolicyNameForControl cannot resolve it; resolution now matches what
+			// deploy-library actually deploys and exposes by control ID, so this
+			// fails instead of producing a binding to a policy the caller could
+			// not otherwise have found by control ID either.
 			name:      "control absent from the released bundle",
-			controlID: "C-0199",
+			controlID: "C-0012",
 			wantErr:   "unsupported control ID",
 		},
 	}
