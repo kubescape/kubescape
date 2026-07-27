@@ -440,3 +440,137 @@ func TestIsFileAndIsDir(t *testing.T) {
 	assert.False(t, isFile(missingPath))
 	assert.False(t, isDir(missingPath))
 }
+
+func TestReadYamlFile(t *testing.T) {
+	tests := []struct {
+		name      string
+		content   string
+		wantCount int
+		wantErr   bool
+	}{
+		{
+			name: "valid single Kubernetes object",
+			content: `apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+  namespace: default`,
+			wantCount: 1,
+		},
+		{
+			name: "multi-document YAML with two valid objects",
+			content: `apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-1
+  namespace: default
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-1
+  namespace: default`,
+			wantCount: 2,
+		},
+		{
+			name: "YAML list resource is expanded into items",
+			content: `apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: pod-in-list
+      namespace: default
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: svc-in-list
+      namespace: default`,
+			wantCount: 2,
+		},
+		{
+			name:      "empty content returns no objects",
+			content:   "",
+			wantCount: 0,
+		},
+		{
+			name: "malformed YAML document is skipped",
+			content: `apiVersion: v1
+kind: Pod
+metadata:
+  name: good-pod
+  namespace: default
+---
+{not: valid: yaml: [`,
+			wantCount: 1, // the malformed doc is skipped, the good one is kept
+		},
+		{
+			name:      "non-Kubernetes object (no kind) returns no results",
+			content:   "foo: bar\nbaz: qux",
+			wantCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := readYamlFile([]byte(tt.content))
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantCount, len(got))
+		})
+	}
+}
+
+func TestReadJsonFile(t *testing.T) {
+	tests := []struct {
+		name      string
+		content   string
+		wantCount int
+		wantErr   bool
+	}{
+		{
+			name: "valid single Kubernetes object",
+			content: `{
+				"apiVersion": "v1",
+				"kind": "Pod",
+				"metadata": {"name": "test-pod", "namespace": "default"}
+			}`,
+			wantCount: 1,
+		},
+		{
+			name: "JSON array of Kubernetes objects",
+			content: `[
+				{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "pod-1", "namespace": "default"}},
+				{"apiVersion": "v1", "kind": "Service", "metadata": {"name": "svc-1", "namespace": "default"}}
+			]`,
+			wantCount: 2,
+		},
+		{
+			name:      "invalid JSON returns error",
+			content:   `{not valid json`,
+			wantCount: 0,
+			wantErr:   true,
+		},
+		{
+			name:      "empty JSON object (no kind) returns no workloads",
+			content:   `{}`,
+			wantCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := readJsonFile([]byte(tt.content))
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantCount, len(got))
+		})
+	}
+}
