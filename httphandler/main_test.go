@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/httphandler/config"
 )
 
 // validServicesV3JSON is a minimal well-formed service-discovery v3 payload.
@@ -68,4 +71,32 @@ func TestInitializeSaaSEnv_networkFailure(t *testing.T) {
 	t.Cleanup(func() { serviceDiscoveryTimeout = origTimeout })
 
 	initializeSaaSEnv() // must log a warning and return, not call Fatal/os.Exit
+}
+
+// TestInitializeSaaSEnv_noBackendConfigured verifies that with no service-discovery
+// file, no API_URL, and no account/accessKey, initializeSaaSEnv skips SaaS wiring
+// entirely (no network call, no cloud connector set) - see
+// https://github.com/kubescape/kubescape/issues/2555.
+func TestInitializeSaaSEnv_noBackendConfigured(t *testing.T) {
+	origAccount, origAccessKey := config.GetAccount(), config.GetAccessKey()
+	config.SetAccount("")
+	config.SetAccessKey("")
+	t.Cleanup(func() {
+		config.SetAccount(origAccount)
+		config.SetAccessKey(origAccessKey)
+	})
+
+	origConnector := getter.GetKSCloudAPIConnector()
+	getter.SetKSCloudAPIConnector(nil)
+	t.Cleanup(func() { getter.SetKSCloudAPIConnector(origConnector) })
+
+	t.Setenv("KS_SERVICE_DISCOVERY_FILE_PATH", filepath.Join(t.TempDir(), "no-services.json"))
+	t.Setenv("API_URL", "")
+
+	initializeSaaSEnv()
+
+	conn := getter.GetKSCloudAPIConnector()
+	if conn.GetCloudAPIURL() != "" || conn.GetCloudReportURL() != "" {
+		t.Fatalf("expected no cloud connector URLs to be set when no backend is configured, got apiURL=%q reportURL=%q", conn.GetCloudAPIURL(), conn.GetCloudReportURL())
+	}
 }

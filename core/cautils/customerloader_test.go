@@ -416,3 +416,26 @@ func TestUpdateCredentials_EnvAppliedWhenNoFlag(t *testing.T) {
 		t.Errorf("expected AccessKey=env-access-key, got %s", configObj.AccessKey)
 	}
 }
+
+func TestUpdateConfigFile_SucceedsWhenDirectoryAlreadyHasCorrectPermissions(t *testing.T) {
+	// Regression test for https://github.com/kubescape/kubescape/issues/2555:
+	// on some mounted volumes (e.g. an emptyDir mounted as a non-root user)
+	// os.Chmod on an already-correctly-permissioned directory/file can fail
+	// even though the directory is perfectly usable. That must not abort
+	// persisting the config.
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	defer func() { getter.DefaultLocalStore = originalStore }()
+
+	configObj := mockConfigObj()
+
+	require.NoError(t, updateConfigFile(configObj))
+	require.NoError(t, updateConfigFile(configObj)) // second write hits the "pre-existing" chmod paths
+
+	dat, err := os.ReadFile(ConfigFileFullPath())
+	require.NoError(t, err)
+
+	readBack := &ConfigObj{}
+	require.NoError(t, json.Unmarshal(dat, readBack))
+	assert.Equal(t, configObj.AccountID, readBack.AccountID)
+}

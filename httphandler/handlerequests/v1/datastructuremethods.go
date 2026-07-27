@@ -56,6 +56,7 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 	if scanRequest.Submit != nil {
 		if submit := cautils.NewBoolPtr(scanRequest.Submit); submit.Get() != nil {
 			scanInfo.Submit = *submit.Get()
+			scanInfo.SubmitExplicitlySet = true
 		}
 	}
 

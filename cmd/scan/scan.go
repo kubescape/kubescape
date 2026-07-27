@@ -50,6 +50,15 @@ var scanCmdExamples = fmt.Sprintf(`
   %[1]s scan --kube-context <kubernetes context>
 `, cautils.ExecName())
 
+// applyExplicitSubmitFlag marks scanInfo.SubmitExplicitlySet when the caller passed
+// --submit on the command line, so that setSubmitBehavior does not silently override
+// an explicit opt-out based on tenant/backend auto-detection.
+func applyExplicitSubmitFlag(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+	if f := cmd.Flags().Lookup("submit"); f != nil && f.Changed {
+		scanInfo.SubmitExplicitlySet = true
+	}
+}
+
 func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
 
@@ -67,6 +76,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 					scanInfo.ControlsVersion,
 				)
 			}
+			applyExplicitSubmitFlag(cmd, &scanInfo)
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {

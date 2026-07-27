@@ -270,6 +270,9 @@ func defaultScanInfo() *cautils.ScanInfo {
 	scanInfo.FormatVersion = envToString("KS_FORMAT_VERSION", "v2")          // output format version
 	scanInfo.Format = envToString("KS_FORMAT", "json")                       // default output should be json
 	scanInfo.Submit = envToBool("KS_SUBMIT", false)                          // publish results to Kubescape SaaS
+	if _, ok := os.LookupEnv("KS_SUBMIT"); ok {
+		scanInfo.SubmitExplicitlySet = true
+	}
 	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)                       // do not publish results to Kubescape SaaS
 	scanInfo.EnableRegoPrint = envToBool("KS_REGO_PRINT", false)             // print rego rules
 	// Only set HostSensorEnabled when explicitly configured; leaving it nil allows

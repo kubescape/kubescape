@@ -125,7 +125,17 @@ func initializeSaaSEnv() {
 	if p := os.Getenv("KS_SERVICE_DISCOVERY_FILE_PATH"); p != "" {
 		path = p
 	}
-	if _, err := os.Stat(path); err == nil {
+	_, fileDiscoveryErr := os.Stat(path)
+	hasFileDiscovery := fileDiscoveryErr == nil
+
+	// No backend was configured (no server URL, no service-discovery file, and no
+	// account/access key) - do not reach out to the default public SaaS endpoint.
+	if !hasFileDiscovery && os.Getenv("API_URL") == "" && config.GetAccount() == "" && config.GetAccessKey() == "" {
+		logger.L().Info("no backend configured (server/account/accessKey not set) - skipping SaaS wiring")
+		return
+	}
+
+	if hasFileDiscovery {
 		logger.L().Info("using file-based service discovery", helpers.String("path", path))
 		sdGetter = servicediscoveryv3.NewServiceDiscoveryFileV3(path)
 	} else {

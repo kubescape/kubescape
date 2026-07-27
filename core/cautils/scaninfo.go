@@ -128,6 +128,7 @@ type ScanInfo struct {
 	FailCoverageThreshold float32                      // Coverage threshold below which the command fails (0 = disabled)
 	FailOnDegradedConfig  bool                         // Fail the scan if control inputs or exceptions could not be loaded and a fallback was used
 	Submit                bool                         // Submit results to Kubescape Cloud BE
+	SubmitExplicitlySet   bool                         // Submit was explicitly requested by the caller (flag/env/request field), as opposed to left at its default
 	ScanID                string                       // Report id of the current scan
 	HostSensorEnabled     BoolPtrFlag                  // Deploy Kubescape K8s host scanner to collect data from certain controls
 	HostSensorYamlPath    string                       // Path to hostsensor file

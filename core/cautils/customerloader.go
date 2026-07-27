@@ -345,16 +345,24 @@ func updateConfigFile(configObj *ConfigObj) error {
 		return err
 	}
 	// Tighten permissions on pre-existing directory in case it was
-	// created with broader permissions by an older version.
+	// created with broader permissions by an older version. This is a
+	// best-effort hardening step: MkdirAll above already applies 0700 to
+	// directories it creates, so a failure here (e.g. chmod is rejected on
+	// some mounted volumes such as an emptyDir mounted as non-root) must
+	// not prevent the config from being persisted.
 	if err := os.Chmod(dir, 0700); err != nil {
-		return err
+		logger.L().Warning("failed to tighten permissions on config directory", helpers.String("dir", dir), helpers.Error(err))
 	}
 	if err := os.WriteFile(fullPath, configObj.Config(), 0600); err != nil {
 		return err
 	}
 	// Tighten permissions on pre-existing file in case it was created
-	// with broader permissions by an older version.
-	return os.Chmod(fullPath, 0600)
+	// with broader permissions by an older version. Same best-effort
+	// rationale as above: WriteFile already applies 0600 to files it creates.
+	if err := os.Chmod(fullPath, 0600); err != nil {
+		logger.L().Warning("failed to tighten permissions on config file", helpers.String("path", fullPath), helpers.Error(err))
+	}
+	return nil
 }
 
 func (c *ClusterConfig) GenerateAccountID() (string, error) {

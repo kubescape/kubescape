@@ -20,6 +20,16 @@ func TestDefaultScanInfo(t *testing.T) {
 	assert.False(t, s.HostSensorEnabled.GetBool())
 	assert.False(t, s.Local)
 	assert.False(t, s.Submit)
+	assert.False(t, s.SubmitExplicitlySet)
+}
+
+func TestDefaultScanInfo_SubmitExplicitlySetFromEnv(t *testing.T) {
+	t.Setenv("KS_SUBMIT", "false")
+
+	s := defaultScanInfo()
+
+	assert.False(t, s.Submit)
+	assert.True(t, s.SubmitExplicitlySet)
 }
 
 func TestGetScanCommand(t *testing.T) {

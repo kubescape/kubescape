@@ -96,6 +96,7 @@ func getPrometheusDefaultScanCommand(scanID, resultsFile, frameworksParam string
 	scanInfo := defaultScanInfo()
 	scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape from downloading the artifacts every time)
 	scanInfo.Submit = false                              // do not submit results every scan
+	scanInfo.SubmitExplicitlySet = true                  // do not submit results every scan
 	scanInfo.Local = true                                // do not submit results every scan
 	scanInfo.FrameworkScan = true
 	scanInfo.HostSensorEnabled.SetBool(false)                // disable host scanner

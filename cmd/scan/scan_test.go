@@ -379,6 +379,35 @@ func TestGetScanCommand(t *testing.T) {
 	assert.Equal(t, scanCmdExamples, cmd.Example)
 }
 
+func TestApplyExplicitSubmitFlag(t *testing.T) {
+	// --submit not passed - default value, not explicitly set
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	si := &cautils.ScanInfo{}
+	applyExplicitSubmitFlag(cmd, si)
+	assert.False(t, si.SubmitExplicitlySet)
+
+	// --submit=false passed explicitly - regression test for
+	// https://github.com/kubescape/kubescape/issues/2555, so an explicit
+	// opt-out is not silently overridden by tenant/backend auto-detection.
+	// ParseFlags (not PersistentFlags().Set) is used so cobra merges the
+	// persistent flags into cmd.Flags(), matching real CLI invocation.
+	mockKubescape = &mocks.MockIKubescape{}
+	cmd = GetScanCommand(mockKubescape)
+	require.NoError(t, cmd.ParseFlags([]string{"--submit=false"}))
+	si = &cautils.ScanInfo{}
+	applyExplicitSubmitFlag(cmd, si)
+	assert.True(t, si.SubmitExplicitlySet)
+
+	// --submit=true passed explicitly
+	mockKubescape = &mocks.MockIKubescape{}
+	cmd = GetScanCommand(mockKubescape)
+	require.NoError(t, cmd.ParseFlags([]string{"--submit=true"}))
+	si = &cautils.ScanInfo{}
+	applyExplicitSubmitFlag(cmd, si)
+	assert.True(t, si.SubmitExplicitlySet)
+}
+
 func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	cmd := GetScanCommand(mockKubescape)

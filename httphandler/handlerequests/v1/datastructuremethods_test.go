@@ -15,6 +15,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestToScanInfo_SubmitExplicitlySet(t *testing.T) {
+	// no submit field in the request - not explicitly set
+	s := ToScanInfo(&utilsmetav1.PostScanRequest{TargetType: apisv1.KindFramework})
+	assert.False(t, s.SubmitExplicitlySet)
+
+	// submit:false explicitly requested
+	falseVal := false
+	s = ToScanInfo(&utilsmetav1.PostScanRequest{TargetType: apisv1.KindFramework, Submit: &falseVal})
+	assert.True(t, s.SubmitExplicitlySet)
+	assert.False(t, s.Submit)
+
+	// submit:true explicitly requested
+	trueVal := true
+	s = ToScanInfo(&utilsmetav1.PostScanRequest{TargetType: apisv1.KindFramework, Submit: &trueVal})
+	assert.True(t, s.SubmitExplicitlySet)
+	assert.True(t, s.Submit)
+}
+
 func TestToScanInfo(t *testing.T) {
 	{
 		req := &utilsmetav1.PostScanRequest{

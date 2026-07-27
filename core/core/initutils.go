@@ -198,6 +198,10 @@ func policyIdentifierIdentities(pi []cautils.PolicyIdentifier) string {
 func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig) {
 
 	/*
+		If the caller explicitly opted out of submission (--submit=false, KS_SUBMIT=false,
+		or the httphandler request body's submit:false) - Do not send report, and do not
+		let the auto-detection below override that choice.
+
 		If keep-local OR scan type which is not submittable - Do not send report
 
 		If CloudReportURL not set - Do not send report
@@ -211,6 +215,12 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 				Valid Account - Submit report
 
 	*/
+
+	// respect an explicit opt-out - never auto-submit against the caller's wishes
+	if scanInfo.SubmitExplicitlySet && !scanInfo.Submit {
+		scanInfo.Submit = false
+		return
+	}
 
 	// do not submit control/workload scanning
 	if !isScanTypeForSubmission(scanInfo.ScanType) || scanInfo.Local {
