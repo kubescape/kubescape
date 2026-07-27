@@ -63,21 +63,32 @@ type Evaluator struct {
 	// behind a violation's remediation paths happens once per expression rather
 	// than once per failing object (see paths.go).
 	plans *pathPlanCache
-	// costLimit overrides the per-evaluation CEL cost budget. Zero means "do not
-	// override", which leaves the budget the base env already bakes in
-	// (apiserver's PerCallLimit). When cost limits are wired up the real value
-	// flows through here, so that becomes a value change not a signature one.
-	costLimit uint64
+	// costBudget overrides the budget one policy evaluation shares across all of
+	// its expressions against one object. Zero means the apiserver's
+	// RuntimeCELCostBudget, which is what keeps us in step with admission; tests
+	// set it low to reach the exhausted path without writing a costly
+	// expression. The PER-EXPRESSION limit is not configurable here on purpose:
+	// the base env bakes in cel.CostLimit(PerCallLimit) and overriding it would
+	// mean scanning under a different ceiling than admission enforces.
+	costBudget int64
 }
 
 // Option configures an Evaluator.
 type Option func(*Evaluator)
 
-// WithCostLimit overrides the per-evaluation CEL cost budget. Leave it unset to
-// keep the base env's default (apiserver's PerCallLimit), which is what gives us
-// scan/admission parity.
-func WithCostLimit(limit uint64) Option {
-	return func(e *Evaluator) { e.costLimit = limit }
+// WithCostBudget overrides the shared per-policy-evaluation cost budget. Leave
+// it unset to keep the apiserver's RuntimeCELCostBudget, which is what gives us
+// scan/admission parity (see budget.go).
+func WithCostBudget(budget int64) Option {
+	return func(e *Evaluator) { e.costBudget = budget }
+}
+
+// budgetLimit is the shared budget a single object's evaluation starts with.
+func (e *Evaluator) budgetLimit() int64 {
+	if e.costBudget > 0 {
+		return e.costBudget
+	}
+	return celconfig.RuntimeCELCostBudget
 }
 
 // NewEvaluator builds an Evaluator over the offline VAP CEL env (see newEnv).
@@ -123,6 +134,14 @@ func NewEvaluator(opts ...Option) (*Evaluator, error) {
 // Each validation then yields one ValidationResult, in order. The error return is
 // reserved for setup failures; per-validation outcomes (including eval errors)
 // live on the result (see evaluateValidation).
+//
+// One shared cost budget covers the whole call, matching what admission spends
+// on this object (see budget.go). When it runs out we stop evaluating, as the
+// apiserver does, but unlike the apiserver we KEEP the verdicts already reached
+// instead of collapsing the policy into a single error: the scanner is built to
+// report a mixed outcome, and discarding a confirmed violation because a later
+// validation ran long would lose real information. The unreached validations
+// carry the out-of-budget error, so they read as unknown, never as passing.
 func (e *Evaluator) EvaluateOnObject(
 	ctx context.Context,
 	obj map[string]any,
@@ -131,11 +150,16 @@ func (e *Evaluator) EvaluateOnObject(
 	variables []Variable,
 	validations []Validation,
 ) ([]ValidationResult, error) {
-	activation := e.activationFor(ctx, obj, namespaceObject, params, variables)
+	budget := newCostBudget(e.budgetLimit())
+	activation := e.activationFor(ctx, obj, namespaceObject, params, variables, budget)
 
 	results := make([]ValidationResult, 0, len(validations))
 	for _, val := range validations {
-		res := e.evaluateValidation(ctx, val, activation)
+		if budget.exhausted() {
+			results = append(results, ValidationResult{Expression: val.Expression, Err: budget.err()})
+			continue
+		}
+		res := e.evaluateValidation(ctx, val, activation, budget)
 		if res.Err == nil && !res.Passed {
 			res.Paths = e.violationPaths(ctx, val.Expression, obj, namespaceObject, params, variables)
 		}
@@ -154,11 +178,14 @@ func (e *Evaluator) EvaluateOnObject(
 // narrowed, which is why this is separate: the lazy variables memoize against
 // the object they were built for, so a modified object needs its own bindings
 // rather than a reused map.
-func (e *Evaluator) activationFor(ctx context.Context, obj, namespaceObject map[string]any, params any, variables []Variable) map[string]any {
+//
+// budget is the cost budget the variables bound here charge against, and may be
+// nil for an unmetered activation (path derivation, see violationPaths).
+func (e *Evaluator) activationFor(ctx context.Context, obj, namespaceObject map[string]any, params any, variables []Variable, budget *costBudget) map[string]any {
 	activation := stubBindings(obj, namespaceObject)
 	activation["object"] = obj
 	activation["params"] = params
-	activation["variables"] = e.lazyVariables(ctx, variables, activation)
+	activation["variables"] = e.lazyVariables(ctx, variables, activation, budget)
 	return activation
 }
 
@@ -169,9 +196,16 @@ func (e *Evaluator) activationFor(ctx context.Context, obj, namespaceObject map[
 // element": an expression that errors or returns a non-bool on the narrowed
 // object tells us nothing, and blaming an element on a guess would put a wrong
 // path in front of the user.
+//
+// These re-runs are deliberately UNMETERED by the policy's shared cost budget
+// (nil budget). Admission never narrows an object and re-checks it, so charging
+// this work would let a scan run out of budget where admission does not, and
+// report unknown for a violation admission is happy to reject. Each re-run is
+// still capped by the per-expression limit the base env applies to every
+// program, and the whole loop only runs for an object that already failed.
 func (e *Evaluator) violationPaths(ctx context.Context, expr string, obj, namespaceObject map[string]any, params any, variables []Variable) []PathHint {
 	return e.plans.get(expr, variables).resolve(obj, func(narrowed map[string]any) bool {
-		out, err := e.evalExpression(ctx, expr, e.activationFor(ctx, narrowed, namespaceObject, params, variables))
+		out, err := e.evalExpression(ctx, expr, e.activationFor(ctx, narrowed, namespaceObject, params, variables, nil), nil)
 		if err != nil {
 			return false
 		}
@@ -206,12 +240,21 @@ const variablesTypeName = "kubescape.cel.variables"
 // part of, so a variable referencing variables.<earlier> triggers that earlier
 // variable's callback on demand. An eval/compile failure becomes a CEL error
 // value, which propagates only to the validation that referenced the variable.
-func (e *Evaluator) lazyVariables(ctx context.Context, variables []Variable, activation map[string]any) *lazy.MapValue {
+// A variable's cost is REPORTED to the budget rather than charged against it
+// here: the variable runs inside whichever expression first referenced it, so
+// the two are settled together by that expression's charge, which is how the
+// apiserver's compositionContext accounts for them. Memoization means a second
+// validation reading the same variable pays nothing, offline and at admission
+// alike.
+func (e *Evaluator) lazyVariables(ctx context.Context, variables []Variable, activation map[string]any, budget *costBudget) *lazy.MapValue {
 	lazyVars := lazy.NewMapValue(types.NewObjectType(variablesTypeName))
 	for _, v := range variables {
 		v := v // capture per iteration for the callback
 		lazyVars.Append(v.Name, func(*lazy.MapValue) ref.Val {
-			out, err := e.evalExpression(ctx, v.Expression, activation)
+			out, details, err := e.run(ctx, v.Expression, activation)
+			if reportErr := budget.reportDetails(details); reportErr != nil {
+				return types.NewErr("variable %q: %v", v.Name, reportErr)
+			}
 			if err != nil {
 				return types.NewErr("variable %q: %v", v.Name, err)
 			}
@@ -224,10 +267,10 @@ func (e *Evaluator) lazyVariables(ctx context.Context, variables []Variable, act
 // evaluateValidation evaluates one validation against the prepared activation.
 // Only a compile/eval failure of the validation expression sets Err; everything
 // else resolves to a clean pass or a violation with a message.
-func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, activation map[string]any) ValidationResult {
+func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, activation map[string]any, budget *costBudget) ValidationResult {
 	res := ValidationResult{Expression: val.Expression}
 
-	out, err := e.evalExpression(ctx, val.Expression, activation)
+	out, err := e.evalExpression(ctx, val.Expression, activation, budget)
 	if err != nil {
 		res.Err = err
 		return res
@@ -241,7 +284,7 @@ func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, acti
 
 	res.Passed = passed
 	if !passed {
-		res.Message = e.resolveMessage(ctx, val, activation)
+		res.Message = e.resolveMessage(ctx, val, activation, budget)
 	}
 	return res
 }
@@ -255,9 +298,18 @@ func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, acti
 // violation, so we fall back rather than promote to Err. A messageExpression
 // result that is non-string, empty/whitespace-only, multi-line, or longer than
 // the apiserver's limit also falls back, matching what admission would accept.
-func (e *Evaluator) resolveMessage(ctx context.Context, val Validation, activation map[string]any) string {
+//
+// A messageExpression draws from the same budget, as it does at admission,
+// where it runs on whatever the validations left. Exhausting the budget here
+// still only costs the message: the violation stands with its fallback text,
+// and the validations that follow report the out-of-budget error instead.
+// (The apiserver runs every validation before any messageExpression; we
+// interleave them, so the two can differ in WHICH expression first finds the
+// budget empty. The set of expressions charged, and therefore whether the
+// policy fits, is the same.)
+func (e *Evaluator) resolveMessage(ctx context.Context, val Validation, activation map[string]any, budget *costBudget) string {
 	if val.MessageExpression != "" {
-		if msg, ok := e.evalMessageExpression(ctx, val.MessageExpression, activation); ok {
+		if msg, ok := e.evalMessageExpression(ctx, val.MessageExpression, activation, budget); ok {
 			return msg
 		}
 	}
@@ -272,8 +324,8 @@ func (e *Evaluator) resolveMessage(ctx context.Context, val Validation, activati
 // errors, is non-string, is empty/whitespace, exceeds the size limit, or spans
 // multiple lines; we apply the same guards so the message we report offline is
 // one admission would actually use.
-func (e *Evaluator) evalMessageExpression(ctx context.Context, expr string, activation map[string]any) (string, bool) {
-	out, err := e.evalExpression(ctx, expr, activation)
+func (e *Evaluator) evalMessageExpression(ctx context.Context, expr string, activation map[string]any, budget *costBudget) (string, bool) {
+	out, err := e.evalExpression(ctx, expr, activation, budget)
 	if err != nil {
 		return "", false
 	}
@@ -288,44 +340,69 @@ func (e *Evaluator) evalMessageExpression(ctx context.Context, expr string, acti
 	return msg, true
 }
 
-// evalExpression evaluates a single CEL expression against the activation. The
-// compiled program comes from the cache (compiled on first use, reused for
-// every later object; see cache.go). When cost reporting is added it surfaces
-// the EvalDetails this currently discards.
-func (e *Evaluator) evalExpression(ctx context.Context, expr string, activation map[string]any) (ref.Val, error) {
-	prog, err := e.programs.get(expr)
-	if err != nil {
+// evalExpression evaluates one expression and settles it against the budget.
+//
+// The charge happens BEFORE the eval error is returned, on purpose: an
+// expression that ran and then failed still consumed the units, and admission
+// charges it the same way (activation.go Evaluate accounts for cost first and
+// only then inspects the error). Skipping the charge on error would let a
+// policy spend more offline than it can at admission.
+func (e *Evaluator) evalExpression(ctx context.Context, expr string, activation map[string]any, budget *costBudget) (ref.Val, error) {
+	out, details, evalErr := e.run(ctx, expr, activation)
+	if err := budget.charge(details); err != nil {
 		return nil, err
 	}
-
-	out, _, err := prog.ContextEval(ctx, activation)
-	if err != nil {
-		return nil, fmt.Errorf("eval: %w", err)
+	if evalErr != nil {
+		return nil, evalErr
 	}
 	return out, nil
 }
 
+// run evaluates a single CEL expression against the activation and hands back
+// the raw cost details alongside the result. The compiled program comes from
+// the cache (compiled on first use, reused for every later object; see
+// cache.go). Callers settle the cost themselves: a validation charges it, a
+// variable only reports it (see lazyVariables).
+func (e *Evaluator) run(ctx context.Context, expr string, activation map[string]any) (ref.Val, *cel.EvalDetails, error) {
+	prog, err := e.programs.get(expr)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	out, details, err := prog.ContextEval(ctx, activation)
+	if err != nil {
+		return nil, details, fmt.Errorf("eval: %w", err)
+	}
+	return out, details, nil
+}
+
 // compileProgram compiles one expression into a runnable program. Callers go
 // through the program cache, never here directly, so each expression compiles
-// once. The cost-limit override is only applied when set; otherwise the base
-// env's baked-in PerCallLimit stands. InterruptCheckFrequency gets added here
-// later too.
+// once.
 //
-// Note for when the cost limit is turned on: this applies a fresh per-expression
-// budget. The apiserver instead shares one budget across all of a policy's
-// expressions (variables + validations) per evaluation, so that accounting, not
-// just the per-call value, is what needs to be matched then.
+// Two program options matter here, and only one of them is ours to set:
+//
+//   - the PER-EXPRESSION cost limit is already in place. MustBaseEnvSet bakes
+//     cel.CostLimit(PerCallLimit) in as a library option and cel-go applies it
+//     to every env.Program call, so no expression can exceed 1M units offline
+//     any more than it can at admission. Setting it again here would be a
+//     no-op at best and a parity break at worst, so we do not.
+//   - InterruptCheckFrequency is NOT in the base env set; the apiserver adds it
+//     in its own compiler (plugin/cel/compile.go). Without it ContextEval only
+//     notices a cancelled context between calls, so a comprehension over a long
+//     list ignores Ctrl+C until it finishes. With it the runtime checks every
+//     CheckFrequency steps, which is what makes an interrupted scan actually
+//     stop.
+//
+// The budget the base env cannot give us is the shared one across a policy's
+// expressions; that is accounted at evaluation time instead (see budget.go).
 func (e *Evaluator) compileProgram(expr string) (cel.Program, error) {
 	ast, issues := e.env.Compile(expr)
 	if issues != nil && issues.Err() != nil {
 		return nil, fmt.Errorf("compile: %w", issues.Err())
 	}
 
-	var opts []cel.ProgramOption
-	if e.costLimit > 0 {
-		opts = append(opts, cel.CostLimit(e.costLimit))
-	}
-	prog, err := e.env.Program(ast, opts...)
+	prog, err := e.env.Program(ast, cel.InterruptCheckFrequency(celconfig.CheckFrequency))
 	if err != nil {
 		return nil, fmt.Errorf("program: %w", err)
 	}
