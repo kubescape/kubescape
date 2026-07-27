@@ -593,6 +593,7 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 
 		violated := false
 		var messages []string
+		var hints []cel.PathHint
 		var objErrs []error
 		for _, res := range eval.Results {
 			if res.Err != nil {
@@ -602,12 +603,13 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 			if !res.Passed {
 				violated = true
 				messages = append(messages, res.Message)
+				hints = append(hints, res.Paths...)
 			}
 		}
 
 		switch {
 		case violated:
-			responses = append(responses, celRuleResponse(rule, obj, messages))
+			responses = append(responses, celRuleResponse(rule, obj, messages, hints))
 			// A confirmed violation wins over a sibling validation that errored,
 			// matching admission (a deny stands). Surface the dropped errors so a
 			// broken validation in an otherwise-failing policy is not invisible.
@@ -672,16 +674,56 @@ func (opap *OPAProcessor) getCELEvaluator() (*cel.Evaluator, error) {
 // handling (processRule) treats CEL and Rego violations identically: a
 // RuleResponse with no Exception is a failure (opa-utils RuleResponse.Failed),
 // and GetFailedResources reads the object back out of AlertObject.K8SApiObjects.
-func celRuleResponse(rule *reporthandling.PolicyRule, obj map[string]any, messages []string) reporthandling.RuleResponse {
+func celRuleResponse(rule *reporthandling.PolicyRule, obj map[string]any, messages []string, hints []cel.PathHint) reporthandling.RuleResponse {
 	return reporthandling.RuleResponse{
-		AlertMessage: strings.Join(messages, "; "),
-		RuleStatus:   reporthandling.StatusFailed,
-		PackageName:  rule.Name,
-		Rulename:     rule.Name,
+		AlertMessage:        strings.Join(messages, "; "),
+		AssistedRemediation: celRemediation(hints),
+		RuleStatus:          reporthandling.StatusFailed,
+		PackageName:         rule.Name,
+		Rulename:            rule.Name,
 		AlertObject: reporthandling.AlertObject{
 			K8SApiObjects: []map[string]any{obj},
 		},
 	}
+}
+
+// celRemediation maps the evaluator's neutral path hints onto the report
+// model's remediation fields, so appendPaths gives a CEL failure the same
+// ResourceAssociatedRule.Paths a Rego failure carries.
+//
+// A hint with a value says what the policy requires at that path, which is a
+// fix `kubescape fix` can write into the YAML. A hint without one only says
+// where the policy looked, so it becomes a review path: naming the field is
+// useful, but inventing the value to put there would let `kubescape fix` write
+// something the policy never asked for.
+//
+// Paths repeat across a policy's validations (the bundle guards each kind with
+// its own validation, and several can name the same field), so they are
+// deduplicated by path to keep one finding from listing the same path twice.
+// The dedup is keyed on the path alone, not the whole hint: if the same path
+// arrives once with a value and once without, it must land in exactly one of
+// FixPaths or ReviewPaths, so the valued hint wins and the bare one is dropped.
+func celRemediation(hints []cel.PathHint) reporthandling.AssistedRemediation {
+	byPath := make(map[string]string, len(hints))
+	order := make([]string, 0, len(hints))
+	for _, hint := range hints {
+		if existing, seen := byPath[hint.Path]; !seen {
+			byPath[hint.Path] = hint.Value
+			order = append(order, hint.Path)
+		} else if existing == "" {
+			byPath[hint.Path] = hint.Value // a valued hint supersedes a bare one
+		}
+	}
+
+	var remediation reporthandling.AssistedRemediation
+	for _, path := range order {
+		if value := byPath[path]; value != "" {
+			remediation.FixPaths = append(remediation.FixPaths, armotypes.FixPath{Path: path, Value: value})
+			continue
+		}
+		remediation.ReviewPaths = append(remediation.ReviewPaths, path)
+	}
+	return remediation
 }
 
 // celResourceID labels an object in an eval-error message; it falls back to a

@@ -43,6 +43,11 @@ type ValidationResult struct {
 	Passed     bool
 	Message    string
 	Err        error
+	// Paths are the places in the object this validation looked at, derived
+	// from the expression (see paths.go). Only set for a violation, since a
+	// passing or unknown verdict has nothing to remediate. Empty is normal: an
+	// expression we cannot read a path out of reports none rather than guess.
+	Paths []PathHint
 }
 
 // Evaluator runs a VAP's variables and validations against scanned objects. The
@@ -54,6 +59,10 @@ type Evaluator struct {
 	// expression is compiled once per Evaluator rather than once per scanned
 	// object (see cache.go).
 	programs *programCache
+	// plans caches the path plan derived from each expression, so the AST walk
+	// behind a violation's remediation paths happens once per expression rather
+	// than once per failing object (see paths.go).
+	plans *pathPlanCache
 	// costLimit overrides the per-evaluation CEL cost budget. Zero means "do not
 	// override", which leaves the budget the base env already bakes in
 	// (apiserver's PerCallLimit). When cost limits are wired up the real value
@@ -84,6 +93,7 @@ func NewEvaluator(opts ...Option) (*Evaluator, error) {
 	// The cache closes over e so compiles pick up option-set state (costLimit);
 	// options are applied above, before anything can trigger a compile.
 	e.programs = newProgramCache(e.compileProgram)
+	e.plans = newPathPlanCache(e.buildPathPlan)
 	return e, nil
 }
 
@@ -121,19 +131,65 @@ func (e *Evaluator) EvaluateOnObject(
 	variables []Variable,
 	validations []Validation,
 ) ([]ValidationResult, error) {
-	// stubBindings owns request, oldObject and namespaceObject. We add the
-	// remaining env-declared variables so every declared variable is bound (an
-	// unbound declared variable errors at eval time, see env.go).
+	activation := e.activationFor(ctx, obj, namespaceObject, params, variables)
+
+	results := make([]ValidationResult, 0, len(validations))
+	for _, val := range validations {
+		res := e.evaluateValidation(ctx, val, activation)
+		if res.Err == nil && !res.Passed {
+			res.Paths = e.violationPaths(ctx, val.Expression, obj, namespaceObject, params, variables)
+		}
+		results = append(results, res)
+	}
+	return results, nil
+}
+
+// activationFor builds the variable bindings one evaluation runs against.
+//
+// stubBindings owns request, oldObject and namespaceObject. We add the
+// remaining env-declared variables so every declared variable is bound (an
+// unbound declared variable errors at eval time, see env.go).
+//
+// Path derivation builds a second activation for the same object with one list
+// narrowed, which is why this is separate: the lazy variables memoize against
+// the object they were built for, so a modified object needs its own bindings
+// rather than a reused map.
+func (e *Evaluator) activationFor(ctx context.Context, obj, namespaceObject map[string]any, params any, variables []Variable) map[string]any {
 	activation := stubBindings(obj, namespaceObject)
 	activation["object"] = obj
 	activation["params"] = params
 	activation["variables"] = e.lazyVariables(ctx, variables, activation)
+	return activation
+}
 
-	results := make([]ValidationResult, 0, len(validations))
-	for _, val := range validations {
-		results = append(results, e.evaluateValidation(ctx, val, activation))
+// violationPaths derives the remediation paths for a validation that just
+// failed on an object (see paths.go for how, and why it needs to re-evaluate).
+//
+// The re-check treats anything other than a clean violation as "not this
+// element": an expression that errors or returns a non-bool on the narrowed
+// object tells us nothing, and blaming an element on a guess would put a wrong
+// path in front of the user.
+func (e *Evaluator) violationPaths(ctx context.Context, expr string, obj, namespaceObject map[string]any, params any, variables []Variable) []PathHint {
+	return e.plans.get(expr).resolve(obj, func(narrowed map[string]any) bool {
+		out, err := e.evalExpression(ctx, expr, e.activationFor(ctx, narrowed, namespaceObject, params, variables))
+		if err != nil {
+			return false
+		}
+		passed, ok := out.Value().(bool)
+		return ok && !passed
+	})
+}
+
+// buildPathPlan compiles an expression and reads its path plan off the AST.
+// Callers go through the plan cache. An expression that will not compile never
+// reached evaluation either, so an empty plan (no paths) is the right answer
+// rather than an error to propagate.
+func (e *Evaluator) buildPathPlan(expr string) pathPlan {
+	ast, issues := e.env.Compile(expr)
+	if issues != nil && issues.Err() != nil {
+		return pathPlan{}
 	}
-	return results, nil
+	return newPathPlan(ast)
 }
 
 // variablesTypeName is the CEL type name of the lazy variables map. It only
