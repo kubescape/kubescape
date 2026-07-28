@@ -306,9 +306,8 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 
 		log.Infof("Patching %d vulnerabilities", len(updates.Updates))
 		patchedImageState, errPkgs, err := manager.InstallUpdates(ctx, updates, ignoreError)
-		log.Infof("Error is: %v", err)
 		if err != nil {
-			return nil, nil
+			return nil, fmt.Errorf("copa: error installing updates :: %w", err)
 		}
 
 		platform := platforms.Normalize(platforms.DefaultSpec())
