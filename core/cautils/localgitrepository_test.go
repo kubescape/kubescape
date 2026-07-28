@@ -8,9 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	gitv5 "github.com/go-git/go-git/v5"
 	configv5 "github.com/go-git/go-git/v5/config"
 	plumbingv5 "github.com/go-git/go-git/v5/plumbing"
+	objectv5 "github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -197,4 +202,145 @@ func TestGetRemoteUrl(t *testing.T) {
 		},
 		)
 	}
+}
+
+func TestLocalGitRepositoryDetachedHead(t *testing.T) {
+	fixture := createDetachedRepositoryFixture(t, "origin", "https://github.com/kubescape/detached-head-fixture.git")
+
+	repository, err := NewLocalGitRepository(filepath.Join(fixture.root, "nested"))
+	require.NoError(t, err)
+	assert.Empty(t, repository.GetBranchName(), "a detached commit must not be reported as a branch")
+
+	remoteURL, err := repository.GetRemoteUrl()
+	require.NoError(t, err)
+	assert.Equal(t, "https://github.com/kubescape/detached-head-fixture.git", remoteURL)
+	name, err := repository.GetName()
+	require.NoError(t, err)
+	assert.Equal(t, "detached-head-fixture", name)
+
+	root, err := repository.GetRootDir()
+	require.NoError(t, err)
+	wantRoot, err := filepath.EvalSymlinks(fixture.root)
+	require.NoError(t, err)
+	assert.Equal(t, wantRoot, root)
+
+	commit, err := repository.GetLastCommit()
+	require.NoError(t, err)
+	assert.Equal(t, fixture.commit.String(), commit.SHA)
+	assert.Equal(t, "fixture commit", commit.Message)
+	assert.Equal(t, "Fixture Author", commit.Author.Name)
+	assert.Equal(t, "Fixture Committer", commit.Committer.Name)
+	assert.True(t, fixture.when.Equal(commit.Committer.Date))
+}
+
+func TestDetachedHeadRemoteResolution(t *testing.T) {
+	tests := []struct {
+		name       string
+		remoteName string
+		wantURL    string
+		wantError  string
+	}{
+		{
+			name:       "origin is the detached default",
+			remoteName: "origin",
+			wantURL:    "https://example.com/team/project.git",
+		},
+		{
+			name:       "a non-origin remote is not guessed",
+			remoteName: "upstream",
+			wantError:  "did not find a default remote with name 'origin'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := createDetachedRepositoryFixture(t, tt.remoteName, "https://example.com/team/project.git")
+			repository, err := NewLocalGitRepository(fixture.root)
+			require.NoError(t, err)
+
+			got, err := repository.GetRemoteUrl()
+			if tt.wantError != "" {
+				require.EqualError(t, err, tt.wantError)
+				assert.Empty(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantURL, got)
+		})
+	}
+}
+
+func TestMetadataGitLocalDetachedHead(t *testing.T) {
+	t.Run("origin produces complete detached metadata", func(t *testing.T) {
+		fixture := createDetachedRepositoryFixture(t, "origin", "https://github.com/kubescape/detached-head-fixture.git")
+
+		metadata, err := metadataGitLocal(fixture.root)
+		require.NoError(t, err)
+		require.NotNil(t, metadata)
+		assert.Equal(t, "none", metadata.Branch)
+		assert.Equal(t, "none", metadata.DefaultBranch)
+		assert.Equal(t, "github", metadata.Provider)
+		assert.Equal(t, "kubescape", metadata.Owner)
+		assert.Equal(t, "detached-head-fixture", metadata.Repo)
+		assert.Equal(t, "https://github.com/kubescape/detached-head-fixture", metadata.RemoteURL)
+		wantRoot, rootErr := filepath.EvalSymlinks(fixture.root)
+		require.NoError(t, rootErr)
+		assert.Equal(t, wantRoot, metadata.LocalRootPath)
+		assert.Equal(t, fixture.commit.String(), metadata.LastCommit.Hash)
+		assert.Equal(t, "Fixture Committer", metadata.LastCommit.CommitterName)
+		assert.True(t, fixture.when.Equal(metadata.LastCommit.Date))
+	})
+
+	t.Run("remote lookup failure preserves safe partial metadata", func(t *testing.T) {
+		fixture := createDetachedRepositoryFixture(t, "upstream", "https://example.com/team/project.git")
+
+		metadata, err := metadataGitLocal(fixture.root)
+		require.EqualError(t, err, "did not find a default remote with name 'origin'")
+		require.NotNil(t, metadata)
+		assert.Equal(t, "none", metadata.Branch)
+		assert.Equal(t, "none", metadata.DefaultBranch)
+		wantRoot, rootErr := filepath.EvalSymlinks(fixture.root)
+		require.NoError(t, rootErr)
+		assert.Equal(t, wantRoot, metadata.LocalRootPath)
+	})
+}
+
+type detachedRepositoryFixture struct {
+	root   string
+	commit plumbingv5.Hash
+	when   time.Time
+}
+
+func createDetachedRepositoryFixture(t *testing.T, remoteName, remoteURL string) detachedRepositoryFixture {
+	t.Helper()
+
+	root := t.TempDir()
+	repository, err := gitv5.PlainInit(root, false)
+	require.NoError(t, err)
+	worktree, err := repository.Worktree()
+	require.NoError(t, err)
+	require.NoError(t, os.Mkdir(filepath.Join(root, "nested"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "README.md"), []byte("fixture\n"), 0o600))
+	_, err = worktree.Add("README.md")
+	require.NoError(t, err)
+
+	when := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	commit, err := worktree.Commit("fixture commit", &gitv5.CommitOptions{
+		Author: &objectv5.Signature{
+			Name:  "Fixture Author",
+			Email: "author@example.com",
+			When:  when.Add(-time.Minute),
+		},
+		Committer: &objectv5.Signature{
+			Name:  "Fixture Committer",
+			Email: "committer@example.com",
+			When:  when,
+		},
+	})
+	require.NoError(t, err)
+	_, err = repository.CreateRemote(&configv5.RemoteConfig{Name: remoteName, URLs: []string{remoteURL}})
+	require.NoError(t, err)
+	require.NoError(t, repository.Storer.SetReference(plumbingv5.NewHashReference(plumbingv5.HEAD, commit)))
+
+	return detachedRepositoryFixture{root: root, commit: commit, when: when}
 }

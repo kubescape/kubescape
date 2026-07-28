@@ -537,25 +537,36 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 }
 
 func metadataGitLocal(input string) (*reporthandlingv2.RepoContextMetadata, error) {
+	repoContext := &reporthandlingv2.RepoContextMetadata{
+		Branch:        "none",
+		DefaultBranch: "none",
+		LocalRootPath: getAbsPath(input),
+	}
 	gitParser, err := NewLocalGitRepository(input)
 	if err != nil {
-		return nil, fmt.Errorf("%w", err)
+		return repoContext, fmt.Errorf("%w", err)
+	}
+	if root, rootErr := gitParser.GetRootDir(); rootErr == nil {
+		repoContext.LocalRootPath = root
 	}
 	remoteURL, err := gitParser.GetRemoteUrl()
 	if err != nil {
-		return nil, fmt.Errorf("%w", err)
+		return repoContext, fmt.Errorf("%w", err)
 	}
-	repoContext := &reporthandlingv2.RepoContextMetadata{}
 	gitParserURL, err := giturl.NewGitURL(remoteURL)
 	if err != nil {
 		return repoContext, fmt.Errorf("%w", err)
 	}
-	gitParserURL.SetBranchName(gitParser.GetBranchName())
+	branchName := gitParser.GetBranchName()
+	if branchName != "" {
+		gitParserURL.SetBranchName(branchName)
+		repoContext.Branch = branchName
+		repoContext.DefaultBranch = ""
+	}
 
 	repoContext.Provider = gitParserURL.GetProvider()
 	repoContext.Repo = gitParserURL.GetRepoName()
 	repoContext.Owner = gitParserURL.GetOwnerName()
-	repoContext.Branch = gitParserURL.GetBranchName()
 	repoContext.RemoteURL = gitParserURL.GetURL().String()
 
 	commit, err := gitParser.GetLastCommit()
@@ -567,8 +578,6 @@ func metadataGitLocal(input string) (*reporthandlingv2.RepoContextMetadata, erro
 		Date:          commit.Committer.Date,
 		CommitterName: commit.Committer.Name,
 	}
-	repoContext.LocalRootPath, _ = gitParser.GetRootDir()
-
 	return repoContext, nil
 }
 func getHostname() string {

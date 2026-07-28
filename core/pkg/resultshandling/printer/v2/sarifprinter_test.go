@@ -427,6 +427,22 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 			want: tempDir,
 		},
 		{
+			name: "GitLocal without repository metadata",
+			session: cautils.OPASessionObj{
+				Metadata: &reporthandlingv2.Metadata{
+					ScanMetadata: reporthandlingv2.ScanMetadata{
+						ScanningTarget: reporthandlingv2.GitLocal,
+					},
+				},
+			},
+			want: "",
+		},
+		{
+			name:    "missing metadata",
+			session: cautils.OPASessionObj{},
+			want:    "",
+		},
+		{
 			name: "Directory",
 			session: cautils.OPASessionObj{
 				Metadata: &reporthandlingv2.Metadata{
