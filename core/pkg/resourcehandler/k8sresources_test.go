@@ -623,7 +623,11 @@ func TestSetMapNamespaceToNumOfResources(t *testing.T) {
 func TestCloudResourceRequired(t *testing.T) {
 	cloudResources := []string{"container.googleapis.com/v1/ClusterDescribe",
 		"eks.amazonaws.com/v1/DescribeRepositories",
+		"container.googleapis.com/v1/DescribeRepositories",
+		"management.azure.com/v1/DescribeRepositories",
 		"eks.amazonaws.com/v1/ListEntitiesForPolicies",
+		"container.googleapis.com/v1/ListEntitiesForPolicies",
+		"management.azure.com/v1/ListEntitiesForPolicies",
 		"eks.amazonaws.com/v1/ClusterDescribe"}
 
 	assert.True(t, cloudResourceRequired(cloudResources, ClusterDescribe))
