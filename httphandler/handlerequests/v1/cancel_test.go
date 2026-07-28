@@ -188,3 +188,78 @@ func TestCancelScan_EmptyID_CancelsLatest(t *testing.T) {
 		t.Fatal("blocked scan did not unblock after cancelling via empty ID")
 	}
 }
+
+func TestCancelScan_DrainsQueuedRequest_UnblocksWaitingCaller(t *testing.T) {
+	withTempOutputDirs(t)
+
+	firstStarted := make(chan struct{})
+	defer func(o scanner) { scanImpl = o }(scanImpl)
+	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+		close(firstStarted)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+
+	h := NewHTTPHandler(false)
+
+	firstDone := make(chan *http.Response, 1)
+	go func() {
+		rq := httptest.NewRequest(http.MethodPost, "/scan?wait=true", testBody(t))
+		w := httptest.NewRecorder()
+		h.Scan(w, rq)
+		firstDone <- w.Result()
+	}()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first scan was never picked up by watchForScan")
+	}
+	firstID := h.state.getLatestID()
+
+	secondDone := make(chan *http.Response, 1)
+	go func() {
+		rq := httptest.NewRequest(http.MethodPost, "/scan?wait=true", testBody(t))
+		w := httptest.NewRecorder()
+		h.Scan(w, rq)
+		secondDone <- w.Result()
+	}()
+
+	var secondID string
+	for i := 0; i < 200; i++ {
+		if h.state.len() == 2 {
+			secondID = h.state.getLatestID()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if secondID == "" || secondID == firstID {
+		t.Fatalf("second scan was never queued (secondID=%q, firstID=%q)", secondID, firstID)
+	}
+
+	cancelRq := httptest.NewRequest(http.MethodDelete, "/scan?id="+secondID, nil)
+	cancelW := httptest.NewRecorder()
+	h.CancelScan(cancelW, cancelRq)
+
+	if cancelW.Result().StatusCode != http.StatusOK {
+		t.Fatalf("CancelScan status = %d, want %d", cancelW.Result().StatusCode, http.StatusOK)
+	}
+
+	select {
+	case rs := <-secondDone:
+		var resp utilsmetav1.Response
+		if err := json.NewDecoder(rs.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode second Scan response: %v", err)
+		}
+		if resp.Type != utilsapisv1.ErrorScanResponseType {
+			t.Errorf("queued scan response type = %v, want %v", resp.Type, utilsapisv1.ErrorScanResponseType)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued scan caller blocked forever after cancellation")
+	}
+
+	cleanupRq := httptest.NewRequest(http.MethodDelete, "/scan?id="+firstID, nil)
+	cleanupW := httptest.NewRecorder()
+	h.CancelScan(cleanupW, cleanupRq)
+	<-firstDone
+}

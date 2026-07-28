@@ -149,6 +149,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handler.state.setBusy(scanID, cancel)
+	handler.state.setLatestUserScanID(scanID)
 
 	select {
 	case handler.scanRequestChan <- scanRequestParams:
@@ -215,7 +216,7 @@ func (handler *HTTPHandler) CancelScan(w http.ResponseWriter, r *http.Request) {
 
 	scanID := cancelQueryParams.ScanID
 	if scanID == "" {
-		scanID = handler.state.getLatestID()
+		scanID = handler.state.getLatestUserScanID()
 	}
 
 	logger.L().Info("requesting scan cancellation", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
@@ -253,6 +254,16 @@ func (handler *HTTPHandler) drainQueuedScan(id string) {
 		select {
 		case req := <-handler.scanRequestChan:
 			if req.scanID == id {
+				if req.resp != nil {
+					select {
+					case req.resp <- &utilsmetav1.Response{
+						ID:       req.scanID,
+						Type:     utilsapisv1.ErrorScanResponseType,
+						Response: fmt.Sprintf("scan '%s' was cancelled", req.scanID),
+					}:
+					default:
+					}
+				}
 				continue
 			}
 			pending = append(pending, req)

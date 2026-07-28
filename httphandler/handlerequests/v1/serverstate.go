@@ -7,9 +7,10 @@ import (
 )
 
 type serverState struct {
-	statusID map[string]context.CancelFunc
-	latestID string
-	mtx      sync.RWMutex
+	statusID         map[string]context.CancelFunc
+	latestID         string
+	latestUserScanID string
+	mtx              sync.RWMutex
 }
 
 // isBusy is server busy with ID, if id is empty will check for latest ID
@@ -39,6 +40,22 @@ func (s *serverState) setNotBusy(id string) {
 func (s *serverState) getLatestID() string {
 	s.mtx.RLock()
 	id := s.latestID
+	s.mtx.RUnlock()
+	return id
+}
+
+// setLatestUserScanID records id as the latest user-triggered scan (via the
+// Scan handler). Internal scans (e.g. Metrics) do not call this, so it stays
+// distinct from latestID, which any caller of setBusy can advance.
+func (s *serverState) setLatestUserScanID(id string) {
+	s.mtx.Lock()
+	s.latestUserScanID = id
+	s.mtx.Unlock()
+}
+
+func (s *serverState) getLatestUserScanID() string {
+	s.mtx.RLock()
+	id := s.latestUserScanID
 	s.mtx.RUnlock()
 	return id
 }
