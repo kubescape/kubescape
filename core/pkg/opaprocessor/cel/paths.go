@@ -58,6 +58,21 @@ type fieldRef struct {
 	value string
 }
 
+// fieldAlternative is one arm of an object-rooted ternary. base is the object
+// selected by that arm, while ref is the field read from it. Keeping the base
+// is important because the leaf is often absent precisely when it needs to be
+// remediated.
+type fieldAlternative struct {
+	base string
+	ref  fieldRef
+}
+
+// fieldAlternativeGroup contains exactly the arms of one ternary-derived
+// field read. It is recorded while walking the AST; unlike similarly shaped
+// dotted paths, these refs are known to be alternatives rather than inferred
+// to be alternatives later.
+type fieldAlternativeGroup []fieldAlternative
+
 // elementPlan describes a validation that iterates a list on the object, which
 // is the shape almost every workload policy in the bundle has
 // (`object.spec.containers.all(container, ...)`). fields are element-relative,
@@ -81,8 +96,14 @@ type elementPlan struct {
 // pathPlan is everything one validation expression can say about where it
 // failed, independent of any particular object.
 type pathPlan struct {
-	// direct are fields read straight off the object.
+	// direct are fields read straight off the object. Ternary-derived reads are
+	// also kept flattened here for diagnostics; directAlternatives identifies
+	// the exact subsets that resolve must choose between for one object.
 	direct []fieldRef
+	// directAlternatives preserves each object-rooted ternary arm group found
+	// while building the plan. Independent fields never enter these groups even
+	// when their dotted paths happen to share a suffix.
+	directAlternatives []fieldAlternativeGroup
 	// elements is set only when the expression iterates exactly one list on the
 	// object AND narrowing that list to one element and re-checking is an exact
 	// test of that element (see narrowingIsExact). With no such list there is
@@ -239,7 +260,7 @@ func newPathPlan(ast *cel.Ast) pathPlan {
 	// The iterated list itself is not a direct hint: either we are about to
 	// point at one of its elements, or we could not tell which list failed and
 	// naming them all would just be noise.
-	plan.direct = fieldsRootedAt(native, root, "object", ranges)
+	plan.direct, plan.directAlternatives = fieldsAndAlternativesRootedAt(native, root, "object", ranges)
 	return plan
 }
 
@@ -337,26 +358,77 @@ func quantifierIsAll(c celast.ComprehensionExpr) (isAll bool, ok bool) {
 // leaf is noise. So chains that another chain extends are dropped. Scope guards
 // and the excluded paths (an iterated collection) never become fields.
 func fieldsRootedAt(native *celast.AST, root celast.NavigableExpr, ident string, exclude map[string]bool) []fieldRef {
+	refs, _ := fieldsAndAlternativesRootedAt(native, root, ident, exclude)
+	return refs
+}
+
+// fieldsAndAlternativesRootedAt returns the same flattened refs as
+// fieldsRootedAt and, separately, the exact groups produced by selecting a
+// field from an object-rooted ternary. The flattened view keeps plan
+// inspection simple; resolve uses the groups to choose only the arm that can
+// apply to the concrete object.
+func fieldsAndAlternativesRootedAt(native *celast.AST, root celast.NavigableExpr, ident string, exclude map[string]bool) ([]fieldRef, []fieldAlternativeGroup) {
 	var refs []fieldRef
+	var groups []fieldAlternativeGroup
 	for _, node := range celast.MatchDescendants(root, celast.KindMatcher(celast.SelectKind)) {
 		// A select whose parent is a select is the operand of a longer chain;
 		// the outermost one carries the full path.
 		if parent, ok := node.Parent(); ok && parent.Kind() == celast.SelectKind {
 			continue
 		}
-		paths, ok := selectPaths(node, ident)
+		paths, bases, ok := selectPathAlternatives(node, ident)
 		if !ok {
 			continue
 		}
 		value := requiredValue(native, node, ident)
-		for _, path := range paths {
+		group := make(fieldAlternativeGroup, 0, len(paths))
+		for i, path := range paths {
 			if path == "" || scopeGuardFields[path] || exclude[path] {
 				continue
 			}
-			refs = append(refs, fieldRef{path: path, value: value})
+			ref := fieldRef{path: path, value: value}
+			refs = append(refs, ref)
+			if len(bases) > 0 {
+				group = append(group, fieldAlternative{base: bases[i], ref: ref})
+			}
+		}
+		if len(group) > 1 {
+			groups = append(groups, group)
 		}
 	}
-	return dedupeRefs(refs)
+
+	refs = dedupeRefs(refs)
+	final := make(map[string]string, len(refs))
+	for _, ref := range refs {
+		final[ref.path] = ref.value
+	}
+
+	// Reconcile the groups with dedupeRefs: base-object reads encountered while
+	// walking the ternary are prefixes of the actual leaf refs and disappear,
+	// and a presence read may have gained the value from a sibling equality.
+	seen := make(map[string]bool)
+	keptGroups := make([]fieldAlternativeGroup, 0, len(groups))
+	for _, group := range groups {
+		kept := make(fieldAlternativeGroup, 0, len(group))
+		var key strings.Builder
+		for _, alternative := range group {
+			value, ok := final[alternative.ref.path]
+			if !ok {
+				continue
+			}
+			alternative.ref.value = value
+			kept = append(kept, alternative)
+			key.WriteString(alternative.base)
+			key.WriteByte('\x00')
+			key.WriteString(alternative.ref.path)
+			key.WriteByte('\x00')
+		}
+		if len(kept) > 1 && !seen[key.String()] {
+			seen[key.String()] = true
+			keptGroups = append(keptGroups, kept)
+		}
+	}
+	return refs, keptGroups
 }
 
 // dedupeRefs drops duplicates and any path another path extends, then orders
@@ -430,55 +502,127 @@ func selectPath(expr celast.Expr, ident string) (string, bool) {
 // as that catch-all rather than disqualifying the whole chain, since resolve
 // only ever uses a candidate that actually is a list on the object it checks.
 func objectRootedPaths(expr celast.Expr, ident string) ([]string, bool) {
+	paths, _, ok := objectRootedPathCandidates(expr, ident)
+	return paths, ok
+}
+
+// objectRootedPathCandidates is objectRootedPaths with an extra flag reporting
+// whether every ternary condition is an explicit scope dispatch on kind or API
+// version. Plain paths return true for that flag as the neutral recursive case.
+func objectRootedPathCandidates(expr celast.Expr, ident string) (paths []string, scopeDispatch bool, ok bool) {
 	if path, ok := selectPath(expr, ident); ok {
-		return []string{path}, true
+		return []string{path}, true, true
 	}
 	if expr.Kind() != celast.CallKind {
-		return nil, false
+		return nil, false, false
 	}
 	call := expr.AsCall()
 	if call.FunctionName() != operators.Conditional || len(call.Args()) != 3 {
-		return nil, false
+		return nil, false, false
 	}
 
-	truePaths, ok := objectRootedPaths(call.Args()[1], ident)
+	truePaths, trueScopeDispatch, ok := objectRootedPathCandidates(call.Args()[1], ident)
 	if !ok {
-		return nil, false
+		return nil, false, false
 	}
 
 	elseBranch := call.Args()[2]
+	conditionDispatch := scopeDispatchCondition(call.Args()[0], ident)
+	if !conditionDispatch {
+		conditionDispatch = presenceDefaultCondition(call.Args()[0], call.Args()[1], elseBranch, ident)
+	}
+	scopeDispatch = conditionDispatch && trueScopeDispatch
+
 	if elseBranch.Kind() == celast.CallKind && elseBranch.AsCall().FunctionName() == operators.Conditional {
-		elsePaths, ok := objectRootedPaths(elseBranch, ident)
+		elsePaths, elseScopeDispatch, ok := objectRootedPathCandidates(elseBranch, ident)
 		if !ok {
-			return nil, false
+			return nil, false, false
 		}
-		return append(truePaths, elsePaths...), true
+		return append(truePaths, elsePaths...), scopeDispatch && elseScopeDispatch, true
 	}
 	if path, ok := selectPath(elseBranch, ident); ok {
-		return append(truePaths, path), true
+		return append(truePaths, path), scopeDispatch, true
 	}
-	return truePaths, true
+	return truePaths, scopeDispatch, true
 }
 
-// selectPaths generalizes selectPath to a select chain whose base does not
-// bottom out at ident directly but at an object-rooted ternary of paths (see
-// objectRootedPaths) - the shape inlineVariables leaves behind when a
-// variable's own expression picks the right object by kind
-// (`(object.kind == 'Pod' ? object.spec.securityContext : ...).runAsUser`).
-// Each candidate base contributes one path, base-plus-the-peeled-suffix; a
-// plain chain still resolves to its one path, same as selectPath.
+// presenceDefaultCondition recognizes the safe presence-guard shape used by
+// the policy bundle: `has(object.path) ? object.path : {}`. It is neutral when
+// nested beneath a kind or API-version dispatch because it does not choose
+// between different remediation paths; it only supplies an empty default when
+// the already-selected path is absent. Other has()-guarded ternaries remain
+// ordinary conditions so their arms are preserved rather than guessed.
+func presenceDefaultCondition(condition, trueBranch, elseBranch celast.Expr, ident string) bool {
+	if condition.Kind() != celast.SelectKind || !condition.AsSelect().IsTestOnly() {
+		return false
+	}
+	guardedPath, ok := selectPath(condition, ident)
+	if !ok {
+		return false
+	}
+	selectedPath, ok := selectPath(trueBranch, ident)
+	if !ok || selectedPath != guardedPath {
+		return false
+	}
+	return elseBranch.Kind() == celast.MapKind && len(elseBranch.AsMap().Entries()) == 0
+}
+
+// scopeDispatchCondition reports whether a ternary condition is composed only
+// of comparisons on object.kind or object.apiVersion. Those fields select the
+// policy's resource scope; other conditions can choose between arbitrary paths,
+// for which path depth says nothing about the branch actually evaluated.
+func scopeDispatchCondition(expr celast.Expr, ident string) bool {
+	if expr.Kind() != celast.CallKind {
+		return false
+	}
+	call := expr.AsCall()
+	switch call.FunctionName() {
+	case operators.Equals, operators.NotEquals, operators.In:
+		found := false
+		for _, arg := range call.Args() {
+			path, ok := selectPath(arg, ident)
+			if !ok {
+				if arg.Kind() != celast.LiteralKind && arg.Kind() != celast.ListKind {
+					return false
+				}
+				continue
+			}
+			if !scopeGuardFields[path] {
+				return false
+			}
+			found = true
+		}
+		return found
+	case operators.LogicalAnd, operators.LogicalOr:
+		if len(call.Args()) == 0 {
+			return false
+		}
+		for _, arg := range call.Args() {
+			if !scopeDispatchCondition(arg, ident) {
+				return false
+			}
+		}
+		return true
+	case operators.LogicalNot:
+		return len(call.Args()) == 1 && scopeDispatchCondition(call.Args()[0], ident)
+	default:
+		return false
+	}
+}
+
+// selectPathAlternatives generalizes selectPath to a select chain whose base
+// is an object-rooted ternary. Each candidate base contributes its composed
+// leaf path. bases is aligned with paths only when the ternary explicitly
+// dispatches on kind or API version; for any other condition it is nil so the
+// caller conservatively keeps every arm instead of selecting by path shape.
 //
-// The bare base paths are not returned, only the composed ones - a caller
-// that (like fieldsRootedAt, walking every select in the tree) also visits
-// the base's own select nodes as their own chains gets the bare paths
-// separately, and dedupeRefs drops each one once the corresponding composed
-// path here makes it a prefix of something more specific. Without that, a
-// ternary base half-resolved through a further field select would report the
-// object it picks - "spec.securityContext" - as if that whole object were
-// the fix, instead of the one field the validation actually reads off it.
-func selectPaths(expr celast.Expr, ident string) ([]string, bool) {
+// Bare base paths are not returned. The AST walk also sees those selects on
+// their own, and dedupeRefs removes them once the composed leaf exists. This
+// avoids reporting an entire selected object such as spec.securityContext as
+// the fix when the validation actually reads one field below it.
+func selectPathAlternatives(expr celast.Expr, ident string) ([]string, []string, bool) {
 	if path, ok := selectPath(expr, ident); ok {
-		return []string{path}, true
+		return []string{path}, nil, true
 	}
 
 	var suffix []string
@@ -488,11 +632,11 @@ func selectPaths(expr celast.Expr, ident string) ([]string, bool) {
 		expr = sel.Operand()
 	}
 	if len(suffix) == 0 {
-		return nil, false
+		return nil, nil, false
 	}
-	bases, ok := objectRootedPaths(expr, ident)
+	bases, scopeDispatch, ok := objectRootedPathCandidates(expr, ident)
 	if !ok {
-		return nil, false
+		return nil, nil, false
 	}
 
 	for i, j := 0, len(suffix)-1; i < j; i, j = i+1, j-1 {
@@ -504,7 +648,10 @@ func selectPaths(expr celast.Expr, ident string) ([]string, bool) {
 	for i, base := range bases {
 		paths[i] = base + "." + tail
 	}
-	return paths, true
+	if !scopeDispatch {
+		bases = nil
+	}
+	return paths, bases, true
 }
 
 // requiredValue returns the literal a field read is compared against, but only
@@ -699,7 +846,7 @@ func literalString(val ref.Val) (string, bool) {
 // differ). Worth doing, but as its own change.
 func (p pathPlan) resolve(obj map[string]any, violates func(map[string]any) bool) []PathHint {
 	hints := make([]PathHint, 0, len(p.direct))
-	for _, ref := range p.direct {
+	for _, ref := range p.resolveDirect(obj) {
 		hints = append(hints, PathHint{Path: ref.path, Value: ref.value})
 	}
 	if p.elements == nil || len(p.elements.fields) == 0 {
@@ -732,6 +879,75 @@ func (p pathPlan) resolve(obj map[string]any, violates func(map[string]any) bool
 		}
 	}
 	return hints
+}
+
+// resolveDirect selects the applicable arm from each ternary-derived group and
+// preserves every independent direct field. Groups that cannot be resolved
+// are deliberately kept intact: an extra review hint is safer than silently
+// deleting every remediation path.
+func (p pathPlan) resolveDirect(obj map[string]any) []fieldRef {
+	grouped := make(map[string]bool)
+	for _, group := range p.directAlternatives {
+		for _, alternative := range group {
+			grouped[alternative.ref.path] = true
+		}
+	}
+
+	refs := make([]fieldRef, 0, len(p.direct))
+	for _, ref := range p.direct {
+		if !grouped[ref.path] {
+			refs = append(refs, ref)
+		}
+	}
+	for _, group := range p.directAlternatives {
+		refs = append(refs, resolveAlternativeGroup(group, obj)...)
+	}
+	return dedupeRefs(refs)
+}
+
+// resolveAlternativeGroup chooses the most specific base that exists on the
+// object. Candidate bases are commonly nested prefixes (spec,
+// spec.template.spec, ...), so the deepest match is the branch-specific one.
+// A tie or no match is ambiguous and therefore preserves every candidate.
+func resolveAlternativeGroup(group fieldAlternativeGroup, obj map[string]any) []fieldRef {
+	maxDepth := -1
+	var selected []fieldRef
+	for _, alternative := range group {
+		if !objectPathExists(obj, alternative.base) {
+			continue
+		}
+		depth := strings.Count(alternative.base, ".") + 1
+		switch {
+		case depth > maxDepth:
+			maxDepth = depth
+			selected = []fieldRef{alternative.ref}
+		case depth == maxDepth:
+			selected = append(selected, alternative.ref)
+		}
+	}
+	if len(selected) == 1 {
+		return selected
+	}
+	refs := make([]fieldRef, 0, len(group))
+	for _, alternative := range group {
+		refs = append(refs, alternative.ref)
+	}
+	return refs
+}
+
+func objectPathExists(obj map[string]any, path string) bool {
+	var current any = obj
+	for _, segment := range strings.Split(path, ".") {
+		mapping, ok := current.(map[string]any)
+		if !ok {
+			return false
+		}
+		current, ok = mapping[segment]
+		if !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveCollection picks which candidate list path is a real list on obj. The
