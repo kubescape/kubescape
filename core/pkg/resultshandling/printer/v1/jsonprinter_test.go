@@ -61,7 +61,7 @@ func TestJsonPrinterActionPrint(t *testing.T) {
 		checkJSON     func(t *testing.T, raw []byte)
 	}{
 		{
-			name: "single framework report marshals as a single object",
+			name: "no frameworks falls back to a single unnamed report",
 			opaSessionObj: &cautils.OPASessionObj{
 				Report: &reporthandlingv2.PostureReport{
 					SummaryDetails: reportsummary.SummaryDetails{
@@ -72,7 +72,25 @@ func TestJsonPrinterActionPrint(t *testing.T) {
 			checkJSON: func(t *testing.T, raw []byte) {
 				var got reporthandling.FrameworkReport
 				require.NoError(t, json.Unmarshal(raw, &got))
+				assert.Empty(t, got.Name)
 				assert.Equal(t, float32(77), got.Score)
+			},
+		},
+		{
+			name: "single framework report marshals as a single object",
+			opaSessionObj: &cautils.OPASessionObj{
+				Report: &reporthandlingv2.PostureReport{
+					SummaryDetails: reportsummary.SummaryDetails{
+						Score:      77,
+						Frameworks: []reportsummary.FrameworkSummary{{Name: "NSA", Score: 90}},
+					},
+				},
+			},
+			checkJSON: func(t *testing.T, raw []byte) {
+				var got reporthandling.FrameworkReport
+				require.NoError(t, json.Unmarshal(raw, &got))
+				assert.Equal(t, "NSA", got.Name)
+				assert.Equal(t, float32(90), got.Score) // framework score, not SummaryDetails.Score
 			},
 		},
 		{
@@ -131,12 +149,20 @@ func TestJsonPrinterCloseWriter(t *testing.T) {
 	})
 
 	t.Run("does not close stdout", func(t *testing.T) {
+		r, w, err := os.Pipe()
+		require.NoError(t, err)
+		defer r.Close()
+		defer w.Close()
+
+		old := os.Stdout
+		os.Stdout = w
+		defer func() { os.Stdout = old }()
+
 		jp := NewJsonPrinter()
 		jp.writer = os.Stdout
-
 		jp.CloseWriter()
 
-		_, err := os.Stdout.Stat()
+		_, err = os.Stdout.Write([]byte("still open"))
 		assert.NoError(t, err, "os.Stdout should remain usable")
 	})
 }
