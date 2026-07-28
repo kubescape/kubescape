@@ -142,6 +142,10 @@ func NewEvaluator(opts ...Option) (*Evaluator, error) {
 // report a mixed outcome, and discarding a confirmed violation because a later
 // validation ran long would lose real information. The unreached validations
 // carry the out-of-budget error, so they read as unknown, never as passing.
+//
+// A cancelled context stops the loop the same way, and an expression that fails
+// to compile stops nothing at all: it never ran, so it costs the policy nothing
+// and the validations after it still get their verdicts.
 func (e *Evaluator) EvaluateOnObject(
 	ctx context.Context,
 	obj map[string]any,
@@ -155,6 +159,15 @@ func (e *Evaluator) EvaluateOnObject(
 
 	results := make([]ValidationResult, 0, len(validations))
 	for _, val := range validations {
+		// A cancelled scan stops here rather than partway through whichever
+		// expression happens to be long enough for the runtime to notice.
+		// InterruptCheckFrequency only makes cel-go check #interrupted every N
+		// steps INSIDE one evaluation, so without this an ordinary policy of
+		// cheap expressions runs every one of them to completion after Ctrl+C.
+		if err := ctx.Err(); err != nil {
+			results = append(results, ValidationResult{Expression: val.Expression, Err: fmt.Errorf("evaluation stopped: %w", err)})
+			continue
+		}
 		if budget.exhausted() {
 			results = append(results, ValidationResult{Expression: val.Expression, Err: budget.err()})
 			continue
@@ -251,12 +264,19 @@ func (e *Evaluator) lazyVariables(ctx context.Context, variables []Variable, act
 	for _, v := range variables {
 		v := v // capture per iteration for the callback
 		lazyVars.Append(v.Name, func(*lazy.MapValue) ref.Val {
-			out, details, err := e.run(ctx, v.Expression, activation)
+			// Compiling first keeps a variable that never ran out of the cost
+			// accounting entirely: a compile failure is this variable's error to
+			// report, not a missing cost report to complain about.
+			prog, err := e.programs.get(v.Expression)
+			if err != nil {
+				return types.NewErr("variable %q: %v", v.Name, err)
+			}
+			out, details, evalErr := e.run(ctx, prog, activation)
 			if reportErr := budget.reportDetails(details); reportErr != nil {
 				return types.NewErr("variable %q: %v", v.Name, reportErr)
 			}
-			if err != nil {
-				return types.NewErr("variable %q: %v", v.Name, err)
+			if evalErr != nil {
+				return types.NewErr("variable %q: %v", v.Name, evalErr)
 			}
 			return out
 		})
@@ -340,15 +360,31 @@ func (e *Evaluator) evalMessageExpression(ctx context.Context, expr string, acti
 	return msg, true
 }
 
-// evalExpression evaluates one expression and settles it against the budget.
+// evalExpression compiles one expression, evaluates it and settles it against
+// the budget.
 //
-// The charge happens BEFORE the eval error is returned, on purpose: an
-// expression that ran and then failed still consumed the units, and admission
-// charges it the same way (activation.go Evaluate accounts for cost first and
-// only then inspects the error). Skipping the charge on error would let a
-// policy spend more offline than it can at admission.
+// Compiling is a separate step here, and it has to stay one: an expression that
+// does not compile never ran, so it spent nothing and must not touch the budget
+// at all. Admission works the same way, returning on compilationResult.Error
+// before it reaches the accounting (plugin/cel/activation.go Evaluate), which
+// leaves the rest of the policy free to evaluate on the untouched budget. Folding
+// the two steps together would charge a typo the whole remaining budget and take
+// every later validation in the policy down with it.
+//
+// Once the program does run, the charge happens BEFORE the eval error is
+// returned, also on purpose: an expression that ran and then failed still
+// consumed the units, and admission charges it the same way (cost first, error
+// second). Skipping the charge on error would let a policy spend more offline
+// than it can at admission.
 func (e *Evaluator) evalExpression(ctx context.Context, expr string, activation map[string]any, budget *costBudget) (ref.Val, error) {
-	out, details, evalErr := e.run(ctx, expr, activation)
+	// Compiled on first use and reused for every later object, so this is a map
+	// lookup on all but the first (see cache.go).
+	prog, err := e.programs.get(expr)
+	if err != nil {
+		return nil, err
+	}
+
+	out, details, evalErr := e.run(ctx, prog, activation)
 	if err := budget.charge(details); err != nil {
 		return nil, err
 	}
@@ -358,17 +394,17 @@ func (e *Evaluator) evalExpression(ctx context.Context, expr string, activation 
 	return out, nil
 }
 
-// run evaluates a single CEL expression against the activation and hands back
-// the raw cost details alongside the result. The compiled program comes from
-// the cache (compiled on first use, reused for every later object; see
-// cache.go). Callers settle the cost themselves: a validation charges it, a
-// variable only reports it (see lazyVariables).
-func (e *Evaluator) run(ctx context.Context, expr string, activation map[string]any) (ref.Val, *cel.EvalDetails, error) {
-	prog, err := e.programs.get(expr)
-	if err != nil {
-		return nil, nil, err
-	}
-
+// run evaluates one already-compiled program against the activation and hands
+// back the raw cost details alongside the result. Callers settle the cost
+// themselves: a validation charges it, a variable only reports it (see
+// lazyVariables).
+//
+// Taking a program rather than an expression is what keeps "never compiled" and
+// "ran but reported no cost" apart for those callers. Anything that reaches here
+// starts evaluating, and cel-go reports the cost tracker to the observer before
+// it evaluates a single step, so the details returned are non-nil even when the
+// run is cut short by an interrupt or the per-call limit.
+func (e *Evaluator) run(ctx context.Context, prog cel.Program, activation map[string]any) (ref.Val, *cel.EvalDetails, error) {
 	out, details, err := prog.ContextEval(ctx, activation)
 	if err != nil {
 		return nil, details, fmt.Errorf("eval: %w", err)

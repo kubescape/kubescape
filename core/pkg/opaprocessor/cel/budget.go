@@ -65,10 +65,13 @@ func (b *costBudget) err() error {
 // charge does that, so a variable and the expression that pulled it in are
 // accounted together and in that order, as the apiserver does.
 //
-// A variable whose cost the runtime did not report is an error rather than a
-// free variable, matching the apiserver's variableAccessor.Callback. The error
-// surfaces as the variable's value, so it reaches only the validations that
-// actually referenced it.
+// A variable that RAN and whose cost the runtime did not report is an error
+// rather than a free variable, matching the apiserver's
+// variableAccessor.Callback. The error surfaces as the variable's value, so it
+// reaches only the validations that actually referenced it. A variable that
+// never ran at all does not reach here: the caller returns its compile error
+// directly (see lazyVariables), so a broken variable reports what is actually
+// wrong with it instead of a missing cost.
 func (b *costBudget) reportDetails(details *cel.EvalDetails) error {
 	if b == nil {
 		return nil
@@ -93,9 +96,13 @@ func (b *costBudget) reportDetails(details *cel.EvalDetails) error {
 // expression errored, because a failed evaluation still consumed the units, and
 // admission charges it the same way.
 //
-// details comes straight from ContextEval. A nil details or a nil ActualCost
-// means the runtime did not report a cost, which we cannot distinguish from an
-// expensive expression, so it is treated as a failure rather than as free.
+// details comes straight from ContextEval, and only ever for an expression that
+// actually started evaluating: a compile failure is returned by the caller
+// before it gets here (see evalExpression), because an expression that never ran
+// spent nothing and must leave the rest of the policy its full budget. A nil
+// details or a nil ActualCost therefore means the runtime ran the expression and
+// did not tell us what it cost, which we cannot distinguish from an expensive
+// expression, so it is treated as a failure rather than as free.
 func (b *costBudget) charge(details *cel.EvalDetails) error {
 	if b == nil {
 		return nil

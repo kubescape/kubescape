@@ -17,7 +17,9 @@ import (
 func costOf(t *testing.T, e *Evaluator, expr string, obj map[string]any, variables []Variable) int64 {
 	t.Helper()
 	activation := e.activationFor(context.Background(), obj, nil, nil, variables, nil)
-	_, details, err := e.run(context.Background(), expr, activation)
+	prog, err := e.programs.get(expr)
+	require.NoError(t, err)
+	_, details, err := e.run(context.Background(), prog, activation)
 	require.NoError(t, err)
 	require.NotNil(t, details, "base env must track cost")
 	actual := details.ActualCost()
@@ -202,6 +204,65 @@ func TestPathDerivationDoesNotSpendTheBudget(t *testing.T) {
 	assert.NotEmpty(t, results[0].Paths, "paths must still be derived on an exhausted budget")
 }
 
+func TestCompileFailureLeavesTheBudgetToTheRestOfThePolicy(t *testing.T) {
+	// An expression that does not compile never ran, so it spent nothing. Charging
+	// it would latch the budget and take every later validation down with it,
+	// while admission returns on the compile error before it touches the budget
+	// and keeps going. authorizer is deliberately undeclared in newEnv, so a
+	// policy referencing it is exactly the "should fail to compile and get
+	// skipped" case env.go describes.
+	obj := budgetPod()
+	broken := "authorizer.group('').resource('pods').check('create').allowed()"
+
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+	results, err := e.EvaluateOnObject(context.Background(), obj, nil, nil, nil, []Validation{
+		{Expression: broken},
+		{Expression: "object.spec.hostNetwork == false", Message: "host network"},
+		{Expression: "object.metadata.name == 'p'"},
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+
+	// The compile error is what the caller gets, not an out-of-budget error
+	// standing in for it.
+	require.Error(t, results[0].Err)
+	assert.False(t, errors.Is(results[0].Err, errOutOfBudget), "a compile failure must not read as an exhausted budget")
+	assert.Contains(t, results[0].Err.Error(), "compile")
+
+	// And the validations after it still get real verdicts.
+	assert.NoError(t, results[1].Err)
+	assert.False(t, results[1].Passed)
+	assert.Equal(t, "host network", results[1].Message)
+	assert.NoError(t, results[2].Err)
+	assert.True(t, results[2].Passed)
+}
+
+func TestVariableCompileFailureOnlyBreaksItsOwnValidation(t *testing.T) {
+	// Same rule on the variable path: a variable that never compiled has no cost
+	// to report, so the validation that read it must name the compile failure
+	// rather than a missing cost report, and validations that never touched it
+	// must be unaffected.
+	obj := budgetPod()
+	vars := []Variable{{Name: "bad", Expression: "authorizer.group('')"}}
+
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+	results, err := e.EvaluateOnObject(context.Background(), obj, nil, nil, vars, []Validation{
+		{Expression: "variables.bad == 1"},
+		{Expression: "object.spec.hostNetwork == false"},
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	require.Error(t, results[0].Err)
+	assert.Contains(t, results[0].Err.Error(), "compile")
+	assert.False(t, errors.Is(results[0].Err, errOutOfBudget))
+
+	assert.NoError(t, results[1].Err)
+	assert.False(t, results[1].Passed)
+}
+
 func TestCancelledContextInterruptsAComprehension(t *testing.T) {
 	// Guards cel.InterruptCheckFrequency being set on every program. Without it
 	// cel-go never plans an interruptable evaluation, and ContextEval ignores a
@@ -209,6 +270,10 @@ func TestCancelledContextInterruptsAComprehension(t *testing.T) {
 	// nothing during, so a comprehension over a long list runs to completion
 	// whatever the caller does. The list is longer than CheckFrequency so the
 	// runtime reaches at least one check.
+	//
+	// This goes at one expression rather than through EvaluateOnObject, which
+	// would refuse a cancelled context before evaluating anything (see the test
+	// below) and so would pass with or without the program option.
 	items := make([]any, 0, 5*celconfig.CheckFrequency)
 	for i := 0; i < 5*celconfig.CheckFrequency; i++ {
 		items = append(items, map[string]any{"name": "c", "image": "nginx"})
@@ -221,10 +286,32 @@ func TestCancelledContextInterruptsAComprehension(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	results, err := e.EvaluateOnObject(ctx, obj, nil, nil, nil,
-		[]Validation{{Expression: "object.spec.containers.all(c, c.image == 'nginx')"}})
+	_, err = e.evalExpression(ctx, "object.spec.containers.all(c, c.image == 'nginx')",
+		e.activationFor(ctx, obj, nil, nil, nil, nil), nil)
+	require.Error(t, err, "a cancelled scan must not keep evaluating CEL")
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestCancelledContextStopsTheRemainingValidations(t *testing.T) {
+	// InterruptCheckFrequency only makes the runtime check every N steps INSIDE
+	// one evaluation, so an ordinary policy of cheap expressions would run every
+	// one of them to completion after Ctrl+C. A scan over thousands of objects
+	// has to stop on the spot instead, whatever shape its expressions are.
+	e, err := NewEvaluator()
 	require.NoError(t, err)
-	require.Len(t, results, 1)
-	require.Error(t, results[0].Err, "a cancelled scan must not keep evaluating CEL")
-	assert.False(t, results[0].Passed)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	results, err := e.EvaluateOnObject(ctx, budgetPod(), nil, nil, nil, []Validation{
+		{Expression: "object.spec.hostNetwork == false"},
+		{Expression: "object.metadata.name == 'p'"},
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	for i, res := range results {
+		require.Error(t, res.Err, "validation %d kept evaluating after cancellation", i)
+		assert.ErrorIs(t, res.Err, context.Canceled)
+		assert.False(t, res.Passed, "validation %d", i)
+	}
 }
