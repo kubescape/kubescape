@@ -399,8 +399,12 @@ func readConfig(dat []byte, configObj *ConfigObj) error {
 	return nil
 }
 
+// servicesConfigPath is the path to the services discovery config file mounted
+// in-cluster. It is a var (not a const) so tests can point it at a temp file.
+var servicesConfigPath = "/etc/config/services.json"
+
 func loadUrlsFromFile(obj *ConfigObj) error {
-	dat, err := os.ReadFile("/etc/config/services.json")
+	dat, err := os.ReadFile(servicesConfigPath)
 	if err != nil {
 		return nil // no config file
 	}

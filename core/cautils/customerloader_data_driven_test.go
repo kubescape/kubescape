@@ -194,9 +194,10 @@ func Test_loadConfigFromFile(t *testing.T) {
 	t.Run("no file present returns nil without touching configObj", func(t *testing.T) {
 		useTemporaryConfigStore(t)
 
-		configObj := &ConfigObj{}
-		assert.NoError(t, loadConfigFromFile(configObj))
-		assert.Equal(t, &ConfigObj{}, configObj)
+		want := ConfigObj{AccountID: "sentinel-account", AccessKey: "sentinel-key", ClusterName: "sentinel-cluster"}
+		configObj := want
+		assert.NoError(t, loadConfigFromFile(&configObj))
+		assert.Equal(t, want, configObj)
 	})
 
 	t.Run("existing file is loaded into configObj", func(t *testing.T) {
@@ -225,13 +226,35 @@ func Test_loadConfigFromFile(t *testing.T) {
 	})
 }
 
-func Test_loadUrlsFromFile_NoServicesFile(t *testing.T) {
-	// /etc/config/services.json is not expected to exist in the test environment,
-	// so loadUrlsFromFile should hit the "no config file" branch and return nil
-	// without modifying the passed-in ConfigObj.
-	configObj := &ConfigObj{}
-	assert.NoError(t, loadUrlsFromFile(configObj))
-	assert.Equal(t, &ConfigObj{}, configObj)
+func useTemporaryServicesConfigPath(t *testing.T, path string) {
+	t.Helper()
+	original := servicesConfigPath
+	servicesConfigPath = path
+	t.Cleanup(func() { servicesConfigPath = original })
+}
+
+func Test_loadUrlsFromFile(t *testing.T) {
+	t.Run("missing services file leaves configObj untouched", func(t *testing.T) {
+		useTemporaryServicesConfigPath(t, filepath.Join(t.TempDir(), "services.json"))
+
+		want := ConfigObj{AccountID: "sentinel-account", AccessKey: "sentinel-key", ClusterName: "sentinel-cluster"}
+		configObj := want
+		assert.NoError(t, loadUrlsFromFile(&configObj))
+		assert.Equal(t, want, configObj)
+	})
+
+	t.Run("valid services file populates cloud urls", func(t *testing.T) {
+		servicesPath := filepath.Join(t.TempDir(), "services.json")
+		useTemporaryServicesConfigPath(t, servicesPath)
+
+		payload := `{"version":"v2","response":{"api-server":"https://api.example.com","event-receiver-http":"https://report.example.com"}}`
+		require.NoError(t, os.WriteFile(servicesPath, []byte(payload), 0o600))
+
+		configObj := &ConfigObj{}
+		require.NoError(t, loadUrlsFromFile(configObj))
+		assert.Equal(t, "https://api.example.com", configObj.CloudAPIURL)
+		assert.Equal(t, "https://report.example.com", configObj.CloudReportURL)
+	})
 }
 
 func Test_NewClusterConfig(t *testing.T) {
@@ -271,9 +294,11 @@ func Test_GetTenantConfig(t *testing.T) {
 	getter.SetKSCloudAPIConnector(nil)
 	t.Cleanup(func() { getter.SetKSCloudAPIConnector(nil) })
 
+	originalConnected := k8sinterface.IsConnectedToCluster()
+	t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
+
 	t.Run("not connected to cluster returns LocalConfig", func(t *testing.T) {
 		k8sinterface.SetConnectedToCluster(false)
-		t.Cleanup(func() { k8sinterface.SetConnectedToCluster(false) })
 
 		config := GetTenantConfig("account", "key", "cluster", "", nil)
 		_, ok := config.(*LocalConfig)
@@ -282,7 +307,6 @@ func Test_GetTenantConfig(t *testing.T) {
 
 	t.Run("connected to cluster with k8s client returns ClusterConfig", func(t *testing.T) {
 		k8sinterface.SetConnectedToCluster(true)
-		t.Cleanup(func() { k8sinterface.SetConnectedToCluster(false) })
 
 		k8s := k8sinterface.NewKubernetesApiMock()
 		config := GetTenantConfig("account", "key", "cluster", "", k8s)
@@ -292,7 +316,6 @@ func Test_GetTenantConfig(t *testing.T) {
 
 	t.Run("connected to cluster without k8s client falls back to LocalConfig", func(t *testing.T) {
 		k8sinterface.SetConnectedToCluster(true)
-		t.Cleanup(func() { k8sinterface.SetConnectedToCluster(false) })
 
 		config := GetTenantConfig("account", "key", "cluster", "", nil)
 		_, ok := config.(*LocalConfig)
