@@ -36,7 +36,10 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	scanID := uuid.NewString()
 	defer handler.recover(r.Context(), w, scanID)
 
-	handler.state.setBusy(scanID)
+	scanCtx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
+	defer cancel()
+
+	handler.state.setBusy(scanID, cancel)
 	defer handler.state.setNotBusy(scanID)
 
 	metricsQueryParams := &MetricsQueryParams{}
@@ -58,7 +61,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		},
 		scanInfo: scanInfo,
 		scanID:   scanID,
-		ctx:      context.WithoutCancel(r.Context()),
+		ctx:      scanCtx,
 		resp:     make(chan *utilsmetav1.Response, 1),
 	}
 

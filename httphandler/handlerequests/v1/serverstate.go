@@ -1,12 +1,13 @@
 package v1
 
 import (
+	"context"
 	"fmt"
 	"sync"
 )
 
 type serverState struct {
-	statusID map[string]bool
+	statusID map[string]context.CancelFunc
 	latestID string
 	mtx      sync.RWMutex
 }
@@ -17,14 +18,14 @@ func (s *serverState) isBusy(id string) bool {
 	if id == "" {
 		id = s.latestID
 	}
-	busy := s.statusID[id]
+	_, busy := s.statusID[id]
 	s.mtx.RUnlock()
 	return busy
 }
 
-func (s *serverState) setBusy(id string) {
+func (s *serverState) setBusy(id string, cancel context.CancelFunc) {
 	s.mtx.Lock()
-	s.statusID[id] = true
+	s.statusID[id] = cancel
 	s.latestID = id
 	s.mtx.Unlock()
 }
@@ -59,9 +60,34 @@ func (s *serverState) removeAllIfIdle(removeFn func()) error {
 	return nil
 }
 
+// cancel invokes the CancelFunc stored for id and removes it from the busy
+// set. It returns false if id has no in-flight scan, either because it is
+// unknown or the scan has already finished.
+func (s *serverState) cancel(id string) bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	cancelFunc, ok := s.statusID[id]
+	if !ok {
+		return false
+	}
+	cancelFunc()
+	delete(s.statusID, id)
+	return true
+}
+
+// cancelAll invokes every stored CancelFunc and clears the busy set.
+func (s *serverState) cancelAll() {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	for id, cancelFunc := range s.statusID {
+		cancelFunc()
+		delete(s.statusID, id)
+	}
+}
+
 func newServerState() *serverState {
 	return &serverState{
-		statusID: make(map[string]bool),
+		statusID: make(map[string]context.CancelFunc),
 		mtx:      sync.RWMutex{},
 	}
 }

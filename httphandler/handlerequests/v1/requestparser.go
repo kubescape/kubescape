@@ -63,6 +63,15 @@ type StatusQueryParams struct {
 	ScanID string `schema:"id" json:"id"`
 }
 
+// swagger:parameters cancelScan
+type CancelScanQueryParams struct {
+	// ID of the scan to cancel. If empty, the latest scan is cancelled.
+	//
+	// in:query
+	// swagger:strfmt uuid4
+	ScanID string `schema:"id" json:"id"`
+}
+
 // scanRequestParams params passed to channel
 type scanRequestParams struct {
 	scanInfo        *cautils.ScanInfo // request as received from api

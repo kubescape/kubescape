@@ -140,14 +140,15 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		handler.writeError(w, err, "")
 		return
 	}
-	scanRequestParams.ctx = context.WithoutCancel(r.Context())
+	cancelCtx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
+	scanRequestParams.ctx = cancelCtx
 
 	if handler.offline {
 		scanRequestParams.scanInfo.UseDefault = true
 		scanRequestParams.scanInfo.UseArtifactsFrom = getter.DefaultLocalStore
 	}
 
-	handler.state.setBusy(scanID)
+	handler.state.setBusy(scanID, cancel)
 
 	select {
 	case handler.scanRequestChan <- scanRequestParams:
@@ -198,6 +199,70 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(statusCode)
 	w.Write(responseToBytes(response))
+}
+
+// CancelScan handles DELETE /v1/scan
+func (handler *HTTPHandler) CancelScan(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	defer handler.recover(r.Context(), w, "")
+	defer r.Body.Close()
+
+	cancelQueryParams := &CancelScanQueryParams{}
+	if err := schema.NewDecoder().Decode(cancelQueryParams, r.URL.Query()); err != nil {
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
+		return
+	}
+
+	scanID := cancelQueryParams.ScanID
+	if scanID == "" {
+		scanID = handler.state.getLatestID()
+	}
+
+	logger.L().Info("requesting scan cancellation", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
+
+	if !handler.state.cancel(scanID) {
+		logger.L().Info("cancel: no in-flight scan", helpers.String("ID", scanID))
+		w.WriteHeader(http.StatusNotFound)
+		response := utilsmetav1.Response{
+			Response: fmt.Sprintf("no in-flight scan found for '%s'", scanID),
+			Type:     utilsapisv1.ErrorScanResponseType,
+		}
+		w.Write(responseToBytes(&response))
+		return
+	}
+
+	handler.drainQueuedScan(scanID)
+
+	logger.L().Info("scan cancelled", helpers.String("ID", scanID))
+	w.WriteHeader(http.StatusOK)
+	response := utilsmetav1.Response{
+		ID:       scanID,
+		Response: fmt.Sprintf("scan '%s' cancelled", scanID),
+		Type:     utilsapisv1.NotBusyScanResponseType,
+	}
+	w.Write(responseToBytes(&response))
+}
+
+// drainQueuedScan removes a not-yet-started scan request for id from the
+// pending queue, if it is still sitting there. It is best-effort: a request
+// already picked up by watchForScan is unaffected and relies on the
+// cancelled context to stop it promptly instead.
+func (handler *HTTPHandler) drainQueuedScan(id string) {
+	pending := make([]*scanRequestParams, 0, len(handler.scanRequestChan))
+	for {
+		select {
+		case req := <-handler.scanRequestChan:
+			if req.scanID == id {
+				continue
+			}
+			pending = append(pending, req)
+		default:
+			for _, req := range pending {
+				handler.scanRequestChan <- req
+			}
+			return
+		}
+	}
 }
 
 // ============================================== RESULTS ========================================================

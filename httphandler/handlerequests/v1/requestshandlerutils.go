@@ -62,10 +62,18 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
 	_, err := scanImpl(scanReq.ctx, scanReq.scanInfo, scanReq.scanID, scanReq.scanQueryParams.SkipPersistence)
 	if err != nil {
-		logger.L().Ctx(scanReq.ctx).Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
-		if scanReq.scanQueryParams.ReturnResults {
-			response.Type = utilsapisv1.ErrorScanResponseType
-			response.Response = err.Error()
+		if scanReq.ctx.Err() == context.Canceled {
+			logger.L().Ctx(scanReq.ctx).Info("scan cancelled", helpers.String("ID", scanReq.scanID))
+			if scanReq.scanQueryParams.ReturnResults {
+				response.Type = utilsapisv1.ErrorScanResponseType
+				response.Response = fmt.Sprintf("scan '%s' was cancelled", scanReq.scanID)
+			}
+		} else {
+			logger.L().Ctx(scanReq.ctx).Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
+			if scanReq.scanQueryParams.ReturnResults {
+				response.Type = utilsapisv1.ErrorScanResponseType
+				response.Response = err.Error()
+			}
 		}
 	} else {
 		logger.L().Ctx(scanReq.ctx).Success("done scanning", helpers.String("ID", scanReq.scanID))
