@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -100,6 +101,12 @@ func TestServePprof(t *testing.T) {
 	// give the goroutine a chance to run before the test (and its coverage
 	// counters) exit.
 	time.Sleep(20 * time.Millisecond)
+
+	// The regression this guards against: servePprof binding pprof even at
+	// info level. If it did, this bind would fail instead of succeeding.
+	ln, err := net.Listen("tcp", ":6060")
+	require.NoError(t, err, "pprof must not listen when log level is info")
+	defer ln.Close()
 }
 
 // occupyPort binds a loopback listener on a free port so a subsequent bind to
@@ -134,8 +141,7 @@ func TestSetupHTTPListener(t *testing.T) {
 		t.Setenv("KS_PORT", port)
 
 		err := SetupHTTPListener()
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "address already in use")
+		require.ErrorIs(t, err, syscall.EADDRINUSE)
 	})
 
 	t.Run("fails fast over TLS when the port is already bound", func(t *testing.T) {
@@ -148,8 +154,7 @@ func TestSetupHTTPListener(t *testing.T) {
 		t.Setenv("KS_PORT", port)
 
 		err := SetupHTTPListener()
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "address already in use")
+		require.ErrorIs(t, err, syscall.EADDRINUSE)
 	})
 }
 
