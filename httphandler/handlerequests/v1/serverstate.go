@@ -6,8 +6,13 @@ import (
 	"sync"
 )
 
+type scanEntry struct {
+	cancel    context.CancelFunc
+	cancelled bool
+}
+
 type serverState struct {
-	statusID         map[string]context.CancelFunc
+	statusID         map[string]*scanEntry
 	latestID         string
 	latestUserScanID string
 	mtx              sync.RWMutex
@@ -26,7 +31,7 @@ func (s *serverState) isBusy(id string) bool {
 
 func (s *serverState) setBusy(id string, cancel context.CancelFunc) {
 	s.mtx.Lock()
-	s.statusID[id] = cancel
+	s.statusID[id] = &scanEntry{cancel: cancel}
 	s.latestID = id
 	s.mtx.Unlock()
 }
@@ -34,6 +39,9 @@ func (s *serverState) setBusy(id string, cancel context.CancelFunc) {
 func (s *serverState) setNotBusy(id string) {
 	s.mtx.Lock()
 	delete(s.statusID, id)
+	if s.latestUserScanID == id {
+		s.latestUserScanID = ""
+	}
 	s.mtx.Unlock()
 }
 
@@ -44,9 +52,10 @@ func (s *serverState) getLatestID() string {
 	return id
 }
 
-// setLatestUserScanID records id as the latest user-triggered scan (via the
-// Scan handler). Internal scans (e.g. Metrics) do not call this, so it stays
-// distinct from latestID, which any caller of setBusy can advance.
+// setLatestUserScanID records id as the scan currently executing on behalf of
+// the Scan handler (not Metrics). watchForScan calls this when it dequeues a
+// user-submitted request, so it always reflects the scan actually running,
+// not merely the last one accepted into the queue.
 func (s *serverState) setLatestUserScanID(id string) {
 	s.mtx.Lock()
 	s.latestUserScanID = id
@@ -77,34 +86,54 @@ func (s *serverState) removeAllIfIdle(removeFn func()) error {
 	return nil
 }
 
-// cancel invokes the CancelFunc stored for id and removes it from the busy
-// set. It returns false if id has no in-flight scan, either because it is
-// unknown or the scan has already finished.
-func (s *serverState) cancel(id string) bool {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	cancelFunc, ok := s.statusID[id]
+// releaseLocked invokes the CancelFunc for id and marks it cancelled, if
+// present. Must be called with mtx held. It never removes the entry --
+// setNotBusy owns removal, so isBusy/isCancelled stay accurate until the
+// scan has actually stopped running.
+func (s *serverState) releaseLocked(id string) bool {
+	entry, ok := s.statusID[id]
 	if !ok {
 		return false
 	}
-	cancelFunc()
-	delete(s.statusID, id)
+	entry.cancelled = true
+	entry.cancel()
 	return true
 }
 
-// cancelAll invokes every stored CancelFunc and clears the busy set.
-func (s *serverState) cancelAll() {
+// cancel invokes the CancelFunc stored for id and marks it cancelled. It
+// returns false if id has no in-flight scan, either because it is unknown or
+// the scan has already finished.
+func (s *serverState) cancel(id string) bool {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	for id, cancelFunc := range s.statusID {
-		cancelFunc()
-		delete(s.statusID, id)
+	return s.releaseLocked(id)
+}
+
+// releaseCancel invokes the CancelFunc for id, if present, without regard to
+// whether it was already cancelled. executeScan calls this on every
+// completion path (success, failure, or cancellation) so a scan's cancel
+// func is always released once it stops running.
+func (s *serverState) releaseCancel(id string) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	s.releaseLocked(id)
+}
+
+// isCancelled reports whether id was cancelled while still queued or while
+// running. It stays true after cancel() until setNotBusy removes the entry.
+func (s *serverState) isCancelled(id string) bool {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	entry, ok := s.statusID[id]
+	if !ok {
+		return false
 	}
+	return entry.cancelled
 }
 
 func newServerState() *serverState {
 	return &serverState{
-		statusID: make(map[string]context.CancelFunc),
+		statusID: make(map[string]*scanEntry),
 		mtx:      sync.RWMutex{},
 	}
 }

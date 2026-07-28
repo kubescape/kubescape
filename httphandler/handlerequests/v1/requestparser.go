@@ -80,6 +80,7 @@ type scanRequestParams struct {
 	ctx             context.Context
 	resp            chan *utilsmetav1.Response // Respose chan; nil if not interested.
 	callbackURL     string                     // validated scan-completion callback URL; empty if not requested.
+	isUserScan      bool                       // true when submitted via the Scan handler, not Metrics
 }
 
 // swagger:parameters triggerScan
@@ -110,6 +111,7 @@ func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParam
 		scanID:          scanID,
 		scanQueryParams: &ScanQueryParams{},
 		scanInfo:        getScanCommand(scanRequest, scanID),
+		isUserScan:      true,
 	}
 	if err := schema.NewDecoder().Decode(p.scanQueryParams, r.URL.Query()); err != nil {
 		return p, fmt.Errorf("failed to parse query params, reason: %s", err.Error())
