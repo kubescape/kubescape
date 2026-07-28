@@ -7,11 +7,13 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/kubescape/go-logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -37,6 +39,117 @@ func TestLoadTLSKey(t *testing.T) {
 		require.NotNil(t, pair)
 		assert.NotEmpty(t, pair.Certificate)
 		assert.NotNil(t, pair.PrivateKey)
+	})
+
+	t.Run("returns nil pair and nil error when neither is set", func(t *testing.T) {
+		pair, err := loadTLSKey("", "")
+		require.NoError(t, err)
+		require.Nil(t, pair)
+	})
+
+	t.Run("returns error when the cert/key files cannot be loaded", func(t *testing.T) {
+		dir := t.TempDir()
+		pair, err := loadTLSKey(filepath.Join(dir, "missing-cert.pem"), filepath.Join(dir, "missing-key.pem"))
+		require.Error(t, err)
+		require.Nil(t, pair)
+		require.Contains(t, err.Error(), "failed to load key pair")
+	})
+}
+
+func TestGetCertFile(t *testing.T) {
+	t.Run("returns env var when set", func(t *testing.T) {
+		t.Setenv("KS_CERT_FILE", "/tmp/cert.pem")
+		if got := getCertFile(); got != "/tmp/cert.pem" {
+			t.Fatalf("getCertFile() = %q, want %q", got, "/tmp/cert.pem")
+		}
+	})
+
+	t.Run("returns empty when unset", func(t *testing.T) {
+		t.Setenv("KS_CERT_FILE", "")
+		if got := getCertFile(); got != "" {
+			t.Fatalf("getCertFile() = %q, want empty", got)
+		}
+	})
+}
+
+func TestGetKeyFile(t *testing.T) {
+	t.Run("returns env var when set", func(t *testing.T) {
+		t.Setenv("KS_KEY_FILE", "/tmp/key.pem")
+		if got := getKeyFile(); got != "/tmp/key.pem" {
+			t.Fatalf("getKeyFile() = %q, want %q", got, "/tmp/key.pem")
+		}
+	})
+
+	t.Run("returns empty when unset", func(t *testing.T) {
+		t.Setenv("KS_KEY_FILE", "")
+		if got := getKeyFile(); got != "" {
+			t.Fatalf("getKeyFile() = %q, want empty", got)
+		}
+	})
+}
+
+func TestServePprof(t *testing.T) {
+	// At the default (non-debug) log level, servePprof must return without
+	// actually binding the pprof listener. Deliberately does not touch the
+	// logger's level: go-logger's IconLogger stores it in a plain field with
+	// no synchronization, so calling SetLevel here would race the level read
+	// servePprof's goroutine does internally.
+	require.Equal(t, "info", logger.L().GetLevel())
+
+	servePprof()
+	// give the goroutine a chance to run before the test (and its coverage
+	// counters) exit.
+	time.Sleep(20 * time.Millisecond)
+}
+
+// occupyPort binds a loopback listener on a free port so a subsequent bind to
+// ":<port>" (all interfaces) fails immediately with "address already in use",
+// letting SetupHTTPListener's server-start path be exercised without actually
+// serving traffic.
+func occupyPort(t *testing.T) (net.Listener, string) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	require.NoError(t, err)
+	return ln, port
+}
+
+func TestSetupHTTPListener(t *testing.T) {
+	t.Run("returns error on invalid TLS config", func(t *testing.T) {
+		t.Setenv("KS_CERT_FILE", "cert.pem")
+		t.Setenv("KS_KEY_FILE", "")
+
+		err := SetupHTTPListener()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "KS_CERT_FILE and KS_KEY_FILE")
+	})
+
+	t.Run("fails fast over plain HTTP when the port is already bound", func(t *testing.T) {
+		occupied, port := occupyPort(t)
+		defer occupied.Close()
+
+		t.Setenv("KS_CERT_FILE", "")
+		t.Setenv("KS_KEY_FILE", "")
+		t.Setenv("KS_PORT", port)
+
+		err := SetupHTTPListener()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "address already in use")
+	})
+
+	t.Run("fails fast over TLS when the port is already bound", func(t *testing.T) {
+		certFile, keyFile := writeTestTLSFiles(t)
+		occupied, port := occupyPort(t)
+		defer occupied.Close()
+
+		t.Setenv("KS_CERT_FILE", certFile)
+		t.Setenv("KS_KEY_FILE", keyFile)
+		t.Setenv("KS_PORT", port)
+
+		err := SetupHTTPListener()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "address already in use")
 	})
 }
 
