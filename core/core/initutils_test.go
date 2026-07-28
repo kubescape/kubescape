@@ -507,6 +507,49 @@ func TestSetSubmitBehavior(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			// Regression test for https://github.com/kubescape/kubescape/issues/2555:
+			// an explicit opt-out must not be silently overridden by auto-detection,
+			// even when a CloudReportURL is present and no account is set (the
+			// scenario that would otherwise force Submit=true).
+			name: "Test SetSubmitBehavior explicit opt-out is respected despite CloudReportURL and no AccountID",
+			args: args{
+				scanInfo: &cautils.ScanInfo{
+					ScanType: cautils.ScanTypeCluster,
+					Local:    false,
+					Submit:   cautils.NewBoolPtr(new(false)),
+				},
+				tenantConfig: &TenantConfigMock{
+					clusterName:    "test",
+					accountID:      "",
+					accessKey:      "",
+					cloudReportURL: "https://example.kubescape.com",
+				},
+				isScanTypeForSubmission: true,
+				isLocal:                 false,
+			},
+			want: false,
+		},
+		{
+			// An explicit opt-in must still go through the normal auto-detection -
+			// it does not bypass the "no backend configured" safety check.
+			name: "Test SetSubmitBehavior explicit opt-in does not bypass missing CloudReportURL",
+			args: args{
+				scanInfo: &cautils.ScanInfo{
+					ScanType: cautils.ScanTypeCluster,
+					Local:    false,
+					Submit:   cautils.NewBoolPtr(new(true)),
+				},
+				tenantConfig: &TenantConfigMock{
+					clusterName: "test",
+					accountID:   "",
+					accessKey:   "",
+				},
+				isScanTypeForSubmission: true,
+				isLocal:                 false,
+			},
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -516,7 +559,7 @@ func TestSetSubmitBehavior(t *testing.T) {
 
 			setSubmitBehavior(tt.args.scanInfo, tt.args.tenantConfig)
 
-			assert.Equal(t, tt.want, tt.args.scanInfo.Submit)
+			assert.Equal(t, tt.want, tt.args.scanInfo.Submit.GetBool())
 		})
 	}
 }

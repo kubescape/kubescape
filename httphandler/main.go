@@ -116,16 +116,47 @@ func initializeLoggerLevel() {
 	}
 }
 
+// defaultServiceDiscoveryPath is a package-level indirection so tests can
+// override the fallback path without depending on /etc/config/services.json
+// being absent on the machine running the tests.
+var defaultServiceDiscoveryPath = "/etc/config/services.json"
+
 func initializeSaaSEnv() {
 	var sdGetter schema.IServiceDiscoveryServiceGetter
 
 	// Prefer file-based discovery: allows sidecar and private-cluster deployments
 	// to inject endpoints without network egress to api.armosec.io.
-	path := "/etc/config/services.json"
-	if p := os.Getenv("KS_SERVICE_DISCOVERY_FILE_PATH"); p != "" {
-		path = p
+	// A present-but-empty value (common for an unset Helm value) is treated
+	// the same as absent, not as an explicit override.
+	envPath, hasExplicitPath := os.LookupEnv("KS_SERVICE_DISCOVERY_FILE_PATH")
+	hasExplicitPath = hasExplicitPath && envPath != ""
+	path := defaultServiceDiscoveryPath
+	if hasExplicitPath {
+		path = envPath
 	}
-	if _, err := os.Stat(path); err == nil {
+	_, fileDiscoveryErr := os.Stat(path)
+	hasFileDiscovery := fileDiscoveryErr == nil
+
+	if !hasFileDiscovery {
+		// An explicit file path was configured but isn't there (typo, or a
+		// configmap that hasn't finished mounting yet) - this is a
+		// configuration problem, not "no backend configured", and falling
+		// back to the public SaaS endpoint would be a surprising thing to
+		// do silently for a deployer who opted into file-based discovery.
+		if hasExplicitPath {
+			logger.L().Warning("configured service-discovery file not found - skipping SaaS wiring", helpers.String("path", path), helpers.Error(fileDiscoveryErr))
+			return
+		}
+
+		// No backend was configured (no server URL and no account/access key) -
+		// do not reach out to the default public SaaS endpoint.
+		if os.Getenv("API_URL") == "" && config.GetAccount() == "" && config.GetAccessKey() == "" {
+			logger.L().Info("no backend configured (server/account/accessKey not set) - skipping SaaS wiring")
+			return
+		}
+	}
+
+	if hasFileDiscovery {
 		logger.L().Info("using file-based service discovery", helpers.String("path", path))
 		sdGetter = servicediscoveryv3.NewServiceDiscoveryFileV3(path)
 	} else {

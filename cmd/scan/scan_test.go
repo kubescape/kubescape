@@ -379,6 +379,56 @@ func TestGetScanCommand(t *testing.T) {
 	assert.Equal(t, scanCmdExamples, cmd.Example)
 }
 
+func TestSubmitFlag_TracksExplicitCommandLineUse(t *testing.T) {
+	// Regression test for https://github.com/kubescape/kubescape/issues/2555:
+	// --submit is bound directly as a cautils.BoolPtrFlag (like --enable-host-scan),
+	// so "not passed" (nil) is structurally distinguishable from "passed with any
+	// value" (non-nil) without any separate hand-rolled bookkeeping that could be
+	// forgotten at a call site or broken by a future PersistentPreRunE change.
+
+	// --submit not passed - flag not Changed
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	f := cmd.PersistentFlags().Lookup("submit")
+	require.NotNil(t, f, "--submit flag must be registered")
+	assert.False(t, f.Changed)
+	assert.Equal(t, "false", f.DefValue)
+
+	// --submit=false passed explicitly
+	mockKubescape = &mocks.MockIKubescape{}
+	cmd = GetScanCommand(mockKubescape)
+	require.NoError(t, cmd.ParseFlags([]string{"--submit=false"}))
+	f = cmd.PersistentFlags().Lookup("submit")
+	assert.True(t, f.Changed)
+	assert.Equal(t, "false", f.Value.String())
+
+	// --submit (bare, no value) passed explicitly - must still imply true, matching
+	// the original BoolVarP-based flag's behavior (NoOptDefVal="true")
+	mockKubescape = &mocks.MockIKubescape{}
+	cmd = GetScanCommand(mockKubescape)
+	require.NoError(t, cmd.ParseFlags([]string{"--submit"}))
+	f = cmd.PersistentFlags().Lookup("submit")
+	assert.True(t, f.Changed)
+	assert.Equal(t, "true", f.Value.String())
+}
+
+func TestSubmitFlag_PropagatesToAllSubcommands(t *testing.T) {
+	// Pins the invariant matthyx flagged in review: --submit must reach every
+	// scan subcommand. Because it's a cobra-inherited persistent flag rather
+	// than something wired through a hand-rolled PersistentPreRunE, this is a
+	// structural guarantee rather than something a future subcommand change
+	// could silently break.
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	for _, sub := range cmd.Commands() {
+		t.Run(sub.Name(), func(t *testing.T) {
+			f := sub.InheritedFlags().Lookup("submit")
+			require.NotNil(t, f, "subcommand %q must inherit --submit from the parent scan command", sub.Name())
+		})
+	}
+}
+
 func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	cmd := GetScanCommand(mockKubescape)

@@ -416,3 +416,52 @@ func TestUpdateCredentials_EnvAppliedWhenNoFlag(t *testing.T) {
 		t.Errorf("expected AccessKey=env-access-key, got %s", configObj.AccessKey)
 	}
 }
+
+func TestUpdateConfigFile_RoundTrip(t *testing.T) {
+	// Basic smoke test: writing twice (first write creates the directory/file,
+	// second write exercises the "pre-existing directory" chmod path) must
+	// round-trip the config correctly under normal conditions.
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	defer func() { getter.DefaultLocalStore = originalStore }()
+
+	configObj := mockConfigObj()
+
+	require.NoError(t, updateConfigFile(configObj))
+	require.NoError(t, updateConfigFile(configObj))
+
+	dat, err := os.ReadFile(ConfigFileFullPath())
+	require.NoError(t, err)
+
+	readBack := &ConfigObj{}
+	require.NoError(t, json.Unmarshal(dat, readBack))
+	assert.Equal(t, configObj.AccountID, readBack.AccountID)
+}
+
+func TestUpdateConfigFile_ToleratesDirectoryChmodFailure(t *testing.T) {
+	// Regression test for https://github.com/kubescape/kubescape/issues/2555:
+	// on some mounted volumes (e.g. an emptyDir mounted as a non-root user)
+	// os.Chmod on an already-correctly-permissioned directory can fail even
+	// though the directory is perfectly usable. That must not abort
+	// persisting the config. A real filesystem can't reliably be made to
+	// reject a chmod from its owning user (which is what tests run as), so
+	// the failure is forced via the package-level `chmod` seam instead.
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	defer func() { getter.DefaultLocalStore = originalStore }()
+
+	origChmod := chmod
+	chmod = func(string, os.FileMode) error { return os.ErrPermission }
+	defer func() { chmod = origChmod }()
+
+	configObj := mockConfigObj()
+
+	require.NoError(t, updateConfigFile(configObj))
+
+	dat, err := os.ReadFile(ConfigFileFullPath())
+	require.NoError(t, err)
+
+	readBack := &ConfigObj{}
+	require.NoError(t, json.Unmarshal(dat, readBack))
+	assert.Equal(t, configObj.AccountID, readBack.AccountID)
+}

@@ -95,7 +95,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 func getPrometheusDefaultScanCommand(scanID, resultsFile, frameworksParam string) *cautils.ScanInfo {
 	scanInfo := defaultScanInfo()
 	scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape from downloading the artifacts every time)
-	scanInfo.Submit = false                              // do not submit results every scan
+	scanInfo.Submit.SetBool(false)                       // deliberate opt-out, not left at the default - never flipped into submit mode by backend auto-detection
 	scanInfo.Local = true                                // do not submit results every scan
 	scanInfo.FrameworkScan = true
 	scanInfo.HostSensorEnabled.SetBool(false)                // disable host scanner

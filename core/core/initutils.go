@@ -139,7 +139,7 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 	if !isAirGappedMode(scanInfo) {
 		_ = getter.GetKSCloudAPIConnector()
 	}
-	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
+	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit.GetBool())
 	return resourcehandler.NewK8sResourceHandler(ctx, k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
 }
 
@@ -198,6 +198,10 @@ func policyIdentifierIdentities(pi []cautils.PolicyIdentifier) string {
 func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig) {
 
 	/*
+		If the caller explicitly opted out of submission (--submit=false, KS_SUBMIT=false,
+		or the httphandler request body's submit:false) - Do not send report, and do not
+		let the auto-detection below override that choice.
+
 		If keep-local OR scan type which is not submittable - Do not send report
 
 		If CloudReportURL not set - Do not send report
@@ -212,20 +216,25 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 
 	*/
 
+	// respect an explicit opt-out - never auto-submit against the caller's wishes
+	if explicit := scanInfo.Submit.Get(); explicit != nil && !*explicit {
+		return
+	}
+
 	// do not submit control/workload scanning
 	if !isScanTypeForSubmission(scanInfo.ScanType) || scanInfo.Local {
-		scanInfo.Submit = false
+		scanInfo.Submit.SetBool(false)
 		return
 	}
 
 	if tenantConfig.GetCloudReportURL() == "" {
-		scanInfo.Submit = false
+		scanInfo.Submit.SetBool(false)
 		return
 	}
 
 	// a new account will be created if a report URL is set and there is no account ID
 	if tenantConfig.GetAccountID() == "" {
-		scanInfo.Submit = true
+		scanInfo.Submit.SetBool(true)
 		return
 	}
 
@@ -235,7 +244,7 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 	}
 
 	// submit if account is valid
-	scanInfo.Submit = err == nil
+	scanInfo.Submit.SetBool(err == nil)
 }
 
 func isScanTypeForSubmission(scanType cautils.ScanTypes) bool {
