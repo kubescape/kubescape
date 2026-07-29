@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -421,8 +422,7 @@ func TestSetComplianceScores_ControlMetricsUseComplianceScore(t *testing.T) {
 	m.setComplianceScores(summaryDetails)
 	output := m.String()
 
-	assert.Contains(t, output, "kubescape_control_complianceScore{name=\"Set Control\"")
-	assert.Contains(t, output, "} 65")
+	assert.Regexp(t, regexp.MustCompile(`(?m)^kubescape_control_complianceScore\{name="Set Control".*\} 65$`), output)
 	assert.NotContains(t, output, "kubescape_control_complianceScore{name=\"Unset Control\"")
 	assert.Contains(t, output, "kubescape_control_count_resources_failed{name=\"Unset Control\"")
 }
