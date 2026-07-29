@@ -69,6 +69,23 @@ func TestResolveLocation(t *testing.T) {
 
 }
 
+func TestResolveLocation_ZeroCandidateNodesDoesNotPanic(t *testing.T) {
+	yamlFilePath := filepath.Join(onlineBoutiquePath(), "adservice.yaml")
+	resolver, err := NewFixPathLocationResolver(yamlFilePath)
+	assert.NoError(t, err)
+
+	// this fixPath evaluates to a yq expression whose select() filter matches
+	// no candidate nodes, which previously caused a nil pointer dereference
+	// panic on candidateNodes.Back() in ResolveLocation.
+	fixPath := `spec.template.spec.containers[] | select(.name == "nonexistent")=some-value`
+
+	assert.NotPanics(t, func() {
+		location, err := resolver.ResolveLocation(fixPath, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, Location{}, location)
+	})
+}
+
 func TestFixPathLocationResolver_NonExistentYaml(t *testing.T) {
 	yamlFilePath := filepath.Join(onlineBoutiquePath(), "adservice_invalid.yaml")
 	resolver, err := NewFixPathLocationResolver(yamlFilePath)
