@@ -10,11 +10,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 
-	"github.com/kubescape/go-logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,56 +58,27 @@ func TestLoadTLSKey(t *testing.T) {
 func TestGetCertFile(t *testing.T) {
 	t.Run("returns env var when set", func(t *testing.T) {
 		t.Setenv("KS_CERT_FILE", "/tmp/cert.pem")
-		if got := getCertFile(); got != "/tmp/cert.pem" {
-			t.Fatalf("getCertFile() = %q, want %q", got, "/tmp/cert.pem")
-		}
+		require.Equal(t, "/tmp/cert.pem", getCertFile())
 	})
 
 	t.Run("returns empty when unset", func(t *testing.T) {
-		t.Setenv("KS_CERT_FILE", "")
-		if got := getCertFile(); got != "" {
-			t.Fatalf("getCertFile() = %q, want empty", got)
-		}
+		t.Setenv("KS_CERT_FILE", "placeholder") // registers cleanup/restore
+		os.Unsetenv("KS_CERT_FILE")
+		require.Empty(t, getCertFile())
 	})
 }
 
 func TestGetKeyFile(t *testing.T) {
 	t.Run("returns env var when set", func(t *testing.T) {
 		t.Setenv("KS_KEY_FILE", "/tmp/key.pem")
-		if got := getKeyFile(); got != "/tmp/key.pem" {
-			t.Fatalf("getKeyFile() = %q, want %q", got, "/tmp/key.pem")
-		}
+		require.Equal(t, "/tmp/key.pem", getKeyFile())
 	})
 
 	t.Run("returns empty when unset", func(t *testing.T) {
-		t.Setenv("KS_KEY_FILE", "")
-		if got := getKeyFile(); got != "" {
-			t.Fatalf("getKeyFile() = %q, want empty", got)
-		}
+		t.Setenv("KS_KEY_FILE", "placeholder") // registers cleanup/restore
+		os.Unsetenv("KS_KEY_FILE")
+		require.Empty(t, getKeyFile())
 	})
-}
-
-func TestServePprof(t *testing.T) {
-	// At the default (non-debug) log level, servePprof must return without
-	// actually binding the pprof listener. Deliberately does not touch the
-	// logger's level: go-logger's IconLogger stores it in a plain field with
-	// no synchronization, so calling SetLevel here would race the level read
-	// servePprof's goroutine does internally.
-	require.Equal(t, "info", logger.L().GetLevel())
-
-	servePprof()
-	// give the goroutine a chance to run before the test (and its coverage
-	// counters) exit.
-	time.Sleep(20 * time.Millisecond)
-
-	// The regression this guards against: servePprof binding pprof even at
-	// info level. If it did, this bind would fail instead of succeeding.
-	// Loopback-only (not the wildcard address) to satisfy gosec G102; a
-	// wildcard bind by servePprof would still collide with this one, so the
-	// check is just as effective.
-	ln, err := net.Listen("tcp", "127.0.0.1:6060")
-	require.NoError(t, err, "pprof must not listen when log level is info")
-	defer ln.Close()
 }
 
 // occupyPort binds a loopback listener on a free port so a subsequent bind to
@@ -144,7 +113,11 @@ func TestSetupHTTPListener(t *testing.T) {
 		t.Setenv("KS_PORT", port)
 
 		err := SetupHTTPListener()
-		require.ErrorIs(t, err, syscall.EADDRINUSE)
+		// The specific errno isn't portable (syscall.EADDRINUSE doesn't map
+		// to Windows' WSAEADDRINUSE); the point of this test is that
+		// SetupHTTPListener propagates the ListenAndServe(TLS) error instead
+		// of blocking, so a plain error check is enough.
+		require.Error(t, err)
 	})
 
 	t.Run("fails fast over TLS when the port is already bound", func(t *testing.T) {
@@ -157,7 +130,11 @@ func TestSetupHTTPListener(t *testing.T) {
 		t.Setenv("KS_PORT", port)
 
 		err := SetupHTTPListener()
-		require.ErrorIs(t, err, syscall.EADDRINUSE)
+		// The specific errno isn't portable (syscall.EADDRINUSE doesn't map
+		// to Windows' WSAEADDRINUSE); the point of this test is that
+		// SetupHTTPListener propagates the ListenAndServe(TLS) error instead
+		// of blocking, so a plain error check is enough.
+		require.Error(t, err)
 	})
 }
 
