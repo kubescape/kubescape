@@ -271,8 +271,8 @@ func resolvePlan(t *testing.T, expr string, obj map[string]any) []PathHint {
 	require.NoError(t, err)
 
 	violates := func(candidate map[string]any) bool {
-		activation := e.activationFor(context.Background(), candidate, nil, nil, nil)
-		out, err := e.evalExpression(context.Background(), expr, activation)
+		activation := e.activationFor(context.Background(), candidate, nil, nil, nil, nil)
+		out, err := e.evalExpression(context.Background(), expr, activation, nil)
 		require.NoError(t, err)
 		passed, ok := out.Value().(bool)
 		require.True(t, ok)
