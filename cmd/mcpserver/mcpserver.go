@@ -55,6 +55,23 @@ func (ksServer *KubescapeMcpserver) getK8sClient() *k8sinterface.KubernetesApi {
 	return ksServer.k8sClient
 }
 
+// toolHandler binds a registered tool to its declared name and normalizes an
+// omitted arguments object. A non-null value of any other JSON shape is a
+// client error: silently treating it as an empty object could discard scope
+// filters and unintentionally widen a query.
+func (ksServer *KubescapeMcpserver) toolHandler(name string) server.ToolHandlerFunc {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, ok := request.Params.Arguments.(map[string]any)
+		if !ok && request.Params.Arguments != nil {
+			return mcp.NewToolResultError("arguments must be a JSON object"), nil
+		}
+		if args == nil {
+			args = map[string]any{}
+		}
+		return ksServer.CallTool(ctx, name, args)
+	}
+}
+
 func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
 	// Tool to list vulnerability manifests
 	listManifestsTool := mcp.NewTool(
@@ -69,9 +86,7 @@ func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
 		),
 	)
 
-	ksServer.s.AddTool(listManifestsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return ksServer.CallTool(ctx, "list_vulnerability_manifests", request.Params.Arguments.(map[string]any))
-	})
+	ksServer.s.AddTool(listManifestsTool, ksServer.toolHandler(listManifestsTool.Name))
 
 	listVulnerabilitiesTool := mcp.NewTool(
 		"list_vulnerabilities_in_manifest",
@@ -85,9 +100,7 @@ func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
 		),
 	)
 
-	ksServer.s.AddTool(listVulnerabilitiesTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return ksServer.CallTool(ctx, "list_vulnerabilities_in_manifest", request.Params.Arguments.(map[string]any))
-	})
+	ksServer.s.AddTool(listVulnerabilitiesTool, ksServer.toolHandler(listVulnerabilitiesTool.Name))
 
 	listVulnerabilityMatchesForCVE := mcp.NewTool(
 		"list_vulnerability_matches_for_cve",
@@ -105,9 +118,7 @@ func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
 		),
 	)
 
-	ksServer.s.AddTool(listVulnerabilityMatchesForCVE, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return ksServer.CallTool(ctx, "list_vulnerability_matches_for_cve", request.Params.Arguments.(map[string]any))
-	})
+	ksServer.s.AddTool(listVulnerabilityMatchesForCVE, ksServer.toolHandler(listVulnerabilityMatchesForCVE.Name))
 
 	vulnerabilityManifestTemplate := mcp.NewResourceTemplate(
 		"kubescape://vulnerability-manifests/{namespace}/{manifest_name}",
@@ -130,9 +141,7 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 		),
 	)
 
-	ksServer.s.AddTool(listConfigsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return ksServer.CallTool(ctx, "list_configuration_security_scan_manifests", request.Params.Arguments.(map[string]any))
-	})
+	ksServer.s.AddTool(listConfigsTool, ksServer.toolHandler(listConfigsTool.Name))
 
 	getConfigDetailsTool := mcp.NewTool(
 		"get_configuration_security_scan_manifest",
@@ -146,9 +155,7 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 		),
 	)
 
-	ksServer.s.AddTool(getConfigDetailsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return ksServer.CallTool(ctx, "get_configuration_security_scan_manifest", request.Params.Arguments.(map[string]any))
-	})
+	ksServer.s.AddTool(getConfigDetailsTool, ksServer.toolHandler(getConfigDetailsTool.Name))
 
 	configManifestTemplate := mcp.NewResourceTemplate(
 		"kubescape://configuration-manifests/{namespace}/{manifest_name}",
@@ -170,13 +177,7 @@ func createRuntimeToolsAndResources(ksServer *KubescapeMcpserver) {
 		),
 	)
 
-	ksServer.s.AddTool(listContainerProfilesTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args, ok := request.Params.Arguments.(map[string]any)
-		if !ok {
-			args = map[string]any{}
-		}
-		return ksServer.CallTool(ctx, "list_container_profiles", args)
-	})
+	ksServer.s.AddTool(listContainerProfilesTool, ksServer.toolHandler(listContainerProfilesTool.Name))
 
 	getContainerProfileTool := mcp.NewTool(
 		"get_container_profile",
@@ -190,13 +191,7 @@ func createRuntimeToolsAndResources(ksServer *KubescapeMcpserver) {
 		),
 	)
 
-	ksServer.s.AddTool(getContainerProfileTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args, ok := request.Params.Arguments.(map[string]any)
-		if !ok {
-			args = map[string]any{}
-		}
-		return ksServer.CallTool(ctx, "get_container_profile", args)
-	})
+	ksServer.s.AddTool(getContainerProfileTool, ksServer.toolHandler(getContainerProfileTool.Name))
 
 	containerProfileTemplate := mcp.NewResourceTemplate(
 		"kubescape://container-profiles/{namespace}/{profile_name}",
@@ -868,18 +863,7 @@ func createRBACScanningTools(ksServer *KubescapeMcpserver) {
 		),
 	)
 
-	ksServer.s.AddTool(runRBACScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Blocker 3 fix: use comma-ok pattern to prevent panic when namespace is
-		// omitted (tool is callable with no arguments since namespace is optional).
-		args, ok := request.Params.Arguments.(map[string]any)
-		if !ok && request.Params.Arguments != nil {
-			return mcp.NewToolResultError("arguments must be a JSON object"), nil
-		}
-		if args == nil {
-			args = map[string]any{}
-		}
-		return ksServer.CallTool(ctx, "run_rbac_security_scan", args)
-	})
+	ksServer.s.AddTool(runRBACScanTool, ksServer.toolHandler(runRBACScanTool.Name))
 }
 
 func createNetworkScanningTools(ksServer *KubescapeMcpserver) {
@@ -891,16 +875,7 @@ func createNetworkScanningTools(ksServer *KubescapeMcpserver) {
 		),
 	)
 
-	ksServer.s.AddTool(runNetworkScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args, ok := request.Params.Arguments.(map[string]any)
-		if !ok && request.Params.Arguments != nil {
-			return mcp.NewToolResultError("arguments must be a JSON object"), nil
-		}
-		if args == nil {
-			args = map[string]any{}
-		}
-		return ksServer.CallTool(ctx, "run_network_security_scan", args)
-	})
+	ksServer.s.AddTool(runNetworkScanTool, ksServer.toolHandler(runNetworkScanTool.Name))
 }
 
 func createFrameworkScanningTools(ksServer *KubescapeMcpserver) {
@@ -916,16 +891,7 @@ func createFrameworkScanningTools(ksServer *KubescapeMcpserver) {
 		),
 	)
 
-	ksServer.s.AddTool(runFrameworkScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args, ok := request.Params.Arguments.(map[string]any)
-		if !ok && request.Params.Arguments != nil {
-			return mcp.NewToolResultError("arguments must be a JSON object"), nil
-		}
-		if args == nil {
-			args = map[string]any{}
-		}
-		return ksServer.CallTool(ctx, "run_framework_security_scan", args)
-	})
+	ksServer.s.AddTool(runFrameworkScanTool, ksServer.toolHandler(runFrameworkScanTool.Name))
 }
 
 func createIaCScanningTools(ksServer *KubescapeMcpserver) {
@@ -941,16 +907,7 @@ func createIaCScanningTools(ksServer *KubescapeMcpserver) {
 		),
 	)
 
-	ksServer.s.AddTool(iacScanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args, ok := request.Params.Arguments.(map[string]any)
-		if !ok && request.Params.Arguments != nil {
-			return mcp.NewToolResultError("arguments must be a JSON object"), nil
-		}
-		if args == nil {
-			args = map[string]any{}
-		}
-		return ksServer.CallTool(ctx, "scan_local_iac", args)
-	})
+	ksServer.s.AddTool(iacScanTool, ksServer.toolHandler(iacScanTool.Name))
 }
 
 func GetMCPServerCmd() *cobra.Command {
