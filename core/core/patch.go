@@ -111,14 +111,12 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	sout, serr := os.Stdout, os.Stderr
 	if logger.L().GetLevel() != "debug" {
 		disableCopaLogger()
+		defer func() { os.Stdout, os.Stderr = sout, serr }()
 	}
 
 	if err = copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.OutputMode, patchInfo.OutputPath, patchInfo.BuildKitOpts); err != nil {
 		return false, err
 	}
-
-	// Restore the output streams
-	os.Stdout, os.Stderr = sout, serr
 
 	switch patchInfo.OutputMode {
 	case "image":
