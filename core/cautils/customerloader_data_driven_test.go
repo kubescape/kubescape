@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
@@ -182,4 +183,142 @@ func TestClusterConfigLoadsKubernetesSourcesDataDriven(t *testing.T) {
 			assert.Equal(t, test.wantConfig, *config.configObj)
 		})
 	}
+}
+
+func Test_GetDefaultNS(t *testing.T) {
+	c := &ClusterConfig{configMapNamespace: "my-namespace"}
+	assert.Equal(t, "my-namespace", c.GetDefaultNS())
+}
+
+func Test_loadConfigFromFile(t *testing.T) {
+	t.Run("no file present returns nil without touching configObj", func(t *testing.T) {
+		useTemporaryConfigStore(t)
+
+		want := ConfigObj{AccountID: "sentinel-account", AccessKey: "sentinel-key", ClusterName: "sentinel-cluster"}
+		configObj := want
+		assert.NoError(t, loadConfigFromFile(&configObj))
+		assert.Equal(t, want, configObj)
+	})
+
+	t.Run("existing file is loaded into configObj", func(t *testing.T) {
+		useTemporaryConfigStore(t)
+
+		want := &ConfigObj{AccountID: "file-account", AccessKey: "file-key", CloudAPIURL: "https://api.example.com"}
+		fullPath := ConfigFileFullPath()
+		require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o700))
+		require.NoError(t, os.WriteFile(fullPath, want.Config(), 0o600))
+
+		configObj := &ConfigObj{}
+		require.NoError(t, loadConfigFromFile(configObj))
+		assert.Equal(t, want.AccountID, configObj.AccountID)
+		assert.Equal(t, want.AccessKey, configObj.AccessKey)
+		assert.Equal(t, want.CloudAPIURL, configObj.CloudAPIURL)
+	})
+
+	t.Run("malformed file returns an error", func(t *testing.T) {
+		useTemporaryConfigStore(t)
+
+		fullPath := ConfigFileFullPath()
+		require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o700))
+		require.NoError(t, os.WriteFile(fullPath, []byte("not-json"), 0o600))
+
+		assert.Error(t, loadConfigFromFile(&ConfigObj{}))
+	})
+}
+
+func useTemporaryServicesConfigPath(t *testing.T, path string) {
+	t.Helper()
+	original := servicesConfigPath
+	servicesConfigPath = path
+	t.Cleanup(func() { servicesConfigPath = original })
+}
+
+func Test_loadUrlsFromFile(t *testing.T) {
+	t.Run("missing services file leaves configObj untouched", func(t *testing.T) {
+		useTemporaryServicesConfigPath(t, filepath.Join(t.TempDir(), "services.json"))
+
+		want := ConfigObj{AccountID: "sentinel-account", AccessKey: "sentinel-key", ClusterName: "sentinel-cluster"}
+		configObj := want
+		assert.NoError(t, loadUrlsFromFile(&configObj))
+		assert.Equal(t, want, configObj)
+	})
+
+	t.Run("valid services file populates cloud urls", func(t *testing.T) {
+		servicesPath := filepath.Join(t.TempDir(), "services.json")
+		useTemporaryServicesConfigPath(t, servicesPath)
+
+		payload := `{"version":"v2","response":{"api-server":"https://api.example.com","event-receiver-http":"https://report.example.com"}}`
+		require.NoError(t, os.WriteFile(servicesPath, []byte(payload), 0o600))
+
+		configObj := &ConfigObj{}
+		require.NoError(t, loadUrlsFromFile(configObj))
+		assert.Equal(t, "https://api.example.com", configObj.CloudAPIURL)
+		assert.Equal(t, "https://report.example.com", configObj.CloudReportURL)
+	})
+}
+
+func Test_NewClusterConfig(t *testing.T) {
+	useTemporaryConfigStore(t)
+	getter.SetKSCloudAPIConnector(nil)
+	t.Cleanup(func() { getter.SetKSCloudAPIConnector(nil) })
+	t.Setenv(accountIdEnvVar, "")
+	t.Setenv(accessKeyEnvVar, "")
+	t.Setenv(cloudApiUrlEnvVar, "")
+	t.Setenv(cloudReportUrlEnvVar, "")
+	t.Setenv(defaultConfigMapNamespaceEnvVar, "security")
+
+	objects := []runtime.Object{
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "cloud", Namespace: "security", Labels: map[string]string{"kubescape.io/infra": "config"}}, Data: map[string]string{
+			"clusterData": `{"cloudAPIURL":"https://api.example.com","cloudReportURL":"https://report.example.com"}`,
+		}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "credentials", Namespace: "security", Labels: map[string]string{"kubescape.io/infra": "credentials"}}, Data: map[string][]byte{
+			"account": []byte("tenant-id"), "accessKey": []byte("access-key"),
+		}},
+	}
+
+	k8s := k8sinterface.NewKubernetesApiMock()
+	k8s.KubernetesClient = fake.NewClientset(objects...)
+
+	config := NewClusterConfig(k8s, "", "", "my:cluster", "")
+
+	assert.Equal(t, "security", config.GetDefaultNS())
+	assert.Equal(t, "tenant-id", config.GetAccountID())
+	assert.Equal(t, "access-key", config.GetAccessKey())
+	assert.Equal(t, "https://api.example.com", config.GetCloudAPIURL())
+	assert.Equal(t, "https://report.example.com", config.GetCloudReportURL())
+	assert.Equal(t, "my-cluster", config.GetContextName())
+}
+
+func Test_GetTenantConfig(t *testing.T) {
+	useTemporaryConfigStore(t)
+	getter.SetKSCloudAPIConnector(nil)
+	t.Cleanup(func() { getter.SetKSCloudAPIConnector(nil) })
+
+	originalConnected := k8sinterface.IsConnectedToCluster()
+	t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
+
+	t.Run("not connected to cluster returns LocalConfig", func(t *testing.T) {
+		k8sinterface.SetConnectedToCluster(false)
+
+		config := GetTenantConfig("account", "key", "cluster", "", nil)
+		_, ok := config.(*LocalConfig)
+		assert.True(t, ok, "expected *LocalConfig when not connected to a cluster")
+	})
+
+	t.Run("connected to cluster with k8s client returns ClusterConfig", func(t *testing.T) {
+		k8sinterface.SetConnectedToCluster(true)
+
+		k8s := k8sinterface.NewKubernetesApiMock()
+		config := GetTenantConfig("account", "key", "cluster", "", k8s)
+		_, ok := config.(*ClusterConfig)
+		assert.True(t, ok, "expected *ClusterConfig when connected to a cluster with a k8s client")
+	})
+
+	t.Run("connected to cluster without k8s client falls back to LocalConfig", func(t *testing.T) {
+		k8sinterface.SetConnectedToCluster(true)
+
+		config := GetTenantConfig("account", "key", "cluster", "", nil)
+		_, ok := config.(*LocalConfig)
+		assert.True(t, ok, "expected *LocalConfig when k8s client is nil")
+	})
 }
