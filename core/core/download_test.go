@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -176,9 +178,9 @@ func TestDownload_UnknownTargetReturnsError(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Fakes for the getter interfaces, used together with the policyGetterFunc /
-// exceptionsGetterFunc / attackTracksGetterFunc / configInputsGetterFunc
-// seams so the download* functions below can be exercised without a network
-// or cluster dependency.
+// exceptionsGetterFunc / attackTracksGetterFunc / configInputsGetterFunc /
+// tenantConfigFunc seams so the download* functions below can be exercised
+// without a network or cluster dependency.
 // ---------------------------------------------------------------------------
 
 type fakePolicyGetter struct {
@@ -229,9 +231,31 @@ func (f *fakeControlsInputsGetter) GetControlsInputs(string) (map[string][]strin
 	return f.inputs, f.err
 }
 
+// fakeTenantConfig is a minimal cautils.ITenantConfig that never touches disk,
+// the network, or a Kubernetes cluster.
+type fakeTenantConfig struct {
+	accountID   string
+	contextName string
+}
+
+var _ cautils.ITenantConfig = &fakeTenantConfig{}
+
+func (f *fakeTenantConfig) UpdateCachedConfig() error                { return nil }
+func (f *fakeTenantConfig) DeleteCachedConfig(context.Context) error { return nil }
+func (f *fakeTenantConfig) GenerateAccountID() (string, error)       { return f.accountID, nil }
+func (f *fakeTenantConfig) DeleteCredentials() error                 { return nil }
+func (f *fakeTenantConfig) GetContextName() string                   { return f.contextName }
+func (f *fakeTenantConfig) GetAccountID() string                     { return f.accountID }
+func (f *fakeTenantConfig) GetAccessKey() string                     { return "" }
+func (f *fakeTenantConfig) GetConfigObj() *cautils.ConfigObj         { return &cautils.ConfigObj{} }
+func (f *fakeTenantConfig) GetCloudReportURL() string                { return "" }
+func (f *fakeTenantConfig) GetCloudAPIURL() string                   { return "" }
+
 // blockedDir returns a path that cannot be used as a directory (it is a
 // regular file), so a getter.SaveInFile call underneath it fails with a
-// non-NotExist error instead of silently mkdir-ing its way to success.
+// non-NotExist error instead of silently mkdir-ing its way to success. The
+// resulting *fs.PathError includes this file's name ("blocker") in its
+// message, which the "SaveInFile fails" subtests below assert on.
 func blockedDir(t *testing.T) string {
 	t.Helper()
 	blocker := filepath.Join(t.TempDir(), "blocker")
@@ -239,58 +263,110 @@ func blockedDir(t *testing.T) string {
 	return blocker
 }
 
+// ---------------------------------------------------------------------------
+// Seam helpers. None of these are safe to use from a subtest that also calls
+// t.Parallel(): they mutate the package-level *Func vars for the duration of
+// the (sub)test and restore them on cleanup, so concurrent subtests would
+// race on and clobber each other's stubs.
+// ---------------------------------------------------------------------------
+
+func withConfigInputsGetter(t *testing.T, g getter.IControlsInputsGetter, err error) {
+	t.Helper()
+	orig := configInputsGetterFunc
+	configInputsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool, bool) (getter.IControlsInputsGetter, bool, error) {
+		return g, false, err
+	}
+	t.Cleanup(func() { configInputsGetterFunc = orig })
+}
+
+func withExceptionsGetter(t *testing.T, g getter.IExceptionsGetter, err error) {
+	t.Helper()
+	orig := exceptionsGetterFunc
+	exceptionsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IExceptionsGetter, error) {
+		return g, err
+	}
+	t.Cleanup(func() { exceptionsGetterFunc = orig })
+}
+
+func withAttackTracksGetter(t *testing.T, g getter.IAttackTracksGetter, err error) {
+	t.Helper()
+	orig := attackTracksGetterFunc
+	attackTracksGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IAttackTracksGetter, error) {
+		return g, err
+	}
+	t.Cleanup(func() { attackTracksGetterFunc = orig })
+}
+
+func withPolicyGetter(t *testing.T, g getter.IPolicyGetter, err error) {
+	t.Helper()
+	orig := policyGetterFunc
+	policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
+		return g, err
+	}
+	t.Cleanup(func() { policyGetterFunc = orig })
+}
+
+// withTenantConfig stubs tenantConfigFunc AND kubernetesAPIFunc so the
+// download* functions never reach cautils.GetTenantConfig or
+// getKubernetesApi. Both must be stubbed together: kubernetesAPIFunc() is
+// evaluated eagerly as an argument to tenantConfigFunc(...), so leaving it
+// real still probes a configured cluster (via discovery's
+// ServerPreferredResources) even with tenantConfigFunc faked - reproduced
+// locally by pointing KUBECONFIG at an unroutable address, which hangs
+// TestDownloadConfigInputs for minutes without this stub. With no
+// kubeconfig configured getKubernetesApi() already returns nil, but that's
+// an accident of the test environment, not something these tests should
+// depend on.
+func withTenantConfig(t *testing.T, tc cautils.ITenantConfig) {
+	t.Helper()
+	origTenant := tenantConfigFunc
+	tenantConfigFunc = func(string, string, string, string, *k8sinterface.KubernetesApi) cautils.ITenantConfig {
+		return tc
+	}
+	t.Cleanup(func() { tenantConfigFunc = origTenant })
+
+	origK8s := kubernetesAPIFunc
+	kubernetesAPIFunc = func() *k8sinterface.KubernetesApi { return nil }
+	t.Cleanup(func() { kubernetesAPIFunc = origK8s })
+}
+
 func TestDownloadConfigInputs(t *testing.T) {
 	t.Run("returns error from the getter constructor", func(t *testing.T) {
-		orig := configInputsGetterFunc
-		configInputsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool, bool) (getter.IControlsInputsGetter, bool, error) {
-			return nil, false, errors.New("boom")
-		}
-		t.Cleanup(func() { configInputsGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withConfigInputsGetter(t, nil, errors.New("boom"))
 
 		err := downloadConfigInputs(context.Background(), &metav1.DownloadInfo{Target: TargetControlsInputs, Path: t.TempDir()})
 		require.EqualError(t, err, "boom")
 	})
 
 	t.Run("returns error from GetControlsInputs", func(t *testing.T) {
-		orig := configInputsGetterFunc
-		configInputsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool, bool) (getter.IControlsInputsGetter, bool, error) {
-			return &fakeControlsInputsGetter{err: errors.New("fetch failed")}, false, nil
-		}
-		t.Cleanup(func() { configInputsGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withConfigInputsGetter(t, &fakeControlsInputsGetter{err: errors.New("fetch failed")}, nil)
 
 		err := downloadConfigInputs(context.Background(), &metav1.DownloadInfo{Target: TargetControlsInputs, Path: t.TempDir()})
 		require.EqualError(t, err, "fetch failed")
 	})
 
 	t.Run("returns error when controlInputs is nil", func(t *testing.T) {
-		orig := configInputsGetterFunc
-		configInputsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool, bool) (getter.IControlsInputsGetter, bool, error) {
-			return &fakeControlsInputsGetter{inputs: nil}, false, nil
-		}
-		t.Cleanup(func() { configInputsGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: nil}, nil)
 
 		err := downloadConfigInputs(context.Background(), &metav1.DownloadInfo{Target: TargetControlsInputs, Path: t.TempDir()})
 		require.EqualError(t, err, "failed to download controlInputs - received an empty objects")
 	})
 
 	t.Run("returns error when SaveInFile fails", func(t *testing.T) {
-		orig := configInputsGetterFunc
-		configInputsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool, bool) (getter.IControlsInputsGetter, bool, error) {
-			return &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"b"}}}, false, nil
-		}
-		t.Cleanup(func() { configInputsGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"b"}}}, nil)
 
 		err := downloadConfigInputs(context.Background(), &metav1.DownloadInfo{Target: TargetControlsInputs, Path: blockedDir(t)})
-		require.Error(t, err)
+		require.ErrorContains(t, err, "blocker")
 	})
 
 	t.Run("succeeds and defaults the filename", func(t *testing.T) {
-		orig := configInputsGetterFunc
+		withTenantConfig(t, &fakeTenantConfig{})
 		want := map[string][]string{"alpha": {"1", "2"}}
-		configInputsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool, bool) (getter.IControlsInputsGetter, bool, error) {
-			return &fakeControlsInputsGetter{inputs: want}, false, nil
-		}
-		t.Cleanup(func() { configInputsGetterFunc = orig })
+		withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: want}, nil)
 
 		dir := t.TempDir()
 		info := &metav1.DownloadInfo{Target: TargetControlsInputs, Path: dir}
@@ -305,45 +381,33 @@ func TestDownloadConfigInputs(t *testing.T) {
 
 func TestDownloadExceptions(t *testing.T) {
 	t.Run("returns error from the getter constructor", func(t *testing.T) {
-		orig := exceptionsGetterFunc
-		exceptionsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IExceptionsGetter, error) {
-			return nil, errors.New("boom")
-		}
-		t.Cleanup(func() { exceptionsGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withExceptionsGetter(t, nil, errors.New("boom"))
 
 		err := downloadExceptions(context.Background(), &metav1.DownloadInfo{Target: TargetExceptions, Path: t.TempDir()})
 		require.EqualError(t, err, "boom")
 	})
 
 	t.Run("returns error from GetExceptions", func(t *testing.T) {
-		orig := exceptionsGetterFunc
-		exceptionsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IExceptionsGetter, error) {
-			return &fakeExceptionsGetter{err: errors.New("fetch failed")}, nil
-		}
-		t.Cleanup(func() { exceptionsGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withExceptionsGetter(t, &fakeExceptionsGetter{err: errors.New("fetch failed")}, nil)
 
 		err := downloadExceptions(context.Background(), &metav1.DownloadInfo{Target: TargetExceptions, Path: t.TempDir()})
 		require.EqualError(t, err, "fetch failed")
 	})
 
 	t.Run("returns error when SaveInFile fails", func(t *testing.T) {
-		orig := exceptionsGetterFunc
-		exceptionsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IExceptionsGetter, error) {
-			return &fakeExceptionsGetter{}, nil
-		}
-		t.Cleanup(func() { exceptionsGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withExceptionsGetter(t, &fakeExceptionsGetter{}, nil)
 
 		err := downloadExceptions(context.Background(), &metav1.DownloadInfo{Target: TargetExceptions, Path: blockedDir(t)})
-		require.Error(t, err)
+		require.ErrorContains(t, err, "blocker")
 	})
 
 	t.Run("succeeds and preserves an explicit filename", func(t *testing.T) {
-		orig := exceptionsGetterFunc
+		withTenantConfig(t, &fakeTenantConfig{})
 		want := []armotypes.PostureExceptionPolicy{{PolicyType: "exception"}}
-		exceptionsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IExceptionsGetter, error) {
-			return &fakeExceptionsGetter{exceptions: want}, nil
-		}
-		t.Cleanup(func() { exceptionsGetterFunc = orig })
+		withExceptionsGetter(t, &fakeExceptionsGetter{exceptions: want}, nil)
 
 		dir := t.TempDir()
 		info := &metav1.DownloadInfo{Target: TargetExceptions, Path: dir, FileName: "custom-exceptions.json"}
@@ -358,45 +422,33 @@ func TestDownloadExceptions(t *testing.T) {
 
 func TestDownloadAttackTracks(t *testing.T) {
 	t.Run("returns error from the getter constructor", func(t *testing.T) {
-		orig := attackTracksGetterFunc
-		attackTracksGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IAttackTracksGetter, error) {
-			return nil, errors.New("boom")
-		}
-		t.Cleanup(func() { attackTracksGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withAttackTracksGetter(t, nil, errors.New("boom"))
 
 		err := downloadAttackTracks(context.Background(), &metav1.DownloadInfo{Target: TargetAttackTracks, Path: t.TempDir()})
 		require.EqualError(t, err, "boom")
 	})
 
 	t.Run("returns error from GetAttackTracks", func(t *testing.T) {
-		orig := attackTracksGetterFunc
-		attackTracksGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IAttackTracksGetter, error) {
-			return &fakeAttackTracksGetter{err: errors.New("fetch failed")}, nil
-		}
-		t.Cleanup(func() { attackTracksGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withAttackTracksGetter(t, &fakeAttackTracksGetter{err: errors.New("fetch failed")}, nil)
 
 		err := downloadAttackTracks(context.Background(), &metav1.DownloadInfo{Target: TargetAttackTracks, Path: t.TempDir()})
 		require.EqualError(t, err, "fetch failed")
 	})
 
 	t.Run("returns error when SaveInFile fails", func(t *testing.T) {
-		orig := attackTracksGetterFunc
-		attackTracksGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IAttackTracksGetter, error) {
-			return &fakeAttackTracksGetter{}, nil
-		}
-		t.Cleanup(func() { attackTracksGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withAttackTracksGetter(t, &fakeAttackTracksGetter{}, nil)
 
 		err := downloadAttackTracks(context.Background(), &metav1.DownloadInfo{Target: TargetAttackTracks, Path: blockedDir(t)})
-		require.Error(t, err)
+		require.ErrorContains(t, err, "blocker")
 	})
 
 	t.Run("succeeds and defaults the filename", func(t *testing.T) {
-		orig := attackTracksGetterFunc
+		withTenantConfig(t, &fakeTenantConfig{})
 		want := []v1alpha1.AttackTrack{{ApiVersion: "v1"}}
-		attackTracksGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IAttackTracksGetter, error) {
-			return &fakeAttackTracksGetter{tracks: want}, nil
-		}
-		t.Cleanup(func() { attackTracksGetterFunc = orig })
+		withAttackTracksGetter(t, &fakeAttackTracksGetter{tracks: want}, nil)
 
 		dir := t.TempDir()
 		info := &metav1.DownloadInfo{Target: TargetAttackTracks, Path: dir}
@@ -411,36 +463,27 @@ func TestDownloadAttackTracks(t *testing.T) {
 
 func TestDownloadFramework(t *testing.T) {
 	t.Run("returns error from the getter constructor", func(t *testing.T) {
-		orig := policyGetterFunc
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return nil, errors.New("boom")
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, nil, errors.New("boom"))
 
 		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir()})
 		require.EqualError(t, err, "boom")
 	})
 
 	t.Run("no identifier: returns error from GetFrameworks", func(t *testing.T) {
-		orig := policyGetterFunc
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{frameworksErr: errors.New("fetch failed")}, nil
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{frameworksErr: errors.New("fetch failed")}, nil)
 
 		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir()})
 		require.EqualError(t, err, "fetch failed")
 	})
 
 	t.Run("no identifier: skips a framework with an empty name and saves the rest", func(t *testing.T) {
-		orig := policyGetterFunc
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{frameworks: []reporthandling.Framework{
-				{PortalBase: armotypes.PortalBase{Name: ""}},
-				{PortalBase: armotypes.PortalBase{Name: "nsa"}},
-			}}, nil
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{
+			{PortalBase: armotypes.PortalBase{Name: ""}},
+			{PortalBase: armotypes.PortalBase{Name: "nsa"}},
+		}}, nil)
 
 		dir := t.TempDir()
 		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: dir})
@@ -453,58 +496,43 @@ func TestDownloadFramework(t *testing.T) {
 	})
 
 	t.Run("no identifier: returns error when SaveInFile fails", func(t *testing.T) {
-		orig := policyGetterFunc
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{frameworks: []reporthandling.Framework{
-				{PortalBase: armotypes.PortalBase{Name: "nsa"}},
-			}}, nil
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{
+			{PortalBase: armotypes.PortalBase{Name: "nsa"}},
+		}}, nil)
 
 		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: blockedDir(t)})
-		require.Error(t, err)
+		require.ErrorContains(t, err, "blocker")
 	})
 
 	t.Run("with identifier: returns error from PolicyCacheFilename", func(t *testing.T) {
-		orig := policyGetterFunc
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{}, nil
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{}, nil)
 
 		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir(), Identifier: "a/b"})
-		require.Error(t, err)
+		require.ErrorContains(t, err, "path separators")
 	})
 
 	t.Run("with identifier: returns error from GetFramework", func(t *testing.T) {
-		orig := policyGetterFunc
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{frameworkErr: errors.New("fetch failed")}, nil
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{frameworkErr: errors.New("fetch failed")}, nil)
 
 		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir(), Identifier: "nsa"})
 		require.EqualError(t, err, "fetch failed")
 	})
 
 	t.Run("with identifier: returns error when the framework is nil", func(t *testing.T) {
-		orig := policyGetterFunc
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{framework: nil}, nil
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{framework: nil}, nil)
 
 		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir(), Identifier: "nsa"})
 		require.EqualError(t, err, "failed to download framework - received an empty objects")
 	})
 
 	t.Run("with identifier: succeeds and derives the filename", func(t *testing.T) {
-		orig := policyGetterFunc
+		withTenantConfig(t, &fakeTenantConfig{})
 		want := &reporthandling.Framework{PortalBase: armotypes.PortalBase{Name: "nsa"}}
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{framework: want}, nil
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withPolicyGetter(t, &fakePolicyGetter{framework: want}, nil)
 
 		dir := t.TempDir()
 		info := &metav1.DownloadInfo{Target: TargetFramework, Path: dir, Identifier: "nsa"}
@@ -517,57 +545,42 @@ func TestDownloadFramework(t *testing.T) {
 	})
 
 	t.Run("with identifier: returns error when SaveInFile fails", func(t *testing.T) {
-		orig := policyGetterFunc
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{framework: &reporthandling.Framework{PortalBase: armotypes.PortalBase{Name: "nsa"}}}, nil
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{framework: &reporthandling.Framework{PortalBase: armotypes.PortalBase{Name: "nsa"}}}, nil)
 
 		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: blockedDir(t), Identifier: "nsa"})
-		require.Error(t, err)
+		require.ErrorContains(t, err, "blocker")
 	})
 }
 
 func TestDownloadControl(t *testing.T) {
 	t.Run("returns error from the getter constructor", func(t *testing.T) {
-		orig := policyGetterFunc
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return nil, errors.New("boom")
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, nil, errors.New("boom"))
 
 		err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir(), Identifier: "C-0001"})
 		require.EqualError(t, err, "boom")
 	})
 
 	t.Run("returns error when the identifier is missing", func(t *testing.T) {
-		orig := policyGetterFunc
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{}, nil
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{}, nil)
 
 		err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir()})
 		require.EqualError(t, err, "missing control ID")
 	})
 
 	t.Run("returns error from PolicyCacheFilename", func(t *testing.T) {
-		orig := policyGetterFunc
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{}, nil
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{}, nil)
 
 		err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir(), Identifier: "a/b"})
-		require.Error(t, err)
+		require.ErrorContains(t, err, "path separators")
 	})
 
 	t.Run("returns a wrapped error from GetControl", func(t *testing.T) {
-		orig := policyGetterFunc
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{controlErr: errors.New("fetch failed")}, nil
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{controlErr: errors.New("fetch failed")}, nil)
 
 		err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir(), Identifier: "C-0001"})
 		require.ErrorContains(t, err, "C-0001")
@@ -575,11 +588,8 @@ func TestDownloadControl(t *testing.T) {
 	})
 
 	t.Run("returns error when the control is nil", func(t *testing.T) {
-		orig := policyGetterFunc
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{control: nil}, nil
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{control: nil}, nil)
 
 		err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir(), Identifier: "C-0001"})
 		require.ErrorContains(t, err, "C-0001")
@@ -587,23 +597,17 @@ func TestDownloadControl(t *testing.T) {
 	})
 
 	t.Run("returns error when SaveInFile fails", func(t *testing.T) {
-		orig := policyGetterFunc
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{control: &reporthandling.Control{}}, nil
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withTenantConfig(t, &fakeTenantConfig{})
+		withPolicyGetter(t, &fakePolicyGetter{control: &reporthandling.Control{}}, nil)
 
 		err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: blockedDir(t), Identifier: "C-0001"})
-		require.Error(t, err)
+		require.ErrorContains(t, err, "blocker")
 	})
 
 	t.Run("succeeds and derives the filename", func(t *testing.T) {
-		orig := policyGetterFunc
+		withTenantConfig(t, &fakeTenantConfig{})
 		want := &reporthandling.Control{ControlID: "C-0001"}
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{control: want}, nil
-		}
-		t.Cleanup(func() { policyGetterFunc = orig })
+		withPolicyGetter(t, &fakePolicyGetter{control: want}, nil)
 
 		dir := t.TempDir()
 		info := &metav1.DownloadInfo{Target: TargetControl, Path: dir, Identifier: "C-0001"}
@@ -618,22 +622,11 @@ func TestDownloadControl(t *testing.T) {
 
 func TestDownloadArtifacts(t *testing.T) {
 	t.Run("saves every artifact and always returns nil", func(t *testing.T) {
-		origConfig, origExceptions, origAttack, origPolicy := configInputsGetterFunc, exceptionsGetterFunc, attackTracksGetterFunc, policyGetterFunc
-		configInputsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool, bool) (getter.IControlsInputsGetter, bool, error) {
-			return &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"1"}}}, false, nil
-		}
-		exceptionsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IExceptionsGetter, error) {
-			return &fakeExceptionsGetter{exceptions: []armotypes.PostureExceptionPolicy{{}}}, nil
-		}
-		attackTracksGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IAttackTracksGetter, error) {
-			return &fakeAttackTracksGetter{tracks: []v1alpha1.AttackTrack{{}}}, nil
-		}
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}}, nil
-		}
-		t.Cleanup(func() {
-			configInputsGetterFunc, exceptionsGetterFunc, attackTracksGetterFunc, policyGetterFunc = origConfig, origExceptions, origAttack, origPolicy
-		})
+		withTenantConfig(t, &fakeTenantConfig{})
+		withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"1"}}}, nil)
+		withExceptionsGetter(t, &fakeExceptionsGetter{exceptions: []armotypes.PostureExceptionPolicy{{}}}, nil)
+		withAttackTracksGetter(t, &fakeAttackTracksGetter{tracks: []v1alpha1.AttackTrack{{}}}, nil)
+		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}}, nil)
 
 		dir := t.TempDir()
 		err := downloadArtifacts(context.Background(), &metav1.DownloadInfo{Target: TargetArtifacts, Path: dir})
@@ -645,23 +638,12 @@ func TestDownloadArtifacts(t *testing.T) {
 		}
 	})
 
-	t.Run("logs a warning and continues when one artifact fails", func(t *testing.T) {
-		origConfig, origExceptions, origAttack, origPolicy := configInputsGetterFunc, exceptionsGetterFunc, attackTracksGetterFunc, policyGetterFunc
-		configInputsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool, bool) (getter.IControlsInputsGetter, bool, error) {
-			return &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"1"}}}, false, nil
-		}
-		exceptionsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IExceptionsGetter, error) {
-			return nil, errors.New("boom")
-		}
-		attackTracksGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IAttackTracksGetter, error) {
-			return &fakeAttackTracksGetter{tracks: []v1alpha1.AttackTrack{{}}}, nil
-		}
-		policyGetterFunc = func(context.Context, []string, string, bool, *getter.DownloadReleasedPolicy, bool) (getter.IPolicyGetter, error) {
-			return &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}}, nil
-		}
-		t.Cleanup(func() {
-			configInputsGetterFunc, exceptionsGetterFunc, attackTracksGetterFunc, policyGetterFunc = origConfig, origExceptions, origAttack, origPolicy
-		})
+	t.Run("continues after one artifact fails", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"1"}}}, nil)
+		withExceptionsGetter(t, nil, errors.New("boom"))
+		withAttackTracksGetter(t, &fakeAttackTracksGetter{tracks: []v1alpha1.AttackTrack{{}}}, nil)
+		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}}, nil)
 
 		dir := t.TempDir()
 		err := downloadArtifacts(context.Background(), &metav1.DownloadInfo{Target: TargetArtifacts, Path: dir})
