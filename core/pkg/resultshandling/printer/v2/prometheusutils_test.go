@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -370,4 +371,17 @@ func TestMetrics_String_MultiItem_NoDuplicateHeaders(t *testing.T) {
 	// verify both resource series are present
 	assert.Contains(t, output, "kubescape_resource_count_controls_failed{apiVersion=\"v1\",kind=\"Pod\",namespace=\"ns1\",name=\"Resource A\"} 2")
 	assert.Contains(t, output, "kubescape_resource_count_controls_failed{apiVersion=\"v1\",kind=\"Pod\",namespace=\"ns2\",name=\"Resource B\"} 4")
+}
+
+func TestSetComplianceScores_ClusterMetricUsesComplianceScore(t *testing.T) {
+	// The cluster gauge is named complianceScore, so it must not be fed the risk score.
+	summaryDetails := &reportsummary.SummaryDetails{
+		Score:           42,
+		ComplianceScore: 77,
+	}
+
+	m := &Metrics{}
+	m.setComplianceScores(summaryDetails)
+
+	assert.Equal(t, 77, m.rs.complianceScore)
 }

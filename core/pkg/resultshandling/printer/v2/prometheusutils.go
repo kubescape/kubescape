@@ -321,7 +321,8 @@ func (mcrs *mControlComplianceScore) set(resources reportsummary.ICounters) {
 }
 func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetails) {
 	m.rs.set(summaryDetails.NumberOfResources(), summaryDetails.NumberOfControls())
-	m.rs.complianceScore = cautils.Float32ToInt(summaryDetails.GetScore())
+	// GetScore() returns the risk score; the metric is the compliance score.
+	m.rs.complianceScore = cautils.Float32ToInt(summaryDetails.ComplianceScore)
 
 	for _, fw := range summaryDetails.ListFrameworks() {
 		mfrs := mFrameworkComplianceScore{
