@@ -104,7 +104,10 @@ func (mcrs *mControlComplianceScore) metrics() []string {
 
 	m := []string{}
 	// overall
-	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mcrs.prefix(), metricsScore), mcrs.labels(), mcrs.complianceScore))
+	// GetComplianceScore returns -1 when a control has no calculated score.
+	if mcrs.complianceScore >= 0 {
+		m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mcrs.prefix(), metricsScore), mcrs.labels(), mcrs.complianceScore))
+	}
 
 	// resources
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mcrs.prefix(), metricsCount, metricsResources, metricsFailed), mcrs.labels(), mcrs.resourcesCountFailed))
@@ -337,7 +340,7 @@ func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetai
 		mcrs := mControlComplianceScore{
 			controlName:     control.GetName(),
 			controlID:       control.GetID(),
-			complianceScore: cautils.Float32ToInt(control.GetScore()),
+			complianceScore: cautils.Float32ToInt(control.GetComplianceScore()),
 			link:            cautils.GetControlLink(control.GetID()),
 			severity:        apis.ControlSeverityToString(control.GetScoreFactor()),
 			remediation:     control.GetRemediation(),

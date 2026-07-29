@@ -102,6 +102,18 @@ func TestControlComplianceScore_MetricsLabelsAndPrefix(t *testing.T) {
 			expectedMetrics: []string{"kubescape_control_complianceScore{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 37", "kubescape_control_count_resources_failed{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 17", "kubescape_control_count_resources_skipped{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 27", "kubescape_control_count_resources_passed{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 7"},
 			expectedLabels:  "name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"",
 		},
+		{
+			name: "Unset compliance score omits only the score metric",
+			mcrs: mControlComplianceScore{
+				controlName:           "Unset Control",
+				resourcesCountPassed:  7,
+				resourcesCountFailed:  17,
+				resourcesCountSkipped: 27,
+				complianceScore:       -1,
+			},
+			expectedMetrics: []string{"kubescape_control_count_resources_failed{name=\"Unset Control\",severity=\"\",link=\"\"} 17", "kubescape_control_count_resources_skipped{name=\"Unset Control\",severity=\"\",link=\"\"} 27", "kubescape_control_count_resources_passed{name=\"Unset Control\",severity=\"\",link=\"\"} 7"},
+			expectedLabels:  "name=\"Unset Control\",severity=\"\",link=\"\"",
+		},
 	}
 
 	for _, tt := range tests {
@@ -384,4 +396,33 @@ func TestSetComplianceScores_ClusterMetricUsesComplianceScore(t *testing.T) {
 	m.setComplianceScores(summaryDetails)
 
 	assert.Equal(t, 77, m.rs.complianceScore)
+	assert.Contains(t, m.String(), "kubescape_cluster_complianceScore{} 77")
+}
+
+func TestSetComplianceScores_ControlMetricsUseComplianceScore(t *testing.T) {
+	complianceScore := float32(65)
+	summaryDetails := &reportsummary.SummaryDetails{
+		Controls: reportsummary.ControlSummaries{
+			"C-SET": {
+				ControlID:       "C-SET",
+				Name:            "Set Control",
+				Score:           10,
+				ComplianceScore: &complianceScore,
+			},
+			"C-UNSET": {
+				ControlID: "C-UNSET",
+				Name:      "Unset Control",
+				Score:     20,
+			},
+		},
+	}
+
+	m := &Metrics{}
+	m.setComplianceScores(summaryDetails)
+	output := m.String()
+
+	assert.Contains(t, output, "kubescape_control_complianceScore{name=\"Set Control\"")
+	assert.Contains(t, output, "} 65")
+	assert.NotContains(t, output, "kubescape_control_complianceScore{name=\"Unset Control\"")
+	assert.Contains(t, output, "kubescape_control_count_resources_failed{name=\"Unset Control\"")
 }
