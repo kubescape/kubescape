@@ -308,8 +308,7 @@ func TestCancelScan_WaitFalse_NoFailedArtifactLeftBehind(t *testing.T) {
 	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, scanID string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		close(scanStarted)
 		<-ctx.Done()
-		writeScanErrorToFile(ctx.Err(), scanID)
-		return nil, ctx.Err()
+		return nil, writeScanErrorToFile(ctx.Err(), scanID)
 	}
 
 	h := NewHTTPHandler(false)

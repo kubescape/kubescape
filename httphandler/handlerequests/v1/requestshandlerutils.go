@@ -64,7 +64,7 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
 	_, err := scanImpl(scanReq.ctx, scanReq.scanInfo, scanReq.scanID, scanReq.scanQueryParams.SkipPersistence)
 	if err != nil {
-		if errors.Is(err, context.Canceled) && errors.Is(scanReq.ctx.Err(), context.Canceled) {
+		if errors.Is(scanReq.ctx.Err(), context.Canceled) {
 			logger.L().Ctx(scanReq.ctx).Info("scan cancelled", helpers.String("ID", scanReq.scanID))
 			removeResultsFile(scanReq.scanID)
 			if scanReq.scanQueryParams.ReturnResults {
@@ -133,6 +133,21 @@ func (handler *HTTPHandler) watchForScan() {
 				default:
 				}
 			}
+			if scanReq.callbackURL != "" {
+				payload := scanCallbackPayload{ID: scanReq.scanID, Status: callbackStatusFailed, Error: "scan cancelled"}
+				cbCtx := context.WithoutCancel(scanReq.ctx)
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							logger.L().Ctx(cbCtx).Error("scan completion callback panicked", helpers.String("ID", scanReq.scanID), helpers.Error(fmt.Errorf("%v", r)))
+						}
+					}()
+					if cbErr := postScanCallback(cbCtx, scanReq.callbackURL, payload); cbErr != nil {
+						logger.L().Ctx(cbCtx).Error("failed to deliver scan completion callback", helpers.String("ID", scanReq.scanID), helpers.Error(cbErr))
+					}
+				}()
+			}
+			handler.state.releaseCancel(scanReq.scanID)
 			handler.state.setNotBusy(scanReq.scanID)
 			continue
 		}
