@@ -394,16 +394,19 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 
 	for img := range imagesToScan.Iter() {
 		logger.L().Start("Scanning", helpers.String("image", img))
-		if err := scanSingleImage(ctx, img, svc, resultsHandling); err != nil {
+		if err := scanSingleImage(ctx, img, svc, resultsHandling, scanInfo.RegistryMapping); err != nil {
 			logger.L().StopError("failed to scan", helpers.String("image", img), helpers.Error(err))
 		}
 		logger.L().StopSuccess("Done scanning", helpers.String("image", img))
 	}
 }
 
-func scanSingleImage(ctx context.Context, img string, svc *imagescan.Service, resultsHandling *resultshandling.ResultsHandler) error {
+func scanSingleImage(ctx context.Context, img string, svc *imagescan.Service, resultsHandling *resultshandling.ResultsHandler, registryMapping map[string]string) error {
 
-	scanResults, err := svc.Scan(ctx, img, imagescan.RegistryCredentials{}, nil, nil)
+	scanResults, err := scanWithRegistryMapping(
+		ctx, svc, img, imagescan.RegistryCredentials{},
+		registryMapping, nil, nil,
+	)
 	if err != nil {
 		return err
 	}
