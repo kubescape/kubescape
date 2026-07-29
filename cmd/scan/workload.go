@@ -71,7 +71,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if err := validateThresholdsOnly(scanInfo); err != nil {
 				return err
 			}
-			namespace, kind, name, err := parseWorkloadIdentifierString(args[0])
+			namespace, kind, name, apiVersion, err := parseWorkloadIdentifierString(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid input: %w", err)
 			}
@@ -80,9 +80,8 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				scanInfo.Namespace = namespace
 			}
 
-			setWorkloadScanInfo(scanInfo, kind, name)
+			setWorkloadScanInfo(scanInfo, apiVersion, kind, name)
 
-			// todo: add api version if provided
 			results, err := ks.Scan(scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())
@@ -106,12 +105,15 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 	return workloadCmd
 }
 
-func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string) {
+func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, apiVersion string, kind string, name string) {
 	scanInfo.SetScanType(cautils.ScanTypeWorkload)
 	scanInfo.ScanImages = true
 
 	scanInfo.ScanObject = &objectsenvelopes.ScanObject{}
 	scanInfo.ScanObject.SetNamespace(scanInfo.Namespace)
+	if apiVersion != "" {
+		scanInfo.ScanObject.SetApiVersion(apiVersion)
+	}
 	scanInfo.ScanObject.SetKind(kind)
 	scanInfo.ScanObject.SetName(name)
 
@@ -123,26 +125,48 @@ func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string) {
 }
 
 func validateWorkloadIdentifier(workloadIdentifier string) error {
-	_, _, _, err := parseWorkloadIdentifierString(workloadIdentifier)
+	_, _, _, _, err := parseWorkloadIdentifierString(workloadIdentifier)
 	return err
 }
 
-func parseWorkloadIdentifierString(workloadIdentifier string) (namespace, kind, name string, err error) {
+func parseWorkloadIdentifierString(workloadIdentifier string) (namespace, kind, name, apiVersion string, err error) {
 	// workloadIdentifier is in the form of kind/name or namespace/kind/name
 	// example: default/Deployment/nginx-deployment
 	x := strings.Split(workloadIdentifier, "/")
 	if len(x) == 2 {
 		if x[0] == "" || x[1] == "" {
-			return "", "", "", ErrInvalidWorkloadIdentifier
+			return "", "", "", "", ErrInvalidWorkloadIdentifier
 		}
-		return "", x[0], x[1], nil
+		parsedKind, parsedApiVersion := parseKindAndApiVersion(x[0])
+		return "", parsedKind, x[1], parsedApiVersion, nil
 	}
 	if len(x) == 3 {
 		if x[0] == "" || x[1] == "" || x[2] == "" {
-			return "", "", "", ErrInvalidWorkloadIdentifier
+			return "", "", "", "", ErrInvalidWorkloadIdentifier
 		}
-		return x[0], x[1], x[2], nil
+		parsedKind, parsedApiVersion := parseKindAndApiVersion(x[1])
+		return x[0], parsedKind, x[2], parsedApiVersion, nil
 	}
 
-	return "", "", "", ErrInvalidWorkloadIdentifier
+	return "", "", "", "", ErrInvalidWorkloadIdentifier
+}
+
+func parseKindAndApiVersion(kindStr string) (kind, apiVersion string) {
+	parts := strings.Split(kindStr, ".")
+	
+	// Reject empty components
+	for _, part := range parts {
+		if part == "" {
+			return kindStr, ""
+		}
+	}
+
+	if len(parts) >= 3 {
+		group := strings.Join(parts[2:], ".")
+		return parts[0], group + "/" + parts[1] // kind.version.group -> group/version
+	}
+	if len(parts) == 2 {
+		return parts[0], parts[1] // kind.version -> version
+	}
+	return kindStr, ""
 }
