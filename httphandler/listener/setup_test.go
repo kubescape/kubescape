@@ -104,7 +104,10 @@ func TestServePprof(t *testing.T) {
 
 	// The regression this guards against: servePprof binding pprof even at
 	// info level. If it did, this bind would fail instead of succeeding.
-	ln, err := net.Listen("tcp", ":6060")
+	// Loopback-only (not the wildcard address) to satisfy gosec G102; a
+	// wildcard bind by servePprof would still collide with this one, so the
+	// check is just as effective.
+	ln, err := net.Listen("tcp", "127.0.0.1:6060")
 	require.NoError(t, err, "pprof must not listen when log level is info")
 	defer ln.Close()
 }
