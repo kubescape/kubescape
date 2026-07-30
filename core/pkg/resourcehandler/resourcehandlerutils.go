@@ -69,11 +69,28 @@ func getQueryableResourceMapFromPoliciesWithWarned(frameworks []reporthandling.F
 				for i := range rule.Match {
 					updateQueryableResourcesMapFromRuleMatchObject(&rule.Match[i], resourcesFilterMap, queryableResources, namespace, resolver)
 				}
+				addCELNamespaceQuery(rule, resource, namespace, queryableResources, resolver)
 			}
 		}
 	}
 
 	return queryableResources, excludedRulesMap
+}
+
+func addCELNamespaceQuery(rule reporthandling.PolicyRule, resource workloadinterface.IWorkload, namespace string, queryableResources QueryableResources, resolver resourceResolver) {
+	if rule.RuleLanguage != reporthandling.CELLanguage {
+		return
+	}
+	if resource != nil && namespace == "" {
+		return
+	}
+
+	namespaceMatch := reporthandling.RuleMatchObjects{
+		APIGroups:   []string{""},
+		APIVersions: []string{"v1"},
+		Resources:   []string{"Namespace"},
+	}
+	updateQueryableResourcesMapFromRuleMatchObject(&namespaceMatch, nil, queryableResources, namespace, resolver)
 }
 
 // getScannedResourceNamespace returns the namespace of the scanned resource.
