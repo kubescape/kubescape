@@ -206,8 +206,8 @@ func isEmptyResources(counters reportsummary.ICounters) bool {
 	return counters.Failed() == 0 && counters.Skipped() == 0 && counters.Passed() == 0
 }
 
-func getAllSupportedObjects(k8sResources cautils.K8SResources, externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) map[string][]workloadinterface.IMetadata {
-	k8sObjects := getKubernetesObjects(k8sResources, allResources, rule.Match)
+func getAllSupportedObjects(k8sResources cautils.K8SResources, externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule, resourceCount int) map[string][]workloadinterface.IMetadata {
+	k8sObjects := getKubernetesObjects(k8sResources, allResources, rule.Match, resourceCount)
 	externalObjs := getKubernetesObjectsFromExternalResources(externalResources, allResources, rule.DynamicMatch)
 	if len(externalObjs) > 0 {
 		l, ok := k8sObjects[clusterScope]
@@ -243,7 +243,7 @@ func getKubernetesObjectsFromExternalResources(externalResources cautils.Externa
 	return k8sObjects
 }
 
-func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) map[string][]workloadinterface.IMetadata {
+func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects, resourceCount int) map[string][]workloadinterface.IMetadata {
 	k8sObjects := map[string][]workloadinterface.IMetadata{}
 
 	for m := range match {
@@ -256,7 +256,7 @@ func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[st
 							for i := range k8sObj {
 
 								obj := allResources[k8sObj[i]]
-								ns := getNamespaceName(obj, len(allResources))
+								ns := getNamespaceName(obj, resourceCount)
 
 								l, ok := k8sObjects[ns]
 								if !ok {

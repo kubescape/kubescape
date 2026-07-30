@@ -67,6 +67,11 @@ type OPAProcessor struct {
 	celEvaluator     *cel.Evaluator
 	celEvaluatorOnce sync.Once
 	celEvaluatorErr  error
+	// initialResourceCount is the size of AllResources snapshotted once before
+	// the control loop starts, so the large-cluster namespace-bucketing decision
+	// (see getNamespaceName) is made once per scan instead of drifting mid-scan
+	// as rules write aggregator-produced resources back into AllResources.
+	initialResourceCount int
 }
 
 func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool, exceptionEventRecorder record.EventRecorder) *OPAProcessor {
@@ -132,6 +137,8 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 		progressListener.Start(len(policies.Controls))
 		defer progressListener.Stop()
 	}
+
+	opap.initialResourceCount = len(opap.AllResources)
 
 	var processErrs []error
 	for _, toPin := range policies.Controls {
@@ -253,7 +260,7 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ControlConfigInputs, fixedControlInputs)
 
 	var evalErrs []error
-	resourcesPerNS := getAllSupportedObjects(opap.K8SResources, opap.ExternalResources, opap.AllResources, rule)
+	resourcesPerNS := getAllSupportedObjects(opap.K8SResources, opap.ExternalResources, opap.AllResources, rule, opap.initialResourceCount)
 	for i := range resourcesPerNS {
 		resourceToScan := resourcesPerNS[i]
 		if _, ok := resourcesPerNS[clusterScope]; ok && i != clusterScope {
