@@ -38,11 +38,37 @@ func getOperatorPod(k8sClient *k8sinterface.KubernetesApi, ns string) (*v1.Pod, 
 	if err != nil {
 		return nil, err
 	}
-	if len(pods.Items) != 1 {
-		return nil, errors.New("could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts")
-	}
 
-	return &pods.Items[0], nil
+	notFoundErr := errors.New("could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts")
+
+	switch len(pods.Items) {
+	case 0:
+		return nil, notFoundErr
+	case 1:
+		return &pods.Items[0], nil
+	default:
+		// More than one operator pod can be present during HA deployments or
+		// rolling upgrades, so pick the first one that is actually ready
+		// instead of failing outright.
+		for i := range pods.Items {
+			if isPodReady(&pods.Items[i]) {
+				return &pods.Items[i], nil
+			}
+		}
+		return nil, notFoundErr
+	}
+}
+
+func isPodReady(pod *v1.Pod) bool {
+	if pod.Status.Phase != v1.PodRunning {
+		return false
+	}
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == v1.PodReady {
+			return condition.Status == v1.ConditionTrue
+		}
+	}
+	return false
 }
 
 func NewOperatorAdapter(scanInfo cautils.OperatorScanInfo, ns string) (*OperatorAdapter, error) {
