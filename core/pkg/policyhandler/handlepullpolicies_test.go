@@ -267,3 +267,25 @@ func TestDownloadScanPolicies_LocalCacheBypass(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, files)
 }
+
+type ControlsInputsGetterNilMock struct{}
+
+func (mock *ControlsInputsGetterNilMock) GetControlsInputs(clusterName string) (map[string][]string, error) {
+	return nil, nil
+}
+
+func TestGetControlInputs_NilReturnsNotCached(t *testing.T) {
+	policyHandler := NewPolicyHandler("test-cluster")
+	policyHandler.cachedControlInputs.Invalidate()
+	policyHandler.getters = &cautils.Getters{
+		ControlsInputsGetter: &ControlsInputsGetterNilMock{},
+	}
+
+	controlInputs, err := policyHandler.getControlInputs()
+
+	assert.NoError(t, err)
+	assert.Nil(t, controlInputs)
+
+	_, cacheHit := policyHandler.cachedControlInputs.Get()
+	assert.False(t, cacheHit, "nil control inputs should not be cached")
+}

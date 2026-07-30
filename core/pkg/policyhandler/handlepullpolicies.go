@@ -261,7 +261,7 @@ func (policyHandler *PolicyHandler) getControlInputs() (map[string][]string, err
 	}
 
 	controlInputs, err := policyHandler.getters.ControlsInputsGetter.GetControlsInputs(policyHandler.clusterName)
-	if err == nil {
+	if err == nil && controlInputs != nil {
 		policyHandler.cachedControlInputs.Set(controlInputs)
 	}
 
