@@ -18,7 +18,7 @@ var operatorScanConfigExamples = fmt.Sprintf(`
 
 `, cautils.ExecName())
 
-func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo cautils.OperatorInfo) *cobra.Command {
+func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo *cautils.OperatorInfo) *cobra.Command {
 	configCmd := &cobra.Command{
 		Use:     "configurations",
 		Short:   "Trigger configuration scanning from the Kubescape Operator microservice",

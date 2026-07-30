@@ -14,7 +14,7 @@ const (
 	configurationsSubCommand  string = "configurations"
 )
 
-func getOperatorScanCmd(ks meta.IKubescape, operatorInfo cautils.OperatorInfo) *cobra.Command {
+func getOperatorScanCmd(ks meta.IKubescape, operatorInfo *cautils.OperatorInfo) *cobra.Command {
 	operatorCmd := &cobra.Command{
 		Use:     "scan",
 		Short:   "Scan your cluster using the Kubescape-operator within the cluster components",

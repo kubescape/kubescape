@@ -16,7 +16,7 @@ func TestGetOperatorScanVulnerabilitiesCmd(t *testing.T) {
 		Namespace: "namespace",
 	}
 
-	cmd := getOperatorScanVulnerabilitiesCmd(mockKubescape, operatorInfo)
+	cmd := getOperatorScanVulnerabilitiesCmd(mockKubescape, &operatorInfo)
 
 	// Verify the command name and short description
 	assert.Equal(t, "vulnerabilities", cmd.Use)

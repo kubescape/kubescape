@@ -19,7 +19,7 @@ var operatorScanVulnerabilitiesExamples = fmt.Sprintf(`
 
 `, cautils.ExecName())
 
-func getOperatorScanVulnerabilitiesCmd(ks meta.IKubescape, operatorInfo cautils.OperatorInfo) *cobra.Command {
+func getOperatorScanVulnerabilitiesCmd(ks meta.IKubescape, operatorInfo *cautils.OperatorInfo) *cobra.Command {
 	configCmd := &cobra.Command{
 		Use:     "vulnerabilities",
 		Short:   "Scan your cluster for vulnerabilities using the Kubescape Operator in-cluster components",
