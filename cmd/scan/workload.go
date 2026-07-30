@@ -3,6 +3,7 @@ package scan
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -137,36 +138,51 @@ func parseWorkloadIdentifierString(workloadIdentifier string) (namespace, kind, 
 		if x[0] == "" || x[1] == "" {
 			return "", "", "", "", ErrInvalidWorkloadIdentifier
 		}
-		parsedKind, parsedApiVersion := parseKindAndApiVersion(x[0])
+		parsedKind, parsedApiVersion, err := parseKindAndApiVersion(x[0])
+		if err != nil {
+			return "", "", "", "", err
+		}
 		return "", parsedKind, x[1], parsedApiVersion, nil
 	}
 	if len(x) == 3 {
 		if x[0] == "" || x[1] == "" || x[2] == "" {
 			return "", "", "", "", ErrInvalidWorkloadIdentifier
 		}
-		parsedKind, parsedApiVersion := parseKindAndApiVersion(x[1])
+		parsedKind, parsedApiVersion, err := parseKindAndApiVersion(x[1])
+		if err != nil {
+			return "", "", "", "", err
+		}
 		return x[0], parsedKind, x[2], parsedApiVersion, nil
 	}
 
 	return "", "", "", "", ErrInvalidWorkloadIdentifier
 }
 
-func parseKindAndApiVersion(kindStr string) (kind, apiVersion string) {
+var apiVersionPattern = regexp.MustCompile(`^v\d+((alpha|beta)\d+)?$`)
+
+func parseKindAndApiVersion(kindStr string) (kind, apiVersion string, err error) {
 	parts := strings.Split(kindStr, ".")
-	
+	if len(parts) == 1 {
+		return kindStr, "", nil
+	}
+
 	// Reject empty components
 	for _, part := range parts {
 		if part == "" {
-			return kindStr, ""
+			return "", "", fmt.Errorf("%w: empty component in %q", ErrInvalidWorkloadIdentifier, kindStr)
 		}
+	}
+
+	if !apiVersionPattern.MatchString(parts[1]) {
+		return "", "", fmt.Errorf("%w: %q is not a valid API version in %q", ErrInvalidWorkloadIdentifier, parts[1], kindStr)
 	}
 
 	if len(parts) >= 3 {
 		group := strings.Join(parts[2:], ".")
-		return parts[0], group + "/" + parts[1] // kind.version.group -> group/version
+		return parts[0], group + "/" + parts[1], nil // kind.version.group -> group/version
 	}
 	if len(parts) == 2 {
-		return parts[0], parts[1] // kind.version -> version
+		return parts[0], parts[1], nil // kind.version -> version
 	}
-	return kindStr, ""
+	return kindStr, "", nil
 }

@@ -135,11 +135,7 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 					t.Errorf("got: %v, want: %v", scanInfo.ScanObject.Metadata.Namespace, tc.want.ScanObject.Metadata.Namespace)
 				}
 
-				if tc.apiVersion != "" {
-					if scanInfo.ScanObject.GetApiVersion() != tc.want.ScanObject.GetApiVersion() {
-						t.Errorf("got: %v, want: %v", scanInfo.ScanObject.GetApiVersion(), tc.want.ScanObject.GetApiVersion())
-					}
-				}
+				assert.Equal(t, tc.want.ScanObject.GetApiVersion(), scanInfo.ScanObject.GetApiVersion())
 
 				if tc.filePath == "" {
 					assert.Len(t, scanInfo.InputPatterns, 0)
@@ -292,13 +288,24 @@ func Test_parseWorkloadIdentifierString_Values(t *testing.T) {
 			WantErr:        false,
 		},
 		{
-			Description:    "invalid empty dotted component",
-			Input:          "Deployment..apps/nginx",
-			WantNamespace:  "",
-			WantKind:       "Deployment..apps",
-			WantName:       "nginx",
-			WantApiVersion: "",
-			WantErr:        false,
+			Description: "invalid empty dotted component",
+			Input:       "Deployment..apps/nginx",
+			WantErr:     true,
+		},
+		{
+			Description: "invalid empty trailing component",
+			Input:       "Deployment./nginx",
+			WantErr:     true,
+		},
+		{
+			Description: "invalid missing apiVersion",
+			Input:       "Deployment.apps/nginx",
+			WantErr:     true,
+		},
+		{
+			Description: "invalid apiVersion segment",
+			Input:       "Deployment.bogus/nginx",
+			WantErr:     true,
 		},
 		{
 			Description: "too many segments",
