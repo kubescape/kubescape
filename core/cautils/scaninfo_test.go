@@ -3,9 +3,13 @@ package cautils
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -24,19 +28,41 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.Nil(t, ctx.HelmContextMetadata)
 		assert.Nil(t, ctx.RepoContextMetadata)
 	}
-	// TODO: tests were commented out due to actual http calls ; http calls should be mocked.
-	/*{
+	t.Run("git local repository metadata", func(t *testing.T) {
+		// metadataGitLocal only parses the local repo's configured remote URL,
+		// so a local fixture reproduces the remote metadata without any HTTP calls.
+		dir := t.TempDir()
+		repo, err := git.PlainInit(dir, false)
+		require.NoError(t, err)
+		_, err = repo.CreateRemote(&config.RemoteConfig{
+			Name: "origin",
+			URLs: []string{"https://github.com/kubescape/kubescape"},
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test\n"), 0600))
+		worktree, err := repo.Worktree()
+		require.NoError(t, err)
+		_, err = worktree.Add("README.md")
+		require.NoError(t, err)
+		_, err = worktree.Commit("initial commit", &git.CommitOptions{
+			Author: &object.Signature{Name: "kubescape", Email: "kubescape@example.com", When: time.Now()},
+		})
+		require.NoError(t, err)
+
 		ctx := reporthandlingv2.ContextMetadata{}
-		setContextMetadata(&ctx, "https://github.com/kubescape/kubescape")
+		scanInfo := &ScanInfo{InputPatterns: []string{dir}}
+		scanInfo.setContextMetadata(context.Background(), &ctx)
+
 		assert.Nil(t, ctx.ClusterContextMetadata)
 		assert.Nil(t, ctx.DirectoryContextMetadata)
 		assert.Nil(t, ctx.FileContextMetadata)
 		assert.Nil(t, ctx.HelmContextMetadata)
-		assert.NotNil(t, ctx.RepoContextMetadata)
+		require.NotNil(t, ctx.RepoContextMetadata)
 		assert.Equal(t, "kubescape", ctx.RepoContextMetadata.Repo)
 		assert.Equal(t, "kubescape", ctx.RepoContextMetadata.Owner)
 		assert.Equal(t, "master", ctx.RepoContextMetadata.Branch)
-	}*/
+	})
 }
 
 func TestGetHostname(t *testing.T) {
