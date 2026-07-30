@@ -847,3 +847,42 @@ func TestRunCELOnK8s(t *testing.T) {
 		assert.Empty(t, outcome.excluded)
 	})
 }
+
+func TestGetNamespaceObject(t *testing.T) {
+	t.Run("cluster-scoped resource resolves to nil without touching AllResources", func(t *testing.T) {
+		opap := &OPAProcessor{}
+		assert.Nil(t, opap.getNamespaceObject(""))
+	})
+
+	t.Run("namespace collected in AllResources is resolved by name", func(t *testing.T) {
+		nsObj := map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Namespace",
+			"metadata":   map[string]any{"name": "prod", "labels": map[string]any{"environment": "prod"}},
+		}
+		ns := objectsenvelopes.NewObject(nsObj)
+		opap := &OPAProcessor{
+			OPASessionObj: &cautils.OPASessionObj{
+				AllResources: map[string]workloadinterface.IMetadata{ns.GetID(): ns},
+			},
+		}
+
+		got := opap.getNamespaceObject("prod")
+		require.NotNil(t, got)
+		assert.Equal(t, "prod", got["metadata"].(map[string]any)["name"])
+	})
+
+	t.Run("namespace not collected resolves to nil", func(t *testing.T) {
+		opap := &OPAProcessor{
+			OPASessionObj: &cautils.OPASessionObj{
+				AllResources: map[string]workloadinterface.IMetadata{},
+			},
+		}
+		assert.Nil(t, opap.getNamespaceObject("missing"))
+	})
+
+	t.Run("nil OPASessionObj does not panic and resolves to nil", func(t *testing.T) {
+		opap := &OPAProcessor{}
+		assert.Nil(t, opap.getNamespaceObject("default"))
+	})
+}

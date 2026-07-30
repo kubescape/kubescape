@@ -67,6 +67,11 @@ type OPAProcessor struct {
 	celEvaluator     *cel.Evaluator
 	celEvaluatorOnce sync.Once
 	celEvaluatorErr  error
+	// namespaceObjects caches Namespace resources from AllResources keyed by
+	// name, built once per scan so CEL evaluation can resolve the real
+	// namespaceObject for namespaced resources instead of always binding nil.
+	namespaceObjects     map[string]map[string]any
+	namespaceObjectsOnce sync.Once
 }
 
 func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool, exceptionEventRecorder record.EventRecorder) *OPAProcessor {
@@ -537,6 +542,28 @@ type skippedCELResource struct {
 	err error
 }
 
+// getNamespaceObject returns the collected Namespace resource matching name,
+// or nil for cluster-scoped resources (name == "") or namespaces that were
+// not collected in this scan. The lookup table is built once per OPAProcessor
+// from AllResources, since scanning it per object would be wasteful.
+func (opap *OPAProcessor) getNamespaceObject(name string) map[string]any {
+	if name == "" {
+		return nil
+	}
+	opap.namespaceObjectsOnce.Do(func() {
+		namespaces := make(map[string]map[string]any)
+		if opap.OPASessionObj != nil {
+			for _, resource := range opap.AllResources {
+				if resource.GetKind() == "Namespace" {
+					namespaces[resource.GetName()] = resource.GetObject()
+				}
+			}
+		}
+		opap.namespaceObjects = namespaces
+	})
+	return opap.namespaceObjects[name]
+}
+
 // runCELOnK8s evaluates a CEL-based PolicyRule against k8s objects by loading
 // the control's ValidatingAdmissionPolicy from the embedded bundle and running
 // its validations. controlID is threaded down from processControl (not read off
@@ -571,10 +598,12 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 			return nil, celOutcome{}, err
 		}
 
-		// namespaceObject is not resolved yet: policies referencing it eval-error
-		// and their resources are skipped (parity-safe), never passed. Wiring the
-		// real namespace object is a follow-up.
-		eval, err := evaluator.EvaluateControl(ctx, controlID, obj, nil)
+		// Resolve the real namespace object for namespaced resources so policies
+		// referencing namespaceObject.* can evaluate instead of always erroring.
+		// Cluster-scoped resources and resources whose namespace was not
+		// collected still bind nil, matching prior behavior.
+		namespaceObject := opap.getNamespaceObject(workloadinterface.NewBaseObject(obj).GetNamespace())
+		eval, err := evaluator.EvaluateControl(ctx, controlID, obj, namespaceObject)
 		if err != nil {
 			return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 		}
