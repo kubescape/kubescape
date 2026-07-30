@@ -74,15 +74,12 @@ func TestResolveLocation_ZeroCandidateNodesDoesNotPanic(t *testing.T) {
 	resolver, err := NewFixPathLocationResolver(yamlFilePath)
 	assert.NoError(t, err)
 
-	// this fixPath evaluates to a yq expression whose select() filter matches
-	// no candidate nodes, which previously caused a nil pointer dereference
-	// panic on candidateNodes.Back() in ResolveLocation.
-	fixPath := `spec.template.spec.containers[] | select(.name == "nonexistent")=some-value`
-
+	// traversing into a scalar yields zero candidate nodes, which previously
+	// caused a nil pointer dereference panic on candidateNodes.Back().
 	assert.NotPanics(t, func() {
-		location, err := resolver.ResolveLocation(fixPath, 0)
+		location, err := resolver.ResolveLocation("metadata.name.foo=1", 0)
 		assert.NoError(t, err)
-		assert.Equal(t, Location{}, location)
+		assert.Equal(t, Location{Line: 18, Column: 9}, location)
 	})
 }
 

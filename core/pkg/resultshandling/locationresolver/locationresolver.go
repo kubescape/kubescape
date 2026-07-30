@@ -71,17 +71,12 @@ func (l *FixPathLocationResolver) ResolveLocation(fixPath string, nodeIndex int)
 			return Location{}, err
 		}
 
-		backElement := candidateNodes.Back()
-		if backElement == nil {
-			// the expression matched zero candidate nodes; fall back to a default location
-			// instead of panicking on a nil *list.Element.
-			return Location{}, nil
-		}
+		if backElement := candidateNodes.Back(); backElement != nil {
+			candidateNode := backElement.Value.(*yqlib.CandidateNode).Node
 
-		candidateNode := backElement.Value.(*yqlib.CandidateNode).Node
-
-		if candidateNode.Line != 0 || len(yamlExpression) <= 1 {
-			return Location{Line: candidateNode.Line, Column: candidateNode.Column}, nil
+			if candidateNode.Line != 0 || len(yamlExpression) <= 1 {
+				return Location{Line: candidateNode.Line, Column: candidateNode.Column}, nil
+			}
 		}
 
 		// for non-existent yaml expressions, remove the last part of the expression and try again
