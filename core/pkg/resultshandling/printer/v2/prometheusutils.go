@@ -321,7 +321,7 @@ func (mcrs *mControlComplianceScore) set(resources reportsummary.ICounters) {
 }
 func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetails) {
 	m.rs.set(summaryDetails.NumberOfResources(), summaryDetails.NumberOfControls())
-	m.rs.complianceScore = cautils.Float32ToInt(summaryDetails.GetScore())
+	m.rs.complianceScore = cautils.Float32ToInt(summaryDetails.ComplianceScore)
 
 	for _, fw := range summaryDetails.ListFrameworks() {
 		mfrs := mFrameworkComplianceScore{
@@ -333,10 +333,14 @@ func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetai
 	}
 
 	for _, control := range summaryDetails.ListControls() {
+		complianceScore := cautils.Float32ToInt(control.GetComplianceScore())
+		if complianceScore < 0 {
+			continue
+		}
 		mcrs := mControlComplianceScore{
 			controlName:     control.GetName(),
 			controlID:       control.GetID(),
-			complianceScore: cautils.Float32ToInt(control.GetScore()),
+			complianceScore: complianceScore,
 			link:            cautils.GetControlLink(control.GetID()),
 			severity:        apis.ControlSeverityToString(control.GetScoreFactor()),
 			remediation:     control.GetRemediation(),

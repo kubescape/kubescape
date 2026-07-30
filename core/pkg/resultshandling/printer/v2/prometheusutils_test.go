@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -370,4 +371,58 @@ func TestMetrics_String_MultiItem_NoDuplicateHeaders(t *testing.T) {
 	// verify both resource series are present
 	assert.Contains(t, output, "kubescape_resource_count_controls_failed{apiVersion=\"v1\",kind=\"Pod\",namespace=\"ns1\",name=\"Resource A\"} 2")
 	assert.Contains(t, output, "kubescape_resource_count_controls_failed{apiVersion=\"v1\",kind=\"Pod\",namespace=\"ns2\",name=\"Resource B\"} 4")
+}
+
+// TestSetComplianceScoresUsesComplianceScore verifies that setComplianceScores
+// reads ComplianceScore, not Score (risk score), for every metric named
+// complianceScore. Regression test for issue #2578.
+func TestSetComplianceScoresUsesComplianceScore(t *testing.T) {
+	compliance := float32(85.0)
+	m := Metrics{}
+	m.setComplianceScores(&reportsummary.SummaryDetails{
+		Score:           10.0,
+		ComplianceScore: 75.0,
+		Frameworks: []reportsummary.FrameworkSummary{
+			{Name: "NSA", Score: 10, ComplianceScore: 85},
+		},
+		Controls: reportsummary.ControlSummaries{
+			"C-0002": {
+				ControlID:        "C-0002",
+				Name:             "Exec into container",
+				ComplianceScore:  &compliance,
+			},
+		},
+	})
+
+	// cluster-level uses SummaryDetails.ComplianceScore (75), not Score (10)
+	assert.Equal(t, 75, m.rs.complianceScore, "cluster complianceScore must be 75, not 10")
+
+	// framework-level uses FrameworkSummary.ComplianceScore (85), not Score (10)
+	if assert.Len(t, m.listFrameworks, 1) {
+		assert.Equal(t, 85, m.listFrameworks[0].complianceScore, "framework complianceScore must be 85, not 10")
+	}
+
+	// control-level uses ControlSummary.ComplianceScore (85), not Score (0)
+	if assert.Len(t, m.listControls, 1) {
+		assert.Equal(t, 85, m.listControls[0].complianceScore, "control complianceScore must be 85, not 0")
+	}
+}
+
+// TestSetComplianceScoresSkipsNilControlComplianceScore verifies that controls
+// with unset ComplianceScore (nil pointer, GetComplianceScore returns -1) are
+// silently skipped rather than emitting -1 into the gauge.
+func TestSetComplianceScoresSkipsNilControlComplianceScore(t *testing.T) {
+	m := Metrics{}
+	m.setComplianceScores(&reportsummary.SummaryDetails{
+		Score:           10.0,
+		ComplianceScore: 75.0,
+		Controls: reportsummary.ControlSummaries{
+			"C-NO-CS": {
+				ControlID: "C-NO-CS",
+				Name:      "no compliance score",
+			},
+		},
+	})
+
+	assert.Empty(t, m.listControls, "controls with nil ComplianceScore must be skipped")
 }
