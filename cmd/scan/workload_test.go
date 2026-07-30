@@ -172,12 +172,12 @@ func TestGetWorkloadCmd_ChartPathAndFilePathEmpty(t *testing.T) {
 	scanInfo.FilePath = ""
 
 	// Verify the command name and short description
-	assert.Equal(t, "workload <kind>/<name> [`<glob pattern>`/`-`] [flags]", cmd.Use)
+	assert.Equal(t, "workload <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]", cmd.Use)
 	assert.Equal(t, "Scan a workload for misconfigurations and image vulnerabilities", cmd.Short)
 	assert.Equal(t, workloadExample, cmd.Example)
 
 	err := cmd.Args(&cobra.Command{}, []string{})
-	expectedErrorMessage := "usage: <kind>/<name> [`<glob pattern>`/`-`] [flags]"
+	expectedErrorMessage := "usage: <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]"
 	assert.Equal(t, expectedErrorMessage, err.Error())
 
 	err = cmd.Args(&cobra.Command{}, []string{"nginx"})

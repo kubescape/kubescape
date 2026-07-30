@@ -19,33 +19,36 @@ var (
 	workloadExample = fmt.Sprintf(`
   Scan a workload for misconfigurations and image vulnerabilities.
 
-  # Scan an workload
-  %[1]s scan workload <kind>/<name>
+  # Scan a workload
+  %[1]s scan workload <kind>[.<version>[.<group>]]/<name>
 	
-  # Scan an workload in a specific namespace
-  %[1]s scan workload <kind>/<name> --namespace <namespace>
+  # Scan a specific kind, version, and group
+  %[1]s scan workload Deployment.v1.apps/nginx
 
-  # Scan an workload from a file path
-  %[1]s scan workload <kind>/<name> --file-path <file path>
+  # Scan a workload in a specific namespace
+  %[1]s scan workload <kind>[.<version>[.<group>]]/<name> --namespace <namespace>
+
+  # Scan a workload from a file path
+  %[1]s scan workload <kind>[.<version>[.<group>]]/<name> --file-path <file path>
   
-  # Scan an workload from a helm-chart template
-  %[1]s scan workload <kind>/<name> --chart-path <chart path> --file-path <file path>
+  # Scan a workload from a helm-chart template
+  %[1]s scan workload <kind>[.<version>[.<group>]]/<name> --chart-path <chart path> --file-path <file path>
 
 
 `, cautils.ExecName())
 
-	ErrInvalidWorkloadIdentifier = errors.New("invalid workload identifier")
+	ErrInvalidWorkloadIdentifier = errors.New("invalid workload identifier, expected <kind>[.<version>[.<group>]]/<name>")
 )
 
 // controlCmd represents the control command
 func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 	workloadCmd := &cobra.Command{
-		Use:     "workload <kind>/<name> [`<glob pattern>`/`-`] [flags]",
+		Use:     "workload <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]",
 		Short:   "Scan a workload for misconfigurations and image vulnerabilities",
 		Example: workloadExample,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return fmt.Errorf("usage: <kind>/<name> [`<glob pattern>`/`-`] [flags]")
+				return fmt.Errorf("usage: <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]")
 			}
 
 			// Looks strange, a bug maybe????
