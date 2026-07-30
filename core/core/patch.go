@@ -108,13 +108,10 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		return false, err
 	}
 
-	sout, serr := os.Stdout, os.Stderr
-	if logger.L().GetLevel() != "debug" {
-		disableCopaLogger()
-		defer func() { os.Stdout, os.Stderr = sout, serr }()
-	}
-
-	if err = copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.OutputMode, patchInfo.OutputPath, patchInfo.BuildKitOpts); err != nil {
+	err = runWithCopaLoggerMuted(logger.L().GetLevel() == "debug", func() error {
+		return copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.OutputMode, patchInfo.OutputPath, patchInfo.BuildKitOpts)
+	})
+	if err != nil {
 		return false, err
 	}
 
@@ -182,6 +179,22 @@ func disableCopaLogger() {
 	os.Stdout, os.Stderr = nil, nil
 	null, _ := os.Open(os.DevNull)
 	log.SetOutput(null)
+}
+
+// runWithCopaLoggerMuted mutes copa's logrus output (which writes directly to
+// os.Stdout/os.Stderr) for the duration of fn, unless debug is set. The
+// streams are always restored before this function returns, so callers can
+// safely keep using os.Stdout/os.Stderr regardless of whether fn succeeds.
+func runWithCopaLoggerMuted(debug bool, fn func() error) error {
+	if debug {
+		return fn()
+	}
+
+	sout, serr := os.Stdout, os.Stderr
+	defer func() { os.Stdout, os.Stderr = sout, serr }()
+
+	disableCopaLogger()
+	return fn()
 }
 
 // copaPatch is a slightly modified copy of the Patch function from the original "project-copacetic/copacetic" repo
