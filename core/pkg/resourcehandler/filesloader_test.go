@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	gitv5 "github.com/go-git/go-git/v5"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -39,6 +40,42 @@ func TestGetResourcesFromPath_SingleFileRelativePathIsRepositoryRelative(t *test
 		assert.Equal(t, "pod.yaml", filepath.Base(rel))
 	}
 }
+
+// A scan of a subdirectory must report paths relative to the repository root even when the repository's branch and remote metadata is unusable. A CI checkout with a detached HEAD or no configured remote is still a repository, and anchoring on the scan directory instead drops the subdirectory prefix, leaving GitLab and GitHub with findings that point at paths the repository does not contain. See #2594.
+func TestGetResourcesFromPath_AnchorsOnRepositoryRootWithoutUsableGitMetadata(t *testing.T) {
+	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	_, err = gitv5.PlainInit(repoRoot, false)
+	require.NoError(t, err)
+
+	_, err = cautils.NewLocalGitRepository(repoRoot)
+	require.Error(t, err, "the repository's git metadata must be unusable for this test to mean anything")
+
+	manifestDir := filepath.Join(repoRoot, "workloads", "apps", "base", "app")
+	require.NoError(t, os.MkdirAll(manifestDir, os.ModePerm))
+	require.NoError(t, os.WriteFile(filepath.Join(manifestDir, "cronjobs.yaml"), []byte(singlePodManifest), 0o644))
+
+	workloadIDToSource, workloads, err := getResourcesFromPath(context.TODO(), filepath.Join(repoRoot, "workloads"), cautils.HelmValueOptions{})
+	require.NoError(t, err)
+	require.NotEmpty(t, workloads)
+
+	for _, w := range workloads {
+		src, ok := workloadIDToSource[w.GetID()]
+		require.True(t, ok, "every workload must have a source")
+		assert.Equal(t, "workloads/apps/base/app/cronjobs.yaml", filepath.ToSlash(src.RelativePath), "the path must keep the scanned subdirectory's prefix")
+		assert.Equal(t, repoRoot, src.Path, "Source.Path must be the root RelativePath resolves against")
+	}
+}
+
+const singlePodManifest = `apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.14.2
+`
 
 // A chart whose helm render fails must still have its static templates plain-scanned. The render is
 // best-effort and drops the whole chart on any template error, so excluding templates/ unconditionally

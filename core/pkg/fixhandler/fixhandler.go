@@ -198,6 +198,14 @@ func getLocalPath(report *reporthandlingv2.PostureReport) string {
 	}
 }
 
+// resourceBasePath returns the root the resource's relative path resolves against. The resource's own Source.Path is the root the scan computed that relative path from, so it stays correct where the report-wide base path does not: multi-input scans record only the first input, and a scan of a subdirectory anchors on the repository root. Reports without it (cloned repos, older reports) keep using the report-wide path.
+func (h *FixHandler) resourceBasePath(resourceObj *reporthandling.Resource) string {
+	if resourceObj != nil && resourceObj.Source != nil && resourceObj.Source.Path != "" {
+		return resourceObj.Source.Path
+	}
+	return h.localBasePath
+}
+
 func (h *FixHandler) buildResourcesMap() map[string]*reporthandling.Resource {
 	resourceIdToRawResource := make(map[string]*reporthandling.Resource)
 	for i := range h.reportObj.Resources {
@@ -286,7 +294,11 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				logger.L().Ctx(ctx).Warning("Skipping invalid resource path: " + sanitizeForLog(resourcePath))
 				skipReason = "skipped: invalid resource path"
 			} else {
-				candidatePath := filepath.Join(h.localBasePath, relativePath)
+				// the resource's own root, not the report-wide one: a single-file
+				// scan records the file rather than its root, and a multi-input
+				// scan records only the first input
+				basePath := h.resourceBasePath(resourceObj)
+				candidatePath := filepath.Join(basePath, relativePath)
 				if _, err := os.Stat(candidatePath); err != nil {
 					// Checked before containment so EvalSymlinks (inside
 					// isPathContained) has something to resolve, and so a
@@ -294,7 +306,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 					// "escapes scanned directory".
 					logger.L().Ctx(ctx).Warning("Skipping missing file: " + sanitizeForLog(candidatePath))
 					skipReason = "skipped: file not found"
-				} else if !isPathContained(h.localBasePath, candidatePath) {
+				} else if !isPathContained(basePath, candidatePath) {
 					logger.L().Ctx(ctx).Warning("Skipping resource path that escapes the scanned directory: " + sanitizeForLog(resourcePath))
 					skipReason = "skipped: resource path escapes scanned directory"
 				} else {

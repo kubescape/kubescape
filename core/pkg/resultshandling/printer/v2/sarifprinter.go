@@ -23,6 +23,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	v2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -213,11 +214,7 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 				continue
 			}
 
-			effectiveBase := basePath
-			if effectiveBase == "" && resourceSource.Path != "" {
-				effectiveBase = resourceSource.Path
-			}
-			rsrcAbsPath := filepath.Join(effectiveBase, relPath)
+			rsrcAbsPath := filepath.Join(effectiveBasePath(resourceSource, basePath), relPath)
 			locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
 			if err != nil {
 				logger.L().Warning("failed to create location resolver, SARIF locations will default to line 1", helpers.Error(err))
@@ -459,6 +456,14 @@ func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
 	default:
 		return ""
 	}
+}
+
+// effectiveBasePath returns the root a resource's RelativePath resolves against. The resource's own Source.Path is authoritative because it is the root the relative path was computed from, which the scan-wide base path is not: it is derived separately, covers only the first input pattern, and anchors on the scanned directory rather than the repository root whenever git metadata was unusable. Sources that intentionally carry no path (cloned repos) fall back to it.
+func effectiveBasePath(resourceSource reporthandling.Source, basePath string) string {
+	if resourceSource.Path != "" {
+		return resourceSource.Path
+	}
+	return basePath
 }
 
 // generateRemediationMessage generates a remediation message for the given control summary

@@ -505,6 +505,40 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 	}
 }
 
+// A resource's own Source.Path is the root its RelativePath was computed from, so it must win over the scan-wide base path: the latter covers only the first input pattern and anchors on the scanned directory rather than the repository root whenever git metadata was unusable. See #2594.
+func TestEffectiveBasePath(t *testing.T) {
+	tests := []struct {
+		name           string
+		resourceSource reporthandling.Source
+		basePath       string
+		want           string
+	}{
+		{
+			name:           "resource path wins over the scan-wide base path",
+			resourceSource: reporthandling.Source{Path: "/repo", RelativePath: "workloads/deploy.yaml"},
+			basePath:       "/repo/workloads",
+			want:           "/repo",
+		},
+		{
+			name:           "sources without a path fall back to the scan-wide base path",
+			resourceSource: reporthandling.Source{RelativePath: "deploy.yaml"},
+			basePath:       "/repo",
+			want:           "/repo",
+		},
+		{
+			name:           "no anchor at all",
+			resourceSource: reporthandling.Source{RelativePath: "deploy.yaml"},
+			want:           "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, effectiveBasePath(tt.resourceSource, tt.basePath))
+		})
+	}
+}
+
 // TestPrintConfigurationScan_FileScanResolvesLineNumbers is the regression test
 // for absolute-path single-file scans: SARIF must resolve real line numbers even
 // when cwd differs from the manifest directory (common in CI).

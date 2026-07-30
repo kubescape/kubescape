@@ -362,7 +362,9 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 			}
 		}
 
+		// Path carries the root RelativePath was computed against, so consumers can resolve the file without guessing at the scan's base
 		workloadSource := reporthandling.Source{
+			Path:                   repoRoot,
 			RelativePath:           source,
 			FileType:               reporthandling.SourceTypeKustomizeDirectory,
 			KustomizeDirectoryName: kustomizeDirectoryName,
@@ -388,9 +390,15 @@ func extractGitRepo(path string) (string, *cautils.LocalGitRepository) {
 	gitRepo, err := cautils.NewLocalGitRepository(path)
 	if err == nil && gitRepo != nil {
 		repoRoot, _ = gitRepo.GetRootDir()
-	} else {
-		repoRoot, _ = filepath.Abs(path)
+		return repoRoot, gitRepo
 	}
+
+	// the git metadata is unusable, but reported paths must still be anchored to the repository root when there is one, or a scan of a subdirectory loses its prefix and the paths resolve against nothing. See #2594
+	if root, ok := cautils.GetGitRootDir(path); ok {
+		return root, gitRepo
+	}
+
+	repoRoot, _ = filepath.Abs(path)
 	return repoRoot, gitRepo
 }
 

@@ -153,6 +153,7 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 
 	basePath := getBasePathFromMetadata(*opaSessionObj)
 
+	var skippedResources int
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if !result.GetStatus(nil).IsFailed() {
 			continue
@@ -163,15 +164,12 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 
 		// location.file is built from the relative path alone, and GitLab can only anchor a finding to a file inside the repository
 		if !isRepositoryRelative(relPath) {
+			skippedResources++
 			logger.L().Debug("resource path is not repository-relative, skipping", helpers.String("path", relPath), helpers.String("resourceID", resourceID))
 			continue
 		}
 
-		effectiveBase := basePath
-		if effectiveBase == "" && resourceSource.Path != "" {
-			effectiveBase = resourceSource.Path
-		}
-		rsrcAbsPath := filepath.Join(effectiveBase, relPath)
+		rsrcAbsPath := filepath.Join(effectiveBasePath(resourceSource, basePath), relPath)
 		locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
 		if err != nil {
 			logger.L().Warning("failed to create location resolver, GitLab SAST locations will default to line 1", helpers.Error(err))
@@ -192,6 +190,12 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
 			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, resourceID, relPath, location))
 		}
+	}
+
+	// an empty report is otherwise indistinguishable from a clean scan, so say how many failed resources were dropped and why
+	if skippedResources > 0 {
+		logger.L().Ctx(ctx).Warning("some failed resources were excluded from the GitLab SAST report because their paths are not relative to the repository root; scan a path inside the repository to include them",
+			helpers.Int("excludedResources", skippedResources), helpers.Int("reportedVulnerabilities", len(report.Vulnerabilities)))
 	}
 
 	finishedAt := time.Now().UTC()

@@ -130,6 +130,21 @@ func (g *LocalGitRepository) GetLastCommit() (*apis.Commit, error) {
 	}, nil
 }
 
+// GetGitRootDir returns the root directory of the git repository containing path, if any. It deliberately does not go through NewLocalGitRepository: locating the root must not depend on the branch and remote metadata that constructor demands, which CI checkouts routinely lack (detached HEAD on tag/MR pipelines, no configured remote) even though the repository every reported path is relative to is right there.
+func GetGitRootDir(path string) (string, bool) {
+	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return "", false
+	}
+
+	worktree, err := goGitRepo.Worktree()
+	if err != nil {
+		return "", false
+	}
+
+	return worktree.Filesystem.Root(), true
+}
+
 func (g *LocalGitRepository) GetRootDir() (string, error) {
 	wt, err := g.goGitRepo.Worktree()
 	if err != nil {
