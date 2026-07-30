@@ -134,14 +134,14 @@ func (s *LocalGitRepositoryTestSuite) TestRepositoryWithoutRemotes() {
 	}
 }
 
-// The repository root must resolve from any path inside the worktree even when the branch and remote metadata NewLocalGitRepository demands is missing, otherwise scans of a subdirectory report paths relative to the scan directory instead of the repository root. See #2594.
+// TestGetGitRootDirWithoutUsableMetadata verifies that the repository root resolves from any path inside the worktree even when the branch and remote metadata NewLocalGitRepository demands is missing, otherwise scans of a subdirectory report paths relative to the scan directory instead of the repository root. See #2594.
 func (s *LocalGitRepositoryTestSuite) TestGetGitRootDirWithoutUsableMetadata() {
 	repoPath := s.gitRepositoryPaths["withoutremotes"]
 	absRepoPath, err := filepath.Abs(repoPath)
 	s.NoError(err)
 
 	subDir := filepath.Join(repoPath, "workloads", "apps")
-	s.NoError(os.MkdirAll(subDir, os.ModePerm))
+	s.NoError(os.MkdirAll(subDir, 0o750))
 	defer os.RemoveAll(filepath.Join(repoPath, "workloads"))
 
 	_, err = NewLocalGitRepository(subDir)
@@ -153,6 +153,7 @@ func (s *LocalGitRepositoryTestSuite) TestGetGitRootDirWithoutUsableMetadata() {
 	}
 }
 
+// TestGetGitRootDirOutsideRepository verifies that a path outside any repository reports no root rather than an arbitrary one
 func (s *LocalGitRepositoryTestSuite) TestGetGitRootDirOutsideRepository() {
 	_, ok := GetGitRootDir(s.T().TempDir())
 	s.False(ok)

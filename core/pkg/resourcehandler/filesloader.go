@@ -209,6 +209,9 @@ func resolveHelmRemotePath(clonedRepo string, gitRepo *cautils.LocalGitRepositor
 	return strings.TrimSuffix(url, ".git")
 }
 
+// getResourcesFromPath loads every scannable resource under path, from plain
+// manifests, helm charts and kustomize directories, and maps each workload to the
+// source file it came from.
 func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
 	workloadIDToSource := make(map[string]reporthandling.Source)
 	var workloads []workloadinterface.IMetadata
@@ -385,6 +388,7 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	return workloadIDToSource, workloads, nil
 }
 
+// extractGitRepo returns the root every reported path for this scan is relative to, along with the git repository when its metadata is usable enough to attribute commits
 func extractGitRepo(path string) (string, *cautils.LocalGitRepository) {
 	repoRoot := ""
 	gitRepo, err := cautils.NewLocalGitRepository(path)

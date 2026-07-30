@@ -311,6 +311,84 @@ func TestPrintConfigurationScan_MissingControl(t *testing.T) {
 	})
 }
 
+// TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath verifies that a resource with no relative path is dropped even when a base path is available: the SARIF location is written from the relative path alone, so such a result would carry an empty artifact location, which GitHub Code Scanning rejects on upload.
+func TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath(t *testing.T) {
+	const controlID = "C-0057"
+	resourceID := "apps/v1/Deployment/default/demo"
+
+	tests := []struct {
+		name           string
+		resourceSource reporthandling.Source
+	}{
+		{name: "no anchor at all", resourceSource: reporthandling.Source{}},
+		{name: "resource path set", resourceSource: reporthandling.Source{Path: t.TempDir()}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session := cautils.NewOPASessionObjMock()
+			session.Metadata = &reporthandlingv2.Metadata{
+				ScanMetadata: reporthandlingv2.ScanMetadata{
+					ScanningTarget: reporthandlingv2.Directory,
+				},
+				ContextMetadata: reporthandlingv2.ContextMetadata{
+					DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{
+						BasePath: t.TempDir(),
+					},
+				},
+			}
+			session.ResourcesResult[resourceID] = resourcesresults.Result{
+				ResourceID: resourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: controlID,
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+					},
+				},
+			}
+			session.ResourceSource = map[string]reporthandling.Source{resourceID: tt.resourceSource}
+			session.Report = &reporthandlingv2.PostureReport{
+				SummaryDetails: reportsummary.SummaryDetails{
+					Controls: reportsummary.ControlSummaries{
+						controlID: reportsummary.ControlSummary{
+							ControlID:   controlID,
+							Name:        "Privileged container",
+							Description: "Do not run privileged containers",
+							ScoreFactor: 8.0,
+						},
+					},
+				},
+			}
+
+			// the base path is non-empty, so only the missing relative path can skip this finding
+			require.NotEmpty(t, getBasePathFromMetadata(*session))
+
+			tmp, err := os.CreateTemp("", "sarif-norelpath-*.sarif")
+			require.NoError(t, err)
+			defer func() {
+				assert.NoError(t, os.Remove(tmp.Name()))
+			}()
+
+			sp := NewSARIFPrinter()
+			sp.writer = tmp
+			require.NoError(t, sp.printConfigurationScan(context.Background(), session))
+			require.NoError(t, tmp.Close())
+
+			raw, err := os.ReadFile(tmp.Name())
+			require.NoError(t, err)
+
+			var report struct {
+				Runs []struct {
+					Results []json.RawMessage `json:"results"`
+				} `json:"runs"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &report))
+			require.Len(t, report.Runs, 1)
+			assert.Empty(t, report.Runs[0].Results, "a result with no file location must not be emitted")
+		})
+	}
+}
+
 // TestPrintConfigurationScan_PopulatesInvocations is the regression test for
 // the SARIF half of kubescape/kubescape#2325: runs[].invocations was absent
 // from every SARIF report, so GitHub code-scanning ingestion collapsed every
@@ -505,7 +583,7 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 	}
 }
 
-// A resource's own Source.Path is the root its RelativePath was computed from, so it must win over the scan-wide base path: the latter covers only the first input pattern and anchors on the scanned directory rather than the repository root whenever git metadata was unusable. See #2594.
+// TestEffectiveBasePath verifies that a resource's own Source.Path wins over the scan-wide base path, because it is the root its RelativePath was computed from: the scan-wide path covers only the first input pattern and anchors on the scanned directory rather than the repository root whenever git metadata was unusable. See #2594.
 func TestEffectiveBasePath(t *testing.T) {
 	tests := []struct {
 		name           string

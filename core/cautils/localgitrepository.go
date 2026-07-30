@@ -145,6 +145,7 @@ func GetGitRootDir(path string) (string, bool) {
 	return worktree.Filesystem.Root(), true
 }
 
+// GetRootDir returns the root directory of the repository's worktree
 func (g *LocalGitRepository) GetRootDir() (string, error) {
 	wt, err := g.goGitRepo.Worktree()
 	if err != nil {

@@ -41,7 +41,7 @@ func TestGetResourcesFromPath_SingleFileRelativePathIsRepositoryRelative(t *test
 	}
 }
 
-// A scan of a subdirectory must report paths relative to the repository root even when the repository's branch and remote metadata is unusable. A CI checkout with a detached HEAD or no configured remote is still a repository, and anchoring on the scan directory instead drops the subdirectory prefix, leaving GitLab and GitHub with findings that point at paths the repository does not contain. See #2594.
+// TestGetResourcesFromPath_AnchorsOnRepositoryRootWithoutUsableGitMetadata verifies that a scan of a subdirectory reports paths relative to the repository root even when the repository's branch and remote metadata is unusable. A CI checkout with a detached HEAD or no configured remote is still a repository, and anchoring on the scan directory instead drops the subdirectory prefix, leaving GitLab and GitHub with findings that point at paths the repository does not contain. See #2594.
 func TestGetResourcesFromPath_AnchorsOnRepositoryRootWithoutUsableGitMetadata(t *testing.T) {
 	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
@@ -52,8 +52,8 @@ func TestGetResourcesFromPath_AnchorsOnRepositoryRootWithoutUsableGitMetadata(t 
 	require.Error(t, err, "the repository's git metadata must be unusable for this test to mean anything")
 
 	manifestDir := filepath.Join(repoRoot, "workloads", "apps", "base", "app")
-	require.NoError(t, os.MkdirAll(manifestDir, os.ModePerm))
-	require.NoError(t, os.WriteFile(filepath.Join(manifestDir, "cronjobs.yaml"), []byte(singlePodManifest), 0o644))
+	require.NoError(t, os.MkdirAll(manifestDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(manifestDir, "cronjobs.yaml"), []byte(singlePodManifest), 0o600))
 
 	workloadIDToSource, workloads, err := getResourcesFromPath(context.TODO(), filepath.Join(repoRoot, "workloads"), cautils.HelmValueOptions{})
 	require.NoError(t, err)

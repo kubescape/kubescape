@@ -209,8 +209,8 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 			resourceSource := opaSessionObj.ResourceSource[resourceID]
 			relPath := resourceSource.RelativePath
 
-			// Github Code Scanning considers results not associated to a file path meaningless and invalid when uploading
-			if relPath == "" && basePath == "" {
+			// Github Code Scanning considers results not associated to a file path meaningless and invalid when uploading, and the location written to the report is the relative path alone, so a base path cannot stand in for a missing one
+			if relPath == "" {
 				continue
 			}
 
