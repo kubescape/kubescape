@@ -181,8 +181,5 @@ func parseKindAndApiVersion(kindStr string) (kind, apiVersion string, err error)
 		group := strings.Join(parts[2:], ".")
 		return parts[0], group + "/" + parts[1], nil // kind.version.group -> group/version
 	}
-	if len(parts) == 2 {
-		return parts[0], parts[1], nil // kind.version -> version
-	}
-	return kindStr, "", nil
+	return parts[0], parts[1], nil // kind.version -> version
 }
