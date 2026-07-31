@@ -22,36 +22,51 @@ import (
 )
 
 type KubescapeMcpserver struct {
-	s             *server.MCPServer
-	ksClient      spdxv1beta1.SpdxV1beta1Interface
-	ksClientOnce  sync.Once
-	ksClientErr   error
-	k8sClient     *k8sinterface.KubernetesApi
-	k8sClientOnce sync.Once
-	policyGetter  *getter.DownloadReleasedPolicy
+	s          *server.MCPServer
+	ksClientMu sync.Mutex
+	ksClient   spdxv1beta1.SpdxV1beta1Interface
+	// ksClientInit creates the Kubescape storage client. Overridable in tests
+	// to simulate initialization failures without a real connection attempt.
+	ksClientInit func() (spdxv1beta1.SpdxV1beta1Interface, error)
+	k8sClientMu  sync.Mutex
+	k8sClient    *k8sinterface.KubernetesApi
+	policyGetter *getter.DownloadReleasedPolicy
 }
 
+// getKsClient lazily initializes the Kubescape storage client. A transient
+// initialization failure is not cached, so the next call retries instead of
+// returning the same error forever.
 func (ksServer *KubescapeMcpserver) getKsClient() (spdxv1beta1.SpdxV1beta1Interface, error) {
-	ksServer.ksClientOnce.Do(func() {
-		if ksServer.ksClient == nil {
-			ksServer.ksClient, ksServer.ksClientErr = CreateKsObjectConnection("default", 10*time.Second)
-		}
-	})
-	if ksServer.ksClientErr != nil {
-		return nil, ksServer.ksClientErr
+	ksServer.ksClientMu.Lock()
+	defer ksServer.ksClientMu.Unlock()
+	if ksServer.ksClient != nil {
+		return ksServer.ksClient, nil
 	}
-	if ksServer.ksClient == nil {
+	init := ksServer.ksClientInit
+	if init == nil {
+		init = func() (spdxv1beta1.SpdxV1beta1Interface, error) {
+			return CreateKsObjectConnection("default", 10*time.Second)
+		}
+	}
+	client, err := init()
+	if err != nil {
+		return nil, err
+	}
+	if client == nil {
 		return nil, fmt.Errorf("kubernetes client initialization returned nil")
 	}
+	ksServer.ksClient = client
 	return ksServer.ksClient, nil
 }
 
+// getK8sClient lazily initializes the Kubernetes API client, retrying on
+// every call until initialization succeeds.
 func (ksServer *KubescapeMcpserver) getK8sClient() *k8sinterface.KubernetesApi {
-	ksServer.k8sClientOnce.Do(func() {
-		if ksServer.k8sClient == nil {
-			ksServer.k8sClient = k8sinterface.NewKubernetesApi()
-		}
-	})
+	ksServer.k8sClientMu.Lock()
+	defer ksServer.k8sClientMu.Unlock()
+	if ksServer.k8sClient == nil {
+		ksServer.k8sClient = k8sinterface.NewKubernetesApi()
+	}
 	return ksServer.k8sClient
 }
 

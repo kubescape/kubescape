@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+
+	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 )
 
 func TestParseVulnManifestURI(t *testing.T) {
@@ -110,9 +112,10 @@ func TestParseVulnManifestURI(t *testing.T) {
 func TestReadConfigurationResource_URIParsing(t *testing.T) {
 	expectedErr := fmt.Errorf("sentinel connection error")
 	ksServer := &KubescapeMcpserver{
-		ksClientErr: expectedErr,
+		ksClientInit: func() (spdxv1beta1.SpdxV1beta1Interface, error) {
+			return nil, expectedErr
+		},
 	}
-	ksServer.ksClientOnce.Do(func() {}) // Mark as done to prevent real connection
 
 	tests := []struct {
 		name      string
@@ -181,9 +184,10 @@ func TestReadConfigurationResource_URIParsing(t *testing.T) {
 func TestReadContainerProfileResource_URIParsing(t *testing.T) {
 	expectedErr := fmt.Errorf("sentinel connection error")
 	ksServer := &KubescapeMcpserver{
-		ksClientErr: expectedErr,
+		ksClientInit: func() (spdxv1beta1.SpdxV1beta1Interface, error) {
+			return nil, expectedErr
+		},
 	}
-	ksServer.ksClientOnce.Do(func() {}) // Mark as done to prevent real connection
 
 	tests := []struct {
 		name      string
@@ -313,5 +317,46 @@ func TestCallTool_RunFrameworkScan(t *testing.T) {
 				t.Errorf("expected error containing %q, got %q", tt.wantErrString, res.Content[0].(mcp.TextContent).Text)
 			}
 		})
+	}
+}
+
+func TestGetKsClient_RetriesAfterTransientFailure(t *testing.T) {
+	sentinelErr := fmt.Errorf("transient init failure")
+	calls := 0
+	fakeClient := struct {
+		spdxv1beta1.SpdxV1beta1Interface
+	}{}
+	ksServer := &KubescapeMcpserver{
+		ksClientInit: func() (spdxv1beta1.SpdxV1beta1Interface, error) {
+			calls++
+			if calls == 1 {
+				return nil, sentinelErr
+			}
+			return fakeClient, nil
+		},
+	}
+
+	_, err := ksServer.getKsClient()
+	if err == nil || !strings.Contains(err.Error(), "transient init failure") {
+		t.Fatalf("expected transient init failure on first call, got: %v", err)
+	}
+
+	client, err := ksServer.getKsClient()
+	if err != nil {
+		t.Fatalf("expected retry to succeed after transient failure, got error: %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected non-nil client after successful retry")
+	}
+	if calls != 2 {
+		t.Fatalf("expected init to be called twice (once failing, once succeeding), got %d calls", calls)
+	}
+
+	// A subsequent call must reuse the cached successful client, not re-init.
+	if _, err := ksServer.getKsClient(); err != nil {
+		t.Fatalf("unexpected error on cached client call: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected init not to be called again once a client is cached, got %d calls", calls)
 	}
 }
