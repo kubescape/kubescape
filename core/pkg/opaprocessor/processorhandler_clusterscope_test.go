@@ -166,7 +166,7 @@ func TestProcessRule_NamespaceBucketingStableAcrossAggregatorGrowth(t *testing.T
 	sess.K8SResources = cautils.K8SResources{
 		"rbac.authorization.k8s.io/v1/rolebindings": {binding.GetID()},
 		"rbac.authorization.k8s.io/v1/roles":        {role.GetID()},
-		"/v1/pods": {podA.GetID(), podB.GetID()},
+		"/v1/pods":                                  {podA.GetID(), podB.GetID()},
 	}
 	sess.AllResources[binding.GetID()] = binding
 	sess.AllResources[role.GetID()] = role

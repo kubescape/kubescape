@@ -121,6 +121,8 @@ func NewOPAProcessorMock(opaSessionObjMock string, resourcesMock []byte) *OPAPro
 	for i := range allResources {
 		opap.AllResources[i] = workloadinterface.NewWorkloadObj(allResources[i])
 	}
+	// mirror NewOPAProcessor: freeze the bucketing input after AllResources is populated
+	opap.initialResourceCount = len(opap.AllResources)
 
 	return opap
 }

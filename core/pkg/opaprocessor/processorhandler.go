@@ -74,6 +74,7 @@ type OPAProcessor struct {
 	initialResourceCount int
 }
 
+// NewOPAProcessor requires sessionObj.AllResources to already be fully collected (i.e. CollectResources must have already run), since it snapshots the resource count at construction.
 func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool, exceptionEventRecorder record.EventRecorder) *OPAProcessor {
 	if regoDependenciesData != nil && sessionObj != nil {
 		regoDependenciesData.PostureControlInputs = sessionObj.RegoInputData.PostureControlInputs
