@@ -136,7 +136,7 @@ func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo
 		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Target)
 	}
 	if controlInputs == nil {
-		return fmt.Errorf("failed to download controlInputs - received an empty objects")
+		return fmt.Errorf("failed to download controlInputs - received empty objects")
 	}
 	// save in file
 	err = getter.SaveInFile(controlInputs, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
@@ -240,7 +240,7 @@ func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) e
 			return err
 		}
 		if framework == nil {
-			return fmt.Errorf("failed to download framework - received an empty objects")
+			return fmt.Errorf("failed to download framework - received empty objects")
 		}
 		downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
 		err = getter.SaveInFile(framework, downloadTo)
@@ -277,7 +277,7 @@ func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) err
 		return fmt.Errorf("failed to download control id '%s',  %s", downloadInfo.Identifier, err.Error())
 	}
 	if controls == nil {
-		return fmt.Errorf("failed to download control id '%s' - received an empty objects", downloadInfo.Identifier)
+		return fmt.Errorf("failed to download control id '%s' - received empty objects", downloadInfo.Identifier)
 	}
 	downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
 	err = getter.SaveInFile(controls, downloadTo)
