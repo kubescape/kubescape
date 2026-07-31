@@ -301,7 +301,7 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 			url, err := gitRepo.GetRemoteUrl()
 			if err != nil {
 				logger.L().Warning("failed to get remote url", helpers.Error(err))
-				break
+				continue
 			}
 			helmChart.Path = strings.TrimSuffix(url, ".git")
 			repoRoot = ""
