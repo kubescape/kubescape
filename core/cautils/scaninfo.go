@@ -87,16 +87,23 @@ func (bpf *BoolPtrFlag) Set(val string) error {
 type ViewTypes string
 
 const (
-	// ResourceViewType groups results by scanned resource, listing each resource and its findings.
-	// With verbose mode enabled, all input resources are shown rather than only failed ones.
+	// ResourceViewType prints one section per failed resource, listing the
+	// controls that failed it. It only takes effect in verbose mode; passed
+	// resources are not shown.
 	ResourceViewType ViewTypes = "resource"
 
-	// SecurityViewType is the default view. It presents the overall posture summary grouped by
-	// security aspects, and is the most comprehensive view of the scan results.
+	// SecurityViewType is the default view (see the --view flag). Rather than
+	// changing how results are grouped, it selects a security-oriented set of
+	// frameworks to scan with — workloadscan+allcontrols for a repository or
+	// directory target, clusterscan+mitre+nsa for a cluster — and prints the
+	// standard posture summary without per-control or per-resource detail.
+	// Note: the `scan framework` subcommand rewrites this to ResourceViewType.
 	SecurityViewType ViewTypes = "security"
 
-	// ControlViewType groups results by control, showing the compliance status of every control
-	// and the resources that failed it.
+	// ControlViewType groups results by control, showing the compliance status
+	// of every control and the resources that failed it. Failed and
+	// action-required resources are always listed, and passed resources are
+	// listed in verbose mode.
 	ControlViewType ViewTypes = "control"
 )
 
