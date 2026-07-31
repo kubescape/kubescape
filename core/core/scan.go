@@ -396,6 +396,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		logger.L().Start("Scanning", helpers.String("image", img))
 		if err := scanSingleImage(ctx, img, svc, resultsHandling); err != nil {
 			logger.L().StopError("failed to scan", helpers.String("image", img), helpers.Error(err))
+			continue
 		}
 		logger.L().StopSuccess("Done scanning", helpers.String("image", img))
 	}
