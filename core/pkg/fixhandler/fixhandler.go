@@ -158,10 +158,15 @@ func isSupportedScanningTarget(report *reporthandlingv2.PostureReport) error {
 }
 
 func getLocalPath(report *reporthandlingv2.PostureReport) string {
-
+	if report == nil {
+		return ""
+	}
 	switch report.Metadata.ScanMetadata.ScanningTarget {
 	case reporthandlingv2.GitLocal:
-		return report.Metadata.ContextMetadata.RepoContextMetadata.LocalRootPath
+		if repo := report.Metadata.ContextMetadata.RepoContextMetadata; repo != nil {
+			return repo.LocalRootPath
+		}
+		return ""
 	case reporthandlingv2.Directory:
 		return report.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
 	case reporthandlingv2.File:

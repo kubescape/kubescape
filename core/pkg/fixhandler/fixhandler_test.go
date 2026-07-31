@@ -670,6 +670,26 @@ func TestGetLocalPath(t *testing.T) {
 			want: os.TempDir(),
 		},
 		{
+			name: "Scan target GitLocal without repository metadata",
+			args: args{
+				report: &reporthandlingv2.PostureReport{
+					Metadata: reporthandlingv2.Metadata{
+						ScanMetadata: reporthandlingv2.ScanMetadata{
+							ScanningTarget: reporthandlingv2.GitLocal,
+						},
+					},
+				},
+			},
+			want: "",
+		},
+		{
+			name: "nil report",
+			args: args{
+				report: nil,
+			},
+			want: "",
+		},
+		{
 			name: "Scan target Directory",
 			args: args{
 				report: &reporthandlingv2.PostureReport{

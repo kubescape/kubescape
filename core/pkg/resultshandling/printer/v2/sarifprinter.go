@@ -440,9 +440,15 @@ func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, 
 }
 
 func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
+	if opaSessionObj.Metadata == nil {
+		return ""
+	}
 	switch opaSessionObj.Metadata.ScanMetadata.ScanningTarget {
 	case v2.GitLocal:
-		return opaSessionObj.Metadata.ContextMetadata.RepoContextMetadata.LocalRootPath
+		if repo := opaSessionObj.Metadata.ContextMetadata.RepoContextMetadata; repo != nil {
+			return repo.LocalRootPath
+		}
+		return ""
 	case v2.Directory:
 		return opaSessionObj.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
 	case v2.File:
