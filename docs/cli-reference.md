@@ -201,8 +201,10 @@ Scan a specific workload.
 ### Synopsis
 
 ```bash
-kubescape scan workload <kind>/<name> [flags]
+kubescape scan workload <kind>[.<version>[.<group>]]/<name> [flags]
 ```
+
+Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this command requires a **Kind** (e.g. `Deployment.v1.apps`, not `deployments.v1.apps`).
 
 ### Flags
 
@@ -214,6 +216,7 @@ kubescape scan workload <kind>/<name> [flags]
 
 ```bash
 kubescape scan workload Deployment/nginx --namespace default
+kubescape scan workload Deployment.v1.apps/nginx
 kubescape scan workload DaemonSet/fluentd --namespace logging
 ```
 
