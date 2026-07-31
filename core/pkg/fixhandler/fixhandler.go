@@ -264,11 +264,17 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				logger.L().Ctx(ctx).Warning("Skipping invalid resource path: " + resourcePath)
 				skipReason = "skipped: invalid resource path"
 			} else {
-				absolutePath = filepath.Join(h.localBasePath, relativePath)
-				documentIndex = idx
-				if _, err := os.Stat(absolutePath); err != nil {
-					logger.L().Ctx(ctx).Warning("Skipping missing file: " + absolutePath)
-					skipReason = "skipped: file not found"
+				candidatePath := filepath.Join(h.localBasePath, relativePath)
+				if !isPathContained(h.localBasePath, candidatePath) {
+					logger.L().Ctx(ctx).Warning("Skipping resource path that escapes the scanned directory: " + resourcePath)
+					skipReason = "skipped: resource path escapes scanned directory"
+				} else {
+					absolutePath = candidatePath
+					documentIndex = idx
+					if _, err := os.Stat(absolutePath); err != nil {
+						logger.L().Ctx(ctx).Warning("Skipping missing file: " + absolutePath)
+						skipReason = "skipped: file not found"
+					}
 				}
 			}
 		}
@@ -588,6 +594,17 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 	}
 
 	return len(updatedFiles), errors
+}
+
+// isPathContained reports whether target resolves to a path inside base,
+// preventing a resource path from the (untrusted) scan report from escaping
+// the local scan directory via "../" traversal.
+func isPathContained(base, target string) bool {
+	rel, err := filepath.Rel(filepath.Clean(base), filepath.Clean(target))
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath string, documentIndex int, err error) {
