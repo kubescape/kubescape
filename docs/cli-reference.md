@@ -46,6 +46,7 @@ kubescape scan [target] [flags]
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `sarif`, `html`, `pdf`, `prometheus` | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
+| `--host-scan` | Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use `--host-scan=false` to disable host data collection. See the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for a managed alternative. | auto-detect |
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
 | `--keep-local` | Don't report results to backend | `false` |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
