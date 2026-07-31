@@ -206,6 +206,7 @@ func isEmptyResources(counters reportsummary.ICounters) bool {
 	return counters.Failed() == 0 && counters.Skipped() == 0 && counters.Passed() == 0
 }
 
+// resourceCount must be the scan's frozen initial snapshot (OPAProcessor.initialResourceCount), not len(allResources).
 func getAllSupportedObjects(k8sResources cautils.K8SResources, externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule, resourceCount int) map[string][]workloadinterface.IMetadata {
 	k8sObjects := getKubernetesObjects(k8sResources, allResources, rule.Match, resourceCount)
 	externalObjs := getKubernetesObjectsFromExternalResources(externalResources, allResources, rule.DynamicMatch)
@@ -243,6 +244,7 @@ func getKubernetesObjectsFromExternalResources(externalResources cautils.Externa
 	return k8sObjects
 }
 
+// resourceCount must be the scan's frozen initial snapshot (OPAProcessor.initialResourceCount), not len(allResources).
 func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects, resourceCount int) map[string][]workloadinterface.IMetadata {
 	k8sObjects := map[string][]workloadinterface.IMetadata{}
 

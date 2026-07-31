@@ -233,13 +233,107 @@ deny[msga] {
 	podAResult, ok := got[podA.GetID()]
 	assert.True(t, ok, "podA must appear in results")
 	if ok {
-		assert.NotEqual(t, apis.StatusFailed, podAResult.Status,
-			"podA was evaluated in isolation — bucketing drifted mid-scan; got=%+v", podAResult)
+		assert.Equal(t, apis.StatusPassed, podAResult.Status,
+			"podA was evaluated in isolation -- bucketing drifted mid-scan; got=%+v", podAResult)
 	}
 	podBResult, ok := got[podB.GetID()]
 	assert.True(t, ok, "podB must appear in results")
 	if ok {
-		assert.NotEqual(t, apis.StatusFailed, podBResult.Status,
-			"podB was evaluated in isolation — bucketing drifted mid-scan; got=%+v", podBResult)
+		assert.Equal(t, apis.StatusPassed, podBResult.Status,
+			"podB was evaluated in isolation -- bucketing drifted mid-scan; got=%+v", podBResult)
+	}
+}
+
+// TestProcess_NamespaceBucketingWiredFromConstruction drives the real
+// production path -- NewOPAProcessor followed by Process() -- instead of
+// hand-assigning opap.initialResourceCount, so that deleting the snapshot
+// assignment in NewOPAProcessor causes this test to fail. Two Pods, one per
+// namespace, are the only resources at construction time; the single control's
+// rule denies any Pod evaluated without its sibling in the same batch, which
+// only happens if per-namespace bucketing split them into separate batches.
+func TestProcess_NamespaceBucketingWiredFromConstruction(t *testing.T) {
+	origLarge := largeClusterSize
+	largeClusterSize = 1
+	t.Cleanup(func() { largeClusterSize = origLarge })
+
+	podA := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "pa", "namespace": "ns-a"},
+	})
+	podB := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "pb", "namespace": "ns-b"},
+	})
+
+	sess := cautils.NewOPASessionObjMock()
+	sess.K8SResources = cautils.K8SResources{
+		"/v1/pods": {podA.GetID(), podB.GetID()},
+	}
+	sess.AllResources[podA.GetID()] = podA
+	sess.AllResources[podB.GetID()] = podB
+
+	opap := NewOPAProcessor(sess, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+
+	podRule := reporthandling.PolicyRule{
+		Rule: `package armo_builtins
+
+deny[msga] {
+    pod := input[_]
+    pod.kind == "Pod"
+    pods := [p | p := input[_]; p.kind == "Pod"]
+    count(pods) < 2
+    msga := {
+        "alertMessage": "pod evaluated without its sibling",
+        "packagename":  "armo_builtins",
+        "alertScore":   5,
+        "fixPaths":     [],
+        "failedPaths":  [],
+        "alertObject":  {"k8sApiObjects": [pod]},
+    }
+}
+`,
+		RuleLanguage: reporthandling.RegoLanguage,
+		Match: []reporthandling.RuleMatchObjects{
+			{
+				APIGroups:   []string{""},
+				APIVersions: []string{"v1"},
+				Resources:   []string{"Pod"},
+			},
+		},
+	}
+	podRule.Name = "pods-evaluated-together"
+
+	control := reporthandling.Control{ControlID: "C-TEST", Rules: []reporthandling.PolicyRule{podRule}}
+	policies := &cautils.Policies{Controls: map[string]reporthandling.Control{"C-TEST": control}}
+	opap.AllPolicies = policies
+
+	err := opap.Process(context.Background(), policies, nil)
+	assert.NoError(t, err)
+
+	podAResult, ok := opap.ResourcesResult[podA.GetID()]
+	assert.True(t, ok, "podA must appear in results")
+	if ok {
+		assert.Equal(t, 1, len(podAResult.AssociatedControls))
+		if len(podAResult.AssociatedControls) == 1 {
+			assert.Equal(t, 1, len(podAResult.AssociatedControls[0].ResourceAssociatedRules))
+			if len(podAResult.AssociatedControls[0].ResourceAssociatedRules) == 1 {
+				assert.Equal(t, apis.StatusFailed, podAResult.AssociatedControls[0].ResourceAssociatedRules[0].Status,
+					"podA was not evaluated in its own per-namespace batch -- initialResourceCount is not wired from NewOPAProcessor")
+			}
+		}
+	}
+	podBResult, ok := opap.ResourcesResult[podB.GetID()]
+	assert.True(t, ok, "podB must appear in results")
+	if ok {
+		assert.Equal(t, 1, len(podBResult.AssociatedControls))
+		if len(podBResult.AssociatedControls) == 1 {
+			assert.Equal(t, 1, len(podBResult.AssociatedControls[0].ResourceAssociatedRules))
+			if len(podBResult.AssociatedControls[0].ResourceAssociatedRules) == 1 {
+				assert.Equal(t, apis.StatusFailed, podBResult.AssociatedControls[0].ResourceAssociatedRules[0].Status,
+					"podB was not evaluated in its own per-namespace batch -- initialResourceCount is not wired from NewOPAProcessor")
+			}
+		}
 	}
 }

@@ -67,10 +67,10 @@ type OPAProcessor struct {
 	celEvaluator     *cel.Evaluator
 	celEvaluatorOnce sync.Once
 	celEvaluatorErr  error
-	// initialResourceCount is the size of AllResources snapshotted once before
-	// the control loop starts, so the large-cluster namespace-bucketing decision
-	// (see getNamespaceName) is made once per scan instead of drifting mid-scan
-	// as rules write aggregator-produced resources back into AllResources.
+	// initialResourceCount is the size of AllResources snapshotted once at
+	// construction, so the large-cluster namespace-bucketing decision (see
+	// getNamespaceName) is made once per scan instead of drifting mid-scan as
+	// rules write aggregator-produced resources back into AllResources.
 	initialResourceCount int
 }
 
@@ -78,6 +78,11 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 	if regoDependenciesData != nil && sessionObj != nil {
 		regoDependenciesData.PostureControlInputs = sessionObj.RegoInputData.PostureControlInputs
 		regoDependenciesData.DataControlInputs = sessionObj.RegoInputData.DataControlInputs
+	}
+
+	initialResourceCount := 0
+	if sessionObj != nil {
+		initialResourceCount = len(sessionObj.AllResources)
 	}
 
 	return &OPAProcessor{
@@ -90,6 +95,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		printEnabled:           enableRegoPrint,
 		compiledModules:        make(map[string]*ast.Compiler),
 		TimedOutControls:       make(map[string]string),
+		initialResourceCount:   initialResourceCount,
 	}
 }
 
@@ -137,8 +143,6 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 		progressListener.Start(len(policies.Controls))
 		defer progressListener.Stop()
 	}
-
-	opap.initialResourceCount = len(opap.AllResources)
 
 	var processErrs []error
 	for _, toPin := range policies.Controls {
