@@ -128,12 +128,23 @@ func getKeyFile() string {
 	return os.Getenv("KS_KEY_FILE")
 }
 
+// servePprof starts the net/http/pprof debug server, but only when
+// explicitly opted into via KS_PPROF_ENABLED=true. It used to start
+// automatically whenever the logger level was "debug", which is the
+// server's default log level - meaning every deployment exposed
+// unauthenticated pprof endpoints (heap dumps, CPU profiling, ...) on
+// :6060 by default. It now also binds to loopback only, so it's reachable
+// only via port-forward/exec into the pod, not from the network.
 func servePprof() {
+	if os.Getenv("KS_PPROF_ENABLED") != "true" {
+		return
+	}
 	go func() {
 		// start pprof server -> https://pkg.go.dev/net/http/pprof
-		if logger.L().GetLevel() == helpers.DebugLevel.String() {
-			logger.L().Info("starting pprof server", helpers.String("port", "6060"))
-			logger.L().Error(http.ListenAndServe(":6060", nil).Error())
+		addr := "127.0.0.1:6060"
+		logger.L().Info("starting pprof server", helpers.String("address", addr))
+		if err := http.ListenAndServe(addr, nil); err != nil {
+			logger.L().Error("pprof server stopped", helpers.Error(err))
 		}
 	}()
 }
