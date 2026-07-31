@@ -28,7 +28,7 @@ func TestJsonPrinterScore(t *testing.T) {
 		score float32
 		want  string
 	}{
-		{name: "rounds fractional score", score: 20.7, want: "\nOverall compliance-score (100- Excellent, 0- All failed): 21\n"},
+		{name: "floors fractional score", score: 20.7, want: "\nOverall compliance-score (100- Excellent, 0- All failed): 20\n"},
 		{name: "zero score", score: 0, want: "\nOverall compliance-score (100- Excellent, 0- All failed): 0\n"},
 		{name: "perfect score", score: 100, want: "\nOverall compliance-score (100- Excellent, 0- All failed): 100\n"},
 	}

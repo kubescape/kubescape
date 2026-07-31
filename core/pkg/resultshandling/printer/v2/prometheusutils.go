@@ -325,12 +325,12 @@ func (mcrs *mControlComplianceScore) set(resources reportsummary.ICounters) {
 func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetails) {
 	m.rs.set(summaryDetails.NumberOfResources(), summaryDetails.NumberOfControls())
 	// GetScore() returns the risk score; the metric is the compliance score.
-	m.rs.complianceScore = cautils.Float32ToInt(summaryDetails.ComplianceScore)
+	m.rs.complianceScore = cautils.Float32ToIntFloor(summaryDetails.ComplianceScore)
 
 	for _, fw := range summaryDetails.ListFrameworks() {
 		mfrs := mFrameworkComplianceScore{
 			frameworkName:   fw.GetName(),
-			complianceScore: cautils.Float32ToInt(fw.GetComplianceScore()),
+			complianceScore: cautils.Float32ToIntFloor(fw.GetComplianceScore()),
 		}
 		mfrs.set(fw.NumberOfResources(), fw.NumberOfControls())
 		m.listFrameworks = append(m.listFrameworks, mfrs)
@@ -340,7 +340,7 @@ func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetai
 		mcrs := mControlComplianceScore{
 			controlName:     control.GetName(),
 			controlID:       control.GetID(),
-			complianceScore: cautils.Float32ToInt(control.GetComplianceScore()),
+			complianceScore: cautils.Float32ToIntFloor(control.GetComplianceScore()),
 			link:            cautils.GetControlLink(control.GetID()),
 			severity:        apis.ControlSeverityToString(control.GetScoreFactor()),
 			remediation:     control.GetRemediation(),

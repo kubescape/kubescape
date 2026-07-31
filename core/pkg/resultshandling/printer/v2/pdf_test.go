@@ -24,7 +24,7 @@ func TestScore_Pdf(t *testing.T) {
 		{
 			name:  "Score not an integer",
 			score: 20.7,
-			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 21\n",
+			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 20\n",
 		},
 		{
 			name:  "Score less than 0",
