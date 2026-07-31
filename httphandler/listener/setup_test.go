@@ -8,6 +8,8 @@ import (
 	"encoding/pem"
 	"math/big"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -209,5 +211,70 @@ func TestGetOffline(t *testing.T) {
 		if getOffline() {
 			t.Fatal("getOffline() = true, want false")
 		}
+	})
+}
+
+func TestGetAPIKey(t *testing.T) {
+	t.Setenv("KS_API_KEY", "s3cr3t")
+	if got := getAPIKey(); got != "s3cr3t" {
+		t.Fatalf("getAPIKey() = %q, want %q", got, "s3cr3t")
+	}
+}
+
+func TestAPIKeyMiddleware(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	t.Run("no api key configured allows any request", func(t *testing.T) {
+		handler := apiKeyMiddleware("")(next)
+		req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("rejects request with no credentials", func(t *testing.T) {
+		handler := apiKeyMiddleware("s3cr3t")(next)
+		req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("rejects request with wrong key", func(t *testing.T) {
+		handler := apiKeyMiddleware("s3cr3t")(next)
+		req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+		req.Header.Set("X-API-Key", "wrong")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	})
+
+	t.Run("accepts request with correct X-API-Key header", func(t *testing.T) {
+		handler := apiKeyMiddleware("s3cr3t")(next)
+		req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+		req.Header.Set("X-API-Key", "s3cr3t")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("accepts request with correct Authorization bearer token", func(t *testing.T) {
+		handler := apiKeyMiddleware("s3cr3t")(next)
+		req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+		req.Header.Set("Authorization", "Bearer s3cr3t")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("rejects malformed Authorization header", func(t *testing.T) {
+		handler := apiKeyMiddleware("s3cr3t")(next)
+		req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+		req.Header.Set("Authorization", "s3cr3t")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
 	})
 }
