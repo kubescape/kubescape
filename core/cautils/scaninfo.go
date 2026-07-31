@@ -83,15 +83,21 @@ func (bpf *BoolPtrFlag) Set(val string) error {
 	return nil
 }
 
-// TODO - UPDATE
+// ViewTypes specifies how scan results are presented by the default (pretty) printer.
 type ViewTypes string
-type EnvScopeTypes string
-type ManageClusterTypes string
 
 const (
+	// ResourceViewType groups results by scanned resource, listing each resource and its findings.
+	// With verbose mode enabled, all input resources are shown rather than only failed ones.
 	ResourceViewType ViewTypes = "resource"
+
+	// SecurityViewType is the default view. It presents the overall posture summary grouped by
+	// security aspects, and is the most comprehensive view of the scan results.
 	SecurityViewType ViewTypes = "security"
-	ControlViewType  ViewTypes = "control"
+
+	// ControlViewType groups results by control, showing the compliance status of every control
+	// and the resources that failed it.
+	ControlViewType ViewTypes = "control"
 )
 
 type PolicyIdentifier struct {
