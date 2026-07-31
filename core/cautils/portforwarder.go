@@ -95,7 +95,7 @@ func (p *portForward) waitForPortForwardReadiness() error {
 }
 
 func (p *portForward) GetPortForwardLocalhost() string {
-	return "localhost:" + getPortForwardingPort()
+	return "localhost:" + p.localPort
 }
 
 func (p *portForward) StopPortForwarder() {

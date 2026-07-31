@@ -222,7 +222,7 @@ func Test_GetPortForwardLocalhost(t *testing.T) {
 			assert.Equal(t, nil, err)
 
 			result := pf.GetPortForwardLocalhost()
-			assert.Equal(t, tc.result+":"+getPortForwardingPort(), result)
+			assert.Equal(t, tc.result+":"+tc.port, result)
 		})
 	}
 }
