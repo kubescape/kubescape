@@ -140,6 +140,16 @@ func TestReadConfigurationResource_URIParsing(t *testing.T) {
 			uri:     "kubescape://configuration-manifests/ns/manifest/extra",
 			wantErr: "invalid URI",
 		},
+		{
+			name:    "empty namespace",
+			uri:     "kubescape://configuration-manifests//manifest",
+			wantErr: "invalid URI",
+		},
+		{
+			name:    "empty manifest name",
+			uri:     "kubescape://configuration-manifests/ns/",
+			wantErr: "invalid URI",
+		},
 	}
 
 	for _, tt := range tests {
@@ -199,6 +209,16 @@ func TestReadContainerProfileResource_URIParsing(t *testing.T) {
 		{
 			name:    "too many parts",
 			uri:     "kubescape://container-profiles/ns/manifest/extra",
+			wantErr: "invalid URI",
+		},
+		{
+			name:    "empty namespace",
+			uri:     "kubescape://container-profiles//profile",
+			wantErr: "invalid URI",
+		},
+		{
+			name:    "empty profile name",
+			uri:     "kubescape://container-profiles/ns/",
 			wantErr: "invalid URI",
 		},
 	}

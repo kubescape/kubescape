@@ -83,15 +83,28 @@ func (bpf *BoolPtrFlag) Set(val string) error {
 	return nil
 }
 
-// TODO - UPDATE
+// ViewTypes specifies how scan results are presented by the default (pretty) printer.
 type ViewTypes string
-type EnvScopeTypes string
-type ManageClusterTypes string
 
 const (
+	// ResourceViewType prints one section per failed resource, listing the
+	// controls that failed it. It only takes effect in verbose mode; passed
+	// resources are not shown.
 	ResourceViewType ViewTypes = "resource"
+
+	// SecurityViewType is the default view (see the --view flag). Rather than
+	// changing how results are grouped, it selects a security-oriented set of
+	// frameworks to scan with — workloadscan+allcontrols for a repository or
+	// directory target, clusterscan+mitre+nsa for a cluster — and prints the
+	// standard posture summary without per-control or per-resource detail.
+	// Note: the `scan framework` subcommand rewrites this to ResourceViewType.
 	SecurityViewType ViewTypes = "security"
-	ControlViewType  ViewTypes = "control"
+
+	// ControlViewType groups results by control, showing the compliance status
+	// of every control and the resources that failed it. Failed and
+	// action-required resources are always listed, and passed resources are
+	// listed in verbose mode.
+	ControlViewType ViewTypes = "control"
 )
 
 type PolicyIdentifier struct {
@@ -158,7 +171,8 @@ type ScanInfo struct {
 	LabelsToCopy          []string // Labels to copy from workloads to scan reports
 	scanningContext       *ScanningContext
 	cleanups              []func()
-	ListingURL            string //Grype vulnerability database URL
+	ListingURL            string            //Grype vulnerability database URL
+	RegistryMapping       map[string]string // Map internal registry URLs to external ones
 }
 
 type Getters struct {
@@ -523,25 +537,36 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 }
 
 func metadataGitLocal(input string) (*reporthandlingv2.RepoContextMetadata, error) {
+	repoContext := &reporthandlingv2.RepoContextMetadata{
+		Branch:        "none",
+		DefaultBranch: "none",
+		LocalRootPath: getAbsPath(input),
+	}
 	gitParser, err := NewLocalGitRepository(input)
 	if err != nil {
-		return nil, fmt.Errorf("%w", err)
+		return repoContext, fmt.Errorf("%w", err)
+	}
+	if root, rootErr := gitParser.GetRootDir(); rootErr == nil {
+		repoContext.LocalRootPath = root
 	}
 	remoteURL, err := gitParser.GetRemoteUrl()
 	if err != nil {
-		return nil, fmt.Errorf("%w", err)
+		return repoContext, fmt.Errorf("%w", err)
 	}
-	repoContext := &reporthandlingv2.RepoContextMetadata{}
 	gitParserURL, err := giturl.NewGitURL(remoteURL)
 	if err != nil {
 		return repoContext, fmt.Errorf("%w", err)
 	}
-	gitParserURL.SetBranchName(gitParser.GetBranchName())
+	branchName := gitParser.GetBranchName()
+	if branchName != "" {
+		gitParserURL.SetBranchName(branchName)
+		repoContext.Branch = branchName
+		repoContext.DefaultBranch = ""
+	}
 
 	repoContext.Provider = gitParserURL.GetProvider()
 	repoContext.Repo = gitParserURL.GetRepoName()
 	repoContext.Owner = gitParserURL.GetOwnerName()
-	repoContext.Branch = gitParserURL.GetBranchName()
 	repoContext.RemoteURL = gitParserURL.GetURL().String()
 
 	commit, err := gitParser.GetLastCommit()
@@ -553,8 +578,6 @@ func metadataGitLocal(input string) (*reporthandlingv2.RepoContextMetadata, erro
 		Date:          commit.Committer.Date,
 		CommitterName: commit.Committer.Name,
 	}
-	repoContext.LocalRootPath, _ = gitParser.GetRootDir()
-
 	return repoContext, nil
 }
 func getHostname() string {

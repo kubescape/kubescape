@@ -429,6 +429,49 @@ func TestSubmitFlag_PropagatesToAllSubcommands(t *testing.T) {
 	}
 }
 
+func TestGetScanCommand_DeprecatedFlagsRemoved(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+
+	cmd := GetScanCommand(mockKubescape)
+	require.NotNil(t, cmd)
+
+	for _, removed := range []string{
+		"fail-threshold",
+		"create-account",
+		"enable-host-scan",
+		"host-scan-yaml",
+	} {
+		assert.Nil(t, cmd.PersistentFlags().Lookup(removed),
+			"deprecated flag %q must no longer be registered", removed)
+	}
+}
+
+func TestGetScanCommand_HostScanFlagTriState(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	// Removing the deprecated --enable-host-scan binding must not remove the
+	// CLI opt-out for host data collection: the initutils.go auto-detect branch
+	// turns host scanning on whenever the tri-state BoolPtrFlag is nil.
+	f := cmd.PersistentFlags().Lookup("host-scan")
+	require.NotNil(t, f, "--host-scan flag must be registered to keep a CLI opt-out for host data collection")
+	assert.Equal(t, "bool", f.Value.Type())
+
+	// not passed -> nil -> auto-detect node-agent CRDs (the default behavior)
+	assert.Equal(t, "", f.Value.String(), "unset --host-scan must leave the BoolPtrFlag nil (auto-detect)")
+
+	// --host-scan (bare) forces host data collection on
+	assert.Equal(t, "true", f.NoOptDefVal, "bare --host-scan must force host data collection on")
+
+	// --host-scan=false is the opt-out
+	require.NoError(t, cmd.PersistentFlags().Set("host-scan", "false"))
+	assert.Equal(t, "false", f.Value.String(), "--host-scan=false must explicitly disable host data collection")
+
+	// --host-scan=true forces it on
+	require.NoError(t, cmd.PersistentFlags().Set("host-scan", "true"))
+	assert.Equal(t, "true", f.Value.String(), "--host-scan=true must force host data collection on")
+}
+
 func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	cmd := GetScanCommand(mockKubescape)

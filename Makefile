@@ -16,7 +16,7 @@ test:
 # it stays reproducible instead of hand-maintained. Bump CEL_LIBRARY_VERSION to
 # vendor a newer bundle.
 CEL_VAPDATA_DIR := core/pkg/opaprocessor/cel/vapdata
-CEL_LIBRARY_VERSION := v0.12
+CEL_LIBRARY_VERSION := v0.13
 CEL_LIBRARY_BASE_URL := https://github.com/kubescape/cel-admission-library/releases/download/$(CEL_LIBRARY_VERSION)
 CEL_VAP_FILES := \
 	kubescape-validating-admission-policies.yaml \

@@ -46,6 +46,7 @@ kubescape scan [target] [flags]
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `sarif`, `html`, `pdf`, `prometheus` | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
+| `--host-scan` | Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use `--host-scan=false` to disable host data collection. See the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for a managed alternative. | auto-detect |
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
 | `--keep-local` | Don't report results to backend | `false` |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
@@ -112,8 +113,8 @@ kubescape scan --exclude-namespaces kube-system,kube-public
 ```
 ### Score thresholds
 
-`--compliance-threshold` (compliance score) and the deprecated
-`--fail-threshold` (risk score) apply to the following invocations:
+`--compliance-threshold` (compliance score) applies to the following
+invocations:
 
 - `kubescape scan framework <name> ...`
 - `kubescape scan control <id> ...`
@@ -121,7 +122,7 @@ kubescape scan --exclude-namespaces kube-system,kube-public
 
 The default `kubescape scan [path]` uses `--view security`, which does
 not evaluate against a score threshold. To gate a pipeline on the
-compliance or risk score, use one of the forms above.
+compliance score, use one of the forms above.
 `--severity-threshold` and `--fail-coverage-below` apply in every view.
 
 `--fail-coverage-below` gates on the **scan coverage score**, not the raw
@@ -201,8 +202,10 @@ Scan a specific workload.
 ### Synopsis
 
 ```bash
-kubescape scan workload <kind>/<name> [flags]
+kubescape scan workload <kind>[.<version>[.<group>]]/<name> [flags]
 ```
+
+Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this command requires a **Kind** (e.g. `Deployment.v1.apps`, not `deployments.v1.apps`).
 
 ### Flags
 
@@ -214,6 +217,7 @@ kubescape scan workload <kind>/<name> [flags]
 
 ```bash
 kubescape scan workload Deployment/nginx --namespace default
+kubescape scan workload Deployment.v1.apps/nginx
 kubescape scan workload DaemonSet/fluentd --namespace logging
 ```
 

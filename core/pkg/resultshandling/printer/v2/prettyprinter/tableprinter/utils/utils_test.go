@@ -132,7 +132,7 @@ func TestPrintInfo(t *testing.T) {
 					Info:  "Critical Info",
 				},
 			},
-			expected: "🚨 5 Critical Info\n",
+			expected: "\n🚨 5 Critical Info\n",
 		},
 		{
 			name: "Medium and high info",
@@ -146,7 +146,7 @@ func TestPrintInfo(t *testing.T) {
 					Info:  "High Info",
 				},
 			},
-			expected: "🚨 3 Medium Info\n🚨 4 High Info\n",
+			expected: "\n🚨 3 Medium Info\n🚨 4 High Info\n",
 		},
 		{
 			name: "Negligible and low info",
@@ -160,20 +160,18 @@ func TestPrintInfo(t *testing.T) {
 					Info:  "Low Info",
 				},
 			},
-			expected: "🚨 1 Negligible Info\n🚨 2 Low Info\n",
+			expected: "\n🚨 1 Negligible Info\n🚨 2 Low Info\n",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a temporary file to capture output
 			f, err := os.CreateTemp("", "pdfPrinter-score-output")
 			if err != nil {
 				panic(err)
 			}
 			defer f.Close()
 
-			// Redirect stderr to the temporary file
 			oldStderr := os.Stderr
 			defer func() {
 				os.Stderr = oldStderr
@@ -182,7 +180,6 @@ func TestPrintInfo(t *testing.T) {
 
 			PrintInfo(f, tt.infoToPrintInfo)
 
-			// Read the contents of the temporary file
 			f.Seek(0, 0)
 			got, err := io.ReadAll(f)
 			if err != nil {
@@ -262,6 +259,7 @@ func TestGetStatusIcon(t *testing.T) {
 			status:   apis.StatusFailed,
 			expected: "❌",
 		},
+
 		{
 			name:     "Status passed",
 			status:   apis.StatusPassed,

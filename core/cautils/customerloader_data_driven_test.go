@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	restclient "k8s.io/client-go/rest"
 )
 
 func useTemporaryConfigStore(t *testing.T) {
@@ -297,6 +298,9 @@ func Test_GetTenantConfig(t *testing.T) {
 	originalConnected := k8sinterface.IsConnectedToCluster()
 	t.Cleanup(func() { k8sinterface.SetConnectedToCluster(originalConnected) })
 
+	originalK8SConfig := k8sinterface.K8SConfig
+	t.Cleanup(func() { k8sinterface.K8SConfig = originalK8SConfig })
+
 	t.Run("not connected to cluster returns LocalConfig", func(t *testing.T) {
 		k8sinterface.SetConnectedToCluster(false)
 
@@ -306,6 +310,7 @@ func Test_GetTenantConfig(t *testing.T) {
 	})
 
 	t.Run("connected to cluster with k8s client returns ClusterConfig", func(t *testing.T) {
+		k8sinterface.K8SConfig = &restclient.Config{}
 		k8sinterface.SetConnectedToCluster(true)
 
 		k8s := k8sinterface.NewKubernetesApiMock()

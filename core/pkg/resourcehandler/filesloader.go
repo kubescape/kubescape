@@ -194,6 +194,21 @@ func getWorkloadSourceHelmChart(repoRoot string, source string, gitRepo *cautils
 	}
 }
 
+// resolveHelmRemotePath returns the repository-level remote path used to rewrite helm
+// chart provenance, or "" when this is not a cloned-repo scan or the remote URL is
+// unavailable — in which case callers fall back to local paths.
+func resolveHelmRemotePath(clonedRepo string, gitRepo *cautils.LocalGitRepository) string {
+	if clonedRepo == "" || gitRepo == nil {
+		return ""
+	}
+	url, err := gitRepo.GetRemoteUrl()
+	if err != nil {
+		logger.L().Warning("failed to get remote url, helm sources will use local paths", helpers.Error(err))
+		return ""
+	}
+	return strings.TrimSuffix(url, ".git")
+}
+
 func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
 	workloadIDToSource := make(map[string]reporthandling.Source)
 	var workloads []workloadinterface.IMetadata
@@ -292,23 +307,21 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		logger.L().Debug("files found in local storage", helpers.Int("files", len(sourceToWorkloads)), helpers.Int("workloads", len(workloads)))
 	}
 
+	helmRemotePath := resolveHelmRemotePath(clonedRepo, gitRepo)
+
 	// process the helm charts rendered above
 	for source, ws := range helmSourceToWorkloads {
 		workloads = append(workloads, ws...)
 		helmChart := helmSourceToChart[source]
 
-		if clonedRepo != "" && gitRepo != nil {
-			url, err := gitRepo.GetRemoteUrl()
-			if err != nil {
-				logger.L().Warning("failed to get remote url", helpers.Error(err))
-				break
-			}
-			helmChart.Path = strings.TrimSuffix(url, ".git")
-			repoRoot = ""
+		chartRoot := repoRoot
+		if helmRemotePath != "" {
+			helmChart.Path = helmRemotePath
+			chartRoot = ""
 			source = strings.TrimPrefix(source, fmt.Sprintf("%s/", clonedRepo))
 		}
 
-		workloadSource := getWorkloadSourceHelmChart(repoRoot, source, gitRepo, helmChart)
+		workloadSource := getWorkloadSourceHelmChart(chartRoot, source, gitRepo, helmChart)
 
 		for i := range ws {
 			workloadIDToSource[ws[i].GetID()] = workloadSource

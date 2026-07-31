@@ -440,8 +440,18 @@ func isYAMLDocumentSeparator(line []byte) bool {
 	return len(rest) == 0 || rest[0] == '#'
 }
 
-func readJsonFile(jsonFile []byte) ([]workloadinterface.IMetadata, error) {
-	workloads := []workloadinterface.IMetadata{}
+func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err error) {
+	workloads = []workloadinterface.IMetadata{}
+	// The object envelopes do unchecked type assertions on the decoded
+	// document, so a well formed but wrongly typed manifest panics. Recover
+	// the same way readYamlFile does, so one bad file fails that file rather
+	// than the whole scan.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic during JSON parsing: %v", r)
+		}
+	}()
+
 	var jsonObj any
 	if err := json.Unmarshal(jsonFile, &jsonObj); err != nil {
 		return workloads, err

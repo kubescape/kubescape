@@ -58,7 +58,7 @@ func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
 
 		return nil
 	}
-	return fmt.Errorf("unknown command to download")
+	return fmt.Errorf("unknown command to list")
 }
 
 func (ks *Kubescape) listAndFormatControls(listPolicies *metav1.ListPolicies) error {
