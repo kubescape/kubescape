@@ -47,7 +47,6 @@ type OPAProcessor struct {
 	regoDependenciesData *resources.RegoDependenciesData
 	*cautils.OPASessionObj
 	exceptionEventRecorder record.EventRecorder
-	opaRegisterOnce        sync.Once
 	excludeNamespaces      []string
 	includeNamespaces      []string
 	printEnabled           bool
@@ -735,13 +734,40 @@ func celResourceID(obj map[string]any) string {
 	return "<unknown>"
 }
 
-// runRegoOnK8s compiles an OPA PolicyRule and evaluates its against k8s
-func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
-	opap.opaRegisterOnce.Do(func() {
+// opaRegisterOnce guards rego.RegisterBuiltin1/2 below. Those calls mutate
+// OPA's process-global builtin registry (ast.Builtins/ast.BuiltinMap), which
+// the OPA docs call out as not thread-safe and unsupported to call more than
+// once per process. This must stay a package-level sync.Once: a field on
+// OPAProcessor would give every new instance (i.e. every scan) its own,
+// never-fired Once, defeating the "only once" guarantee it exists to provide.
+var opaRegisterOnce sync.Once
+
+// registerOPABuiltins registers kubescape's custom Rego builtins with the OPA
+// runtime exactly once for the lifetime of the process, regardless of how
+// many OPAProcessor instances (scans) are created. It stays idempotent (via
+// opaRegisterOnce) even though init() below already calls it eagerly,
+// because runRegoOnK8s and tests also call it directly.
+func registerOPABuiltins() {
+	opaRegisterOnce.Do(func() {
 		rego.RegisterBuiltin2(cosignVerifySignatureDeclaration, cosignVerifySignatureDefinition)
 		rego.RegisterBuiltin1(cosignHasSignatureDeclaration, cosignHasSignatureDefinition)
 		rego.RegisterBuiltin1(imageNameNormalizeDeclaration, imageNameNormalizeDefinition)
 	})
+}
+
+// Registering eagerly at package init, rather than lazily on the first scan,
+// removes the (currently unused, but latent) window where a concurrent
+// scan-triggering path could race the first call to registerOPABuiltins.
+// The declarations/definitions it references are plain package-level vars
+// with no runtime dependency, so they are already initialized by the time
+// any init() func runs.
+func init() {
+	registerOPABuiltins()
+}
+
+// runRegoOnK8s compiles an OPA PolicyRule and evaluates its against k8s
+func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
+	registerOPABuiltins()
 
 	ruleData := getRuleData(rule)
 	compiled, err := opap.getCompiledRule(ctx, rule.Name, ruleData, opap.printEnabled)
