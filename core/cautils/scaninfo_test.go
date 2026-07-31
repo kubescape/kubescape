@@ -19,7 +19,7 @@ import (
 )
 
 func TestSetContextMetadata(t *testing.T) {
-	{
+	t.Run("empty input cluster context", func(t *testing.T) {
 		ctx := reporthandlingv2.ContextMetadata{}
 		scanInfo := &ScanInfo{}
 		scanInfo.setContextMetadata(context.Background(), &ctx)
@@ -29,7 +29,7 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.Nil(t, ctx.FileContextMetadata)
 		assert.Nil(t, ctx.HelmContextMetadata)
 		assert.Nil(t, ctx.RepoContextMetadata)
-	}
+	})
 	t.Run("git local repository metadata", func(t *testing.T) {
 		// metadataGitLocal only parses the local repo's configured remote URL,
 		// so a local fixture reproduces the remote metadata without any HTTP calls.
