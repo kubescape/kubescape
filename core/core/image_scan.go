@@ -1,11 +1,17 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strings"
+	"syscall"
+
+	"github.com/distribution/reference"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -188,6 +194,97 @@ func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolic
 	return uniqueVulnsList, uniqueSeversList
 }
 
+// applyRegistryMapping replaces the registry part of the image name if a match
+// is found in the provided mapping. The returned bool indicates whether a
+// mapping key actually matched; callers should only retry when matched is true.
+func applyRegistryMapping(imgName string, registryMapping map[string]string) (string, bool, error) {
+	if len(registryMapping) == 0 {
+		return imgName, false, nil
+	}
+	canonicalImageName, err := cautils.NormalizeImageName(imgName)
+	if err != nil {
+		return "", false, err
+	}
+	tokens := strings.Split(canonicalImageName, "/")
+	registry := tokens[0]
+	if altRegistry, ok := registryMapping[registry]; ok {
+		tokens[0] = altRegistry
+		mappedName := strings.Join(tokens, "/")
+		if _, err := reference.ParseNormalizedNamed(mappedName); err != nil {
+			return "", false, fmt.Errorf("invalid image reference after applying registry mapping: %w", err)
+		}
+		return mappedName, true, nil
+	}
+	return imgName, false, nil
+}
+
+// isResolutionError checks if the error is related to unreachable registry hosts
+// (DNS resolution failures, connection refused, timeouts). It uses typed error
+// checks first and falls back to substring matching for wrapped errors.
+func isResolutionError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Typed error checks — stable across Go and library versions.
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EHOSTUNREACH) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	// Belt-and-braces: substring fallback for deeply wrapped errors where
+	// the typed original has been lost.
+	errStr := err.Error()
+	return strings.Contains(errStr, "no such host") ||
+		strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "i/o timeout")
+}
+
+// scanWithRegistryMapping attempts to scan an image and, on a resolution error,
+// retries using a mapped registry if one is configured. It returns the scan
+// results or a combined error preserving both the original and fallback context.
+func scanWithRegistryMapping(
+	ctx context.Context,
+	svc *imagescan.Service,
+	img string,
+	creds imagescan.RegistryCredentials,
+	registryMapping map[string]string,
+	vulnExceptions, sevExceptions []string,
+) (*cautils.ImageScanData, error) {
+	scanData, err := svc.Scan(ctx, img, creds, vulnExceptions, sevExceptions)
+	if err == nil {
+		return scanData, nil
+	}
+
+	if len(registryMapping) == 0 || !isResolutionError(err) {
+		return nil, err
+	}
+
+	logger.L().Warning(fmt.Sprintf("Failed to scan image %s: %s. Trying registry mapping...", img, err))
+
+	mappedImage, matched, mapErr := applyRegistryMapping(img, registryMapping)
+	if mapErr != nil {
+		return nil, fmt.Errorf("scan failed for %s (%w) and failed to construct mapped image: %w", img, err, mapErr)
+	}
+	if !matched {
+		return nil, err
+	}
+
+	logger.L().Info(fmt.Sprintf("Scanning mapped image %s (original: %s)...", mappedImage, img))
+	scanData, fallbackErr := svc.Scan(ctx, mappedImage, creds, vulnExceptions, sevExceptions)
+	if fallbackErr != nil {
+		return nil, fmt.Errorf("scan failed for %s (%w) and for mapped image %s: %w", img, err, mappedImage, fallbackErr)
+	}
+	return scanData, nil
+}
+
 func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (bool, error) {
 	logger.L().Start(fmt.Sprintf("Scanning image %s...", imgScanInfo.Image))
 
@@ -220,9 +317,12 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 		vulnerabilityExceptions, severityExceptions = getUniqueVulnerabilitiesAndSeverities(exceptionPolicies, imgScanInfo.Image)
 	}
 
-	imageScanData, err := svc.Scan(ks.Context(), imgScanInfo.Image, creds, vulnerabilityExceptions, severityExceptions)
+	imageScanData, err := scanWithRegistryMapping(
+		ks.Context(), svc, imgScanInfo.Image, creds,
+		scanInfo.RegistryMapping, vulnerabilityExceptions, severityExceptions,
+	)
 	if err != nil {
-		logger.L().StopError(fmt.Sprintf("Failed to scan image: %s", imgScanInfo.Image))
+		logger.L().StopError(fmt.Sprintf("Failed to scan image %s: %s", imgScanInfo.Image, err))
 		return false, err
 	}
 
