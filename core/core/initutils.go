@@ -284,6 +284,7 @@ func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, account
 //  2. Kubescape Cloud API (if accountID configured)
 //  3. ControlInput CRD in-cluster (if connected to cluster and CRD exists)
 //  4. Defaults from regolibrary GitHub releases
+//
 // getConfigInputsGetter returns the control inputs getter and a bool reporting
 // whether the inputs are served from the local cache fallback (GitHub download
 // failed) rather than fetched fresh, so the caller can record a PolicyDegradation.
