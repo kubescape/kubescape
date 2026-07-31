@@ -42,11 +42,12 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.Nil(t, ctx.DirectoryContextMetadata)
 		assert.Nil(t, ctx.FileContextMetadata)
 		assert.Nil(t, ctx.HelmContextMetadata)
-		assertRepoContextMetadata(t, ctx.RepoContextMetadata, dir)
+		assertRepoContextMetadata(t, ctx.RepoContextMetadata, "https://github.com/kubescape/kubescape", dir)
 	})
 	t.Run("git remote repository metadata", func(t *testing.T) {
-		// metadataGitRemote only parses the repo that CloneGitRepo cached in
-		// tmpDirPaths, so pre-registering the clone path avoids any HTTP calls.
+		// The ContextGitRemote arm parses the repo that CloneGitRepo cached in
+		// tmpDirPaths via metadataGitLocal(GetClonedPath(input)), so
+		// pre-registering the clone path avoids any HTTP calls.
 		remoteURL := "https://github.com/kubescape/kubescape"
 		dir := newGitFixture(t, remoteURL)
 		gitURL, err := giturl.NewGitAPI(remoteURL)
@@ -54,7 +55,9 @@ func TestSetContextMetadata(t *testing.T) {
 		if tmpDirPaths == nil {
 			tmpDirPaths = make(map[string]string)
 		}
-		tmpDirPaths[hashRepoURL(gitURL.GetHttpCloneURL())] = dir
+		key := hashRepoURL(gitURL.GetHttpCloneURL())
+		tmpDirPaths[key] = dir
+		t.Cleanup(func() { delete(tmpDirPaths, key) })
 
 		ctx := reporthandlingv2.ContextMetadata{}
 		scanInfo := &ScanInfo{InputPatterns: []string{remoteURL}}
@@ -64,21 +67,25 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.Nil(t, ctx.DirectoryContextMetadata)
 		assert.Nil(t, ctx.FileContextMetadata)
 		assert.Nil(t, ctx.HelmContextMetadata)
-		assertRepoContextMetadata(t, ctx.RepoContextMetadata, dir)
+		assertRepoContextMetadata(t, ctx.RepoContextMetadata, remoteURL, dir)
 	})
 }
 
 // assertRepoContextMetadata verifies every field metadataGitLocal is expected
 // to populate, including LastCommit, so regressions like a zeroed committer
-// are caught rather than silently shipped in scan reports.
-func assertRepoContextMetadata(t *testing.T, meta *reporthandlingv2.RepoContextMetadata, localRoot string) {
+// are caught rather than silently shipped in scan reports. The provider,
+// repo, owner and remote URL expectations are derived from remoteURL so the
+// fixture can be pointed at any repository.
+func assertRepoContextMetadata(t *testing.T, meta *reporthandlingv2.RepoContextMetadata, remoteURL, localRoot string) {
 	t.Helper()
 	require.NotNil(t, meta)
-	assert.Equal(t, "github", meta.Provider)
-	assert.Equal(t, "kubescape", meta.Repo)
-	assert.Equal(t, "kubescape", meta.Owner)
+	gitURL, err := giturl.NewGitURL(remoteURL)
+	require.NoError(t, err)
+	assert.Equal(t, gitURL.GetProvider(), meta.Provider)
+	assert.Equal(t, gitURL.GetRepoName(), meta.Repo)
+	assert.Equal(t, gitURL.GetOwnerName(), meta.Owner)
 	assert.Equal(t, "master", meta.Branch)
-	assert.Equal(t, "https://github.com/kubescape/kubescape", meta.RemoteURL)
+	assert.Equal(t, gitURL.GetURL().String(), meta.RemoteURL)
 	// go-git resolves symlinks, so on macOS /var/... resolves to /private/var/...
 	resolvedRoot, err := filepath.EvalSymlinks(localRoot)
 	require.NoError(t, err)
