@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/stretchr/testify/assert"
@@ -12,30 +13,114 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func Test_getOperatorPod(t *testing.T) {
+func readyPod(name string) v1.Pod {
+	return v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: map[string]string{"app": "operator"},
+		},
+		Status: v1.PodStatus{
+			Phase:      v1.PodRunning,
+			Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+		},
+	}
+}
+
+func notReadyPod(name string) v1.Pod {
+	return v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: map[string]string{"app": "operator"},
+		},
+		Status: v1.PodStatus{
+			Phase:      v1.PodRunning,
+			Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionFalse}},
+		},
+	}
+}
+
+func Test_isPodReady(t *testing.T) {
+	terminating := readyPod("terminating")
+	deletionTimestamp := metav1.NewTime(time.Unix(0, 0))
+	terminating.DeletionTimestamp = &deletionTimestamp
+
 	testCases := []struct {
-		name                                  string
-		createOperatorPod                     bool
-		createAnotherOperatorPodWithSameLabel bool
-		expectedError                         error
+		name string
+		pod  v1.Pod
+		want bool
 	}{
 		{
-			name:                                  "test error no operator exist",
-			createOperatorPod:                     false,
-			createAnotherOperatorPodWithSameLabel: false,
-			expectedError:                         fmt.Errorf("could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts"),
+			name: "running and ready",
+			pod:  readyPod("p"),
+			want: true,
 		},
 		{
-			name:                                  "test error several operators exist",
-			createOperatorPod:                     true,
-			createAnotherOperatorPodWithSameLabel: true,
-			expectedError:                         fmt.Errorf("could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts"),
+			name: "running but ready condition is false",
+			pod:  notReadyPod("p"),
+			want: false,
 		},
 		{
-			name:                                  "test no error",
-			createOperatorPod:                     true,
-			createAnotherOperatorPodWithSameLabel: false,
-			expectedError:                         nil,
+			name: "running with no ready condition at all",
+			pod:  v1.Pod{Status: v1.PodStatus{Phase: v1.PodRunning}},
+			want: false,
+		},
+		{
+			name: "pending with ready condition true",
+			pod: v1.Pod{Status: v1.PodStatus{
+				Phase:      v1.PodPending,
+				Conditions: []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}},
+			}},
+			want: false,
+		},
+		{
+			name: "terminating pod stays running and ready but must not be selected",
+			pod:  terminating,
+			want: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isPodReady(&tc.pod))
+		})
+	}
+}
+
+func Test_getOperatorPod(t *testing.T) {
+	notReadyErr := func(count int) error {
+		return fmt.Errorf("found %d Kubescape Operator pod(s) in namespace %q, but none are running and ready", count, kubescapeNamespace)
+	}
+
+	testCases := []struct {
+		name         string
+		pods         []v1.Pod
+		expectedErr  error
+		expectedName string
+	}{
+		{
+			name:        "no operator pod exists",
+			pods:        nil,
+			expectedErr: errOperatorNotFound,
+		},
+		{
+			name:         "single ready pod is returned",
+			pods:         []v1.Pod{readyPod("first")},
+			expectedName: "first",
+		},
+		{
+			name:        "single not-ready pod is reported, not handed to the caller",
+			pods:        []v1.Pod{notReadyPod("first")},
+			expectedErr: notReadyErr(1),
+		},
+		{
+			name:         "multiple pods, the ready one is selected even when it sorts after the not-ready one",
+			pods:         []v1.Pod{notReadyPod("aaa-not-ready"), readyPod("zzz-ready")},
+			expectedName: "zzz-ready",
+		},
+		{
+			name:        "multiple pods, none ready",
+			pods:        []v1.Pod{notReadyPod("first"), notReadyPod("second")},
+			expectedErr: notReadyErr(2),
 		},
 	}
 
@@ -46,105 +131,20 @@ func Test_getOperatorPod(t *testing.T) {
 				Context:          context.Background(),
 			}
 
-			var createdOperatorPod *v1.Pod
-			if tc.createOperatorPod {
-				operatorPod := v1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "first",
-						Labels: map[string]string{
-							"app": "operator",
-						},
-					},
-				}
-				var err error
-				createdOperatorPod, err = k8sClient.KubernetesClient.CoreV1().Pods(kubescapeNamespace).Create(k8sClient.Context, &operatorPod, metav1.CreateOptions{})
-				assert.Equal(t, nil, err)
-			}
-			if tc.createAnotherOperatorPodWithSameLabel {
-				operatorPod := v1.Pod{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "second",
-						Labels: map[string]string{
-							"app": "operator",
-						},
-					},
-				}
-				_, err := k8sClient.KubernetesClient.CoreV1().Pods(kubescapeNamespace).Create(k8sClient.Context, &operatorPod, metav1.CreateOptions{})
-				assert.Equal(t, nil, err)
+			for i := range tc.pods {
+				_, err := k8sClient.KubernetesClient.CoreV1().Pods(kubescapeNamespace).Create(k8sClient.Context, &tc.pods[i], metav1.CreateOptions{})
+				assert.NoError(t, err)
 			}
 
 			pod, err := getOperatorPod(&k8sClient, kubescapeNamespace)
-			assert.Equal(t, err, tc.expectedError)
-			if tc.expectedError == nil {
-				assert.Equal(t, pod, createdOperatorPod)
+			if tc.expectedErr != nil {
+				assert.EqualError(t, err, tc.expectedErr.Error())
+				return
 			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expectedName, pod.Name)
 		})
 	}
-}
-
-func Test_getOperatorPod_multiplePods_oneReady(t *testing.T) {
-	k8sClient := k8sinterface.KubernetesApi{
-		KubernetesClient: fake.NewClientset(),
-		Context:          context.Background(),
-	}
-
-	notReadyPod := v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   "old",
-			Labels: map[string]string{"app": "operator"},
-		},
-		Status: v1.PodStatus{
-			Phase: v1.PodRunning,
-			Conditions: []v1.PodCondition{
-				{Type: v1.PodReady, Status: v1.ConditionFalse},
-			},
-		},
-	}
-	_, err := k8sClient.KubernetesClient.CoreV1().Pods(kubescapeNamespace).Create(k8sClient.Context, &notReadyPod, metav1.CreateOptions{})
-	assert.NoError(t, err)
-
-	readyPod := v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   "new",
-			Labels: map[string]string{"app": "operator"},
-		},
-		Status: v1.PodStatus{
-			Phase: v1.PodRunning,
-			Conditions: []v1.PodCondition{
-				{Type: v1.PodReady, Status: v1.ConditionTrue},
-			},
-		},
-	}
-	createdReadyPod, err := k8sClient.KubernetesClient.CoreV1().Pods(kubescapeNamespace).Create(k8sClient.Context, &readyPod, metav1.CreateOptions{})
-	assert.NoError(t, err)
-
-	pod, err := getOperatorPod(&k8sClient, kubescapeNamespace)
-	assert.NoError(t, err)
-	assert.Equal(t, createdReadyPod, pod)
-}
-
-func Test_getOperatorPod_multiplePods_noneReady(t *testing.T) {
-	k8sClient := k8sinterface.KubernetesApi{
-		KubernetesClient: fake.NewClientset(),
-		Context:          context.Background(),
-	}
-
-	for _, name := range []string{"first", "second"} {
-		pod := v1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   name,
-				Labels: map[string]string{"app": "operator"},
-			},
-			Status: v1.PodStatus{
-				Phase: v1.PodPending,
-			},
-		}
-		_, err := k8sClient.KubernetesClient.CoreV1().Pods(kubescapeNamespace).Create(k8sClient.Context, &pod, metav1.CreateOptions{})
-		assert.NoError(t, err)
-	}
-
-	_, err := getOperatorPod(&k8sClient, kubescapeNamespace)
-	assert.EqualError(t, err, "could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts")
 }
 
 func Test_getOperatorPod_nilClient(t *testing.T) {

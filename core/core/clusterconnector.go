@@ -27,6 +27,8 @@ type OperatorAdapter struct {
 	cautils.OperatorConnector
 }
 
+var errOperatorNotFound = errors.New("could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts")
+
 func getOperatorPod(k8sClient *k8sinterface.KubernetesApi, ns string) (*v1.Pod, error) {
 	if k8sClient == nil || k8sClient.KubernetesClient == nil {
 		return nil, errors.New("kubernetes client is not initialised")
@@ -39,27 +41,30 @@ func getOperatorPod(k8sClient *k8sinterface.KubernetesApi, ns string) (*v1.Pod, 
 		return nil, err
 	}
 
-	notFoundErr := errors.New("could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts")
-
-	switch len(pods.Items) {
-	case 0:
-		return nil, notFoundErr
-	case 1:
-		return &pods.Items[0], nil
-	default:
-		// More than one operator pod can be present during HA deployments or
-		// rolling upgrades, so pick the first one that is actually ready
-		// instead of failing outright.
-		for i := range pods.Items {
-			if isPodReady(&pods.Items[i]) {
-				return &pods.Items[i], nil
-			}
-		}
-		return nil, notFoundErr
+	if len(pods.Items) == 0 {
+		return nil, errOperatorNotFound
 	}
+
+	// More than one operator pod can be present during HA deployments or
+	// rolling upgrades. The operator has no leader election, so any ready
+	// replica can serve v1/triggerAction: picking the first ready pod is a
+	// deliberate choice, not an approximation. A single pod goes through the
+	// same check, so a not-yet-ready lone pod is reported instead of being
+	// handed to CreatePortForwarder.
+	for i := range pods.Items {
+		if isPodReady(&pods.Items[i]) {
+			return &pods.Items[i], nil
+		}
+	}
+	return nil, fmt.Errorf("found %d Kubescape Operator pod(s) in namespace %q, but none are running and ready", len(pods.Items), ns)
 }
 
 func isPodReady(pod *v1.Pod) bool {
+	if pod.DeletionTimestamp != nil {
+		// A terminating pod keeps reporting Ready=True for the whole
+		// termination grace period, so it must not be selected.
+		return false
+	}
 	if pod.Status.Phase != v1.PodRunning {
 		return false
 	}
