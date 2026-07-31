@@ -567,6 +567,16 @@ func TestReadJsonFile(t *testing.T) {
 			content:   `{}`,
 			wantCount: 0,
 		},
+		{
+			name: "wrongly typed kind is an error, not a panic",
+			content: `{
+				"apiVersion": "v1",
+				"kind": 123,
+				"metadata": {"name": "test-pod", "namespace": "default"}
+			}`,
+			wantCount: 0,
+			wantErr:   true,
+		},
 	}
 
 	for _, tt := range tests {
