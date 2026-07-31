@@ -261,9 +261,13 @@ func (policyHandler *PolicyHandler) getControlInputs() (map[string][]string, err
 	}
 
 	controlInputs, err := policyHandler.getters.ControlsInputsGetter.GetControlsInputs(policyHandler.clusterName)
-	if err == nil && controlInputs != nil {
-		policyHandler.cachedControlInputs.Set(controlInputs)
+	if err != nil {
+		return nil, err
+	}
+	if len(controlInputs) == 0 {
+		return nil, fmt.Errorf("no control configuration inputs available")
 	}
 
-	return controlInputs, err
+	policyHandler.cachedControlInputs.Set(controlInputs)
+	return controlInputs, nil
 }
