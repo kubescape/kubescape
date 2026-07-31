@@ -50,8 +50,22 @@ var scanCmdExamples = fmt.Sprintf(`
   %[1]s scan --kube-context <kubernetes context>
 `, cautils.ExecName())
 
+// defaultFailThreshold is the CLI default of the removed --fail-threshold flag.
+// The framework/control exit gates still read scanInfo.FailThreshold, so without
+// an explicit default a normal scan could fail on any non-zero risk score.
+const defaultFailThreshold float32 = 100
+
+// applyCLIDefaults applies CLI-level defaults that removed deprecated flag
+// bindings used to initialize through their pflag default values. The
+// corresponding ScanInfo fields remain available for HTTP/API callers, who set
+// their own values.
+func applyCLIDefaults(scanInfo *cautils.ScanInfo) {
+	scanInfo.FailThreshold = defaultFailThreshold
+}
+
 func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
+	applyCLIDefaults(&scanInfo)
 
 	// scanCmd represents the scan command
 	scanCmd := &cobra.Command{
@@ -162,6 +176,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnDegradedConfig, "fail-on-degraded-config", false, "Fail the scan (exit code 1) if control configurations or exceptions could not be loaded from their configured source and bundled defaults were used instead")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsVersion, "controls-version", "", "Pin the regolibrary release tag used to download controls (see https://github.com/kubescape/regolibrary/releases). If not used will download the latest release. Has no effect when --account is set (cloud backend is used instead)")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output file format. Supported formats: "pretty-printer", "json", "junit", "prometheus", "pdf", "html", "sarif", "gitlab-sast"`)
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to configured backend.")

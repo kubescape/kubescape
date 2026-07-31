@@ -429,6 +429,19 @@ func TestSubmitFlag_PropagatesToAllSubcommands(t *testing.T) {
 	}
 }
 
+func TestGetScanCommand_PreservesFailThresholdDefault(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	assert.Nil(t, cmd.PersistentFlags().Lookup("fail-threshold"),
+		"--fail-threshold must no longer be a registered flag")
+
+	var scanInfo cautils.ScanInfo
+	applyCLIDefaults(&scanInfo)
+	assert.Equal(t, float32(100), scanInfo.FailThreshold,
+		"the framework/control exit gates still read FailThreshold; a 0 default would fail any scan with a non-zero risk score")
+}
+
 func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	cmd := GetScanCommand(mockKubescape)
