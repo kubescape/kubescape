@@ -7,7 +7,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/core"
 	"github.com/kubescape/kubescape/v3/core/meta"
 	"github.com/spf13/cobra"
 )
@@ -20,6 +19,10 @@ var operatorScanVulnerabilitiesExamples = fmt.Sprintf(`
 `, cautils.ExecName())
 
 func getOperatorScanVulnerabilitiesCmd(ks meta.IKubescape, operatorInfo *cautils.OperatorInfo) *cobra.Command {
+	vulnerabilitiesScanInfo := &cautils.VulnerabilitiesScanInfo{
+		ClusterName: k8sinterface.GetContextName(),
+	}
+
 	configCmd := &cobra.Command{
 		Use:     "vulnerabilities",
 		Short:   "Scan your cluster for vulnerabilities using the Kubescape Operator in-cluster components",
@@ -30,7 +33,7 @@ func getOperatorScanVulnerabilitiesCmd(ks meta.IKubescape, operatorInfo *cautils
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			operatorAdapter, err := core.NewOperatorAdapter(operatorInfo.OperatorScanInfo, operatorInfo.Namespace)
+			operatorAdapter, err := newOperatorAdapter(vulnerabilitiesScanInfo, operatorInfo.Namespace)
 			if err != nil {
 				return err
 			}
@@ -44,11 +47,6 @@ func getOperatorScanVulnerabilitiesCmd(ks meta.IKubescape, operatorInfo *cautils
 			return err
 		},
 	}
-
-	vulnerabilitiesScanInfo := &cautils.VulnerabilitiesScanInfo{
-		ClusterName: k8sinterface.GetContextName(),
-	}
-	operatorInfo.OperatorScanInfo = vulnerabilitiesScanInfo
 
 	configCmd.PersistentFlags().StringSliceVar(&vulnerabilitiesScanInfo.IncludeNamespaces, "include-namespaces", nil, "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
 
