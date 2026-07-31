@@ -4,50 +4,65 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
+	"strings"
 	"testing"
 
+	"github.com/kubescape/go-logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// captureLog redirects the shared logger to a temp file for the duration of
+// fn and returns everything written to it, so tests can assert on log
+// content instead of just "it didn't panic".
+func captureLog(t *testing.T, fn func()) string {
+	t.Helper()
+	buf, err := os.CreateTemp(t.TempDir(), "log-*")
+	require.NoError(t, err)
+	prev := logger.L().GetWriter()
+	logger.L().SetWriter(buf)
+	t.Cleanup(func() { logger.L().SetWriter(prev) })
+
+	fn()
+
+	require.NoError(t, buf.Sync())
+	b, err := os.ReadFile(buf.Name())
+	require.NoError(t, err)
+	return string(b)
+}
 
 func TestGetWriter_EmptyFileName(t *testing.T) {
 	ctx := context.Background()
 	outputFile := ""
 	file := GetWriter(ctx, outputFile)
-	assert.Equal(t, os.Stdout, file)
+	assert.Same(t, os.Stdout, file)
 }
 
 // Regression: GetWriterNoStdoutFallback must never hand back os.Stdout, even
 // when the requested path is unwritable — the whole point is to protect TTYs
-// from binary/markup formats.
+// from binary/markup formats. It must actually fall back to a usable temp
+// file, not merely to "something that isn't stdout" (e.g. os.DevNull, which
+// would silently discard the user's report).
 func TestGetWriterNoStdoutFallback_UnwritableTargetFallsBackToTemp(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX permission semantics required for this test")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses file-mode permissions; cannot exercise the failure path")
-	}
 	ctx := context.Background()
 
-	// Create a 0555 directory we cannot write into, then ask to create a file
-	// inside it. This is the same shape as matthyx's reproducer (read-only cwd).
-	roDir := filepath.Join(t.TempDir(), "ro")
-	assert.NoError(t, os.Mkdir(roDir, 0o555))
-	target := filepath.Join(roDir, "report.pdf")
+	// os.Create on an existing directory fails with EISDIR regardless of uid,
+	// so this exercises the failure path even when tests run as root.
+	target := filepath.Join(t.TempDir(), "report.pdf")
+	require.NoError(t, os.Mkdir(target, 0o755))
 
 	f := GetWriterNoStdoutFallback(ctx, target, "kubescape-report-*.pdf")
-	if f != nil {
-		t.Cleanup(func() {
-			_ = f.Close()
-			_ = os.Remove(f.Name())
-		})
-	}
-	assert.NotNil(t, f)
-	assert.NotEqual(t, os.Stdout.Name(), f.Name(),
-		"must not fall back to stdout for binary/markup formats")
-	assert.NotEqual(t, target, f.Name(),
-		"target was unwritable; expected a fallback path")
+	require.NotNil(t, f)
+	t.Cleanup(func() {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+	})
+
+	assert.Equal(t, os.TempDir(), filepath.Dir(f.Name()))
+	assert.True(t, strings.HasPrefix(filepath.Base(f.Name()), "kubescape-report-"))
+	assert.True(t, strings.HasSuffix(f.Name(), ".pdf"))
+	_, err := f.WriteString("pdf-bytes") // the handle must be usable, not a discard sink
+	assert.NoError(t, err)
 }
 
 func TestGetWriterNoStdoutFallback_EmptyFileNameStillAvoidsStdout(t *testing.T) {
@@ -72,7 +87,6 @@ func TestGetWriter_ValidFileName(t *testing.T) {
 	t.Cleanup(func() { _ = f.Close() })
 
 	assert.Equal(t, target, f.Name())
-	assert.NotEqual(t, os.Stdout, f)
 }
 
 // MkdirAll fails when a path component that should be a directory is actually
@@ -84,22 +98,17 @@ func TestGetWriter_MkdirAllFailsFallsBackToStdout(t *testing.T) {
 	target := filepath.Join(blocker, "subdir", "report.json")
 
 	f := GetWriter(context.Background(), target)
-	assert.Equal(t, os.Stdout, f)
+	assert.Same(t, os.Stdout, f)
 }
 
 func TestGetWriter_CreateFailsFallsBackToStdout(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX permission semantics required for this test")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses file-mode permissions; cannot exercise the failure path")
-	}
-	roDir := filepath.Join(t.TempDir(), "ro")
-	require.NoError(t, os.Mkdir(roDir, 0o555))
-	target := filepath.Join(roDir, "report.json")
+	// os.Create on an existing directory fails with EISDIR regardless of uid,
+	// so this exercises the failure path even when tests run as root.
+	target := filepath.Join(t.TempDir(), "report.json")
+	require.NoError(t, os.Mkdir(target, 0o755))
 
 	f := GetWriter(context.Background(), target)
-	assert.Equal(t, os.Stdout, f)
+	assert.Same(t, os.Stdout, f)
 }
 
 func TestGetWriterNoStdoutFallback_ValidFileName(t *testing.T) {
@@ -125,31 +134,25 @@ func TestGetWriterNoStdoutFallback_MkdirAllFailsFallsBackToTemp(t *testing.T) {
 	target := filepath.Join(blocker, "subdir", "report.pdf")
 
 	f := GetWriterNoStdoutFallback(context.Background(), target, "kubescape-report-*.pdf")
-	if f != nil {
-		t.Cleanup(func() {
-			_ = f.Close()
-			_ = os.Remove(f.Name())
-		})
-	}
 	require.NotNil(t, f)
-	assert.NotEqual(t, os.Stdout.Name(), f.Name())
-	assert.NotEqual(t, target, f.Name())
+	t.Cleanup(func() {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+	})
+
+	assert.Equal(t, os.TempDir(), filepath.Dir(f.Name()))
+	assert.True(t, strings.HasPrefix(filepath.Base(f.Name()), "kubescape-report-"))
+	assert.True(t, strings.HasSuffix(f.Name(), ".pdf"))
+	_, err := f.WriteString("pdf-bytes") // the handle must be usable, not a discard sink
+	assert.NoError(t, err)
 }
 
 func TestLogOutputFile(t *testing.T) {
-	// LogOutputFile only branches on the filename; calling it for each branch
-	// is enough to confirm it does not panic and logs are skipped for the
-	// stdout/stderr/devnull sinks.
-	t.Run("regular file logs success", func(t *testing.T) {
-		LogOutputFile(filepath.Join(t.TempDir(), "report.json"))
-	})
-	t.Run("stdout is not logged", func(t *testing.T) {
-		LogOutputFile(os.Stdout.Name())
-	})
-	t.Run("stderr is not logged", func(t *testing.T) {
-		LogOutputFile(os.Stderr.Name())
-	})
-	t.Run("devnull is not logged", func(t *testing.T) {
-		LogOutputFile(os.DevNull)
-	})
+	out := captureLog(t, func() { LogOutputFile(filepath.Join(t.TempDir(), "report.json")) })
+	assert.Contains(t, out, "Scan results saved")
+
+	for _, sink := range []string{os.Stdout.Name(), os.Stderr.Name(), os.DevNull} {
+		out := captureLog(t, func() { LogOutputFile(sink) })
+		assert.Empty(t, strings.TrimSpace(out), "expected no log for %s", sink)
+	}
 }
