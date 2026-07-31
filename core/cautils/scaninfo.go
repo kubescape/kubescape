@@ -83,15 +83,28 @@ func (bpf *BoolPtrFlag) Set(val string) error {
 	return nil
 }
 
-// TODO - UPDATE
+// ViewTypes specifies how scan results are presented by the default (pretty) printer.
 type ViewTypes string
-type EnvScopeTypes string
-type ManageClusterTypes string
 
 const (
+	// ResourceViewType prints one section per failed resource, listing the
+	// controls that failed it. It only takes effect in verbose mode; passed
+	// resources are not shown.
 	ResourceViewType ViewTypes = "resource"
+
+	// SecurityViewType is the default view (see the --view flag). Rather than
+	// changing how results are grouped, it selects a security-oriented set of
+	// frameworks to scan with — workloadscan+allcontrols for a repository or
+	// directory target, clusterscan+mitre+nsa for a cluster — and prints the
+	// standard posture summary without per-control or per-resource detail.
+	// Note: the `scan framework` subcommand rewrites this to ResourceViewType.
 	SecurityViewType ViewTypes = "security"
-	ControlViewType  ViewTypes = "control"
+
+	// ControlViewType groups results by control, showing the compliance status
+	// of every control and the resources that failed it. Failed and
+	// action-required resources are always listed, and passed resources are
+	// listed in verbose mode.
+	ControlViewType ViewTypes = "control"
 )
 
 type PolicyIdentifier struct {
