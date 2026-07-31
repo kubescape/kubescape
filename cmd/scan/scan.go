@@ -50,29 +50,8 @@ var scanCmdExamples = fmt.Sprintf(`
   %[1]s scan --kube-context <kubernetes context>
 `, cautils.ExecName())
 
-// defaultFailThreshold is the CLI default of the removed --fail-threshold flag.
-// The framework/control exit gates still read scanInfo.FailThreshold, so without
-// an explicit default a normal scan could fail on any non-zero risk score.
-const defaultFailThreshold float32 = 100
-
-// applyCLIDefaults applies CLI-level defaults that removed deprecated flag
-// bindings used to initialize through their pflag default values. The
-// corresponding ScanInfo fields remain available for HTTP/API callers, who set
-// their own values.
-func applyCLIDefaults(scanInfo *cautils.ScanInfo) {
-	scanInfo.FailThreshold = defaultFailThreshold
-}
-
 func GetScanCommand(ks meta.IKubescape) *cobra.Command {
-	cmd, _ := newScanCommand(ks)
-	return cmd
-}
-
-// newScanCommand builds the scan command and returns the ScanInfo it is wired
-// to, so tests can assert the CLI-level defaults the command actually applies.
-func newScanCommand(ks meta.IKubescape) (*cobra.Command, *cautils.ScanInfo) {
 	var scanInfo cautils.ScanInfo
-	applyCLIDefaults(&scanInfo)
 
 	// scanCmd represents the scan command
 	scanCmd := &cobra.Command{
@@ -247,7 +226,7 @@ func newScanCommand(ks meta.IKubescape) (*cobra.Command, *cautils.ScanInfo) {
 
 	scanCmd.AddCommand(getImageCmd(ks, &scanInfo))
 
-	return scanCmd, &scanInfo
+	return scanCmd
 }
 
 func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) {

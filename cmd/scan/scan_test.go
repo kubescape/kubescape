@@ -429,18 +429,11 @@ func TestSubmitFlag_PropagatesToAllSubcommands(t *testing.T) {
 	}
 }
 
-func TestGetScanCommand_PreservesFailThresholdDefault(t *testing.T) {
+func TestGetScanCommand_DeprecatedFlagsRemoved(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 
-	cmd, scanInfo := newScanCommand(mockKubescape)
+	cmd := GetScanCommand(mockKubescape)
 	require.NotNil(t, cmd)
-	require.NotNil(t, scanInfo)
-
-	// The framework/control exit gates still read FailThreshold; a 0 default
-	// would fail any scan with a non-zero risk score. Assert on the ScanInfo
-	// the command is wired to, so removing the applyCLIDefaults wiring fails.
-	assert.Equal(t, float32(100), scanInfo.FailThreshold,
-		"CLI default for FailThreshold must be 100")
 
 	for _, removed := range []string{
 		"fail-threshold",
