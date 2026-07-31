@@ -524,6 +524,44 @@ metadata:
 	}
 }
 
+// TestRevertSanitizeYaml guards the `< 5` / `[:5]` pairing: the guard was
+// previously `< 3` while the slice was `[:5]`, so any 3-4 byte input panicked
+// with "slice bounds out of range". Covers every length from 0 up to and past
+// the "# ---" marker, since that boundary is exactly where the bug lived.
+func TestRevertSanitizeYaml(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "length 0", in: "", want: ""},
+		{name: "length 1", in: "-", want: "-"},
+		{name: "length 2", in: "--", want: "--"},
+		{name: "length 3 (previously panicked)", in: "# -", want: "# -"},
+		{name: "length 4 (previously panicked)", in: "# --", want: "# --"},
+		{name: "length 5, marker present", in: "# ---", want: "---"},
+		{name: "length 5, marker absent", in: "# abc", want: "# abc"},
+		{name: "marker with trailing content", in: "# ---\nkind: Pod\n", want: "---\nkind: Pod\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				got := revertSanitizeYaml(tt.in)
+				assert.Equal(t, tt.want, got)
+			})
+		})
+	}
+}
+
+// TestSanitizeYaml_RoundTrip confirms revertSanitizeYaml undoes sanitizeYaml
+// for the case both were built for: a document starting with "---".
+func TestSanitizeYaml_RoundTrip(t *testing.T) {
+	original := "---\napiVersion: v1\nkind: Pod\n"
+	sanitized := sanitizeYaml(original)
+	assert.Equal(t, "# ---\napiVersion: v1\nkind: Pod\n", sanitized)
+	assert.Equal(t, original, revertSanitizeYaml(sanitized))
+}
+
 func TestReduceYamlExpressions(t *testing.T) {
 	type args struct {
 		yamlExpressions []string
