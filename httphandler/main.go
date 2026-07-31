@@ -86,11 +86,13 @@ func initializeStorage(clusterName string, cfg config.Config) {
 	ksClient, err := ksinit.CreateKsObjectConnection(namespace, 0)
 	if err != nil {
 		logger.L().Fatal("storage initialization error", helpers.Error(err))
+		return
 	}
 
 	s, err := storage.NewAPIServerStorage(clusterName, namespace, ksClient, cfg.ContinuousPostureScan)
 	if err != nil {
 		logger.L().Fatal("storage initialization error", helpers.Error(err))
+		return
 	}
 	storage.SetStorage(s)
 }
