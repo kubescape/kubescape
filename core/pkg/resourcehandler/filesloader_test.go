@@ -57,6 +57,76 @@ func TestGetResourcesFromPath_ScansTemplatesOfChartThatFailedToRender(t *testing
 	assert.True(t, found, "a static template of a chart that failed to render must still be scanned")
 }
 
+func createMockGitRepo(t *testing.T, hasOrigin bool) string {
+	dir := t.TempDir()
+	gitDir := filepath.Join(dir, ".git")
+	require.NoError(t, os.MkdirAll(filepath.Join(gitDir, "refs", "heads"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/master\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(gitDir, "refs", "heads", "master"), []byte("0000000000000000000000000000000000000000\n"), 0o600))
+
+	configContent := `[core]
+	repositoryformatversion = 0
+[remote "upstream"]
+	url = https://example.com/upstream.git
+`
+	if hasOrigin {
+		configContent += `[remote "origin"]
+	url = https://example.com/origin.git
+`
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte(configContent), 0o600))
+	return dir
+}
+
+func TestResolveHelmRemotePath(t *testing.T) {
+	healthyRepo := createMockGitRepo(t, true)
+	gitHealthy, err := cautils.NewLocalGitRepository(healthyRepo)
+	require.NoError(t, err)
+
+	brokenRepo := createMockGitRepo(t, false)
+	gitBroken, err := cautils.NewLocalGitRepository(brokenRepo)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name       string
+		clonedRepo string
+		gitRepo    *cautils.LocalGitRepository
+		want       string
+	}{
+		{
+			name:       "empty clonedRepo",
+			clonedRepo: "",
+			gitRepo:    gitHealthy,
+			want:       "",
+		},
+		{
+			name:       "nil gitRepo",
+			clonedRepo: "some-repo",
+			gitRepo:    nil,
+			want:       "",
+		},
+		{
+			name:       "repo whose remote lookup fails",
+			clonedRepo: "some-repo",
+			gitRepo:    gitBroken,
+			want:       "",
+		},
+		{
+			name:       "healthy repo",
+			clonedRepo: "some-repo",
+			gitRepo:    gitHealthy,
+			want:       "https://example.com/origin",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveHelmRemotePath(tt.clonedRepo, tt.gitRepo)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 // A chart that renders cleanly has its templates covered by the render, so the plain-YAML loader must
 // not scan them again (no duplicate, no malformed-template warnings), while crds/ and files outside
 // templates/ stay plainly scanned.
