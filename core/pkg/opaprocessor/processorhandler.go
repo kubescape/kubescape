@@ -41,6 +41,14 @@ type IJobProgressNotificationClient interface {
 	Stop()
 }
 
+// compiledRule pairs a compiled rule with the Rego version it was actually
+// compiled under, so evaluation (regoEval) can be run at the matching
+// version rather than assuming RegoV1.
+type compiledRule struct {
+	compiler *ast.Compiler
+	version  ast.RegoVersion
+}
+
 // OPAProcessor processes Open Policy Agent rules.
 type OPAProcessor struct {
 	clusterName          string
@@ -50,7 +58,7 @@ type OPAProcessor struct {
 	excludeNamespaces      []string
 	includeNamespaces      []string
 	printEnabled           bool
-	compiledModules        map[string]*ast.Compiler
+	compiledModules        map[string]compiledRule
 	compiledMu             sync.RWMutex
 	// ControlTimeout, when non-zero, bounds the evaluation time of a single
 	// control. If exceeded, the control is recorded as not evaluated instead
@@ -82,7 +90,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		excludeNamespaces:      split(excludeNamespaces),
 		includeNamespaces:      split(includeNamespaces),
 		printEnabled:           enableRegoPrint,
-		compiledModules:        make(map[string]*ast.Compiler),
+		compiledModules:        make(map[string]compiledRule),
 		TimedOutControls:       make(map[string]string),
 	}
 }
@@ -770,7 +778,7 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 	registerOPABuiltins()
 
 	ruleData := getRuleData(rule)
-	compiled, err := opap.getCompiledRule(ctx, rule.Name, ruleData, opap.printEnabled)
+	compiled, regoVersion, err := opap.getCompiledRule(ctx, rule.Name, ruleData, opap.printEnabled)
 	if err != nil {
 		return nil, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 	}
@@ -780,7 +788,7 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 		return nil, err
 	}
 
-	results, err := opap.regoEval(ctx, k8sObjects, compiled, &store)
+	results, err := opap.regoEval(ctx, k8sObjects, compiled, regoVersion, &store)
 	if err != nil {
 		return nil, fmt.Errorf("rule '%s': rego eval failed: %w", rule.Name, err)
 	}
@@ -794,9 +802,9 @@ func (opap *OPAProcessor) Print(ctx opaprint.Context, str string) error {
 	return nil
 }
 
-func (opap *OPAProcessor) regoEval(ctx context.Context, inputObj []map[string]any, compiledRego *ast.Compiler, store *storage.Store) ([]reporthandling.RuleResponse, error) {
+func (opap *OPAProcessor) regoEval(ctx context.Context, inputObj []map[string]any, compiledRego *ast.Compiler, regoVersion ast.RegoVersion, store *storage.Store) ([]reporthandling.RuleResponse, error) {
 	rego := rego.New(
-		rego.SetRegoVersion(ast.RegoV0),
+		rego.SetRegoVersion(regoVersion),
 		rego.Query("data.armo_builtins"), // get package name from rule
 		rego.Compiler(compiledRego),
 		rego.Input(inputObj),
@@ -906,40 +914,60 @@ func split(namespaces string) []string {
 	return result
 }
 
-func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleData string, printEnabled bool) (*ast.Compiler, error) {
+// getCompiledRule compiles ruleName+ruleData together with the shared rule
+// dependencies, preferring Rego v1. Policy sources that predate the
+// regolibrary/opa-utils v1 migration - a pinned --controls-version release,
+// a --use-from/--use-default air-gapped bundle, or a tenant-authored custom
+// control from the cloud backend - are plain v0 syntax with no "import
+// rego.v1" marker, so the v1 parse fails outright; falling back to v0 keeps
+// those inputs scannable instead of producing a fatal, empty-report exit.
+// Modules that do declare "import rego.v1" parse identically under either
+// default, so this only changes behavior for genuinely legacy v0 rules.
+func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleData string, printEnabled bool) (*ast.Compiler, ast.RegoVersion, error) {
 	cacheKey := ruleName + "|" + ruleData
 
 	opap.compiledMu.RLock()
-	if compiled, ok := opap.compiledModules[cacheKey]; ok {
+	if entry, ok := opap.compiledModules[cacheKey]; ok {
 		opap.compiledMu.RUnlock()
-		return compiled, nil
+		return entry.compiler, entry.version, nil
 	}
 	opap.compiledMu.RUnlock()
 
 	opap.compiledMu.Lock()
 	defer opap.compiledMu.Unlock()
 
-	if compiled, ok := opap.compiledModules[cacheKey]; ok {
-		return compiled, nil
+	if entry, ok := opap.compiledModules[cacheKey]; ok {
+		return entry.compiler, entry.version, nil
 	}
 
 	baseModules, err := getRuleDependencies(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get rule dependencies: %w", err)
+		return nil, 0, fmt.Errorf("failed to get rule dependencies: %w", err)
 	}
 
 	modules := make(map[string]string, len(baseModules)+1)
 	maps.Copy(modules, baseModules)
 	modules[ruleName] = ruleData
 
-	compiled, err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
+	version := ast.RegoV1
+	compiled, v1Err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
 		EnablePrintStatements: printEnabled,
-		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV0},
+		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV1},
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile rule '%s': %w", ruleName, err)
+	if v1Err != nil {
+		var v0Err error
+		compiled, v0Err = ast.CompileModulesWithOpt(modules, ast.CompileOpts{
+			EnablePrintStatements: printEnabled,
+			ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV0},
+		})
+		if v0Err != nil {
+			return nil, 0, fmt.Errorf("failed to compile rule '%s': %w", ruleName, v1Err)
+		}
+		version = ast.RegoV0
+		logger.L().Ctx(ctx).Warning("rule uses deprecated Rego v0 syntax; v0 support will be removed in a future release",
+			helpers.String("rule", ruleName))
 	}
 
-	opap.compiledModules[cacheKey] = compiled
-	return compiled, nil
+	opap.compiledModules[cacheKey] = compiledRule{compiler: compiled, version: version}
+	return compiled, version, nil
 }

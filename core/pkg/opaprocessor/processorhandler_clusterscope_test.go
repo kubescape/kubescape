@@ -57,8 +57,9 @@ func TestProcessRule_ClusterScopedPathsAcrossNamespaces(t *testing.T) {
 
 	rule := &reporthandling.PolicyRule{
 		Rule: `package armo_builtins
+import rego.v1
 
-deny[msga] {
+deny contains msga if {
     cr := input[_]
     cr.kind == "ClusterRole"
     pod := input[_]
