@@ -264,7 +264,7 @@ func TestOperatorAdapter_httpPostOperatorScanRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			connector := &fakeOperatorConnector{startErr: tc.startErr}
 			adapter := &OperatorAdapter{
-				httpPostFunc:      fakeHTTPPost(tc.statusCode, tc.postErr),
+				httpPostFunc:      fakeHTTPPost(tc.statusCode, tc.postErr), //nolint:bodyclose // fakeHTTPPost returns a func value, not a response; the response's Body is http.NoBody (Close is a no-op) and is closed by httpPostOperatorScanRequest's own defer
 				OperatorScanInfo:  &fakeOperatorScanInfo{},
 				OperatorConnector: connector,
 			}
@@ -295,7 +295,7 @@ func TestOperatorAdapter_OperatorScan(t *testing.T) {
 		connector := &fakeOperatorConnector{}
 		scanInfo := &fakeOperatorScanInfo{validateErr: errors.New("missing target namespace")}
 		adapter := &OperatorAdapter{
-			httpPostFunc:      fakeHTTPPost(http.StatusOK, nil),
+			httpPostFunc:      fakeHTTPPost(http.StatusOK, nil), //nolint:bodyclose // fakeHTTPPost returns a func value, not a response; the response's Body is http.NoBody (Close is a no-op) and is closed by httpPostOperatorScanRequest's own defer
 			OperatorScanInfo:  scanInfo,
 			OperatorConnector: connector,
 		}
@@ -313,7 +313,7 @@ func TestOperatorAdapter_OperatorScan(t *testing.T) {
 		connector := &fakeOperatorConnector{}
 		scanInfo := &fakeOperatorScanInfo{}
 		adapter := &OperatorAdapter{
-			httpPostFunc:      fakeHTTPPost(http.StatusOK, nil),
+			httpPostFunc:      fakeHTTPPost(http.StatusOK, nil), //nolint:bodyclose // fakeHTTPPost returns a func value, not a response; the response's Body is http.NoBody (Close is a no-op) and is closed by httpPostOperatorScanRequest's own defer
 			OperatorScanInfo:  scanInfo,
 			OperatorConnector: connector,
 		}
