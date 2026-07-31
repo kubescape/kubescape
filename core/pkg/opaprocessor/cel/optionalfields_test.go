@@ -232,6 +232,9 @@ func TestBundleControlIDsAreCurrent(t *testing.T) {
 	listed := make(map[string]bool, len(bundleControlIDs))
 	for _, id := range bundleControlIDs {
 		listed[id] = true
+		_, exists := catalog.byControl[id]
+		assert.Truef(t, exists,
+			"control %s is listed in bundleControlIDs but absent from the bundle; remove or rename it", id)
 	}
 	for id := range catalog.byControl {
 		assert.Truef(t, listed[id],

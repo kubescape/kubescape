@@ -607,7 +607,7 @@ spec:
           )
         )
       )
-    message: object.kind + "/" + object.metadata.name + " contains container/s which
+    messageExpression: object.kind + "/" + object.metadata.name + " contains container/s which
       have the capability to run as root! (see more at https://kubescape.io/docs/controls/c-0013/)"
   variables:
   - expression: |
@@ -2323,7 +2323,7 @@ spec:
               : -1)
         ) != 0
       )
-    message: |
+    messageExpression: |
       object.kind + '/' + object.metadata.name + ' has a container explicitly running as root (UID 0). (see more at https://kubescape.io/docs/controls/c-0198/)'
   variables:
   - expression: |
@@ -2619,7 +2619,7 @@ spec:
               : 'Unconfined')
         ) != 'Unconfined'
       )
-    message: |
+    messageExpression: |
       object.kind + '/' + object.metadata.name + ' has a container with seccomp profile Unconfined or undefined. (see more at https://kubescape.io/docs/controls/c-0210/)'
   variables:
   - expression: |
