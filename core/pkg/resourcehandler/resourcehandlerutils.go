@@ -1,6 +1,8 @@
 package resourcehandler
 
 import (
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -18,7 +20,22 @@ func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResou
 
 	allResources[wl.GetID()] = wl
 
-	resourceGroup := k8sinterface.ResourceGroupToSlice(wl.GetGroup(), wl.GetVersion(), wl.GetKind())[0]
+	// ResourceGroupToSlice returns an empty slice (not an error) when the
+	// workload's group/version don't match any group/version this library
+	// knows for its kind. Every current caller only passes a workload that
+	// already cleared k8sinterface.IsTypeWorkload, which makes this
+	// unreachable today, but that's an invariant this function has no way to
+	// enforce on its own - indexing [0] unconditionally made it a latent
+	// panic waiting for a caller that doesn't uphold it.
+	groups := k8sinterface.ResourceGroupToSlice(wl.GetGroup(), wl.GetVersion(), wl.GetKind())
+	if len(groups) == 0 {
+		logger.L().Warning("failed to resolve resource group for workload, skipping",
+			helpers.String("id", wl.GetID()), helpers.String("kind", wl.GetKind()),
+			helpers.String("apiVersion", wl.GetApiVersion()))
+		return
+	}
+
+	resourceGroup := groups[0]
 	k8sResources[resourceGroup] = append(k8sResources[resourceGroup], wl.GetID())
 }
 
