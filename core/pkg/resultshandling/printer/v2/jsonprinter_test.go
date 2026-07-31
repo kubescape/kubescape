@@ -54,6 +54,11 @@ func TestScore_Json(t *testing.T) {
 			score: 100,
 			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 100\n",
 		},
+		{
+			name:  "Non-perfect score does not round up to 100",
+			score: 99.5,
+			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 99\n",
+		},
 	}
 
 	jp := NewJsonPrinter()

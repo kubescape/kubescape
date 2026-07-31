@@ -86,6 +86,11 @@ func TestScore(t *testing.T) {
 			score: 100,
 			want:  "# HELP kubescape_score Overall compliance score (100 Excellent, 0 All failed)\n# TYPE kubescape_score gauge\nkubescape_score 100\n",
 		},
+		{
+			name:  "Non-perfect score does not round up to 100",
+			score: 99.5,
+			want:  "# HELP kubescape_score Overall compliance score (100 Excellent, 0 All failed)\n# TYPE kubescape_score gauge\nkubescape_score 99\n",
+		},
 	}
 
 	for _, tt := range tests {
