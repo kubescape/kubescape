@@ -247,9 +247,6 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
 		return ErrBadThreshold
 	}
-	if 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
-		return ErrBadThreshold
-	}
 	if 100 < scanInfo.FailCoverageThreshold || 0 > scanInfo.FailCoverageThreshold {
 		return ErrBadThreshold
 	}
@@ -279,14 +276,11 @@ func validateControlTimeout(scanInfo *cautils.ScanInfo) error {
 }
 
 // validateThresholdsOnly validates only the numeric threshold ranges
-// (compliance-threshold and fail-threshold must be between 0 and 100).
+// (compliance-threshold and fail-coverage-threshold must be between 0 and 100).
 // Unlike validateFrameworkScanInfo, this function does not mutate scanInfo
 // or enforce unrelated constraints.
 func validateThresholdsOnly(scanInfo *cautils.ScanInfo) error {
 	if 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
-		return ErrBadThreshold
-	}
-	if 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
 		return ErrBadThreshold
 	}
 	if 100 < scanInfo.FailCoverageThreshold || 0 > scanInfo.FailCoverageThreshold {
