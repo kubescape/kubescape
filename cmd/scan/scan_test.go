@@ -431,15 +431,26 @@ func TestSubmitFlag_PropagatesToAllSubcommands(t *testing.T) {
 
 func TestGetScanCommand_PreservesFailThresholdDefault(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
-	cmd := GetScanCommand(mockKubescape)
 
-	assert.Nil(t, cmd.PersistentFlags().Lookup("fail-threshold"),
-		"--fail-threshold must no longer be a registered flag")
+	cmd, scanInfo := newScanCommand(mockKubescape)
+	require.NotNil(t, cmd)
+	require.NotNil(t, scanInfo)
 
-	var scanInfo cautils.ScanInfo
-	applyCLIDefaults(&scanInfo)
+	// The framework/control exit gates still read FailThreshold; a 0 default
+	// would fail any scan with a non-zero risk score. Assert on the ScanInfo
+	// the command is wired to, so removing the applyCLIDefaults wiring fails.
 	assert.Equal(t, float32(100), scanInfo.FailThreshold,
-		"the framework/control exit gates still read FailThreshold; a 0 default would fail any scan with a non-zero risk score")
+		"CLI default for FailThreshold must be 100")
+
+	for _, removed := range []string{
+		"fail-threshold",
+		"create-account",
+		"enable-host-scan",
+		"host-scan-yaml",
+	} {
+		assert.Nil(t, cmd.PersistentFlags().Lookup(removed),
+			"deprecated flag %q must no longer be registered", removed)
+	}
 }
 
 func TestGetScanCommand_HostScanFlagTriState(t *testing.T) {

@@ -64,6 +64,13 @@ func applyCLIDefaults(scanInfo *cautils.ScanInfo) {
 }
 
 func GetScanCommand(ks meta.IKubescape) *cobra.Command {
+	cmd, _ := newScanCommand(ks)
+	return cmd
+}
+
+// newScanCommand builds the scan command and returns the ScanInfo it is wired
+// to, so tests can assert the CLI-level defaults the command actually applies.
+func newScanCommand(ks meta.IKubescape) (*cobra.Command, *cautils.ScanInfo) {
 	var scanInfo cautils.ScanInfo
 	applyCLIDefaults(&scanInfo)
 
@@ -240,7 +247,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanCmd.AddCommand(getImageCmd(ks, &scanInfo))
 
-	return scanCmd
+	return scanCmd, &scanInfo
 }
 
 func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) {
