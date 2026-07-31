@@ -71,7 +71,7 @@ func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl m
 	for group := range complexMap {
 		for version := range complexMap[group] {
 			for resource := range complexMap[group][version] {
-				groupResources := k8sinterface.ResourceGroupToString(group, version, resource)
+				groupResources := resolveResourceGroups(group, version, resource)
 				for _, groupResource := range groupResources {
 					externalResources[groupResource] = nil
 				}
@@ -92,7 +92,7 @@ func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToCo
 					for _, apiGroup := range match.APIGroups {
 						for _, apiVersion := range match.APIVersions {
 							for _, resource := range match.Resources {
-								for _, groupResource := range k8sinterface.ResourceGroupToString(apiGroup, apiVersion, resource) {
+								for _, groupResource := range resolveResourceGroups(apiGroup, apiVersion, resource) {
 									if !slices.Contains(resourceToControls[groupResource], control.ControlID) {
 										resourceToControls[groupResource] = append(resourceToControls[groupResource], control.ControlID)
 									}

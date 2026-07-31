@@ -1,11 +1,35 @@
 package resourcehandler
 
 import (
+	"strings"
+
+	"github.com/jinzhu/inflection"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
+
+// resolveResourceGroups converts policy Kind names to the plural resource names
+// used by the dynamic client. k8s-interface handles resources found through
+// discovery; the fallback keeps conventional CRDs scannable from local files and
+// in tests where discovery data is unavailable.
+func resolveResourceGroups(group, version, resource string) []string {
+	resourceGroups := k8sinterface.ResourceGroupToSlice(group, version, resource)
+	if group == "*" || version == "*" || resource == "" || resource == "*" {
+		return resourceGroups
+	}
+	if len(mapKSResourceToApiGroup(resource)) > 0 {
+		return resourceGroups
+	}
+
+	if _, err := k8sinterface.GetGroupVersionResource(resource); err == nil {
+		return resourceGroups
+	}
+
+	resourceName := strings.ToLower(inflection.Plural(resource))
+	return []string{k8sinterface.JoinResourceTriplets(group, version, resourceName)}
+}
 
 // utils which are common to all resource handlers
 func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IWorkload) {
@@ -18,7 +42,7 @@ func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResou
 
 	allResources[wl.GetID()] = wl
 
-	resourceGroup := k8sinterface.ResourceGroupToSlice(wl.GetGroup(), wl.GetVersion(), wl.GetKind())[0]
+	resourceGroup := resolveResourceGroups(wl.GetGroup(), wl.GetVersion(), wl.GetKind())[0]
 	k8sResources[resourceGroup] = append(k8sResources[resourceGroup], wl.GetID())
 }
 
@@ -127,7 +151,7 @@ func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMa
 					}
 				}
 
-				groupResources := k8sinterface.ResourceGroupToString(apiGroup, apiVersions, resource)
+				groupResources := resolveResourceGroups(apiGroup, apiVersions, resource)
 				// if namespace filter is set, we are scanning a workload in a specific namespace
 				// calling the getNamespacesSelector will add the namespace field selector (or name for Namespace resource)
 				globalFieldSelector := getNamespacesSelector(resource, namespace, "=")
