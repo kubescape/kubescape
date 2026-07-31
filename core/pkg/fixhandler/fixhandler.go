@@ -601,7 +601,10 @@ func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string)
 		return "", err
 	}
 
-	fixInfo := getFixInfo(ctx, originalRootNodes, fixedRootNodes)
+	fixInfo, err := getFixInfo(ctx, originalRootNodes, fixedRootNodes)
+	if err != nil {
+		return "", err
+	}
 
 	fixedYamlLines := getFixedYamlLines(yamlLines, fixInfo, newline)
 

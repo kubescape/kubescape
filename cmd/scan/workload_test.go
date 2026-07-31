@@ -14,6 +14,7 @@ import (
 func TestSetWorkloadScanInfo(t *testing.T) {
 	tests := []struct {
 		Description string
+		apiVersion  string
 		kind        string
 		name        string
 		namespace   string
@@ -74,6 +75,37 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 				InputPatterns: []string{"manifests/pod.yaml"},
 			},
 		},
+		{
+			Description: "Set workload scan info with apiVersion",
+			apiVersion:  "apps/v1",
+			kind:        "Deployment",
+			name:        "api",
+			namespace:   "default",
+			filePath:    "manifests/deployment.yaml",
+			want: &cautils.ScanInfo{
+				PolicyIdentifier: []cautils.PolicyIdentifier{
+					{
+						Identifier: "workloadscan",
+						Kind:       v1.KindFramework,
+					},
+					{
+						Identifier: "allcontrols",
+						Kind:       v1.KindFramework,
+					},
+				},
+				ScanType:   cautils.ScanTypeWorkload,
+				ScanImages: true,
+				ScanObject: &objectsenvelopes.ScanObject{
+					ApiVersion: "apps/v1",
+					Kind:       "Deployment",
+					Metadata: objectsenvelopes.ScanObjectMetadata{
+						Name:      "api",
+						Namespace: "default",
+					},
+				},
+				InputPatterns: []string{"manifests/deployment.yaml"},
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -81,7 +113,7 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 			tc.Description,
 			func(t *testing.T) {
 				scanInfo := &cautils.ScanInfo{FilePath: tc.filePath, Namespace: tc.namespace}
-				setWorkloadScanInfo(scanInfo, tc.kind, tc.name)
+				setWorkloadScanInfo(scanInfo, tc.apiVersion, tc.kind, tc.name)
 
 				if scanInfo.ScanType != tc.want.ScanType {
 					t.Errorf("got: %v, want: %v", scanInfo.ScanType, tc.want.ScanType)
@@ -102,6 +134,8 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 				if scanInfo.ScanObject.Metadata.Namespace != tc.want.ScanObject.Metadata.Namespace {
 					t.Errorf("got: %v, want: %v", scanInfo.ScanObject.Metadata.Namespace, tc.want.ScanObject.Metadata.Namespace)
 				}
+
+				assert.Equal(t, tc.want.ScanObject.GetApiVersion(), scanInfo.ScanObject.GetApiVersion())
 
 				if tc.filePath == "" {
 					assert.Len(t, scanInfo.InputPatterns, 0)
@@ -138,12 +172,12 @@ func TestGetWorkloadCmd_ChartPathAndFilePathEmpty(t *testing.T) {
 	scanInfo.FilePath = ""
 
 	// Verify the command name and short description
-	assert.Equal(t, "workload <kind>/<name> [`<glob pattern>`/`-`] [flags]", cmd.Use)
+	assert.Equal(t, "workload <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]", cmd.Use)
 	assert.Equal(t, "Scan a workload for misconfigurations and image vulnerabilities", cmd.Short)
 	assert.Equal(t, workloadExample, cmd.Example)
 
 	err := cmd.Args(&cobra.Command{}, []string{})
-	expectedErrorMessage := "usage: <kind>/<name> [`<glob pattern>`/`-`] [flags]"
+	expectedErrorMessage := "usage: <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]"
 	assert.Equal(t, expectedErrorMessage, err.Error())
 
 	err = cmd.Args(&cobra.Command{}, []string{"nginx"})
@@ -172,7 +206,7 @@ func Test_parseWorkloadIdentifierString_Invalid(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, _, err := parseWorkloadIdentifierString(tt.input)
+			_, _, _, _, err := parseWorkloadIdentifierString(tt.input)
 			assert.Error(t, err)
 		})
 	}
@@ -180,38 +214,98 @@ func Test_parseWorkloadIdentifierString_Invalid(t *testing.T) {
 
 func Test_parseWorkloadIdentifierString_Valid(t *testing.T) {
 	t.Run("valid identifier", func(t *testing.T) {
-		namespace, kind, name, err := parseWorkloadIdentifierString("default/Deployment/nginx-deployment")
+		namespace, kind, name, apiVersion, err := parseWorkloadIdentifierString("default/Deployment/nginx-deployment")
 		assert.NoError(t, err)
 		assert.Equal(t, "default", namespace)
 		assert.Equal(t, "Deployment", kind)
 		assert.Equal(t, "nginx-deployment", name)
+		assert.Equal(t, "", apiVersion)
 	})
 }
 
 func Test_parseWorkloadIdentifierString_Values(t *testing.T) {
 	testCases := []struct {
-		Description   string
-		Input         string
-		WantNamespace string
-		WantKind      string
-		WantName      string
-		WantErr       bool
+		Description    string
+		Input          string
+		WantNamespace  string
+		WantKind       string
+		WantName       string
+		WantApiVersion string
+		WantErr        bool
 	}{
 		{
-			Description:   "valid kind and name",
-			Input:         "Deployment/nginx",
-			WantNamespace: "",
-			WantKind:      "Deployment",
-			WantName:      "nginx",
-			WantErr:       false,
+			Description:    "valid kind and name",
+			Input:          "Deployment/nginx",
+			WantNamespace:  "",
+			WantKind:       "Deployment",
+			WantName:       "nginx",
+			WantApiVersion: "",
+			WantErr:        false,
 		},
 		{
-			Description:   "valid namespace kind and name",
-			Input:         "default/Deployment/nginx",
-			WantNamespace: "default",
-			WantKind:      "Deployment",
-			WantName:      "nginx",
-			WantErr:       false,
+			Description:    "valid namespace kind and name",
+			Input:          "default/Deployment/nginx",
+			WantNamespace:  "default",
+			WantKind:       "Deployment",
+			WantName:       "nginx",
+			WantApiVersion: "",
+			WantErr:        false,
+		},
+		{
+			Description:    "valid kind.version and name",
+			Input:          "Pod.v1/nginx",
+			WantNamespace:  "",
+			WantKind:       "Pod",
+			WantName:       "nginx",
+			WantApiVersion: "v1",
+			WantErr:        false,
+		},
+		{
+			Description:    "valid kind.version.group and name",
+			Input:          "Deployment.v1.apps/nginx",
+			WantNamespace:  "",
+			WantKind:       "Deployment",
+			WantName:       "nginx",
+			WantApiVersion: "apps/v1",
+			WantErr:        false,
+		},
+		{
+			Description:    "valid namespace kind.version.group and name",
+			Input:          "default/Deployment.v1.apps/nginx",
+			WantNamespace:  "default",
+			WantKind:       "Deployment",
+			WantName:       "nginx",
+			WantApiVersion: "apps/v1",
+			WantErr:        false,
+		},
+		{
+			Description:    "valid multi-label group",
+			Input:          "Ingress.v1.networking.k8s.io/name",
+			WantNamespace:  "",
+			WantKind:       "Ingress",
+			WantName:       "name",
+			WantApiVersion: "networking.k8s.io/v1",
+			WantErr:        false,
+		},
+		{
+			Description: "invalid empty dotted component",
+			Input:       "Deployment..apps/nginx",
+			WantErr:     true,
+		},
+		{
+			Description: "invalid empty trailing component",
+			Input:       "Deployment./nginx",
+			WantErr:     true,
+		},
+		{
+			Description: "invalid missing apiVersion",
+			Input:       "Deployment.apps/nginx",
+			WantErr:     true,
+		},
+		{
+			Description: "invalid apiVersion segment",
+			Input:       "Deployment.bogus/nginx",
+			WantErr:     true,
 		},
 		{
 			Description: "too many segments",
@@ -222,7 +316,7 @@ func Test_parseWorkloadIdentifierString_Values(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.Description, func(t *testing.T) {
-			namespace, kind, name, err := parseWorkloadIdentifierString(tc.Input)
+			namespace, kind, name, apiVersion, err := parseWorkloadIdentifierString(tc.Input)
 			if tc.WantErr {
 				assert.Error(t, err)
 				return
@@ -231,6 +325,7 @@ func Test_parseWorkloadIdentifierString_Values(t *testing.T) {
 			assert.Equal(t, tc.WantNamespace, namespace)
 			assert.Equal(t, tc.WantKind, kind)
 			assert.Equal(t, tc.WantName, name)
+			assert.Equal(t, tc.WantApiVersion, apiVersion)
 		})
 	}
 }

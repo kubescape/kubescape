@@ -1,12 +1,16 @@
 package prettyprinter
 
 import (
+	"io"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFilterComplianceFrameworks(t *testing.T) {
@@ -49,6 +53,69 @@ func TestFilterComplianceFrameworks(t *testing.T) {
 			assert.True(t, reflect.DeepEqual(complianceFws, tt.expectedSummaryDetails.ListFrameworks()))
 		})
 	}
+}
+
+func TestPrintImagesCommandsUsesFullImageReference(t *testing.T) {
+	tests := []struct {
+		name        string
+		images      []string
+		wantGeneric bool
+	}{
+		{
+			name:   "tagged short names remain distinct",
+			images: []string{"nginx:1.25", "nginx:1.27"},
+		},
+		{
+			name:   "registry port is preserved",
+			images: []string{"localhost:5000/team/api:v1"},
+		},
+		{
+			name: "digest is preserved",
+			images: []string{
+				"registry.example.com/team/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			},
+		},
+		{
+			name:        "large image sets keep the generic hint",
+			images:      []string{"one:v1", "two:v2", "three:v3", "four:v4"},
+			wantGeneric: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			output := capturePrintImagesCommands(t, tt.images)
+			if tt.wantGeneric {
+				assert.Contains(t, output, "Receive a full report by running: kubescape scan image <image>")
+				for _, image := range tt.images {
+					assert.NotContains(t, output, image)
+				}
+				return
+			}
+
+			for _, image := range tt.images {
+				assert.Equal(t, 1, strings.Count(output, image),
+					"the command should contain the full image reference exactly once")
+			}
+			assert.NotContains(t, output, "Receive a full report for ")
+		})
+	}
+}
+
+func capturePrintImagesCommands(t *testing.T, images []string) string {
+	t.Helper()
+
+	output, err := os.CreateTemp(t.TempDir(), "image-commands-*.txt")
+	require.NoError(t, err)
+	defer output.Close()
+
+	printImagesCommands(output, imageprinter.ImageScanSummary{Images: images})
+	require.NoError(t, output.Sync())
+	_, err = output.Seek(0, io.SeekStart)
+	require.NoError(t, err)
+	contents, err := io.ReadAll(output)
+	require.NoError(t, err)
+	return string(contents)
 }
 
 func TestGetWorkloadPrefixForCmd(t *testing.T) {

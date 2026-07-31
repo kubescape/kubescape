@@ -90,7 +90,7 @@ deny[msga] {
 	}
 	rule.Name = "cluster-role-path-accumulation"
 
-	got, err := opap.processRule(context.Background(), rule, nil)
+	got, err := opap.processRule(context.Background(), rule, nil, "")
 	assert.NoError(t, err)
 
 	crResult, ok := got[clusterRole.GetID()]

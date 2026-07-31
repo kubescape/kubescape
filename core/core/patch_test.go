@@ -3,9 +3,11 @@ package core
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"testing"
 
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/moby/buildkit/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -289,4 +291,42 @@ VERSION_ID=2023
 			assert.Equal(t, tt.expected, actual)
 		})
 	}
+}
+
+// TestRunWithCopaLoggerMuted guards against a regression where Patch() left
+// os.Stdout/os.Stderr nil through the printer setup that follows copaPatch().
+// GetUIPrinter calls os.Stdout.Name(), which has no nil-receiver guard and
+// panics, so runWithCopaLoggerMuted must restore the streams before it
+// returns, on both the success and error paths.
+func TestRunWithCopaLoggerMuted(t *testing.T) {
+	sout, serr := os.Stdout, os.Stderr
+	defer func() { os.Stdout, os.Stderr = sout, serr }()
+
+	t.Run("success", func(t *testing.T) {
+		err := runWithCopaLoggerMuted(false, func() error { return nil })
+		require.NoError(t, err)
+		require.NotNil(t, os.Stdout)
+		require.NotNil(t, os.Stderr)
+
+		scanInfo := &cautils.ScanInfo{}
+		scanInfo.SetScanType(cautils.ScanTypeImage)
+		assert.NotPanics(t, func() {
+			_ = GetUIPrinter(context.Background(), scanInfo, "")
+		})
+	})
+
+	t.Run("error", func(t *testing.T) {
+		wantErr := errors.New("install failed")
+		err := runWithCopaLoggerMuted(false, func() error { return wantErr })
+		require.ErrorIs(t, err, wantErr)
+		require.NotNil(t, os.Stdout)
+		require.NotNil(t, os.Stderr)
+	})
+
+	t.Run("debug bypasses muting", func(t *testing.T) {
+		err := runWithCopaLoggerMuted(true, func() error { return nil })
+		require.NoError(t, err)
+		require.NotNil(t, os.Stdout)
+		require.NotNil(t, os.Stderr)
+	})
 }

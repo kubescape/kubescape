@@ -34,6 +34,18 @@ var scanCmdExamples = fmt.Sprintf(`
   # Display all resources
   %[1]s scan --verbose
 
+  # Generate an anonymized report
+  %[1]s scan --hide --format json -o report.json
+
+  # The key is used as raw bytes and must be exactly 32 characters long.
+  # Note: openssl rand -base64 32 (44 chars) and openssl rand -hex 32 (64 chars)
+  # are NOT valid — they exceed 32 bytes once passed through as raw text.
+  export KUBESCAPE_MASTER_KEY="01234567890123456789012345678901"
+  %[1]s scan --encrypt --format json -o encrypted-report.json
+
+  # Decrypt an encrypted report
+  %[1]s decrypt encrypted-report.json > decrypted-report.json
+
   # Scan different clusters from the kubectl context
   %[1]s scan --kube-context <kubernetes context>
 `, cautils.ExecName())
@@ -47,6 +59,16 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Short:   "Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations",
 		Long:    `Scan a Kubernetes cluster, YAML files, Helm charts, Kustomize directories, Git repositories, or container images for security misconfigurations and vulnerabilities.`,
 		Example: scanCmdExamples,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// runs for the bare scan command and all subcommands (framework, control, workload, image)
+			if strings.Contains(scanInfo.ControlsVersion, "/") {
+				return fmt.Errorf(
+					"invalid --controls-version %q: must be a regolibrary release tag and cannot contain '/'",
+					scanInfo.ControlsVersion,
+				)
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if scanInfo.FailThresholdSeverity != "" {
 				if err := shared.ValidateSeverity(
@@ -61,7 +83,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				scanInfo.Format == "" {
 
 				return fmt.Errorf(
-					"format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif",
+					"format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast",
 				)
 			}
 
@@ -140,7 +162,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnDegradedConfig, "fail-on-degraded-config", false, "Fail the scan (exit code 1) if control configurations or exceptions could not be loaded from their configured source and bundled defaults were used instead")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1")
-	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output file format. Supported formats: "pretty-printer", "json", "junit", "prometheus", "pdf", "html", "sarif"`)
+	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output file format. Supported formats: "pretty-printer", "json", "junit", "prometheus", "pdf", "html", "sarif", "gitlab-sast"`)
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to configured backend.")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
@@ -150,14 +172,17 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.UseFrom, "use-from", nil, "Load local policy object from specified path. If not used will download latest")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FormatVersion, "format-version", "v2", "Output object can be different between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.CustomClusterName, "cluster-name", "", "Set the custom name of the cluster. Not same as the kube-context flag")
-	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Submit the scan results to Kubescape SaaS where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
+	submitF := scanCmd.PersistentFlags().VarPF(&scanInfo.Submit, "submit", "", "Submit the scan results to Kubescape SaaS where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
+	submitF.NoOptDefVal = "true"
+	submitF.DefValue = "false"
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.OmitRawResources, "omit-raw-resources", "", false, "Omit raw resources from the output. By default the raw resources are included in the output")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.PrintAttackTree, "print-attack-tree", "", false, "Print attack tree")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.EnableRegoPrint, "enable-rego-prints", "", false, "Enable sending to rego prints to the logs (use with debug log level: -l debug)")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ScanImages, "scan-images", "", false, "Scan resources images")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.UseDefaultMatchers, "use-default-matchers", "", true, "Use default matchers (true) or CPE matchers (false) for image scanning")
-	scanCmd.PersistentFlags().BoolVar(&scanInfo.Hide, "hide", false, "Hide sensitive identifiers using irreversible pseudonymization")
-	scanCmd.PersistentFlags().BoolVar(&scanInfo.EncryptionEnabled, "encrypt", false, "Use reversible encryption for repository metadata instead of pseudonymization")
+	scanCmd.PersistentFlags().StringToStringVar(&scanInfo.RegistryMapping, "registry-mapping", nil, "Map internal registry hosts to reachable ones, e.g. --registry-mapping image-registry.openshift-image-registry.svc:5000=registry.company.com (host[:port], no scheme; mapped registry must allow anonymous pulls on cluster/workload scan paths)")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.Hide, "hide", false, "Replace sensitive report metadata with deterministic pseudonyms")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.EncryptionEnabled, "encrypt", false, "Encrypt sensitive report metadata using the KUBESCAPE_MASTER_KEY environment variable")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.LabelsToCopy, "labels-to-copy", nil, "Labels to copy from workloads to scan reports for easy identification. e.g: --labels-to-copy=app,team,environment")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ListingURL, "grype-db-url", "", "Grype vulnerability database URL")
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ScanTimeout, "scan-timeout", 0, "Maximum duration for the scan (e.g. 5m, 30s, 1h). 0 means no timeout. When the timeout is reached the scan exits with a non-zero code.")

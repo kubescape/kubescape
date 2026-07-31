@@ -62,7 +62,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentIn
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
 
-	if scanInfo.Submit {
+	if scanInfo.Submit.GetBool() {
 		// submit - Create tenant & Submit report
 		if scanInfo.OmitRawResources {
 			logger.L().Ctx(ctx).Warning("omit-raw-resources flag will be ignored in submit mode")
@@ -93,7 +93,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentIn
 	// ================== setup reporter & printer objects ======================================
 
 	// reporting behavior - setup reporter
-	reportHandler := getReporter(ctx, tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, *scanInfo)
+	reportHandler := getReporter(ctx, tenantConfig, scanInfo.ScanID, scanInfo.Submit.GetBool(), scanInfo.FrameworkScan, *scanInfo)
 
 	// setup printers
 	outputPrinters, err := GetOutputPrinters(scanInfo, ctx, tenantConfig.GetContextName())
@@ -169,6 +169,8 @@ func fileExtForFormat(format string) string {
 		return printer.JunitOutputExt
 	case printer.SARIFFormat:
 		return printer.SARIFOutputExt
+	case printer.GitLabSASTFormat:
+		return printer.JsonOutputExt
 	case printer.HtmlFormat:
 		return printer.HtmlOutputExt
 	case printer.PdfFormat:
@@ -195,34 +197,52 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	}
 	interfaces.report.SetTenantConfig(interfaces.tenantConfig)
 
-	// Only create DownloadReleasedPolicy if not in air-gapped mode
-	airGapped := isAirGappedMode(scanInfo)
-	var downloadReleasedPolicy *getter.DownloadReleasedPolicy
-	if airGapped {
-		// In air-gapped mode (--keep-local or using local files via --use-from, --controls-config, --exceptions, or attack tracks),
-		// don't initialize the downloader to prevent network access
-		downloadReleasedPolicy = nil
-	} else {
-		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy() // download config inputs from github release
-	}
-
-	// set policy getter only after setting the customerGUID
-	scanInfo.PolicyGetter = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy, airGapped)
-	scanInfo.ControlsInputsGetter = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped)
-	scanInfo.ExceptionsGetter = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
-	scanInfo.AttackTracksGetter = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
-
-	// TODO - list supported frameworks/controls
-	if scanInfo.ScanAll {
-		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.PolicyGetter), apisv1.KindFramework)
-	}
-
 	// remove host scanner components
 	defer func() {
 		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
 			logger.L().Ctx(ks.Context()).StopError("Failed to tear down host scanner", helpers.Error(err))
 		}
 	}()
+
+	// Only create DownloadReleasedPolicy if not in air-gapped mode
+	airGapped := isAirGappedMode(scanInfo)
+	var downloadReleasedPolicy *getter.DownloadReleasedPolicy
+	if airGapped {
+		// In air-gapped mode (--use-from is set — the user explicitly wants to load everything
+		// from local files with no network access), don't initialize the downloader to prevent
+		// network access
+		downloadReleasedPolicy = nil
+	} else {
+		downloadReleasedPolicy = getter.NewDownloadReleasedPolicyWithVersion(scanInfo.ControlsVersion) // download config inputs from github release
+	}
+
+	// set policy getter only after setting the customerGUID
+	scanInfo.PolicyGetter, err = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy, airGapped)
+	if err != nil {
+		spanInit.End()
+		return nil, err
+	}
+	var controlInputsFromCache bool
+	scanInfo.ControlsInputsGetter, controlInputsFromCache, err = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped)
+	if err != nil {
+		spanInit.End()
+		return nil, err
+	}
+	scanInfo.ExceptionsGetter, err = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	if err != nil {
+		spanInit.End()
+		return nil, err
+	}
+	scanInfo.AttackTracksGetter, err = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	if err != nil {
+		spanInit.End()
+		return nil, err
+	}
+
+	// TODO - list supported frameworks/controls
+	if scanInfo.ScanAll {
+		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.PolicyGetter), apisv1.KindFramework)
+	}
 
 	logger.L().StopSuccess("Initialized scanner")
 
@@ -235,6 +255,9 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	if err != nil {
 		spanInit.End()
 		return resultsHandling, err
+	}
+	if controlInputsFromCache {
+		scanData.PolicyDegradations = append(scanData.PolicyDegradations, cautils.PolicyDegradation{Component: "controlInputs", Reason: "failed to fetch from GitHub, loaded from local cache"})
 	}
 	spanPolicies.End()
 
@@ -371,16 +394,19 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 
 	for img := range imagesToScan.Iter() {
 		logger.L().Start("Scanning", helpers.String("image", img))
-		if err := scanSingleImage(ctx, img, svc, resultsHandling); err != nil {
+		if err := scanSingleImage(ctx, img, svc, resultsHandling, scanInfo.RegistryMapping); err != nil {
 			logger.L().StopError("failed to scan", helpers.String("image", img), helpers.Error(err))
 		}
 		logger.L().StopSuccess("Done scanning", helpers.String("image", img))
 	}
 }
 
-func scanSingleImage(ctx context.Context, img string, svc *imagescan.Service, resultsHandling *resultshandling.ResultsHandler) error {
+func scanSingleImage(ctx context.Context, img string, svc *imagescan.Service, resultsHandling *resultshandling.ResultsHandler, registryMapping map[string]string) error {
 
-	scanResults, err := svc.Scan(ctx, img, imagescan.RegistryCredentials{}, nil, nil)
+	scanResults, err := scanWithRegistryMapping(
+		ctx, svc, img, imagescan.RegistryCredentials{},
+		registryMapping, nil, nil,
+	)
 	if err != nil {
 		return err
 	}
@@ -393,11 +419,12 @@ func isPrioritizationScanType(scanType cautils.ScanTypes) bool {
 	return scanType == cautils.ScanTypeCluster || scanType == cautils.ScanTypeRepo
 }
 
-// isAirGappedMode returns true if the scan is configured to run in air-gapped mode
-// (i.e., without any network access to download policies, exceptions, or other artifacts)
+// isAirGappedMode returns true if the scan is configured to run in air-gapped mode,
+// i.e. the user explicitly wants to load everything from local files via --use-from,
+// with no network access to download the framework/policy at all. The other local-file
+// flags (--controls-config, --exceptions, --attack-tracks) each have their own
+// dedicated local-file-first branch in their respective getter functions in
+// initutils.go and don't need to disable the network downloader entirely.
 func isAirGappedMode(scanInfo *cautils.ScanInfo) bool {
-	return len(scanInfo.UseFrom) > 0 ||
-		scanInfo.ControlsInputs != "" ||
-		scanInfo.UseExceptions != "" ||
-		scanInfo.AttackTracks != ""
+	return len(scanInfo.UseFrom) > 0
 }

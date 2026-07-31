@@ -31,7 +31,7 @@ func Test_validateControlScanInfo(t *testing.T) {
 		},
 		{
 			"Submit with omit-raw-resources should be invalid",
-			&cautils.ScanInfo{Submit: true, OmitRawResources: true},
+			&cautils.ScanInfo{Submit: cautils.NewBoolPtr(new(true)), OmitRawResources: true},
 			ErrOmitRawResourcesOrSubmit,
 		},
 	}
@@ -88,12 +88,12 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 		},
 		{
 			"Submit with keep-local should be invalid",
-			&cautils.ScanInfo{Submit: true, Local: true, AccountID: validAccountID},
+			&cautils.ScanInfo{Submit: cautils.NewBoolPtr(new(true)), Local: true, AccountID: validAccountID},
 			ErrKeepLocalOrSubmit,
 		},
 		{
 			"Submit with omit-raw-resources should be invalid",
-			&cautils.ScanInfo{Submit: true, OmitRawResources: true, AccountID: validAccountID},
+			&cautils.ScanInfo{Submit: cautils.NewBoolPtr(new(true)), OmitRawResources: true, AccountID: validAccountID},
 			ErrOmitRawResourcesOrSubmit,
 		},
 		{

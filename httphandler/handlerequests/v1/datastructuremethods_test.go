@@ -15,6 +15,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestToScanInfo_SubmitExplicitlySet(t *testing.T) {
+	// no submit field in the request - not explicitly set
+	s := ToScanInfo(&utilsmetav1.PostScanRequest{TargetType: apisv1.KindFramework})
+	assert.Nil(t, s.Submit.Get())
+
+	// submit:false explicitly requested
+	falseVal := false
+	s = ToScanInfo(&utilsmetav1.PostScanRequest{TargetType: apisv1.KindFramework, Submit: &falseVal})
+	require.NotNil(t, s.Submit.Get())
+	assert.False(t, s.Submit.GetBool())
+
+	// submit:true explicitly requested
+	trueVal := true
+	s = ToScanInfo(&utilsmetav1.PostScanRequest{TargetType: apisv1.KindFramework, Submit: &trueVal})
+	require.NotNil(t, s.Submit.Get())
+	assert.True(t, s.Submit.GetBool())
+}
+
 func TestToScanInfo(t *testing.T) {
 	{
 		req := &utilsmetav1.PostScanRequest{
@@ -35,7 +53,7 @@ func TestToScanInfo(t *testing.T) {
 
 		assert.False(t, s.HostSensorEnabled.GetBool())
 		assert.False(t, s.Local)
-		assert.False(t, s.Submit)
+		assert.False(t, s.Submit.GetBool())
 		assert.False(t, s.ScanAll)
 		assert.True(t, s.FrameworkScan)
 		assert.Equal(t, "nsa", s.PolicyIdentifier[0].Identifier)

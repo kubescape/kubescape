@@ -201,6 +201,21 @@ func TestCalculateMove_InvalidString(t *testing.T) {
 	assert.False(t, success)
 }
 
+// Lines containing multi-byte characters must be measured in runes, not bytes,
+// or the computed position drifts past the line's actual length.
+func TestCalculateMove_MultiByteRunes(t *testing.T) {
+	str := "10"
+	file := []string{"héllo world", "line 2", "line 3"}
+	endColumn := 5
+	endLine := 1
+
+	newLine, newColumn, success := calculateMove(str, file, endColumn, endLine)
+
+	assert.True(t, success)
+	assert.Equal(t, 2, newLine)
+	assert.Equal(t, 3, newColumn)
+}
+
 // Adds a new fix to the result with the given filepath, start and end positions, and text.
 func TestAddFix_AddsNewFixToResult(t *testing.T) {
 	result := sarif.Result{}

@@ -29,7 +29,6 @@ type ImageScanData struct {
 	Image                 string
 	Matches               match.Matches
 	Packages              []pkg.Package
-	RemainingMatches      *match.Matches
 	SBOM                  *sbom.SBOM
 	VulnerabilityProvider vulnerability.Provider
 }

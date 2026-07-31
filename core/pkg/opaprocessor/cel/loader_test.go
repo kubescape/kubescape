@@ -100,22 +100,23 @@ metadata:
 spec:
   policyName: kubescape-c-1000
 `
-	index, _, err := parseVAPBundle([]byte(bundle))
+	catalog, err := parseVAPBundle([]byte(bundle))
 	require.NoError(t, err)
-	assert.Len(t, index, 1)
-	assert.Contains(t, index, "C-1000")
+	assert.Len(t, catalog.byControl, 1)
+	assert.Contains(t, catalog.byControl, "C-1000")
 }
 
 // TestParseVAPBundleSkipsNoControlID proves policies without a controlId label
-// (cluster-scoped helpers) are dropped from the index rather than indexed under
-// an empty key.
+// (cluster-scoped helpers) stay out of the control index (no empty key) while
+// remaining reachable by name, since name-keyed callers still need them.
 func TestParseVAPBundleSkipsNoControlID(t *testing.T) {
 	bundle := vapDoc("cluster-policy-helper", "") + "---\n" + vapDoc("kubescape-c-1000", "C-1000")
-	index, _, err := parseVAPBundle([]byte(bundle))
+	catalog, err := parseVAPBundle([]byte(bundle))
 	require.NoError(t, err)
-	assert.Len(t, index, 1)
-	assert.Contains(t, index, "C-1000")
-	assert.NotContains(t, index, "")
+	assert.Len(t, catalog.byControl, 1)
+	assert.Contains(t, catalog.byControl, "C-1000")
+	assert.NotContains(t, catalog.byControl, "")
+	assert.Contains(t, catalog.byName, "cluster-policy-helper")
 }
 
 // TestParseVAPBundleDuplicateControl proves a duplicated control poisons only
@@ -126,12 +127,28 @@ func TestParseVAPBundleDuplicateControl(t *testing.T) {
 	bundle := vapDoc("kubescape-c-1000-a", "C-1000") +
 		"---\n" + vapDoc("kubescape-c-1000-b", "C-1000") +
 		"---\n" + vapDoc("kubescape-c-2000", "C-2000")
-	index, duplicates, err := parseVAPBundle([]byte(bundle))
+	catalog, err := parseVAPBundle([]byte(bundle))
 	require.NoError(t, err)
 
-	assert.NotContains(t, index, "C-1000", "a duplicated control must not silently win")
-	assert.Contains(t, duplicates, "C-1000")
-	assert.Contains(t, index, "C-2000", "an unrelated control must still index")
+	assert.NotContains(t, catalog.byControl, "C-1000", "a duplicated control must not silently win")
+	assert.Contains(t, catalog.dupControls, "C-1000")
+	assert.Contains(t, catalog.byControl, "C-2000", "an unrelated control must still index")
+}
+
+// TestParseVAPBundleDuplicateName proves the same poisoning applies to the name
+// index: two policies sharing a metadata.name is a bundle bug (the bundle could
+// not even be kubectl-applied), so neither wins and name lookups refuse it,
+// while other names still index.
+func TestParseVAPBundleDuplicateName(t *testing.T) {
+	bundle := vapDoc("kubescape-c-1000", "C-1000") +
+		"---\n" + vapDoc("kubescape-c-1000", "C-1001") +
+		"---\n" + vapDoc("kubescape-c-2000", "C-2000")
+	catalog, err := parseVAPBundle([]byte(bundle))
+	require.NoError(t, err)
+
+	assert.NotContains(t, catalog.byName, "kubescape-c-1000", "a duplicated name must not silently win")
+	assert.Contains(t, catalog.dupNames, "kubescape-c-1000")
+	assert.Contains(t, catalog.byName, "kubescape-c-2000", "an unrelated name must still index")
 }
 
 // TestLoadVAPRefusesMatchConditions proves a policy with a matchConditions gate is
@@ -152,10 +169,10 @@ spec:
   validations:
   - expression: "false"
 `
-	index, _, err := parseVAPBundle([]byte(bundle))
+	catalog, err := parseVAPBundle([]byte(bundle))
 	require.NoError(t, err)
 
-	vap := index["C-1001"]
+	vap := catalog.byControl["C-1001"]
 	require.NotNil(t, vap)
 	require.NotEmpty(t, vap.matchConditions, "matchConditions must be captured, not dropped")
 
