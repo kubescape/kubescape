@@ -1029,3 +1029,40 @@ func TestNewFixHandler_AcceptsValidReport(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, h)
 }
+
+func TestPrepareResourcesToFix_MissingResourceDoesNotPanic(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  "nonexistent-resource-id",
+			RawResource: nil,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0001", "some-control", failedRuleNoFix()),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, []reporthandling.Resource{*res}, false)
+	rtf := h.PrepareResourcesToFix(context.Background())
+	assert.Empty(t, rtf)
+}
+
+func TestRevertSanitizeYaml_ShortInputDoesNotPanic(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", ""},
+		{"a", "a"},
+		{"ab", "ab"},
+		{"abc", "abc"},
+		{"# -", "# -"},
+		{"# ---", "---"},
+		{"# ---hello", "---hello"},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, revertSanitizeYaml(c.in), "input %q", c.in)
+	}
+}

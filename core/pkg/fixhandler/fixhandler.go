@@ -221,6 +221,9 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 		resourceID := result.ResourceID
 		resourceObj := resourceIdToResource[resourceID]
+		if resourceObj == nil {
+			continue
+		}
 		resourcePath := h.getPathFromRawResource(resourceObj.GetObject())
 
 		// Determine an upfront reason if we already know this resource is not
@@ -874,7 +877,7 @@ func sanitizeYaml(fileAsString string) string {
 //
 // For sanitization details, refer to the sanitizeYaml() function.
 func revertSanitizeYaml(fixedYamlString string) string {
-	if len(fixedYamlString) < 3 {
+	if len(fixedYamlString) < 5 {
 		return fixedYamlString
 	}
 
