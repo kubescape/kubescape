@@ -157,7 +157,7 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 		return hostSensorHandler
 
 	case hostSensorVal == nil && wantsHostSensorControls:
-		// Auto-detect: if node-agent CRDs are available, use them without requiring --enable-host-scanner.
+		// Auto-detect: if node-agent CRDs are available, use them instead of deploying the host-sensor daemonset.
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, "")
 		if err != nil {
 			logger.L().Ctx(ctx).Debug("node-agent not available, host sensor disabled", helpers.Error(err))

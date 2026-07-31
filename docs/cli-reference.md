@@ -90,8 +90,8 @@ kubescape scan --exclude-namespaces kube-system,kube-public
 
 ### Score thresholds
 
-`--compliance-threshold` (compliance score) and the deprecated
-`--fail-threshold` (risk score) apply to the following invocations:
+`--compliance-threshold` (compliance score) applies to the following
+invocations:
 
 - `kubescape scan framework <name> ...`
 - `kubescape scan control <id> ...`
@@ -99,7 +99,7 @@ kubescape scan --exclude-namespaces kube-system,kube-public
 
 The default `kubescape scan [path]` uses `--view security`, which does
 not evaluate against a score threshold. To gate a pipeline on the
-compliance or risk score, use one of the forms above.
+compliance score, use one of the forms above.
 `--severity-threshold` and `--fail-coverage-below` apply in every view.
 
 `--fail-coverage-below` gates on the **scan coverage score**, not the raw

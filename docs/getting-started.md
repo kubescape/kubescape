@@ -263,8 +263,7 @@ We offer two important metrics to assess compliance:
     kubescape scan framework <FRAMEWORK_NAME> --compliance-threshold <SCORE_VALUE[float32]>
     ```
 
-`--compliance-threshold` (compliance score) and the deprecated
-`--fail-threshold` (risk score) apply to the framework/control
+`--compliance-threshold` (compliance score) applies to the framework/control
 subcommands and to `--view resource|control`. The default
 `kubescape scan <path>` (security view) does not evaluate against
 these score thresholds, so use one of the forms above when you want
