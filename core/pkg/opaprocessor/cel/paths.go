@@ -700,6 +700,9 @@ func literalString(val ref.Val) (string, bool) {
 func (p pathPlan) resolve(obj map[string]any, violates func(map[string]any) bool) []PathHint {
 	hints := make([]PathHint, 0, len(p.direct))
 	for _, ref := range p.direct {
+		if !objectHasKindSegment(obj, ref.path) {
+			continue
+		}
 		hints = append(hints, PathHint{Path: ref.path, Value: ref.value})
 	}
 	if p.elements == nil || len(p.elements.fields) == 0 {
@@ -770,6 +773,30 @@ func lookupList(obj map[string]any, segments []string) ([]any, bool) {
 	}
 	list, ok := current.([]any)
 	return list, ok
+}
+
+var kindSegments = map[string]bool{
+	"template":    true,
+	"jobTemplate": true,
+}
+
+// objectHasKindSegment reports whether the kind-dependent prefix of path exists
+// on obj. When a variable's inlined ternary contributes paths for several kinds
+// (e.g. spec.securityContext for Pod, spec.template.spec.securityContext for
+// Deployment, spec.jobTemplate.spec.template.spec.securityContext for CronJob),
+// only the one matching obj's kind survives — the same rule resolveCollection
+// applies via lookupList for element lists, ported to direct paths.
+func objectHasKindSegment(obj map[string]any, path string) bool {
+	parts := strings.Split(path, ".")
+	if len(parts) < 2 || parts[0] != "spec" || !kindSegments[parts[1]] {
+		return true
+	}
+	spec, ok := obj["spec"].(map[string]any)
+	if !ok {
+		return true
+	}
+	_, exists := spec[parts[1]]
+	return exists
 }
 
 // narrow returns a copy of obj with the value at a dotted path replaced,

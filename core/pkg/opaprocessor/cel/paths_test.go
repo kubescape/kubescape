@@ -3,6 +3,7 @@ package cel
 import (
 	"context"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -484,6 +485,106 @@ func TestEveryDerivedBundlePathIsWellFormed(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestViolationPathsFilterWrongKindDirectPaths(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	expr := "variables.containers.all(container, (has(container.securityContext) && has(container.securityContext.seccompProfile) && has(container.securityContext.seccompProfile.type) ? container.securityContext.seccompProfile.type : (has(variables.podSecurityContext) && has(variables.podSecurityContext.seccompProfile) && has(variables.podSecurityContext.seccompProfile.type) ? variables.podSecurityContext.seccompProfile.type : 'Unconfined')) != 'Unconfined')"
+	variables := []Variable{
+		{
+			Name: "containers",
+			Expression: "object.kind == 'Pod' ? object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : []) : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'] ? object.spec.template.spec.containers + (has(object.spec.template.spec.initContainers) ? object.spec.template.spec.initContainers : []) + (has(object.spec.template.spec.ephemeralContainers) ? object.spec.template.spec.ephemeralContainers : []) : object.kind == 'CronJob' ? object.spec.jobTemplate.spec.template.spec.containers + (has(object.spec.jobTemplate.spec.template.spec.initContainers) ? object.spec.jobTemplate.spec.template.spec.initContainers : []) + (has(object.spec.jobTemplate.spec.template.spec.ephemeralContainers) ? object.spec.jobTemplate.spec.template.spec.ephemeralContainers : []) : []",
+		},
+		{
+			Name:       "podSecurityContext",
+			Expression: "object.kind == 'Pod' ? (has(object.spec.securityContext) ? object.spec.securityContext : {}) : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'] ? (has(object.spec.template.spec.securityContext) ? object.spec.template.spec.securityContext : {}) : object.kind == 'CronJob' ? (has(object.spec.jobTemplate.spec.template.spec.securityContext) ? object.spec.jobTemplate.spec.template.spec.securityContext : {}) : {}",
+		},
+	}
+
+	plan := e.buildPathPlan(expr, variables)
+
+	t.Run("pod", func(t *testing.T) {
+		obj := map[string]any{
+			"apiVersion": "v1", "kind": "Pod",
+			"metadata": map[string]any{"name": "p"},
+			"spec": map[string]any{
+				"securityContext": map[string]any{"seccompProfile": map[string]any{"type": "Unconfined"}},
+				"containers":     []any{map[string]any{"name": "app", "image": "nginx"}},
+			},
+		}
+		hints := plan.resolve(obj, nil)
+		found := false
+		for _, h := range hints {
+			assert.NotContains(t, h.Path, "template", "Pod should not get template-prefixed paths")
+			assert.NotContains(t, h.Path, "jobTemplate", "Pod should not get jobTemplate-prefixed paths")
+			if strings.Contains(h.Path, "spec.securityContext") {
+				found = true
+			}
+		}
+		assert.True(t, found, "Pod should get a spec.securityContext path")
+	})
+
+	t.Run("deployment", func(t *testing.T) {
+		obj := map[string]any{
+			"apiVersion": "apps/v1", "kind": "Deployment",
+			"metadata": map[string]any{"name": "d"},
+			"spec": map[string]any{
+				"replicas": float64(1),
+				"selector": map[string]any{"matchLabels": map[string]any{"app": "test"}},
+				"template": map[string]any{
+					"metadata": map[string]any{"labels": map[string]any{"app": "test"}},
+					"spec": map[string]any{
+						"securityContext": map[string]any{"seccompProfile": map[string]any{"type": "Unconfined"}},
+						"containers":      []any{map[string]any{"name": "app", "image": "nginx"}},
+					},
+				},
+			},
+		}
+		hints := plan.resolve(obj, nil)
+		found := false
+		for _, h := range hints {
+			assert.NotContains(t, h.Path, "jobTemplate", "Deployment should not get jobTemplate-prefixed paths")
+			if strings.Contains(h.Path, "spec.template.spec.securityContext") {
+				found = true
+			}
+		}
+		assert.True(t, found, "Deployment should get a spec.template.spec.securityContext path")
+	})
+
+	t.Run("cronjob", func(t *testing.T) {
+		obj := map[string]any{
+			"apiVersion": "batch/v1", "kind": "CronJob",
+			"metadata": map[string]any{"name": "c"},
+			"spec": map[string]any{
+				"schedule": "*/5 * * * *",
+				"jobTemplate": map[string]any{
+					"spec": map[string]any{
+						"template": map[string]any{
+							"metadata": map[string]any{"labels": map[string]any{"app": "test"}},
+							"spec": map[string]any{
+								"securityContext": map[string]any{"seccompProfile": map[string]any{"type": "Unconfined"}},
+								"containers":      []any{map[string]any{"name": "app", "image": "nginx"}},
+							},
+						},
+					},
+				},
+			},
+		}
+		hints := plan.resolve(obj, nil)
+		found := false
+		for _, h := range hints {
+			if strings.Contains(h.Path, "template") {
+				assert.True(t, strings.HasPrefix(h.Path, "spec.jobTemplate."),
+					"CronJob template paths must be under jobTemplate, got %s", h.Path)
+			}
+			if strings.Contains(h.Path, "spec.jobTemplate.spec.template.spec.securityContext") {
+				found = true
+			}
+		}
+		assert.True(t, found, "CronJob should get a spec.jobTemplate.spec.template.spec.securityContext path")
+	})
 }
 
 // bundleFixValues is every (path, value) pair the current bundle produces a fix
