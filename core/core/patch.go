@@ -175,25 +175,33 @@ func buildPatchedImageName(image, patchedTag string) (string, error) {
 	return fmt.Sprintf("%s:%s", ref.Name(), patchedTag), nil
 }
 
-func disableCopaLogger() {
-	os.Stdout, os.Stderr = nil, nil
-	null, _ := os.Open(os.DevNull)
-	log.SetOutput(null)
-}
-
-// runWithCopaLoggerMuted mutes copa's logrus output (which writes directly to
-// os.Stdout/os.Stderr) for the duration of fn, unless debug is set. The
-// streams are always restored before this function returns, so callers can
-// safely keep using os.Stdout/os.Stderr regardless of whether fn succeeds.
+// runWithCopaLoggerMuted redirects os.Stdout/os.Stderr and the logrus output
+// to os.DevNull for the duration of fn, unless debug is set. It never nils
+// out os.Stdout/os.Stderr: other code running concurrently (buildkit,
+// containerd, grpc logging, ...) may read those package variables and call
+// methods on them that are not nil-receiver-safe (e.g. os.File.Name()),
+// which would panic the whole process. The streams and logrus output are
+// always restored before this function returns, so callers can safely keep
+// using os.Stdout/os.Stderr regardless of whether fn succeeds.
 func runWithCopaLoggerMuted(debug bool, fn func() error) error {
 	if debug {
 		return fn()
 	}
 
+	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		// Can't mute output, but that's not a reason to fail the patch.
+		return fn()
+	}
+	defer null.Close()
+
 	sout, serr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = null, null
 	defer func() { os.Stdout, os.Stderr = sout, serr }()
 
-	disableCopaLogger()
+	log.SetOutput(null)
+	defer log.SetOutput(serr)
+
 	return fn()
 }
 
