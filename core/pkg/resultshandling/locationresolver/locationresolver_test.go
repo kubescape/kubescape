@@ -69,6 +69,20 @@ func TestResolveLocation(t *testing.T) {
 
 }
 
+func TestResolveLocation_ZeroCandidateNodesDoesNotPanic(t *testing.T) {
+	yamlFilePath := filepath.Join(onlineBoutiquePath(), "adservice.yaml")
+	resolver, err := NewFixPathLocationResolver(yamlFilePath)
+	assert.NoError(t, err)
+
+	// traversing into a scalar yields zero candidate nodes, which previously
+	// caused a nil pointer dereference panic on candidateNodes.Back().
+	assert.NotPanics(t, func() {
+		location, err := resolver.ResolveLocation("metadata.name.foo=1", 0)
+		assert.NoError(t, err)
+		assert.Equal(t, Location{Line: 18, Column: 9}, location)
+	})
+}
+
 func TestFixPathLocationResolver_NonExistentYaml(t *testing.T) {
 	yamlFilePath := filepath.Join(onlineBoutiquePath(), "adservice_invalid.yaml")
 	resolver, err := NewFixPathLocationResolver(yamlFilePath)
