@@ -21,3 +21,14 @@ func Float16ToInt(x float32) int {
 func Float32ToIntFloor(x float32) int {
 	return int(math.Floor(float64(x)))
 }
+
+// Float32ToIntComplianceScore converts a compliance score to int so a non-perfect score never displays as 100
+func Float32ToIntComplianceScore(score float32) int {
+	if score >= 100 {
+		return 100
+	}
+	if score > 99 {
+		return 99
+	}
+	return Float32ToInt(score)
+}
