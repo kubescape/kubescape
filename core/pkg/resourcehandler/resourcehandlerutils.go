@@ -1,38 +1,21 @@
 package resourcehandler
 
 import (
-	"strings"
-
-	"github.com/jinzhu/inflection"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
-
-// resolveResourceGroups converts policy Kind names to the plural resource names
-// used by the dynamic client. k8s-interface handles resources found through
-// discovery; the fallback keeps conventional CRDs scannable from local files and
-// in tests where discovery data is unavailable.
-func resolveResourceGroups(group, version, resource string) []string {
-	resourceGroups := k8sinterface.ResourceGroupToSlice(group, version, resource)
-	if group == "*" || version == "*" || resource == "" || resource == "*" {
-		return resourceGroups
-	}
-	if len(mapKSResourceToApiGroup(resource)) > 0 {
-		return resourceGroups
-	}
-
-	if _, err := k8sinterface.GetGroupVersionResource(resource); err == nil {
-		return resourceGroups
-	}
-
-	resourceName := strings.ToLower(inflection.Plural(resource))
-	return []string{k8sinterface.JoinResourceTriplets(group, version, resourceName)}
-}
 
 // utils which are common to all resource handlers
 func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IWorkload) {
+	addSingleResourceToResourceMapsWithResolver(k8sResources, allResources, wl, defaultResourceResolver)
+}
+
+func addSingleResourceToResourceMapsWithResolver(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IWorkload, resolver resourceResolver) {
 	if wl == nil {
 		return
 	}
@@ -42,14 +25,23 @@ func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResou
 
 	allResources[wl.GetID()] = wl
 
-	resourceGroup := resolveResourceGroups(wl.GetGroup(), wl.GetVersion(), wl.GetKind())[0]
+	resolved := resolver(wl.GetGroup(), wl.GetVersion(), wl.GetKind())
+	if len(resolved) != 1 {
+		logger.L().Warning("unable to resolve object resource", helpers.String("kind", wl.GetKind()), helpers.String("id", wl.GetID()))
+		return
+	}
+	resourceGroup := resolved[0].groupVersionResourceTriplet
 	k8sResources[resourceGroup] = append(k8sResources[resourceGroup], wl.GetID())
 }
 
 func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload, scanningScope reporthandling.ScanningScopeType) (QueryableResources, map[string]bool) {
+	return getQueryableResourceMapFromPoliciesWithResolver(frameworks, resource, scanningScope, defaultResourceResolver)
+}
+
+func getQueryableResourceMapFromPoliciesWithResolver(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload, scanningScope reporthandling.ScanningScopeType, resolver resourceResolver) (QueryableResources, map[string]bool) {
 	queryableResources := make(QueryableResources)
 	excludedRulesMap := make(map[string]bool)
-	namespace := getScannedResourceNamespace(resource)
+	namespace := getScannedResourceNamespaceWithResolver(resource, resolver)
 
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {
@@ -69,7 +61,7 @@ func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, 
 					}
 				}
 				for i := range rule.Match {
-					updateQueryableResourcesMapFromRuleMatchObject(&rule.Match[i], resourcesFilterMap, queryableResources, namespace)
+					updateQueryableResourcesMapFromRuleMatchObjectWithResolver(&rule.Match[i], resourcesFilterMap, queryableResources, namespace, resolver)
 				}
 			}
 		}
@@ -83,11 +75,23 @@ func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, 
 // If the resource is a namespaced or the Namespace itself, returns the namespace name
 // In all other cases, returns an empty string
 func getScannedResourceNamespace(workload workloadinterface.IWorkload) string {
+	return getScannedResourceNamespaceWithResolver(workload, defaultResourceResolver)
+}
+
+func getScannedResourceNamespaceWithResolver(workload workloadinterface.IWorkload, resolver resourceResolver) string {
 	if workload == nil {
 		return ""
 	}
 	if workload.GetKind() == "Namespace" {
 		return workload.GetName()
+	}
+
+	resolved := resolver(workload.GetGroup(), workload.GetVersion(), workload.GetKind())
+	if len(resolved) == 1 && resolved[0].namespaced != nil {
+		if *resolved[0].namespaced {
+			return workload.GetNamespace()
+		}
+		return ""
 	}
 
 	if k8sinterface.IsResourceInNamespaceScope(workload.GetKind()) {
@@ -142,6 +146,10 @@ func filterRuleMatchesForResource(resourceKind string, matchObjects []reporthand
 // if namespace is not empty, the namespace filter is added to the queryable resources (which are namespaced)
 // if resourcesFilterMap is not nil, only the resources with value 'true' will be added to the queryable resources
 func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMatchObjects, resourcesFilterMap map[string]bool, queryableResources QueryableResources, namespace string) {
+	updateQueryableResourcesMapFromRuleMatchObjectWithResolver(match, resourcesFilterMap, queryableResources, namespace, defaultResourceResolver)
+}
+
+func updateQueryableResourcesMapFromRuleMatchObjectWithResolver(match *reporthandling.RuleMatchObjects, resourcesFilterMap map[string]bool, queryableResources QueryableResources, namespace string, resolver resourceResolver) {
 	for _, apiGroup := range match.APIGroups {
 		for _, apiVersions := range match.APIVersions {
 			for _, resource := range match.Resources {
@@ -151,14 +159,16 @@ func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMa
 					}
 				}
 
-				groupResources := resolveResourceGroups(apiGroup, apiVersions, resource)
-				// if namespace filter is set, we are scanning a workload in a specific namespace
-				// calling the getNamespacesSelector will add the namespace field selector (or name for Namespace resource)
-				globalFieldSelector := getNamespacesSelector(resource, namespace, "=")
-
-				for _, groupResource := range groupResources {
+				for _, resolved := range resolver(apiGroup, apiVersions, resource) {
+					apiGroup, apiVersion, resourceName := k8sinterface.StringToResourceGroup(resolved.groupVersionResourceTriplet)
+					gvr := &schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resourceName}
+					globalFieldSelector := getNamespacesSelector(resource, namespace, "=")
+					if resolved.namespaced != nil {
+						globalFieldSelector = getNamespacesSelectorForScope(gvr, namespace, "=", *resolved.namespaced)
+					}
 					queryableResource := QueryableResource{
-						GroupVersionResourceTriplet: groupResource,
+						GroupVersionResourceTriplet: resolved.groupVersionResourceTriplet,
+						Namespaced:                  resolved.namespaced,
 					}
 					queryableResource.AddFieldSelector(globalFieldSelector)
 

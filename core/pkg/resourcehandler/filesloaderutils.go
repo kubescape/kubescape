@@ -55,13 +55,28 @@ func dedupWorkloads(workloads []workloadinterface.IMetadata, workloadIDToSource 
 
 func addWorkloadsToResourcesMap(allResources map[string][]workloadinterface.IMetadata, workloads []workloadinterface.IMetadata) {
 	for i := range workloads {
-		group, version := k8sinterface.SplitApiVersion(workloads[i].GetApiVersion())
-		resourceGroups := resolveResourceGroups(group, version, workloads[i].GetKind())
-		if len(resourceGroups) != 1 {
-			logger.L().Warning("unable to resolve object resource", helpers.String("kind", workloads[i].GetKind()), helpers.String("id", workloads[i].GetID()))
-			continue
+		groupVersionResource, err := k8sinterface.GetGroupVersionResource(workloads[i].GetKind())
+		var resourceTriplets string
+		if err != nil {
+			group, version := k8sinterface.SplitApiVersion(workloads[i].GetApiVersion())
+			resolved := defaultResourceResolver(group, version, workloads[i].GetKind())
+			if len(resolved) != 1 {
+				logger.L().Warning("unable to resolve object resource", helpers.String("kind", workloads[i].GetKind()), helpers.String("id", workloads[i].GetID()))
+				continue
+			}
+			resourceTriplets = resolved[0].groupVersionResourceTriplet
+			logger.L().Debug("using manifest identity for custom resource unavailable in discovery",
+				helpers.String("kind", workloads[i].GetKind()), helpers.String("id", workloads[i].GetID()))
+		} else {
+			if k8sinterface.IsTypeWorkload(workloads[i].GetObject()) {
+				w := workloadinterface.NewWorkloadObj(workloads[i].GetObject())
+				if groupVersionResource.Group != w.GetGroup() || groupVersionResource.Version != w.GetVersion() {
+					logger.L().Warning("workload GroupVersion mismatch", helpers.String("id", workloads[i].GetID()), helpers.String("kind", workloads[i].GetKind()), helpers.String("expectedGroup", groupVersionResource.Group), helpers.String("actualGroup", w.GetGroup()), helpers.String("expectedVersion", groupVersionResource.Version), helpers.String("actualVersion", w.GetVersion()))
+					continue
+				}
+			}
+			resourceTriplets = k8sinterface.JoinResourceTriplets(groupVersionResource.Group, groupVersionResource.Version, groupVersionResource.Resource)
 		}
-		resourceTriplets := resourceGroups[0]
 		if r, ok := allResources[resourceTriplets]; ok {
 			allResources[resourceTriplets] = append(r, workloads[i])
 		} else {

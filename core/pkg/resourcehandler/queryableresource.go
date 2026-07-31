@@ -14,6 +14,9 @@ type QueryableResource struct {
 	GroupVersionResourceTriplet string
 	// metadata.name==<resource name>, metadata.namespace==<resource namespace> etc.
 	FieldSelectors string
+	// Namespaced carries authoritative discovery scope when available. A nil
+	// value preserves the existing k8s-interface scope lookup.
+	Namespaced *bool
 }
 
 func (qr *QueryableResource) String() string {
@@ -27,6 +30,7 @@ func (qr *QueryableResource) Copy() QueryableResource {
 	return QueryableResource{
 		GroupVersionResourceTriplet: qr.GroupVersionResourceTriplet,
 		FieldSelectors:              qr.FieldSelectors,
+		Namespaced:                  qr.Namespaced,
 	}
 }
 

@@ -2,18 +2,23 @@ package resourcehandler
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	discoveryfake "k8s.io/client-go/discovery/fake"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -44,7 +49,43 @@ func agentRuntimeFramework() reporthandling.Framework {
 	return *mockFramework("agent-runtime", []reporthandling.Control{control})
 }
 
-func TestResolveResourceGroupsAgentRuntimeCRDs(t *testing.T) {
+func agentRuntimeDiscovery() *discoveryfake.FakeDiscovery {
+	discovery := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	discovery.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "agents.x-k8s.io/v1alpha1",
+			APIResources: []metav1.APIResource{{Name: "sandboxes", Kind: "Sandbox", Namespaced: true, Verbs: metav1.Verbs{"get", "list"}}},
+		},
+		{
+			GroupVersion: "agents.x-k8s.io/v1beta1",
+			APIResources: []metav1.APIResource{{Name: "sandboxes", Kind: "Sandbox", Namespaced: true, Verbs: metav1.Verbs{"get", "list"}}},
+		},
+		{
+			GroupVersion: "extensions.agents.x-k8s.io/v1alpha1",
+			APIResources: []metav1.APIResource{{Name: "sandboxtemplates", Kind: "SandboxTemplate", Namespaced: true, Verbs: metav1.Verbs{"get", "list"}}},
+		},
+		{
+			GroupVersion: "extensions.agents.x-k8s.io/v1beta1",
+			APIResources: []metav1.APIResource{{Name: "sandboxtemplates", Kind: "SandboxTemplate", Namespaced: true, Verbs: metav1.Verbs{"get", "list"}}},
+		},
+		{
+			GroupVersion: "ate.dev/v1alpha1",
+			APIResources: []metav1.APIResource{
+				{Name: "actortemplates", Kind: "ActorTemplate", Namespaced: true, Verbs: metav1.Verbs{"get", "list"}},
+				{Name: "workerpools", Kind: "WorkerPool", Namespaced: true, Verbs: metav1.Verbs{"get", "list"}},
+			},
+		},
+		{
+			GroupVersion: "monitoring.coreos.com/v1",
+			APIResources: []metav1.APIResource{{Name: "prometheuses", Kind: "Prometheus", Namespaced: true, Verbs: metav1.Verbs{"get", "list"}}},
+		},
+	}
+	return discovery
+}
+
+func TestDiscoveryResolverUsesDeclaredPluralAndScope(t *testing.T) {
+	resolver := newDiscoveryResourceResolver(agentRuntimeDiscovery())
+
 	tests := []struct {
 		group    string
 		version  string
@@ -52,30 +93,63 @@ func TestResolveResourceGroupsAgentRuntimeCRDs(t *testing.T) {
 		want     string
 	}{
 		{group: "agents.x-k8s.io", version: "v1alpha1", resource: "Sandbox", want: "agents.x-k8s.io/v1alpha1/sandboxes"},
-		{group: "agents.x-k8s.io", version: "v1beta1", resource: "Sandbox", want: "agents.x-k8s.io/v1beta1/sandboxes"},
-		{group: "extensions.agents.x-k8s.io", version: "v1alpha1", resource: "SandboxTemplate", want: "extensions.agents.x-k8s.io/v1alpha1/sandboxtemplates"},
+		{group: "agents.x-k8s.io", version: "v1beta1", resource: "sandboxes", want: "agents.x-k8s.io/v1beta1/sandboxes"},
 		{group: "extensions.agents.x-k8s.io", version: "v1beta1", resource: "SandboxTemplate", want: "extensions.agents.x-k8s.io/v1beta1/sandboxtemplates"},
 		{group: "ate.dev", version: "v1alpha1", resource: "ActorTemplate", want: "ate.dev/v1alpha1/actortemplates"},
 		{group: "ate.dev", version: "v1alpha1", resource: "WorkerPool", want: "ate.dev/v1alpha1/workerpools"},
-		{group: "ate.dev", version: "v1alpha1", resource: "actortemplates", want: "ate.dev/v1alpha1/actortemplates"},
+		{group: "monitoring.coreos.com", version: "v1", resource: "Prometheus", want: "monitoring.coreos.com/v1/prometheuses"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.resource+"_"+test.version, func(t *testing.T) {
-			assert.Equal(t, []string{test.want}, resolveResourceGroups(test.group, test.version, test.resource))
+			resolved := resolver(test.group, test.version, test.resource)
+			require.Len(t, resolved, 1)
+			assert.Equal(t, test.want, resolved[0].groupVersionResourceTriplet)
+			require.NotNil(t, resolved[0].namespaced)
+			assert.True(t, *resolved[0].namespaced)
 		})
 	}
 }
 
+func TestDefaultResolverKeepsExactOfflineIdentityWithoutGuessingWildcards(t *testing.T) {
+	exact := defaultResourceResolver("ate.dev", "v1alpha1", "ActorTemplate")
+	require.Len(t, exact, 1)
+	assert.Equal(t, "ate.dev/v1alpha1/ActorTemplate", exact[0].groupVersionResourceTriplet)
+
+	assert.Empty(t, defaultResourceResolver("ate.dev", "*", "ActorTemplate"))
+	assert.Empty(t, defaultResourceResolver("*", "v1alpha1", "ActorTemplate"))
+	assert.Empty(t, defaultResourceResolver("", "v1", "UnknownCoreKind"))
+	assert.Empty(t, defaultResourceResolver("ate.dev", "", "ActorTemplate"))
+}
+
+func TestDiscoveredScopeAppliesIncludeAndExcludeSelectors(t *testing.T) {
+	resolver := newDiscoveryResourceResolver(agentRuntimeDiscovery())
+	resolved := resolver("agents.x-k8s.io", "v1beta1", "Sandbox")
+	require.Len(t, resolved, 1)
+	require.NotNil(t, resolved[0].namespaced)
+
+	gvr := &schema.GroupVersionResource{Group: "agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxes"}
+	assert.Equal(t,
+		[]string{"metadata.namespace==agents"},
+		getNamespacesSelectorsWithOptionalScope(NewIncludeSelector("agents"), gvr, resolved[0].namespaced),
+	)
+	assert.Equal(t,
+		[]string{"metadata.namespace!=kube-system"},
+		getNamespacesSelectorsWithOptionalScope(NewExcludeSelector("kube-system"), gvr, resolved[0].namespaced),
+	)
+}
+
 func TestAgentRuntimeCRDResourceToControlKeysMatchQueries(t *testing.T) {
 	framework := agentRuntimeFramework()
-	queryable, _ := getQueryableResourceMapFromPolicies(
+	resolver := newDiscoveryResourceResolver(agentRuntimeDiscovery())
+	queryable, _ := getQueryableResourceMapFromPoliciesWithResolver(
 		[]reporthandling.Framework{framework},
 		nil,
 		reporthandling.ScopeCluster,
+		resolver,
 	)
 	resourceToControls := map[string][]string{}
-	setComplexKSResourceMap([]reporthandling.Framework{framework}, resourceToControls)
+	setComplexKSResourceMapWithResolver([]reporthandling.Framework{framework}, resourceToControls, resolver)
 
 	for query := range queryable {
 		assert.Containsf(t, resourceToControls, query,
@@ -119,11 +193,14 @@ metadata:
 	require.NoError(t, err)
 	require.Len(t, allResources, 4)
 
+	// Offline there is no authoritative REST discovery. Unknown Kind-style
+	// identities stay unchanged, keeping the policy and manifest maps aligned
+	// without inventing a plural name.
 	expected := map[string]string{
-		"agents.x-k8s.io/v1alpha1/sandboxes":                  "Sandbox",
-		"extensions.agents.x-k8s.io/v1beta1/sandboxtemplates": "SandboxTemplate",
-		"ate.dev/v1alpha1/actortemplates":                     "ActorTemplate",
-		"ate.dev/v1alpha1/workerpools":                        "WorkerPool",
+		"agents.x-k8s.io/v1alpha1/Sandbox":                   "Sandbox",
+		"extensions.agents.x-k8s.io/v1beta1/SandboxTemplate": "SandboxTemplate",
+		"ate.dev/v1alpha1/ActorTemplate":                     "ActorTemplate",
+		"ate.dev/v1alpha1/WorkerPool":                        "WorkerPool",
 	}
 	for resourceGroup, kind := range expected {
 		require.Lenf(t, resources[resourceGroup], 1, "expected one %s under %s", kind, resourceGroup)
@@ -131,42 +208,107 @@ metadata:
 	}
 }
 
-func TestK8sResourceHandlerCollectsAgentRuntimeCRDs(t *testing.T) {
-	objects := map[schema.GroupVersionResource]*unstructured.Unstructured{
-		{Group: "agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxes"}:                   unstructuredResource("agents.x-k8s.io/v1beta1", "Sandbox", "agents", "live-sandbox"),
-		{Group: "extensions.agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxtemplates"}: unstructuredResource("extensions.agents.x-k8s.io/v1beta1", "SandboxTemplate", "agents", "live-template"),
-		{Group: "ate.dev", Version: "v1alpha1", Resource: "actortemplates"}:                     unstructuredResource("ate.dev/v1alpha1", "ActorTemplate", "agents", "live-actor-template"),
-		{Group: "ate.dev", Version: "v1alpha1", Resource: "workerpools"}:                        unstructuredResource("ate.dev/v1alpha1", "WorkerPool", "agents", "live-worker-pool"),
+func TestK8sResourceHandlerUsesDiscoveredGVRsAndNamespaceScope(t *testing.T) {
+	expectedGVRs := []schema.GroupVersionResource{
+		{Group: "agents.x-k8s.io", Version: "v1alpha1", Resource: "sandboxes"},
+		{Group: "agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxes"},
+		{Group: "extensions.agents.x-k8s.io", Version: "v1alpha1", Resource: "sandboxtemplates"},
+		{Group: "extensions.agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxtemplates"},
+		{Group: "ate.dev", Version: "v1alpha1", Resource: "actortemplates"},
+		{Group: "ate.dev", Version: "v1alpha1", Resource: "workerpools"},
 	}
-	listKinds := map[schema.GroupVersionResource]string{
-		{Group: "agents.x-k8s.io", Version: "v1alpha1", Resource: "sandboxes"}:                   "SandboxList",
-		{Group: "agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxes"}:                    "SandboxList",
-		{Group: "extensions.agents.x-k8s.io", Version: "v1alpha1", Resource: "sandboxtemplates"}: "SandboxTemplateList",
-		{Group: "extensions.agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxtemplates"}:  "SandboxTemplateList",
-		{Group: "ate.dev", Version: "v1alpha1", Resource: "actortemplates"}:                      "ActorTemplateList",
-		{Group: "ate.dev", Version: "v1alpha1", Resource: "workerpools"}:                         "WorkerPoolList",
+	objects := map[schema.GroupVersionResource]*unstructured.Unstructured{
+		expectedGVRs[0]: nil,
+		expectedGVRs[1]: unstructuredResource("agents.x-k8s.io/v1beta1", "Sandbox", "agents", "live-sandbox"),
+		expectedGVRs[2]: nil,
+		expectedGVRs[3]: unstructuredResource("extensions.agents.x-k8s.io/v1beta1", "SandboxTemplate", "agents", "live-template"),
+		expectedGVRs[4]: unstructuredResource("ate.dev/v1alpha1", "ActorTemplate", "agents", "live-actor-template"),
+		expectedGVRs[5]: unstructuredResource("ate.dev/v1alpha1", "WorkerPool", "agents", "live-worker-pool"),
+	}
+	listKinds := map[schema.GroupVersionResource]string{}
+	for _, gvr := range expectedGVRs {
+		listKinds[gvr] = "CustomResourceList"
 	}
 	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds)
 	dynamicClient.PrependReactor("list", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		object, ok := objects[action.GetResource()]
+		gvr := action.GetResource()
+		object, ok := objects[gvr]
 		if !ok {
-			return true, &unstructured.UnstructuredList{}, nil
+			return true, nil, fmt.Errorf("unexpected resource query: %s", gvr.String())
 		}
-		return true, &unstructured.UnstructuredList{Items: []unstructured.Unstructured{*object}}, nil
+		list := &unstructured.UnstructuredList{}
+		if object != nil {
+			list.Items = []unstructured.Unstructured{*object}
+		}
+		return true, list, nil
 	})
-	handler := &K8sResourceHandler{k8s: &k8sinterface.KubernetesApi{DynamicClient: dynamicClient}}
-
-	queryable, _ := getQueryableResourceMapFromPolicies(
+	handler := &K8sResourceHandler{k8s: &k8sinterface.KubernetesApi{
+		DynamicClient:   dynamicClient,
+		DiscoveryClient: agentRuntimeDiscovery(),
+	}}
+	resolver := newDiscoveryResourceResolver(handler.k8s.DiscoveryClient)
+	queryable, _ := getQueryableResourceMapFromPoliciesWithResolver(
 		[]reporthandling.Framework{agentRuntimeFramework()},
 		nil,
 		reporthandling.ScopeCluster,
+		resolver,
 	)
-	resources, allResources, failures := handler.pullResources(context.Background(), queryable, &EmptySelector{})
+	resources, allResources, failures := handler.pullResources(context.Background(), queryable, NewIncludeSelector("agents"))
 
 	assert.Empty(t, failures)
 	require.Len(t, allResources, 4)
-	assert.Len(t, resources["agents.x-k8s.io/v1beta1/sandboxes"], 1)
-	assert.Len(t, resources["extensions.agents.x-k8s.io/v1beta1/sandboxtemplates"], 1)
-	assert.Len(t, resources["ate.dev/v1alpha1/actortemplates"], 1)
-	assert.Len(t, resources["ate.dev/v1alpha1/workerpools"], 1)
+
+	var actualQueries []string
+	seenSelectors := map[schema.GroupVersionResource]string{}
+	for _, action := range dynamicClient.Actions() {
+		if action.GetVerb() == "list" {
+			gvr := action.GetResource()
+			actualQueries = append(actualQueries, gvr.String())
+			listAction, ok := action.(k8stesting.ListAction)
+			require.True(t, ok)
+			seenSelectors[gvr] = listAction.GetListRestrictions().Fields.String()
+		}
+	}
+	var expectedQueries []string
+	for _, gvr := range expectedGVRs {
+		expectedQueries = append(expectedQueries, gvr.String())
+	}
+	sort.Strings(actualQueries)
+	sort.Strings(expectedQueries)
+	assert.Equal(t, expectedQueries, actualQueries)
+	for _, gvr := range expectedGVRs {
+		assert.Equal(t, "metadata.namespace=agents", seenSelectors[gvr])
+		assert.Contains(t, resources, k8sinterface.GroupVersionResourceToString(&gvr))
+	}
+}
+
+func TestAddWorkloadsToResourcesMapPreservesGroupVersionMismatchGuard(t *testing.T) {
+	workload := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "extensions/v1beta1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "legacy-deployment",
+			"namespace": "default",
+		},
+	})
+	mapped := map[string][]workloadinterface.IMetadata{}
+
+	addWorkloadsToResourcesMap(mapped, []workloadinterface.IMetadata{workload})
+
+	assert.Empty(t, mapped, "known resources with a non-canonical GroupVersion must remain skipped")
+}
+
+func TestAddSingleResourceToResourceMapsGuardsUnresolvedIdentity(t *testing.T) {
+	workload := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "ate.dev/v1alpha1",
+		"kind":       "",
+		"metadata":   map[string]any{"name": "malformed"},
+	})
+	resources := cautils.K8SResources{}
+	allResources := map[string]workloadinterface.IMetadata{}
+
+	assert.NotPanics(t, func() {
+		addSingleResourceToResourceMaps(resources, allResources, workload)
+	})
+	assert.Empty(t, resources)
 }
