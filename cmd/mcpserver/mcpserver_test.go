@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/mark3labs/mcp-go/mcp"
 
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
@@ -358,5 +359,37 @@ func TestGetKsClient_RetriesAfterTransientFailure(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("expected init not to be called again once a client is cached, got %d calls", calls)
+	}
+}
+
+func TestGetK8sClient_NotConnectedReturnsError(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+
+	// When not connected to a cluster, getK8sClient must return an error
+	// instead of calling k8sinterface.NewKubernetesApi, which terminates the
+	// process on most internal failures.
+	if k8sinterface.IsConnectedToCluster() {
+		t.Skip("test requires no cluster connection to be available")
+	}
+
+	client, err := ksServer.getK8sClient()
+	if err == nil {
+		t.Fatal("expected error when no cluster is reachable, got nil")
+	}
+	if client != nil {
+		t.Fatalf("expected nil client on error, got %v", client)
+	}
+}
+
+func TestGetK8sClient_CachesClient(t *testing.T) {
+	fakeClient := &k8sinterface.KubernetesApi{}
+	ksServer := &KubescapeMcpserver{k8sClient: fakeClient}
+
+	client, err := ksServer.getK8sClient()
+	if err != nil {
+		t.Fatalf("unexpected error for pre-populated client: %v", err)
+	}
+	if client != fakeClient {
+		t.Fatalf("expected cached client to be returned, got %v", client)
 	}
 }

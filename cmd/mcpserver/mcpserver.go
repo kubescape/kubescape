@@ -21,12 +21,20 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 )
 
+// newKsClient creates the Kubescape storage client. It is a package-level
+// var so tests can override it to simulate initialization failures without a
+// real connection attempt, while production always goes through this same
+// value instead of a per-call fallback.
+var newKsClient = func() (spdxv1beta1.SpdxV1beta1Interface, error) {
+	return CreateKsObjectConnection("default", 10*time.Second)
+}
+
 type KubescapeMcpserver struct {
 	s          *server.MCPServer
 	ksClientMu sync.Mutex
 	ksClient   spdxv1beta1.SpdxV1beta1Interface
-	// ksClientInit creates the Kubescape storage client. Overridable in tests
-	// to simulate initialization failures without a real connection attempt.
+	// ksClientInit overrides newKsClient for this server instance; used by
+	// tests. Nil means use newKsClient.
 	ksClientInit func() (spdxv1beta1.SpdxV1beta1Interface, error)
 	k8sClientMu  sync.Mutex
 	k8sClient    *k8sinterface.KubernetesApi
@@ -44,30 +52,43 @@ func (ksServer *KubescapeMcpserver) getKsClient() (spdxv1beta1.SpdxV1beta1Interf
 	}
 	init := ksServer.ksClientInit
 	if init == nil {
-		init = func() (spdxv1beta1.SpdxV1beta1Interface, error) {
-			return CreateKsObjectConnection("default", 10*time.Second)
-		}
+		init = newKsClient
 	}
 	client, err := init()
 	if err != nil {
 		return nil, err
 	}
 	if client == nil {
+		// Belt-and-braces: CreateKsObjectConnection never returns (nil, nil)
+		// today, but this guards against a future/injected implementation
+		// doing so. It only catches an untyped nil interface value; a typed
+		// nil pointer wrapped in the interface would still slip through and
+		// be cached, since the error contract is what init() implementations
+		// are expected to honor.
 		return nil, fmt.Errorf("kubernetes client initialization returned nil")
 	}
 	ksServer.ksClient = client
 	return ksServer.ksClient, nil
 }
 
-// getK8sClient lazily initializes the Kubernetes API client, retrying on
-// every call until initialization succeeds.
-func (ksServer *KubescapeMcpserver) getK8sClient() *k8sinterface.KubernetesApi {
+// getK8sClient lazily initializes the Kubernetes API client. It only calls
+// k8sinterface.NewKubernetesApi (which terminates the process via
+// logger.L().Fatal on most internal failures) once a cluster connection is
+// confirmed available, so a missing/invalid KUBECONFIG returns an error
+// instead of killing the server. Once a client is built it is cached; there
+// is no retry for failures inside NewKubernetesApi itself, since those are
+// fatal by construction and cannot be recovered from in-process.
+func (ksServer *KubescapeMcpserver) getK8sClient() (*k8sinterface.KubernetesApi, error) {
 	ksServer.k8sClientMu.Lock()
 	defer ksServer.k8sClientMu.Unlock()
-	if ksServer.k8sClient == nil {
-		ksServer.k8sClient = k8sinterface.NewKubernetesApi()
+	if ksServer.k8sClient != nil {
+		return ksServer.k8sClient, nil
 	}
-	return ksServer.k8sClient
+	if !k8sinterface.IsConnectedToCluster() {
+		return nil, fmt.Errorf("no reachable kubernetes cluster: ensure KUBECONFIG is set or the server is running inside a cluster")
+	}
+	ksServer.k8sClient = k8sinterface.NewKubernetesApi()
+	return ksServer.k8sClient, nil
 }
 
 // toolHandler binds a registered tool to its declared name and normalizes an
