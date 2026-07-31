@@ -105,7 +105,7 @@ func unzipAllResourcesTestDataAndSetVar(zipFilePath, destFilePath string) error 
 
 func NewOPAProcessorMock(opaSessionObjMock string, resourcesMock []byte) *OPAProcessor {
 	opap := &OPAProcessor{
-		compiledModules: make(map[string]*ast.Compiler),
+		compiledModules: make(map[string]compiledRule),
 	}
 	if err := json.Unmarshal([]byte(regoDependenciesData), &opap.regoDependenciesData); err != nil {
 		panic(err)
@@ -682,6 +682,92 @@ func TestRunOPAOnSingleRuleDispatch(t *testing.T) {
 		assert.Contains(t, err.Error(), "not supported")
 		assert.Contains(t, err.Error(), "mystery-rule")
 	})
+}
+
+// TestGetCompiledRule_RegoV0Fallback locks in backward compatibility for
+// policy sources that predate the regolibrary/opa-utils Rego v1 migration:
+// a pinned --controls-version release, a --use-from/--use-default air-gapped
+// bundle, or a tenant-authored custom control from the cloud backend. None
+// of those are guaranteed to carry "import rego.v1", so getCompiledRule must
+// fall back to the v0 parser instead of failing the whole scan.
+func TestGetCompiledRule_RegoV0Fallback(t *testing.T) {
+	opap := &OPAProcessor{compiledModules: make(map[string]compiledRule)}
+
+	t.Run("v1 rule compiles as v1", func(t *testing.T) {
+		v1Rule := `package armo_builtins
+import rego.v1
+
+deny contains msga if {
+	input.kind == "Pod"
+	msga := {"alertMessage": "test", "alertScore": 1, "failedPaths": [], "fixPaths": [], "alertObject": {"k8sApiObjects": [input]}}
+}
+`
+		compiled, version, err := opap.getCompiledRule(context.Background(), "v1-rule", v1Rule, false)
+		require.NoError(t, err)
+		assert.Equal(t, ast.RegoV1, version)
+		assert.NotNil(t, compiled)
+	})
+
+	t.Run("legacy v0 rule with no import rego.v1 falls back instead of failing", func(t *testing.T) {
+		v0Rule := `package armo_builtins
+
+deny[msga] {
+	input.kind == "Pod"
+	msga := {"alertMessage": "test", "alertScore": 1, "failedPaths": [], "fixPaths": [], "alertObject": {"k8sApiObjects": [input]}}
+}
+`
+		compiled, version, err := opap.getCompiledRule(context.Background(), "v0-rule", v0Rule, false)
+		require.NoError(t, err, "a legacy v0 rule must still compile via the v0 fallback, not fail the scan")
+		assert.Equal(t, ast.RegoV0, version)
+		assert.NotNil(t, compiled)
+	})
+
+	t.Run("genuinely invalid rego fails under both versions", func(t *testing.T) {
+		broken := `package armo_builtins
+
+this is not valid rego at all {{{
+`
+		_, _, err := opap.getCompiledRule(context.Background(), "broken-rule", broken, false)
+		assert.Error(t, err)
+	})
+}
+
+// TestRunOPAOnSingleRule_RegoV0FallbackEvaluates proves the fallback isn't
+// just a compile-time formality: a legacy v0 rule must actually evaluate
+// and produce a result, which requires regoEval to run at the same Rego
+// version the rule was compiled under (not hardcode v1 independently).
+func TestRunOPAOnSingleRule_RegoV0FallbackEvaluates(t *testing.T) {
+	opap := &OPAProcessor{compiledModules: make(map[string]compiledRule)}
+	getRuleData := func(r *reporthandling.PolicyRule) string { return r.Rule }
+
+	rule := &reporthandling.PolicyRule{
+		PortalBase:   armotypes.PortalBase{Name: "legacy-v0-rule"},
+		RuleLanguage: reporthandling.RegoLanguage,
+		Rule: `package armo_builtins
+
+deny[msga] {
+	pod := input[_]
+	pod.kind == "Pod"
+	msga := {
+		"alertMessage": "pod found",
+		"packagename": "armo_builtins",
+		"alertScore": 1,
+		"failedPaths": [],
+		"fixPaths": [],
+		"alertObject": {"k8sApiObjects": [pod]}
+	}
+}
+`,
+	}
+	obj := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "p", "namespace": "default"},
+	}
+
+	responses, _, err := opap.runOPAOnSingleRule(context.Background(), rule, []map[string]any{obj}, getRuleData, resources.RegoDependenciesData{}, "")
+	require.NoError(t, err)
+	require.Len(t, responses, 1)
 }
 
 func TestCELRemediation(t *testing.T) {
