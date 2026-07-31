@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,6 +20,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
+
+// expectedOperatorURL is the exact endpoint httpPostOperatorScanRequest must
+// hit through a fakeOperatorConnector with its default localhost.
+const expectedOperatorURL = "http://127.0.0.1:4002/v1/triggerAction"
 
 func readyPod(name string) v1.Pod {
 	return v1.Pod{
@@ -217,8 +222,23 @@ func (f *fakeOperatorConnector) GetPortForwardLocalhost() string {
 	return "127.0.0.1:4002"
 }
 
-func fakeHTTPPost(statusCode int, postErr error) func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error) {
-	return func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error) {
+// httpPostRecorder captures the arguments httpPostOperatorScanRequest passes
+// to httpPostFunc, so tests can assert on the actual outbound request (URL,
+// headers, serialized payload) instead of only on which branch was taken.
+type httpPostRecorder struct {
+	calls   int
+	url     string
+	headers map[string]string
+	body    []byte
+}
+
+func (r *httpPostRecorder) fakeHTTPPost(statusCode int, postErr error) func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error) {
+	return func(_ httputils.IHttpClient, url string, headers map[string]string, body []byte) (*http.Response, error) {
+		r.calls++
+		r.url = url
+		r.headers = headers
+		r.body = body
+
 		if postErr != nil {
 			return nil, postErr
 		}
@@ -230,6 +250,12 @@ func fakeHTTPPost(statusCode int, postErr error) func(httputils.IHttpClient, str
 }
 
 func TestOperatorAdapter_httpPostOperatorScanRequest(t *testing.T) {
+	// A distinctive, non-empty payload: if the wrong value ever reached the
+	// wire, comparing the recorded body against this exact value would catch it.
+	payload := apis.Commands{Commands: []apis.Command{{CommandName: "scan", ResponseID: "distinctive-marker-af3e9c"}}}
+	wantBody, err := json.Marshal(payload)
+	require.NoError(t, err)
+
 	testCases := []struct {
 		name        string
 		startErr    error
@@ -237,39 +263,46 @@ func TestOperatorAdapter_httpPostOperatorScanRequest(t *testing.T) {
 		postErr     error
 		expectErr   string
 		expectValue string
+		expectPost  bool // whether httpPostFunc is expected to be invoked at all
 	}{
 		{
 			name:        "success",
 			statusCode:  http.StatusOK,
 			expectValue: "success",
+			expectPost:  true,
 		},
 		{
 			name:      "port forwarder fails to start",
 			startErr:  errors.New("boom"),
 			expectErr: "boom",
+			// httpPostOperatorScanRequest returns before ever calling httpPostFunc.
+			expectPost: false,
 		},
 		{
-			name:      "http post fails",
-			postErr:   errors.New("network unreachable"),
-			expectErr: "network unreachable",
+			name:       "http post fails",
+			postErr:    errors.New("network unreachable"),
+			expectErr:  "network unreachable",
+			expectPost: true,
 		},
 		{
 			name:       "non-200 status",
 			statusCode: http.StatusInternalServerError,
 			expectErr:  "http-error: 500",
+			expectPost: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			connector := &fakeOperatorConnector{startErr: tc.startErr}
+			recorder := &httpPostRecorder{}
 			adapter := &OperatorAdapter{
-				httpPostFunc:      fakeHTTPPost(tc.statusCode, tc.postErr), //nolint:bodyclose // fakeHTTPPost returns a func value, not a response; the response's Body is http.NoBody (Close is a no-op) and is closed by httpPostOperatorScanRequest's own defer
+				httpPostFunc:      recorder.fakeHTTPPost(tc.statusCode, tc.postErr), //nolint:bodyclose // fakeHTTPPost returns a func value, not a response; the response's Body is http.NoBody (Close is a no-op) and is closed by httpPostOperatorScanRequest's own defer
 				OperatorScanInfo:  &fakeOperatorScanInfo{},
 				OperatorConnector: connector,
 			}
 
-			got, err := adapter.httpPostOperatorScanRequest(apis.Commands{})
+			got, err := adapter.httpPostOperatorScanRequest(payload)
 
 			if tc.expectErr != "" {
 				require.Error(t, err)
@@ -280,11 +313,23 @@ func TestOperatorAdapter_httpPostOperatorScanRequest(t *testing.T) {
 				assert.Equal(t, tc.expectValue, got)
 			}
 
+			// StartPortForwarder is always attempted first, regardless of outcome.
+			assert.Equal(t, 1, connector.startCalls, "StartPortForwarder must be attempted exactly once")
+
 			// StopPortForwarder must run even on failure paths that reach past StartPortForwarder.
 			if tc.startErr == nil {
 				assert.Equal(t, 1, connector.stopCalls, "StopPortForwarder must be called after a successful StartPortForwarder")
 			} else {
 				assert.Equal(t, 0, connector.stopCalls, "StopPortForwarder must not run if StartPortForwarder itself failed")
+			}
+
+			if tc.expectPost {
+				require.Equal(t, 1, recorder.calls, "httpPostFunc must be invoked exactly once")
+				assert.Equal(t, expectedOperatorURL, recorder.url)
+				assert.Equal(t, "application/json", recorder.headers["Content-Type"])
+				assert.JSONEq(t, string(wantBody), string(recorder.body), "the exact GetRequestPayload() value must reach the HTTP call as JSON")
+			} else {
+				assert.Equal(t, 0, recorder.calls, "httpPostFunc must not be invoked on this failure path")
 			}
 		})
 	}
@@ -293,9 +338,10 @@ func TestOperatorAdapter_httpPostOperatorScanRequest(t *testing.T) {
 func TestOperatorAdapter_OperatorScan(t *testing.T) {
 	t.Run("invalid payload short-circuits before any network call", func(t *testing.T) {
 		connector := &fakeOperatorConnector{}
+		recorder := &httpPostRecorder{}
 		scanInfo := &fakeOperatorScanInfo{validateErr: errors.New("missing target namespace")}
 		adapter := &OperatorAdapter{
-			httpPostFunc:      fakeHTTPPost(http.StatusOK, nil), //nolint:bodyclose // fakeHTTPPost returns a func value, not a response; the response's Body is http.NoBody (Close is a no-op) and is closed by httpPostOperatorScanRequest's own defer
+			httpPostFunc:      recorder.fakeHTTPPost(http.StatusOK, nil), //nolint:bodyclose // fakeHTTPPost returns a func value, not a response; the response's Body is http.NoBody (Close is a no-op) and is closed by httpPostOperatorScanRequest's own defer
 			OperatorScanInfo:  scanInfo,
 			OperatorConnector: connector,
 		}
@@ -307,22 +353,35 @@ func TestOperatorAdapter_OperatorScan(t *testing.T) {
 		assert.Empty(t, got)
 		assert.Equal(t, 1, scanInfo.validateCalls)
 		assert.Equal(t, 0, connector.startCalls, "must not attempt a port-forward when the payload is invalid")
+		assert.Equal(t, 0, recorder.calls, "must not reach the HTTP call when the payload is invalid")
 	})
 
 	t.Run("valid payload triggers the scan request", func(t *testing.T) {
+		// Distinctive, non-empty payload so this test guards the real request
+		// contract (exact bytes on the wire) rather than only OperatorScan's
+		// return branches.
+		payload := &apis.Commands{Commands: []apis.Command{{CommandName: "scan", ResponseID: "distinctive-marker-2f7b1d"}}}
+		wantBody, err := json.Marshal(payload)
+		require.NoError(t, err)
+
 		connector := &fakeOperatorConnector{}
-		scanInfo := &fakeOperatorScanInfo{}
+		recorder := &httpPostRecorder{}
+		scanInfo := &fakeOperatorScanInfo{payload: payload}
 		adapter := &OperatorAdapter{
-			httpPostFunc:      fakeHTTPPost(http.StatusOK, nil), //nolint:bodyclose // fakeHTTPPost returns a func value, not a response; the response's Body is http.NoBody (Close is a no-op) and is closed by httpPostOperatorScanRequest's own defer
+			httpPostFunc:      recorder.fakeHTTPPost(http.StatusOK, nil), //nolint:bodyclose // fakeHTTPPost returns a func value, not a response; the response's Body is http.NoBody (Close is a no-op) and is closed by httpPostOperatorScanRequest's own defer
 			OperatorScanInfo:  scanInfo,
 			OperatorConnector: connector,
 		}
 
-		got, err := adapter.OperatorScan()
+		got, opErr := adapter.OperatorScan()
 
-		require.NoError(t, err)
+		require.NoError(t, opErr)
 		assert.Equal(t, "success", got)
 		assert.Equal(t, 1, connector.startCalls)
+		require.Equal(t, 1, recorder.calls, "httpPostFunc must be invoked exactly once")
+		assert.Equal(t, expectedOperatorURL, recorder.url)
+		assert.Equal(t, "application/json", recorder.headers["Content-Type"])
+		assert.JSONEq(t, string(wantBody), string(recorder.body), "the exact GetRequestPayload() value must reach the HTTP call as JSON")
 	})
 }
 
