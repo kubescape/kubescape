@@ -9,7 +9,8 @@ import (
 
 func TestHostSensorHandlerMock(t *testing.T) {
 	ctx := context.Background()
-	h := &HostSensorHandlerMock{}
+	h := NewHostSensorHandlerMock()
+	require.NotNil(t, h)
 
 	require.NoError(t, h.Init(ctx))
 

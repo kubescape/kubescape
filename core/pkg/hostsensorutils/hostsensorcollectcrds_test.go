@@ -2,6 +2,7 @@ package hostsensorutils
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	k8shostsensor "github.com/kubescape/k8s-interface/hostsensor"
@@ -13,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func newCRDItem(kind, name string, spec map[string]any) *unstructured.Unstructured {
@@ -129,6 +131,7 @@ func TestCRDResourceGetters(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, got, 1)
 			assert.Equal(t, "node-1", got[0].GetName())
+			assert.Equal(t, tt.name, got[0].GetKind())
 		})
 	}
 }
@@ -169,6 +172,27 @@ func TestCollectResources_IncludesControlPlaneInfoWithoutCloudProvider(t *testin
 	assert.True(t, hasKind(res, k8shostsensor.ControlPlaneInfo))
 }
 
+// CollectResources must never return an error itself: every per-resource
+// query failure is swallowed into infoMap so the caller keeps going. This
+// exercises both the CloudProviderInfo failure arm and the per-resource
+// addInfoToMap arm.
+func TestCollectResources_RecordsQueryErrors(t *testing.T) {
+	client := newCRDDynamicClient(t)
+	client.PrependReactor("list", "kubeletinfos", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("boom")
+	})
+	client.PrependReactor("list", "cloudproviderinfos", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("cloud boom")
+	})
+	hsh := &HostSensorHandler{dynamicClient: client}
+
+	res, infoMap, err := hsh.CollectResources(context.Background())
+
+	require.NoError(t, err)
+	assert.Empty(t, res)
+	assert.Len(t, infoMap, 2)
+}
+
 func hasKind(envelopes []hostsensor.HostSensorDataEnvelope, kind k8shostsensor.HostSensorResource) bool {
 	for _, e := range envelopes {
 		if e.GetKind() == kind.String() {
@@ -176,15 +200,4 @@ func hasKind(envelopes []hostsensor.HostSensorDataEnvelope, kind k8shostsensor.H
 		}
 	}
 	return false
-}
-
-func TestNewHostSensorHandlerMock(t *testing.T) {
-	mock := NewHostSensorHandlerMock()
-
-	require.NotNil(t, mock)
-
-	res, infoMap, err := mock.CollectResources(context.Background())
-	require.NoError(t, err)
-	assert.Nil(t, infoMap)
-	assert.Empty(t, res)
 }
