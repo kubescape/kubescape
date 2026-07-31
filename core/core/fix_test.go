@@ -81,7 +81,7 @@ func buildFixableReport(t *testing.T, dir string) string {
 			"  containers:\n"+
 			"  - name: demo\n"+
 			"    securityContext:\n"+
-			"      privileged: true\n"), 0644))
+			"      privileged: true\n"), 0600))
 
 	obj := map[string]any{
 		"apiVersion": "apps/v1",
@@ -139,7 +139,7 @@ func writeReportFile(t *testing.T, dir string, report *reporthandlingv2.PostureR
 	require.NoError(t, err)
 
 	reportPath := filepath.Join(dir, "report.json")
-	require.NoError(t, os.WriteFile(reportPath, b, 0644))
+	require.NoError(t, os.WriteFile(reportPath, b, 0600))
 	return reportPath
 }
 
