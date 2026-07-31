@@ -118,20 +118,10 @@ func mockWorkload(apiVersion, kind, namespace, name string) workloadinterface.IW
 }
 
 // TestAddSingleResourceToResourceMaps_UnresolvableApiVersion is a defense-in-
-// depth guard: k8sinterface.ResourceGroupToSlice can return an empty slice
-// (not an error) for a group/version/kind combination it can't resolve, and
-// this function used to index [0] into that result unconditionally, which
-// panics on an empty slice.
-//
-// In practice every current caller of this function only ever supplies a
-// workload that has already passed k8sinterface.IsTypeWorkload (see
-// filesloaderutils.findScanObjectResource, k8sresourcesutils.getWorkloadFromScanObject,
-// and (*K8sResourceHandler).findScanObjectResource) - and IsTypeWorkload
-// resolves the exact same group/version/kind lookup, so a workload that
-// clears that gate is already guaranteed a non-empty result here. This test
-// bypasses that gate deliberately (unlike mockWorkload, which enforces it) to
-// pin the function's own behavior against future callers that might not gate
-// on IsTypeWorkload first.
+// depth guard (see the comment above the `groups :=` guard in
+// resourcehandlerutils.go for why this is unreachable via current callers).
+// It bypasses the IsTypeWorkload gate deliberately (unlike mockWorkload,
+// which enforces it) to pin the function's own behavior on its own.
 func TestAddSingleResourceToResourceMaps_UnresolvableApiVersion(t *testing.T) {
 	k8sinterface.InitializeMapResourcesMock()
 

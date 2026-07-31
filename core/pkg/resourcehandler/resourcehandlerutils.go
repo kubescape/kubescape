@@ -20,13 +20,9 @@ func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResou
 
 	allResources[wl.GetID()] = wl
 
-	// ResourceGroupToSlice returns an empty slice (not an error) when the
-	// workload's group/version don't match any group/version this library
-	// knows for its kind. Every current caller only passes a workload that
-	// already cleared k8sinterface.IsTypeWorkload, which makes this
-	// unreachable today, but that's an invariant this function has no way to
-	// enforce on its own - indexing [0] unconditionally made it a latent
-	// panic waiting for a caller that doesn't uphold it.
+	// ResourceGroupToSlice can return an empty slice for a group/version/kind
+	// it can't resolve; every current caller gates on IsTypeWorkload first, so
+	// this is unreachable today, but the guard doesn't depend on that holding.
 	groups := k8sinterface.ResourceGroupToSlice(wl.GetGroup(), wl.GetVersion(), wl.GetKind())
 	if len(groups) == 0 {
 		logger.L().Warning("failed to resolve resource group for workload, skipping",
@@ -35,6 +31,10 @@ func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResou
 		return
 	}
 
+	// [0] is a deliberate pick when multiple groups resolve (only possible
+	// with an empty group and >1 group serving the resource at that version);
+	// current callers can't reach that case either, since IsTypeWorkload also
+	// requires exactly one match.
 	resourceGroup := groups[0]
 	k8sResources[resourceGroup] = append(k8sResources[resourceGroup], wl.GetID())
 }
