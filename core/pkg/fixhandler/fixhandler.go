@@ -222,6 +222,22 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		resourceID := result.ResourceID
 		resourceObj := resourceIdToResource[resourceID]
 		if resourceObj == nil {
+			// The report references a resource ID with no backing resource data.
+			// We cannot fix it, but it is still a failed control the user must
+			// remediate manually — surface it rather than dropping it.
+			logger.L().Ctx(ctx).Warning("Skipping result with no resource data in report: " + resourceID)
+			for i := range result.AssociatedControls {
+				ac := &result.AssociatedControls[i]
+				if !ac.GetStatus(nil).IsFailed() {
+					continue
+				}
+				h.unfixedControls = append(h.unfixedControls, UnfixedControl{
+					ControlID:    ac.GetID(),
+					ControlName:  ac.GetName(),
+					ResourceName: resourceID,
+					Reason:       "skipped: resource data missing from report",
+				})
+			}
 			continue
 		}
 		resourcePath := h.getPathFromRawResource(resourceObj.GetObject())
@@ -863,11 +879,7 @@ func determineNewlineSeparator(contents string) string {
 // - Since `yaml/v3` fails to serialize documents starting with a document
 // separator, we comment it out to be compatible.
 func sanitizeYaml(fileAsString string) string {
-	if len(fileAsString) < 3 {
-		return fileAsString
-	}
-
-	if fileAsString[:3] == "---" {
+	if strings.HasPrefix(fileAsString, "---") {
 		fileAsString = "# " + fileAsString
 	}
 	return fileAsString
@@ -877,11 +889,7 @@ func sanitizeYaml(fileAsString string) string {
 //
 // For sanitization details, refer to the sanitizeYaml() function.
 func revertSanitizeYaml(fixedYamlString string) string {
-	if len(fixedYamlString) < 5 {
-		return fixedYamlString
-	}
-
-	if fixedYamlString[:5] == "# ---" {
+	if strings.HasPrefix(fixedYamlString, "# ---") {
 		fixedYamlString = fixedYamlString[2:]
 	}
 	return fixedYamlString
