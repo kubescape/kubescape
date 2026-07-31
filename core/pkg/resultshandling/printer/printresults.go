@@ -23,6 +23,7 @@ const (
 	HtmlFormat        string = "html"
 	SARIFFormat       string = "sarif"
 	GitLabSASTFormat  string = "gitlab-sast"
+	YamlFormat        string = "yaml"
 )
 
 const (
@@ -33,6 +34,7 @@ const (
 	PdfOutputExt        = ".pdf"
 	PrometheusOutputExt = ".txt"
 	PrettyOutputExt     = ".txt"
+	YamlOutputExt       = ".yaml"
 )
 
 type IPrinter interface {

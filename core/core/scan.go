@@ -165,6 +165,8 @@ func fileExtForFormat(format string) string {
 	switch format {
 	case printer.JsonFormat:
 		return printer.JsonOutputExt
+	case printer.YamlFormat:
+		return printer.YamlOutputExt
 	case printer.JunitResultFormat:
 		return printer.JunitOutputExt
 	case printer.SARIFFormat:

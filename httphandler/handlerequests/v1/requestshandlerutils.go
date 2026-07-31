@@ -281,8 +281,8 @@ func defaultScanInfo() *cautils.ScanInfo {
 			logger.L().Warning("ignoring unparsable KS_SUBMIT value", helpers.String("value", raw))
 		}
 	}
-	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)                       // do not publish results to Kubescape SaaS
-	scanInfo.EnableRegoPrint = envToBool("KS_REGO_PRINT", false)             // print rego rules
+	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)           // do not publish results to Kubescape SaaS
+	scanInfo.EnableRegoPrint = envToBool("KS_REGO_PRINT", false) // print rego rules
 	// Only set HostSensorEnabled when explicitly configured; leaving it nil allows
 	// auto-detection of node-agent CRDs in getHostSensorHandler.
 	if val, ok := os.LookupEnv("KS_ENABLE_HOST_SCANNER"); ok {
