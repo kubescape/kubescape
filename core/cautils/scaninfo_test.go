@@ -9,7 +9,9 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	giturl "github.com/kubescape/go-git-url"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -31,25 +33,7 @@ func TestSetContextMetadata(t *testing.T) {
 	t.Run("git local repository metadata", func(t *testing.T) {
 		// metadataGitLocal only parses the local repo's configured remote URL,
 		// so a local fixture reproduces the remote metadata without any HTTP calls.
-		dir := t.TempDir()
-		repo, err := git.PlainInit(dir, false)
-		require.NoError(t, err)
-		_, err = repo.CreateRemote(&config.RemoteConfig{
-			Name: "origin",
-			URLs: []string{"https://github.com/kubescape/kubescape"},
-		})
-		require.NoError(t, err)
-
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test\n"), 0600))
-		worktree, err := repo.Worktree()
-		require.NoError(t, err)
-		_, err = worktree.Add("README.md")
-		require.NoError(t, err)
-		_, err = worktree.Commit("initial commit", &git.CommitOptions{
-			Author: &object.Signature{Name: "kubescape", Email: "kubescape@example.com", When: time.Now()},
-		})
-		require.NoError(t, err)
-
+		dir := newGitFixture(t, "https://github.com/kubescape/kubescape")
 		ctx := reporthandlingv2.ContextMetadata{}
 		scanInfo := &ScanInfo{InputPatterns: []string{dir}}
 		scanInfo.setContextMetadata(context.Background(), &ctx)
@@ -58,11 +42,79 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.Nil(t, ctx.DirectoryContextMetadata)
 		assert.Nil(t, ctx.FileContextMetadata)
 		assert.Nil(t, ctx.HelmContextMetadata)
-		require.NotNil(t, ctx.RepoContextMetadata)
-		assert.Equal(t, "kubescape", ctx.RepoContextMetadata.Repo)
-		assert.Equal(t, "kubescape", ctx.RepoContextMetadata.Owner)
-		assert.Equal(t, "master", ctx.RepoContextMetadata.Branch)
+		assertRepoContextMetadata(t, ctx.RepoContextMetadata, dir)
 	})
+	t.Run("git remote repository metadata", func(t *testing.T) {
+		// metadataGitRemote only parses the repo that CloneGitRepo cached in
+		// tmpDirPaths, so pre-registering the clone path avoids any HTTP calls.
+		remoteURL := "https://github.com/kubescape/kubescape"
+		dir := newGitFixture(t, remoteURL)
+		gitURL, err := giturl.NewGitAPI(remoteURL)
+		require.NoError(t, err)
+		if tmpDirPaths == nil {
+			tmpDirPaths = make(map[string]string)
+		}
+		tmpDirPaths[hashRepoURL(gitURL.GetHttpCloneURL())] = dir
+
+		ctx := reporthandlingv2.ContextMetadata{}
+		scanInfo := &ScanInfo{InputPatterns: []string{remoteURL}}
+		scanInfo.setContextMetadata(context.Background(), &ctx)
+
+		assert.Nil(t, ctx.ClusterContextMetadata)
+		assert.Nil(t, ctx.DirectoryContextMetadata)
+		assert.Nil(t, ctx.FileContextMetadata)
+		assert.Nil(t, ctx.HelmContextMetadata)
+		assertRepoContextMetadata(t, ctx.RepoContextMetadata, dir)
+	})
+}
+
+// assertRepoContextMetadata verifies every field metadataGitLocal is expected
+// to populate, including LastCommit, so regressions like a zeroed committer
+// are caught rather than silently shipped in scan reports.
+func assertRepoContextMetadata(t *testing.T, meta *reporthandlingv2.RepoContextMetadata, localRoot string) {
+	t.Helper()
+	require.NotNil(t, meta)
+	assert.Equal(t, "github", meta.Provider)
+	assert.Equal(t, "kubescape", meta.Repo)
+	assert.Equal(t, "kubescape", meta.Owner)
+	assert.Equal(t, "master", meta.Branch)
+	assert.Equal(t, "https://github.com/kubescape/kubescape", meta.RemoteURL)
+	// go-git resolves symlinks, so on macOS /var/... resolves to /private/var/...
+	resolvedRoot, err := filepath.EvalSymlinks(localRoot)
+	require.NoError(t, err)
+	assert.Equal(t, resolvedRoot, meta.LocalRootPath)
+	assert.NotEmpty(t, meta.LastCommit.Hash)
+	assert.Equal(t, "kubescape", meta.LastCommit.CommitterName)
+	assert.NotZero(t, meta.LastCommit.Date)
+}
+
+// newGitFixture creates a local git repository with a single commit, an
+// "origin" remote pointing at remoteURL, and an explicit "master" default
+// branch (rather than relying on go-git's implicit default), returning its
+// working directory.
+func newGitFixture(t *testing.T, remoteURL string) string {
+	t.Helper()
+	dir := t.TempDir()
+	repo, err := git.PlainInitWithOptions(dir, &git.PlainInitOptions{
+		InitOptions: git.InitOptions{DefaultBranch: plumbing.Master},
+	})
+	require.NoError(t, err)
+	_, err = repo.CreateRemote(&config.RemoteConfig{
+		Name: "origin",
+		URLs: []string{remoteURL},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# test\n"), 0600))
+	worktree, err := repo.Worktree()
+	require.NoError(t, err)
+	_, err = worktree.Add("README.md")
+	require.NoError(t, err)
+	_, err = worktree.Commit("initial commit", &git.CommitOptions{
+		Author: &object.Signature{Name: "kubescape", Email: "kubescape@example.com", When: time.Now()},
+	})
+	require.NoError(t, err)
+	return dir
 }
 
 func TestGetHostname(t *testing.T) {

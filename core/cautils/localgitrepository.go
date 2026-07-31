@@ -121,9 +121,13 @@ func (g *LocalGitRepository) GetLastCommit() (*apis.Commit, error) {
 			Email: commit.Author.Email,
 			Date:  commit.Author.When,
 		},
-		Message:   commit.Message,
-		Committer: apis.Committer{},
-		Files:     []apis.Files{},
+		Message: commit.Message,
+		Committer: apis.Committer{
+			Name:  commit.Committer.Name,
+			Email: commit.Committer.Email,
+			Date:  commit.Committer.When,
+		},
+		Files: []apis.Files{},
 	}, nil
 }
 
