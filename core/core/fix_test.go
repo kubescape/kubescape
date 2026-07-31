@@ -78,16 +78,22 @@ func buildFixableReport(t *testing.T, dir string) string {
 			"metadata:\n"+
 			"  name: demo\n"+
 			"spec:\n"+
-			"  containers:\n"+
-			"  - name: demo\n"+
-			"    securityContext:\n"+
-			"      privileged: true\n"), 0600))
+			"  template:\n"+
+			"    spec:\n"+
+			"      containers:\n"+
+			"      - name: demo\n"+
+			"        securityContext:\n"+
+			"          privileged: true\n"), 0600))
 
 	obj := map[string]any{
 		"apiVersion": "apps/v1",
 		"kind":       "Deployment",
 		"metadata":   map[string]any{"name": "demo", "namespace": "default"},
-		"spec":       map[string]any{},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{},
+			},
+		},
 	}
 	lw := localworkload.NewLocalWorkload(obj)
 	lw.SetPath(manifestName + ":0")
@@ -110,7 +116,7 @@ func buildFixableReport(t *testing.T, dir string) string {
 						Name:   "rule-privileged",
 						Status: apis.StatusFailed,
 						Paths: []armotypes.PosturePaths{
-							{FixPath: armotypes.FixPath{Path: "spec.containers[0].securityContext.privileged", Value: "false"}},
+							{FixPath: armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"}},
 						},
 					},
 				},
@@ -231,6 +237,15 @@ func TestFix_NoConfirmAppliesChanges(t *testing.T) {
 }
 
 func TestFix_ReturnsErrorWhenApplyFails(t *testing.T) {
+	if os.Geteuid() == 0 {
+		// A read-only file mode does not stop a process with CAP_DAC_OVERRIDE
+		// (e.g. root) from writing to it, so this chmod-based failure
+		// injection cannot be enforced when the test runs as root. Be honest
+		// about that instead of asserting on an outcome the setup can't
+		// actually guarantee.
+		t.Skip("chmod-based write failure is not enforced for root")
+	}
+
 	dir := t.TempDir()
 	reportPath := buildFixableReport(t, dir)
 	// Make the target file unwritable so ApplyChanges fails for it.
