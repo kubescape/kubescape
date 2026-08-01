@@ -50,8 +50,24 @@ type githubDefaultBranchAPI struct {
 	DefaultBranch string `json:"default_branch"`
 }
 
-var defaultHTTPClient = &http.Client{
-	Timeout: 30 * time.Second,
+const defaultHTTPTimeout = 30 * time.Second
+
+// testHTTPClient is a hook for testing to override HTTP client creation
+var testHTTPClient *http.Client
+
+// getHTTPClient creates a new HTTP client with proper connection pooling configuration
+func getHTTPClient(timeout time.Duration) *http.Client {
+	if testHTTPClient != nil {
+		return testHTTPClient
+	}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
 }
 
 func NewGitHubRepository() *GitHubRepository {
@@ -172,7 +188,7 @@ func (g *GitHubRepository) setBranch(branchOptional string) error {
 	if g.branch != "" {
 		return nil
 	}
-	body, err := httpGet(defaultHTTPClient, g.defaultBranchAPI(), g.getHeaders())
+	body, err := httpGet(getHTTPClient(defaultHTTPTimeout), g.defaultBranchAPI(), g.getHeaders())
 	if err != nil {
 		return err
 	}
@@ -218,7 +234,7 @@ func (g *GitHubRepository) setTree() error {
 		return nil
 	}
 
-	body, err := httpGet(defaultHTTPClient, g.treeAPI(), g.getHeaders())
+	body, err := httpGet(getHTTPClient(defaultHTTPTimeout), g.treeAPI(), g.getHeaders())
 	if err != nil {
 		return err
 	}

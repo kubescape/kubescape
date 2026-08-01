@@ -75,10 +75,11 @@ func (t *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func TestMain(m *testing.M) {
-	originalTransport := defaultHTTPClient.Transport
-	defaultHTTPClient.Transport = &mockTransport{}
+	testHTTPClient = &http.Client{
+		Transport: &mockTransport{},
+	}
 	code := m.Run()
-	defaultHTTPClient.Transport = originalTransport
+	testHTTPClient = nil
 	os.Exit(code)
 }
 
