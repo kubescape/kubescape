@@ -80,12 +80,23 @@ type OPAProcessor struct {
 	// AllResources is the immutable collected-resource snapshot used to decide
 	// large-cluster bucketing.
 	evaluatedResources map[string]workloadinterface.IMetadata
+	// initialResourceCount is the size of AllResources snapshotted once at
+	// construction, so the large-cluster namespace-bucketing decision (see
+	// getNamespaceName) is made once per scan instead of drifting mid-scan as
+	// rules write aggregator-produced resources back into AllResources.
+	initialResourceCount int
 }
 
+// NewOPAProcessor requires sessionObj.AllResources to already be fully collected (i.e. CollectResources must have already run), since it snapshots the resource count at construction.
 func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool, exceptionEventRecorder record.EventRecorder) *OPAProcessor {
 	if regoDependenciesData != nil && sessionObj != nil {
 		regoDependenciesData.PostureControlInputs = sessionObj.RegoInputData.PostureControlInputs
 		regoDependenciesData.DataControlInputs = sessionObj.RegoInputData.DataControlInputs
+	}
+
+	initialResourceCount := 0
+	if sessionObj != nil {
+		initialResourceCount = len(sessionObj.AllResources)
 	}
 
 	return &OPAProcessor{
@@ -99,6 +110,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		compiledModules:        make(map[string]compiledRule),
 		TimedOutControls:       make(map[string]string),
 		evaluatedResources:     make(map[string]workloadinterface.IMetadata),
+		initialResourceCount:   initialResourceCount,
 	}
 }
 
@@ -282,7 +294,7 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ControlConfigInputs, fixedControlInputs)
 
 	var evalErrs []error
-	resourcesPerNS := getAllSupportedObjects(opap.K8SResources, opap.ExternalResources, opap.AllResources, rule)
+	resourcesPerNS := getAllSupportedObjects(opap.K8SResources, opap.ExternalResources, opap.AllResources, rule, opap.initialResourceCount)
 	for i := range resourcesPerNS {
 		resourceToScan := resourcesPerNS[i]
 		if _, ok := resourcesPerNS[clusterScope]; ok && i != clusterScope {
