@@ -11,7 +11,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 )
 
-func loadResourcesFromUrl(inputPatterns []string) (map[string][]workloadinterface.IMetadata, error) {
+func LoadResourcesFromUrl(inputPatterns []string) (map[string][]workloadinterface.IMetadata, error) {
 	if len(inputPatterns) == 0 {
 		return nil, nil
 	}
