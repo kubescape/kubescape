@@ -24,19 +24,10 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.Nil(t, ctx.HelmContextMetadata)
 		assert.Nil(t, ctx.RepoContextMetadata)
 	}
-	// TODO: tests were commented out due to actual http calls ; http calls should be mocked.
-	/*{
-		ctx := reporthandlingv2.ContextMetadata{}
-		setContextMetadata(&ctx, "https://github.com/kubescape/kubescape")
-		assert.Nil(t, ctx.ClusterContextMetadata)
-		assert.Nil(t, ctx.DirectoryContextMetadata)
-		assert.Nil(t, ctx.FileContextMetadata)
-		assert.Nil(t, ctx.HelmContextMetadata)
-		assert.NotNil(t, ctx.RepoContextMetadata)
-		assert.Equal(t, "kubescape", ctx.RepoContextMetadata.Repo)
-		assert.Equal(t, "kubescape", ctx.RepoContextMetadata.Owner)
-		assert.Equal(t, "master", ctx.RepoContextMetadata.Branch)
-	}*/
+	// Additional test case for GitHub URL context metadata was removed because it called
+	// a non-existent function with an outdated API signature. A proper test for the current
+	// setContextMetadata method would require mocking git operations and testing the actual
+	// ScanInfo method signature.
 }
 
 func TestGetHostname(t *testing.T) {
