@@ -88,7 +88,10 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	statusQueryParams := &StatusQueryParams{}
 	if err := schema.NewDecoder().Decode(statusQueryParams, r.URL.Query()); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		// writeError() sends the response header (400) itself; calling
+		// w.WriteHeader() here first made the second call inside writeError()
+		// a silent no-op, so the client always got 500 regardless of the
+		// intended 400.
 		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
 		return
 	}
