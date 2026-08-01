@@ -130,19 +130,36 @@ func (g *LocalGitRepository) GetLastCommit() (*apis.Commit, error) {
 	}, nil
 }
 
-// GetGitRootDir returns the root directory of the git repository containing path, if any. It deliberately does not go through NewLocalGitRepository: locating the root must not depend on the branch and remote metadata that constructor demands, which CI checkouts routinely lack (detached HEAD on tag/MR pipelines, no configured remote) even though the repository every reported path is relative to is right there.
-func GetGitRootDir(path string) (string, bool) {
+// GetGitRootDir returns the root directory of the git repository containing path.
+// It deliberately does not go through NewLocalGitRepository: locating the root must
+// not depend on the branch and remote metadata that constructor demands, which CI
+// checkouts routinely lack even though the repository every reported path is
+// relative to is right there.
+func GetGitRootDir(path string) (string, error) {
 	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
-		return "", false
+		return "", err
 	}
 
 	worktree, err := goGitRepo.Worktree()
 	if err != nil {
-		return "", false
+		return "", fmt.Errorf("failed to get repo root: %w", err)
 	}
 
-	return worktree.Filesystem.Root(), true
+	return worktree.Filesystem.Root(), nil
+}
+
+// ScanRootPath returns the root that paths reported for input are relative to: the
+// repository root when input sits inside a worktree, and input's own absolute path
+// otherwise. Scan metadata and the resource sources built in the file loader must
+// derive their anchor the same way, or the report's base path and its resources'
+// relative paths no longer compose.
+func ScanRootPath(input string) string {
+	absPath := getAbsPath(input)
+	if root, err := GetGitRootDir(absPath); err == nil {
+		return root
+	}
+	return absPath
 }
 
 // GetRootDir returns the root directory of the repository's worktree

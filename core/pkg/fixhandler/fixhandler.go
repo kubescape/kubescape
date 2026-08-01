@@ -198,7 +198,11 @@ func getLocalPath(report *reporthandlingv2.PostureReport) string {
 	}
 }
 
-// resourceBasePath returns the root the resource's relative path resolves against. The resource's own Source.Path is the root the scan computed that relative path from, so it stays correct where the report-wide base path does not: multi-input scans record only the first input, and a scan of a subdirectory anchors on the repository root. Reports without it (cloned repos, older reports) keep using the report-wide path.
+// resourceBasePath returns the root the resource's relative path resolves against. The
+// resource's own Source.Path is the root the scan computed that relative path from, so
+// it stays correct where the report-wide base path does not: multi-input scans record
+// only the first input. Reports without it (cloned repos, older reports) keep using the
+// report-wide path.
 func (h *FixHandler) resourceBasePath(resourceObj *reporthandling.Resource) string {
 	if resourceObj != nil && resourceObj.Source != nil && resourceObj.Source.Path != "" {
 		return resourceObj.Source.Path

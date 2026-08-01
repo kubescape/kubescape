@@ -209,7 +209,10 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 			resourceSource := opaSessionObj.ResourceSource[resourceID]
 			relPath := resourceSource.RelativePath
 
-			// Github Code Scanning considers results not associated to a file path meaningless and invalid when uploading, and the location written to the report is the relative path alone, so a base path cannot stand in for a missing one
+			// Github Code Scanning considers results not associated to a file path
+			// meaningless and invalid when uploading, and the location written to the
+			// report is the relative path alone, so a base path cannot stand in for a
+			// missing one
 			if relPath == "" {
 				continue
 			}
@@ -450,7 +453,13 @@ func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
 		return opaSessionObj.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
 	case v2.File:
 		if opaSessionObj.Metadata.ContextMetadata.FileContextMetadata != nil {
-			return filepath.Dir(opaSessionObj.Metadata.ContextMetadata.FileContextMetadata.FilePath)
+			filePath := opaSessionObj.Metadata.ContextMetadata.FileContextMetadata.FilePath
+			// a file inside a repository is anchored on the repository root, so its
+			// own directory is the right base only outside one
+			if root, err := cautils.GetGitRootDir(filePath); err == nil {
+				return root
+			}
+			return filepath.Dir(filePath)
 		}
 		return ""
 	default:
@@ -458,7 +467,11 @@ func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
 	}
 }
 
-// effectiveBasePath returns the root a resource's RelativePath resolves against. The resource's own Source.Path is authoritative because it is the root the relative path was computed from, which the scan-wide base path is not: it is derived separately, covers only the first input pattern, and anchors on the scanned directory rather than the repository root whenever git metadata was unusable. Sources that intentionally carry no path (cloned repos) fall back to it.
+// effectiveBasePath returns the root a resource's RelativePath resolves against. The
+// resource's own Source.Path is authoritative because it is the root the relative path
+// was computed from, which the scan-wide base path is not: it covers only the first
+// input pattern of a multi-input scan. Sources that intentionally carry no path
+// (cloned repos) fall back to it.
 func effectiveBasePath(resourceSource reporthandling.Source, basePath string) string {
 	if resourceSource.Path != "" {
 		return resourceSource.Path

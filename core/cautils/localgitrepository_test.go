@@ -134,29 +134,33 @@ func (s *LocalGitRepositoryTestSuite) TestRepositoryWithoutRemotes() {
 	}
 }
 
-// TestGetGitRootDirWithoutUsableMetadata verifies that the repository root resolves from any path inside the worktree even when the branch and remote metadata NewLocalGitRepository demands is missing, otherwise scans of a subdirectory report paths relative to the scan directory instead of the repository root. See #2594.
-func (s *LocalGitRepositoryTestSuite) TestGetGitRootDirWithoutUsableMetadata() {
-	repoPath := s.gitRepositoryPaths["withoutremotes"]
-	absRepoPath, err := filepath.Abs(repoPath)
-	s.NoError(err)
+// TestGetGitRootDirWithoutUsableMetadata verifies that the repository root resolves
+// from any path inside the worktree even when the branch and remote metadata
+// NewLocalGitRepository demands is missing. Without it, a scan of a subdirectory
+// reports paths relative to the scan directory instead of the repository root.
+func TestGetGitRootDirWithoutUsableMetadata(t *testing.T) {
+	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	_, err = gitv5.PlainInit(repoRoot, false)
+	require.NoError(t, err)
 
-	subDir := filepath.Join(repoPath, "workloads", "apps")
-	s.NoError(os.MkdirAll(subDir, 0o750))
-	defer os.RemoveAll(filepath.Join(repoPath, "workloads"))
+	subDir := filepath.Join(repoRoot, "workloads", "apps")
+	require.NoError(t, os.MkdirAll(subDir, 0o750))
 
 	_, err = NewLocalGitRepository(subDir)
-	s.Error(err, "the fixture must keep its metadata unusable for this test to mean anything")
+	require.Error(t, err, "the repository's metadata must be unusable for this test to mean anything")
 
-	root, ok := GetGitRootDir(subDir)
-	if s.True(ok) {
-		s.Equal(absRepoPath, root)
+	root, err := GetGitRootDir(subDir)
+	if assert.NoError(t, err) {
+		assert.Equal(t, repoRoot, root)
 	}
 }
 
-// TestGetGitRootDirOutsideRepository verifies that a path outside any repository reports no root rather than an arbitrary one
-func (s *LocalGitRepositoryTestSuite) TestGetGitRootDirOutsideRepository() {
-	_, ok := GetGitRootDir(s.T().TempDir())
-	s.False(ok)
+// TestGetGitRootDirOutsideRepository verifies that a path outside any repository
+// reports no root rather than an arbitrary one.
+func TestGetGitRootDirOutsideRepository(t *testing.T) {
+	_, err := GetGitRootDir(t.TempDir())
+	assert.Error(t, err)
 }
 
 func (s *LocalGitRepositoryTestSuite) TestGetBranchName() {

@@ -311,7 +311,10 @@ func TestPrintConfigurationScan_MissingControl(t *testing.T) {
 	})
 }
 
-// TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath verifies that a resource with no relative path is dropped even when a base path is available: the SARIF location is written from the relative path alone, so such a result would carry an empty artifact location, which GitHub Code Scanning rejects on upload.
+// TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath verifies that a resource
+// with no relative path is dropped even when a base path is available: the SARIF
+// location is written from the relative path alone, so such a result would carry an
+// empty artifact location, which GitHub Code Scanning rejects on upload.
 func TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath(t *testing.T) {
 	const controlID = "C-0057"
 	resourceID := "apps/v1/Deployment/default/demo"
@@ -583,7 +586,9 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 	}
 }
 
-// TestEffectiveBasePath verifies that a resource's own Source.Path wins over the scan-wide base path, because it is the root its RelativePath was computed from: the scan-wide path covers only the first input pattern and anchors on the scanned directory rather than the repository root whenever git metadata was unusable. See #2594.
+// TestEffectiveBasePath verifies that a resource's own Source.Path wins over the
+// scan-wide base path, because it is the root its RelativePath was computed from,
+// while the scan-wide path covers only the first input pattern of a multi-input scan.
 func TestEffectiveBasePath(t *testing.T) {
 	tests := []struct {
 		name           string

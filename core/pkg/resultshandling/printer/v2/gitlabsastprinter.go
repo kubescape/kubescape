@@ -153,7 +153,7 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 
 	basePath := getBasePathFromMetadata(*opaSessionObj)
 
-	var skippedResources int
+	var withoutFilePath, outsideRepository int
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if !result.GetStatus(nil).IsFailed() {
 			continue
@@ -163,8 +163,13 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 		relPath := resourceSource.RelativePath
 
 		// location.file is built from the relative path alone, and GitLab can only anchor a finding to a file inside the repository
+		if relPath == "" {
+			withoutFilePath++
+			logger.L().Debug("resource has no file path, skipping", helpers.String("resourceID", resourceID))
+			continue
+		}
 		if !isRepositoryRelative(relPath) {
-			skippedResources++
+			outsideRepository++
 			logger.L().Debug("resource path is not repository-relative, skipping", helpers.String("path", relPath), helpers.String("resourceID", resourceID))
 			continue
 		}
@@ -192,10 +197,17 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 		}
 	}
 
-	// an empty report is otherwise indistinguishable from a clean scan, so say how many failed resources were dropped and why
-	if skippedResources > 0 {
-		logger.L().Ctx(ctx).Warning("some failed resources were excluded from the GitLab SAST report because their paths are not relative to the repository root; scan a path inside the repository to include them",
-			helpers.Int("excludedResources", skippedResources), helpers.Int("reportedVulnerabilities", len(report.Vulnerabilities)))
+	// an empty report is otherwise indistinguishable from a clean scan, so say how
+	// many failed resources were dropped and why
+	if outsideRepository > 0 {
+		logger.L().Ctx(ctx).Warning("some failed resources were excluded from the GitLab SAST report because their paths are outside the repository root; scan a path inside the repository to include them",
+			helpers.Int("excludedResources", outsideRepository), helpers.Int("reportedVulnerabilities", len(report.Vulnerabilities)))
+	}
+	// a cluster scan has no file paths at all, so the exclusion is inherent to the
+	// format rather than a path problem the user can act on
+	if withoutFilePath > 0 && basePath != "" {
+		logger.L().Ctx(ctx).Warning("some failed resources were excluded from the GitLab SAST report because they are not associated with a file",
+			helpers.Int("excludedResources", withoutFilePath), helpers.Int("reportedVulnerabilities", len(report.Vulnerabilities)))
 	}
 
 	finishedAt := time.Now().UTC()

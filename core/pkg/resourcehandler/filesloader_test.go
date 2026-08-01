@@ -41,8 +41,12 @@ func TestGetResourcesFromPath_SingleFileRelativePathIsRepositoryRelative(t *test
 	}
 }
 
-// TestGetResourcesFromPath_AnchorsOnRepositoryRootWithoutUsableGitMetadata verifies that a scan of a subdirectory reports paths relative to the repository root even when the repository's branch and remote metadata is unusable. A CI checkout with a detached HEAD or no configured remote is still a repository, and anchoring on the scan directory instead drops the subdirectory prefix, leaving GitLab and GitHub with findings that point at paths the repository does not contain. See #2594.
-func TestGetResourcesFromPath_AnchorsOnRepositoryRootWithoutUsableGitMetadata(t *testing.T) {
+// newRepoWithUnusableGitMetadata builds a repository that go-git can locate but
+// NewLocalGitRepository rejects (unborn HEAD, no remotes), as a CI checkout often is,
+// and writes manifestPath inside it.
+func newRepoWithUnusableGitMetadata(t *testing.T, manifestPath string) string {
+	t.Helper()
+
 	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
 	_, err = gitv5.PlainInit(repoRoot, false)
@@ -51,19 +55,45 @@ func TestGetResourcesFromPath_AnchorsOnRepositoryRootWithoutUsableGitMetadata(t 
 	_, err = cautils.NewLocalGitRepository(repoRoot)
 	require.Error(t, err, "the repository's git metadata must be unusable for this test to mean anything")
 
-	manifestDir := filepath.Join(repoRoot, "workloads", "apps", "base", "app")
-	require.NoError(t, os.MkdirAll(manifestDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(manifestDir, "cronjobs.yaml"), []byte(singlePodManifest), 0o600))
+	absManifest := filepath.Join(repoRoot, filepath.FromSlash(manifestPath))
+	require.NoError(t, os.MkdirAll(filepath.Dir(absManifest), 0o750))
+	require.NoError(t, os.WriteFile(absManifest, []byte(singlePodManifest), 0o600))
 
-	workloadIDToSource, workloads, err := getResourcesFromPath(context.TODO(), filepath.Join(repoRoot, "workloads"), cautils.HelmValueOptions{})
-	require.NoError(t, err)
-	require.NotEmpty(t, workloads)
+	return repoRoot
+}
 
-	for _, w := range workloads {
-		src, ok := workloadIDToSource[w.GetID()]
-		require.True(t, ok, "every workload must have a source")
-		assert.Equal(t, "workloads/apps/base/app/cronjobs.yaml", filepath.ToSlash(src.RelativePath), "the path must keep the scanned subdirectory's prefix")
-		assert.Equal(t, repoRoot, src.Path, "Source.Path must be the root RelativePath resolves against")
+// TestGetResourcesFromPath_AnchorsOnRepositoryRootWithoutUsableGitMetadata verifies
+// that a scan reports paths relative to the repository root even when the
+// repository's branch and remote metadata is unusable. A CI checkout with a detached
+// HEAD or no configured remote is still a repository, and anchoring on the scan path
+// instead drops the prefix, leaving GitLab and GitHub with findings that point at
+// paths the repository does not contain.
+func TestGetResourcesFromPath_AnchorsOnRepositoryRootWithoutUsableGitMetadata(t *testing.T) {
+	const manifest = "workloads/apps/base/app/cronjobs.yaml"
+
+	tests := []struct {
+		name     string
+		scanPath string
+	}{
+		{name: "directory scan", scanPath: "workloads"},
+		{name: "single file scan", scanPath: manifest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repoRoot := newRepoWithUnusableGitMetadata(t, manifest)
+
+			workloadIDToSource, workloads, err := getResourcesFromPath(context.TODO(), filepath.Join(repoRoot, filepath.FromSlash(tt.scanPath)), cautils.HelmValueOptions{})
+			require.NoError(t, err)
+			require.NotEmpty(t, workloads)
+
+			for _, w := range workloads {
+				src, ok := workloadIDToSource[w.GetID()]
+				require.True(t, ok, "every workload must have a source")
+				assert.Equal(t, manifest, filepath.ToSlash(src.RelativePath), "the path must be relative to the repository root, not the scan path")
+				assert.Equal(t, repoRoot, src.Path, "Source.Path must be the root RelativePath resolves against")
+			}
+		})
 	}
 }
 

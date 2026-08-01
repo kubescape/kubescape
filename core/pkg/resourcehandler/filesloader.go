@@ -284,18 +284,21 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 			}
 		}
 
+		// source falls back to the unmodified path when filepath.Rel failed above;
+		// relSource is empty there, and a source with no relative path is dropped
+		// outright by the SARIF and GitLab SAST printers
 		var workloadSource reporthandling.Source
 		if clonedRepo != "" {
 			workloadSource = reporthandling.Source{
 				Path:         "",
-				RelativePath: relSource,
+				RelativePath: source,
 				FileType:     filetype,
 				LastCommit:   lastCommit,
 			}
 		} else {
 			workloadSource = reporthandling.Source{
 				Path:         repoRoot,
-				RelativePath: relSource,
+				RelativePath: source,
 				FileType:     filetype,
 				LastCommit:   lastCommit,
 			}
@@ -365,7 +368,8 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 			}
 		}
 
-		// Path carries the root RelativePath was computed against, so consumers can resolve the file without guessing at the scan's base
+		// Path carries the root RelativePath was computed against, so consumers can
+		// resolve the file without guessing at the scan's base
 		workloadSource := reporthandling.Source{
 			Path:                   repoRoot,
 			RelativePath:           source,
@@ -388,18 +392,33 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	return workloadIDToSource, workloads, nil
 }
 
-// extractGitRepo returns the root every reported path for this scan is relative to, along with the git repository when its metadata is usable enough to attribute commits
+// extractGitRepo returns the root every reported path for this scan is relative to,
+// along with the git repository when its metadata is usable enough to attribute commits.
 func extractGitRepo(path string) (string, *cautils.LocalGitRepository) {
-	repoRoot := ""
 	gitRepo, err := cautils.NewLocalGitRepository(path)
 	if err == nil && gitRepo != nil {
-		repoRoot, _ = gitRepo.GetRootDir()
+		repoRoot, _ := gitRepo.GetRootDir()
 		return repoRoot, gitRepo
 	}
 
-	// the git metadata is unusable, but reported paths must still be anchored to the repository root when there is one, or a scan of a subdirectory loses its prefix and the paths resolve against nothing. See #2594
-	if root, ok := cautils.GetGitRootDir(path); ok {
-		return root, gitRepo
+	// The git metadata is unusable, but reported paths must still be anchored to the
+	// repository root when there is one, or a scan of a subdirectory loses its prefix
+	// and the paths resolve against nothing. Reuse the repository the constructor
+	// already opened rather than opening it a second time.
+	repoRoot, rootErr := "", error(nil)
+	if gitRepo != nil {
+		repoRoot, rootErr = gitRepo.GetRootDir()
+	} else {
+		repoRoot, rootErr = cautils.GetGitRootDir(path)
+	}
+
+	if rootErr == nil && repoRoot != "" {
+		// re-anchoring is invisible in the output otherwise, and any ancestor .git
+		// counts, including one left behind by a stray `git init`
+		if absPath, err := filepath.Abs(path); err != nil || absPath != repoRoot {
+			logger.L().Debug("anchoring reported paths on the repository root", helpers.String("root", repoRoot), helpers.String("scanPath", path))
+		}
+		return repoRoot, gitRepo
 	}
 
 	repoRoot, _ = filepath.Abs(path)
