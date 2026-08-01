@@ -245,6 +245,7 @@ func getKubernetesObjectsFromExternalResources(externalResources cautils.Externa
 
 func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) map[string][]workloadinterface.IMetadata {
 	k8sObjects := map[string][]workloadinterface.IMetadata{}
+	seenResourceIDs := map[string]struct{}{}
 
 	for m := range match {
 		for _, groups := range match[m].APIGroups {
@@ -254,8 +255,12 @@ func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[st
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := k8sResources[groupResource]; ok {
 							for i := range k8sObj {
+								resourceID := k8sObj[i]
+								if _, seen := seenResourceIDs[resourceID]; seen {
+									continue
+								}
 
-								obj := allResources[k8sObj[i]]
+								obj := allResources[resourceID]
 								ns := getNamespaceName(obj, len(allResources))
 
 								l, ok := k8sObjects[ns]
@@ -264,6 +269,7 @@ func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[st
 								}
 								l = append(l, obj)
 								k8sObjects[ns] = l
+								seenResourceIDs[resourceID] = struct{}{}
 							}
 						}
 					}

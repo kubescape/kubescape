@@ -7,13 +7,45 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/exceptions"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 )
+
+func TestGetKubernetesObjectsDeduplicatesResourceAliases(t *testing.T) {
+	workload := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "agents.x-k8s.io/v1alpha1",
+		"kind":       "Sandbox",
+		"metadata": map[string]any{
+			"name":      "agent-sandbox",
+			"namespace": "default",
+		},
+	})
+	resourceID := workload.GetID()
+	resources := cautils.K8SResources{
+		"agents.x-k8s.io/v1alpha1/sandbox":   {resourceID},
+		"agents.x-k8s.io/v1alpha1/sandboxes": {resourceID},
+	}
+	allResources := map[string]workloadinterface.IMetadata{resourceID: workload}
+	match := []reporthandling.RuleMatchObjects{{
+		APIGroups:   []string{"agents.x-k8s.io"},
+		APIVersions: []string{"v1alpha1"},
+		Resources:   []string{"Sandbox", "sandboxes"},
+	}}
+
+	objectsByNamespace := getKubernetesObjects(resources, allResources, match)
+	objectCount := 0
+	for _, objects := range objectsByNamespace {
+		objectCount += len(objects)
+	}
+
+	assert.Equal(t, 1, objectCount)
+}
 
 func TestRemoveData(t *testing.T) {
 	type args struct {

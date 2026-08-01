@@ -380,6 +380,22 @@ func TestUpdateQueryableResourcesMapFromRuleMatchObject(t *testing.T) {
 				"/v1/namespaces",
 			},
 		},
+		{
+			name: "singular and plural CRD aliases produce one query",
+			matches: []reporthandling.RuleMatchObjects{{
+				APIGroups:   []string{"agents.x-k8s.io"},
+				APIVersions: []string{"v1alpha1"},
+				Resources:   []string{"Sandbox", "sandboxes"},
+			}},
+			resourcesFilterMap: nil,
+			namespace:          "",
+			expectedQueryableResourceGroups: []string{
+				"agents.x-k8s.io/v1alpha1/sandbox",
+			},
+			expectedK8SResourceGroups: []string{
+				"agents.x-k8s.io/v1alpha1/sandbox",
+			},
+		},
 	}
 
 	for _, testCase := range testCases {

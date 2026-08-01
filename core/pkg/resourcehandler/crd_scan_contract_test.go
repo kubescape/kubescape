@@ -480,12 +480,13 @@ func TestOfflineManifestResourceAliases(t *testing.T) {
 		kind string
 		want []string
 	}{
-		{kind: "Gateway", want: []string{"gateway", "gateways", "gatewayes"}},
-		{kind: "Proxy", want: []string{"proxy", "proxys", "proxyes", "proxies"}},
-		{kind: "Policy", want: []string{"policy", "policys", "policyes", "policies"}},
+		{kind: "Gateway", want: []string{"gateway", "gateways"}},
+		{kind: "Proxy", want: []string{"proxy", "proxys", "proxies"}},
+		{kind: "Policy", want: []string{"policy", "policys", "policies"}},
 		{kind: "Sandbox", want: []string{"sandbox", "sandboxs", "sandboxes"}},
-		{kind: "HTTPRoute", want: []string{"httproute", "httproutes", "httproutees"}},
+		{kind: "HTTPRoute", want: []string{"httproute", "httproutes"}},
 		{kind: "Ingress", want: []string{"ingress", "ingresses"}},
+		{kind: "Elasticsearch", want: []string{"elasticsearch", "elasticsearchs", "elasticsearches"}},
 	}
 
 	for _, test := range tests {

@@ -2,7 +2,6 @@ package resourcehandler
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -108,7 +107,11 @@ func offlineManifestResourceAliases(kind string) []string {
 		return append(aliases, singular+"es")
 	}
 
-	aliases = append(aliases, singular+"s", singular+"es")
+	aliases = append(aliases, singular+"s")
+	if strings.HasSuffix(singular, "x") || strings.HasSuffix(singular, "z") ||
+		strings.HasSuffix(singular, "ch") || strings.HasSuffix(singular, "sh") {
+		aliases = append(aliases, singular+"es")
+	}
 	if n := len(singular); n >= 2 && singular[n-1] == 'y' &&
 		!strings.ContainsRune("aeiou", rune(singular[n-2])) {
 		aliases = append(aliases, singular[:n-1]+"ies")
@@ -161,18 +164,12 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
 
 	var wls []workloadinterface.IWorkload
-	seenResources := make(map[uintptr]struct{})
+	seenResources := make(map[string]struct{})
 	for _, resources := range mappedResources {
 		for _, r := range resources {
-			// Offline comparison aliases point to the same metadata instance.
-			// Count that instance once while preserving distinct manifests that
-			// happen to declare the same Kubernetes identity.
-			resourceValue := reflect.ValueOf(r)
-			resourcePointer := uintptr(0)
-			if resourceValue.IsValid() && resourceValue.Kind() == reflect.Ptr {
-				resourcePointer = resourceValue.Pointer()
-			}
-			if _, seen := seenResources[resourcePointer]; resourcePointer != 0 && seen {
+			// File-loaded resource IDs include their source path, so aliases of
+			// one object collapse while distinct manifests remain distinguishable.
+			if _, seen := seenResources[r.GetID()]; seen {
 				continue
 			}
 			if r.GetKind() == resource.GetKind() && r.GetName() == resource.GetName() {
@@ -186,9 +183,7 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 				if k8sinterface.IsTypeWorkload(r.GetObject()) {
 					wl := workloadinterface.NewWorkloadObj(r.GetObject())
 					wls = append(wls, wl)
-					if resourcePointer != 0 {
-						seenResources[resourcePointer] = struct{}{}
-					}
+					seenResources[r.GetID()] = struct{}{}
 				}
 			}
 		}

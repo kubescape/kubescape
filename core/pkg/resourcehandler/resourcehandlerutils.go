@@ -160,7 +160,12 @@ func filterRuleMatchesForResource(resourceKind string, matchObjects []reporthand
 func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMatchObjects, resourcesFilterMap map[string]bool, queryableResources QueryableResources, namespace string, resolver resourceResolver) {
 	for _, apiGroup := range match.APIGroups {
 		for _, apiVersions := range match.APIVersions {
+			var handledResources []string
 			for _, resource := range match.Resources {
+				if sharesOfflineResourceAlias(resource, handledResources) {
+					continue
+				}
+				handledResources = append(handledResources, resource)
 				if resourcesFilterMap != nil {
 					if relevant := resourcesFilterMap[resource]; !relevant {
 						continue
@@ -195,4 +200,25 @@ func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMa
 			}
 		}
 	}
+}
+
+func sharesOfflineResourceAlias(resource string, handledResources []string) bool {
+	resource = strings.ToLower(resource)
+	for _, handled := range handledResources {
+		handled = strings.ToLower(handled)
+		if resource == handled || containsString(offlineManifestResourceAliases(resource), handled) ||
+			containsString(offlineManifestResourceAliases(handled), resource) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
