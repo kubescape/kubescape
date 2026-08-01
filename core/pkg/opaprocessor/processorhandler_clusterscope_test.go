@@ -7,6 +7,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/resources"
 	"github.com/stretchr/testify/assert"
 )
@@ -110,4 +111,97 @@ deny contains msga if {
 		"ns-a path missing — pre-seed overwrite regressed; got paths=%v", crResult.Paths)
 	assert.True(t, failed["metadata.annotations.bound-by-ns-b"],
 		"ns-b path missing — pre-seed overwrite regressed; got paths=%v", crResult.Paths)
+}
+
+func TestProcessRule_EnumeratorOutputsDoNotMutateAllResources(t *testing.T) {
+	origLarge := largeClusterSize
+	largeClusterSize = 2
+	t.Cleanup(func() { largeClusterSize = origLarge })
+
+	podA := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "pa", "namespace": "ns-a"},
+	})
+	podB := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "pb", "namespace": "ns-b"},
+	})
+	syntheticA := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "kubescape.io/v1",
+		"kind":       "AggregatedResource",
+		"metadata":   map[string]any{"name": "pa-aggregate", "namespace": "ns-a"},
+	})
+	syntheticB := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "kubescape.io/v1",
+		"kind":       "AggregatedResource",
+		"metadata":   map[string]any{"name": "pb-aggregate", "namespace": "ns-b"},
+	})
+
+	sess := cautils.NewOPASessionObjMock()
+	sess.K8SResources = cautils.K8SResources{
+		"/v1/pods": {podA.GetID(), podB.GetID()},
+	}
+	sess.AllResources[podA.GetID()] = podA
+	sess.AllResources[podB.GetID()] = podB
+
+	opap := NewOPAProcessor(sess, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+
+	rule := &reporthandling.PolicyRule{
+		ResourceEnumerator: `package armo_builtins
+import rego.v1
+
+deny contains msga if {
+    pod := input[_]
+    synthetic := {
+        "apiVersion": "kubescape.io/v1",
+        "kind":       "AggregatedResource",
+        "metadata": {
+            "name":      sprintf("%s-aggregate", [pod.metadata.name]),
+            "namespace": pod.metadata.namespace,
+        },
+    }
+    msga := {
+        "alertMessage": "enumerated resource",
+        "packagename":  "armo_builtins",
+        "alertObject":  {"k8sApiObjects": [synthetic]},
+    }
+}
+`,
+		Rule: `package armo_builtins
+import rego.v1
+
+deny contains msga if {
+    false
+    msga := {}
+}
+`,
+		RuleLanguage: reporthandling.RegoLanguage,
+		Match: []reporthandling.RuleMatchObjects{
+			{
+				APIGroups:   []string{""},
+				APIVersions: []string{"v1"},
+				Resources:   []string{"Pod"},
+			},
+		},
+	}
+	rule.Name = "enumerated-resource-snapshot"
+
+	got, err := opap.processRule(context.Background(), rule, nil, "")
+	assert.NoError(t, err)
+
+	assert.Len(t, opap.AllResources, 2)
+	assert.NotContains(t, opap.AllResources, syntheticA.GetID())
+	assert.NotContains(t, opap.AllResources, syntheticB.GetID())
+	assert.Contains(t, opap.evaluatedResources, syntheticA.GetID())
+	assert.Contains(t, opap.evaluatedResources, syntheticB.GetID())
+
+	for _, synthetic := range []workloadinterface.IMetadata{syntheticA, syntheticB} {
+		result, ok := got[synthetic.GetID()]
+		assert.True(t, ok, "enumerated resource %s must be represented in rule results", synthetic.GetID())
+		if ok {
+			assert.Equal(t, apis.StatusPassed, result.Status)
+		}
+	}
 }
