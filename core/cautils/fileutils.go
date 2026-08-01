@@ -119,9 +119,9 @@ func mergeMaps(base, override map[string]any) map[string]any {
 // If the contents at given path is a Kustomize Directory, LoadResourcesFromKustomizeDirectory will
 // generate yaml files using "Kustomize" & renders a map of workloads from those yaml files
 func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, string) {
-	isKustomizeDirectory := isKustomizeDirectory(basePath)
+	isKustomizeDir := isKustomizeDirectory(basePath)
 	isKustomizeFile := IsKustomizeFile(basePath)
-	if ok := isKustomizeDirectory || isKustomizeFile; !ok {
+	if ok := isKustomizeDir || isKustomizeFile; !ok {
 		return nil, ""
 	}
 
