@@ -136,7 +136,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 // The streaming approach:
 // 1. Receives batches via a channel (resident batch first, then namespace batches)
 // 2. Keeps the resident batch in memory for the entire scan
-// 3. Processes each namespace batch against the resident batch
+// 3. Processes each namespace batch against the resident batch as it arrives
 // 4. Releases memory from namespace batches after processing
 // 5. Merges results from all batches
 func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, policies *cautils.Policies, batchChan <-chan *cautils.ResourceBatch, errChan <-chan error, progressListener IJobProgressNotificationClient) error {
@@ -152,24 +152,20 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, policies *ca
 
 	// Track the resident batch (cluster-scoped resources)
 	var residentBatch *cautils.ResourceBatch
-	var namespaceBatches []*cautils.ResourceBatch
 
-	// Receive all batches first
-	for batch := range batchChan {
+	// First, wait for the resident batch
+	select {
+	case batch := <-batchChan:
 		if batch.Scope == cautils.ClusterScope {
 			residentBatch = batch
 		} else {
-			namespaceBatches = append(namespaceBatches, batch)
+			// First batch must be resident
+			return fmt.Errorf("first batch must be resident (cluster-scoped), got: %s", batch.Scope)
 		}
-	}
-
-	// Check for errors from streaming
-	select {
 	case err := <-errChan:
-		if err != nil {
-			return err
-		}
-	default:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
 	if residentBatch == nil {
@@ -177,95 +173,69 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, policies *ca
 	}
 
 	// Set up session with resident resources
-	opap.K8SResources = residentBatch.K8SResources
+	// Initialize AllResources with resident resources, we'll merge namespace resources as we process them
+	opap.K8SResources = make(cautils.K8SResources)
+	for k, v := range residentBatch.K8SResources {
+		opap.K8SResources[k] = v
+	}
 	opap.ExternalResources = residentBatch.ExternalResources
-	opap.AllResources = residentBatch.AllResources
-
-	// Build evaluation scopes from batches
-	scopes := make([]evaluationScope, 0, len(namespaceBatches)+1)
-	scopes = append(scopes, evaluationScope{name: residentBatch.Scope, resident: residentBatch})
-
-	for _, batch := range namespaceBatches {
-		scopes = append(scopes, evaluationScope{name: batch.Scope, batch: batch, resident: residentBatch})
+	opap.AllResources = make(map[string]workloadinterface.IMetadata)
+	for k, v := range residentBatch.AllResources {
+		opap.AllResources[k] = v
 	}
 
-	if progressListener != nil {
-		progressListener.Start(len(controlIDs) * len(scopes))
-		defer progressListener.Stop()
+	// Process resident batch first
+	residentScope := evaluationScope{name: residentBatch.Scope, resident: residentBatch}
+	if err := opap.processScope(ctx, policies, controlIDs, residentScope, progressListener); err != nil {
+		return err
 	}
 
-	remaining := make(map[string]time.Duration, len(controlIDs))
-	var processErrs []error
+	// Process namespace batches as they arrive
+	for {
+		select {
+		case batch, ok := <-batchChan:
+			if !ok {
+				// Channel closed, no more batches
+				goto done
+			}
+			if batch.Scope == cautils.ClusterScope {
+				return fmt.Errorf("received duplicate resident batch")
+			}
 
-	// Process each scope
-	for _, scope := range scopes {
-		if err := ctx.Err(); err != nil {
-			processErrs = append(processErrs, err)
-			break
+			// Process this namespace batch
+			namespaceScope := evaluationScope{name: batch.Scope, batch: batch, resident: residentBatch}
+			if err := opap.processScope(ctx, policies, controlIDs, namespaceScope, progressListener); err != nil {
+				return err
+			}
+
+			// Merge namespace batch resources into session AllResources
+			// This is needed for other components (exceptions, prioritization, etc.)
+			// that may need to access these resources after OPA evaluation
+			for resourceID, resource := range batch.AllResources {
+				opap.AllResources[resourceID] = resource
+			}
+			for gvr, ids := range batch.K8SResources {
+				opap.K8SResources[gvr] = append(opap.K8SResources[gvr], ids...)
+			}
+
+			// Note: We don't clear batch resources here because other components
+			// (exceptions, prioritization, image scanning, printers, reporters) may
+			// need them after OPA evaluation. Memory is naturally released when the
+			// batch goes out of scope after processing.
+
+		case err := <-errChan:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
 		}
+	}
 
-		for _, controlID := range controlIDs {
-			if err := ctx.Err(); err != nil {
-				processErrs = append(processErrs, err)
-				break
-			}
-			if progressListener != nil {
-				progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", controlID))
-			}
-			if _, timedOut := opap.TimedOutControls[controlID]; timedOut {
-				continue
-			}
-
-			control := policies.Controls[controlID]
-
-			var resourcesAssociatedControl map[string]resourcesresults.ResourceAssociatedControl
-			var err error
-
-			if opap.ControlTimeout > 0 {
-				budget, ok := remaining[controlID]
-				if !ok {
-					budget = opap.ControlTimeout
-				}
-				cctx, cancel := context.WithTimeout(ctx, budget)
-				start := time.Now()
-				resourcesAssociatedControl, err = opap.processControl(cctx, &control, scope)
-				remaining[controlID] = budget - time.Since(start)
-				if cctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
-					opap.markControlTimedOut(&control, opap.ControlTimeout)
-					opap.dropControlResults(controlID)
-					err = nil
-					resourcesAssociatedControl = nil
-				}
-				cancel()
-			} else {
-				resourcesAssociatedControl, err = opap.processControl(ctx, &control, scope)
-			}
-
-			if err != nil {
-				processErrs = append(processErrs, fmt.Errorf("control %q: %w", control.ControlID, err))
-			}
-
-			// Update resources with latest results
-			for resourceID, controlResult := range resourcesAssociatedControl {
-				t, ok := opap.ResourcesResult[resourceID]
-				if !ok {
-					t = resourcesresults.Result{ResourceID: resourceID}
-				}
-				t.AssociatedControls = mergeAssociatedControls(t.AssociatedControls, controlResult, opap.AllPolicies)
-				opap.ResourcesResult[resourceID] = t
-			}
-		}
-
-		// Release memory from namespace batch after processing all controls
-		if scope.batch != nil {
-			// Clear the batch's resources to free memory
-			for id := range scope.batch.AllResources {
-				delete(scope.batch.AllResources, id)
-			}
-			for key := range scope.batch.K8SResources {
-				delete(scope.batch.K8SResources, key)
-			}
-		}
+done:
+	// Check for any remaining errors
+	select {
+	case err := <-errChan:
+		return err
+	default:
 	}
 
 	// Rebuild scan coverage
@@ -282,6 +252,66 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, policies *ca
 	}
 
 	opap.reweightComplianceScores()
+
+	return nil
+}
+
+// processScope processes all controls for a single evaluation scope
+func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Policies, controlIDs []string, scope evaluationScope, progressListener IJobProgressNotificationClient) error {
+	remaining := make(map[string]time.Duration, len(controlIDs))
+	var processErrs []error
+
+	for _, controlID := range controlIDs {
+		if err := ctx.Err(); err != nil {
+			processErrs = append(processErrs, err)
+			break
+		}
+		if progressListener != nil {
+			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", controlID))
+		}
+		if _, timedOut := opap.TimedOutControls[controlID]; timedOut {
+			continue
+		}
+
+		control := policies.Controls[controlID]
+
+		var resourcesAssociatedControl map[string]resourcesresults.ResourceAssociatedControl
+		var err error
+
+		if opap.ControlTimeout > 0 {
+			budget, ok := remaining[controlID]
+			if !ok {
+				budget = opap.ControlTimeout
+			}
+			cctx, cancel := context.WithTimeout(ctx, budget)
+			start := time.Now()
+			resourcesAssociatedControl, err = opap.processControl(cctx, &control, scope)
+			remaining[controlID] = budget - time.Since(start)
+			if cctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+				opap.markControlTimedOut(&control, opap.ControlTimeout)
+				opap.dropControlResults(controlID)
+				err = nil
+				resourcesAssociatedControl = nil
+			}
+			cancel()
+		} else {
+			resourcesAssociatedControl, err = opap.processControl(ctx, &control, scope)
+		}
+
+		if err != nil {
+			processErrs = append(processErrs, fmt.Errorf("control %q: %w", control.ControlID, err))
+		}
+
+		// Update resources with latest results
+		for resourceID, controlResult := range resourcesAssociatedControl {
+			t, ok := opap.ResourcesResult[resourceID]
+			if !ok {
+				t = resourcesresults.Result{ResourceID: resourceID}
+			}
+			t.AssociatedControls = mergeAssociatedControls(t.AssociatedControls, controlResult, opap.AllPolicies)
+			opap.ResourcesResult[resourceID] = t
+		}
+	}
 
 	return errors.Join(processErrs...)
 }

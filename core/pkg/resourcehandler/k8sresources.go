@@ -285,6 +285,7 @@ func (k8sHandler *K8sResourceHandler) collectResidentBatch(ctx context.Context, 
 
 		for _, metaObj := range metaObjs {
 			// Only include cluster-scoped resources in resident batch
+			// Namespace-scoped resources will be handled in streamNamespaceBatches
 			if cautils.ResourceScope(metaObj) == cautils.ClusterScope {
 				resident.K8SResources[qr.GroupVersionResourceTriplet] = append(resident.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
 				resident.AllResources[metaObj.GetID()] = metaObj
@@ -368,10 +369,10 @@ func (k8sHandler *K8sResourceHandler) collectResidentBatch(ctx context.Context, 
 
 // streamNamespaceBatches streams namespace-scoped resources in batches.
 // Each batch contains resources from a single namespace to maintain scope boundaries.
+// This implementation streams batches incrementally to avoid building all batches in memory at once.
 func (k8sHandler *K8sResourceHandler) streamNamespaceBatches(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, resident *cautils.ResourceBatch, batchChan chan<- *cautils.ResourceBatch, sessionObj *cautils.OPASessionObj) error {
-	// Group namespace-scoped resources by namespace
-	namespaceBatches := make(map[string]*cautils.ResourceBatch)
-
+	// First pass: collect all unique namespaces to ensure deterministic ordering
+	namespaces := make(map[string]bool)
 	for key := range queryableResources {
 		qr := queryableResources[key]
 		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
@@ -386,39 +387,51 @@ func (k8sHandler *K8sResourceHandler) streamNamespaceBatches(ctx context.Context
 
 		for _, metaObj := range metaObjs {
 			scope := cautils.ResourceScope(metaObj)
-			if scope == cautils.ClusterScope {
-				continue // Already in resident batch
-			}
-
-			// Get or create namespace batch
-			batch, ok := namespaceBatches[scope]
-			if !ok {
-				batch = cautils.NewResourceBatch(scope)
-				namespaceBatches[scope] = batch
-			}
-
-			batch.K8SResources[qr.GroupVersionResourceTriplet] = append(batch.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
-			batch.AllResources[metaObj.GetID()] = metaObj
-		}
-	}
-
-	// Send namespace batches in sorted order for deterministic evaluation
-	scopes := make([]string, 0, len(namespaceBatches))
-	for scope := range namespaceBatches {
-		scopes = append(scopes, scope)
-	}
-	// Sort scopes for deterministic order
-	// (simple string sort is sufficient for namespace names)
-	for i := 0; i < len(scopes); i++ {
-		for j := i + 1; j < len(scopes); j++ {
-			if scopes[i] > scopes[j] {
-				scopes[i], scopes[j] = scopes[j], scopes[i]
+			if scope != cautils.ClusterScope {
+				namespaces[scope] = true
 			}
 		}
 	}
 
-	for _, scope := range scopes {
-		batch := namespaceBatches[scope]
+	// Sort namespaces for deterministic order
+	sortedNamespaces := make([]string, 0, len(namespaces))
+	for ns := range namespaces {
+		sortedNamespaces = append(sortedNamespaces, ns)
+	}
+	for i := 0; i < len(sortedNamespaces); i++ {
+		for j := i + 1; j < len(sortedNamespaces); j++ {
+			if sortedNamespaces[i] > sortedNamespaces[j] {
+				sortedNamespaces[i], sortedNamespaces[j] = sortedNamespaces[j], sortedNamespaces[i]
+			}
+		}
+	}
+
+	// Second pass: build and stream one namespace batch at a time
+	for _, namespace := range sortedNamespaces {
+		batch := cautils.NewResourceBatch(namespace)
+
+		for key := range queryableResources {
+			qr := queryableResources[key]
+			apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
+			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
+
+			result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, qr.FieldSelectors, globalFieldSelectors)
+			if len(result) == 0 && len(selectorErrs) > 0 {
+				continue
+			}
+
+			metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
+
+			for _, metaObj := range metaObjs {
+				scope := cautils.ResourceScope(metaObj)
+				if scope == namespace {
+					batch.K8SResources[qr.GroupVersionResourceTriplet] = append(batch.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
+					batch.AllResources[metaObj.GetID()] = metaObj
+				}
+			}
+		}
+
+		// Stream the batch immediately
 		select {
 		case batchChan <- batch:
 		case <-ctx.Done():
