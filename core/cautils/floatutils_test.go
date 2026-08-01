@@ -25,3 +25,53 @@ func TestFloat32ToInt(t *testing.T) {
 	assert.Equal(t, -4, Float32ToInt(-3.5))
 	assert.Equal(t, -4, Float32ToInt(-3.51))
 }
+
+func TestComplianceScoreToInt(t *testing.T) {
+	tests := []struct {
+		name  string
+		score float32
+		want  int
+	}{
+		{
+			name:  "ordinary fractional score still rounds",
+			score: 20.7,
+			want:  21,
+		},
+		{
+			name:  "almost perfect score does not round to perfect",
+			score: 99.5,
+			want:  99,
+		},
+		{
+			name:  "near-perfect score does not round to perfect",
+			score: 99.99,
+			want:  99,
+		},
+		{
+			name:  "perfect score remains perfect",
+			score: 100,
+			want:  100,
+		},
+		{
+			name:  "unscored sentinel remains negative",
+			score: -1,
+			want:  -1,
+		},
+		{
+			name:  "integer score from 53 of 100 avoids float32 underflow",
+			score: (float32(53) / float32(100)) * 100,
+			want:  53,
+		},
+		{
+			name:  "integer score from 59 of 100 avoids float32 underflow",
+			score: (float32(59) / float32(100)) * 100,
+			want:  59,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ComplianceScoreToInt(tt.score))
+		})
+	}
+}

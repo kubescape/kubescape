@@ -77,6 +77,11 @@ func TestScore(t *testing.T) {
 			want:  "# HELP kubescape_score Overall compliance score (100 Excellent, 0 All failed)\n# TYPE kubescape_score gauge\nkubescape_score 50\n",
 		},
 		{
+			name:  "Fractional score below perfect",
+			score: 99.5,
+			want:  "# HELP kubescape_score Overall compliance score (100 Excellent, 0 All failed)\n# TYPE kubescape_score gauge\nkubescape_score 99\n",
+		},
+		{
 			name:  "Zero Score",
 			score: 0.0,
 			want:  "# HELP kubescape_score Overall compliance score (100 Excellent, 0 All failed)\n# TYPE kubescape_score gauge\nkubescape_score 0\n",
