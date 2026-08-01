@@ -207,7 +207,8 @@ func (k8sHandler *K8sResourceHandler) GetCloudProvider() string {
 // 1. First, it collects all cluster-scoped and external resources into a resident batch
 // 2. Then, it streams namespace-scoped resources in batches
 // The resident batch is sent first, followed by namespace batches in sorted order.
-func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, error) {
+// Returns the batch channel, error channel, expected number of namespace batches, and any setup error.
+func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
 	logger.L().Start("Streaming Kubernetes objects in batches...")
 
 	batchChan := make(chan *cautils.ResourceBatch, 2)
@@ -215,6 +216,9 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 
 	// Setup phase: collect metadata and queryable resources
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
+
+	// Count expected namespace batches for progress reporting
+	expectedNamespaceBatches := 0
 
 	var err error
 	if scanInfo.IsDeletedScanObject {
@@ -224,7 +228,7 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 	}
 
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
 	scanningScope := cautils.GetScanningScope(sessionObj.Metadata.ContextMetadata)
@@ -256,13 +260,14 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 		}
 
 		// Phase 2: Stream namespace-scoped resources in batches
-		if err := k8sHandler.streamNamespaceBatches(ctx, queryableResources, globalFieldSelectors, residentBatch, batchChan, sessionObj); err != nil {
+		expectedNamespaceBatches, err = k8sHandler.streamNamespaceBatches(ctx, queryableResources, globalFieldSelectors, residentBatch, batchChan, sessionObj)
+		if err != nil {
 			errChan <- err
 			return
 		}
 	}()
 
-	return batchChan, errChan, nil
+	return batchChan, errChan, expectedNamespaceBatches, nil
 }
 
 // collectResidentBatch collects all cluster-scoped and external resources into a single batch
@@ -370,7 +375,8 @@ func (k8sHandler *K8sResourceHandler) collectResidentBatch(ctx context.Context, 
 // streamNamespaceBatches streams namespace-scoped resources in batches.
 // Each batch contains resources from a single namespace to maintain scope boundaries.
 // This implementation streams batches incrementally to avoid building all batches in memory at once.
-func (k8sHandler *K8sResourceHandler) streamNamespaceBatches(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, resident *cautils.ResourceBatch, batchChan chan<- *cautils.ResourceBatch, sessionObj *cautils.OPASessionObj) error {
+// Returns the number of namespace batches sent.
+func (k8sHandler *K8sResourceHandler) streamNamespaceBatches(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, resident *cautils.ResourceBatch, batchChan chan<- *cautils.ResourceBatch, sessionObj *cautils.OPASessionObj) (int, error) {
 	// First pass: collect all unique namespaces to ensure deterministic ordering
 	namespaces := make(map[string]bool)
 	for key := range queryableResources {
@@ -435,11 +441,11 @@ func (k8sHandler *K8sResourceHandler) streamNamespaceBatches(ctx context.Context
 		select {
 		case batchChan <- batch:
 		case <-ctx.Done():
-			return ctx.Err()
+			return 0, ctx.Err()
 		}
 	}
 
-	return nil
+	return len(sortedNamespaces), nil
 }
 
 // findScanObjectResource pulls the requested k8s object to be scanned from the api server

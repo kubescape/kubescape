@@ -14,6 +14,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor/cel"
@@ -137,9 +138,14 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 // 1. Receives batches via a channel (resident batch first, then namespace batches)
 // 2. Keeps the resident batch in memory for the entire scan
 // 3. Processes each namespace batch against the resident batch as it arrives
-// 4. Releases memory from namespace batches after processing
-// 5. Merges results from all batches
-func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, policies *cautils.Policies, batchChan <-chan *cautils.ResourceBatch, errChan <-chan error, progressListener IJobProgressNotificationClient) error {
+// 4. Retains only minimal resource metadata (for exceptions) from namespace batches
+// 5. Releases full resource objects from namespace batches after processing
+// 6. Merges results from all batches
+//
+// Note: Streaming bounds OPA evaluation input memory, not total memory.
+// Downstream components (exceptions, sensitive data removal) require minimal
+// resource metadata which is retained, but full resource objects are released.
+func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, policies *cautils.Policies, batchChan <-chan *cautils.ResourceBatch, errChan <-chan error, progressListener IJobProgressNotificationClient, expectedNamespaceBatches int) error {
 	ctx, span := otel.Tracer("").Start(ctx, "OPAProcessor.ProcessWithStreaming")
 	defer span.End()
 	opap.loggerStartScanning()
@@ -150,12 +156,32 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, policies *ca
 
 	controlIDs := sortedControlIDs(policies)
 
+	// Calculate total progress steps: controls × (resident scope + namespace scopes)
+	totalSteps := len(controlIDs) * (1 + expectedNamespaceBatches)
+	if progressListener != nil {
+		progressListener.Start(totalSteps)
+		defer progressListener.Stop()
+	}
+
+	// Track control timeout budgets across all scopes
+	remaining := make(map[string]time.Duration, len(controlIDs))
+
 	// Track the resident batch (cluster-scoped resources)
 	var residentBatch *cautils.ResourceBatch
 
 	// First, wait for the resident batch
 	select {
-	case batch := <-batchChan:
+	case batch, ok := <-batchChan:
+		if !ok {
+			// Channel closed without sending a batch
+			// Check if there's an error from the producer
+			select {
+			case err := <-errChan:
+				return fmt.Errorf("batch channel closed without resident batch: %w", err)
+			default:
+				return fmt.Errorf("batch channel closed without resident batch")
+			}
+		}
 		if batch.Scope == cautils.ClusterScope {
 			residentBatch = batch
 		} else {
@@ -186,7 +212,7 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, policies *ca
 
 	// Process resident batch first
 	residentScope := evaluationScope{name: residentBatch.Scope, resident: residentBatch}
-	if err := opap.processScope(ctx, policies, controlIDs, residentScope, progressListener); err != nil {
+	if err := opap.processScope(ctx, policies, controlIDs, residentScope, progressListener, remaining); err != nil {
 		return err
 	}
 
@@ -204,24 +230,22 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, policies *ca
 
 			// Process this namespace batch
 			namespaceScope := evaluationScope{name: batch.Scope, batch: batch, resident: residentBatch}
-			if err := opap.processScope(ctx, policies, controlIDs, namespaceScope, progressListener); err != nil {
+			if err := opap.processScope(ctx, policies, controlIDs, namespaceScope, progressListener, remaining); err != nil {
 				return err
 			}
 
-			// Merge namespace batch resources into session AllResources
-			// This is needed for other components (exceptions, prioritization, etc.)
-			// that may need to access these resources after OPA evaluation
+			// Retain minimal resource metadata for exceptions processing
+			// This keeps only the structural metadata (namespace, kind, labels, etc.)
+			// needed for exception matching, while releasing large data fields
+			// (spec, status, data) to reduce memory footprint
 			for resourceID, resource := range batch.AllResources {
-				opap.AllResources[resourceID] = resource
+				// Create a lightweight copy with only metadata
+				lightweightResource := createLightweightResource(resource)
+				opap.AllResources[resourceID] = lightweightResource
 			}
 			for gvr, ids := range batch.K8SResources {
 				opap.K8SResources[gvr] = append(opap.K8SResources[gvr], ids...)
 			}
-
-			// Note: We don't clear batch resources here because other components
-			// (exceptions, prioritization, image scanning, printers, reporters) may
-			// need them after OPA evaluation. Memory is naturally released when the
-			// batch goes out of scope after processing.
 
 		case err := <-errChan:
 			return err
@@ -257,8 +281,7 @@ done:
 }
 
 // processScope processes all controls for a single evaluation scope
-func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Policies, controlIDs []string, scope evaluationScope, progressListener IJobProgressNotificationClient) error {
-	remaining := make(map[string]time.Duration, len(controlIDs))
+func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Policies, controlIDs []string, scope evaluationScope, progressListener IJobProgressNotificationClient, remaining map[string]time.Duration) error {
 	var processErrs []error
 
 	for _, controlID := range controlIDs {
@@ -1281,4 +1304,39 @@ func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleDat
 
 	opap.compiledModules[cacheKey] = compiledRule{compiler: compiled, version: version}
 	return compiled, version, nil
+}
+
+// createLightweightResource creates a minimal resource copy containing only
+// metadata needed for exception matching (namespace, kind, labels, name, etc.)
+// while discarding large data fields (spec, status, data) to reduce memory footprint.
+func createLightweightResource(resource workloadinterface.IMetadata) workloadinterface.IMetadata {
+	if resource == nil {
+		return nil
+	}
+
+	// Get the underlying object
+	obj := resource.GetObject()
+	if obj == nil {
+		return resource
+	}
+
+	// For Kubernetes workloads, create a lightweight copy
+	if k8sinterface.IsTypeWorkload(obj) {
+		workload := workloadinterface.NewWorkloadObj(obj)
+		lightweight := make(map[string]interface{})
+
+		// Copy only essential metadata fields
+		lightweight["apiVersion"] = workload.GetApiVersion()
+		lightweight["kind"] = workload.GetKind()
+		lightweight["metadata"] = map[string]interface{}{
+			"name":      workload.GetName(),
+			"namespace": workload.GetNamespace(),
+			"labels":    workload.GetLabels(),
+		}
+
+		return workloadinterface.NewWorkloadObj(lightweight)
+	}
+
+	// For non-workload resources, return as-is (they're typically smaller)
+	return resource
 }

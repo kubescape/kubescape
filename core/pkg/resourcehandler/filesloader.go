@@ -103,7 +103,7 @@ func (fileHandler *FileResourceHandler) GetCloudProvider() string {
 // StreamResourcesBatches provides a streaming interface for file-based resources.
 // Since file-based resources are typically smaller, this implementation loads all resources
 // and returns them as a single batch for simplicity.
-func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, error) {
+func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
 	batchChan := make(chan *cautils.ResourceBatch, 1)
 	errChan := make(chan error, 1)
 
@@ -133,7 +133,7 @@ func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Conte
 		}
 	}()
 
-	return batchChan, errChan, nil
+	return batchChan, errChan, 0, nil
 }
 
 // helmValueOptionsFromScanInfo extracts the user-supplied Helm value/release flags from ScanInfo

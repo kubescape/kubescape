@@ -471,7 +471,7 @@ func estimateClusterSize(resourceHandler resourcehandler.IResourceHandler, ctx c
 // to reduce memory usage on large clusters.
 func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandler resourcehandler.IResourceHandler, scanData *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, clusterName string, excludedNamespaces string, includeNamespaces string, enableRegoPrint bool, controlTimeout time.Duration) error {
 	// Stream resources in batches
-	batchChan, errChan, err := resourceHandler.StreamResourcesBatches(ctx, scanData, scanInfo)
+	batchChan, errChan, expectedNamespaceBatches, err := resourceHandler.StreamResourcesBatches(ctx, scanData, scanInfo)
 	if err != nil {
 		return fmt.Errorf("failed to start resource streaming: %w", err)
 	}
@@ -484,7 +484,7 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	reportResults.ControlTimeout = controlTimeout
 
 	// Process batches with streaming
-	if err := reportResults.ProcessWithStreaming(ctx, scanData.AllPolicies, batchChan, errChan, cautils.NewProgressHandler("")); err != nil {
+	if err := reportResults.ProcessWithStreaming(ctx, scanData.AllPolicies, batchChan, errChan, cautils.NewProgressHandler(""), expectedNamespaceBatches); err != nil {
 		return fmt.Errorf("failed to process rules with streaming: %w", err)
 	}
 
