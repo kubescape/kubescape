@@ -138,7 +138,7 @@ func TestAddSingleResourceToResourceMaps_UnresolvableApiVersion(t *testing.T) {
 	allResources := map[string]workloadinterface.IMetadata{}
 
 	assert.NotPanics(t, func() {
-		addSingleResourceToResourceMaps(k8sResources, allResources, wl)
+		addSingleResourceToResourceMaps(k8sResources, allResources, wl, defaultResourceResolver)
 	})
 
 	// The resource is still recorded for lookup purposes (e.g. by ID)...
@@ -156,7 +156,7 @@ func TestAddSingleResourceToResourceMaps_KnownApiVersion(t *testing.T) {
 	k8sResources := cautils.K8SResources{}
 	allResources := map[string]workloadinterface.IMetadata{}
 
-	addSingleResourceToResourceMaps(k8sResources, allResources, wl)
+	addSingleResourceToResourceMaps(k8sResources, allResources, wl, defaultResourceResolver)
 
 	assert.Contains(t, allResources, wl.GetID())
 	assert.Contains(t, k8sResources["apps/v1/deployments"], wl.GetID())
@@ -167,7 +167,7 @@ func TestAddSingleResourceToResourceMaps_NilWorkload(t *testing.T) {
 	allResources := map[string]workloadinterface.IMetadata{}
 
 	assert.NotPanics(t, func() {
-		addSingleResourceToResourceMaps(k8sResources, allResources, nil)
+		addSingleResourceToResourceMaps(k8sResources, allResources, nil, defaultResourceResolver)
 	})
 	assert.Empty(t, allResources)
 	assert.Empty(t, k8sResources)
