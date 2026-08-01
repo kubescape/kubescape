@@ -211,7 +211,21 @@ func httpGet(client *http.Client, url string, headers map[string]string) ([]byte
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		const maxBodyInError = 1024
+		if len(body) > maxBodyInError {
+			body = body[:maxBodyInError]
+		}
+		return nil, fmt.Errorf("request to %q failed with status %q: %s", url, resp.Status, body)
+	}
+
+	return body, nil
 }
 func (g *GitHubRepository) setTree() error {
 	if g.isFile {
