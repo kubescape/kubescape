@@ -40,12 +40,13 @@ spec:
 
 		// Test loading resources from the local path
 		// Note: Since the giturl library expects git URLs, this test validates
-		// that the function handles the case where giturl parsing fails gracefully
+		// that the function returns an error when giturl parsing fails
 		workloads, err := LoadResourcesFromUrl([]string{tmpDir})
 
-		// The function should return nil, nil when giturl parsing fails
-		assert.Nil(t, err)
+		// The function should return an error when giturl parsing fails
+		assert.Error(t, err)
 		assert.Nil(t, workloads)
+		assert.Contains(t, err.Error(), "failed to parse Git URL")
 	})
 
 	t.Run("empty input patterns", func(t *testing.T) {
