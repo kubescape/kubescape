@@ -824,7 +824,7 @@ func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int
 
 	// Strings should be quoted
 	if isStringValue {
-		value = fmt.Sprintf("\"%s\"", value)
+		value = fmt.Sprintf("%q", value)
 	}
 
 	// select document index and add a dot for the root node

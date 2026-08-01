@@ -272,6 +272,15 @@ func Test_fixPathToValidYamlExpression(t *testing.T) {
 			want: "select(di==0).metadata.namespace |= \"YOUR_NAMESPACE\"",
 		},
 		{
+			name: "fix path with string containing quotes",
+			args: args{
+				fixPath:             "spec.template.spec.containers[0].command[1]",
+				value:               "app=\"web\"",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).spec.template.spec.containers[0].command[1] |= \"app=\\\"web\\\"\"",
+		},
+		{
 			name: "fix path with number",
 			args: args{
 				fixPath:             "xxx.yyy",
