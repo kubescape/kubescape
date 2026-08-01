@@ -14,6 +14,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -203,11 +204,57 @@ func getLocalPath(report *reporthandlingv2.PostureReport) string {
 // it stays correct where the report-wide base path does not: multi-input scans record
 // only the first input. Reports without it (cloned repos, older reports) keep using the
 // report-wide path.
+//
+// Source.Path is attacker-controlled report input that ends up joined into a path this
+// package writes to, so it may only narrow the report-wide root, never leave it. A
+// rejected or stale root resolves to a file that fails the os.Stat in
+// PrepareResourcesToFix, which reports the resource as unfixed instead of writing
+// outside the scanned tree.
 func (h *FixHandler) resourceBasePath(resourceObj *reporthandling.Resource) string {
-	if resourceObj != nil && resourceObj.Source != nil && resourceObj.Source.Path != "" {
-		return resourceObj.Source.Path
+	if resourceObj == nil || resourceObj.Source == nil || resourceObj.Source.Path == "" {
+		return h.localBasePath
 	}
-	return h.localBasePath
+	if !isPathWithin(h.localBasePath, resourceObj.Source.Path) {
+		logger.L().Debug("ignoring resource source path outside the scanned directory",
+			helpers.String("sourcePath", resourceObj.Source.Path), helpers.String("basePath", h.localBasePath))
+		return h.localBasePath
+	}
+	return resourceObj.Source.Path
+}
+
+// isPathWithin reports whether target resolves to base or somewhere underneath it, after
+// resolving symlinks so neither a "../" segment nor a link out of the tree can escape.
+// A path that does not exist is compared in its cleaned absolute form: it cannot be
+// followed anywhere, and the caller's os.Stat rejects it later.
+func isPathWithin(base, target string) bool {
+	canonicalBase, err := canonicalPath(base)
+	if err != nil {
+		return false
+	}
+	canonicalTarget, err := canonicalPath(target)
+	if err != nil {
+		return false
+	}
+
+	rel, err := filepath.Rel(canonicalBase, canonicalTarget)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// canonicalPath resolves path to an absolute, symlink-free form, falling back to the
+// cleaned absolute path when it does not exist on disk.
+func canonicalPath(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return absPath, nil
+	}
+	return resolved, nil
 }
 
 func (h *FixHandler) buildResourcesMap() map[string]*reporthandling.Resource {
