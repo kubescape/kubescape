@@ -18,7 +18,7 @@ type KustomizeDirectory struct {
 }
 
 // Used for checking if there is "Kustomization" file in the given Directory
-var kustomizationFileMatchers = [3]string{"kustomization.yml", "kustomization.yaml", "Kustomization"}
+var kustomizationFileMatchers = []string{"kustomization.yml", "kustomization.yaml", "Kustomization"}
 
 func isKustomizeDirectory(path string) bool {
 	if ok := isDir(path); !ok {
