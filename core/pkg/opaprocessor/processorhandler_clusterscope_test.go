@@ -113,11 +113,6 @@ deny contains msga if {
 		"ns-b path missing — pre-seed overwrite regressed; got paths=%v", crResult.Paths)
 }
 
-func TestProcessRule_EnumeratorOutputsDoNotMutateAllResources(t *testing.T) {
-	origLarge := largeClusterSize
-	largeClusterSize = 2
-	t.Cleanup(func() { largeClusterSize = origLarge })
-
 // TestProcessRule_NamespaceBucketingStableAcrossAggregatorGrowth guards
 // against a regression where the large-cluster namespace-bucketing decision
 // (getNamespaceName) was recomputed from the live size of opap.AllResources
@@ -167,21 +162,6 @@ func TestProcessRule_NamespaceBucketingStableAcrossAggregatorGrowth(t *testing.T
 		"kind":       "Pod",
 		"metadata":   map[string]any{"name": "pb", "namespace": "ns-b"},
 	})
-	syntheticA := workloadinterface.NewWorkloadObj(map[string]any{
-		"apiVersion": "kubescape.io/v1",
-		"kind":       "AggregatedResource",
-		"metadata":   map[string]any{"name": "pa-aggregate", "namespace": "ns-a"},
-	})
-	syntheticB := workloadinterface.NewWorkloadObj(map[string]any{
-		"apiVersion": "kubescape.io/v1",
-		"kind":       "AggregatedResource",
-		"metadata":   map[string]any{"name": "pb-aggregate", "namespace": "ns-b"},
-	})
-
-	sess := cautils.NewOPASessionObjMock()
-	sess.K8SResources = cautils.K8SResources{
-		"/v1/pods": {podA.GetID(), podB.GetID()},
-	}
 
 	sess := cautils.NewOPASessionObjMock()
 	sess.K8SResources = cautils.K8SResources{
@@ -195,34 +175,6 @@ func TestProcessRule_NamespaceBucketingStableAcrossAggregatorGrowth(t *testing.T
 	sess.AllResources[podB.GetID()] = podB
 
 	opap := NewOPAProcessor(sess, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
-
-	rule := &reporthandling.PolicyRule{
-		ResourceEnumerator: `package armo_builtins
-import rego.v1
-
-deny contains msga if {
-    pod := input[_]
-    synthetic := {
-        "apiVersion": "kubescape.io/v1",
-        "kind":       "AggregatedResource",
-        "metadata": {
-            "name":      sprintf("%s-aggregate", [pod.metadata.name]),
-            "namespace": pod.metadata.namespace,
-        },
-    }
-    msga := {
-        "alertMessage": "enumerated resource",
-        "packagename":  "armo_builtins",
-        "alertObject":  {"k8sApiObjects": [synthetic]},
-    }
-}
-`,
-		Rule: `package armo_builtins
-import rego.v1
-
-deny contains msga if {
-    false
-    msga := {}
 	opap.initialResourceCount = len(sess.AllResources)
 
 	assert.False(t, isLargeCluster(opap.initialResourceCount), "test setup must start below the large-cluster threshold")
@@ -352,22 +304,6 @@ deny[msga] {
 			},
 		},
 	}
-	rule.Name = "enumerated-resource-snapshot"
-
-	got, err := opap.processRule(context.Background(), rule, nil, "")
-	assert.NoError(t, err)
-
-	assert.Len(t, opap.AllResources, 2)
-	assert.NotContains(t, opap.AllResources, syntheticA.GetID())
-	assert.NotContains(t, opap.AllResources, syntheticB.GetID())
-	assert.Contains(t, opap.evaluatedResources, syntheticA.GetID())
-	assert.Contains(t, opap.evaluatedResources, syntheticB.GetID())
-
-	for _, synthetic := range []workloadinterface.IMetadata{syntheticA, syntheticB} {
-		result, ok := got[synthetic.GetID()]
-		assert.True(t, ok, "enumerated resource %s must be represented in rule results", synthetic.GetID())
-		if ok {
-			assert.Equal(t, apis.StatusPassed, result.Status)
 	podRule.Name = "pods-evaluated-together"
 
 	control := reporthandling.Control{ControlID: "C-TEST", Rules: []reporthandling.PolicyRule{podRule}}

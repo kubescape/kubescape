@@ -42,9 +42,6 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	for i := range opap.AllResources {
 		removeData(opap.AllResources[i])
 	}
-	for i := range opap.evaluatedResources {
-		removeData(opap.evaluatedResources[i])
-	}
 
 	processor := exceptions.NewProcessor()
 
@@ -56,7 +53,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 		t := opap.ResourcesResult[i]
 
 		// first set exceptions (reuse the same exceptions processor)
-		if resource, ok := opap.resourceForResult(i); ok {
+		if resource, ok := opap.AllResources[i]; ok {
 			t.SetExceptions(
 				resource,
 				opap.Exceptions,
@@ -84,30 +81,6 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	// map control to error
 	controlToInfoMap := mapControlToInfo(opap.ResourceToControlsMap, opap.InfoMap, opap.Report.SummaryDetails.Controls)
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
-}
-
-func (opap *OPAProcessor) recordEvaluatedResources(inputResources []workloadinterface.IMetadata) {
-	if len(inputResources) == 0 {
-		return
-	}
-	if opap.evaluatedResources == nil {
-		opap.evaluatedResources = make(map[string]workloadinterface.IMetadata)
-	}
-	for _, inputResource := range inputResources {
-		if inputResource == nil || opap.skipNamespace(inputResource.GetNamespace()) {
-			continue
-		}
-		opap.evaluatedResources[inputResource.GetID()] = inputResource
-	}
-}
-
-func (opap *OPAProcessor) resourceForResult(resourceID string) (workloadinterface.IMetadata, bool) {
-	resource, ok := opap.AllResources[resourceID]
-	if ok {
-		return resource, true
-	}
-	resource, ok = opap.evaluatedResources[resourceID]
-	return resource, ok
 }
 
 // applyExceptionsToManualControls marks manual controls as passed+w/exceptions when

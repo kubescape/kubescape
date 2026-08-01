@@ -74,12 +74,6 @@ type OPAProcessor struct {
 	celEvaluator     *cel.Evaluator
 	celEvaluatorOnce sync.Once
 	celEvaluatorErr  error
-	// evaluatedResources stores resources produced during rule evaluation, such
-	// as resource-enumerator or aggregator outputs. They must be available during
-	// result aggregation, but must not be written back to AllResources because
-	// AllResources is the immutable collected-resource snapshot used to decide
-	// large-cluster bucketing.
-	evaluatedResources map[string]workloadinterface.IMetadata
 	// initialResourceCount is the size of AllResources snapshotted once at
 	// construction, so the large-cluster namespace-bucketing decision (see
 	// getNamespaceName) is made once per scan instead of drifting mid-scan as
@@ -109,7 +103,6 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		printEnabled:           enableRegoPrint,
 		compiledModules:        make(map[string]compiledRule),
 		TimedOutControls:       make(map[string]string),
-		evaluatedResources:     make(map[string]workloadinterface.IMetadata),
 		initialResourceCount:   initialResourceCount,
 	}
 }
@@ -147,6 +140,11 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	return processErr
 }
 
+type policyControl struct {
+	key     string
+	control reporthandling.Control
+}
+
 // Process OPA policies (rules) on all configured controls.
 func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policies, progressListener IJobProgressNotificationClient) error {
 	ctx, span := otel.Tracer("").Start(ctx, "OPAProcessor.Process")
@@ -161,11 +159,12 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 	}
 
 	var processErrs []error
-	for _, toPin := range controls {
+	for _, item := range controls {
 		if err := ctx.Err(); err != nil {
 			processErrs = append(processErrs, err)
 			break
 		}
+		toPin := item.control
 		if progressListener != nil {
 			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", toPin.ControlID))
 		}
@@ -210,18 +209,25 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 	return errors.Join(processErrs...)
 }
 
-func sortedPolicyControls(controls map[string]reporthandling.Control) []reporthandling.Control {
-	out := make([]reporthandling.Control, 0, len(controls))
+func sortedPolicyControls(controls map[string]reporthandling.Control) []policyControl {
+	out := make([]policyControl, 0, len(controls))
 	for key, control := range controls {
-		if control.ControlID == "" {
-			control.ControlID = key
-		}
-		out = append(out, control)
+		out = append(out, policyControl{key: key, control: control})
 	}
-	slices.SortFunc(out, func(a, b reporthandling.Control) int {
-		return strings.Compare(a.ControlID, b.ControlID)
+	slices.SortFunc(out, func(a, b policyControl) int {
+		if c := strings.Compare(policyControlSortKey(a), policyControlSortKey(b)); c != 0 {
+			return c
+		}
+		return strings.Compare(a.key, b.key)
 	})
 	return out
+}
+
+func policyControlSortKey(item policyControl) string {
+	if item.control.ControlID != "" {
+		return item.control.ControlID
+	}
+	return item.key
 }
 
 func (opap *OPAProcessor) loggerStartScanning() {
@@ -326,7 +332,12 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 
 		inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
 
-		opap.recordEvaluatedResources(inputResources)
+		for _, inputResource := range inputResources {
+			if opap.skipNamespace(inputResource.GetNamespace()) {
+				continue
+			}
+			opap.AllResources[inputResource.GetID()] = inputResource
+		}
 
 		ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData, controlID)
 		if err != nil {

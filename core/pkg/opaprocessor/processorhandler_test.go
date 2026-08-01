@@ -144,10 +144,11 @@ func TestSortedPolicyControls(t *testing.T) {
 	got := sortedPolicyControls(controls)
 
 	require.Len(t, got, 4)
-	assert.Equal(t, "C-0001", got[0].ControlID)
-	assert.Equal(t, "C-0002", got[1].ControlID)
-	assert.Equal(t, "C-0003", got[2].ControlID)
-	assert.Equal(t, "fallback-id", got[3].ControlID)
+	assert.Equal(t, "C-0001", got[0].control.ControlID)
+	assert.Equal(t, "C-0002", got[1].control.ControlID)
+	assert.Equal(t, "C-0003", got[2].control.ControlID)
+	assert.Equal(t, "fallback-id", got[3].key)
+	assert.Empty(t, got[3].control.ControlID)
 	assert.Empty(t, controls["fallback-id"].ControlID, "sorting must not mutate the source controls map")
 }
 

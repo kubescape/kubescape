@@ -1,16 +1,13 @@
 package opaprocessor
 
 import (
-	"context"
 	"testing"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/exceptions"
-	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
@@ -939,170 +936,6 @@ func TestGetNamespaceName(t *testing.T) {
 			assert.Equal(t, tt.want, getNamespaceName(tt.obj, tt.clusterSize))
 		})
 	}
-}
-
-func TestRecordEvaluatedResourcesDoesNotMutateAllResourcesOrFlipBucketing(t *testing.T) {
-	orig := largeClusterSize
-	largeClusterSize = 2
-	t.Cleanup(func() { largeClusterSize = orig })
-
-	podA := workloadinterface.NewWorkloadObj(map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Pod",
-		"metadata": map[string]any{
-			"name":      "pod-a",
-			"namespace": "ns-a",
-		},
-	})
-	podB := workloadinterface.NewWorkloadObj(map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Pod",
-		"metadata": map[string]any{
-			"name":      "pod-b",
-			"namespace": "ns-b",
-		},
-	})
-	synthetic := workloadinterface.NewWorkloadObj(map[string]any{
-		"apiVersion": "kubescape.io/v1",
-		"kind":       "AggregatedResource",
-		"metadata": map[string]any{
-			"name":      "subject-role-rolebinding",
-			"namespace": "ns-a",
-		},
-	})
-
-	opap := &OPAProcessor{
-		OPASessionObj: &cautils.OPASessionObj{
-			AllResources: map[string]workloadinterface.IMetadata{
-				podA.GetID(): podA,
-				podB.GetID(): podB,
-			},
-			K8SResources: cautils.K8SResources{
-				"/v1/pods": {podA.GetID(), podB.GetID()},
-			},
-		},
-	}
-
-	opap.recordEvaluatedResources([]workloadinterface.IMetadata{synthetic})
-
-	assert.Len(t, opap.AllResources, 2)
-	assert.NotContains(t, opap.AllResources, synthetic.GetID())
-	assert.Contains(t, opap.evaluatedResources, synthetic.GetID())
-
-	rule := &reporthandling.PolicyRule{
-		Match: []reporthandling.RuleMatchObjects{
-			{
-				APIGroups:   []string{""},
-				APIVersions: []string{"v1"},
-				Resources:   []string{"Pod"},
-			},
-		},
-	}
-
-	got := getAllSupportedObjects(opap.K8SResources, nil, opap.AllResources, rule)
-	assert.ElementsMatch(t, []workloadinterface.IMetadata{podA, podB}, got[clusterScope])
-	assert.NotContains(t, got, "ns-a")
-	assert.NotContains(t, got, "ns-b")
-}
-
-func TestResourceForResultFallsBackToEvaluatedResources(t *testing.T) {
-	collected := workloadinterface.NewWorkloadObj(map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Pod",
-		"metadata": map[string]any{
-			"name":      "collected",
-			"namespace": "default",
-		},
-	})
-	evaluated := workloadinterface.NewWorkloadObj(map[string]any{
-		"apiVersion": "kubescape.io/v1",
-		"kind":       "AggregatedResource",
-		"metadata": map[string]any{
-			"name":      "evaluated",
-			"namespace": "default",
-		},
-	})
-	shadow := workloadinterface.NewWorkloadObj(map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Pod",
-		"metadata": map[string]any{
-			"name":      "shadow",
-			"namespace": "default",
-		},
-	})
-
-	opap := &OPAProcessor{
-		OPASessionObj: &cautils.OPASessionObj{
-			AllResources: map[string]workloadinterface.IMetadata{
-				collected.GetID(): collected,
-				shadow.GetID():    shadow,
-			},
-		},
-		evaluatedResources: map[string]workloadinterface.IMetadata{
-			evaluated.GetID(): evaluated,
-			shadow.GetID():    evaluated,
-		},
-	}
-
-	got, ok := opap.resourceForResult(evaluated.GetID())
-	require.True(t, ok)
-	assert.Equal(t, evaluated.GetID(), got.GetID())
-
-	got, ok = opap.resourceForResult(shadow.GetID())
-	require.True(t, ok)
-	assert.Equal(t, shadow.GetID(), got.GetID(), "collected resource snapshot must win over evaluated-resource fallback")
-
-	_, ok = opap.resourceForResult("missing")
-	assert.False(t, ok)
-}
-
-func TestRecordEvaluatedResourcesHonorsNamespaceFilters(t *testing.T) {
-	keep := workloadinterface.NewWorkloadObj(map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Pod",
-		"metadata": map[string]any{
-			"name":      "keep",
-			"namespace": "included",
-		},
-	})
-	drop := workloadinterface.NewWorkloadObj(map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Pod",
-		"metadata": map[string]any{
-			"name":      "drop",
-			"namespace": "excluded",
-		},
-	})
-
-	opap := NewOPAProcessor(cautils.NewOPASessionObjMock(), nil, "test", "", "included", false, nil)
-	opap.recordEvaluatedResources([]workloadinterface.IMetadata{nil, keep, drop})
-
-	assert.Contains(t, opap.evaluatedResources, keep.GetID())
-	assert.NotContains(t, opap.evaluatedResources, drop.GetID())
-}
-
-func TestUpdateResultsSanitizesEvaluatedResources(t *testing.T) {
-	secret := workloadinterface.NewWorkloadObj(map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Secret",
-		"metadata": map[string]any{
-			"name":      "generated-secret",
-			"namespace": "default",
-		},
-		"data": map[string]any{
-			"password": "placeholder-value",
-		},
-	})
-
-	opaSessionObj := cautils.NewOPASessionObjMock()
-	opap := NewOPAProcessor(opaSessionObj, nil, "test", "", "", false, nil)
-	opap.evaluatedResources[secret.GetID()] = secret
-
-	opap.updateResults(context.Background())
-
-	data, ok := secret.GetObject()["data"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, "XXXXXX", data["password"])
 }
 
 func TestFilterExpiredExceptions(t *testing.T) {
