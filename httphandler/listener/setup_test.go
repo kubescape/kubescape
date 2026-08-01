@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"math/big"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -209,4 +210,83 @@ func TestGetOffline(t *testing.T) {
 			t.Fatal("getOffline() = true, want false")
 		}
 	})
+}
+
+func TestGetPprofEnabled(t *testing.T) {
+	t.Run("returns false when unset", func(t *testing.T) {
+		t.Setenv("KS_PPROF_ENABLED", "")
+		if getPprofEnabled() {
+			t.Fatal("getPprofEnabled() = true, want false")
+		}
+	})
+
+	t.Run("returns true for lowercase true", func(t *testing.T) {
+		t.Setenv("KS_PPROF_ENABLED", "true")
+		if !getPprofEnabled() {
+			t.Fatal("getPprofEnabled() = false, want true")
+		}
+	})
+
+	t.Run("returns true case-insensitively", func(t *testing.T) {
+		t.Setenv("KS_PPROF_ENABLED", "TRUE")
+		if !getPprofEnabled() {
+			t.Fatal("getPprofEnabled() = false, want true — this is a security-relevant knob an operator sets by hand, so it must not silently no-op on a differently-cased value")
+		}
+	})
+
+	t.Run("returns false for other values", func(t *testing.T) {
+		t.Setenv("KS_PPROF_ENABLED", "1")
+		if getPprofEnabled() {
+			t.Fatal("getPprofEnabled() = true, want false")
+		}
+	})
+}
+
+func TestGetPprofAddr(t *testing.T) {
+	t.Run("returns default when unset", func(t *testing.T) {
+		t.Setenv("KS_PPROF_ADDR", "")
+		if got := getPprofAddr(); got != "127.0.0.1:6060" {
+			t.Fatalf("getPprofAddr() = %q, want %q", got, "127.0.0.1:6060")
+		}
+	})
+
+	t.Run("returns env var when set", func(t *testing.T) {
+		t.Setenv("KS_PPROF_ADDR", "127.0.0.1:7070")
+		if got := getPprofAddr(); got != "127.0.0.1:7070" {
+			t.Fatalf("getPprofAddr() = %q, want %q", got, "127.0.0.1:7070")
+		}
+	})
+}
+
+// TestServePprof_RegistersOwnMuxNotDefaultServeMux guards against a
+// regression back to http.ListenAndServe(addr, nil): serving off
+// http.DefaultServeMux means these endpoints only exist because some
+// unrelated package blank-imports net/http/pprof. If that import were
+// removed as dead code, servePprof would keep logging success while every
+// request 404s. Registering on a dedicated mux makes the dependency
+// self-contained and keeps profiling handlers off the global
+// DefaultServeMux.
+func TestServePprof_RegistersOwnMuxNotDefaultServeMux(t *testing.T) {
+	t.Setenv("KS_PPROF_ENABLED", "true")
+	port := func() string {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		defer ln.Close()
+		_, p, err := net.SplitHostPort(ln.Addr().String())
+		require.NoError(t, err)
+		return p
+	}()
+	addr := "127.0.0.1:" + port
+	t.Setenv("KS_PPROF_ADDR", addr)
+
+	servePprof()
+
+	require.Eventually(t, func() bool {
+		resp, err := http.Get("http://" + addr + "/debug/pprof/")
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, time.Second, 10*time.Millisecond, "pprof server did not come up serving its own mux")
 }

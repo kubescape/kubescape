@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -128,22 +130,57 @@ func getKeyFile() string {
 	return os.Getenv("KS_KEY_FILE")
 }
 
+func getPprofEnabled() bool {
+	return strings.EqualFold(os.Getenv("KS_PPROF_ENABLED"), "true")
+}
+
+func getPprofAddr() string {
+	if a := os.Getenv("KS_PPROF_ADDR"); a != "" {
+		return a
+	}
+	return "127.0.0.1:6060"
+}
+
 // servePprof starts the net/http/pprof debug server, but only when
 // explicitly opted into via KS_PPROF_ENABLED=true. It used to start
 // automatically whenever the logger level was "debug", which is the
 // server's default log level - meaning every deployment exposed
 // unauthenticated pprof endpoints (heap dumps, CPU profiling, ...) on
-// :6060 by default. It now also binds to loopback only, so it's reachable
-// only via port-forward/exec into the pod, not from the network.
+// :6060 by default. It now also binds to loopback only by default (override
+// via KS_PPROF_ADDR), so it's reachable only via port-forward/exec into the
+// pod, not from the network.
+//
+// The handlers are registered on a dedicated mux rather than passing nil to
+// http.ListenAndServe (which serves off http.DefaultServeMux): the pprof
+// package normally self-registers on DefaultServeMux via its own init(), so
+// relying on that means these endpoints exist only because some other,
+// unrelated package blank-imports "net/http/pprof" - remove that import as
+// dead code and this server would silently start logging success while
+// serving 404s. Registering explicitly here also keeps profiling handlers
+// off the global DefaultServeMux, so a future handler-less http.Server
+// elsewhere in this binary can't accidentally re-expose them.
 func servePprof() {
-	if os.Getenv("KS_PPROF_ENABLED") != "true" {
+	if !getPprofEnabled() {
 		return
 	}
+	addr := getPprofAddr()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second, // same slowloris guard as the main server
+	}
+
 	go func() {
-		// start pprof server -> https://pkg.go.dev/net/http/pprof
-		addr := "127.0.0.1:6060"
 		logger.L().Info("starting pprof server", helpers.String("address", addr))
-		if err := http.ListenAndServe(addr, nil); err != nil {
+		if err := srv.ListenAndServe(); err != nil {
 			logger.L().Error("pprof server stopped", helpers.Error(err))
 		}
 	}()
