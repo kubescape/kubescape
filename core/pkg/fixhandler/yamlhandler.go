@@ -87,14 +87,22 @@ func flattenWithDFSHelper(node *yaml.Node, parent *yaml.Node, dfsOrder *[]nodeIn
 	}
 }
 
-func getFixInfo(ctx context.Context, originalRootNodes, fixedRootNodes []yaml.Node) fileFixInfo {
+func getFixInfo(ctx context.Context, originalRootNodes, fixedRootNodes []yaml.Node) (fileFixInfo, error) {
 	contentToAdd := make([]contentToAdd, 0)
 	linesToRemove := make([]linesToRemove, 0)
 
 	for idx := range fixedRootNodes {
+		// The two decoders can disagree on document count (e.g. an empty leading
+		// document), so guard the paired index instead of panicking.
+		if idx >= len(originalRootNodes) {
+			break
+		}
 		originalList := flattenWithDFS(&originalRootNodes[idx])
 		fixedList := flattenWithDFS(&fixedRootNodes[idx])
-		nodeContentToAdd, nodeLinesToRemove := getFixInfoHelper(ctx, *originalList, *fixedList)
+		nodeContentToAdd, nodeLinesToRemove, err := getFixInfoHelper(ctx, *originalList, *fixedList)
+		if err != nil {
+			return fileFixInfo{}, err
+		}
 		contentToAdd = append(contentToAdd, nodeContentToAdd...)
 		linesToRemove = append(linesToRemove, nodeLinesToRemove...)
 	}
@@ -102,10 +110,10 @@ func getFixInfo(ctx context.Context, originalRootNodes, fixedRootNodes []yaml.No
 	return fileFixInfo{
 		contentsToAdd: &contentToAdd,
 		linesToRemove: &linesToRemove,
-	}
+	}, nil
 }
 
-func getFixInfoHelper(ctx context.Context, originalList, fixedList []nodeInfo) ([]contentToAdd, []linesToRemove) {
+func getFixInfoHelper(ctx context.Context, originalList, fixedList []nodeInfo) ([]contentToAdd, []linesToRemove, error) {
 
 	// While obtaining fixedYamlNode, comments and empty lines at the top are ignored.
 	// This causes a difference in Line numbers across the tree structure. In order to
@@ -132,26 +140,34 @@ func getFixInfoHelper(ctx context.Context, originalList, fixedList []nodeInfo) (
 		fixInfoMetadata.originalListTracker = originalListTracker
 		fixInfoMetadata.fixedListTracker = fixedListTracker
 
+		var err error
 		switch matchNodeResult {
 		case sameNodes:
 			originalListTracker += 1
 			fixedListTracker += 1
 
 		case removedNode:
-			originalListTracker, fixedListTracker = addLinesToRemove(ctx, fixInfoMetadata)
+			originalListTracker, fixedListTracker, err = addLinesToRemove(ctx, fixInfoMetadata)
 
 		case insertedNode:
-			originalListTracker, fixedListTracker = addLinesToInsert(ctx, fixInfoMetadata)
+			originalListTracker, fixedListTracker, err = addLinesToInsert(ctx, fixInfoMetadata)
 
 		case replacedNode:
-			originalListTracker, fixedListTracker = updateLinesToReplace(ctx, fixInfoMetadata)
+			originalListTracker, fixedListTracker, err = updateLinesToReplace(ctx, fixInfoMetadata)
+		}
+		if err != nil {
+			return nil, nil, err
 		}
 	}
 
 	// Some nodes are still not visited if they are removed at the end of the list
 	for originalListTracker < len(originalList) {
 		fixInfoMetadata.originalListTracker = originalListTracker
-		originalListTracker, _ = addLinesToRemove(ctx, fixInfoMetadata)
+		var err error
+		originalListTracker, _, err = addLinesToRemove(ctx, fixInfoMetadata)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	// Some nodes are still not visited if they are inserted at the end of the list
@@ -159,15 +175,19 @@ func getFixInfoHelper(ctx context.Context, originalList, fixedList []nodeInfo) (
 		// Use negative index of last node in original list as a placeholder to determine the last line number later
 		fixInfoMetadata.originalListTracker = -(len(originalList) - 1)
 		fixInfoMetadata.fixedListTracker = fixedListTracker
-		_, fixedListTracker = addLinesToInsert(ctx, fixInfoMetadata)
+		var err error
+		_, fixedListTracker, err = addLinesToInsert(ctx, fixInfoMetadata)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
-	return contentToAdd, linesToRemove
+	return contentToAdd, linesToRemove, nil
 
 }
 
 // Adds the lines to remove and returns the updated originalListTracker
-func addLinesToRemove(ctx context.Context, fixInfoMetadata *fixInfoMetadata) (int, int) {
+func addLinesToRemove(ctx context.Context, fixInfoMetadata *fixInfoMetadata) (int, int, error) {
 	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.originalList, fixInfoMetadata.originalListTracker)
 
 	if isOneLine {
@@ -184,11 +204,11 @@ func addLinesToRemove(ctx context.Context, fixInfoMetadata *fixInfoMetadata) (in
 		endLine:   getNodeLine(fixInfoMetadata.originalList, newOriginalListTracker-1), // newOriginalListTracker is the next node
 	})
 
-	return newOriginalListTracker, fixInfoMetadata.fixedListTracker
+	return newOriginalListTracker, fixInfoMetadata.fixedListTracker, nil
 }
 
 // Adds the lines to insert and returns the updated fixedListTracker
-func addLinesToInsert(ctx context.Context, fixInfoMetadata *fixInfoMetadata) (int, int) {
+func addLinesToInsert(ctx context.Context, fixInfoMetadata *fixInfoMetadata) (int, int, error) {
 
 	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
@@ -199,7 +219,10 @@ func addLinesToInsert(ctx context.Context, fixInfoMetadata *fixInfoMetadata) (in
 	currentDFSNode := (*fixInfoMetadata.fixedList)[fixInfoMetadata.fixedListTracker]
 
 	lineToInsert := getLineToInsert(fixInfoMetadata)
-	contentToInsert := getContent(ctx, currentDFSNode.parent, fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
+	contentToInsert, err := getContent(ctx, currentDFSNode.parent, fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
+	if err != nil {
+		return 0, 0, err
+	}
 
 	newFixedTracker := updateTracker(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
@@ -208,11 +231,11 @@ func addLinesToInsert(ctx context.Context, fixInfoMetadata *fixInfoMetadata) (in
 		content: contentToInsert,
 	})
 
-	return fixInfoMetadata.originalListTracker, newFixedTracker
+	return fixInfoMetadata.originalListTracker, newFixedTracker, nil
 }
 
 // Adds the lines to remove and insert and updates the fixedListTracker and originalListTracker
-func updateLinesToReplace(ctx context.Context, fixInfoMetadata *fixInfoMetadata) (int, int) {
+func updateLinesToReplace(ctx context.Context, fixInfoMetadata *fixInfoMetadata) (int, int, error) {
 
 	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
@@ -228,10 +251,15 @@ func updateLinesToReplace(ctx context.Context, fixInfoMetadata *fixInfoMetadata)
 		fixInfoMetadata.fixedListTracker -= 1
 	}
 
-	addLinesToRemove(ctx, fixInfoMetadata)
-	updatedOriginalTracker, updatedFixedTracker := addLinesToInsert(ctx, fixInfoMetadata)
+	if _, _, err := addLinesToRemove(ctx, fixInfoMetadata); err != nil {
+		return 0, 0, err
+	}
+	updatedOriginalTracker, updatedFixedTracker, err := addLinesToInsert(ctx, fixInfoMetadata)
+	if err != nil {
+		return 0, 0, err
+	}
 
-	return updatedOriginalTracker, updatedFixedTracker
+	return updatedOriginalTracker, updatedFixedTracker, nil
 }
 
 func removeNewLinesAtTheEnd(yamlLines []string) []string {

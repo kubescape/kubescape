@@ -1,9 +1,11 @@
 package printer
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -100,6 +102,18 @@ func TestControlComplianceScore_MetricsLabelsAndPrefix(t *testing.T) {
 			},
 			expectedMetrics: []string{"kubescape_control_complianceScore{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 37", "kubescape_control_count_resources_failed{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 17", "kubescape_control_count_resources_skipped{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 27", "kubescape_control_count_resources_passed{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 7"},
 			expectedLabels:  "name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"",
+		},
+		{
+			name: "Unset compliance score omits only the score metric",
+			mcrs: mControlComplianceScore{
+				controlName:           "Unset Control",
+				resourcesCountPassed:  7,
+				resourcesCountFailed:  17,
+				resourcesCountSkipped: 27,
+				complianceScore:       -1,
+			},
+			expectedMetrics: []string{"kubescape_control_count_resources_failed{name=\"Unset Control\",severity=\"\",link=\"\"} 17", "kubescape_control_count_resources_skipped{name=\"Unset Control\",severity=\"\",link=\"\"} 27", "kubescape_control_count_resources_passed{name=\"Unset Control\",severity=\"\",link=\"\"} 7"},
+			expectedLabels:  "name=\"Unset Control\",severity=\"\",link=\"\"",
 		},
 	}
 
@@ -370,4 +384,45 @@ func TestMetrics_String_MultiItem_NoDuplicateHeaders(t *testing.T) {
 	// verify both resource series are present
 	assert.Contains(t, output, "kubescape_resource_count_controls_failed{apiVersion=\"v1\",kind=\"Pod\",namespace=\"ns1\",name=\"Resource A\"} 2")
 	assert.Contains(t, output, "kubescape_resource_count_controls_failed{apiVersion=\"v1\",kind=\"Pod\",namespace=\"ns2\",name=\"Resource B\"} 4")
+}
+
+func TestSetComplianceScores_ClusterMetricUsesComplianceScore(t *testing.T) {
+	// The cluster gauge is named complianceScore, so it must not be fed the risk score.
+	summaryDetails := &reportsummary.SummaryDetails{
+		Score:           42,
+		ComplianceScore: 77,
+	}
+
+	m := &Metrics{}
+	m.setComplianceScores(summaryDetails)
+
+	assert.Equal(t, 77, m.rs.complianceScore)
+	assert.Contains(t, m.String(), "kubescape_cluster_complianceScore{} 77")
+}
+
+func TestSetComplianceScores_ControlMetricsUseComplianceScore(t *testing.T) {
+	complianceScore := float32(65)
+	summaryDetails := &reportsummary.SummaryDetails{
+		Controls: reportsummary.ControlSummaries{
+			"C-SET": {
+				ControlID:       "C-SET",
+				Name:            "Set Control",
+				Score:           10,
+				ComplianceScore: &complianceScore,
+			},
+			"C-UNSET": {
+				ControlID: "C-UNSET",
+				Name:      "Unset Control",
+				Score:     20,
+			},
+		},
+	}
+
+	m := &Metrics{}
+	m.setComplianceScores(summaryDetails)
+	output := m.String()
+
+	assert.Regexp(t, regexp.MustCompile(`(?m)^kubescape_control_complianceScore\{name="Set Control".*\} 65$`), output)
+	assert.NotContains(t, output, "kubescape_control_complianceScore{name=\"Unset Control\"")
+	assert.Contains(t, output, "kubescape_control_count_resources_failed{name=\"Unset Control\"")
 }

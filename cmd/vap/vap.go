@@ -11,6 +11,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor/cel"
 	"github.com/spf13/cobra"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,8 +27,10 @@ var vapHelperCmdExamples = fmt.Sprintf(`
 
   Examples:
 
-  # Install Kubescape CEL admission policy library
+  # Install Kubescape CEL admission policy library (the copy embedded in this binary)
   %[1]s vap deploy-library | kubectl apply -f -
+  # Install a specific cel-admission-library release instead of the embedded copy
+  %[1]s vap deploy-library --from-release v0.11 | kubectl apply -f -
   # Create a policy binding by Kubescape control ID
   %[1]s vap create-policy-binding --name my-policy-binding --control C-0016 --namespace=my-namespace | kubectl apply -f -
   # Create a policy binding by ValidatingAdmissionPolicy name
@@ -52,6 +55,7 @@ func GetVapHelperCmd() *cobra.Command {
 
 func getDeployLibraryCmd() *cobra.Command {
 	var outputFile string
+	var fromRelease string
 	var timeout time.Duration
 
 	cmd := &cobra.Command{
@@ -59,7 +63,7 @@ func getDeployLibraryCmd() *cobra.Command {
 		Short: "Install Kubescape CEL admission policy library",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			content, err := deployLibrary(timeout)
+			content, err := deployLibrary(fromRelease, timeout)
 			if err != nil {
 				return err
 			}
@@ -67,7 +71,8 @@ func getDeployLibraryCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file instead of stdout")
-	cmd.Flags().DurationVar(&timeout, "timeout", 0, "HTTP request timeout per download (e.g. 30s, 1m)")
+	cmd.Flags().StringVar(&fromRelease, "from-release", "", "Download the library from this cel-admission-library release tag (e.g. v0.11) instead of using the embedded copy")
+	cmd.Flags().DurationVar(&timeout, "timeout", 0, "HTTP request timeout per download, only used with --from-release (e.g. 30s, 1m)")
 
 	return cmd
 }
@@ -95,9 +100,30 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// A policy that declares a paramKind needs a ParamRef on its binding
+			// to be functional, so refuse to emit a silently broken binding. The
+			// check covers both flags: --control reads the paramKind off the
+			// control's policy, --policy off the named policy (a name outside
+			// the embedded bundle is left unchecked — we know nothing about it).
 			normalizedControlID := strings.ToUpper(strings.TrimSpace(controlID))
-			if normalizedControlID != "" && parameterReference == "" && celAdmissionControlsRequiringParams[normalizedControlID] {
-				return fmt.Errorf("control %s requires --parameter-reference because its CEL policy uses params", normalizedControlID)
+			if parameterReference == "" {
+				if normalizedControlID != "" {
+					paramKind, err := cel.ParamKindForControl(normalizedControlID)
+					if err != nil {
+						return err
+					}
+					if paramKind != nil {
+						return fmt.Errorf("control %s requires --parameter-reference because its CEL policy uses params", normalizedControlID)
+					}
+				} else {
+					paramKind, found, err := cel.ParamKindForPolicy(resolvedPolicyName)
+					if err != nil {
+						return err
+					}
+					if found && paramKind != nil {
+						return fmt.Errorf("policy %s requires --parameter-reference because it uses params", resolvedPolicyName)
+					}
+				}
 			}
 			if err := isValidK8sObjectName(resolvedPolicyName); err != nil {
 				return fmt.Errorf("invalid policy name %s: %w", resolvedPolicyName, err)
@@ -149,67 +175,13 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 	return createPolicyBindingCmd
 }
 
-var celAdmissionPolicyByControlID = map[string]string{
-	"C-0001": "kubescape-c-0001-deny-forbidden-container-registries",
-	"C-0004": "kubescape-c-0004-deny-resources-with-memory-limit-or-request-not-set",
-	"C-0009": "kubescape-c-0009-deny-resources-with-memory-or-cpu-limit-not-set",
-	"C-0012": "kubescape-c-0012-deny-resources-with-sensitive-information-in-environment-variables",
-	"C-0013": "kubescape-c-0013-deny-resources-with-capability-to-run-as-root",
-	"C-0016": "kubescape-c-0016-allow-privilege-escalation",
-	"C-0017": "kubescape-c-0017-deny-resources-with-mutable-container-filesystem",
-	"C-0018": "kubescape-c-0018-deny-resources-without-configured-readiness-probes",
-	"C-0020": "kubescape-c-0020-deny-resources-having-volumes-with-potential-access-to-known-cloud-credentials",
-	"C-0026": "kubescape-c-0026-deny-cronjobs",
-	"C-0034": "kubescape-c-0034-deny-resources-with-automount-service-account-token-enabled",
-	"C-0038": "kubescape-c-0038-deny-resources-with-host-ipc-or-pid-privileges",
-	"C-0041": "kubescape-c-0041-deny-resources-with-host-network-access",
-	"C-0042": "kubescape-c-0042-deny-resources-with-ssh-server-running",
-	"C-0044": "kubescape-c-0044-deny-resources-with-host-port",
-	"C-0045": "kubescape-c-0045-deny-workloads-with-hostpath-volumes-readonly-not-false",
-	"C-0046": "kubescape-c-0046-deny-resources-with-insecure-capabilities",
-	"C-0048": "kubescape-c-0048-deny-workloads-with-hostpath-mounts",
-	"C-0050": "kubescape-c-0050-deny-resources-with-cpu-limit-or-request-not-set",
-	"C-0055": "kubescape-c-0055-linux-hardening",
-	"C-0056": "kubescape-c-0056-deny-resources-without-configured-liveliness-probes",
-	"C-0057": "kubescape-c-0057-privileged-container-denied",
-	"C-0061": "kubescape-c-0061-deny-workloads-in-default-namespace",
-	"C-0062": "kubescape-c-0062-deny-resources-having-containers-with-sudo-in-entrypoint",
-	"C-0073": "kubescape-c-0073-deny-naked-pods",
-	"C-0074": "kubescape-c-0074-resources-mounting-docker-socket-denied",
-	"C-0075": "kubescape-c-0075-deny-resources-with-image-pull-policy-not-set-to-always-for-latest-tag",
-	"C-0076": "kubescape-c-0076-deny-resources-without-configured-list-of-labels-not-set",
-	"C-0077": "kubescape-c-0077-deny-resources-without-configured-list-of-k8s-common-labels-not-set",
-	"C-0078": "kubescape-c-0078-only-allow-images-from-allowed-registry",
-	"C-0198": "kubescape-c-0198-deny-root-containers",
-	"C-0199": "kubescape-c-0199-deny-net-raw-capability",
-	"C-0200": "kubescape-c-0200-deny-added-capabilities",
-	"C-0201": "kubescape-c-0201-deny-capabilities-assigned",
-	"C-0210": "kubescape-c-0210-deny-seccomp-profile-unconfined",
-	"C-0268": "kubescape-c-0268-deny-resources-with-cpu-request-not-set",
-	"C-0269": "kubescape-c-0269-deny-resources-with-memory-request-not-set",
-	"C-0270": "kubescape-c-0270-deny-resources-with-cpu-limit-not-set",
-	"C-0271": "kubescape-c-0271-deny-resources-with-memory-limit-not-set",
-	"C-0280": "kubescape-c-0280-deny-access-to-csr-approval-subresource",
-}
-
-var celAdmissionControlsRequiringParams = map[string]bool{
-	"C-0001": true,
-	"C-0004": true,
-	"C-0012": true,
-	"C-0020": true,
-	"C-0046": true,
-	"C-0050": true,
-	"C-0076": true,
-	"C-0077": true,
-	"C-0078": true,
-	"C-0268": true,
-	"C-0269": true,
-	"C-0270": true,
-	"C-0271": true,
-}
-
+// resolvePolicyName resolves the --policy/--control pair to a policy name.
+// Control IDs resolve against the VAP bundle embedded in the CEL engine, so the
+// answer always matches the deployable YAML instead of a hand-maintained copy.
+// Policy names are lowercased like control IDs are uppercased: both flags then
+// accept any casing of their canonical form.
 func resolvePolicyName(policyName, controlID string) (string, error) {
-	policyName = strings.TrimSpace(policyName)
+	policyName = strings.ToLower(strings.TrimSpace(policyName))
 	controlID = strings.ToUpper(strings.TrimSpace(controlID))
 
 	if policyName == "" && controlID == "" {
@@ -222,50 +194,57 @@ func resolvePolicyName(policyName, controlID string) (string, error) {
 		return policyName, nil
 	}
 
-	resolved, ok := celAdmissionPolicyByControlID[controlID]
-	if !ok {
-		return "", fmt.Errorf("unsupported control ID %s", controlID)
+	resolved, err := cel.PolicyNameForControl(controlID)
+	if err != nil {
+		return "", fmt.Errorf("unsupported control ID %s: %w", controlID, err)
 	}
 	return resolved, nil
 }
 
 // Implementation of the VAP helper commands
 // deploy-library
-func deployLibrary(timeout time.Duration) (string, error) {
-	logger.L().Info("Downloading the Kubescape CEL admission policy library")
-	// Download the policy-configuration-definition.yaml from the latest release URL
-	policyConfigurationDefinitionURL := "https://github.com/kubescape/cel-admission-library/releases/latest/download/policy-configuration-definition.yaml"
-	policyConfigurationDefinition, err := downloadFileToString(policyConfigurationDefinitionURL, timeout)
-	if err != nil {
-		return "", err
+//
+// By default the library comes from the bundle embedded in this binary: the
+// same copy the scan engine evaluates and create-policy-binding resolves
+// metadata from, so what gets deployed is exactly what this build was tested
+// against. Downloading a release instead is an explicit opt-in via
+// --from-release; it can serve a library this binary knows nothing about, so
+// it is never the silent default (issue #2507).
+func deployLibrary(fromRelease string, timeout time.Duration) (string, error) {
+	if fromRelease != "" {
+		return downloadLibrary(fromRelease, timeout)
 	}
+	return cel.EmbeddedLibraryYAML()
+}
 
-	// Download the basic-control-configuration.yaml from the latest release URL
-	basicControlConfigurationURL := "https://github.com/kubescape/cel-admission-library/releases/latest/download/basic-control-configuration.yaml"
-	basicControlConfiguration, err := downloadFileToString(basicControlConfigurationURL, timeout)
-	if err != nil {
-		return "", err
-	}
+// libraryReleaseFiles are the release assets that make up the deployable
+// library, in apply order (the CRD first, then the configuration, then the
+// policies). Must stay in sync with the assets `make sync-vap` vendors.
+var libraryReleaseFiles = []string{
+	"policy-configuration-definition.yaml",
+	"basic-control-configuration.yaml",
+	"kubescape-validating-admission-policies.yaml",
+}
 
-	// Download the kubescape-validating-admission-policies.yaml from the latest release URL
-	kubescapeValidatingAdmissionPoliciesURL := "https://github.com/kubescape/cel-admission-library/releases/latest/download/kubescape-validating-admission-policies.yaml"
-	kubescapeValidatingAdmissionPolicies, err := downloadFileToString(kubescapeValidatingAdmissionPoliciesURL, timeout)
-	if err != nil {
-		return "", err
+// downloadLibrary fetches the library files from one pinned release tag and
+// concatenates them into a single multi-document YAML stream. The tag is
+// always explicit — downloading whatever "latest" points at would reintroduce
+// the skew deployLibrary's embedded default exists to prevent.
+func downloadLibrary(tag string, timeout time.Duration) (string, error) {
+	logger.L().Info(fmt.Sprintf("Downloading the Kubescape CEL admission policy library release %s", tag))
+
+	parts := make([]string, 0, len(libraryReleaseFiles))
+	for _, file := range libraryReleaseFiles {
+		url := fmt.Sprintf("https://github.com/kubescape/cel-admission-library/releases/download/%s/%s", tag, file)
+		content, err := downloadFileToString(url, timeout)
+		if err != nil {
+			return "", fmt.Errorf("download %s from release %s: %w", file, tag, err)
+		}
+		parts = append(parts, content)
 	}
 
 	logger.L().Info("Successfully downloaded admission policy library")
-
-	// Concatenate the downloaded files into a single YAML document with --- separators
-	var result strings.Builder
-	result.WriteString(policyConfigurationDefinition)
-	result.WriteString("\n---\n")
-	result.WriteString(basicControlConfiguration)
-	result.WriteString("\n---\n")
-	result.WriteString(kubescapeValidatingAdmissionPolicies)
-	result.WriteString("\n")
-
-	return result.String(), nil
+	return strings.Join(parts, "\n---\n") + "\n", nil
 }
 
 func downloadFileToString(url string, timeout time.Duration) (string, error) {

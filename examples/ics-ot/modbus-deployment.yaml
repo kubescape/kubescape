@@ -1,0 +1,75 @@
+# Example ICS/OT workload: Modbus TCP PLC bridge.
+#
+# This manifest deliberately violates several Kubescape controls to
+# demonstrate deviations common in ICS/OT deployments. Do NOT run
+# unmodified in production without a formal risk acceptance.
+# See docs/ics-ot-workloads.md for the full guidance.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ot-modbus
+  labels:
+    sector: ics-ot
+    environment: ot
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: modbus-controller
+  namespace: ot-modbus
+  labels:
+    app: modbus-controller
+    sector: ics-ot
+    protocol: modbus-tcp
+  annotations:
+    # C-0041: bridge needs direct PLC subnet reachability without NAT.
+    kubescape.io/control-C-0041: "hostNetwork required for direct PLC subnet access"
+    # C-0048: USB-to-RS-485 adapter exposed as a character device.
+    kubescape.io/control-C-0048: "hostPath /dev/ttyUSB0 for RS-485 serial bridge"
+    # C-0057: vendor libmodbus requires /dev/mem for timing-critical polling.
+    kubescape.io/control-C-0057: "privileged mode required by vendor libmodbus"
+    # C-0044: Modbus TCP clients connect to well-known TCP/502.
+    kubescape.io/control-C-0044: "hostPort 502 for legacy HMI clients"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: modbus-controller
+  template:
+    metadata:
+      labels:
+        app: modbus-controller
+        sector: ics-ot
+        protocol: modbus-tcp
+    spec:
+      hostNetwork: true                # C-0041
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      containers:
+        - name: modbus-bridge
+          image: openplc/openplc-v3:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: modbus-tcp
+              containerPort: 502
+              hostPort: 502            # C-0044
+              protocol: TCP
+          securityContext:
+            privileged: true           # C-0057
+            runAsNonRoot: false
+            readOnlyRootFilesystem: false
+          volumeMounts:
+            - name: serial-device
+              mountPath: /dev/ttyUSB0
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+      volumes:
+        - name: serial-device
+          hostPath:                    # C-0048
+            path: /dev/ttyUSB0
+            type: CharDevice

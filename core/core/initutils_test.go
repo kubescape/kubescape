@@ -106,7 +106,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 				accountID:              "",
 				downloadReleasedPolicy: getter.NewDownloadReleasedPolicy(),
 			},
-			want: "*getter.LoadPolicy",
+			want: "*getter.MergedExceptionsGetter",
 		},
 		{
 			name: "Test GetExceptionsGetter with useExceptions and filled accountID",
@@ -116,7 +116,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 				accountID:              "123456789012",
 				downloadReleasedPolicy: getter.NewDownloadReleasedPolicy(),
 			},
-			want: "*getter.LoadPolicy",
+			want: "*getter.MergedExceptionsGetter",
 		},
 		{
 			name: "Test GetExceptionsGetter with accountID",
@@ -132,7 +132,8 @@ func TestGetExceptionsGetter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := getExceptionsGetter(tt.args.ctx, tt.args.useExceptions, tt.args.accountID, tt.args.downloadReleasedPolicy, false)
+			got, err := getExceptionsGetter(tt.args.ctx, tt.args.useExceptions, tt.args.accountID, tt.args.downloadReleasedPolicy, false)
+			assert.NoError(t, err)
 			assert.Equal(t, tt.want, reflect.TypeOf(got).String())
 		})
 	}
@@ -142,14 +143,18 @@ func TestGettersAirGappedUseCache(t *testing.T) {
 	ctx := context.Background()
 	for _, accountID := range []string{"", "123456789012"} {
 		t.Run("accountID="+accountID, func(t *testing.T) {
-			assert.Equal(t, "*getter.LoadPolicy",
-				reflect.TypeOf(getPolicyGetter(ctx, nil, accountID, true, nil, true)).String())
-			assert.Equal(t, "*getter.LoadPolicy",
-				reflect.TypeOf(getConfigInputsGetter(ctx, "", accountID, nil, false, true)).String())
-			assert.Equal(t, "*getter.LoadPolicy",
-				reflect.TypeOf(getAttackTracksGetter(ctx, "", accountID, nil, true)).String())
-			assert.Equal(t, "*getter.MergedExceptionsGetter",
-				reflect.TypeOf(getExceptionsGetter(ctx, "", accountID, nil, true)).String())
+			policyGetter, err := getPolicyGetter(ctx, nil, accountID, true, nil, true)
+			assert.NoError(t, err)
+			assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(policyGetter).String())
+			configInputsGetter, _, err := getConfigInputsGetter(ctx, "", accountID, nil, false, true)
+			assert.NoError(t, err)
+			assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(configInputsGetter).String())
+			attackTracksGetter, err := getAttackTracksGetter(ctx, "", accountID, nil, true)
+			assert.NoError(t, err)
+			assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(attackTracksGetter).String())
+			exceptionsGetter, err := getExceptionsGetter(ctx, "", accountID, nil, true)
+			assert.NoError(t, err)
+			assert.Equal(t, "*getter.MergedExceptionsGetter", reflect.TypeOf(exceptionsGetter).String())
 		})
 	}
 }
@@ -502,6 +507,49 @@ func TestSetSubmitBehavior(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			// Regression test for https://github.com/kubescape/kubescape/issues/2555:
+			// an explicit opt-out must not be silently overridden by auto-detection,
+			// even when a CloudReportURL is present and no account is set (the
+			// scenario that would otherwise force Submit=true).
+			name: "Test SetSubmitBehavior explicit opt-out is respected despite CloudReportURL and no AccountID",
+			args: args{
+				scanInfo: &cautils.ScanInfo{
+					ScanType: cautils.ScanTypeCluster,
+					Local:    false,
+					Submit:   cautils.NewBoolPtr(new(false)),
+				},
+				tenantConfig: &TenantConfigMock{
+					clusterName:    "test",
+					accountID:      "",
+					accessKey:      "",
+					cloudReportURL: "https://example.kubescape.com",
+				},
+				isScanTypeForSubmission: true,
+				isLocal:                 false,
+			},
+			want: false,
+		},
+		{
+			// An explicit opt-in must still go through the normal auto-detection -
+			// it does not bypass the "no backend configured" safety check.
+			name: "Test SetSubmitBehavior explicit opt-in does not bypass missing CloudReportURL",
+			args: args{
+				scanInfo: &cautils.ScanInfo{
+					ScanType: cautils.ScanTypeCluster,
+					Local:    false,
+					Submit:   cautils.NewBoolPtr(new(true)),
+				},
+				tenantConfig: &TenantConfigMock{
+					clusterName: "test",
+					accountID:   "",
+					accessKey:   "",
+				},
+				isScanTypeForSubmission: true,
+				isLocal:                 false,
+			},
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -511,7 +559,7 @@ func TestSetSubmitBehavior(t *testing.T) {
 
 			setSubmitBehavior(tt.args.scanInfo, tt.args.tenantConfig)
 
-			assert.Equal(t, tt.want, tt.args.scanInfo.Submit)
+			assert.Equal(t, tt.want, tt.args.scanInfo.Submit.GetBool())
 		})
 	}
 }
@@ -579,7 +627,45 @@ func TestGetDownloadReleasedPolicy(t *testing.T) {
 
 	require.NoError(t, downloadReleasedPolicy.SetRegoObjects())
 
-	result := getDownloadReleasedPolicy(ctx, downloadReleasedPolicy)
+	result, err := getDownloadReleasedPolicy(ctx, downloadReleasedPolicy)
 
+	require.NoError(t, err)
 	assert.NotNil(t, result)
+}
+
+// With a pinned --controls-version whose release does not exist, the download
+// fails and each getter must propagate a hard error (returning nil, err) rather
+// than logging Fatal and falling through with an empty getter. Fatal is a no-op
+// under --logger none, so only real error propagation halts the scan.
+func TestPinnedVersionGettersReturnHardError(t *testing.T) {
+	ctx := context.Background()
+	const pinnedVersion = "v0.0.0-does-not-exist"
+
+	newPinned := func() *getter.DownloadReleasedPolicy {
+		return getter.NewDownloadReleasedPolicyWithVersion(pinnedVersion)
+	}
+
+	t.Run("getPolicyGetter", func(t *testing.T) {
+		g, err := getPolicyGetter(ctx, nil, "", true, newPinned(), false)
+		require.Error(t, err)
+		require.Nil(t, g)
+	})
+
+	t.Run("getConfigInputsGetter", func(t *testing.T) {
+		g, _, err := getConfigInputsGetter(ctx, "", "", newPinned(), false, false)
+		require.Error(t, err)
+		require.Nil(t, g)
+	})
+
+	t.Run("getExceptionsGetter", func(t *testing.T) {
+		g, err := getExceptionsGetter(ctx, "", "", newPinned(), false)
+		require.Error(t, err)
+		require.Nil(t, g)
+	})
+
+	t.Run("getAttackTracksGetter", func(t *testing.T) {
+		g, err := getAttackTracksGetter(ctx, "", "", newPinned(), false)
+		require.Error(t, err)
+		require.Nil(t, g)
+	})
 }

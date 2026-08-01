@@ -203,7 +203,7 @@ func TestLoadPolicy(t *testing.T) {
 			require.Equal(t, extraFramework, fws[1])
 		})
 
-		t.Run("should fail on file error", func(t *testing.T) {
+		t.Run("should skip unreadable file and return the rest", func(t *testing.T) {
 			t.Parallel()
 
 			const (
@@ -213,11 +213,14 @@ func TestLoadPolicy(t *testing.T) {
 			p := NewLoadPolicy([]string{
 				testFrameworkFile(testFramework),
 				testFrameworkFile(extraFramework),
-				testFrameworkFile(nowhere), // should raise an error
+				testFrameworkFile(nowhere), // should be skipped, not raise an error
 			})
 			fws, err := p.ListFrameworks()
-			require.Error(t, err)
-			require.Nil(t, fws)
+			require.NoError(t, err)
+			require.Len(t, fws, 2)
+
+			require.Equal(t, testFramework, fws[0])
+			require.Equal(t, extraFramework, fws[1])
 		})
 	})
 
@@ -388,6 +391,72 @@ func TestLoadPolicy(t *testing.T) {
 
 func testFrameworkFile(framework string) string {
 	return filepath.Join(testutils.CurrentDir(), "testdata", fmt.Sprintf("%s.json", framework))
+}
+
+func TestLoadPolicyMultiPathFallback(t *testing.T) {
+	t.Parallel()
+
+	writeFile := func(t *testing.T, dir, name, content string) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+		return path
+	}
+
+	t.Run("GetFramework skips missing file and uses next valid one", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		missingPath := filepath.Join(tmpDir, "missing.json")
+		validPath := writeFile(t, tmpDir, "valid.json", `{"name": "MyFramework", "controls": []}`)
+
+		p := NewLoadPolicy([]string{missingPath, validPath})
+		fw, err := p.GetFramework("MyFramework")
+		require.NoError(t, err)
+		require.NotNil(t, fw)
+		require.Equal(t, "MyFramework", fw.Name)
+	})
+
+	t.Run("GetFramework skips corrupt json and uses next valid one", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		corruptPath := writeFile(t, tmpDir, "corrupt.json", `"{not valid json`)
+		validPath := writeFile(t, tmpDir, "valid.json", `{"name": "MyFramework", "controls": []}`)
+
+		p := NewLoadPolicy([]string{corruptPath, validPath})
+		fw, err := p.GetFramework("MyFramework")
+		require.NoError(t, err)
+		require.NotNil(t, fw)
+		require.Equal(t, "MyFramework", fw.Name)
+	})
+
+	t.Run("GetFrameworks skips missing file and returns frameworks from valid files", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		missingPath := filepath.Join(tmpDir, "missing.json")
+		validPath := writeFile(t, tmpDir, "valid.json", `{"name": "MyFramework", "controls": []}`)
+
+		p := NewLoadPolicy([]string{missingPath, validPath})
+		fws, err := p.GetFrameworks()
+		require.NoError(t, err)
+		require.Len(t, fws, 1)
+		require.Equal(t, "MyFramework", fws[0].Name)
+	})
+
+	t.Run("ListFrameworks skips missing file and returns names from valid files", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		missingPath := filepath.Join(tmpDir, "missing.json")
+		validPath := writeFile(t, tmpDir, "valid.json", `{"name": "MyFramework", "controls": []}`)
+
+		p := NewLoadPolicy([]string{missingPath, validPath})
+		names, err := p.ListFrameworks()
+		require.NoError(t, err)
+		require.Contains(t, names, "MyFramework")
+	})
 }
 
 func writeTempJSONControlInputs(t testing.TB) (string, map[string][]string) {

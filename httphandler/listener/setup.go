@@ -67,7 +67,8 @@ func SetupHTTPListener() error {
 	v1SubRouter := rtr.PathPrefix(v1PathPrefix).Subrouter()
 	v1SubRouter.Use(otelMiddleware)
 	v1SubRouter.HandleFunc(v1PrometheusMetricsPath, httpHandler.Metrics) // deprecated
-	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.Scan)
+	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.Scan).Methods(http.MethodPost)
+	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.CancelScan).Methods(http.MethodDelete)
 	v1SubRouter.HandleFunc(v1StatusPath, httpHandler.Status)
 	v1SubRouter.HandleFunc(v1ResultsPath, httpHandler.GetResults).Methods(http.MethodGet)
 	v1SubRouter.HandleFunc(v1ResultsPath, httpHandler.DeleteResults).Methods(http.MethodDelete)

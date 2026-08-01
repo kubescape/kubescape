@@ -267,3 +267,43 @@ func TestDownloadScanPolicies_LocalCacheBypass(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, files)
 }
+
+type ControlsInputsGetterEmptyMock struct{}
+
+func (mock *ControlsInputsGetterEmptyMock) GetControlsInputs(clusterName string) (map[string][]string, error) {
+	return nil, nil
+}
+
+func TestGetControlInputs_EmptyReturnsErrorNotCached(t *testing.T) {
+	t.Setenv("POLICIES_CACHE_TTL", "10")
+	policyHandler := NewRequestScopedPolicyHandler("test-cluster")
+	defer policyHandler.Close()
+	policyHandler.getters = &cautils.Getters{
+		ControlsInputsGetter: &ControlsInputsGetterEmptyMock{},
+	}
+
+	controlInputs, err := policyHandler.getControlInputs()
+
+	assert.Error(t, err)
+	assert.Nil(t, controlInputs)
+
+	_, cacheHit := policyHandler.cachedControlInputs.Get()
+	assert.False(t, cacheHit, "empty control inputs should not be cached")
+}
+
+func TestGetControlInputs_NonNilResultIsCached(t *testing.T) {
+	t.Setenv("POLICIES_CACHE_TTL", "10")
+	policyHandler := NewRequestScopedPolicyHandler("test-cluster")
+	defer policyHandler.Close()
+	policyHandler.getters = &cautils.Getters{
+		ControlsInputsGetter: &ControlsInputsGetterMock{},
+	}
+
+	controlInputs, err := policyHandler.getControlInputs()
+
+	assert.NoError(t, err)
+	assert.Equal(t, CachedControlInputs, controlInputs)
+
+	_, cacheHit := policyHandler.cachedControlInputs.Get()
+	assert.True(t, cacheHit, "non-nil control inputs should be cached")
+}

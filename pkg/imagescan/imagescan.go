@@ -195,6 +195,7 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 	for m := range remainingMatches.Enumerate() {
 		metadata, err := vp.VulnerabilityMetadata(m.Vulnerability.Reference)
 		if err != nil {
+			filteredMatches.Add(m)
 			continue
 		}
 
@@ -234,7 +235,6 @@ func (s *Service) Scan(_ context.Context, userInput string, creds RegistryCreden
 		Image:                 userInput,
 		Matches:               filteredMatches,
 		Packages:              packages,
-		RemainingMatches:      remainingMatches,
 		SBOM:                  sbom,
 		VulnerabilityProvider: s.vp,
 	}

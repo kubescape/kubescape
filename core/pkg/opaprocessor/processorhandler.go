@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor/cel"
 	"github.com/kubescape/kubescape/v3/core/pkg/score"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -40,17 +41,24 @@ type IJobProgressNotificationClient interface {
 	Stop()
 }
 
+// compiledRule pairs a compiled rule with the Rego version it was actually
+// compiled under, so evaluation (regoEval) can be run at the matching
+// version rather than assuming RegoV1.
+type compiledRule struct {
+	compiler *ast.Compiler
+	version  ast.RegoVersion
+}
+
 // OPAProcessor processes Open Policy Agent rules.
 type OPAProcessor struct {
 	clusterName          string
 	regoDependenciesData *resources.RegoDependenciesData
 	*cautils.OPASessionObj
 	exceptionEventRecorder record.EventRecorder
-	opaRegisterOnce        sync.Once
 	excludeNamespaces      []string
 	includeNamespaces      []string
 	printEnabled           bool
-	compiledModules        map[string]*ast.Compiler
+	compiledModules        map[string]compiledRule
 	compiledMu             sync.RWMutex
 	// ControlTimeout, when non-zero, bounds the evaluation time of a single
 	// control. If exceeded, the control is recorded as not evaluated instead
@@ -59,6 +67,13 @@ type OPAProcessor struct {
 	// TimedOutControls maps controlID to the reason its evaluation was
 	// aborted after exceeding ControlTimeout.
 	TimedOutControls map[string]string
+	// celEvaluator is the CEL engine shared across the whole scan, built once
+	// via celEvaluatorOnce. One evaluator (and its compiled-program cache) is
+	// reused for every control and object because building the CEL env is far
+	// more expensive than evaluating with it.
+	celEvaluator     *cel.Evaluator
+	celEvaluatorOnce sync.Once
+	celEvaluatorErr  error
 }
 
 func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool, exceptionEventRecorder record.EventRecorder) *OPAProcessor {
@@ -75,7 +90,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		excludeNamespaces:      split(excludeNamespaces),
 		includeNamespaces:      split(includeNamespaces),
 		printEnabled:           enableRegoPrint,
-		compiledModules:        make(map[string]*ast.Compiler),
+		compiledModules:        make(map[string]compiledRule),
 		TimedOutControls:       make(map[string]string),
 	}
 }
@@ -206,7 +221,7 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 			ruleErrs = append(ruleErrs, err)
 			break
 		}
-		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput)
+		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput, control.ControlID)
 		if err != nil {
 			ruleErrs = append(ruleErrs, fmt.Errorf("rule %q: %w", control.Rules[i].Name, err))
 		}
@@ -239,7 +254,7 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 //
 // NOTE: processRule no longer mutates the state of the current OPAProcessor instance,
 // and returns a map instead, to be merged by the caller.
-func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
+func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string, controlID string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
 	resources := make(map[string]*resourcesresults.ResourceAssociatedRule)
 
 	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ControlConfigInputs, fixedControlInputs)
@@ -268,7 +283,7 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 		inputRawResources := workloadinterface.ListMetaToMap(inputResources)
 
 		// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data
-		enumeratedData, err := opap.enumerateData(ctx, rule, inputRawResources)
+		enumeratedData, err := opap.enumerateData(ctx, rule, inputRawResources, controlID)
 		if err != nil {
 			evalErrs = append(evalErrs, fmt.Errorf("enumerator failed for namespace %q: %w", i, err))
 			opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
@@ -284,12 +299,16 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 			opap.AllResources[inputResource.GetID()] = inputResource
 		}
 
-		ruleResponses, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData)
+		ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData, controlID)
 		if err != nil {
-			evalErrs = append(evalErrs, fmt.Errorf("rego eval failed for namespace %q: %w", i, err))
+			evalErrs = append(evalErrs, fmt.Errorf("eval failed for namespace %q: %w", i, err))
 			opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
 			continue
 		}
+
+		// Seed the CEL rule's unknown-verdict resources as skipped so the
+		// pass-inference below preserves them. celOut is empty for the Rego path.
+		opap.seedCELSkips(resources, rule, ruleRegoDependenciesData, celOut.skipped)
 
 		// Build the set of failed IDs so we can correctly mark the remainder as passed.
 		// Resources are only written to the result map after a successful OPA evaluation,
@@ -320,6 +339,9 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 			id := inputResource.GetID()
 			if _, failed := failedIDs[id]; failed {
 				continue
+			}
+			if _, excluded := celOut.excluded[id]; excluded {
+				continue // outside the CEL policy's scope: not evaluated, so not a pass
 			}
 			if existing, ok := resources[id]; ok && (existing.Status == apis.StatusFailed || existing.Status == apis.StatusSkipped) {
 				continue
@@ -491,33 +513,272 @@ func appendPaths(paths []armotypes.PosturePaths, assistedRemediation reporthandl
 	return paths
 }
 
-func (opap *OPAProcessor) runOPAOnSingleRule(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
+func (opap *OPAProcessor) runOPAOnSingleRule(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData, controlID string) ([]reporthandling.RuleResponse, celOutcome, error) {
 	switch rule.RuleLanguage {
 	case reporthandling.RegoLanguage, reporthandling.RegoLanguage2:
-		return opap.runRegoOnK8s(ctx, rule, k8sObjects, getRuleData, ruleRegoDependenciesData)
+		responses, err := opap.runRegoOnK8s(ctx, rule, k8sObjects, getRuleData, ruleRegoDependenciesData)
+		return responses, celOutcome{}, err
 	case reporthandling.CELLanguage:
-		return opap.runCELOnK8s(ctx, rule, k8sObjects, getRuleData)
+		return opap.runCELOnK8s(ctx, rule, k8sObjects, getRuleData, controlID)
 	default:
-		return nil, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
+		return nil, celOutcome{}, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
 	}
 }
 
-// runCELOnK8s evaluates a CEL-based PolicyRule against k8s objects.
-// Stub: the CEL evaluator is added in follow-up PRs (kubescape/kubescape#2001).
-func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, getRuleData func(*reporthandling.PolicyRule) string) ([]reporthandling.RuleResponse, error) {
-	return nil, fmt.Errorf("rule: '%s', CEL evaluation not yet implemented", rule.Name)
+// celOutcome carries the per-resource results of a CEL rule that are not
+// violations: resources whose verdict is unknown (skipped) and resources the
+// policy does not cover (excluded). processRule applies these so neither kind is
+// misreported as passed. The Rego path returns a zero celOutcome.
+type celOutcome struct {
+	// skipped holds resources with an unknown verdict (a validation errored on
+	// them): they must land as StatusSkipped, not passed.
+	skipped []skippedCELResource
+	// excluded holds the IDs of resources outside the policy's matchConstraints:
+	// admission would never match them, so they must not appear in the rule's
+	// results at all.
+	excluded map[string]struct{}
 }
 
-// runRegoOnK8s compiles an OPA PolicyRule and evaluates its against k8s
-func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
-	opap.opaRegisterOnce.Do(func() {
+type skippedCELResource struct {
+	obj map[string]any
+	err error
+}
+
+// runCELOnK8s evaluates a CEL-based PolicyRule against k8s objects by loading
+// the control's ValidatingAdmissionPolicy from the embedded bundle and running
+// its validations. controlID is threaded down from processControl (not read off
+// the rule) and selects which policy to load.
+//
+// getRuleData is part of the shared dispatch signature but unused here: CEL
+// expressions come from the loaded VAP, not from the rule's Rego text.
+//
+// Verdicts map to the Rego path's shape (processRule infers the passing
+// resources as the input minus everything else), but per resource rather than
+// per batch, so one odd object cannot bury the rest:
+//   - a violation produces a RuleResponse (a failure);
+//   - an object outside the policy's matchConstraints is excluded, matching
+//     admission where it is never matched;
+//   - an object with no violation but an eval error has an unknown verdict and
+//     is skipped, never inferred as a pass;
+//   - anything else passes (no entry; processRule infers it).
+//
+// A control-wide failure (the evaluator or policy will not load) is the only
+// rule-level error: every object hits it identically, so the whole rule is
+// skipped, the same path a Rego eval error takes.
+func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, _ func(*reporthandling.PolicyRule) string, controlID string) ([]reporthandling.RuleResponse, celOutcome, error) {
+	evaluator, err := opap.getCELEvaluator()
+	if err != nil {
+		return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
+	}
+
+	var responses []reporthandling.RuleResponse
+	outcome := celOutcome{excluded: make(map[string]struct{})}
+	for _, obj := range k8sObjects {
+		if err := ctx.Err(); err != nil {
+			return nil, celOutcome{}, err
+		}
+
+		// namespaceObject is not resolved yet: policies referencing it eval-error
+		// and their resources are skipped (parity-safe), never passed. Wiring the
+		// real namespace object is a follow-up.
+		eval, err := evaluator.EvaluateControl(ctx, controlID, obj, nil)
+		if err != nil {
+			return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
+		}
+
+		if !eval.Applicable {
+			// Exclusions are silent in the results (the resource is out of scope,
+			// as at admission), but log one so a wrong GVR guess that quietly drops
+			// a resource the control should have seen stays diagnosable.
+			resID := celResourceID(obj)
+			logger.L().Debug("CEL control does not apply to resource, excluding it",
+				helpers.String("rule", rule.Name),
+				helpers.String("resource", resID))
+			outcome.excluded[resID] = struct{}{}
+			continue
+		}
+
+		violated := false
+		var messages []string
+		var hints []cel.PathHint
+		var objErrs []error
+		for _, res := range eval.Results {
+			if res.Err != nil {
+				objErrs = append(objErrs, res.Err)
+				continue
+			}
+			if !res.Passed {
+				violated = true
+				messages = append(messages, res.Message)
+				hints = append(hints, res.Paths...)
+			}
+		}
+
+		switch {
+		case violated:
+			responses = append(responses, celRuleResponse(rule, obj, messages, hints))
+			// A confirmed violation wins over a sibling validation that errored,
+			// matching admission (a deny stands). Surface the dropped errors so a
+			// broken validation in an otherwise-failing policy is not invisible.
+			if len(objErrs) > 0 {
+				logger.L().Debug("CEL validation error on an already-violating resource",
+					helpers.String("rule", rule.Name),
+					helpers.String("resource", celResourceID(obj)),
+					helpers.Error(errors.Join(objErrs...)))
+			}
+		case len(objErrs) > 0:
+			outcome.skipped = append(outcome.skipped, skippedCELResource{obj: obj, err: errors.Join(objErrs...)})
+		}
+	}
+
+	return responses, outcome, nil
+}
+
+// seedCELSkips records the CEL rule's unknown-verdict resources as StatusSkipped
+// (with their eval error in InfoMap) before pass-inference, so they are not
+// later mistaken for passes. It mirrors markResourcesSkipped but per resource,
+// each with its own error, and never downgrades a confirmed failure.
+func (opap *OPAProcessor) seedCELSkips(out map[string]*resourcesresults.ResourceAssociatedRule, rule *reporthandling.PolicyRule, deps resources.RegoDependenciesData, skipped []skippedCELResource) {
+	for _, s := range skipped {
+		meta := objectsenvelopes.NewObject(s.obj)
+		if meta == nil {
+			continue
+		}
+		if opap.skipNamespace(meta.GetNamespace()) {
+			continue
+		}
+		id := meta.GetID()
+		if existing, ok := out[id]; ok && existing.Status == apis.StatusFailed {
+			continue
+		}
+		out[id] = &resourcesresults.ResourceAssociatedRule{
+			Name:                  rule.Name,
+			ControlConfigurations: deps.PostureControlInputs,
+			Status:                apis.StatusSkipped,
+			SubStatus:             apis.SubStatusUnknown,
+		}
+		if opap.InfoMap != nil {
+			opap.InfoMap[id] = apis.StatusInfo{
+				InnerInfo:   s.err.Error(),
+				InnerStatus: apis.StatusSkipped,
+				SubStatus:   apis.SubStatusUnknown,
+			}
+		}
+	}
+}
+
+// getCELEvaluator lazily builds the CEL evaluator shared across the whole scan
+// (see the celEvaluator field).
+func (opap *OPAProcessor) getCELEvaluator() (*cel.Evaluator, error) {
+	opap.celEvaluatorOnce.Do(func() {
+		opap.celEvaluator, opap.celEvaluatorErr = cel.NewEvaluator()
+	})
+	return opap.celEvaluator, opap.celEvaluatorErr
+}
+
+// celRuleResponse builds the RuleResponse for one object that violated a CEL
+// policy, shaped like the Rego path's failure responses so downstream result
+// handling (processRule) treats CEL and Rego violations identically: a
+// RuleResponse with no Exception is a failure (opa-utils RuleResponse.Failed),
+// and GetFailedResources reads the object back out of AlertObject.K8SApiObjects.
+func celRuleResponse(rule *reporthandling.PolicyRule, obj map[string]any, messages []string, hints []cel.PathHint) reporthandling.RuleResponse {
+	return reporthandling.RuleResponse{
+		AlertMessage:        strings.Join(messages, "; "),
+		AssistedRemediation: celRemediation(hints),
+		RuleStatus:          reporthandling.StatusFailed,
+		PackageName:         rule.Name,
+		Rulename:            rule.Name,
+		AlertObject: reporthandling.AlertObject{
+			K8SApiObjects: []map[string]any{obj},
+		},
+	}
+}
+
+// celRemediation maps the evaluator's neutral path hints onto the report
+// model's remediation fields, so appendPaths gives a CEL failure the same
+// ResourceAssociatedRule.Paths a Rego failure carries.
+//
+// A hint with a value says what the policy requires at that path, which is a
+// fix `kubescape fix` can write into the YAML. A hint without one only says
+// where the policy looked, so it becomes a review path: naming the field is
+// useful, but inventing the value to put there would let `kubescape fix` write
+// something the policy never asked for.
+//
+// Paths repeat across a policy's validations (the bundle guards each kind with
+// its own validation, and several can name the same field), so they are
+// deduplicated by path to keep one finding from listing the same path twice.
+// The dedup is keyed on the path alone, not the whole hint: if the same path
+// arrives once with a value and once without, it must land in exactly one of
+// FixPaths or ReviewPaths, so the valued hint wins and the bare one is dropped.
+func celRemediation(hints []cel.PathHint) reporthandling.AssistedRemediation {
+	byPath := make(map[string]string, len(hints))
+	order := make([]string, 0, len(hints))
+	for _, hint := range hints {
+		if existing, seen := byPath[hint.Path]; !seen {
+			byPath[hint.Path] = hint.Value
+			order = append(order, hint.Path)
+		} else if existing == "" {
+			byPath[hint.Path] = hint.Value // a valued hint supersedes a bare one
+		}
+	}
+
+	var remediation reporthandling.AssistedRemediation
+	for _, path := range order {
+		if value := byPath[path]; value != "" {
+			remediation.FixPaths = append(remediation.FixPaths, armotypes.FixPath{Path: path, Value: value})
+			continue
+		}
+		remediation.ReviewPaths = append(remediation.ReviewPaths, path)
+	}
+	return remediation
+}
+
+// celResourceID labels an object in an eval-error message; it falls back to a
+// placeholder when the object is not a recognizable envelope.
+func celResourceID(obj map[string]any) string {
+	if meta := objectsenvelopes.NewObject(obj); meta != nil {
+		return meta.GetID()
+	}
+	return "<unknown>"
+}
+
+// opaRegisterOnce guards rego.RegisterBuiltin1/2 below. Those calls mutate
+// OPA's process-global builtin registry (ast.Builtins/ast.BuiltinMap), which
+// the OPA docs call out as not thread-safe and unsupported to call more than
+// once per process. This must stay a package-level sync.Once: a field on
+// OPAProcessor would give every new instance (i.e. every scan) its own,
+// never-fired Once, defeating the "only once" guarantee it exists to provide.
+var opaRegisterOnce sync.Once
+
+// registerOPABuiltins registers kubescape's custom Rego builtins with the OPA
+// runtime exactly once for the lifetime of the process, regardless of how
+// many OPAProcessor instances (scans) are created. It stays idempotent (via
+// opaRegisterOnce) even though init() below already calls it eagerly,
+// because runRegoOnK8s and tests also call it directly.
+func registerOPABuiltins() {
+	opaRegisterOnce.Do(func() {
 		rego.RegisterBuiltin2(cosignVerifySignatureDeclaration, cosignVerifySignatureDefinition)
 		rego.RegisterBuiltin1(cosignHasSignatureDeclaration, cosignHasSignatureDefinition)
 		rego.RegisterBuiltin1(imageNameNormalizeDeclaration, imageNameNormalizeDefinition)
 	})
+}
+
+// Registering eagerly at package init, rather than lazily on the first scan,
+// removes the (currently unused, but latent) window where a concurrent
+// scan-triggering path could race the first call to registerOPABuiltins.
+// The declarations/definitions it references are plain package-level vars
+// with no runtime dependency, so they are already initialized by the time
+// any init() func runs.
+func init() {
+	registerOPABuiltins()
+}
+
+// runRegoOnK8s compiles an OPA PolicyRule and evaluates its against k8s
+func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
+	registerOPABuiltins()
 
 	ruleData := getRuleData(rule)
-	compiled, err := opap.getCompiledRule(ctx, rule.Name, ruleData, opap.printEnabled)
+	compiled, regoVersion, err := opap.getCompiledRule(ctx, rule.Name, ruleData, opap.printEnabled)
 	if err != nil {
 		return nil, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 	}
@@ -527,7 +788,7 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 		return nil, err
 	}
 
-	results, err := opap.regoEval(ctx, k8sObjects, compiled, &store)
+	results, err := opap.regoEval(ctx, k8sObjects, compiled, regoVersion, &store)
 	if err != nil {
 		return nil, fmt.Errorf("rule '%s': rego eval failed: %w", rule.Name, err)
 	}
@@ -541,9 +802,9 @@ func (opap *OPAProcessor) Print(ctx opaprint.Context, str string) error {
 	return nil
 }
 
-func (opap *OPAProcessor) regoEval(ctx context.Context, inputObj []map[string]any, compiledRego *ast.Compiler, store *storage.Store) ([]reporthandling.RuleResponse, error) {
+func (opap *OPAProcessor) regoEval(ctx context.Context, inputObj []map[string]any, compiledRego *ast.Compiler, regoVersion ast.RegoVersion, store *storage.Store) ([]reporthandling.RuleResponse, error) {
 	rego := rego.New(
-		rego.SetRegoVersion(ast.RegoV0),
+		rego.SetRegoVersion(regoVersion),
 		rego.Query("data.armo_builtins"), // get package name from rule
 		rego.Compiler(compiledRego),
 		rego.Input(inputObj),
@@ -565,13 +826,22 @@ func (opap *OPAProcessor) regoEval(ctx context.Context, inputObj []map[string]an
 	return results, nil
 }
 
-func (opap *OPAProcessor) enumerateData(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any) ([]map[string]any, error) {
+// enumerateData resolves a rule's ResourceEnumerator. A CEL rule must not carry
+// one (it scopes via the VAP's matchConstraints); the guard below enforces that
+// rather than trusting it, because routing a CEL rule through the enumerator
+// would run its validations as the enumerator and silently drop every compliant
+// resource. So the enumerator path here is provably the Rego path, and controlID
+// is unused on it.
+func (opap *OPAProcessor) enumerateData(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, controlID string) ([]map[string]any, error) {
 	if ruleEnumeratorData(rule) == "" {
 		return k8sObjects, nil
 	}
+	if rule.RuleLanguage == reporthandling.CELLanguage {
+		return nil, fmt.Errorf("rule: '%s', CEL rules must not declare a ResourceEnumerator; they scope via the policy's matchConstraints", rule.Name)
+	}
 
 	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ControlConfigInputs, nil)
-	ruleResponse, err := opap.runOPAOnSingleRule(ctx, rule, k8sObjects, ruleEnumeratorData, ruleRegoDependenciesData)
+	ruleResponse, _, err := opap.runOPAOnSingleRule(ctx, rule, k8sObjects, ruleEnumeratorData, ruleRegoDependenciesData, controlID)
 	if err != nil {
 		return nil, err
 	}
@@ -644,40 +914,60 @@ func split(namespaces string) []string {
 	return result
 }
 
-func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleData string, printEnabled bool) (*ast.Compiler, error) {
+// getCompiledRule compiles ruleName+ruleData together with the shared rule
+// dependencies, preferring Rego v1. Policy sources that predate the
+// regolibrary/opa-utils v1 migration - a pinned --controls-version release,
+// a --use-from/--use-default air-gapped bundle, or a tenant-authored custom
+// control from the cloud backend - are plain v0 syntax with no "import
+// rego.v1" marker, so the v1 parse fails outright; falling back to v0 keeps
+// those inputs scannable instead of producing a fatal, empty-report exit.
+// Modules that do declare "import rego.v1" parse identically under either
+// default, so this only changes behavior for genuinely legacy v0 rules.
+func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleData string, printEnabled bool) (*ast.Compiler, ast.RegoVersion, error) {
 	cacheKey := ruleName + "|" + ruleData
 
 	opap.compiledMu.RLock()
-	if compiled, ok := opap.compiledModules[cacheKey]; ok {
+	if entry, ok := opap.compiledModules[cacheKey]; ok {
 		opap.compiledMu.RUnlock()
-		return compiled, nil
+		return entry.compiler, entry.version, nil
 	}
 	opap.compiledMu.RUnlock()
 
 	opap.compiledMu.Lock()
 	defer opap.compiledMu.Unlock()
 
-	if compiled, ok := opap.compiledModules[cacheKey]; ok {
-		return compiled, nil
+	if entry, ok := opap.compiledModules[cacheKey]; ok {
+		return entry.compiler, entry.version, nil
 	}
 
 	baseModules, err := getRuleDependencies(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get rule dependencies: %w", err)
+		return nil, 0, fmt.Errorf("failed to get rule dependencies: %w", err)
 	}
 
 	modules := make(map[string]string, len(baseModules)+1)
 	maps.Copy(modules, baseModules)
 	modules[ruleName] = ruleData
 
-	compiled, err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
+	version := ast.RegoV1
+	compiled, v1Err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
 		EnablePrintStatements: printEnabled,
-		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV0},
+		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV1},
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile rule '%s': %w", ruleName, err)
+	if v1Err != nil {
+		var v0Err error
+		compiled, v0Err = ast.CompileModulesWithOpt(modules, ast.CompileOpts{
+			EnablePrintStatements: printEnabled,
+			ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV0},
+		})
+		if v0Err != nil {
+			return nil, 0, fmt.Errorf("failed to compile rule '%s': %w", ruleName, v1Err)
+		}
+		version = ast.RegoV0
+		logger.L().Ctx(ctx).Warning("rule uses deprecated Rego v0 syntax; v0 support will be removed in a future release",
+			helpers.String("rule", ruleName))
 	}
 
-	opap.compiledModules[cacheKey] = compiled
-	return compiled, nil
+	opap.compiledModules[cacheKey] = compiledRule{compiler: compiled, version: version}
+	return compiled, version, nil
 }

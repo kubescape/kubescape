@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -49,13 +50,10 @@ type Chart struct {
 // If user-supplied overrides cannot be parsed (bad --set syntax, missing -f file, unreadable
 // --set-file path, etc.) the error is returned to the caller. We deliberately do not silently
 // fall back to chart defaults — scanning the wrong manifests is worse than failing fast.
-func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions) (map[string][]workloadinterface.IMetadata, map[string]Chart, error) {
-	directories, _ := listDirs(basePath)
-	helmDirectories := make([]string, 0)
-	for _, dir := range directories {
-		if ok, _ := IsHelmDirectory(dir); ok {
-			helmDirectories = append(helmDirectories, dir)
-		}
+func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
+	helmDirectories, discoveryErrs := listHelmChartDirs(basePath)
+	for _, err := range discoveryErrs {
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(err))
 	}
 
 	// Parse user-supplied value overrides once; reuse for every chart we render.
@@ -64,38 +62,114 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		var err error
 		userValues, err = valueOpts.MergeValues()
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to parse Helm value overrides: %w", err)
+			return nil, nil, nil, fmt.Errorf("failed to parse Helm value overrides: %w", err)
 		}
 	}
 	releaseOpts := valueOpts.ReleaseOptions()
 
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
 	sourceToChart := make(map[string]Chart, 0)
+	// renderedCharts holds the chart directories that rendered without errors. Rendering is
+	// best-effort: a chart that fails is dropped whole (see the continue below), so callers must
+	// keep plain-scanning its files rather than assume this loader covered them.
+	renderedCharts := make([]string, 0, len(helmDirectories))
 	for _, helmDir := range helmDirectories {
 		chart, err := NewHelmChart(helmDir)
-		if err == nil {
-			values := chart.GetDefaultValues()
-			if userValues != nil {
-				values = mergeMaps(values, userValues)
-			}
-			wls, errs := chart.GetWorkloadsWithOptions(values, releaseOpts)
-			if len(errs) > 0 {
-				logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
-				continue
-			}
-			chartName := chart.GetName()
-			prov := chart.Provenance()
-			for k, v := range wls {
-				sourceToWorkloads[k] = v
-				sourceToChart[k] = Chart{
-					Name:       chartName,
-					Path:       helmDir,
-					Provenance: prov[k],
-				}
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("Failed to load Helm chart", helpers.String("path", helmDir), helpers.Error(err))
+			continue
+		}
+		values := chart.GetDefaultValues()
+		if userValues != nil {
+			values = mergeMaps(values, userValues)
+		}
+		wls, errs := chart.GetWorkloadsWithOptions(values, releaseOpts)
+		if len(errs) > 0 {
+			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
+			continue
+		}
+		renderedCharts = append(renderedCharts, helmDir)
+		chartName := chart.GetName()
+		prov := chart.Provenance()
+		for k, v := range wls {
+			sourceToWorkloads[k] = v
+			sourceToChart[k] = Chart{
+				Name:       chartName,
+				Path:       helmDir,
+				Provenance: prov[k],
 			}
 		}
 	}
-	return sourceToWorkloads, sourceToChart, nil
+	return sourceToWorkloads, sourceToChart, renderedCharts, nil
+}
+
+// listHelmChartDirs scans a given path (recursively) and returns the directories holding a helm chart.
+// Subcharts are picked up by the same walk, since each carries its own Chart.yaml.
+func listHelmChartDirs(basePath string) ([]string, []error) {
+	directories, errs := listDirs(basePath)
+	helmDirectories := make([]string, 0)
+	for _, dir := range directories {
+		chartFile := filepath.Join(dir, "Chart.yaml")
+		if _, err := os.Stat(chartFile); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			errs = append(errs, fmt.Errorf("failed to inspect Helm chart metadata %q: %w", chartFile, err))
+			continue
+		}
+		ok, err := IsHelmDirectory(dir)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to inspect %q as a Helm chart: %w", dir, err))
+			continue
+		}
+		if ok {
+			helmDirectories = append(helmDirectories, dir)
+		}
+	}
+	return helmDirectories, errs
+}
+
+// excludeHelmTemplateFiles drops the files living under the templates/ directory of a helm chart.
+// LoadResourcesFromHelmCharts renders those templates, so passing them to the plain-YAML loader
+// as well duplicates the workloads it already renders, and warns on every raw template whose
+// "{{ ... }}" actions are not valid YAML. Only templates/ is excluded: helm renders nothing else,
+// so the rest of the chart (crds/ in particular, which helm does apply) stays plainly scanned.
+//
+// renderedCharts must be the chart directories that rendered without errors. A chart that failed
+// to render is dropped whole by LoadResourcesFromHelmCharts, so its templates must NOT be excluded
+// here — otherwise its resources reach neither loader and vanish from the scan silently.
+func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
+	if len(renderedCharts) == 0 {
+		return files
+	}
+
+	templateDirs := make([]string, 0, len(renderedCharts))
+	for _, helmDir := range renderedCharts {
+		templateDirs = append(templateDirs, filepath.Join(helmDir, "templates"))
+	}
+
+	remaining := make([]string, 0, len(files))
+	for _, file := range files {
+		if !isUnderAnyDir(file, templateDirs) {
+			remaining = append(remaining, file)
+		}
+	}
+	return remaining
+}
+
+// isUnderAnyDir reports whether path is inside one of dirs. Both are expected to be absolute,
+// as returned by listFiles and listDirs.
+func isUnderAnyDir(path string, dirs []string) bool {
+	for _, dir := range dirs {
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			continue
+		}
+		// a sibling merely sharing a prefix (e.g. "templates-docs" next to "templates") escapes with ".."
+		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // mergeMaps performs a deep merge of override into a copy of base, with override winning on conflicts.
@@ -142,34 +216,55 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 	kustomizeDirectoryName := getKustomizeDirectoryName(newBasePath)
 
 	if len(errs) > 0 {
-		logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering yaml from Kustomize failed: %v", errs))
+		err := fmt.Errorf("failed to render Kustomize resources from %q: %w", newBasePath, errors.Join(errs...))
+		logger.L().Ctx(ctx).Error("Rendering yaml from Kustomize failed", helpers.Error(err))
+		return nil, kustomizeDirectoryName, err
 	}
 
 	maps.Copy(sourceToWorkloads, wls)
-	return sourceToWorkloads, kustomizeDirectoryName
+	return sourceToWorkloads, kustomizeDirectoryName, nil
 }
 
-func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) map[string][]workloadinterface.IMetadata {
+// LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts
+// are the chart directories LoadResourcesFromHelmCharts already rendered; their templates are left
+// to that render and skipped here. Pass nil to scan everything (e.g. when no charts were rendered).
+func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, renderedCharts []string) (map[string][]workloadinterface.IMetadata, error) {
 	// skip the plain-YAML glob for a kustomize directory; the kustomize render handles it
 	if isKustomizeDirectory(input) {
-		return nil
+		return nil, nil
 	}
 
 	files, errs := listFiles(input)
 	if len(errs) > 0 {
-		logger.L().Ctx(ctx).Warning(fmt.Sprintf("%v", errs))
+		discoveryErr := fmt.Errorf("failed to discover all manifest files for %q: %w", input, errors.Join(errs...))
+		if len(files) == 0 {
+			return nil, discoveryErr
+		}
+		logger.L().Ctx(ctx).Warning("Continuing with manifest files found before a discovery error", helpers.Error(discoveryErr))
 	}
 	if len(files) == 0 {
-		logger.L().Ctx(ctx).Error("no files found to scan", helpers.String("input", input))
-		return nil
+		return nil, fmt.Errorf("no YAML or JSON manifest files found for input %q", input)
 	}
+
+	// skip the plain-YAML glob for the templates of charts the helm render already covered; a chart
+	// whose render failed is absent from renderedCharts, so its templates stay plainly scanned.
+	files = excludeHelmTemplateFiles(files, renderedCharts)
 
 	workloads, errs := loadFiles(rootPath, files)
 	if len(errs) > 0 {
-		logger.L().Ctx(ctx).Warning(fmt.Sprintf("%v", errs))
+		loadErr := fmt.Errorf("failed to load one or more manifests from %q: %w", input, errors.Join(errs...))
+		// Directory and glob scans have historically been best effort. Keep the
+		// valid resources from mixed inputs, but make the skipped files visible.
+		// An explicitly requested file, or an input with no usable resources,
+		// remains a hard failure because returning success would scan nothing or
+		// conceal corruption in the exact file the user requested.
+		if isFile(input) || len(workloads) == 0 {
+			return workloads, loadErr
+		}
+		logger.L().Ctx(ctx).Warning("Skipping invalid manifest files", helpers.Error(loadErr))
 	}
 
-	return workloads
+	return workloads, nil
 }
 
 func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterface.IMetadata, []error) {
@@ -187,7 +282,13 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 
 		w, e := ReadFile(f, getFileFormat(filePaths[i]))
 		if e != nil {
-			logger.L().Debug("failed to read file", helpers.String("file", filePaths[i]), helpers.Error(e))
+			// Raw Helm templates are a best-effort fallback when chart rendering
+			// fails. Go-template actions are not valid YAML, so keep scanning any
+			// static templates without treating templated siblings as corrupt
+			// standalone manifests.
+			if !bytes.Contains(f, []byte("{{")) {
+				errs = append(errs, fmt.Errorf("failed to parse %q: %w", filePaths[i], e))
+			}
 		}
 		if len(w) != 0 {
 			path := filePaths[i]
@@ -260,27 +361,27 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool) ([]string, []e
 	}
 
 	f, err := glob(root, shouldMatch, onlyDirectories)
+	paths = append(paths, f...)
 	if err != nil {
 		errs = append(errs, err)
-	} else {
-		paths = append(paths, f...)
 	}
 
 	return paths, errs
 }
 
-func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, _ error) {
+func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err error) {
 	yamlObjs = []workloadinterface.IMetadata{}
 	defer func() {
 		if r := recover(); r != nil {
-			logger.L().Warning(fmt.Sprintf("panic during YAML parsing: %v", r))
+			err = fmt.Errorf("panic during YAML parsing: %v", r)
 		}
 	}()
 
+	var parseErrs []error
 	for i, doc := range splitYAMLDocuments(yamlFile) {
 		var t any
-		if err := yaml.Unmarshal(doc, &t); err != nil {
-			logger.L().Warning(fmt.Sprintf("skipping malformed YAML document %d: %v", i+1, err))
+		if unmarshalErr := yaml.Unmarshal(doc, &t); unmarshalErr != nil {
+			parseErrs = append(parseErrs, fmt.Errorf("document %d: %w", i+1, unmarshalErr))
 			continue
 		}
 		j := convertYamlToJson(t)
@@ -300,7 +401,7 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, _ er
 		}
 	}
 
-	return
+	return yamlObjs, errors.Join(parseErrs...)
 }
 
 func splitYAMLDocuments(data []byte) [][]byte {
@@ -339,8 +440,18 @@ func isYAMLDocumentSeparator(line []byte) bool {
 	return len(rest) == 0 || rest[0] == '#'
 }
 
-func readJsonFile(jsonFile []byte) ([]workloadinterface.IMetadata, error) {
-	workloads := []workloadinterface.IMetadata{}
+func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err error) {
+	workloads = []workloadinterface.IMetadata{}
+	// The object envelopes do unchecked type assertions on the decoded
+	// document, so a well formed but wrongly typed manifest panics. Recover
+	// the same way readYamlFile does, so one bad file fails that file rather
+	// than the whole scan.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic during JSON parsing: %v", r)
+		}
+	}()
+
 	var jsonObj any
 	if err := json.Unmarshal(jsonFile, &jsonObj); err != nil {
 		return workloads, err
@@ -426,7 +537,7 @@ func glob(root, pattern string, onlyDirectories bool) ([]string, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return matches, err
 	}
 	return matches, nil
 }

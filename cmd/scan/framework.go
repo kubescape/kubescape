@@ -76,7 +76,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				}
 			}
 			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif")
+				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast")
 			}
 			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ScanFormats); err != nil {
 				return err
@@ -132,9 +132,6 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				logger.L().Fatal(err.Error())
 			}
 
-			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
-				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
-			}
 			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
 				logger.L().Fatal("scan compliance-score is below permitted threshold", helpers.String("compliance-score", fmt.Sprintf("%.2f", results.GetComplianceScore())), helpers.String("compliance-threshold", fmt.Sprintf("%.2f", scanInfo.ComplianceThreshold)))
 			}
@@ -244,19 +241,16 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 		scanInfo.View = string(cautils.ResourceViewType)
 	}
 
-	if scanInfo.Submit && scanInfo.Local {
+	if scanInfo.Submit.GetBool() && scanInfo.Local {
 		return ErrKeepLocalOrSubmit
 	}
 	if 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
 		return ErrBadThreshold
 	}
-	if 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
-		return ErrBadThreshold
-	}
 	if 100 < scanInfo.FailCoverageThreshold || 0 > scanInfo.FailCoverageThreshold {
 		return ErrBadThreshold
 	}
-	if scanInfo.Submit && scanInfo.OmitRawResources {
+	if scanInfo.Submit.GetBool() && scanInfo.OmitRawResources {
 		return ErrOmitRawResourcesOrSubmit
 	}
 	if err := validateControlTimeout(scanInfo); err != nil {
@@ -282,14 +276,11 @@ func validateControlTimeout(scanInfo *cautils.ScanInfo) error {
 }
 
 // validateThresholdsOnly validates only the numeric threshold ranges
-// (compliance-threshold and fail-threshold must be between 0 and 100).
+// (compliance-threshold and fail-coverage-threshold must be between 0 and 100).
 // Unlike validateFrameworkScanInfo, this function does not mutate scanInfo
 // or enforce unrelated constraints.
 func validateThresholdsOnly(scanInfo *cautils.ScanInfo) error {
 	if 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
-		return ErrBadThreshold
-	}
-	if 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
 		return ErrBadThreshold
 	}
 	if 100 < scanInfo.FailCoverageThreshold || 0 > scanInfo.FailCoverageThreshold {

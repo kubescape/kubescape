@@ -226,6 +226,22 @@ func TestApplyFixKeepsFormatting(t *testing.T) {
 	}
 }
 
+// TestApplyFixToContent_EmptyLeadingDocument guards the regression from issue
+// #2495: a file whose first document is empty (a comment followed by "---") is
+// decoded inconsistently by go-yaml and yqlib, which used to make the fix
+// renderer call logger.Fatal and os.Exit the whole process mid-write (leaving
+// an empty SARIF file). It must now return an error gracefully instead.
+func TestApplyFixToContent_EmptyLeadingDocument(t *testing.T) {
+	yamlContent := "# a comment, followed by a document separator\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          image: nginx:1.27\n"
+	// The scanner counts the empty leading document, so the Deployment is di==1.
+	expression := FixPathToValidYamlExpression("spec.template.spec.containers[0].image", "nginx:1.28", 1)
+
+	got, err := ApplyFixToContent(context.Background(), yamlContent, expression)
+
+	assert.Error(t, err, "expected a graceful error rather than a process exit")
+	assert.Empty(t, got)
+}
+
 func Test_fixPathToValidYamlExpression(t *testing.T) {
 	type args struct {
 		fixPath             string
@@ -508,6 +524,44 @@ metadata:
 	}
 }
 
+// TestRevertSanitizeYaml guards the `< 5` / `[:5]` pairing: the guard was
+// previously `< 3` while the slice was `[:5]`, so any 3-4 byte input panicked
+// with "slice bounds out of range". Covers every length from 0 up to and past
+// the "# ---" marker, since that boundary is exactly where the bug lived.
+func TestRevertSanitizeYaml(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "length 0", in: "", want: ""},
+		{name: "length 1", in: "-", want: "-"},
+		{name: "length 2", in: "--", want: "--"},
+		{name: "length 3 (previously panicked)", in: "# -", want: "# -"},
+		{name: "length 4 (previously panicked)", in: "# --", want: "# --"},
+		{name: "length 5, marker present", in: "# ---", want: "---"},
+		{name: "length 5, marker absent", in: "# abc", want: "# abc"},
+		{name: "marker with trailing content", in: "# ---\nkind: Pod\n", want: "---\nkind: Pod\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				got := revertSanitizeYaml(tt.in)
+				assert.Equal(t, tt.want, got)
+			})
+		})
+	}
+}
+
+// TestSanitizeYaml_RoundTrip confirms revertSanitizeYaml undoes sanitizeYaml
+// for the case both were built for: a document starting with "---".
+func TestSanitizeYaml_RoundTrip(t *testing.T) {
+	original := "---\napiVersion: v1\nkind: Pod\n"
+	sanitized := sanitizeYaml(original)
+	assert.Equal(t, "# ---\napiVersion: v1\nkind: Pod\n", sanitized)
+	assert.Equal(t, original, revertSanitizeYaml(sanitized))
+}
+
 func TestReduceYamlExpressions(t *testing.T) {
 	type args struct {
 		yamlExpressions []string
@@ -614,6 +668,26 @@ func TestGetLocalPath(t *testing.T) {
 				},
 			},
 			want: os.TempDir(),
+		},
+		{
+			name: "Scan target GitLocal without repository metadata",
+			args: args{
+				report: &reporthandlingv2.PostureReport{
+					Metadata: reporthandlingv2.Metadata{
+						ScanMetadata: reporthandlingv2.ScanMetadata{
+							ScanningTarget: reporthandlingv2.GitLocal,
+						},
+					},
+				},
+			},
+			want: "",
+		},
+		{
+			name: "nil report",
+			args: args{
+				report: nil,
+			},
+			want: "",
 		},
 		{
 			name: "Scan target Directory",

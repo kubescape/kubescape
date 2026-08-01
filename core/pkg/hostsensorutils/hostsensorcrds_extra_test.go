@@ -10,9 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic/fake"
 )
 
 func TestConvertCRDToEnvelope(t *testing.T) {
@@ -114,17 +111,9 @@ func TestHasCloudProviderInfo(t *testing.T) {
 }
 
 func TestListCRDResources(t *testing.T) {
-	item := &unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": hostDataGroup + "/" + hostDataVersion,
-			"kind":       "OsReleaseFile",
-			"metadata": map[string]any{
-				"name": "node-1",
-			},
-		},
-	}
+	item := newCRDItem("OsReleaseFile", "node-1", nil)
 	hsh := &HostSensorHandler{
-		dynamicClient: fake.NewSimpleDynamicClient(runtime.NewScheme(), item),
+		dynamicClient: newCRDDynamicClient(t, item),
 	}
 
 	got, err := hsh.listCRDResources(context.Background(), "osreleasefiles", k8shostsensor.OsReleaseFile.String())
@@ -154,12 +143,7 @@ func mustJSON(t *testing.T, value map[string]any) string {
 
 func TestInitAllowsEmptyCRDList(t *testing.T) {
 	hsh := &HostSensorHandler{
-		dynamicClient: fake.NewSimpleDynamicClientWithCustomListKinds(
-			runtime.NewScheme(),
-			map[schema.GroupVersionResource]string{
-				{Group: hostDataGroup, Version: hostDataVersion, Resource: "osreleasefiles"}: "OsReleaseFileList",
-			},
-		),
+		dynamicClient: newCRDDynamicClient(t),
 	}
 
 	err := hsh.Init(context.Background())

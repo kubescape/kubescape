@@ -162,3 +162,54 @@ func hydrateReleasedPolicyFromMock(t testing.TB, p *DownloadReleasedPolicy) {
 func testRegoFile(framework string) string {
 	return filepath.Join(testutils.CurrentDir(), "testdata", fmt.Sprintf("%s.json", framework))
 }
+
+func TestNewDownloadReleasedPolicyWithVersion(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty version falls back to the latest release", func(t *testing.T) {
+		t.Parallel()
+
+		pinned := NewDownloadReleasedPolicyWithVersion("")
+		latest := NewDownloadReleasedPolicy()
+		require.Equal(t, latest.gs.URL, pinned.gs.URL)
+	})
+
+	t.Run("pinned version targets the release tag", func(t *testing.T) {
+		t.Parallel()
+
+		p := NewDownloadReleasedPolicyWithVersion("v2.0.301")
+		require.Contains(t, p.gs.URL, "download/v2.0.301")
+	})
+}
+
+func TestSetRegoObjectsWithFallback(t *testing.T) {
+	t.Parallel()
+
+	// unroutable URL (port 0) so the download fails deterministically offline
+	const unreachableURL = "http://127.0.0.1:0/download"
+
+	t.Run("empty version keeps cache fallback on download failure", func(t *testing.T) {
+		t.Parallel()
+
+		p := NewDownloadReleasedPolicyWithVersion("")
+		require.False(t, p.IsVersionPinned())
+		p.gs.URL = unreachableURL
+
+		fallback, err := p.SetRegoObjectsWithFallback()
+		require.NoError(t, err)
+		require.True(t, fallback)
+	})
+
+	t.Run("pinned version returns a hard error on download failure", func(t *testing.T) {
+		t.Parallel()
+
+		p := NewDownloadReleasedPolicyWithVersion("v0.0.0-does-not-exist")
+		require.True(t, p.IsVersionPinned())
+		p.gs.URL = unreachableURL
+
+		fallback, err := p.SetRegoObjectsWithFallback()
+		require.Error(t, err)
+		require.False(t, fallback)
+		require.Contains(t, err.Error(), "v0.0.0-does-not-exist")
+	})
+}

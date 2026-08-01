@@ -63,10 +63,24 @@ func TestResolveLocation(t *testing.T) {
 		assert.Equalf(t, expected.Line, location.Line, "fixPath %s, expected line: %d, actual line: %d", fixPath, expected.Line, location.Line)
 		assert.Equalf(t, expected.Column, location.Column, "fixPath %s, expected column: %d, actual column: %d", fixPath, expected.Column, location.Column)
 	}
-
 	_, err := resolver.ResolveLocation("some invalid string as an input", 0)
+	assert.ErrorContains(t, err, "failed to evaluate yaml expression")
 	assert.ErrorContains(t, err, "invalid input")
 
+}
+
+func TestResolveLocation_ZeroCandidateNodesDoesNotPanic(t *testing.T) {
+	yamlFilePath := filepath.Join(onlineBoutiquePath(), "adservice.yaml")
+	resolver, err := NewFixPathLocationResolver(yamlFilePath)
+	assert.NoError(t, err)
+
+	// traversing into a scalar yields zero candidate nodes, which previously
+	// caused a nil pointer dereference panic on candidateNodes.Back().
+	assert.NotPanics(t, func() {
+		location, err := resolver.ResolveLocation("metadata.name.foo=1", 0)
+		assert.NoError(t, err)
+		assert.Equal(t, Location{Line: 18, Column: 9}, location)
+	})
 }
 
 func TestFixPathLocationResolver_NonExistentYaml(t *testing.T) {

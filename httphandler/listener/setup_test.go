@@ -7,6 +7,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -37,6 +38,103 @@ func TestLoadTLSKey(t *testing.T) {
 		require.NotNil(t, pair)
 		assert.NotEmpty(t, pair.Certificate)
 		assert.NotNil(t, pair.PrivateKey)
+	})
+
+	t.Run("returns nil pair and nil error when neither is set", func(t *testing.T) {
+		pair, err := loadTLSKey("", "")
+		require.NoError(t, err)
+		require.Nil(t, pair)
+	})
+
+	t.Run("returns error when the cert/key files cannot be loaded", func(t *testing.T) {
+		dir := t.TempDir()
+		pair, err := loadTLSKey(filepath.Join(dir, "missing-cert.pem"), filepath.Join(dir, "missing-key.pem"))
+		require.Error(t, err)
+		require.Nil(t, pair)
+		require.Contains(t, err.Error(), "failed to load key pair")
+	})
+}
+
+func TestGetCertFile(t *testing.T) {
+	t.Run("returns env var when set", func(t *testing.T) {
+		t.Setenv("KS_CERT_FILE", "/tmp/cert.pem")
+		require.Equal(t, "/tmp/cert.pem", getCertFile())
+	})
+
+	t.Run("returns empty when unset", func(t *testing.T) {
+		t.Setenv("KS_CERT_FILE", "placeholder") // registers cleanup/restore
+		os.Unsetenv("KS_CERT_FILE")
+		require.Empty(t, getCertFile())
+	})
+}
+
+func TestGetKeyFile(t *testing.T) {
+	t.Run("returns env var when set", func(t *testing.T) {
+		t.Setenv("KS_KEY_FILE", "/tmp/key.pem")
+		require.Equal(t, "/tmp/key.pem", getKeyFile())
+	})
+
+	t.Run("returns empty when unset", func(t *testing.T) {
+		t.Setenv("KS_KEY_FILE", "placeholder") // registers cleanup/restore
+		os.Unsetenv("KS_KEY_FILE")
+		require.Empty(t, getKeyFile())
+	})
+}
+
+// occupyPort binds a loopback listener on a free port so a subsequent bind to
+// ":<port>" (all interfaces) fails immediately with "address already in use",
+// letting SetupHTTPListener's server-start path be exercised without actually
+// serving traffic.
+func occupyPort(t *testing.T) (net.Listener, string) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	_, port, err := net.SplitHostPort(ln.Addr().String())
+	require.NoError(t, err)
+	return ln, port
+}
+
+func TestSetupHTTPListener(t *testing.T) {
+	t.Run("returns error on invalid TLS config", func(t *testing.T) {
+		t.Setenv("KS_CERT_FILE", "cert.pem")
+		t.Setenv("KS_KEY_FILE", "")
+
+		err := SetupHTTPListener()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "KS_CERT_FILE and KS_KEY_FILE")
+	})
+
+	t.Run("fails fast over plain HTTP when the port is already bound", func(t *testing.T) {
+		occupied, port := occupyPort(t)
+		defer occupied.Close()
+
+		t.Setenv("KS_CERT_FILE", "")
+		t.Setenv("KS_KEY_FILE", "")
+		t.Setenv("KS_PORT", port)
+
+		err := SetupHTTPListener()
+		// The specific errno isn't portable (syscall.EADDRINUSE doesn't map
+		// to Windows' WSAEADDRINUSE); the point of this test is that
+		// SetupHTTPListener propagates the ListenAndServe(TLS) error instead
+		// of blocking, so a plain error check is enough.
+		require.Error(t, err)
+	})
+
+	t.Run("fails fast over TLS when the port is already bound", func(t *testing.T) {
+		certFile, keyFile := writeTestTLSFiles(t)
+		occupied, port := occupyPort(t)
+		defer occupied.Close()
+
+		t.Setenv("KS_CERT_FILE", certFile)
+		t.Setenv("KS_KEY_FILE", keyFile)
+		t.Setenv("KS_PORT", port)
+
+		err := SetupHTTPListener()
+		// The specific errno isn't portable (syscall.EADDRINUSE doesn't map
+		// to Windows' WSAEADDRINUSE); the point of this test is that
+		// SetupHTTPListener propagates the ListenAndServe(TLS) error instead
+		// of blocking, so a plain error check is enough.
+		require.Error(t, err)
 	})
 }
 

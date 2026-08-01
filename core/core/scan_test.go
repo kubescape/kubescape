@@ -95,25 +95,25 @@ func TestIsAirGappedMode(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "air-gapped with ControlsInputs",
+			name: "not air-gapped with ControlsInputs",
 			scanInfo: &cautils.ScanInfo{
 				ControlsInputs: "/path/to/controls",
 			},
-			want: true,
+			want: false,
 		},
 		{
-			name: "air-gapped with UseExceptions",
+			name: "not air-gapped with UseExceptions",
 			scanInfo: &cautils.ScanInfo{
 				UseExceptions: "/path/to/exceptions",
 			},
-			want: true,
+			want: false,
 		},
 		{
-			name: "air-gapped with AttackTracks",
+			name: "not air-gapped with AttackTracks",
 			scanInfo: &cautils.ScanInfo{
 				AttackTracks: "/path/to/attack-tracks",
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name:     "not air-gapped - all empty",

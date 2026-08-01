@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"sigs.k8s.io/kustomize/api/krusty"
@@ -101,7 +100,7 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	wls, e := ReadFile(yml, YAML_FILE_FORMAT)
 
 	if e != nil {
-		logger.L().Debug("failed to read rendered yaml file", helpers.String("file", kustomizeDirectoryPath), helpers.Error(e))
+		errs = append(errs, e)
 	}
 
 	if len(wls) != 0 {

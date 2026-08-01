@@ -42,7 +42,7 @@ func TestServerState_InitialState(t *testing.T) {
 
 func TestServerState_SetBusyMakesIDReachable(t *testing.T) {
 	s := newServerState()
-	s.setBusy("scan-abc")
+	s.setBusy("scan-abc", func() {})
 
 	// After setBusy the ID must be visible.
 	if !s.isBusy("scan-abc") {
@@ -64,7 +64,7 @@ func TestServerState_SetBusyMakesIDReachable(t *testing.T) {
 
 func TestServerState_SetNotBusyClearsID(t *testing.T) {
 	s := newServerState()
-	s.setBusy("scan-xyz")
+	s.setBusy("scan-xyz", func() {})
 	s.setNotBusy("scan-xyz")
 
 	// After completion the scan must report not-busy.
@@ -88,8 +88,8 @@ func TestServerState_SetNotBusyClearsID(t *testing.T) {
 
 func TestServerState_LatestIDTracksLastRegisteredScan(t *testing.T) {
 	s := newServerState()
-	s.setBusy("first")
-	s.setBusy("second")
+	s.setBusy("first", func() {})
+	s.setBusy("second", func() {})
 
 	// latestID must always reflect the most recent setBusy call.
 	if id := s.getLatestID(); id != "second" {
@@ -150,7 +150,7 @@ func TestStatus_WhenNoScanHasRun_ReturnsNotBusy(t *testing.T) {
 
 func TestStatus_WhenScanIsRunning_WithExplicitID_ReturnsBusy(t *testing.T) {
 	h := &HTTPHandler{state: newServerState()}
-	h.state.setBusy("scan-123")
+	h.state.setBusy("scan-123", func() {})
 
 	rq := httptest.NewRequest(http.MethodGet, "/status?id=scan-123", nil)
 	w := httptest.NewRecorder()
@@ -176,7 +176,7 @@ func TestStatus_WhenScanIsRunning_WithEmptyID_ResolvesViaLatestID(t *testing.T) 
 	// isBusy("") resolves to statusID[latestID], and then the handler
 	// populates the response ID from getLatestID(). Both steps are untested.
 	h := &HTTPHandler{state: newServerState()}
-	h.state.setBusy("scan-456")
+	h.state.setBusy("scan-456", func() {})
 
 	rq := httptest.NewRequest(http.MethodGet, "/status", nil) // no ?id= param
 	w := httptest.NewRecorder()
@@ -198,7 +198,7 @@ func TestStatus_AfterScanCompletes_ReturnsNotBusy(t *testing.T) {
 	// Without this test a regression where setNotBusy fails to clear the state
 	// would cause the operator to believe a scan is running indefinitely.
 	h := &HTTPHandler{state: newServerState()}
-	h.state.setBusy("scan-789")
+	h.state.setBusy("scan-789", func() {})
 	h.state.setNotBusy("scan-789") // scan finished
 
 	rq := httptest.NewRequest(http.MethodGet, "/status?id=scan-789", nil)

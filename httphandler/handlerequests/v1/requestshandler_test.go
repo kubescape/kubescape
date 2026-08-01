@@ -7,9 +7,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
@@ -30,30 +33,114 @@ func TestScan(t *testing.T) {
 
 	// Our scanner is not setting up the k8s connection; the test is covering the rest of the wiring
 	// that the signaling from the http handler goes all the way to the scanner implementation.
+	withTempOutputDirs(t)
+
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(context.Context, *cautils.ScanInfo, string, bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(_ context.Context, _ *cautils.ScanInfo, scanID string, _ bool) (*reporthandlingv2.PostureReport, error) {
+		report := &reporthandlingv2.PostureReport{}
+		b, err := json.Marshal(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(OutputDir, scanID+".json"), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
 		return nil, nil
 	}
 
 	var (
 		h  = NewHTTPHandler(false)
-		rq = httptest.NewRequest("POST", "/scan?wait=true", testBody(t))
+		rq = httptest.NewRequest("POST", "/scan?wait=true&keep=true", testBody(t))
 		w  = httptest.NewRecorder()
 	)
 	h.Scan(w, rq)
 	rs := w.Result()
 	body, _ := io.ReadAll(rs.Body)
 
-	type out struct {
-		code  int
-		ctype string
-		body  string
+	var resp utilsmetav1.Response
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("failed to decode Scan response body: %v", err)
 	}
-	want := out{200, "application/json", `{"id":"","type":"v1results"}`}
-	got := out{rs.StatusCode, rs.Header.Get("Content-type"), string(body)}
 
-	if got != want {
-		t.Errorf("Scan result: %v,  want %v", got, want)
+	if rs.StatusCode != http.StatusOK {
+		t.Errorf("Scan status code = %d, want %d", rs.StatusCode, http.StatusOK)
+	}
+	if resp.Type != utilsapisv1.ResultsV1ScanResponseType {
+		t.Errorf("Scan response type = %v, want %v", resp.Type, utilsapisv1.ResultsV1ScanResponseType)
+	}
+	if resp.Response == nil {
+		t.Errorf("Scan response.Response is nil, want populated PostureReport")
+	}
+}
+
+// TestScan_SyncResponse covers the sync response branch that populates
+// response.Response from the on-disk results file (requestshandler.go:130-138).
+func TestScan_SyncResponse(t *testing.T) {
+	tests := []struct {
+		name         string
+		writeResults bool
+		wantType     utilsapisv1.ScanResponseType
+	}{
+		{
+			name:         "results file present returns populated report",
+			writeResults: true,
+			wantType:     utilsapisv1.ResultsV1ScanResponseType,
+		},
+		{
+			name:         "results file missing returns error",
+			writeResults: false,
+			wantType:     utilsapisv1.ErrorScanResponseType,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			withTempOutputDirs(t)
+
+			defer func(o scanner) { scanImpl = o }(scanImpl)
+			scanImpl = func(_ context.Context, _ *cautils.ScanInfo, scanID string, _ bool) (*reporthandlingv2.PostureReport, error) {
+				if tt.writeResults {
+					b, err := json.Marshal(&reporthandlingv2.PostureReport{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(OutputDir, scanID+".json"), b, 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return nil, nil
+			}
+
+			var (
+				h  = NewHTTPHandler(false)
+				rq = httptest.NewRequest("POST", "/scan?wait=true&keep=true", testBody(t))
+				w  = httptest.NewRecorder()
+			)
+			h.Scan(w, rq)
+			rs := w.Result()
+			body, _ := io.ReadAll(rs.Body)
+
+			var resp utilsmetav1.Response
+			if err := json.Unmarshal(body, &resp); err != nil {
+				t.Fatalf("failed to decode Scan response body: %v", err)
+			}
+
+			if resp.Type != tt.wantType {
+				t.Errorf("response type = %v, want %v", resp.Type, tt.wantType)
+			}
+
+			switch tt.wantType {
+			case utilsapisv1.ResultsV1ScanResponseType:
+				if resp.Response == nil {
+					t.Errorf("response.Response is nil, want populated PostureReport")
+				}
+			case utilsapisv1.ErrorScanResponseType:
+				msg, ok := resp.Response.(string)
+				if !ok || msg == "" {
+					t.Errorf("response.Response = %v, want non-empty error message", resp.Response)
+				}
+			}
+		})
 	}
 }
 
