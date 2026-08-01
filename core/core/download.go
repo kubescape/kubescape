@@ -274,7 +274,7 @@ func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) err
 	}
 	controls, err := g.GetControl(downloadInfo.Identifier)
 	if err != nil {
-		return fmt.Errorf("failed to download control id '%s',  %s", downloadInfo.Identifier, err.Error())
+		return fmt.Errorf("failed to download control id '%s', %s", downloadInfo.Identifier, err.Error())
 	}
 	if controls == nil {
 		return fmt.Errorf("failed to download control id '%s' - received an empty objects", downloadInfo.Identifier)
