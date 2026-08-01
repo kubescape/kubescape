@@ -177,10 +177,22 @@ func TestDownload_UnknownTargetReturnsError(t *testing.T) {
 }
 
 // TestDownload_CreatesOutputDirectoryWithRestrictivePermissions guards
-// against a regression back to os.ModePerm (0777, world-writable). Download()
-// creates downloadInfo.Path before dispatching to the target-specific
-// downloader, so an unknown target (which fails after directory creation) is
-// enough to exercise the MkdirAll call in isolation.
+// against a regression back to os.ModePerm (0777, world-writable), and
+// against Download() drifting from the 0700 policy customerloader.go's
+// updateConfigFile() already enforces on ~/.kubescape - which is where
+// Download() writes by default (setPathAndFilename falls back to
+// getter.GetDefaultPath("") when no --output path is given), and which
+// holds config.json's AccessKey. Download() applies that same 0700 to every
+// path it creates, not just the default one, so this holds even though the
+// test passes an explicit custom Path. Download() creates downloadInfo.Path
+// before dispatching to the target-specific downloader, so an unknown
+// target (which fails after directory creation) is enough to exercise the
+// MkdirAll call in isolation.
+//
+// The 0-bits-outside-0700 assertion below is a meaningful guard only when
+// the process umask doesn't already mask those bits out (see the identical
+// caveat on printer.assertDirNotMorePermissiveThan0750); CI's default umask
+// (022) makes it effective.
 func TestDownload_CreatesOutputDirectoryWithRestrictivePermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "download-dir")
 
@@ -194,7 +206,7 @@ func TestDownload_CreatesOutputDirectoryWithRestrictivePermissions(t *testing.T)
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	mode := info.Mode().Perm()
-	assert.Zerof(t, mode&0o027, "directory %s has mode %o, more permissive than 0750", path, mode)
+	assert.Zerof(t, mode&0o077, "directory %s has mode %o, more permissive than 0700", path, mode)
 }
 
 // ---------------------------------------------------------------------------

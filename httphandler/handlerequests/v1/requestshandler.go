@@ -25,6 +25,10 @@ const (
 	defaultMaxScanRequestBodyBytes = int64(1 << 20) // 1 MiB
 	scanQueueCapacityEnv           = "KS_SCAN_QUEUE_CAPACITY"
 	scanRequestMaxBytesEnv         = "KS_SCAN_REQUEST_MAX_BYTES"
+	// outputDirPerm restricts OutputDir/FailedOutputDir to the owner plus
+	// group read/traverse, instead of os.ModePerm (0777, world-writable),
+	// which scan output/failure directories have no reason to be.
+	outputDirPerm = 0o750
 )
 
 // A Scan Response object
