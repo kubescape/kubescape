@@ -519,3 +519,10 @@ func TestNaturalSortPolicies(t *testing.T) {
 		})
 	}
 }
+
+func TestListInvalidTarget(t *testing.T) {
+	ks := NewKubescape(context.Background())
+	err := ks.List(&metav1.ListPolicies{Target: "not-a-valid-target"})
+	assert.Error(t, err)
+	assert.Equal(t, "unknown command to list", err.Error())
+}
