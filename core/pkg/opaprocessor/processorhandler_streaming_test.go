@@ -2,6 +2,7 @@ package opaprocessor
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -125,7 +126,7 @@ func TestResourceBatch_MemoryUsage(t *testing.T) {
 
 	// Add cluster-scoped resources
 	for i := 0; i < 10; i++ {
-		node := mustWorkload(t, `{"apiVersion":"v1","kind":"Node","metadata":{"name":"node-`+string(rune('0'+i))+`"}}`)
+		node := mustWorkload(t, `{"apiVersion":"v1","kind":"Node","metadata":{"name":"node-`+strconv.Itoa(i)+`"}}`)
 		allResources[node.GetID()] = node
 		k8sResources["/v1/nodes"] = append(k8sResources["/v1/nodes"], node.GetID())
 	}
@@ -133,7 +134,7 @@ func TestResourceBatch_MemoryUsage(t *testing.T) {
 	// Add namespace-scoped resources across multiple namespaces
 	for ns := 0; ns < 5; ns++ {
 		for i := 0; i < 20; i++ {
-			pod := mustWorkload(t, `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-`+string(rune('0'+i))+`","namespace":"ns-`+string(rune('0'+ns))+`"}}`)
+			pod := mustWorkload(t, `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-`+strconv.Itoa(ns*20+i)+`","namespace":"ns-`+strconv.Itoa(ns)+`"}}`)
 			allResources[pod.GetID()] = pod
 			k8sResources["/v1/pods"] = append(k8sResources["/v1/pods"], pod.GetID())
 		}
@@ -183,7 +184,7 @@ func BenchmarkStreamingMemoryUsage(b *testing.B) {
 
 	// Add cluster-scoped resources (typically 10-20% of total)
 	for i := 0; i < 50; i++ {
-		node, _ := workloadinterface.NewWorkload([]byte(`{"apiVersion":"v1","kind":"Node","metadata":{"name":"node-` + string(rune('0'+i%10)) + `"}}`))
+		node, _ := workloadinterface.NewWorkload([]byte(`{"apiVersion":"v1","kind":"Node","metadata":{"name":"node-` + strconv.Itoa(i) + `"}}`))
 		allResources[node.GetID()] = node
 		k8sResources["/v1/nodes"] = append(k8sResources["/v1/nodes"], node.GetID())
 	}
@@ -191,7 +192,7 @@ func BenchmarkStreamingMemoryUsage(b *testing.B) {
 	// Add namespace-scoped resources (typically 80-90% of total)
 	for ns := 0; ns < 10; ns++ {
 		for i := 0; i < 100; i++ {
-			pod, _ := workloadinterface.NewWorkload([]byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-` + string(rune('0'+i%10)) + `","namespace":"ns-` + string(rune('0'+ns%10)) + `"}}`))
+			pod, _ := workloadinterface.NewWorkload([]byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-` + strconv.Itoa(ns*100+i) + `","namespace":"ns-` + strconv.Itoa(ns) + `"}}`))
 			allResources[pod.GetID()] = pod
 			k8sResources["/v1/pods"] = append(k8sResources["/v1/pods"], pod.GetID())
 		}
@@ -232,7 +233,7 @@ func BenchmarkEagerMemoryUsage(b *testing.B) {
 
 	// Add cluster-scoped resources
 	for i := 0; i < 50; i++ {
-		node, _ := workloadinterface.NewWorkload([]byte(`{"apiVersion":"v1","kind":"Node","metadata":{"name":"node-` + string(rune('0'+i%10)) + `"}}`))
+		node, _ := workloadinterface.NewWorkload([]byte(`{"apiVersion":"v1","kind":"Node","metadata":{"name":"node-` + strconv.Itoa(i) + `"}}`))
 		allResources[node.GetID()] = node
 		k8sResources["/v1/nodes"] = append(k8sResources["/v1/nodes"], node.GetID())
 	}
@@ -240,7 +241,7 @@ func BenchmarkEagerMemoryUsage(b *testing.B) {
 	// Add namespace-scoped resources
 	for ns := 0; ns < 10; ns++ {
 		for i := 0; i < 100; i++ {
-			pod, _ := workloadinterface.NewWorkload([]byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-` + string(rune('0'+i%10)) + `","namespace":"ns-` + string(rune('0'+ns%10)) + `"}}`))
+			pod, _ := workloadinterface.NewWorkload([]byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-` + strconv.Itoa(ns*100+i) + `","namespace":"ns-` + strconv.Itoa(ns) + `"}}`))
 			allResources[pod.GetID()] = pod
 			k8sResources["/v1/pods"] = append(k8sResources["/v1/pods"], pod.GetID())
 		}
