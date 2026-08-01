@@ -176,6 +176,27 @@ func TestDownload_UnknownTargetReturnsError(t *testing.T) {
 	assert.EqualError(t, err, "unknown command to download")
 }
 
+// TestDownload_CreatesOutputDirectoryWithRestrictivePermissions guards
+// against a regression back to os.ModePerm (0777, world-writable). Download()
+// creates downloadInfo.Path before dispatching to the target-specific
+// downloader, so an unknown target (which fails after directory creation) is
+// enough to exercise the MkdirAll call in isolation.
+func TestDownload_CreatesOutputDirectoryWithRestrictivePermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "download-dir")
+
+	ks := NewKubescape(context.Background())
+	err := ks.Download(&metav1.DownloadInfo{
+		Target: "unknown",
+		Path:   path,
+	})
+	require.Error(t, err)
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	mode := info.Mode().Perm()
+	assert.Zerof(t, mode&0o027, "directory %s has mode %o, more permissive than 0750", path, mode)
+}
+
 // ---------------------------------------------------------------------------
 // Fakes for the getter interfaces, used together with the policyGetterFunc /
 // exceptionsGetterFunc / attackTracksGetterFunc / configInputsGetterFunc /
