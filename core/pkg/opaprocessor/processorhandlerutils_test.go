@@ -38,7 +38,7 @@ func TestGetKubernetesObjectsDeduplicatesResourceAliases(t *testing.T) {
 		Resources:   []string{"Sandbox", "sandboxes"},
 	}}
 
-	objectsByNamespace := getKubernetesObjects(resources, allResources, match)
+	objectsByNamespace := getKubernetesObjects(resources, allResources, match, len(allResources))
 	objectCount := 0
 	for _, objects := range objectsByNamespace {
 		objectCount += len(objects)

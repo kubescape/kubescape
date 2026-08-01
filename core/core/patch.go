@@ -175,25 +175,24 @@ func buildPatchedImageName(image, patchedTag string) (string, error) {
 	return fmt.Sprintf("%s:%s", ref.Name(), patchedTag), nil
 }
 
-func disableCopaLogger() {
-	os.Stdout, os.Stderr = nil, nil
-	null, _ := os.Open(os.DevNull)
-	log.SetOutput(null)
-}
-
-// runWithCopaLoggerMuted mutes copa's logrus output (which writes directly to
-// os.Stdout/os.Stderr) for the duration of fn, unless debug is set. The
-// streams are always restored before this function returns, so callers can
-// safely keep using os.Stdout/os.Stderr regardless of whether fn succeeds.
+// runWithCopaLoggerMuted mutes copa's logrus output for the duration of fn,
+// unless debug is set. It does not touch os.Stdout/os.Stderr at all: logrus
+// resolves os.Stderr once, by value, at package init, so reassigning the os
+// package variables has no effect on it anyway (only log.SetOutput does),
+// and copaPatch's buildkit/containerd goroutines can still be running after
+// a timeout, so mutating those process-wide globals here would be an
+// unsynchronized write racing with any concurrent reader. The previous
+// logrus writer - whatever it actually was, not assumed to be os.Stderr - is
+// captured and restored before this function returns.
 func runWithCopaLoggerMuted(debug bool, fn func() error) error {
 	if debug {
 		return fn()
 	}
 
-	sout, serr := os.Stdout, os.Stderr
-	defer func() { os.Stdout, os.Stderr = sout, serr }()
+	prevOut := log.StandardLogger().Out
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(prevOut)
 
-	disableCopaLogger()
 	return fn()
 }
 
