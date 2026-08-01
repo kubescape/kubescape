@@ -35,7 +35,11 @@ func IsLargeCluster(clusterSize int) bool {
 // ClusterScope for everything else.
 func ResourceScope(obj workloadinterface.IMetadata) string {
 	if k8sinterface.IsResourceInNamespaceScope(obj.GetKind()) {
-		return obj.GetNamespace()
+		if ns := obj.GetNamespace(); ns != "" {
+			return ns
+		}
+		// Empty namespace for a namespaced kind maps to cluster scope
+		return ClusterScope
 	}
 	if obj.GetKind() == "Namespace" {
 		return obj.GetName()
