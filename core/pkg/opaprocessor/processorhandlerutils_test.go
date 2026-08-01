@@ -11,7 +11,6 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -832,110 +831,6 @@ func TestMapControlToInfo(t *testing.T) {
 	assert.Equal(t, map[string]apis.StatusInfo{
 		"C-0001": infoMap["resource-with-empty-control"],
 	}, got)
-}
-
-func TestIsLargeCluster(t *testing.T) {
-	orig := largeClusterSize
-	t.Cleanup(func() { largeClusterSize = orig })
-	t.Setenv("LARGE_CLUSTER_SIZE", "2500")
-
-	tests := []struct {
-		name        string
-		clusterSize int
-		want        bool
-	}{
-		{
-			name:        "zero nodes — not large",
-			clusterSize: 0,
-			want:        false,
-		},
-		{
-			name:        "below threshold — not large",
-			clusterSize: 100,
-			want:        false,
-		},
-		{
-			name:        "at threshold — not large (exclusive)",
-			clusterSize: 2500,
-			want:        false,
-		},
-		{
-			name:        "above threshold — large",
-			clusterSize: 2501,
-			want:        true,
-		},
-		{
-			name:        "well above threshold — large",
-			clusterSize: 10000,
-			want:        true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			largeClusterSize = -1
-			assert.Equal(t, tt.want, isLargeCluster(tt.clusterSize))
-		})
-	}
-}
-
-func TestGetNamespaceName(t *testing.T) {
-	orig := largeClusterSize
-	t.Cleanup(func() { largeClusterSize = orig })
-	t.Setenv("LARGE_CLUSTER_SIZE", "2500")
-
-	podJSON := `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"mypod","namespace":"mynamespace"}}`
-	namespaceJSON := `{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"mynamespace"}}`
-	nodeJSON := `{"apiVersion":"v1","kind":"Node","metadata":{"name":"mynode"}}`
-
-	pod, err := workloadinterface.NewWorkload([]byte(podJSON))
-	require.NoError(t, err)
-	require.NotNil(t, pod)
-
-	ns, err := workloadinterface.NewWorkload([]byte(namespaceJSON))
-	require.NoError(t, err)
-	require.NotNil(t, ns)
-
-	node, err := workloadinterface.NewWorkload([]byte(nodeJSON))
-	require.NoError(t, err)
-	require.NotNil(t, node)
-
-	tests := []struct {
-		name        string
-		obj         workloadinterface.IMetadata
-		clusterSize int
-		want        string
-	}{
-		{
-			name:        "small cluster — always clusterScope",
-			obj:         pod,
-			clusterSize: 10,
-			want:        clusterScope,
-		},
-		{
-			name:        "large cluster — namespaced resource returns namespace",
-			obj:         pod,
-			clusterSize: 3000,
-			want:        "mynamespace",
-		},
-		{
-			name:        "large cluster — Namespace kind returns its name",
-			obj:         ns,
-			clusterSize: 3000,
-			want:        "mynamespace",
-		},
-		{
-			name:        "large cluster — cluster-scoped resource returns clusterScope",
-			obj:         node,
-			clusterSize: 3000,
-			want:        clusterScope,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			largeClusterSize = -1
-			assert.Equal(t, tt.want, getNamespaceName(tt.obj, tt.clusterSize))
-		})
-	}
 }
 
 func TestFilterExpiredExceptions(t *testing.T) {

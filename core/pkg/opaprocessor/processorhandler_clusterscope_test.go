@@ -17,16 +17,13 @@ import (
 // silently dropping Paths and Status accumulated by earlier namespace
 // iterations.
 //
-// Setup: large-cluster mode (each namespace becomes its own bucket in
-// resourcesPerNS) with one cluster-scoped ClusterRole and one Pod in each
-// of two namespaces. The Rego fails the ClusterRole and emits a failedPath
-// that contains the namespace of the Pod present in the iteration's input,
-// so iteration over ns-a and ns-b produces two distinct paths. Both must
-// survive in the final result.
+// Setup: large-cluster mode (each namespace becomes its own scope) with one
+// cluster-scoped ClusterRole and one Pod in each of two namespaces. The Rego
+// fails the ClusterRole and emits a failedPath that contains the namespace of
+// the Pod present in the iteration's input, so evaluating ns-a and ns-b
+// produces two distinct paths. Both must survive in the final result.
 func TestProcessRule_ClusterScopedPathsAcrossNamespaces(t *testing.T) {
-	origLarge := largeClusterSize
-	largeClusterSize = 1
-	t.Cleanup(func() { largeClusterSize = origLarge })
+	t.Setenv("LARGE_CLUSTER_SIZE", "1")
 
 	clusterRole := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "rbac.authorization.k8s.io/v1",

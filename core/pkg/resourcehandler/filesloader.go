@@ -100,6 +100,42 @@ func (fileHandler *FileResourceHandler) GetCloudProvider() string {
 	return ""
 }
 
+// StreamResourcesBatches provides a streaming interface for file-based resources.
+// Since file-based resources are typically smaller, this implementation loads all resources
+// and returns them as a single batch for simplicity.
+func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, error) {
+	batchChan := make(chan *cautils.ResourceBatch, 1)
+	errChan := make(chan error, 1)
+
+	go func() {
+		defer close(batchChan)
+		defer close(errChan)
+
+		// Use existing GetResources implementation
+		k8sResources, allResources, externalResources, excludedRulesMap, err := fileHandler.GetResources(ctx, sessionObj, scanInfo)
+		if err != nil {
+			errChan <- err
+			return
+		}
+
+		// Create a single batch with all resources
+		batch := cautils.NewResourceBatch(cautils.ClusterScope)
+		batch.K8SResources = k8sResources
+		batch.AllResources = allResources
+		batch.ExternalResources = externalResources
+
+		sessionObj.ExcludedRules = excludedRulesMap
+
+		select {
+		case batchChan <- batch:
+		case <-ctx.Done():
+			errChan <- ctx.Err()
+		}
+	}()
+
+	return batchChan, errChan, nil
+}
+
 // helmValueOptionsFromScanInfo extracts the user-supplied Helm value/release flags from ScanInfo
 // into the cautils.HelmValueOptions used by chart rendering.
 func helmValueOptionsFromScanInfo(scanInfo *cautils.ScanInfo) cautils.HelmValueOptions {

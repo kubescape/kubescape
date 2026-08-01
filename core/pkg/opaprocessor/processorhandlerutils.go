@@ -20,10 +20,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-const clusterScope = "clusterScope"
-
-var largeClusterSize int = -1
-
 // updateResults updates the results objects and report objects. This is a critical function - DO NOT CHANGE
 //
 // The function:
@@ -206,20 +202,6 @@ func isEmptyResources(counters reportsummary.ICounters) bool {
 	return counters.Failed() == 0 && counters.Skipped() == 0 && counters.Passed() == 0
 }
 
-func getAllSupportedObjects(k8sResources cautils.K8SResources, externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) map[string][]workloadinterface.IMetadata {
-	k8sObjects := getKubernetesObjects(k8sResources, allResources, rule.Match)
-	externalObjs := getKubernetesObjectsFromExternalResources(externalResources, allResources, rule.DynamicMatch)
-	if len(externalObjs) > 0 {
-		l, ok := k8sObjects[clusterScope]
-		if !ok {
-			l = []workloadinterface.IMetadata{}
-		}
-		l = append(l, externalObjs...)
-		k8sObjects[clusterScope] = l
-	}
-	return k8sObjects
-}
-
 func getKubernetesObjectsFromExternalResources(externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
 
@@ -243,8 +225,12 @@ func getKubernetesObjectsFromExternalResources(externalResources cautils.Externa
 	return k8sObjects
 }
 
-func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) map[string][]workloadinterface.IMetadata {
-	k8sObjects := map[string][]workloadinterface.IMetadata{}
+// getKubernetesObjects returns the objects of a single scope that the rule
+// matches, in match-declaration order. Callers evaluate one scope at a time,
+// so no per-namespace bucketing happens here: the caller's batch already is
+// the bucket (see cautils.PartitionResources).
+func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+	k8sObjects := []workloadinterface.IMetadata{}
 
 	for m := range match {
 		for _, groups := range match[m].APIGroups {
@@ -252,18 +238,9 @@ func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[st
 				for _, resource := range match[m].Resources {
 					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
 					for _, groupResource := range groupResources {
-						if k8sObj, ok := k8sResources[groupResource]; ok {
-							for i := range k8sObj {
-
-								obj := allResources[k8sObj[i]]
-								ns := getNamespaceName(obj, len(allResources))
-
-								l, ok := k8sObjects[ns]
-								if !ok {
-									l = []workloadinterface.IMetadata{}
-								}
-								l = append(l, obj)
-								k8sObjects[ns] = l
+						for _, id := range k8sResources[groupResource] {
+							if obj, ok := allResources[id]; ok {
+								k8sObjects = append(k8sObjects, obj)
 							}
 						}
 					}
@@ -273,7 +250,6 @@ func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[st
 	}
 
 	return k8sObjects
-	// return filterOutChildResources(k8sObjects, match)
 }
 func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 	modules := resources.LoadRegoModules()
@@ -373,31 +349,4 @@ func ruleData(rule *reporthandling.PolicyRule) string {
 
 func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
 	return rule.ResourceEnumerator
-}
-
-func getNamespaceName(obj workloadinterface.IMetadata, clusterSize int) string {
-
-	if !isLargeCluster(clusterSize) {
-		return clusterScope
-	}
-
-	// if the resource is in namespace scope, get the namespace
-	if k8sinterface.IsResourceInNamespaceScope(obj.GetKind()) {
-		return obj.GetNamespace()
-	}
-	if obj.GetKind() == "Namespace" {
-		return obj.GetName()
-	}
-
-	return clusterScope
-}
-
-// isLargeCluster returns true if the cluster size is larger than the largeClusterSize
-// This code is a workaround for large clusters. The final solution will be to scan resources individually
-func isLargeCluster(clusterSize int) bool {
-	if largeClusterSize < 0 {
-		// initialize large cluster size
-		largeClusterSize, _ = cautils.ParseIntEnvVar("LARGE_CLUSTER_SIZE", 2500)
-	}
-	return clusterSize > largeClusterSize
 }
