@@ -1,11 +1,13 @@
 package listener
 
 import (
+	"crypto/subtle"
 	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -72,6 +74,13 @@ func SetupHTTPListener() error {
 	otelMiddleware := otelmux.Middleware("kubescape-svc")
 	v1SubRouter := rtr.PathPrefix(v1PathPrefix).Subrouter()
 	v1SubRouter.Use(otelMiddleware)
+
+	apiKey := getAPIKey()
+	if apiKey == "" {
+		logger.L().Warning("KS_API_KEY is not set - /v1 endpoints (scan, results, status, metrics) are reachable without authentication")
+	}
+	v1SubRouter.Use(apiKeyMiddleware(apiKey))
+
 	v1SubRouter.HandleFunc(v1PrometheusMetricsPath, httpHandler.Metrics) // deprecated
 	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.Scan).Methods(http.MethodPost)
 	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.CancelScan).Methods(http.MethodDelete)
@@ -126,6 +135,41 @@ func getCertFile() string {
 
 func getKeyFile() string {
 	return os.Getenv("KS_KEY_FILE")
+}
+
+func getAPIKey() string {
+	return os.Getenv("KS_API_KEY")
+}
+
+// apiKeyMiddleware enforces the KS_API_KEY bearer token on /v1/* routes when
+// apiKey is non-empty. It is opt-in (via the KS_API_KEY env var) rather than
+// mandatory, to avoid breaking existing deployments that don't set it - but
+// its absence is logged at startup so operators are aware that every /v1/*
+// endpoint (including triggering/cancelling scans and deleting all results)
+// is otherwise reachable by any network caller without authentication.
+func apiKeyMiddleware(apiKey string) mux.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		if apiKey == "" {
+			return next
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !validAPIKey(r, apiKey) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func validAPIKey(r *http.Request, apiKey string) bool {
+	if key := r.Header.Get("X-API-Key"); key != "" {
+		return subtle.ConstantTimeCompare([]byte(key), []byte(apiKey)) == 1
+	}
+	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		return subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(auth, "Bearer ")), []byte(apiKey)) == 1
+	}
+	return false
 }
 
 func servePprof() {
