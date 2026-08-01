@@ -222,6 +222,8 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 			resolved = []resolvedResource{{
 				groupVersionResourceTriplet: k8sinterface.GroupVersionResourceToString(&groupVersionResource),
 			}}
+		} else {
+			return nil, fmt.Errorf("apiVersion is required to resolve non-built-in resource %q for a single-resource scan", resource.GetKind())
 		}
 	} else {
 		g, v := k8sinterface.SplitApiVersion(resource.GetApiVersion())

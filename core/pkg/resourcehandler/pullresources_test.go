@@ -402,7 +402,7 @@ func TestGetResources_DiscoveryFailureReachesScanCoverage(t *testing.T) {
 	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
 	require.NoError(t, err)
 	require.Len(t, sessionObj.PartialGVRFailures, 1)
-	assert.Equal(t, "custom.metrics.k8s.io/v1beta2", sessionObj.PartialGVRFailures[0].GVR)
+	assert.Equal(t, "discovery:custom.metrics.k8s.io/v1beta2", sessionObj.PartialGVRFailures[0].GVR)
 	assert.Equal(t, "discovery", sessionObj.PartialGVRFailures[0].Selector)
 	assert.Contains(t, sessionObj.PartialGVRFailures[0].Error, "provider unavailable")
 

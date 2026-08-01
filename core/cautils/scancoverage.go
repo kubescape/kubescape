@@ -101,6 +101,9 @@ type FailedGVRPull struct {
 // (e.g. a namespace or name selector) for a GVR that was otherwise partially
 // collected. Unlike FailedGVRPull, other queries for the same GVR succeeded,
 // so controls are evaluated against an incomplete resource set.
+// Discovery-stage failures use the self-describing GVR form
+// "discovery:<group/version>" (or "discovery:*" when no group is available)
+// together with Selector "discovery".
 type PartialGVRPull struct {
 	GVR      string `json:"gvr"`
 	Selector string `json:"selector"`

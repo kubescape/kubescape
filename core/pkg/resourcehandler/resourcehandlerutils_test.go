@@ -141,9 +141,8 @@ func TestAddSingleResourceToResourceMaps_UnresolvableApiVersion(t *testing.T) {
 		addSingleResourceToResourceMaps(k8sResources, allResources, wl, defaultResourceResolver)
 	})
 
-	// The resource is still recorded for lookup purposes (e.g. by ID)...
-	assert.Contains(t, allResources, wl.GetID())
-	// ...but is not added under any resource group, since none could be resolved.
+	// An unresolvable resource must not leave the two maps inconsistent.
+	assert.NotContains(t, allResources, wl.GetID())
 	for group, ids := range k8sResources {
 		assert.NotContains(t, ids, wl.GetID(), "workload with unresolvable apiVersion must not be added under group %q", group)
 	}
@@ -531,6 +530,20 @@ func TestFilterRuleMatchesForResource(t *testing.T) {
 			expectedMap: map[string]bool{
 				"PodSecurityPolicy": false,
 				"Pod":               true,
+			},
+		},
+		{
+			resourceKind:   "Sandbox",
+			matchResources: []string{"sandboxes"},
+			expectedMap: map[string]bool{
+				"sandboxes": false,
+			},
+		},
+		{
+			resourceKind:   "Gateway",
+			matchResources: []string{"GATEWAYS"},
+			expectedMap: map[string]bool{
+				"GATEWAYS": false,
 			},
 		},
 	}

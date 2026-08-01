@@ -1,6 +1,8 @@
 package resourcehandler
 
 import (
+	"strings"
+
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -19,15 +21,22 @@ func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResou
 	// 	return
 	// }
 
-	allResources[wl.GetID()] = wl
-
 	resolved := resolver(wl.GetGroup(), wl.GetVersion(), wl.GetKind())
 	if len(resolved) != 1 {
 		logger.L().Warning("unable to resolve object resource", helpers.String("kind", wl.GetKind()), helpers.String("id", wl.GetID()))
 		return
 	}
-	resourceGroup := resolved[0].groupVersionResourceTriplet
-	k8sResources[resourceGroup] = append(k8sResources[resourceGroup], wl.GetID())
+
+	resourceGroups := append([]string{resolved[0].groupVersionResourceTriplet}, resolved[0].comparisonTriplets...)
+	seen := make(map[string]struct{}, len(resourceGroups))
+	for _, resourceGroup := range resourceGroups {
+		if _, exists := seen[resourceGroup]; exists {
+			continue
+		}
+		seen[resourceGroup] = struct{}{}
+		k8sResources[resourceGroup] = append(k8sResources[resourceGroup], wl.GetID())
+	}
+	allResources[wl.GetID()] = wl
 }
 
 func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload, scanningScope reporthandling.ScanningScopeType, resolver resourceResolver) (QueryableResources, map[string]bool) {
@@ -100,8 +109,23 @@ func filterRuleMatchesForResource(resourceKind string, matchObjects []reporthand
 		}
 	}
 
-	// rule does not apply to this workload
-	if _, exists := resourceMap[resourceKind]; !exists {
+	resourceAliases := make(map[string]struct{})
+	for _, alias := range offlineManifestResourceAliases(resourceKind) {
+		resourceAliases[alias] = struct{}{}
+	}
+	matchesInputResource := func(resource string) bool {
+		_, exists := resourceAliases[strings.ToLower(resource)]
+		return exists
+	}
+
+	ruleApplies := false
+	for resource := range resourceMap {
+		if matchesInputResource(resource) {
+			ruleApplies = true
+			break
+		}
+	}
+	if !ruleApplies {
 		return nil
 	}
 
@@ -119,7 +143,7 @@ func filterRuleMatchesForResource(resourceKind string, matchObjects []reporthand
 
 	for r := range resourceMap {
 		// we don't need to query the same resource
-		if r == resourceKind {
+		if matchesInputResource(r) {
 			continue
 		}
 

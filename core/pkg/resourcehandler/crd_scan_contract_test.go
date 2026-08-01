@@ -136,10 +136,10 @@ func TestDiscoveryResolverReportsPartialDiscoveryFailures(t *testing.T) {
 
 	resolver, failures := newDiscoveryResourceResolver(discoveryClient)
 	require.Len(t, failures, 2)
-	assert.Equal(t, "custom.metrics.k8s.io/v1beta2", failures[0].GVR)
+	assert.Equal(t, "discovery:custom.metrics.k8s.io/v1beta2", failures[0].GVR)
 	assert.Equal(t, "discovery", failures[0].Selector)
 	assert.Contains(t, failures[0].Error, "provider unavailable")
-	assert.Equal(t, "metrics.k8s.io/v1beta1", failures[1].GVR)
+	assert.Equal(t, "discovery:metrics.k8s.io/v1beta1", failures[1].GVR)
 
 	// Partial discovery results remain usable for groups that did respond.
 	resolved := resolver("agents.x-k8s.io", "v1alpha1", "Sandbox")
@@ -151,6 +151,20 @@ func TestDiscoveryResolverReportsPartialDiscoveryFailures(t *testing.T) {
 	assert.Len(t, coverage.PartialGVRPulls, 2)
 	assert.True(t, coverage.Degraded)
 	assert.Less(t, coverage.CoverageScore, float32(100))
+}
+
+func TestDiscoveryResolverReportsUntypedDiscoveryFailure(t *testing.T) {
+	discoveryClient := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	discoveryClient.PrependReactor("get", "resource", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("discovery endpoint unavailable")
+	})
+
+	_, failures := newDiscoveryResourceResolver(discoveryClient)
+
+	require.Len(t, failures, 1)
+	assert.Equal(t, "discovery:*", failures[0].GVR)
+	assert.Equal(t, "discovery", failures[0].Selector)
+	assert.Contains(t, failures[0].Error, "discovery endpoint unavailable")
 }
 
 func TestDiscoveredScopeAppliesIncludeAndExcludeSelectors(t *testing.T) {
@@ -272,6 +286,68 @@ metadata:
 			assert.Len(t, resources[resolved[0].groupVersionResourceTriplet], 1)
 		})
 	}
+}
+
+func TestFileResourceHandlerMatchesGatewayPlural(t *testing.T) {
+	manifest := `apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: public-gateway
+  namespace: gateway-system
+`
+	manifestPath := filepath.Join(t.TempDir(), "gateway.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0o600))
+
+	match := reporthandling.RuleMatchObjects{
+		APIGroups:   []string{"gateway.networking.k8s.io"},
+		APIVersions: []string{"v1"},
+		Resources:   []string{"gateways"},
+	}
+	framework := *mockFramework("offline-gateway", []reporthandling.Control{
+		mockControl("offline-gateway", []reporthandling.PolicyRule{
+			mockRule("offline-gateway", []reporthandling.RuleMatchObjects{match}, ""),
+		}),
+	})
+	scanInfo := &cautils.ScanInfo{InputPatterns: []string{manifestPath}}
+	session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo)
+
+	resources, allResources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+	require.NoError(t, err)
+	require.Len(t, allResources, 1)
+	assert.Len(t, resources["gateway.networking.k8s.io/v1/gateways"], 1)
+}
+
+func TestFileSingleResourceScanMatchesPluralPolicy(t *testing.T) {
+	manifest := `apiVersion: agents.x-k8s.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: alpha-sandbox
+  namespace: agents
+`
+	manifestPath := filepath.Join(t.TempDir(), "sandbox.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0o600))
+
+	match := reporthandling.RuleMatchObjects{
+		APIGroups:   []string{"agents.x-k8s.io"},
+		APIVersions: []string{"v1alpha1"},
+		Resources:   []string{"sandboxes"},
+	}
+	framework := *mockFramework("offline-single-resource", []reporthandling.Control{
+		mockControl("offline-single-resource", []reporthandling.PolicyRule{
+			mockRule("offline-single-resource", []reporthandling.RuleMatchObjects{match}, ""),
+		}),
+	})
+	scanInfo := &cautils.ScanInfo{
+		InputPatterns: []string{manifestPath},
+		ScanObject:    scanObject("agents.x-k8s.io/v1alpha1", "Sandbox", "agents", "alpha-sandbox"),
+	}
+	session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo)
+
+	resources, allResources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+	require.NoError(t, err)
+	require.Len(t, allResources, 1)
+	require.Len(t, resources["agents.x-k8s.io/v1alpha1/sandboxes"], 1)
+	assert.Contains(t, allResources, resources["agents.x-k8s.io/v1alpha1/sandboxes"][0])
 }
 
 func TestK8sResourceHandlerUsesDiscoveredGVRsAndNamespaceScope(t *testing.T) {
@@ -399,6 +475,55 @@ func TestAddWorkloadsToResourcesMapKeepsCustomKindCollisions(t *testing.T) {
 	assert.Len(t, mapped["serving.knative.dev/v1/services"], 1)
 }
 
+func TestOfflineManifestResourceAliases(t *testing.T) {
+	tests := []struct {
+		kind string
+		want []string
+	}{
+		{kind: "Gateway", want: []string{"gateway", "gateways", "gatewayes"}},
+		{kind: "Proxy", want: []string{"proxy", "proxys", "proxyes", "proxies"}},
+		{kind: "Policy", want: []string{"policy", "policys", "policyes", "policies"}},
+		{kind: "Sandbox", want: []string{"sandbox", "sandboxs", "sandboxes"}},
+		{kind: "HTTPRoute", want: []string{"httproute", "httproutes", "httproutees"}},
+		{kind: "Ingress", want: []string{"ingress", "ingresses"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.kind, func(t *testing.T) {
+			assert.Equal(t, test.want, offlineManifestResourceAliases(test.kind))
+		})
+	}
+}
+
+func TestCanonicalAPIGroupMatchingDoesNotRequireAnAllowlist(t *testing.T) {
+	assert.True(t, matchesCanonicalAPIGroup("imagepolicy.k8s.io", "imagepolicy.k8s.io"))
+	assert.True(t, matchesCanonicalAPIGroup("settings.k8s.io", "settings.k8s.io"))
+	assert.True(t, matchesCanonicalAPIGroup("extensions", "apps"))
+	assert.True(t, matchesCanonicalAPIGroup("extensions", "networking.k8s.io"))
+	assert.False(t, matchesCanonicalAPIGroup("serving.knative.dev", ""))
+	assert.False(t, matchesCanonicalAPIGroup("migration.k8s.io", "apps"))
+}
+
+func TestAddSingleResourceToResourceMapsIndexesOfflineAliases(t *testing.T) {
+	workload := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "agents.x-k8s.io/v1alpha1",
+		"kind":       "Sandbox",
+		"metadata": map[string]any{
+			"name":      "alpha-sandbox",
+			"namespace": "agents",
+		},
+	})
+	resources := cautils.K8SResources{}
+	allResources := map[string]workloadinterface.IMetadata{}
+
+	addSingleResourceToResourceMaps(resources, allResources, workload, defaultResourceResolver)
+
+	for _, resource := range []string{"sandbox", "sandboxs", "sandboxes"} {
+		assert.Equal(t, []string{workload.GetID()}, resources["agents.x-k8s.io/v1alpha1/"+resource])
+	}
+	assert.Same(t, workload, allResources[workload.GetID()])
+}
+
 func TestAddSingleResourceToResourceMapsGuardsUnresolvedIdentity(t *testing.T) {
 	workload := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "ate.dev/v1alpha1",
@@ -412,4 +537,5 @@ func TestAddSingleResourceToResourceMapsGuardsUnresolvedIdentity(t *testing.T) {
 		addSingleResourceToResourceMaps(resources, allResources, workload, defaultResourceResolver)
 	})
 	assert.Empty(t, resources)
+	assert.Empty(t, allResources)
 }

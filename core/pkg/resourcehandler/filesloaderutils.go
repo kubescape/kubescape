@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -61,7 +62,7 @@ func addWorkloadsToResourcesMap(allResources map[string][]workloadinterface.IMet
 		canonical, canonicalErr := k8sinterface.GetGroupVersionResource(workload.GetKind())
 
 		var resourceTriplets []string
-		if canonicalErr == nil && isBuiltInAPIGroup(group) {
+		if canonicalErr == nil && matchesCanonicalAPIGroup(group, canonical.Group) {
 			if canonical.Group != group || canonical.Version != version {
 				logger.L().Warning("workload GroupVersion mismatch", helpers.String("id", workload.GetID()), helpers.String("kind", workload.GetKind()), helpers.String("expectedGroup", canonical.Group), helpers.String("actualGroup", group), helpers.String("expectedVersion", canonical.Version), helpers.String("actualVersion", version))
 				continue
@@ -88,30 +89,7 @@ func offlineManifestResourceTriplets(group, version, kind string) []string {
 		return nil
 	}
 
-	singular := strings.ToLower(kind)
-	aliases := []string{singular}
-	switch singular {
-	case "ingress":
-		aliases = append(aliases, "ingresses")
-	case "storageclass":
-		aliases = append(aliases, "storageclasses")
-	default:
-		if !strings.HasSuffix(singular, "s") {
-			if strings.HasSuffix(singular, "y") {
-				aliases = append(aliases, strings.TrimSuffix(singular, "y")+"ies")
-			} else {
-				// Preserve the k8s-interface comparison form while also accepting
-				// the conventional plural commonly declared by CRDs such as
-				// Sandbox (sandboxes). These are file-index aliases only and are
-				// never used to construct a live API query.
-				aliases = append(aliases, singular+"s")
-				if strings.HasSuffix(singular, "x") || strings.HasSuffix(singular, "ch") ||
-					strings.HasSuffix(singular, "sh") || strings.HasSuffix(singular, "ss") {
-					aliases = append(aliases, singular+"es")
-				}
-			}
-		}
-	}
+	aliases := offlineManifestResourceAliases(kind)
 
 	triplets := make([]string, 0, len(aliases))
 	for _, alias := range aliases {
@@ -120,21 +98,34 @@ func offlineManifestResourceTriplets(group, version, kind string) []string {
 	return triplets
 }
 
-func isBuiltInAPIGroup(group string) bool {
-	// A Kind that collides with a built-in Kind is only treated as built-in when
-	// its manifest group is an actual Kubernetes API group. A different custom
-	// group (for example serving.knative.dev/v1 Service) belongs on the CRD path.
-	switch group {
-	case "", "admissionregistration.k8s.io", "apiextensions.k8s.io", "apiregistration.k8s.io",
-		"apps", "authentication.k8s.io", "authorization.k8s.io", "autoscaling", "batch",
-		"certificates.k8s.io", "coordination.k8s.io", "discovery.k8s.io", "events.k8s.io",
-		"extensions", "flowcontrol.apiserver.k8s.io", "internal.apiserver.k8s.io", "migration.k8s.io",
-		"networking.k8s.io", "node.k8s.io", "policy", "rbac.authorization.k8s.io",
-		"resource.k8s.io", "scheduling.k8s.io", "storage.k8s.io", "storagemigration.k8s.io":
-		return true
-	default:
-		return false
+// offlineManifestResourceAliases returns comparison keys for file indexing.
+// They are never used to construct live API requests, so retaining all common
+// candidates is safer than guessing one plural without CRD discovery data.
+func offlineManifestResourceAliases(kind string) []string {
+	singular := strings.ToLower(kind)
+	aliases := []string{singular}
+	if strings.HasSuffix(singular, "s") {
+		return append(aliases, singular+"es")
 	}
+
+	aliases = append(aliases, singular+"s", singular+"es")
+	if n := len(singular); n >= 2 && singular[n-1] == 'y' &&
+		!strings.ContainsRune("aeiou", rune(singular[n-2])) {
+		aliases = append(aliases, singular[:n-1]+"ies")
+	}
+	return aliases
+}
+
+// matchesCanonicalAPIGroup distinguishes a stale built-in API version from a
+// custom resource whose Kind happens to collide with a built-in Kind. Most
+// built-ins retain their canonical group; extensions is the narrow legacy
+// exception for resources that moved to apps or networking.k8s.io.
+func matchesCanonicalAPIGroup(manifestGroup, canonicalGroup string) bool {
+	if manifestGroup == canonicalGroup {
+		return true
+	}
+	return manifestGroup == "extensions" &&
+		(canonicalGroup == "apps" || canonicalGroup == "networking.k8s.io")
 }
 
 /* unused for now
@@ -170,8 +161,20 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
 
 	var wls []workloadinterface.IWorkload
+	seenResources := make(map[uintptr]struct{})
 	for _, resources := range mappedResources {
 		for _, r := range resources {
+			// Offline comparison aliases point to the same metadata instance.
+			// Count that instance once while preserving distinct manifests that
+			// happen to declare the same Kubernetes identity.
+			resourceValue := reflect.ValueOf(r)
+			resourcePointer := uintptr(0)
+			if resourceValue.IsValid() && resourceValue.Kind() == reflect.Ptr {
+				resourcePointer = resourceValue.Pointer()
+			}
+			if _, seen := seenResources[resourcePointer]; resourcePointer != 0 && seen {
+				continue
+			}
 			if r.GetKind() == resource.GetKind() && r.GetName() == resource.GetName() {
 				if resource.GetNamespace() != "" && resource.GetNamespace() != r.GetNamespace() {
 					continue
@@ -183,6 +186,9 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 				if k8sinterface.IsTypeWorkload(r.GetObject()) {
 					wl := workloadinterface.NewWorkloadObj(r.GetObject())
 					wls = append(wls, wl)
+					if resourcePointer != 0 {
+						seenResources[resourcePointer] = struct{}{}
+					}
 				}
 			}
 		}

@@ -84,6 +84,11 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 			request:   scanObject("example.com/v1", "UnknownKind", "shop", "object"),
 			wantError: "resource not found",
 		},
+		{
+			name:      "unknown kind without apiVersion explains required identity",
+			request:   scanObject("", "UnknownKind", "shop", "object"),
+			wantError: "apiVersion is required to resolve non-built-in resource",
+		},
 	}
 
 	for _, test := range tests {

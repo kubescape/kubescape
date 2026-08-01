@@ -17,6 +17,7 @@ import (
 
 type resolvedResource struct {
 	groupVersionResourceTriplet string
+	comparisonTriplets          []string
 	namespaced                  *bool
 }
 
@@ -39,6 +40,7 @@ func defaultResourceResolver(group, version, resource string) []resolvedResource
 		// or plural form; file indexing supplies both manifest-derived aliases.
 		return []resolvedResource{{
 			groupVersionResourceTriplet: k8sinterface.JoinResourceTriplets(group, version, strings.ToLower(resource)),
+			comparisonTriplets:          offlineManifestResourceTriplets(group, version, resource),
 		}}
 	}
 	resourceGroups := k8sinterface.ResourceGroupToSlice(group, version, resource)
@@ -124,7 +126,7 @@ func getDiscoveryFailures(err error) []cautils.PartialGVRPull {
 	var groupFailure *discovery.ErrGroupDiscoveryFailed
 	if !errors.As(err, &groupFailure) {
 		return []cautils.PartialGVRPull{{
-			GVR:      "Kubernetes API discovery",
+			GVR:      "discovery:*",
 			Selector: "discovery",
 			Error:    err.Error(),
 		}}
@@ -141,7 +143,7 @@ func getDiscoveryFailures(err error) []cautils.PartialGVRPull {
 	failures := make([]cautils.PartialGVRPull, 0, len(groupVersions))
 	for _, groupVersion := range groupVersions {
 		failures = append(failures, cautils.PartialGVRPull{
-			GVR:      groupVersion.String(),
+			GVR:      "discovery:" + groupVersion.String(),
 			Selector: "discovery",
 			Error:    groupFailure.Groups[groupVersion].Error(),
 		})
