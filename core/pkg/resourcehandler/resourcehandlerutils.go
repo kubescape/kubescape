@@ -1,6 +1,8 @@
 package resourcehandler
 
 import (
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -18,7 +20,22 @@ func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResou
 
 	allResources[wl.GetID()] = wl
 
-	resourceGroup := k8sinterface.ResourceGroupToSlice(wl.GetGroup(), wl.GetVersion(), wl.GetKind())[0]
+	// ResourceGroupToSlice can return an empty slice for a group/version/kind
+	// it can't resolve; every current caller gates on IsTypeWorkload first, so
+	// this is unreachable today, but the guard doesn't depend on that holding.
+	groups := k8sinterface.ResourceGroupToSlice(wl.GetGroup(), wl.GetVersion(), wl.GetKind())
+	if len(groups) == 0 {
+		logger.L().Warning("failed to resolve resource group for workload, skipping",
+			helpers.String("id", wl.GetID()), helpers.String("kind", wl.GetKind()),
+			helpers.String("apiVersion", wl.GetApiVersion()))
+		return
+	}
+
+	// [0] is a deliberate pick when multiple groups resolve (only possible
+	// with an empty group and >1 group serving the resource at that version);
+	// current callers can't reach that case either, since IsTypeWorkload also
+	// requires exactly one match.
+	resourceGroup := groups[0]
 	k8sResources[resourceGroup] = append(k8sResources[resourceGroup], wl.GetID())
 }
 

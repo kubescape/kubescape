@@ -36,6 +36,12 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	scanID := uuid.NewString()
 	defer handler.recover(r.Context(), w, scanID)
 
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
 	scanCtx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
 	defer cancel()
 
@@ -48,8 +54,6 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), scanID)
 		return
 	}
-	skipPersistence := r.URL.Query().Get("skipPersistence") == "true"
-
 	resultsFile := filepath.Join(OutputDir, scanID)
 	scanInfo := getPrometheusDefaultScanCommand(scanID, resultsFile, metricsQueryParams.Frameworks)
 
@@ -57,7 +61,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		scanQueryParams: &ScanQueryParams{
 			ReturnResults:   true,
 			KeepResults:     false,
-			SkipPersistence: skipPersistence,
+			SkipPersistence: metricsQueryParams.SkipPersistence,
 		},
 		scanInfo: scanInfo,
 		scanID:   scanID,
@@ -67,7 +71,16 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 
 	// send to scan queue
 	logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/metrics"))
-	handler.scanRequestChan <- scanParams
+	select {
+	case handler.scanRequestChan <- scanParams:
+	default:
+		handler.state.setNotBusy(scanID)
+		w.Header().Set("Retry-After", "1")
+		handler.writeErrorWithStatus(w,
+			fmt.Errorf("scan queue is full; retry the request later"),
+			"", http.StatusTooManyRequests)
+		return
+	}
 
 	// wait for scan to complete
 	results := <-scanParams.resp
@@ -109,9 +122,8 @@ func getPrometheusDefaultScanCommand(scanID, resultsFile, frameworksParam string
 	scanInfo.Format = envToString("KS_FORMAT", "prometheus") // default output format is prometheus
 
 	// Check if specific frameworks are requested via query parameter
-	if frameworksParam != "" {
-		// Scan specific frameworks (comma-separated list)
-		frameworks := splitAndTrim(frameworksParam, ",")
+	frameworks := splitAndTrim(frameworksParam, ",")
+	if len(frameworks) > 0 {
 		scanInfo.SetPolicyIdentifiers(frameworks, utilsapisv1.KindFramework)
 	} else {
 		// Default: scan all available frameworks (including CIS)

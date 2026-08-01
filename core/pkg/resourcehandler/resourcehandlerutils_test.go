@@ -8,6 +8,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 )
@@ -114,6 +115,62 @@ func mockWorkload(apiVersion, kind, namespace, name string) workloadinterface.IW
 	}
 
 	return mock
+}
+
+// TestAddSingleResourceToResourceMaps_UnresolvableApiVersion is a defense-in-
+// depth guard (see the comment above the `groups :=` guard in
+// resourcehandlerutils.go for why this is unreachable via current callers).
+// It bypasses the IsTypeWorkload gate deliberately (unlike mockWorkload,
+// which enforces it) to pin the function's own behavior on its own.
+func TestAddSingleResourceToResourceMaps_UnresolvableApiVersion(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+
+	obj := map[string]any{
+		"apiVersion": "v2", // no known group serves "deployments" at version "v2"
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "nginx",
+			"namespace": "default",
+		},
+	}
+	wl := workloadinterface.NewWorkloadObj(obj)
+	k8sResources := cautils.K8SResources{}
+	allResources := map[string]workloadinterface.IMetadata{}
+
+	assert.NotPanics(t, func() {
+		addSingleResourceToResourceMaps(k8sResources, allResources, wl)
+	})
+
+	// The resource is still recorded for lookup purposes (e.g. by ID)...
+	assert.Contains(t, allResources, wl.GetID())
+	// ...but is not added under any resource group, since none could be resolved.
+	for group, ids := range k8sResources {
+		assert.NotContains(t, ids, wl.GetID(), "workload with unresolvable apiVersion must not be added under group %q", group)
+	}
+}
+
+func TestAddSingleResourceToResourceMaps_KnownApiVersion(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+
+	wl := mockWorkload("apps/v1", "Deployment", "default", "nginx")
+	k8sResources := cautils.K8SResources{}
+	allResources := map[string]workloadinterface.IMetadata{}
+
+	addSingleResourceToResourceMaps(k8sResources, allResources, wl)
+
+	assert.Contains(t, allResources, wl.GetID())
+	assert.Contains(t, k8sResources["apps/v1/deployments"], wl.GetID())
+}
+
+func TestAddSingleResourceToResourceMaps_NilWorkload(t *testing.T) {
+	k8sResources := cautils.K8SResources{}
+	allResources := map[string]workloadinterface.IMetadata{}
+
+	assert.NotPanics(t, func() {
+		addSingleResourceToResourceMaps(k8sResources, allResources, nil)
+	})
+	assert.Empty(t, allResources)
+	assert.Empty(t, k8sResources)
 }
 
 func TestGetQueryableResourceMapFromPolicies(t *testing.T) {

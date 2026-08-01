@@ -81,13 +81,12 @@ func TestGetKeyFile(t *testing.T) {
 	})
 }
 
-// occupyPort binds a loopback listener on a free port so a subsequent bind to
-// ":<port>" (all interfaces) fails immediately with "address already in use",
-// letting SetupHTTPListener's server-start path be exercised without actually
-// serving traffic.
+// occupyPort binds the same wildcard address shape used by SetupHTTPListener
+// so a subsequent bind to ":<port>" fails immediately with "address already in
+// use", letting the server-start path be exercised without serving traffic.
 func occupyPort(t *testing.T) (net.Listener, string) {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", ":0")
 	require.NoError(t, err)
 	_, port, err := net.SplitHostPort(ln.Addr().String())
 	require.NoError(t, err)

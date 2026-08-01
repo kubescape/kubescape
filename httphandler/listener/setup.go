@@ -3,6 +3,7 @@ package listener
 import (
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -36,8 +37,13 @@ func SetupHTTPListener() error {
 	if err != nil {
 		return err
 	}
+	addr := fmt.Sprintf(":%s", getPort())
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
 	server := &http.Server{
-		Addr: fmt.Sprintf(":%s", getPort()), // TODO - support loading port from config/env
+		Addr: addr, // TODO - support loading port from config/env
 		// ReadHeaderTimeout defends against slowloris-style attacks without
 		// capping handler duration. ReadTimeout and WriteTimeout are left at 0
 		// because the synchronous scan path (POST /v1/scan?wait=true) blocks
@@ -83,9 +89,9 @@ func SetupHTTPListener() error {
 	servePprof()
 
 	if keyPair != nil {
-		return server.ListenAndServeTLS("", "")
+		return server.ServeTLS(ln, "", "")
 	}
-	return server.ListenAndServe()
+	return server.Serve(ln)
 }
 
 func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
