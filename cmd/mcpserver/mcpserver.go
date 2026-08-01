@@ -314,7 +314,7 @@ func (ksServer *KubescapeMcpserver) ReadConfigurationResource(ctx context.Contex
 		return nil, fmt.Errorf("invalid URI: %s", uri)
 	}
 	parts := strings.Split(uri[len("kubescape://configuration-manifests/"):], "/")
-	if len(parts) != 2 {
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return nil, fmt.Errorf("invalid URI: %s", uri)
 	}
 	namespace := parts[0]
@@ -343,7 +343,7 @@ func (ksServer *KubescapeMcpserver) ReadContainerProfileResource(ctx context.Con
 		return nil, fmt.Errorf("invalid URI: %s", uri)
 	}
 	parts := strings.Split(uri[len("kubescape://container-profiles/"):], "/")
-	if len(parts) != 2 {
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return nil, fmt.Errorf("invalid URI: %s", uri)
 	}
 	namespace := parts[0]

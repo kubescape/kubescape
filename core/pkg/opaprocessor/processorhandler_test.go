@@ -105,7 +105,7 @@ func unzipAllResourcesTestDataAndSetVar(zipFilePath, destFilePath string) error 
 
 func NewOPAProcessorMock(opaSessionObjMock string, resourcesMock []byte) *OPAProcessor {
 	opap := &OPAProcessor{
-		compiledModules: make(map[string]*ast.Compiler),
+		compiledModules: make(map[string]compiledRule),
 	}
 	if err := json.Unmarshal([]byte(regoDependenciesData), &opap.regoDependenciesData); err != nil {
 		panic(err)
@@ -295,7 +295,7 @@ func TestProcessRule(t *testing.T) {
 					Name:       "exposure-to-internet",
 					Attributes: map[string]any{},
 				},
-				Rule: "package armo_builtins\n\n# Checks if NodePort or LoadBalancer is connected to a workload to expose something\ndeny[msga] {\n    service := input[_]\n    service.kind == \"Service\"\n    is_exposed_service(service)\n    \n    wl := input[_]\n    spec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Pod\", \"Job\", \"CronJob\"}\n    spec_template_spec_patterns[wl.kind]\n    wl_connected_to_service(wl, service)\n    failPath := [\"spec.type\"]\n    msga := {\n        \"alertMessage\": sprintf(\"workload '%v' is exposed through service '%v'\", [wl.metadata.name, service.metadata.name]),\n        \"packagename\": \"armo_builtins\",\n        \"alertScore\": 7,\n        \"fixPaths\": [],\n        \"failedPaths\": [],\n        \"alertObject\": {\n            \"k8sApiObjects\": [wl]\n        },\n        \"relatedObjects\": [{\n            \"object\": service,\n            \"failedPaths\": failPath,\n   \"reviewPaths\": failPath,\n      }]\n    }\n}\n\n# Checks if Ingress is connected to a service and a workload to expose something\ndeny[msga] {\n    ingress := input[_]\n    ingress.kind == \"Ingress\"\n    \n    svc := input[_]\n    svc.kind == \"Service\"\n    # avoid duplicate alerts\n    # if service is already exposed through NodePort or LoadBalancer workload will fail on that\n    not is_exposed_service(svc)\n\n    wl := input[_]\n    spec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Pod\", \"Job\", \"CronJob\"}\n    spec_template_spec_patterns[wl.kind]\n    wl_connected_to_service(wl, svc)\n\n    result := svc_connected_to_ingress(svc, ingress)\n    \n    msga := {\n        \"alertMessage\": sprintf(\"workload '%v' is exposed through ingress '%v'\", [wl.metadata.name, ingress.metadata.name]),\n        \"packagename\": \"armo_builtins\",\n        \"failedPaths\": [],\n        \"fixPaths\": [],\n        \"alertScore\": 7,\n        \"alertObject\": {\n            \"k8sApiObjects\": [wl]\n        },\n        \"relatedObjects\": [{\n            \"object\": ingress,\n            \"failedPaths\": result,\n     \"reviewPaths\": result,\n    }]\n    }\n} \n\n# ====================================================================================\n\nis_exposed_service(svc) {\n    svc.spec.type == \"NodePort\"\n}\n\nis_exposed_service(svc) {\n    svc.spec.type == \"LoadBalancer\"\n}\n\nwl_connected_to_service(wl, svc) {\n    count({x | svc.spec.selector[x] == wl.metadata.labels[x]}) == count(svc.spec.selector)\n}\n\nwl_connected_to_service(wl, svc) {\n    wl.spec.selector.matchLabels == svc.spec.selector\n}\n\n# check if service is connected to ingress\nsvc_connected_to_ingress(svc, ingress) = result {\n    rule := ingress.spec.rules[i]\n    paths := rule.http.paths[j]\n    svc.metadata.name == paths.backend.service.name\n    result := [sprintf(\"ingress.spec.rules[%d].http.paths[%d].backend.service.name\", [i,j])]\n}\n\n",
+				Rule: "package armo_builtins\nimport rego.v1\n\n# Checks if NodePort or LoadBalancer is connected to a workload to expose something\ndeny contains msga if {\n    service := input[_]\n    service.kind == \"Service\"\n    is_exposed_service(service)\n    \n    wl := input[_]\n    spec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Pod\", \"Job\", \"CronJob\"}\n    spec_template_spec_patterns[wl.kind]\n    wl_connected_to_service(wl, service)\n    failPath := [\"spec.type\"]\n    msga := {\n        \"alertMessage\": sprintf(\"workload '%v' is exposed through service '%v'\", [wl.metadata.name, service.metadata.name]),\n        \"packagename\": \"armo_builtins\",\n        \"alertScore\": 7,\n        \"fixPaths\": [],\n        \"failedPaths\": [],\n        \"alertObject\": {\n            \"k8sApiObjects\": [wl]\n        },\n        \"relatedObjects\": [{\n            \"object\": service,\n            \"failedPaths\": failPath,\n   \"reviewPaths\": failPath,\n      }]\n    }\n}\n\n# Checks if Ingress is connected to a service and a workload to expose something\ndeny contains msga if {\n    ingress := input[_]\n    ingress.kind == \"Ingress\"\n    \n    svc := input[_]\n    svc.kind == \"Service\"\n    # avoid duplicate alerts\n    # if service is already exposed through NodePort or LoadBalancer workload will fail on that\n    not is_exposed_service(svc)\n\n    wl := input[_]\n    spec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Pod\", \"Job\", \"CronJob\"}\n    spec_template_spec_patterns[wl.kind]\n    wl_connected_to_service(wl, svc)\n\n    result := svc_connected_to_ingress(svc, ingress)\n    \n    msga := {\n        \"alertMessage\": sprintf(\"workload '%v' is exposed through ingress '%v'\", [wl.metadata.name, ingress.metadata.name]),\n        \"packagename\": \"armo_builtins\",\n        \"failedPaths\": [],\n        \"fixPaths\": [],\n        \"alertScore\": 7,\n        \"alertObject\": {\n            \"k8sApiObjects\": [wl]\n        },\n        \"relatedObjects\": [{\n            \"object\": ingress,\n            \"failedPaths\": result,\n     \"reviewPaths\": result,\n    }]\n    }\n} \n\n# ====================================================================================\n\nis_exposed_service(svc) if {\n    svc.spec.type == \"NodePort\"\n}\n\nis_exposed_service(svc) if {\n    svc.spec.type == \"LoadBalancer\"\n}\n\nwl_connected_to_service(wl, svc) if {\n    count({x | svc.spec.selector[x] == wl.metadata.labels[x]}) == count(svc.spec.selector)\n}\n\nwl_connected_to_service(wl, svc) if {\n    wl.spec.selector.matchLabels == svc.spec.selector\n}\n\n# check if service is connected to ingress\nsvc_connected_to_ingress(svc, ingress) = result if {\n    rule := ingress.spec.rules[i]\n    paths := rule.http.paths[j]\n    svc.metadata.name == paths.backend.service.name\n    result := [sprintf(\"ingress.spec.rules[%d].http.paths[%d].backend.service.name\", [i,j])]\n}\n\n",
 				Match: []reporthandling.RuleMatchObjects{
 					{
 						APIGroups:   []string{""},
@@ -358,7 +358,7 @@ func TestProcessRule(t *testing.T) {
 					Name:       "exposure-to-internet",
 					Attributes: map[string]any{},
 				},
-				Rule: "\npackage armo_builtins\n\n# Checks if NodePort or LoadBalancer is connected to a workload to expose something\ndeny[msga] {\n    service := input[_]\n    service.kind == \"Service\"\n    is_exposed_service(service)\n    \n    wl := input[_]\n    spec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Pod\", \"Job\", \"CronJob\"}\n    spec_template_spec_patterns[wl.kind]\n    wl_connected_to_service(wl, service)\n    failPath := [\"spec.type\"]\n    msga := {\n        \"alertMessage\": sprintf(\"workload '%v' is exposed through service '%v'\", [wl.metadata.name, service.metadata.name]),\n        \"packagename\": \"armo_builtins\",\n        \"alertScore\": 7,\n        \"fixPaths\": [],\n        \"failedPaths\": [],\n        \"alertObject\": {\n            \"k8sApiObjects\": [wl]\n        },\n        \"relatedObjects\": [{\n            \"object\": service,\n\t\t    \"reviewPaths\": failPath,\n            \"failedPaths\": failPath,\n        }]\n    }\n}\n\n# Checks if Ingress is connected to a service and a workload to expose something\ndeny[msga] {\n    ingress := input[_]\n    ingress.kind == \"Ingress\"\n    \n    svc := input[_]\n    svc.kind == \"Service\"\n\n    # Make sure that they belong to the same namespace\n    svc.metadata.namespace == ingress.metadata.namespace\n\n    # avoid duplicate alerts\n    # if service is already exposed through NodePort or LoadBalancer workload will fail on that\n    not is_exposed_service(svc)\n\n    wl := input[_]\n    spec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Pod\", \"Job\", \"CronJob\"}\n    spec_template_spec_patterns[wl.kind]\n    wl_connected_to_service(wl, svc)\n\n    result := svc_connected_to_ingress(svc, ingress)\n    \n    msga := {\n        \"alertMessage\": sprintf(\"workload '%v' is exposed through ingress '%v'\", [wl.metadata.name, ingress.metadata.name]),\n        \"packagename\": \"armo_builtins\",\n        \"failedPaths\": [],\n        \"fixPaths\": [],\n        \"alertScore\": 7,\n        \"alertObject\": {\n            \"k8sApiObjects\": [wl]\n        },\n        \"relatedObjects\": [\n\t\t{\n\t            \"object\": ingress,\n\t\t    \"reviewPaths\": result,\n\t            \"failedPaths\": result,\n\t        },\n\t\t{\n\t            \"object\": svc,\n\t\t}\n        ]\n    }\n} \n\n# ====================================================================================\n\nis_exposed_service(svc) {\n    svc.spec.type == \"NodePort\"\n}\n\nis_exposed_service(svc) {\n    svc.spec.type == \"LoadBalancer\"\n}\n\nwl_connected_to_service(wl, svc) {\n    count({x | svc.spec.selector[x] == wl.metadata.labels[x]}) == count(svc.spec.selector)\n}\n\nwl_connected_to_service(wl, svc) {\n    wl.spec.selector.matchLabels == svc.spec.selector\n}\n\n# check if service is connected to ingress\nsvc_connected_to_ingress(svc, ingress) = result {\n    rule := ingress.spec.rules[i]\n    paths := rule.http.paths[j]\n    svc.metadata.name == paths.backend.service.name\n    result := [sprintf(\"spec.rules[%d].http.paths[%d].backend.service.name\", [i,j])]\n}\n\n",
+				Rule: "\npackage armo_builtins\nimport rego.v1\n\n# Checks if NodePort or LoadBalancer is connected to a workload to expose something\ndeny contains msga if {\n    service := input[_]\n    service.kind == \"Service\"\n    is_exposed_service(service)\n    \n    wl := input[_]\n    spec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Pod\", \"Job\", \"CronJob\"}\n    spec_template_spec_patterns[wl.kind]\n    wl_connected_to_service(wl, service)\n    failPath := [\"spec.type\"]\n    msga := {\n        \"alertMessage\": sprintf(\"workload '%v' is exposed through service '%v'\", [wl.metadata.name, service.metadata.name]),\n        \"packagename\": \"armo_builtins\",\n        \"alertScore\": 7,\n        \"fixPaths\": [],\n        \"failedPaths\": [],\n        \"alertObject\": {\n            \"k8sApiObjects\": [wl]\n        },\n        \"relatedObjects\": [{\n            \"object\": service,\n\t\t    \"reviewPaths\": failPath,\n            \"failedPaths\": failPath,\n        }]\n    }\n}\n\n# Checks if Ingress is connected to a service and a workload to expose something\ndeny contains msga if {\n    ingress := input[_]\n    ingress.kind == \"Ingress\"\n    \n    svc := input[_]\n    svc.kind == \"Service\"\n\n    # Make sure that they belong to the same namespace\n    svc.metadata.namespace == ingress.metadata.namespace\n\n    # avoid duplicate alerts\n    # if service is already exposed through NodePort or LoadBalancer workload will fail on that\n    not is_exposed_service(svc)\n\n    wl := input[_]\n    spec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Pod\", \"Job\", \"CronJob\"}\n    spec_template_spec_patterns[wl.kind]\n    wl_connected_to_service(wl, svc)\n\n    result := svc_connected_to_ingress(svc, ingress)\n    \n    msga := {\n        \"alertMessage\": sprintf(\"workload '%v' is exposed through ingress '%v'\", [wl.metadata.name, ingress.metadata.name]),\n        \"packagename\": \"armo_builtins\",\n        \"failedPaths\": [],\n        \"fixPaths\": [],\n        \"alertScore\": 7,\n        \"alertObject\": {\n            \"k8sApiObjects\": [wl]\n        },\n        \"relatedObjects\": [\n\t\t{\n\t            \"object\": ingress,\n\t\t    \"reviewPaths\": result,\n\t            \"failedPaths\": result,\n\t        },\n\t\t{\n\t            \"object\": svc,\n\t\t}\n        ]\n    }\n} \n\n# ====================================================================================\n\nis_exposed_service(svc) if {\n    svc.spec.type == \"NodePort\"\n}\n\nis_exposed_service(svc) if {\n    svc.spec.type == \"LoadBalancer\"\n}\n\nwl_connected_to_service(wl, svc) if {\n    count({x | svc.spec.selector[x] == wl.metadata.labels[x]}) == count(svc.spec.selector)\n}\n\nwl_connected_to_service(wl, svc) if {\n    wl.spec.selector.matchLabels == svc.spec.selector\n}\n\n# check if service is connected to ingress\nsvc_connected_to_ingress(svc, ingress) = result if {\n    rule := ingress.spec.rules[i]\n    paths := rule.http.paths[j]\n    svc.metadata.name == paths.backend.service.name\n    result := [sprintf(\"spec.rules[%d].http.paths[%d].backend.service.name\", [i,j])]\n}\n\n",
 				Match: []reporthandling.RuleMatchObjects{
 					{
 						APIGroups:   []string{""},
@@ -682,6 +682,92 @@ func TestRunOPAOnSingleRuleDispatch(t *testing.T) {
 		assert.Contains(t, err.Error(), "not supported")
 		assert.Contains(t, err.Error(), "mystery-rule")
 	})
+}
+
+// TestGetCompiledRule_RegoV0Fallback locks in backward compatibility for
+// policy sources that predate the regolibrary/opa-utils Rego v1 migration:
+// a pinned --controls-version release, a --use-from/--use-default air-gapped
+// bundle, or a tenant-authored custom control from the cloud backend. None
+// of those are guaranteed to carry "import rego.v1", so getCompiledRule must
+// fall back to the v0 parser instead of failing the whole scan.
+func TestGetCompiledRule_RegoV0Fallback(t *testing.T) {
+	opap := &OPAProcessor{compiledModules: make(map[string]compiledRule)}
+
+	t.Run("v1 rule compiles as v1", func(t *testing.T) {
+		v1Rule := `package armo_builtins
+import rego.v1
+
+deny contains msga if {
+	input.kind == "Pod"
+	msga := {"alertMessage": "test", "alertScore": 1, "failedPaths": [], "fixPaths": [], "alertObject": {"k8sApiObjects": [input]}}
+}
+`
+		compiled, version, err := opap.getCompiledRule(context.Background(), "v1-rule", v1Rule, false)
+		require.NoError(t, err)
+		assert.Equal(t, ast.RegoV1, version)
+		assert.NotNil(t, compiled)
+	})
+
+	t.Run("legacy v0 rule with no import rego.v1 falls back instead of failing", func(t *testing.T) {
+		v0Rule := `package armo_builtins
+
+deny[msga] {
+	input.kind == "Pod"
+	msga := {"alertMessage": "test", "alertScore": 1, "failedPaths": [], "fixPaths": [], "alertObject": {"k8sApiObjects": [input]}}
+}
+`
+		compiled, version, err := opap.getCompiledRule(context.Background(), "v0-rule", v0Rule, false)
+		require.NoError(t, err, "a legacy v0 rule must still compile via the v0 fallback, not fail the scan")
+		assert.Equal(t, ast.RegoV0, version)
+		assert.NotNil(t, compiled)
+	})
+
+	t.Run("genuinely invalid rego fails under both versions", func(t *testing.T) {
+		broken := `package armo_builtins
+
+this is not valid rego at all {{{
+`
+		_, _, err := opap.getCompiledRule(context.Background(), "broken-rule", broken, false)
+		assert.Error(t, err)
+	})
+}
+
+// TestRunOPAOnSingleRule_RegoV0FallbackEvaluates proves the fallback isn't
+// just a compile-time formality: a legacy v0 rule must actually evaluate
+// and produce a result, which requires regoEval to run at the same Rego
+// version the rule was compiled under (not hardcode v1 independently).
+func TestRunOPAOnSingleRule_RegoV0FallbackEvaluates(t *testing.T) {
+	opap := &OPAProcessor{compiledModules: make(map[string]compiledRule)}
+	getRuleData := func(r *reporthandling.PolicyRule) string { return r.Rule }
+
+	rule := &reporthandling.PolicyRule{
+		PortalBase:   armotypes.PortalBase{Name: "legacy-v0-rule"},
+		RuleLanguage: reporthandling.RegoLanguage,
+		Rule: `package armo_builtins
+
+deny[msga] {
+	pod := input[_]
+	pod.kind == "Pod"
+	msga := {
+		"alertMessage": "pod found",
+		"packagename": "armo_builtins",
+		"alertScore": 1,
+		"failedPaths": [],
+		"fixPaths": [],
+		"alertObject": {"k8sApiObjects": [pod]}
+	}
+}
+`,
+	}
+	obj := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "p", "namespace": "default"},
+	}
+
+	responses, _, err := opap.runOPAOnSingleRule(context.Background(), rule, []map[string]any{obj}, getRuleData, resources.RegoDependenciesData{}, "")
+	require.NoError(t, err)
+	require.Len(t, responses, 1)
 }
 
 func TestCELRemediation(t *testing.T) {

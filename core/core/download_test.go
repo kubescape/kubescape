@@ -352,7 +352,7 @@ func TestDownloadConfigInputs(t *testing.T) {
 		withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: nil}, nil)
 
 		err := downloadConfigInputs(context.Background(), &metav1.DownloadInfo{Target: TargetControlsInputs, Path: t.TempDir()})
-		require.EqualError(t, err, "failed to download controlInputs - received an empty objects")
+		require.EqualError(t, err, "failed to download controlInputs - received empty objects")
 	})
 
 	t.Run("returns error when SaveInFile fails", func(t *testing.T) {
@@ -526,7 +526,7 @@ func TestDownloadFramework(t *testing.T) {
 		withPolicyGetter(t, &fakePolicyGetter{framework: nil}, nil)
 
 		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir(), Identifier: "nsa"})
-		require.EqualError(t, err, "failed to download framework - received an empty objects")
+		require.EqualError(t, err, "failed to download framework - received empty objects")
 	})
 
 	t.Run("with identifier: succeeds and derives the filename", func(t *testing.T) {
@@ -593,7 +593,7 @@ func TestDownloadControl(t *testing.T) {
 
 		err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir(), Identifier: "C-0001"})
 		require.ErrorContains(t, err, "C-0001")
-		require.ErrorContains(t, err, "received an empty objects")
+		require.ErrorContains(t, err, "received empty objects")
 	})
 
 	t.Run("returns error when SaveInFile fails", func(t *testing.T) {

@@ -151,7 +151,16 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 	hostSensorVal := scanInfo.HostSensorEnabled.Get()
 
 	switch {
-	case !k8sinterface.IsConnectedToCluster() || k8s == nil: // TODO(fred): fix race condition on global KSConfig there
+	case k8s == nil:
+		// k8s is nil exactly when this scan never connected to a cluster (a
+		// non-cluster scan, or getKubernetesApi() failing - which exits the
+		// process via logger.Fatal before we'd get here). Re-checking
+		// k8sinterface.IsConnectedToCluster() here as well used to read the
+		// same global connection state a second time, at a later point than
+		// when k8s was obtained, with no synchronization between the two
+		// reads - a caller could observe k8s and IsConnectedToCluster()
+		// disagree. k8s == nil is already a complete, single-read proxy for
+		// "no cluster connection", so the second read added nothing but risk.
 		return hostsensorutils.NewHostSensorHandlerMock()
 
 	case hostSensorVal != nil && *hostSensorVal:
@@ -164,7 +173,7 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 		return hostSensorHandler
 
 	case hostSensorVal == nil && wantsHostSensorControls:
-		// Auto-detect: if node-agent CRDs are available, use them without requiring --enable-host-scanner.
+		// Auto-detect: if node-agent CRDs are available, use them instead of deploying the host-sensor daemonset.
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, "")
 		if err != nil {
 			logger.L().Ctx(ctx).Debug("node-agent not available, host sensor disabled", helpers.Error(err))
