@@ -44,14 +44,16 @@ func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
 		config:    config,
 	}
 
-	if repoRoot, err := l.GetRootDir(); err == nil {
-		gitRepository, err := newGitRepository(repoRoot)
-		if err != nil {
-			return l, err
-		}
-
-		l.gitRepository = gitRepository
+	repoRoot, err := l.GetRootDir()
+	if err != nil {
+		return nil, err
 	}
+
+	gitRepository, err := newGitRepository(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	l.gitRepository = gitRepository
 
 	return l, nil
 }
