@@ -253,6 +253,10 @@ var rule_invalid_from = &reporthandling.PolicyRule{PortalBase: armotypes.PortalB
 	Attributes: map[string]any{"useFromKubescapeVersion": 1.0135, "useUntilKubescapeVersion": "v1.0.135"}}}
 var rule_invalid_until = &reporthandling.PolicyRule{PortalBase: armotypes.PortalBase{
 	Attributes: map[string]any{"useFromKubescapeVersion": "v1.0.135", "useUntilKubescapeVersion": 1.0135}}}
+var rule_bad_semver_from = &reporthandling.PolicyRule{PortalBase: armotypes.PortalBase{
+	Attributes: map[string]any{"useFromKubescapeVersion": "not-a-version"}}}
+var rule_bad_semver_until = &reporthandling.PolicyRule{PortalBase: armotypes.PortalBase{
+	Attributes: map[string]any{"useUntilKubescapeVersion": "not-a-version"}}}
 
 func TestIsRuleKubescapeVersionCompatible(t *testing.T) {
 	// local build- no build number
@@ -295,6 +299,13 @@ func TestIsRuleKubescapeVersionCompatible(t *testing.T) {
 	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_132.Attributes, buildNumberMock))
 	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_133.Attributes, buildNumberMock))
 	assert.True(t, isRuleKubescapeVersionCompatible(rule_v1_0_134.Attributes, buildNumberMock))
+
+	// invalid semver strings in version range attributes must not exclude the rule
+	buildNumberMock = "v1.0.133"
+	assert.True(t, isRuleKubescapeVersionCompatible(rule_bad_semver_from.Attributes, buildNumberMock),
+		"rule with invalid useFromKubescapeVersion string must not be excluded")
+	assert.True(t, isRuleKubescapeVersionCompatible(rule_bad_semver_until.Attributes, buildNumberMock),
+		"rule with invalid useUntilKubescapeVersion string must not be excluded")
 }
 
 func TestGetScanningScope(t *testing.T) {
