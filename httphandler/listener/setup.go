@@ -28,6 +28,10 @@ const (
 	// healtcheck paths
 	livePath  = "/livez"
 	readyPath = "/readyz"
+
+	// default ports
+	defaultHTTPServerPort = "8080"
+	defaultPprofPort      = "6060"
 )
 
 // SetupHTTPListener set up listening http servers
@@ -110,7 +114,7 @@ func getPort() string {
 	if p := os.Getenv("KS_PORT"); p != "" {
 		return p
 	}
-	return "8080"
+	return defaultHTTPServerPort
 }
 
 func getCertFile() string {
@@ -125,8 +129,8 @@ func servePprof() {
 	go func() {
 		// start pprof server -> https://pkg.go.dev/net/http/pprof
 		if logger.L().GetLevel() == helpers.DebugLevel.String() {
-			logger.L().Info("starting pprof server", helpers.String("port", "6060"))
-			logger.L().Error(http.ListenAndServe(":6060", nil).Error())
+			logger.L().Info("starting pprof server", helpers.String("port", defaultPprofPort))
+			logger.L().Error(http.ListenAndServe(":"+defaultPprofPort, nil).Error())
 		}
 	}()
 }
