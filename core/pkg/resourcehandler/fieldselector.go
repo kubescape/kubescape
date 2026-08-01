@@ -14,14 +14,14 @@ const (
 )
 
 type IFieldSelector interface {
-	GetNamespacesSelectors(*schema.GroupVersionResource) []string
+	GetNamespacesSelectors(*schema.GroupVersionResource, *bool) []string
 	GetClusterScope(*schema.GroupVersionResource) bool
 }
 
 type EmptySelector struct {
 }
 
-func (es *EmptySelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
+func (es *EmptySelector) GetNamespacesSelectors(resource *schema.GroupVersionResource, namespaced *bool) []string {
 	return []string{""} //
 }
 
@@ -55,11 +55,7 @@ func (is *IncludeSelector) GetClusterScope(resource *schema.GroupVersionResource
 	return resource.Resource == "namespaces"
 }
 
-func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
-	return es.getNamespacesSelectors(resource, nil)
-}
-
-func (es *ExcludeSelector) getNamespacesSelectors(resource *schema.GroupVersionResource, namespaced *bool) []string {
+func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource, namespaced *bool) []string {
 	fieldSelectors := ""
 	for n := range strings.SplitSeq(es.namespace, FieldSelectorsSeparator) {
 		n = strings.TrimSpace(n)
@@ -71,11 +67,7 @@ func (es *ExcludeSelector) getNamespacesSelectors(resource *schema.GroupVersionR
 
 }
 
-func (is *IncludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
-	return is.getNamespacesSelectors(resource, nil)
-}
-
-func (is *IncludeSelector) getNamespacesSelectors(resource *schema.GroupVersionResource, namespaced *bool) []string {
+func (is *IncludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource, namespaced *bool) []string {
 	fieldSelectors := []string{}
 	for n := range strings.SplitSeq(is.namespace, FieldSelectorsSeparator) {
 		n = strings.TrimSpace(n)
@@ -93,20 +85,6 @@ func (is *IncludeSelector) getNamespacesSelectors(resource *schema.GroupVersionR
 		fieldSelectors = append(fieldSelectors, sel)
 	}
 	return fieldSelectors
-}
-
-func getNamespacesSelectorsWithOptionalScope(fieldSelector IFieldSelector, resource *schema.GroupVersionResource, namespaced *bool) []string {
-	if namespaced == nil {
-		return fieldSelector.GetNamespacesSelectors(resource)
-	}
-	switch selector := fieldSelector.(type) {
-	case *IncludeSelector:
-		return selector.getNamespacesSelectors(resource, namespaced)
-	case *ExcludeSelector:
-		return selector.getNamespacesSelectors(resource, namespaced)
-	default:
-		return fieldSelector.GetNamespacesSelectors(resource)
-	}
 }
 
 func getNamespacesSelectorWithOptionalScope(resource *schema.GroupVersionResource, ns, operator string, namespaced *bool) string {

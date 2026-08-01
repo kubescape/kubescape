@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -55,33 +56,84 @@ func dedupWorkloads(workloads []workloadinterface.IMetadata, workloadIDToSource 
 
 func addWorkloadsToResourcesMap(allResources map[string][]workloadinterface.IMetadata, workloads []workloadinterface.IMetadata) {
 	for i := range workloads {
-		groupVersionResource, err := k8sinterface.GetGroupVersionResource(workloads[i].GetKind())
-		var resourceTriplets string
-		if err != nil {
-			group, version := k8sinterface.SplitApiVersion(workloads[i].GetApiVersion())
-			resolved := defaultResourceResolver(group, version, workloads[i].GetKind())
-			if len(resolved) != 1 {
-				logger.L().Warning("unable to resolve object resource", helpers.String("kind", workloads[i].GetKind()), helpers.String("id", workloads[i].GetID()))
+		workload := workloads[i]
+		group, version := k8sinterface.SplitApiVersion(workload.GetApiVersion())
+		canonical, canonicalErr := k8sinterface.GetGroupVersionResource(workload.GetKind())
+
+		var resourceTriplets []string
+		if canonicalErr == nil && isBuiltInAPIGroup(group) {
+			if canonical.Group != group || canonical.Version != version {
+				logger.L().Warning("workload GroupVersion mismatch", helpers.String("id", workload.GetID()), helpers.String("kind", workload.GetKind()), helpers.String("expectedGroup", canonical.Group), helpers.String("actualGroup", group), helpers.String("expectedVersion", canonical.Version), helpers.String("actualVersion", version))
 				continue
 			}
-			resourceTriplets = resolved[0].groupVersionResourceTriplet
-			logger.L().Debug("using manifest identity for custom resource unavailable in discovery",
-				helpers.String("kind", workloads[i].GetKind()), helpers.String("id", workloads[i].GetID()))
+			resourceTriplets = []string{k8sinterface.JoinResourceTriplets(canonical.Group, canonical.Version, canonical.Resource)}
 		} else {
-			if k8sinterface.IsTypeWorkload(workloads[i].GetObject()) {
-				w := workloadinterface.NewWorkloadObj(workloads[i].GetObject())
-				if groupVersionResource.Group != w.GetGroup() || groupVersionResource.Version != w.GetVersion() {
-					logger.L().Warning("workload GroupVersion mismatch", helpers.String("id", workloads[i].GetID()), helpers.String("kind", workloads[i].GetKind()), helpers.String("expectedGroup", groupVersionResource.Group), helpers.String("actualGroup", w.GetGroup()), helpers.String("expectedVersion", groupVersionResource.Version), helpers.String("actualVersion", w.GetVersion()))
-					continue
+			resourceTriplets = offlineManifestResourceTriplets(group, version, workload.GetKind())
+			if len(resourceTriplets) == 0 {
+				logger.L().Warning("unable to resolve object resource", helpers.String("kind", workload.GetKind()), helpers.String("id", workload.GetID()))
+				continue
+			}
+			logger.L().Debug("using manifest identity for custom resource unavailable in discovery",
+				helpers.String("kind", workload.GetKind()), helpers.String("id", workload.GetID()))
+		}
+
+		for _, resourceTriplet := range resourceTriplets {
+			allResources[resourceTriplet] = append(allResources[resourceTriplet], workload)
+		}
+	}
+}
+
+func offlineManifestResourceTriplets(group, version, kind string) []string {
+	if group == "" || version == "" || kind == "" {
+		return nil
+	}
+
+	singular := strings.ToLower(kind)
+	aliases := []string{singular}
+	switch singular {
+	case "ingress":
+		aliases = append(aliases, "ingresses")
+	case "storageclass":
+		aliases = append(aliases, "storageclasses")
+	default:
+		if !strings.HasSuffix(singular, "s") {
+			if strings.HasSuffix(singular, "y") {
+				aliases = append(aliases, strings.TrimSuffix(singular, "y")+"ies")
+			} else {
+				// Preserve the k8s-interface comparison form while also accepting
+				// the conventional plural commonly declared by CRDs such as
+				// Sandbox (sandboxes). These are file-index aliases only and are
+				// never used to construct a live API query.
+				aliases = append(aliases, singular+"s")
+				if strings.HasSuffix(singular, "x") || strings.HasSuffix(singular, "ch") ||
+					strings.HasSuffix(singular, "sh") || strings.HasSuffix(singular, "ss") {
+					aliases = append(aliases, singular+"es")
 				}
 			}
-			resourceTriplets = k8sinterface.JoinResourceTriplets(groupVersionResource.Group, groupVersionResource.Version, groupVersionResource.Resource)
 		}
-		if r, ok := allResources[resourceTriplets]; ok {
-			allResources[resourceTriplets] = append(r, workloads[i])
-		} else {
-			allResources[resourceTriplets] = []workloadinterface.IMetadata{workloads[i]}
-		}
+	}
+
+	triplets := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		triplets = append(triplets, k8sinterface.JoinResourceTriplets(group, version, alias))
+	}
+	return triplets
+}
+
+func isBuiltInAPIGroup(group string) bool {
+	// A Kind that collides with a built-in Kind is only treated as built-in when
+	// its manifest group is an actual Kubernetes API group. A different custom
+	// group (for example serving.knative.dev/v1 Service) belongs on the CRD path.
+	switch group {
+	case "", "admissionregistration.k8s.io", "apiextensions.k8s.io", "apiregistration.k8s.io",
+		"apps", "authentication.k8s.io", "authorization.k8s.io", "autoscaling", "batch",
+		"certificates.k8s.io", "coordination.k8s.io", "discovery.k8s.io", "events.k8s.io",
+		"extensions", "flowcontrol.apiserver.k8s.io", "internal.apiserver.k8s.io", "migration.k8s.io",
+		"networking.k8s.io", "node.k8s.io", "policy", "rbac.authorization.k8s.io",
+		"resource.k8s.io", "scheduling.k8s.io", "storage.k8s.io", "storagemigration.k8s.io":
+		return true
+	default:
+		return false
 	}
 }
 

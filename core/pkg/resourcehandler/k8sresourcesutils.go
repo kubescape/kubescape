@@ -65,13 +65,9 @@ func isEmptyImgVulns(externalResourcesMap cautils.ExternalResources) bool {
 	return true
 }
 
-func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl map[string][]string) cautils.ExternalResources {
-	return setKSResourceMapWithResolver(frameworks, resourceToControl, defaultResourceResolver)
-}
-
-func setKSResourceMapWithResolver(frameworks []reporthandling.Framework, resourceToControl map[string][]string, resolver resourceResolver) cautils.ExternalResources {
+func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl map[string][]string, resolver resourceResolver) cautils.ExternalResources {
 	externalResources := make(cautils.ExternalResources)
-	complexMap := setComplexKSResourceMapWithResolver(frameworks, resourceToControl, resolver)
+	complexMap := setComplexKSResourceMap(frameworks, resourceToControl, resolver)
 	for group := range complexMap {
 		for version := range complexMap[group] {
 			for resource := range complexMap[group][version] {
@@ -85,11 +81,7 @@ func setKSResourceMapWithResolver(frameworks []reporthandling.Framework, resourc
 }
 
 // [group][versionn][resource]
-func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToControls map[string][]string) map[string]map[string]map[string]any {
-	return setComplexKSResourceMapWithResolver(frameworks, resourceToControls, defaultResourceResolver)
-}
-
-func setComplexKSResourceMapWithResolver(frameworks []reporthandling.Framework, resourceToControls map[string][]string, resolver resourceResolver) map[string]map[string]map[string]any {
+func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToControls map[string][]string, resolver resourceResolver) map[string]map[string]map[string]any {
 	k8sResources := make(map[string]map[string]map[string]any)
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {

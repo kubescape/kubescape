@@ -212,7 +212,7 @@ func TestGetQueryableResourceMapFromPolicies(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			resourceGroups, excludedRulesMap := getQueryableResourceMapFromPolicies([]reporthandling.Framework{*mockFramework("test", testCase.controls)}, testCase.workload, reporthandling.ScopeCluster) // TODO check second param
+			resourceGroups, excludedRulesMap := getQueryableResourceMapFromPolicies([]reporthandling.Framework{*mockFramework("test", testCase.controls)}, testCase.workload, reporthandling.ScopeCluster, defaultResourceResolver) // TODO check second param
 			assert.Equalf(t, len(testCase.expectedExcludedRules), len(excludedRulesMap), "excludedRulesMap length is not as expected")
 			for _, expectedExcludedRuleName := range testCase.expectedExcludedRules {
 				assert.Contains(t, excludedRulesMap, expectedExcludedRuleName, "excludedRulesMap does not contain expected rule name")
@@ -330,7 +330,7 @@ func TestUpdateQueryableResourcesMapFromRuleMatchObject(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			queryableResources := make(QueryableResources)
 			for i := range testCase.matches {
-				updateQueryableResourcesMapFromRuleMatchObject(&testCase.matches[i], testCase.resourcesFilterMap, queryableResources, testCase.namespace)
+				updateQueryableResourcesMapFromRuleMatchObject(&testCase.matches[i], testCase.resourcesFilterMap, queryableResources, testCase.namespace, defaultResourceResolver)
 			}
 
 			assert.Equal(t, len(testCase.expectedQueryableResourceGroups), len(queryableResources))

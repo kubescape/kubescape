@@ -90,8 +90,10 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, test.objects...)
 			handler := &K8sResourceHandler{k8s: &k8sinterface.KubernetesApi{DynamicClient: dynamicClient}}
+			resolver, discoveryFailures := newDiscoveryResourceResolver(nil)
+			require.Empty(t, discoveryFailures)
 
-			workload, err := handler.findScanObjectResource(context.Background(), test.request, &EmptySelector{})
+			workload, err := handler.findScanObjectResource(context.Background(), test.request, &EmptySelector{}, resolver)
 			if test.wantError != "" {
 				require.ErrorContains(t, err, test.wantError)
 				assert.Nil(t, workload)

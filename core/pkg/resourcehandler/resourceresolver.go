@@ -1,6 +1,7 @@
 package resourcehandler
 
 import (
+	"errors"
 	"sort"
 	"strings"
 	"sync"
@@ -8,6 +9,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
@@ -24,12 +26,20 @@ func defaultResourceResolver(group, version, resource string) []resolvedResource
 	if version == "" || resource == "" {
 		return nil
 	}
-	if _, err := k8sinterface.GetGroupVersionResource(resource); err != nil &&
-		len(mapKSResourceToApiGroup(resource)) == 0 &&
-		(group == "" || group == "*" || version == "*" || resource == "*") {
+	_, builtInErr := k8sinterface.GetGroupVersionResource(resource)
+	isUnknown := builtInErr != nil && len(mapKSResourceToApiGroup(resource)) == 0
+	if isUnknown && (group == "" || group == "*" || version == "*" || resource == "*") {
 		// Without discovery, a wildcard cannot provide the missing group,
 		// version, or declared CRD plural safely.
 		return nil
+	}
+	if isUnknown {
+		// Offline custom-resource identities are comparison keys, not REST
+		// queries. Normalize case while preserving the policy-provided singular
+		// or plural form; file indexing supplies both manifest-derived aliases.
+		return []resolvedResource{{
+			groupVersionResourceTriplet: k8sinterface.JoinResourceTriplets(group, version, strings.ToLower(resource)),
+		}}
 	}
 	resourceGroups := k8sinterface.ResourceGroupToSlice(group, version, resource)
 	resolved := make([]resolvedResource, 0, len(resourceGroups))
@@ -49,12 +59,14 @@ type discoveredAPIResource struct {
 // resource name, and namespace scope for live scans. If discovery is unavailable,
 // built-in and Kubescape virtual resources retain the existing k8s-interface
 // behavior; unknown CRDs are not guessed into live queries.
-func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) resourceResolver {
+func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resourceResolver, []cautils.PartialGVRPull) {
 	var discovered []discoveredAPIResource
+	var discoveryFailures []cautils.PartialGVRPull
 	if client != nil {
 		_, resourceLists, err := client.ServerGroupsAndResources()
 		if err != nil {
 			logger.L().Warning("Kubernetes resource discovery was incomplete", helpers.Error(err))
+			discoveryFailures = getDiscoveryFailures(err)
 		}
 		discovered = collectDiscoveredResources(resourceLists)
 	}
@@ -105,7 +117,36 @@ func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) resourceR
 		}
 		warnedMu.Unlock()
 		return nil
+	}, discoveryFailures
+}
+
+func getDiscoveryFailures(err error) []cautils.PartialGVRPull {
+	var groupFailure *discovery.ErrGroupDiscoveryFailed
+	if !errors.As(err, &groupFailure) {
+		return []cautils.PartialGVRPull{{
+			GVR:      "Kubernetes API discovery",
+			Selector: "discovery",
+			Error:    err.Error(),
+		}}
 	}
+
+	groupVersions := make([]schema.GroupVersion, 0, len(groupFailure.Groups))
+	for groupVersion := range groupFailure.Groups {
+		groupVersions = append(groupVersions, groupVersion)
+	}
+	sort.Slice(groupVersions, func(i, j int) bool {
+		return groupVersions[i].String() < groupVersions[j].String()
+	})
+
+	failures := make([]cautils.PartialGVRPull, 0, len(groupVersions))
+	for _, groupVersion := range groupVersions {
+		failures = append(failures, cautils.PartialGVRPull{
+			GVR:      groupVersion.String(),
+			Selector: "discovery",
+			Error:    groupFailure.Groups[groupVersion].Error(),
+		})
+	}
+	return failures
 }
 
 func collectDiscoveredResources(resourceLists []*metav1.APIResourceList) []discoveredAPIResource {

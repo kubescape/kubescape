@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
 	discoveryfake "k8s.io/client-go/discovery/fake"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -84,7 +86,8 @@ func agentRuntimeDiscovery() *discoveryfake.FakeDiscovery {
 }
 
 func TestDiscoveryResolverUsesDeclaredPluralAndScope(t *testing.T) {
-	resolver := newDiscoveryResourceResolver(agentRuntimeDiscovery())
+	resolver, failures := newDiscoveryResourceResolver(agentRuntimeDiscovery())
+	require.Empty(t, failures)
 
 	tests := []struct {
 		group    string
@@ -111,10 +114,10 @@ func TestDiscoveryResolverUsesDeclaredPluralAndScope(t *testing.T) {
 	}
 }
 
-func TestDefaultResolverKeepsExactOfflineIdentityWithoutGuessingWildcards(t *testing.T) {
+func TestDefaultResolverNormalizesOfflineIdentityWithoutGuessingWildcards(t *testing.T) {
 	exact := defaultResourceResolver("ate.dev", "v1alpha1", "ActorTemplate")
 	require.Len(t, exact, 1)
-	assert.Equal(t, "ate.dev/v1alpha1/ActorTemplate", exact[0].groupVersionResourceTriplet)
+	assert.Equal(t, "ate.dev/v1alpha1/actortemplate", exact[0].groupVersionResourceTriplet)
 
 	assert.Empty(t, defaultResourceResolver("ate.dev", "*", "ActorTemplate"))
 	assert.Empty(t, defaultResourceResolver("*", "v1alpha1", "ActorTemplate"))
@@ -122,8 +125,37 @@ func TestDefaultResolverKeepsExactOfflineIdentityWithoutGuessingWildcards(t *tes
 	assert.Empty(t, defaultResourceResolver("ate.dev", "", "ActorTemplate"))
 }
 
+func TestDiscoveryResolverReportsPartialDiscoveryFailures(t *testing.T) {
+	discoveryClient := agentRuntimeDiscovery()
+	discoveryClient.PrependReactor("get", "resource", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, &discovery.ErrGroupDiscoveryFailed{Groups: map[schema.GroupVersion]error{
+			{Group: "custom.metrics.k8s.io", Version: "v1beta2"}: errors.New("provider unavailable"),
+			{Group: "metrics.k8s.io", Version: "v1beta1"}:        errors.New("metrics server unavailable"),
+		}}
+	})
+
+	resolver, failures := newDiscoveryResourceResolver(discoveryClient)
+	require.Len(t, failures, 2)
+	assert.Equal(t, "custom.metrics.k8s.io/v1beta2", failures[0].GVR)
+	assert.Equal(t, "discovery", failures[0].Selector)
+	assert.Contains(t, failures[0].Error, "provider unavailable")
+	assert.Equal(t, "metrics.k8s.io/v1beta1", failures[1].GVR)
+
+	// Partial discovery results remain usable for groups that did respond.
+	resolved := resolver("agents.x-k8s.io", "v1alpha1", "Sandbox")
+	require.Len(t, resolved, 1)
+	assert.Equal(t, "agents.x-k8s.io/v1alpha1/sandboxes", resolved[0].groupVersionResourceTriplet)
+
+	coverage := cautils.BuildScanCoverage(nil, nil, nil, failures, nil)
+	coverage.ComputeCoverageScore(1)
+	assert.Len(t, coverage.PartialGVRPulls, 2)
+	assert.True(t, coverage.Degraded)
+	assert.Less(t, coverage.CoverageScore, float32(100))
+}
+
 func TestDiscoveredScopeAppliesIncludeAndExcludeSelectors(t *testing.T) {
-	resolver := newDiscoveryResourceResolver(agentRuntimeDiscovery())
+	resolver, failures := newDiscoveryResourceResolver(agentRuntimeDiscovery())
+	require.Empty(t, failures)
 	resolved := resolver("agents.x-k8s.io", "v1beta1", "Sandbox")
 	require.Len(t, resolved, 1)
 	require.NotNil(t, resolved[0].namespaced)
@@ -131,25 +163,26 @@ func TestDiscoveredScopeAppliesIncludeAndExcludeSelectors(t *testing.T) {
 	gvr := &schema.GroupVersionResource{Group: "agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxes"}
 	assert.Equal(t,
 		[]string{"metadata.namespace==agents"},
-		getNamespacesSelectorsWithOptionalScope(NewIncludeSelector("agents"), gvr, resolved[0].namespaced),
+		NewIncludeSelector("agents").GetNamespacesSelectors(gvr, resolved[0].namespaced),
 	)
 	assert.Equal(t,
 		[]string{"metadata.namespace!=kube-system"},
-		getNamespacesSelectorsWithOptionalScope(NewExcludeSelector("kube-system"), gvr, resolved[0].namespaced),
+		NewExcludeSelector("kube-system").GetNamespacesSelectors(gvr, resolved[0].namespaced),
 	)
 }
 
 func TestAgentRuntimeCRDResourceToControlKeysMatchQueries(t *testing.T) {
 	framework := agentRuntimeFramework()
-	resolver := newDiscoveryResourceResolver(agentRuntimeDiscovery())
-	queryable, _ := getQueryableResourceMapFromPoliciesWithResolver(
+	resolver, failures := newDiscoveryResourceResolver(agentRuntimeDiscovery())
+	require.Empty(t, failures)
+	queryable, _ := getQueryableResourceMapFromPolicies(
 		[]reporthandling.Framework{framework},
 		nil,
 		reporthandling.ScopeCluster,
 		resolver,
 	)
 	resourceToControls := map[string][]string{}
-	setComplexKSResourceMapWithResolver([]reporthandling.Framework{framework}, resourceToControls, resolver)
+	setComplexKSResourceMap([]reporthandling.Framework{framework}, resourceToControls, resolver)
 
 	for query := range queryable {
 		assert.Containsf(t, resourceToControls, query,
@@ -193,18 +226,51 @@ metadata:
 	require.NoError(t, err)
 	require.Len(t, allResources, 4)
 
-	// Offline there is no authoritative REST discovery. Unknown Kind-style
-	// identities stay unchanged, keeping the policy and manifest maps aligned
-	// without inventing a plural name.
+	// Offline there is no authoritative REST discovery. Policies naming the
+	// Kind use the lowercase, manifest-derived singular comparison key.
 	expected := map[string]string{
-		"agents.x-k8s.io/v1alpha1/Sandbox":                   "Sandbox",
-		"extensions.agents.x-k8s.io/v1beta1/SandboxTemplate": "SandboxTemplate",
-		"ate.dev/v1alpha1/ActorTemplate":                     "ActorTemplate",
-		"ate.dev/v1alpha1/WorkerPool":                        "WorkerPool",
+		"agents.x-k8s.io/v1alpha1/sandbox":                   "Sandbox",
+		"extensions.agents.x-k8s.io/v1beta1/sandboxtemplate": "SandboxTemplate",
+		"ate.dev/v1alpha1/actortemplate":                     "ActorTemplate",
+		"ate.dev/v1alpha1/workerpool":                        "WorkerPool",
 	}
 	for resourceGroup, kind := range expected {
 		require.Lenf(t, resources[resourceGroup], 1, "expected one %s under %s", kind, resourceGroup)
 		assert.Equal(t, kind, allResources[resources[resourceGroup][0]].GetKind())
+	}
+}
+
+func TestFileResourceHandlerMatchesCustomResourcesByKindOrPlural(t *testing.T) {
+	manifest := `apiVersion: agents.x-k8s.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: alpha-sandbox
+  namespace: agents
+`
+	manifestPath := filepath.Join(t.TempDir(), "sandbox.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0o600))
+
+	for _, policyResource := range []string{"Sandbox", "sandbox", "sandboxs", "sandboxes", "SANDBOXES"} {
+		t.Run(policyResource, func(t *testing.T) {
+			match := reporthandling.RuleMatchObjects{
+				APIGroups:   []string{"agents.x-k8s.io"},
+				APIVersions: []string{"v1alpha1"},
+				Resources:   []string{policyResource},
+			}
+			framework := *mockFramework("offline-custom-resource", []reporthandling.Control{
+				mockControl("offline-custom-resource", []reporthandling.PolicyRule{mockRule("offline-custom-resource", []reporthandling.RuleMatchObjects{match}, "")}),
+			})
+			scanInfo := &cautils.ScanInfo{InputPatterns: []string{manifestPath}}
+			session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo)
+
+			resources, allResources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+			require.NoError(t, err)
+			require.Len(t, allResources, 1)
+
+			resolved := defaultResourceResolver("agents.x-k8s.io", "v1alpha1", policyResource)
+			require.Len(t, resolved, 1)
+			assert.Len(t, resources[resolved[0].groupVersionResourceTriplet], 1)
+		})
 	}
 }
 
@@ -246,8 +312,9 @@ func TestK8sResourceHandlerUsesDiscoveredGVRsAndNamespaceScope(t *testing.T) {
 		DynamicClient:   dynamicClient,
 		DiscoveryClient: agentRuntimeDiscovery(),
 	}}
-	resolver := newDiscoveryResourceResolver(handler.k8s.DiscoveryClient)
-	queryable, _ := getQueryableResourceMapFromPoliciesWithResolver(
+	resolver, discoveryFailures := newDiscoveryResourceResolver(handler.k8s.DiscoveryClient)
+	require.Empty(t, discoveryFailures)
+	queryable, _ := getQueryableResourceMapFromPolicies(
 		[]reporthandling.Framework{agentRuntimeFramework()},
 		nil,
 		reporthandling.ScopeCluster,
@@ -283,11 +350,44 @@ func TestK8sResourceHandlerUsesDiscoveredGVRsAndNamespaceScope(t *testing.T) {
 }
 
 func TestAddWorkloadsToResourcesMapPreservesGroupVersionMismatchGuard(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+	tests := []struct {
+		apiVersion string
+		kind       string
+	}{
+		{apiVersion: "extensions/v1beta1", kind: "Deployment"},
+		{apiVersion: "rbac.authorization.k8s.io/v1beta1", kind: "Role"},
+		{apiVersion: "batch/v1beta1", kind: "CronJob"},
+		{apiVersion: "autoscaling/v2beta2", kind: "HorizontalPodAutoscaler"},
+		{apiVersion: "networking.k8s.io/v1beta1", kind: "Ingress"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.kind, func(t *testing.T) {
+			workload := workloadinterface.NewWorkloadObj(map[string]any{
+				"apiVersion": test.apiVersion,
+				"kind":       test.kind,
+				"metadata": map[string]any{
+					"name":      "legacy-resource",
+					"namespace": "default",
+				},
+			})
+			mapped := map[string][]workloadinterface.IMetadata{}
+
+			addWorkloadsToResourcesMap(mapped, []workloadinterface.IMetadata{workload})
+
+			assert.Empty(t, mapped, "known resources with a non-canonical GroupVersion must remain skipped")
+		})
+	}
+}
+
+func TestAddWorkloadsToResourcesMapKeepsCustomKindCollisions(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
 	workload := workloadinterface.NewWorkloadObj(map[string]any{
-		"apiVersion": "extensions/v1beta1",
-		"kind":       "Deployment",
+		"apiVersion": "serving.knative.dev/v1",
+		"kind":       "Service",
 		"metadata": map[string]any{
-			"name":      "legacy-deployment",
+			"name":      "hello",
 			"namespace": "default",
 		},
 	})
@@ -295,7 +395,8 @@ func TestAddWorkloadsToResourcesMapPreservesGroupVersionMismatchGuard(t *testing
 
 	addWorkloadsToResourcesMap(mapped, []workloadinterface.IMetadata{workload})
 
-	assert.Empty(t, mapped, "known resources with a non-canonical GroupVersion must remain skipped")
+	assert.Len(t, mapped["serving.knative.dev/v1/service"], 1)
+	assert.Len(t, mapped["serving.knative.dev/v1/services"], 1)
 }
 
 func TestAddSingleResourceToResourceMapsGuardsUnresolvedIdentity(t *testing.T) {
@@ -308,7 +409,7 @@ func TestAddSingleResourceToResourceMapsGuardsUnresolvedIdentity(t *testing.T) {
 	allResources := map[string]workloadinterface.IMetadata{}
 
 	assert.NotPanics(t, func() {
-		addSingleResourceToResourceMaps(resources, allResources, workload)
+		addSingleResourceToResourceMaps(resources, allResources, workload, defaultResourceResolver)
 	})
 	assert.Empty(t, resources)
 }

@@ -52,7 +52,7 @@ func TestSetComplexKSResourceMap_IncludesRuleMatch(t *testing.T) {
 	}
 
 	resourceToControls := map[string][]string{}
-	setComplexKSResourceMap([]reporthandling.Framework{framework}, resourceToControls)
+	setComplexKSResourceMap([]reporthandling.Framework{framework}, resourceToControls, defaultResourceResolver)
 
 	// At least one GVR key for clusterrolebindings should map to the control.
 	found := false
@@ -92,13 +92,14 @@ func TestSetComplexKSResourceMap_RuleMatchKeyMatchesPullResourcesKey(t *testing.
 
 	// Keys from ResourceToControlsMap (built by setComplexKSResourceMap).
 	resourceToControls := map[string][]string{}
-	setComplexKSResourceMap([]reporthandling.Framework{framework}, resourceToControls)
+	setComplexKSResourceMap([]reporthandling.Framework{framework}, resourceToControls, defaultResourceResolver)
 
 	// Keys from QueryableResources (built by getQueryableResourceMapFromPolicies).
 	queryable, _ := getQueryableResourceMapFromPolicies(
 		[]reporthandling.Framework{framework},
 		nil,
 		reporthandling.ScopeCluster,
+		defaultResourceResolver,
 	)
 
 	// Every QueryableResource GVR that appears in QueryableResources should also

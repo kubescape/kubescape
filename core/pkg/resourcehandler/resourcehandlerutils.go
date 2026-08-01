@@ -11,11 +11,7 @@ import (
 )
 
 // utils which are common to all resource handlers
-func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IWorkload) {
-	addSingleResourceToResourceMapsWithResolver(k8sResources, allResources, wl, defaultResourceResolver)
-}
-
-func addSingleResourceToResourceMapsWithResolver(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IWorkload, resolver resourceResolver) {
+func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IWorkload, resolver resourceResolver) {
 	if wl == nil {
 		return
 	}
@@ -34,14 +30,10 @@ func addSingleResourceToResourceMapsWithResolver(k8sResources cautils.K8SResourc
 	k8sResources[resourceGroup] = append(k8sResources[resourceGroup], wl.GetID())
 }
 
-func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload, scanningScope reporthandling.ScanningScopeType) (QueryableResources, map[string]bool) {
-	return getQueryableResourceMapFromPoliciesWithResolver(frameworks, resource, scanningScope, defaultResourceResolver)
-}
-
-func getQueryableResourceMapFromPoliciesWithResolver(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload, scanningScope reporthandling.ScanningScopeType, resolver resourceResolver) (QueryableResources, map[string]bool) {
+func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload, scanningScope reporthandling.ScanningScopeType, resolver resourceResolver) (QueryableResources, map[string]bool) {
 	queryableResources := make(QueryableResources)
 	excludedRulesMap := make(map[string]bool)
-	namespace := getScannedResourceNamespaceWithResolver(resource, resolver)
+	namespace := getScannedResourceNamespace(resource, resolver)
 
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {
@@ -61,7 +53,7 @@ func getQueryableResourceMapFromPoliciesWithResolver(frameworks []reporthandling
 					}
 				}
 				for i := range rule.Match {
-					updateQueryableResourcesMapFromRuleMatchObjectWithResolver(&rule.Match[i], resourcesFilterMap, queryableResources, namespace, resolver)
+					updateQueryableResourcesMapFromRuleMatchObject(&rule.Match[i], resourcesFilterMap, queryableResources, namespace, resolver)
 				}
 			}
 		}
@@ -74,11 +66,7 @@ func getQueryableResourceMapFromPoliciesWithResolver(frameworks []reporthandling
 // If input is nil (e.g. cluster scan), returns an empty string
 // If the resource is a namespaced or the Namespace itself, returns the namespace name
 // In all other cases, returns an empty string
-func getScannedResourceNamespace(workload workloadinterface.IWorkload) string {
-	return getScannedResourceNamespaceWithResolver(workload, defaultResourceResolver)
-}
-
-func getScannedResourceNamespaceWithResolver(workload workloadinterface.IWorkload, resolver resourceResolver) string {
+func getScannedResourceNamespace(workload workloadinterface.IWorkload, resolver resourceResolver) string {
 	if workload == nil {
 		return ""
 	}
@@ -145,11 +133,7 @@ func filterRuleMatchesForResource(resourceKind string, matchObjects []reporthand
 // updateQueryableResourcesMapFromRuleMatchObject updates the queryableResources map with the relevant resources from the match object.
 // if namespace is not empty, the namespace filter is added to the queryable resources (which are namespaced)
 // if resourcesFilterMap is not nil, only the resources with value 'true' will be added to the queryable resources
-func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMatchObjects, resourcesFilterMap map[string]bool, queryableResources QueryableResources, namespace string) {
-	updateQueryableResourcesMapFromRuleMatchObjectWithResolver(match, resourcesFilterMap, queryableResources, namespace, defaultResourceResolver)
-}
-
-func updateQueryableResourcesMapFromRuleMatchObjectWithResolver(match *reporthandling.RuleMatchObjects, resourcesFilterMap map[string]bool, queryableResources QueryableResources, namespace string, resolver resourceResolver) {
+func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMatchObjects, resourcesFilterMap map[string]bool, queryableResources QueryableResources, namespace string, resolver resourceResolver) {
 	for _, apiGroup := range match.APIGroups {
 		for _, apiVersions := range match.APIVersions {
 			for _, resource := range match.Resources {
@@ -160,8 +144,8 @@ func updateQueryableResourcesMapFromRuleMatchObjectWithResolver(match *reporthan
 				}
 
 				for _, resolved := range resolver(apiGroup, apiVersions, resource) {
-					apiGroup, apiVersion, resourceName := k8sinterface.StringToResourceGroup(resolved.groupVersionResourceTriplet)
-					gvr := &schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resourceName}
+					resolvedGroup, resolvedVersion, resourceName := k8sinterface.StringToResourceGroup(resolved.groupVersionResourceTriplet)
+					gvr := &schema.GroupVersionResource{Group: resolvedGroup, Version: resolvedVersion, Resource: resourceName}
 					globalFieldSelector := getNamespacesSelector(resource, namespace, "=")
 					if resolved.namespaced != nil {
 						globalFieldSelector = getNamespacesSelectorForScope(gvr, namespace, "=", *resolved.namespaced)
