@@ -198,6 +198,7 @@ func TestMetrics_NonGetMethodReturns405WithoutScanning(t *testing.T) {
 			h.Metrics(w, rq)
 
 			require.Equal(t, http.StatusMethodNotAllowed, w.Result().StatusCode)
+			assert.Equal(t, http.MethodGet, w.Result().Header.Get("Allow"), "405 response must advertise the allowed method")
 			select {
 			case <-scanCalled:
 				t.Fatal("scan should not be invoked for non-GET metrics requests")
