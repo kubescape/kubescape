@@ -22,7 +22,7 @@ func TestGetControlsInputs_WithControls(t *testing.T) {
 				},
 				"spec": map[string]any{
 					"controls": map[string]any{
-						"untrustedRegistries": []any{"docker.io", "quay.io"},
+						"untrustedRegistries":  []any{"docker.io", "quay.io"},
 						"insecureCapabilities": []any{"NET_RAW", "SYS_ADMIN"},
 					},
 				},
@@ -43,8 +43,8 @@ func TestGetControlsInputs_MissingDefault(t *testing.T) {
 	client := fake.NewSimpleDynamicClient(scheme)
 
 	getter := &CRDControlInputs{client: client}
-	_, err := getter.GetControlsInputs("")
-	assert.Error(t, err)
+	_, err := getter.GetControlsInputs("") // clusterName is unused by the implementation
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get ControlInput CRD")
 }
 
