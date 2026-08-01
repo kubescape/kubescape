@@ -12,7 +12,14 @@ func Float32ToInt(x float32) int {
 	return Float64ToInt(float64(x))
 }
 
-// Float32ToIntFloor converts float32 to int by flooring, so a value never rounds up
+// Float32ToIntFloor converts float32 to int by flooring, so a value never
+// rounds up. float32 representation error means exact percentages like
+// 53/100 may render as 52.999996 — a small epsilon tolerance snaps those
+// back to the true integer before flooring, so 53.0/100.0 stays 53.
 func Float32ToIntFloor(x float32) int {
-	return int(math.Floor(float64(x)))
+	f := float64(x)
+	if r := math.Round(f); math.Abs(f-r) < 1e-4 {
+		return int(r)
+	}
+	return int(math.Floor(f))
 }

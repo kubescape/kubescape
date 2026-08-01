@@ -51,10 +51,10 @@ func getComplianceScoreColumn(controlSummary reportsummary.IControlSummary, info
 	if controlSummary.GetStatus().IsSkipped() {
 		return fmt.Sprintf("%s %s", "Action Required", getInfoColumn(controlSummary, infoToPrintInfo))
 	}
-	if compliance := cautils.Float32ToInt(controlSummary.GetComplianceScore()); compliance < 0 {
+	if compliance := cautils.Float32ToIntFloor(controlSummary.GetComplianceScore()); compliance < 0 {
 		return "N/A"
 	} else {
-		return fmt.Sprintf("%d", cautils.Float32ToInt(controlSummary.GetComplianceScore())) + "%"
+		return fmt.Sprintf("%d", cautils.Float32ToIntFloor(controlSummary.GetComplianceScore())) + "%"
 	}
 
 }
