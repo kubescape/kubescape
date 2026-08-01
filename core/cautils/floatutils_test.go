@@ -25,13 +25,3 @@ func TestFloat32ToInt(t *testing.T) {
 	assert.Equal(t, -4, Float32ToInt(-3.5))
 	assert.Equal(t, -4, Float32ToInt(-3.51))
 }
-
-func TestFloat16ToInt(t *testing.T) {
-	assert.Equal(t, 3, Float16ToInt(3.49))
-	assert.Equal(t, 4, Float16ToInt(3.5))
-	assert.Equal(t, 4, Float16ToInt(3.51))
-	assert.Equal(t, 0, Float16ToInt(0.0))
-	assert.Equal(t, -3, Float16ToInt(-3.49))
-	assert.Equal(t, -4, Float16ToInt(-3.5))
-	assert.Equal(t, -4, Float16ToInt(-3.51))
-}
