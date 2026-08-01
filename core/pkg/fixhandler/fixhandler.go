@@ -822,9 +822,11 @@ func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int
 		isStringValue = false
 	}
 
-	// Strings should be quoted
+	// Strings should be quoted. Escape only `"` — yq's expression lexer
+	// (lexer_participle.go stringValue) unescapes \" and nothing else, so any
+	// other Go-style escape would be written to the file literally.
 	if isStringValue {
-		value = fmt.Sprintf("%q", value)
+		value = `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 	}
 
 	// select document index and add a dot for the root node

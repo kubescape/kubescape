@@ -281,6 +281,33 @@ func Test_fixPathToValidYamlExpression(t *testing.T) {
 			want: "select(di==0).spec.template.spec.containers[0].command[1] |= \"app=\\\"web\\\"\"",
 		},
 		{
+			name: "fix path with string containing backslash",
+			args: args{
+				fixPath:             "path",
+				value:               "C:\\path\\to",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).path |= \"C:\\path\\to\"",
+		},
+		{
+			name: "fix path with string containing newline",
+			args: args{
+				fixPath:             "path",
+				value:               "line1\nline2",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).path |= \"line1\nline2\"",
+		},
+		{
+			name: "fix path with string containing tab",
+			args: args{
+				fixPath:             "path",
+				value:               "a\tb",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).path |= \"a\tb\"",
+		},
+		{
 			name: "fix path with number",
 			args: args{
 				fixPath:             "xxx.yyy",
