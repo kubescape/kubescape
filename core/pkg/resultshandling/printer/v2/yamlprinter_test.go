@@ -72,7 +72,9 @@ func TestScore_Yaml(t *testing.T) {
 			if err != nil {
 				panic(err)
 			}
-			defer f.Close()
+			defer func() {
+				_ = f.Close()
+			}()
 
 			oldStderr := os.Stderr
 			defer func() {
@@ -97,7 +99,9 @@ func TestActionPrint_Yaml(t *testing.T) {
 
 	tmpYaml, err := os.CreateTemp("", "yaml-regression-*.yaml")
 	assert.NoError(t, err)
-	defer os.Remove(tmpYaml.Name())
+	defer func() {
+		_ = os.Remove(tmpYaml.Name())
+	}()
 
 	yp := NewYamlPrinter()
 	yp.writer = tmpYaml
@@ -113,11 +117,56 @@ func TestActionPrint_Yaml(t *testing.T) {
 
 	tmpJson, err := os.CreateTemp("", "json-regression-*.json")
 	assert.NoError(t, err)
-	defer os.Remove(tmpJson.Name())
+	defer func() {
+		_ = os.Remove(tmpJson.Name())
+	}()
 
 	jp := NewJsonPrinter()
 	jp.writer = tmpJson
 	jp.ActionPrint(context.Background(), session, nil)
+	assert.NoError(t, tmpJson.Close())
+
+	rawJson, err := os.ReadFile(tmpJson.Name())
+	assert.NoError(t, err)
+
+	var gotJson interface{}
+	err = json.Unmarshal(rawJson, &gotJson)
+	assert.NoError(t, err, "output must be valid JSON")
+
+	assert.Equal(t, gotJson, gotYaml)
+}
+
+func TestActionPrint_ImageScan_Yaml(t *testing.T) {
+	// A populated []cautils.ImageScanData
+	imageScanData := []cautils.ImageScanData{buildSeverityExceptionImageScanData()}
+
+	tmpYaml, err := os.CreateTemp("", "yaml-imagescan-*.yaml")
+	assert.NoError(t, err)
+	defer func() {
+		_ = os.Remove(tmpYaml.Name())
+	}()
+
+	yp := NewYamlPrinter()
+	yp.writer = tmpYaml
+	yp.ActionPrint(context.Background(), nil, imageScanData)
+	assert.NoError(t, tmpYaml.Close())
+
+	rawYaml, err := os.ReadFile(tmpYaml.Name())
+	assert.NoError(t, err)
+
+	var gotYaml interface{}
+	err = yaml.Unmarshal(rawYaml, &gotYaml)
+	assert.NoError(t, err, "output must be valid YAML")
+
+	tmpJson, err := os.CreateTemp("", "json-imagescan-*.json")
+	assert.NoError(t, err)
+	defer func() {
+		_ = os.Remove(tmpJson.Name())
+	}()
+
+	jp := NewJsonPrinter()
+	jp.writer = tmpJson
+	jp.ActionPrint(context.Background(), nil, imageScanData)
 	assert.NoError(t, tmpJson.Close())
 
 	rawJson, err := os.ReadFile(tmpJson.Name())
