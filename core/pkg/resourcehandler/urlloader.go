@@ -11,6 +11,15 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 )
 
+// LoadResourcesFromUrl loads Kubernetes resources from Git URLs using the GitHub/GitLab REST API.
+// NOTE: This function is currently exported but not integrated into the main resource loading flow.
+// The existing git clone-based approach (via ScanInfo.getScanningContext and getResourcesFromPath)
+// is preferred because it provides:
+// - LastCommit attribution for finding sources
+// - Helm chart rendering support
+// - Kustomize support
+// - Better rate-limit resilience (no API rate limits vs. 60 req/h for unauthenticated API calls)
+// This function may be useful for future work that needs API-based downloading without full clones.
 func LoadResourcesFromUrl(inputPatterns []string) (map[string][]workloadinterface.IMetadata, error) {
 	if len(inputPatterns) == 0 {
 		return nil, nil

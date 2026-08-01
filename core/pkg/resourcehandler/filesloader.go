@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	giturl "github.com/kubescape/go-git-url"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -45,8 +44,6 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		helmValueOpts := helmValueOptionsFromScanInfo(scanInfo)
 		if scanInfo.ChartPath != "" && scanInfo.FilePath != "" {
 			workloadIDToSource, workloads, err = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath, helmValueOpts)
-		} else if isGitURL(scanInfo.InputPatterns[path]) {
-			workloadIDToSource, workloads, err = getResourcesFromURL(ctx, scanInfo.InputPatterns[path])
 		} else {
 			workloadIDToSource, workloads, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path], helmValueOpts)
 		}
@@ -395,39 +392,6 @@ func extractGitRepo(path string) (string, *cautils.LocalGitRepository) {
 		repoRoot, _ = filepath.Abs(path)
 	}
 	return repoRoot, gitRepo
-}
-
-func isGitURL(path string) bool {
-	_, err := giturl.NewGitURL(path)
-	return err == nil
-}
-
-func getResourcesFromURL(ctx context.Context, url string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
-	workloadIDToSource := make(map[string]reporthandling.Source)
-	var workloads []workloadinterface.IMetadata
-
-	urlWorkloads, err := LoadResourcesFromUrl([]string{url})
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if len(urlWorkloads) == 0 {
-		return nil, nil, fmt.Errorf("no resources found from URL %q", url)
-	}
-
-	for source, ws := range urlWorkloads {
-		workloads = append(workloads, ws...)
-
-		for _, w := range ws {
-			workloadIDToSource[w.GetID()] = reporthandling.Source{
-				Path:         url,
-				RelativePath: source,
-				FileType:     reporthandling.SourceTypeYaml,
-			}
-		}
-	}
-
-	return workloadIDToSource, workloads, nil
 }
 
 func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo(_ context.Context) *version.Info {
