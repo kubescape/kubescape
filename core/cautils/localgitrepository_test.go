@@ -123,9 +123,11 @@ func (s *LocalGitRepositoryTestSuite) TearDownSuite() {
 }
 
 func (s *LocalGitRepositoryTestSuite) TestInvalidRepositoryPath() {
-	if _, err := NewLocalGitRepository("/invalidpath"); s.Error(err) {
+	repo, err := NewLocalGitRepository("/invalidpath")
+	if s.Error(err) {
 		s.Equal("repository does not exist", err.Error())
 	}
+	s.Nil(repo, "NewLocalGitRepository must not return a partially initialized repository on error")
 }
 
 func (s *LocalGitRepositoryTestSuite) TestRepositoryWithoutRemotes() {
