@@ -121,9 +121,6 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 			return nil
 		},
-		PostRun: func(cmd *cobra.Command, args []string) {
-			// TODO - revert context
-		},
 	}
 
 	scanInfo.TriggeredByCLI = true
