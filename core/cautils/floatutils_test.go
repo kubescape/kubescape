@@ -25,3 +25,11 @@ func TestFloat32ToInt(t *testing.T) {
 	assert.Equal(t, -4, Float32ToInt(-3.5))
 	assert.Equal(t, -4, Float32ToInt(-3.51))
 }
+
+func TestFloat32ToIntFloor(t *testing.T) {
+	assert.Equal(t, 99, Float32ToIntFloor(99.5))
+	assert.Equal(t, 99, Float32ToIntFloor(99.9))
+	assert.Equal(t, 100, Float32ToIntFloor(100.0))
+	assert.Equal(t, 0, Float32ToIntFloor(0.5))
+	assert.Equal(t, 0, Float32ToIntFloor(0.0))
+}
