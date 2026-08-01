@@ -178,6 +178,20 @@ func CheckShortTerminalWidth(rows []table.Row, headers table.Row) bool {
 	return termWidth <= maxWidth
 }
 
+// TruncateName truncates name to at most maxLen runes, appending "...".
+// Slicing a string by byte index (name[:maxLen]) can split a multi-byte
+// UTF-8 rune in half when name contains non-ASCII characters (e.g. non-Latin
+// script, accented characters, emoji in resource/control names), producing
+// invalid UTF-8 and garbled table output. Truncating by rune count avoids
+// that.
+func TruncateName(name string, maxLen int) string {
+	runes := []rune(name)
+	if len(runes) <= maxLen {
+		return name
+	}
+	return string(runes[:maxLen]) + "..."
+}
+
 func GetColorForVulnerabilitySeverity(severity string) func(...string) string {
 	switch severity {
 	case apis.SeverityCriticalString:
