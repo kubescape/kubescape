@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -107,7 +108,11 @@ func TestParseVulnManifestURI(t *testing.T) {
 }
 
 func TestReadConfigurationResource_URIParsing(t *testing.T) {
-	ksServer := &KubescapeMcpserver{}
+	expectedErr := fmt.Errorf("sentinel connection error")
+	ksServer := &KubescapeMcpserver{
+		ksClientErr: expectedErr,
+	}
+	ksServer.ksClientOnce.Do(func() {}) // Mark as done to prevent real connection
 
 	tests := []struct {
 		name      string
@@ -135,6 +140,16 @@ func TestReadConfigurationResource_URIParsing(t *testing.T) {
 			uri:     "kubescape://configuration-manifests/ns/manifest/extra",
 			wantErr: "invalid URI",
 		},
+		{
+			name:    "empty namespace",
+			uri:     "kubescape://configuration-manifests//manifest",
+			wantErr: "invalid URI",
+		},
+		{
+			name:    "empty manifest name",
+			uri:     "kubescape://configuration-manifests/ns/",
+			wantErr: "invalid URI",
+		},
 	}
 
 	for _, tt := range tests {
@@ -143,14 +158,13 @@ func TestReadConfigurationResource_URIParsing(t *testing.T) {
 			req.Params.URI = tt.uri
 
 			if tt.passParse {
-				defer func() {
-					r := recover()
-					if r == nil {
-						t.Fatal("expected panic from nil ksClient after successful URI parse, got none")
-					}
-				}()
-				_, _ = ksServer.ReadConfigurationResource(context.Background(), req)
-				t.Fatal("expected panic, but call returned normally")
+				_, err := ksServer.ReadConfigurationResource(context.Background(), req)
+				if err == nil {
+					t.Fatal("expected error from ksClient, got nil")
+				}
+				if !strings.Contains(err.Error(), "sentinel connection error") {
+					t.Errorf("expected error containing 'sentinel connection error', got %v", err)
+				}
 			} else {
 				_, err := ksServer.ReadConfigurationResource(context.Background(), req)
 				if err == nil {
@@ -165,7 +179,11 @@ func TestReadConfigurationResource_URIParsing(t *testing.T) {
 }
 
 func TestReadContainerProfileResource_URIParsing(t *testing.T) {
-	ksServer := &KubescapeMcpserver{}
+	expectedErr := fmt.Errorf("sentinel connection error")
+	ksServer := &KubescapeMcpserver{
+		ksClientErr: expectedErr,
+	}
+	ksServer.ksClientOnce.Do(func() {}) // Mark as done to prevent real connection
 
 	tests := []struct {
 		name      string
@@ -193,6 +211,16 @@ func TestReadContainerProfileResource_URIParsing(t *testing.T) {
 			uri:     "kubescape://container-profiles/ns/manifest/extra",
 			wantErr: "invalid URI",
 		},
+		{
+			name:    "empty namespace",
+			uri:     "kubescape://container-profiles//profile",
+			wantErr: "invalid URI",
+		},
+		{
+			name:    "empty profile name",
+			uri:     "kubescape://container-profiles/ns/",
+			wantErr: "invalid URI",
+		},
 	}
 
 	for _, tt := range tests {
@@ -201,14 +229,13 @@ func TestReadContainerProfileResource_URIParsing(t *testing.T) {
 			req.Params.URI = tt.uri
 
 			if tt.passParse {
-				defer func() {
-					r := recover()
-					if r == nil {
-						t.Fatal("expected panic from nil ksClient after successful URI parse, got none")
-					}
-				}()
-				_, _ = ksServer.ReadContainerProfileResource(context.Background(), req)
-				t.Fatal("expected panic, but call returned normally")
+				_, err := ksServer.ReadContainerProfileResource(context.Background(), req)
+				if err == nil {
+					t.Fatal("expected error from ksClient, got nil")
+				}
+				if !strings.Contains(err.Error(), "sentinel connection error") {
+					t.Errorf("expected error containing 'sentinel connection error', got %v", err)
+				}
 			} else {
 				_, err := ksServer.ReadContainerProfileResource(context.Background(), req)
 				if err == nil {
@@ -217,6 +244,73 @@ func TestReadContainerProfileResource_URIParsing(t *testing.T) {
 				if !strings.Contains(err.Error(), tt.wantErr) {
 					t.Errorf("expected error containing %q, got: %v", tt.wantErr, err)
 				}
+			}
+		})
+	}
+}
+
+func TestCallTool_RunFrameworkScan(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+
+	tests := []struct {
+		name          string
+		arguments     map[string]any
+		wantErrString string
+	}{
+		{
+			name:          "missing framework_name",
+			arguments:     map[string]any{},
+			wantErrString: "framework_name argument is required",
+		},
+		{
+			name: "framework_name not a string",
+			arguments: map[string]any{
+				"framework_name": 123,
+			},
+			wantErrString: "framework_name argument must be a string",
+		},
+		{
+			name: "empty framework_name",
+			arguments: map[string]any{
+				"framework_name": "",
+			},
+			wantErrString: "framework_name argument must not be empty",
+		},
+		{
+			name: "whitespace framework_name",
+			arguments: map[string]any{
+				"framework_name": "   ",
+			},
+			wantErrString: "framework_name argument must not be empty",
+		},
+		{
+			name: "allcontrols framework_name rejected (case-insensitive)",
+			arguments: map[string]any{
+				"framework_name": "AllControls",
+			},
+			wantErrString: "is exceptionally heavy and is not supported in the headless MCP scanner",
+		},
+		{
+			name: "namespace not a string",
+			arguments: map[string]any{
+				"framework_name": "nsa",
+				"namespace":      123,
+			},
+			wantErrString: "namespace argument must be a string",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, err := ksServer.CallTool(context.Background(), "run_framework_security_scan", tt.arguments)
+			if err != nil {
+				t.Fatalf("unexpected error from CallTool itself: %v", err)
+			}
+			if res.IsError == false {
+				t.Fatalf("expected error result, got success")
+			}
+			if !strings.Contains(res.Content[0].(mcp.TextContent).Text, tt.wantErrString) {
+				t.Errorf("expected error containing %q, got %q", tt.wantErrString, res.Content[0].(mcp.TextContent).Text)
 			}
 		})
 	}

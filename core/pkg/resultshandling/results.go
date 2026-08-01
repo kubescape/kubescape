@@ -100,7 +100,7 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 
 	// We should submit only after printing results, so a user can see
 	// results at all times, even if submission fails
-	if rh.ReporterObj != nil && scanInfo.Submit {
+	if rh.ReporterObj != nil && scanInfo.Submit.GetBool() {
 		if err := rh.ReporterObj.Submit(ctx, rh.ScanData); err != nil {
 			return err
 		}
@@ -132,6 +132,8 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		return printerv2.NewHtmlPrinter()
 	case printer.SARIFFormat:
 		return printerv2.NewSARIFPrinter()
+	case printer.GitLabSASTFormat:
+		return printerv2.NewGitLabSASTPrinter()
 	default:
 		if printFormat != printer.PrettyFormat {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
@@ -153,8 +155,8 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 		}
 	}
 
-	if printFormat == printer.SARIFFormat {
-		// supported types for SARIF
+	if printFormat == printer.SARIFFormat || printFormat == printer.GitLabSASTFormat {
+		// SARIF and GitLab SAST resolve file locations, so they only apply to local files
 		switch scanContext {
 		case cautils.ContextDir, cautils.ContextFile, cautils.ContextGitLocal, cautils.ContextGitRemote:
 			return false, nil

@@ -313,8 +313,9 @@ You can create custom controls using Rego:
 
 ```rego
 package armo_builtins
+import rego.v1
 
-deny[msga] {
+deny contains msga if {
     # Your custom policy logic
     input.kind == "Deployment"
     not input.spec.template.spec.securityContext.runAsNonRoot

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/rbac-utils/rbacscanner"
+	"github.com/kubescape/rbac-utils/rbacutils"
 	"github.com/stretchr/testify/assert"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -110,6 +111,114 @@ func TestConvertToMap(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equal(t, tt.expectedName, got["metadata"].(map[string]any)["name"])
 			assert.Contains(t, got, "rules")
+		})
+	}
+}
+
+func TestRBACObjectsToResources(t *testing.T) {
+	tests := []struct {
+		name string
+		obj  *rbacutils.RbacObjects
+	}{
+		{
+			name: "all RBAC resource types",
+			obj: &rbacutils.RbacObjects{
+				ClusterRoles: &rbacv1.ClusterRoleList{
+					Items: []rbacv1.ClusterRole{
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "test-cluster-role",
+							},
+						},
+					},
+				},
+				Roles: &rbacv1.RoleList{
+					Items: []rbacv1.Role{
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      "test-role",
+								Namespace: "default",
+							},
+						},
+					},
+				},
+				ClusterRoleBindings: &rbacv1.ClusterRoleBindingList{
+					Items: []rbacv1.ClusterRoleBinding{
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "test-cluster-role-binding",
+							},
+						},
+					},
+				},
+				RoleBindings: &rbacv1.RoleBindingList{
+					Items: []rbacv1.RoleBinding{
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      "test-role-binding",
+								Namespace: "default",
+							},
+						},
+					},
+				},
+				SA2WLIDmap:   make(map[string][]string),
+				SAID2WLIDmap: make(map[string][]string),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rbacObjects := NewRBACObjects(&rbacscanner.RbacScannerFromK8sAPI{})
+			resources, err := rbacObjects.rbacObjectsToResources(tt.obj)
+
+			assert.NoError(t, err)
+			assert.NotNil(t, resources)
+
+			// Verify ClusterRole has correct apiVersion and kind
+			clusterRoleFound := false
+			for _, resource := range resources {
+				if resource.GetKind() == "ClusterRole" {
+					clusterRoleFound = true
+					// Access the underlying map to check apiVersion
+					obj := resource.GetObject()
+					assert.Equal(t, "rbac.authorization.k8s.io/v1", obj["apiVersion"])
+				}
+			}
+			assert.True(t, clusterRoleFound, "ClusterRole should be present in resources")
+
+			// Verify Role has correct apiVersion and kind
+			roleFound := false
+			for _, resource := range resources {
+				if resource.GetKind() == "Role" {
+					roleFound = true
+					obj := resource.GetObject()
+					assert.Equal(t, "rbac.authorization.k8s.io/v1", obj["apiVersion"])
+				}
+			}
+			assert.True(t, roleFound, "Role should be present in resources")
+
+			// Verify ClusterRoleBinding has correct apiVersion and kind
+			clusterRoleBindingFound := false
+			for _, resource := range resources {
+				if resource.GetKind() == "ClusterRoleBinding" {
+					clusterRoleBindingFound = true
+					obj := resource.GetObject()
+					assert.Equal(t, "rbac.authorization.k8s.io/v1", obj["apiVersion"])
+				}
+			}
+			assert.True(t, clusterRoleBindingFound, "ClusterRoleBinding should be present in resources")
+
+			// Verify RoleBinding has correct apiVersion and kind
+			roleBindingFound := false
+			for _, resource := range resources {
+				if resource.GetKind() == "RoleBinding" {
+					roleBindingFound = true
+					obj := resource.GetObject()
+					assert.Equal(t, "rbac.authorization.k8s.io/v1", obj["apiVersion"])
+				}
+			}
+			assert.True(t, roleBindingFound, "RoleBinding should be present in resources")
 		})
 	}
 }

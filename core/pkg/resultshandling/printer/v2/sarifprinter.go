@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anchore/clio"
 	"github.com/anchore/grype/grype/presenter/models"
@@ -124,7 +125,7 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 
 func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults cautils.ImageScanData) error {
 	model, err := models.NewDocument(clio.Identification{}, scanResults.Packages, scanResults.Context,
-		*scanResults.RemainingMatches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
+		scanResults.Matches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
 	if err != nil {
 		return fmt.Errorf("failed to create document: %w", err)
 	}
@@ -231,7 +232,7 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 						logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
 						continue
 					}
-					location := sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
+					location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
 					sp.addRule(run, ctl)
 					r := sp.addResult(run, ctl, relPath, location)
 					collectFixes(ctx, r, ac, opaSessionObj, resourceID, relPath, rsrcAbsPath)
@@ -250,12 +251,16 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 
 	report.AddRun(run)
 
-	report.PrettyWrite(sp.writer)
+	// Surface write failures instead of silently leaving an empty/partial file.
+	if err := report.PrettyWrite(sp.writer); err != nil {
+		return fmt.Errorf("failed to write SARIF report: %w", err)
+	}
 
 	return nil
 }
 
-func (sp *SARIFPrinter) resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {
+// resolveFixLocation resolves a failed control's location in the manifest, falling back to line 1. Shared by the SARIF and GitLab SAST printers
+func resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {
 	defaultLocation := locationresolver.Location{Line: 1, Column: 1}
 	if locationResolver == nil {
 		return defaultLocation
@@ -323,8 +328,8 @@ func calculateMove(str string, file []string, endColumn int, endLine int) (int, 
 	if endLine > len(file) {
 		return 0, 0, false
 	}
-	for num+endColumn-1 > len(file[endLine-1]) {
-		num -= len(file[endLine-1]) - endColumn + 2
+	for num+endColumn-1 > utf8.RuneCountInString(file[endLine-1]) {
+		num -= utf8.RuneCountInString(file[endLine-1]) - endColumn + 2
 		endLine++
 		endColumn = 1
 	}
@@ -435,9 +440,15 @@ func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, 
 }
 
 func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
+	if opaSessionObj.Metadata == nil {
+		return ""
+	}
 	switch opaSessionObj.Metadata.ScanMetadata.ScanningTarget {
 	case v2.GitLocal:
-		return opaSessionObj.Metadata.ContextMetadata.RepoContextMetadata.LocalRootPath
+		if repo := opaSessionObj.Metadata.ContextMetadata.RepoContextMetadata; repo != nil {
+			return repo.LocalRootPath
+		}
+		return ""
 	case v2.Directory:
 		return opaSessionObj.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
 	case v2.File:

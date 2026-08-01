@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,6 +48,7 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 				logger.L().Ctx(scanReq.ctx).Error("failed to persist panic error to file", helpers.String("ID", scanReq.scanID), helpers.Error(persistErr))
 				responseMsg = persistErr.Error()
 			}
+			handler.state.releaseCancel(scanReq.scanID)
 			handler.state.setNotBusy(scanReq.scanID)
 			if scanReq.scanQueryParams.ReturnResults {
 				response.Type = utilsapisv1.ErrorScanResponseType
@@ -61,19 +64,28 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
 	_, err := scanImpl(scanReq.ctx, scanReq.scanInfo, scanReq.scanID, scanReq.scanQueryParams.SkipPersistence)
 	if err != nil {
-		logger.L().Ctx(scanReq.ctx).Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
-		if scanReq.scanQueryParams.ReturnResults {
-			response.Type = utilsapisv1.ErrorScanResponseType
-			response.Response = err.Error()
+		if errors.Is(scanReq.ctx.Err(), context.Canceled) {
+			logger.L().Ctx(scanReq.ctx).Info("scan cancelled", helpers.String("ID", scanReq.scanID))
+			removeResultsFile(scanReq.scanID)
+			if scanReq.scanQueryParams.ReturnResults {
+				response.Type = utilsapisv1.ErrorScanResponseType
+				response.Response = fmt.Sprintf("scan '%s' was cancelled", scanReq.scanID)
+			}
+		} else {
+			logger.L().Ctx(scanReq.ctx).Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
+			if scanReq.scanQueryParams.ReturnResults {
+				response.Type = utilsapisv1.ErrorScanResponseType
+				response.Response = err.Error()
+			}
 		}
 	} else {
 		logger.L().Ctx(scanReq.ctx).Success("done scanning", helpers.String("ID", scanReq.scanID))
 		if scanReq.scanQueryParams.ReturnResults {
-			//TODO(ttimonen) should we actually pass the PostureReport here somehow?
 			response.Type = utilsapisv1.ResultsV1ScanResponseType
 		}
 	}
 
+	handler.state.releaseCancel(scanReq.scanID)
 	handler.state.setNotBusy(scanReq.scanID)
 
 	// return results, if someone's waiting for them; never block.
@@ -106,6 +118,39 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 func (handler *HTTPHandler) watchForScan() {
 	for {
 		scanReq := <-handler.scanRequestChan
+		if scanReq.isUserScan {
+			handler.state.setLatestUserScanID(scanReq.scanID)
+		}
+		if handler.state.isCancelled(scanReq.scanID) {
+			logger.L().Info("skipping cancelled scan", helpers.String("scanID", scanReq.scanID))
+			if scanReq.resp != nil {
+				select {
+				case scanReq.resp <- &utilsmetav1.Response{
+					ID:       scanReq.scanID,
+					Type:     utilsapisv1.ErrorScanResponseType,
+					Response: fmt.Sprintf("scan '%s' was cancelled", scanReq.scanID),
+				}:
+				default:
+				}
+			}
+			if scanReq.callbackURL != "" {
+				payload := scanCallbackPayload{ID: scanReq.scanID, Status: callbackStatusFailed, Error: "scan cancelled"}
+				cbCtx := context.WithoutCancel(scanReq.ctx)
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							logger.L().Ctx(cbCtx).Error("scan completion callback panicked", helpers.String("ID", scanReq.scanID), helpers.Error(fmt.Errorf("%v", r)))
+						}
+					}()
+					if cbErr := postScanCallback(cbCtx, scanReq.callbackURL, payload); cbErr != nil {
+						logger.L().Ctx(cbCtx).Error("failed to deliver scan completion callback", helpers.String("ID", scanReq.scanID), helpers.Error(cbErr))
+					}
+				}()
+			}
+			handler.state.releaseCancel(scanReq.scanID)
+			handler.state.setNotBusy(scanReq.scanID)
+			continue
+		}
 		logger.L().Info("triggering scan", helpers.String("scanID", scanReq.scanID))
 		handler.executeScan(scanReq)
 	}
@@ -270,7 +315,17 @@ func defaultScanInfo() *cautils.ScanInfo {
 	scanInfo.HostSensorYamlPath = envToString("KS_HOST_SCAN_YAML", "")       // path to host scan YAML
 	scanInfo.FormatVersion = envToString("KS_FORMAT_VERSION", "v2")          // output format version
 	scanInfo.Format = envToString("KS_FORMAT", "json")                       // default output should be json
-	scanInfo.Submit = envToBool("KS_SUBMIT", false)                          // publish results to Kubescape SaaS
+	// KS_SUBMIT is presence-checked (not just envToBool'd): its mere presence
+	// marks Submit as explicitly requested, so an unparsable value (including
+	// "", which Helm commonly renders for an unset value) must not silently
+	// become a permanent, unoverridable opt-out - warn and leave it unset instead.
+	if raw, ok := os.LookupEnv("KS_SUBMIT"); ok {
+		if v, err := strconv.ParseBool(strings.TrimSpace(raw)); err == nil {
+			scanInfo.Submit.SetBool(v)
+		} else {
+			logger.L().Warning("ignoring unparsable KS_SUBMIT value", helpers.String("value", raw))
+		}
+	}
 	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)                       // do not publish results to Kubescape SaaS
 	scanInfo.EnableRegoPrint = envToBool("KS_REGO_PRINT", false)             // print rego rules
 	// Only set HostSensorEnabled when explicitly configured; leaving it nil allows

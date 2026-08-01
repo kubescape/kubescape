@@ -181,6 +181,7 @@ func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts 
 		wls, e := ReadFile([]byte(renderedYaml), YAML_FILE_FORMAT)
 		if e != nil {
 			logger.L().Debug("failed to read rendered yaml file", helpers.String("file", path), helpers.Error(e))
+			errs = append(errs, fmt.Errorf("failed to parse rendered Helm template %q: %w", path, e))
 		}
 		if len(wls) == 0 {
 			continue

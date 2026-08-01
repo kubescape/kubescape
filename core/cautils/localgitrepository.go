@@ -29,10 +29,6 @@ func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
 		return nil, err
 	}
 
-	if !head.Name().IsBranch() {
-		return nil, fmt.Errorf("current HEAD reference is not a branch")
-	}
-
 	config, err := goGitRepo.Config()
 	if err != nil {
 		return nil, err
@@ -62,6 +58,9 @@ func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
 
 // GetBranchName get current branch name
 func (g *LocalGitRepository) GetBranchName() string {
+	if !g.head.Name().IsBranch() {
+		return ""
+	}
 	return g.head.Name().Short()
 }
 
@@ -121,9 +120,13 @@ func (g *LocalGitRepository) GetLastCommit() (*apis.Commit, error) {
 			Email: commit.Author.Email,
 			Date:  commit.Author.When,
 		},
-		Message:   commit.Message,
-		Committer: apis.Committer{},
-		Files:     []apis.Files{},
+		Message: commit.Message,
+		Committer: apis.Committer{
+			Name:  commit.Committer.Name,
+			Email: commit.Committer.Email,
+			Date:  commit.Committer.When,
+		},
+		Files: []apis.Files{},
 	}, nil
 }
 

@@ -166,7 +166,7 @@ func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath 
 	// Get repo root
 	repoRoot, gitRepo := extractGitRepo(clonedRepo)
 
-	helmSourceToWorkloads, helmSourceToChart, err := cautils.LoadResourcesFromHelmCharts(ctx, helmPath, helmValueOpts)
+	helmSourceToWorkloads, helmSourceToChart, _, err := cautils.LoadResourcesFromHelmCharts(ctx, helmPath, helmValueOpts)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -230,6 +230,21 @@ func getWorkloadSourceHelmChart(repoRoot string, source string, gitRepo *cautils
 	}
 }
 
+// resolveHelmRemotePath returns the repository-level remote path used to rewrite helm
+// chart provenance, or "" when this is not a cloned-repo scan or the remote URL is
+// unavailable — in which case callers fall back to local paths.
+func resolveHelmRemotePath(clonedRepo string, gitRepo *cautils.LocalGitRepository) string {
+	if clonedRepo == "" || gitRepo == nil {
+		return ""
+	}
+	url, err := gitRepo.GetRemoteUrl()
+	if err != nil {
+		logger.L().Warning("failed to get remote url, helm sources will use local paths", helpers.Error(err))
+		return ""
+	}
+	return strings.TrimSuffix(url, ".git")
+}
+
 func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
 	workloadIDToSource := make(map[string]reporthandling.Source)
 	var workloads []workloadinterface.IMetadata
@@ -249,8 +264,19 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		repoRoot = filepath.Dir(repoRoot)
 	}
 
+	// render helm charts first, so the plain-YAML loader knows which charts' templates the render
+	// already covered and can skip only those. A chart whose render failed is dropped whole here, so
+	// its templates must stay plainly scanned rather than vanish from the scan.
+	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmCharts(ctx, path, helmValueOpts)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// load resource from local file system
-	sourceToWorkloads := cautils.LoadResourcesFromFiles(ctx, path, repoRoot)
+	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, renderedCharts)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// update workloads and workloadIDToSource
 	var warnIssued bool
@@ -317,27 +343,21 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		logger.L().Debug("files found in local storage", helpers.Int("files", len(sourceToWorkloads)), helpers.Int("workloads", len(workloads)))
 	}
 
-	// load resources from helm charts
-	helmSourceToWorkloads, helmSourceToChart, err := cautils.LoadResourcesFromHelmCharts(ctx, path, helmValueOpts)
-	if err != nil {
-		return nil, nil, err
-	}
+	helmRemotePath := resolveHelmRemotePath(clonedRepo, gitRepo)
+
+	// process the helm charts rendered above
 	for source, ws := range helmSourceToWorkloads {
 		workloads = append(workloads, ws...)
 		helmChart := helmSourceToChart[source]
 
-		if clonedRepo != "" && gitRepo != nil {
-			url, err := gitRepo.GetRemoteUrl()
-			if err != nil {
-				logger.L().Warning("failed to get remote url", helpers.Error(err))
-				break
-			}
-			helmChart.Path = strings.TrimSuffix(url, ".git")
-			repoRoot = ""
+		chartRoot := repoRoot
+		if helmRemotePath != "" {
+			helmChart.Path = helmRemotePath
+			chartRoot = ""
 			source = strings.TrimPrefix(source, fmt.Sprintf("%s/", clonedRepo))
 		}
 
-		workloadSource := getWorkloadSourceHelmChart(repoRoot, source, gitRepo, helmChart)
+		workloadSource := getWorkloadSourceHelmChart(chartRoot, source, gitRepo, helmChart)
 
 		for i := range ws {
 			workloadIDToSource[ws[i].GetID()] = workloadSource
@@ -350,7 +370,10 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 
 	//patch, get value from env
 	// Load resources from Kustomize directory
-	kustomizeSourceToWorkloads, kustomizeDirectoryName := cautils.LoadResourcesFromKustomizeDirectory(ctx, path) //?
+	kustomizeSourceToWorkloads, kustomizeDirectoryName, err := cautils.LoadResourcesFromKustomizeDirectory(ctx, path)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// update workloads and workloadIDToSource with workloads from Kustomize Directory
 	for source, ws := range kustomizeSourceToWorkloads {
@@ -389,6 +412,9 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 
 	// backstop: drop cross-provider identity collisions the path-level kustomize skip can't see (e.g. helm + raw YAML)
 	workloads, workloadIDToSource = dedupWorkloads(workloads, workloadIDToSource)
+	if len(workloads) == 0 {
+		return nil, nil, fmt.Errorf("no scannable Kubernetes resources found for input %q", path)
+	}
 
 	return workloadIDToSource, workloads, nil
 }

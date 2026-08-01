@@ -1,7 +1,11 @@
 package core
 
 import (
+	"errors"
+	"fmt"
+	"net"
 	"sort"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -581,6 +585,160 @@ func TestGetVulnerabilitiesAndSeverities(t *testing.T) {
 			sort.Strings(vulnerabilities)
 			assert.Equal(t, tt.expectedVulnerabilities, vulnerabilities)
 			assert.Equal(t, tt.expectedSeverities, severities)
+		})
+	}
+}
+
+func TestApplyRegistryMapping(t *testing.T) {
+	tests := []struct {
+		name            string
+		image           string
+		registryMapping map[string]string
+		expected        string
+		expectMatched   bool
+		expectErr       bool
+	}{
+		{
+			name:            "OpenShift internal to external",
+			image:           "image-registry.openshift-image-registry.svc:5000/namespace/image:tag",
+			registryMapping: map[string]string{"image-registry.openshift-image-registry.svc:5000": "registry.company.com"},
+			expected:        "registry.company.com/namespace/image:tag",
+			expectMatched:   true,
+		},
+		{
+			name:            "Docker Hub short to alternative",
+			image:           "nginx",
+			registryMapping: map[string]string{"docker.io": "my.registry.local:8080"},
+			expected:        "my.registry.local:8080/library/nginx",
+			expectMatched:   true,
+		},
+		{
+			name:            "Quay to alternative",
+			image:           "quay.io/kubescape/kubescape:latest",
+			registryMapping: map[string]string{"quay.io": "internal.quay.mirror"},
+			expected:        "internal.quay.mirror/kubescape/kubescape:latest",
+			expectMatched:   true,
+		},
+		{
+			name:            "No mapping matched — fully qualified",
+			image:           "quay.io/kubescape/kubescape:latest",
+			registryMapping: map[string]string{"docker.io": "internal.quay.mirror"},
+			expected:        "quay.io/kubescape/kubescape:latest",
+			expectMatched:   false,
+		},
+		{
+			name:            "No mapping matched — short name returns original",
+			image:           "nginx",
+			registryMapping: map[string]string{"quay.io": "mirror.local"},
+			expected:        "nginx",
+			expectMatched:   false,
+		},
+		{
+			name:            "Empty mapping returns original",
+			image:           "nginx",
+			registryMapping: map[string]string{},
+			expected:        "nginx",
+			expectMatched:   false,
+		},
+		{
+			name:            "Invalid fallback registry with scheme",
+			image:           "image-registry.openshift-image-registry.svc:5000/namespace/image:tag",
+			registryMapping: map[string]string{"image-registry.openshift-image-registry.svc:5000": "https://registry.company.com"},
+			expectErr:       true,
+		},
+		{
+			name:            "Invalid fallback registry with trailing slash",
+			image:           "image-registry.openshift-image-registry.svc:5000/namespace/image:tag",
+			registryMapping: map[string]string{"image-registry.openshift-image-registry.svc:5000": "registry.company.com/"},
+			expectErr:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, matched, err := applyRegistryMapping(tt.image, tt.registryMapping)
+			if tt.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+				assert.Equal(t, tt.expectMatched, matched)
+			}
+		})
+	}
+}
+
+func TestIsResolutionError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "DNS error (typed)",
+			err:      fmt.Errorf("get descriptor: %w", &net.DNSError{Err: "no such host", Name: "registry.svc", IsNotFound: true}),
+			expected: true,
+		},
+		{
+			name:     "connection refused (typed)",
+			err:      fmt.Errorf("dial tcp 10.0.0.1:5000: %w", syscall.ECONNREFUSED),
+			expected: true,
+		},
+		{
+			name:     "host unreachable (typed)",
+			err:      fmt.Errorf("dial tcp: %w", syscall.EHOSTUNREACH),
+			expected: true,
+		},
+		{
+			name:     "timeout (net.Error interface)",
+			err:      fmt.Errorf("connect: %w", &net.DNSError{Err: "i/o timeout", IsTimeout: true}),
+			expected: true,
+		},
+		{
+			name:     "string fallback — no such host",
+			err:      errors.New("Get https://registry.svc:5000/v2/: dial tcp: lookup registry.svc: no such host"),
+			expected: true,
+		},
+		{
+			name:     "string fallback — connection refused",
+			err:      errors.New("Get https://registry.svc:5000/v2/: dial tcp 10.0.0.1:5000: connect: connection refused"),
+			expected: true,
+		},
+		{
+			name:     "string fallback — i/o timeout",
+			err:      errors.New("Get https://registry.svc:5000/v2/: dial tcp 10.0.0.1:5000: i/o timeout"),
+			expected: true,
+		},
+		{
+			name:     "auth failure — should NOT match",
+			err:      errors.New("UNAUTHORIZED: authentication required"),
+			expected: false,
+		},
+		{
+			name:     "manifest not found — should NOT match",
+			err:      errors.New("name unknown: manifest unknown"),
+			expected: false,
+		},
+		{
+			name:     "bad certificate — should NOT match",
+			err:      errors.New("x509: certificate signed by unknown authority"),
+			expected: false,
+		},
+		{
+			name:     "rate limited — should NOT match",
+			err:      errors.New("TOOMANYREQUESTS: retry later"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isResolutionError(tt.err))
 		})
 	}
 }

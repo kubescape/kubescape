@@ -54,8 +54,9 @@ func TestProcessRule_ClusterScopedPathsAcrossNamespaces(t *testing.T) {
 
 	rule := &reporthandling.PolicyRule{
 		Rule: `package armo_builtins
+import rego.v1
 
-deny[msga] {
+deny contains msga if {
     cr := input[_]
     cr.kind == "ClusterRole"
     pod := input[_]
@@ -87,7 +88,7 @@ deny[msga] {
 	}
 	rule.Name = "cluster-role-path-accumulation"
 
-	got, err := opap.processRule(context.Background(), rule, nil)
+	got, err := opap.processRule(context.Background(), rule, nil, "")
 	assert.NoError(t, err)
 
 	crResult, ok := got[clusterRole.GetID()]

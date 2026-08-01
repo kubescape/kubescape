@@ -23,7 +23,7 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 		assert.Equal(t, scanID, scanInfo.ScanID)
 		assert.Equal(t, outputFile, scanInfo.Output)
 		assert.Equal(t, "prometheus", scanInfo.Format)
-		assert.False(t, scanInfo.Submit)
+		assert.False(t, scanInfo.Submit.GetBool())
 		assert.True(t, scanInfo.Local)
 		assert.True(t, scanInfo.FrameworkScan)
 		assert.True(t, scanInfo.ScanAll) // Scan all available frameworks by default
@@ -39,7 +39,7 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 		assert.Equal(t, scanID, scanInfo.ScanID)
 		assert.Equal(t, outputFile, scanInfo.Output)
 		assert.Equal(t, "prometheus", scanInfo.Format)
-		assert.False(t, scanInfo.Submit)
+		assert.False(t, scanInfo.Submit.GetBool())
 		assert.True(t, scanInfo.Local)
 		assert.True(t, scanInfo.FrameworkScan)
 		assert.False(t, scanInfo.ScanAll) // Don't scan all when specific frameworks are set

@@ -676,3 +676,65 @@ func TestTestCases_MissingControl(t *testing.T) {
 		}
 	})
 }
+
+// TestJunitActionPrintComplianceScore is an integration-level regression test
+// for issue #2540. Unlike the unit-level TestListTestsSuiteUsesComplianceScores
+// in junit_compliance_score_test.go, this test exercises the full ActionPrint
+// path and decodes the real marshalled XML to verify the complianceScore
+// property is correct end-to-end.
+func TestJunitActionPrintComplianceScore(t *testing.T) {
+	tests := []struct {
+		name       string
+		frameworks []reportsummary.FrameworkSummary
+		want       string
+	}{
+		{
+			name:       "no frameworks uses summary compliance score",
+			frameworks: []reportsummary.FrameworkSummary{},
+			want:       "87.75",
+		},
+		{
+			name: "frameworks use per-framework compliance score",
+			frameworks: []reportsummary.FrameworkSummary{
+				{Name: "NSA", Score: 10, ComplianceScore: 90},
+			},
+			want: "90.00",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session := cautils.NewOPASessionObjMock()
+			session.Report = &reporthandlingv2.PostureReport{
+				SummaryDetails: reportsummary.SummaryDetails{
+					Score:           12.25,
+					ComplianceScore: 87.75,
+					Frameworks:      tt.frameworks,
+				},
+			}
+
+			tmp, err := os.CreateTemp("", "junit-integration-*.xml")
+			require.NoError(t, err)
+			defer os.Remove(tmp.Name())
+
+			jp := NewJunitPrinter(false)
+			jp.writer = tmp
+			jp.ActionPrint(context.Background(), session, nil)
+			require.NoError(t, tmp.Close())
+
+			raw, err := os.ReadFile(tmp.Name())
+			require.NoError(t, err)
+
+			var got JUnitXML
+			dec := xml.NewDecoder(bytes.NewReader(raw))
+			require.NoError(t, dec.Decode(&got.TestSuites))
+			require.Len(t, got.TestSuites.Suites, 1)
+			require.GreaterOrEqual(t, len(got.TestSuites.Suites[0].Properties), 1)
+
+			prop := got.TestSuites.Suites[0].Properties[0]
+			assert.Equal(t, "complianceScore", prop.Name)
+			assert.Equal(t, tt.want, prop.Value,
+				"complianceScore must come from ComplianceScore (%s), not Score", tt.want)
+		})
+	}
+}
