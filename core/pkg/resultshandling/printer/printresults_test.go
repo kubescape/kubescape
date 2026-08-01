@@ -58,7 +58,7 @@ func TestGetWriterNoStdoutFallback_UnwritableTargetFallsBackToTemp(t *testing.T)
 		_ = os.Remove(f.Name())
 	})
 
-	assert.Equal(t, os.TempDir(), filepath.Dir(f.Name()))
+	assert.Equal(t, filepath.Clean(os.TempDir()), filepath.Dir(f.Name()))
 	assert.True(t, strings.HasPrefix(filepath.Base(f.Name()), "kubescape-report-"))
 	assert.True(t, strings.HasSuffix(f.Name(), ".pdf"))
 	_, err := f.WriteString("pdf-bytes") // the handle must be usable, not a discard sink
@@ -140,7 +140,7 @@ func TestGetWriterNoStdoutFallback_MkdirAllFailsFallsBackToTemp(t *testing.T) {
 		_ = os.Remove(f.Name())
 	})
 
-	assert.Equal(t, os.TempDir(), filepath.Dir(f.Name()))
+	assert.Equal(t, filepath.Clean(os.TempDir()), filepath.Dir(f.Name()))
 	assert.True(t, strings.HasPrefix(filepath.Base(f.Name()), "kubescape-report-"))
 	assert.True(t, strings.HasSuffix(f.Name(), ".pdf"))
 	_, err := f.WriteString("pdf-bytes") // the handle must be usable, not a discard sink
