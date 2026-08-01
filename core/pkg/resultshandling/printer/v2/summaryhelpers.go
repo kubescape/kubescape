@@ -37,35 +37,19 @@ func groupByNamespaceOrKind(resources []WorkloadSummary, status func(workloadSum
 		if t == objectsenvelopes.TypeRegoResponseVectorObject && !isKindToBeGrouped(resources[i].resource.GetKind()) {
 			t = workloadinterface.TypeWorkloadObject
 		}
-		switch t { // TODO - find a better way to defind the groups
+		group := ""
+		switch t {
 		case workloadinterface.TypeWorkloadObject:
-			ns := ""
 			if resources[i].resource.GetNamespace() != "" {
-				ns = "Namespace " + resources[i].resource.GetNamespace()
-			}
-			if r, ok := mapResources[ns]; ok {
-				r = append(r, resources[i])
-				mapResources[ns] = r
-			} else {
-				mapResources[ns] = []WorkloadSummary{resources[i]}
+				group = "Namespace " + resources[i].resource.GetNamespace()
 			}
 		case objectsenvelopes.TypeRegoResponseVectorObject:
-			group := resources[i].resource.GetKind() + "s"
-			if r, ok := mapResources[group]; ok {
-				r = append(r, resources[i])
-				mapResources[group] = r
-			} else {
-				mapResources[group] = []WorkloadSummary{resources[i]}
-			}
+			group = resources[i].resource.GetKind() + "s"
 		default:
-			group, _ := k8sinterface.SplitApiVersion(resources[i].resource.GetApiVersion())
-			if r, ok := mapResources[group]; ok {
-				r = append(r, resources[i])
-				mapResources[group] = r
-			} else {
-				mapResources[group] = []WorkloadSummary{resources[i]}
-			}
+			group, _ = k8sinterface.SplitApiVersion(resources[i].resource.GetApiVersion())
 		}
+		mapResources[group] = append(mapResources[group], resources[i])
+
 	}
 	return mapResources
 }
