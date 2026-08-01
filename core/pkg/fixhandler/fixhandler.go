@@ -85,7 +85,6 @@ func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
 		if !isPathContained(resolvedBasePath, resolvedLocalPath) {
 			return nil, fmt.Errorf("report's scan path %q is outside --base-path %q; refusing to trust the report's location claim", localPath, fixInfo.BasePath)
 		}
-		localPath = resolvedLocalPath
 	}
 
 	backendLoggerLeveled := logging.AddModuleLevel(logging.NewLogBackend(logger.L().GetWriter(), "", 0))
