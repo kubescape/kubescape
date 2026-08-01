@@ -297,6 +297,47 @@ func TestIsRuleKubescapeVersionCompatible(t *testing.T) {
 	assert.True(t, isRuleKubescapeVersionCompatible(rule_v1_0_134.Attributes, buildNumberMock))
 }
 
+// TestPoliciesSetDoesNotMutateCallerFrameworks guards against a regression where Set
+// filtered a control's rules into a new slice but wrote it back through the caller's
+// slice header, permanently deleting excluded rules from the caller's data (e.g.
+// PolicyHandler's cached frameworks, reused across scans while POLICIES_CACHE_TTL is set).
+func TestPoliciesSetDoesNotMutateCallerFrameworks(t *testing.T) {
+	buildFrameworks := func() []reporthandling.Framework {
+		return []reporthandling.Framework{
+			{
+				PortalBase: armotypes.PortalBase{Name: "test-framework"},
+				Controls: []reporthandling.Control{
+					{
+						ControlID: "control-1",
+						Rules: []reporthandling.PolicyRule{
+							{PortalBase: armotypes.PortalBase{Name: "rule-a"}},
+							{PortalBase: armotypes.PortalBase{Name: "rule-b"}},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	frameworks := buildFrameworks()
+	originalRuleCount := len(frameworks[0].Controls[0].Rules)
+
+	// first scan excludes "rule-a"
+	firstScanPolicies := NewPolicies()
+	firstScanPolicies.Set(frameworks, map[string]bool{"rule-a": true}, "")
+	assert.Len(t, firstScanPolicies.Controls["control-1"].Rules, 1)
+
+	// the caller's original slice must be untouched by the first Set call
+	assert.Len(t, frameworks[0].Controls[0].Rules, originalRuleCount,
+		"Set must not mutate the caller's frameworks slice")
+
+	// a second scan reusing the same frameworks slice (e.g. a cache hit) with no
+	// exclusions must see all rules, not the previous scan's filtered-down set
+	secondScanPolicies := NewPolicies()
+	secondScanPolicies.Set(frameworks, nil, "")
+	assert.Len(t, secondScanPolicies.Controls["control-1"].Rules, originalRuleCount)
+}
+
 func TestGetScanningScope(t *testing.T) {
 	tests := []struct {
 		name     string
