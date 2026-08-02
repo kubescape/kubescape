@@ -42,7 +42,14 @@ func (p *PrometheusPrinter) printResources(allResources map[string]workloadinter
 func (p *PrometheusPrinter) printDetails(allResources map[string]workloadinterface.IMetadata, resourcesIDs []string, frameworkName, controlName, status string) {
 	objs := make(map[string]map[string]map[string]int)
 	for _, resourceID := range resourcesIDs {
-		resource := allResources[resourceID]
+		// allResources may not contain every ID resourcesIDs lists (e.g. a
+		// resource pruned after the report was built): skip it rather than
+		// calling methods on the nil workloadinterface.IMetadata the map
+		// lookup would otherwise return, which panics.
+		resource, ok := allResources[resourceID]
+		if !ok {
+			continue
+		}
 
 		gvk := fmt.Sprintf("%s/%s", resource.GetApiVersion(), resource.GetKind())
 
@@ -57,11 +64,17 @@ func (p *PrometheusPrinter) printDetails(allResources map[string]workloadinterfa
 	for gvk, namespaces := range objs {
 		for namespace, names := range namespaces {
 			for name, value := range names {
-				fmt.Fprintf(p.writer, "# Failed object from \"%s\" control \"%s\"\n", frameworkName, controlName)
+				// status ("failed", "excluded", or "passed") must drive both
+				// the comment and the metric name: this function used to
+				// hardcode "Failed"/kubescape_object_failed_count
+				// unconditionally, so callers reporting excluded or (in
+				// verbose mode) passed resources silently mislabeled them as
+				// failed in the emitted Prometheus metrics.
+				fmt.Fprintf(p.writer, "# %s object from \"%s\" control \"%s\"\n", status, frameworkName, controlName)
 				if namespace != "" {
-					fmt.Fprintf(p.writer, "kubescape_object_failed_count{framework=\"%s\",control=\"%s\",namespace=\"%s\",name=\"%s\",groupVersionKind=\"%s\"} %d\n", frameworkName, controlName, namespace, name, gvk, value)
+					fmt.Fprintf(p.writer, "kubescape_object_%s_count{framework=\"%s\",control=\"%s\",namespace=\"%s\",name=\"%s\",groupVersionKind=\"%s\"} %d\n", status, frameworkName, controlName, namespace, name, gvk, value)
 				} else {
-					fmt.Fprintf(p.writer, "kubescape_object_failed_count{framework=\"%s\",control=\"%s\",name=\"%s\",groupVersionKind=\"%s\"} %d\n", frameworkName, controlName, name, gvk, value)
+					fmt.Fprintf(p.writer, "kubescape_object_%s_count{framework=\"%s\",control=\"%s\",name=\"%s\",groupVersionKind=\"%s\"} %d\n", status, frameworkName, controlName, name, gvk, value)
 				}
 			}
 		}

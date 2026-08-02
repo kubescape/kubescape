@@ -113,6 +113,73 @@ func TestPrometheusPrinterPrintDetails(t *testing.T) {
 	}
 }
 
+// TestPrometheusPrinterPrintDetails_StatusDrivesMetricName guards against a
+// regression where printDetails always emitted "kubescape_object_failed_count"
+// regardless of the status argument. printResources calls printDetails once
+// per status ("failed", "excluded", "passed"), so excluded and (in verbose
+// mode) passed resources were silently counted as failed in the emitted
+// Prometheus metrics.
+func TestPrometheusPrinterPrintDetails_StatusDrivesMetricName(t *testing.T) {
+	allResources := map[string]workloadinterface.IMetadata{
+		"deploy-1": workload("apps/v1", "Deployment", "default", "api"),
+	}
+
+	for _, status := range []string{"failed", "excluded", "passed"} {
+		t.Run(status, func(t *testing.T) {
+			outputFile := filepath.Join(t.TempDir(), "prometheus.out")
+			writer, err := os.Create(outputFile)
+			require.NoError(t, err)
+
+			p := NewPrometheusPrinter(false)
+			p.writer = writer
+			p.printDetails(allResources, []string{"deploy-1"}, "fw", "ctrl", status)
+			require.NoError(t, writer.Close())
+
+			got, err := os.ReadFile(outputFile)
+			require.NoError(t, err)
+
+			wantMetric := "kubescape_object_" + status + "_count{"
+			assert.Contains(t, string(got), wantMetric)
+
+			for _, other := range []string{"failed", "excluded", "passed"} {
+				if other == status {
+					continue
+				}
+				assert.NotContains(t, string(got), "kubescape_object_"+other+"_count{",
+					"printDetails(status=%q) must not emit a %q-labeled metric", status, other)
+			}
+		})
+	}
+}
+
+// TestPrometheusPrinterPrintDetails_UnknownResourceIDDoesNotPanic guards
+// against a regression where printDetails looked up resourceID in
+// allResources without checking the map's "ok" result. A resourceID absent
+// from allResources produced the zero value of the
+// workloadinterface.IMetadata interface (nil), and calling GetApiVersion()
+// on it panicked with a nil pointer dereference instead of being skipped.
+func TestPrometheusPrinterPrintDetails_UnknownResourceIDDoesNotPanic(t *testing.T) {
+	allResources := map[string]workloadinterface.IMetadata{
+		"deploy-1": workload("apps/v1", "Deployment", "default", "api"),
+	}
+
+	outputFile := filepath.Join(t.TempDir(), "prometheus.out")
+	writer, err := os.Create(outputFile)
+	require.NoError(t, err)
+
+	p := NewPrometheusPrinter(false)
+	p.writer = writer
+
+	assert.NotPanics(t, func() {
+		p.printDetails(allResources, []string{"deploy-1", "does-not-exist"}, "fw", "ctrl", "failed")
+	})
+	require.NoError(t, writer.Close())
+
+	got, err := os.ReadFile(outputFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(got), `kubescape_object_failed_count{framework="fw",control="ctrl",namespace="default",name="api",groupVersionKind="apps/v1/Deployment"} 1`)
+}
+
 func TestNewPrometheusPrinterStoresVerboseMode(t *testing.T) {
 	assert.False(t, NewPrometheusPrinter(false).verboseMode)
 	assert.True(t, NewPrometheusPrinter(true).verboseMode)
