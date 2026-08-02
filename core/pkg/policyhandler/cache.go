@@ -59,10 +59,6 @@ func (c *TimedCache[T]) Set(value T) {
 	c.isSet = true
 	c.value = value
 	c.expiration = time.Now().Add(c.ttl)
-
-	if time.Now().After(c.expiration) {
-		c.invalidateLocked()
-	}
 }
 
 func (c *TimedCache[T]) Get() (T, bool) {

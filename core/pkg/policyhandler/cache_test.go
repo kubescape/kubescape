@@ -85,6 +85,29 @@ func TestCache_SetAndGet(t *testing.T) {
 	}
 }
 
+// TestCache_SetNeverImmediatelySelfInvalidates pins the documented behavior
+// of Set(): a value it just stored must be immediately readable via Get(),
+// repeatedly, for a small ttl. Set() used to compute
+// expiration = time.Now().Add(ttl) and then immediately re-check
+// `if time.Now().After(expiration) { invalidateLocked() }` - a check that
+// can only ever fire if the gap between those two time.Now() calls exceeds
+// ttl itself. For any realistic ttl (this codebase only ever uses
+// seconds-scale values) that gap is always negative, so the check was dead
+// code; this test exercises Set()+Get() back-to-back many times at a small
+// ttl to keep that documented.
+func TestCache_SetNeverImmediatelySelfInvalidates(t *testing.T) {
+	cache := NewTimedCache[int](50 * time.Millisecond)
+	t.Cleanup(cache.Stop)
+
+	for i := range 1000 {
+		cache.Set(i)
+		value, exists := cache.Get()
+		if !exists || value != i {
+			t.Fatalf("iteration %d: Set() followed immediately by Get() must return the just-set value; got value=%d exists=%v", i, value, exists)
+		}
+	}
+}
+
 func TestCache_Expiration(t *testing.T) {
 	cache := NewTimedCache[int](time.Millisecond * 500)
 
