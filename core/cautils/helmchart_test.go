@@ -6,14 +6,63 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
 )
+
+// registryClientPlainHTTP reads the unexported plainHTTP field
+// helmregistry.NewClient populates from ClientOptPlainHTTP(), since the
+// registry package exposes no public getter for it.
+func registryClientPlainHTTP(t *testing.T, client any) bool {
+	t.Helper()
+	v := reflect.ValueOf(client).Elem().FieldByName("plainHTTP")
+	require.True(t, v.IsValid(), "helmregistry.Client has no plainHTTP field - update this test to match the library")
+	return v.Bool()
+}
+
+// TestNewRegistryClient_PlainHTTPGatedOnPlainHTTPArg guards against a
+// regression where the plainHTTP client option was gated on the
+// insecureSkipTLS argument instead of the plainHTTP argument. Those mean
+// different things (skip certificate verification vs. disable TLS
+// entirely), so the old code silently disabled encryption for any caller
+// that only asked to skip certificate verification.
+func TestNewRegistryClient_PlainHTTPGatedOnPlainHTTPArg(t *testing.T) {
+	t.Run("plainHTTP=true enables plain HTTP", func(t *testing.T) {
+		client, err := newRegistryClient("", "", "", false, true, "", "")
+		require.NoError(t, err)
+		assert.True(t, registryClientPlainHTTP(t, client))
+	})
+
+	t.Run("insecureSkipTLS=true alone must not enable plain HTTP", func(t *testing.T) {
+		client, err := newRegistryClient("", "", "", true, false, "", "")
+		require.NoError(t, err)
+		assert.False(t, registryClientPlainHTTP(t, client),
+			"insecureSkipTLS must not be conflated with plainHTTP - it must not silently disable TLS")
+	})
+
+	t.Run("both false leaves plain HTTP disabled", func(t *testing.T) {
+		client, err := newRegistryClient("", "", "", false, false, "", "")
+		require.NoError(t, err)
+		assert.False(t, registryClientPlainHTTP(t, client))
+	})
+}
+
+// TestNewRegistryClient_BasicAuthCredentialsAccepted guards against a
+// regression where the username/password arguments were accepted but never
+// passed to helmregistry.ClientOptBasicAuth, silently dropping credentials
+// for authenticated OCI registries.
+func TestNewRegistryClient_BasicAuthCredentialsAccepted(t *testing.T) {
+	client, err := newRegistryClient("", "", "", false, false, "someuser", "somepass")
+	require.NoError(t, err)
+	require.NotNil(t, client)
+}
 
 type HelmChartTestSuite struct {
 	suite.Suite

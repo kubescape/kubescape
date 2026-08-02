@@ -33,7 +33,15 @@ func IsHelmDirectory(path string) (bool, error) {
 	return helmchartutil.IsChartDir(path)
 }
 
-// newRegistryClient creates a Helm registry client for chart authentication
+// newRegistryClient creates a Helm registry client for chart authentication.
+//
+// insecureSkipTLS is currently not wired to anything: doing so correctly
+// requires a custom *http.Client with tls.Config{InsecureSkipVerify: true}
+// passed via helmregistry.ClientOptHTTPClient, not ClientOptPlainHTTP()
+// (which disables TLS entirely rather than just certificate verification -
+// see the plainHTTP branch below for why those must not be conflated). Left
+// unimplemented rather than risk wiring it to the wrong option again; the
+// sole call site always passes false for it today.
 func newRegistryClient(certFile, keyFile, caFile string, insecureSkipTLS, plainHTTP bool, username, password string) (*helmregistry.Client, error) {
 	// Basic client options with debug disabled
 	opts := []helmregistry.ClientOption{
@@ -51,9 +59,20 @@ func newRegistryClient(certFile, keyFile, caFile string, insecureSkipTLS, plainH
 		opts = append(opts, helmregistry.ClientOptCredentialsFile(caFile))
 	}
 
-	// Enable plain HTTP if needed
-	if insecureSkipTLS {
+	// Enable plain HTTP if requested. This must be gated on plainHTTP, not
+	// insecureSkipTLS: those are different things (insecureSkipTLS means
+	// "skip certificate verification but still use HTTPS", plainHTTP means
+	// "don't use TLS at all"). Wiring insecureSkipTLS to
+	// ClientOptPlainHTTP() would silently drop encryption entirely - and the
+	// credentials below with it - for a caller who only asked to bypass
+	// certificate validation.
+	if plainHTTP {
 		opts = append(opts, helmregistry.ClientOptPlainHTTP())
+	}
+
+	// Add basic auth credentials if provided
+	if username != "" && password != "" {
+		opts = append(opts, helmregistry.ClientOptBasicAuth(username, password))
 	}
 
 	registryClient, err := helmregistry.NewClient(opts...)
