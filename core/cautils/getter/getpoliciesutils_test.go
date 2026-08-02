@@ -285,3 +285,27 @@ func TestHttpRespToString_ErrorCodeLessThan200(t *testing.T) {
 	assert.EqualError(t, err, "http-error: '', reason: 'test response'")
 	assert.Equal(t, "test response", result)
 }
+
+func TestSetHeaders(t *testing.T) {
+	t.Run("sets every header on the request", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+		require.NoError(t, err)
+
+		setHeaders(req, map[string]string{"Authorization": "token abc", "X-Custom": "value"})
+
+		assert.Equal(t, "token abc", req.Header.Get("Authorization"))
+		assert.Equal(t, "value", req.Header.Get("X-Custom"))
+	})
+
+	// Regression: setHeaders used to gate the range loop behind
+	// `if len(headers) >= 0`, a condition that is always true (len() is
+	// never negative) - a nil map must still be handled without panicking,
+	// which ranging over nil already does safely in Go.
+	t.Run("nil headers map does not panic and sets nothing", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+		require.NoError(t, err)
+
+		assert.NotPanics(t, func() { setHeaders(req, nil) })
+		assert.Empty(t, req.Header)
+	})
+}
