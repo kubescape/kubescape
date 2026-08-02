@@ -427,12 +427,20 @@ func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, 
 		return 0, false
 	}
 
-	splittedPath := strings.Split(localworkload.GetPath(), ":")
-	if len(splittedPath) <= 1 {
+	// GetPath() is "<file path>:<document index>". Split on the *last* colon,
+	// not the first/second: strings.Split(path, ":")[1] silently picks the
+	// wrong segment for any path containing more than one colon (e.g. a
+	// Windows path like "C:\repo\deploy.yaml:0"), producing a non-numeric
+	// value that Atoi rejects and this function reporting "no doc index"
+	// even though one exists. This matches how fixhandler.getFilePathAndIndex
+	// parses the same convention.
+	path := localworkload.GetPath()
+	lastColon := strings.LastIndex(path, ":")
+	if lastColon == -1 {
 		return 0, false
 	}
 
-	docIndex, err := strconv.Atoi(splittedPath[1])
+	docIndex, err := strconv.Atoi(path[lastColon+1:])
 	if err != nil {
 		return 0, false
 	}
