@@ -12,18 +12,25 @@ type Config struct {
 
 // LoadConfig reads configuration from file or environment variables.
 func LoadConfig(path string) (Config, error) {
-	viper.AddConfigPath(path)
-	viper.SetConfigName("clusterData")
-	viper.SetConfigType("json")
+	// A scoped instance instead of the viper package-level singleton: the
+	// singleton accumulates state across calls (e.g. AddConfigPath appends
+	// rather than replacing), so a second LoadConfig call in the same
+	// process - a second cluster/namespace config, or just a test calling it
+	// more than once - would read stale settings left over from a previous
+	// call instead of a clean state.
+	v := viper.New()
+	v.AddConfigPath(path)
+	v.SetConfigName("clusterData")
+	v.SetConfigType("json")
 
-	viper.AutomaticEnv()
+	v.AutomaticEnv()
 
-	err := viper.ReadInConfig()
+	err := v.ReadInConfig()
 	if err != nil {
 		return Config{}, err
 	}
 
 	var config Config
-	err = viper.Unmarshal(&config)
+	err = v.Unmarshal(&config)
 	return config, err
 }
