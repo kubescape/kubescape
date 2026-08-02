@@ -164,6 +164,34 @@ func TestGetAttributesFromImage(t *testing.T) {
 			},
 			expectedErr: nil,
 		},
+		{
+			// Regression: a digest-pinned reference's digest ("sha256:...")
+			// contains a colon. Splitting the name:tag segment on ":" without
+			// accounting for the digest used to leave "@sha256" stuck onto
+			// ImageName and the raw hash treated as ImageTag, which silently
+			// broke isTargetImage's exception-policy matching for these images.
+			imageName: "myregistry.io/myimage@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+			expectedAttributes: Attributes{
+				Registry:     "myregistry.io",
+				Organization: "",
+				ImageName:    "myimage",
+				ImageTag:     "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+			},
+			expectedErr: nil,
+		},
+		{
+			// Both an explicit tag and a digest: the explicit tag must win
+			// over the digest for ImageTag, and ImageName must still exclude
+			// both suffixes.
+			imageName: "myregistry.io/myimage:v1@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+			expectedAttributes: Attributes{
+				Registry:     "myregistry.io",
+				Organization: "",
+				ImageName:    "myimage",
+				ImageTag:     "v1",
+			},
+			expectedErr: nil,
+		},
 	}
 
 	for _, tt := range tests {

@@ -86,13 +86,24 @@ func getAttributesFromImage(imgName string) (Attributes, error) {
 		organization = strings.Join(tokens[1:len(tokens)-1], "/")
 	}
 
-	imageNameAndTag := strings.Split(nameAndTag, ":")
-	imageName := imageNameAndTag[0]
-
-	// Intialize the image tag with default value
+	// nameAndTag may be "name", "name:tag", "name@algo:digest" (e.g.
+	// "name@sha256:abc123..."), or "name:tag@algo:digest" - a digest-pinned
+	// reference. Split off any "@digest" suffix first: the digest itself
+	// contains a colon ("sha256:..."), so splitting nameAndTag on ":"
+	// without accounting for that left "@sha256" stuck onto imageName and
+	// the raw hash treated as the tag, which silently broke exception-policy
+	// matching (isTargetImage below) for digest-pinned images.
+	beforeDigest := nameAndTag
 	imageTag := "latest"
-	if len(imageNameAndTag) > 1 {
-		imageTag = imageNameAndTag[1]
+	if at := strings.Index(nameAndTag, "@"); at != -1 {
+		beforeDigest = nameAndTag[:at]
+		imageTag = nameAndTag[at+1:] // digest, used as a fallback "tag" below
+	}
+
+	imageName := beforeDigest
+	if colon := strings.LastIndex(beforeDigest, ":"); colon != -1 {
+		imageName = beforeDigest[:colon]
+		imageTag = beforeDigest[colon+1:] // an explicit tag wins over the digest
 	}
 
 	attributes := Attributes{
