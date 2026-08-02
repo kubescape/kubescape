@@ -95,6 +95,22 @@ script:
   - export PATH=$PATH:$HOME/.kubescape/bin
   - kubescape scan . --format junit --output results.xml
     
+Findings point at paths that do not exist in the repository
+GitLab resolves the `location.file` of every SAST finding from the repository root. Kubescape anchors reported paths on the root of the repository the scanned path belongs to, so scanning a subdirectory keeps its prefix:
+
+```bash
+kubescape scan framework nsa workloads/ --format gitlab-sast --output gl-sast-report.json
+# "file": "workloads/apps/base/app/cronjobs.yaml"
+```
+
+If findings are missing the prefix, the scanned path is not inside a git worktree the runner can see. Check that the job clones the repository rather than copying files into the container, and that `GIT_STRATEGY` is not set to `none`.
+
+Findings reappear as new after upgrading
+A finding's identity is derived in part from the file path it was reported at. Releases that correct those paths therefore change the identity of the affected findings, and GitLab reports them as new once. Previously dismissed findings from affected scans have to be dismissed again on that first pipeline run; identities are stable across subsequent scans.
+
+Some resources are missing from the report
+The GitLab SAST format can only anchor a finding to a file inside the repository, so resources with no file path, or with a path outside the repository root, are excluded. Kubescape logs a warning with the count when this happens. Cluster scans have no file paths at all and cannot be reported in this format; use `--format json` or `--format sarif` for those.
+
 Further Reading
 - Kubescape CLI Reference
 - GitLab CI/CD Documentation

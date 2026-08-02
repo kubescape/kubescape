@@ -15,6 +15,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -193,7 +194,7 @@ func getLocalPath(report *reporthandlingv2.PostureReport) string {
 	case reporthandlingv2.Directory:
 		return report.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
 	case reporthandlingv2.File:
-		return filepath.Dir(report.Metadata.ContextMetadata.FileContextMetadata.FilePath)
+		return cautils.FileScanRootPath(report.Metadata.ContextMetadata.FileContextMetadata.FilePath)
 	default:
 		return ""
 	}
@@ -202,59 +203,32 @@ func getLocalPath(report *reporthandlingv2.PostureReport) string {
 // resourceBasePath returns the root the resource's relative path resolves against. The
 // resource's own Source.Path is the root the scan computed that relative path from, so
 // it stays correct where the report-wide base path does not: multi-input scans record
-// only the first input. Reports without it (cloned repos, older reports) keep using the
-// report-wide path.
+// only the first input, and a single-file scan records the file rather than its root. In
+// both, Source.Path is an ancestor of the report-wide path rather than a descendant.
 //
-// Source.Path is attacker-controlled report input that ends up joined into a path this
-// package writes to, so it may only narrow the report-wide root, never leave it. A
-// rejected or stale root resolves to a file that fails the os.Stat in
-// PrepareResourcesToFix, which reports the resource as unfixed instead of writing
-// outside the scanned tree.
+// Only an absolute root is accepted: the scanner always records one, and a relative value
+// would resolve against the process working directory rather than anything in the report.
+// Reports without a usable root (cloned repos, older reports) keep using the report-wide
+// path. Traversal is contained where it can actually occur, on the join in
+// PrepareResourcesToFix.
+//
+// Source.Path is as report-supplied as the report-wide path, so --base-path has to
+// constrain it too: without this it would be the one way a report could still name a fix
+// root outside the anchor the caller vouched for.
 func (h *FixHandler) resourceBasePath(resourceObj *reporthandling.Resource) string {
-	if resourceObj == nil || resourceObj.Source == nil || resourceObj.Source.Path == "" {
+	if resourceObj == nil || resourceObj.Source == nil {
 		return h.localBasePath
 	}
-	if !isPathWithin(h.localBasePath, resourceObj.Source.Path) {
-		logger.L().Debug("ignoring resource source path outside the scanned directory",
-			helpers.String("sourcePath", resourceObj.Source.Path), helpers.String("basePath", h.localBasePath))
+	sourcePath := resourceObj.Source.Path
+	if sourcePath == "" || !filepath.IsAbs(sourcePath) {
 		return h.localBasePath
 	}
-	return resourceObj.Source.Path
-}
-
-// isPathWithin reports whether target resolves to base or somewhere underneath it, after
-// resolving symlinks so neither a "../" segment nor a link out of the tree can escape.
-// A path that does not exist is compared in its cleaned absolute form: it cannot be
-// followed anywhere, and the caller's os.Stat rejects it later.
-func isPathWithin(base, target string) bool {
-	canonicalBase, err := canonicalPath(base)
-	if err != nil {
-		return false
+	if h.fixInfo != nil && h.fixInfo.BasePath != "" && !isPathContained(h.fixInfo.BasePath, sourcePath) {
+		logger.L().Debug("ignoring resource source path outside --base-path",
+			helpers.String("sourcePath", sanitizeForLog(sourcePath)), helpers.String("basePath", h.fixInfo.BasePath))
+		return h.localBasePath
 	}
-	canonicalTarget, err := canonicalPath(target)
-	if err != nil {
-		return false
-	}
-
-	rel, err := filepath.Rel(canonicalBase, canonicalTarget)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
-}
-
-// canonicalPath resolves path to an absolute, symlink-free form, falling back to the
-// cleaned absolute path when it does not exist on disk.
-func canonicalPath(path string) (string, error) {
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	resolved, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
-		return absPath, nil
-	}
-	return resolved, nil
+	return sourcePath
 }
 
 func (h *FixHandler) buildResourcesMap() map[string]*reporthandling.Resource {
@@ -347,7 +321,9 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			} else {
 				// the resource's own root, not the report-wide one: a single-file
 				// scan records the file rather than its root, and a multi-input
-				// scan records only the first input
+				// scan records only the first input. relativePath is report input
+				// and is the field that can carry "..", so the file this package
+				// writes to must still land inside the root it resolved against.
 				basePath := h.resourceBasePath(resourceObj)
 				candidatePath := filepath.Join(basePath, relativePath)
 				if _, err := os.Stat(candidatePath); err != nil {

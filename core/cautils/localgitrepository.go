@@ -3,6 +3,7 @@ package cautils
 import (
 	"fmt"
 	"path"
+	"path/filepath"
 	"strings"
 
 	gitv5 "github.com/go-git/go-git/v5"
@@ -147,6 +148,18 @@ func GetGitRootDir(path string) (string, error) {
 	}
 
 	return worktree.Filesystem.Root(), nil
+}
+
+// FileScanRootPath returns the root a single-file scan's reported paths are relative to:
+// the repository root when the file sits inside a worktree, and the file's own directory
+// otherwise. The File scanning target records the scanned file rather than a root, so
+// every consumer has to derive the anchor from the same rule or a file scan's relative
+// paths resolve against different bases in `fix` and in the printers.
+func FileScanRootPath(filePath string) string {
+	if root, err := GetGitRootDir(filePath); err == nil {
+		return root
+	}
+	return filepath.Dir(filePath)
 }
 
 // ScanRootPath returns the root that paths reported for input are relative to: the

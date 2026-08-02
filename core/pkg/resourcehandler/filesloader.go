@@ -405,7 +405,8 @@ func extractGitRepo(path string) (string, *cautils.LocalGitRepository) {
 	// repository root when there is one, or a scan of a subdirectory loses its prefix
 	// and the paths resolve against nothing. Reuse the repository the constructor
 	// already opened rather than opening it a second time.
-	repoRoot, rootErr := "", error(nil)
+	var repoRoot string
+	var rootErr error
 	if gitRepo != nil {
 		repoRoot, rootErr = gitRepo.GetRootDir()
 	} else {

@@ -453,13 +453,7 @@ func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
 		return opaSessionObj.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
 	case v2.File:
 		if opaSessionObj.Metadata.ContextMetadata.FileContextMetadata != nil {
-			filePath := opaSessionObj.Metadata.ContextMetadata.FileContextMetadata.FilePath
-			// a file inside a repository is anchored on the repository root, so its
-			// own directory is the right base only outside one
-			if root, err := cautils.GetGitRootDir(filePath); err == nil {
-				return root
-			}
-			return filepath.Dir(filePath)
+			return cautils.FileScanRootPath(opaSessionObj.Metadata.ContextMetadata.FileContextMetadata.FilePath)
 		}
 		return ""
 	default:
