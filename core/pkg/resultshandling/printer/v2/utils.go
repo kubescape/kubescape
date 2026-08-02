@@ -296,8 +296,9 @@ func setSeverityToSummaryMap(cves []imageprinter.CVE, mapSeverityToSummary map[s
 
 func setPkgNameToScoreMap(matches match.Matches, pkgScores map[string]*imageprinter.PackageScore) {
 	for _, m := range matches.Sorted() {
-		// key is pkg name + version to avoid version conflicts
-		key := m.Package.Name + m.Package.Version
+		// key is pkg name + version, separated so that e.g. name="foo1",
+		// version="2.3" cannot collide with name="foo", version="12.3"
+		key := m.Package.Name + "@" + m.Package.Version
 
 		if _, ok := pkgScores[key]; !ok {
 			pkgScores[key] = &imageprinter.PackageScore{

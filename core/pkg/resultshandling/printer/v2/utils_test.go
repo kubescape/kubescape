@@ -222,7 +222,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				},
 			}...),
 			want: map[string]*imageprinter.PackageScore{
-				"foo1.2.3": {
+				"foo@1.2.3": {
 					Name:    "foo",
 					Score:   4,
 					Version: "1.2.3",
@@ -273,7 +273,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				},
 			}...),
 			want: map[string]*imageprinter.PackageScore{
-				"pkg1version1": {
+				"pkg1@version1": {
 					Name:    "pkg1",
 					Score:   5,
 					Version: "version1",
@@ -281,7 +281,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"Critical": 1,
 					},
 				},
-				"pkg21.2": {
+				"pkg2@1.2": {
 					Name:    "pkg2",
 					Score:   2,
 					Version: "1.2",
@@ -289,7 +289,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"Low": 1,
 					},
 				},
-				"pkg31.2.3": {
+				"pkg3@1.2.3": {
 					Name:    "pkg3",
 					Score:   4,
 					Version: "1.2.3",
@@ -376,7 +376,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				},
 			}...),
 			want: map[string]*imageprinter.PackageScore{
-				"pkg1version1": {
+				"pkg1@version1": {
 					Name:    "pkg1",
 					Score:   8,
 					Version: "version1",
@@ -384,7 +384,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"High": 2,
 					},
 				},
-				"pkg1version2": {
+				"pkg1@version2": {
 					Name:    "pkg1",
 					Score:   5,
 					Version: "version2",
@@ -392,7 +392,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"Critical": 1,
 					},
 				},
-				"pkg31.2": {
+				"pkg3@1.2": {
 					Name:    "pkg3",
 					Score:   5,
 					Version: "1.2",
@@ -401,7 +401,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"Low":    1,
 					},
 				},
-				"pkg41.2.3": {
+				"pkg4@1.2.3": {
 					Name:    "pkg4",
 					Score:   4,
 					Version: "1.2.3",
@@ -457,7 +457,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				},
 			}...),
 			originalMap: map[string]*imageprinter.PackageScore{
-				"pkg41.2.3": {
+				"pkg4@1.2.3": {
 					Name:    "pkg4",
 					Score:   4,
 					Version: "1.2.3",
@@ -467,7 +467,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				},
 			},
 			want: map[string]*imageprinter.PackageScore{
-				"pkg41.2.3": {
+				"pkg4@1.2.3": {
 					Name:    "pkg4",
 					Score:   4,
 					Version: "1.2.3",
@@ -475,7 +475,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"High": 1,
 					},
 				},
-				"pkg1version1": {
+				"pkg1@version1": {
 					Name:    "pkg1",
 					Score:   8,
 					Version: "version1",
@@ -483,7 +483,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"High": 2,
 					},
 				},
-				"pkg1version2": {
+				"pkg1@version2": {
 					Name:    "pkg1",
 					Score:   5,
 					Version: "version2",
@@ -534,7 +534,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				},
 			}...),
 			originalMap: map[string]*imageprinter.PackageScore{
-				"pkg1version1": {
+				"pkg1@version1": {
 					Name:    "pkg1",
 					Score:   4,
 					Version: "version1",
@@ -544,7 +544,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				},
 			},
 			want: map[string]*imageprinter.PackageScore{
-				"pkg1version1": {
+				"pkg1@version1": {
 					Name:    "pkg1",
 					Score:   12,
 					Version: "version1",
@@ -552,7 +552,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"High": 3,
 					},
 				},
-				"pkg1version2": {
+				"pkg1@version2": {
 					Name:    "pkg1",
 					Score:   5,
 					Version: "version2",
@@ -600,6 +600,52 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSetPkgNameToScoreMap_NoCollisionWithoutSeparator verifies that two
+// distinct (name, version) pairs whose concatenation would be identical if no
+// separator were used between them - e.g. name="foo1"+version="2.3" and
+// name="foo"+version="12.3", both "foo12.3" - are kept as separate entries
+// instead of one silently overwriting the other's CVE data.
+func TestSetPkgNameToScoreMap_NoCollisionWithoutSeparator(t *testing.T) {
+	matches := match.NewMatches([]match.Match{
+		{
+			Package: pkg.Package{
+				ID:      "1",
+				Name:    "foo1",
+				Version: "2.3",
+			},
+			Vulnerability: vulnerability.Vulnerability{
+				Metadata: &vulnerability.Metadata{
+					Severity: "High",
+				},
+			},
+		},
+		{
+			Package: pkg.Package{
+				ID:      "2",
+				Name:    "foo",
+				Version: "12.3",
+			},
+			Vulnerability: vulnerability.Vulnerability{
+				Metadata: &vulnerability.Metadata{
+					Severity: "Critical",
+				},
+			},
+		},
+	}...)
+
+	pkgScores := make(map[string]*imageprinter.PackageScore)
+	setPkgNameToScoreMap(matches, pkgScores)
+
+	require.Len(t, pkgScores, 2, "both packages must have their own entry, not collide into one")
+
+	names := make(map[string]string)
+	for _, score := range pkgScores {
+		names[score.Name+"/"+score.Version] = score.Name
+	}
+	assert.Contains(t, names, "foo1/2.3")
+	assert.Contains(t, names, "foo/12.3")
 }
 
 func TestSetSeverityToSummaryMap(t *testing.T) {
