@@ -82,13 +82,19 @@ func (batch *ResourceBatch) Len() int {
 // batch and zero or more namespace batches, sorted by namespace for
 // deterministic evaluation order.
 //
+// clusterSize is the resource count the large-cluster decision is made from.
+// It must be the count frozen when the resources were collected — not the live
+// size of allResources — so that a rule whose aggregator writes synthesized
+// resources back into allResources mid-scan cannot re-bucket namespaces
+// partway through evaluation.
+//
 // On clusters at or below the large-cluster threshold no namespace batches are
 // produced: every resource lands in the resident batch, which reproduces the
 // single cluster-wide evaluation input used for small clusters.
 //
 // Resource IDs present in the indexes but missing from allResources are
 // skipped rather than materialised as nil entries.
-func PartitionResources(k8sResources K8SResources, externalResources ExternalResources, allResources map[string]workloadinterface.IMetadata) (resident *ResourceBatch, batches []*ResourceBatch) {
+func PartitionResources(clusterSize int, k8sResources K8SResources, externalResources ExternalResources, allResources map[string]workloadinterface.IMetadata) (resident *ResourceBatch, batches []*ResourceBatch) {
 	resident = NewResourceBatch(ClusterScope)
 
 	for groupResource, ids := range externalResources {
@@ -102,7 +108,7 @@ func PartitionResources(k8sResources K8SResources, externalResources ExternalRes
 		}
 	}
 
-	byNamespace := IsLargeCluster(len(allResources))
+	byNamespace := IsLargeCluster(clusterSize)
 	namespaced := make(map[string]*ResourceBatch)
 
 	for groupResource, ids := range k8sResources {

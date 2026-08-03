@@ -96,7 +96,7 @@ func TestPartitionResources_SmallCluster(t *testing.T) {
 		node.GetID(): node,
 	}
 
-	resident, batches := PartitionResources(k8sResources, nil, allResources)
+	resident, batches := PartitionResources(len(allResources), k8sResources, nil, allResources)
 
 	assert.Empty(t, batches, "small clusters must not be split by namespace")
 	assert.Equal(t, ClusterScope, resident.Scope)
@@ -128,7 +128,7 @@ func TestPartitionResources_LargeCluster(t *testing.T) {
 		clusterRole.GetID(): clusterRole,
 	}
 
-	resident, batches := PartitionResources(k8sResources, nil, allResources)
+	resident, batches := PartitionResources(len(allResources), k8sResources, nil, allResources)
 
 	// only the ClusterRole is resident: a Namespace object belongs to the
 	// scope it names, so it is evaluated together with its own workloads
@@ -161,7 +161,7 @@ func TestPartitionResources_ExternalResourcesAreResident(t *testing.T) {
 		apiServerInfo.GetID(): apiServerInfo,
 	}
 
-	resident, batches := PartitionResources(k8sResources, externalResources, allResources)
+	resident, batches := PartitionResources(len(allResources), k8sResources, externalResources, allResources)
 
 	assert.Contains(t, resident.AllResources, apiServerInfo.GetID())
 	assert.Equal(t, []string{apiServerInfo.GetID()},
@@ -180,7 +180,7 @@ func TestPartitionResources_SkipsUnknownIDs(t *testing.T) {
 	k8sResources := K8SResources{"/v1/pods": {pod.GetID(), "path/to/nowhere"}}
 	allResources := map[string]workloadinterface.IMetadata{pod.GetID(): pod}
 
-	resident, batches := PartitionResources(k8sResources, nil, allResources)
+	resident, batches := PartitionResources(len(allResources), k8sResources, nil, allResources)
 
 	assert.Empty(t, batches)
 	assert.Equal(t, []string{pod.GetID()}, resident.K8SResources["/v1/pods"])

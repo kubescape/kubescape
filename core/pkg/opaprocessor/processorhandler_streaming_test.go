@@ -51,7 +51,7 @@ func TestProcessWithStreaming_Parity(t *testing.T) {
 		t.Setenv("LARGE_CLUSTER_SIZE", "1000")
 
 		// For now, just verify the partitioning logic works correctly
-		resident, batches := cautils.PartitionResources(k8sResources, nil, allResources)
+		resident, batches := cautils.PartitionResources(len(allResources), k8sResources, nil, allResources)
 
 		// Small cluster should have single resident batch
 		assert.Empty(t, batches, "Small cluster should not have namespace batches")
@@ -64,7 +64,7 @@ func TestProcessWithStreaming_Parity(t *testing.T) {
 		t.Setenv("LARGE_CLUSTER_SIZE", "1")
 
 		// Verify partitioning creates multiple batches
-		resident, batches := cautils.PartitionResources(k8sResources, nil, allResources)
+		resident, batches := cautils.PartitionResources(len(allResources), k8sResources, nil, allResources)
 
 		// Large cluster should split by namespace
 		assert.NotEmpty(t, batches, "Large cluster should have namespace batches")
@@ -141,7 +141,7 @@ func TestResourceBatch_MemoryUsage(t *testing.T) {
 	}
 
 	// Partition resources
-	resident, batches := cautils.PartitionResources(k8sResources, nil, allResources)
+	resident, batches := cautils.PartitionResources(len(allResources), k8sResources, nil, allResources)
 
 	// Verify resident batch contains only cluster-scoped resources
 	assert.Equal(t, 10, resident.Len(), "Resident batch should have 10 nodes")
@@ -202,7 +202,7 @@ func BenchmarkStreamingMemoryUsage(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		// Partition resources (simulates streaming approach)
-		resident, batches := cautils.PartitionResources(k8sResources, nil, allResources)
+		resident, batches := cautils.PartitionResources(len(allResources), k8sResources, nil, allResources)
 
 		// Process resident batch
 		_ = resident.Len()
@@ -251,7 +251,7 @@ func BenchmarkEagerMemoryUsage(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		// Partition resources (simulates eager approach - single batch)
-		resident, batches := cautils.PartitionResources(k8sResources, nil, allResources)
+		resident, batches := cautils.PartitionResources(len(allResources), k8sResources, nil, allResources)
 
 		// Process all resources at once (simulates eager evaluation)
 		_ = resident.Len()

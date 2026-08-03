@@ -436,9 +436,13 @@ func (scope evaluationScope) matchedObjects(rule *reporthandling.PolicyRule) []w
 }
 
 // evaluationScopes partitions the session's resources into the scopes to
-// evaluate, resident scope first and namespaces in sorted order.
+// evaluate, resident scope first and namespaces in sorted order. The
+// large-cluster bucketing decision is made from initialResourceCount — the
+// count frozen at construction — rather than the live size of AllResources,
+// so aggregator write-back during evaluation cannot re-bucket namespaces
+// mid-scan.
 func (opap *OPAProcessor) evaluationScopes() []evaluationScope {
-	resident, batches := cautils.PartitionResources(opap.K8SResources, opap.ExternalResources, opap.AllResources)
+	resident, batches := cautils.PartitionResources(opap.initialResourceCount, opap.K8SResources, opap.ExternalResources, opap.AllResources)
 
 	scopes := make([]evaluationScope, 0, len(batches)+1)
 	scopes = append(scopes, evaluationScope{name: resident.Scope, resident: resident})
