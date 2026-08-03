@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -215,4 +216,25 @@ func TestFilterBySeverity_CIGate(t *testing.T) {
 		controlIDs[i] = c.ControlID
 	}
 	assert.ElementsMatch(t, []string{"C-HIGH", "C-CRITICAL"}, controlIDs)
+}
+
+func TestPrintYAML(t *testing.T) {
+	cs := &ChangeSet{
+		New: []ControlChange{
+			{
+				ResourceID:  "path-123/api/v1/Pod/demo",
+				ControlID:   "C-0057",
+				ControlName: "Privileged container",
+				BaseStatus:  "",
+				HeadStatus:  "failed",
+			},
+		},
+	}
+	var buf bytes.Buffer
+	require.NoError(t, PrintYAML(&buf, cs))
+	yamlStr := buf.String()
+
+	assert.Contains(t, yamlStr, "resourceID: path-123/api/v1/Pod/demo")
+	assert.Contains(t, yamlStr, "controlID: C-0057")
+	assert.Contains(t, yamlStr, "controlName: Privileged container")
 }
