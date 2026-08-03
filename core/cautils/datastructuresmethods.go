@@ -39,7 +39,7 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, excludedRul
 					}
 				}
 
-				if shouldSkipRule(control, control.Rules[r], scanningScope, warned) {
+				if ShouldSkipRuleWithWarned(control, control.Rules[r], scanningScope, warned) {
 					continue
 				}
 				// if isRuleKubescapeVersionCompatible(control.Rules[r].Attributes, version) && isControlFitToScanScope(control, scanningScope) {
@@ -69,10 +69,14 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, excludedRul
 //  1. Rule is compatible with the current kubescape version
 //  2. Rule fits the current scanning scope
 func ShouldSkipRule(control reporthandling.Control, rule reporthandling.PolicyRule, scanningScope reporthandling.ScanningScopeType) bool {
-	return shouldSkipRule(control, rule, scanningScope, make(map[string]struct{}))
+	return ShouldSkipRuleWithWarned(control, rule, scanningScope, make(map[string]struct{}))
 }
 
-func shouldSkipRule(control reporthandling.Control, rule reporthandling.PolicyRule, scanningScope reporthandling.ScanningScopeType, warned map[string]struct{}) bool {
+// ShouldSkipRuleWithWarned is like ShouldSkipRule but accepts a warned map for
+// deduplicating malformed-version-bound warnings across multiple calls (e.g.
+// when iterating over frameworks/controls/rules in a loop). Callers should
+// create the map once before the loop and pass the same instance to every call.
+func ShouldSkipRuleWithWarned(control reporthandling.Control, rule reporthandling.PolicyRule, scanningScope reporthandling.ScanningScopeType, warned map[string]struct{}) bool {
 	if !isRuleKubescapeVersionCompatible(rule.Name, rule.Attributes, versioncheck.BuildNumber, warned) {
 		return true
 	}
@@ -94,7 +98,7 @@ func isRuleKubescapeVersionCompatible(ruleName string, attributes map[string]any
 	if from, ok := attributes["useFromKubescapeVersion"]; ok && from != nil {
 		switch sfrom := from.(type) {
 		case string:
-			if normalizedVersion != "" && semver.IsValid(normalizedVersion) && !semver.IsValid(sfrom) {
+			if !semver.IsValid(sfrom) {
 				key := ruleName + ":useFromKubescapeVersion:" + sfrom
 				if _, seen := warned[key]; !seen {
 					warned[key] = struct{}{}
@@ -107,8 +111,12 @@ func isRuleKubescapeVersionCompatible(ruleName string, attributes map[string]any
 				return false
 			}
 		default:
-			logger.L().Warning("non-string useFromKubescapeVersion in rule attributes, skipping rule",
-				helpers.String("rule", ruleName))
+			key := ruleName + ":useFromKubescapeVersion:non-string"
+			if _, seen := warned[key]; !seen {
+				warned[key] = struct{}{}
+				logger.L().Warning("non-string useFromKubescapeVersion in rule attributes, skipping rule",
+					helpers.String("rule", ruleName))
+			}
 			return false
 		}
 	}
@@ -130,8 +138,12 @@ func isRuleKubescapeVersionCompatible(ruleName string, attributes map[string]any
 				return false
 			}
 		default:
-			logger.L().Warning("non-string useUntilKubescapeVersion in rule attributes, skipping rule",
-				helpers.String("rule", ruleName))
+			key := ruleName + ":useUntilKubescapeVersion:non-string"
+			if _, seen := warned[key]; !seen {
+				warned[key] = struct{}{}
+				logger.L().Warning("non-string useUntilKubescapeVersion in rule attributes, skipping rule",
+					helpers.String("rule", ruleName))
+			}
 			return false
 		}
 	}

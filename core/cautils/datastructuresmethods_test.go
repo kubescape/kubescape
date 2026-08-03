@@ -442,7 +442,7 @@ func TestIsRuleKubescapeVersionCompatible_WarnsOnInvalidFrom(t *testing.T) {
 	logger.L().SetWriter(f)
 	defer logger.L().SetWriter(prev)
 
-	assert.True(t, isRuleKubescapeVersionCompatible("c-0002", map[string]any{"useFromKubescapeVersion": "not-a-version"}, "v1.0.133", make(map[string]struct{})))
+	assert.True(t, isRuleKubescapeVersionCompatible("c-0002", map[string]any{"useFromKubescapeVersion": "not-a-version"}, "", make(map[string]struct{})))
 
 	require.NoError(t, f.Sync())
 	b, err := os.ReadFile(f.Name())
@@ -468,4 +468,13 @@ func TestIsRuleKubescapeVersionCompatible_DedupWarnings(t *testing.T) {
 	b, err := os.ReadFile(f.Name())
 	require.NoError(t, err)
 	assert.Equal(t, 1, bytes.Count(b, []byte("invalid useUntilKubescapeVersion")), "expected exactly one warning, got duplicates")
+}
+
+func TestIsRuleKubescapeVersionCompatible_UnparseableBuildNumberAndInvalidUntil(t *testing.T) {
+	// when both BuildNumber and useUntilKubescapeVersion are invalid semver,
+	// the rule is correctly excluded (fail-closed). Master kept the rule in
+	// this scenario because semver.IsValid(normalizedVersion) was false and
+	// the comparison was skipped; this branch now consistently fail-closes.
+	assert.False(t, isRuleKubescapeVersionCompatible(
+		"r", map[string]any{"useUntilKubescapeVersion": "not-a-version"}, "not-a-version", make(map[string]struct{})))
 }

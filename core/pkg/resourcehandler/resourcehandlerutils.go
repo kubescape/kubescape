@@ -43,12 +43,13 @@ func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, 
 	queryableResources := make(QueryableResources)
 	excludedRulesMap := make(map[string]bool)
 	namespace := getScannedResourceNamespace(resource)
+	warned := make(map[string]struct{})
 
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {
 			for _, rule := range control.Rules {
 				// check if the rule should be skipped according to the scanning scope and the rule attributes
-				if cautils.ShouldSkipRule(control, rule, scanningScope) {
+				if cautils.ShouldSkipRuleWithWarned(control, rule, scanningScope, warned) {
 					continue
 				}
 
