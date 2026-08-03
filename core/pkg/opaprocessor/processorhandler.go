@@ -460,28 +460,6 @@ func sortedControlIDs(policies *cautils.Policies) []string {
 	return slices.Sorted(maps.Keys(policies.Controls))
 }
 
-// dropControlResults removes every trace of a control from the results
-// accumulated so far, and drops resources left with no control at all.
-func (opap *OPAProcessor) dropControlResults(controlID string) {
-	for resourceID, result := range opap.ResourcesResult {
-		kept := make([]resourcesresults.ResourceAssociatedControl, 0, len(result.AssociatedControls))
-		for _, associated := range result.AssociatedControls {
-			if associated.ControlID != controlID {
-				kept = append(kept, associated)
-			}
-		}
-		if len(kept) == len(result.AssociatedControls) {
-			continue
-		}
-		if len(kept) == 0 {
-			delete(opap.ResourcesResult, resourceID)
-			continue
-		}
-		result.AssociatedControls = kept
-		opap.ResourcesResult[resourceID] = result
-	}
-}
-
 func (opap *OPAProcessor) loggerStartScanning() {
 	targetScan := opap.Metadata.ScanMetadata.ScanningTarget
 	if reporthandlingv2.Cluster == targetScan {
