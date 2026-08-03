@@ -84,7 +84,7 @@ func isRuleKubescapeVersionCompatible(attributes map[string]any, version string)
 	if from, ok := attributes["useFromKubescapeVersion"]; ok && from != nil {
 		switch sfrom := from.(type) {
 		case string:
-			if normalizedVersion != "" && semver.IsValid(normalizedVersion) && semver.IsValid(sfrom) && semver.Compare(normalizedVersion, sfrom) == -1 {
+			if normalizedVersion != "" && semver.IsValid(normalizedVersion) && semver.Compare(normalizedVersion, sfrom) == -1 {
 				return false
 			}
 		default:
@@ -95,7 +95,7 @@ func isRuleKubescapeVersionCompatible(attributes map[string]any, version string)
 	if until, ok := attributes["useUntilKubescapeVersion"]; ok && until != nil {
 		switch suntil := until.(type) {
 		case string:
-			if normalizedVersion == "" || (semver.IsValid(normalizedVersion) && semver.IsValid(suntil) && semver.Compare(normalizedVersion, suntil) >= 0) {
+			if normalizedVersion == "" || (semver.IsValid(normalizedVersion) && semver.Compare(normalizedVersion, suntil) >= 0) {
 				return false
 			}
 		default:
