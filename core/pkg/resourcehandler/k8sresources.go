@@ -877,6 +877,51 @@ func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber(ctx context.Context)
 	return len(scheduableNodes.Items), nil
 }
 
+// namespacedResourcesToEstimate is the set of common namespaced GVRs used to
+// estimate cluster size. These cover the vast majority of resources in a
+// typical cluster and keep the estimate cheap (one limit=1 LIST per type).
+var namespacedResourcesToEstimate = []schema.GroupVersionResource{
+	{Group: "", Version: "v1", Resource: "pods"},
+	{Group: "", Version: "v1", Resource: "services"},
+	{Group: "", Version: "v1", Resource: "configmaps"},
+	{Group: "", Version: "v1", Resource: "secrets"},
+	{Group: "", Version: "v1", Resource: "serviceaccounts"},
+	{Group: "", Version: "v1", Resource: "persistentvolumeclaims"},
+	{Group: "apps", Version: "v1", Resource: "deployments"},
+	{Group: "apps", Version: "v1", Resource: "replicasets"},
+	{Group: "apps", Version: "v1", Resource: "statefulsets"},
+	{Group: "apps", Version: "v1", Resource: "daemonsets"},
+	{Group: "batch", Version: "v1", Resource: "jobs"},
+	{Group: "batch", Version: "v1", Resource: "cronjobs"},
+	{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"},
+	{Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"},
+	{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "roles"},
+	{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"},
+}
+
+// EstimateClusterSize estimates the number of namespaced resources in the
+// cluster by issuing metadata-only LIST requests (limit=1) to the API server
+// and summing the remainingItemCount from each response.
+// Returns 0 if the estimate cannot be produced (discovery or LIST errors).
+func (k8sHandler *K8sResourceHandler) EstimateClusterSize(ctx context.Context, scanInfo *cautils.ScanInfo) (int, error) {
+	if k8sHandler.k8s == nil || k8sHandler.k8s.DynamicClient == nil {
+		return 0, fmt.Errorf("kubernetes client not available")
+	}
+
+	var total int
+	for _, gvr := range namespacedResourcesToEstimate {
+		result, err := k8sHandler.k8s.DynamicClient.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{Limit: 1})
+		if err != nil {
+			continue
+		}
+		if rc := result.GetRemainingItemCount(); rc != nil {
+			total += int(*rc)
+		}
+	}
+
+	return total, nil
+}
+
 func (k8sHandler *K8sResourceHandler) setCloudProvider(ctx context.Context) error {
 	nodeList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {

@@ -2,12 +2,98 @@ package core
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/version"
 )
+
+// estimateClusterSizeMock implements resourcehandler.IResourceHandler with a
+// controllable EstimateClusterSize return value. All other methods are stubs.
+type estimateClusterSizeMock struct {
+	size int
+	err  error
+}
+
+func (m estimateClusterSizeMock) GetResources(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
+	return nil, nil, nil, nil, nil
+}
+
+func (m estimateClusterSizeMock) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
+	return nil, nil, 0, nil
+}
+
+func (m estimateClusterSizeMock) EstimateClusterSize(ctx context.Context, scanInfo *cautils.ScanInfo) (int, error) {
+	return m.size, m.err
+}
+
+func (m estimateClusterSizeMock) GetClusterAPIServerInfo(ctx context.Context) *version.Info {
+	return nil
+}
+
+func (m estimateClusterSizeMock) GetCloudProvider() string {
+	return ""
+}
+
+func TestEstimateClusterSize(t *testing.T) {
+	// A ScanInfo with no input patterns is treated as a cluster scan.
+	clusterScanInfo := &cautils.ScanInfo{}
+
+	// A ScanInfo with an explicit file input is treated as a file scan.
+	fileScanInfo := &cautils.ScanInfo{
+		InputPatterns: map[string]string{"deployment.yaml": ""},
+	}
+
+	tests := []struct {
+		name     string
+		handler  resourcehandler.IResourceHandler
+		scanInfo *cautils.ScanInfo
+		want     int
+	}{
+		{
+			name:     "non-cluster context returns 0",
+			handler:  estimateClusterSizeMock{size: 5000},
+			scanInfo: fileScanInfo,
+			want:     0,
+		},
+		{
+			name:     "handler error falls back to 0",
+			handler:  estimateClusterSizeMock{err: errors.New("API unavailable")},
+			scanInfo: clusterScanInfo,
+			want:     0,
+		},
+		{
+			name:     "small cluster estimate",
+			handler:  estimateClusterSizeMock{size: 500},
+			scanInfo: clusterScanInfo,
+			want:     500,
+		},
+		{
+			name:     "large cluster estimate",
+			handler:  estimateClusterSizeMock{size: 10000},
+			scanInfo: clusterScanInfo,
+			want:     10000,
+		},
+		{
+			name:     "zero estimate (empty cluster)",
+			handler:  estimateClusterSizeMock{size: 0},
+			scanInfo: clusterScanInfo,
+			want:     0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := estimateClusterSize(tt.handler, context.Background(), tt.scanInfo)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
 
 func TestGetOutputPrinters(t *testing.T) {
 	ctx := context.Background()

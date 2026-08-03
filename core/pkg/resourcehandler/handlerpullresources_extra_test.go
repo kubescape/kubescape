@@ -35,6 +35,14 @@ func (m collectResourcesMock) GetCloudProvider() string {
 	return m.cloudProvider
 }
 
+func (m collectResourcesMock) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
+	return nil, nil, 0, errors.New("not implemented in mock")
+}
+
+func (m collectResourcesMock) EstimateClusterSize(ctx context.Context, scanInfo *cautils.ScanInfo) (int, error) {
+	return 0, nil
+}
+
 func TestCollectResources(t *testing.T) {
 	tests := []struct {
 		name       string

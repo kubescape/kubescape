@@ -100,6 +100,12 @@ func (fileHandler *FileResourceHandler) GetCloudProvider() string {
 	return ""
 }
 
+// EstimateClusterSize always returns 0 for file-based scans since streaming
+// is not needed for local or URL-based resources.
+func (fileHandler *FileResourceHandler) EstimateClusterSize(ctx context.Context, scanInfo *cautils.ScanInfo) (int, error) {
+	return 0, nil
+}
+
 // StreamResourcesBatches provides a streaming interface for file-based resources.
 // Since file-based resources are typically smaller, this implementation loads all resources
 // and returns them as a single batch for simplicity.

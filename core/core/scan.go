@@ -269,7 +269,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	enableStreaming := scanInfo.EnableStreaming
 	if !enableStreaming && scanInfo.GetScanningContext() == cautils.ContextCluster {
 		// Auto-enable streaming for large clusters
-		enableStreaming = cautils.IsLargeCluster(estimateClusterSize(interfaces.resourceHandler, ctxResources, scanData, scanInfo))
+		enableStreaming = cautils.IsLargeCluster(estimateClusterSize(interfaces.resourceHandler, ctxResources, scanInfo))
 		if enableStreaming {
 			logger.L().Ctx(ctxResources).Info("Large cluster detected, enabling resource streaming to reduce memory usage")
 		}
@@ -454,17 +454,20 @@ func isAirGappedMode(scanInfo *cautils.ScanInfo) bool {
 }
 
 // estimateClusterSize estimates the cluster size for determining if streaming should be enabled.
-// For cluster scans, it queries the Kubernetes API for resource counts.
-// For file-based scans, it returns 0 (streaming not needed).
-func estimateClusterSize(resourceHandler resourcehandler.IResourceHandler, ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) int {
+// For cluster scans it delegates to the resource handler which queries the API server
+// with metadata-only LIST requests. For file-based scans it returns 0.
+// Returns 0 on error so that a failed estimate falls back to the non-streaming path.
+func estimateClusterSize(resourceHandler resourcehandler.IResourceHandler, ctx context.Context, scanInfo *cautils.ScanInfo) int {
 	if scanInfo.GetScanningContext() != cautils.ContextCluster {
 		return 0
 	}
 
-	// For cluster scans, we need to estimate the size without loading all resources
-	// This is a rough estimate based on common resource types
-	// In a production implementation, this could use Kubernetes discovery APIs
-	return 2501 // Force streaming for testing purposes
+	size, err := resourceHandler.EstimateClusterSize(ctx, scanInfo)
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to estimate cluster size, falling back to non-streaming", helpers.Error(err))
+		return 0
+	}
+	return size
 }
 
 // collectAndProcessResourcesWithStreaming collects and processes resources using streaming
