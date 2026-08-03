@@ -361,6 +361,7 @@ kubescape version
 - Consider running with a service account that has limited permissions in production
 - **Credential Handling**: The `scan_container_image` tool accepts optional registry credentials (`username` and `password`). Be aware that parameters supplied to MCP tools may be retained in client conversation logs or model contexts depending on your client environment.
 - **Image Reference Validation**: The `scan_container_image` tool validates image names as remote image references and rejects local file paths and scheme prefixes (such as `dir:`, `file:`, `sbom:`) to prevent unauthorized local filesystem access.
+- **Air-Gapped Environments**: In air-gapped environments, set the `KS_GRYPE_LISTING_URL` environment variable to point to your internal Grype vulnerability database mirror listing URL.
 
 ## Related Documentation
 

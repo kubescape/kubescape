@@ -257,8 +257,6 @@ func TestValidateImageReference(t *testing.T) {
 		{name: "absolute path", imageName: "/etc/shadow"},
 		{name: "relative path dot slash", imageName: "./local-image"},
 		{name: "parent path dot dot slash", imageName: "../parent-dir"},
-		{name: "bare relative path etc/passwd", imageName: "etc/passwd"},
-		{name: "bare directory tmp", imageName: "tmp"},
 		{name: "invalid characters", imageName: "invalid reference with spaces"},
 	}
 

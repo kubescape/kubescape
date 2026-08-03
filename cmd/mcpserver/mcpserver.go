@@ -46,23 +46,36 @@ func (ksServer *KubescapeMcpserver) getImageScanService(ctx context.Context) (*i
 		return ksServer.imageScanSvc, nil
 	}
 
+	type initResult struct {
+		svc *imagescan.Service
+		err error
+	}
+
+	initCh := make(chan initResult, 1)
+	go func() {
+		distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(ksServer.dbListingURL)
+		if err != nil {
+			initCh <- initResult{err: fmt.Errorf("failed to initialize default Grype database configuration: %w", err)}
+			return
+		}
+		svc, err := imagescan.NewScanService(distCfg, installCfg)
+		if err != nil {
+			initCh <- initResult{err: fmt.Errorf("failed to initialize image scan service: %w", err)}
+			return
+		}
+		initCh <- initResult{svc: svc}
+	}()
+
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
+		return nil, fmt.Errorf("image scan service initialization timed out or was canceled: %w", ctx.Err())
+	case res := <-initCh:
+		if res.err != nil {
+			return nil, res.err
+		}
+		ksServer.imageScanSvc = res.svc
+		return ksServer.imageScanSvc, nil
 	}
-
-	distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(ksServer.dbListingURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize default Grype database configuration: %w", err)
-	}
-	svc, err := imagescan.NewScanService(distCfg, installCfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize image scan service: %w", err)
-	}
-
-	ksServer.imageScanSvc = svc
-	return ksServer.imageScanSvc, nil
 }
 
 func (ksServer *KubescapeMcpserver) getKsClient() (spdxv1beta1.SpdxV1beta1Interface, error) {
@@ -914,9 +927,6 @@ func mcpServerEntrypoint() error {
 	}
 
 	dbListingURL := os.Getenv("KS_GRYPE_LISTING_URL")
-	if dbListingURL == "" {
-		dbListingURL = os.Getenv("GRYPE_DB_LISTING_URL")
-	}
 
 	ksServer := &KubescapeMcpserver{
 		s:            s,

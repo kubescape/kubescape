@@ -51,6 +51,7 @@ func validateImageReference(imageName string) error {
 	forbiddenPrefixes := []string{
 		"dir:", "file:", "sbom:", "purl:", "cpe:", "pkg:", "oci-dir:", "oci-archive:",
 		"docker-archive:", "docker-daemon:", "docker:", "podman:", "singularity:",
+		"local-file:", "local-directory:", "daemon:", "containerd:", "image:", "oci-model:", "snap:",
 	}
 	for _, prefix := range forbiddenPrefixes {
 		if strings.HasPrefix(lower, prefix) {
@@ -70,11 +71,6 @@ func validateImageReference(imageName string) error {
 	}
 	if _, err := os.Stat(imageName); err == nil {
 		return fmt.Errorf("invalid image reference %q: resolves to a local file or directory", imageName)
-	}
-	if !strings.HasPrefix(pathPart, "/") {
-		if _, err := os.Stat("/" + pathPart); err == nil {
-			return fmt.Errorf("invalid image reference %q: resolves to a local file or directory", imageName)
-		}
 	}
 
 	// Validate using go-containerregistry
@@ -174,7 +170,6 @@ func (ksServer *KubescapeMcpserver) runImageScan(ctx context.Context, imageName,
 	if !ksServer.imageScanMu.TryLock() {
 		return nil, fmt.Errorf("another container image scan is currently in progress; please wait for it to complete")
 	}
-	defer ksServer.imageScanMu.Unlock()
 
 	// Derive a bounded child context with a timeout covering service initialization and scan
 	scanCtx, cancel := context.WithTimeout(ctx, defaultImageScanTimeout)
@@ -184,6 +179,7 @@ func (ksServer *KubescapeMcpserver) runImageScan(ctx context.Context, imageName,
 
 	svc, err := ksServer.getImageScanService(scanCtx)
 	if err != nil {
+		ksServer.imageScanMu.Unlock()
 		return nil, fmt.Errorf("failed to get image scan service: %w", err)
 	}
 
@@ -199,6 +195,7 @@ func (ksServer *KubescapeMcpserver) runImageScan(ctx context.Context, imageName,
 
 	ch := make(chan result, 1)
 	go func() {
+		defer ksServer.imageScanMu.Unlock()
 		res, err := svc.Scan(scanCtx, imageName, creds, nil, nil)
 		ch <- result{data: res, err: err}
 	}()

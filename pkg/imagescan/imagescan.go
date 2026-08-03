@@ -139,6 +139,7 @@ func getProviderConfig(creds RegistryCredentials) pkg.ProviderConfig {
 		SyftProviderConfig: pkg.SyftProviderConfig{
 			RegistryOptions: regOpts,
 			SBOMOptions:     syft.DefaultCreateSBOMConfig(),
+			Sources:         []string{"registry"},
 		},
 		SynthesisConfig: pkg.SynthesisConfig{
 			GenerateMissingCPEs: true,
