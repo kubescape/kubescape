@@ -241,8 +241,8 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 
 	// Start streaming goroutine
 	go func() {
-		defer close(batchChan)
 		defer close(errChan)
+		defer close(batchChan)
 		defer logger.L().StopSuccess("Done streaming Kubernetes objects")
 
 		if err := k8sHandler.collectAndStreamBatches(ctx, queryableResources, globalFieldSelectors, sessionObj, scanInfo, ksResourceMap, batchChan); err != nil {

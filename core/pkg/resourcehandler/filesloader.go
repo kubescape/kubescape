@@ -107,15 +107,17 @@ func (fileHandler *FileResourceHandler) EstimateClusterSize(ctx context.Context,
 }
 
 // StreamResourcesBatches provides a streaming interface for file-based resources.
-// Since file-based resources are typically smaller, this implementation loads all resources
-// and returns them as a single batch for simplicity.
+// This implementation loads all resources via GetResources and returns them as a
+// single batch — it provides no memory bound and behaves identically to the
+// non-streaming path. File-based scans should not rely on --enable-streaming for
+// memory reduction.
 func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
 	batchChan := make(chan *cautils.ResourceBatch, 1)
 	errChan := make(chan error, 1)
 
 	go func() {
-		defer close(batchChan)
 		defer close(errChan)
+		defer close(batchChan)
 
 		// Use existing GetResources implementation
 		k8sResources, allResources, externalResources, excludedRulesMap, err := fileHandler.GetResources(ctx, sessionObj, scanInfo)
