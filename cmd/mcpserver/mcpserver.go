@@ -58,11 +58,20 @@ func (ksServer *KubescapeMcpserver) getImageScanService(ctx context.Context) (*i
 			initCh <- initResult{err: fmt.Errorf("failed to initialize default Grype database configuration: %w", err)}
 			return
 		}
-		svc, err := imagescan.NewScanService(distCfg, installCfg)
+		svc, err := imagescan.NewRemoteOnlyScanService(distCfg, installCfg)
 		if err != nil {
 			initCh <- initResult{err: fmt.Errorf("failed to initialize image scan service: %w", err)}
 			return
 		}
+
+		ksServer.imageScanSvcMu.Lock()
+		if ksServer.imageScanSvc == nil {
+			ksServer.imageScanSvc = svc
+		} else {
+			svc.Close()
+		}
+		ksServer.imageScanSvcMu.Unlock()
+
 		initCh <- initResult{svc: svc}
 	}()
 
@@ -73,8 +82,7 @@ func (ksServer *KubescapeMcpserver) getImageScanService(ctx context.Context) (*i
 		if res.err != nil {
 			return nil, res.err
 		}
-		ksServer.imageScanSvc = res.svc
-		return ksServer.imageScanSvc, nil
+		return res.svc, nil
 	}
 }
 
