@@ -130,9 +130,7 @@ deny contains msga if {
 // proving the second rule was evaluated with the frozen initial count, not
 // the grown live count.
 func TestProcessRule_NamespaceBucketingStableAcrossAggregatorGrowth(t *testing.T) {
-	origLarge := largeClusterSize
-	largeClusterSize = 4
-	t.Cleanup(func() { largeClusterSize = origLarge })
+	t.Setenv("LARGE_CLUSTER_SIZE", "4")
 
 	binding := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "rbac.authorization.k8s.io/v1",
@@ -174,7 +172,7 @@ func TestProcessRule_NamespaceBucketingStableAcrossAggregatorGrowth(t *testing.T
 	opap := NewOPAProcessor(sess, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
 	opap.initialResourceCount = len(sess.AllResources)
 
-	assert.False(t, isLargeCluster(opap.initialResourceCount), "test setup must start below the large-cluster threshold")
+	assert.False(t, cautils.IsLargeCluster(opap.initialResourceCount), "test setup must start below the large-cluster threshold")
 
 	aggregatorRule := &reporthandling.PolicyRule{
 		Rule:         "package armo_builtins\n\ndeny[msga] {\n    false\n    msga := {\"alertMessage\": \"unused\"}\n}\n",
@@ -193,7 +191,7 @@ func TestProcessRule_NamespaceBucketingStableAcrossAggregatorGrowth(t *testing.T
 	_, err := opap.processRule(context.Background(), aggregatorRule, nil, evaluationScope{}, "")
 	assert.NoError(t, err)
 
-	assert.True(t, isLargeCluster(len(opap.AllResources)),
+	assert.True(t, cautils.IsLargeCluster(len(opap.AllResources)),
 		"aggregator write-back must grow AllResources past the threshold for this test to be meaningful")
 
 	podRule := &reporthandling.PolicyRule{
@@ -250,9 +248,7 @@ deny[msga] {
 // rule denies any Pod evaluated without its sibling in the same batch, which
 // only happens if per-namespace bucketing split them into separate batches.
 func TestProcess_NamespaceBucketingWiredFromConstruction(t *testing.T) {
-	origLarge := largeClusterSize
-	largeClusterSize = 1
-	t.Cleanup(func() { largeClusterSize = origLarge })
+	t.Setenv("LARGE_CLUSTER_SIZE", "1")
 
 	podA := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",

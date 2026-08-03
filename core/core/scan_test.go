@@ -46,7 +46,7 @@ func TestEstimateClusterSize(t *testing.T) {
 
 	// A ScanInfo with an explicit file input is treated as a file scan.
 	fileScanInfo := &cautils.ScanInfo{
-		InputPatterns: map[string]string{"deployment.yaml": ""},
+		InputPatterns: []string{"deployment.yaml"},
 	}
 
 	tests := []struct {

@@ -181,7 +181,10 @@ func TestNewFixHandler_BasePathFlag_AcceptsReportPathInsideBasePath(t *testing.T
 
 	h, err := NewFixHandler(&metav1.FixInfo{ReportFile: reportFile, BasePath: trustedRoot})
 	require.NoError(t, err)
-	assert.Equal(t, scannedDir, h.localBasePath)
+	// EvalSymlinks because macOS resolves /var → /private/var.
+	resolved, err := filepath.EvalSymlinks(scannedDir)
+	require.NoError(t, err)
+	assert.Equal(t, resolved, h.localBasePath)
 }
 
 func TestNewFixHandler_BasePathFlag_ReportPathEqualsBasePathIsAccepted(t *testing.T) {
@@ -190,7 +193,9 @@ func TestNewFixHandler_BasePathFlag_ReportPathEqualsBasePathIsAccepted(t *testin
 
 	h, err := NewFixHandler(&metav1.FixInfo{ReportFile: reportFile, BasePath: trustedRoot})
 	require.NoError(t, err)
-	assert.Equal(t, trustedRoot, h.localBasePath)
+	resolved, err := filepath.EvalSymlinks(trustedRoot)
+	require.NoError(t, err)
+	assert.Equal(t, resolved, h.localBasePath)
 }
 
 func TestNewFixHandler_BasePathFlag_InvalidBasePathErrors(t *testing.T) {
