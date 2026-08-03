@@ -134,6 +134,35 @@ func (s *LocalGitRepositoryTestSuite) TestRepositoryWithoutRemotes() {
 	}
 }
 
+// TestGetGitRootDirWithoutUsableMetadata verifies that the repository root resolves
+// from any path inside the worktree even when the branch and remote metadata
+// NewLocalGitRepository demands is missing. Without it, a scan of a subdirectory
+// reports paths relative to the scan directory instead of the repository root.
+func TestGetGitRootDirWithoutUsableMetadata(t *testing.T) {
+	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	_, err = gitv5.PlainInit(repoRoot, false)
+	require.NoError(t, err)
+
+	subDir := filepath.Join(repoRoot, "workloads", "apps")
+	require.NoError(t, os.MkdirAll(subDir, 0o750))
+
+	_, err = NewLocalGitRepository(subDir)
+	require.Error(t, err, "the repository's metadata must be unusable for this test to mean anything")
+
+	root, err := GetGitRootDir(subDir)
+	if assert.NoError(t, err) {
+		assert.Equal(t, repoRoot, root)
+	}
+}
+
+// TestGetGitRootDirOutsideRepository verifies that a path outside any repository
+// reports no root rather than an arbitrary one.
+func TestGetGitRootDirOutsideRepository(t *testing.T) {
+	_, err := GetGitRootDir(t.TempDir())
+	assert.Error(t, err)
+}
+
 func (s *LocalGitRepositoryTestSuite) TestGetBranchName() {
 	if localRepo, err := NewLocalGitRepository(s.gitRepositoryPaths["localrepo"]); s.NoError(err) {
 		s.Equal("master", localRepo.GetBranchName())

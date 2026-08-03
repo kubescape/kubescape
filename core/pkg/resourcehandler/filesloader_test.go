@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	gitv5 "github.com/go-git/go-git/v5"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -39,6 +40,72 @@ func TestGetResourcesFromPath_SingleFileRelativePathIsRepositoryRelative(t *test
 		assert.Equal(t, "pod.yaml", filepath.Base(rel))
 	}
 }
+
+// newRepoWithUnusableGitMetadata builds a repository that go-git can locate but
+// NewLocalGitRepository rejects (unborn HEAD, no remotes), as a CI checkout often is,
+// and writes manifestPath inside it.
+func newRepoWithUnusableGitMetadata(t *testing.T, manifestPath string) string {
+	t.Helper()
+
+	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	_, err = gitv5.PlainInit(repoRoot, false)
+	require.NoError(t, err)
+
+	_, err = cautils.NewLocalGitRepository(repoRoot)
+	require.Error(t, err, "the repository's git metadata must be unusable for this test to mean anything")
+
+	absManifest := filepath.Join(repoRoot, filepath.FromSlash(manifestPath))
+	require.NoError(t, os.MkdirAll(filepath.Dir(absManifest), 0o750))
+	require.NoError(t, os.WriteFile(absManifest, []byte(singlePodManifest), 0o600))
+
+	return repoRoot
+}
+
+// TestGetResourcesFromPath_AnchorsOnRepositoryRootWithoutUsableGitMetadata verifies
+// that a scan reports paths relative to the repository root even when the
+// repository's branch and remote metadata is unusable. A CI checkout with a detached
+// HEAD or no configured remote is still a repository, and anchoring on the scan path
+// instead drops the prefix, leaving GitLab and GitHub with findings that point at
+// paths the repository does not contain.
+func TestGetResourcesFromPath_AnchorsOnRepositoryRootWithoutUsableGitMetadata(t *testing.T) {
+	const manifest = "workloads/apps/base/app/cronjobs.yaml"
+
+	tests := []struct {
+		name     string
+		scanPath string
+	}{
+		{name: "directory scan", scanPath: "workloads"},
+		{name: "single file scan", scanPath: manifest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repoRoot := newRepoWithUnusableGitMetadata(t, manifest)
+
+			workloadIDToSource, workloads, err := getResourcesFromPath(context.TODO(), filepath.Join(repoRoot, filepath.FromSlash(tt.scanPath)), cautils.HelmValueOptions{})
+			require.NoError(t, err)
+			require.NotEmpty(t, workloads)
+
+			for _, w := range workloads {
+				src, ok := workloadIDToSource[w.GetID()]
+				require.True(t, ok, "every workload must have a source")
+				assert.Equal(t, manifest, filepath.ToSlash(src.RelativePath), "the path must be relative to the repository root, not the scan path")
+				assert.Equal(t, repoRoot, src.Path, "Source.Path must be the root RelativePath resolves against")
+			}
+		})
+	}
+}
+
+const singlePodManifest = `apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.14.2
+`
 
 // A chart whose helm render fails must still have its static templates plain-scanned. The render is
 // best-effort and drops the whole chart on any template error, so excluding templates/ unconditionally

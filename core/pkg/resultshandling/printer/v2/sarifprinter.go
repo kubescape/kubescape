@@ -23,6 +23,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	v2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -208,16 +209,15 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 			resourceSource := opaSessionObj.ResourceSource[resourceID]
 			relPath := resourceSource.RelativePath
 
-			// Github Code Scanning considers results not associated to a file path meaningless and invalid when uploading
-			if relPath == "" && basePath == "" {
+			// Github Code Scanning considers results not associated to a file path
+			// meaningless and invalid when uploading, and the location written to the
+			// report is the relative path alone, so a base path cannot stand in for a
+			// missing one
+			if relPath == "" {
 				continue
 			}
 
-			effectiveBase := basePath
-			if effectiveBase == "" && resourceSource.Path != "" {
-				effectiveBase = resourceSource.Path
-			}
-			rsrcAbsPath := filepath.Join(effectiveBase, relPath)
+			rsrcAbsPath := filepath.Join(effectiveBasePath(resourceSource, basePath), relPath)
 			locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
 			if err != nil {
 				logger.L().Warning("failed to create location resolver, SARIF locations will default to line 1", helpers.Error(err))
@@ -461,12 +461,24 @@ func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
 		return opaSessionObj.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
 	case v2.File:
 		if opaSessionObj.Metadata.ContextMetadata.FileContextMetadata != nil {
-			return filepath.Dir(opaSessionObj.Metadata.ContextMetadata.FileContextMetadata.FilePath)
+			return cautils.FileScanRootPath(opaSessionObj.Metadata.ContextMetadata.FileContextMetadata.FilePath)
 		}
 		return ""
 	default:
 		return ""
 	}
+}
+
+// effectiveBasePath returns the root a resource's RelativePath resolves against. The
+// resource's own Source.Path is authoritative because it is the root the relative path
+// was computed from, which the scan-wide base path is not: it covers only the first
+// input pattern of a multi-input scan. Sources that intentionally carry no path
+// (cloned repos) fall back to it.
+func effectiveBasePath(resourceSource reporthandling.Source, basePath string) string {
+	if resourceSource.Path != "" {
+		return resourceSource.Path
+	}
+	return basePath
 }
 
 // generateRemediationMessage generates a remediation message for the given control summary
