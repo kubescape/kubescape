@@ -487,7 +487,7 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	reportResults.ControlTimeout = controlTimeout
 
 	// Process batches with streaming
-	if err := reportResults.ProcessWithStreaming(ctx, scanData.AllPolicies, batchChan, errChan, cautils.NewProgressHandler(""), expectedNamespaceBatches); err != nil {
+	if err := reportResults.ProcessWithStreaming(ctx, batchChan, errChan, cautils.NewProgressHandler(""), expectedNamespaceBatches); err != nil {
 		return fmt.Errorf("failed to process rules with streaming: %w", err)
 	}
 

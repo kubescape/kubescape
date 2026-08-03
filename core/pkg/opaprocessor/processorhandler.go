@@ -157,7 +157,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 // Note: Streaming bounds OPA evaluation input memory, not total memory.
 // Downstream components (exceptions, sensitive data removal) require minimal
 // resource metadata which is retained, but full resource objects are released.
-func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, policies *cautils.Policies, batchChan <-chan *cautils.ResourceBatch, errChan <-chan error, progressListener IJobProgressNotificationClient, expectedNamespaceBatches int) error {
+func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-chan *cautils.ResourceBatch, errChan <-chan error, progressListener IJobProgressNotificationClient, expectedNamespaceBatches int) error {
 	ctx, span := otel.Tracer("").Start(ctx, "OPAProcessor.ProcessWithStreaming")
 	defer span.End()
 	opap.loggerStartScanning()
@@ -166,7 +166,7 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, policies *ca
 	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.ExcludedRules, cautils.GetScanningScope(opap.Metadata.ContextMetadata))
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
-	controlIDs := sortedControlIDs(policies)
+	controlIDs := sortedControlIDs(opap.AllPolicies)
 
 	// Calculate total progress steps: controls × (resident scope + namespace scopes)
 	totalSteps := len(controlIDs) * (1 + expectedNamespaceBatches)
@@ -224,7 +224,7 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, policies *ca
 
 	// Process resident batch first
 	residentScope := evaluationScope{name: residentBatch.Scope, resident: residentBatch}
-	if err := opap.processScope(ctx, policies, controlIDs, residentScope, progressListener, remaining); err != nil {
+	if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, residentScope, progressListener, remaining); err != nil {
 		return err
 	}
 
@@ -242,7 +242,7 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, policies *ca
 
 			// Process this namespace batch
 			namespaceScope := evaluationScope{name: batch.Scope, batch: batch, resident: residentBatch}
-			if err := opap.processScope(ctx, policies, controlIDs, namespaceScope, progressListener, remaining); err != nil {
+			if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, namespaceScope, progressListener, remaining); err != nil {
 				return err
 			}
 
