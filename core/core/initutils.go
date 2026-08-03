@@ -37,6 +37,13 @@ var (
 
 // isConnectedToCluster reports whether a Kubernetes cluster connection is
 // available, loading the cluster config at most once per process.
+//
+// The load result is only a hint: on the success path the real answer still
+// comes from k8sinterface.IsConnectedToCluster(), so an explicit
+// SetConnectedToCluster(false) is honored even when a kubeconfig file is
+// readable. On the failure path we short-circuit instead of re-entering
+// k8sinterface (whose globals are unsynchronized), which would re-trigger
+// LoadK8sConfig() and SetConnectedToCluster(false) concurrently on every call.
 func isConnectedToCluster() bool {
 	k8sConfigOnce.Do(func() {
 		k8sConfigLoaded = k8sinterface.LoadK8sConfig() == nil
@@ -44,7 +51,10 @@ func isConnectedToCluster() bool {
 			k8sinterface.SetConnectedToCluster(false)
 		}
 	})
-	return k8sConfigLoaded
+	if !k8sConfigLoaded {
+		return false
+	}
+	return k8sinterface.IsConnectedToCluster() // still the source of truth
 }
 
 // getKubernetesApi
