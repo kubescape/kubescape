@@ -24,32 +24,35 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, excludedRul
 			policies.Frameworks = append(policies.Frameworks, frameworks[i].Name)
 		}
 		for j := range frameworks[i].Controls {
+			// operate on a local copy so we never mutate the caller's backing array -
+			// frameworks may be a cached slice reused across scans (see PolicyHandler's cachedFrameworks)
+			control := frameworks[i].Controls[j]
 			compatibleRules := []reporthandling.PolicyRule{}
-			for r := range frameworks[i].Controls[j].Rules {
+			for r := range control.Rules {
 				if excludedRules != nil {
-					ruleName := frameworks[i].Controls[j].Rules[r].Name
+					ruleName := control.Rules[r].Name
 					if _, exclude := excludedRules[ruleName]; exclude {
 						continue
 					}
 				}
 
-				if ShouldSkipRule(frameworks[i].Controls[j], frameworks[i].Controls[j].Rules[r], scanningScope) {
+				if ShouldSkipRule(control, control.Rules[r], scanningScope) {
 					continue
 				}
-				// if isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) && isControlFitToScanScope(frameworks[i].Controls[j], scanningScope) {
-				compatibleRules = append(compatibleRules, frameworks[i].Controls[j].Rules[r])
+				// if isRuleKubescapeVersionCompatible(control.Rules[r].Attributes, version) && isControlFitToScanScope(control, scanningScope) {
+				compatibleRules = append(compatibleRules, control.Rules[r])
 				// }
 			}
 			if len(compatibleRules) > 0 {
-				frameworks[i].Controls[j].Rules = compatibleRules
-				policies.Controls[frameworks[i].Controls[j].ControlID] = frameworks[i].Controls[j]
+				control.Rules = compatibleRules
+				policies.Controls[control.ControlID] = control
 			} else { // if the control type is manual review, add it to the list of controls
-				actionRequiredStr := frameworks[i].Controls[j].GetActionRequiredAttribute()
+				actionRequiredStr := control.GetActionRequiredAttribute()
 				if actionRequiredStr == "" {
 					continue
 				}
 				if actionRequiredStr == string(apis.SubStatusManualReview) {
-					policies.Controls[frameworks[i].Controls[j].ControlID] = frameworks[i].Controls[j]
+					policies.Controls[control.ControlID] = control
 				}
 			}
 
