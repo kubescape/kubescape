@@ -22,6 +22,15 @@ const (
 	TargetFramework      = "framework"
 	TargetArtifacts      = "artifacts"
 	TargetAttackTracks   = "attack-tracks"
+
+	// downloadDirPerm matches the 0700 policy customerloader.go's
+	// updateConfigFile() already enforces (and re-tightens with chmod) on
+	// ~/.kubescape: setPathAndFilename() defaults downloadInfo.Path to that
+	// same directory (getter.GetDefaultPath("")) when no --output path is
+	// given, and it holds config.json's AccessKey. A more permissive mode
+	// here would race the config loader's own hardening and could leave the
+	// directory group-readable depending on which one runs first.
+	downloadDirPerm = 0700
 )
 
 var downloadFunc = map[string]func(context.Context, *metav1.DownloadInfo) error{
@@ -70,7 +79,7 @@ func DownloadSupportCommands() []string {
 
 func (ks *Kubescape) Download(downloadInfo *metav1.DownloadInfo) error {
 	setPathAndFilename(downloadInfo)
-	if err := os.MkdirAll(downloadInfo.Path, os.ModePerm); err != nil {
+	if err := os.MkdirAll(downloadInfo.Path, downloadDirPerm); err != nil {
 		return err
 	}
 	if err := downloadArtifact(ks.Context(), downloadInfo, downloadFunc); err != nil {

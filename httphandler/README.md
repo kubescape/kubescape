@@ -291,6 +291,8 @@ Configure the HTTP handler using environment variables:
 | `KS_DOWNLOAD_ARTIFACTS` | Download artifacts on each scan | `true`, `false` |
 | `KS_SCAN_QUEUE_CAPACITY` | Maximum number of scans waiting behind the active scan | `10` |
 | `KS_SCAN_REQUEST_MAX_BYTES` | Maximum size in bytes of a `POST /v1/scan` request body | `1048576` |
+| `KS_PPROF_ENABLED` | Enable the pprof debug server (off by default; binds to loopback only) | `true`, `false` |
+| `KS_PPROF_ADDR` | Address the pprof debug server binds to when enabled | `127.0.0.1:6060` |
 
 ---
 
@@ -322,18 +324,27 @@ export KS_LOGGER_LEVEL=debug
 
 ### Performance Profiling
 
-The HTTP handler exposes pprof endpoints for performance analysis:
+The pprof debug server is **off by default** and binds to `127.0.0.1` only, so it's
+reachable from inside the pod's network namespace but not from the network. Enable it
+and reach it via `kubectl port-forward`:
 
 ```bash
+export KS_PPROF_ENABLED=true
+# then, e.g.: kubectl port-forward <pod> 6060:6060
+
 # Heap profile
-go tool pprof http://localhost:6060/debug/pprof/heap
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap
 
 # CPU profile
-go tool pprof http://localhost:6060/debug/pprof/profile?seconds=30
+go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=30
 
 # Goroutine profile
-go tool pprof http://localhost:6060/debug/pprof/goroutine
+go tool pprof http://127.0.0.1:6060/debug/pprof/goroutine
 ```
+
+Set `KS_PPROF_ADDR` to change the bind address (e.g. if `6060` collides with a sidecar
+in the pod). Binding to anything other than loopback is a deliberate, explicit choice —
+do so only on a trusted network.
 
 For more information on pprof, see the [pprof documentation](https://pkg.go.dev/net/http/pprof).
 

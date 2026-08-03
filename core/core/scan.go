@@ -155,7 +155,13 @@ func resolvedOutputPath(format, outputFile string) string {
 		return ""
 	}
 	ext := fileExtForFormat(format)
-	if ext != "" && filepath.Ext(trimmed) != ext {
+	fileExt := filepath.Ext(trimmed)
+
+	if ext == printer.YamlOutputExt && fileExt == ".yml" {
+		return trimmed
+	}
+
+	if ext != "" && fileExt != ext {
 		return trimmed + ext
 	}
 	return trimmed
@@ -165,6 +171,8 @@ func fileExtForFormat(format string) string {
 	switch format {
 	case printer.JsonFormat:
 		return printer.JsonOutputExt
+	case printer.YamlFormat:
+		return printer.YamlOutputExt
 	case printer.JunitResultFormat:
 		return printer.JunitOutputExt
 	case printer.SARIFFormat:

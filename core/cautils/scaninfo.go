@@ -491,8 +491,11 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 			ContextName: k8sinterface.GetContextName(),
 		}
 	case ContextDir:
+		// the base path must be the root the file loader anchored the resources'
+		// relative paths on, or the two no longer compose for anyone joining them
+		basePath := ScanRootPath(input)
 		contextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{
-			BasePath: getAbsPath(input),
+			BasePath: basePath,
 			HostName: getHostname(),
 		}
 		// add repo context for submitting
@@ -502,7 +505,7 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 			Owner:         getHostname(),
 			Branch:        "none",
 			DefaultBranch: "none",
-			LocalRootPath: getAbsPath(input),
+			LocalRootPath: basePath,
 		}
 
 	case ContextFile:
@@ -517,7 +520,7 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 			Owner:         getHostname(),
 			Branch:        "none",
 			DefaultBranch: "none",
-			LocalRootPath: getAbsPath(input),
+			LocalRootPath: ScanRootPath(input),
 		}
 	case ContextGitLocal:
 		// local

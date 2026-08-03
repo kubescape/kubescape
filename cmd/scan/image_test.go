@@ -80,7 +80,7 @@ func TestGetImageCmd_RunE_FormatFlagInvalid(t *testing.T) {
 	assert.NoError(t, parent.PersistentFlags().Set("format", "xml"))
 
 	err := cmd.RunE(cmd, []string{"nginx"})
-	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, sarif`)
+	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, sarif, yaml`)
 }
 
 func TestGetImageCmd_RunE_Success(t *testing.T) {

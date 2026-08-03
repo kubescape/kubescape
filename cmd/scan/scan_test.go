@@ -479,7 +479,7 @@ func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	require.NoError(t, cmd.PersistentFlags().Set("format", "xml"))
 
 	err := cmd.RunE(cmd, []string{"."})
-	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast`)
+	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml`)
 }
 
 func TestGetScanCommand_ScanTimeoutFlagRegistered(t *testing.T) {

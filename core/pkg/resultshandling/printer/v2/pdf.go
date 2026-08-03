@@ -59,7 +59,7 @@ func (pp *PdfPrinter) Score(score float32) {
 		score = 0
 	}
 
-	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
+	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.ComplianceScoreToInt(score))
 }
 
 func (pp *PdfPrinter) PrintNextSteps() {
