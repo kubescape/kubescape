@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -258,25 +259,28 @@ func TestGetPprofAddr(t *testing.T) {
 	})
 }
 
-// TestServePprof_RegistersOwnMuxNotDefaultServeMux guards against a
-// regression back to http.ListenAndServe(addr, nil): serving off
-// http.DefaultServeMux means these endpoints only exist because some
-// unrelated package blank-imports net/http/pprof. If that import were
-// removed as dead code, servePprof would keep logging success while every
-// request 404s. Registering on a dedicated mux makes the dependency
-// self-contained and keeps profiling handlers off the global
-// DefaultServeMux.
-func TestServePprof_RegistersOwnMuxNotDefaultServeMux(t *testing.T) {
+// TestNewPprofServer_UsesItsOwnMux guards against a regression back to
+// http.ListenAndServe(addr, nil) / Handler: nil: a nil Handler falls back to
+// http.DefaultServeMux, which - because net/http/pprof is imported - also
+// answers /debug/pprof/ with 200. A live HTTP probe against the listening
+// server can't tell the two muxes apart, so this asserts on the handler
+// itself instead.
+func TestNewPprofServer_UsesItsOwnMux(t *testing.T) {
+	srv := newPprofServer("127.0.0.1:0")
+
+	require.NotNil(t, srv.Handler)
+	require.NotSame(t, http.DefaultServeMux, srv.Handler)
+
+	rec := httptest.NewRecorder()
+	srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+// TestServePprof_ListensWhenEnabled proves servePprof actually binds and
+// serves when KS_PPROF_ENABLED=true.
+func TestServePprof_ListensWhenEnabled(t *testing.T) {
 	t.Setenv("KS_PPROF_ENABLED", "true")
-	port := func() string {
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		defer ln.Close()
-		_, p, err := net.SplitHostPort(ln.Addr().String())
-		require.NoError(t, err)
-		return p
-	}()
-	addr := "127.0.0.1:" + port
+	addr := "127.0.0.1:" + freePort(t)
 	t.Setenv("KS_PPROF_ADDR", addr)
 
 	servePprof()
@@ -288,5 +292,35 @@ func TestServePprof_RegistersOwnMuxNotDefaultServeMux(t *testing.T) {
 		}
 		defer resp.Body.Close()
 		return resp.StatusCode == http.StatusOK
-	}, time.Second, 10*time.Millisecond, "pprof server did not come up serving its own mux")
+	}, time.Second, 10*time.Millisecond, "pprof server did not come up")
+}
+
+// TestServePprof_DoesNotListenWhenDisabled is the negative case: the
+// security property this feature exists to establish is that pprof stays
+// off unless explicitly opted into.
+func TestServePprof_DoesNotListenWhenDisabled(t *testing.T) {
+	t.Setenv("KS_PPROF_ENABLED", "")
+	addr := "127.0.0.1:" + freePort(t)
+	t.Setenv("KS_PPROF_ADDR", addr)
+
+	servePprof()
+
+	require.Never(t, func() bool {
+		conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+		if err != nil {
+			return false
+		}
+		conn.Close()
+		return true
+	}, 250*time.Millisecond, 25*time.Millisecond, "pprof server must not listen when KS_PPROF_ENABLED is unset")
+}
+
+func freePort(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+	_, p, err := net.SplitHostPort(ln.Addr().String())
+	require.NoError(t, err)
+	return p
 }
