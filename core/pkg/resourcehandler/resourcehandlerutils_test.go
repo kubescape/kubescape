@@ -396,6 +396,44 @@ func TestUpdateQueryableResourcesMapFromRuleMatchObject(t *testing.T) {
 				"agents.x-k8s.io/v1alpha1/sandbox",
 			},
 		},
+		{
+			name: "filtered singular alias does not hide eligible plural alias",
+			matches: []reporthandling.RuleMatchObjects{{
+				APIGroups:   []string{"apps"},
+				APIVersions: []string{"v1"},
+				Resources:   []string{"Deployment", "deployments"},
+			}},
+			resourcesFilterMap: map[string]bool{
+				"Deployment":  false,
+				"deployments": true,
+			},
+			namespace: "ns",
+			expectedQueryableResourceGroups: []string{
+				"apps/v1/deployments/metadata.namespace=ns",
+			},
+			expectedK8SResourceGroups: []string{
+				"apps/v1/deployments",
+			},
+		},
+		{
+			name: "eligible plural alias remains stable in reversed order",
+			matches: []reporthandling.RuleMatchObjects{{
+				APIGroups:   []string{"apps"},
+				APIVersions: []string{"v1"},
+				Resources:   []string{"deployments", "Deployment"},
+			}},
+			resourcesFilterMap: map[string]bool{
+				"Deployment":  false,
+				"deployments": true,
+			},
+			namespace: "ns",
+			expectedQueryableResourceGroups: []string{
+				"apps/v1/deployments/metadata.namespace=ns",
+			},
+			expectedK8SResourceGroups: []string{
+				"apps/v1/deployments",
+			},
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -440,6 +478,15 @@ func TestFilterRuleMatchesForResource(t *testing.T) {
 				"StatefulSet":       false,
 				"CronJob":           false,
 				"Job":               false,
+			},
+		},
+		{
+			resourceKind:   "Pod",
+			matchResources: []string{"Pod", "Deployment", "deployments"},
+			expectedMap: map[string]bool{
+				"Pod":         false,
+				"Deployment":  false,
+				"deployments": false,
 			},
 		},
 		{

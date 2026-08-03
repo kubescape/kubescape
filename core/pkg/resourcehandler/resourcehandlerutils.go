@@ -1,6 +1,7 @@
 package resourcehandler
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -139,7 +140,17 @@ func filterRuleMatchesForResource(resourceKind string, matchObjects []reporthand
 		"Job":         false,
 	}
 
-	_, isInputResourceWorkload := workloadKinds[resourceKind]
+	isWorkloadResource := func(resource string) bool {
+		resource = strings.ToLower(resource)
+		for kind := range workloadKinds {
+			if slices.Contains(offlineManifestResourceAliases(kind), resource) {
+				return true
+			}
+		}
+		return false
+	}
+
+	isInputResourceWorkload := isWorkloadResource(resourceKind)
 
 	for r := range resourceMap {
 		// we don't need to query the same resource
@@ -147,7 +158,7 @@ func filterRuleMatchesForResource(resourceKind string, matchObjects []reporthand
 			continue
 		}
 
-		_, isCurrentResourceWorkload := workloadKinds[r]
+		isCurrentResourceWorkload := isWorkloadResource(r)
 		resourceMap[r] = !isCurrentResourceWorkload || !isInputResourceWorkload
 	}
 
@@ -162,15 +173,15 @@ func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMa
 		for _, apiVersions := range match.APIVersions {
 			var handledResources []string
 			for _, resource := range match.Resources {
-				if sharesOfflineResourceAlias(resource, handledResources) {
-					continue
-				}
-				handledResources = append(handledResources, resource)
 				if resourcesFilterMap != nil {
 					if relevant := resourcesFilterMap[resource]; !relevant {
 						continue
 					}
 				}
+				if sharesOfflineResourceAlias(resource, handledResources) {
+					continue
+				}
+				handledResources = append(handledResources, resource)
 
 				for _, resolved := range resolver(apiGroup, apiVersions, resource) {
 					resolvedGroup, resolvedVersion, resourceName := k8sinterface.StringToResourceGroup(resolved.groupVersionResourceTriplet)
@@ -206,17 +217,8 @@ func sharesOfflineResourceAlias(resource string, handledResources []string) bool
 	resource = strings.ToLower(resource)
 	for _, handled := range handledResources {
 		handled = strings.ToLower(handled)
-		if resource == handled || containsString(offlineManifestResourceAliases(resource), handled) ||
-			containsString(offlineManifestResourceAliases(handled), resource) {
-			return true
-		}
-	}
-	return false
-}
-
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
+		if resource == handled || slices.Contains(offlineManifestResourceAliases(resource), handled) ||
+			slices.Contains(offlineManifestResourceAliases(handled), resource) {
 			return true
 		}
 	}

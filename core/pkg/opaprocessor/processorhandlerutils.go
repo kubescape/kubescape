@@ -256,8 +256,7 @@ func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[st
 					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := k8sResources[groupResource]; ok {
-							for i := range k8sObj {
-								resourceID := k8sObj[i]
+							for _, resourceID := range k8sObj {
 								if _, seen := seenResourceIDs[resourceID]; seen {
 									continue
 								}
