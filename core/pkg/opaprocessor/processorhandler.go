@@ -182,13 +182,15 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-
 		select {
 		case batch, ok := <-batchChan:
 			if !ok {
-				// Channel closed without sending a batch
-				// Check if there's an error from the producer
+				// Channel closed without sending a batch.
+				// Check if the producer left an error.
 				select {
 				case err, ok := <-errChan:
 					if ok && err != nil {
 						return fmt.Errorf("batch channel closed without resident batch: %w", err)
 					}
+					// errChan closed without error — no resident batch was ever sent.
+					return fmt.Errorf("batch channel closed without resident batch")
 				default:
 					return fmt.Errorf("batch channel closed without resident batch")
 				}
@@ -386,58 +388,16 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 		defer progressListener.Stop()
 	}
 
+	// Delegate to processScope so the timeout and evaluation logic lives in
+	// one place instead of two near-identical loops that have already drifted.
 	var processErrs []error
 	for _, scope := range scopes {
 		if err := ctx.Err(); err != nil {
 			processErrs = append(processErrs, err)
 			break
 		}
-
-		for _, controlID := range controlIDs {
-			if err := ctx.Err(); err != nil {
-				processErrs = append(processErrs, err)
-				break
-			}
-			if progressListener != nil {
-				progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", controlID))
-			}
-			if _, timedOut := opap.TimedOutControls[controlID]; timedOut {
-				continue
-			}
-
-			control := policies.Controls[controlID]
-
-			var resourcesAssociatedControl map[string]resourcesresults.ResourceAssociatedControl
-			var err error
-
-			if opap.ControlTimeout > 0 {
-				cctx, cancel := context.WithTimeout(ctx, opap.ControlTimeout)
-				resourcesAssociatedControl, err = opap.processControl(cctx, &control, scope)
-				if cctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
-					opap.markControlTimedOut(&control, opap.ControlTimeout)
-					// Keep results accumulated from earlier scopes; only discard
-					// the current scope's verdicts since the control did not finish.
-					err = nil
-					resourcesAssociatedControl = nil
-				}
-				cancel()
-			} else {
-				resourcesAssociatedControl, err = opap.processControl(ctx, &control, scope)
-			}
-
-			if err != nil {
-				processErrs = append(processErrs, fmt.Errorf("control %q: %w", control.ControlID, err))
-			}
-
-			// update resources with latest results
-			for resourceID, controlResult := range resourcesAssociatedControl {
-				t, ok := opap.ResourcesResult[resourceID]
-				if !ok {
-					t = resourcesresults.Result{ResourceID: resourceID}
-				}
-				t.AssociatedControls = mergeAssociatedControls(t.AssociatedControls, controlResult, opap.AllPolicies)
-				opap.ResourcesResult[resourceID] = t
-			}
+		if err := opap.processScope(ctx, policies, controlIDs, scope, progressListener); err != nil {
+			processErrs = append(processErrs, err)
 		}
 	}
 
