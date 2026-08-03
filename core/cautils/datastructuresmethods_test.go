@@ -1,13 +1,18 @@
 package cautils
 
 import (
+	"bytes"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsScanningScopeMatchToControlScope(t *testing.T) {
@@ -259,42 +264,42 @@ func TestIsRuleKubescapeVersionCompatible(t *testing.T) {
 
 	// should not crash when the value of useUntilKubescapeVersion is not a string
 	buildNumberMock := "v1.0.135"
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_invalid_from.Attributes, buildNumberMock))
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_invalid_until.Attributes, buildNumberMock))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_invalid_from.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_invalid_until.Attributes, buildNumberMock, make(map[string]struct{})))
 	// should use only rules that don't have "until"
 	buildNumberMock = ""
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_131.Attributes, buildNumberMock))
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_132.Attributes, buildNumberMock))
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_133.Attributes, buildNumberMock))
-	assert.True(t, isRuleKubescapeVersionCompatible(rule_v1_0_134.Attributes, buildNumberMock))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_131.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_132.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_133.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.True(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_134.Attributes, buildNumberMock, make(map[string]struct{})))
 
 	// should only use rules that version is in range of use
 	buildNumberMock = "v1.0.130"
-	assert.True(t, isRuleKubescapeVersionCompatible(rule_v1_0_131.Attributes, buildNumberMock))
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_132.Attributes, buildNumberMock))
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_133.Attributes, buildNumberMock))
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_134.Attributes, buildNumberMock))
+	assert.True(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_131.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_132.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_133.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_134.Attributes, buildNumberMock, make(map[string]struct{})))
 
 	// should only use rules that version is in range of use
 	buildNumberMock = "v1.0.132"
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_131.Attributes, buildNumberMock))
-	assert.True(t, isRuleKubescapeVersionCompatible(rule_v1_0_132.Attributes, buildNumberMock))
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_133.Attributes, buildNumberMock))
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_134.Attributes, buildNumberMock))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_131.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.True(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_132.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_133.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_134.Attributes, buildNumberMock, make(map[string]struct{})))
 
 	// should only use rules that version is in range of use
 	buildNumberMock = "v1.0.133"
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_131.Attributes, buildNumberMock))
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_132.Attributes, buildNumberMock))
-	assert.True(t, isRuleKubescapeVersionCompatible(rule_v1_0_133.Attributes, buildNumberMock))
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_134.Attributes, buildNumberMock))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_131.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_132.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.True(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_133.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_134.Attributes, buildNumberMock, make(map[string]struct{})))
 
 	// should only use rules that version is in range of use
 	buildNumberMock = "v1.0.135"
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_131.Attributes, buildNumberMock))
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_132.Attributes, buildNumberMock))
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_133.Attributes, buildNumberMock))
-	assert.True(t, isRuleKubescapeVersionCompatible(rule_v1_0_134.Attributes, buildNumberMock))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_131.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_132.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.False(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_133.Attributes, buildNumberMock, make(map[string]struct{})))
+	assert.True(t, isRuleKubescapeVersionCompatible("test-rule", rule_v1_0_134.Attributes, buildNumberMock, make(map[string]struct{})))
 }
 
 // TestPoliciesSetDoesNotMutateCallerFrameworks guards against a regression where Set
@@ -402,18 +407,65 @@ func TestIsRuleKubescapeVersionCompatible_BadSemverBounds(t *testing.T) {
 			buildNumber: "v1.0.133",
 			want:        false,
 		},
-		{
-			name:        "rule with only valid from bound is not excluded at higher version",
-			attributes:  map[string]interface{}{"useFromKubescapeVersion": "v1.0.130"},
-			buildNumber: "v1.0.133",
-			want:        true,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isRuleKubescapeVersionCompatible(tt.attributes, tt.buildNumber)
+			got := isRuleKubescapeVersionCompatible("test-rule", tt.attributes, tt.buildNumber, make(map[string]struct{}))
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestIsRuleKubescapeVersionCompatible_WarnsOnInvalidUntil(t *testing.T) {
+	f, err := os.Create(filepath.Join(t.TempDir(), "log"))
+	require.NoError(t, err)
+	defer f.Close()
+	prev := logger.L().GetWriter()
+	logger.L().SetWriter(f)
+	defer logger.L().SetWriter(prev)
+
+	assert.False(t, isRuleKubescapeVersionCompatible("c-0001", map[string]any{"useUntilKubescapeVersion": "not-a-version"}, "v1.0.133", make(map[string]struct{})))
+
+	require.NoError(t, f.Sync())
+	b, err := os.ReadFile(f.Name())
+	require.NoError(t, err)
+	assert.Contains(t, string(b), "invalid useUntilKubescapeVersion")
+	assert.Contains(t, string(b), "c-0001")
+}
+
+func TestIsRuleKubescapeVersionCompatible_WarnsOnInvalidFrom(t *testing.T) {
+	f, err := os.Create(filepath.Join(t.TempDir(), "log"))
+	require.NoError(t, err)
+	defer f.Close()
+	prev := logger.L().GetWriter()
+	logger.L().SetWriter(f)
+	defer logger.L().SetWriter(prev)
+
+	assert.True(t, isRuleKubescapeVersionCompatible("c-0002", map[string]any{"useFromKubescapeVersion": "not-a-version"}, "v1.0.133", make(map[string]struct{})))
+
+	require.NoError(t, f.Sync())
+	b, err := os.ReadFile(f.Name())
+	require.NoError(t, err)
+	assert.Contains(t, string(b), "invalid useFromKubescapeVersion")
+	assert.Contains(t, string(b), "c-0002")
+}
+
+func TestIsRuleKubescapeVersionCompatible_DedupWarnings(t *testing.T) {
+	f, err := os.Create(filepath.Join(t.TempDir(), "log"))
+	require.NoError(t, err)
+	defer f.Close()
+	prev := logger.L().GetWriter()
+	logger.L().SetWriter(f)
+	defer logger.L().SetWriter(prev)
+
+	warned := make(map[string]struct{})
+	for range 3 {
+		isRuleKubescapeVersionCompatible("dedup-rule", map[string]any{"useUntilKubescapeVersion": "bad-semver"}, "v1.0.133", warned)
+	}
+
+	require.NoError(t, f.Sync())
+	b, err := os.ReadFile(f.Name())
+	require.NoError(t, err)
+	assert.Equal(t, 1, bytes.Count(b, []byte("invalid useUntilKubescapeVersion")), "expected exactly one warning, got duplicates")
 }
