@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"sort"
 	"strings"
 	"sync"
 
@@ -371,19 +372,14 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	for ns := range namespaceBatches {
 		sortedNamespaces = append(sortedNamespaces, ns)
 	}
-	for i := 0; i < len(sortedNamespaces); i++ {
-		for j := i + 1; j < len(sortedNamespaces); j++ {
-			if sortedNamespaces[i] > sortedNamespaces[j] {
-				sortedNamespaces[i], sortedNamespaces[j] = sortedNamespaces[j], sortedNamespaces[i]
-			}
-		}
-	}
+	sort.Strings(sortedNamespaces)
 	for _, ns := range sortedNamespaces {
 		select {
 		case batchChan <- namespaceBatches[ns]:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+		delete(namespaceBatches, ns) // allow GC after the consumer has received the batch
 	}
 
 	return nil

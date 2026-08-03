@@ -386,11 +386,6 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 		defer progressListener.Stop()
 	}
 
-	// Remaining evaluation budget per control. ControlTimeout bounds the total
-	// time spent on a control, so the budget is carried across scopes instead
-	// of being granted afresh to each one.
-	remaining := make(map[string]time.Duration, len(controlIDs))
-
 	var processErrs []error
 	for _, scope := range scopes {
 		if err := ctx.Err(); err != nil {
@@ -416,19 +411,12 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 			var err error
 
 			if opap.ControlTimeout > 0 {
-				budget, ok := remaining[controlID]
-				if !ok {
-					budget = opap.ControlTimeout
-				}
-				cctx, cancel := context.WithTimeout(ctx, budget)
-				start := time.Now()
+				cctx, cancel := context.WithTimeout(ctx, opap.ControlTimeout)
 				resourcesAssociatedControl, err = opap.processControl(cctx, &control, scope)
-				remaining[controlID] = budget - time.Since(start)
 				if cctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
 					opap.markControlTimedOut(&control, opap.ControlTimeout)
-					// discard the verdicts already merged from earlier scopes:
-					// a control that did not finish must contribute nothing
-					opap.dropControlResults(controlID)
+					// Keep results accumulated from earlier scopes; only discard
+					// the current scope's verdicts since the control did not finish.
 					err = nil
 					resourcesAssociatedControl = nil
 				}
