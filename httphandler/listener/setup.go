@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -128,12 +130,71 @@ func getKeyFile() string {
 	return os.Getenv("KS_KEY_FILE")
 }
 
+func getPprofEnabled() bool {
+	return strings.EqualFold(os.Getenv("KS_PPROF_ENABLED"), "true")
+}
+
+func getPprofAddr() string {
+	if a := os.Getenv("KS_PPROF_ADDR"); a != "" {
+		return a
+	}
+	return "127.0.0.1:6060"
+}
+
+// servePprof starts the net/http/pprof debug server, but only when
+// explicitly opted into via KS_PPROF_ENABLED=true. It used to start
+// automatically whenever the logger level was "debug", which is the
+// server's default log level - meaning every deployment exposed
+// unauthenticated pprof endpoints (heap dumps, CPU profiling, ...) on
+// :6060 by default. It now also binds to loopback only by default (override
+// via KS_PPROF_ADDR), so it's reachable only via port-forward/exec into the
+// pod, not from the network.
+//
+// The handlers are registered on a dedicated mux rather than passing nil to
+// http.ListenAndServe (which serves off http.DefaultServeMux): the pprof
+// package normally self-registers on DefaultServeMux via its own init(), so
+// relying on that means these endpoints exist only because some other,
+// unrelated package blank-imports "net/http/pprof" - remove that import as
+// dead code and this server would silently start logging success while
+// serving 404s. Registering explicitly here makes that dependency
+// self-contained and compiler-enforced.
+//
+// Note: importing net/http/pprof anywhere in the binary registers these
+// routes on http.DefaultServeMux via that package's init(); serving our own
+// mux does not undo that. It's inert here because SetupHTTPListener always
+// sets server.Handler, so no server in this binary falls back to the global
+// mux - but a future handler-less http.Server would expose them.
 func servePprof() {
+	if !getPprofEnabled() {
+		return
+	}
+	addr := getPprofAddr()
+	srv := newPprofServer(addr)
+
 	go func() {
-		// start pprof server -> https://pkg.go.dev/net/http/pprof
-		if logger.L().GetLevel() == helpers.DebugLevel.String() {
-			logger.L().Info("starting pprof server", helpers.String("port", "6060"))
-			logger.L().Error(http.ListenAndServe(":6060", nil).Error())
+		logger.L().Info("starting pprof server", helpers.String("address", addr))
+		if err := srv.ListenAndServe(); err != nil {
+			logger.L().Error("pprof server stopped", helpers.Error(err))
 		}
 	}()
+}
+
+// newPprofServer builds the pprof debug *http.Server on its own dedicated
+// mux, so tests can assert on the handler directly instead of probing it
+// over the wire (a wire probe can't distinguish a dedicated mux from
+// http.DefaultServeMux, since importing net/http/pprof populates the latter
+// too - see the DefaultServeMux note on servePprof).
+func newPprofServer(addr string) *http.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
+	return &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second, // same slowloris guard as the main server
+	}
 }
