@@ -87,6 +87,25 @@ func TestGetWriter_ValidFileName(t *testing.T) {
 	t.Cleanup(func() { _ = f.Close() })
 
 	assert.Equal(t, target, f.Name())
+	assertDirNotMorePermissiveThan0750(t, filepath.Dir(target))
+}
+
+// assertDirNotMorePermissiveThan0750 fails the test if dir's permission bits
+// grant group-write or any access to others - i.e. it is no more permissive
+// than 0o750. This is a meaningful regression guard only when the process
+// umask doesn't already mask out those bits: umask can strip bits from the
+// mode MkdirAll requests but never add them, so under a restrictive umask
+// (e.g. 077) even the old os.ModePerm (0777) code would satisfy this check,
+// producing a false pass. CI's default umask (022) does make this
+// effective; a locally reproducible false pass isn't worth the
+// platform-specific (Unix-only) umask control it would take to close, given
+// this repo also ships Windows builds.
+func assertDirNotMorePermissiveThan0750(t *testing.T, dir string) {
+	t.Helper()
+	info, err := os.Stat(dir)
+	require.NoError(t, err)
+	mode := info.Mode().Perm()
+	assert.Zerof(t, mode&0o027, "directory %s has mode %o, more permissive than 0750", dir, mode)
 }
 
 // MkdirAll fails when a path component that should be a directory is actually
@@ -121,6 +140,7 @@ func TestGetWriterNoStdoutFallback_ValidFileName(t *testing.T) {
 
 	assert.Equal(t, target, f.Name())
 	assert.NotEqual(t, os.Stdout.Name(), f.Name())
+	assertDirNotMorePermissiveThan0750(t, filepath.Dir(target))
 }
 
 // MkdirAll fails when a path component that should be a directory is actually
