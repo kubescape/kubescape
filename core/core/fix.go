@@ -1,7 +1,9 @@
 package core
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -97,6 +99,11 @@ func userConfirmed() bool {
 	for {
 		fmt.Println(confirmationQuestion)
 		if _, err := fmt.Scanln(&input); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				// stdin is closed or non-interactive: no answer will ever come,
+				// so treat it as a refusal instead of retrying forever.
+				return false
+			}
 			continue
 		}
 

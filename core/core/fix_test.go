@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
@@ -59,6 +60,33 @@ func TestUserConfirmed(t *testing.T) {
 
 			assert.Equal(t, tt.want, got)
 		})
+	}
+}
+
+// TestUserConfirmed_ClosedStdinReturnsFalse guards against a hang: if stdin is
+// closed or non-interactive (e.g. `kubescape fix < /dev/null`), fmt.Scanln
+// fails with io.EOF on every call. userConfirmed must treat that as a refusal
+// instead of busy-looping forever retrying a read that can never succeed.
+func TestUserConfirmed_ClosedStdinReturnsFalse(t *testing.T) {
+	originalStdin := os.Stdin
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	require.NoError(t, w.Close()) // close the write end so reads see EOF immediately
+	os.Stdin = r
+	defer func() {
+		os.Stdin = originalStdin
+	}()
+
+	done := make(chan bool, 1)
+	go func() {
+		done <- userConfirmed()
+	}()
+
+	select {
+	case got := <-done:
+		assert.False(t, got)
+	case <-time.After(5 * time.Second):
+		t.Fatal("userConfirmed did not return after stdin EOF; it is hanging/spinning")
 	}
 }
 
