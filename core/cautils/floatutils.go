@@ -2,6 +2,8 @@ package cautils
 
 import "math"
 
+const floorEpsilon = 1e-4
+
 // Float64ToInt convert float64 to int
 func Float64ToInt(x float64) int {
 	return int(math.Round(x))
@@ -12,7 +14,27 @@ func Float32ToInt(x float32) int {
 	return Float64ToInt(float64(x))
 }
 
-// Float32ToIntFloor converts float32 to int by flooring, so a value never rounds up
+// Float32ToIntFloor converts float32 to int by flooring. float32 representation
+// error can make float32(53)/float32(100)*100 evaluate to 52.999996, so values
+// within epsilon of an integer snap to that integer first. This is a deliberate
+// exception to flooring: a value just below an integer can snap up to it.
+// The snap only applies to non-negative values; negative inputs retain standard
+// math.Floor semantics.
 func Float32ToIntFloor(x float32) int {
-	return int(math.Floor(float64(x)))
+	f := float64(x)
+	if r := math.Round(f); f >= 0 && math.Abs(f-r) < floorEpsilon {
+		return int(r)
+	}
+	return int(math.Floor(f))
+}
+
+// ComplianceScoreToInt converts a compliance score to a display-safe integer.
+// It preserves the existing rounded display for ordinary scores while ensuring
+// a score below 100 never appears perfect because of rounding.
+func ComplianceScoreToInt(x float32) int {
+	i := Float32ToInt(x)
+	if i >= 100 && x < 100 {
+		return 99
+	}
+	return i
 }

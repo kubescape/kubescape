@@ -226,6 +226,15 @@ func TestGenerateFooter_Full(t *testing.T) {
 	}
 }
 
+func TestGetComplianceScoreColumnDoesNotRoundFractionalScoreToPerfect(t *testing.T) {
+	score := float32(99.5)
+	controlSummary := &reportsummary.ControlSummary{
+		ComplianceScore: &score,
+	}
+
+	assert.Equal(t, "99%", GetComplianceScoreColumn(controlSummary, nil))
+}
+
 func TestGenerateFooter_ShortVsFullDiffer(t *testing.T) {
 	sd := reportsummary.SummaryDetails{ComplianceScore: 50}
 	short := GenerateFooter(&sd, true)

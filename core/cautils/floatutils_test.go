@@ -25,3 +25,74 @@ func TestFloat32ToInt(t *testing.T) {
 	assert.Equal(t, -4, Float32ToInt(-3.5))
 	assert.Equal(t, -4, Float32ToInt(-3.51))
 }
+
+func TestComplianceScoreToInt(t *testing.T) {
+	tests := []struct {
+		name  string
+		score float32
+		want  int
+	}{
+		{
+			name:  "ordinary fractional score still rounds",
+			score: 20.7,
+			want:  21,
+		},
+		{
+			name:  "almost perfect score does not round to perfect",
+			score: 99.5,
+			want:  99,
+		},
+		{
+			name:  "near-perfect score does not round to perfect",
+			score: 99.99,
+			want:  99,
+		},
+		{
+			name:  "perfect score remains perfect",
+			score: 100,
+			want:  100,
+		},
+		{
+			name:  "unscored sentinel remains negative",
+			score: -1,
+			want:  -1,
+		},
+		{
+			name:  "integer score from 53 of 100 avoids float32 underflow",
+			score: (float32(53) / float32(100)) * 100,
+			want:  53,
+		},
+		{
+			name:  "integer score from 59 of 100 avoids float32 underflow",
+			score: (float32(59) / float32(100)) * 100,
+			want:  59,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ComplianceScoreToInt(tt.score))
+		})
+	}
+}
+
+func TestFloat32ToIntFloor(t *testing.T) {
+	assert.Equal(t, 99, Float32ToIntFloor(99.5))
+	assert.Equal(t, 99, Float32ToIntFloor(99.9))
+	assert.Equal(t, 100, Float32ToIntFloor(100.0))
+	assert.Equal(t, 0, Float32ToIntFloor(0.5))
+	// boundary: inside epsilon snaps to integer
+	assert.Equal(t, 100, Float32ToIntFloor(100-float32(5e-5)))
+	// boundary: outside epsilon still floors
+	assert.Equal(t, 99, Float32ToIntFloor(100-float32(2e-3)))
+	// negative values preserve standard floor semantics
+	assert.Equal(t, -1, Float32ToIntFloor(-1e-5))
+	assert.Equal(t, -2, Float32ToIntFloor(-1.00005))
+	assert.Equal(t, -1, Float32ToIntFloor(-0.5))
+}
+
+func TestFloat32ToIntFloor_Float32Precision(t *testing.T) {
+	assert.Equal(t, 53, Float32ToIntFloor(float32(53)/float32(100)*100))
+	assert.Equal(t, 59, Float32ToIntFloor(float32(59)/float32(100)*100))
+	assert.Equal(t, 53, Float32ToIntFloor(float32(106)/float32(200)*100))
+}

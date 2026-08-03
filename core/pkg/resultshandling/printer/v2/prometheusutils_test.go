@@ -426,3 +426,32 @@ func TestSetComplianceScores_ControlMetricsUseComplianceScore(t *testing.T) {
 	assert.NotContains(t, output, "kubescape_control_complianceScore{name=\"Unset Control\"")
 	assert.Contains(t, output, "kubescape_control_count_resources_failed{name=\"Unset Control\"")
 }
+
+func TestSetComplianceScoresDoNotRoundFractionalScoresToPerfect(t *testing.T) {
+	controlScore := float32(99.5)
+	summaryDetails := &reportsummary.SummaryDetails{
+		ComplianceScore: 99.5,
+		Frameworks: []reportsummary.FrameworkSummary{
+			{
+				Name:            "Almost Perfect",
+				ComplianceScore: 99.5,
+			},
+		},
+		Controls: reportsummary.ControlSummaries{
+			"C-ALMOST": {
+				ControlID:       "C-ALMOST",
+				Name:            "Almost Perfect Control",
+				ComplianceScore: &controlScore,
+			},
+		},
+	}
+
+	m := &Metrics{}
+	m.setComplianceScores(summaryDetails)
+	output := m.String()
+
+	assert.Contains(t, output, "kubescape_cluster_complianceScore{} 99")
+	assert.Contains(t, output, "kubescape_framework_complianceScore{name=\"Almost Perfect\"} 99")
+	assert.Regexp(t, regexp.MustCompile(`(?m)^kubescape_control_complianceScore\{name="Almost Perfect Control".*\} 99$`), output)
+	assert.NotContains(t, output, "complianceScore{} 100")
+}

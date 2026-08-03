@@ -65,15 +65,14 @@ func isEmptyImgVulns(externalResourcesMap cautils.ExternalResources) bool {
 	return true
 }
 
-func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl map[string][]string) cautils.ExternalResources {
+func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl map[string][]string, resolver resourceResolver) cautils.ExternalResources {
 	externalResources := make(cautils.ExternalResources)
-	complexMap := setComplexKSResourceMap(frameworks, resourceToControl)
+	complexMap := setComplexKSResourceMap(frameworks, resourceToControl, resolver)
 	for group := range complexMap {
 		for version := range complexMap[group] {
 			for resource := range complexMap[group][version] {
-				groupResources := k8sinterface.ResourceGroupToString(group, version, resource)
-				for _, groupResource := range groupResources {
-					externalResources[groupResource] = nil
+				for _, resolved := range resolver(group, version, resource) {
+					externalResources[resolved.groupVersionResourceTriplet] = nil
 				}
 			}
 		}
@@ -82,7 +81,7 @@ func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl m
 }
 
 // [group][versionn][resource]
-func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToControls map[string][]string) map[string]map[string]map[string]any {
+func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToControls map[string][]string, resolver resourceResolver) map[string]map[string]map[string]any {
 	k8sResources := make(map[string]map[string]map[string]any)
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {
@@ -92,9 +91,10 @@ func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToCo
 					for _, apiGroup := range match.APIGroups {
 						for _, apiVersion := range match.APIVersions {
 							for _, resource := range match.Resources {
-								for _, groupResource := range k8sinterface.ResourceGroupToString(apiGroup, apiVersion, resource) {
-									if !slices.Contains(resourceToControls[groupResource], control.ControlID) {
-										resourceToControls[groupResource] = append(resourceToControls[groupResource], control.ControlID)
+								for _, resolved := range resolver(apiGroup, apiVersion, resource) {
+									resourceGroup := resolved.groupVersionResourceTriplet
+									if !slices.Contains(resourceToControls[resourceGroup], control.ControlID) {
+										resourceToControls[resourceGroup] = append(resourceToControls[resourceGroup], control.ControlID)
 									}
 								}
 							}

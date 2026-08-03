@@ -69,11 +69,13 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	var err error
 
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
+	resolver, discoveryFailures := newDiscoveryResourceResolver(k8sHandler.k8s.DiscoveryClient)
+	sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, discoveryFailures...)
 
 	if scanInfo.IsDeletedScanObject {
 		sessionObj.SingleResourceScan, err = getWorkloadFromScanObject(scanInfo.ScanObject)
 	} else {
-		sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(ctx, scanInfo.ScanObject, globalFieldSelectors)
+		sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(ctx, scanInfo.ScanObject, globalFieldSelectors, resolver)
 	}
 
 	if err != nil {
@@ -85,8 +87,8 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	resourceToControl := make(map[string][]string)
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope)
-	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl)
+	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver)
+	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
 
 	// map of Kubescape resources to control_ids
 	sessionObj.ResourceToControlsMap = resourceToControl
@@ -100,7 +102,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	// separately so they can be surfaced without overriding the whole-GVR status.
 	partialFailures := recordFailedQueryStatuses(failedQueries, k8sResourcesMap, sessionObj.InfoMap)
 	if len(partialFailures) > 0 {
-		sessionObj.PartialGVRFailures = partialFailures
+		sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, partialFailures...)
 		for _, p := range partialFailures {
 			logger.L().Ctx(ctx).Warning("partial resource collection: some resources may be missing from scan results",
 				helpers.String("gvr", p.GVR),
@@ -132,7 +134,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 
 	// add single resource to k8s resources map (for single resource scan)
 	if !scanInfo.IsDeletedScanObject {
-		addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan)
+		addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan, resolver)
 	}
 
 	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
@@ -386,29 +388,41 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 }
 
 // findScanObjectResource pulls the requested k8s object to be scanned from the api server
-func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context, resource *objectsenvelopes.ScanObject, globalFieldSelector IFieldSelector) (workloadinterface.IWorkload, error) {
+func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context, resource *objectsenvelopes.ScanObject, globalFieldSelector IFieldSelector, resolver resourceResolver) (workloadinterface.IWorkload, error) {
 	if resource == nil {
 		return nil, nil
 	}
 
 	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
 
-	gvr, err := k8sinterface.GetGroupVersionResource(resource.GetKind())
-	if err != nil {
-		return nil, err
-	}
-
-	if resource.GetApiVersion() != "" {
+	var resolved []resolvedResource
+	if resource.GetApiVersion() == "" {
+		// Keep the legacy single-resource behavior for built-in objects whose
+		// callers omit apiVersion. CRDs still require their declared apiVersion
+		// so discovery can select an unambiguous GVR.
+		groupVersionResource, err := k8sinterface.GetGroupVersionResource(resource.GetKind())
+		if err == nil {
+			resolved = []resolvedResource{{
+				groupVersionResourceTriplet: k8sinterface.GroupVersionResourceToString(&groupVersionResource),
+			}}
+		} else {
+			return nil, fmt.Errorf("apiVersion is required to resolve non-built-in resource %q for a single-resource scan", resource.GetKind())
+		}
+	} else {
 		g, v := k8sinterface.SplitApiVersion(resource.GetApiVersion())
-		gvr.Group = g
-		gvr.Version = v
+		resolved = resolver(g, v, resource.GetKind())
 	}
+	if len(resolved) != 1 {
+		return nil, fmt.Errorf("resource not found in Kubernetes discovery: %s", getReadableID(resource))
+	}
+	apiGroup, apiVersion, resourceName := k8sinterface.StringToResourceGroup(resolved[0].groupVersionResourceTriplet)
+	gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resourceName}
 
 	fieldSelectors := getNameFieldSelectorString(resource.GetName(), FieldSelectorsEqualsOperator)
-	if resource.GetNamespace() != "" && k8sinterface.IsNamespaceScope(&gvr) {
+	if resource.GetNamespace() != "" && ((resolved[0].namespaced != nil && *resolved[0].namespaced) || (resolved[0].namespaced == nil && k8sinterface.IsNamespaceScope(&gvr))) {
 		fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespaceFieldSelectorString(resource.GetNamespace(), FieldSelectorsEqualsOperator))
 	}
-	result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, fieldSelectors, globalFieldSelector)
+	result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, fieldSelectors, globalFieldSelector, resolved[0].namespaced)
 	if len(result) == 0 && len(selectorErrs) > 0 {
 		return nil, fmt.Errorf("failed to get resource %s, reason: %v", getReadableID(resource), selectorErrs[0].err)
 	}
@@ -597,7 +611,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 
 			apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-			result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, qr.FieldSelectors, globalFieldSelectors)
+			result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced)
 			if err := ctx.Err(); err != nil {
 				mu.Lock()
 				failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
@@ -669,11 +683,11 @@ func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResourc
 	return partials
 }
 
-func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, resource *schema.GroupVersionResource, labels map[string]string, fields string, fieldSelector IFieldSelector) ([]unstructured.Unstructured, []selectorFailure) {
+func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, resource *schema.GroupVersionResource, labels map[string]string, fields string, fieldSelector IFieldSelector, namespaced *bool) ([]unstructured.Unstructured, []selectorFailure) {
 	var resourceList []unstructured.Unstructured
 	var selectorErrs []selectorFailure
 
-	fieldSelectors := fieldSelector.GetNamespacesSelectors(resource)
+	fieldSelectors := fieldSelector.GetNamespacesSelectors(resource, namespaced)
 
 	for i := range fieldSelectors {
 		listOptions := metav1.ListOptions{}

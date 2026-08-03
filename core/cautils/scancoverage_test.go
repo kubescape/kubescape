@@ -294,3 +294,22 @@ func TestBuildScanCoverage_PartialGVRPullsPassedThrough(t *testing.T) {
 	assert.Empty(t, coverage.FailedGVRPulls)
 	assert.Empty(t, coverage.NotEvaluatedControls)
 }
+
+func TestComputeCoverageScore_Float32PrecisionLoss(t *testing.T) {
+	// 53 out of 100 evaluated controls: float32(53)/float32(100)*100
+	// evaluates to 52.999996 internally, but Float32ToIntFloor snaps it
+	// back to 53 so the displayed score is correct.
+	c := ScanCoverage{
+		NotEvaluatedControls: makeNotEvaluatedControls(47),
+	}
+	c.ComputeCoverageScore(100)
+	assert.Equal(t, 53, Float32ToIntFloor(c.CoverageScore))
+}
+
+func makeNotEvaluatedControls(n int) []NotEvaluatedControl {
+	ne := make([]NotEvaluatedControl, n)
+	for i := range ne {
+		ne[i] = NotEvaluatedControl{ControlID: string(rune('A' + i))}
+	}
+	return ne
+}
