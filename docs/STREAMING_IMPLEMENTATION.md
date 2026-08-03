@@ -2,7 +2,9 @@
 
 ## Overview
 
-This implementation addresses the memory issue described in A1 of `issues.md` and Phase 5 of `docs/optimization-plan.md`. The solution introduces resource streaming to bound memory usage on large clusters, preventing the 2-4 GB memory consumption that occurs when loading entire cluster state into memory.
+This implementation addresses the API-server load issue described in A1 of `issues.md` and Phase 5 of `docs/optimization-plan.md`. The solution introduces resource streaming so the OPA evaluation never holds the whole cluster as its input: resources are partitioned by scope and the processor evaluates the resident (cluster-scoped) batch plus one namespace batch at a time, while the collection phase replaces the previous O(L × N) per-GVR-per-namespace LIST calls with a single LIST per GVR (O(L)).
+
+Note what streaming does *not* do: it does not reduce total retained memory. The collector still pulls every GVR and holds the full cluster until the first batch is sent, and the processor retains all resources in `AllResources` for downstream stages (exceptions, printers, image scanning). Streaming bounds the *evaluation input* and the number of API-server calls, not the process high-water mark.
 
 ## Problem Statement
 
@@ -21,7 +23,7 @@ The implementation leverages the existing `ResourceBatch` architecture that was 
 
 2. **Streams resources incrementally**: Instead of loading all resources at once, resources are streamed in batches via channels.
 
-3. **Releases memory after processing**: Namespace batches are released from memory after all controls have been evaluated against them.
+3. **Bounded evaluation input**: Each namespace batch is evaluated one at a time against the resident batch, so the evaluation input never contains the whole cluster.
 
 4. **Maintains result parity**: The streaming implementation produces identical results to the non-streaming approach.
 
@@ -49,7 +51,7 @@ The resident batch includes:
 - External resources (cloud/host scanner data, RBAC resources)
 - VAP resources (ValidatingAdmissionPolicy)
 
-Namespace batches contain only the resources belonging to a specific namespace, allowing them to be released after processing.
+Namespace batches contain only the resources belonging to a specific namespace, so the evaluation input never holds more than the resident batch plus one namespace.
 
 ### 3. FileResourceHandler Streaming (`core/pkg/resourcehandler/filesloader.go`)
 
@@ -62,7 +64,6 @@ Added `ProcessWithStreaming` method that:
 - Receives batches via channels
 - Keeps the resident batch in memory throughout the scan
 - Processes each namespace batch against the resident batch
-- Releases memory from namespace batches after processing
 - Merges results from all batches
 
 The method leverages the existing `evaluationScope` and `matchedObjects` logic, ensuring that related-object resolution works correctly across batches since cluster-scoped resources remain resident.
@@ -72,7 +73,7 @@ The method leverages the existing `evaluationScope` and `matchedObjects` logic, 
 Added CLI flag `--enable-streaming` to manually enable streaming, and auto-detection for large clusters:
 
 ```go
-scanCmd.PersistentFlags().BoolVar(&scanInfo.EnableStreaming, "enable-streaming", false, "Enable resource streaming for large clusters to reduce memory usage. Resources are processed in batches instead of loading all at once. Automatically enabled for clusters with >2500 resources.")
+scanCmd.PersistentFlags().BoolVar(&scanInfo.EnableStreaming, "enable-streaming", false, "Enable resource streaming for large clusters. Resources are collected in a single pass per type and evaluated one namespace at a time. Automatically enabled for clusters with >2500 resources.")
 ```
 
 The scan logic automatically enables streaming for clusters with >2500 resources (configurable via `LARGE_CLUSTER_SIZE` environment variable).
@@ -95,12 +96,12 @@ Added `EnableStreaming` field to `ScanInfo` struct to control streaming behavior
 
 ### Memory Management
 
-The implementation reduces memory usage by:
+The implementation reduces peak evaluation memory by:
 
-- Loading only cluster-scoped resources (~10-20% of total) into memory permanently
-- Loading namespace-scoped resources one namespace at a time
-- Releasing namespace batches after all controls have been evaluated
+- Keeping only cluster-scoped resources (~10-20% of total) plus a single namespace batch in the evaluation input at any time
 - Processing controls scope-by-scope (resident + one namespace at a time)
+
+The collection peak is not reduced: all resources are pulled and partitioned before the first batch is sent, and the processor retains resources in `AllResources` for downstream stages. The real win over the previous approach is the API-server load — one LIST per GVR instead of one per GVR per namespace — and a bounded evaluation input.
 
 ### Related-Object Resolution
 
@@ -128,25 +129,22 @@ Since `scope.resident` contains all cluster-scoped resources, rules can access t
 Added comprehensive parity tests in `core/pkg/opaprocessor/processorhandler_streaming_test.go`:
 
 1. **TestProcessWithStreaming_Parity**: Verifies that resource partitioning works correctly for both small and large clusters
-2. **TestResourceBatch_MemoryUsage**: Verifies that memory is actually released after processing batches
+2. **TestResourceBatch_MemoryUsage**: Verifies that namespace batches are partitioned correctly
 
 The tests confirm that:
 - Small clusters (<2500 resources) use a single resident batch (backward compatible)
 - Large clusters (>2500 resources) split into multiple namespace batches
 - Cluster-scoped resources remain in the resident batch
 - Namespace-scoped resources are partitioned correctly
-- Memory can be released after processing batches
 
 ## Performance Impact
 
-### Expected Memory Savings
+### Expected API-server Savings
 
 - **Small clusters (<2500 resources)**: No change (single batch mode)
-- **Large clusters (>2500 resources)**: 40-60% memory reduction
+- **Large clusters (>2500 resources)**: LIST calls drop from O(L × N) (one per GVR per namespace) to O(L) (one per GVR)
 
-For a cluster with 10,000 resources:
-- **Traditional approach**: ~2-4 GB memory
-- **Streaming approach**: ~0.8-1.6 GB memory (assuming 80% namespace-scoped resources)
+For a cluster with 2500 namespaces and 100 GVRs, this is ~250,000 LIST calls down to 100.
 
 ### CPU Impact
 
@@ -155,7 +153,7 @@ Minimal CPU overhead from:
 - Channel operations
 - Batch management
 
-The streaming approach may be slightly slower due to the overhead of managing batches, but the memory savings are significant for large clusters.
+The streaming approach may be slightly slower due to the overhead of managing batches, but the API-server LIST savings are significant for large clusters.
 
 ## Usage
 
@@ -190,4 +188,4 @@ kubescape scan  # Will auto-enable streaming for large clusters
 
 ## Conclusion
 
-This implementation successfully addresses the memory issue described in A1 by introducing resource streaming that leverages the existing `ResourceBatch` architecture. The solution maintains correctness while significantly reducing memory usage for large clusters, making Kubescape more suitable for scanning enterprise-scale Kubernetes environments.
+This implementation addresses the API-server load issue described in A1 by replacing the O(L × N) collection loop with a single pass per GVR and by streaming batches to the OPA processor so evaluation never sees the whole cluster as its input. The solution maintains correctness while keeping the evaluation input bounded, making Kubescape more suitable for scanning enterprise-scale Kubernetes environments. It is not a total-process memory reduction: bounding the collection peak itself is left to future paged-LIST collection.

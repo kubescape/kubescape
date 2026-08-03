@@ -279,7 +279,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 		// Auto-enable streaming for large clusters
 		enableStreaming = cautils.IsLargeCluster(estimateClusterSize(interfaces.resourceHandler, ctxResources, scanInfo))
 		if enableStreaming {
-			logger.L().Ctx(ctxResources).Info("Large cluster detected, enabling resource streaming to reduce memory usage")
+			logger.L().Ctx(ctxResources).Info("Large cluster detected, enabling resource streaming")
 		}
 	}
 
@@ -478,8 +478,8 @@ func estimateClusterSize(resourceHandler resourcehandler.IResourceHandler, ctx c
 	return size
 }
 
-// collectAndProcessResourcesWithStreaming collects and processes resources using streaming
-// to reduce memory usage on large clusters.
+// collectAndProcessResourcesWithStreaming collects and processes resources in
+// batches so the evaluation input stays bounded on large clusters.
 func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandler resourcehandler.IResourceHandler, scanData *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, clusterName string, excludedNamespaces string, includeNamespaces string, enableRegoPrint bool, controlTimeout time.Duration) error {
 	// Stream resources in batches
 	batchChan, errChan, expectedNamespaceBatches, err := resourceHandler.StreamResourcesBatches(ctx, scanData, scanInfo)

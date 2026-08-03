@@ -115,8 +115,9 @@ func TestProcessWithStreaming_EndToEndParity(t *testing.T) {
 	t.Skip("End-to-end parity test requires complex mock setup - covered by processorhandler_parity_test.go")
 }
 
-// TestResourceBatch_MemoryUsage verifies that streaming approach
-// actually reduces memory usage by releasing batches after processing.
+// TestResourceBatch_MemoryUsage verifies that namespace batches are partitioned
+// correctly and that dropping a batch's reference after processing allows the
+// batch wrapper to be collected.
 func TestResourceBatch_MemoryUsage(t *testing.T) {
 	t.Setenv("LARGE_CLUSTER_SIZE", "1")
 

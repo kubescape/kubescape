@@ -10,7 +10,9 @@ import (
 
 type IResourceHandler interface {
 	GetResources(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error)
-	// StreamResourcesBatches streams resources in batches to reduce memory usage on large clusters.
+	// StreamResourcesBatches streams resources in batches so the evaluation
+	// input stays bounded on large clusters (resident batch plus one namespace
+	// at a time) and collection is a single pass per GVR.
 	// Returns a channel of ResourceBatch objects, the expected number of namespace batches, and an error if streaming setup fails.
 	// The caller must process batches sequentially and ensure proper cleanup.
 	StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error)

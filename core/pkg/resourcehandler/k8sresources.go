@@ -205,8 +205,10 @@ func (k8sHandler *K8sResourceHandler) GetCloudProvider() string {
 	return k8sHandler.cloudProvider
 }
 
-// StreamResourcesBatches streams resources in batches to reduce memory usage on large clusters.
-// This method implements a two-phase approach:
+// StreamResourcesBatches streams resources in batches so the OPA processor can
+// evaluate one namespace batch at a time, bounding the evaluation input instead
+// of holding the whole cluster in it. This method implements a two-phase
+// approach:
 // 1. First, it collects all cluster-scoped and external resources into a resident batch
 // 2. Then, it streams namespace-scoped resources in batches
 // The resident batch is sent first, followed by namespace batches in sorted order.
@@ -265,6 +267,15 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 // This replaces the previous two-phase approach (collectResidentBatch +
 // streamNamespaceBatches) which re-listed every GVR once per namespace,
 // resulting in O(L × N) API-server LIST calls on large clusters.
+//
+// What this bounds is the evaluation input, not the collection peak: every GVR
+// is pulled and partitioned before the first batch is sent, so the whole
+// cluster is resident in this function at that point. The consumer
+// (OPAProcessor.ProcessWithStreaming) evaluates one namespace batch at a time,
+// so only the resident batch plus one namespace batch are in the evaluation
+// input at any moment. Bounding the collection peak itself would require paged
+// LISTs (metav1.ListOptions{Limit, Continue}) per GVR — a larger change than
+// this one.
 func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, ksResourceMap cautils.ExternalResources, batchChan chan<- *cautils.ResourceBatch) error {
 	resident := cautils.NewResourceBatch(cautils.ClusterScope)
 	namespaceBatches := make(map[string]*cautils.ResourceBatch)
@@ -381,7 +392,12 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		delete(namespaceBatches, ns) // allow GC after the consumer has received the batch
+		// Drop the producer's reference to the batch now that it has been
+		// handed off. This bounds the producer's retention during drain when
+		// the consumer is slower than the producer; it is not a peak-memory
+		// reduction — the resources stay reachable via the consumer's
+		// AllResources for downstream stages.
+		delete(namespaceBatches, ns)
 	}
 
 	return nil

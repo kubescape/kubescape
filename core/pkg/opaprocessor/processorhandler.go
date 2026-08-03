@@ -141,21 +141,21 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 }
 
 // ProcessWithStreaming processes OPA policies using streaming resource batches.
-// This method is designed for large clusters where loading all resources into memory
-// is prohibitive. It processes batches incrementally, keeping only the resident
-// (cluster-scoped) batch in memory throughout.
+// It processes batches incrementally, keeping the resident (cluster-scoped)
+// batch in memory throughout.
 //
 // The streaming approach:
-// 1. Receives batches via a channel (resident batch first, then namespace batches)
-// 2. Keeps the resident batch in memory for the entire scan
-// 3. Processes each namespace batch against the resident batch as it arrives
-// 4. Retains only minimal resource metadata (for exceptions) from namespace batches
-// 5. Releases full resource objects from namespace batches after processing
-// 6. Merges results from all batches
+//  1. Receives batches via a channel (resident batch first, then namespace batches)
+//  2. Keeps the resident batch in memory for the entire scan
+//  3. Processes each namespace batch against the resident batch as it arrives
+//  4. Merges each namespace batch's resources into the session-wide maps so
+//     downstream stages (exceptions, printers, image scanning) can access them
+//  5. Merges results from all batches
 //
-// Note: Streaming bounds OPA evaluation input memory, not total memory.
-// Downstream components (exceptions, sensitive data removal) require minimal
-// resource metadata which is retained, but full resource objects are released.
+// Note: Streaming bounds the OPA evaluation input (resident batch plus one
+// namespace batch at a time), not total memory: the producer holds the whole
+// cluster while collecting, and this method retains every resource in
+// AllResources for downstream stages.
 func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-chan *cautils.ResourceBatch, errChan <-chan error, progressListener IJobProgressNotificationClient, expectedNamespaceBatches int) error {
 	ctx, span := otel.Tracer("").Start(ctx, "OPAProcessor.ProcessWithStreaming")
 	defer span.End()
