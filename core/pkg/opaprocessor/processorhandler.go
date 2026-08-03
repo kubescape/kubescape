@@ -592,6 +592,10 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		if opap.skipNamespace(inputResource.GetNamespace()) {
 			continue
 		}
+		// AllResources is also the partitioning input (evaluationScopes →
+		// PartitionResources), so this aggregator write-back grows the map
+		// mid-scan. Bucketing must keep using the frozen initialResourceCount,
+		// not the live length, or later rules could see per-namespace scopes.
 		opap.AllResources[inputResource.GetID()] = inputResource
 	}
 
