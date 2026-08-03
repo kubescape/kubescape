@@ -217,18 +217,15 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 	// Setup phase: collect metadata and queryable resources
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
 
-	// Count expected namespace batches for progress reporting
-	expectedNamespaceBatches := 0
-
-	var err error
+	var setupErr error
 	if scanInfo.IsDeletedScanObject {
-		sessionObj.SingleResourceScan, err = getWorkloadFromScanObject(scanInfo.ScanObject)
+		sessionObj.SingleResourceScan, setupErr = getWorkloadFromScanObject(scanInfo.ScanObject)
 	} else {
-		sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(ctx, scanInfo.ScanObject, globalFieldSelectors)
+		sessionObj.SingleResourceScan, setupErr = k8sHandler.findScanObjectResource(ctx, scanInfo.ScanObject, globalFieldSelectors)
 	}
 
-	if err != nil {
-		return nil, nil, 0, err
+	if setupErr != nil {
+		return nil, nil, 0, setupErr
 	}
 
 	scanningScope := cautils.GetScanningScope(sessionObj.Metadata.ContextMetadata)
@@ -238,30 +235,17 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 	sessionObj.ResourceToControlsMap = resourceToControl
 	sessionObj.ExcludedRules = excludedRulesMap
 
+	// Compute expected namespace count synchronously before launching
+	// the goroutine so the caller has it at return time.
+	expectedNamespaceBatches := k8sHandler.countNamespaces(ctx)
+
 	// Start streaming goroutine
 	go func() {
 		defer close(batchChan)
 		defer close(errChan)
 		defer logger.L().StopSuccess("Done streaming Kubernetes objects")
 
-		// Phase 1: Collect resident batch (cluster-scoped + external resources)
-		residentBatch, err := k8sHandler.collectResidentBatch(ctx, queryableResources, globalFieldSelectors, sessionObj, scanInfo, ksResourceMap)
-		if err != nil {
-			errChan <- err
-			return
-		}
-
-		// Send resident batch first
-		select {
-		case batchChan <- residentBatch:
-		case <-ctx.Done():
-			errChan <- ctx.Err()
-			return
-		}
-
-		// Phase 2: Stream namespace-scoped resources in batches
-		expectedNamespaceBatches, err = k8sHandler.streamNamespaceBatches(ctx, queryableResources, globalFieldSelectors, residentBatch, batchChan, sessionObj)
-		if err != nil {
+		if err := k8sHandler.collectAndStreamBatches(ctx, queryableResources, globalFieldSelectors, sessionObj, scanInfo, ksResourceMap, batchChan); err != nil {
 			errChan <- err
 			return
 		}
@@ -270,115 +254,19 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 	return batchChan, errChan, expectedNamespaceBatches, nil
 }
 
-// collectResidentBatch collects all cluster-scoped and external resources into a single batch
-// that will remain resident throughout the scan.
-func (k8sHandler *K8sResourceHandler) collectResidentBatch(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, ksResourceMap cautils.ExternalResources) (*cautils.ResourceBatch, error) {
+// collectAndStreamBatches pulls every queryable GVR exactly once, partitions
+// the results into a single resident batch (cluster-scoped and external
+// resources) and one batch per namespace, then streams the resident batch
+// followed by each namespace batch in deterministic order.
+//
+// This replaces the previous two-phase approach (collectResidentBatch +
+// streamNamespaceBatches) which re-listed every GVR once per namespace,
+// resulting in O(L × N) API-server LIST calls on large clusters.
+func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, ksResourceMap cautils.ExternalResources, batchChan chan<- *cautils.ResourceBatch) error {
 	resident := cautils.NewResourceBatch(cautils.ClusterScope)
+	namespaceBatches := make(map[string]*cautils.ResourceBatch)
 
-	// Collect cluster-scoped Kubernetes resources
-	for key := range queryableResources {
-		qr := queryableResources[key]
-		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
-		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-
-		result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, qr.FieldSelectors, globalFieldSelectors)
-		if len(result) == 0 && len(selectorErrs) > 0 {
-			continue
-		}
-
-		metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
-
-		for _, metaObj := range metaObjs {
-			// Only include cluster-scoped resources in resident batch
-			// Namespace-scoped resources will be handled in streamNamespaceBatches
-			if cautils.ResourceScope(metaObj) == cautils.ClusterScope {
-				resident.K8SResources[qr.GroupVersionResourceTriplet] = append(resident.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
-				resident.AllResources[metaObj.GetID()] = metaObj
-			}
-		}
-	}
-
-	// Collect external resources (cloud, host sensor, etc.)
-	allResources := resident.AllResources
-
-	// Add single resource if applicable
-	if !scanInfo.IsDeletedScanObject && sessionObj.SingleResourceScan != nil {
-		addSingleResourceToResourceMaps(resident.K8SResources, allResources, sessionObj.SingleResourceScan)
-	}
-
-	// Collect host resources
-	hostResources := cautils.MapHostResources(ksResourceMap)
-	if len(hostResources) > 0 && sessionObj.Metadata.ScanMetadata.HostScanner {
-		logger.L().Info("Requesting Host scanner data")
-		infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
-			cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
-		} else {
-			for k, v := range infoMap {
-				sessionObj.InfoMap[k] = v
-			}
-		}
-	}
-
-	// Collect RBAC resources
-	if err := k8sHandler.collectRbacResources(allResources); err != nil {
-		logger.L().Ctx(ctx).Warning("failed to collect rbac resources", helpers.Error(err))
-	}
-
-	// Collect cloud resources
-	cloudResources := cautils.MapCloudResources(ksResourceMap)
-	if len(cloudResources) > 0 {
-		if err := k8sHandler.collectCloudResources(ctx, sessionObj, allResources, ksResourceMap, cloudResources); err != nil {
-			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
-		}
-	}
-
-	// Collect VAP resources if scanning cluster
-	if scanInfo.GetScanningContext() == cautils.ContextCluster {
-		policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
-		} else {
-			sessionObj.VAPPolicies = policies
-			sessionObj.VAPBindings = bindings
-		}
-	}
-
-	// Add external resources to resident batch
-	for groupResource, ids := range ksResourceMap {
-		for _, id := range ids {
-			if _, ok := allResources[id]; ok {
-				resident.ExternalResources[groupResource] = append(resident.ExternalResources[groupResource], id)
-			}
-		}
-	}
-
-	// Update session object with resident resources
-	sessionObj.K8SResources = resident.K8SResources
-	sessionObj.ExternalResources = resident.ExternalResources
-	sessionObj.AllResources = allResources
-
-	// Collect worker nodes count
-	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
-	if err != nil {
-		logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
-	} else {
-		sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
-		metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
-		metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
-	}
-
-	return resident, nil
-}
-
-// streamNamespaceBatches streams namespace-scoped resources in batches.
-// Each batch contains resources from a single namespace to maintain scope boundaries.
-// This implementation streams batches incrementally to avoid building all batches in memory at once.
-// Returns the number of namespace batches sent.
-func (k8sHandler *K8sResourceHandler) streamNamespaceBatches(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, resident *cautils.ResourceBatch, batchChan chan<- *cautils.ResourceBatch, sessionObj *cautils.OPASessionObj) (int, error) {
-	// First pass: collect all unique namespaces to ensure deterministic ordering
-	namespaces := make(map[string]bool)
+	// Single pass: pull each GVR once, partition by scope.
 	for key := range queryableResources {
 		qr := queryableResources[key]
 		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
@@ -393,15 +281,94 @@ func (k8sHandler *K8sResourceHandler) streamNamespaceBatches(ctx context.Context
 
 		for _, metaObj := range metaObjs {
 			scope := cautils.ResourceScope(metaObj)
-			if scope != cautils.ClusterScope {
-				namespaces[scope] = true
+			if scope == cautils.ClusterScope {
+				resident.K8SResources[qr.GroupVersionResourceTriplet] = append(resident.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
+				resident.AllResources[metaObj.GetID()] = metaObj
+			} else {
+				batch, ok := namespaceBatches[scope]
+				if !ok {
+					batch = cautils.NewResourceBatch(scope)
+					namespaceBatches[scope] = batch
+				}
+				batch.K8SResources[qr.GroupVersionResourceTriplet] = append(batch.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
+				batch.AllResources[metaObj.GetID()] = metaObj
 			}
 		}
 	}
 
-	// Sort namespaces for deterministic order
-	sortedNamespaces := make([]string, 0, len(namespaces))
-	for ns := range namespaces {
+	// Collect external resources (host, cloud, RBAC, VAP) into the resident batch.
+	allResources := resident.AllResources
+
+	if !scanInfo.IsDeletedScanObject && sessionObj.SingleResourceScan != nil {
+		addSingleResourceToResourceMaps(resident.K8SResources, allResources, sessionObj.SingleResourceScan)
+	}
+
+	hostResources := cautils.MapHostResources(ksResourceMap)
+	if len(hostResources) > 0 && sessionObj.Metadata.ScanMetadata.HostScanner {
+		logger.L().Info("Requesting Host scanner data")
+		infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
+			cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
+		} else {
+			for k, v := range infoMap {
+				sessionObj.InfoMap[k] = v
+			}
+		}
+	}
+
+	if err := k8sHandler.collectRbacResources(allResources); err != nil {
+		logger.L().Ctx(ctx).Warning("failed to collect rbac resources", helpers.Error(err))
+	}
+
+	cloudResources := cautils.MapCloudResources(ksResourceMap)
+	if len(cloudResources) > 0 {
+		if err := k8sHandler.collectCloudResources(ctx, sessionObj, allResources, ksResourceMap, cloudResources); err != nil {
+			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
+		}
+	}
+
+	if scanInfo.GetScanningContext() == cautils.ContextCluster {
+		policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
+		} else {
+			sessionObj.VAPPolicies = policies
+			sessionObj.VAPBindings = bindings
+		}
+	}
+
+	for groupResource, ids := range ksResourceMap {
+		for _, id := range ids {
+			if _, ok := allResources[id]; ok {
+				resident.ExternalResources[groupResource] = append(resident.ExternalResources[groupResource], id)
+			}
+		}
+	}
+
+	sessionObj.K8SResources = resident.K8SResources
+	sessionObj.ExternalResources = resident.ExternalResources
+	sessionObj.AllResources = allResources
+
+	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
+	if err != nil {
+		logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
+	} else {
+		sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
+		metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
+		metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
+	}
+
+	// Stream resident batch first.
+	select {
+	case batchChan <- resident:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	// Stream namespace batches in deterministic order.
+	sortedNamespaces := make([]string, 0, len(namespaceBatches))
+	for ns := range namespaceBatches {
 		sortedNamespaces = append(sortedNamespaces, ns)
 	}
 	for i := 0; i < len(sortedNamespaces); i++ {
@@ -411,41 +378,15 @@ func (k8sHandler *K8sResourceHandler) streamNamespaceBatches(ctx context.Context
 			}
 		}
 	}
-
-	// Second pass: build and stream one namespace batch at a time
-	for _, namespace := range sortedNamespaces {
-		batch := cautils.NewResourceBatch(namespace)
-
-		for key := range queryableResources {
-			qr := queryableResources[key]
-			apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
-			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-
-			result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, qr.FieldSelectors, globalFieldSelectors)
-			if len(result) == 0 && len(selectorErrs) > 0 {
-				continue
-			}
-
-			metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
-
-			for _, metaObj := range metaObjs {
-				scope := cautils.ResourceScope(metaObj)
-				if scope == namespace {
-					batch.K8SResources[qr.GroupVersionResourceTriplet] = append(batch.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
-					batch.AllResources[metaObj.GetID()] = metaObj
-				}
-			}
-		}
-
-		// Stream the batch immediately
+	for _, ns := range sortedNamespaces {
 		select {
-		case batchChan <- batch:
+		case batchChan <- namespaceBatches[ns]:
 		case <-ctx.Done():
-			return 0, ctx.Err()
+			return ctx.Err()
 		}
 	}
 
-	return len(sortedNamespaces), nil
+	return nil
 }
 
 // findScanObjectResource pulls the requested k8s object to be scanned from the api server
@@ -855,6 +796,20 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 	logger.L().StopSuccess("Collected RBAC resources")
 
 	return nil
+}
+
+// countNamespaces returns the number of namespaces in the cluster by listing
+// them from the Kubernetes API. Used for progress bar estimation in streaming.
+func (k8sHandler *K8sResourceHandler) countNamespaces(ctx context.Context) int {
+	if k8sHandler.k8s == nil || k8sHandler.k8s.KubernetesClient == nil {
+		return 0
+	}
+	nsList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		logger.L().Ctx(ctx).Debug("failed to list namespaces for progress estimate", helpers.Error(err))
+		return 0
+	}
+	return len(nsList.Items)
 }
 
 func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber(ctx context.Context) (int, error) {
