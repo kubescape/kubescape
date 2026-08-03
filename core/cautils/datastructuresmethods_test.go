@@ -379,3 +379,41 @@ func TestGetScanningScope(t *testing.T) {
 		})
 	}
 }
+
+func TestIsRuleKubescapeVersionCompatible_BadSemverBounds(t *testing.T) {
+	tests := []struct {
+		name        string
+		attributes  map[string]interface{}
+		buildNumber string
+		want        bool
+	}{
+		{
+			name:        "invalid useUntilKubescapeVersion excludes the rule (fail-closed)",
+			attributes:  map[string]interface{}{"useUntilKubescapeVersion": "not-a-version"},
+			buildNumber: "v1.0.133",
+			want:        false,
+		},
+		{
+			name: "valid from, invalid until excludes the rule (mixed case)",
+			attributes: map[string]interface{}{
+				"useFromKubescapeVersion":  "v1.0.130",
+				"useUntilKubescapeVersion": "not-a-version",
+			},
+			buildNumber: "v1.0.133",
+			want:        false,
+		},
+		{
+			name:        "rule with only valid from bound is not excluded at higher version",
+			attributes:  map[string]interface{}{"useFromKubescapeVersion": "v1.0.130"},
+			buildNumber: "v1.0.133",
+			want:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isRuleKubescapeVersionCompatible(tt.attributes, tt.buildNumber)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

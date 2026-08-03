@@ -2,6 +2,8 @@ package cautils
 
 import (
 	"github.com/kubescape/backend/pkg/versioncheck"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -98,6 +100,9 @@ func isRuleKubescapeVersionCompatible(attributes map[string]any, version string)
 	if until, ok := attributes["useUntilKubescapeVersion"]; ok && until != nil {
 		switch suntil := until.(type) {
 		case string:
+			if normalizedVersion != "" && !semver.IsValid(suntil) {
+				logger.L().Warning("invalid useUntilKubescapeVersion in rule attributes", helpers.String("useUntilKubescapeVersion", suntil))
+			}
 			if normalizedVersion == "" || (semver.IsValid(normalizedVersion) && semver.Compare(normalizedVersion, suntil) >= 0) {
 				return false
 			}
