@@ -240,7 +240,13 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 					continue
 				}
 
-				resource := results.AllResources[rId]
+				resource, ok := results.AllResources[rId]
+				if !ok {
+					logger.L().Debug("resource missing from AllResources, reporting by ID",
+						helpers.String("resourceID", rId))
+					resources[fmt.Sprintf("resourceID: %s", rId)] = nil
+					continue
+				}
 				sourcePath := ""
 				if ResourceSourcePath, ok := results.ResourceSource[rId]; ok {
 					sourcePath = ResourceSourcePath.RelativePath

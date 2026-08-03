@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -124,6 +125,9 @@ func TestSetTopWorkloads(t *testing.T) {
 		obj.ResourcesPrioritized = map[string]prioritization.PrioritizedResource{
 			"res1": {ResourceID: "res1", Score: 80},
 		}
+		obj.AllResources = map[string]workloadinterface.IMetadata{
+			"res1": workloadinterface.NewWorkloadObj(map[string]any{}),
+		}
 		obj.ResourceSource = map[string]reporthandling.Source{}
 
 		obj.SetTopWorkloads()
@@ -136,6 +140,9 @@ func TestSetTopWorkloads(t *testing.T) {
 		obj.Report = nil
 		obj.ResourcesPrioritized = map[string]prioritization.PrioritizedResource{
 			"res1": {ResourceID: "res1", Score: 50},
+		}
+		obj.AllResources = map[string]workloadinterface.IMetadata{
+			"res1": workloadinterface.NewWorkloadObj(map[string]any{}),
 		}
 		obj.ResourceSource = map[string]reporthandling.Source{}
 
@@ -151,6 +158,10 @@ func TestSetTopWorkloads_Idempotent(t *testing.T) {
 	obj.ResourcesPrioritized = map[string]prioritization.PrioritizedResource{
 		"res1": {ResourceID: "res1", Score: 100},
 		"res2": {ResourceID: "res2", Score: 90},
+	}
+	obj.AllResources = map[string]workloadinterface.IMetadata{
+		"res1": workloadinterface.NewWorkloadObj(map[string]any{}),
+		"res2": workloadinterface.NewWorkloadObj(map[string]any{}),
 	}
 
 	obj.ResourceSource = map[string]reporthandling.Source{}
