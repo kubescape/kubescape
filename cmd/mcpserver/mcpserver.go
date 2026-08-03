@@ -803,6 +803,40 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run framework scan: %v", err)), nil
 		}
 		return mcp.NewToolResultText(string(responseBytes)), nil
+	case "scan_container_image":
+		imageName := ""
+		if img, ok := arguments["image_name"]; ok {
+			imgStr, ok := img.(string)
+			if !ok {
+				return mcp.NewToolResultError("image_name argument must be a string"), nil
+			}
+			imageName = strings.TrimSpace(imgStr)
+		}
+		if imageName == "" {
+			return mcp.NewToolResultError("image_name argument is required and cannot be empty"), nil
+		}
+		var regUsername string
+		if u, ok := arguments["username"]; ok {
+			uStr, ok := u.(string)
+			if !ok {
+				return mcp.NewToolResultError("username argument must be a string"), nil
+			}
+			regUsername = uStr
+		}
+		var regSecret string
+		if p, ok := arguments["password"]; ok {
+			pStr, ok := p.(string)
+			if !ok {
+				return mcp.NewToolResultError("password argument must be a string"), nil
+			}
+			regSecret = pStr
+		}
+
+		responseBytes, err := ksServer.runImageScan(ctx, imageName, regUsername, regSecret)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to run container image scan: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(responseBytes)), nil
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -846,6 +880,7 @@ func mcpServerEntrypoint() error {
 	createNetworkScanningTools(ksServer)
 	createFrameworkScanningTools(ksServer)
 	createIaCScanningTools(ksServer)
+	createImageScanningTools(ksServer)
 
 	// Start the server
 	if err := server.ServeStdio(s); err != nil {
@@ -908,6 +943,25 @@ func createIaCScanningTools(ksServer *KubescapeMcpserver) {
 	)
 
 	ksServer.s.AddTool(iacScanTool, ksServer.toolHandler(iacScanTool.Name))
+}
+
+func createImageScanningTools(ksServer *KubescapeMcpserver) {
+	scanImageTool := mcp.NewTool(
+		"scan_container_image",
+		mcp.WithDescription("Run an on-demand container image vulnerability scan and return structured JSON containing matches, vulnerabilities, and severities"),
+		mcp.WithString("image_name",
+			mcp.Required(),
+			mcp.Description("Name of the container image to scan (e.g., nginx:alpine)"),
+		),
+		mcp.WithString("username",
+			mcp.Description("Username for registry authentication (optional)"),
+		),
+		mcp.WithString("password",
+			mcp.Description("Password for registry authentication (optional)"),
+		),
+	)
+
+	ksServer.s.AddTool(scanImageTool, ksServer.toolHandler(scanImageTool.Name))
 }
 
 func GetMCPServerCmd() *cobra.Command {

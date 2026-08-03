@@ -212,3 +212,29 @@ func TestReadResourceWithFakeClient(t *testing.T) {
 		})
 	}
 }
+
+func TestScanContainerImageValidation(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+	tests := []struct {
+		name      string
+		arguments map[string]any
+		wantError string
+	}{
+		{name: "missing image_name", arguments: map[string]any{}, wantError: "image_name argument is required and cannot be empty"},
+		{name: "empty image_name", arguments: map[string]any{"image_name": "  "}, wantError: "image_name argument is required and cannot be empty"},
+		{name: "invalid image_name type", arguments: map[string]any{"image_name": 123}, wantError: "image_name argument must be a string"},
+		{name: "invalid username type", arguments: map[string]any{"image_name": "nginx:alpine", "username": true}, wantError: "username argument must be a string"},
+		{name: "invalid password type", arguments: map[string]any{"image_name": "nginx:alpine", "password": 456}, wantError: "password argument must be a string"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := ksServer.CallTool(context.Background(), "scan_container_image", test.arguments)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.True(t, result.IsError)
+			assert.Equal(t, test.wantError, toolResultText(t, result))
+		})
+	}
+}
+
