@@ -14,7 +14,6 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor/cel"
@@ -175,36 +174,43 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-
 		defer progressListener.Stop()
 	}
 
-	// Track control timeout budgets across all scopes
-	remaining := make(map[string]time.Duration, len(controlIDs))
-
 	// Track the resident batch (cluster-scoped resources)
 	var residentBatch *cautils.ResourceBatch
 
 	// First, wait for the resident batch
-	select {
-	case batch, ok := <-batchChan:
-		if !ok {
-			// Channel closed without sending a batch
-			// Check if there's an error from the producer
-			select {
-			case err := <-errChan:
-				return fmt.Errorf("batch channel closed without resident batch: %w", err)
-			default:
-				return fmt.Errorf("batch channel closed without resident batch")
+	for {
+		select {
+		case batch, ok := <-batchChan:
+			if !ok {
+				// Channel closed without sending a batch
+				// Check if there's an error from the producer
+				select {
+				case err, ok := <-errChan:
+					if ok && err != nil {
+						return fmt.Errorf("batch channel closed without resident batch: %w", err)
+					}
+				default:
+					return fmt.Errorf("batch channel closed without resident batch")
+				}
 			}
+			if batch.Scope == cautils.ClusterScope {
+				residentBatch = batch
+			} else {
+				// First batch must be resident
+				return fmt.Errorf("first batch must be resident (cluster-scoped), got: %s", batch.Scope)
+			}
+			goto haveResident
+		case err, ok := <-errChan:
+			if !ok {
+				errChan = nil
+				continue
+			}
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-		if batch.Scope == cautils.ClusterScope {
-			residentBatch = batch
-		} else {
-			// First batch must be resident
-			return fmt.Errorf("first batch must be resident (cluster-scoped), got: %s", batch.Scope)
-		}
-	case err := <-errChan:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
 	}
+haveResident:
 
 	if residentBatch == nil {
 		return fmt.Errorf("no resident batch received")
@@ -224,7 +230,7 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-
 
 	// Process resident batch first
 	residentScope := evaluationScope{name: residentBatch.Scope, resident: residentBatch}
-	if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, residentScope, progressListener, remaining); err != nil {
+	if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, residentScope, progressListener); err != nil {
 		return err
 	}
 
@@ -242,24 +248,25 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-
 
 			// Process this namespace batch
 			namespaceScope := evaluationScope{name: batch.Scope, batch: batch, resident: residentBatch}
-			if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, namespaceScope, progressListener, remaining); err != nil {
+			if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, namespaceScope, progressListener); err != nil {
 				return err
 			}
 
-			// Retain minimal resource metadata for exceptions processing
-			// This keeps only the structural metadata (namespace, kind, labels, etc.)
-			// needed for exception matching, while releasing large data fields
-			// (spec, status, data) to reduce memory footprint
+			// Merge namespace batch resources into the session-wide map so
+			// downstream stages (exception matching, printers, image scanning,
+			// prioritisation) can access them.
 			for resourceID, resource := range batch.AllResources {
-				// Create a lightweight copy with only metadata
-				lightweightResource := createLightweightResource(resource)
-				opap.AllResources[resourceID] = lightweightResource
+				opap.AllResources[resourceID] = resource
 			}
 			for gvr, ids := range batch.K8SResources {
 				opap.K8SResources[gvr] = append(opap.K8SResources[gvr], ids...)
 			}
 
-		case err := <-errChan:
+		case err, ok := <-errChan:
+			if !ok {
+				errChan = nil
+				continue
+			}
 			return err
 		case <-ctx.Done():
 			return ctx.Err()
@@ -267,10 +274,12 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-
 	}
 
 done:
-	// Check for any remaining errors
+	// Drain any remaining error (non-blocking; errChan may already be closed).
 	select {
-	case err := <-errChan:
-		return err
+	case err, ok := <-errChan:
+		if ok && err != nil {
+			return err
+		}
 	default:
 	}
 
@@ -292,8 +301,11 @@ done:
 	return nil
 }
 
-// processScope processes all controls for a single evaluation scope
-func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Policies, controlIDs []string, scope evaluationScope, progressListener IJobProgressNotificationClient, remaining map[string]time.Duration) error {
+// processScope processes all controls for a single evaluation scope.
+// Each scope gets the full ControlTimeout budget — the timeout is not shared
+// across scopes, so a control that completes in earlier scopes keeps its
+// accumulated results even if a later scope exceeds the budget.
+func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Policies, controlIDs []string, scope evaluationScope, progressListener IJobProgressNotificationClient) error {
 	var processErrs []error
 
 	for _, controlID := range controlIDs {
@@ -314,17 +326,12 @@ func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Po
 		var err error
 
 		if opap.ControlTimeout > 0 {
-			budget, ok := remaining[controlID]
-			if !ok {
-				budget = opap.ControlTimeout
-			}
-			cctx, cancel := context.WithTimeout(ctx, budget)
-			start := time.Now()
+			cctx, cancel := context.WithTimeout(ctx, opap.ControlTimeout)
 			resourcesAssociatedControl, err = opap.processControl(cctx, &control, scope)
-			remaining[controlID] = budget - time.Since(start)
 			if cctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
 				opap.markControlTimedOut(&control, opap.ControlTimeout)
-				opap.dropControlResults(controlID)
+				// Keep results accumulated from earlier scopes; only discard
+				// the current scope's verdicts since the control did not finish.
 				err = nil
 				resourcesAssociatedControl = nil
 			}
@@ -559,7 +566,7 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 			ruleErrs = append(ruleErrs, err)
 			break
 		}
-		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput, control.ControlID)
+		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput, scope, control.ControlID)
 		if err != nil {
 			ruleErrs = append(ruleErrs, fmt.Errorf("rule %q: %w", control.Rules[i].Name, err))
 		}
@@ -588,22 +595,27 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 	return resourcesAssociatedControl, errors.Join(ruleErrs...)
 }
 
-// processRule processes a single policy rule over every scope, merging the
-// per-scope verdicts exactly as Process does.
+// processRule processes a single policy rule. When scope is provided
+// (scope.name != ""), it evaluates the rule against that scope only. When
+// scope is empty, it loops over every scope — this is the path used by the
+// parity harness; Process and ProcessWithStreaming always pass a concrete
+// scope.
 //
-// Process itself does not call this: it interleaves scopes with controls so
-// that a scope is visited once for all controls. processRule is the
-// single-rule reference for that behaviour, and is what the parity harness
-// compares the scope-outer loop against.
+// controlID is threaded to enumerateData and runOPAOnSingleRule for CEL
+// policy support (VAP binding lookups).
 //
 // NOTE: processRule no longer mutates the state of the current OPAProcessor instance,
 // and returns a map instead, to be merged by the caller.
-func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
-	merged := make(map[string]*resourcesresults.ResourceAssociatedRule)
+func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string, scope evaluationScope, controlID string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
+	if scope.name != "" {
+		return opap.processRuleOnScope(ctx, rule, fixedControlInputs, scope, controlID)
+	}
 
+	// No explicit scope — loop over all scopes (parity harness path).
+	merged := make(map[string]*resourcesresults.ResourceAssociatedRule)
 	var evalErrs []error
-	for _, scope := range opap.evaluationScopes() {
-		scoped, err := opap.processRuleOnScope(ctx, rule, fixedControlInputs, scope)
+	for _, s := range opap.evaluationScopes() {
+		scoped, err := opap.processRuleOnScope(ctx, rule, fixedControlInputs, s, controlID)
 		if err != nil {
 			evalErrs = append(evalErrs, err)
 		}
@@ -611,13 +623,12 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 			merged[resourceID] = mergeAssociatedRule(merged[resourceID], ruleResult)
 		}
 	}
-
 	return merged, errors.Join(evalErrs...)
 }
 
 // processRuleOnScope evaluates a single policy rule against a single scope,
 // with some extra fixed control inputs.
-func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string, scope evaluationScope) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
+func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string, scope evaluationScope, controlID string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
 	resources := make(map[string]*resourcesresults.ResourceAssociatedRule)
 
 	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ControlConfigInputs, fixedControlInputs)
@@ -639,7 +650,7 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 	inputRawResources := workloadinterface.ListMetaToMap(inputResources)
 
 	// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data
-	enumeratedData, err := opap.enumerateData(ctx, rule, inputRawResources)
+	enumeratedData, err := opap.enumerateData(ctx, rule, inputRawResources, controlID)
 	if err != nil {
 		opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
 		return resources, fmt.Errorf("enumerator failed for namespace %q: %w", scope.name, err)
@@ -654,11 +665,14 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		opap.AllResources[inputResource.GetID()] = inputResource
 	}
 
-	ruleResponses, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData)
+	ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData, controlID)
 	if err != nil {
 		opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
 		return resources, fmt.Errorf("rego eval failed for namespace %q: %w", scope.name, err)
 	}
+
+	// Record CEL resources with unknown verdicts as skipped before pass-inference.
+	opap.seedCELSkips(resources, rule, ruleRegoDependenciesData, celOut.skipped)
 
 	// Build the set of failed IDs so we can correctly mark the remainder as passed.
 	// Resources are only written to the result map after a successful OPA evaluation,
@@ -689,6 +703,9 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		id := inputResource.GetID()
 		if _, failed := failedIDs[id]; failed {
 			continue
+		}
+		if _, excluded := celOut.excluded[id]; excluded {
+			continue // outside the CEL policy's scope: not evaluated, so not a pass
 		}
 		if existing, ok := resources[id]; ok && (existing.Status == apis.StatusFailed || existing.Status == apis.StatusSkipped) {
 			continue
@@ -1318,37 +1335,8 @@ func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleDat
 	return compiled, version, nil
 }
 
-// createLightweightResource creates a minimal resource copy containing only
-// metadata needed for exception matching (namespace, kind, labels, name, etc.)
-// while discarding large data fields (spec, status, data) to reduce memory footprint.
-func createLightweightResource(resource workloadinterface.IMetadata) workloadinterface.IMetadata {
-	if resource == nil {
-		return nil
-	}
-
-	// Get the underlying object
-	obj := resource.GetObject()
-	if obj == nil {
-		return resource
-	}
-
-	// For Kubernetes workloads, create a lightweight copy
-	if k8sinterface.IsTypeWorkload(obj) {
-		workload := workloadinterface.NewWorkloadObj(obj)
-		lightweight := make(map[string]interface{})
-
-		// Copy only essential metadata fields
-		lightweight["apiVersion"] = workload.GetApiVersion()
-		lightweight["kind"] = workload.GetKind()
-		lightweight["metadata"] = map[string]interface{}{
-			"name":      workload.GetName(),
-			"namespace": workload.GetNamespace(),
-			"labels":    workload.GetLabels(),
-		}
-
-		return workloadinterface.NewWorkloadObj(lightweight)
-	}
-
-	// For non-workload resources, return as-is (they're typically smaller)
-	return resource
-}
+// createLightweightResource is intentionally removed. Stripping spec/status/data
+// from resources stored in opap.AllResources broke downstream stages (printers,
+// image scanning, prioritisation, exception matching) that read the full object.
+// The streaming path now stores the original resource, matching the non-streaming
+// path's behaviour.

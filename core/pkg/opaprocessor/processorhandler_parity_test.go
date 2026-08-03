@@ -156,7 +156,7 @@ func referenceProcess(t *testing.T, opap *OPAProcessor, policies *cautils.Polici
 
 		associated := make(map[string]resourcesresults.ResourceAssociatedControl)
 		for i := range control.Rules {
-			ruleResults, err := opap.processRule(context.Background(), &control.Rules[i], control.FixedInput)
+			ruleResults, err := opap.processRule(context.Background(), &control.Rules[i], control.FixedInput, evaluationScope{}, control.ControlID)
 			require.NoError(t, err)
 
 			for resourceID, ruleResult := range ruleResults {
