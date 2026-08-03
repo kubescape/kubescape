@@ -401,6 +401,54 @@ func TestPrintConfigurationScan_InvocationStartTimeUsesReportGenerationTime(t *t
 		"startTimeUtc must reuse ReportGenerationTime, got %s want %s", inv.StartTimeUTC, preset)
 }
 
+// TestGetDocIndex_PathContainingColon guards against a regression where
+// getDocIndex parsed LocalWorkload.GetPath() ("<file path>:<document
+// index>") with strings.Split(path, ":")[1] instead of splitting on the last
+// colon. That silently picked the wrong segment whenever the file path
+// itself contained more than one colon (e.g. a Windows path like
+// "C:\repo\deploy.yaml:0"), so strconv.Atoi failed on a non-numeric segment
+// and getDocIndex reported "no document index" even though one exists. This
+// must match how fixhandler.getFilePathAndIndex parses the same convention
+// (splitting on the last colon).
+func TestGetDocIndex_PathContainingColon(t *testing.T) {
+	resourceID := "apps/v1/Deployment/default/demo"
+	obj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "demo"},
+		"spec":       map[string]interface{}{},
+	}
+
+	tests := []struct {
+		name      string
+		path      string
+		wantIndex int
+		wantOk    bool
+	}{
+		{name: "plain relative path, no colon in file path", path: "deploy.yaml:0", wantIndex: 0, wantOk: true},
+		{name: "nested relative path", path: "charts/app/deploy.yaml:2", wantIndex: 2, wantOk: true},
+		{name: "file path itself contains a colon", path: `C:\repo\deploy.yaml:3`, wantIndex: 3, wantOk: true},
+		{name: "no colon at all", path: "deploy.yaml", wantIndex: 0, wantOk: false},
+		{name: "trailing colon with non-numeric suffix", path: "deploy.yaml:abc", wantIndex: 0, wantOk: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lw := localworkload.NewLocalWorkload(obj)
+			lw.SetPath(tt.path)
+
+			session := cautils.NewOPASessionObjMock()
+			session.AllResources[resourceID] = lw
+
+			gotIndex, gotOk := getDocIndex(session, resourceID)
+			assert.Equal(t, tt.wantOk, gotOk)
+			if tt.wantOk {
+				assert.Equal(t, tt.wantIndex, gotIndex)
+			}
+		})
+	}
+}
+
 func TestGetBasePathFromMetadata(t *testing.T) {
 	tempDir := t.TempDir()
 	absFilePath := filepath.Join(tempDir, "deploy.yaml")
