@@ -13,11 +13,13 @@ import (
 // non-matching kind, which the scanner would otherwise record as a pass the
 // cluster never made (issue #2001).
 //
-// Matching is by resource rule (apiGroups/apiVersions/resources, honoring "*"
-// and excludeResourceRules). The label selectors and operations on
-// matchConstraints are not applied offline: the vendored bundle uses neither,
-// and ignoring them can only widen scope, which surfaces as an evaluated result
-// rather than a silently dropped one.
+// Matching is by resource rule (apiGroups/apiVersions/resources plus the rule's
+// operations, honoring "*" and excludeResourceRules). The scan models every
+// resource as a fresh CREATE (see stub.go), so a rule that fires only on other
+// operations does not match here either. The label selectors on matchConstraints
+// are not evaluated offline; a policy that narrows with one is refused at load
+// instead (see requireSupported), since ignoring it would evaluate objects
+// admission exempts.
 func (v *VAP) appliesTo(obj map[string]any) bool {
 	if v.matchConstraints == nil || len(v.matchConstraints.ResourceRules) == 0 {
 		return true // no scoping info: evaluate (a malformed-policy edge)
@@ -64,9 +66,31 @@ func objectGVR(obj map[string]any) (schema.GroupVersionResource, bool) {
 }
 
 func resourceRuleMatches(rule *admissionregistrationv1.NamedRuleWithOperations, gvr schema.GroupVersionResource) bool {
-	return matchesValue(rule.APIGroups, gvr.Group) &&
+	return matchesOperation(rule.Operations) &&
+		matchesValue(rule.APIGroups, gvr.Group) &&
 		matchesValue(rule.APIVersions, gvr.Version) &&
 		matchesResource(rule.Resources, gvr.Resource)
+}
+
+// matchesOperation reports whether the rule fires on CREATE, the one operation
+// the offline scan models (request.operation is stubbed to CREATE, see stub.go).
+// A rule listing only UPDATE or DELETE never sees the CREATE we model, so at
+// admission the policy would not be handed the object and the scan must not
+// evaluate it either. This applies to exclude rules symmetrically: an exclusion
+// scoped to UPDATE does not exempt the CREATE we model. An empty list is invalid
+// on a real policy (the API requires at least one operation); treat it as
+// matching so a malformed rule surfaces as an evaluated result rather than a
+// silently dropped one, the same stance appliesTo takes on missing constraints.
+func matchesOperation(ops []admissionregistrationv1.OperationType) bool {
+	if len(ops) == 0 {
+		return true
+	}
+	for _, op := range ops {
+		if op == admissionregistrationv1.OperationAll || op == admissionregistrationv1.Create {
+			return true
+		}
+	}
+	return false
 }
 
 // matchesValue reports whether want is listed, treating "*" as "any".

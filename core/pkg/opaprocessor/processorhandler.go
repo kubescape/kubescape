@@ -30,6 +30,7 @@ import (
 	"github.com/open-policy-agent/opa/v1/storage"
 	opaprint "github.com/open-policy-agent/opa/v1/topdown/print"
 	"go.opentelemetry.io/otel"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/record"
 )
 
@@ -74,6 +75,15 @@ type OPAProcessor struct {
 	celEvaluator     *cel.Evaluator
 	celEvaluatorOnce sync.Once
 	celEvaluatorErr  error
+	// celNamespaceIndex maps namespace name -> the scan's Namespace object, so
+	// CEL evaluation can bind namespaceObject the way the apiserver does. Built
+	// once via celNamespaceOnce (see celNamespaceObjects): Namespace objects
+	// come from resource collection, which is complete before processing starts
+	// (see NewOPAProcessor), so a one-time snapshot cannot miss one — the
+	// mid-scan writes into AllResources are aggregator-produced resources,
+	// never Namespaces.
+	celNamespaceIndex map[string]map[string]any
+	celNamespaceOnce  sync.Once
 	// initialResourceCount is the size of AllResources snapshotted once at
 	// construction, so the large-cluster namespace-bucketing decision (see
 	// getNamespaceName) is made once per scan instead of drifting mid-scan as
@@ -590,10 +600,12 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 			return nil, celOutcome{}, err
 		}
 
-		// namespaceObject is not resolved yet: policies referencing it eval-error
-		// and their resources are skipped (parity-safe), never passed. Wiring the
-		// real namespace object is a follow-up.
-		eval, err := evaluator.EvaluateControl(ctx, controlID, obj, nil)
+		// namespaceObject is the resource's Namespace object when the scan
+		// collected it, and nil otherwise — the evaluator then binds null, so a
+		// policy reading namespaceObject.* sees an absent namespace (and a
+		// selection into it eval-errors and skips, never passes). File scans and
+		// scans whose frameworks never matched Namespaces stay on that safe path.
+		eval, err := evaluator.EvaluateControl(ctx, controlID, obj, opap.celNamespaceObjectFor(obj))
 		if err != nil {
 			return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 		}
@@ -686,6 +698,41 @@ func (opap *OPAProcessor) getCELEvaluator() (*cel.Evaluator, error) {
 		opap.celEvaluator, opap.celEvaluatorErr = cel.NewEvaluator()
 	})
 	return opap.celEvaluator, opap.celEvaluatorErr
+}
+
+// celNamespaceObjectFor resolves the Namespace object a scanned resource lives
+// in, for the evaluator's namespaceObject binding. It returns nil for a
+// cluster-scoped resource (no namespace to resolve) and for a namespace the
+// scan did not collect; the evaluator binds null in both cases, exactly as the
+// apiserver binds null for cluster-scoped resources.
+func (opap *OPAProcessor) celNamespaceObjectFor(obj map[string]any) map[string]any {
+	namespace, _, _ := unstructured.NestedString(obj, "metadata", "namespace")
+	if namespace == "" {
+		return nil
+	}
+	return opap.celNamespaceObjects()[namespace]
+}
+
+// celNamespaceObjects lazily indexes the scan's collected Namespace objects by
+// name (see the celNamespaceIndex field for why once is enough). Scans that
+// carry no session or no Namespaces produce an empty index, never an error: a
+// missing namespace binds null, the same degraded-but-safe behaviour those
+// scans had before namespaceObject was resolved at all.
+func (opap *OPAProcessor) celNamespaceObjects() map[string]map[string]any {
+	opap.celNamespaceOnce.Do(func() {
+		if opap.OPASessionObj == nil {
+			return
+		}
+		index := make(map[string]map[string]any)
+		for _, resource := range opap.AllResources {
+			if resource == nil || resource.GetKind() != "Namespace" || resource.GetApiVersion() != "v1" {
+				continue
+			}
+			index[resource.GetName()] = resource.GetObject()
+		}
+		opap.celNamespaceIndex = index
+	})
+	return opap.celNamespaceIndex
 }
 
 // celRuleResponse builds the RuleResponse for one object that violated a CEL

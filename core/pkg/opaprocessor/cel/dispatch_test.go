@@ -104,3 +104,70 @@ func TestEvaluateControlUnknownControl(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "C-9999")
 }
+
+// capabilitiesPod is a Pod whose single container adds the given capabilities.
+func capabilitiesPod(name string, caps ...any) map[string]any {
+	return map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": name, "namespace": "default"},
+		"spec": map[string]any{
+			"containers": []any{
+				map[string]any{
+					"name":  "c",
+					"image": "nginx",
+					"securityContext": map[string]any{
+						"capabilities": map[string]any{"add": caps},
+					},
+				},
+			},
+		},
+	}
+}
+
+// TestEvaluateControlResolvesParamsEndToEnd runs a paramKind control (C-0046)
+// through the whole pipeline: bundle load, params resolution from the embedded
+// control configuration, and evaluation. Its expressions select
+// params.settings.insecureCapabilities with no has() guard, so if params were
+// not actually bound the selection would error and every result would carry
+// Err — the clean verdicts below are only reachable with the configuration
+// resolved for real. TestLoadVAPWithParams covers the loader half in
+// isolation; this is the two halves together, which nothing else exercises
+// (C-0017 above declares no paramKind).
+func TestEvaluateControlResolvesParamsEndToEnd(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	t.Run("capability listed in the embedded params fails the policy", func(t *testing.T) {
+		// SYS_ADMIN is in basic-control-configuration.yaml's insecureCapabilities.
+		eval, err := e.EvaluateControl(context.Background(), "C-0046", capabilitiesPod("privileged", "SYS_ADMIN"), nil)
+		require.NoError(t, err)
+		require.True(t, eval.Applicable)
+		require.NotEmpty(t, eval.Results)
+
+		violated := false
+		for _, res := range eval.Results {
+			require.NoError(t, res.Err, "an eval error here means params did not resolve")
+			if !res.Passed {
+				violated = true
+				assert.NotEmpty(t, res.Message)
+			}
+		}
+		assert.True(t, violated, "a pod adding SYS_ADMIN must violate C-0046")
+	})
+
+	t.Run("capability absent from the embedded params passes", func(t *testing.T) {
+		// NET_BIND_SERVICE is not in the vendored insecureCapabilities list, so a
+		// pass here proves the verdict came from the resolved values rather than
+		// from a short-circuit that never read them.
+		eval, err := e.EvaluateControl(context.Background(), "C-0046", capabilitiesPod("bind", "NET_BIND_SERVICE"), nil)
+		require.NoError(t, err)
+		require.True(t, eval.Applicable)
+		require.NotEmpty(t, eval.Results)
+
+		for _, res := range eval.Results {
+			require.NoError(t, res.Err, "an eval error here means params did not resolve")
+			assert.True(t, res.Passed)
+		}
+	})
+}

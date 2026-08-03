@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/yaml"
 )
@@ -73,14 +74,33 @@ type VAP struct {
 // scan/admission parity. matchConditions is an admission-time gate we do not
 // evaluate yet; running a gated policy's validations unconditionally would emit
 // violations live admission never would, so we refuse the control instead. The
-// error maps to the same errored/skipped status a Rego eval error takes, never a
-// silent pass or a false violation. Removing this guard is the seam for when the
-// evaluator learns to evaluate matchConditions.
+// namespaceSelector and objectSelector on matchConstraints are the same kind of
+// gate (they exempt labelled objects at admission) and are refused for the same
+// reason: ignoring one would evaluate objects admission exempts. The error maps
+// to the same errored/skipped status a Rego eval error takes, never a silent
+// pass or a false violation. Removing a guard here is the seam for when the
+// evaluator learns to evaluate that gate.
 func (v *VAP) requireSupported() error {
 	if len(v.matchConditions) > 0 {
 		return fmt.Errorf("control %q uses spec.matchConditions, which the offline engine does not evaluate yet; refusing it to preserve scan/admission parity", v.ControlID)
 	}
+	if v.matchConstraints != nil {
+		if selectorNarrows(v.matchConstraints.NamespaceSelector) {
+			return fmt.Errorf("control %q scopes matchConstraints with a namespaceSelector, which the offline engine does not evaluate yet; refusing it to preserve scan/admission parity", v.ControlID)
+		}
+		if selectorNarrows(v.matchConstraints.ObjectSelector) {
+			return fmt.Errorf("control %q scopes matchConstraints with an objectSelector, which the offline engine does not evaluate yet; refusing it to preserve scan/admission parity", v.ControlID)
+		}
+	}
 	return nil
+}
+
+// selectorNarrows reports whether a label selector actually narrows anything.
+// Both nil and the empty selector match every object (the empty selector is
+// what the apiserver defaults an omitted one to), so only a selector carrying
+// requirements makes the policy one the offline engine cannot honor.
+func selectorNarrows(s *metav1.LabelSelector) bool {
+	return s != nil && (len(s.MatchLabels) > 0 || len(s.MatchExpressions) > 0)
 }
 
 // vapCatalog is everything indexed out of the embedded bundle. It is built once

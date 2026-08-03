@@ -153,3 +153,44 @@ func TestVAPAppliesToExcludeRules(t *testing.T) {
 	assert.True(t, v.appliesTo(obj("v1", "Pod")))
 	assert.False(t, v.appliesTo(obj("v1", "ConfigMap")), "excluded resource must not apply")
 }
+
+// withOps returns a copy of the rule constrained to the given operations.
+func withOps(r admissionregistrationv1.NamedRuleWithOperations, ops ...admissionregistrationv1.OperationType) admissionregistrationv1.NamedRuleWithOperations {
+	r.Operations = ops
+	return r
+}
+
+// TestVAPAppliesToOperations pins the operation side of rule matching: the scan
+// models every resource as a CREATE, so a rule that fires only on other
+// operations must not match — at admission that policy would never be handed
+// the object we are scanning.
+func TestVAPAppliesToOperations(t *testing.T) {
+	pods := rule([]string{""}, []string{"v1"}, []string{"pods"})
+
+	cases := []struct {
+		name string
+		ops  []admissionregistrationv1.OperationType
+		want bool
+	}{
+		{"CREATE matches", []admissionregistrationv1.OperationType{admissionregistrationv1.Create}, true},
+		{"CREATE and UPDATE matches (the bundle's shape)", []admissionregistrationv1.OperationType{admissionregistrationv1.Create, admissionregistrationv1.Update}, true},
+		{"wildcard matches", []admissionregistrationv1.OperationType{admissionregistrationv1.OperationAll}, true},
+		{"UPDATE-only does not match a modeled CREATE", []admissionregistrationv1.OperationType{admissionregistrationv1.Update}, false},
+		{"DELETE-only does not match a modeled CREATE", []admissionregistrationv1.OperationType{admissionregistrationv1.Delete}, false},
+		{"no operations (malformed) falls back to matching", nil, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := vapWithConstraints(withOps(pods, tc.ops...))
+			assert.Equal(t, tc.want, v.appliesTo(obj("v1", "Pod")))
+		})
+	}
+
+	t.Run("an exclusion scoped to UPDATE does not exempt the modeled CREATE", func(t *testing.T) {
+		v := &VAP{matchConstraints: &admissionregistrationv1.MatchResources{
+			ResourceRules:        []admissionregistrationv1.NamedRuleWithOperations{withOps(pods, admissionregistrationv1.Create)},
+			ExcludeResourceRules: []admissionregistrationv1.NamedRuleWithOperations{withOps(pods, admissionregistrationv1.Update)},
+		}}
+		assert.True(t, v.appliesTo(obj("v1", "Pod")), "the exclusion only covers UPDATE, so the CREATE we model is still matched")
+	})
+}
