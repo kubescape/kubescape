@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
@@ -20,74 +20,60 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUserConfirmed(t *testing.T) {
+func TestConfirm(t *testing.T) {
 	tests := []struct {
+		name  string
 		input string
 		want  bool
 	}{
-		{
-			input: "yes",
-			want:  true,
-		},
-		{
-			input: "y",
-			want:  true,
-		},
-		{
-			input: "no",
-			want:  false,
-		},
-		{
-			input: "n",
-			want:  false,
-		},
+		{name: "yes", input: "yes\n", want: true},
+		{name: "y", input: "y\n", want: true},
+		{name: "no", input: "no\n", want: false},
+		{name: "n", input: "n\n", want: false},
+		{name: "retries past blank lines then accepts", input: "\n\n  \ny\n", want: true},
+		{name: "EOF before any answer is a decline", input: "", want: false},
 	}
 
 	for _, tt := range tests {
-		t.Run(string(tt.input), func(t *testing.T) {
-			originalStdin := os.Stdin
-			r, w, _ := os.Pipe()
-			os.Stdin = r
-			defer func() {
-				os.Stdin = originalStdin
-			}()
-
-			go func() {
-				fmt.Fprintln(w, tt.input)
-			}()
-
-			got := userConfirmed()
-
+		t.Run(tt.name, func(t *testing.T) {
+			got := confirm(strings.NewReader(tt.input))
 			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
-// TestUserConfirmed_ClosedStdinReturnsFalse guards against a hang: if stdin is
-// closed or non-interactive (e.g. `kubescape fix < /dev/null`), fmt.Scanln
-// fails with io.EOF on every call. userConfirmed must treat that as a refusal
-// instead of busy-looping forever retrying a read that can never succeed.
-func TestUserConfirmed_ClosedStdinReturnsFalse(t *testing.T) {
+// TestUserConfirmed_NonInteractiveStdinDeclines guards against #2711: on
+// non-interactive stdin (closed, /dev/null, a redirected file, a pipe whose
+// reads fail outright, ...) no answer can ever arrive, so userConfirmed must
+// decline up front instead of ever entering the retry loop.
+func TestUserConfirmed_NonInteractiveStdinDeclines(t *testing.T) {
+	prevIsTerminal := isTerminal
+	t.Cleanup(func() { isTerminal = prevIsTerminal })
+	isTerminal = func(uintptr) bool { return false }
+
+	assert.False(t, userConfirmed())
+}
+
+// TestUserConfirmed_InteractiveReadsStdin checks the (small) wiring in
+// userConfirmed itself — that it reads from os.Stdin once isTerminal says
+// stdin is interactive — since TestConfirm exercises the retry/parsing logic
+// directly and wouldn't catch a wiring mistake here.
+func TestUserConfirmed_InteractiveReadsStdin(t *testing.T) {
+	prevIsTerminal := isTerminal
+	t.Cleanup(func() { isTerminal = prevIsTerminal })
+	isTerminal = func(uintptr) bool { return true }
+
 	originalStdin := os.Stdin
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
-	require.NoError(t, w.Close()) // close the write end so reads see EOF immediately
+	t.Cleanup(func() { os.Stdin = originalStdin })
 	os.Stdin = r
-	defer func() {
-		os.Stdin = originalStdin
-	}()
 
-	done := make(chan bool, 1)
-	go func() {
-		done <- userConfirmed()
-	}()
+	_, err = w.WriteString("y\n")
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
 
-	select {
-	case got := <-done:
-		assert.False(t, got)
-	case <-time.After(5 * time.Second):
-		t.Fatal("userConfirmed did not return after stdin EOF; it is hanging/spinning")
-	}
+	assert.True(t, userConfirmed())
 }
 
 // --- Fix() orchestration -----------------------------------------------
@@ -184,8 +170,17 @@ func manifestContent(t *testing.T, dir string) string {
 	return string(b)
 }
 
+// withStdin simulates an interactive user typing input at the confirmation
+// prompt: it stubs isTerminal to true (userConfirmed's non-interactive
+// short-circuit would otherwise decline before ever reading from the pipe)
+// and feeds input through os.Stdin.
 func withStdin(t *testing.T, input string, fn func()) {
 	t.Helper()
+
+	prevIsTerminal := isTerminal
+	isTerminal = func(uintptr) bool { return true }
+	t.Cleanup(func() { isTerminal = prevIsTerminal })
+
 	originalStdin := os.Stdin
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
