@@ -247,10 +247,9 @@ Run an on-demand container image vulnerability scan and return structured JSON c
 ```json
 {
   "image": "nginx:alpine",
-  "total_vulnerabilities": 2,
+  "total_vulnerabilities": 1,
   "severities": {
-    "Critical": 1,
-    "High": 1
+    "Critical": 1
   },
   "vulnerabilities": [
     {

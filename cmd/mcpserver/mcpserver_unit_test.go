@@ -228,6 +228,8 @@ func TestScanContainerImageValidation(t *testing.T) {
 		{name: "invalid password type", arguments: map[string]any{"image_name": "nginx:alpine", "password": 456}, wantError: "password argument must be a string"},
 		{name: "invalid include_matches type", arguments: map[string]any{"image_name": "nginx:alpine", "include_matches": "true"}, wantError: "include_matches argument must be a boolean"},
 		{name: "invalid severity type", arguments: map[string]any{"image_name": "nginx:alpine", "severity": 123}, wantError: "severity argument must be a string"},
+		{name: "invalid severity value typo", arguments: map[string]any{"image_name": "nginx:alpine", "severity": "Hihg"}, wantError: "invalid severity \"Hihg\": must be one of Critical, High, Medium, Low, Negligible, Unknown"},
+		{name: "invalid severity value bogus", arguments: map[string]any{"image_name": "nginx:alpine", "severity": "bogus"}, wantError: "invalid severity \"bogus\": must be one of Critical, High, Medium, Low, Negligible, Unknown"},
 	}
 
 	for _, test := range tests {
@@ -249,11 +251,14 @@ func TestValidateImageReference(t *testing.T) {
 		{name: "dir prefix", imageName: "dir:/"},
 		{name: "file prefix", imageName: "file:/etc/passwd"},
 		{name: "sbom prefix", imageName: "sbom:/some/file"},
+		{name: "purl prefix", imageName: "purl:/etc/passwd"},
 		{name: "oci-dir prefix", imageName: "oci-dir:/path"},
 		{name: "docker-archive prefix", imageName: "docker-archive:/path"},
 		{name: "absolute path", imageName: "/etc/shadow"},
 		{name: "relative path dot slash", imageName: "./local-image"},
 		{name: "parent path dot dot slash", imageName: "../parent-dir"},
+		{name: "bare relative path etc/passwd", imageName: "etc/passwd"},
+		{name: "bare directory tmp", imageName: "tmp"},
 		{name: "invalid characters", imageName: "invalid reference with spaces"},
 	}
 
@@ -365,5 +370,3 @@ func TestProcessMatches(t *testing.T) {
 		assert.Equal(t, 0, resp.Severities["Unknown"])
 	})
 }
-
-

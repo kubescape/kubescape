@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -15,12 +16,26 @@ import (
 	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 )
 
+const defaultImageScanTimeout = 5 * time.Minute
+
 type imageScanResponse struct {
 	Image           string                 `json:"image"`
 	TotalUniqueCVEs int                    `json:"total_vulnerabilities"`
 	Severities      map[string]int         `json:"severities"`
 	Vulnerabilities []models.Vulnerability `json:"vulnerabilities"`
 	Matches         []models.Match         `json:"matches,omitempty"`
+}
+
+func validateSeverity(sev string) error {
+	if sev == "" {
+		return nil
+	}
+	switch strings.ToLower(sev) {
+	case "critical", "high", "medium", "low", "negligible", "unknown":
+		return nil
+	default:
+		return fmt.Errorf("invalid severity %q: must be one of Critical, High, Medium, Low, Negligible, Unknown", sev)
+	}
 }
 
 // validateImageReference validates that imageName is a valid remote image reference
@@ -32,9 +47,9 @@ func validateImageReference(imageName string) error {
 
 	lower := strings.ToLower(imageName)
 
-	// Block scheme prefixes that Syft resolves locally or on disk
+	// Block scheme prefixes that Syft/Grype resolve locally or on disk
 	forbiddenPrefixes := []string{
-		"dir:", "file:", "sbom:", "oci-dir:", "oci-archive:",
+		"dir:", "file:", "sbom:", "purl:", "cpe:", "pkg:", "oci-dir:", "oci-archive:",
 		"docker-archive:", "docker-daemon:", "docker:", "podman:", "singularity:",
 	}
 	for _, prefix := range forbiddenPrefixes {
@@ -46,6 +61,20 @@ func validateImageReference(imageName string) error {
 	// Block relative or absolute local file paths
 	if strings.HasPrefix(imageName, "/") || strings.HasPrefix(imageName, "./") || strings.HasPrefix(imageName, "../") {
 		return fmt.Errorf("invalid image reference %q: local file paths are not allowed", imageName)
+	}
+
+	// Extract path component before tags/digests and check if it exists on local filesystem
+	pathPart := strings.SplitN(strings.SplitN(imageName, ":", 2)[0], "@", 2)[0]
+	if _, err := os.Stat(pathPart); err == nil {
+		return fmt.Errorf("invalid image reference %q: resolves to a local file or directory", imageName)
+	}
+	if _, err := os.Stat(imageName); err == nil {
+		return fmt.Errorf("invalid image reference %q: resolves to a local file or directory", imageName)
+	}
+	if !strings.HasPrefix(pathPart, "/") {
+		if _, err := os.Stat("/" + pathPart); err == nil {
+			return fmt.Errorf("invalid image reference %q: resolves to a local file or directory", imageName)
+		}
 	}
 
 	// Validate using go-containerregistry
@@ -142,6 +171,11 @@ func (ksServer *KubescapeMcpserver) runImageScan(ctx context.Context, imageName,
 		return nil, err
 	}
 
+	if !ksServer.imageScanMu.TryLock() {
+		return nil, fmt.Errorf("another container image scan is currently in progress; please wait for it to complete")
+	}
+	defer ksServer.imageScanMu.Unlock()
+
 	logger.L().Info(fmt.Sprintf("Starting on-demand MCP container image scan for %s", imageName))
 
 	svc, err := ksServer.getImageScanService()
@@ -154,8 +188,8 @@ func (ksServer *KubescapeMcpserver) runImageScan(ctx context.Context, imageName,
 		Password: regSecret,
 	}
 
-	// Derive a bounded child context with a 5-minute timeout for the scan
-	scanCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	// Derive a bounded child context with a timeout for the scan
+	scanCtx, cancel := context.WithTimeout(ctx, defaultImageScanTimeout)
 	defer cancel()
 
 	type result struct {

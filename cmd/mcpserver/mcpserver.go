@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -31,29 +32,31 @@ type KubescapeMcpserver struct {
 	k8sClientOnce sync.Once
 	policyGetter  *getter.DownloadReleasedPolicy
 
-	imageScanSvc     *imagescan.Service
-	imageScanSvcOnce sync.Once
-	imageScanSvcErr  error
-	dbListingURL     string
+	imageScanSvc   *imagescan.Service
+	imageScanSvcMu sync.Mutex
+	imageScanMu    sync.Mutex
+	dbListingURL   string
 }
 
 func (ksServer *KubescapeMcpserver) getImageScanService() (*imagescan.Service, error) {
+	ksServer.imageScanSvcMu.Lock()
+	defer ksServer.imageScanSvcMu.Unlock()
+
 	if ksServer.imageScanSvc != nil {
 		return ksServer.imageScanSvc, nil
 	}
-	ksServer.imageScanSvcOnce.Do(func() {
-		distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(ksServer.dbListingURL)
-		if err != nil {
-			ksServer.imageScanSvcErr = fmt.Errorf("failed to initialize default Grype database configuration: %w", err)
-			return
-		}
-		ksServer.imageScanSvc, err = imagescan.NewScanService(distCfg, installCfg)
-		if err != nil {
-			ksServer.imageScanSvcErr = fmt.Errorf("failed to initialize image scan service: %w", err)
-			return
-		}
-	})
-	return ksServer.imageScanSvc, ksServer.imageScanSvcErr
+
+	distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(ksServer.dbListingURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize default Grype database configuration: %w", err)
+	}
+	svc, err := imagescan.NewScanService(distCfg, installCfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize image scan service: %w", err)
+	}
+
+	ksServer.imageScanSvc = svc
+	return ksServer.imageScanSvc, nil
 }
 
 func (ksServer *KubescapeMcpserver) getKsClient() (spdxv1beta1.SpdxV1beta1Interface, error) {
@@ -871,6 +874,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 				return mcp.NewToolResultError("severity argument must be a string"), nil
 			}
 			severity = strings.TrimSpace(sevStr)
+			if err := validateSeverity(severity); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
 		}
 
 		responseBytes, err := ksServer.runImageScan(ctx, imageName, regUsername, regSecret, includeMatches, severity)
@@ -901,10 +907,16 @@ func mcpServerEntrypoint() error {
 		k8sApi = k8sinterface.NewKubernetesApi()
 	}
 
+	dbListingURL := os.Getenv("KS_GRYPE_LISTING_URL")
+	if dbListingURL == "" {
+		dbListingURL = os.Getenv("GRYPE_DB_LISTING_URL")
+	}
+
 	ksServer := &KubescapeMcpserver{
 		s:            s,
 		k8sClient:    k8sApi,
 		policyGetter: getter.NewDownloadReleasedPolicy(),
+		dbListingURL: dbListingURL,
 	}
 
 	// Initialize the policy getter to load the local ~/.kubescape cache.
