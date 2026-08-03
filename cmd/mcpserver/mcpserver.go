@@ -19,6 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 )
 
 type KubescapeMcpserver struct {
@@ -29,6 +30,30 @@ type KubescapeMcpserver struct {
 	k8sClient     *k8sinterface.KubernetesApi
 	k8sClientOnce sync.Once
 	policyGetter  *getter.DownloadReleasedPolicy
+
+	imageScanSvc     *imagescan.Service
+	imageScanSvcOnce sync.Once
+	imageScanSvcErr  error
+	dbListingURL     string
+}
+
+func (ksServer *KubescapeMcpserver) getImageScanService() (*imagescan.Service, error) {
+	if ksServer.imageScanSvc != nil {
+		return ksServer.imageScanSvc, nil
+	}
+	ksServer.imageScanSvcOnce.Do(func() {
+		distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(ksServer.dbListingURL)
+		if err != nil {
+			ksServer.imageScanSvcErr = fmt.Errorf("failed to initialize default Grype database configuration: %w", err)
+			return
+		}
+		ksServer.imageScanSvc, err = imagescan.NewScanService(distCfg, installCfg)
+		if err != nil {
+			ksServer.imageScanSvcErr = fmt.Errorf("failed to initialize image scan service: %w", err)
+			return
+		}
+	})
+	return ksServer.imageScanSvc, ksServer.imageScanSvcErr
 }
 
 func (ksServer *KubescapeMcpserver) getKsClient() (spdxv1beta1.SpdxV1beta1Interface, error) {
@@ -831,8 +856,24 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			}
 			regSecret = pStr
 		}
+		var includeMatches bool
+		if inc, ok := arguments["include_matches"]; ok {
+			incBool, ok := inc.(bool)
+			if !ok {
+				return mcp.NewToolResultError("include_matches argument must be a boolean"), nil
+			}
+			includeMatches = incBool
+		}
+		var severity string
+		if sev, ok := arguments["severity"]; ok {
+			sevStr, ok := sev.(string)
+			if !ok {
+				return mcp.NewToolResultError("severity argument must be a string"), nil
+			}
+			severity = strings.TrimSpace(sevStr)
+		}
 
-		responseBytes, err := ksServer.runImageScan(ctx, imageName, regUsername, regSecret)
+		responseBytes, err := ksServer.runImageScan(ctx, imageName, regUsername, regSecret, includeMatches, severity)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run container image scan: %v", err)), nil
 		}
@@ -948,16 +989,22 @@ func createIaCScanningTools(ksServer *KubescapeMcpserver) {
 func createImageScanningTools(ksServer *KubescapeMcpserver) {
 	scanImageTool := mcp.NewTool(
 		"scan_container_image",
-		mcp.WithDescription("Run an on-demand container image vulnerability scan and return structured JSON containing matches, vulnerabilities, and severities"),
+		mcp.WithDescription("Run an on-demand container image vulnerability scan. Note: this network-bound operation scans a container image and initializes/queries the vulnerability database."),
 		mcp.WithString("image_name",
 			mcp.Required(),
-			mcp.Description("Name of the container image to scan (e.g., nginx:alpine)"),
+			mcp.Description("Name of the remote container image to scan (e.g., nginx:alpine)"),
 		),
 		mcp.WithString("username",
 			mcp.Description("Username for registry authentication (optional)"),
 		),
 		mcp.WithString("password",
 			mcp.Description("Password for registry authentication (optional)"),
+		),
+		mcp.WithBoolean("include_matches",
+			mcp.Description("Include detailed match location and package info for each vulnerability (optional, defaults to false)"),
+		),
+		mcp.WithString("severity",
+			mcp.Description("Minimum severity filter (e.g., Low, Medium, High, Critical) (optional)"),
 		),
 	)
 

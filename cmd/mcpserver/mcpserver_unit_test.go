@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/anchore/grype/grype/presenter/models"
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	storagefake "github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -225,6 +226,8 @@ func TestScanContainerImageValidation(t *testing.T) {
 		{name: "invalid image_name type", arguments: map[string]any{"image_name": 123}, wantError: "image_name argument must be a string"},
 		{name: "invalid username type", arguments: map[string]any{"image_name": "nginx:alpine", "username": true}, wantError: "username argument must be a string"},
 		{name: "invalid password type", arguments: map[string]any{"image_name": "nginx:alpine", "password": 456}, wantError: "password argument must be a string"},
+		{name: "invalid include_matches type", arguments: map[string]any{"image_name": "nginx:alpine", "include_matches": "true"}, wantError: "include_matches argument must be a boolean"},
+		{name: "invalid severity type", arguments: map[string]any{"image_name": "nginx:alpine", "severity": 123}, wantError: "severity argument must be a string"},
 	}
 
 	for _, test := range tests {
@@ -237,4 +240,130 @@ func TestScanContainerImageValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateImageReference(t *testing.T) {
+	invalidImages := []struct {
+		name      string
+		imageName string
+	}{
+		{name: "dir prefix", imageName: "dir:/"},
+		{name: "file prefix", imageName: "file:/etc/passwd"},
+		{name: "sbom prefix", imageName: "sbom:/some/file"},
+		{name: "oci-dir prefix", imageName: "oci-dir:/path"},
+		{name: "docker-archive prefix", imageName: "docker-archive:/path"},
+		{name: "absolute path", imageName: "/etc/shadow"},
+		{name: "relative path dot slash", imageName: "./local-image"},
+		{name: "parent path dot dot slash", imageName: "../parent-dir"},
+		{name: "invalid characters", imageName: "invalid reference with spaces"},
+	}
+
+	for _, tt := range invalidImages {
+		t.Run("rejects "+tt.name, func(t *testing.T) {
+			err := validateImageReference(tt.imageName)
+			require.Error(t, err)
+		})
+	}
+
+	validImages := []string{
+		"nginx:alpine",
+		"gcr.io/distroless/static:latest",
+		"ubuntu@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	}
+
+	for _, img := range validImages {
+		t.Run("accepts "+img, func(t *testing.T) {
+			err := validateImageReference(img)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestProcessMatches(t *testing.T) {
+	// Import models for presenter matches
+	matches := []models.Match{
+		{
+			Vulnerability: models.Vulnerability{
+				VulnerabilityMetadata: models.VulnerabilityMetadata{
+					ID:       "CVE-2024-0001",
+					Severity: "High",
+				},
+			},
+		},
+		{
+			// Duplicate CVE match across different package location
+			Vulnerability: models.Vulnerability{
+				VulnerabilityMetadata: models.VulnerabilityMetadata{
+					ID:       "CVE-2024-0001",
+					Severity: "High",
+				},
+			},
+		},
+		{
+			// Lowercase severity
+			Vulnerability: models.Vulnerability{
+				VulnerabilityMetadata: models.VulnerabilityMetadata{
+					ID:       "CVE-2024-0002",
+					Severity: "critical",
+				},
+			},
+		},
+		{
+			// Missing severity
+			Vulnerability: models.Vulnerability{
+				VulnerabilityMetadata: models.VulnerabilityMetadata{
+					ID:       "CVE-2024-0003",
+					Severity: "",
+				},
+			},
+		},
+		{
+			// Low severity
+			Vulnerability: models.Vulnerability{
+				VulnerabilityMetadata: models.VulnerabilityMetadata{
+					ID:       "CVE-2024-0004",
+					Severity: "Low",
+				},
+			},
+		},
+	}
+
+	t.Run("default summary mode without matches array", func(t *testing.T) {
+		resp := processMatches("nginx:alpine", matches, false, "")
+
+		assert.Equal(t, "nginx:alpine", resp.Image)
+		assert.Equal(t, 4, resp.TotalUniqueCVEs)
+		assert.Nil(t, resp.Matches) // omitted when includeMatches is false
+
+		// Verify severity counts match total unique CVEs
+		totalCount := 0
+		for _, count := range resp.Severities {
+			totalCount += count
+		}
+		assert.Equal(t, resp.TotalUniqueCVEs, totalCount)
+
+		assert.Equal(t, 1, resp.Severities["High"])
+		assert.Equal(t, 1, resp.Severities["Critical"])
+		assert.Equal(t, 1, resp.Severities["Unknown"])
+		assert.Equal(t, 1, resp.Severities["Low"])
+	})
+
+	t.Run("include matches mode", func(t *testing.T) {
+		resp := processMatches("nginx:alpine", matches, true, "")
+
+		assert.Equal(t, 4, resp.TotalUniqueCVEs)
+		assert.Len(t, resp.Matches, 5) // all 5 raw matches included
+	})
+
+	t.Run("severity filtering", func(t *testing.T) {
+		resp := processMatches("nginx:alpine", matches, false, "High")
+
+		// Only Critical and High should remain (CVE-2024-0001 and CVE-2024-0002)
+		assert.Equal(t, 2, resp.TotalUniqueCVEs)
+		assert.Equal(t, 1, resp.Severities["High"])
+		assert.Equal(t, 1, resp.Severities["Critical"])
+		assert.Equal(t, 0, resp.Severities["Low"])
+		assert.Equal(t, 0, resp.Severities["Unknown"])
+	})
+}
+
 
