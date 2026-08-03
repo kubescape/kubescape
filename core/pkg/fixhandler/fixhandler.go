@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -929,7 +930,7 @@ func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int
 	isStringValue := true
 	if _, err := strconv.ParseBool(value); err == nil {
 		isStringValue = false
-	} else if _, err := strconv.ParseFloat(value, 64); err == nil {
+	} else if f, err := strconv.ParseFloat(value, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
 		isStringValue = false
 	} else if _, err := strconv.Atoi(value); err == nil {
 		isStringValue = false
