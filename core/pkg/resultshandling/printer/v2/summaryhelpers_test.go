@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 )
@@ -209,7 +210,7 @@ func TestGroupByNamespaceOrKind(t *testing.T) {
 		"apiVersion": "rbac.authorization.k8s.io/v1",
 		"kind":       "ClusterRole",
 		"metadata": map[string]interface{}{
-			"name": "clusterrole1",
+			"name": "clusterrole1", // Empty namespace workload case
 		},
 	})
 
@@ -222,23 +223,96 @@ func TestGroupByNamespaceOrKind(t *testing.T) {
 		},
 	})
 
-	resources := []WorkloadSummary{
-		{resource: w1, status: apis.StatusFailed},
-		{resource: w2, status: apis.StatusFailed},
-		{resource: w3, status: apis.StatusFailed},
-		{resource: r1, status: apis.StatusFailed},
+	// RegoResponseVectorObject not in the allowed Group/User to test fallthrough
+	rFallthrough := objectsenvelopes.NewRegoResponseVectorObject(map[string]interface{}{
+		"apiVersion": "rbac.authorization.k8s.io/v1",
+		"kind":       "RoleBinding",
+		"metadata": map[string]interface{}{
+			"name": "rolebinding1",
+		},
+	})
+
+	// Non-workload envelope to test default apiGroup parsing branch
+	lw := localworkload.NewLocalWorkload(map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "d1",
+			"namespace": "default",
+		},
+		"sourcePath":   "/tmp/a.yaml",
+		"relativePath": "a.yaml",
+	})
+
+	tests := []struct {
+		name            string
+		resources       []WorkloadSummary
+		filterFunc      func(*WorkloadSummary) bool
+		expectedBuckets map[string][]workloadinterface.IMetadata
+	}{
+		{
+			name: "StatusFailed filter with various resource types",
+			resources: []WorkloadSummary{
+				{resource: w1, status: apis.StatusFailed},
+				{resource: w2, status: apis.StatusFailed},
+				{resource: w3, status: apis.StatusFailed},
+				{resource: r1, status: apis.StatusFailed},
+				{resource: rFallthrough, status: apis.StatusFailed},
+				{resource: lw, status: apis.StatusFailed},
+			},
+			filterFunc: workloadSummaryFailed,
+			expectedBuckets: map[string][]workloadinterface.IMetadata{
+				"Namespace default":     {w1},
+				"Namespace kube-system": {w2},
+				"":                      {w3, rFallthrough},
+				"Users":                 {r1},
+				"apps":                  {lw},
+			},
+		},
+		{
+			name: "StatusPassed filter ensures StatusFailed are skipped",
+			resources: []WorkloadSummary{
+				{resource: w1, status: apis.StatusFailed},
+				{resource: w2, status: apis.StatusPassed},
+			},
+			filterFunc: workloadSummaryPassed,
+			expectedBuckets: map[string][]workloadinterface.IMetadata{
+				"Namespace kube-system": {w2},
+			},
+		},
 	}
 
-	result := groupByNamespaceOrKind(resources, workloadSummaryFailed)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := groupByNamespaceOrKind(tt.resources, tt.filterFunc)
 
-	assert.Len(t, result, 4)
-	assert.Contains(t, result, "Namespace default")
-	assert.Contains(t, result, "Namespace kube-system")
-	assert.Contains(t, result, "")
-	assert.Contains(t, result, "Users")
+			// Verify total cardinality to ensure nothing was grouped unexpectedly
+			expectedCount := 0
+			for _, expectedResList := range tt.expectedBuckets {
+				expectedCount += len(expectedResList)
+			}
+			actualCount := 0
+			for _, resList := range result {
+				actualCount += len(resList)
+			}
+			assert.Equal(t, expectedCount, actualCount, "Total number of resources grouped does not match")
 
-	assert.Len(t, result["Namespace default"], 1)
-	assert.Len(t, result["Namespace kube-system"], 1)
-	assert.Len(t, result[""], 1)
-	assert.Len(t, result["Users"], 1)
+			// Verify identity and exact bucket lengths
+			for group, expectedResList := range tt.expectedBuckets {
+				assert.Contains(t, result, group)
+				assert.Len(t, result[group], len(expectedResList))
+
+				for _, expectedRes := range expectedResList {
+					found := false
+					for _, res := range result[group] {
+						if res.resource == expectedRes {
+							found = true
+							break
+						}
+					}
+					assert.True(t, found, "Expected to find specific resource in group %s", group)
+				}
+			}
+		})
+	}
 }

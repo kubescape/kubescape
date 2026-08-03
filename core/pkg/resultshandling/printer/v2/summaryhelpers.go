@@ -37,21 +37,25 @@ func groupByNamespaceOrKind(resources []WorkloadSummary, status func(workloadSum
 		if t == objectsenvelopes.TypeRegoResponseVectorObject && !isKindToBeGrouped(resources[i].resource.GetKind()) {
 			t = workloadinterface.TypeWorkloadObject
 		}
-		group := ""
-		switch t {
-		case workloadinterface.TypeWorkloadObject:
-			if resources[i].resource.GetNamespace() != "" {
-				group = "Namespace " + resources[i].resource.GetNamespace()
-			}
-		case objectsenvelopes.TypeRegoResponseVectorObject:
-			group = resources[i].resource.GetKind() + "s"
-		default:
-			group, _ = k8sinterface.SplitApiVersion(resources[i].resource.GetApiVersion())
-		}
+		group := groupKey(resources[i].resource, t)
 		mapResources[group] = append(mapResources[group], resources[i])
-
 	}
 	return mapResources
+}
+
+func groupKey(resource workloadinterface.IMetadata, t workloadinterface.ObjectType) string {
+	switch t {
+	case workloadinterface.TypeWorkloadObject:
+		if resource.GetNamespace() != "" {
+			return "Namespace " + resource.GetNamespace()
+		}
+	case objectsenvelopes.TypeRegoResponseVectorObject:
+		return resource.GetKind() + "s"
+	default:
+		group, _ := k8sinterface.SplitApiVersion(resource.GetApiVersion())
+		return group
+	}
+	return ""
 }
 
 func isKindToBeGrouped(kind string) bool {
