@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"os"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
@@ -23,16 +24,39 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// k8sConfigOnce and k8sConfigLoaded guard the lazy Kubernetes client config
+// load. The k8sinterface package reads and writes package-level state
+// (K8SConfig, connectedToCluster) without any synchronization, so triggering the
+// load from concurrent scans (e.g. the HTTP handler running multiple scans in
+// parallel) is a data race on that global state. Loading it exactly once per
+// process removes the race.
+var (
+	k8sConfigOnce   sync.Once
+	k8sConfigLoaded bool
+)
+
+// isConnectedToCluster reports whether a Kubernetes cluster connection is
+// available, loading the cluster config at most once per process.
+func isConnectedToCluster() bool {
+	k8sConfigOnce.Do(func() {
+		k8sConfigLoaded = k8sinterface.LoadK8sConfig() == nil
+		if !k8sConfigLoaded {
+			k8sinterface.SetConnectedToCluster(false)
+		}
+	})
+	return k8sConfigLoaded
+}
+
 // getKubernetesApi
 func getKubernetesApi() *k8sinterface.KubernetesApi {
-	if !k8sinterface.IsConnectedToCluster() {
+	if !isConnectedToCluster() {
 		return nil
 	}
 	return k8sinterface.NewKubernetesApi()
 }
 
 func getExceptionsK8sClient(ctx context.Context) client.Client {
-	if !k8sinterface.IsConnectedToCluster() {
+	if !isConnectedToCluster() {
 		return nil
 	}
 	config := k8sinterface.GetK8sConfig()
@@ -144,7 +168,7 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 	hostSensorVal := scanInfo.HostSensorEnabled.Get()
 
 	switch {
-	case !k8sinterface.IsConnectedToCluster() || k8s == nil: // TODO(fred): fix race condition on global KSConfig there
+	case k8s == nil: // k8s is the authoritative, race-free proxy for "connected to cluster"
 		return hostsensorutils.NewHostSensorHandlerMock()
 
 	case hostSensorVal != nil && *hostSensorVal:
