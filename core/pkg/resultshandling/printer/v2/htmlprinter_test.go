@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -88,4 +89,23 @@ func TestBuildResourceControlResultTable_MissingControl(t *testing.T) {
 		results := buildResourceControlResultTable([]resourcesresults.ResourceAssociatedControl{ac}, summaryDetails)
 		assert.Empty(t, results)
 	})
+}
+
+func TestBuildResourceTableView_SkipsMissingResource(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.ResourcesResult = map[string]resourcesresults.Result{
+		"r-1": {
+			ResourceID: "r-1",
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0001",
+					Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				},
+			},
+		},
+	}
+	// Do not populate session.AllResources["r-1"]
+
+	view := buildResourceTableView(session)
+	assert.Empty(t, view, "missing resource should be skipped, not included with nil")
 }

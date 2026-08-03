@@ -9,6 +9,8 @@ import (
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
 	apis "github.com/kubescape/opa-utils/reporthandling/apis"
@@ -130,15 +132,21 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 
 	// set top workloads according to number of top workloads
 	topWorkloads := make([]reporthandling.IResource, 0, TopWorkloadsNumber)
-	for i := range TopWorkloadsNumber {
-		if i >= len(topWorkloadsSorted) {
+	for _, wl := range topWorkloadsSorted {
+		if len(topWorkloads) >= TopWorkloadsNumber {
 			break
 		}
 
-		source := sessionObj.ResourceSource[topWorkloadsSorted[i].ResourceID]
+		source := sessionObj.ResourceSource[wl.ResourceID]
 
+		res, ok := sessionObj.AllResources[wl.ResourceID]
+		if !ok {
+			logger.L().Debug("resource missing from AllResources, skipping",
+				helpers.String("resourceID", wl.ResourceID))
+			continue
+		}
 		wlObj := &reporthandling.Resource{
-			IMetadata: sessionObj.AllResources[topWorkloadsSorted[i].ResourceID],
+			IMetadata: res,
 			Source:    &source,
 		}
 
