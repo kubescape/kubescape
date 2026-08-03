@@ -107,10 +107,9 @@ func HttpGetter(httpClient *http.Client, fullURL string, headers map[string]stri
 }
 
 func setHeaders(req *http.Request, headers map[string]string) {
-	if len(headers) >= 0 { // might be nil
-		for k, v := range headers {
-			req.Header.Set(k, v)
-		}
+	// range over a nil map is a no-op, so headers being nil needs no guard here.
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 }
 
