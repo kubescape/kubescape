@@ -247,6 +247,7 @@ func getKubernetesObjectsFromExternalResources(externalResources cautils.Externa
 // resourceCount must be the scan's frozen initial snapshot (OPAProcessor.initialResourceCount), not len(allResources).
 func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects, resourceCount int) map[string][]workloadinterface.IMetadata {
 	k8sObjects := map[string][]workloadinterface.IMetadata{}
+	seenResourceIDs := map[string]struct{}{}
 
 	for m := range match {
 		for _, groups := range match[m].APIGroups {
@@ -255,9 +256,12 @@ func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[st
 					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := k8sResources[groupResource]; ok {
-							for i := range k8sObj {
+							for _, resourceID := range k8sObj {
+								if _, seen := seenResourceIDs[resourceID]; seen {
+									continue
+								}
 
-								obj := allResources[k8sObj[i]]
+								obj := allResources[resourceID]
 								ns := getNamespaceName(obj, resourceCount)
 
 								l, ok := k8sObjects[ns]
@@ -266,6 +270,7 @@ func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[st
 								}
 								l = append(l, obj)
 								k8sObjects[ns] = l
+								seenResourceIDs[resourceID] = struct{}{}
 							}
 						}
 					}
