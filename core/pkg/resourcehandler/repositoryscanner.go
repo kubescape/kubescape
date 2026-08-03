@@ -61,6 +61,12 @@ func NewGitHubRepository() *GitHubRepository {
 	}
 }
 
+// ScanRepository lists YAML/JSON manifest paths in a GitHub repository via
+// the GitHub REST API. As of this writing nothing in this repository calls
+// it - `kubescape scan <github-url>` resolves through cautils.CloneGitRepo
+// (go-git clone) instead, which never reaches this file. It's kept as
+// exported API surface for external importers of this module; if that's not
+// actually needed, this file is a candidate for deletion.
 func ScanRepository(command string, branchOptional string) ([]string, error) {
 	repo, err := getRepository(command)
 	if err != nil {
@@ -212,20 +218,16 @@ func httpGet(client *http.Client, url string, headers map[string]string) ([]byte
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		const maxBodyInError = 1024
-		if len(body) > maxBodyInError {
-			body = body[:maxBodyInError]
-		}
-		return nil, fmt.Errorf("request to %q failed with status %q: %s", url, resp.Status, body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxBodyInError))
+		// Bounding the read can cut a multi-byte UTF-8 rune in half at the
+		// 1024-byte boundary; drop the resulting invalid trailing bytes
+		// rather than embedding a mangled rune in the error string.
+		return nil, fmt.Errorf("request to %q failed with status %q: %s", url, resp.Status, strings.ToValidUTF8(string(body), ""))
 	}
 
-	return body, nil
+	return io.ReadAll(resp.Body)
 }
 func (g *GitHubRepository) setTree() error {
 	if g.isFile {
