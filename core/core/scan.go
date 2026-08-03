@@ -156,11 +156,11 @@ func resolvedOutputPath(format, outputFile string) string {
 	}
 	ext := fileExtForFormat(format)
 	fileExt := filepath.Ext(trimmed)
-	
+
 	if ext == printer.YamlOutputExt && fileExt == ".yml" {
 		return trimmed
 	}
-	
+
 	if ext != "" && fileExt != ext {
 		return trimmed + ext
 	}
