@@ -19,10 +19,11 @@ import (
 type ResourcesPrioritizationHandler struct {
 	resourceToAttackTracks map[string]v1alpha1.IAttackTrack
 	attackTracks           []v1alpha1.IAttackTrack
+	supportedKinds         []string
 	buildResourcesMap      bool
 }
 
-var supportedKinds = []string{
+var DefaultSupportedKinds = []string{
 	"Deployment",
 	"Pod",
 	"ReplicaSet",
@@ -33,10 +34,14 @@ var supportedKinds = []string{
 	"CronJob",
 }
 
+// Keep supportedKinds package variable for backwards compatibility
+var supportedKinds = DefaultSupportedKinds
+
 func NewResourcesPrioritizationHandler(ctx context.Context, attackTracksGetter getter.IAttackTracksGetter, buildResourcesMap bool) (*ResourcesPrioritizationHandler, error) {
 	handler := &ResourcesPrioritizationHandler{
 		attackTracks:           make([]v1alpha1.IAttackTrack, 0),
 		resourceToAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		supportedKinds:         append([]string(nil), DefaultSupportedKinds...),
 		buildResourcesMap:      buildResourcesMap,
 	}
 
@@ -65,6 +70,22 @@ func NewResourcesPrioritizationHandler(ctx context.Context, attackTracksGetter g
 	}
 
 	return handler, nil
+}
+
+func (handler *ResourcesPrioritizationHandler) SetSupportedKinds(kinds []string) {
+	handler.supportedKinds = append([]string(nil), kinds...)
+}
+
+func (handler *ResourcesPrioritizationHandler) AddSupportedKinds(kinds ...string) {
+	for _, kind := range kinds {
+		if !slices.Contains(handler.supportedKinds, kind) {
+			handler.supportedKinds = append(handler.supportedKinds, kind)
+		}
+	}
+}
+
+func (handler *ResourcesPrioritizationHandler) GetSupportedKinds() []string {
+	return handler.supportedKinds
 }
 
 func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *cautils.OPASessionObj) error {
@@ -158,12 +179,42 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 }
 
 func (handler *ResourcesPrioritizationHandler) isSupportedKind(obj workloadinterface.IMetadata) bool {
-	if obj != nil {
-		if slices.Contains(supportedKinds, obj.GetKind()) {
-			return true
-		}
+	if obj == nil {
+		return false
 	}
-	return false
+	kinds := handler.supportedKinds
+	if len(kinds) == 0 {
+		kinds = DefaultSupportedKinds
+	}
+	if slices.Contains(kinds, obj.GetKind()) {
+		return true
+	}
+	// Dynamic fallback detector: check if the Kubernetes resource contains a Pod template spec (spec.template.spec.containers)
+	return hasPodTemplateSpec(obj.GetObject())
+}
+
+// hasPodTemplateSpec checks if the Kubernetes resource contains a Pod template spec (spec.template.spec.containers) or spec.containers
+func hasPodTemplateSpec(object map[string]any) bool {
+	if object == nil {
+		return false
+	}
+	spec, ok := object["spec"].(map[string]any)
+	if !ok {
+		return false
+	}
+	if containers, ok := spec["containers"].([]any); ok && len(containers) > 0 {
+		return true
+	}
+	template, ok := spec["template"].(map[string]any)
+	if !ok {
+		return false
+	}
+	templateSpec, ok := template["spec"].(map[string]any)
+	if !ok {
+		return false
+	}
+	containers, ok := templateSpec["containers"].([]any)
+	return ok && len(containers) > 0
 }
 
 func (handler *ResourcesPrioritizationHandler) copyAttackTrack(attackTrack v1alpha1.IAttackTrack, lookup v1alpha1.IAttackTrackControlsLookup) v1alpha1.IAttackTrack {
