@@ -22,6 +22,15 @@ const (
 	TargetFramework      = "framework"
 	TargetArtifacts      = "artifacts"
 	TargetAttackTracks   = "attack-tracks"
+
+	// downloadDirPerm matches the 0700 policy customerloader.go's
+	// updateConfigFile() already enforces (and re-tightens with chmod) on
+	// ~/.kubescape: setPathAndFilename() defaults downloadInfo.Path to that
+	// same directory (getter.GetDefaultPath("")) when no --output path is
+	// given, and it holds config.json's AccessKey. A more permissive mode
+	// here would race the config loader's own hardening and could leave the
+	// directory group-readable depending on which one runs first.
+	downloadDirPerm = 0700
 )
 
 var downloadFunc = map[string]func(context.Context, *metav1.DownloadInfo) error{
@@ -32,6 +41,30 @@ var downloadFunc = map[string]func(context.Context, *metav1.DownloadInfo) error{
 	TargetArtifacts:      downloadArtifacts,
 	TargetAttackTracks:   downloadAttackTracks,
 }
+
+// Indirection seams used only by the download* functions in this file: by
+// default they are the real getter constructors from initutils.go,
+// cautils.GetTenantConfig, and getKubernetesApi, which (with no local file,
+// no account configured, and/or a reachable cluster) ultimately reach the
+// network - GitHub releases, the Kubescape Cloud API, or the Kubernetes API
+// server. kubernetesAPIFunc in particular must be stubbed together with
+// tenantConfigFunc: it is evaluated eagerly as an argument to
+// tenantConfigFunc, so leaving it real still probes the cluster (discovery's
+// ServerPreferredResources call) even when tenantConfigFunc itself is faked.
+// Tests substitute fakes here to exercise every branch of the download*
+// functions without a network or cluster dependency.
+//
+// policyGetterFunc and exceptionsGetterFunc are also called directly (not
+// through these vars) from list.go and scan.go, so swapping them here has no
+// effect on those call sites.
+var (
+	policyGetterFunc       = getPolicyGetter
+	exceptionsGetterFunc   = getExceptionsGetter
+	attackTracksGetterFunc = getAttackTracksGetter
+	configInputsGetterFunc = getConfigInputsGetter
+	tenantConfigFunc       = cautils.GetTenantConfig
+	kubernetesAPIFunc      = getKubernetesApi
+)
 
 func DownloadSupportCommands() []string {
 	commands := []string{}
@@ -46,7 +79,7 @@ func DownloadSupportCommands() []string {
 
 func (ks *Kubescape) Download(downloadInfo *metav1.DownloadInfo) error {
 	setPathAndFilename(downloadInfo)
-	if err := os.MkdirAll(downloadInfo.Path, os.ModePerm); err != nil {
+	if err := os.MkdirAll(downloadInfo.Path, downloadDirPerm); err != nil {
 		return err
 	}
 	if err := downloadArtifact(ks.Context(), downloadInfo, downloadFunc); err != nil {
@@ -98,9 +131,12 @@ func downloadArtifacts(ctx context.Context, downloadInfo *metav1.DownloadInfo) e
 }
 
 func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
-	tenant := cautils.GetTenantConfig(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", getKubernetesApi())
+	tenant := tenantConfigFunc(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 
-	controlsInputsGetter := getConfigInputsGetter(ctx, downloadInfo.Identifier, tenant.GetAccountID(), nil, false, false)
+	controlsInputsGetter, _, err := configInputsGetterFunc(ctx, downloadInfo.Identifier, tenant.GetAccountID(), nil, false, false)
+	if err != nil {
+		return err
+	}
 	controlInputs, err := controlsInputsGetter.GetControlsInputs(tenant.GetContextName())
 	if err != nil {
 		return err
@@ -109,7 +145,7 @@ func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo
 		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Target)
 	}
 	if controlInputs == nil {
-		return fmt.Errorf("failed to download controlInputs - received an empty objects")
+		return fmt.Errorf("failed to download controlInputs - received empty objects")
 	}
 	// save in file
 	err = getter.SaveInFile(controlInputs, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
@@ -121,8 +157,11 @@ func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo
 }
 
 func downloadExceptions(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
-	tenant := cautils.GetTenantConfig(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", getKubernetesApi())
-	exceptionsGetter := getExceptionsGetter(ctx, "", tenant.GetAccountID(), nil, false)
+	tenant := tenantConfigFunc(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
+	exceptionsGetter, err := exceptionsGetterFunc(ctx, "", tenant.GetAccountID(), nil, false)
+	if err != nil {
+		return err
+	}
 
 	exceptions, err := exceptionsGetter.GetExceptions(tenant.GetContextName())
 	if err != nil {
@@ -143,9 +182,12 @@ func downloadExceptions(ctx context.Context, downloadInfo *metav1.DownloadInfo) 
 
 func downloadAttackTracks(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 	var err error
-	tenant := cautils.GetTenantConfig(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", getKubernetesApi())
+	tenant := tenantConfigFunc(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 
-	attackTracksGetter := getAttackTracksGetter(ctx, "", tenant.GetAccountID(), nil, false)
+	attackTracksGetter, err := attackTracksGetterFunc(ctx, "", tenant.GetAccountID(), nil, false)
+	if err != nil {
+		return err
+	}
 
 	attackTracks, err := attackTracksGetter.GetAttackTracks()
 	if err != nil {
@@ -167,9 +209,12 @@ func downloadAttackTracks(ctx context.Context, downloadInfo *metav1.DownloadInfo
 
 func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 
-	tenant := cautils.GetTenantConfig(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", getKubernetesApi())
+	tenant := tenantConfigFunc(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 
-	g := getPolicyGetter(ctx, nil, tenant.GetAccountID(), true, nil, false)
+	g, err := policyGetterFunc(ctx, nil, tenant.GetAccountID(), true, nil, false)
+	if err != nil {
+		return err
+	}
 
 	if downloadInfo.Identifier == "" {
 		// if framework name not specified - download all frameworks
@@ -204,7 +249,7 @@ func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) e
 			return err
 		}
 		if framework == nil {
-			return fmt.Errorf("failed to download framework - received an empty objects")
+			return fmt.Errorf("failed to download framework - received empty objects")
 		}
 		downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
 		err = getter.SaveInFile(framework, downloadTo)
@@ -218,9 +263,12 @@ func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) e
 
 func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 
-	tenant := cautils.GetTenantConfig(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", getKubernetesApi())
+	tenant := tenantConfigFunc(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 
-	g := getPolicyGetter(ctx, nil, tenant.GetAccountID(), false, nil, false)
+	g, err := policyGetterFunc(ctx, nil, tenant.GetAccountID(), false, nil, false)
+	if err != nil {
+		return err
+	}
 
 	if downloadInfo.Identifier == "" {
 		// TODO - support
@@ -235,10 +283,10 @@ func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) err
 	}
 	controls, err := g.GetControl(downloadInfo.Identifier)
 	if err != nil {
-		return fmt.Errorf("failed to download control id '%s',  %s", downloadInfo.Identifier, err.Error())
+		return fmt.Errorf("failed to download control ID '%s': %w", downloadInfo.Identifier, err)
 	}
 	if controls == nil {
-		return fmt.Errorf("failed to download control id '%s' - received an empty objects", downloadInfo.Identifier)
+		return fmt.Errorf("failed to download control id '%s' - received empty objects", downloadInfo.Identifier)
 	}
 	downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
 	err = getter.SaveInFile(controls, downloadTo)

@@ -32,7 +32,8 @@ func TestListFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
-	workloads := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "")
+	workloads, err := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "", nil)
+	require.NoError(t, err)
 	assert.Equal(t, 12, len(workloads))
 
 	for i, w := range workloads {
@@ -48,7 +49,8 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 func TestLoadResourcesFromFiles_SupportsMixedCaseExtensions(t *testing.T) {
 	o, _ := os.Getwd()
 	testDir := filepath.Join(o, "testdata", "mixed_extensions")
-	workloads := LoadResourcesFromFiles(context.Background(), testDir, "")
+	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, "", nil)
+	require.NoError(t, err)
 	assert.Equal(t, 2, len(workloads))
 
 	expectedFiles := []string{
@@ -62,8 +64,135 @@ func TestLoadResourcesFromFiles_SupportsMixedCaseExtensions(t *testing.T) {
 	}
 }
 
+// helmChartLayoutPath returns the fixture holding a chart with templates, crds and a subchart.
+func helmChartLayoutPath() string {
+	o, _ := os.Getwd()
+	return filepath.Join(o, "testdata", "helm_chart_layout")
+}
+
+// TestLoadResourcesFromFiles_SkipsHelmTemplates asserts that, for a chart the render covered, the
+// plain-YAML loader leaves the templates to the helm render and keeps loading the rest of the chart.
+func TestLoadResourcesFromFiles_SkipsHelmTemplates(t *testing.T) {
+	testDir := helmChartLayoutPath()
+	renderedCharts := []string{
+		filepath.Join(testDir, "mychart"),
+		filepath.Join(testDir, "mychart", "charts", "mysubchart"),
+	}
+	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
+	require.NoError(t, err)
+
+	expectedFiles := []string{
+		filepath.Join(testDir, "plain-pod.yaml"),
+		filepath.Join(testDir, "mychart", "crds", "widget.yaml"),
+	}
+	for _, ef := range expectedFiles {
+		_, ok := workloads[ef]
+		assert.Truef(t, ok, "expected workload for file %s", ef)
+	}
+	assert.Equal(t, len(expectedFiles), len(workloads))
+}
+
+// TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart asserts that scanning a chart
+// directly skips its templates too, since charts are detected recursively rather than at the input.
+func TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart(t *testing.T) {
+	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
+	renderedCharts := []string{testDir, filepath.Join(testDir, "charts", "mysubchart")}
+	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
+	require.NoError(t, err)
+
+	expectedFile := filepath.Join(testDir, "crds", "widget.yaml")
+	_, ok := workloads[expectedFile]
+	assert.Truef(t, ok, "expected workload for file %s", expectedFile)
+	assert.Equal(t, 1, len(workloads))
+}
+
+// TestLoadResourcesFromFiles_ScansTemplatesOfUnrenderedChart asserts the safety net: when a chart
+// is absent from renderedCharts (its helm render failed), its templates are plainly scanned rather
+// than dropped, so its static manifests still reach the scan.
+func TestLoadResourcesFromFiles_ScansTemplatesOfUnrenderedChart(t *testing.T) {
+	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
+	// no charts rendered successfully, so nothing may be excluded
+	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, nil)
+	require.NoError(t, err)
+
+	staticTemplate := filepath.Join(testDir, "templates", "serviceaccount.yaml")
+	_, ok := workloads[staticTemplate]
+	assert.Truef(t, ok, "expected the static template %s to be scanned when its chart did not render", staticTemplate)
+}
+
+// TestExcludeHelmTemplateFiles asserts that only the templates of a detected chart are excluded.
+func TestExcludeHelmTemplateFiles(t *testing.T) {
+	chart := filepath.Join("repo", "mychart")
+	subchart := filepath.Join(chart, "charts", "mysubchart")
+	helmDirectories := []string{chart, subchart}
+
+	tests := []struct {
+		name     string
+		file     string
+		excluded bool
+	}{
+		{
+			name:     "chart template is excluded",
+			file:     filepath.Join(chart, "templates", "deployment.yaml"),
+			excluded: true,
+		},
+		{
+			name:     "nested chart template is excluded",
+			file:     filepath.Join(chart, "templates", "rbac", "role.yaml"),
+			excluded: true,
+		},
+		{
+			name:     "subchart template is excluded",
+			file:     filepath.Join(subchart, "templates", "service.yaml"),
+			excluded: true,
+		},
+		{
+			name:     "crd is kept, helm does not render it",
+			file:     filepath.Join(chart, "crds", "widget.yaml"),
+			excluded: false,
+		},
+		{
+			name:     "chart metadata is kept",
+			file:     filepath.Join(chart, "values.yaml"),
+			excluded: false,
+		},
+		{
+			name:     "file outside a chart is kept",
+			file:     filepath.Join("repo", "plain-pod.yaml"),
+			excluded: false,
+		},
+		{
+			name:     "directory sharing the templates prefix is kept",
+			file:     filepath.Join(chart, "templates-docs", "example.yaml"),
+			excluded: false,
+		},
+		{
+			name:     "chart sharing a name prefix is kept",
+			file:     filepath.Join("repo", "mychart-docs", "templates", "example.yaml"),
+			excluded: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			remaining := excludeHelmTemplateFiles([]string{tt.file}, helmDirectories)
+			if tt.excluded {
+				assert.Empty(t, remaining)
+			} else {
+				assert.Equal(t, []string{tt.file}, remaining)
+			}
+		})
+	}
+}
+
+// TestExcludeHelmTemplateFiles_NoCharts asserts that a scan without charts keeps every file.
+func TestExcludeHelmTemplateFiles_NoCharts(t *testing.T) {
+	files := []string{filepath.Join("repo", "templates", "pod.yaml")}
+	assert.Equal(t, files, excludeHelmTemplateFiles(files, nil))
+}
+
 func TestLoadResourcesFromHelmCharts(t *testing.T) {
-	sourceToWorkloads, sourceToChartName, err := LoadResourcesFromHelmCharts(context.Background(), helmChartPath(), HelmValueOptions{})
+	sourceToWorkloads, sourceToChartName, _, err := LoadResourcesFromHelmCharts(context.Background(), helmChartPath(), HelmValueOptions{})
 	assert.NoError(t, err)
 	assert.Equal(t, 6, len(sourceToWorkloads))
 
@@ -97,8 +226,9 @@ func TestLoadResourcesFromHelmCharts(t *testing.T) {
 
 func TestLoadFiles(t *testing.T) {
 	files, _ := listFiles(onlineBoutiquePath())
-	_, err := loadFiles("", files)
-	assert.Equal(t, 0, len(err))
+	_, errs := loadFiles("", files)
+	assert.Len(t, errs, 1)
+	assert.Contains(t, errs[0].Error(), "invalid.yaml")
 }
 
 func TestListDirs(t *testing.T) {
@@ -315,4 +445,149 @@ func TestIsFileAndIsDir(t *testing.T) {
 	missingPath := filepath.Join(tempDir, "missing-path")
 	assert.False(t, isFile(missingPath))
 	assert.False(t, isDir(missingPath))
+}
+
+func TestReadYamlFile(t *testing.T) {
+	tests := []struct {
+		name      string
+		content   string
+		wantCount int
+		wantErr   bool
+	}{
+		{
+			name: "valid single Kubernetes object",
+			content: `apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+  namespace: default`,
+			wantCount: 1,
+		},
+		{
+			name: "multi-document YAML with two valid objects",
+			content: `apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-1
+  namespace: default
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-1
+  namespace: default`,
+			wantCount: 2,
+		},
+		{
+			name: "YAML list resource is expanded into items",
+			content: `apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: pod-in-list
+      namespace: default
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: svc-in-list
+      namespace: default`,
+			wantCount: 2,
+		},
+		{
+			name:      "empty content returns no objects",
+			content:   "",
+			wantCount: 0,
+		},
+		{
+			name: "malformed YAML document is skipped",
+			content: `apiVersion: v1
+kind: Pod
+metadata:
+  name: good-pod
+  namespace: default
+---
+{not: valid: yaml: [`,
+			wantCount: 1, // the malformed doc is skipped, the good one is kept
+			wantErr:   true,
+		},
+		{
+			name:      "non-Kubernetes object (no kind) returns no results",
+			content:   "foo: bar\nbaz: qux",
+			wantCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := readYamlFile([]byte(tt.content))
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantCount, len(got))
+		})
+	}
+}
+
+func TestReadJsonFile(t *testing.T) {
+	tests := []struct {
+		name      string
+		content   string
+		wantCount int
+		wantErr   bool
+	}{
+		{
+			name: "valid single Kubernetes object",
+			content: `{
+				"apiVersion": "v1",
+				"kind": "Pod",
+				"metadata": {"name": "test-pod", "namespace": "default"}
+			}`,
+			wantCount: 1,
+		},
+		{
+			name: "JSON array of Kubernetes objects",
+			content: `[
+				{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "pod-1", "namespace": "default"}},
+				{"apiVersion": "v1", "kind": "Service", "metadata": {"name": "svc-1", "namespace": "default"}}
+			]`,
+			wantCount: 2,
+		},
+		{
+			name:      "invalid JSON returns error",
+			content:   `{not valid json`,
+			wantCount: 0,
+			wantErr:   true,
+		},
+		{
+			name:      "empty JSON object (no kind) returns no workloads",
+			content:   `{}`,
+			wantCount: 0,
+		},
+		{
+			name: "wrongly typed kind is an error, not a panic",
+			content: `{
+				"apiVersion": "v1",
+				"kind": 123,
+				"metadata": {"name": "test-pod", "namespace": "default"}
+			}`,
+			wantCount: 0,
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := readJsonFile([]byte(tt.content))
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantCount, len(got))
+		})
+	}
 }

@@ -536,3 +536,181 @@ func TestDecryptResourceMetadata_Nil(
 
 	require.NoError(t, err)
 }
+
+func TestDecryptResourceLabels_RoundTrip(t *testing.T) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	encryptedTeam, err := EncryptString(
+		"payments",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedEnv, err := EncryptString(
+		"production",
+		dek,
+	)
+	require.NoError(t, err)
+
+	resource := workloadinterface.NewWorkloadObj(
+		map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"labels": map[string]any{
+					"team": encryptedTeam,
+					"env":  encryptedEnv,
+				},
+			},
+		},
+	)
+
+	err = DecryptResourceLabels(
+		resource,
+		dek,
+	)
+	require.NoError(t, err)
+
+	labels := resource.GetLabels()
+
+	assert.Equal(
+		t,
+		"payments",
+		labels["team"],
+	)
+
+	assert.Equal(
+		t,
+		"production",
+		labels["env"],
+	)
+}
+
+func TestDecryptResourceAnnotations_RoundTrip(t *testing.T) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	encryptedValue1, err := EncryptString(
+		"secret/data/payment",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedValue2, err := EncryptString(
+		"abcd1234",
+		dek,
+	)
+	require.NoError(t, err)
+
+	resource := workloadinterface.NewWorkloadObj(
+		map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Deployment",
+			"metadata": map[string]any{
+				"annotations": map[string]any{
+					"vault.hashicorp.com/path": encryptedValue1,
+					"example.com/token":        encryptedValue2,
+				},
+			},
+		},
+	)
+
+	err = DecryptResourceAnnotations(
+		resource,
+		dek,
+	)
+	require.NoError(t, err)
+
+	metadata := resource.GetObject()["metadata"].(map[string]any)
+	annotations := metadata["annotations"].(map[string]any)
+
+	assert.Equal(
+		t,
+		"secret/data/payment",
+		annotations["vault.hashicorp.com/path"],
+	)
+
+	assert.Equal(
+		t,
+		"abcd1234",
+		annotations["example.com/token"],
+	)
+}
+
+func TestDecryptResourceObjectSourcePath_RoundTrip(t *testing.T) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	encryptedPath, err := EncryptString(
+		"/workspace/manifests/payment.yaml",
+		dek,
+	)
+	require.NoError(t, err)
+
+	resource := workloadinterface.NewWorkloadObj(
+		map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"sourcePath": encryptedPath + ":42",
+		},
+	)
+
+	err = DecryptResourceObjectSourcePath(
+		resource,
+		dek,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		"/workspace/manifests/payment.yaml:42",
+		resource.GetObject()["sourcePath"],
+	)
+}
+
+func TestDecryptResourceLabels_Nil(t *testing.T) {
+	err := DecryptResourceLabels(
+		nil,
+		make([]byte, 32),
+	)
+
+	require.NoError(t, err)
+}
+
+func TestDecryptResourceAnnotations_Nil(t *testing.T) {
+	err := DecryptResourceAnnotations(
+		nil,
+		make([]byte, 32),
+	)
+
+	require.NoError(t, err)
+}
+
+func TestDecryptResourceObjectSourcePath_Nil(t *testing.T) {
+	err := DecryptResourceObjectSourcePath(
+		nil,
+		make([]byte, 32),
+	)
+
+	require.NoError(t, err)
+}
+
+func TestDecryptResourceLabels_Plaintext(t *testing.T) {
+	resource := workloadinterface.NewWorkloadObj(
+		map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"labels": map[string]any{
+					"team": "backend",
+				},
+			},
+		},
+	)
+
+	err := DecryptResourceLabels(resource, make([]byte, 32))
+	require.NoError(t, err)
+
+	assert.Equal(t, "backend", resource.GetLabels()["team"])
+}

@@ -27,6 +27,8 @@ type OperatorAdapter struct {
 	cautils.OperatorConnector
 }
 
+var errOperatorNotFound = errors.New("could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts")
+
 func getOperatorPod(k8sClient *k8sinterface.KubernetesApi, ns string) (*v1.Pod, error) {
 	if k8sClient == nil || k8sClient.KubernetesClient == nil {
 		return nil, errors.New("kubernetes client is not initialised")
@@ -38,11 +40,40 @@ func getOperatorPod(k8sClient *k8sinterface.KubernetesApi, ns string) (*v1.Pod, 
 	if err != nil {
 		return nil, err
 	}
-	if len(pods.Items) != 1 {
-		return nil, errors.New("could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts")
+
+	if len(pods.Items) == 0 {
+		return nil, errOperatorNotFound
 	}
 
-	return &pods.Items[0], nil
+	// More than one operator pod can be present during HA deployments or
+	// rolling upgrades. The operator has no leader election, so any ready
+	// replica can serve v1/triggerAction: picking the first ready pod is a
+	// deliberate choice, not an approximation. A single pod goes through the
+	// same check, so a not-yet-ready lone pod is reported instead of being
+	// handed to CreatePortForwarder.
+	for i := range pods.Items {
+		if isPodReady(&pods.Items[i]) {
+			return &pods.Items[i], nil
+		}
+	}
+	return nil, fmt.Errorf("found %d Kubescape Operator pod(s) in namespace %q, but none are running and ready", len(pods.Items), ns)
+}
+
+func isPodReady(pod *v1.Pod) bool {
+	if pod.DeletionTimestamp != nil {
+		// A terminating pod keeps reporting Ready=True for the whole
+		// termination grace period, so it must not be selected.
+		return false
+	}
+	if pod.Status.Phase != v1.PodRunning {
+		return false
+	}
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == v1.PodReady {
+			return condition.Status == v1.ConditionTrue
+		}
+	}
+	return false
 }
 
 func NewOperatorAdapter(scanInfo cautils.OperatorScanInfo, ns string) (*OperatorAdapter, error) {

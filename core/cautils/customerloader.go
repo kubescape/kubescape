@@ -183,8 +183,9 @@ KS_DEFAULT_CONFIGMAP_NAMESPACE   // configmap namespace, if not set default is '
 
 KS_ACCOUNT_ID
 
-TODO - support:
-KS_CACHE // path to cached files
+The cache directory (where this config file is stored, see ConfigFileFullPath) is
+configurable via the --cache-dir flag or the KS_CACHE_DIR environment variable; see
+initCacheDir in cmd/rootutils.go. It defaults to getter.DefaultLocalStore ($HOME/.kubescape).
 */
 var _ ITenantConfig = &ClusterConfig{}
 
@@ -337,23 +338,61 @@ func existsConfigFile() bool {
 	return err == nil
 }
 
+// chmod is a package-level indirection so tests can simulate a chmod failure
+// (e.g. EPERM on a restrictive mount) without needing real filesystem
+// permission tricks, which don't reliably fail for the owning user.
+var chmod = os.Chmod
+
 func updateConfigFile(configObj *ConfigObj) error {
 	fullPath := ConfigFileFullPath()
 	dir := filepath.Dir(fullPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	// Tighten permissions on pre-existing directory in case it was
-	// created with broader permissions by an older version.
-	if err := os.Chmod(dir, 0700); err != nil {
+	// Tighten permissions on a pre-existing directory in case it was
+	// created with broader permissions by an older version. This is a
+	// best-effort hardening step: MkdirAll above already applies 0700 to
+	// directories it creates, so a failure here (e.g. chmod is rejected on
+	// some mounted volumes such as an emptyDir mounted as non-root) must
+	// not prevent the config from being persisted.
+	if err := chmod(dir, 0700); err != nil {
+		mode := "unknown"
+		if fi, statErr := os.Stat(dir); statErr == nil {
+			mode = fi.Mode().Perm().String()
+		}
+		logger.L().Warning("failed to tighten permissions on config directory", helpers.String("dir", dir), helpers.String("currentMode", mode), helpers.Error(err))
+	}
+
+	// Write via a temp file in the same directory, then rename it over the
+	// target. os.CreateTemp always creates the file at mode 0600, and rename
+	// replaces the destination's inode outright - so the final file always
+	// ends up at the correct permissions on a fresh inode, regardless of
+	// whatever mode a pre-existing config.json (e.g. from an older kubescape
+	// version) had, and without needing a chmod on the target path at all.
+	tmpFile, err := os.CreateTemp(dir, ".config-*.json.tmp")
+	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(fullPath, configObj.Config(), 0600); err != nil {
+	tmpPath := tmpFile.Name()
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmpFile.Write(configObj.Config()); err != nil {
+		tmpFile.Close()
 		return err
 	}
-	// Tighten permissions on pre-existing file in case it was created
-	// with broader permissions by an older version.
-	return os.Chmod(fullPath, 0600)
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, fullPath); err != nil {
+		return err
+	}
+	removeTmp = false
+	return nil
 }
 
 func (c *ClusterConfig) GenerateAccountID() (string, error) {
@@ -398,8 +437,12 @@ func readConfig(dat []byte, configObj *ConfigObj) error {
 	return nil
 }
 
+// servicesConfigPath is the path to the services discovery config file mounted
+// in-cluster. It is a var (not a const) so tests can point it at a temp file.
+var servicesConfigPath = "/etc/config/services.json"
+
 func loadUrlsFromFile(obj *ConfigObj) error {
-	dat, err := os.ReadFile("/etc/config/services.json")
+	dat, err := os.ReadFile(servicesConfigPath)
 	if err != nil {
 		return nil // no config file
 	}

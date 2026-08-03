@@ -145,7 +145,7 @@ kubescape scan
 ```
 
 > **Note**  
-> [Read more about host scanning](https://hub.armosec.io/docs/host-sensor?utm_source=github&utm_medium=repository).
+> For certain controls, Kubescape collects node-level data from the cluster. By default it auto-detects node-agent CRDs and uses a CRD-based host sensor when available; run `kubescape scan --host-scan=false` to disable host data collection. The deprecated `--enable-host-scan` daemonset deployment is removed — use the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for the managed alternative. [Read more about host scanning](https://hub.armosec.io/docs/host-sensor?utm_source=github&utm_medium=repository).
 
 #### Scan NSA framework
 Scan a running Kubernetes cluster with the [NSA framework](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/):
@@ -263,8 +263,7 @@ We offer two important metrics to assess compliance:
     kubescape scan framework <FRAMEWORK_NAME> --compliance-threshold <SCORE_VALUE[float32]>
     ```
 
-`--compliance-threshold` (compliance score) and the deprecated
-`--fail-threshold` (risk score) apply to the framework/control
+`--compliance-threshold` (compliance score) applies to the framework/control
 subcommands and to `--view resource|control`. The default
 `kubescape scan <path>` (security view) does not evaluate against
 these score thresholds, so use one of the forms above when you want

@@ -90,7 +90,7 @@ func TestResults_DeleteAll_RefusedWhileScanInProgress(t *testing.T) {
 	}
 
 	h := newResultsHandler(false)
-	h.state.setBusy("scan-in-flight") // simulate an active scan
+	h.state.setBusy("scan-in-flight", func() {}) // simulate an active scan
 
 	rq := httptest.NewRequest(http.MethodDelete, "/results?all=true", nil)
 	w := httptest.NewRecorder()
@@ -136,7 +136,7 @@ func TestResults_GetWhileBusy_ReturnsBusyResponse(t *testing.T) {
 
 	h := newResultsHandler(false)
 	id := "123e4567-e89b-12d3-a456-426614174000"
-	h.state.setBusy(id)
+	h.state.setBusy(id, func() {})
 
 	rq := httptest.NewRequest(http.MethodGet, "/results?id="+id, nil)
 	w := httptest.NewRecorder()
@@ -258,7 +258,7 @@ func TestResults_GetEmptyID_OfflineFallback_TableDriven(t *testing.T) {
 			h := newResultsHandler(true) // offline = true
 
 			if c.seedLatest {
-				h.state.setBusy(validUUID)
+				h.state.setBusy(validUUID, func() {})
 				h.state.setNotBusy(validUUID) // latestID survives, scan finished
 			}
 			resultFile := filepath.Join(out, validUUID)
@@ -316,7 +316,7 @@ func TestResults_DeleteEmptyID_OfflineRejected(t *testing.T) {
 	out := withTempOutputDirs(t)
 
 	h := newResultsHandler(true)
-	h.state.setBusy(validUUID)
+	h.state.setBusy(validUUID, func() {})
 	h.state.setNotBusy(validUUID) // latestID == validUUID, scan idle
 
 	resultFile := filepath.Join(out, validUUID)

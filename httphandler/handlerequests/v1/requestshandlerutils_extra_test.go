@@ -62,3 +62,22 @@ func TestWriteScanErrorToFile(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.Equal(t, "scan failed", string(got))
 }
+
+// TestWriteScanErrorToFile_CreatesDirectoryWithRestrictivePermissions guards
+// against a regression back to os.ModePerm (0777, world-writable) for
+// FailedOutputDir. FailedOutputDir must not already exist for this to
+// exercise the MkdirAll call - t.TempDir() itself always exists, so this
+// nests one level under it.
+func TestWriteScanErrorToFile_CreatesDirectoryWithRestrictivePermissions(t *testing.T) {
+	nested := filepath.Join(t.TempDir(), "failed")
+	oldFailedOutputDir := FailedOutputDir
+	FailedOutputDir = nested
+	defer func() { FailedOutputDir = oldFailedOutputDir }()
+
+	require.Error(t, writeScanErrorToFile(errors.New("scan failed"), "scan-id"))
+
+	info, err := os.Stat(nested)
+	require.NoError(t, err)
+	mode := info.Mode().Perm()
+	assert.Zerof(t, mode&0o027, "directory %s has mode %o, more permissive than 0750", nested, mode)
+}

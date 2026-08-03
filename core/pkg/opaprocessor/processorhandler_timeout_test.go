@@ -24,8 +24,9 @@ import (
 // evaluation mid-computation (topdown checks for cancellation on every
 // expression evaluation), not just at an external blocking point.
 const blockingRule = `package armo_builtins
+import rego.v1
 
-deny[msga] {
+deny contains msga if {
 	a := numbers.range(1, 100000)
 	b := numbers.range(1, 100000)
 	x := a[_]

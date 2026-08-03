@@ -200,7 +200,8 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
 		if outputFile == "" {
 			outputFile = prettyOutputFile
 		}
-		if filepath.Ext(outputFile) != printer.PrettyOutputExt {
+		// os.DevNull is used to silence the UI printer, appending an extension would turn it into a regular file
+		if outputFile != os.DevNull && filepath.Ext(outputFile) != printer.PrettyOutputExt {
 			outputFile = outputFile + printer.PrettyOutputExt
 		}
 	}

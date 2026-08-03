@@ -32,6 +32,14 @@ import (
 
 var rootInfo cautils.RootInfo
 
+func init() {
+	// root.go and scan/scan.go both define PersistentPreRun(E) hooks. Cobra's default
+	// behavior only runs the closest one in the command chain, silently skipping root's
+	// (logger/cache-dir/kube-context init and --server service discovery) for any
+	// `kubescape scan ...` invocation. Enable full root-to-leaf traversal so both run.
+	cobra.EnableTraverseRunHooks = true
+}
+
 var ksExamples = fmt.Sprintf(`
   # Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations
   %[1]s scan

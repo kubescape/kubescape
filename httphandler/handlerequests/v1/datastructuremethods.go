@@ -54,9 +54,7 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 
 	// submit
 	if scanRequest.Submit != nil {
-		if submit := cautils.NewBoolPtr(scanRequest.Submit); submit.Get() != nil {
-			scanInfo.Submit = *submit.Get()
-		}
+		scanInfo.Submit = cautils.NewBoolPtr(scanRequest.Submit)
 	}
 
 	// host scanner

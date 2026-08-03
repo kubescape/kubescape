@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/schema"
@@ -19,6 +20,17 @@ import (
 var OutputDir = "./results/"
 var FailedOutputDir = "./failed/"
 
+const (
+	defaultScanQueueCapacity       = 10
+	defaultMaxScanRequestBodyBytes = int64(1 << 20) // 1 MiB
+	scanQueueCapacityEnv           = "KS_SCAN_QUEUE_CAPACITY"
+	scanRequestMaxBytesEnv         = "KS_SCAN_REQUEST_MAX_BYTES"
+	// outputDirPerm restricts OutputDir/FailedOutputDir to the owner plus
+	// group read/traverse, instead of os.ModePerm (0777, world-writable),
+	// which scan output/failure directories have no reason to be.
+	outputDirPerm = 0o750
+)
+
 // A Scan Response object
 //
 // swagger:response scanResponse
@@ -28,19 +40,41 @@ type ScanResponse struct {
 }
 
 type HTTPHandler struct {
-	offline         bool
-	state           *serverState
-	scanRequestChan chan *scanRequestParams
+	offline             bool
+	state               *serverState
+	scanRequestChan     chan *scanRequestParams
+	maxRequestBodyBytes int64
 }
 
 func NewHTTPHandler(offline bool) *HTTPHandler {
+	return newHTTPHandler(offline, configuredPositiveInt(scanQueueCapacityEnv, defaultScanQueueCapacity), int64(configuredPositiveInt(scanRequestMaxBytesEnv, int(defaultMaxScanRequestBodyBytes))))
+}
+
+func newHTTPHandler(offline bool, queueCapacity int, maxRequestBodyBytes int64) *HTTPHandler {
 	handler := &HTTPHandler{
-		offline:         offline,
-		state:           newServerState(),
-		scanRequestChan: make(chan *scanRequestParams),
+		offline:             offline,
+		state:               newServerState(),
+		scanRequestChan:     make(chan *scanRequestParams, queueCapacity),
+		maxRequestBodyBytes: maxRequestBodyBytes,
 	}
 	go handler.watchForScan()
 	return handler
+}
+
+func configuredPositiveInt(name string, fallback int) int {
+	raw := envToString(name, "")
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		logger.L().Warning("invalid positive integer configuration; using default",
+			helpers.String("environmentVariable", name),
+			helpers.String("value", raw),
+			helpers.Int("default", fallback))
+		return fallback
+	}
+	return value
 }
 
 // ============================================== STATUS ========================================================
@@ -97,26 +131,40 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	r.Body = http.MaxBytesReader(w, r.Body, handler.maxRequestBodyBytes)
 	scanRequestParams, err := getScanParamsFromRequest(r, scanID)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			handler.writeErrorWithStatus(w,
+				fmt.Errorf("scan request body exceeds the %d byte limit", handler.maxRequestBodyBytes),
+				"", http.StatusRequestEntityTooLarge)
+			return
+		}
 		handler.writeError(w, err, "")
 		return
 	}
-	scanRequestParams.ctx = context.WithoutCancel(r.Context())
+	cancelCtx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
+	scanRequestParams.ctx = cancelCtx
 
 	if handler.offline {
 		scanRequestParams.scanInfo.UseDefault = true
 		scanRequestParams.scanInfo.UseArtifactsFrom = getter.DefaultLocalStore
 	}
 
-	handler.state.setBusy(scanID)
+	handler.state.setBusy(scanID, cancel)
 
-	// you must use a goroutine since the executeScan function is not always listening to the channel
-	go func() {
-		// send to scanning handler
+	select {
+	case handler.scanRequestChan <- scanRequestParams:
 		logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
-		handler.scanRequestChan <- scanRequestParams
-	}()
+	default:
+		handler.state.setNotBusy(scanID)
+		w.Header().Set("Retry-After", "1")
+		handler.writeErrorWithStatus(w,
+			fmt.Errorf("scan queue is full; retry the request later"),
+			"", http.StatusTooManyRequests)
+		return
+	}
 
 	response := &utilsmetav1.Response{
 		ID:       scanID,
@@ -126,6 +174,20 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	if scanRequestParams.resp != nil {
 		// wait for scan to complete
 		response = <-scanRequestParams.resp
+
+		if response.Type == utilsapisv1.ResultsV1ScanResponseType {
+			// populate the response with the report before it is deleted below
+			if res, err := readResultsFile(scanID); err != nil {
+				response.Type = utilsapisv1.ErrorScanResponseType
+				if scanFailed, ok := errors.AsType[*ScanFailedError](err); ok {
+					response.Response = scanFailed.Message
+				} else {
+					response.Response = err.Error()
+				}
+			} else {
+				response.Response = res
+			}
+		}
 
 		if !scanRequestParams.scanQueryParams.KeepResults {
 			// delete results after returning
@@ -141,6 +203,46 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(statusCode)
 	w.Write(responseToBytes(response))
+}
+
+// CancelScan handles DELETE /v1/scan
+func (handler *HTTPHandler) CancelScan(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	defer handler.recover(r.Context(), w, "")
+	defer r.Body.Close()
+
+	cancelQueryParams := &CancelScanQueryParams{}
+	if err := schema.NewDecoder().Decode(cancelQueryParams, r.URL.Query()); err != nil {
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
+		return
+	}
+
+	scanID := cancelQueryParams.ScanID
+	if scanID == "" {
+		scanID = handler.state.getLatestUserScanID()
+	}
+
+	logger.L().Info("requesting scan cancellation", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
+
+	if !handler.state.cancel(scanID) {
+		logger.L().Info("cancel: no in-flight scan", helpers.String("ID", scanID))
+		w.WriteHeader(http.StatusNotFound)
+		response := utilsmetav1.Response{
+			Response: fmt.Sprintf("no in-flight scan found for '%s'", scanID),
+			Type:     utilsapisv1.ErrorScanResponseType,
+		}
+		w.Write(responseToBytes(&response))
+		return
+	}
+
+	logger.L().Info("scan cancelled", helpers.String("ID", scanID))
+	w.WriteHeader(http.StatusOK)
+	response := utilsmetav1.Response{
+		ID:       scanID,
+		Response: fmt.Sprintf("scan '%s' cancelled", scanID),
+		Type:     utilsapisv1.NotBusyScanResponseType,
+	}
+	w.Write(responseToBytes(&response))
 }
 
 // ============================================== RESULTS ========================================================
@@ -308,8 +410,12 @@ func (handler *HTTPHandler) recover(ctx context.Context, w http.ResponseWriter, 
 }
 
 func (handler *HTTPHandler) writeError(w http.ResponseWriter, err error, scanID string) {
+	handler.writeErrorWithStatus(w, err, scanID, http.StatusBadRequest)
+}
+
+func (handler *HTTPHandler) writeErrorWithStatus(w http.ResponseWriter, err error, scanID string, status int) {
 	response := utilsmetav1.Response{}
-	w.WriteHeader(http.StatusBadRequest)
+	w.WriteHeader(status)
 	response.Response = err.Error()
 	response.Type = utilsapisv1.ErrorScanResponseType
 	w.Write(responseToBytes(&response))

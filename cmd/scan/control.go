@@ -62,7 +62,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				}
 			}
 			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif")
+				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast")
 			}
 			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ScanFormats); err != nil {
 				return err
@@ -116,9 +116,6 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if !scanInfo.VerboseMode {
 				logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
 			}
-			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
-				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
-			}
 			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
 				logger.L().Fatal("scan compliance-score is below permitted threshold", helpers.String("compliance score", fmt.Sprintf("%.2f", results.GetComplianceScore())), helpers.String("compliance-threshold", fmt.Sprintf("%.2f", scanInfo.ComplianceThreshold)))
 			}
@@ -135,7 +132,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 	severity := scanInfo.FailThresholdSeverity
 
-	if scanInfo.Submit && scanInfo.OmitRawResources {
+	if scanInfo.Submit.GetBool() && scanInfo.OmitRawResources {
 		return ErrOmitRawResourcesOrSubmit
 	}
 
