@@ -38,12 +38,18 @@ type KubescapeMcpserver struct {
 	dbListingURL   string
 }
 
-func (ksServer *KubescapeMcpserver) getImageScanService() (*imagescan.Service, error) {
+func (ksServer *KubescapeMcpserver) getImageScanService(ctx context.Context) (*imagescan.Service, error) {
 	ksServer.imageScanSvcMu.Lock()
 	defer ksServer.imageScanSvcMu.Unlock()
 
 	if ksServer.imageScanSvc != nil {
 		return ksServer.imageScanSvc, nil
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 
 	distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(ksServer.dbListingURL)

@@ -176,9 +176,13 @@ func (ksServer *KubescapeMcpserver) runImageScan(ctx context.Context, imageName,
 	}
 	defer ksServer.imageScanMu.Unlock()
 
+	// Derive a bounded child context with a timeout covering service initialization and scan
+	scanCtx, cancel := context.WithTimeout(ctx, defaultImageScanTimeout)
+	defer cancel()
+
 	logger.L().Info(fmt.Sprintf("Starting on-demand MCP container image scan for %s", imageName))
 
-	svc, err := ksServer.getImageScanService()
+	svc, err := ksServer.getImageScanService(scanCtx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get image scan service: %w", err)
 	}
@@ -187,10 +191,6 @@ func (ksServer *KubescapeMcpserver) runImageScan(ctx context.Context, imageName,
 		Username: username,
 		Password: regSecret,
 	}
-
-	// Derive a bounded child context with a timeout for the scan
-	scanCtx, cancel := context.WithTimeout(ctx, defaultImageScanTimeout)
-	defer cancel()
 
 	type result struct {
 		data *cautils.ImageScanData
