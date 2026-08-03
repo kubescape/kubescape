@@ -19,6 +19,15 @@ type LocalGitRepository struct {
 	config    *configv5.Config
 }
 
+// worktreeRoot resolves the repository's worktree root. It is a package-level
+// var (rather than a direct l.GetRootDir() call) purely so tests can swap in
+// a failing stub to exercise the defensive nil-on-error handling below: with
+// the pinned go-git version, Worktree() only fails when the repository was
+// opened without a worktree filesystem, which PlainOpenWithOptions's
+// DetectDotGit walk does not yield while Head()/Config() still resolve — so
+// no real on-disk fixture can reach that branch today.
+var worktreeRoot = (*LocalGitRepository).GetRootDir
+
 func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
 	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
@@ -45,14 +54,20 @@ func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
 		config:    config,
 	}
 
-	if repoRoot, err := l.GetRootDir(); err == nil {
-		gitRepository, err := newGitRepository(repoRoot)
-		if err != nil {
-			return l, err
-		}
-
-		l.gitRepository = gitRepository
+	repoRoot, err := worktreeRoot(l)
+	if err != nil {
+		return nil, err
 	}
+
+	// newGitRepository (git_native_disabled.go) never actually returns a
+	// non-nil error today; this is propagated defensively rather than
+	// ignored so NewLocalGitRepository can't return a partially
+	// initialized *LocalGitRepository if that ever changes.
+	gitRepository, err := newGitRepository(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	l.gitRepository = gitRepository
 
 	return l, nil
 }

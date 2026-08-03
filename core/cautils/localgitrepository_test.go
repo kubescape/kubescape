@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"archive/zip"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -123,9 +124,11 @@ func (s *LocalGitRepositoryTestSuite) TearDownSuite() {
 }
 
 func (s *LocalGitRepositoryTestSuite) TestInvalidRepositoryPath() {
-	if _, err := NewLocalGitRepository("/invalidpath"); s.Error(err) {
+	repo, err := NewLocalGitRepository("/invalidpath")
+	if s.Error(err) {
 		s.Equal("repository does not exist", err.Error())
 	}
+	s.Nil(repo, "NewLocalGitRepository must not return a partially initialized repository on error")
 }
 
 func (s *LocalGitRepositoryTestSuite) TestRepositoryWithoutRemotes() {
@@ -231,6 +234,26 @@ func TestGetRemoteUrl(t *testing.T) {
 		},
 		)
 	}
+}
+
+// TestNewLocalGitRepositoryRootDirFailure exercises the defensive nil-on-error
+// branch in NewLocalGitRepository for a worktreeRoot (GetRootDir) failure. No
+// on-disk fixture can drive go-git into that state with the pinned go-git
+// version (see the comment on the worktreeRoot var), so the failure is
+// injected via the seam instead.
+func TestNewLocalGitRepositoryRootDirFailure(t *testing.T) {
+	fixture := createDetachedRepositoryFixture(t, "origin", "https://example.com/team/project.git")
+
+	original := worktreeRoot
+	t.Cleanup(func() { worktreeRoot = original })
+	wantErr := errors.New("simulated worktree resolution failure")
+	worktreeRoot = func(*LocalGitRepository) (string, error) {
+		return "", wantErr
+	}
+
+	repo, err := NewLocalGitRepository(fixture.root)
+	require.Nil(t, repo, "NewLocalGitRepository must not return a partially initialized repository when the worktree root can't be resolved")
+	require.ErrorIs(t, err, wantErr)
 }
 
 func TestLocalGitRepositoryDetachedHead(t *testing.T) {
