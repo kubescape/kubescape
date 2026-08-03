@@ -181,12 +181,15 @@ spec:
 	assert.Contains(t, err.Error(), "matchConditions")
 }
 
-// TestLoadVAPRefusesNarrowingSelectors proves a policy that narrows its
-// matchConstraints with a namespaceSelector or objectSelector is refused, the
-// same way a matchConditions gate is: the offline engine does not evaluate
-// selectors, and ignoring one would evaluate objects admission exempts. An
-// empty selector matches everything (it is what the apiserver defaults an
-// omitted one to), so it must NOT trip the refusal.
+// TestLoadVAPRefusesNarrowingSelectors pins which selector is refused and which
+// is not. namespaceSelector reads the NAMESPACE's labels, which the scan only
+// has when some control's match happened to collect Namespaces, so a policy
+// narrowing with it is refused (a loud skip) rather than evaluated against an
+// input that may be absent (a silent parity break). objectSelector reads the
+// scanned object's own labels, which the scan always has, so it is evaluated in
+// appliesTo instead of refused — see TestVAPAppliesToObjectSelector. An empty
+// selector matches everything (it is what the apiserver defaults an omitted one
+// to), so it must not trip the refusal either.
 func TestLoadVAPRefusesNarrowingSelectors(t *testing.T) {
 	policy := func(selectorYAML string) string {
 		return `apiVersion: admissionregistration.k8s.io/v1
@@ -221,13 +224,13 @@ spec:
 			refusedFor: "namespaceSelector",
 		},
 		{
-			name: "objectSelector with expressions is refused",
+			name: "objectSelector with expressions is supported, not refused",
 			selectorYAML: `    objectSelector:
       matchExpressions:
       - key: app
         operator: Exists
 `,
-			refusedFor: "objectSelector",
+			refusedFor: "",
 		},
 		{
 			name: "empty selectors match everything and are supported",

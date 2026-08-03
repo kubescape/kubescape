@@ -74,23 +74,31 @@ type VAP struct {
 // scan/admission parity. matchConditions is an admission-time gate we do not
 // evaluate yet; running a gated policy's validations unconditionally would emit
 // violations live admission never would, so we refuse the control instead. The
-// namespaceSelector and objectSelector on matchConstraints are the same kind of
-// gate (they exempt labelled objects at admission) and are refused for the same
-// reason: ignoring one would evaluate objects admission exempts. The error maps
-// to the same errored/skipped status a Rego eval error takes, never a silent
-// pass or a false violation. Removing a guard here is the seam for when the
-// evaluator learns to evaluate that gate.
+// error maps to the same errored/skipped status a Rego eval error takes, never a
+// silent pass or a false violation. Removing a guard here is the seam for when
+// the evaluator learns to evaluate that gate.
+//
+// A namespaceSelector is refused for a subtler reason. Its input is the
+// NAMESPACE's labels, and the scan only has those when some control's match
+// happened to collect Namespaces (the same best-effort behind the
+// namespaceObject binding, see the scanner's celNamespaceObjectFor). Evaluating
+// it against an absent namespace would silently exempt objects admission
+// matches, or match objects admission exempts, depending on the selector's
+// direction — both are silent parity breaks, where refusal is a loud skip. So
+// it stays refused not because the input never exists, but because it is not
+// GUARANTEED to exist; the seam for honoring it is guaranteeing Namespace
+// collection whenever a loaded policy needs it.
+//
+// The other matchConstraints narrowings do not need refusing, because their
+// inputs are on the scanned object itself and appliesTo evaluates them:
+// objectSelector (the object's own labels) and a resource rule's operations
+// and resourceNames (the object's own name).
 func (v *VAP) requireSupported() error {
 	if len(v.matchConditions) > 0 {
 		return fmt.Errorf("control %q uses spec.matchConditions, which the offline engine does not evaluate yet; refusing it to preserve scan/admission parity", v.ControlID)
 	}
-	if v.matchConstraints != nil {
-		if selectorNarrows(v.matchConstraints.NamespaceSelector) {
-			return fmt.Errorf("control %q scopes matchConstraints with a namespaceSelector, which the offline engine does not evaluate yet; refusing it to preserve scan/admission parity", v.ControlID)
-		}
-		if selectorNarrows(v.matchConstraints.ObjectSelector) {
-			return fmt.Errorf("control %q scopes matchConstraints with an objectSelector, which the offline engine does not evaluate yet; refusing it to preserve scan/admission parity", v.ControlID)
-		}
+	if v.matchConstraints != nil && selectorNarrows(v.matchConstraints.NamespaceSelector) {
+		return fmt.Errorf("control %q scopes matchConstraints with a namespaceSelector, whose input (namespace labels) the scan cannot guarantee to have; refusing it to preserve scan/admission parity", v.ControlID)
 	}
 	return nil
 }

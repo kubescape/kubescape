@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func rule(groups, versions, resources []string) admissionregistrationv1.NamedRuleWithOperations {
@@ -192,5 +193,137 @@ func TestVAPAppliesToOperations(t *testing.T) {
 			ExcludeResourceRules: []admissionregistrationv1.NamedRuleWithOperations{withOps(pods, admissionregistrationv1.Update)},
 		}}
 		assert.True(t, v.appliesTo(obj("v1", "Pod")), "the exclusion only covers UPDATE, so the CREATE we model is still matched")
+	})
+}
+
+// TestBundleControlRulesAllMatchModeledCreate is the safety case for honoring
+// operations, and it is the assertion the kind sweep cannot make: that sweep
+// skips subresources, which is exactly where the bundle's non-CREATE rules
+// live. Every controlId-bearing policy must have rules the modeled CREATE
+// matches, otherwise that control silently loses those resources at scan time
+// (an exclusion is only Debug-logged, so there is no signal in the output). A
+// `make sync-vap` introducing an UPDATE-only control fails here instead.
+func TestBundleControlRulesAllMatchModeledCreate(t *testing.T) {
+	catalog, err := getVAPCatalog()
+	require.NoError(t, err)
+	require.NotEmpty(t, catalog.byControl)
+
+	for id, vap := range catalog.byControl {
+		if vap.matchConstraints == nil {
+			continue
+		}
+		for _, rr := range vap.matchConstraints.ResourceRules {
+			assert.Truef(t, matchesOperation(rr.Operations),
+				"control %q has a rule scoped to %v, which the modeled CREATE will not match; that control silently loses those resources", id, rr.Operations)
+		}
+	}
+}
+
+// TestBundleUsesNoUnevaluatedScoping records the other half of the safety case:
+// the scoping knobs this package evaluates or refuses are all unused by the
+// vendored bundle today, so none of it changes a shipped control's behaviour.
+// When a sync does introduce one, this test is the notice that the handling
+// stopped being theoretical and wants checking against a real policy.
+func TestBundleUsesNoUnevaluatedScoping(t *testing.T) {
+	catalog, err := getVAPCatalog()
+	require.NoError(t, err)
+
+	for name, vap := range catalog.byName {
+		if vap.matchConstraints == nil {
+			continue
+		}
+		assert.Falsef(t, selectorNarrows(vap.matchConstraints.NamespaceSelector),
+			"policy %q now uses a namespaceSelector: loadVAP refuses it, so confirm a control-wide skip is the outcome you want", name)
+		assert.Falsef(t, selectorNarrows(vap.matchConstraints.ObjectSelector),
+			"policy %q now uses an objectSelector: appliesTo evaluates it against the object's labels, so confirm that matches the policy's intent", name)
+
+		rules := append(append([]admissionregistrationv1.NamedRuleWithOperations{}, vap.matchConstraints.ResourceRules...), vap.matchConstraints.ExcludeResourceRules...)
+		for _, rr := range rules {
+			assert.Emptyf(t, rr.ResourceNames,
+				"policy %q now uses resourceNames: appliesTo matches it against metadata.name, so confirm the scanned manifests carry the names it expects", name)
+		}
+	}
+}
+
+func TestVAPAppliesToObjectSelector(t *testing.T) {
+	pods := rule([]string{""}, []string{"v1"}, []string{"pods"})
+	labelled := func(labels map[string]any) map[string]any {
+		o := obj("v1", "Pod")
+		o["metadata"].(map[string]any)["labels"] = labels
+		return o
+	}
+
+	t.Run("matchLabels narrows to the labelled object", func(t *testing.T) {
+		v := vapWithConstraints(pods)
+		v.matchConstraints.ObjectSelector = &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}}
+
+		assert.True(t, v.appliesTo(labelled(map[string]any{"app": "web"})))
+		assert.False(t, v.appliesTo(labelled(map[string]any{"app": "db"})), "a non-matching label must put the object out of scope")
+		assert.False(t, v.appliesTo(obj("v1", "Pod")), "an unlabelled object cannot satisfy matchLabels")
+	})
+
+	t.Run("matchExpressions are honored", func(t *testing.T) {
+		v := vapWithConstraints(pods)
+		v.matchConstraints.ObjectSelector = &metav1.LabelSelector{
+			MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "skip", Operator: metav1.LabelSelectorOpDoesNotExist}},
+		}
+
+		assert.True(t, v.appliesTo(obj("v1", "Pod")))
+		assert.False(t, v.appliesTo(labelled(map[string]any{"skip": "true"})), "an object carrying the exempting label must be out of scope")
+	})
+
+	t.Run("nil and empty selectors match everything", func(t *testing.T) {
+		// The nil case is the one that bites: LabelSelectorAsSelector maps nil to
+		// "match nothing", the opposite of what an omitted selector means.
+		v := vapWithConstraints(pods)
+		assert.True(t, v.appliesTo(obj("v1", "Pod")), "an omitted objectSelector must not narrow anything")
+
+		v.matchConstraints.ObjectSelector = &metav1.LabelSelector{}
+		assert.True(t, v.appliesTo(obj("v1", "Pod")))
+		assert.True(t, v.appliesTo(labelled(map[string]any{"app": "web"})))
+	})
+}
+
+// TestVAPAppliesToResourceNames covers the third narrowing knob on a resource
+// rule. Ignoring it would evaluate every object of the kind against a policy
+// admission only ever hands one named object, which is a false violation on
+// objects admission exempts.
+func TestVAPAppliesToResourceNames(t *testing.T) {
+	named := func(resourceNames ...string) admissionregistrationv1.NamedRuleWithOperations {
+		r := rule([]string{""}, []string{"v1"}, []string{"pods"})
+		r.ResourceNames = resourceNames
+		return r
+	}
+	podNamed := func(name string) map[string]any {
+		o := obj("v1", "Pod")
+		o["metadata"].(map[string]any)["name"] = name
+		return o
+	}
+
+	t.Run("only the named resource is in scope", func(t *testing.T) {
+		v := vapWithConstraints(named("coredns"))
+		assert.True(t, v.appliesTo(podNamed("coredns")))
+		assert.False(t, v.appliesTo(podNamed("nginx")), "a rule naming one pod must not pull in every pod")
+	})
+
+	t.Run("an empty resourceNames list matches every name", func(t *testing.T) {
+		v := vapWithConstraints(named())
+		assert.True(t, v.appliesTo(podNamed("anything")))
+	})
+
+	t.Run("a named exclusion exempts only that resource", func(t *testing.T) {
+		v := &VAP{matchConstraints: &admissionregistrationv1.MatchResources{
+			ResourceRules:        []admissionregistrationv1.NamedRuleWithOperations{named()},
+			ExcludeResourceRules: []admissionregistrationv1.NamedRuleWithOperations{named("kube-proxy")},
+		}}
+		assert.False(t, v.appliesTo(podNamed("kube-proxy")))
+		assert.True(t, v.appliesTo(podNamed("nginx")))
+	})
+
+	t.Run("a generateName-only manifest does not match a named rule", func(t *testing.T) {
+		// Admission sees no name either at that point, so it would not match.
+		o := obj("v1", "Pod")
+		delete(o["metadata"].(map[string]any), "name")
+		assert.False(t, vapWithConstraints(named("coredns")).appliesTo(o))
 	})
 }

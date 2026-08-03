@@ -77,13 +77,11 @@ type OPAProcessor struct {
 	celEvaluatorErr  error
 	// celNamespaceIndex maps namespace name -> the scan's Namespace object, so
 	// CEL evaluation can bind namespaceObject the way the apiserver does. Built
-	// once via celNamespaceOnce (see celNamespaceObjects): Namespace objects
-	// come from resource collection, which is complete before processing starts
-	// (see NewOPAProcessor), so a one-time snapshot cannot miss one — the
-	// mid-scan writes into AllResources are aggregator-produced resources,
-	// never Namespaces.
+	// at construction (see indexNamespaces): NewOPAProcessor already requires
+	// AllResources to be fully collected, so indexing there makes the snapshot
+	// structurally independent of whatever rules write into AllResources
+	// mid-scan, instead of depending on when the first CEL rule happens to run.
 	celNamespaceIndex map[string]map[string]any
-	celNamespaceOnce  sync.Once
 	// initialResourceCount is the size of AllResources snapshotted once at
 	// construction, so the large-cluster namespace-bucketing decision (see
 	// getNamespaceName) is made once per scan instead of drifting mid-scan as
@@ -114,7 +112,27 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		compiledModules:        make(map[string]compiledRule),
 		TimedOutControls:       make(map[string]string),
 		initialResourceCount:   initialResourceCount,
+		celNamespaceIndex:      indexNamespaces(sessionObj),
 	}
+}
+
+// indexNamespaces maps namespace name -> Namespace object out of the session's
+// collected resources, for the CEL namespaceObject binding (see
+// celNamespaceObjectFor). Nil-safe by returning an empty index: a nil session
+// or a scan that never collected Namespaces (file scans, frameworks with no
+// Namespace-matching control) just resolves every lookup to nil.
+func indexNamespaces(sessionObj *cautils.OPASessionObj) map[string]map[string]any {
+	if sessionObj == nil {
+		return nil
+	}
+	index := make(map[string]map[string]any)
+	for _, resource := range sessionObj.AllResources {
+		if resource == nil || resource.GetKind() != "Namespace" || resource.GetApiVersion() != "v1" {
+			continue
+		}
+		index[resource.GetName()] = resource.GetObject()
+	}
+	return index
 }
 
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
@@ -704,35 +722,15 @@ func (opap *OPAProcessor) getCELEvaluator() (*cel.Evaluator, error) {
 // in, for the evaluator's namespaceObject binding. It returns nil for a
 // cluster-scoped resource (no namespace to resolve) and for a namespace the
 // scan did not collect; the evaluator binds null in both cases, exactly as the
-// apiserver binds null for cluster-scoped resources.
+// apiserver binds null for cluster-scoped resources. The namespaced test is
+// the same one stub.go's isNamespaced applies to the same object a moment
+// later: a non-empty metadata.namespace.
 func (opap *OPAProcessor) celNamespaceObjectFor(obj map[string]any) map[string]any {
 	namespace, _, _ := unstructured.NestedString(obj, "metadata", "namespace")
 	if namespace == "" {
 		return nil
 	}
-	return opap.celNamespaceObjects()[namespace]
-}
-
-// celNamespaceObjects lazily indexes the scan's collected Namespace objects by
-// name (see the celNamespaceIndex field for why once is enough). Scans that
-// carry no session or no Namespaces produce an empty index, never an error: a
-// missing namespace binds null, the same degraded-but-safe behaviour those
-// scans had before namespaceObject was resolved at all.
-func (opap *OPAProcessor) celNamespaceObjects() map[string]map[string]any {
-	opap.celNamespaceOnce.Do(func() {
-		if opap.OPASessionObj == nil {
-			return
-		}
-		index := make(map[string]map[string]any)
-		for _, resource := range opap.AllResources {
-			if resource == nil || resource.GetKind() != "Namespace" || resource.GetApiVersion() != "v1" {
-				continue
-			}
-			index[resource.GetName()] = resource.GetObject()
-		}
-		opap.celNamespaceIndex = index
-	})
-	return opap.celNamespaceIndex
+	return opap.celNamespaceIndex[namespace]
 }
 
 // celRuleResponse builds the RuleResponse for one object that violated a CEL

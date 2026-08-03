@@ -962,12 +962,14 @@ func TestCELNamespaceObjectFor(t *testing.T) {
 	})
 	require.NotNil(t, decoy)
 
-	opap := &OPAProcessor{OPASessionObj: &cautils.OPASessionObj{
+	// Built through the constructor on purpose: that is where the index is
+	// snapshotted, so this also pins that NewOPAProcessor wires it.
+	opap := NewOPAProcessor(&cautils.OPASessionObj{
 		AllResources: map[string]workloadinterface.IMetadata{
 			nsMeta.GetID(): nsMeta,
 			decoy.GetID():  decoy,
 		},
-	}}
+	}, &resources.RegoDependenciesData{}, "", "", "", false, nil)
 
 	podIn := func(namespace string) map[string]any {
 		metadata := map[string]any{"name": "p"}
@@ -995,7 +997,9 @@ func TestCELNamespaceObjectFor(t *testing.T) {
 	})
 
 	t.Run("no session resolves to nil without panicking", func(t *testing.T) {
-		bare := &OPAProcessor{}
-		assert.Nil(t, bare.celNamespaceObjectFor(podIn("prod")))
+		// Both the zero value and a constructor call with no session: the second
+		// is the one a caller can actually reach.
+		assert.Nil(t, (&OPAProcessor{}).celNamespaceObjectFor(podIn("prod")))
+		assert.Nil(t, NewOPAProcessor(nil, nil, "", "", "", false, nil).celNamespaceObjectFor(podIn("prod")))
 	})
 }
