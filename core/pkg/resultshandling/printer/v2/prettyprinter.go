@@ -298,7 +298,7 @@ func (pp *PrettyPrinter) printGroupedResource(indent string, title string, rsc [
 
 	resources := []string{}
 	for r := range rsc {
-		relatedObjectsStr := generateRelatedObjectsStr(rsc[r]) // TODO -
+		relatedObjectsStr := generateRelatedObjectsStr(rsc[r])
 		resources = append(resources, fmt.Sprintf("%s%s - %s %s", indent, rsc[r].resource.GetKind(), rsc[r].resource.GetName(), relatedObjectsStr))
 	}
 
