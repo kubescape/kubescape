@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -249,7 +250,7 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 
 	// Compute expected namespace count synchronously before launching
 	// the goroutine so the caller has it at return time.
-	expectedNamespaceBatches := k8sHandler.countNamespaces(ctx)
+	expectedNamespaceBatches := k8sHandler.countNamespaces(ctx, scanInfo)
 
 	// Start streaming goroutine
 	go func() {
@@ -836,9 +837,14 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 	return nil
 }
 
-// countNamespaces returns the number of namespaces in the cluster by listing
-// them from the Kubernetes API. Used for progress bar estimation in streaming.
-func (k8sHandler *K8sResourceHandler) countNamespaces(ctx context.Context) int {
+// countNamespaces returns the number of namespaces that can contribute a
+// namespace batch to the streaming scan, used as the expected-batch count for
+// progress reporting. It honours the scan's include/exclude namespace filters
+// (mirroring skipNamespace in the OPA processor: include takes precedence).
+// The result is deliberately an upper bound: a namespace batch is only created
+// once a namespace actually holds a queryable resource, so sparse or filtered
+// clusters progress faster than the estimate suggests.
+func (k8sHandler *K8sResourceHandler) countNamespaces(ctx context.Context, scanInfo *cautils.ScanInfo) int {
 	if k8sHandler.k8s == nil || k8sHandler.k8s.KubernetesClient == nil {
 		return 0
 	}
@@ -847,7 +853,38 @@ func (k8sHandler *K8sResourceHandler) countNamespaces(ctx context.Context) int {
 		logger.L().Ctx(ctx).Debug("failed to list namespaces for progress estimate", helpers.Error(err))
 		return 0
 	}
-	return len(nsList.Items)
+
+	include := splitNamespaces(scanInfo.IncludeNamespaces)
+	exclude := splitNamespaces(scanInfo.ExcludedNamespaces)
+
+	count := 0
+	for _, ns := range nsList.Items {
+		if len(include) > 0 {
+			if !slices.Contains(include, ns.Name) {
+				continue
+			}
+		} else if slices.Contains(exclude, ns.Name) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+// splitNamespaces parses a comma-separated namespace list (as passed to
+// --include-namespaces / --exclude-namespaces) into a clean slice. Empty
+// entries and surrounding whitespace are dropped.
+func splitNamespaces(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for p := range strings.SplitSeq(s, ",") {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber(ctx context.Context) (int, error) {
@@ -894,22 +931,32 @@ var namespacedResourcesToEstimate = []schema.GroupVersionResource{
 
 // EstimateClusterSize estimates the number of namespaced resources in the
 // cluster by issuing metadata-only LIST requests (limit=1) to the API server
-// and summing the remainingItemCount from each response.
-// Returns 0 if the estimate cannot be produced (discovery or LIST errors).
+// and summing the remainingItemCount from each response. A per-GVR failure
+// (type unavailable, or the service account lacking read access) is tolerated,
+// but if no representative type can be listed at all the estimate is useless —
+// returning (0, nil) would be indistinguishable from a genuinely small cluster
+// — so the function reports the failure and lets the caller fall back to
+// non-streaming.
 func (k8sHandler *K8sResourceHandler) EstimateClusterSize(ctx context.Context, scanInfo *cautils.ScanInfo) (int, error) {
 	if k8sHandler.k8s == nil || k8sHandler.k8s.DynamicClient == nil {
 		return 0, fmt.Errorf("kubernetes client not available")
 	}
 
 	var total int
+	var ok int
 	for _, gvr := range namespacedResourcesToEstimate {
 		result, err := k8sHandler.k8s.DynamicClient.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{Limit: 1})
 		if err != nil {
 			continue
 		}
+		ok++
 		if rc := result.GetRemainingItemCount(); rc != nil {
 			total += int(*rc)
 		}
+	}
+
+	if ok == 0 {
+		return 0, fmt.Errorf("no resource types could be listed for cluster size estimate")
 	}
 
 	return total, nil

@@ -9,10 +9,12 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	fakeclientset "k8s.io/client-go/kubernetes/fake"
 )
 
 // gvrAwareDynamicClient is a mock dynamic client that can return different
@@ -128,6 +130,46 @@ func TestEstimateClusterSize_ListErrors(t *testing.T) {
 	require.NoError(t, err)
 	// 15 GVRs * 100 = 1500 (pods error is skipped)
 	assert.Equal(t, 1500, size)
+}
+
+func TestEstimateClusterSize_AllListErrors(t *testing.T) {
+	mockClient := &gvrAwareDynamicClient{
+		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			return nil, errors.New("API server error")
+		},
+	}
+
+	handler := &K8sResourceHandler{
+		k8s: &k8sinterface.KubernetesApi{DynamicClient: mockClient},
+	}
+
+	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
+	require.Error(t, err, "an estimate where no type could be listed must be reported as a failure, not read as a small cluster")
+	assert.Equal(t, 0, size)
+}
+
+func TestCountNamespaces_AppliesNamespaceFilters(t *testing.T) {
+	ns := func(name string) *corev1.Namespace {
+		return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	}
+	client := fakeclientset.NewSimpleClientset(ns("default"), ns("kube-system"), ns("prod-a"), ns("prod-b"))
+	handler := &K8sResourceHandler{k8s: &k8sinterface.KubernetesApi{KubernetesClient: client}}
+
+	t.Run("no filters counts all namespaces", func(t *testing.T) {
+		assert.Equal(t, 4, handler.countNamespaces(context.Background(), &cautils.ScanInfo{}))
+	})
+	t.Run("include filter keeps only included", func(t *testing.T) {
+		scanInfo := &cautils.ScanInfo{IncludeNamespaces: " prod-a , prod-b "}
+		assert.Equal(t, 2, handler.countNamespaces(context.Background(), scanInfo))
+	})
+	t.Run("exclude filter drops excluded", func(t *testing.T) {
+		scanInfo := &cautils.ScanInfo{ExcludedNamespaces: "kube-system,default"}
+		assert.Equal(t, 2, handler.countNamespaces(context.Background(), scanInfo))
+	})
+	t.Run("include takes precedence over exclude", func(t *testing.T) {
+		scanInfo := &cautils.ScanInfo{IncludeNamespaces: "prod-a", ExcludedNamespaces: "prod-a"}
+		assert.Equal(t, 1, handler.countNamespaces(context.Background(), scanInfo))
+	})
 }
 
 func TestEstimateClusterSize_NilRemainingItemCount(t *testing.T) {
