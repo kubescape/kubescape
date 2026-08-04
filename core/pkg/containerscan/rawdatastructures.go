@@ -16,7 +16,7 @@ type ScanResultReport struct {
 	ContainerName            string     `json:"containerName"`
 	Timestamp                int64      `json:"timestamp"`
 	Layers                   LayersList `json:"layers"`
-	ListOfDangerousArtifacts []string   `json:"ListOfDangerousArtifacts"`
+	ListOfDangerousArtifacts []string   `json:"listOfDangerousArtifcats"`
 }
 
 // ScanResultLayer - represents a single layer from container scan result
