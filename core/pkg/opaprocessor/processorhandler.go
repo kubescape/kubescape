@@ -76,11 +76,13 @@ type OPAProcessor struct {
 	celEvaluatorOnce sync.Once
 	celEvaluatorErr  error
 	// celNamespaceIndex maps namespace name -> the scan's Namespace object, so
-	// CEL evaluation can bind namespaceObject the way the apiserver does. Built
-	// at construction (see indexNamespaces): NewOPAProcessor already requires
-	// AllResources to be fully collected, so indexing there makes the snapshot
-	// structurally independent of whatever rules write into AllResources
-	// mid-scan, instead of depending on when the first CEL rule happens to run.
+	// CEL evaluation can bind namespaceObject the way the apiserver does. In the
+	// non-streaming path it is built at construction (see indexNamespaces), where
+	// AllResources is already fully collected, so the snapshot is structurally
+	// independent of whatever rules write into AllResources mid-scan instead of
+	// depending on when the first CEL rule happens to run. The streaming path has
+	// no such snapshot to take, so it extends the index batch by batch via
+	// indexNamespacesFrom, always before the batch is evaluated.
 	celNamespaceIndex map[string]map[string]any
 	// initialResourceCount is the size of AllResources snapshotted once at
 	// construction, so the large-cluster namespace-bucketing decision (see
@@ -117,6 +119,52 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		TimedOutControls:       make(map[string]string),
 		initialResourceCount:   initialResourceCount,
 		celNamespaceIndex:      indexNamespaces(sessionObj),
+	}
+}
+
+// indexNamespaces maps namespace name -> Namespace object out of the session's
+// collected resources, for the CEL namespaceObject binding (see
+// celNamespaceObjectFor). Nil-safe by returning an empty index: a nil session
+// or a scan that never collected Namespaces (file scans, frameworks with no
+// Namespace-matching control) just resolves every lookup to nil.
+//
+// In the streaming path AllResources is still empty here, so this yields an
+// empty index and ProcessWithStreaming fills it in per batch via
+// indexNamespacesFrom instead.
+func indexNamespaces(sessionObj *cautils.OPASessionObj) map[string]map[string]any {
+	if sessionObj == nil {
+		return nil
+	}
+	index := make(map[string]map[string]any)
+	addNamespacesToIndex(index, sessionObj.AllResources)
+	return index
+}
+
+// indexNamespacesFrom merges the Namespace objects in resources into the CEL
+// namespace index. The streaming path calls it for every batch before the batch
+// is evaluated, because AllResources is empty at construction time: a Namespace
+// object is scoped to its own name by cautils.ResourceScope, so it arrives in
+// that namespace's batch alongside the resources it contains, which is exactly
+// the batch whose objects need it bound. Without this, celNamespaceObjectFor
+// would resolve every namespace to nil under --enable-streaming and
+// admission-scoped CEL rules would diverge from the non-streaming path.
+func (opap *OPAProcessor) indexNamespacesFrom(resources map[string]workloadinterface.IMetadata) {
+	if len(resources) == 0 {
+		return
+	}
+	if opap.celNamespaceIndex == nil {
+		opap.celNamespaceIndex = make(map[string]map[string]any)
+	}
+	addNamespacesToIndex(opap.celNamespaceIndex, resources)
+}
+
+// addNamespacesToIndex indexes every v1 Namespace object in resources by name.
+func addNamespacesToIndex(index map[string]map[string]any, resources map[string]workloadinterface.IMetadata) {
+	for _, resource := range resources {
+		if resource == nil || resource.GetKind() != "Namespace" || resource.GetApiVersion() != "v1" {
+			continue
+		}
+		index[resource.GetName()] = resource.GetObject()
 	}
 }
 
@@ -253,6 +301,10 @@ haveResident:
 		opap.AllResources[k] = v
 	}
 
+	// Index any Namespace objects the resident batch carries before evaluating,
+	// so CEL's namespaceObject binding is populated for this scope's objects.
+	opap.indexNamespacesFrom(residentBatch.AllResources)
+
 	// Process resident batch first
 	residentScope := evaluationScope{name: residentBatch.Scope, resident: residentBatch}
 	if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, residentScope, progressListener); err != nil {
@@ -270,6 +322,10 @@ haveResident:
 			if batch.Scope == cautils.ClusterScope {
 				return fmt.Errorf("received duplicate resident batch")
 			}
+
+			// A namespace's own Namespace object is scoped to this batch, so
+			// index it before evaluating the batch that needs it bound.
+			opap.indexNamespacesFrom(batch.AllResources)
 
 			// Process this namespace batch
 			namespaceScope := evaluationScope{name: batch.Scope, batch: batch, resident: residentBatch}
@@ -338,7 +394,6 @@ func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Po
 			processErrs = append(processErrs, err)
 			break
 		}
-		toPin := item.control
 		if progressListener != nil {
 			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", controlID))
 		}
@@ -481,11 +536,49 @@ func (opap *OPAProcessor) evaluationScopes() []evaluationScope {
 	return scopes
 }
 
-// sortedControlIDs returns the controls to evaluate in a stable order. The
-// order determines how a resource's AssociatedControls are laid out, which
-// used to depend on Go's map iteration order.
+type policyControl struct {
+	key     string
+	control reporthandling.Control
+}
+
+// sortedControlIDs returns the keys of the controls to evaluate in a stable
+// order. The order determines how a resource's AssociatedControls are laid out,
+// which used to depend on Go's map iteration order. Keys (rather than
+// ControlIDs) are returned because the scope loops look controls back up in
+// policies.Controls, which is keyed by name, and because a control with an
+// empty ControlID must still be addressable.
 func sortedControlIDs(policies *cautils.Policies) []string {
-	return slices.Sorted(maps.Keys(policies.Controls))
+	items := sortedPolicyControls(policies.Controls)
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		keys = append(keys, item.key)
+	}
+	return keys
+}
+
+// sortedPolicyControls orders controls by ControlID, falling back to the map
+// key for controls that have no ControlID, and breaks ties on the key so the
+// order is total. Sorting on ControlID rather than the map key keeps the
+// evaluation order aligned with the user-visible control identity.
+func sortedPolicyControls(controls map[string]reporthandling.Control) []policyControl {
+	out := make([]policyControl, 0, len(controls))
+	for key, control := range controls {
+		out = append(out, policyControl{key: key, control: control})
+	}
+	slices.SortFunc(out, func(a, b policyControl) int {
+		if c := strings.Compare(policyControlSortKey(a), policyControlSortKey(b)); c != 0 {
+			return c
+		}
+		return strings.Compare(a.key, b.key)
+	})
+	return out
+}
+
+func policyControlSortKey(item policyControl) string {
+	if item.control.ControlID != "" {
+		return item.control.ControlID
+	}
+	return item.key
 }
 
 func (opap *OPAProcessor) loggerStartScanning() {

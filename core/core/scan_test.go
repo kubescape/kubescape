@@ -9,9 +9,26 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/version"
 )
+
+type recordingImageScanService struct {
+	image              string
+	credentials        imagescan.RegistryCredentials
+	registryMappingErr error
+}
+
+func (s *recordingImageScanService) Scan(_ context.Context, image string, credentials imagescan.RegistryCredentials, _, _ []string) (*cautils.ImageScanData, error) {
+	s.image = image
+	s.credentials = credentials
+	if s.registryMappingErr != nil {
+		return nil, s.registryMappingErr
+	}
+	return &cautils.ImageScanData{Image: image}, nil
+}
 
 // estimateClusterSizeMock implements resourcehandler.IResourceHandler with a
 // controllable EstimateClusterSize return value. All other methods are stubs.

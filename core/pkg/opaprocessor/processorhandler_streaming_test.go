@@ -368,6 +368,64 @@ func BenchmarkEagerMemoryUsage(b *testing.B) {
 	}
 }
 
+// TestProcessWithStreaming_PopulatesCELNamespaceIndex pins the CEL
+// namespaceObject binding on the streaming path. NewOPAProcessor builds the
+// namespace index from sessionObj.AllResources, which is still empty when the
+// streaming path constructs the processor, so without per-batch indexing every
+// lookup would resolve to nil and admission-scoped CEL rules would silently
+// behave differently under --enable-streaming than on the eager path.
+func TestProcessWithStreaming_PopulatesCELNamespaceIndex(t *testing.T) {
+	namespace := mustWorkload(t, `{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"prod","labels":{"pod-security.kubernetes.io/enforce":"restricted"}}}`)
+	pod := mustWorkload(t, `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-1","namespace":"prod"}}`)
+	node := mustWorkload(t, `{"apiVersion":"v1","kind":"Node","metadata":{"name":"node-1"}}`)
+
+	scanInfo := &cautils.ScanInfo{}
+	session := cautils.NewOPASessionObj(context.Background(), parityFrameworks(true), nil, scanInfo)
+	session.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
+
+	opap := NewOPAProcessor(session, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	require.Empty(t, opap.celNamespaceIndex,
+		"the streaming path constructs the processor before any resource is collected")
+
+	// A Namespace object is scoped to its own name, so it arrives in that
+	// namespace's batch rather than the resident one.
+	resident := cautils.NewResourceBatch(cautils.ClusterScope)
+	resident.K8SResources["/v1/nodes"] = []string{node.GetID()}
+	resident.AllResources[node.GetID()] = node
+
+	nsBatch := cautils.NewResourceBatch("prod")
+	nsBatch.K8SResources["/v1/namespaces"] = []string{namespace.GetID()}
+	nsBatch.K8SResources["/v1/pods"] = []string{pod.GetID()}
+	nsBatch.AllResources[namespace.GetID()] = namespace
+	nsBatch.AllResources[pod.GetID()] = pod
+
+	batchChan := make(chan *cautils.ResourceBatch, 2)
+	batchChan <- resident
+	batchChan <- nsBatch
+	close(batchChan)
+
+	errChan := make(chan error)
+	close(errChan)
+
+	require.NoError(t, opap.ProcessWithStreaming(context.Background(), batchChan, errChan, cautils.NewProgressHandler(""), 1))
+
+	got := opap.celNamespaceObjectFor(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "pod-1", "namespace": "prod"},
+	})
+	require.NotNil(t, got, "the namespace object streamed in its batch must be bound, not nil")
+	labels := got["metadata"].(map[string]any)["labels"].(map[string]any)
+	assert.Equal(t, "restricted", labels["pod-security.kubernetes.io/enforce"],
+		"the binding must carry the real Namespace object, labels included")
+
+	assert.Nil(t, opap.celNamespaceObjectFor(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "pod-2", "namespace": "staging"},
+	}), "a namespace the scan never streamed must still resolve to nil")
+}
+
 func mustWorkload(t *testing.T, raw string) workloadinterface.IMetadata {
 	t.Helper()
 	workload, err := workloadinterface.NewWorkload([]byte(raw))

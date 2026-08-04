@@ -506,18 +506,22 @@ func estimateClusterSize(resourceHandler resourcehandler.IResourceHandler, ctx c
 // count because sessionObj.AllResources is populated asynchronously by the
 // producer goroutine.
 func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandler resourcehandler.IResourceHandler, scanData *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, clusterName string, excludedNamespaces string, includeNamespaces string, enableRegoPrint bool, controlTimeout time.Duration, estimatedClusterSize int) error {
+	// Construct the processor before starting the producer goroutine. The
+	// producer does not touch scanData's resource maps (it carries them on the
+	// resident batch instead), but constructing first means the constructor's
+	// reads of scanData cannot race a producer write regardless of what the
+	// producer does later — the invariant is enforced by ordering rather than by
+	// a comment in the resource handler.
+	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), clusterName)
+	var exceptionRecorder = newSecurityExceptionEventRecorder()
+	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, clusterName, excludedNamespaces, includeNamespaces, enableRegoPrint, exceptionRecorder)
+	reportResults.ControlTimeout = controlTimeout
+
 	// Stream resources in batches
 	batchChan, errChan, expectedNamespaceBatches, err := resourceHandler.StreamResourcesBatches(ctx, scanData, scanInfo)
 	if err != nil {
 		return fmt.Errorf("failed to start resource streaming: %w", err)
 	}
-
-	// Create OPA processor with streaming support
-	// Use the same approach as the non-streaming path
-	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), clusterName)
-	var exceptionRecorder = newSecurityExceptionEventRecorder()
-	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, clusterName, excludedNamespaces, includeNamespaces, enableRegoPrint, exceptionRecorder)
-	reportResults.ControlTimeout = controlTimeout
 	// AllResources is still empty here — the producer goroutine fills it only
 	// after the resident batch is sent — so the frozen bucketing count must
 	// come from the estimate rather than the construction-time snapshot.
