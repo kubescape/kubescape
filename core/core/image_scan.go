@@ -250,9 +250,13 @@ func isResolutionError(err error) bool {
 // scanWithRegistryMapping attempts to scan an image and, on a resolution error,
 // retries using a mapped registry if one is configured. It returns the scan
 // results or a combined error preserving both the original and fallback context.
+type imageScanService interface {
+	Scan(context.Context, string, imagescan.RegistryCredentials, []string, []string) (*cautils.ImageScanData, error)
+}
+
 func scanWithRegistryMapping(
 	ctx context.Context,
-	svc *imagescan.Service,
+	svc imageScanService,
 	img string,
 	creds imagescan.RegistryCredentials,
 	registryMapping map[string]string,
@@ -301,8 +305,10 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 	defer svc.Close()
 
 	creds := imagescan.RegistryCredentials{
-		Username: imgScanInfo.Username,
-		Password: imgScanInfo.Password,
+		Authority: imgScanInfo.Authority,
+		Username:  imgScanInfo.Username,
+		Password:  imgScanInfo.Password,
+		Token:     imgScanInfo.Token,
 	}
 
 	var vulnerabilityExceptions []string

@@ -228,18 +228,22 @@ Ensure your kubeconfig user has sufficient permissions. At minimum, you need rea
 
 **Solutions:**
 
-1. Verify credentials work with docker:
+1. Verify credentials work with docker. Kubescape uses your docker config and configured credential helpers by default:
    ```bash
    docker login myregistry.io
    docker pull myregistry.io/myimage:tag
    ```
 
-2. Use environment variables for credentials:
+2. Use environment variables for credentials when a docker config or credential helper is not available:
    ```bash
-   export KUBESCAPE_REGISTRY_USERNAME=myuser
-   export KUBESCAPE_REGISTRY_PASSWORD=mypassword
+   export KUBESCAPE_REGISTRY_USERNAME=<registry-username>
+   export KUBESCAPE_REGISTRY_PASSWORD=<registry-password>
    kubescape scan image myregistry.io/myimage:tag
    ```
+
+   If your registry uses bearer tokens, set `KUBESCAPE_REGISTRY_TOKEN` instead of username/password.
+
+   For `kubescape scan --scan-images`, also pass `--registry-authority myregistry.io` so the credentials are only used for that registry.
 
 ### Vulnerability database outdated
 

@@ -173,6 +173,10 @@ type ScanInfo struct {
 	cleanups              []func()
 	ListingURL            string            //Grype vulnerability database URL
 	RegistryMapping       map[string]string // Map internal registry URLs to external ones
+	RegistryAuthority     string            // Registry host[:port] explicit credentials apply to
+	RegistryUsername      string            // Username for workload image registry authentication
+	RegistryPassword      string            // Password for workload image registry authentication
+	RegistryToken         string            // Bearer token for workload image registry authentication
 }
 
 type Getters struct {
