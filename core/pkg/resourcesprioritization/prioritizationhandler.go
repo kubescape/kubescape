@@ -24,7 +24,7 @@ type ResourcesPrioritizationHandler struct {
 	buildResourcesMap      bool
 }
 
-var DefaultSupportedKinds = []string{
+var defaultSupportedKinds = []string{
 	"Deployment",
 	"Pod",
 	"ReplicaSet",
@@ -33,6 +33,10 @@ var DefaultSupportedKinds = []string{
 	"StatefulSet",
 	"Job",
 	"CronJob",
+}
+
+func DefaultSupportedKinds() []string {
+	return slices.Clone(defaultSupportedKinds)
 }
 
 func NewResourcesPrioritizationHandler(ctx context.Context, attackTracksGetter getter.IAttackTracksGetter, buildResourcesMap bool) (*ResourcesPrioritizationHandler, error) {
@@ -80,7 +84,7 @@ func (handler *ResourcesPrioritizationHandler) SetSupportedKinds(kinds []string)
 
 func (handler *ResourcesPrioritizationHandler) AddSupportedKinds(kinds ...string) {
 	if handler.supportedKinds == nil {
-		handler.supportedKinds = append([]string(nil), DefaultSupportedKinds...)
+		handler.supportedKinds = append([]string(nil), defaultSupportedKinds...)
 	}
 	for _, kind := range kinds {
 		if !slices.Contains(handler.supportedKinds, kind) {
@@ -91,7 +95,7 @@ func (handler *ResourcesPrioritizationHandler) AddSupportedKinds(kinds ...string
 
 func (handler *ResourcesPrioritizationHandler) GetSupportedKinds() []string {
 	if handler.supportedKinds == nil {
-		return slices.Clone(DefaultSupportedKinds)
+		return slices.Clone(defaultSupportedKinds)
 	}
 	return slices.Clone(handler.supportedKinds)
 }
@@ -200,7 +204,7 @@ func (handler *ResourcesPrioritizationHandler) isSupportedKind(obj workloadinter
 	}
 	kinds := handler.supportedKinds
 	if kinds == nil {
-		kinds = DefaultSupportedKinds
+		kinds = defaultSupportedKinds
 	}
 	if slices.Contains(kinds, obj.GetKind()) {
 		return true

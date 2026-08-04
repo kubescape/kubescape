@@ -117,7 +117,7 @@ func TestNewResourcesPrioritizationHandler(t *testing.T) {
 	assert.Equal(t, handler.attackTracks[1].GetName(), "TestAttackTrack_2")
 	assert.Equal(t, handler.attackTracks[2].GetName(), "TestAttackTrack_3")
 	assert.True(t, handler.GetPodTemplateFallback())
-	assert.Equal(t, DefaultSupportedKinds, handler.GetSupportedKinds())
+	assert.Equal(t, DefaultSupportedKinds(), handler.GetSupportedKinds())
 }
 
 func TestResourcesPrioritizationHandler_PrioritizeResources(t *testing.T) {
@@ -262,6 +262,10 @@ func TestResourcesPrioritizationHandler_ConfigurableSupportedKinds(t *testing.T)
 	kinds := handler.GetSupportedKinds()
 	kinds[0] = "MODIFIED"
 	assert.NotEqual(t, "MODIFIED", handler.GetSupportedKinds()[0])
+
+	defaultKinds := DefaultSupportedKinds()
+	defaultKinds[0] = "MODIFIED"
+	assert.NotEqual(t, "MODIFIED", DefaultSupportedKinds()[0])
 }
 
 func TestResourcesPrioritizationHandler_DynamicPodTemplateSpecFallback(t *testing.T) {
@@ -314,7 +318,7 @@ func TestResourcesPrioritizationHandler_PodTemplateFallbackKnobAndScope(t *testi
 
 	// Reset to nil (unset -> default kinds)
 	handler.SetSupportedKinds(nil)
-	assert.Equal(t, DefaultSupportedKinds, handler.GetSupportedKinds())
+	assert.Equal(t, DefaultSupportedKinds(), handler.GetSupportedKinds())
 }
 
 func TestResourcesPrioritizationHandler_PrioritizeCustomWorkload(t *testing.T) {
