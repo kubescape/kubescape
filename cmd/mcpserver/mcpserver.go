@@ -63,25 +63,30 @@ func (ksServer *KubescapeMcpserver) getImageScanService(ctx context.Context) (*i
 			initCh <- initResult{err: fmt.Errorf("failed to initialize image scan service: %w", err)}
 			return
 		}
-
-		ksServer.imageScanSvcMu.Lock()
-		if ksServer.imageScanSvc == nil {
-			ksServer.imageScanSvc = svc
-		} else {
-			svc.Close()
-		}
-		ksServer.imageScanSvcMu.Unlock()
-
 		initCh <- initResult{svc: svc}
 	}()
 
 	select {
 	case <-ctx.Done():
+		go func() {
+			res := <-initCh
+			if res.svc == nil {
+				return
+			}
+			ksServer.imageScanSvcMu.Lock()
+			defer ksServer.imageScanSvcMu.Unlock()
+			if ksServer.imageScanSvc == nil {
+				ksServer.imageScanSvc = res.svc
+			} else {
+				res.svc.Close()
+			}
+		}()
 		return nil, fmt.Errorf("image scan service initialization timed out or was canceled: %w", ctx.Err())
 	case res := <-initCh:
 		if res.err != nil {
 			return nil, res.err
 		}
+		ksServer.imageScanSvc = res.svc
 		return res.svc, nil
 	}
 }
