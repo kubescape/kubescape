@@ -193,6 +193,22 @@ func TestNewFixHandler_BasePathFlag_ReportPathEqualsBasePathIsAccepted(t *testin
 	assert.Equal(t, trustedRoot, h.localBasePath)
 }
 
+func TestNewFixHandler_BasePathFlag_PreservesAcceptedReportBasePathSpelling(t *testing.T) {
+	skipOnWindowsSymlink(t)
+
+	trustedRoot := t.TempDir()
+	realScannedDir := filepath.Join(trustedRoot, "real")
+	require.NoError(t, os.Mkdir(realScannedDir, 0o750))
+	reportBasePath := filepath.Join(trustedRoot, "alias")
+	require.NoError(t, os.Symlink(realScannedDir, reportBasePath))
+	reportFile := buildDirectoryReport(t, trustedRoot, reportBasePath)
+
+	h, err := NewFixHandler(&metav1.FixInfo{ReportFile: reportFile, BasePath: trustedRoot})
+	require.NoError(t, err)
+	assert.Equal(t, reportBasePath, h.localBasePath)
+	assert.NotEqual(t, realScannedDir, h.localBasePath)
+}
+
 func TestNewFixHandler_BasePathFlag_InvalidBasePathErrors(t *testing.T) {
 	reportDir := t.TempDir()
 	scannedDir := t.TempDir()

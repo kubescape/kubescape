@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,6 +15,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
+	discoveryfake "k8s.io/client-go/discovery/fake"
 	k8stesting "k8s.io/client-go/testing"
 
 	"k8s.io/client-go/dynamic/fake"
@@ -24,7 +27,7 @@ type staticFieldSelector struct {
 	selectors []string
 }
 
-func (s *staticFieldSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
+func (s *staticFieldSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource, namespaced *bool) []string {
 	return s.selectors
 }
 func (s *staticFieldSelector) GetClusterScope(resource *schema.GroupVersionResource) bool {
@@ -71,6 +74,7 @@ func TestPullSingleResource_FieldSelectorDoesNotLeakAcrossIterations(t *testing.
 		nil,
 		"",
 		fieldSelector,
+		nil,
 	)
 
 	require.Empty(t, selectorErrs)
@@ -366,4 +370,42 @@ func TestRecordFailedQueryStatuses_PartialFailureSessionField(t *testing.T) {
 	require.NotEmpty(t, sessionObj.PartialGVRFailures,
 		"the failed selector must be recorded in PartialGVRFailures, not silently dropped")
 	assert.Contains(t, sessionObj.PartialGVRFailures[0].Error, "RBAC denied for secret2")
+}
+
+func TestGetResources_DiscoveryFailureReachesScanCoverage(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+	handler := getResourceHandlerMock()
+	fakeDiscovery, ok := handler.k8s.DiscoveryClient.(*discoveryfake.FakeDiscovery)
+	require.True(t, ok)
+	fakeDiscovery.PrependReactor("get", "resource", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, &discovery.ErrGroupDiscoveryFailed{Groups: map[schema.GroupVersion]error{
+			{Group: "custom.metrics.k8s.io", Version: "v1beta2"}: fmt.Errorf("provider unavailable"),
+		}}
+	})
+
+	handler.k8s.DynamicClient = &mockDynamicClient{
+		listFunc: func(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			return &unstructured.UnstructuredList{Items: []unstructured.Unstructured{{Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Namespace",
+				"metadata":   map[string]any{"name": "default"},
+			}}}}, nil
+		},
+	}
+
+	rule := mockRule("discovery-coverage", []reporthandling.RuleMatchObjects{mockMatch(6)}, "")
+	control := mockControl("discovery-coverage", []reporthandling.PolicyRule{rule})
+	framework := mockFramework("discovery-coverage", []reporthandling.Control{control})
+	scanInfo := &cautils.ScanInfo{}
+	sessionObj := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{*framework}, nil, scanInfo)
+
+	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
+	require.NoError(t, err)
+	require.Len(t, sessionObj.PartialGVRFailures, 1)
+	assert.Equal(t, "discovery:custom.metrics.k8s.io/v1beta2", sessionObj.PartialGVRFailures[0].GVR)
+	assert.Equal(t, "discovery", sessionObj.PartialGVRFailures[0].Selector)
+	assert.Contains(t, sessionObj.PartialGVRFailures[0].Error, "provider unavailable")
+
+	coverage := cautils.BuildScanCoverage(sessionObj.InfoMap, sessionObj.ResourceToControlsMap, nil, sessionObj.PartialGVRFailures, nil)
+	assert.Len(t, coverage.PartialGVRPulls, 1)
 }

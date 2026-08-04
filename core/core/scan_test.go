@@ -2,12 +2,115 @@ package core
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/version"
 )
+
+type recordingImageScanService struct {
+	image              string
+	credentials        imagescan.RegistryCredentials
+	registryMappingErr error
+}
+
+func (s *recordingImageScanService) Scan(_ context.Context, image string, credentials imagescan.RegistryCredentials, _, _ []string) (*cautils.ImageScanData, error) {
+	s.image = image
+	s.credentials = credentials
+	if s.registryMappingErr != nil {
+		return nil, s.registryMappingErr
+	}
+	return &cautils.ImageScanData{Image: image}, nil
+}
+
+// estimateClusterSizeMock implements resourcehandler.IResourceHandler with a
+// controllable EstimateClusterSize return value. All other methods are stubs.
+type estimateClusterSizeMock struct {
+	size int
+	err  error
+}
+
+func (m estimateClusterSizeMock) GetResources(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
+	return nil, nil, nil, nil, nil
+}
+
+func (m estimateClusterSizeMock) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
+	return nil, nil, 0, nil
+}
+
+func (m estimateClusterSizeMock) EstimateClusterSize(ctx context.Context, scanInfo *cautils.ScanInfo) (int, error) {
+	return m.size, m.err
+}
+
+func (m estimateClusterSizeMock) GetClusterAPIServerInfo(ctx context.Context) *version.Info {
+	return nil
+}
+
+func (m estimateClusterSizeMock) GetCloudProvider() string {
+	return ""
+}
+
+func TestEstimateClusterSize(t *testing.T) {
+	// A ScanInfo with no input patterns is treated as a cluster scan.
+	clusterScanInfo := &cautils.ScanInfo{}
+
+	// A ScanInfo with an explicit file input is treated as a file scan.
+	fileScanInfo := &cautils.ScanInfo{
+		InputPatterns: []string{"deployment.yaml"},
+	}
+
+	tests := []struct {
+		name     string
+		handler  resourcehandler.IResourceHandler
+		scanInfo *cautils.ScanInfo
+		want     int
+	}{
+		{
+			name:     "non-cluster context returns 0",
+			handler:  estimateClusterSizeMock{size: 5000},
+			scanInfo: fileScanInfo,
+			want:     0,
+		},
+		{
+			name:     "handler error falls back to 0",
+			handler:  estimateClusterSizeMock{err: errors.New("API unavailable")},
+			scanInfo: clusterScanInfo,
+			want:     0,
+		},
+		{
+			name:     "small cluster estimate",
+			handler:  estimateClusterSizeMock{size: 500},
+			scanInfo: clusterScanInfo,
+			want:     500,
+		},
+		{
+			name:     "large cluster estimate",
+			handler:  estimateClusterSizeMock{size: 10000},
+			scanInfo: clusterScanInfo,
+			want:     10000,
+		},
+		{
+			name:     "zero estimate (empty cluster)",
+			handler:  estimateClusterSizeMock{size: 0},
+			scanInfo: clusterScanInfo,
+			want:     0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := estimateClusterSize(tt.handler, context.Background(), tt.scanInfo)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
 
 func TestGetOutputPrinters(t *testing.T) {
 	ctx := context.Background()
@@ -72,6 +175,54 @@ func TestIsPrioritizationScanType(t *testing.T) {
 			assert.Equal(t, tt.want, isPrioritizationScanType(tt.name))
 		})
 	}
+}
+
+func TestRegistryCredentialsFromScanInfo(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{
+		RegistryAuthority: "registry.example.com",
+		RegistryUsername:  "user",
+		RegistryPassword:  "pass",
+		RegistryToken:     "token",
+	}
+
+	creds := registryCredentialsFromScanInfo(scanInfo)
+
+	assert.Equal(t, imagescan.RegistryCredentials{
+		Authority: "registry.example.com",
+		Username:  "user",
+		Password:  "pass",
+		Token:     "token",
+	}, creds)
+	assert.Equal(t, imagescan.RegistryCredentials{}, registryCredentialsFromScanInfo(nil))
+}
+
+func TestScanSingleImageForwardsRegistryCredentials(t *testing.T) {
+	svc := &recordingImageScanService{}
+	results := &resultshandling.ResultsHandler{}
+	creds := imagescan.RegistryCredentials{
+		Authority: "registry.example.com",
+		Username:  "user",
+		Password:  "pass",
+	}
+
+	err := scanSingleImage(context.Background(), "registry.example.com/app:tag", svc, results, nil, creds)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "registry.example.com/app:tag", svc.image)
+	assert.Equal(t, creds, svc.credentials)
+	assert.Len(t, results.ImageScanData, 1)
+	assert.Equal(t, "registry.example.com/app:tag", results.ImageScanData[0].Image)
+}
+
+func TestScanSingleImageReturnsScannerError(t *testing.T) {
+	expectedErr := errors.New("scan failed")
+	svc := &recordingImageScanService{registryMappingErr: expectedErr}
+	results := &resultshandling.ResultsHandler{}
+
+	err := scanSingleImage(context.Background(), "registry.example.com/app:tag", svc, results, nil, imagescan.RegistryCredentials{})
+
+	assert.ErrorIs(t, err, expectedErr)
+	assert.Empty(t, results.ImageScanData)
 }
 
 func TestIsAirGappedMode(t *testing.T) {

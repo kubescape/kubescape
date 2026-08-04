@@ -15,7 +15,8 @@ func TestGetDiffCmd_FormatValidation(t *testing.T) {
 	}{
 		{"default pretty-printer", "pretty-printer", false},
 		{"json", "json", false},
-		{"unsupported format is rejected", "yaml", true},
+		{"yaml", "yaml", false},
+		{"unsupported format is rejected", "html", true},
 		{"scan-only format is rejected", "sarif", true},
 		{"comma-separated multi-format is rejected", "json,pretty-printer", true},
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -41,7 +42,10 @@ func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
 		return nil, err
 	}
 	defer jsonFile.Close()
-	byteValue, _ := io.ReadAll(jsonFile)
+	byteValue, err := io.ReadAll(jsonFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read report file: %w", err)
+	}
 
 	var reportObj reporthandlingv2.PostureReport
 	if err = json.Unmarshal(byteValue, &reportObj); err != nil {
@@ -87,7 +91,6 @@ func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
 		if !isPathContained(resolvedBasePath, resolvedLocalPath) {
 			return nil, fmt.Errorf("report's scan path %q is outside --base-path %q; refusing to trust the report's location claim", localPath, fixInfo.BasePath)
 		}
-		localPath = resolvedLocalPath
 	}
 
 	backendLoggerLeveled := logging.AddModuleLevel(logging.NewLogBackend(logger.L().GetWriter(), "", 0))
@@ -926,7 +929,7 @@ func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int
 	isStringValue := true
 	if _, err := strconv.ParseBool(value); err == nil {
 		isStringValue = false
-	} else if _, err := strconv.ParseFloat(value, 64); err == nil {
+	} else if f, err := strconv.ParseFloat(value, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
 		isStringValue = false
 	} else if _, err := strconv.Atoi(value); err == nil {
 		isStringValue = false

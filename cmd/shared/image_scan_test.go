@@ -105,3 +105,98 @@ func TestValidateImageScanInfo(t *testing.T) {
 		)
 	}
 }
+
+func TestValidateImageCredentials(t *testing.T) {
+	testCases := []struct {
+		Description string
+		Credentials ImageCredentials
+		Want        error
+	}{
+		{
+			Description: "Empty credentials are valid",
+			Credentials: ImageCredentials{},
+			Want:        nil,
+		},
+		{
+			Description: "Registry username and password should be accepted",
+			Credentials: ImageCredentials{Username: "user", Password: "pass"},
+			Want:        nil,
+		},
+		{
+			Description: "Registry token should be accepted",
+			Credentials: ImageCredentials{Token: "token"},
+			Want:        nil,
+		},
+		{
+			Description: "Registry authority with token should be accepted",
+			Credentials: ImageCredentials{Authority: "registry.example.com", Token: "token"},
+			Want:        nil,
+		},
+		{
+			Description: "Registry username without password should be invalid",
+			Credentials: ImageCredentials{Username: "user"},
+			Want:        ErrRegistryUsernamePassword,
+		},
+		{
+			Description: "Registry password without username should be invalid",
+			Credentials: ImageCredentials{Password: "pass"},
+			Want:        ErrRegistryUsernamePassword,
+		},
+		{
+			Description: "Registry token with username and password should be invalid",
+			Credentials: ImageCredentials{Username: "user", Password: "pass", Token: "token"},
+			Want:        ErrRegistryAuthConflict,
+		},
+		{
+			Description: "Registry authority without credentials should be invalid",
+			Credentials: ImageCredentials{Authority: "registry.example.com"},
+			Want:        ErrRegistryAuthorityNoAuth,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Description, func(t *testing.T) {
+			assert.Equal(t, tc.Want, ValidateImageCredentials(tc.Credentials))
+		})
+	}
+}
+
+func TestValidateWorkloadImageCredentialsRequiresAuthority(t *testing.T) {
+	testCases := []struct {
+		Description string
+		Credentials ImageCredentials
+		Want        error
+	}{
+		{
+			Description: "Username and password without authority are rejected",
+			Credentials: ImageCredentials{Username: "user", Password: "pass"},
+			Want:        ErrRegistryAuthorityMissing,
+		},
+		{
+			Description: "Token without authority is rejected",
+			Credentials: ImageCredentials{Token: "token"},
+			Want:        ErrRegistryAuthorityMissing,
+		},
+		{
+			Description: "Username and password with authority are accepted",
+			Credentials: ImageCredentials{Authority: "registry.example.com", Username: "user", Password: "pass"},
+			Want:        nil,
+		},
+		{
+			Description: "Token with authority is accepted",
+			Credentials: ImageCredentials{Authority: "registry.example.com", Token: "token"},
+			Want:        nil,
+		},
+		{
+			Description: "Partial credentials keep the more specific validation error",
+			Credentials: ImageCredentials{Authority: "registry.example.com", Username: "user"},
+			Want:        ErrRegistryUsernamePassword,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Description, func(t *testing.T) {
+			assert.Equal(t, tc.Want, ValidateWorkloadImageCredentials(tc.Credentials))
+		})
+	}
+}

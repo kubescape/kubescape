@@ -86,13 +86,35 @@ func getAttributesFromImage(imgName string) (Attributes, error) {
 		organization = strings.Join(tokens[1:len(tokens)-1], "/")
 	}
 
-	imageNameAndTag := strings.Split(nameAndTag, ":")
-	imageName := imageNameAndTag[0]
-
-	// Intialize the image tag with default value
+	// nameAndTag may be "name", "name:tag", "name@algo:digest" (e.g.
+	// "name@sha256:abc123..."), or "name:tag@algo:digest" - a digest-pinned
+	// reference. Split off any "@digest" suffix first: the digest itself
+	// contains a colon ("sha256:..."), so splitting nameAndTag on ":"
+	// without accounting for that left "@sha256" stuck onto imageName and
+	// the raw hash treated as the tag. Because regexStringMatch (below) is
+	// an unanchored match, unanchored policy patterns (the common case,
+	// e.g. "myimage") still matched the old broken ImageName; anchored
+	// patterns (e.g. "^myimage$") did not, and this fixes those.
+	beforeDigest := nameAndTag
 	imageTag := "latest"
-	if len(imageNameAndTag) > 1 {
-		imageTag = imageNameAndTag[1]
+	if at := strings.Index(nameAndTag, "@"); at != -1 {
+		beforeDigest = nameAndTag[:at]
+		// No explicit tag on a digest-pinned reference: fall back to the
+		// digest as ImageTag (deliberate choice, not Docker/OCI reference
+		// semantics - Docker resolves a "name:tag@digest" reference by the
+		// digest, ignoring the tag, but for *exception-policy matching* the
+		// tag the user wrote is what they meant to target). This means an
+		// exception policy that targets a specific ImageTag (e.g. "v3.*")
+		// cannot match a purely digest-pinned scan, since ImageTag will be
+		// the digest instead; only Registry/Organization/ImageName targets
+		// (and an ImageTag target of "" - "any tag") can match it.
+		imageTag = nameAndTag[at+1:]
+	}
+
+	imageName := beforeDigest
+	if colon := strings.LastIndex(beforeDigest, ":"); colon != -1 {
+		imageName = beforeDigest[:colon]
+		imageTag = beforeDigest[colon+1:] // an explicit tag wins over the digest fallback above
 	}
 
 	attributes := Attributes{
@@ -250,9 +272,13 @@ func isResolutionError(err error) bool {
 // scanWithRegistryMapping attempts to scan an image and, on a resolution error,
 // retries using a mapped registry if one is configured. It returns the scan
 // results or a combined error preserving both the original and fallback context.
+type imageScanService interface {
+	Scan(context.Context, string, imagescan.RegistryCredentials, []string, []string) (*cautils.ImageScanData, error)
+}
+
 func scanWithRegistryMapping(
 	ctx context.Context,
-	svc *imagescan.Service,
+	svc imageScanService,
 	img string,
 	creds imagescan.RegistryCredentials,
 	registryMapping map[string]string,
@@ -301,8 +327,10 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 	defer svc.Close()
 
 	creds := imagescan.RegistryCredentials{
-		Username: imgScanInfo.Username,
-		Password: imgScanInfo.Password,
+		Authority: imgScanInfo.Authority,
+		Username:  imgScanInfo.Username,
+		Password:  imgScanInfo.Password,
+		Token:     imgScanInfo.Token,
 	}
 
 	var vulnerabilityExceptions []string

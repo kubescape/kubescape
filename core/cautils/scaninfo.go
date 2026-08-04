@@ -160,6 +160,7 @@ type ScanInfo struct {
 	UseDefaultMatchers    bool
 	ScanTimeout           time.Duration // Maximum duration for the entire scan (0 = no timeout)
 	ControlTimeout        time.Duration // Maximum duration for evaluating a single control (0 = no timeout)
+	EnableStreaming       bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
 	ChartPath             string
 	FilePath              string
 	HelmValueFiles        []string // -f / --values: paths to Helm values YAML files (repeatable)
@@ -173,6 +174,10 @@ type ScanInfo struct {
 	cleanups              []func()
 	ListingURL            string            //Grype vulnerability database URL
 	RegistryMapping       map[string]string // Map internal registry URLs to external ones
+	RegistryAuthority     string            // Registry host[:port] explicit credentials apply to
+	RegistryUsername      string            // Username for workload image registry authentication
+	RegistryPassword      string            // Password for workload image registry authentication
+	RegistryToken         string            // Bearer token for workload image registry authentication
 }
 
 type Getters struct {

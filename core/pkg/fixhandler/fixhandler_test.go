@@ -317,6 +317,33 @@ func Test_fixPathToValidYamlExpression(t *testing.T) {
 			},
 			want: "select(di==0).xxx.yyy |= 123",
 		},
+		{
+			name: "fix path with NaN string value",
+			args: args{
+				fixPath:             "xxx.yyy",
+				value:               "NaN",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).xxx.yyy |= \"NaN\"",
+		},
+		{
+			name: "fix path with Inf string value",
+			args: args{
+				fixPath:             "xxx.yyy",
+				value:               "Inf",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).xxx.yyy |= \"Inf\"",
+		},
+		{
+			name: "fix path with -Inf string value",
+			args: args{
+				fixPath:             "xxx.yyy",
+				value:               "-Inf",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).xxx.yyy |= \"-Inf\"",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

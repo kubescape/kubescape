@@ -11,6 +11,7 @@ import (
 	"github.com/anchore/grype/grype/match"
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -151,61 +152,11 @@ func TestParseSeverity(t *testing.T) {
 	}
 }
 
-func TestIsEmpty(t *testing.T) {
-	tests := []struct {
-		name  string
-		creds RegistryCredentials
-		want  bool
-	}{
-		{
-			name: "Both Non Empty",
-			creds: RegistryCredentials{
-				Username: "username",
-				Password: "password",
-			},
-			want: false,
-		},
-		{
-			name: "Password Empty",
-			creds: RegistryCredentials{
-				Username: "username",
-				Password: "",
-			},
-			want: true,
-		},
-		{
-			name: "Username Empty",
-			creds: RegistryCredentials{
-				Username: "",
-				Password: "password",
-			},
-			want: true,
-		},
-		{
-			name: "Both empty",
-			creds: RegistryCredentials{
-				Username: "",
-				Password: "",
-			},
-			want: true,
-		},
-		{
-			name:  "Empty struct",
-			creds: RegistryCredentials{},
-			want:  true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, tt.creds.IsEmpty())
-		})
-	}
-}
-
 func TestGetProviderConfig(t *testing.T) {
 	tests := []struct {
-		name  string
-		creds RegistryCredentials
+		name      string
+		creds     RegistryCredentials
+		wantCreds []image.RegistryCredentials
 	}{
 		{
 			name: "Both Non Empty",
@@ -213,6 +164,7 @@ func TestGetProviderConfig(t *testing.T) {
 				Username: "username",
 				Password: "password",
 			},
+			wantCreds: []image.RegistryCredentials{{Username: "username", Password: "password"}},
 		},
 		{
 			name: "Password Empty",
@@ -220,6 +172,7 @@ func TestGetProviderConfig(t *testing.T) {
 				Username: "username",
 				Password: "",
 			},
+			wantCreds: nil,
 		},
 		{
 			name: "Username Empty",
@@ -227,6 +180,7 @@ func TestGetProviderConfig(t *testing.T) {
 				Username: "",
 				Password: "password",
 			},
+			wantCreds: nil,
 		},
 		{
 			name: "Both empty",
@@ -234,6 +188,15 @@ func TestGetProviderConfig(t *testing.T) {
 				Username: "",
 				Password: "",
 			},
+			wantCreds: nil,
+		},
+		{
+			name: "Token with authority",
+			creds: RegistryCredentials{
+				Authority: "registry.example.com",
+				Token:     "token",
+			},
+			wantCreds: []image.RegistryCredentials{{Authority: "registry.example.com", Token: "token"}},
 		},
 	}
 	for _, tt := range tests {
@@ -241,6 +204,7 @@ func TestGetProviderConfig(t *testing.T) {
 			providerConfig := getProviderConfig(tt.creds, nil)
 			assert.NotNil(t, providerConfig)
 			assert.Equal(t, true, providerConfig.GenerateMissingCPEs)
+			assert.Equal(t, tt.wantCreds, providerConfig.RegistryOptions.Credentials)
 		})
 	}
 }

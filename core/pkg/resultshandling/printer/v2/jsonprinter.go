@@ -85,7 +85,7 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 
 	if opaSessionObj != nil {
 		err = printConfigurationsScanning(opaSessionObj, imageScanData, jp)
-	} else if imageScanData != nil {
+	} else if len(imageScanData) > 0 {
 		model, err2 := models.NewDocument(clio.Identification{}, imageScanData[0].Packages, imageScanData[0].Context,
 			imageScanData[0].Matches, imageScanData[0].IgnoredMatches, imageScanData[0].VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
 		if err2 != nil {

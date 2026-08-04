@@ -136,7 +136,12 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableV
 	resourceTableView := make(ResourceTableView, 0)
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if result.GetStatus(nil).IsFailed() {
-			resource := opaSessionObj.AllResources[resourceID]
+			resource, ok := opaSessionObj.AllResources[resourceID]
+			if !ok {
+				logger.L().Debug("resource missing from AllResources, skipping",
+					helpers.String("resourceID", resourceID))
+				continue
+			}
 			ctlResults := buildResourceControlResultTable(result.AssociatedControls, &opaSessionObj.Report.SummaryDetails)
 			resourceTableView = append(resourceTableView, ResourceResult{resource, ctlResults})
 		}

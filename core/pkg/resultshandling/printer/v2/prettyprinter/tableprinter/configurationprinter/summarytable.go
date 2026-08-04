@@ -71,11 +71,7 @@ func GenerateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo [
 	}
 
 	row[summaryColumnSeverity] = GetSeverityColumn(controlSummary)
-	if len(controlSummary.GetName()) > 50 {
-		row[summaryColumnName] = controlSummary.GetName()[:50] + "..." //nolint:gosec // Safe: row has length _summaryRowLen (5), accessing index 1
-	} else {
-		row[summaryColumnName] = controlSummary.GetName() //nolint:gosec // Safe: row has length _summaryRowLen (5), accessing index 1
-	}
+	row[summaryColumnName] = utils.TruncateName(controlSummary.GetName(), utils.MaxControlNameLen)
 	row[summaryColumnCounterFailed] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
 	row[summaryColumnCounterAll] = fmt.Sprintf("%d", controlSummary.NumberOfResources().All())
 	row[summaryColumnComplianceScore] = GetComplianceScoreColumn(controlSummary, infoToPrintInfo)

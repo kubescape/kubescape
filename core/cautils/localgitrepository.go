@@ -13,14 +13,25 @@ import (
 )
 
 type LocalGitRepository struct {
-	*gitRepository
-	goGitRepo *gitv5.Repository
-	head      *plumbingv5.Reference
-	config    *configv5.Config
+	// named rather than embedded: embedding promoted GetFileLastCommit, and since this field is unexported no caller outside the package could check it was set before invoking the promoted method.
+	gitRepository *gitRepository
+	goGitRepo     *gitv5.Repository
+	head          *plumbingv5.Reference
+	config        *configv5.Config
 }
 
+// worktreeRoot resolves the repository's worktree root. It is a package-level
+// var (rather than a direct l.GetRootDir() call) purely so tests can swap in
+// a failing stub to exercise the defensive nil-on-error handling below: with
+// the pinned go-git version, Worktree() only fails when the repository was
+// opened without a worktree filesystem, which PlainOpenWithOptions's
+// DetectDotGit walk does not yield while Head()/Config() still resolve — so
+// no real on-disk fixture can reach that branch today.
+var worktreeRoot = (*LocalGitRepository).GetRootDir
+
 func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
-	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})
+	// EnableDotGitCommonDir is required for linked worktrees, whose .git points at a per-worktree admin dir while the ref HEAD names, the config and the objects stay in the main repository's common dir.
+	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
 	if err != nil {
 		return nil, err
 	}
@@ -45,14 +56,20 @@ func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
 		config:    config,
 	}
 
-	if repoRoot, err := l.GetRootDir(); err == nil {
-		gitRepository, err := newGitRepository(repoRoot)
-		if err != nil {
-			return l, err
-		}
-
-		l.gitRepository = gitRepository
+	repoRoot, err := worktreeRoot(l)
+	if err != nil {
+		return nil, err
 	}
+
+	// newGitRepository (git_native_disabled.go) never actually returns a
+	// non-nil error today; this is propagated defensively rather than
+	// ignored so NewLocalGitRepository can't return a partially
+	// initialized *LocalGitRepository if that ever changes.
+	gitRepository, err := newGitRepository(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	l.gitRepository = gitRepository
 
 	return l, nil
 }
@@ -131,12 +148,23 @@ func (g *LocalGitRepository) GetLastCommit() (*apis.Commit, error) {
 	}, nil
 }
 
+// GetFileLastCommit returns the last commit that touched filePath, or an error when the repository carries no git metadata.
+// It replaces the method the embedded *gitRepository used to promote, so an unset metadata reader reports itself instead of panicking on a nil receiver the caller had no way to inspect.
+func (g *LocalGitRepository) GetFileLastCommit(filePath string) (*apis.Commit, error) {
+	if g == nil || g.gitRepository == nil {
+		return nil, fmt.Errorf("no git metadata available for file: %s", filePath)
+	}
+
+	return g.gitRepository.GetFileLastCommit(filePath)
+}
+
 // GetGitRootDir returns the root directory of the git repository containing path.
 // It deliberately does not go through NewLocalGitRepository: locating the root must
 // not depend on the branch and remote metadata that constructor demands, which CI
 // checkouts routinely lack even though the repository every reported path is
 // relative to is right there.
 func GetGitRootDir(path string) (string, error) {
+	// EnableDotGitCommonDir is deliberately omitted here: Worktree() reads no refs, so a linked worktree already resolves, and setting it would fail an orphaned one whose root still resolves fine.
 	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		return "", err

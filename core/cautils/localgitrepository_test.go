@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"archive/zip"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -123,9 +124,11 @@ func (s *LocalGitRepositoryTestSuite) TearDownSuite() {
 }
 
 func (s *LocalGitRepositoryTestSuite) TestInvalidRepositoryPath() {
-	if _, err := NewLocalGitRepository("/invalidpath"); s.Error(err) {
+	repo, err := NewLocalGitRepository("/invalidpath")
+	if s.Error(err) {
 		s.Equal("repository does not exist", err.Error())
 	}
+	s.Nil(repo, "NewLocalGitRepository must not return a partially initialized repository on error")
 }
 
 func (s *LocalGitRepositoryTestSuite) TestRepositoryWithoutRemotes() {
@@ -231,6 +234,65 @@ func TestGetRemoteUrl(t *testing.T) {
 		},
 		)
 	}
+}
+
+// TestNewLocalGitRepositoryRootDirFailure exercises the defensive nil-on-error
+// branch in NewLocalGitRepository for a worktreeRoot (GetRootDir) failure. No
+// on-disk fixture can drive go-git into that state with the pinned go-git
+// version (see the comment on the worktreeRoot var), so the failure is
+// injected via the seam instead.
+func TestNewLocalGitRepositoryRootDirFailure(t *testing.T) {
+	fixture := createDetachedRepositoryFixture(t, "origin", "https://example.com/team/project.git")
+
+	original := worktreeRoot
+	t.Cleanup(func() { worktreeRoot = original })
+	wantErr := errors.New("simulated worktree resolution failure")
+	worktreeRoot = func(*LocalGitRepository) (string, error) {
+		return "", wantErr
+	}
+
+	repo, err := NewLocalGitRepository(fixture.root)
+	require.Nil(t, repo, "NewLocalGitRepository must not return a partially initialized repository when the worktree root can't be resolved")
+	require.ErrorIs(t, err, wantErr)
+}
+
+// TestGetFileLastCommitWithoutMetadata covers the reason GetFileLastCommit is declared
+// explicitly instead of being promoted from an embedded *gitRepository. The field is
+// unexported, so callers outside this package can only check the outer pointer; when the
+// metadata reader was left unset, the promoted method dereferenced a nil receiver and
+// panicked. Both shapes must now report the failure through the error they already handle.
+func TestGetFileLastCommitWithoutMetadata(t *testing.T) {
+	t.Run("repository without a metadata reader", func(t *testing.T) {
+		repository := &LocalGitRepository{}
+
+		commit, err := repository.GetFileLastCommit("workloads/deployment.yaml")
+		assert.Nil(t, commit)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "workloads/deployment.yaml")
+	})
+
+	t.Run("nil repository", func(t *testing.T) {
+		var repository *LocalGitRepository
+
+		commit, err := repository.GetFileLastCommit("workloads/deployment.yaml")
+		assert.Nil(t, commit)
+		assert.Error(t, err)
+	})
+}
+
+// TestNewLocalGitRepositoryPopulatesMetadataReader pins the invariant the type change is
+// meant to protect: a repository handed out by the constructor always carries its metadata
+// reader, so a caller that got one never has to reason about a half-built value.
+func TestNewLocalGitRepositoryPopulatesMetadataReader(t *testing.T) {
+	fixture := createDetachedRepositoryFixture(t, "origin", "https://example.com/team/project.git")
+
+	repository, err := NewLocalGitRepository(fixture.root)
+	require.NoError(t, err)
+	require.NotNil(t, repository.gitRepository, "the constructor must never hand out a repository without a metadata reader")
+
+	// a file that was never committed still resolves through the reader rather than panicking
+	_, err = repository.GetFileLastCommit("never-committed.yaml")
+	assert.Error(t, err)
 }
 
 func TestLocalGitRepositoryDetachedHead(t *testing.T) {
@@ -372,4 +434,128 @@ func createDetachedRepositoryFixture(t *testing.T, remoteName, remoteURL string)
 	require.NoError(t, repository.Storer.SetReference(plumbingv5.NewHashReference(plumbingv5.HEAD, commit)))
 
 	return detachedRepositoryFixture{root: root, commit: commit, when: when}
+}
+
+type linkedWorktreeFixture struct {
+	worktreeRoot string
+	branch       string
+	commit       plumbingv5.Hash
+	when         time.Time
+}
+
+// createLinkedWorktreeFixture reproduces the on-disk layout `git worktree add` writes,
+// because go-git can open a linked worktree but cannot create one and the tests must not
+// depend on a git binary. The worktree's own admin directory holds only HEAD, commondir
+// and gitdir; the branch it names, the config and the objects stay in the main
+// repository's common directory, which is exactly what makes this case interesting.
+func createLinkedWorktreeFixture(t *testing.T, branch, remoteURL string) linkedWorktreeFixture {
+	t.Helper()
+
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	mainRoot := filepath.Join(base, "main")
+	require.NoError(t, os.Mkdir(mainRoot, 0o750))
+	repository, err := gitv5.PlainInit(mainRoot, false)
+	require.NoError(t, err)
+	worktree, err := repository.Worktree()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(mainRoot, "README.md"), []byte("fixture\n"), 0o600))
+	_, err = worktree.Add("README.md")
+	require.NoError(t, err)
+
+	when := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	commit, err := worktree.Commit("fixture commit", &gitv5.CommitOptions{
+		Author: &objectv5.Signature{
+			Name:  "Fixture Author",
+			Email: "author@example.com",
+			When:  when.Add(-time.Minute),
+		},
+		Committer: &objectv5.Signature{
+			Name:  "Fixture Committer",
+			Email: "committer@example.com",
+			When:  when,
+		},
+	})
+	require.NoError(t, err)
+	_, err = repository.CreateRemote(&configv5.RemoteConfig{Name: "origin", URLs: []string{remoteURL}})
+	require.NoError(t, err)
+
+	branchRef := plumbingv5.NewBranchReferenceName(branch)
+	require.NoError(t, repository.Storer.SetReference(plumbingv5.NewHashReference(branchRef, commit)))
+
+	worktreeRoot := filepath.Join(base, "worktree")
+	require.NoError(t, os.Mkdir(worktreeRoot, 0o750))
+	require.NoError(t, os.Mkdir(filepath.Join(worktreeRoot, "nested"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(worktreeRoot, "README.md"), []byte("fixture\n"), 0o600))
+
+	adminDir := filepath.Join(mainRoot, gitv5.GitDirName, "worktrees", "worktree")
+	require.NoError(t, os.MkdirAll(adminDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(adminDir, "HEAD"), []byte("ref: "+branchRef.String()+"\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(adminDir, "commondir"), []byte("../..\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(adminDir, "gitdir"), []byte(filepath.Join(worktreeRoot, gitv5.GitDirName)+"\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(worktreeRoot, gitv5.GitDirName), []byte("gitdir: "+adminDir+"\n"), 0o600))
+
+	return linkedWorktreeFixture{worktreeRoot: worktreeRoot, branch: branch, commit: commit, when: when}
+}
+
+// TestLocalGitRepositoryLinkedWorktree verifies that scanning from a linked worktree
+// resolves the repository's metadata instead of failing with "reference not found",
+// which every caller treats as "not a repository" and then scans without any git context.
+func TestLocalGitRepositoryLinkedWorktree(t *testing.T) {
+	fixture := createLinkedWorktreeFixture(t, "feature", "https://github.com/kubescape/worktree-fixture.git")
+
+	repository, err := NewLocalGitRepository(filepath.Join(fixture.worktreeRoot, "nested"))
+	require.NoError(t, err)
+	assert.Equal(t, fixture.branch, repository.GetBranchName())
+
+	remoteURL, err := repository.GetRemoteUrl()
+	require.NoError(t, err)
+	assert.Equal(t, "https://github.com/kubescape/worktree-fixture.git", remoteURL)
+
+	name, err := repository.GetName()
+	require.NoError(t, err)
+	assert.Equal(t, "worktree-fixture", name)
+
+	root, err := repository.GetRootDir()
+	require.NoError(t, err)
+	assert.Equal(t, fixture.worktreeRoot, root, "reported paths must be anchored to the linked worktree, not to the main repository")
+
+	commit, err := repository.GetLastCommit()
+	require.NoError(t, err)
+	assert.Equal(t, fixture.commit.String(), commit.SHA)
+	assert.Equal(t, "fixture commit", commit.Message)
+	assert.Equal(t, "Fixture Committer", commit.Committer.Name)
+	assert.True(t, fixture.when.Equal(commit.Committer.Date))
+}
+
+// TestGetGitRootDirLinkedWorktree pins the root resolution a linked worktree already had,
+// so the deliberate absence of EnableDotGitCommonDir in GetGitRootDir stays a decision
+// rather than an oversight: the root must be the worktree's, not the main repository's.
+func TestGetGitRootDirLinkedWorktree(t *testing.T) {
+	fixture := createLinkedWorktreeFixture(t, "feature", "https://github.com/kubescape/worktree-fixture.git")
+
+	root, err := GetGitRootDir(filepath.Join(fixture.worktreeRoot, "nested"))
+	if assert.NoError(t, err) {
+		assert.Equal(t, fixture.worktreeRoot, root)
+	}
+	assert.Equal(t, fixture.worktreeRoot, ScanRootPath(filepath.Join(fixture.worktreeRoot, "nested")))
+}
+
+func TestMetadataGitLocalLinkedWorktree(t *testing.T) {
+	fixture := createLinkedWorktreeFixture(t, "feature", "https://github.com/kubescape/worktree-fixture.git")
+
+	metadata, err := metadataGitLocal(filepath.Join(fixture.worktreeRoot, "nested"))
+	require.NoError(t, err)
+	require.NotNil(t, metadata)
+	assert.Equal(t, "github", metadata.Provider)
+	assert.Equal(t, "kubescape", metadata.Owner)
+	assert.Equal(t, "worktree-fixture", metadata.Repo)
+	assert.Equal(t, fixture.branch, metadata.Branch)
+	assert.Empty(t, metadata.DefaultBranch, "a resolved branch clears the default-branch placeholder")
+	assert.Equal(t, "https://github.com/kubescape/worktree-fixture", metadata.RemoteURL)
+	assert.Equal(t, fixture.worktreeRoot, metadata.LocalRootPath)
+	assert.Equal(t, fixture.commit.String(), metadata.LastCommit.Hash)
+	assert.Equal(t, "Fixture Committer", metadata.LastCommit.CommitterName)
+	assert.True(t, fixture.when.Equal(metadata.LastCommit.Date))
 }

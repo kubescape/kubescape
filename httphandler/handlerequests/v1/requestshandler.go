@@ -91,7 +91,6 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	statusQueryParams := &StatusQueryParams{}
 	if err := schema.NewDecoder().Decode(statusQueryParams, r.URL.Query()); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
 		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
 		return
 	}

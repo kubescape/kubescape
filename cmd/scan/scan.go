@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -14,6 +15,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var scanCmdExamples = fmt.Sprintf(`
@@ -67,6 +69,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 					scanInfo.ControlsVersion,
 				)
 			}
+			applyRegistryCredentialsFromEnv(cmd, &scanInfo)
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -83,7 +86,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				scanInfo.Format == "" {
 
 				return fmt.Errorf(
-					"format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast",
+					"format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml",
 				)
 			}
 
@@ -92,6 +95,19 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				shared.ScanFormats,
 			); err != nil {
 				return err
+			}
+			if scanInfo.ScanImages {
+				if err := shared.ValidateImageScanInfo(&scanInfo); err != nil {
+					return err
+				}
+				if err := shared.ValidateWorkloadImageCredentials(shared.ImageCredentials{
+					Authority: scanInfo.RegistryAuthority,
+					Username:  scanInfo.RegistryUsername,
+					Password:  scanInfo.RegistryPassword,
+					Token:     scanInfo.RegistryToken,
+				}); err != nil {
+					return err
+				}
 			}
 
 			if scanInfo.EncryptionEnabled {
@@ -167,7 +183,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	hostF := scanCmd.PersistentFlags().VarPF(&scanInfo.HostSensorEnabled, "host-scan", "", "Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use --host-scan=false to disable host data collection. See https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator for the operator-based alternative")
 	hostF.NoOptDefVal = "true"
 
-	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output file format. Supported formats: "pretty-printer", "json", "junit", "prometheus", "pdf", "html", "sarif", "gitlab-sast"`)
+	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output file format. Supported formats: "pretty-printer", "json", "junit", "prometheus", "pdf", "html", "sarif", "gitlab-sast", "yaml"`)
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to configured backend.")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
@@ -185,13 +201,18 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.EnableRegoPrint, "enable-rego-prints", "", false, "Enable sending to rego prints to the logs (use with debug log level: -l debug)")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ScanImages, "scan-images", "", false, "Scan resources images")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.UseDefaultMatchers, "use-default-matchers", "", true, "Use default matchers (true) or CPE matchers (false) for image scanning")
-	scanCmd.PersistentFlags().StringToStringVar(&scanInfo.RegistryMapping, "registry-mapping", nil, "Map internal registry hosts to reachable ones, e.g. --registry-mapping image-registry.openshift-image-registry.svc:5000=registry.company.com (host[:port], no scheme; mapped registry must allow anonymous pulls on cluster/workload scan paths)")
+	scanCmd.PersistentFlags().StringToStringVar(&scanInfo.RegistryMapping, "registry-mapping", nil, "Map internal registry hosts to reachable ones, e.g. --registry-mapping image-registry.openshift-image-registry.svc:5000=registry.company.com (host[:port], no scheme)")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.RegistryUsername, "registry-username", "", "Username for image registry login when no docker config or credential helper is available; can also be set with KUBESCAPE_REGISTRY_USERNAME")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.RegistryPassword, "registry-password", "", "Password for image registry login when no docker config or credential helper is available; can also be set with KUBESCAPE_REGISTRY_PASSWORD")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.RegistryToken, "registry-token", "", "Bearer token for image registry login when no docker config or credential helper is available; can also be set with KUBESCAPE_REGISTRY_TOKEN")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.RegistryAuthority, "registry-authority", "", "Registry host[:port] the --scan-images credentials apply to")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.Hide, "hide", false, "Replace sensitive report metadata with deterministic pseudonyms")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.EncryptionEnabled, "encrypt", false, "Encrypt sensitive report metadata using the KUBESCAPE_MASTER_KEY environment variable")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.LabelsToCopy, "labels-to-copy", nil, "Labels to copy from workloads to scan reports for easy identification. e.g: --labels-to-copy=app,team,environment")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ListingURL, "grype-db-url", "", "Grype vulnerability database URL")
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ScanTimeout, "scan-timeout", 0, "Maximum duration for the scan (e.g. 5m, 30s, 1h). 0 means no timeout. When the timeout is reached the scan exits with a non-zero code.")
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ControlTimeout, "control-timeout", 0, "Maximum duration for evaluating a single control (e.g. 30s, 1m). 0 means no timeout. Controls that exceed this are marked as not evaluated and the scan continues. Must be lower than --scan-timeout when both are set.")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.EnableStreaming, "enable-streaming", false, "Enable resource streaming for large clusters to reduce memory usage. Resources are processed in batches instead of loading all at once. Automatically enabled for clusters with >2500 resources.")
 
 	// Helm value override flags. Mirror `helm install` so users can pass overrides through verbatim
 	// when scanning a Helm chart directory. Note: -f is already taken by --format, so --values is long-only.
@@ -224,6 +245,39 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.AddCommand(getImageCmd(ks, &scanInfo))
 
 	return scanCmd
+}
+
+func applyRegistryCredentialsFromEnv(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
+	if scanInfo == nil {
+		return
+	}
+	usernameFlagChanged := registryCredentialFlagChanged(cmd, "registry-username", "username")
+	passwordFlagChanged := registryCredentialFlagChanged(cmd, "registry-password", "password")
+	tokenFlagChanged := registryCredentialFlagChanged(cmd, "registry-token")
+
+	if !tokenFlagChanged && !usernameFlagChanged && scanInfo.RegistryUsername == "" {
+		scanInfo.RegistryUsername = os.Getenv("KUBESCAPE_REGISTRY_USERNAME")
+	}
+	if !tokenFlagChanged && !passwordFlagChanged && scanInfo.RegistryPassword == "" {
+		scanInfo.RegistryPassword = os.Getenv("KUBESCAPE_REGISTRY_PASSWORD")
+	}
+	if !tokenFlagChanged && !usernameFlagChanged && !passwordFlagChanged && scanInfo.RegistryToken == "" {
+		scanInfo.RegistryToken = os.Getenv("KUBESCAPE_REGISTRY_TOKEN")
+	}
+}
+
+func registryCredentialFlagChanged(cmd *cobra.Command, names ...string) bool {
+	if cmd == nil {
+		return false
+	}
+	for _, name := range names {
+		for _, flags := range []*pflag.FlagSet{cmd.Flags(), cmd.PersistentFlags(), cmd.InheritedFlags()} {
+			if flag := flags.Lookup(name); flag != nil && flag.Changed {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) {

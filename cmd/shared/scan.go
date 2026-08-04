@@ -15,8 +15,8 @@ import (
 // ScanFormats and ImageScanFormats list the output formats supported by the scan commands.
 // They are built from the printer.*Format constants to keep a single source of truth.
 var (
-	ScanFormats      = []string{printer.PrettyFormat, printer.JsonFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.HtmlFormat, printer.SARIFFormat, printer.GitLabSASTFormat}
-	ImageScanFormats = []string{printer.PrettyFormat, printer.JsonFormat, printer.SARIFFormat}
+	ScanFormats      = []string{printer.PrettyFormat, printer.JsonFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.HtmlFormat, printer.SARIFFormat, printer.GitLabSASTFormat, printer.YamlFormat}
+	ImageScanFormats = []string{printer.PrettyFormat, printer.JsonFormat, printer.SARIFFormat, printer.YamlFormat}
 )
 
 var ErrUnknownSeverity = fmt.Errorf("unknown severity. Supported severities are: %s", strings.Join(reporthandlingapis.GetSupportedSeverities(), ", "))

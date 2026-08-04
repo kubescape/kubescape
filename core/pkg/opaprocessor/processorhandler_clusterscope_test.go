@@ -18,16 +18,13 @@ import (
 // silently dropping Paths and Status accumulated by earlier namespace
 // iterations.
 //
-// Setup: large-cluster mode (each namespace becomes its own bucket in
-// resourcesPerNS) with one cluster-scoped ClusterRole and one Pod in each
-// of two namespaces. The Rego fails the ClusterRole and emits a failedPath
-// that contains the namespace of the Pod present in the iteration's input,
-// so iteration over ns-a and ns-b produces two distinct paths. Both must
-// survive in the final result.
+// Setup: large-cluster mode (each namespace becomes its own scope) with one
+// cluster-scoped ClusterRole and one Pod in each of two namespaces. The Rego
+// fails the ClusterRole and emits a failedPath that contains the namespace of
+// the Pod present in the iteration's input, so evaluating ns-a and ns-b
+// produces two distinct paths. Both must survive in the final result.
 func TestProcessRule_ClusterScopedPathsAcrossNamespaces(t *testing.T) {
-	origLarge := largeClusterSize
-	largeClusterSize = 1
-	t.Cleanup(func() { largeClusterSize = origLarge })
+	t.Setenv("LARGE_CLUSTER_SIZE", "1")
 
 	clusterRole := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "rbac.authorization.k8s.io/v1",
@@ -92,7 +89,7 @@ deny contains msga if {
 	}
 	rule.Name = "cluster-role-path-accumulation"
 
-	got, err := opap.processRule(context.Background(), rule, nil, "")
+	got, err := opap.processRule(context.Background(), rule, nil, evaluationScope{}, "")
 	assert.NoError(t, err)
 
 	crResult, ok := got[clusterRole.GetID()]
@@ -133,9 +130,7 @@ deny contains msga if {
 // proving the second rule was evaluated with the frozen initial count, not
 // the grown live count.
 func TestProcessRule_NamespaceBucketingStableAcrossAggregatorGrowth(t *testing.T) {
-	origLarge := largeClusterSize
-	largeClusterSize = 4
-	t.Cleanup(func() { largeClusterSize = origLarge })
+	t.Setenv("LARGE_CLUSTER_SIZE", "4")
 
 	binding := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "rbac.authorization.k8s.io/v1",
@@ -177,7 +172,7 @@ func TestProcessRule_NamespaceBucketingStableAcrossAggregatorGrowth(t *testing.T
 	opap := NewOPAProcessor(sess, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
 	opap.initialResourceCount = len(sess.AllResources)
 
-	assert.False(t, isLargeCluster(opap.initialResourceCount), "test setup must start below the large-cluster threshold")
+	assert.False(t, cautils.IsLargeCluster(opap.initialResourceCount), "test setup must start below the large-cluster threshold")
 
 	aggregatorRule := &reporthandling.PolicyRule{
 		Rule:         "package armo_builtins\n\ndeny[msga] {\n    false\n    msga := {\"alertMessage\": \"unused\"}\n}\n",
@@ -193,10 +188,10 @@ func TestProcessRule_NamespaceBucketingStableAcrossAggregatorGrowth(t *testing.T
 	aggregatorRule.Name = "subject-role-rolebinding-aggregator"
 	aggregatorRule.Attributes = map[string]interface{}{"resourcesAggregator": "subject-role-rolebinding"}
 
-	_, err := opap.processRule(context.Background(), aggregatorRule, nil, "")
+	_, err := opap.processRule(context.Background(), aggregatorRule, nil, evaluationScope{}, "")
 	assert.NoError(t, err)
 
-	assert.True(t, isLargeCluster(len(opap.AllResources)),
+	assert.True(t, cautils.IsLargeCluster(len(opap.AllResources)),
 		"aggregator write-back must grow AllResources past the threshold for this test to be meaningful")
 
 	podRule := &reporthandling.PolicyRule{
@@ -228,7 +223,7 @@ deny[msga] {
 	}
 	podRule.Name = "pods-evaluated-together"
 
-	got, err := opap.processRule(context.Background(), podRule, nil, "")
+	got, err := opap.processRule(context.Background(), podRule, nil, evaluationScope{}, "")
 	assert.NoError(t, err)
 
 	podAResult, ok := got[podA.GetID()]
@@ -253,9 +248,7 @@ deny[msga] {
 // rule denies any Pod evaluated without its sibling in the same batch, which
 // only happens if per-namespace bucketing split them into separate batches.
 func TestProcess_NamespaceBucketingWiredFromConstruction(t *testing.T) {
-	origLarge := largeClusterSize
-	largeClusterSize = 1
-	t.Cleanup(func() { largeClusterSize = origLarge })
+	t.Setenv("LARGE_CLUSTER_SIZE", "1")
 
 	podA := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",

@@ -193,6 +193,18 @@ func TestGetScanningContext(t *testing.T) {
 	}
 }
 
+// TestGetScanningContextLinkedWorktree covers the user-visible half of the linked
+// worktree bug: the metadata loss is silent precisely because the scan still succeeds,
+// having been classified as a plain directory rather than as a local git repository.
+// It is kept out of the TestGetScanningContext table so it stays hermetic — that table
+// clones over the network, and this case needs nothing but a temp directory.
+func TestGetScanningContextLinkedWorktree(t *testing.T) {
+	fixture := createLinkedWorktreeFixture(t, "feature", "https://github.com/kubescape/worktree-fixture.git")
+
+	scanInfo := &ScanInfo{}
+	assert.Equal(t, ContextGitLocal, scanInfo.getScanningContext(fixture.worktreeRoot))
+}
+
 func TestScanInfoFormats(t *testing.T) {
 	testCases := []struct {
 		name  string

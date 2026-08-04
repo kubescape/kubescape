@@ -74,7 +74,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 	// build a resources map, based on the policies
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	resourceToQuery, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope)
+	resourceToQuery, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, defaultResourceResolver)
 	k8sResources := resourceToQuery.ToK8sResourceMap()
 
 	// save only relevant resources
@@ -91,13 +91,58 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 	logger.L().StopSuccess("Done accessing local objects")
 	// save input resource in resource maps
-	addSingleResourceToResourceMaps(k8sResources, allResources, sessionObj.SingleResourceScan)
+	addSingleResourceToResourceMaps(k8sResources, allResources, sessionObj.SingleResourceScan, defaultResourceResolver)
 
 	return k8sResources, allResources, externalResources, excludedRulesMap, nil
 }
 
 func (fileHandler *FileResourceHandler) GetCloudProvider() string {
 	return ""
+}
+
+// EstimateClusterSize always returns 0 for file-based scans since streaming
+// is not needed for local or URL-based resources.
+func (fileHandler *FileResourceHandler) EstimateClusterSize(ctx context.Context, scanInfo *cautils.ScanInfo) (int, error) {
+	return 0, nil
+}
+
+// StreamResourcesBatches provides a streaming interface for file-based resources.
+// This implementation loads all resources via GetResources and returns them as a
+// single batch — it provides no memory bound and behaves identically to the
+// non-streaming path. File-based scans should not rely on --enable-streaming for
+// memory reduction.
+func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
+	batchChan := make(chan *cautils.ResourceBatch, 1)
+	errChan := make(chan error, 1)
+
+	// Collect synchronously so sessionObj mutations (ExcludedRules,
+	// SingleResourceScan, ResourceSource) happen-before the caller's
+	// NewOPAProcessor/ProcessWithStreaming read them, instead of racing from a
+	// producer goroutine like the eager path did. File collection is local and
+	// fast, so this blocks no longer than the old async body did.
+	k8sResources, allResources, externalResources, excludedRulesMap, err := fileHandler.GetResources(ctx, sessionObj, scanInfo)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	sessionObj.ExcludedRules = excludedRulesMap
+
+	go func() {
+		defer close(errChan)
+		defer close(batchChan)
+
+		// Create a single batch with all resources
+		batch := cautils.NewResourceBatch(cautils.ClusterScope)
+		batch.K8SResources = k8sResources
+		batch.AllResources = allResources
+		batch.ExternalResources = externalResources
+
+		select {
+		case batchChan <- batch:
+		case <-ctx.Done():
+		}
+	}()
+
+	return batchChan, errChan, 0, nil
 }
 
 // helmValueOptionsFromScanInfo extracts the user-supplied Helm value/release flags from ScanInfo
