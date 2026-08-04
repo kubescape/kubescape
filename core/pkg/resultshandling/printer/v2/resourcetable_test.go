@@ -622,3 +622,228 @@ func TestAddContainerNameToAssistedRemediation_OutOfBounds(t *testing.T) {
 		})
 	}
 }
+
+func TestAddValueToAssistedRemediation(t *testing.T) {
+	simpleControl := &resourcesresults.ResourceAssociatedControl{ControlID: "control-1"}
+	credentialControl := &resourcesresults.ResourceAssociatedControl{ControlID: "C-0012"}
+	credentialControlC0207 := &resourcesresults.ResourceAssociatedControl{ControlID: "C-0207"}
+	controlWithFixPath := &resourcesresults.ResourceAssociatedControl{
+		ControlID: "control-1",
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+			{
+				Paths: []armotypes.PosturePaths{
+					{
+						FixPath: armotypes.FixPath{
+							Path:  "spec.containers[0].resources.limits.cpu",
+							Value: "YOUR_VALUE",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name          string
+		resourceObj   map[string]interface{}
+		control       *resourcesresults.ResourceAssociatedControl
+		paths         []string
+		expectedPaths []string
+	}{
+		{
+			name: "simple path resolves value",
+			resourceObj: map[string]interface{}{
+				"kind": "Deployment",
+				"spec": map[string]interface{}{
+					"replicas": 1,
+				},
+			},
+			control:       simpleControl,
+			paths:         []string{"spec.replicas"},
+			expectedPaths: []string{"spec.replicas=1"},
+		},
+		{
+			name: "path with container index resolves value",
+			resourceObj: map[string]interface{}{
+				"kind": "Pod",
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name": "nginx",
+							"securityContext": map[string]interface{}{
+								"privileged": true,
+							},
+						},
+					},
+				},
+			},
+			control:       simpleControl,
+			paths:         []string{"spec.containers[0].securityContext.privileged"},
+			expectedPaths: []string{"spec.containers[0].securityContext.privileged=true"},
+		},
+		{
+			name: "path that does not exist is left unchanged",
+			resourceObj: map[string]interface{}{
+				"kind": "Pod",
+				"spec": map[string]interface{}{},
+			},
+			control:       simpleControl,
+			paths:         []string{"spec.doesNotExist"},
+			expectedPaths: []string{"spec.doesNotExist"},
+		},
+		{
+			name: "out of bounds container index is left unchanged",
+			resourceObj: map[string]interface{}{
+				"kind": "Pod",
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{"name": "nginx"},
+					},
+				},
+			},
+			control:       simpleControl,
+			paths:         []string{"spec.containers[5].securityContext.privileged"},
+			expectedPaths: []string{"spec.containers[5].securityContext.privileged"},
+		},
+		{
+			name: "path that already has a fixPath value is left unchanged",
+			resourceObj: map[string]interface{}{
+				"kind": "Deployment",
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"resources": map[string]interface{}{
+								"limits": map[string]interface{}{
+									"cpu": "500m",
+								},
+							},
+						},
+					},
+				},
+			},
+			control:       controlWithFixPath,
+			paths:         []string{"spec.containers[0].resources.limits.cpu=YOUR_VALUE"},
+			expectedPaths: []string{"spec.containers[0].resources.limits.cpu=YOUR_VALUE"},
+		},
+		{
+			name: "credential-detecting control skips resolution entirely",
+			resourceObj: map[string]interface{}{
+				"kind": "Pod",
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"env": []interface{}{
+								map[string]interface{}{
+									"name":  "DB_PASSWORD",
+									"value": "not-a-real-secret-placeholder",
+								},
+							},
+						},
+					},
+				},
+			},
+			control:       credentialControl,
+			paths:         []string{"spec.containers[0].env[0].value"},
+			expectedPaths: []string{"spec.containers[0].env[0].value"},
+		},
+		{
+			name: "C-0207 also skips resolution entirely (same rule family as C-0012)",
+			resourceObj: map[string]interface{}{
+				"kind": "Pod",
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"env": []interface{}{
+								map[string]interface{}{
+									"name":  "API_TOKEN",
+									"value": "not-a-real-secret-placeholder",
+								},
+							},
+						},
+					},
+				},
+			},
+			control:       credentialControlC0207,
+			paths:         []string{"spec.containers[0].env[0].value"},
+			expectedPaths: []string{"spec.containers[0].env[0].value"},
+		},
+		{
+			name: "large integer keeps original precision",
+			resourceObj: map[string]interface{}{
+				"kind": "Pod",
+				"spec": map[string]interface{}{
+					"securityContext": map[string]interface{}{
+						"runAsUser": 1000660000,
+					},
+				},
+			},
+			control:       simpleControl,
+			paths:         []string{"spec.securityContext.runAsUser"},
+			expectedPaths: []string{"spec.securityContext.runAsUser=1000660000"},
+		},
+		{
+			name: "non-scalar value is left unchanged",
+			resourceObj: map[string]interface{}{
+				"kind": "Pod",
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"resources": map[string]interface{}{
+								"limits": map[string]interface{}{
+									"cpu":    "100m",
+									"memory": "128Mi",
+								},
+							},
+						},
+					},
+				},
+			},
+			control:       simpleControl,
+			paths:         []string{"spec.containers[0].resources"},
+			expectedPaths: []string{"spec.containers[0].resources"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resource := workloadinterface.NewWorkloadObj(tt.resourceObj)
+			root, ok := resolveResourceObject(resource)
+			assert.True(t, ok)
+			paths := tt.paths
+			addValueToAssistedRemediation(root, tt.control, &paths)
+			assert.Equal(t, tt.expectedPaths, paths)
+		})
+	}
+}
+
+func TestSplitIndex(t *testing.T) {
+	tests := []struct {
+		name          string
+		segment       string
+		expectedKey   string
+		expectedIndex int
+		expectedHas   bool
+	}{
+		{
+			name:          "plain segment has no index",
+			segment:       "spec",
+			expectedKey:   "spec",
+			expectedIndex: 0,
+			expectedHas:   false,
+		},
+		{
+			name:          "segment with index",
+			segment:       "containers[2]",
+			expectedKey:   "containers",
+			expectedIndex: 2,
+			expectedHas:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key, index, hasIndex := splitIndex(tt.segment)
+			assert.Equal(t, tt.expectedKey, key)
+			assert.Equal(t, tt.expectedIndex, index)
+			assert.Equal(t, tt.expectedHas, hasIndex)
+		})
+	}
+}
