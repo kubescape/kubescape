@@ -127,6 +127,8 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 			logger.L().Ctx(ctx).Warning("Deprecated format version", helpers.String("run", "--format-version=v2"))
 		}
 		return printerv2.NewYamlPrinter()
+	case printer.CsvFormat:
+		return printerv2.NewCsvPrinter()
 	case printer.JunitResultFormat:
 		return printerv2.NewJunitPrinter(scanInfo.VerboseMode)
 	case printer.PrometheusFormat:
@@ -151,7 +153,7 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 	if scanType == cautils.ScanTypeImage {
 		// supported types for image scanning
 		switch printFormat {
-		case printer.JsonFormat, printer.SARIFFormat, printer.YamlFormat:
+		case printer.JsonFormat, printer.SARIFFormat, printer.YamlFormat, printer.CsvFormat:
 			return false, nil
 		case printer.PrettyFormat:
 			return true, nil
@@ -171,7 +173,7 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 	}
 
 	switch printFormat {
-	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat:
+	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat:
 		return false, nil
 	default:
 		return true, nil

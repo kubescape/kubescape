@@ -24,6 +24,7 @@ const (
 	SARIFFormat       string = "sarif"
 	GitLabSASTFormat  string = "gitlab-sast"
 	YamlFormat        string = "yaml"
+	CsvFormat         string = "csv"
 )
 
 const (
@@ -35,6 +36,7 @@ const (
 	PrometheusOutputExt = ".txt"
 	PrettyOutputExt     = ".txt"
 	YamlOutputExt       = ".yaml"
+	CsvOutputExt        = ".csv"
 )
 
 type IPrinter interface {
