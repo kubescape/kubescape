@@ -16,7 +16,7 @@ type ScanResultReport struct {
 	ContainerName            string     `json:"containerName"`
 	Timestamp                int64      `json:"timestamp"`
 	Layers                   LayersList `json:"layers"`
-	ListOfDangerousArtifacts []string   `json:"listOfDangerousArtifcats"`
+	ListOfDangerousArtifacts []string   `json:"ListOfDangerousArtifacts"`
 }
 
 // ScanResultLayer - represents a single layer from container scan result
@@ -71,7 +71,7 @@ type PackageFile struct {
 
 // types to provide unmarshalling:
 
-// LayersList -s.e
+// LayersList is a list of scan result layers.
 type LayersList []ScanResultLayer
 
 // VulnerabilitiesList -s.e
