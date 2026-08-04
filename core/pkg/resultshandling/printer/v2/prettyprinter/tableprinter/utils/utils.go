@@ -178,7 +178,13 @@ func CheckShortTerminalWidth(rows []table.Row, headers table.Row) bool {
 	return termWidth <= maxWidth
 }
 
-// TruncateName truncates name to at most maxLen runes, appending "...".
+// MaxControlNameLen is the truncation limit shared by the category and
+// summary table control-name columns, so the two stay in sync.
+const MaxControlNameLen = 50
+
+// TruncateName returns name unchanged if it is at most maxLen runes long,
+// otherwise truncates it to maxLen runes plus an appended "..." (so the
+// result is maxLen+3 runes when truncation happens).
 // Slicing a string by byte index (name[:maxLen]) can split a multi-byte
 // UTF-8 rune in half when name contains non-ASCII characters (e.g. non-Latin
 // script, accented characters, emoji in resource/control names), producing

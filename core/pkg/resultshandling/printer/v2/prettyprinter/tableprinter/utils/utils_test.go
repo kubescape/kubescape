@@ -11,6 +11,7 @@ import (
 	"github.com/jwalton/gchalk"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestTruncateName(t *testing.T) {
@@ -34,15 +35,14 @@ func TestTruncateName(t *testing.T) {
 	// must never do that.
 	t.Run("multi-byte UTF-8 name is truncated on a rune boundary", func(t *testing.T) {
 		name := strings.Repeat("héllo-世界-", 10) // multi-byte runes throughout, > 50 bytes and > 50 runes
-		require := assert.New(t)
-		require.Greater(len([]byte(name)), 50)
-		require.Greater(len([]rune(name)), 50)
+		require.Greater(t, len([]byte(name)), 50)
+		require.Greater(t, len([]rune(name)), 50)
 
 		got := TruncateName(name, 50)
 
-		require.True(utf8.ValidString(got), "truncated name must be valid UTF-8")
-		require.True(strings.HasSuffix(got, "..."))
-		require.Equal(50, len([]rune(strings.TrimSuffix(got, "..."))), "must truncate by rune count, not byte count")
+		require.True(t, utf8.ValidString(got), "truncated name must be valid UTF-8")
+		require.True(t, strings.HasSuffix(got, "..."))
+		require.Equal(t, 50, len([]rune(strings.TrimSuffix(got, "..."))), "must truncate by rune count, not byte count")
 	})
 }
 
