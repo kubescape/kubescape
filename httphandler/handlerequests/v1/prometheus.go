@@ -50,7 +50,6 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 
 	metricsQueryParams := &MetricsQueryParams{}
 	if err := schema.NewDecoder().Decode(metricsQueryParams, r.URL.Query()); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
 		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), scanID)
 		return
 	}

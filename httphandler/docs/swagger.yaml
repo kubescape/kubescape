@@ -338,6 +338,8 @@ paths:
       responses:
         "200":
           $ref: '#/responses/scanResponse'
+        "400":
+          $ref: '#/responses/scanResponseBadRequest'
       summary: Returns a scan’s status
       tags:
       - scanning
