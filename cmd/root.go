@@ -69,7 +69,7 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 			k8sinterface.SetClusterContextName(rootInfo.KubeContext)
 			initLogger()
 			initLoggerLevel(cmd)
-			initEnvironment()
+			initEnvironment(ks.Context())
 			initCacheDir(cmd)
 		},
 	}

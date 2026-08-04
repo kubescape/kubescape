@@ -131,7 +131,7 @@ func downloadArtifacts(ctx context.Context, downloadInfo *metav1.DownloadInfo) e
 }
 
 func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
-	tenant := tenantConfigFunc(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
+	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 
 	controlsInputsGetter, _, err := configInputsGetterFunc(ctx, downloadInfo.Identifier, tenant.GetAccountID(), nil, false, false)
 	if err != nil {
@@ -157,7 +157,7 @@ func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo
 }
 
 func downloadExceptions(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
-	tenant := tenantConfigFunc(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
+	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 	exceptionsGetter, err := exceptionsGetterFunc(ctx, "", tenant.GetAccountID(), nil, false)
 	if err != nil {
 		return err
@@ -182,7 +182,7 @@ func downloadExceptions(ctx context.Context, downloadInfo *metav1.DownloadInfo) 
 
 func downloadAttackTracks(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 	var err error
-	tenant := tenantConfigFunc(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
+	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 
 	attackTracksGetter, err := attackTracksGetterFunc(ctx, "", tenant.GetAccountID(), nil, false)
 	if err != nil {
@@ -209,7 +209,7 @@ func downloadAttackTracks(ctx context.Context, downloadInfo *metav1.DownloadInfo
 
 func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 
-	tenant := tenantConfigFunc(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
+	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 
 	g, err := policyGetterFunc(ctx, nil, tenant.GetAccountID(), true, nil, false)
 	if err != nil {
@@ -263,7 +263,7 @@ func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) e
 
 func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 
-	tenant := tenantConfigFunc(downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
+	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 
 	g, err := policyGetterFunc(ctx, nil, tenant.GetAccountID(), false, nil, false)
 	if err != nil {
