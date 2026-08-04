@@ -2,9 +2,11 @@ package diff
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -237,4 +239,48 @@ func TestPrintYAML(t *testing.T) {
 	assert.Contains(t, yamlStr, "resourceID: path-123/api/v1/Pod/demo")
 	assert.Contains(t, yamlStr, "controlID: C-0057")
 	assert.Contains(t, yamlStr, "controlName: Privileged container")
+}
+
+func TestCompute_DeterministicOrdering(t *testing.T) {
+	// Several failing resource+control pairs per bucket, deliberately written out
+	// of order so a correct implementation has to sort rather than preserve input.
+	base := makeReport(
+		makeResult("res3", makeControl("C-003", "Control 3", "failed")),
+		makeResult("res1", makeControl("C-002", "Control 2", "failed")),
+		makeResult("res2", makeControl("C-001", "Control 1", "failed")),
+		makeResult("res1", makeControl("C-001", "Control 1", "failed")),
+	)
+	head := makeReport(
+		makeResult("res2", makeControl("C-004", "Control 4", "failed")),
+		makeResult("res1", makeControl("C-001", "Control 1", "failed")),
+		makeResult("res3", makeControl("C-003", "Control 3", "passed")),
+		makeResult("res1", makeControl("C-005", "Control 5", "failed")),
+	)
+
+	basePath := writeTempReport(t, base)
+	headPath := writeTempReport(t, head)
+
+	first, err := Compute(basePath, headPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, first.New)
+	require.NotEmpty(t, first.Resolved)
+	require.NotEmpty(t, first.Unchanged)
+
+	// Go randomizes map iteration order per range statement, so repeating the
+	// computation on identical inputs surfaces any unsorted bucket.
+	for i := 0; i < 50; i++ {
+		got, err := Compute(basePath, headPath)
+		require.NoError(t, err)
+		assert.Equal(t, first.New, got.New, "New bucket order changed on run %d", i)
+		assert.Equal(t, first.Resolved, got.Resolved, "Resolved bucket order changed on run %d", i)
+		assert.Equal(t, first.Unchanged, got.Unchanged, "Unchanged bucket order changed on run %d", i)
+	}
+
+	// And the order is the documented one: resource ID, then control ID.
+	assert.True(t, slices.IsSortedFunc(first.New, func(a, b ControlChange) int {
+		if c := cmp.Compare(a.ResourceID, b.ResourceID); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ControlID, b.ControlID)
+	}), "New bucket is not sorted by resource ID then control ID: %+v", first.New)
 }

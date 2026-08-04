@@ -1,10 +1,12 @@
 package diff
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -129,7 +131,25 @@ func Compute(basePath, headPath string) (*ChangeSet, error) {
 		}
 	}
 
+	// The buckets above are filled by ranging over maps, and Go randomizes map
+	// iteration order, so identical inputs would otherwise yield a different
+	// ordering on every run. Sort so the output is reproducible and diffable.
+	sortChanges(cs.New)
+	sortChanges(cs.Resolved)
+	sortChanges(cs.Unchanged)
+
 	return cs, nil
+}
+
+// sortChanges orders a bucket by resource ID, then control ID. The pair is
+// unique per bucket, so the resulting order is total and stable across runs.
+func sortChanges(changes []ControlChange) {
+	slices.SortFunc(changes, func(a, b ControlChange) int {
+		if c := cmp.Compare(a.ResourceID, b.ResourceID); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ControlID, b.ControlID)
+	})
 }
 
 func loadReport(path string) (*scanReport, error) {
