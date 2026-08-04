@@ -127,6 +127,75 @@ func NewOPAProcessorMock(opaSessionObjMock string, resourcesMock []byte) *OPAPro
 	return opap
 }
 
+func TestSortedPolicyControls(t *testing.T) {
+	controls := map[string]reporthandling.Control{
+		"control-c": {
+			ControlID: "C-0003",
+		},
+		"control-a": {
+			ControlID: "C-0001",
+		},
+		"fallback-id": {},
+		"control-b": {
+			ControlID: "C-0002",
+		},
+	}
+
+	got := sortedPolicyControls(controls)
+
+	require.Len(t, got, 4)
+	assert.Equal(t, "C-0001", got[0].control.ControlID)
+	assert.Equal(t, "C-0002", got[1].control.ControlID)
+	assert.Equal(t, "C-0003", got[2].control.ControlID)
+	assert.Equal(t, "fallback-id", got[3].key)
+	assert.Empty(t, got[3].control.ControlID)
+	assert.Empty(t, controls["fallback-id"].ControlID, "sorting must not mutate the source controls map")
+}
+
+type recordingProgressListener struct {
+	started  int
+	messages []string
+	stopped  bool
+}
+
+func (r *recordingProgressListener) Start(allSteps int) {
+	r.started = allSteps
+}
+
+func (r *recordingProgressListener) ProgressJob(_ int, message string) {
+	r.messages = append(r.messages, message)
+}
+
+func (r *recordingProgressListener) Stop() {
+	r.stopped = true
+}
+
+func TestProcessReportsControlsInSortedOrder(t *testing.T) {
+	opaSessionObj := cautils.NewOPASessionObjMock()
+	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+
+	policies := &cautils.Policies{
+		Controls: map[string]reporthandling.Control{
+			"C-0003": {ControlID: "C-0003"},
+			"C-0001": {ControlID: "C-0001"},
+			"C-0002": {ControlID: "C-0002"},
+		},
+	}
+	opap.AllPolicies = policies
+
+	progress := &recordingProgressListener{}
+	err := opap.Process(context.Background(), policies, progress)
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, progress.started)
+	assert.True(t, progress.stopped)
+	assert.Equal(t, []string{
+		"Control: C-0001",
+		"Control: C-0002",
+		"Control: C-0003",
+	}, progress.messages)
+}
+
 func monitorHeapSpace(maxHeap *uint64, quitChan chan bool) {
 	for {
 		select {

@@ -168,6 +168,11 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	return processErr
 }
 
+type policyControl struct {
+	key     string
+	control reporthandling.Control
+}
+
 // Process OPA policies (rules) on all configured controls.
 func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policies, progressListener IJobProgressNotificationClient) error {
 	ctx, span := otel.Tracer("").Start(ctx, "OPAProcessor.Process")
@@ -175,17 +180,19 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 	opap.loggerStartScanning()
 	defer opap.loggerDoneScanning()
 
+	controls := sortedPolicyControls(policies.Controls)
 	if progressListener != nil {
-		progressListener.Start(len(policies.Controls))
+		progressListener.Start(len(controls))
 		defer progressListener.Stop()
 	}
 
 	var processErrs []error
-	for _, toPin := range policies.Controls {
+	for _, item := range controls {
 		if err := ctx.Err(); err != nil {
 			processErrs = append(processErrs, err)
 			break
 		}
+		toPin := item.control
 		if progressListener != nil {
 			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", toPin.ControlID))
 		}
@@ -228,6 +235,27 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 	}
 
 	return errors.Join(processErrs...)
+}
+
+func sortedPolicyControls(controls map[string]reporthandling.Control) []policyControl {
+	out := make([]policyControl, 0, len(controls))
+	for key, control := range controls {
+		out = append(out, policyControl{key: key, control: control})
+	}
+	slices.SortFunc(out, func(a, b policyControl) int {
+		if c := strings.Compare(policyControlSortKey(a), policyControlSortKey(b)); c != 0 {
+			return c
+		}
+		return strings.Compare(a.key, b.key)
+	})
+	return out
+}
+
+func policyControlSortKey(item policyControl) string {
+	if item.control.ControlID != "" {
+		return item.control.ControlID
+	}
+	return item.key
 }
 
 func (opap *OPAProcessor) loggerStartScanning() {
