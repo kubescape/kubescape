@@ -153,7 +153,7 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 	if scanType == cautils.ScanTypeImage {
 		// supported types for image scanning
 		switch printFormat {
-		case printer.JsonFormat, printer.SARIFFormat, printer.YamlFormat, printer.CsvFormat:
+		case printer.JsonFormat, printer.SARIFFormat, printer.YamlFormat:
 			return false, nil
 		case printer.PrettyFormat:
 			return true, nil

@@ -16,7 +16,7 @@ import (
 // They are built from the printer.*Format constants to keep a single source of truth.
 var (
 	ScanFormats      = []string{printer.PrettyFormat, printer.JsonFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.HtmlFormat, printer.SARIFFormat, printer.GitLabSASTFormat, printer.YamlFormat, printer.CsvFormat}
-	ImageScanFormats = []string{printer.PrettyFormat, printer.JsonFormat, printer.SARIFFormat, printer.YamlFormat, printer.CsvFormat}
+	ImageScanFormats = []string{printer.PrettyFormat, printer.JsonFormat, printer.SARIFFormat, printer.YamlFormat}
 )
 
 var ErrUnknownSeverity = fmt.Errorf("unknown severity. Supported severities are: %s", strings.Join(reporthandlingapis.GetSupportedSeverities(), ", "))
