@@ -434,7 +434,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 
 	for img := range imagesToScan.Iter() {
 		logger.L().Start("Scanning", helpers.String("image", img))
-		if err := scanSingleImage(ctx, img, svc, resultsHandling, scanInfo.RegistryMapping); err != nil {
+		if err := scanSingleImage(ctx, img, svc, resultsHandling, scanInfo.RegistryMapping, registryCredentialsFromScanInfo(scanInfo)); err != nil {
 			logger.L().StopError("failed to scan", helpers.String("image", img), helpers.Error(err))
 			continue
 		}
@@ -442,10 +442,22 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 	}
 }
 
-func scanSingleImage(ctx context.Context, img string, svc *imagescan.Service, resultsHandling *resultshandling.ResultsHandler, registryMapping map[string]string) error {
+func registryCredentialsFromScanInfo(scanInfo *cautils.ScanInfo) imagescan.RegistryCredentials {
+	if scanInfo == nil {
+		return imagescan.RegistryCredentials{}
+	}
+	return imagescan.RegistryCredentials{
+		Authority: scanInfo.RegistryAuthority,
+		Username:  scanInfo.RegistryUsername,
+		Password:  scanInfo.RegistryPassword,
+		Token:     scanInfo.RegistryToken,
+	}
+}
+
+func scanSingleImage(ctx context.Context, img string, svc imageScanService, resultsHandling *resultshandling.ResultsHandler, registryMapping map[string]string, creds imagescan.RegistryCredentials) error {
 
 	scanResults, err := scanWithRegistryMapping(
-		ctx, svc, img, imagescan.RegistryCredentials{},
+		ctx, svc, img, creds,
 		registryMapping, nil, nil,
 	)
 	if err != nil {

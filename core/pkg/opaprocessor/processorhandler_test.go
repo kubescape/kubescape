@@ -935,3 +935,71 @@ func TestRunCELOnK8s(t *testing.T) {
 		assert.Empty(t, outcome.excluded)
 	})
 }
+
+// TestCELNamespaceObjectFor covers the resolver behind the evaluator's
+// namespaceObject binding: the scanned resource's Namespace object out of the
+// scan's collected resources, and nil on every path where the scan cannot
+// know it (cluster-scoped resource, uncollected namespace, no session at
+// all) — the evaluator then binds null, which is the pre-wiring behaviour.
+func TestCELNamespaceObjectFor(t *testing.T) {
+	nsObject := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]any{
+			"name":   "prod",
+			"labels": map[string]any{"pod-security.kubernetes.io/enforce": "restricted"},
+		},
+	}
+	nsMeta := objectsenvelopes.NewObject(nsObject)
+	require.NotNil(t, nsMeta)
+
+	// A namespaced resource whose NAME matches a namespace must not be mistaken
+	// for the Namespace object itself.
+	decoy := objectsenvelopes.NewObject(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "prod", "namespace": "prod"},
+	})
+	require.NotNil(t, decoy)
+
+	// Built through the constructor on purpose: that is where the index is
+	// snapshotted, so this also pins that NewOPAProcessor wires it.
+	opap := NewOPAProcessor(&cautils.OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{
+			nsMeta.GetID(): nsMeta,
+			decoy.GetID():  decoy,
+		},
+	}, &resources.RegoDependenciesData{}, "", "", "", false, nil)
+
+	podIn := func(namespace string) map[string]any {
+		metadata := map[string]any{"name": "p"}
+		if namespace != "" {
+			metadata["namespace"] = namespace
+		}
+		return map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": metadata, "spec": map[string]any{}}
+	}
+
+	t.Run("resolves the collected Namespace object", func(t *testing.T) {
+		got := opap.celNamespaceObjectFor(podIn("prod"))
+		require.NotNil(t, got)
+		assert.Equal(t, "Namespace", got["kind"])
+		labels := got["metadata"].(map[string]any)["labels"].(map[string]any)
+		assert.Equal(t, "restricted", labels["pod-security.kubernetes.io/enforce"],
+			"the binding must carry the real Namespace object, labels included")
+	})
+
+	t.Run("uncollected namespace resolves to nil", func(t *testing.T) {
+		assert.Nil(t, opap.celNamespaceObjectFor(podIn("staging")))
+	})
+
+	t.Run("cluster-scoped resource resolves to nil", func(t *testing.T) {
+		assert.Nil(t, opap.celNamespaceObjectFor(podIn("")))
+	})
+
+	t.Run("no session resolves to nil without panicking", func(t *testing.T) {
+		// Both the zero value and a constructor call with no session: the second
+		// is the one a caller can actually reach.
+		assert.Nil(t, (&OPAProcessor{}).celNamespaceObjectFor(podIn("prod")))
+		assert.Nil(t, NewOPAProcessor(nil, nil, "", "", "", false, nil).celNamespaceObjectFor(podIn("prod")))
+	})
+}

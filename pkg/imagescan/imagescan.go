@@ -36,12 +36,14 @@ const (
 )
 
 type RegistryCredentials struct {
-	Username string
-	Password string
+	Authority string
+	Username  string
+	Password  string
+	Token     string
 }
 
-func (c RegistryCredentials) IsEmpty() bool {
-	return c.Username == "" || c.Password == ""
+func (c RegistryCredentials) hasAuthenticator() bool {
+	return c.Token != "" || (c.Username != "" && c.Password != "")
 }
 
 func NewDefaultDBConfig(grypeURL string) (distribution.Config, installation.Config, bool, error) {
@@ -131,7 +133,15 @@ func validateDBLoad(loadErr error, status *vulnerability.ProviderStatus) error {
 }
 
 func getProviderConfig(creds RegistryCredentials) pkg.ProviderConfig {
-	syftCreds := []image.RegistryCredentials{{Username: creds.Username, Password: creds.Password}}
+	var syftCreds []image.RegistryCredentials
+	if creds.hasAuthenticator() {
+		syftCreds = append(syftCreds, image.RegistryCredentials{
+			Authority: creds.Authority,
+			Username:  creds.Username,
+			Password:  creds.Password,
+			Token:     creds.Token,
+		})
+	}
 	regOpts := &image.RegistryOptions{
 		Credentials: syftCreds,
 	}

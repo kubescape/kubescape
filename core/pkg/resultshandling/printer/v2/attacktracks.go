@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/jwalton/gchalk"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/gotree"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -94,18 +96,27 @@ func (prettyPrinter *PrettyPrinter) printAttackTracks(opaSessionObj *cautils.OPA
 		return resources[i].Score > resources[j].Score
 	})
 
-	for i := 0; i < topResourceCount && i < len(resources); i++ {
-		fmt.Fprintf(prettyPrinter.writer, "\n%s\n", getSeparator("^"))
-		resource := resources[i]
-		resourceObj := opaSessionObj.AllResources[resource.ResourceID]
+	printedCount := 0
+	for _, resource := range resources {
+		if printedCount >= topResourceCount {
+			break
+		}
 
+		resourceObj, ok := opaSessionObj.AllResources[resource.ResourceID]
+		if !ok {
+			logger.L().Debug("resource missing from AllResources, skipping",
+				helpers.String("resourceID", resource.ResourceID))
+			continue
+		}
+
+		fmt.Fprintf(prettyPrinter.writer, "\n%s\n", getSeparator("^"))
 		fmt.Fprintf(prettyPrinter.writer, "Name: %s\n", resourceObj.GetName())
 		fmt.Fprintf(prettyPrinter.writer, "Kind: %s\n", resourceObj.GetKind())
 		fmt.Fprintf(prettyPrinter.writer, "Namespace: %s\n\n", resourceObj.GetNamespace())
 
 		fmt.Fprintf(prettyPrinter.writer, "Score: %.2f\n", resource.Score)
 		fmt.Fprintf(prettyPrinter.writer, "Severity: %s\n", apis.SeverityNumberToString(resource.Severity))
-		fmt.Fprintf(prettyPrinter.writer, "Total vectors: %v\n\n", len(resources[i].PriorityVector))
+		fmt.Fprintf(prettyPrinter.writer, "Total vectors: %v\n\n", len(resource.PriorityVector))
 
 		if v, found := resourceToAttackTrack[resource.ResourceID]; found {
 			prettyPrinter.printResourceAttackGraph(v)
@@ -115,7 +126,7 @@ func (prettyPrinter *PrettyPrinter) printAttackTracks(opaSessionObj *cautils.OPA
 			return resource.PriorityVector[x].Score > resource.PriorityVector[y].Score
 		})
 
-		for j := 0; j < topVectorCount && j < len(resources[i].PriorityVector); j++ {
+		for j := 0; j < topVectorCount && j < len(resource.PriorityVector); j++ {
 			priorityVector := resource.PriorityVector[j]
 
 			vectorStrings := []string{}
@@ -125,5 +136,6 @@ func (prettyPrinter *PrettyPrinter) printAttackTracks(opaSessionObj *cautils.OPA
 
 			fmt.Fprintf(prettyPrinter.writer, "%v) [%.2f] [Severity: %v] [Attack Track: %v]: %v \n", j+1, priorityVector.Score, apis.SeverityNumberToString(priorityVector.Severity), priorityVector.AttackTrackName, strings.Join(vectorStrings, " -> "))
 		}
+		printedCount++
 	}
 }

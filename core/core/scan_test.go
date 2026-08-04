@@ -160,6 +160,54 @@ func TestIsPrioritizationScanType(t *testing.T) {
 	}
 }
 
+func TestRegistryCredentialsFromScanInfo(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{
+		RegistryAuthority: "registry.example.com",
+		RegistryUsername:  "user",
+		RegistryPassword:  "pass",
+		RegistryToken:     "token",
+	}
+
+	creds := registryCredentialsFromScanInfo(scanInfo)
+
+	assert.Equal(t, imagescan.RegistryCredentials{
+		Authority: "registry.example.com",
+		Username:  "user",
+		Password:  "pass",
+		Token:     "token",
+	}, creds)
+	assert.Equal(t, imagescan.RegistryCredentials{}, registryCredentialsFromScanInfo(nil))
+}
+
+func TestScanSingleImageForwardsRegistryCredentials(t *testing.T) {
+	svc := &recordingImageScanService{}
+	results := &resultshandling.ResultsHandler{}
+	creds := imagescan.RegistryCredentials{
+		Authority: "registry.example.com",
+		Username:  "user",
+		Password:  "pass",
+	}
+
+	err := scanSingleImage(context.Background(), "registry.example.com/app:tag", svc, results, nil, creds)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "registry.example.com/app:tag", svc.image)
+	assert.Equal(t, creds, svc.credentials)
+	assert.Len(t, results.ImageScanData, 1)
+	assert.Equal(t, "registry.example.com/app:tag", results.ImageScanData[0].Image)
+}
+
+func TestScanSingleImageReturnsScannerError(t *testing.T) {
+	expectedErr := errors.New("scan failed")
+	svc := &recordingImageScanService{registryMappingErr: expectedErr}
+	results := &resultshandling.ResultsHandler{}
+
+	err := scanSingleImage(context.Background(), "registry.example.com/app:tag", svc, results, nil, imagescan.RegistryCredentials{})
+
+	assert.ErrorIs(t, err, expectedErr)
+	assert.Empty(t, results.ImageScanData)
+}
+
 func TestIsAirGappedMode(t *testing.T) {
 	tests := []struct {
 		name     string
