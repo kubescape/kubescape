@@ -338,6 +338,7 @@ func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Po
 			processErrs = append(processErrs, err)
 			break
 		}
+		toPin := item.control
 		if progressListener != nil {
 			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", controlID))
 		}
