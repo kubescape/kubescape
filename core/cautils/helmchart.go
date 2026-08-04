@@ -35,37 +35,31 @@ func IsHelmDirectory(path string) (bool, error) {
 
 // newRegistryClient creates a Helm registry client for chart authentication.
 //
-// insecureSkipTLS is currently not wired to anything: doing so correctly
-// requires a custom *http.Client with tls.Config{InsecureSkipVerify: true}
-// passed via helmregistry.ClientOptHTTPClient, not ClientOptPlainHTTP()
-// (which disables TLS entirely rather than just certificate verification -
-// see the plainHTTP branch below for why those must not be conflated). Left
-// unimplemented rather than risk wiring it to the wrong option again; the
-// sole call site always passes false for it today.
-func newRegistryClient(certFile, keyFile, caFile string, insecureSkipTLS, plainHTTP bool, username, password string) (*helmregistry.Client, error) {
+// Only plainHTTP and basic-auth credentials are exposed here, because those
+// are the only options the sole call site (buildDependencies, below) ever
+// varies - it currently always passes plainHTTP=false and empty credentials.
+// An earlier version of this function also accepted certFile, keyFile,
+// caFile, and insecureSkipTLS, but those were broken rather than merely
+// unused: certFile/keyFile/caFile were passed to
+// helmregistry.ClientOptCredentialsFile, which sets the client's
+// *credentials store* path (e.g. ~/.docker/config.json), not TLS material -
+// caFile silently clobbered whatever certFile/keyFile had set (same
+// underlying field), and any of the three made helmregistry.NewClient fail
+// outright on a real PEM path ("invalid config format"). insecureSkipTLS was
+// left unwired entirely. Wiring TLS material correctly requires either
+// building a *tls.Config locally and passing it via
+// helmregistry.ClientOptHTTPClient, or using helm's own
+// registry.NewRegistryClientWithTLS(...) (helm.sh/helm/v3/pkg/registry/util.go)
+// for the whole client construction. Add that machinery back if a caller
+// ever needs cert/key/CA/insecureSkipTLS again, rather than reintroducing
+// unwired or miswired parameters.
+func newRegistryClient(plainHTTP bool, username, password string) (*helmregistry.Client, error) {
 	// Basic client options with debug disabled
 	opts := []helmregistry.ClientOption{
 		helmregistry.ClientOptDebug(false),
 		helmregistry.ClientOptWriter(io.Discard),
 	}
 
-	// Add TLS certificates if provided
-	if certFile != "" && keyFile != "" {
-		opts = append(opts, helmregistry.ClientOptCredentialsFile(certFile))
-	}
-
-	// Add CA certificate if provided
-	if caFile != "" {
-		opts = append(opts, helmregistry.ClientOptCredentialsFile(caFile))
-	}
-
-	// Enable plain HTTP if requested. This must be gated on plainHTTP, not
-	// insecureSkipTLS: those are different things (insecureSkipTLS means
-	// "skip certificate verification but still use HTTPS", plainHTTP means
-	// "don't use TLS at all"). Wiring insecureSkipTLS to
-	// ClientOptPlainHTTP() would silently drop encryption entirely - and the
-	// credentials below with it - for a caller who only asked to bypass
-	// certificate validation.
 	if plainHTTP {
 		opts = append(opts, helmregistry.ClientOptPlainHTTP())
 	}
@@ -111,7 +105,7 @@ func NewHelmChart(path string) (*HelmChart, error) {
 // buildDependencies builds chart dependencies using the downloader manager
 func buildDependencies(chartPath string) error {
 	// Create registry client for authentication
-	registryClient, err := newRegistryClient("", "", "", false, false, "", "")
+	registryClient, err := newRegistryClient(false, "", "")
 	if err != nil {
 		return fmt.Errorf("failed to create registry client: %w", err)
 	}
