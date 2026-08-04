@@ -13,10 +13,11 @@ import (
 )
 
 type LocalGitRepository struct {
-	*gitRepository
-	goGitRepo *gitv5.Repository
-	head      *plumbingv5.Reference
-	config    *configv5.Config
+	// named rather than embedded: embedding promoted GetFileLastCommit, and since this field is unexported no caller outside the package could check it was set before invoking the promoted method.
+	gitRepository *gitRepository
+	goGitRepo     *gitv5.Repository
+	head          *plumbingv5.Reference
+	config        *configv5.Config
 }
 
 // worktreeRoot resolves the repository's worktree root. It is a package-level
@@ -144,6 +145,16 @@ func (g *LocalGitRepository) GetLastCommit() (*apis.Commit, error) {
 		},
 		Files: []apis.Files{},
 	}, nil
+}
+
+// GetFileLastCommit returns the last commit that touched filePath, or an error when the repository carries no git metadata.
+// It replaces the method the embedded *gitRepository used to promote, so an unset metadata reader reports itself instead of panicking on a nil receiver the caller had no way to inspect.
+func (g *LocalGitRepository) GetFileLastCommit(filePath string) (*apis.Commit, error) {
+	if g == nil || g.gitRepository == nil {
+		return nil, fmt.Errorf("no git metadata available for file: %s", filePath)
+	}
+
+	return g.gitRepository.GetFileLastCommit(filePath)
 }
 
 // GetGitRootDir returns the root directory of the git repository containing path.
