@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -164,6 +165,39 @@ func TestGetGitRootDirWithoutUsableMetadata(t *testing.T) {
 func TestGetGitRootDirOutsideRepository(t *testing.T) {
 	_, err := GetGitRootDir(t.TempDir())
 	assert.Error(t, err)
+}
+
+// TestLinkedWorktreeGitMetadata verifies that a repository opened from a linked
+// worktree (where .git is a file pointing at the per-worktree git dir) still
+// resolves HEAD, remotes and the worktree root. go-git needs
+// EnableDotGitCommonDir for that because the branch refs live in the common
+// directory, not in the per-worktree directory. Without it, go-git reports
+// "reference not found" and every caller treats the path as not a git repo.
+func TestLinkedWorktreeGitMetadata(t *testing.T) {
+	fixture := createLinkedWorktreeFixture(t)
+
+	repository, err := NewLocalGitRepository(fixture.worktreeRoot)
+	require.NoError(t, err)
+
+	assert.Equal(t, "linked-worktree", repository.GetBranchName())
+
+	remoteURL, err := repository.GetRemoteUrl()
+	require.NoError(t, err)
+	assert.Equal(t, "git@github.com:testuser/localrepo", remoteURL)
+
+	name, err := repository.GetName()
+	require.NoError(t, err)
+	assert.Equal(t, "localrepo", name)
+
+	root, err := repository.GetRootDir()
+	require.NoError(t, err)
+	wantRoot, err := filepath.EvalSymlinks(fixture.worktreeRoot)
+	require.NoError(t, err)
+	assert.Equal(t, wantRoot, root)
+
+	commit, err := repository.GetLastCommit()
+	require.NoError(t, err)
+	assert.Equal(t, fixture.commit.String(), commit.SHA)
 }
 
 func (s *LocalGitRepositoryTestSuite) TestGetBranchName() {
@@ -361,6 +395,75 @@ type detachedRepositoryFixture struct {
 	root   string
 	commit plumbingv5.Hash
 	when   time.Time
+}
+
+// linkedWorktreeFixture holds the paths of a manually-assembled linked worktree:
+// a main repository plus a second working tree whose .git is a file pointing at
+// a per-worktree git dir. This mirrors what `git worktree add` produces, which
+// go-git's PlainInit cannot create directly.
+type linkedWorktreeFixture struct {
+	mainRoot     string
+	worktreeRoot string
+	commit       plumbingv5.Hash
+}
+
+// createLinkedWorktreeFixture builds a main repository with one commit and a
+// remote, then adds a linked worktree on a branch "linked-worktree". The layout
+// matches git's own worktree layout: <worktree>/.git is a file containing
+// "gitdir: <main>/.git/worktrees/<name>", and the per-worktree git dir contains
+// a "commondir" file pointing back at the main .git directory where the branch
+// refs live.
+func createLinkedWorktreeFixture(t *testing.T) linkedWorktreeFixture {
+	t.Helper()
+
+	// go-git's dotGitCommonDirectory opens the "commondir" file and leaks the
+	// handle (see go-git v5.19.1 PlainOpenWithOptions with EnableDotGitCommonDir),
+	// which makes Windows unable to delete the tree while it is still referenced.
+	// t.TempDir would fail its cleanup, so the directory is removed manually with
+	// a GC + retry loop instead.
+	base, err := os.MkdirTemp("", "linked-worktree-")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		for i := 0; i < 5; i++ {
+			runtime.GC()
+			if err := os.RemoveAll(base); err == nil {
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	})
+
+	mainRoot := filepath.Join(base, "main")
+	worktreeRoot := filepath.Join(base, "linked-worktree")
+
+	repository, err := gitv5.PlainInit(mainRoot, false)
+	require.NoError(t, err)
+	worktree, err := repository.Worktree()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(mainRoot, "README.md"), []byte("fixture\n"), 0o600))
+	_, err = worktree.Add("README.md")
+	require.NoError(t, err)
+	commit, err := worktree.Commit("fixture commit", &gitv5.CommitOptions{
+		Author:    &objectv5.Signature{Name: "Fixture Author", Email: "author@example.com", When: time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)},
+		Committer: &objectv5.Signature{Name: "Fixture Committer", Email: "committer@example.com", When: time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)},
+	})
+	require.NoError(t, err)
+	_, err = repository.CreateRemote(&configv5.RemoteConfig{Name: "origin", URLs: []string{"git@github.com:testuser/localrepo"}})
+	require.NoError(t, err)
+
+	// Build the branch ref in the main repo first, then assemble the linked
+	// worktree layout around the same commit.
+	require.NoError(t, os.MkdirAll(filepath.Join(mainRoot, ".git", "worktrees", "linked-worktree"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(mainRoot, ".git", "refs", "heads", "linked-worktree"), []byte(commit.String()+"\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mainRoot, ".git", "worktrees", "linked-worktree", "HEAD"), []byte("ref: refs/heads/linked-worktree\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mainRoot, ".git", "worktrees", "linked-worktree", "commondir"), []byte(".."+string(os.PathSeparator)+"..\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(mainRoot, ".git", "worktrees", "linked-worktree", "gitdir"), []byte(filepath.ToSlash(filepath.Join(worktreeRoot, ".git"))+"\n"), 0o600))
+
+	require.NoError(t, os.MkdirAll(worktreeRoot, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(worktreeRoot, ".git"), []byte("gitdir: "+filepath.ToSlash(filepath.Join(mainRoot, ".git", "worktrees", "linked-worktree"))+"\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(worktreeRoot, "README.md"), []byte("worktree\n"), 0o600))
+
+	return linkedWorktreeFixture{mainRoot: mainRoot, worktreeRoot: worktreeRoot, commit: commit}
 }
 
 func createDetachedRepositoryFixture(t *testing.T, remoteName, remoteURL string) detachedRepositoryFixture {

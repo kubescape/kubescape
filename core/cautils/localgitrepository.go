@@ -29,7 +29,7 @@ type LocalGitRepository struct {
 var worktreeRoot = (*LocalGitRepository).GetRootDir
 
 func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
-	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})
+	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func (g *LocalGitRepository) GetLastCommit() (*apis.Commit, error) {
 // checkouts routinely lack even though the repository every reported path is
 // relative to is right there.
 func GetGitRootDir(path string) (string, error) {
-	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})
+	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
 	if err != nil {
 		return "", err
 	}
