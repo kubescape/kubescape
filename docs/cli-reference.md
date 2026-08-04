@@ -291,6 +291,12 @@ kubescape fix results.json --dry-run
 kubescape fix results.json --no-confirm
 ```
 
+> **Note:** The confirmation prompt requires a real interactive terminal. If
+> stdin isn't a TTY — `kubescape fix results.json < /dev/null`, a piped
+> answer like `echo y | kubescape fix results.json`, or any CI/script
+> context — the prompt is skipped and no changes are applied. Use
+> `--no-confirm` to apply fixes in non-interactive contexts.
+
 ---
 
 ## kubescape patch

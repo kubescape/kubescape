@@ -28,8 +28,15 @@ const (
 	stdinClosedWarning    = "stdin was closed before a confirmation was given; treating the fix confirmation as declined and applying no changes (pass --no-confirm to apply without a prompt)"
 )
 
-// isTerminal is a var (not a direct isatty.IsTerminal call) so tests can stub it.
-var isTerminal = isatty.IsTerminal
+// isTerminal and isCygwinTerminal are vars (not direct isatty calls) so tests
+// can stub them. Both must be checked: on Windows under mintty (Git Bash,
+// MSYS2), stdin is a named pipe rather than a console, so IsTerminal alone
+// returns false for a real interactive session — IsCygwinTerminal is the
+// isatty-recommended way to detect that case.
+var (
+	isTerminal       = isatty.IsTerminal
+	isCygwinTerminal = isatty.IsCygwinTerminal
+)
 
 func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	logger.L().Info("Reading report file...")
@@ -107,7 +114,8 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 }
 
 func userConfirmed() bool {
-	if !isTerminal(os.Stdin.Fd()) {
+	fd := os.Stdin.Fd()
+	if !isTerminal(fd) && !isCygwinTerminal(fd) {
 		// Non-interactive stdin (closed, /dev/null, a redirected file, a pipe
 		// whose reads fail outright, ...) will never produce an answer: no
 		// amount of retrying fmt.Scanln fixes that. Treat it as a decline up

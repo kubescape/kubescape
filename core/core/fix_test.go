@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,16 +43,70 @@ func TestConfirm(t *testing.T) {
 	}
 }
 
+// errReader always fails with a non-EOF error, simulating a persistent I/O
+// failure that confirm's error branch doesn't recognize as permanent (unlike
+// io.EOF). It exists to pin the maxConfirmRetries backstop without waiting
+// on 100 real reads' worth of wall-clock time.
+type errReader struct {
+	err   error
+	calls int
+}
+
+func (r *errReader) Read([]byte) (int, error) {
+	r.calls++
+	return 0, r.err
+}
+
+// TestConfirm_ExhaustsRetriesOnPersistentNonEOFError locks in the
+// maxConfirmRetries backstop: a read error that never resolves to EOF still
+// isn't treated as retryable forever, so no future non-EOF, non-recoverable
+// stdin state can reintroduce #2711's unbounded loop.
+func TestConfirm_ExhaustsRetriesOnPersistentNonEOFError(t *testing.T) {
+	r := &errReader{err: errors.New("simulated persistent read failure")}
+
+	got := confirm(r)
+
+	assert.False(t, got)
+	assert.Equal(t, maxConfirmRetries, r.calls,
+		"confirm must give up after exactly maxConfirmRetries reads, not loop forever")
+}
+
 // TestUserConfirmed_NonInteractiveStdinDeclines guards against #2711: on
 // non-interactive stdin (closed, /dev/null, a redirected file, a pipe whose
 // reads fail outright, ...) no answer can ever arrive, so userConfirmed must
 // decline up front instead of ever entering the retry loop.
 func TestUserConfirmed_NonInteractiveStdinDeclines(t *testing.T) {
-	prevIsTerminal := isTerminal
-	t.Cleanup(func() { isTerminal = prevIsTerminal })
+	prevIsTerminal, prevIsCygwinTerminal := isTerminal, isCygwinTerminal
+	t.Cleanup(func() { isTerminal, isCygwinTerminal = prevIsTerminal, prevIsCygwinTerminal })
 	isTerminal = func(uintptr) bool { return false }
+	isCygwinTerminal = func(uintptr) bool { return false }
 
 	assert.False(t, userConfirmed())
+}
+
+// TestUserConfirmed_MinttyStdinPrompts guards against a regression on the
+// isTerminal fix itself: on Windows under mintty (Git Bash, MSYS2), stdin is
+// a named pipe, so isatty.IsTerminal returns false even at a real
+// interactive session — only IsCygwinTerminal reports true there. If
+// userConfirmed only checked isTerminal, a real mintty user would be
+// silently declined on every `kubescape fix` regardless of what they typed.
+func TestUserConfirmed_MinttyStdinPrompts(t *testing.T) {
+	prevIsTerminal, prevIsCygwinTerminal := isTerminal, isCygwinTerminal
+	t.Cleanup(func() { isTerminal, isCygwinTerminal = prevIsTerminal, prevIsCygwinTerminal })
+	isTerminal = func(uintptr) bool { return false }
+	isCygwinTerminal = func(uintptr) bool { return true }
+
+	originalStdin := os.Stdin
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	t.Cleanup(func() { os.Stdin = originalStdin })
+	os.Stdin = r
+
+	_, err = w.WriteString("y\n")
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	assert.True(t, userConfirmed())
 }
 
 // TestUserConfirmed_InteractiveReadsStdin checks the (small) wiring in
