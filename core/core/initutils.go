@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"os"
-	"sync"
 
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
@@ -24,37 +23,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// k8sConfigOnce and k8sConfigLoaded guard the lazy Kubernetes client config
-// load. The k8sinterface package reads and writes package-level state
-// (K8SConfig, connectedToCluster) without any synchronization, so triggering the
-// load from concurrent scans (e.g. the HTTP handler running multiple scans in
-// parallel) is a data race on that global state. Loading it exactly once per
-// process removes the race.
-var (
-	k8sConfigOnce   sync.Once
-	k8sConfigLoaded bool
-)
-
 // isConnectedToCluster reports whether a Kubernetes cluster connection is
-// available, loading the cluster config at most once per process.
+// available, delegating to k8sinterface as the source of truth.
 //
-// The load result is only a hint: on the success path the real answer still
-// comes from k8sinterface.IsConnectedToCluster(), so an explicit
-// SetConnectedToCluster(false) is honored even when a kubeconfig file is
-// readable. On the failure path we short-circuit instead of re-entering
-// k8sinterface (whose globals are unsynchronized), which would re-trigger
-// LoadK8sConfig() and SetConnectedToCluster(false) concurrently on every call.
+// The real answer must come from k8sinterface.IsConnectedToCluster(), so an
+// explicit SetConnectedToCluster(false) is honored even when a kubeconfig file
+// is readable and no Fatal is emitted.
 func isConnectedToCluster() bool {
-	k8sConfigOnce.Do(func() {
-		k8sConfigLoaded = k8sinterface.LoadK8sConfig() == nil
-		if !k8sConfigLoaded {
-			k8sinterface.SetConnectedToCluster(false)
-		}
-	})
-	if !k8sConfigLoaded {
-		return false
-	}
-	return k8sinterface.IsConnectedToCluster() // still the source of truth
+	return k8sinterface.IsConnectedToCluster()
 }
 
 // getKubernetesApi
@@ -185,7 +161,16 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 	hostSensorVal := scanInfo.HostSensorEnabled.Get()
 
 	switch {
-	case k8s == nil: // k8s is the authoritative, race-free proxy for "connected to cluster"
+	case k8s == nil:
+		// k8s is nil exactly when this scan never connected to a cluster (a
+		// non-cluster scan, or getKubernetesApi() failing - which exits the
+		// process via logger.Fatal before we'd get here). Re-checking
+		// k8sinterface.IsConnectedToCluster() here as well used to read the
+		// same global connection state a second time, at a later point than
+		// when k8s was obtained, with no synchronization between the two
+		// reads - a caller could observe k8s and IsConnectedToCluster()
+		// disagree. k8s == nil is already a complete, single-read proxy for
+		// "no cluster connection", so the second read added nothing but risk.
 		return hostsensorutils.NewHostSensorHandlerMock()
 
 	case hostSensorVal != nil && *hostSensorVal:
