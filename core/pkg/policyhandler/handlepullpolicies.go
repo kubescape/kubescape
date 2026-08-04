@@ -34,8 +34,25 @@ type PolicyHandler struct {
 
 // NewPolicyHandler creates and returns an instance of the `PolicyHandler`. The function initializes the `PolicyHandler` only if it hasn't been previously created.
 // The PolicyHandler supports caching of downloaded policies and exceptions by setting the `POLICIES_CACHE_TTL` environment variable (default is no caching).
+//
+// This is a process-wide singleton, reused as long as clusterName does not
+// change, so long-running callers that repeatedly scan the same cluster (the
+// httphandler HTTP service, in particular - see core/core/scan.go) keep the
+// POLICIES_CACHE_TTL caching benefit across requests instead of re-downloading
+// policies/exceptions/control-inputs on every call. When clusterName differs
+// from the cached instance's, exceptions and control-inputs are fetched
+// scoped by clusterName (see getExceptions/getControlInputs below), so
+// blindly reusing an instance built for a different cluster would silently
+// apply the wrong cluster's exception policies to this one; the httphandler
+// service can serve /v1/scan requests for different clusters/accounts across
+// the lifetime of one process, and previously always got the first request's
+// PolicyHandler regardless of what later requests asked for. Close the
+// stale instance first so its background TTL goroutines don't leak.
 func NewPolicyHandler(clusterName string) *PolicyHandler {
-	if policyHandlerInstance == nil {
+	if policyHandlerInstance == nil || policyHandlerInstance.clusterName != clusterName {
+		if policyHandlerInstance != nil {
+			policyHandlerInstance.Close()
+		}
 		policyHandlerInstance = NewRequestScopedPolicyHandler(clusterName)
 	}
 	return policyHandlerInstance
