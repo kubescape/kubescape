@@ -141,6 +141,12 @@ func TestPrometheusPrinterPrintDetails_StatusDrivesMetricName(t *testing.T) {
 			wantMetric := "kubescape_object_" + status + "_count{"
 			assert.Contains(t, string(got), wantMetric)
 
+			// The "failed" comment must stay byte-identical to the pre-fix
+			// output ("# Failed object ..."), not lowercase to "# failed
+			// object ..." as a raw %s interpolation of status would produce.
+			wantLabel := map[string]string{"failed": "Failed", "excluded": "Excluded", "passed": "Passed"}[status]
+			assert.Contains(t, string(got), `# `+wantLabel+` object from "fw" control "ctrl"`)
+
 			for _, other := range []string{"failed", "excluded", "passed"} {
 				if other == status {
 					continue
