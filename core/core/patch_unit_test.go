@@ -105,6 +105,41 @@ func TestTryParseScanReport(t *testing.T) {
 	assert.Equal(t, "CVE-2026-0001", manifest.Updates[0].VulnerabilityID)
 }
 
+// TestResolveBuildkitOpts guards against a regression where bkOpts.Addr was
+// never populated from the --address/-a flag anywhere in this codebase, so
+// buildkit.NewClient always saw an empty Addr and silently fell back to its
+// own auto-detection (docker driver, then buildx, then a hardcoded default
+// socket) instead of connecting to the buildkitd endpoint the user asked
+// for via --address.
+func TestResolveBuildkitOpts(t *testing.T) {
+	t.Run("fills Addr from buildkitAddr when unset", func(t *testing.T) {
+		got := resolveBuildkitOpts("tcp://remote-buildkit:1234", buildkit.Opts{})
+		assert.Equal(t, "tcp://remote-buildkit:1234", got.Addr)
+	})
+
+	t.Run("default flag value is not silently dropped", func(t *testing.T) {
+		got := resolveBuildkitOpts("unix:///run/buildkit/buildkitd.sock", buildkit.Opts{})
+		assert.Equal(t, "unix:///run/buildkit/buildkitd.sock", got.Addr)
+	})
+
+	t.Run("does not override an already-set Addr", func(t *testing.T) {
+		got := resolveBuildkitOpts("tcp://remote-buildkit:1234", buildkit.Opts{Addr: "tcp://explicit:5678"})
+		assert.Equal(t, "tcp://explicit:5678", got.Addr)
+	})
+
+	t.Run("other bkOpts fields are preserved", func(t *testing.T) {
+		got := resolveBuildkitOpts("tcp://remote-buildkit:1234", buildkit.Opts{
+			CACertPath: "/ca.pem",
+			CertPath:   "/cert.pem",
+			KeyPath:    "/key.pem",
+		})
+		assert.Equal(t, "tcp://remote-buildkit:1234", got.Addr)
+		assert.Equal(t, "/ca.pem", got.CACertPath)
+		assert.Equal(t, "/cert.pem", got.CertPath)
+		assert.Equal(t, "/key.pem", got.KeyPath)
+	})
+}
+
 func TestPatchWithContextRejectsInvalidReport(t *testing.T) {
 	reportPath := filepath.Join(t.TempDir(), "invalid.json")
 	require.NoError(t, os.WriteFile(reportPath, []byte("not-json"), 0o600))
