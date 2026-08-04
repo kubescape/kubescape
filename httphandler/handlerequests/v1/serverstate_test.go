@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -243,6 +244,15 @@ func TestStatus_InvalidQueryParams_Returns400(t *testing.T) {
 
 	if w.Result().StatusCode != http.StatusBadRequest {
 		t.Errorf("Status with invalid query params = HTTP %d; want %d", w.Result().StatusCode, http.StatusBadRequest)
+	}
+
+	resp := decodeResponse(t, w)
+	if resp.Type != utilsapisv1.ErrorScanResponseType {
+		t.Errorf("Status with invalid query params: response.Type = %q; want %q", resp.Type, utilsapisv1.ErrorScanResponseType)
+	}
+	message, _ := resp.Response.(string)
+	if !strings.Contains(message, "failed to parse query params") {
+		t.Errorf("Status with invalid query params: response.Response = %q; want it to describe the decode failure", resp.Response)
 	}
 }
 
