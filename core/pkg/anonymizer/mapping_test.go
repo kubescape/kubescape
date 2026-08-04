@@ -72,6 +72,19 @@ func TestMapping_GetOrCreate(t *testing.T) {
 	}
 }
 
+// TestMapping_GetOrCreate_DeterministicAcrossInstances pins the property the
+// docs promise ("identical values produce identical pseudonyms across
+// reports"): two independent Mapping instances - standing in for two
+// separate scan runs - must produce the same pseudonym for the same
+// (prefix, value) pair. A within-instance-only check (same Mapping, called
+// twice) would also pass for a construction that is deterministic only
+// because of the map cache, not because the hash itself is stable.
+func TestMapping_GetOrCreate_DeterministicAcrossInstances(t *testing.T) {
+	assert.Equal(t,
+		NewMapping().GetOrCreate("res", "same-value"),
+		NewMapping().GetOrCreate("res", "same-value"))
+}
+
 func TestMapping_GetOrCreate_PrefixIsolationAcrossMultiplePrefixes(t *testing.T) {
 	mapping := NewMapping()
 
@@ -92,25 +105,40 @@ func pseudoIDSuffix(t *testing.T, pseudoID, prefix string) string {
 	return suffix
 }
 
-// TestMapping_GetOrCreate_HashSuffixDoesNotLeakAcrossPrefixes guards against a
-// regression where GetOrCreate hashed only the raw value, not prefix+value.
-// The pseudo-ID's display prefix always differs across categories, so the
-// full string was always distinct - but the hash *suffix* was identical
-// whenever the same raw value was mapped under two different prefixes (e.g.
-// a namespace and a resource name that happen to be the same string). That
-// let an observer notice "res-a1b2c3d4" and "ns-a1b2c3d4" share a suffix and
-// infer the two original values were equal, without ever learning what the
-// value was - exactly the cross-category correlation an anonymizer must not
-// allow.
-func TestMapping_GetOrCreate_HashSuffixDoesNotLeakAcrossPrefixes(t *testing.T) {
+// TestMapping_GetOrCreate_SameValueSharesHashSuffixAcrossPrefixes pins a
+// property transformSession (session.go) architecturally depends on: the
+// *same raw value* must produce the *same hash suffix* regardless of
+// prefix, even though the display prefix differs. A resource's own name is
+// transformed with prefix "res" (session.go transformResourceMetadata), but
+// a reference to that same name elsewhere - an imagePullSecrets entry, a
+// ConfigMap/Secret volume source, a ServiceAccount name - is transformed
+// separately with prefix "ref"/"sa" (container.go), with no shared lookup
+// table between the two call sites. The shared hash suffix is the only
+// thing that lets a reader of a --hide report tell that a pod actually
+// pulls a specific Secret or runs as a specific ServiceAccount, without the
+// report ever revealing the real name.
+//
+// This was previously untested at the suffix level (existing tests below
+// only assert the full "<prefix>-<suffix>" strings differ, which is always
+// true just from the differing prefix text, regardless of whether the
+// suffix matches) - see the discussion on PR #2687 for how that test gap
+// let a well-intentioned but incorrect "fix" (hashing prefix+value) merge
+// review as a plausible bug fix while actually breaking this cross-reference
+// linkage. Hashing value alone is deliberate, not an oversight; see the
+// doc comment on GetOrCreate for the accepted trade-off this implies.
+func TestMapping_GetOrCreate_SameValueSharesHashSuffixAcrossPrefixes(t *testing.T) {
 	mapping := NewMapping()
 
 	resource := mapping.GetOrCreate("res", "same-value")
-	namespace := mapping.GetOrCreate("ns", "same-value")
+	reference := mapping.GetOrCreate("ref", "same-value")
+	serviceAccount := mapping.GetOrCreate("sa", "same-value")
 
 	resourceSuffix := pseudoIDSuffix(t, resource, "res")
-	namespaceSuffix := pseudoIDSuffix(t, namespace, "ns")
+	referenceSuffix := pseudoIDSuffix(t, reference, "ref")
+	serviceAccountSuffix := pseudoIDSuffix(t, serviceAccount, "sa")
 
-	assert.NotEqual(t, resourceSuffix, namespaceSuffix,
-		"hash suffix must not be identical across prefixes for the same raw value - it leaks that the two original values are equal")
+	assert.Equal(t, resourceSuffix, referenceSuffix,
+		"a resource's own pseudonym (\"res\") and a reference to the same raw name elsewhere (\"ref\") must share a hash suffix, or the report loses the ability to show that the reference points at that resource")
+	assert.Equal(t, resourceSuffix, serviceAccountSuffix,
+		"a resource's own pseudonym (\"res\") and a ServiceAccount name reference (\"sa\") to the same raw name must share a hash suffix, for the same reason")
 }
