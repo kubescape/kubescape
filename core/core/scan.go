@@ -275,9 +275,18 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	// Determine if streaming should be enabled
 	enableStreaming := scanInfo.EnableStreaming
+	// Snapshot the pre-scan cluster size before the streaming decision. The
+	// streaming producer populates sessionObj.AllResources asynchronously, so
+	// OPAProcessor cannot snapshot the resource count at construction the way
+	// the non-streaming path does; the estimate stands in for it. Computing it
+	// up front also covers explicit --enable-streaming on large clusters.
+	var estimatedClusterSize int
+	if scanInfo.GetScanningContext() == cautils.ContextCluster {
+		estimatedClusterSize = estimateClusterSize(interfaces.resourceHandler, ctxResources, scanInfo)
+	}
 	if !enableStreaming && scanInfo.GetScanningContext() == cautils.ContextCluster {
 		// Auto-enable streaming for large clusters
-		enableStreaming = cautils.IsLargeCluster(estimateClusterSize(interfaces.resourceHandler, ctxResources, scanInfo))
+		enableStreaming = cautils.IsLargeCluster(estimatedClusterSize)
 		if enableStreaming {
 			logger.L().Ctx(ctxResources).Info("Large cluster detected, enabling resource streaming")
 		}
@@ -289,7 +298,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	if enableStreaming {
 		// Use streaming approach for large clusters
-		err = collectAndProcessResourcesWithStreaming(ctxResources, interfaces.resourceHandler, scanData, scanInfo, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, scanInfo.ControlTimeout)
+		err = collectAndProcessResourcesWithStreaming(ctxResources, interfaces.resourceHandler, scanData, scanInfo, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, scanInfo.ControlTimeout, estimatedClusterSize)
 	} else {
 		// Use traditional approach for small clusters
 		err = resourcehandler.CollectResources(ctxResources, interfaces.resourceHandler, scanData, scanInfo)
@@ -480,7 +489,11 @@ func estimateClusterSize(resourceHandler resourcehandler.IResourceHandler, ctx c
 
 // collectAndProcessResourcesWithStreaming collects and processes resources in
 // batches so the evaluation input stays bounded on large clusters.
-func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandler resourcehandler.IResourceHandler, scanData *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, clusterName string, excludedNamespaces string, includeNamespaces string, enableRegoPrint bool, controlTimeout time.Duration) error {
+// estimatedClusterSize is the pre-scan cluster-size estimate the streaming
+// decision was made from; the OPA processor uses it as its frozen resource
+// count because sessionObj.AllResources is populated asynchronously by the
+// producer goroutine.
+func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandler resourcehandler.IResourceHandler, scanData *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, clusterName string, excludedNamespaces string, includeNamespaces string, enableRegoPrint bool, controlTimeout time.Duration, estimatedClusterSize int) error {
 	// Stream resources in batches
 	batchChan, errChan, expectedNamespaceBatches, err := resourceHandler.StreamResourcesBatches(ctx, scanData, scanInfo)
 	if err != nil {
@@ -493,6 +506,10 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	var exceptionRecorder = newSecurityExceptionEventRecorder()
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, clusterName, excludedNamespaces, includeNamespaces, enableRegoPrint, exceptionRecorder)
 	reportResults.ControlTimeout = controlTimeout
+	// AllResources is still empty here — the producer goroutine fills it only
+	// after the resident batch is sent — so the frozen bucketing count must
+	// come from the estimate rather than the construction-time snapshot.
+	reportResults.SetInitialResourceCount(estimatedClusterSize)
 
 	// Process batches with streaming
 	if err := reportResults.ProcessWithStreaming(ctx, batchChan, errChan, cautils.NewProgressHandler(""), expectedNamespaceBatches); err != nil {

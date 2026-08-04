@@ -2,13 +2,20 @@ package opaprocessor
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"github.com/kubescape/opa-utils/resources"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"sigs.k8s.io/yaml"
 )
 
 // TestProcessWithStreaming_Parity verifies that ProcessWithStreaming produces
@@ -106,13 +113,109 @@ func TestProcessWithStreaming_Parity(t *testing.T) {
 	})
 }
 
-// TestProcessWithStreaming_EndToEndParity performs an end-to-end comparison
-// between the eager (non-streaming) and streaming evaluation approaches.
-// This test ensures that streaming produces identical results to the traditional approach.
-// NOTE: This test is currently disabled due to initialization complexity with mock objects.
-// The parity tests in processorhandler_parity_test.go already verify the core logic.
+// TestProcessWithStreaming_EndToEndParity runs the eager and streaming
+// pipelines end to end against the same directory of manifests and asserts the
+// results match. It drives the real seam the streaming split introduced: the
+// session object is handed to StreamResourcesBatches, whose producer goroutine
+// fills the resource maps — and, before the race fix, wrote them straight onto
+// sessionObj — while NewOPAProcessor is constructed against that same session.
+// Running under -race instruments exactly that handoff, which no other test
+// touches.
 func TestProcessWithStreaming_EndToEndParity(t *testing.T) {
-	t.Skip("End-to-end parity test requires complex mock setup - covered by processorhandler_parity_test.go")
+	t.Setenv("LARGE_CLUSTER_SIZE", "10000") // eager and streaming both evaluate as one scope
+
+	dir := t.TempDir()
+	writeFixtureManifests(t, dir)
+
+	scanInfo := &cautils.ScanInfo{InputPatterns: []string{dir}}
+	handler := resourcehandler.NewFileResourceHandler()
+	frameworks := parityFrameworks(true)
+
+	// Eager path: CollectResources → ProcessRulesListener, as scan.go does for
+	// non-streaming scans.
+	eagerSession := cautils.NewOPASessionObj(context.Background(), frameworks, nil, scanInfo)
+	eagerSession.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
+	require.NoError(t, resourcehandler.CollectResources(context.Background(), handler, eagerSession, scanInfo))
+
+	eager := NewOPAProcessor(eagerSession, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	require.NoError(t, eager.ProcessRulesListener(context.Background(), cautils.NewProgressHandler("")))
+	require.NotEmpty(t, eager.ResourcesResult)
+
+	// Streaming path: StreamResourcesBatches → ProcessWithStreaming, as scan.go
+	// does for streaming scans. NewOPAProcessor runs against the live session
+	// the producer goroutine fills — the seam this test exists to cover.
+	streamingSession := cautils.NewOPASessionObj(context.Background(), frameworks, nil, scanInfo)
+	streamingSession.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
+
+	batchChan, errChan, expectedBatches, err := handler.StreamResourcesBatches(context.Background(), streamingSession, scanInfo)
+	require.NoError(t, err)
+
+	streaming := NewOPAProcessor(streamingSession, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	streaming.SetInitialResourceCount(0) // file scans never estimate cluster size
+	require.NoError(t, streaming.ProcessWithStreaming(context.Background(), batchChan, errChan, cautils.NewProgressHandler(""), expectedBatches))
+
+	assert.Equal(t, normalize(eager.ResourcesResult), normalize(streaming.ResourcesResult))
+}
+
+// writeFixtureManifests serializes the parity harness fixture to YAML files in
+// dir so FileResourceHandler can scan them like a plain directory of manifests.
+func writeFixtureManifests(t *testing.T, dir string) {
+	t.Helper()
+
+	_, allResources := parityFixture()
+	i := 0
+	for _, wl := range allResources {
+		raw, err := yaml.Marshal(wl.GetObject())
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(dir, fmt.Sprintf("manifest-%03d.yaml", i)), raw, 0o600))
+		i++
+	}
+}
+
+// TestProcessWithStreaming_MatchesProcess pins that streaming evaluation over
+// partitioned batches produces the same results as the eager Process path, and
+// that the resident batch's maps land on the session object (K8SResources,
+// ExternalResources, AllResources) for downstream stages. The session object is
+// deliberately left without its maps before NewOPAProcessor, mirroring the real
+// streaming path where the producer delivers resources on the resident batch
+// while the processor is being constructed.
+func TestProcessWithStreaming_MatchesProcess(t *testing.T) {
+	t.Setenv("LARGE_CLUSTER_SIZE", "1") // force per-namespace batches
+
+	policies := parityPolicies(true)
+
+	expected := newParityProcessor(policies)
+	require.NoError(t, expected.Process(context.Background(), policies, nil))
+	require.NotEmpty(t, expected.ResourcesResult)
+
+	k8sResources, allResources := parityFixture()
+	sessionObj := cautils.NewOPASessionObjMock()
+	// ProcessWithStreaming rebuilds AllPolicies from the session's frameworks,
+	// so seed them the way CollectPolicies does in the real scan flow, with the
+	// same cluster scanning scope the parity harness assumes.
+	sessionObj.Policies = parityFrameworks(true)
+	sessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
+
+	opap := NewOPAProcessor(sessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+
+	resident, batches := cautils.PartitionResources(len(allResources), k8sResources, nil, allResources)
+
+	batchChan := make(chan *cautils.ResourceBatch, len(batches)+1)
+	errChan := make(chan error, 1)
+	close(errChan)
+	batchChan <- resident
+	for _, batch := range batches {
+		batchChan <- batch
+	}
+	close(batchChan)
+
+	require.NoError(t, opap.ProcessWithStreaming(context.Background(), batchChan, errChan, cautils.NewProgressHandler(""), len(batches)))
+
+	assert.Equal(t, normalize(expected.ResourcesResult), normalize(opap.ResourcesResult))
+
+	// Resident resources must reach the session object for downstream stages.
+	assert.Len(t, opap.AllResources, len(allResources))
+	assert.Equal(t, k8sResources, opap.K8SResources)
 }
 
 // TestResourceBatch_MemoryUsage verifies that namespace batches are partitioned

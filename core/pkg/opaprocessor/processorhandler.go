@@ -81,7 +81,11 @@ type OPAProcessor struct {
 	initialResourceCount int
 }
 
-// NewOPAProcessor requires sessionObj.AllResources to already be fully collected (i.e. CollectResources must have already run), since it snapshots the resource count at construction.
+// NewOPAProcessor snapshots len(sessionObj.AllResources) at construction for
+// the large-cluster bucketing decision. In the non-streaming path AllResources
+// must therefore already be fully collected (CollectResources must have run).
+// The streaming path populates AllResources asynchronously, so it calls
+// SetInitialResourceCount with the pre-scan cluster-size estimate instead.
 func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool, exceptionEventRecorder record.EventRecorder) *OPAProcessor {
 	if regoDependenciesData != nil && sessionObj != nil {
 		regoDependenciesData.PostureControlInputs = sessionObj.RegoInputData.PostureControlInputs
@@ -105,6 +109,16 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		TimedOutControls:       make(map[string]string),
 		initialResourceCount:   initialResourceCount,
 	}
+}
+
+// SetInitialResourceCount overrides the frozen resource count used for the
+// large-cluster namespace-bucketing decision (see initialResourceCount). The
+// streaming path sets it to the pre-scan cluster-size estimate because
+// sessionObj.AllResources is populated asynchronously by the producer goroutine
+// after construction, so the snapshot taken in NewOPAProcessor would otherwise
+// be 0 and evaluationScopes() would never partition.
+func (opap *OPAProcessor) SetInitialResourceCount(count int) {
+	opap.initialResourceCount = count
 }
 
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {

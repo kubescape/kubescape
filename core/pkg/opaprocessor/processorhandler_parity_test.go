@@ -96,9 +96,10 @@ func parityFixture() (cautils.K8SResources, map[string]workloadinterface.IMetada
 	return k8sResources, allResources
 }
 
-// parityPolicies returns two real controls plus one that correlates a
-// cluster-scoped resource with namespaced ones.
-func parityPolicies(withCrossScopeControl bool) *cautils.Policies {
+// parityFrameworks returns the frameworks used by the parity harness:
+// two real controls plus one that correlates a cluster-scoped resource with
+// namespaced ones.
+func parityFrameworks(withCrossScopeControl bool) []reporthandling.Framework {
 	frameworks := []reporthandling.Framework{*mocks.MockFramework_0006_0013()}
 	if withCrossScopeControl {
 		crossScope := reporthandling.Control{
@@ -129,7 +130,11 @@ func parityPolicies(withCrossScopeControl bool) *cautils.Policies {
 		})
 	}
 
-	return convertFrameworksToPolicies(frameworks, nil, reporthandling.ScopeCluster)
+	return frameworks
+}
+
+func parityPolicies(withCrossScopeControl bool) *cautils.Policies {
+	return convertFrameworksToPolicies(parityFrameworks(withCrossScopeControl), nil, reporthandling.ScopeCluster)
 }
 
 func newParityProcessor(policies *cautils.Policies) *OPAProcessor {

@@ -115,16 +115,20 @@ func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Conte
 	batchChan := make(chan *cautils.ResourceBatch, 1)
 	errChan := make(chan error, 1)
 
+	// Collect synchronously so sessionObj mutations (ExcludedRules,
+	// SingleResourceScan, ResourceSource) happen-before the caller's
+	// NewOPAProcessor/ProcessWithStreaming read them, instead of racing from a
+	// producer goroutine like the eager path did. File collection is local and
+	// fast, so this blocks no longer than the old async body did.
+	k8sResources, allResources, externalResources, excludedRulesMap, err := fileHandler.GetResources(ctx, sessionObj, scanInfo)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	sessionObj.ExcludedRules = excludedRulesMap
+
 	go func() {
 		defer close(errChan)
 		defer close(batchChan)
-
-		// Use existing GetResources implementation
-		k8sResources, allResources, externalResources, excludedRulesMap, err := fileHandler.GetResources(ctx, sessionObj, scanInfo)
-		if err != nil {
-			errChan <- err
-			return
-		}
 
 		// Create a single batch with all resources
 		batch := cautils.NewResourceBatch(cautils.ClusterScope)
@@ -132,12 +136,9 @@ func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Conte
 		batch.AllResources = allResources
 		batch.ExternalResources = externalResources
 
-		sessionObj.ExcludedRules = excludedRulesMap
-
 		select {
 		case batchChan <- batch:
 		case <-ctx.Done():
-			errChan <- ctx.Err()
 		}
 	}()
 

@@ -212,6 +212,11 @@ func (k8sHandler *K8sResourceHandler) GetCloudProvider() string {
 // 1. First, it collects all cluster-scoped and external resources into a resident batch
 // 2. Then, it streams namespace-scoped resources in batches
 // The resident batch is sent first, followed by namespace batches in sorted order.
+// The producer goroutine never mutates sessionObj's K8SResources,
+// ExternalResources, or AllResources — the collected maps are carried on the
+// resident batch and copied into the session by ProcessWithStreaming once it
+// receives the batch, so NewOPAProcessor (which runs concurrently with the
+// producer) never reads maps another goroutine is writing.
 // Returns the batch channel, error channel, expected number of namespace batches, and any setup error.
 func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
 	logger.L().Start("Streaming Kubernetes objects in batches...")
@@ -362,9 +367,14 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		}
 	}
 
-	sessionObj.K8SResources = resident.K8SResources
-	sessionObj.ExternalResources = resident.ExternalResources
-	sessionObj.AllResources = allResources
+	// Note: the resident batch deliberately carries K8SResources,
+	// ExternalResources, and AllResources instead of the producer writing them
+	// to sessionObj. This goroutine runs concurrently with the caller's
+	// NewOPAProcessor, which snapshots len(sessionObj.AllResources) at
+	// construction; writing those fields here would be an unsynchronised
+	// concurrent write against that read. ProcessWithStreaming copies the
+	// resident batch into the processor (sessionObj) after receiving it, so the
+	// maps still land on the session by the time downstream stages run.
 
 	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
 	if err != nil {
