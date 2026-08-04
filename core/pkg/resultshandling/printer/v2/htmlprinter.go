@@ -73,7 +73,7 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 			}
 			return total
 		},
-		"float32ToInt": cautils.Float32ToInt,
+		"riskScoreToInt": cautils.RiskScoreToInt,
 		"lower":        strings.ToLower,
 		"sortByNamespace": func(resourceTableView ResourceTableView) ResourceTableView {
 			sortedResourceTableView := make(ResourceTableView, len(resourceTableView))

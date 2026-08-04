@@ -109,3 +109,44 @@ func TestBuildResourceTableView_SkipsMissingResource(t *testing.T) {
 	view := buildResourceTableView(session)
 	assert.Empty(t, view, "missing resource should be skipped, not included with nil")
 }
+
+func TestHtmlPrinter_ActionPrint_RiskScoreRounding(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	origWd, err := os.Getwd()
+	assert.NoError(t, err)
+	assert.NoError(t, os.Chdir(tmp))
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+
+	hp := NewHtmlPrinter()
+	hp.SetWriter(ctx, "report.html")
+	t.Cleanup(func() {
+		_ = hp.writer.Close()
+	})
+
+	session := cautils.NewOPASessionObjMock()
+	session.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+		"C-0001": reportsummary.ControlSummary{
+			ControlID:   "C-0001",
+			Name:        "Test Fractional Risk Control",
+			Score:       0.4,
+			ScoreFactor: 1.0,
+			StatusCounters: reportsummary.StatusCounters{
+				FailedResources: 1,
+				PassedResources: 99,
+			},
+		},
+	}
+
+	hp.ActionPrint(ctx, session, nil)
+	hp.CloseWriter()
+
+	content, err := os.ReadFile(hp.writer.Name())
+	assert.NoError(t, err)
+	htmlContent := string(content)
+
+	// Fractional risk score 0.4% must round to 1% display, not 0%
+	assert.Contains(t, htmlContent, `<td class="controlRiskCell numericCell">1</td>`)
+	assert.NotContains(t, htmlContent, `<td class="controlRiskCell numericCell">0</td>`)
+}
+

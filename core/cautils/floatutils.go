@@ -38,3 +38,15 @@ func ComplianceScoreToInt(x float32) int {
 	}
 	return i
 }
+
+// RiskScoreToInt converts a risk score to a display-safe integer. It preserves
+// the existing rounded display while ensuring a non-zero risk never appears as
+// zero because of rounding.
+func RiskScoreToInt(x float32) int {
+	i := Float32ToInt(x)
+	if i <= 0 && x > 0 {
+		return 1
+	}
+	return i
+}
+

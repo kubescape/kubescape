@@ -76,6 +76,57 @@ func TestComplianceScoreToInt(t *testing.T) {
 	}
 }
 
+func TestRiskScoreToInt(t *testing.T) {
+	tests := []struct {
+		name  string
+		score float32
+		want  int
+	}{
+		{
+			name:  "ordinary fractional score still rounds",
+			score: 20.4,
+			want:  20,
+		},
+		{
+			name:  "ordinary fractional score rounds up",
+			score: 20.7,
+			want:  21,
+		},
+		{
+			name:  "small non-zero risk score does not round to zero",
+			score: 0.4,
+			want:  1,
+		},
+		{
+			name:  "tiny non-zero risk score does not round to zero",
+			score: 0.01,
+			want:  1,
+		},
+		{
+			name:  "zero risk score remains zero",
+			score: 0.0,
+			want:  0,
+		},
+		{
+			name:  "unscored sentinel remains negative",
+			score: -1.0,
+			want:  -1,
+		},
+		{
+			name:  "high risk score rounds normally",
+			score: 99.6,
+			want:  100,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, RiskScoreToInt(tt.score))
+		})
+	}
+}
+
+
 func TestFloat32ToIntFloor(t *testing.T) {
 	assert.Equal(t, 99, Float32ToIntFloor(99.5))
 	assert.Equal(t, 99, Float32ToIntFloor(99.9))
