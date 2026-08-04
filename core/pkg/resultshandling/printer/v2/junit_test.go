@@ -222,6 +222,16 @@ func TestProperties(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "Score near 100 does not round to 100.00",
+			score: 99.996,
+			expectedProperty: []JUnitProperty{
+				{
+					Name:  "complianceScore",
+					Value: "99.99",
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
