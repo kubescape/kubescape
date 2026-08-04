@@ -29,7 +29,8 @@ type LocalGitRepository struct {
 var worktreeRoot = (*LocalGitRepository).GetRootDir
 
 func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
-	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})
+	// EnableDotGitCommonDir is required for linked worktrees, whose .git points at a per-worktree admin dir while the ref HEAD names, the config and the objects stay in the main repository's common dir.
+	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true, EnableDotGitCommonDir: true})
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +153,7 @@ func (g *LocalGitRepository) GetLastCommit() (*apis.Commit, error) {
 // checkouts routinely lack even though the repository every reported path is
 // relative to is right there.
 func GetGitRootDir(path string) (string, error) {
+	// EnableDotGitCommonDir is deliberately omitted here: Worktree() reads no refs, so a linked worktree already resolves, and setting it would fail an orphaned one whose root still resolves fine.
 	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		return "", err
