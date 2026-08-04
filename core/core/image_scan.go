@@ -91,19 +91,30 @@ func getAttributesFromImage(imgName string) (Attributes, error) {
 	// reference. Split off any "@digest" suffix first: the digest itself
 	// contains a colon ("sha256:..."), so splitting nameAndTag on ":"
 	// without accounting for that left "@sha256" stuck onto imageName and
-	// the raw hash treated as the tag, which silently broke exception-policy
-	// matching (isTargetImage below) for digest-pinned images.
+	// the raw hash treated as the tag. Because regexStringMatch (below) is
+	// an unanchored match, unanchored policy patterns (the common case,
+	// e.g. "myimage") still matched the old broken ImageName; anchored
+	// patterns (e.g. "^myimage$") did not, and this fixes those.
 	beforeDigest := nameAndTag
 	imageTag := "latest"
 	if at := strings.Index(nameAndTag, "@"); at != -1 {
 		beforeDigest = nameAndTag[:at]
-		imageTag = nameAndTag[at+1:] // digest, used as a fallback "tag" below
+		// No explicit tag on a digest-pinned reference: fall back to the
+		// digest as ImageTag (deliberate choice, not Docker/OCI reference
+		// semantics - Docker resolves a "name:tag@digest" reference by the
+		// digest, ignoring the tag, but for *exception-policy matching* the
+		// tag the user wrote is what they meant to target). This means an
+		// exception policy that targets a specific ImageTag (e.g. "v3.*")
+		// cannot match a purely digest-pinned scan, since ImageTag will be
+		// the digest instead; only Registry/Organization/ImageName targets
+		// (and an ImageTag target of "" - "any tag") can match it.
+		imageTag = nameAndTag[at+1:]
 	}
 
 	imageName := beforeDigest
 	if colon := strings.LastIndex(beforeDigest, ":"); colon != -1 {
 		imageName = beforeDigest[:colon]
-		imageTag = beforeDigest[colon+1:] // an explicit tag wins over the digest
+		imageTag = beforeDigest[colon+1:] // an explicit tag wins over the digest fallback above
 	}
 
 	attributes := Attributes{
