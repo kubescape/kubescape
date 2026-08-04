@@ -1,15 +1,41 @@
 package scan
 
 import (
+	"bytes"
+	"context"
+	"os"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/mocks"
+	resultshandlingpkg "github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+type noOpWorkloadPrinter struct{}
+
+func (noOpWorkloadPrinter) PrintNextSteps() {}
+func (noOpWorkloadPrinter) ActionPrint(context.Context, *cautils.OPASessionObj, []cautils.ImageScanData) {
+}
+func (noOpWorkloadPrinter) SetWriter(context.Context, string) {}
+func (noOpWorkloadPrinter) Score(float32)                     {}
+
+type workloadScanCaptureKubescape struct {
+	mocks.MockIKubescape
+	scanInfo *cautils.ScanInfo
+}
+
+func (m *workloadScanCaptureKubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandlingpkg.ResultsHandler, error) {
+	m.scanInfo = scanInfo
+	results := resultshandlingpkg.NewResultsHandler(nil, nil, noOpWorkloadPrinter{})
+	results.SetData(&cautils.OPASessionObj{Report: &reporthandlingv2.PostureReport{}})
+	return results, nil
+}
 
 func TestSetWorkloadScanInfo(t *testing.T) {
 	tests := []struct {
@@ -19,6 +45,7 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 		name        string
 		namespace   string
 		filePath    string
+		inputPaths  []string
 		want        *cautils.ScanInfo
 	}{
 		{
@@ -106,13 +133,45 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 				InputPatterns: []string{"manifests/deployment.yaml"},
 			},
 		},
+		{
+			Description: "Set workload scan info preserves positional input paths",
+			apiVersion:  "apps/v1",
+			kind:        "Deployment",
+			name:        "api",
+			namespace:   "default",
+			filePath:    "manifests/deployment.yaml",
+			inputPaths:  []string{"manifests"},
+			want: &cautils.ScanInfo{
+				PolicyIdentifier: []cautils.PolicyIdentifier{
+					{
+						Identifier: "workloadscan",
+						Kind:       v1.KindFramework,
+					},
+					{
+						Identifier: "allcontrols",
+						Kind:       v1.KindFramework,
+					},
+				},
+				ScanType:   cautils.ScanTypeWorkload,
+				ScanImages: true,
+				ScanObject: &objectsenvelopes.ScanObject{
+					ApiVersion: "apps/v1",
+					Kind:       "Deployment",
+					Metadata: objectsenvelopes.ScanObjectMetadata{
+						Name:      "api",
+						Namespace: "default",
+					},
+				},
+				InputPatterns: []string{"manifests"},
+			},
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(
 			tc.Description,
 			func(t *testing.T) {
-				scanInfo := &cautils.ScanInfo{FilePath: tc.filePath, Namespace: tc.namespace}
+				scanInfo := &cautils.ScanInfo{FilePath: tc.filePath, Namespace: tc.namespace, InputPatterns: tc.inputPaths}
 				setWorkloadScanInfo(scanInfo, tc.apiVersion, tc.kind, tc.name)
 
 				if scanInfo.ScanType != tc.want.ScanType {
@@ -137,7 +196,7 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 
 				assert.Equal(t, tc.want.ScanObject.GetApiVersion(), scanInfo.ScanObject.GetApiVersion())
 
-				if tc.filePath == "" {
+				if len(tc.want.InputPatterns) == 0 {
 					assert.Len(t, scanInfo.InputPatterns, 0)
 				} else {
 					assert.Equal(t, tc.want.InputPatterns, scanInfo.InputPatterns)
@@ -183,6 +242,99 @@ func TestGetWorkloadCmd_ChartPathAndFilePathEmpty(t *testing.T) {
 	err = cmd.Args(&cobra.Command{}, []string{"nginx"})
 	expectedErrorMessage = "usage: --chart-path <chart path> --file-path <file path>"
 	assert.Equal(t, expectedErrorMessage, err.Error())
+}
+
+func TestGetWorkloadCmd_ArgsAcceptsPositionalLocalInputs(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getWorkloadCmd(&mocks.MockIKubescape{}, &scanInfo)
+
+	err := cmd.Args(cmd, []string{"Deployment/nginx", "manifests/app.yaml", "manifests/sidecar.yaml"})
+
+	assert.NoError(t, err)
+}
+
+func TestGetWorkloadCmd_ArgsRejectsAmbiguousFilePathAndPositionalInputs(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getWorkloadCmd(&mocks.MockIKubescape{}, &scanInfo)
+	scanInfo.FilePath = "manifests/app.yaml"
+
+	err := cmd.Args(cmd, []string{"Deployment/nginx", "manifests"})
+
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
+}
+
+func TestGetWorkloadCmd_ArgsAllowsChartPathWithScanRoot(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getWorkloadCmd(&mocks.MockIKubescape{}, &scanInfo)
+	scanInfo.ChartPath = "charts/app"
+	scanInfo.FilePath = "charts/app/templates/deployment.yaml"
+
+	err := cmd.Args(cmd, []string{"Deployment/nginx", "."})
+
+	assert.NoError(t, err)
+}
+
+func TestGetWorkloadCmd_ArgsRejectsStdinMixedWithOtherInputs(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getWorkloadCmd(&mocks.MockIKubescape{}, &scanInfo)
+
+	err := cmd.Args(cmd, []string{"Deployment/nginx", "-", "manifests/app.yaml"})
+
+	assert.EqualError(t, err, "usage: stdin input '-' cannot be combined with other input paths")
+}
+
+func TestPrepareWorkloadInput(t *testing.T) {
+	t.Run("positional inputs populate input patterns", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+
+		cleanup, err := prepareWorkloadInput(bytes.NewBufferString(""), []string{"Deployment/nginx", "manifests/a.yaml", "manifests/b.yaml"}, &scanInfo)
+		defer cleanup()
+
+		require.NoError(t, err)
+		assert.Equal(t, []string{"manifests/a.yaml", "manifests/b.yaml"}, scanInfo.InputPatterns)
+	})
+
+	t.Run("file path flag populates input patterns when no positional input is passed", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{FilePath: "manifests/app.yaml"}
+
+		cleanup, err := prepareWorkloadInput(bytes.NewBufferString(""), []string{"Deployment/nginx"}, &scanInfo)
+		defer cleanup()
+
+		require.NoError(t, err)
+		assert.Equal(t, []string{"manifests/app.yaml"}, scanInfo.InputPatterns)
+	})
+
+	t.Run("stdin input is copied to a temporary manifest and cleaned up", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		stdin := bytes.NewBufferString("apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx\n")
+
+		cleanup, err := prepareWorkloadInput(stdin, []string{"Pod/nginx", "-"}, &scanInfo)
+		require.NoError(t, err)
+		require.Len(t, scanInfo.InputPatterns, 1)
+
+		got, err := os.ReadFile(scanInfo.InputPatterns[0])
+		require.NoError(t, err)
+		assert.Contains(t, string(got), "kind: Pod")
+
+		cleanup()
+		_, err = os.Stat(scanInfo.InputPatterns[0])
+		assert.True(t, os.IsNotExist(err), "temporary stdin manifest should be removed by cleanup")
+	})
+}
+
+func TestGetWorkloadCmd_RunE_ForwardsPositionalLocalInputs(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	ks := &workloadScanCaptureKubescape{}
+	cmd := getWorkloadCmd(ks, &scanInfo)
+
+	err := cmd.RunE(cmd, []string{"Deployment/nginx", "manifests/app.yaml", "manifests/sidecar.yaml"})
+
+	require.NoError(t, err)
+	require.NotNil(t, ks.scanInfo)
+	assert.Equal(t, cautils.ScanTypeWorkload, ks.scanInfo.ScanType)
+	assert.Equal(t, []string{"manifests/app.yaml", "manifests/sidecar.yaml"}, ks.scanInfo.InputPatterns)
+	assert.Equal(t, "Deployment", ks.scanInfo.ScanObject.GetKind())
+	assert.Equal(t, "nginx", ks.scanInfo.ScanObject.GetName())
 }
 
 func Test_parseWorkloadIdentifierString_Invalid(t *testing.T) {
