@@ -76,11 +76,13 @@ type OPAProcessor struct {
 	celEvaluatorOnce sync.Once
 	celEvaluatorErr  error
 	// celNamespaceIndex maps namespace name -> the scan's Namespace object, so
-	// CEL evaluation can bind namespaceObject the way the apiserver does. Built
-	// at construction (see indexNamespaces): NewOPAProcessor already requires
-	// AllResources to be fully collected, so indexing there makes the snapshot
-	// structurally independent of whatever rules write into AllResources
-	// mid-scan, instead of depending on when the first CEL rule happens to run.
+	// CEL evaluation can bind namespaceObject the way the apiserver does. In the
+	// non-streaming path it is built at construction (see indexNamespaces), where
+	// AllResources is already fully collected, so the snapshot is structurally
+	// independent of whatever rules write into AllResources mid-scan instead of
+	// depending on when the first CEL rule happens to run. The streaming path has
+	// no such snapshot to take, so it extends the index batch by batch via
+	// indexNamespacesFrom, always before the batch is evaluated.
 	celNamespaceIndex map[string]map[string]any
 	// initialResourceCount is the size of AllResources snapshotted once at
 	// construction, so the large-cluster namespace-bucketing decision (see
@@ -89,7 +91,11 @@ type OPAProcessor struct {
 	initialResourceCount int
 }
 
-// NewOPAProcessor requires sessionObj.AllResources to already be fully collected (i.e. CollectResources must have already run), since it snapshots the resource count at construction.
+// NewOPAProcessor snapshots len(sessionObj.AllResources) at construction for
+// the large-cluster bucketing decision. In the non-streaming path AllResources
+// must therefore already be fully collected (CollectResources must have run).
+// The streaming path populates AllResources asynchronously, so it calls
+// SetInitialResourceCount with the pre-scan cluster-size estimate instead.
 func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool, exceptionEventRecorder record.EventRecorder) *OPAProcessor {
 	if regoDependenciesData != nil && sessionObj != nil {
 		regoDependenciesData.PostureControlInputs = sessionObj.RegoInputData.PostureControlInputs
@@ -121,18 +127,55 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 // celNamespaceObjectFor). Nil-safe by returning an empty index: a nil session
 // or a scan that never collected Namespaces (file scans, frameworks with no
 // Namespace-matching control) just resolves every lookup to nil.
+//
+// In the streaming path AllResources is still empty here, so this yields an
+// empty index and ProcessWithStreaming fills it in per batch via
+// indexNamespacesFrom instead.
 func indexNamespaces(sessionObj *cautils.OPASessionObj) map[string]map[string]any {
 	if sessionObj == nil {
 		return nil
 	}
 	index := make(map[string]map[string]any)
-	for _, resource := range sessionObj.AllResources {
+	addNamespacesToIndex(index, sessionObj.AllResources)
+	return index
+}
+
+// indexNamespacesFrom merges the Namespace objects in resources into the CEL
+// namespace index. The streaming path calls it for every batch before the batch
+// is evaluated, because AllResources is empty at construction time: a Namespace
+// object is scoped to its own name by cautils.ResourceScope, so it arrives in
+// that namespace's batch alongside the resources it contains, which is exactly
+// the batch whose objects need it bound. Without this, celNamespaceObjectFor
+// would resolve every namespace to nil under --enable-streaming and
+// admission-scoped CEL rules would diverge from the non-streaming path.
+func (opap *OPAProcessor) indexNamespacesFrom(resources map[string]workloadinterface.IMetadata) {
+	if len(resources) == 0 {
+		return
+	}
+	if opap.celNamespaceIndex == nil {
+		opap.celNamespaceIndex = make(map[string]map[string]any)
+	}
+	addNamespacesToIndex(opap.celNamespaceIndex, resources)
+}
+
+// addNamespacesToIndex indexes every v1 Namespace object in resources by name.
+func addNamespacesToIndex(index map[string]map[string]any, resources map[string]workloadinterface.IMetadata) {
+	for _, resource := range resources {
 		if resource == nil || resource.GetKind() != "Namespace" || resource.GetApiVersion() != "v1" {
 			continue
 		}
 		index[resource.GetName()] = resource.GetObject()
 	}
-	return index
+}
+
+// SetInitialResourceCount overrides the frozen resource count used for the
+// large-cluster namespace-bucketing decision (see initialResourceCount). The
+// streaming path sets it to the pre-scan cluster-size estimate because
+// sessionObj.AllResources is populated asynchronously by the producer goroutine
+// after construction, so the snapshot taken in NewOPAProcessor would otherwise
+// be 0 and evaluationScopes() would never partition.
+func (opap *OPAProcessor) SetInitialResourceCount(count int) {
+	opap.initialResourceCount = count
 }
 
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
@@ -168,68 +211,227 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	return processErr
 }
 
-type policyControl struct {
-	key     string
-	control reporthandling.Control
-}
-
-// Process OPA policies (rules) on all configured controls.
-func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policies, progressListener IJobProgressNotificationClient) error {
-	ctx, span := otel.Tracer("").Start(ctx, "OPAProcessor.Process")
+// ProcessWithStreaming processes OPA policies using streaming resource batches.
+// It processes batches incrementally, keeping the resident (cluster-scoped)
+// batch in memory throughout.
+//
+// The streaming approach:
+//  1. Receives batches via a channel (resident batch first, then namespace batches)
+//  2. Keeps the resident batch in memory for the entire scan
+//  3. Processes each namespace batch against the resident batch as it arrives
+//  4. Merges each namespace batch's resources into the session-wide maps so
+//     downstream stages (exceptions, printers, image scanning) can access them
+//  5. Merges results from all batches
+//
+// Note: Streaming bounds the OPA evaluation input (resident batch plus one
+// namespace batch at a time), not total memory: the producer holds the whole
+// cluster while collecting, and this method retains every resource in
+// AllResources for downstream stages.
+func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-chan *cautils.ResourceBatch, errChan <-chan error, progressListener IJobProgressNotificationClient, expectedNamespaceBatches int) error {
+	ctx, span := otel.Tracer("").Start(ctx, "OPAProcessor.ProcessWithStreaming")
 	defer span.End()
 	opap.loggerStartScanning()
 	defer opap.loggerDoneScanning()
 
-	controls := sortedPolicyControls(policies.Controls)
+	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.ExcludedRules, cautils.GetScanningScope(opap.Metadata.ContextMetadata))
+	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
+
+	controlIDs := sortedControlIDs(opap.AllPolicies)
+
+	// Calculate total progress steps: controls × (resident scope + namespace scopes)
+	totalSteps := len(controlIDs) * (1 + expectedNamespaceBatches)
 	if progressListener != nil {
-		progressListener.Start(len(controls))
+		progressListener.Start(totalSteps)
 		defer progressListener.Stop()
 	}
 
+	// Track the resident batch (cluster-scoped resources)
+	var residentBatch *cautils.ResourceBatch
+
+	// First, wait for the resident batch
+	for {
+		select {
+		case batch, ok := <-batchChan:
+			if !ok {
+				// Channel closed without sending a batch.
+				// Check if the producer left an error.
+				select {
+				case err, ok := <-errChan:
+					if ok && err != nil {
+						return fmt.Errorf("batch channel closed without resident batch: %w", err)
+					}
+					// errChan closed without error — no resident batch was ever sent.
+					return fmt.Errorf("batch channel closed without resident batch")
+				default:
+					return fmt.Errorf("batch channel closed without resident batch")
+				}
+			}
+			if batch.Scope == cautils.ClusterScope {
+				residentBatch = batch
+			} else {
+				// First batch must be resident
+				return fmt.Errorf("first batch must be resident (cluster-scoped), got: %s", batch.Scope)
+			}
+			goto haveResident
+		case err, ok := <-errChan:
+			if !ok {
+				errChan = nil
+				continue
+			}
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+haveResident:
+
+	if residentBatch == nil {
+		return fmt.Errorf("no resident batch received")
+	}
+
+	// Set up session with resident resources
+	// Initialize AllResources with resident resources, we'll merge namespace resources as we process them
+	opap.K8SResources = make(cautils.K8SResources)
+	for k, v := range residentBatch.K8SResources {
+		opap.K8SResources[k] = v
+	}
+	opap.ExternalResources = residentBatch.ExternalResources
+	opap.AllResources = make(map[string]workloadinterface.IMetadata)
+	for k, v := range residentBatch.AllResources {
+		opap.AllResources[k] = v
+	}
+
+	// Index any Namespace objects the resident batch carries before evaluating,
+	// so CEL's namespaceObject binding is populated for this scope's objects.
+	opap.indexNamespacesFrom(residentBatch.AllResources)
+
+	// Process resident batch first
+	residentScope := evaluationScope{name: residentBatch.Scope, resident: residentBatch}
+	if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, residentScope, progressListener); err != nil {
+		return err
+	}
+
+	// Process namespace batches as they arrive
+	for {
+		select {
+		case batch, ok := <-batchChan:
+			if !ok {
+				// Channel closed, no more batches
+				goto done
+			}
+			if batch.Scope == cautils.ClusterScope {
+				return fmt.Errorf("received duplicate resident batch")
+			}
+
+			// A namespace's own Namespace object is scoped to this batch, so
+			// index it before evaluating the batch that needs it bound.
+			opap.indexNamespacesFrom(batch.AllResources)
+
+			// Process this namespace batch
+			namespaceScope := evaluationScope{name: batch.Scope, batch: batch, resident: residentBatch}
+			if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, namespaceScope, progressListener); err != nil {
+				return err
+			}
+
+			// Merge namespace batch resources into the session-wide map so
+			// downstream stages (exception matching, printers, image scanning,
+			// prioritisation) can access them.
+			for resourceID, resource := range batch.AllResources {
+				opap.AllResources[resourceID] = resource
+			}
+			for gvr, ids := range batch.K8SResources {
+				opap.K8SResources[gvr] = append(opap.K8SResources[gvr], ids...)
+			}
+
+		case err, ok := <-errChan:
+			if !ok {
+				errChan = nil
+				continue
+			}
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+done:
+	// Drain any remaining error (non-blocking; errChan may already be closed).
+	select {
+	case err, ok := <-errChan:
+		if ok && err != nil {
+			return err
+		}
+	default:
+	}
+
+	// Rebuild scan coverage
+	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations)
+	opap.ScanCoverage.ComputeCoverageScore(len(opap.Report.SummaryDetails.Controls))
+
+	// Update results
+	opap.updateResults(ctx)
+	opap.markTimedOutControlsSkipped()
+
+	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
+	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
+		logger.L().Ctx(ctx).Warning("failed to calculate score", helpers.Error(err))
+	}
+
+	opap.reweightComplianceScores()
+
+	return nil
+}
+
+// processScope processes all controls for a single evaluation scope.
+// Each scope gets the full ControlTimeout budget — the timeout is not shared
+// across scopes, so a control that completes in earlier scopes keeps its
+// accumulated results even if a later scope exceeds the budget.
+func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Policies, controlIDs []string, scope evaluationScope, progressListener IJobProgressNotificationClient) error {
 	var processErrs []error
-	for _, item := range controls {
+
+	for _, controlID := range controlIDs {
 		if err := ctx.Err(); err != nil {
 			processErrs = append(processErrs, err)
 			break
 		}
-		toPin := item.control
 		if progressListener != nil {
-			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", toPin.ControlID))
+			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", controlID))
+		}
+		if _, timedOut := opap.TimedOutControls[controlID]; timedOut {
+			continue
 		}
 
-		control := toPin
+		control := policies.Controls[controlID]
 
 		var resourcesAssociatedControl map[string]resourcesresults.ResourceAssociatedControl
 		var err error
 
 		if opap.ControlTimeout > 0 {
 			cctx, cancel := context.WithTimeout(ctx, opap.ControlTimeout)
-			resourcesAssociatedControl, err = opap.processControl(cctx, &control)
+			resourcesAssociatedControl, err = opap.processControl(cctx, &control, scope)
 			if cctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
 				opap.markControlTimedOut(&control, opap.ControlTimeout)
+				// Keep results accumulated from earlier scopes; only discard
+				// the current scope's verdicts since the control did not finish.
 				err = nil
 				resourcesAssociatedControl = nil
 			}
 			cancel()
 		} else {
-			resourcesAssociatedControl, err = opap.processControl(ctx, &control)
+			resourcesAssociatedControl, err = opap.processControl(ctx, &control, scope)
 		}
 
 		if err != nil {
 			processErrs = append(processErrs, fmt.Errorf("control %q: %w", control.ControlID, err))
 		}
 
-		if len(resourcesAssociatedControl) == 0 {
-			continue
-		}
-
-		// update resources with latest results
+		// Update resources with latest results
 		for resourceID, controlResult := range resourcesAssociatedControl {
-			if _, ok := opap.ResourcesResult[resourceID]; !ok {
-				opap.ResourcesResult[resourceID] = resourcesresults.Result{ResourceID: resourceID}
+			t, ok := opap.ResourcesResult[resourceID]
+			if !ok {
+				t = resourcesresults.Result{ResourceID: resourceID}
 			}
-			t := opap.ResourcesResult[resourceID]
-			t.AssociatedControls = append(t.AssociatedControls, controlResult)
+			t.AssociatedControls = mergeAssociatedControls(t.AssociatedControls, controlResult, opap.AllPolicies)
 			opap.ResourcesResult[resourceID] = t
 		}
 	}
@@ -237,6 +439,127 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 	return errors.Join(processErrs...)
 }
 
+// Process OPA policies (rules) on all configured controls.
+//
+// Resources are evaluated one scope at a time: first the resident scope
+// (cluster-scoped and external objects), then one scope per namespace, each
+// evaluated together with the resident scope. On clusters at or below the
+// large-cluster threshold there is a single scope holding everything, so the
+// evaluation input is unchanged.
+//
+// The scope loop is the outer loop so that a scope's resources are needed only
+// while that scope is being evaluated. A resource that belongs to several
+// scopes — anything resident — is therefore evaluated once per scope, and its
+// per-scope verdicts are merged (see mergeAssociatedControls). This reproduces
+// the accumulation the previous rule-outer/namespace-inner loop performed
+// inside a single result map.
+func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policies, progressListener IJobProgressNotificationClient) error {
+	ctx, span := otel.Tracer("").Start(ctx, "OPAProcessor.Process")
+	defer span.End()
+	opap.loggerStartScanning()
+	defer opap.loggerDoneScanning()
+
+	scopes := opap.evaluationScopes()
+	controlIDs := sortedControlIDs(policies)
+
+	if progressListener != nil {
+		progressListener.Start(len(controlIDs) * len(scopes))
+		defer progressListener.Stop()
+	}
+
+	// Delegate to processScope so the timeout and evaluation logic lives in
+	// one place instead of two near-identical loops that have already drifted.
+	var processErrs []error
+	for _, scope := range scopes {
+		if err := ctx.Err(); err != nil {
+			processErrs = append(processErrs, err)
+			break
+		}
+		if err := opap.processScope(ctx, policies, controlIDs, scope, progressListener); err != nil {
+			processErrs = append(processErrs, err)
+		}
+	}
+
+	return errors.Join(processErrs...)
+}
+
+// evaluationScope is one unit of evaluation input: a batch of resources plus
+// the resident batch every scope depends on.
+type evaluationScope struct {
+	name string
+	// batch holds the scope's own resources. It is nil for the resident scope,
+	// which is evaluated on its own so that cluster-scoped resources are still
+	// assessed on clusters with no namespaced resources at all.
+	batch    *cautils.ResourceBatch
+	resident *cautils.ResourceBatch
+}
+
+// matchedObjects returns the rule's input for this scope: the scope's own
+// matching objects, then the resident ones. The ordering matters because Rego
+// rules see the input as an array.
+//
+// A namespace scope that matches nothing of its own contributes no input at
+// all: evaluating it would re-run the rule on the resident objects alone,
+// which the resident scope already did.
+func (scope evaluationScope) matchedObjects(rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
+	var objects []workloadinterface.IMetadata
+	if scope.batch != nil {
+		objects = getKubernetesObjects(scope.batch.K8SResources, scope.batch.AllResources, rule.Match)
+		if len(objects) == 0 {
+			return nil
+		}
+	}
+	objects = append(objects, getKubernetesObjects(scope.resident.K8SResources, scope.resident.AllResources, rule.Match)...)
+	objects = append(objects, getKubernetesObjectsFromExternalResources(scope.resident.ExternalResources, scope.resident.AllResources, rule.DynamicMatch)...)
+	return objects
+}
+
+// evaluationScopes partitions the session's resources into the scopes to
+// evaluate, resident scope first and namespaces in sorted order. The
+// large-cluster bucketing decision is made from initialResourceCount — the
+// count frozen at construction — rather than the live size of AllResources,
+// so aggregator write-back during evaluation cannot re-bucket namespaces
+// mid-scan.
+func (opap *OPAProcessor) evaluationScopes() []evaluationScope {
+	resident, batches := cautils.PartitionResources(opap.initialResourceCount, opap.K8SResources, opap.ExternalResources, opap.AllResources)
+
+	scopes := make([]evaluationScope, 0, len(batches)+1)
+	scopes = append(scopes, evaluationScope{name: resident.Scope, resident: resident})
+	for _, batch := range batches {
+		scopes = append(scopes, evaluationScope{name: batch.Scope, batch: batch, resident: resident})
+	}
+
+	logger.L().Debug("partitioned resources for evaluation",
+		helpers.Int("scopes", len(scopes)),
+		helpers.Int("residentResources", resident.Len()))
+
+	return scopes
+}
+
+type policyControl struct {
+	key     string
+	control reporthandling.Control
+}
+
+// sortedControlIDs returns the keys of the controls to evaluate in a stable
+// order. The order determines how a resource's AssociatedControls are laid out,
+// which used to depend on Go's map iteration order. Keys (rather than
+// ControlIDs) are returned because the scope loops look controls back up in
+// policies.Controls, which is keyed by name, and because a control with an
+// empty ControlID must still be addressable.
+func sortedControlIDs(policies *cautils.Policies) []string {
+	items := sortedPolicyControls(policies.Controls)
+	keys := make([]string, 0, len(items))
+	for _, item := range items {
+		keys = append(keys, item.key)
+	}
+	return keys
+}
+
+// sortedPolicyControls orders controls by ControlID, falling back to the map
+// key for controls that have no ControlID, and breaks ties on the key so the
+// order is total. Sorting on ControlID rather than the map key keeps the
+// evaluation order aligned with the user-visible control identity.
 func sortedPolicyControls(controls map[string]reporthandling.Control) []policyControl {
 	out := make([]policyControl, 0, len(controls))
 	for key, control := range controls {
@@ -276,11 +599,12 @@ func (opap *OPAProcessor) loggerDoneScanning() {
 	}
 }
 
-// processControl processes all the rules for a given control
+// processControl processes all the rules for a given control, on a single
+// scope.
 //
 // NOTE: the call to processControl no longer mutates the state of the current OPAProcessor instance,
 // but returns a map instead, to be merged by the caller.
-func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthandling.Control) (map[string]resourcesresults.ResourceAssociatedControl, error) {
+func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthandling.Control, scope evaluationScope) (map[string]resourcesresults.ResourceAssociatedControl, error) {
 	resourcesAssociatedControl := make(map[string]resourcesresults.ResourceAssociatedControl)
 
 	var ruleErrs []error
@@ -289,7 +613,7 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 			ruleErrs = append(ruleErrs, err)
 			break
 		}
-		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput, control.ControlID)
+		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput, scope, control.ControlID)
 		if err != nil {
 			ruleErrs = append(ruleErrs, fmt.Errorf("rule %q: %w", control.Rules[i].Name, err))
 		}
@@ -318,147 +642,169 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 	return resourcesAssociatedControl, errors.Join(ruleErrs...)
 }
 
-// processRule processes a single policy rule, with some extra fixed control inputs.
+// processRule processes a single policy rule. When scope is provided
+// (scope.name != ""), it evaluates the rule against that scope only. When
+// scope is empty, it loops over every scope — this is the path used by the
+// parity harness; Process and ProcessWithStreaming always pass a concrete
+// scope.
+//
+// controlID is threaded to enumerateData and runOPAOnSingleRule for CEL
+// policy support (VAP binding lookups).
 //
 // NOTE: processRule no longer mutates the state of the current OPAProcessor instance,
 // and returns a map instead, to be merged by the caller.
-func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string, controlID string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
+func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string, scope evaluationScope, controlID string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
+	if scope.name != "" {
+		return opap.processRuleOnScope(ctx, rule, fixedControlInputs, scope, controlID)
+	}
+
+	// No explicit scope — loop over all scopes (parity harness path).
+	merged := make(map[string]*resourcesresults.ResourceAssociatedRule)
+	var evalErrs []error
+	for _, s := range opap.evaluationScopes() {
+		scoped, err := opap.processRuleOnScope(ctx, rule, fixedControlInputs, s, controlID)
+		if err != nil {
+			evalErrs = append(evalErrs, err)
+		}
+		for resourceID, ruleResult := range scoped {
+			merged[resourceID] = mergeAssociatedRule(merged[resourceID], ruleResult)
+		}
+	}
+	return merged, errors.Join(evalErrs...)
+}
+
+// processRuleOnScope evaluates a single policy rule against a single scope,
+// with some extra fixed control inputs.
+func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string, scope evaluationScope, controlID string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
 	resources := make(map[string]*resourcesresults.ResourceAssociatedRule)
 
 	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ControlConfigInputs, fixedControlInputs)
 
-	var evalErrs []error
-	resourcesPerNS := getAllSupportedObjects(opap.K8SResources, opap.ExternalResources, opap.AllResources, rule, opap.initialResourceCount)
-	for i := range resourcesPerNS {
-		resourceToScan := resourcesPerNS[i]
-		if _, ok := resourcesPerNS[clusterScope]; ok && i != clusterScope {
-			resourceToScan = append(resourceToScan, resourcesPerNS[clusterScope]...)
-		}
-		inputResources, err := reporthandling.RegoResourcesAggregator(
-			rule,
-			resourceToScan, // NOTE: this uses the initial snapshot of AllResources
-		)
-		if err != nil {
-			evalErrs = append(evalErrs, fmt.Errorf("aggregator failed for namespace %q: %w", i, err))
-			opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, resourceToScan, err)
+	resourceToScan := scope.matchedObjects(rule)
+	inputResources, err := reporthandling.RegoResourcesAggregator(
+		rule,
+		resourceToScan, // NOTE: this uses the initial snapshot of AllResources
+	)
+	if err != nil {
+		opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, resourceToScan, err)
+		return resources, fmt.Errorf("aggregator failed for namespace %q: %w", scope.name, err)
+	}
+
+	if len(inputResources) == 0 {
+		return resources, nil // no resources found for testing
+	}
+
+	inputRawResources := workloadinterface.ListMetaToMap(inputResources)
+
+	// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data
+	enumeratedData, err := opap.enumerateData(ctx, rule, inputRawResources, controlID)
+	if err != nil {
+		opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
+		return resources, fmt.Errorf("enumerator failed for namespace %q: %w", scope.name, err)
+	}
+
+	inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
+
+	for _, inputResource := range inputResources {
+		if opap.skipNamespace(inputResource.GetNamespace()) {
 			continue
 		}
+		// AllResources is also the partitioning input (evaluationScopes →
+		// PartitionResources), so this aggregator write-back grows the map
+		// mid-scan. Bucketing must keep using the frozen initialResourceCount,
+		// not the live length, or later rules could see per-namespace scopes.
+		opap.AllResources[inputResource.GetID()] = inputResource
+	}
 
-		if len(inputResources) == 0 {
-			continue // no resources found for testing
-		}
+	ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData, controlID)
+	if err != nil {
+		opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
+		return resources, fmt.Errorf("rego eval failed for namespace %q: %w", scope.name, err)
+	}
 
-		inputRawResources := workloadinterface.ListMetaToMap(inputResources)
+	// Record CEL resources with unknown verdicts as skipped before pass-inference.
+	opap.seedCELSkips(resources, rule, ruleRegoDependenciesData, celOut.skipped)
 
-		// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data
-		enumeratedData, err := opap.enumerateData(ctx, rule, inputRawResources, controlID)
-		if err != nil {
-			evalErrs = append(evalErrs, fmt.Errorf("enumerator failed for namespace %q: %w", i, err))
-			opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
-			continue
-		}
-
-		inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
-
-		for _, inputResource := range inputResources {
-			if opap.skipNamespace(inputResource.GetNamespace()) {
+	// Build the set of failed IDs so we can correctly mark the remainder as passed.
+	// Resources are only written to the result map after a successful OPA evaluation,
+	// preventing stale StatusPassed entries when evaluation fails.
+	// Failed entries are pre-seeded with rule metadata so the loop below can
+	// find them and attach paths/status without losing Name/ControlConfigurations.
+	failedIDs := make(map[string]struct{})
+	for _, ruleResponse := range ruleResponses {
+		for _, failedResource := range objectsenvelopes.ListMapToMeta(ruleResponse.GetFailedResources()) {
+			if opap.skipNamespace(failedResource.GetNamespace()) {
 				continue
 			}
-			opap.AllResources[inputResource.GetID()] = inputResource
-		}
-
-		ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData, controlID)
-		if err != nil {
-			evalErrs = append(evalErrs, fmt.Errorf("eval failed for namespace %q: %w", i, err))
-			opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
-			continue
-		}
-
-		// Seed the CEL rule's unknown-verdict resources as skipped so the
-		// pass-inference below preserves them. celOut is empty for the Rego path.
-		opap.seedCELSkips(resources, rule, ruleRegoDependenciesData, celOut.skipped)
-
-		// Build the set of failed IDs so we can correctly mark the remainder as passed.
-		// Resources are only written to the result map after a successful OPA evaluation,
-		// preventing stale StatusPassed entries when evaluation fails.
-		// Failed entries are pre-seeded with rule metadata so the loop below can
-		// find them and attach paths/status without losing Name/ControlConfigurations.
-		failedIDs := make(map[string]struct{})
-		for _, ruleResponse := range ruleResponses {
-			for _, failedResource := range objectsenvelopes.ListMapToMeta(ruleResponse.GetFailedResources()) {
-				if opap.skipNamespace(failedResource.GetNamespace()) {
-					continue
-				}
-				id := failedResource.GetID()
-				failedIDs[id] = struct{}{}
-				if _, exists := resources[id]; exists {
-					continue
-				}
-				resources[id] = &resourcesresults.ResourceAssociatedRule{
-					Name:                  rule.Name,
-					ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
-				}
-			}
-		}
-		for _, inputResource := range inputResources {
-			if opap.skipNamespace(inputResource.GetNamespace()) {
-				continue
-			}
-			id := inputResource.GetID()
-			if _, failed := failedIDs[id]; failed {
-				continue
-			}
-			if _, excluded := celOut.excluded[id]; excluded {
-				continue // outside the CEL policy's scope: not evaluated, so not a pass
-			}
-			if existing, ok := resources[id]; ok && (existing.Status == apis.StatusFailed || existing.Status == apis.StatusSkipped) {
+			id := failedResource.GetID()
+			failedIDs[id] = struct{}{}
+			if _, exists := resources[id]; exists {
 				continue
 			}
 			resources[id] = &resourcesresults.ResourceAssociatedRule{
 				Name:                  rule.Name,
 				ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
-				Status:                apis.StatusPassed,
-			}
-		}
-
-		// ruleResponse to ruleResult
-		for _, ruleResponse := range ruleResponses {
-			failedResources := objectsenvelopes.ListMapToMeta(ruleResponse.GetFailedResources())
-			for _, failedResource := range failedResources {
-				if opap.skipNamespace(failedResource.GetNamespace()) {
-					continue
-				}
-				var ruleResult *resourcesresults.ResourceAssociatedRule
-				if r, found := resources[failedResource.GetID()]; found {
-					ruleResult = r
-				} else {
-					ruleResult = &resourcesresults.ResourceAssociatedRule{
-						Paths: make([]armotypes.PosturePaths, 0, len(ruleResponse.FailedPaths)+len(ruleResponse.FixPaths)+1),
-					}
-				}
-
-				ruleResult.SetStatus(apis.StatusFailed, nil)
-				ruleResult.Paths = appendPaths(ruleResult.Paths, ruleResponse.AssistedRemediation, failedResource.GetID())
-				// if ruleResponse has relatedObjects, add it to ruleResult
-				if len(ruleResponse.RelatedObjects) > 0 {
-					relatedResourcesSet := mapset.NewSet[string](ruleResult.RelatedResourcesIDs...)
-					for _, relatedObject := range ruleResponse.RelatedObjects {
-						wl := objectsenvelopes.NewObject(relatedObject.Object)
-						if wl != nil {
-							if !relatedResourcesSet.Contains(wl.GetID()) {
-								ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, wl.GetID())
-							}
-							relatedResourcesSet.Add(wl.GetID())
-							ruleResult.Paths = appendPaths(ruleResult.Paths, relatedObject.AssistedRemediation, wl.GetID())
-						}
-					}
-				}
-
-				resources[failedResource.GetID()] = ruleResult
 			}
 		}
 	}
-	return resources, errors.Join(evalErrs...)
+	for _, inputResource := range inputResources {
+		if opap.skipNamespace(inputResource.GetNamespace()) {
+			continue
+		}
+		id := inputResource.GetID()
+		if _, failed := failedIDs[id]; failed {
+			continue
+		}
+		if _, excluded := celOut.excluded[id]; excluded {
+			continue // outside the CEL policy's scope: not evaluated, so not a pass
+		}
+		if existing, ok := resources[id]; ok && (existing.Status == apis.StatusFailed || existing.Status == apis.StatusSkipped) {
+			continue
+		}
+		resources[id] = &resourcesresults.ResourceAssociatedRule{
+			Name:                  rule.Name,
+			ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
+			Status:                apis.StatusPassed,
+		}
+	}
+
+	// ruleResponse to ruleResult
+	for _, ruleResponse := range ruleResponses {
+		failedResources := objectsenvelopes.ListMapToMeta(ruleResponse.GetFailedResources())
+		for _, failedResource := range failedResources {
+			if opap.skipNamespace(failedResource.GetNamespace()) {
+				continue
+			}
+			var ruleResult *resourcesresults.ResourceAssociatedRule
+			if r, found := resources[failedResource.GetID()]; found {
+				ruleResult = r
+			} else {
+				ruleResult = &resourcesresults.ResourceAssociatedRule{
+					Paths: make([]armotypes.PosturePaths, 0, len(ruleResponse.FailedPaths)+len(ruleResponse.FixPaths)+1),
+				}
+			}
+
+			ruleResult.SetStatus(apis.StatusFailed, nil)
+			ruleResult.Paths = appendPaths(ruleResult.Paths, ruleResponse.AssistedRemediation, failedResource.GetID())
+			// if ruleResponse has relatedObjects, add it to ruleResult
+			if len(ruleResponse.RelatedObjects) > 0 {
+				relatedResourcesSet := mapset.NewSet[string](ruleResult.RelatedResourcesIDs...)
+				for _, relatedObject := range ruleResponse.RelatedObjects {
+					wl := objectsenvelopes.NewObject(relatedObject.Object)
+					if wl != nil {
+						if !relatedResourcesSet.Contains(wl.GetID()) {
+							ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, wl.GetID())
+						}
+						relatedResourcesSet.Add(wl.GetID())
+						ruleResult.Paths = appendPaths(ruleResult.Paths, relatedObject.AssistedRemediation, wl.GetID())
+					}
+				}
+			}
+
+			resources[failedResource.GetID()] = ruleResult
+		}
+	}
+	return resources, nil
 }
 
 // markResourcesSkipped seeds the result map with StatusSkipped entries for every
@@ -1056,3 +1402,9 @@ func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleDat
 	opap.compiledModules[cacheKey] = compiledRule{compiler: compiled, version: version}
 	return compiled, version, nil
 }
+
+// createLightweightResource is intentionally removed. Stripping spec/status/data
+// from resources stored in opap.AllResources broke downstream stages (printers,
+// image scanning, prioritisation, exception matching) that read the full object.
+// The streaming path now stores the original resource, matching the non-streaming
+// path's behaviour.

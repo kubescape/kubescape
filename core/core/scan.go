@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -271,26 +272,57 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	// ===================== resources =====================
 	ctxResources, spanResources := otel.Tracer("").Start(ctxInit, "resources")
-	err = resourcehandler.CollectResources(ctxResources, interfaces.resourceHandler, scanData, scanInfo)
+
+	// Determine if streaming should be enabled
+	enableStreaming := scanInfo.EnableStreaming
+	// Snapshot the pre-scan cluster size before the streaming decision. The
+	// streaming producer populates sessionObj.AllResources asynchronously, so
+	// OPAProcessor cannot snapshot the resource count at construction the way
+	// the non-streaming path does; the estimate stands in for it. Computing it
+	// up front also covers explicit --enable-streaming on large clusters.
+	var estimatedClusterSize int
+	if scanInfo.GetScanningContext() == cautils.ContextCluster {
+		estimatedClusterSize = estimateClusterSize(interfaces.resourceHandler, ctxResources, scanInfo)
+	}
+	if !enableStreaming && scanInfo.GetScanningContext() == cautils.ContextCluster {
+		// Auto-enable streaming for large clusters
+		enableStreaming = cautils.IsLargeCluster(estimatedClusterSize)
+		if enableStreaming {
+			logger.L().Ctx(ctxResources).Info("Large cluster detected, enabling resource streaming")
+		}
+	}
+
+	// OPA context for both streaming and non-streaming paths
+	ctxOpa, spanOpa := otel.Tracer("").Start(ks.Context(), "opa testing")
+	defer spanOpa.End()
+
+	if enableStreaming {
+		// Use streaming approach for large clusters
+		err = collectAndProcessResourcesWithStreaming(ctxResources, interfaces.resourceHandler, scanData, scanInfo, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, scanInfo.ControlTimeout, estimatedClusterSize)
+	} else {
+		// Use traditional approach for small clusters
+		err = resourcehandler.CollectResources(ctxResources, interfaces.resourceHandler, scanData, scanInfo)
+		if err != nil {
+			spanInit.End()
+			return resultsHandling, err
+		}
+
+		deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
+		var exceptionRecorder = newSecurityExceptionEventRecorder()
+		reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, exceptionRecorder)
+		reportResults.ControlTimeout = scanInfo.ControlTimeout
+		if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
+			logger.L().Ctx(ctxOpa).Error("failed to process rules", helpers.Error(err))
+			return resultsHandling, fmt.Errorf("%w", err)
+		}
+	}
+
 	if err != nil {
 		spanInit.End()
 		return resultsHandling, err
 	}
 	spanResources.End()
 	spanInit.End()
-
-	// ========================= opa testing =====================
-	ctxOpa, spanOpa := otel.Tracer("").Start(ks.Context(), "opa testing")
-	defer spanOpa.End()
-
-	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
-	var exceptionRecorder = newSecurityExceptionEventRecorder()
-	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, exceptionRecorder)
-	reportResults.ControlTimeout = scanInfo.ControlTimeout
-	if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
-		logger.L().Ctx(ctxOpa).Error("failed to process rules", helpers.Error(err))
-		return resultsHandling, fmt.Errorf("%w", err)
-	}
 
 	// ======================== prioritization ===================
 	if scanInfo.PrintAttackTree || isPrioritizationScanType(scanInfo.ScanType) {
@@ -448,4 +480,57 @@ func isPrioritizationScanType(scanType cautils.ScanTypes) bool {
 // initutils.go and don't need to disable the network downloader entirely.
 func isAirGappedMode(scanInfo *cautils.ScanInfo) bool {
 	return len(scanInfo.UseFrom) > 0
+}
+
+// estimateClusterSize estimates the cluster size for determining if streaming should be enabled.
+// For cluster scans it delegates to the resource handler which queries the API server
+// with metadata-only LIST requests. For file-based scans it returns 0.
+// Returns 0 on error so that a failed estimate falls back to the non-streaming path.
+func estimateClusterSize(resourceHandler resourcehandler.IResourceHandler, ctx context.Context, scanInfo *cautils.ScanInfo) int {
+	if scanInfo.GetScanningContext() != cautils.ContextCluster {
+		return 0
+	}
+
+	size, err := resourceHandler.EstimateClusterSize(ctx, scanInfo)
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to estimate cluster size, falling back to non-streaming", helpers.Error(err))
+		return 0
+	}
+	return size
+}
+
+// collectAndProcessResourcesWithStreaming collects and processes resources in
+// batches so the evaluation input stays bounded on large clusters.
+// estimatedClusterSize is the pre-scan cluster-size estimate the streaming
+// decision was made from; the OPA processor uses it as its frozen resource
+// count because sessionObj.AllResources is populated asynchronously by the
+// producer goroutine.
+func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandler resourcehandler.IResourceHandler, scanData *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, clusterName string, excludedNamespaces string, includeNamespaces string, enableRegoPrint bool, controlTimeout time.Duration, estimatedClusterSize int) error {
+	// Construct the processor before starting the producer goroutine. The
+	// producer does not touch scanData's resource maps (it carries them on the
+	// resident batch instead), but constructing first means the constructor's
+	// reads of scanData cannot race a producer write regardless of what the
+	// producer does later — the invariant is enforced by ordering rather than by
+	// a comment in the resource handler.
+	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), clusterName)
+	var exceptionRecorder = newSecurityExceptionEventRecorder()
+	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, clusterName, excludedNamespaces, includeNamespaces, enableRegoPrint, exceptionRecorder)
+	reportResults.ControlTimeout = controlTimeout
+
+	// Stream resources in batches
+	batchChan, errChan, expectedNamespaceBatches, err := resourceHandler.StreamResourcesBatches(ctx, scanData, scanInfo)
+	if err != nil {
+		return fmt.Errorf("failed to start resource streaming: %w", err)
+	}
+	// AllResources is still empty here — the producer goroutine fills it only
+	// after the resident batch is sent — so the frozen bucketing count must
+	// come from the estimate rather than the construction-time snapshot.
+	reportResults.SetInitialResourceCount(estimatedClusterSize)
+
+	// Process batches with streaming
+	if err := reportResults.ProcessWithStreaming(ctx, batchChan, errChan, cautils.NewProgressHandler(""), expectedNamespaceBatches); err != nil {
+		return fmt.Errorf("failed to process rules with streaming: %w", err)
+	}
+
+	return nil
 }

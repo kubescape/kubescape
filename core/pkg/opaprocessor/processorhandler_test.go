@@ -512,7 +512,7 @@ func TestProcessRule(t *testing.T) {
 		// since all resources JSON is a large file, we need to unzip it and set the variable before running the benchmark
 		unzipAllResourcesTestDataAndSetVar("testdata/allResourcesMock.json.zip", "testdata/allResourcesMock.json")
 		opap := NewOPAProcessorMock(tc.opaSessionObjMock, tc.resourcesMock)
-		resources, err := opap.processRule(context.Background(), &tc.rule, nil, "")
+		resources, err := opap.processRule(context.Background(), &tc.rule, nil, evaluationScope{}, "")
 		assert.NoError(t, err)
 		assert.Equal(t, tc.expectedResult, resources, t.Name)
 	}
