@@ -2,10 +2,13 @@ package cautils
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"testing"
 
 	v1 "github.com/kubescape/backend/pkg/client/v1"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -436,6 +439,39 @@ func TestUpdateConfigFile_RoundTrip(t *testing.T) {
 	readBack := &ConfigObj{}
 	require.NoError(t, json.Unmarshal(dat, readBack))
 	assert.Equal(t, configObj.AccountID, readBack.AccountID)
+}
+
+// TestNewLocalConfig_LogsOnMalformedCachedConfigFile guards against a
+// regression where a malformed cached config file (~/.kubescape/config.json)
+// caused loadConfigFromFile to return an error that NewLocalConfig discarded
+// completely - config loading silently fell back to defaults with no trace
+// anywhere that the cache was broken, which is confusing to debug ("why
+// isn't my configured account being picked up?").
+func TestNewLocalConfig_LogsOnMalformedCachedConfigFile(t *testing.T) {
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	defer func() { getter.DefaultLocalStore = originalStore }()
+
+	require.NoError(t, os.MkdirAll(getter.DefaultLocalStore, 0o700))
+	require.NoError(t, os.WriteFile(ConfigFileFullPath(), []byte("not valid json"), 0o600))
+
+	originalLevel := logger.L().GetLevel()
+	require.NoError(t, logger.L().SetLevel(helpers.DebugLevel.String()))
+	defer func() { _ = logger.L().SetLevel(originalLevel) }()
+
+	originalWriter := logger.L().GetWriter()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	logger.L().SetWriter(w)
+
+	NewLocalConfig("", "", "", "")
+
+	require.NoError(t, w.Close())
+	logger.L().SetWriter(originalWriter)
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+
+	assert.Contains(t, string(out), "failed to load cached config file")
 }
 
 func TestUpdateConfigFile_ToleratesDirectoryChmodFailure(t *testing.T) {
