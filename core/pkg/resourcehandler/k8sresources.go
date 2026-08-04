@@ -221,12 +221,14 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 
 	// Setup phase: collect metadata and queryable resources
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
+	resolver, discoveryFailures := newDiscoveryResourceResolver(k8sHandler.k8s.DiscoveryClient)
+	sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, discoveryFailures...)
 
 	var setupErr error
 	if scanInfo.IsDeletedScanObject {
 		sessionObj.SingleResourceScan, setupErr = getWorkloadFromScanObject(scanInfo.ScanObject)
 	} else {
-		sessionObj.SingleResourceScan, setupErr = k8sHandler.findScanObjectResource(ctx, scanInfo.ScanObject, globalFieldSelectors)
+		sessionObj.SingleResourceScan, setupErr = k8sHandler.findScanObjectResource(ctx, scanInfo.ScanObject, globalFieldSelectors, resolver)
 	}
 
 	if setupErr != nil {
@@ -235,8 +237,8 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 
 	scanningScope := cautils.GetScanningScope(sessionObj.Metadata.ContextMetadata)
 	resourceToControl := make(map[string][]string)
-	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope)
-	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl)
+	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver)
+	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
 	sessionObj.ResourceToControlsMap = resourceToControl
 	sessionObj.ExcludedRules = excludedRulesMap
 
@@ -250,7 +252,7 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 		defer close(batchChan)
 		defer logger.L().StopSuccess("Done streaming Kubernetes objects")
 
-		if err := k8sHandler.collectAndStreamBatches(ctx, queryableResources, globalFieldSelectors, sessionObj, scanInfo, ksResourceMap, batchChan); err != nil {
+		if err := k8sHandler.collectAndStreamBatches(ctx, queryableResources, globalFieldSelectors, sessionObj, scanInfo, ksResourceMap, batchChan, resolver); err != nil {
 			errChan <- err
 			return
 		}
@@ -276,7 +278,7 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 // input at any moment. Bounding the collection peak itself would require paged
 // LISTs (metav1.ListOptions{Limit, Continue}) per GVR — a larger change than
 // this one.
-func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, ksResourceMap cautils.ExternalResources, batchChan chan<- *cautils.ResourceBatch) error {
+func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, ksResourceMap cautils.ExternalResources, batchChan chan<- *cautils.ResourceBatch, resolver resourceResolver) error {
 	resident := cautils.NewResourceBatch(cautils.ClusterScope)
 	namespaceBatches := make(map[string]*cautils.ResourceBatch)
 
@@ -286,7 +288,7 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 
-		result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, qr.FieldSelectors, globalFieldSelectors)
+		result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced)
 		if len(result) == 0 && len(selectorErrs) > 0 {
 			continue
 		}
@@ -314,7 +316,7 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	allResources := resident.AllResources
 
 	if !scanInfo.IsDeletedScanObject && sessionObj.SingleResourceScan != nil {
-		addSingleResourceToResourceMaps(resident.K8SResources, allResources, sessionObj.SingleResourceScan)
+		addSingleResourceToResourceMaps(resident.K8SResources, allResources, sessionObj.SingleResourceScan, resolver)
 	}
 
 	hostResources := cautils.MapHostResources(ksResourceMap)

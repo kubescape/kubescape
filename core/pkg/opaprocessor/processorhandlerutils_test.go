@@ -37,13 +37,8 @@ func TestGetKubernetesObjectsDeduplicatesResourceAliases(t *testing.T) {
 		Resources:   []string{"Sandbox", "sandboxes"},
 	}}
 
-	objectsByNamespace := getKubernetesObjects(resources, allResources, match, len(allResources))
-	objectCount := 0
-	for _, objects := range objectsByNamespace {
-		objectCount += len(objects)
-	}
-
-	assert.Equal(t, 1, objectCount)
+	objects := getKubernetesObjects(resources, allResources, match)
+	assert.Equal(t, 1, len(objects))
 }
 
 func TestRemoveData(t *testing.T) {
