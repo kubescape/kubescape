@@ -110,22 +110,18 @@ func pseudoIDSuffix(t *testing.T, pseudoID, prefix string) string {
 // *same raw value* must produce the *same hash suffix* regardless of
 // prefix, even though the display prefix differs. A resource's own name is
 // transformed with prefix "res" (session.go transformResourceMetadata), but
-// a reference to that same name elsewhere - an imagePullSecrets entry, a
-// ConfigMap/Secret volume source, a ServiceAccount name - is transformed
-// separately with prefix "ref"/"sa" (container.go), with no shared lookup
-// table between the two call sites. The shared hash suffix is the only
-// thing that lets a reader of a --hide report tell that a pod actually
-// pulls a specific Secret or runs as a specific ServiceAccount, without the
-// report ever revealing the real name.
+// a reference to that same name elsewhere - an imagePullSecrets entry or a
+// ServiceAccount name - is transformed separately with prefix "ref"/"sa"
+// (container.go), with no shared lookup table between the two call sites.
+// The shared hash suffix is the only thing that lets a reader of a --hide
+// report tell that a pod actually pulls a specific Secret or runs as a
+// specific ServiceAccount, without the report ever revealing the real name.
 //
-// This was previously untested at the suffix level (existing tests below
-// only assert the full "<prefix>-<suffix>" strings differ, which is always
-// true just from the differing prefix text, regardless of whether the
-// suffix matches) - see the discussion on PR #2687 for how that test gap
-// let a well-intentioned but incorrect "fix" (hashing prefix+value) merge
-// review as a plausible bug fix while actually breaking this cross-reference
-// linkage. Hashing value alone is deliberate, not an oversight; see the
-// doc comment on GetOrCreate for the accepted trade-off this implies.
+// Previously untested at the suffix level: existing tests only compare full
+// "<prefix>-<suffix>" strings, which differ from the prefix text alone
+// regardless of whether the suffix matches. See #2687. Hashing value alone
+// is deliberate, not an oversight; see the doc comment on GetOrCreate for
+// the accepted trade-off this implies.
 func TestMapping_GetOrCreate_SameValueSharesHashSuffixAcrossPrefixes(t *testing.T) {
 	mapping := NewMapping()
 
