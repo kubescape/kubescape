@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/johnfercher/go-tree/node"
 	"github.com/johnfercher/maroto/v2"
 	"github.com/johnfercher/maroto/v2/pkg/components/image"
@@ -129,7 +130,7 @@ func (t *Template) generateTableTableResult(totalFailed, total int, score float3
 		text.NewCol(5, "Resource summary", defaultProps),
 		text.NewCol(2, fmt.Sprintf("%d", totalFailed), defaultProps),
 		text.NewCol(2, fmt.Sprintf("%d", total), defaultProps),
-		text.NewCol(2, fmt.Sprintf("%.2f%s", score, "%"), defaultProps),
+		text.NewCol(2, fmt.Sprintf("%s%s", cautils.ComplianceScoreToString(score, 2), "%"), defaultProps),
 	)
 }
 

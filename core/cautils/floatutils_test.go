@@ -96,3 +96,55 @@ func TestFloat32ToIntFloor_Float32Precision(t *testing.T) {
 	assert.Equal(t, 59, Float32ToIntFloor(float32(59)/float32(100)*100))
 	assert.Equal(t, 53, Float32ToIntFloor(float32(106)/float32(200)*100))
 }
+
+func TestComplianceScoreToString(t *testing.T) {
+	tests := []struct {
+		name      string
+		score     float32
+		precision int
+		want      string
+	}{
+		{
+			name:      "normal score",
+			score:     50.0,
+			precision: 2,
+			want:      "50.00",
+		},
+		{
+			name:      "just below boundary",
+			score:     99.99,
+			precision: 2,
+			want:      "99.99",
+		},
+		{
+			name:      "sub-100 rounds to 100 without guard",
+			score:     99.996,
+			precision: 2,
+			want:      "99.99",
+		},
+		{
+			name:      "truly perfect stays 100",
+			score:     100.0,
+			precision: 2,
+			want:      "100.00",
+		},
+		{
+			name:      "zero score",
+			score:     0.0,
+			precision: 2,
+			want:      "0.00",
+		},
+		{
+			name:      "precision 3 boundary",
+			score:     99.9996,
+			precision: 3,
+			want:      "99.999",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ComplianceScoreToString(tt.score, tt.precision))
+		})
+	}
+}

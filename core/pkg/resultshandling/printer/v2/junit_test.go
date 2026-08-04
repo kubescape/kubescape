@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/xml"
 	"flag"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -168,7 +167,7 @@ func TestProperties(t *testing.T) {
 			expectedProperty: []JUnitProperty{
 				{
 					Name:  "complianceScore",
-					Value: fmt.Sprintf("%.2f", 20.7),
+					Value: cautils.ComplianceScoreToString(20.7, 2),
 				},
 			},
 		},
@@ -178,7 +177,7 @@ func TestProperties(t *testing.T) {
 			expectedProperty: []JUnitProperty{
 				{
 					Name:  "complianceScore",
-					Value: fmt.Sprintf("%.2f", -20.0),
+					Value: cautils.ComplianceScoreToString(-20.0, 2),
 				},
 			},
 		},
@@ -188,7 +187,7 @@ func TestProperties(t *testing.T) {
 			expectedProperty: []JUnitProperty{
 				{
 					Name:  "complianceScore",
-					Value: fmt.Sprintf("%.2f", 120.0),
+					Value: cautils.ComplianceScoreToString(120.0, 2),
 				},
 			},
 		},
@@ -198,7 +197,7 @@ func TestProperties(t *testing.T) {
 			expectedProperty: []JUnitProperty{
 				{
 					Name:  "complianceScore",
-					Value: fmt.Sprintf("%.2f", 50.0),
+					Value: cautils.ComplianceScoreToString(50.0, 2),
 				},
 			},
 		},
@@ -208,7 +207,7 @@ func TestProperties(t *testing.T) {
 			expectedProperty: []JUnitProperty{
 				{
 					Name:  "complianceScore",
-					Value: fmt.Sprintf("%.2f", 0.0),
+					Value: cautils.ComplianceScoreToString(0.0, 2),
 				},
 			},
 		},
@@ -218,7 +217,17 @@ func TestProperties(t *testing.T) {
 			expectedProperty: []JUnitProperty{
 				{
 					Name:  "complianceScore",
-					Value: fmt.Sprintf("%.2f", 100.0),
+					Value: cautils.ComplianceScoreToString(100.0, 2),
+				},
+			},
+		},
+		{
+			name:  "Near-perfect score does not round to 100",
+			score: 99.996,
+			expectedProperty: []JUnitProperty{
+				{
+					Name:  "complianceScore",
+					Value: "99.99",
 				},
 			},
 		},
