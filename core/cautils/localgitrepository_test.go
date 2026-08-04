@@ -256,6 +256,45 @@ func TestNewLocalGitRepositoryRootDirFailure(t *testing.T) {
 	require.ErrorIs(t, err, wantErr)
 }
 
+// TestGetFileLastCommitWithoutMetadata covers the reason GetFileLastCommit is declared
+// explicitly instead of being promoted from an embedded *gitRepository. The field is
+// unexported, so callers outside this package can only check the outer pointer; when the
+// metadata reader was left unset, the promoted method dereferenced a nil receiver and
+// panicked. Both shapes must now report the failure through the error they already handle.
+func TestGetFileLastCommitWithoutMetadata(t *testing.T) {
+	t.Run("repository without a metadata reader", func(t *testing.T) {
+		repository := &LocalGitRepository{}
+
+		commit, err := repository.GetFileLastCommit("workloads/deployment.yaml")
+		assert.Nil(t, commit)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "workloads/deployment.yaml")
+	})
+
+	t.Run("nil repository", func(t *testing.T) {
+		var repository *LocalGitRepository
+
+		commit, err := repository.GetFileLastCommit("workloads/deployment.yaml")
+		assert.Nil(t, commit)
+		assert.Error(t, err)
+	})
+}
+
+// TestNewLocalGitRepositoryPopulatesMetadataReader pins the invariant the type change is
+// meant to protect: a repository handed out by the constructor always carries its metadata
+// reader, so a caller that got one never has to reason about a half-built value.
+func TestNewLocalGitRepositoryPopulatesMetadataReader(t *testing.T) {
+	fixture := createDetachedRepositoryFixture(t, "origin", "https://example.com/team/project.git")
+
+	repository, err := NewLocalGitRepository(fixture.root)
+	require.NoError(t, err)
+	require.NotNil(t, repository.gitRepository, "the constructor must never hand out a repository without a metadata reader")
+
+	// a file that was never committed still resolves through the reader rather than panicking
+	_, err = repository.GetFileLastCommit("never-committed.yaml")
+	assert.Error(t, err)
+}
+
 func TestLocalGitRepositoryDetachedHead(t *testing.T) {
 	fixture := createDetachedRepositoryFixture(t, "origin", "https://github.com/kubescape/detached-head-fixture.git")
 
