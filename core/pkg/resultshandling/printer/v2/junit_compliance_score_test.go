@@ -38,6 +38,14 @@ func TestListTestsSuiteUsesComplianceScores(t *testing.T) {
 				"MITRE": "20.00",
 			},
 		},
+		{
+			name: "framework scan with near 100 compliance score does not round to 100",
+			summary: reportsummary.SummaryDetails{
+				Score:           0.004,
+				ComplianceScore: 99.996,
+			},
+			want: map[string]string{"kubescape": "99.99"},
+		},
 	}
 
 	for _, tt := range tests {

@@ -310,7 +310,7 @@ func properties(complianceScore float32) []JUnitProperty {
 	return []JUnitProperty{
 		{
 			Name:  "complianceScore",
-			Value: fmt.Sprintf("%.2f", complianceScore),
+			Value: cautils.ComplianceScoreToString(complianceScore, 2),
 		},
 	}
 }

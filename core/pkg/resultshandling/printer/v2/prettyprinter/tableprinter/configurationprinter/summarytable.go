@@ -99,7 +99,7 @@ func GenerateFooter(summaryDetails *reportsummary.SummaryDetails, short bool) ta
 	var row table.Row
 	if short {
 		row = make(table.Row, 1)
-		row[0] = fmt.Sprintf("Resource Summary"+strings.Repeat(" ", 0)+"\n\nFailed Resources"+strings.Repeat(" ", 1)+": %d\nAll Resources"+strings.Repeat(" ", 4)+": %d\n%% Compliance-Score"+strings.Repeat(" ", 4)+": %.2f%%", summaryDetails.NumberOfResources().Failed(), summaryDetails.NumberOfResources().All(), summaryDetails.ComplianceScore)
+		row[0] = fmt.Sprintf("Resource Summary"+strings.Repeat(" ", 0)+"\n\nFailed Resources"+strings.Repeat(" ", 1)+": %d\nAll Resources"+strings.Repeat(" ", 4)+": %d\n%% Compliance-Score"+strings.Repeat(" ", 4)+": %s%%", summaryDetails.NumberOfResources().Failed(), summaryDetails.NumberOfResources().All(), cautils.ComplianceScoreToString(summaryDetails.ComplianceScore, 2))
 	} else {
 		// Severity | Control name | failed resources | all resources | % success
 		row = make(table.Row, _summaryRowLen)
@@ -107,7 +107,7 @@ func GenerateFooter(summaryDetails *reportsummary.SummaryDetails, short bool) ta
 		row[summaryColumnCounterFailed] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed())
 		row[summaryColumnCounterAll] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().All())
 		row[summaryColumnSeverity] = " "
-		row[summaryColumnComplianceScore] = fmt.Sprintf("%.2f%s", summaryDetails.ComplianceScore, "%")
+		row[summaryColumnComplianceScore] = cautils.ComplianceScoreToString(summaryDetails.ComplianceScore, 2) + "%"
 	}
 
 	return row

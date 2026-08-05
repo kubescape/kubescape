@@ -76,6 +76,58 @@ func TestComplianceScoreToInt(t *testing.T) {
 	}
 }
 
+func TestComplianceScoreToString(t *testing.T) {
+	tests := []struct {
+		name      string
+		score     float32
+		precision int
+		want      string
+	}{
+		{
+			name:      "ordinary score formats with requested precision",
+			score:     95.4321,
+			precision: 2,
+			want:      "95.43",
+		},
+		{
+			name:      "score above 99.995 does not round to 100.00",
+			score:     99.996,
+			precision: 2,
+			want:      "99.99",
+		},
+		{
+			name:      "score exactly 99.99 stays 99.99",
+			score:     99.99,
+			precision: 2,
+			want:      "99.99",
+		},
+		{
+			name:      "perfect score 100 remains 100.00",
+			score:     100.0,
+			precision: 2,
+			want:      "100.00",
+		},
+		{
+			name:      "score near 100 with precision 1 does not round to 100.0",
+			score:     99.96,
+			precision: 1,
+			want:      "99.9",
+		},
+		{
+			name:      "zero score formats properly",
+			score:     0.0,
+			precision: 2,
+			want:      "0.00",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ComplianceScoreToString(tt.score, tt.precision))
+		})
+	}
+}
+
 func TestRiskScoreToInt(t *testing.T) {
 	tests := []struct {
 		name  string

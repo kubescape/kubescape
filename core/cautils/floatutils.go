@@ -1,6 +1,9 @@
 package cautils
 
-import "math"
+import (
+	"math"
+	"strconv"
+)
 
 const floorEpsilon = 1e-4
 
@@ -37,6 +40,18 @@ func ComplianceScoreToInt(x float32) int {
 		return 99
 	}
 	return i
+}
+
+// ComplianceScoreToString formats a compliance score for display with the given
+// precision, ensuring a score below 100 never renders as perfect.
+func ComplianceScoreToString(x float32, precision int) string {
+	s := strconv.FormatFloat(float64(x), 'f', precision, 32)
+	if x < 100 {
+		if v, err := strconv.ParseFloat(s, 64); err == nil && v >= 100 {
+			return strconv.FormatFloat(100-math.Pow10(-precision), 'f', precision, 64)
+		}
+	}
+	return s
 }
 
 // RiskScoreToInt converts a risk score to a display-safe integer. It preserves
