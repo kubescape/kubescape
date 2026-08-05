@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 )
 
 type KubescapeMcpserver struct {
@@ -29,6 +31,64 @@ type KubescapeMcpserver struct {
 	k8sClient     *k8sinterface.KubernetesApi
 	k8sClientOnce sync.Once
 	policyGetter  *getter.DownloadReleasedPolicy
+
+	imageScanSvc   *imagescan.Service
+	imageScanSvcMu sync.Mutex
+	imageScanMu    sync.Mutex
+	dbListingURL   string
+}
+
+func (ksServer *KubescapeMcpserver) getImageScanService(ctx context.Context) (*imagescan.Service, error) {
+	ksServer.imageScanSvcMu.Lock()
+	defer ksServer.imageScanSvcMu.Unlock()
+
+	if ksServer.imageScanSvc != nil {
+		return ksServer.imageScanSvc, nil
+	}
+
+	type initResult struct {
+		svc *imagescan.Service
+		err error
+	}
+
+	initCh := make(chan initResult, 1)
+	go func() {
+		distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(ksServer.dbListingURL)
+		if err != nil {
+			initCh <- initResult{err: fmt.Errorf("failed to initialize default Grype database configuration: %w", err)}
+			return
+		}
+		svc, err := imagescan.NewRemoteOnlyScanService(distCfg, installCfg)
+		if err != nil {
+			initCh <- initResult{err: fmt.Errorf("failed to initialize image scan service: %w", err)}
+			return
+		}
+		initCh <- initResult{svc: svc}
+	}()
+
+	select {
+	case <-ctx.Done():
+		go func() {
+			res := <-initCh
+			if res.svc == nil {
+				return
+			}
+			ksServer.imageScanSvcMu.Lock()
+			defer ksServer.imageScanSvcMu.Unlock()
+			if ksServer.imageScanSvc == nil {
+				ksServer.imageScanSvc = res.svc
+			} else {
+				res.svc.Close()
+			}
+		}()
+		return nil, fmt.Errorf("image scan service initialization timed out or was canceled: %w", ctx.Err())
+	case res := <-initCh:
+		if res.err != nil {
+			return nil, res.err
+		}
+		ksServer.imageScanSvc = res.svc
+		return res.svc, nil
+	}
 }
 
 func (ksServer *KubescapeMcpserver) getKsClient() (spdxv1beta1.SpdxV1beta1Interface, error) {
@@ -803,6 +863,59 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run framework scan: %v", err)), nil
 		}
 		return mcp.NewToolResultText(string(responseBytes)), nil
+	case "scan_container_image":
+		imageName := ""
+		if img, ok := arguments["image_name"]; ok {
+			imgStr, ok := img.(string)
+			if !ok {
+				return mcp.NewToolResultError("image_name argument must be a string"), nil
+			}
+			imageName = strings.TrimSpace(imgStr)
+		}
+		if imageName == "" {
+			return mcp.NewToolResultError("image_name argument is required and cannot be empty"), nil
+		}
+		var regUsername string
+		if u, ok := arguments["username"]; ok {
+			uStr, ok := u.(string)
+			if !ok {
+				return mcp.NewToolResultError("username argument must be a string"), nil
+			}
+			regUsername = uStr
+		}
+		var regSecret string
+		if p, ok := arguments["password"]; ok {
+			pStr, ok := p.(string)
+			if !ok {
+				return mcp.NewToolResultError("password argument must be a string"), nil
+			}
+			regSecret = pStr
+		}
+		var includeMatches bool
+		if inc, ok := arguments["include_matches"]; ok {
+			incBool, ok := inc.(bool)
+			if !ok {
+				return mcp.NewToolResultError("include_matches argument must be a boolean"), nil
+			}
+			includeMatches = incBool
+		}
+		var severity string
+		if sev, ok := arguments["severity"]; ok {
+			sevStr, ok := sev.(string)
+			if !ok {
+				return mcp.NewToolResultError("severity argument must be a string"), nil
+			}
+			severity = strings.TrimSpace(sevStr)
+			if err := validateSeverity(severity); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+		}
+
+		responseBytes, err := ksServer.runImageScan(ctx, imageName, regUsername, regSecret, includeMatches, severity)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to run container image scan: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(responseBytes)), nil
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -826,10 +939,13 @@ func mcpServerEntrypoint() error {
 		k8sApi = k8sinterface.NewKubernetesApi()
 	}
 
+	dbListingURL := os.Getenv("KS_GRYPE_LISTING_URL")
+
 	ksServer := &KubescapeMcpserver{
 		s:            s,
 		k8sClient:    k8sApi,
 		policyGetter: getter.NewDownloadReleasedPolicy(),
+		dbListingURL: dbListingURL,
 	}
 
 	// Initialize the policy getter to load the local ~/.kubescape cache.
@@ -846,6 +962,7 @@ func mcpServerEntrypoint() error {
 	createNetworkScanningTools(ksServer)
 	createFrameworkScanningTools(ksServer)
 	createIaCScanningTools(ksServer)
+	createImageScanningTools(ksServer)
 
 	// Start the server
 	if err := server.ServeStdio(s); err != nil {
@@ -908,6 +1025,31 @@ func createIaCScanningTools(ksServer *KubescapeMcpserver) {
 	)
 
 	ksServer.s.AddTool(iacScanTool, ksServer.toolHandler(iacScanTool.Name))
+}
+
+func createImageScanningTools(ksServer *KubescapeMcpserver) {
+	scanImageTool := mcp.NewTool(
+		"scan_container_image",
+		mcp.WithDescription("Run an on-demand container image vulnerability scan. Note: this network-bound operation scans a container image and initializes/queries the vulnerability database."),
+		mcp.WithString("image_name",
+			mcp.Required(),
+			mcp.Description("Name of the remote container image to scan (e.g., nginx:alpine)"),
+		),
+		mcp.WithString("username",
+			mcp.Description("Username for registry authentication (optional)"),
+		),
+		mcp.WithString("password",
+			mcp.Description("Password for registry authentication (optional)"),
+		),
+		mcp.WithBoolean("include_matches",
+			mcp.Description("Include detailed match location and package info for each vulnerability (optional, defaults to false)"),
+		),
+		mcp.WithString("severity",
+			mcp.Description("Minimum severity filter (e.g., Low, Medium, High, Critical) (optional)"),
+		),
+	)
+
+	ksServer.s.AddTool(scanImageTool, ksServer.toolHandler(scanImageTool.Name))
 }
 
 func GetMCPServerCmd() *cobra.Command {
