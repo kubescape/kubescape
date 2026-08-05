@@ -9,8 +9,12 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 
+	"github.com/anchore/grype/grype/match"
+	"github.com/anchore/grype/grype/pkg"
 	"github.com/distribution/reference"
 
 	"github.com/kubescape/go-logger"
@@ -370,4 +374,472 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 	resultsHandler.ImageScanData = []cautils.ImageScanData{*imageScanData}
 
 	return svc.ExceedsSeverityThreshold(imagescan.ParseSeverity(scanInfo.FailThresholdSeverity), imageScanData.Matches), resultsHandler.HandleResults(ks.Context(), scanInfo)
+}
+
+// ScanErrorCategory defines distinct vulnerability scan failure categories.
+type ScanErrorCategory string
+
+const (
+	ErrCategoryDNSTimeout  ScanErrorCategory = "Registry DNSTimeout/Unreachable"
+	ErrCategoryCredentials ScanErrorCategory = "Registry Credentials/Authentication"
+	ErrCategoryParser      ScanErrorCategory = "Image Manifest/Parser Issue"
+	ErrCategoryGeneral     ScanErrorCategory = "General Error"
+)
+
+// CategorizeScanError inspects an error and assigns a ScanErrorCategory.
+func CategorizeScanError(err error) ScanErrorCategory {
+	if err == nil {
+		return ""
+	}
+	if isResolutionError(err) {
+		return ErrCategoryDNSTimeout
+	}
+	errStr := strings.ToLower(err.Error())
+	if strings.Contains(errStr, "unauthorized") ||
+		strings.Contains(errStr, "authentication required") ||
+		strings.Contains(errStr, "forbidden") ||
+		strings.Contains(errStr, "401") ||
+		strings.Contains(errStr, "403") ||
+		strings.Contains(errStr, "credentials") ||
+		strings.Contains(errStr, "login") ||
+		strings.Contains(errStr, "auth") {
+		return ErrCategoryCredentials
+	}
+	if strings.Contains(errStr, "manifest") ||
+		strings.Contains(errStr, "parse") ||
+		strings.Contains(errStr, "syntax") ||
+		strings.Contains(errStr, "unmarshal") ||
+		strings.Contains(errStr, "decode") ||
+		strings.Contains(errStr, "unknown format") ||
+		strings.Contains(errStr, "invalid") ||
+		strings.Contains(errStr, "malformed") {
+		return ErrCategoryParser
+	}
+	return ErrCategoryGeneral
+}
+
+// CategorizedScanError groups an error with its target image and classification.
+type CategorizedScanError struct {
+	Image    string
+	Category ScanErrorCategory
+	Err      error
+}
+
+// ScanErrorAggregator collects and aggregates categorized errors across concurrent worker scans.
+type ScanErrorAggregator struct {
+	mu     sync.Mutex
+	Errors []CategorizedScanError
+}
+
+// NewScanErrorAggregator creates a new thread-safe error aggregator.
+func NewScanErrorAggregator() *ScanErrorAggregator {
+	return &ScanErrorAggregator{
+		Errors: make([]CategorizedScanError, 0),
+	}
+}
+
+// Add appends a categorized error to the aggregator.
+func (a *ScanErrorAggregator) Add(image string, err error) {
+	if err == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Errors = append(a.Errors, CategorizedScanError{
+		Image:    image,
+		Category: CategorizeScanError(err),
+		Err:      err,
+	})
+}
+
+// Summary returns the tally of errors grouped by category.
+func (a *ScanErrorAggregator) Summary() map[ScanErrorCategory]int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	summary := make(map[ScanErrorCategory]int)
+	for _, e := range a.Errors {
+		summary[e.Category]++
+	}
+	return summary
+}
+
+// HasErrors indicates whether any scan errors occurred.
+func (a *ScanErrorAggregator) HasErrors() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.Errors) > 0
+}
+
+// Error formats the aggregated scan errors as a multiline string.
+func (a *ScanErrorAggregator) Error() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.Errors) == 0 {
+		return ""
+	}
+	summary := make(map[ScanErrorCategory][]string)
+	for _, e := range a.Errors {
+		summary[e.Category] = append(summary[e.Category], fmt.Sprintf("%s (%v)", e.Image, e.Err))
+	}
+	var b strings.Builder
+	b.WriteString("Aggregated image scan errors:\n")
+	for cat, list := range summary {
+		b.WriteString(fmt.Sprintf("[%s]: %d errors\n", cat, len(list)))
+		for _, msg := range list {
+			b.WriteString(fmt.Sprintf("  - %s\n", msg))
+		}
+	}
+	return b.String()
+}
+
+// RegistryThrottler manages concurrency limits and pull pacing per registry host.
+type RegistryThrottler struct {
+	mu          sync.Mutex
+	semaphores  map[string]chan struct{}
+	lastCall    map[string]time.Time
+	maxConcur   int
+	minInterval time.Duration
+}
+
+// NewRegistryThrottler instantiates a per-registry pull rate limiter and concurrency gate.
+func NewRegistryThrottler(maxConcurrencyPerRegistry int, minInterval time.Duration) *RegistryThrottler {
+	if maxConcurrencyPerRegistry <= 0 {
+		maxConcurrencyPerRegistry = 2
+	}
+	return &RegistryThrottler{
+		semaphores:  make(map[string]chan struct{}),
+		lastCall:    make(map[string]time.Time),
+		maxConcur:   maxConcurrencyPerRegistry,
+		minInterval: minInterval,
+	}
+}
+
+func (rt *RegistryThrottler) getRegistryDomain(imgName string) string {
+	canonical, err := cautils.NormalizeImageName(imgName)
+	if err != nil {
+		parts := strings.Split(imgName, "/")
+		if len(parts) > 0 && (strings.Contains(parts[0], ".") || strings.Contains(parts[0], ":") || parts[0] == "localhost") {
+			return parts[0]
+		}
+		return "docker.io"
+	}
+	parts := strings.Split(canonical, "/")
+	if len(parts) > 0 {
+		return parts[0]
+	}
+	return "docker.io"
+}
+
+// Acquire requests execution permission for pulling/scanning an image against its target registry.
+func (rt *RegistryThrottler) Acquire(ctx context.Context, imgName string) error {
+	reg := rt.getRegistryDomain(imgName)
+	rt.mu.Lock()
+	sem, ok := rt.semaphores[reg]
+	if !ok {
+		sem = make(chan struct{}, rt.maxConcur)
+		rt.semaphores[reg] = sem
+	}
+	last, existed := rt.lastCall[reg]
+	now := time.Now()
+	var waitDuration time.Duration
+	if existed && rt.minInterval > 0 {
+		elapsed := now.Sub(last)
+		if elapsed < rt.minInterval {
+			waitDuration = rt.minInterval - elapsed
+			rt.lastCall[reg] = last.Add(rt.minInterval)
+		} else {
+			rt.lastCall[reg] = now
+		}
+	} else {
+		rt.lastCall[reg] = now
+	}
+	rt.mu.Unlock()
+
+	if waitDuration > 0 {
+		timer := time.NewTimer(waitDuration)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case sem <- struct{}{}:
+		return nil
+	}
+}
+
+// Release yields the throttling slot back to the registry domain pool.
+func (rt *RegistryThrottler) Release(imgName string) {
+	reg := rt.getRegistryDomain(imgName)
+	rt.mu.Lock()
+	sem, ok := rt.semaphores[reg]
+	rt.mu.Unlock()
+	if ok {
+		select {
+		case <-sem:
+		default:
+		}
+	}
+}
+
+// LayerScanResult stores packages and vulnerability matches associated with a specific base layer.
+type LayerScanResult struct {
+	LayerDigest string
+	Packages    []pkg.Package
+	Matches     match.Matches
+}
+
+// LayerDeduplicator maintains a thread-safe cache of already fetched and analyzed shared base layers.
+type LayerDeduplicator struct {
+	mu         sync.RWMutex
+	layerCache map[string]*LayerScanResult
+	hits       uint64
+	misses     uint64
+}
+
+// NewLayerDeduplicator initializes a new layer deduplication cache.
+func NewLayerDeduplicator() *LayerDeduplicator {
+	return &LayerDeduplicator{
+		layerCache: make(map[string]*LayerScanResult),
+	}
+}
+
+// Get checks if a layer's analysis findings are already cached.
+func (d *LayerDeduplicator) Get(layerDigest string) (*LayerScanResult, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	res, ok := d.layerCache[layerDigest]
+	if ok {
+		d.hits++
+		return res, true
+	}
+	d.misses++
+	return nil, false
+}
+
+// Put records analyzed packages and vulnerability matches under a layer digest.
+func (d *LayerDeduplicator) Put(layerDigest string, res *LayerScanResult) {
+	if layerDigest == "" || res == nil {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.layerCache[layerDigest] = res
+}
+
+// PutIfAbsent records findings under a layer digest if not already present, without incrementing misses.
+func (d *LayerDeduplicator) PutIfAbsent(layerDigest string, res *LayerScanResult) {
+	if layerDigest == "" || res == nil {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, exists := d.layerCache[layerDigest]; !exists {
+		d.layerCache[layerDigest] = res
+	}
+}
+
+// Stats returns cache hit/miss statistics and current cached layer count.
+func (d *LayerDeduplicator) Stats() (hits, misses uint64, cachedLayers int) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.hits, d.misses, len(d.layerCache)
+}
+
+// LayerGetterFunc defines a callback function to resolve base layer digests of an image.
+type LayerGetterFunc func(ctx context.Context, image string, creds imagescan.RegistryCredentials) ([]string, error)
+
+// DeduplicatingImageScanService decorates an image scan service with layer caching and pull throttling.
+type DeduplicatingImageScanService struct {
+	delegate    imageScanService
+	dedup       *LayerDeduplicator
+	throttler   *RegistryThrottler
+	layerGetter LayerGetterFunc
+}
+
+// NewDeduplicatingImageScanService constructs a deduplicating image scan service.
+func NewDeduplicatingImageScanService(delegate imageScanService, dedup *LayerDeduplicator, throttler *RegistryThrottler, layerGetter LayerGetterFunc) *DeduplicatingImageScanService {
+	return &DeduplicatingImageScanService{
+		delegate:    delegate,
+		dedup:       dedup,
+		throttler:   throttler,
+		layerGetter: layerGetter,
+	}
+}
+
+func (d *DeduplicatingImageScanService) Scan(ctx context.Context, img string, creds imagescan.RegistryCredentials, vulnExceptions, sevExceptions []string) (*cautils.ImageScanData, error) {
+	if d.throttler != nil {
+		if err := d.throttler.Acquire(ctx, img); err != nil {
+			return nil, err
+		}
+		defer d.throttler.Release(img)
+	}
+
+	var layers []string
+	if d.layerGetter != nil {
+		var err error
+		layers, err = d.layerGetter(ctx, img, creds)
+		if err != nil {
+			logger.L().Ctx(ctx).Debug(fmt.Sprintf("Could not fetch layer digests for %s: %v", img, err))
+		}
+	}
+
+	if len(layers) > 0 && d.dedup != nil {
+		allCached := true
+		cachedMatches := match.NewMatches()
+		var cachedPkgs []pkg.Package
+		seenPkgs := make(map[string]bool)
+
+		for _, layer := range layers {
+			res, ok := d.dedup.Get(layer)
+			if !ok {
+				allCached = false
+				break
+			}
+			for _, p := range res.Packages {
+				key := fmt.Sprintf("%s:%s", p.Name, p.Version)
+				if !seenPkgs[key] {
+					seenPkgs[key] = true
+					cachedPkgs = append(cachedPkgs, p)
+				}
+			}
+			for m := range res.Matches.Enumerate() {
+				cachedMatches.Add(m)
+			}
+		}
+
+		if allCached {
+			logger.L().Ctx(ctx).Debug(fmt.Sprintf("Layer deduplication hit for image %s: skipping full scan", img))
+			return &cautils.ImageScanData{
+				Image:   img,
+				Matches: cachedMatches,
+				Packages: cachedPkgs,
+			}, nil
+		}
+	}
+
+	scanData, err := d.delegate.Scan(ctx, img, creds, vulnExceptions, sevExceptions)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(layers) > 0 && d.dedup != nil && scanData != nil {
+		for _, layer := range layers {
+			d.dedup.PutIfAbsent(layer, &LayerScanResult{
+				LayerDigest: layer,
+				Packages:    scanData.Packages,
+				Matches:     scanData.Matches,
+			})
+		}
+	}
+
+	return scanData, nil
+}
+
+// ImageScanJob represents an item of work for the concurrent scanner.
+type ImageScanJob struct {
+	Image                   string
+	RegistryCredentials     imagescan.RegistryCredentials
+	VulnerabilityExceptions []string
+	SeverityExceptions      []string
+	RegistryMapping         map[string]string
+}
+
+// ImageScanResult conveys the scan output and categorized errors from a worker.
+type ImageScanResult struct {
+	Image    string
+	ScanData *cautils.ImageScanData
+	Error    error
+}
+
+// ImageScanOrchestrator coordinates concurrent image scan execution across a worker pool.
+type ImageScanOrchestrator struct {
+	concurrency     int
+	svc             imageScanService
+	errorAggregator *ScanErrorAggregator
+}
+
+// NewImageScanOrchestrator instantiates an orchestrator with a worker pool size.
+func NewImageScanOrchestrator(svc imageScanService, concurrency int) *ImageScanOrchestrator {
+	if concurrency <= 0 {
+		concurrency = 5
+	}
+	return &ImageScanOrchestrator{
+		concurrency:     concurrency,
+		svc:             svc,
+		errorAggregator: NewScanErrorAggregator(),
+	}
+}
+
+// ScanImages processes multiple image scanning jobs concurrently using the worker pool.
+func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScanJob) []ImageScanResult {
+	if len(jobs) == 0 {
+		return nil
+	}
+
+	jobChan := make(chan ImageScanJob, len(jobs))
+	resultChan := make(chan ImageScanResult, len(jobs))
+
+	for _, job := range jobs {
+		jobChan <- job
+	}
+	close(jobChan)
+
+	var wg sync.WaitGroup
+	workers := o.concurrency
+	if workers > len(jobs) {
+		workers = len(jobs)
+	}
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobChan {
+				select {
+				case <-ctx.Done():
+					resultChan <- ImageScanResult{
+						Image: job.Image,
+						Error: fmt.Errorf("scan canceled: %w", ctx.Err()),
+					}
+					return
+				default:
+				}
+
+				scanData, err := scanWithRegistryMapping(
+					ctx, o.svc, job.Image, job.RegistryCredentials,
+					job.RegistryMapping, job.VulnerabilityExceptions, job.SeverityExceptions,
+				)
+				if err != nil {
+					if o.errorAggregator != nil {
+						o.errorAggregator.Add(job.Image, err)
+					}
+				}
+				resultChan <- ImageScanResult{
+					Image:    job.Image,
+					ScanData: scanData,
+					Error:    err,
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(resultChan)
+
+	results := make([]ImageScanResult, 0, len(jobs))
+	for res := range resultChan {
+		results = append(results, res)
+	}
+	return results
+}
+
+// GetErrorAggregator returns the orchestrator's scan error aggregator.
+func (o *ImageScanOrchestrator) GetErrorAggregator() *ScanErrorAggregator {
+	return o.errorAggregator
 }
