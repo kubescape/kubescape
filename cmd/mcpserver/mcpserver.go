@@ -471,7 +471,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			})
 		}
 		if err != nil {
-			return nil, err
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list vulnerability manifests: %v", err)), nil
 		}
 
 		logger.L().Info(fmt.Sprintf("Found %d manifests", len(manifests.Items)))
@@ -621,7 +621,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		manifests, err := client.WorkloadConfigurationScans(namespaceStr).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			return nil, err
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list configuration scans: %v", err)), nil
 		}
 		logger.L().Info(fmt.Sprintf("Found %d configuration manifests", len(manifests.Items)))
 		configManifests := []map[string]any{}
@@ -707,7 +707,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		profiles, err := client.ContainerProfiles(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			return nil, err
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list container profiles: %v", err)), nil
 		}
 		logger.L().Info(fmt.Sprintf("Found %d container profiles", len(profiles.Items)))
 		containerProfilesList := []map[string]any{}
