@@ -294,14 +294,24 @@ func removeConfigMapData(workload workloadinterface.IWorkload) {
 }
 
 func overrideSensitiveData(workload workloadinterface.IWorkload) {
-	dataInterface, ok := workloadinterface.InspectMap(workload.GetObject(), "data")
-	if ok {
-		data, ok := dataInterface.(map[string]any)
-		if ok {
-			for key := range data {
-				workloadinterface.SetInMap(workload.GetObject(), []string{"data"}, key, "XXXXXX")
-			}
-		}
+	overrideMapField(workload, "data")
+}
+
+func overrideStringData(workload workloadinterface.IWorkload) {
+	overrideMapField(workload, "stringData")
+}
+
+func overrideMapField(workload workloadinterface.IWorkload, field string) {
+	dataInterface, ok := workloadinterface.InspectMap(workload.GetObject(), field)
+	if !ok {
+		return
+	}
+	data, ok := dataInterface.(map[string]any)
+	if !ok {
+		return
+	}
+	for key := range data {
+		workloadinterface.SetInMap(workload.GetObject(), []string{field}, key, "XXXXXX")
 	}
 }
 
@@ -309,7 +319,9 @@ func removeSecretData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 	overrideSensitiveData(workload)
+	overrideStringData(workload)
 }
+
 func removePodData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
