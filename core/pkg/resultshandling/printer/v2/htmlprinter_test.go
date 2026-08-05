@@ -3,6 +3,7 @@ package printer
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -112,18 +113,13 @@ func TestBuildResourceTableView_SkipsMissingResource(t *testing.T) {
 
 func TestHtmlPrinter_ActionPrint_RiskScoreRounding(t *testing.T) {
 	ctx := context.Background()
-	tmp := t.TempDir()
-	origWd, err := os.Getwd()
-	assert.NoError(t, err)
-	assert.NoError(t, os.Chdir(tmp))
-	t.Cleanup(func() { _ = os.Chdir(origWd) })
+	out := filepath.Join(t.TempDir(), "report.html")
 
 	hp := NewHtmlPrinter()
-	hp.SetWriter(ctx, "report.html")
-	t.Cleanup(func() {
-		_ = hp.writer.Close()
-	})
+	hp.SetWriter(ctx, out)
 
+	// Fixture counters (FailedResources: 2, AllResources: 100) are intentionally
+	// distinct from the expected risk score (1) so no other numeric cell renders 0 or 1.
 	session := cautils.NewOPASessionObjMock()
 	session.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{
 		"C-0001": reportsummary.ControlSummary{
@@ -132,8 +128,8 @@ func TestHtmlPrinter_ActionPrint_RiskScoreRounding(t *testing.T) {
 			Score:       0.4,
 			ScoreFactor: 1.0,
 			StatusCounters: reportsummary.StatusCounters{
-				FailedResources: 1,
-				PassedResources: 99,
+				FailedResources: 2,
+				PassedResources: 98,
 			},
 		},
 	}
@@ -141,7 +137,7 @@ func TestHtmlPrinter_ActionPrint_RiskScoreRounding(t *testing.T) {
 	hp.ActionPrint(ctx, session, nil)
 	hp.CloseWriter()
 
-	content, err := os.ReadFile(hp.writer.Name())
+	content, err := os.ReadFile(out)
 	assert.NoError(t, err)
 	htmlContent := string(content)
 
@@ -149,4 +145,3 @@ func TestHtmlPrinter_ActionPrint_RiskScoreRounding(t *testing.T) {
 	assert.Contains(t, htmlContent, `<td class="controlRiskCell numericCell">1</td>`)
 	assert.NotContains(t, htmlContent, `<td class="controlRiskCell numericCell">0</td>`)
 }
-

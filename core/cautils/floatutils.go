@@ -49,4 +49,3 @@ func RiskScoreToInt(x float32) int {
 	}
 	return i
 }
-

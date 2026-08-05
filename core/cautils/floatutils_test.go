@@ -126,7 +126,6 @@ func TestRiskScoreToInt(t *testing.T) {
 	}
 }
 
-
 func TestFloat32ToIntFloor(t *testing.T) {
 	assert.Equal(t, 99, Float32ToIntFloor(99.5))
 	assert.Equal(t, 99, Float32ToIntFloor(99.9))
