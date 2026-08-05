@@ -49,6 +49,34 @@ func TestGlobalKSCloudAPIConnector(t *testing.T) {
 	})
 }
 
+func TestGlobalKSCloudAPIConnector_Race(t *testing.T) {
+	globalMx.Lock()
+	defer globalMx.Unlock()
+
+	globalKSCloudAPIConnector = nil
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// concurrent writer
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			SetKSCloudAPIConnector(v1.NewEmptyKSCloudAPI())
+		}
+	}()
+
+	// concurrent reader
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			_ = GetKSCloudAPIConnector()
+		}
+	}()
+
+	wg.Wait()
+}
+
 func TestHttpPost(t *testing.T) {
 	client := http.DefaultClient
 	hdrs := map[string]string{"key": "value"}
