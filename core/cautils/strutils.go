@@ -12,10 +12,12 @@ func StringSlicesAreEqual(a, b []string) bool {
 		return false
 	}
 
-	sort.Strings(a)
-	sort.Strings(b)
-	for i := range a {
-		if a[i] != b[i] {
+	ac := append([]string(nil), a...)
+	bc := append([]string(nil), b...)
+	sort.Strings(ac)
+	sort.Strings(bc)
+	for i := range ac {
+		if ac[i] != bc[i] {
 			return false
 		}
 	}
