@@ -3,25 +3,21 @@ package cautils
 import (
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 )
 
+// StringSlicesAreEqual reports whether a and b contain the same elements,
+// ignoring order. It sorts copies rather than the arguments: callers pass
+// slices they do not exclusively own (e.g. the policy handler's cached
+// identifiers), and sorting those in place would mutate shared state outside
+// the owner's lock.
 func StringSlicesAreEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
 
-	ac := append([]string(nil), a...)
-	bc := append([]string(nil), b...)
-	sort.Strings(ac)
-	sort.Strings(bc)
-	for i := range ac {
-		if ac[i] != bc[i] {
-			return false
-		}
-	}
-	return true
+	return slices.Equal(slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b)))
 }
 
 func ParseIntEnvVar(varName string, defaultValue int) (int, error) {
