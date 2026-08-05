@@ -128,12 +128,8 @@ func insertControls(resource string, resourceToControl map[string][]string, cont
 	for _, ksResource := range ksResources {
 		group, version := k8sinterface.SplitApiVersion(ksResource)
 		r := k8sinterface.JoinResourceTriplets(group, version, resource)
-		if _, ok := resourceToControl[r]; !ok {
+		if !slices.Contains(resourceToControl[r], control.ControlID) {
 			resourceToControl[r] = append(resourceToControl[r], control.ControlID)
-		} else {
-			if !slices.Contains(resourceToControl[r], control.ControlID) {
-				resourceToControl[r] = append(resourceToControl[r], control.ControlID)
-			}
 		}
 	}
 }
