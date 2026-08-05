@@ -145,3 +145,51 @@ func Test_getWorkloadFromScanObject(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, workload)
 }
+
+func Test_getGroupNVersion(t *testing.T) {
+	tests := []struct {
+		name        string
+		apiVersion  string
+		wantGroup   string
+		wantVersion string
+	}{
+		{
+			name:        "empty apiVersion",
+			apiVersion:  "",
+			wantGroup:   "",
+			wantVersion: "",
+		},
+		{
+			name:        "core api group (no version slash)",
+			apiVersion:  "v1",
+			wantGroup:   "",
+			wantVersion: "v1",
+		},
+		{
+			name:        "standard api group",
+			apiVersion:  "apps/v1",
+			wantGroup:   "apps",
+			wantVersion: "v1",
+		},
+		{
+			name:        "extended api group",
+			apiVersion:  "rbac.authorization.k8s.io/v1beta1",
+			wantGroup:   "rbac.authorization.k8s.io",
+			wantVersion: "v1beta1",
+		},
+		{
+			name:        "malformed apiVersion with extra slashes",
+			apiVersion:  "group/version/extra",
+			wantGroup:   "group",
+			wantVersion: "version",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			group, version := getGroupNVersion(tt.apiVersion)
+			assert.Equal(t, tt.wantGroup, group)
+			assert.Equal(t, tt.wantVersion, version)
+		})
+	}
+}
