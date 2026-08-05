@@ -113,5 +113,18 @@ func (p *ProgressHandler) ProgressJob(step int, message string) {
 	p.pb.Describe(message)
 }
 
+// Stop completes the progress bar to 100%. It must do this explicitly rather
+// than relying on the caller's ProgressJob calls to have added up to exactly
+// allSteps: callers that estimate allSteps in advance (e.g.
+// OPAProcessor.ProcessWithStreaming sizes it from a namespace count that
+// includes namespaces which turn out to hold no scannable resources, and so
+// never receive a corresponding ProgressJob call) legitimately finish having
+// added fewer steps than allSteps. Before this called Finish(), such a run
+// left the bar visibly stuck below 100% with no further updates, since Stop
+// was a no-op.
 func (p *ProgressHandler) Stop() {
+	if p.pb == nil {
+		return
+	}
+	_ = p.pb.Finish()
 }
