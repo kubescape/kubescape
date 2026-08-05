@@ -49,14 +49,14 @@ jobs:
         run: |
           set -o pipefail
           test_status=0
-          ${{ env.DOCKER_CMD }} go test ./... -count=1 -json -p=1 > test-output.json 2>&1 || test_status=$?
+          ${{ env.DOCKER_CMD }} go test ./... -count=1 -json -p=1 > test-output.json || test_status=$?
           
           if ! command -v jq >/dev/null 2>&1; then
             sudo apt-get update && sudo apt-get install -y jq
           fi
           
           if grep -q '"Action":"fail"' test-output.json; then
-            jq -r 'select(.Action=="fail") | .Package' test-output.json | sort -u > failed_packages.txt
+            grep '"Action":"fail"' test-output.json | jq -r '.Package' | sort -u > failed_packages.txt
             echo "Failing packages:"
             cat failed_packages.txt || true
             echo ""
