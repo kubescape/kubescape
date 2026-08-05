@@ -380,7 +380,8 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 type ScanErrorCategory string
 
 const (
-	ErrCategoryDNSTimeout  ScanErrorCategory = "Registry DNSTimeout/Unreachable"
+	ErrCategoryDNSTimeout ScanErrorCategory = "Registry DNSTimeout/Unreachable"
+	//nolint:gosec // G101: this is a descriptive category label, not a hardcoded credential
 	ErrCategoryCredentials ScanErrorCategory = "Registry Credentials/Authentication"
 	ErrCategoryParser      ScanErrorCategory = "Image Manifest/Parser Issue"
 	ErrCategoryGeneral     ScanErrorCategory = "General Error"
@@ -484,9 +485,9 @@ func (a *ScanErrorAggregator) Error() string {
 	var b strings.Builder
 	b.WriteString("Aggregated image scan errors:\n")
 	for cat, list := range summary {
-		b.WriteString(fmt.Sprintf("[%s]: %d errors\n", cat, len(list)))
+		fmt.Fprintf(&b, "[%s]: %d errors\n", cat, len(list))
 		for _, msg := range list {
-			b.WriteString(fmt.Sprintf("  - %s\n", msg))
+			fmt.Fprintf(&b, "  - %s\n", msg)
 		}
 	}
 	return b.String()
@@ -716,8 +717,8 @@ func (d *DeduplicatingImageScanService) Scan(ctx context.Context, img string, cr
 		if allCached {
 			logger.L().Ctx(ctx).Debug(fmt.Sprintf("Layer deduplication hit for image %s: skipping full scan", img))
 			return &cautils.ImageScanData{
-				Image:   img,
-				Matches: cachedMatches,
+				Image:    img,
+				Matches:  cachedMatches,
 				Packages: cachedPkgs,
 			}, nil
 		}

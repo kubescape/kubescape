@@ -19,12 +19,12 @@ import (
 )
 
 type mockImageScanService struct {
-	mu           sync.Mutex
-	scanCalls    int
-	delay        time.Duration
-	errByImage   map[string]error
-	dataByImage  map[string]*cautils.ImageScanData
-	invokedC     chan string
+	mu          sync.Mutex
+	scanCalls   int
+	delay       time.Duration
+	errByImage  map[string]error
+	dataByImage map[string]*cautils.ImageScanData
+	invokedC    chan string
 }
 
 func newMockImageScanService(delay time.Duration) *mockImageScanService {
