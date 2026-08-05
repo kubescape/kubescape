@@ -130,7 +130,7 @@ func (t *Template) generateTableTableResult(totalFailed, total int, score float3
 		text.NewCol(5, "Resource summary", defaultProps),
 		text.NewCol(2, fmt.Sprintf("%d", totalFailed), defaultProps),
 		text.NewCol(2, fmt.Sprintf("%d", total), defaultProps),
-		text.NewCol(2, fmt.Sprintf("%s%s", cautils.ComplianceScoreToString(score, 2), "%"), defaultProps),
+		text.NewCol(2, cautils.ComplianceScoreToString(score, 2)+"%", defaultProps),
 	)
 }
 

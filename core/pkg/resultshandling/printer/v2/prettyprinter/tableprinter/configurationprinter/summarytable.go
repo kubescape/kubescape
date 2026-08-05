@@ -107,7 +107,7 @@ func GenerateFooter(summaryDetails *reportsummary.SummaryDetails, short bool) ta
 		row[summaryColumnCounterFailed] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed())
 		row[summaryColumnCounterAll] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().All())
 		row[summaryColumnSeverity] = " "
-		row[summaryColumnComplianceScore] = fmt.Sprintf("%s%s", cautils.ComplianceScoreToString(summaryDetails.ComplianceScore, 2), "%")
+		row[summaryColumnComplianceScore] = cautils.ComplianceScoreToString(summaryDetails.ComplianceScore, 2) + "%"
 	}
 
 	return row
