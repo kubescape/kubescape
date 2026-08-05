@@ -48,15 +48,24 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          ${{ env.DOCKER_CMD }} go test ./... -count=1 -json -p=1 > test-output.json || true
-          jq -r 'select(.Action=="fail") | .Package' test-output.json | sort -u > failed_packages.txt || true
-          if [ -s failed_packages.txt ]; then
+          test_status=0
+          ${{ env.DOCKER_CMD }} go test ./... -count=1 -json -p=1 > test-output.json 2>&1 || test_status=$?
+          
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+          
+          if grep -q '"Action":"fail"' test-output.json; then
+            jq -r 'select(.Action=="fail") | .Package' test-output.json | sort -u > failed_packages.txt
             echo "Failing packages:"
-            cat failed_packages.txt
+            cat failed_packages.txt || true
             echo ""
             echo "Tail of test-output.json:"
-            tail -n 500 test-output.json
-            exit 1
+            tail -n 500 test-output.json || true
+          fi
+          
+          if [ $test_status -ne 0 ]; then
+            exit $test_status
           fi
 
       - name: Upload test output
@@ -64,7 +73,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: go-test-output
-          path: test-output.json
+          path: |
+            test-output.json
+            failed_packages.txt
+          retention-days: 7
 
       - name: Test httphandler pkg
         run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test -v ./...'
