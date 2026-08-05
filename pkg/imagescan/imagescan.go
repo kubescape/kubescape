@@ -133,8 +133,6 @@ func validateDBLoad(loadErr error, status *vulnerability.ProviderStatus) error {
 }
 
 func getProviderConfig(creds RegistryCredentials, sources []string) pkg.ProviderConfig {
-	syftCreds := []image.RegistryCredentials{{Username: creds.Username, Password: creds.Password}}
-func getProviderConfig(creds RegistryCredentials) pkg.ProviderConfig {
 	var syftCreds []image.RegistryCredentials
 	if creds.hasAuthenticator() {
 		syftCreds = append(syftCreds, image.RegistryCredentials{
