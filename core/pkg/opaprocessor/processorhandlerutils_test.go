@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -39,6 +40,31 @@ func TestGetKubernetesObjectsDeduplicatesResourceAliases(t *testing.T) {
 
 	objects := getKubernetesObjects(resources, allResources, match)
 	assert.Equal(t, 1, len(objects))
+}
+
+func TestGetKubernetesObjectsMatchesFutureAPIVersionWithWildcards(t *testing.T) {
+	workload := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "autoscaling/v99",
+		"kind":       "HorizontalPodAutoscaler",
+		"metadata": map[string]any{
+			"name":      "future-hpa",
+			"namespace": "default",
+		},
+	})
+	resourceID := workload.GetID()
+	resources := cautils.K8SResources{
+		"autoscaling/v99/horizontalpodautoscaler": {resourceID},
+	}
+	allResources := map[string]workloadinterface.IMetadata{resourceID: workload}
+	match := []reporthandling.RuleMatchObjects{{
+		APIGroups:   []string{"*"},
+		APIVersions: []string{"*"},
+		Resources:   []string{"HorizontalPodAutoscaler"},
+	}}
+
+	objects := getKubernetesObjects(resources, allResources, match)
+	require.Len(t, objects, 1)
+	assert.Same(t, workload, objects[0])
 }
 
 func TestRemoveData(t *testing.T) {

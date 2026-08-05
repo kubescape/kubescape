@@ -58,23 +58,10 @@ func addWorkloadsToResourcesMap(allResources map[string][]workloadinterface.IMet
 	for i := range workloads {
 		workload := workloads[i]
 		group, version := k8sinterface.SplitApiVersion(workload.GetApiVersion())
-		canonical, canonicalErr := k8sinterface.GetGroupVersionResource(workload.GetKind())
-
-		var resourceTriplets []string
-		if canonicalErr == nil && matchesCanonicalAPIGroup(group, canonical.Group) {
-			if canonical.Group != group || canonical.Version != version {
-				logger.L().Warning("workload GroupVersion mismatch", helpers.String("id", workload.GetID()), helpers.String("kind", workload.GetKind()), helpers.String("expectedGroup", canonical.Group), helpers.String("actualGroup", group), helpers.String("expectedVersion", canonical.Version), helpers.String("actualVersion", version))
-				continue
-			}
-			resourceTriplets = []string{k8sinterface.JoinResourceTriplets(canonical.Group, canonical.Version, canonical.Resource)}
-		} else {
-			resourceTriplets = offlineManifestResourceTriplets(group, version, workload.GetKind())
-			if len(resourceTriplets) == 0 {
-				logger.L().Warning("unable to resolve object resource", helpers.String("kind", workload.GetKind()), helpers.String("id", workload.GetID()))
-				continue
-			}
-			logger.L().Debug("using manifest identity for custom resource unavailable in discovery",
-				helpers.String("kind", workload.GetKind()), helpers.String("id", workload.GetID()))
+		resourceTriplets := offlineManifestResourceTriplets(group, version, workload.GetKind())
+		if len(resourceTriplets) == 0 {
+			logger.L().Warning("unable to resolve object resource", helpers.String("kind", workload.GetKind()), helpers.String("id", workload.GetID()))
+			continue
 		}
 
 		for _, resourceTriplet := range resourceTriplets {
@@ -84,7 +71,7 @@ func addWorkloadsToResourcesMap(allResources map[string][]workloadinterface.IMet
 }
 
 func offlineManifestResourceTriplets(group, version, kind string) []string {
-	if group == "" || version == "" || kind == "" {
+	if version == "" || kind == "" {
 		return nil
 	}
 
@@ -117,18 +104,6 @@ func offlineManifestResourceAliases(kind string) []string {
 		aliases = append(aliases, singular[:n-1]+"ies")
 	}
 	return aliases
-}
-
-// matchesCanonicalAPIGroup distinguishes a stale built-in API version from a
-// custom resource whose Kind happens to collide with a built-in Kind. Most
-// built-ins retain their canonical group; extensions is the narrow legacy
-// exception for resources that moved to apps or networking.k8s.io.
-func matchesCanonicalAPIGroup(manifestGroup, canonicalGroup string) bool {
-	if manifestGroup == canonicalGroup {
-		return true
-	}
-	return manifestGroup == "extensions" &&
-		(canonicalGroup == "apps" || canonicalGroup == "networking.k8s.io")
 }
 
 /* unused for now

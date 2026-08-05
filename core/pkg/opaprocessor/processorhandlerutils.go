@@ -2,6 +2,8 @@ package opaprocessor
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -203,18 +205,49 @@ func isEmptyResources(counters reportsummary.ICounters) bool {
 }
 
 func getKubernetesObjectsFromExternalResources(externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+	return getKubernetesObjects(cautils.K8SResources(externalResources), allResources, match)
+}
+
+// getKubernetesObjects returns the objects of a single scope that the rule
+// matches, in match-declaration order. Callers evaluate one scope at a time,
+// so no per-namespace bucketing happens here: the caller's batch already is
+// the bucket (see cautils.PartitionResources).
+func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
+	seenResourceIDs := make(map[string]struct{})
+	// Match the collected GVR keys directly. Re-resolving policy matches through
+	// k8s-interface here would make file scans depend on its discovery snapshot
+	// again and would lose manifest versions that the snapshot does not contain.
+	resourceGroups := make([]string, 0, len(k8sResources))
+	for resourceGroup := range k8sResources {
+		resourceGroups = append(resourceGroups, resourceGroup)
+	}
+	sort.Strings(resourceGroups)
 
 	for m := range match {
 		for _, groups := range match[m].APIGroups {
 			for _, version := range match[m].APIVersions {
 				for _, resource := range match[m].Resources {
-					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
-					for _, groupResource := range groupResources {
-						if k8sObj, ok := externalResources[groupResource]; ok {
-							for i := range k8sObj {
-								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
+					for _, resourceGroup := range resourceGroups {
+						objectGroup, objectVersion, objectResource := k8sinterface.StringToResourceGroup(resourceGroup)
+						if !matchesKubernetesObjectValue(groups, objectGroup) || !matchesKubernetesObjectValue(version, objectVersion) {
+							continue
+						}
+
+						directResourceMatch := resource == "*" || strings.EqualFold(resource, objectResource)
+						for _, id := range k8sResources[resourceGroup] {
+							if _, seen := seenResourceIDs[id]; seen {
+								continue
 							}
+							object, ok := allResources[id]
+							if !ok || object == nil {
+								continue
+							}
+							if !directResourceMatch && !strings.EqualFold(resource, object.GetKind()) {
+								continue
+							}
+							k8sObjects = append(k8sObjects, object)
+							seenResourceIDs[id] = struct{}{}
 						}
 					}
 				}
@@ -225,31 +258,11 @@ func getKubernetesObjectsFromExternalResources(externalResources cautils.Externa
 	return k8sObjects
 }
 
-// getKubernetesObjects returns the objects of a single scope that the rule
-// matches, in match-declaration order. Callers evaluate one scope at a time,
-// so no per-namespace bucketing happens here: the caller's batch already is
-// the bucket (see cautils.PartitionResources).
-func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
-	k8sObjects := []workloadinterface.IMetadata{}
-
-	for m := range match {
-		for _, groups := range match[m].APIGroups {
-			for _, version := range match[m].APIVersions {
-				for _, resource := range match[m].Resources {
-					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
-					for _, groupResource := range groupResources {
-						for _, id := range k8sResources[groupResource] {
-							if obj, ok := allResources[id]; ok {
-								k8sObjects = append(k8sObjects, obj)
-							}
-						}
-					}
-				}
-			}
-		}
+func matchesKubernetesObjectValue(policyValue, objectValue string) bool {
+	if policyValue == "*" || policyValue == objectValue {
+		return true
 	}
-
-	return k8sObjects
+	return policyValue == "core" && objectValue == ""
 }
 func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 	modules := resources.LoadRegoModules()
