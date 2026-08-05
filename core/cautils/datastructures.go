@@ -109,8 +109,6 @@ func estimateClusterSize(k8sResources K8SResources) int {
 
 // SetTopWorkloads sets the top workloads by score
 func (sessionObj *OPASessionObj) SetTopWorkloads() {
-	count := 0
-
 	topWorkloadsSorted := make([]prioritization.PrioritizedResource, 0)
 
 	// create list in order to sort
@@ -151,7 +149,6 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 		}
 
 		topWorkloads = append(topWorkloads, wlObj)
-		count++
 	}
 
 	sessionObj.TopWorkloadsByScore = topWorkloads
