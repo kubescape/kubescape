@@ -489,7 +489,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if ns, ok := arguments["namespace"]; ok {
 			nsStr, ok := ns.(string)
 			if !ok {
-				return nil, fmt.Errorf("namespace must be a string")
+				return mcp.NewToolResultError("namespace must be a string"), nil
 			}
 			if nsStr != "" {
 				namespace = nsStr
@@ -518,20 +518,20 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if labelSelector == "" {
 			client, ksErr := ksServer.getKsClient()
 			if ksErr != nil {
-				return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+				return mcp.NewToolResultError(fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr)), nil
 			}
 			manifests, err = client.VulnerabilityManifests(namespace).List(ctx, metav1.ListOptions{})
 		} else {
 			client, ksErr := ksServer.getKsClient()
 			if ksErr != nil {
-				return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+				return mcp.NewToolResultError(fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr)), nil
 			}
 			manifests, err = client.VulnerabilityManifests(namespace).List(ctx, metav1.ListOptions{
 				LabelSelector: labelSelector,
 			})
 		}
 		if err != nil {
-			return nil, err
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list vulnerability manifests: %v", err)), nil
 		}
 
 		logger.L().Info(fmt.Sprintf("Found %d manifests", len(manifests.Items)))
@@ -564,7 +564,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 
 		content, err := json.Marshal(result)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal result: %w", err)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -581,23 +581,23 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		namespaceStr, ok := namespace.(string)
 		if !ok {
-			return nil, fmt.Errorf("namespace must be a string")
+			return mcp.NewToolResultError("namespace must be a string"), nil
 		}
 		manifestName, ok := arguments["manifest_name"]
 		if !ok {
-			return nil, fmt.Errorf("manifest_name is required")
+			return mcp.NewToolResultError("manifest_name is required"), nil
 		}
 		manifestNameStr, ok := manifestName.(string)
 		if !ok {
-			return nil, fmt.Errorf("manifest_name must be a string")
+			return mcp.NewToolResultError("manifest_name must be a string"), nil
 		}
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
-			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr)), nil
 		}
 		manifest, err := client.VulnerabilityManifests(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("failed to get vulnerability manifest: %w", err)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to get vulnerability manifest: %v", err)), nil
 		}
 		var cveList []v1beta1.Vulnerability
 		for _, match := range manifest.Spec.Payload.Matches {
@@ -605,7 +605,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		responseJson, err := json.Marshal(cveList)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal cve list: %w", err)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal cve list: %v", err)), nil
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -622,31 +622,31 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		namespaceStr, ok := namespace.(string)
 		if !ok {
-			return nil, fmt.Errorf("namespace must be a string")
+			return mcp.NewToolResultError("namespace must be a string"), nil
 		}
 		manifestName, ok := arguments["manifest_name"]
 		if !ok {
-			return nil, fmt.Errorf("manifest_name is required")
+			return mcp.NewToolResultError("manifest_name is required"), nil
 		}
 		manifestNameStr, ok := manifestName.(string)
 		if !ok {
-			return nil, fmt.Errorf("manifest_name must be a string")
+			return mcp.NewToolResultError("manifest_name must be a string"), nil
 		}
 		cveID, ok := arguments["cve_id"]
 		if !ok {
-			return nil, fmt.Errorf("cve_id is required")
+			return mcp.NewToolResultError("cve_id is required"), nil
 		}
 		cveIDStr, ok := cveID.(string)
 		if !ok {
-			return nil, fmt.Errorf("cve_id must be a string")
+			return mcp.NewToolResultError("cve_id must be a string"), nil
 		}
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
-			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr)), nil
 		}
 		manifest, err := client.VulnerabilityManifests(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("failed to get vulnerability manifest: %w", err)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to get vulnerability manifest: %v", err)), nil
 		}
 		var match []v1beta1.Match
 		for _, m := range manifest.Spec.Payload.Matches {
@@ -656,7 +656,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		responseJson, err := json.Marshal(match)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal cve details: %w", err)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal cve details: %v", err)), nil
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -673,15 +673,15 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		namespaceStr, ok := namespace.(string)
 		if !ok {
-			return nil, fmt.Errorf("namespace must be a string")
+			return mcp.NewToolResultError("namespace must be a string"), nil
 		}
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
-			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr)), nil
 		}
 		manifests, err := client.WorkloadConfigurationScans(namespaceStr).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			return nil, err
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list configuration scans: %v", err)), nil
 		}
 		logger.L().Info(fmt.Sprintf("Found %d configuration manifests", len(manifests.Items)))
 		configManifests := []map[string]any{}
@@ -703,7 +703,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		content, err := json.Marshal(result)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal result: %w", err)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -720,27 +720,27 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		namespaceStr, ok := namespace.(string)
 		if !ok {
-			return nil, fmt.Errorf("namespace must be a string")
+			return mcp.NewToolResultError("namespace must be a string"), nil
 		}
 		manifestName, ok := arguments["manifest_name"]
 		if !ok {
-			return nil, fmt.Errorf("manifest_name is required")
+			return mcp.NewToolResultError("manifest_name is required"), nil
 		}
 		manifestNameStr, ok := manifestName.(string)
 		if !ok {
-			return nil, fmt.Errorf("manifest_name must be a string")
+			return mcp.NewToolResultError("manifest_name must be a string"), nil
 		}
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
-			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr)), nil
 		}
 		manifest, err := client.WorkloadConfigurationScans(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("failed to get configuration manifest: %w", err)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to get configuration manifest: %v", err)), nil
 		}
 		responseJson, err := json.Marshal(manifest)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal configuration manifest: %w", err)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal configuration manifest: %v", err)), nil
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -755,7 +755,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if ns, ok := arguments["namespace"]; ok {
 			nsStr, ok := ns.(string)
 			if !ok {
-				return nil, fmt.Errorf("namespace must be a string")
+				return mcp.NewToolResultError("namespace must be a string"), nil
 			}
 			if nsStr != "" {
 				namespace = nsStr
@@ -763,11 +763,11 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
-			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr)), nil
 		}
 		profiles, err := client.ContainerProfiles(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			return nil, err
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list container profiles: %v", err)), nil
 		}
 		logger.L().Info(fmt.Sprintf("Found %d container profiles", len(profiles.Items)))
 		containerProfilesList := []map[string]any{}
@@ -789,7 +789,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		content, err := json.Marshal(result)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal result: %w", err)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -806,27 +806,27 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		namespaceStr, ok := namespace.(string)
 		if !ok {
-			return nil, fmt.Errorf("namespace must be a string")
+			return mcp.NewToolResultError("namespace must be a string"), nil
 		}
 		profileName, ok := arguments["profile_name"]
 		if !ok {
-			return nil, fmt.Errorf("profile_name is required")
+			return mcp.NewToolResultError("profile_name is required"), nil
 		}
 		profileNameStr, ok := profileName.(string)
 		if !ok {
-			return nil, fmt.Errorf("profile_name must be a string")
+			return mcp.NewToolResultError("profile_name must be a string"), nil
 		}
 		client, ksErr := ksServer.getKsClient()
 		if ksErr != nil {
-			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to connect to Kubernetes cluster: %v", ksErr)), nil
 		}
 		profile, err := client.ContainerProfiles(namespaceStr).Get(ctx, profileNameStr, metav1.GetOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("failed to get container profile: %w", err)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to get container profile: %v", err)), nil
 		}
 		responseJson, err := json.Marshal(profile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal container profile: %w", err)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal container profile: %v", err)), nil
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -917,7 +917,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	default:
-		return nil, fmt.Errorf("unknown tool: %s", name)
+		return mcp.NewToolResultError(fmt.Sprintf("unknown tool: %s", name)), nil
 	}
 }
 
