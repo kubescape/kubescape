@@ -94,6 +94,12 @@ func TestRemoveData(t *testing.T) {
 			},
 		},
 		{
+			name: "remove secret stringData",
+			args: args{
+				w: `{"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "example-secret", "namespace": "default"}, "type": "Opaque", "stringData": {"token": "supersecret", "apiKey": "abc123"}}`,
+			},
+		},
+		{
 			name: "remove configMap data",
 			args: args{
 				w: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "example-configmap", "namespace": "default", "annotations": {"kubectl.kubernetes.io/last-applied-configuration": "{}"}}, "data": {"exampleKey": "exampleValue"}}`,
@@ -124,6 +130,14 @@ func TestRemoveData(t *testing.T) {
 				}
 			}
 
+			if sd, ok := workloadinterface.InspectMap(workload.GetObject(), "stringData"); ok {
+				stringData, ok := sd.(map[string]any)
+				assert.True(t, ok)
+				for key := range stringData {
+					assert.Equalf(t, "XXXXXX", stringData[key], "stringData[%q] was not redacted", key)
+				}
+			}
+
 			if c, _ := workload.GetContainers(); c != nil {
 				for i := range c {
 					for _, e := range c[i].Env {
@@ -149,6 +163,47 @@ func TestRemoveData(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRemoveSecretData(t *testing.T) {
+	t.Run("stringData values are redacted", func(t *testing.T) {
+		raw := `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s","namespace":"default"},"type":"Opaque","stringData":{"token":"supersecret","apiKey":"abc123"}}`
+		obj, err := workloadinterface.NewWorkload([]byte(raw))
+		assert.NoError(t, err)
+		removeData(obj)
+		sd, ok := workloadinterface.InspectMap(obj.GetObject(), "stringData")
+		assert.True(t, ok, "stringData key must still be present after redaction")
+		stringData, ok := sd.(map[string]any)
+		assert.True(t, ok)
+		assert.Equal(t, "XXXXXX", stringData["token"])
+		assert.Equal(t, "XXXXXX", stringData["apiKey"])
+	})
+
+	t.Run("data and stringData are both redacted", func(t *testing.T) {
+		raw := `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s","namespace":"default"},"type":"Opaque","data":{"user":"dXNlcg=="},"stringData":{"pass":"cleartext"}}`
+		obj, err := workloadinterface.NewWorkload([]byte(raw))
+		assert.NoError(t, err)
+		removeData(obj)
+		d, ok := workloadinterface.InspectMap(obj.GetObject(), "data")
+		assert.True(t, ok)
+		data, ok := d.(map[string]any)
+		assert.True(t, ok)
+		assert.Equal(t, "XXXXXX", data["user"])
+		sd, ok := workloadinterface.InspectMap(obj.GetObject(), "stringData")
+		assert.True(t, ok)
+		stringData, ok := sd.(map[string]any)
+		assert.True(t, ok)
+		assert.Equal(t, "XXXXXX", stringData["pass"])
+	})
+
+	t.Run("absent stringData does not panic", func(t *testing.T) {
+		raw := `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s","namespace":"default"},"type":"Opaque","data":{"key":"dmFsdWU="}}`
+		obj, err := workloadinterface.NewWorkload([]byte(raw))
+		assert.NoError(t, err)
+		assert.NotPanics(t, func() { removeData(obj) })
+		_, ok := workloadinterface.InspectMap(obj.GetObject(), "stringData")
+		assert.False(t, ok, "stringData must not appear when it was not present originally")
+	})
 }
 
 func TestRemoveContainersData(t *testing.T) {
