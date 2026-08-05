@@ -353,7 +353,7 @@ func withPolicyGetter(t *testing.T, g getter.IPolicyGetter, err error) {
 func withTenantConfig(t *testing.T, tc cautils.ITenantConfig) {
 	t.Helper()
 	origTenant := tenantConfigFunc
-	tenantConfigFunc = func(string, string, string, string, *k8sinterface.KubernetesApi) cautils.ITenantConfig {
+	tenantConfigFunc = func(context.Context, string, string, string, string, *k8sinterface.KubernetesApi) cautils.ITenantConfig {
 		return tc
 	}
 	t.Cleanup(func() { tenantConfigFunc = origTenant })

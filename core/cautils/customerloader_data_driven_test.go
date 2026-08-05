@@ -174,13 +174,13 @@ func TestClusterConfigLoadsKubernetesSourcesDataDriven(t *testing.T) {
 			k8s.KubernetesClient = fake.NewClientset(test.objects...)
 			config := &ClusterConfig{k8s: k8s, configObj: &ConfigObj{}, configMapNamespace: "security"}
 
-			err := config.updateConfigEmptyFieldsFromKubescapeConfigMap()
+			err := config.updateConfigEmptyFieldsFromKubescapeConfigMap(context.Background())
 			if test.wantError != "" {
 				require.ErrorContains(t, err, test.wantError)
 				return
 			}
 			require.NoError(t, err)
-			require.NoError(t, config.updateConfigEmptyFieldsFromCredentialsSecret())
+			require.NoError(t, config.updateConfigEmptyFieldsFromCredentialsSecret(context.Background()))
 			assert.Equal(t, test.wantConfig, *config.configObj)
 		})
 	}
@@ -280,7 +280,7 @@ func Test_NewClusterConfig(t *testing.T) {
 	k8s := k8sinterface.NewKubernetesApiMock()
 	k8s.KubernetesClient = fake.NewClientset(objects...)
 
-	config := NewClusterConfig(k8s, "", "", "my:cluster", "")
+	config := NewClusterConfig(context.Background(), k8s, "", "", "my:cluster", "")
 
 	assert.Equal(t, "security", config.GetDefaultNS())
 	assert.Equal(t, "tenant-id", config.GetAccountID())
@@ -304,7 +304,7 @@ func Test_GetTenantConfig(t *testing.T) {
 	t.Run("not connected to cluster returns LocalConfig", func(t *testing.T) {
 		k8sinterface.SetConnectedToCluster(false)
 
-		config := GetTenantConfig("account", "key", "cluster", "", nil)
+		config := GetTenantConfig(context.Background(), "account", "key", "cluster", "", nil)
 		_, ok := config.(*LocalConfig)
 		assert.True(t, ok, "expected *LocalConfig when not connected to a cluster")
 	})
@@ -314,7 +314,7 @@ func Test_GetTenantConfig(t *testing.T) {
 		k8sinterface.SetConnectedToCluster(true)
 
 		k8s := k8sinterface.NewKubernetesApiMock()
-		config := GetTenantConfig("account", "key", "cluster", "", k8s)
+		config := GetTenantConfig(context.Background(), "account", "key", "cluster", "", k8s)
 		_, ok := config.(*ClusterConfig)
 		assert.True(t, ok, "expected *ClusterConfig when connected to a cluster with a k8s client")
 	})
@@ -322,7 +322,7 @@ func Test_GetTenantConfig(t *testing.T) {
 	t.Run("connected to cluster without k8s client falls back to LocalConfig", func(t *testing.T) {
 		k8sinterface.SetConnectedToCluster(true)
 
-		config := GetTenantConfig("account", "key", "cluster", "", nil)
+		config := GetTenantConfig(context.Background(), "account", "key", "cluster", "", nil)
 		_, ok := config.(*LocalConfig)
 		assert.True(t, ok, "expected *LocalConfig when k8s client is nil")
 	})
