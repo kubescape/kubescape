@@ -103,6 +103,16 @@ func TestStringSlicesAreEqual(t *testing.T) {
 	}
 }
 
+func TestStringSlicesAreEqual_NoMutation(t *testing.T) {
+	a := []string{"foo", "bar", "baz"}
+	b := []string{"baz", "foo", "bar"}
+
+	StringSlicesAreEqual(a, b)
+
+	assert.Equal(t, []string{"foo", "bar", "baz"}, a, "StringSlicesAreEqual must not mutate a")
+	assert.Equal(t, []string{"baz", "foo", "bar"}, b, "StringSlicesAreEqual must not mutate b")
+}
+
 func TestParseBoolEnvVar(t *testing.T) {
 	testCases := []struct {
 		expectedErr  string
