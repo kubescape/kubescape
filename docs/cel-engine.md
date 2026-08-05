@@ -147,6 +147,17 @@ exposes is populated, with zero values where the scan has nothing real, because
 `request` is a dynamic type and selecting an absent key is a runtime error rather
 than null.
 
+### Compiling and caching
+
+Compiling an expression is the expensive step; running the compiled program is
+cheap. A scan runs the same bundle expressions against every scanned object, so
+compiled programs are memoized by expression text and reused for the whole scan.
+
+Compile failures are cached alongside successes, because a broken expression stays
+broken regardless of which object it runs against. Evaluation failures are never
+cached, because they depend on the object: a field missing on one resource may be
+present on the next.
+
 ## Which resources a policy is evaluated against
 
 VAP validations commonly self-guard on kind:
@@ -264,6 +275,20 @@ matched offline.
 
 CEL violations become `RuleResponse` values with the same shape as Rego's, so
 nothing downstream changes.
+
+### Messages
+
+A violation's message follows the same precedence the apiserver's validator uses:
+the validation's `messageExpression` if it has one and it evaluates, then its
+static `message`, then a `failed expression: <expr>` fallback.
+
+A `messageExpression` that fails to evaluate falls back to the next option rather
+than turning the result into an error. The verdict has already been reached at that
+point, and failing to render an explanation is not grounds for discarding it. The
+message expression draws from the same cost budget as the validations, as it does
+at admission.
+
+### Remediation paths
 
 VAP validations carry no path information: a validation has an expression, a
 message, a `messageExpression` and a reason, and nothing that says which field of
