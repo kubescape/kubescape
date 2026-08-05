@@ -107,7 +107,7 @@ func TestStringSlicesAreEqual_NoMutation(t *testing.T) {
 	a := []string{"foo", "bar", "baz"}
 	b := []string{"baz", "foo", "bar"}
 
-	StringSlicesAreEqual(a, b)
+	assert.True(t, StringSlicesAreEqual(a, b), "slices with the same elements must compare equal")
 
 	assert.Equal(t, []string{"foo", "bar", "baz"}, a, "StringSlicesAreEqual must not mutate a")
 	assert.Equal(t, []string{"baz", "foo", "bar"}, b, "StringSlicesAreEqual must not mutate b")
