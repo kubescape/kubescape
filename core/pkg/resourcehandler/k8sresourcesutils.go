@@ -160,10 +160,10 @@ func insertKSResourcesAndControls(k8sResources map[string]map[string]map[string]
 func getGroupNVersion(apiVersion string) (string, string) {
 	gv := strings.Split(apiVersion, "/")
 	group, version := "", ""
-	if len(gv) >= 1 {
+	if len(gv) == 1 {
+		version = gv[0]
+	} else if len(gv) >= 2 {
 		group = gv[0]
-	}
-	if len(gv) >= 2 {
 		version = gv[1]
 	}
 	return group, version
