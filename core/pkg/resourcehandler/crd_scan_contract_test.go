@@ -185,6 +185,47 @@ func TestDiscoveredScopeAppliesIncludeAndExcludeSelectors(t *testing.T) {
 	)
 }
 
+func TestOfflineResolverUsesKindScopeWhenNamespaceIsOmitted(t *testing.T) {
+	tests := []struct {
+		apiVersion     string
+		group          string
+		version        string
+		kind           string
+		resource       string
+		wantNamespaced bool
+		wantSelector   string
+	}{
+		{apiVersion: "v1", version: "v1", kind: "Pod", resource: "pods", wantNamespaced: true, wantSelector: "metadata.namespace!=kube-system"},
+		{apiVersion: "apps/v1", group: "apps", version: "v1", kind: "Deployment", resource: "deployments", wantNamespaced: true, wantSelector: "metadata.namespace!=kube-system"},
+		{apiVersion: "rbac.authorization.k8s.io/v1", group: "rbac.authorization.k8s.io", version: "v1", kind: "ClusterRole", resource: "clusterroles", wantNamespaced: false, wantSelector: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.kind, func(t *testing.T) {
+			workload := workloadinterface.NewWorkloadObj(map[string]any{
+				"apiVersion": test.apiVersion,
+				"kind":       test.kind,
+				"metadata":   map[string]any{"name": "without-namespace"},
+			})
+			mapped := map[string][]workloadinterface.IMetadata{
+				k8sinterface.JoinResourceTriplets(test.group, test.version, test.resource): {workload},
+			}
+			resolver := newOfflineManifestResourceResolver(mapped)
+
+			resolved := resolver(test.group, test.version, test.kind)
+			require.Len(t, resolved, 1)
+			require.NotNil(t, resolved[0].namespaced)
+			assert.Equal(t, test.wantNamespaced, *resolved[0].namespaced)
+
+			gvr := &schema.GroupVersionResource{Group: test.group, Version: test.version, Resource: test.resource}
+			assert.Equal(t,
+				[]string{test.wantSelector},
+				NewExcludeSelector("kube-system").GetNamespacesSelectors(gvr, resolved[0].namespaced),
+			)
+		})
+	}
+}
+
 func TestAgentRuntimeCRDResourceToControlKeysMatchQueries(t *testing.T) {
 	framework := agentRuntimeFramework()
 	resolver, failures := newDiscoveryResourceResolver(agentRuntimeDiscovery())
@@ -425,21 +466,73 @@ func TestK8sResourceHandlerUsesDiscoveredGVRsAndNamespaceScope(t *testing.T) {
 	}
 }
 
-func TestAddWorkloadsToResourcesMapPreservesGroupVersionMismatchGuard(t *testing.T) {
-	k8sinterface.InitializeMapResourcesMock()
+func TestFileResourceHandlerUsesManifestAPIVersionsForBuiltIns(t *testing.T) {
+	manifest := `apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web
+  namespace: default
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web
+  namespace: default
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: web
+  namespace: default
+`
+	manifestPath := filepath.Join(t.TempDir(), "current-builtins.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0o600))
+
+	matches := []reporthandling.RuleMatchObjects{
+		{APIGroups: []string{"autoscaling"}, APIVersions: []string{"v2"}, Resources: []string{"HorizontalPodAutoscaler"}},
+		{APIGroups: []string{"policy"}, APIVersions: []string{"v1"}, Resources: []string{"PodDisruptionBudget"}},
+		{APIGroups: []string{"discovery.k8s.io"}, APIVersions: []string{"v1"}, Resources: []string{"EndpointSlice"}},
+	}
+	framework := *mockFramework("current-builtins", []reporthandling.Control{
+		mockControl("current-builtins", []reporthandling.PolicyRule{mockRule("current-builtins", matches, "")}),
+	})
+	scanInfo := &cautils.ScanInfo{InputPatterns: []string{manifestPath}}
+	session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo)
+
+	resources, allResources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+	require.NoError(t, err)
+	require.Len(t, allResources, 3)
+
+	expected := map[string]string{
+		"autoscaling/v2/horizontalpodautoscaler": "HorizontalPodAutoscaler",
+		"policy/v1/poddisruptionbudget":          "PodDisruptionBudget",
+		"discovery.k8s.io/v1/endpointslice":      "EndpointSlice",
+	}
+	for resourceGroup, kind := range expected {
+		require.Lenf(t, resources[resourceGroup], 1, "expected one %s under %s", kind, resourceGroup)
+		assert.Equal(t, kind, allResources[resources[resourceGroup][0]].GetKind())
+	}
+}
+
+func TestAddWorkloadsToResourcesMapUsesManifestGroupVersionForBuiltIns(t *testing.T) {
 	tests := []struct {
+		name       string
 		apiVersion string
 		kind       string
+		want       string
 	}{
-		{apiVersion: "extensions/v1beta1", kind: "Deployment"},
-		{apiVersion: "rbac.authorization.k8s.io/v1beta1", kind: "Role"},
-		{apiVersion: "batch/v1beta1", kind: "CronJob"},
-		{apiVersion: "autoscaling/v2beta2", kind: "HorizontalPodAutoscaler"},
-		{apiVersion: "networking.k8s.io/v1beta1", kind: "Ingress"},
+		{name: "current HPA", apiVersion: "autoscaling/v2", kind: "HorizontalPodAutoscaler", want: "autoscaling/v2/horizontalpodautoscalers"},
+		{name: "current PDB", apiVersion: "policy/v1", kind: "PodDisruptionBudget", want: "policy/v1/poddisruptionbudgets"},
+		{name: "current EndpointSlice", apiVersion: "discovery.k8s.io/v1", kind: "EndpointSlice", want: "discovery.k8s.io/v1/endpointslices"},
+		{name: "legacy Deployment", apiVersion: "extensions/v1beta1", kind: "Deployment", want: "extensions/v1beta1/deployments"},
+		{name: "legacy Role", apiVersion: "rbac.authorization.k8s.io/v1beta1", kind: "Role", want: "rbac.authorization.k8s.io/v1beta1/roles"},
+		{name: "legacy CronJob", apiVersion: "batch/v1beta1", kind: "CronJob", want: "batch/v1beta1/cronjobs"},
+		{name: "legacy HPA", apiVersion: "autoscaling/v2beta2", kind: "HorizontalPodAutoscaler", want: "autoscaling/v2beta2/horizontalpodautoscalers"},
+		{name: "legacy Ingress", apiVersion: "networking.k8s.io/v1beta1", kind: "Ingress", want: "networking.k8s.io/v1beta1/ingresses"},
 	}
 
 	for _, test := range tests {
-		t.Run(test.kind, func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			workload := workloadinterface.NewWorkloadObj(map[string]any{
 				"apiVersion": test.apiVersion,
 				"kind":       test.kind,
@@ -452,13 +545,13 @@ func TestAddWorkloadsToResourcesMapPreservesGroupVersionMismatchGuard(t *testing
 
 			addWorkloadsToResourcesMap(mapped, []workloadinterface.IMetadata{workload})
 
-			assert.Empty(t, mapped, "known resources with a non-canonical GroupVersion must remain skipped")
+			require.Len(t, mapped[test.want], 1)
+			assert.Same(t, workload, mapped[test.want][0])
 		})
 	}
 }
 
 func TestAddWorkloadsToResourcesMapKeepsCustomKindCollisions(t *testing.T) {
-	k8sinterface.InitializeMapResourcesMock()
 	workload := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "serving.knative.dev/v1",
 		"kind":       "Service",
@@ -496,13 +589,47 @@ func TestOfflineManifestResourceAliases(t *testing.T) {
 	}
 }
 
-func TestCanonicalAPIGroupMatchingDoesNotRequireAnAllowlist(t *testing.T) {
-	assert.True(t, matchesCanonicalAPIGroup("imagepolicy.k8s.io", "imagepolicy.k8s.io"))
-	assert.True(t, matchesCanonicalAPIGroup("settings.k8s.io", "settings.k8s.io"))
-	assert.True(t, matchesCanonicalAPIGroup("extensions", "apps"))
-	assert.True(t, matchesCanonicalAPIGroup("extensions", "networking.k8s.io"))
-	assert.False(t, matchesCanonicalAPIGroup("serving.knative.dev", ""))
-	assert.False(t, matchesCanonicalAPIGroup("migration.k8s.io", "apps"))
+func TestFileResourceHandlerBuildsWildcardMatchesFromManifestCatalog(t *testing.T) {
+	manifest := `apiVersion: autoscaling/v99
+kind: HorizontalPodAutoscaler
+metadata:
+  name: future-hpa
+  namespace: default
+---
+apiVersion: future.example.io/v7
+kind: Widget
+metadata:
+  name: future-widget
+  namespace: default
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: core-pod
+  namespace: default
+`
+	manifestPath := filepath.Join(t.TempDir(), "future-resources.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0o600))
+
+	match := reporthandling.RuleMatchObjects{
+		APIGroups:   []string{"*"},
+		APIVersions: []string{"*"},
+		Resources:   []string{"HorizontalPodAutoscaler", "Widget", "Pod"},
+	}
+	framework := *mockFramework("future-resources", []reporthandling.Control{
+		mockControl("future-resources", []reporthandling.PolicyRule{
+			mockRule("future-resources", []reporthandling.RuleMatchObjects{match}, ""),
+		}),
+	})
+	scanInfo := &cautils.ScanInfo{InputPatterns: []string{manifestPath}}
+	session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo)
+
+	resources, allResources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
+	require.NoError(t, err)
+	require.Len(t, allResources, 3)
+	assert.Len(t, resources["autoscaling/v99/horizontalpodautoscaler"], 1)
+	assert.Len(t, resources["future.example.io/v7/widget"], 1)
+	assert.Len(t, resources["/v1/pod"], 1)
 }
 
 func TestAddSingleResourceToResourceMapsIndexesOfflineAliases(t *testing.T) {
