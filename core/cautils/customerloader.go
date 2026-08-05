@@ -121,7 +121,9 @@ func NewLocalConfig(accountID, accessKey, clusterName, customClusterName string)
 	}
 	// get from configMap
 	if existsConfigFile() { // get from file
-		loadConfigFromFile(lc.configObj)
+		if err := loadConfigFromFile(lc.configObj); err != nil {
+			logger.L().Debug("failed to load cached config file", helpers.Error(err))
+		}
 	}
 
 	updateCredentials(lc.configObj, accountID, accessKey)
@@ -204,16 +206,24 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, accountID, accessKey, clu
 
 	// first, load from file
 	if existsConfigFile() { // get from file
-		loadConfigFromFile(c.configObj)
+		if err := loadConfigFromFile(c.configObj); err != nil {
+			logger.L().Debug("failed to load cached config file", helpers.Error(err))
+		}
 	}
 
 	loadUrlsFromFile(c.configObj)
 
 	// second, load urls from config map
-	c.updateConfigEmptyFieldsFromKubescapeConfigMap()
+	if err := c.updateConfigEmptyFieldsFromKubescapeConfigMap(); err != nil {
+		logger.L().Debug("failed to load config from Kubescape ConfigMap in cluster",
+			helpers.String("namespace", c.configMapNamespace), helpers.Error(err))
+	}
 
 	// third, credentials from secret
-	c.updateConfigEmptyFieldsFromCredentialsSecret()
+	if err := c.updateConfigEmptyFieldsFromCredentialsSecret(); err != nil {
+		logger.L().Debug("failed to load credentials from Kubescape Secret in cluster",
+			helpers.String("namespace", c.configMapNamespace), helpers.Error(err))
+	}
 
 	updateCredentials(c.configObj, accountID, accessKey)
 	updateCloudURLs(c.configObj)
