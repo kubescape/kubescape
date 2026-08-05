@@ -55,13 +55,19 @@ jobs:
             sudo apt-get update && sudo apt-get install -y jq
           fi
           
+          parse_status=0
           if grep -q '"Action":"fail"' test-output.json; then
-            grep '"Action":"fail"' test-output.json | jq -r '.Package' | sort -u > failed_packages.txt
+            grep '"Action":"fail"' test-output.json | jq -r '.Package' | sort -u > failed_packages.txt || parse_status=$?
             echo "Failing packages:"
             cat failed_packages.txt || true
             echo ""
             echo "Tail of test-output.json:"
             tail -n 500 test-output.json || true
+          fi
+          
+          if [ $parse_status -ne 0 ]; then
+            echo "Parsing test output failed with exit code $parse_status"
+            exit $parse_status
           fi
           
           if [ $test_status -ne 0 ]; then
