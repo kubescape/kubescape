@@ -12,7 +12,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
 const (
@@ -97,10 +96,10 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 			ctrlID := assocCtrl.GetID()
 			ctrlName := assocCtrl.GetName()
 
-			// Find severity from SummaryDetails if available
-			severity := "Unknown"
-			if ctrlData, ok := reportWithSeverity.SummaryDetails.Controls[ctrlID]; ok {
-				severity = apis.ControlSeverityToString(ctrlData.GetScoreFactor())
+			// Severity is already populated
+			severity := assocCtrl.Severity
+			if severity == "" {
+				severity = "Unknown"
 			}
 
 			status := string(assocCtrl.GetStatus(nil).Status())
