@@ -34,6 +34,7 @@ func TestMergedExceptionsGetter(t *testing.T) {
 		secondary *exceptionsGetterStub
 		wantLen   int
 		wantErr   bool
+		wantErrIs error
 	}{
 		{
 			name:    "nil getter returns empty",
@@ -61,12 +62,14 @@ func TestMergedExceptionsGetter(t *testing.T) {
 			primary:   &exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "base"}}},
 			secondary: &exceptionsGetterStub{err: context.Canceled},
 			wantErr:   true,
+			wantErrIs: context.Canceled,
 		},
 		{
 			name:      "secondary deadline error returned",
 			primary:   &exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "base"}}},
 			secondary: &exceptionsGetterStub{err: context.DeadlineExceeded},
 			wantErr:   true,
+			wantErrIs: context.DeadlineExceeded,
 		},
 		{
 			name:      "primary error returned",
@@ -95,7 +98,9 @@ func TestMergedExceptionsGetter(t *testing.T) {
 			}
 
 			got, err := getter.GetExceptions(ctx, "cluster-a")
-			if tc.wantErr {
+			if tc.wantErrIs != nil {
+				require.ErrorIs(t, err, tc.wantErrIs)
+			} else if tc.wantErr {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
