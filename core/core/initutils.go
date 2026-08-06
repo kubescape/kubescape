@@ -419,4 +419,3 @@ func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName s
 func isContextErr(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
-

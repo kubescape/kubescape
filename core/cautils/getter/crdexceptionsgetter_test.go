@@ -196,13 +196,12 @@ func TestCRDExceptionsGetter_ContextCancellationOnConversion(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
 	k8sClient := crfake.NewClientBuilder().WithScheme(scheme).Build()
-	
+
 	mockClient := &mockListClient{Client: k8sClient}
 
 	// Create a canceled context
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-
 
 	listKinds := map[schema.GroupVersionResource]string{
 		securityExceptionGVR:        "SecurityExceptionList",
