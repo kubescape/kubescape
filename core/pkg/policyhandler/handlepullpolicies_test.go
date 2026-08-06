@@ -128,13 +128,13 @@ func TestCollectPolicies(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			tc.policyHandler.getters = &cautils.Getters{
+			getters := &cautils.Getters{
 				PolicyGetter:         &PolicyGetterMock{},
 				ExceptionsGetter:     &ExceptionsGetterMock{},
 				ControlsInputsGetter: &ControlsInputsGetterMock{},
 			}
 
-			opaSessionObj, err := tc.policyHandler.CollectPolicies(ctx, tc.policyIdent, tc.scanInfo, tc.policyHandler.getters)
+			opaSessionObj, err := tc.policyHandler.CollectPolicies(ctx, tc.policyIdent, tc.scanInfo, getters)
 
 			assert.Equal(t, tc.expectedError, err)
 			assert.NotNil(t, opaSessionObj)
