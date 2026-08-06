@@ -433,7 +433,7 @@ func TestGetFileFormat(t *testing.T) {
 func TestIsFileAndIsDir(t *testing.T) {
 	tempDir := t.TempDir()
 	tempFile := filepath.Join(tempDir, "test_file.txt")
-	err := os.WriteFile(tempFile, []byte("test"), 0644)
+	err := os.WriteFile(tempFile, []byte("test"), 0o600)
 	require.NoError(t, err)
 
 	assert.True(t, isDir(tempDir))
