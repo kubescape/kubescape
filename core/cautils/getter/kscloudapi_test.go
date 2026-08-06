@@ -53,7 +53,15 @@ func TestGlobalKSCloudAPIConnector_Race(t *testing.T) {
 	globalMx.Lock()
 	defer globalMx.Unlock()
 
+	globalKSCloudAPIConnectorMu.Lock()
+	previous := globalKSCloudAPIConnector
 	globalKSCloudAPIConnector = nil
+	globalKSCloudAPIConnectorMu.Unlock()
+	t.Cleanup(func() {
+		globalKSCloudAPIConnectorMu.Lock()
+		globalKSCloudAPIConnector = previous
+		globalKSCloudAPIConnectorMu.Unlock()
+	})
 
 	var wg sync.WaitGroup
 	wg.Add(2)
