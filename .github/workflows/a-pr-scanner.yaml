@@ -47,6 +47,11 @@ jobs:
       - name: Test core pkg
         run: ${{ env.DOCKER_CMD }} go test -v ./...
 
+      - name: Test cautils pkg with race detector
+        env:
+          CGO_ENABLED: 1
+        run: ${{ env.DOCKER_CMD }} go test -v -race ./core/cautils/...
+
       - name: Test httphandler pkg
         run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test -v ./...'
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"sync"
 
 	v1 "github.com/kubescape/backend/pkg/client/v1"
 	utils "github.com/kubescape/backend/pkg/utils"
@@ -14,7 +15,8 @@ import (
 var (
 	// globalKSCloudAPIConnector is a static global instance of the KS Cloud client,
 	// to be initialized with SetKSCloudAPIConnector.
-	globalKSCloudAPIConnector *v1.KSCloudAPI
+	globalKSCloudAPIConnector      *v1.KSCloudAPI
+	globalKSCloudAPIConnectorMutex sync.Mutex
 
 	_ IPolicyGetter         = &v1.KSCloudAPI{}
 	_ IExceptionsGetter     = &v1.KSCloudAPI{}
@@ -24,7 +26,7 @@ var (
 
 // SetKSCloudAPIConnector registers a global instance of the KS Cloud client.
 //
-// NOTE: cannot be used concurrently.
+// Thread-safe.
 func SetKSCloudAPIConnector(ksCloudAPI *v1.KSCloudAPI) {
 	if ksCloudAPI != nil && ksCloudAPI.GetCloudAPIURL() != "" {
 		logger.L().Debug("setting global KS Cloud API connector",
@@ -32,15 +34,20 @@ func SetKSCloudAPIConnector(ksCloudAPI *v1.KSCloudAPI) {
 			helpers.String("cloudAPIURL", ksCloudAPI.GetCloudAPIURL()),
 			helpers.String("cloudReportURL", ksCloudAPI.GetCloudReportURL()))
 	}
+	globalKSCloudAPIConnectorMutex.Lock()
 	globalKSCloudAPIConnector = ksCloudAPI
+	globalKSCloudAPIConnectorMutex.Unlock()
 }
 
 // GetKSCloudAPIConnector returns a shallow clone of the KS Cloud client registered for this package.
 //
-// NOTE: cannot be used concurrently with SetKSCloudAPIConnector.
+// Thread-safe.
 func GetKSCloudAPIConnector() *v1.KSCloudAPI {
+	globalKSCloudAPIConnectorMutex.Lock()
+	defer globalKSCloudAPIConnectorMutex.Unlock()
+
 	if globalKSCloudAPIConnector == nil {
-		SetKSCloudAPIConnector(v1.NewEmptyKSCloudAPI())
+		globalKSCloudAPIConnector = v1.NewEmptyKSCloudAPI()
 	}
 
 	// we return a shallow clone that may be freely modified by the caller.
