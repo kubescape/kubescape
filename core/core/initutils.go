@@ -23,16 +23,26 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// isConnectedToCluster reports whether a Kubernetes cluster connection is
+// available, delegating to k8sinterface as the source of truth.
+//
+// The real answer must come from k8sinterface.IsConnectedToCluster(), so an
+// explicit SetConnectedToCluster(false) is honored even when a kubeconfig file
+// is readable and no Fatal is emitted.
+func isConnectedToCluster() bool {
+	return k8sinterface.IsConnectedToCluster()
+}
+
 // getKubernetesApi
 func getKubernetesApi() *k8sinterface.KubernetesApi {
-	if !k8sinterface.IsConnectedToCluster() {
+	if !isConnectedToCluster() {
 		return nil
 	}
 	return k8sinterface.NewKubernetesApi()
 }
 
 func getExceptionsK8sClient(ctx context.Context) client.Client {
-	if !k8sinterface.IsConnectedToCluster() {
+	if !isConnectedToCluster() {
 		return nil
 	}
 	config := k8sinterface.GetK8sConfig()

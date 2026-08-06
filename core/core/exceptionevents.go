@@ -1,7 +1,6 @@
 package core
 
 import (
-	"github.com/kubescape/k8s-interface/k8sinterface"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -10,7 +9,7 @@ import (
 )
 
 func newSecurityExceptionEventRecorder() record.EventRecorder {
-	if !k8sinterface.IsConnectedToCluster() {
+	if !isConnectedToCluster() {
 		return nil
 	}
 
