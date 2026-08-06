@@ -61,8 +61,8 @@ jobs:
             echo "Failing packages:"
             cat failed_packages.txt || true
             echo ""
-            echo "Tail of test-output.json:"
-            tail -n 500 test-output.json || true
+            echo "Tail of failing JSON events:"
+            tail -n 100 test-output.json || true
           fi
           
           if [ $parse_status -ne 0 ]; then
@@ -71,6 +71,9 @@ jobs:
           fi
           
           if [ $test_status -ne 0 ]; then
+            echo "go test failed with exit code $test_status."
+            echo "Tail of test-output.json:"
+            tail -n 100 test-output.json || true
             exit $test_status
           fi
 
