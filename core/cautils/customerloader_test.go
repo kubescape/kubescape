@@ -292,9 +292,9 @@ func TestGetConfigMapNamespace(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.env != "" {
-				t.Setenv("KS_DEFAULT_CONFIGMAP_NAMESPACE", tt.env)
-			}
+			// Set unconditionally, including the empty "no env" case, so the
+			// subtest does not inherit a value from the caller's environment.
+			t.Setenv(defaultConfigMapNamespaceEnvVar, tt.env)
 			assert.Equalf(t, tt.want, GetConfigMapNamespace(), "GetConfigMapNamespace()")
 		})
 	}
