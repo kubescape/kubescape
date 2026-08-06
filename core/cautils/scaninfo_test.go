@@ -271,7 +271,7 @@ func TestScanInfoFormatsDeduplicatesInOrder(t *testing.T) {
 	}
 }
 
-func TestScanInfoSetPolicyIdentifiers(t *testing.T) {
+func TestAppendPolicyIdentifiers(t *testing.T) {
 	tests := []struct {
 		name     string
 		existing []PolicyIdentifier
@@ -306,11 +306,9 @@ func TestScanInfoSetPolicyIdentifiers(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scanInfo := &ScanInfo{PolicyIdentifier: tt.existing}
+			policyIdentifiers := AppendPolicyIdentifiers(tt.existing, tt.policies, apisv1.KindFramework)
 
-			scanInfo.SetPolicyIdentifiers(tt.policies, apisv1.KindFramework)
-
-			assert.Equal(t, tt.want, scanInfo.PolicyIdentifier)
+			assert.Equal(t, tt.want, policyIdentifiers)
 		})
 	}
 }
@@ -339,21 +337,21 @@ func TestSplitNamespaceList(t *testing.T) {
 func TestScanInfoToScanMetadataNamespaces(t *testing.T) {
 	t.Run("populates excluded namespaces", func(t *testing.T) {
 		scanInfo := &ScanInfo{ExcludedNamespaces: "kube-system,kube-public"}
-		md := scanInfoToScanMetadata(context.Background(), scanInfo)
+		md := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
 		assert.Equal(t, []string{"kube-system", "kube-public"}, md.ScanMetadata.ExcludedNamespaces)
 		assert.Empty(t, md.ScanMetadata.IncludeNamespaces)
 	})
 
 	t.Run("populates included namespaces", func(t *testing.T) {
 		scanInfo := &ScanInfo{IncludeNamespaces: "default,prod"}
-		md := scanInfoToScanMetadata(context.Background(), scanInfo)
+		md := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
 		assert.Equal(t, []string{"default", "prod"}, md.ScanMetadata.IncludeNamespaces)
 		assert.Empty(t, md.ScanMetadata.ExcludedNamespaces)
 	})
 
 	t.Run("empty when not set", func(t *testing.T) {
 		scanInfo := &ScanInfo{}
-		md := scanInfoToScanMetadata(context.Background(), scanInfo)
+		md := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
 		assert.Empty(t, md.ScanMetadata.ExcludedNamespaces)
 		assert.Empty(t, md.ScanMetadata.IncludeNamespaces)
 	})

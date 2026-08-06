@@ -41,7 +41,7 @@ type componentInterfaces struct {
 	outputPrinters    []printer.IPrinter
 }
 
-func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentInterfaces, error) {
+func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (componentInterfaces, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "setup interfaces")
 	defer span.End()
 
@@ -74,7 +74,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentIn
 	// Skip version check in air-gapped mode (when keep-local flag is set)
 	if !scanInfo.Local {
 		v := versioncheck.NewIVersionCheckHandler(ctx)
-		_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", string(scanInfo.GetScanningContext()), k8sClient))
+		_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(policyIdentifiers), "", string(scanInfo.GetScanningContext()), k8sClient))
 	}
 
 	// ================== setup host scanner object ======================================
@@ -191,15 +191,15 @@ func fileExtForFormat(format string) string {
 	}
 }
 
-func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
+func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ks.Context(), "initialization")
 	logger.L().Start("Kubescape scanner initializing...")
 
 	// ===================== Initialization =====================
-	scanInfo.Init(ctxInit) // initialize scan info
+	scanInfo.Init(ctxInit, policyIdentifiers) // initialize scan info
 	defer scanInfo.Cleanup()
 
-	interfaces, err := getInterfaces(ctxInit, scanInfo)
+	interfaces, err := getInterfaces(ctxInit, scanInfo, policyIdentifiers)
 	if err != nil {
 		spanInit.End()
 		return nil, err
@@ -226,23 +226,24 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	}
 
 	// set policy getter only after setting the customerGUID
-	scanInfo.PolicyGetter, err = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy, airGapped)
+	var getters cautils.Getters
+	getters.PolicyGetter, err = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy, airGapped)
 	if err != nil {
 		spanInit.End()
 		return nil, err
 	}
 	var controlInputsFromCache bool
-	scanInfo.ControlsInputsGetter, controlInputsFromCache, err = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped)
+	getters.ControlsInputsGetter, controlInputsFromCache, err = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped)
 	if err != nil {
 		spanInit.End()
 		return nil, err
 	}
-	scanInfo.ExceptionsGetter, err = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	getters.ExceptionsGetter, err = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
 	if err != nil {
 		spanInit.End()
 		return nil, err
 	}
-	scanInfo.AttackTracksGetter, err = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	getters.AttackTracksGetter, err = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
 	if err != nil {
 		spanInit.End()
 		return nil, err
@@ -250,7 +251,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {
-		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.PolicyGetter), apisv1.KindFramework)
+		policyIdentifiers = cautils.AppendPolicyIdentifiers(policyIdentifiers, listFrameworksNames(getters.PolicyGetter), apisv1.KindFramework)
 	}
 
 	logger.L().StopSuccess("Initialized scanner")
@@ -260,7 +261,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// ===================== policies =====================
 	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies")
 	policyHandler := policyhandler.NewPolicyHandler(interfaces.tenantConfig.GetContextName())
-	scanData, err := policyHandler.CollectPolicies(ctxPolicies, scanInfo.PolicyIdentifier, scanInfo)
+	scanData, err := policyHandler.CollectPolicies(ctxPolicies, policyIdentifiers, scanInfo, &getters)
 	if err != nil {
 		spanInit.End()
 		return resultsHandling, err
@@ -330,7 +331,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// ======================== prioritization ===================
 	if scanInfo.PrintAttackTree || isPrioritizationScanType(scanInfo.ScanType) {
 		_, spanPrioritization := otel.Tracer("").Start(ctxOpa, "prioritization")
-		if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, scanInfo.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
+		if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
 			logger.L().Ctx(ks.Context()).Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
 		} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 			return resultsHandling, fmt.Errorf("%w", err)

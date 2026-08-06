@@ -16,10 +16,10 @@ import (
 	"k8s.io/utils/strings/slices"
 )
 
-func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
+func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) (*cautils.ScanInfo, []cautils.PolicyIdentifier) {
 	scanInfo := defaultScanInfo()
 
-	setTargetInScanInfo(scanRequest, scanInfo)
+	policyIdentifiers := setTargetInScanInfo(scanRequest, scanInfo)
 
 	if scanRequest.Account != "" {
 		scanInfo.AccountID = scanRequest.Account
@@ -81,10 +81,10 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 		}
 	}
 
-	return scanInfo
+	return scanInfo, policyIdentifiers
 }
 
-func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cautils.ScanInfo) {
+func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cautils.ScanInfo) []cautils.PolicyIdentifier {
 	if scanRequest.TargetType != "" && len(scanRequest.TargetNames) > 0 {
 		if strings.EqualFold(string(scanRequest.TargetType), string(apisv1.KindFramework)) {
 			scanRequest.TargetType = apisv1.KindFramework
@@ -100,11 +100,11 @@ func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cau
 			scanInfo.ScanAll = true
 			scanRequest.TargetNames = []string{}
 		}
-		scanInfo.SetPolicyIdentifiers(scanRequest.TargetNames, scanRequest.TargetType)
-	} else {
-		scanInfo.FrameworkScan = true
-		scanInfo.ScanAll = true
+		return cautils.BuildPolicyIdentifiers(scanRequest.TargetNames, scanRequest.TargetType)
 	}
+	scanInfo.FrameworkScan = true
+	scanInfo.ScanAll = true
+	return nil
 }
 
 func saveExceptions(exceptions []armotypes.PostureExceptionPolicy) (string, error) {

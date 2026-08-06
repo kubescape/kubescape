@@ -46,7 +46,7 @@ func TestScanQueueRejectsRequestsWhenCapacityIsExhausted(t *testing.T) {
 	var once sync.Once
 	var releaseOnce sync.Once
 	releaseScans := func() { releaseOnce.Do(func() { close(release) }) }
-	scanImpl = func(context.Context, *cautils.ScanInfo, string, bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier, string, bool) (*reporthandlingv2.PostureReport, error) {
 		once.Do(func() { close(started) })
 		<-release
 		return nil, nil
@@ -93,7 +93,7 @@ func TestScanQueuePreservesAdmissionOrder(t *testing.T) {
 	releaseScans := func() { releaseOnce.Do(func() { close(release) }) }
 	completed := make(chan string, 3)
 	var callCount atomic.Int32
-	scanImpl = func(_ context.Context, _ *cautils.ScanInfo, scanID string, _ bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, scanID string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		if callCount.Add(1) == 1 {
 			close(started)
 			<-release
@@ -145,7 +145,7 @@ func TestScanQueuePreservesAdmissionOrder(t *testing.T) {
 func TestScanRejectsOversizedRequestBodyBeforeAdmission(t *testing.T) {
 	defer func(original scanner) { scanImpl = original }(scanImpl)
 	var calls atomic.Int32
-	scanImpl = func(context.Context, *cautils.ScanInfo, string, bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier, string, bool) (*reporthandlingv2.PostureReport, error) {
 		calls.Add(1)
 		return nil, nil
 	}

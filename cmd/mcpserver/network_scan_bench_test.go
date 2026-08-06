@@ -26,17 +26,19 @@ func BenchmarkNetworkScan_Isolation(b *testing.B) {
 	policyHandler := policyhandler.NewRequestScopedPolicyHandler("")
 	defer policyHandler.Close()
 
+	getters := cautils.Getters{
+		PolicyGetter:         getter.NewLoadPolicy([]string{"../../core/cautils/getter/testdata/policy.json"}),
+		ExceptionsGetter:     getter.NewLoadPolicy([]string{"../../core/cautils/getter/testdata/exceptions.json"}),
+		ControlsInputsGetter: getter.NewLoadPolicy([]string{"../../core/cautils/getter/testdata/controls-inputs.json"}),
+		AttackTracksGetter:   getter.NewLoadPolicy([]string{"../../core/cautils/getter/testdata/attack-tracks.json"}),
+	}
+
+	policyIdentifiers := []cautils.PolicyIdentifier{
+		{Kind: apisv1.KindControl, Identifier: "C-0030"},
+	}
+
 	scanInfo := &cautils.ScanInfo{
-		Getters: cautils.Getters{
-			PolicyGetter:         getter.NewLoadPolicy([]string{"../../core/cautils/getter/testdata/policy.json"}),
-			ExceptionsGetter:     getter.NewLoadPolicy([]string{"../../core/cautils/getter/testdata/exceptions.json"}),
-			ControlsInputsGetter: getter.NewLoadPolicy([]string{"../../core/cautils/getter/testdata/controls-inputs.json"}),
-			AttackTracksGetter:   getter.NewLoadPolicy([]string{"../../core/cautils/getter/testdata/attack-tracks.json"}),
-		},
-		ScanAll: false,
-		PolicyIdentifier: []cautils.PolicyIdentifier{
-			{Kind: apisv1.KindControl, Identifier: "C-0030"},
-		},
+		ScanAll:     false,
 		ScanTimeout: 10 * time.Second,
 	}
 
@@ -96,7 +98,7 @@ func BenchmarkNetworkScan_Isolation(b *testing.B) {
 
 		// Collect a fresh OPASessionObj per iteration so mutations from the previous
 		// run don't bleed into the next one.
-		scanData, err := policyHandler.CollectPolicies(ctx, scanInfo.PolicyIdentifier, scanInfo)
+		scanData, err := policyHandler.CollectPolicies(ctx, policyIdentifiers, scanInfo, &getters)
 		if err != nil {
 			b.Fatalf("failed to collect policies: %v", err)
 		}

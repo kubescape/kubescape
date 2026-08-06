@@ -46,8 +46,10 @@ func main() {
         ScanAll: true,
     }
 
+    var policyIdentifiers []cautils.PolicyIdentifier
+
     // Run scan
-    results, err := ks.Scan(scanInfo)
+    results, err := ks.Scan(scanInfo, policyIdentifiers)
     if err != nil {
         log.Fatalf("Scan failed: %v", err)
     }
@@ -77,7 +79,8 @@ ks := core.NewKubescape(ctx)
 
 ```go
 // Scan with configuration
-results, err := ks.Scan(scanInfo)
+var policyIdentifiers []cautils.PolicyIdentifier
+results, err := ks.Scan(scanInfo, policyIdentifiers)
 ```
 
 ### Listing Frameworks and Controls
@@ -115,10 +118,15 @@ err := ks.Fix(fixInfo)
 ### Scan a Specific Framework
 
 ```go
-scanInfo := &cautils.ScanInfo{}
-scanInfo.SetPolicyIdentifiers([]string{"nsa"}, "framework")
+import (
+    "github.com/kubescape/kubescape/v3/core/cautils"
+    apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+)
 
-results, err := ks.Scan(scanInfo)
+scanInfo := &cautils.ScanInfo{}
+policyIdentifiers := cautils.BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework)
+
+results, err := ks.Scan(scanInfo, policyIdentifiers)
 ```
 
 ### Scan Specific Namespaces
@@ -127,8 +135,9 @@ results, err := ks.Scan(scanInfo)
 scanInfo := &cautils.ScanInfo{
     IncludeNamespaces: "production,staging",
 }
+var policyIdentifiers []cautils.PolicyIdentifier
 
-results, err := ks.Scan(scanInfo)
+results, err := ks.Scan(scanInfo, policyIdentifiers)
 ```
 
 ### Scan Local YAML Files
@@ -138,14 +147,16 @@ scanInfo := &cautils.ScanInfo{
     InputPatterns: []string{"/path/to/manifests"},
 }
 scanInfo.SetScanType(cautils.ScanTypeRepo)
+var policyIdentifiers []cautils.PolicyIdentifier
 
-results, err := ks.Scan(scanInfo)
+results, err := ks.Scan(scanInfo, policyIdentifiers)
 ```
 
 ### Export Results to Different Formats
 
 ```go
-results, _ := ks.Scan(scanInfo)
+var policyIdentifiers []cautils.PolicyIdentifier
+results, _ := ks.Scan(scanInfo, policyIdentifiers)
 
 // JSON
 jsonData, _ := results.ToJson()
@@ -161,8 +172,9 @@ fmt.Printf("Compliance Score: %.2f%%\n", summary.ComplianceScore)
 scanInfo := &cautils.ScanInfo{
     ComplianceThreshold: 80.0, // Fail if below 80%
 }
+var policyIdentifiers []cautils.PolicyIdentifier
 
-results, err := ks.Scan(scanInfo)
+results, err := ks.Scan(scanInfo, policyIdentifiers)
 if err != nil {
     // Handle scan failure
 }
@@ -201,7 +213,8 @@ if results.GetData().Report.SummaryDetails.ComplianceScore < scanInfo.Compliance
 ## Error Handling
 
 ```go
-results, err := ks.Scan(scanInfo)
+var policyIdentifiers []cautils.PolicyIdentifier
+results, err := ks.Scan(scanInfo, policyIdentifiers)
 if err != nil {
     switch {
     case errors.Is(err, context.DeadlineExceeded):
@@ -231,7 +244,8 @@ for _, ns := range namespaces {
         scanInfo := &cautils.ScanInfo{
             IncludeNamespaces: namespace,
         }
-        results, _ := ks.Scan(scanInfo)
+        var policyIdentifiers []cautils.PolicyIdentifier
+        results, _ := ks.Scan(scanInfo, policyIdentifiers)
         // Process results...
     }(ns)
 }

@@ -271,9 +271,10 @@ func Test_terminateOnExceedingSeverity(t *testing.T) {
 
 func TestSetSecurityViewScanInfo(t *testing.T) {
 	tests := []struct {
-		name string
-		args []string
-		want *cautils.ScanInfo
+		name         string
+		args         []string
+		want         *cautils.ScanInfo
+		wantPolicies []cautils.PolicyIdentifier
 	}{
 		{
 			name: "no args",
@@ -281,19 +282,19 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 			want: &cautils.ScanInfo{
 				InputPatterns: []string{},
 				ScanType:      cautils.ScanTypeCluster,
-				PolicyIdentifier: []cautils.PolicyIdentifier{
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "clusterscan",
-					},
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "mitre",
-					},
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "nsa",
-					},
+			},
+			wantPolicies: []cautils.PolicyIdentifier{
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "clusterscan",
+				},
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "mitre",
+				},
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "nsa",
 				},
 			},
 		},
@@ -309,15 +310,15 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 					"file.yaml",
 					"file2.yaml",
 				},
-				PolicyIdentifier: []cautils.PolicyIdentifier{
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "workloadscan",
-					},
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "allcontrols",
-					},
+			},
+			wantPolicies: []cautils.PolicyIdentifier{
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "workloadscan",
+				},
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "allcontrols",
 				},
 			},
 		},
@@ -328,7 +329,7 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 			got := &cautils.ScanInfo{
 				View: string(cautils.SecurityViewType),
 			}
-			setSecurityViewScanInfo(tt.args, got)
+			policyIdentifiers := setSecurityViewScanInfo(tt.args, got)
 
 			if len(tt.want.InputPatterns) != len(got.InputPatterns) {
 				t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.InputPatterns, tt.want.InputPatterns)
@@ -351,16 +352,16 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 				}
 			}
 
-			for i := range tt.want.PolicyIdentifier {
+			for i := range tt.wantPolicies {
 				found := false
-				for j := range got.PolicyIdentifier {
-					if tt.want.PolicyIdentifier[i].Kind == got.PolicyIdentifier[j].Kind && tt.want.PolicyIdentifier[i].Identifier == got.PolicyIdentifier[j].Identifier {
+				for j := range policyIdentifiers {
+					if tt.wantPolicies[i].Kind == policyIdentifiers[j].Kind && tt.wantPolicies[i].Identifier == policyIdentifiers[j].Identifier {
 						found = true
 						break
 					}
 				}
 				if !found {
-					t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.PolicyIdentifier, tt.want.PolicyIdentifier)
+					t.Errorf("in test: %s, got: %v, want: %v", tt.name, policyIdentifiers, tt.wantPolicies)
 				}
 			}
 		})
@@ -572,7 +573,7 @@ type contextTrackingKubescape struct {
 
 func (m *contextTrackingKubescape) Context() context.Context       { return m.ctx }
 func (m *contextTrackingKubescape) SetContext(ctx context.Context) { m.ctx = ctx }
-func (m *contextTrackingKubescape) Scan(_ *cautils.ScanInfo) (*resultshandlingpkg.ResultsHandler, error) {
+func (m *contextTrackingKubescape) Scan(_ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
 	m.scanCalledWith = m.ctx
 	return nil, errors.New("stub: scan not implemented in test")
 }
@@ -581,7 +582,7 @@ func TestSecurityScan_TimeoutDeadlineActiveForScan(t *testing.T) {
 	ks := &contextTrackingKubescape{ctx: context.Background()}
 	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
 
-	_ = securityScan(scanInfo, ks)
+	_ = securityScan(scanInfo, ks, nil)
 
 	_, hasDeadline := ks.scanCalledWith.Deadline()
 	assert.True(t, hasDeadline, "Scan() must receive a context with a deadline when ScanTimeout > 0")
@@ -592,7 +593,7 @@ func TestSecurityScan_TimeoutContextRestoredAfterReturn(t *testing.T) {
 	ks := &contextTrackingKubescape{ctx: originalCtx}
 	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
 
-	_ = securityScan(scanInfo, ks)
+	_ = securityScan(scanInfo, ks, nil)
 
 	_, hasDeadline := ks.Context().Deadline()
 	assert.False(t, hasDeadline, "original context must be restored on ks after securityScan returns")
@@ -602,7 +603,7 @@ func TestSecurityScan_ZeroTimeoutNoDeadline(t *testing.T) {
 	ks := &contextTrackingKubescape{ctx: context.Background()}
 	scanInfo := cautils.ScanInfo{ScanTimeout: 0}
 
-	_ = securityScan(scanInfo, ks)
+	_ = securityScan(scanInfo, ks, nil)
 
 	_, hasDeadline := ks.scanCalledWith.Deadline()
 	assert.False(t, hasDeadline, "Scan() must not receive a deadline when ScanTimeout is 0")

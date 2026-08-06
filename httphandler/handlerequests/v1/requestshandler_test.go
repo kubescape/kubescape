@@ -26,7 +26,7 @@ func testBody(t *testing.T) io.Reader {
 	return bytes.NewReader(b)
 }
 
-type scanner func(_ context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error)
+type scanner func(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error)
 
 // TestScan tests that the scan handler passes the scan requests correctly to the underlying scan engine.
 func TestScan(t *testing.T) {
@@ -36,7 +36,7 @@ func TestScan(t *testing.T) {
 	withTempOutputDirs(t)
 
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(_ context.Context, _ *cautils.ScanInfo, scanID string, _ bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, scanID string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		report := &reporthandlingv2.PostureReport{}
 		b, err := json.Marshal(report)
 		if err != nil {
@@ -98,7 +98,7 @@ func TestScan_SyncResponse(t *testing.T) {
 			withTempOutputDirs(t)
 
 			defer func(o scanner) { scanImpl = o }(scanImpl)
-			scanImpl = func(_ context.Context, _ *cautils.ScanInfo, scanID string, _ bool) (*reporthandlingv2.PostureReport, error) {
+			scanImpl = func(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, scanID string, _ bool) (*reporthandlingv2.PostureReport, error) {
 				if tt.writeResults {
 					b, err := json.Marshal(&reporthandlingv2.PostureReport{})
 					if err != nil {

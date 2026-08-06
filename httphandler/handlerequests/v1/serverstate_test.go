@@ -267,7 +267,7 @@ func TestStatus_InvalidQueryParams_Returns400(t *testing.T) {
 
 func TestScan_WhenScanFails_Returns500WithErrorType(t *testing.T) {
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(_ context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		return nil, fmt.Errorf("rego evaluation failed: module not found")
 	}
 
@@ -300,7 +300,7 @@ func TestScan_WhenScanFails_Returns500WithErrorType(t *testing.T) {
 
 func TestScan_WhenScanPanics_RecoversAndReturns500(t *testing.T) {
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(_ context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		panic("boom")
 	}
 

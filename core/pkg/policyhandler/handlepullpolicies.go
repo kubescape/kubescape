@@ -87,10 +87,10 @@ func (policyHandler *PolicyHandler) Close() {
 	}
 }
 
-func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo) (*cautils.OPASessionObj, error) {
-	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo)
+func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (*cautils.OPASessionObj, error) {
+	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo, policyIdentifier)
 
-	policyHandler.getters = &scanInfo.Getters
+	policyHandler.getters = getters
 
 	// get policies, exceptions and controls inputs
 	policies, exceptions, controlInputs, degradations, err := policyHandler.getPolicies(ctx, policyIdentifier)
