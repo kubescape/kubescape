@@ -34,7 +34,7 @@ func pollGoroutineCount(timeout time.Duration, cond func() bool) bool {
 func TestSecurityExceptionEventRecorderShutdownStopsWatcher(t *testing.T) {
 	baseline := runtime.NumGoroutine()
 
-	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(fake.NewSimpleClientset())
+	recorder, shutdown := newSecurityExceptionEventRecorderWithClient(fake.NewClientset())
 	require.NotNil(t, recorder, "a recorder must be returned for a valid client")
 	require.NotNil(t, shutdown, "a shutdown closure must be returned for a valid client")
 
