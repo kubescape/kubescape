@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"os"
 
 	"github.com/google/uuid"
@@ -318,6 +319,8 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 			if _, crdErr := crdInputs.GetControlsInputs(ctx, ""); crdErr == nil {
 				logger.L().Ctx(ctx).Info("using ControlInput CRD for control configuration")
 				return crdInputs, false, nil
+			} else if errors.Is(crdErr, context.Canceled) || errors.Is(crdErr, context.DeadlineExceeded) {
+				return nil, false, crdErr
 			}
 			logger.L().Ctx(ctx).Debug("ControlInput CRD found but default resource not available, falling back")
 		}
