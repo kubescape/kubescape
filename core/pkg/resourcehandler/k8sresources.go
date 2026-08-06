@@ -287,6 +287,9 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, ksResourceMap cautils.ExternalResources, batchChan chan<- *cautils.ResourceBatch, resolver resourceResolver) error {
 	resident := cautils.NewResourceBatch(cautils.ClusterScope)
 	namespaceBatches := make(map[string]*cautils.ResourceBatch)
+	collectedK8sResources := queryableResources.ToK8sResourceMap()
+	failedQueries := make(map[string]queryFailure)
+	collectedAnyResource := false
 
 	// Single pass: pull each GVR once, partition by scope.
 	for key := range queryableResources {
@@ -295,11 +298,32 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 
 		result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced)
+		for _, se := range selectorErrs {
+			// Match the eager collection path: controls may reference optional
+			// CRDs which are not installed, so a missing resource is not a scan
+			// coverage failure.
+			if strings.Contains(se.err.Error(), "the server could not find the requested resource") {
+				continue
+			}
+			qualifiedKey := qr.GroupVersionResourceTriplet + "/" + se.selector
+			failedQueries[qualifiedKey] = queryFailure{
+				gvr:      qr.GroupVersionResourceTriplet,
+				selector: se.selector,
+				err:      se.err,
+			}
+		}
 		if len(result) == 0 && len(selectorErrs) > 0 {
 			continue
 		}
 
 		metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
+		if len(metaObjs) > 0 {
+			// recordFailedQueryStatuses only distinguishes an empty GVR from a
+			// non-empty one. Keep one representative ID instead of duplicating
+			// every ID already retained in the streaming batches.
+			collectedK8sResources[qr.GroupVersionResourceTriplet] = []string{metaObjs[0].GetID()}
+			collectedAnyResource = true
+		}
 
 		for _, metaObj := range metaObjs {
 			scope := cautils.ResourceScope(metaObj)
@@ -316,6 +340,34 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 				batch.AllResources[metaObj.GetID()] = metaObj
 			}
 		}
+	}
+
+	// Preserve the eager collector's failure contract. Whole-GVR failures feed
+	// InfoMap, while selector failures for a GVR that returned some resources
+	// remain non-fatal and are surfaced as partial coverage.
+	partialFailures := recordFailedQueryStatuses(failedQueries, collectedK8sResources, sessionObj.InfoMap)
+	if len(partialFailures) > 0 {
+		sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, partialFailures...)
+		for _, p := range partialFailures {
+			logger.L().Ctx(ctx).Warning("partial resource collection: some resources may be missing from scan results",
+				helpers.String("gvr", p.GVR),
+				helpers.String("selector", p.Selector),
+				helpers.String("error", p.Error))
+		}
+	}
+	if !collectedAnyResource && len(failedQueries) > 0 {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("scan aborted: %w", ctxErr)
+		}
+		var combined []string
+		for _, f := range failedQueries {
+			combined = append(combined, fmt.Sprintf("%s: %s", f.gvr, f.err.Error()))
+		}
+		return fmt.Errorf("failed to pull any Kubernetes resources: %s", strings.Join(combined, "; "))
+	}
+	for _, f := range failedQueries {
+		logger.L().Ctx(ctx).Warning("failed to pull resource type",
+			helpers.String("gvr", f.gvr), helpers.Error(f.err))
 	}
 
 	// Collect external resources (host, cloud, RBAC, VAP) into the resident batch.
