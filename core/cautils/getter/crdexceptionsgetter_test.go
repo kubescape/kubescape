@@ -13,8 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/fake"
-	clienttesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	crfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -126,6 +126,40 @@ func TestCRDExceptionsGetter_GetExceptionsResolvesClusterNamespaceSelector(t *te
 	assert.Equal(t, "ClusterSecurityException", exceptions[0].Attributes["securityExceptionKind"])
 }
 
+type mockDynamicClient struct {
+	dynamic.Interface
+}
+
+func (m *mockDynamicClient) Resource(resource schema.GroupVersionResource) dynamic.NamespaceableResourceInterface {
+	return &mockNamespaceableResource{NamespaceableResourceInterface: m.Interface.Resource(resource)}
+}
+
+type mockNamespaceableResource struct {
+	dynamic.NamespaceableResourceInterface
+}
+
+func (m *mockNamespaceableResource) Namespace(s string) dynamic.ResourceInterface {
+	return &mockResource{ResourceInterface: m.NamespaceableResourceInterface.Namespace(s)}
+}
+
+func (m *mockNamespaceableResource) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return m.NamespaceableResourceInterface.List(ctx, opts)
+}
+
+type mockResource struct {
+	dynamic.ResourceInterface
+}
+
+func (m *mockResource) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return m.ResourceInterface.List(ctx, opts)
+}
+
 func TestCRDExceptionsGetter_ContextCancellation(t *testing.T) {
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1.AddToScheme(scheme))
@@ -135,13 +169,15 @@ func TestCRDExceptionsGetter_ContextCancellation(t *testing.T) {
 		securityExceptionGVR:        "SecurityExceptionList",
 		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
 	}
-	client := fake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds)
-	client.PrependReactor("list", "*", func(clienttesting.Action) (bool, runtime.Object, error) {
-		return true, nil, context.Canceled
-	})
+	fakeClient := fake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds)
+	mockClient := &mockDynamicClient{Interface: fakeClient}
 
-	getter := &CRDExceptionsGetter{client: client, k8sClient: k8sClient}
-	_, err := getter.GetExceptions(context.TODO(), "cluster-a")
+	// Create a canceled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	getter := &CRDExceptionsGetter{client: mockClient, k8sClient: k8sClient}
+	_, err := getter.GetExceptions(ctx, "cluster-a")
 	require.ErrorIs(t, err, context.Canceled)
 }
 
