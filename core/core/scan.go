@@ -308,7 +308,10 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 		}
 
 		deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
-		var exceptionRecorder = newSecurityExceptionEventRecorder()
+		exceptionRecorder, shutdownRecorder := newSecurityExceptionEventRecorder()
+		if shutdownRecorder != nil {
+			defer shutdownRecorder()
+		}
 		reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, exceptionRecorder)
 		reportResults.ControlTimeout = scanInfo.ControlTimeout
 		if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
@@ -513,7 +516,10 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	// producer does later — the invariant is enforced by ordering rather than by
 	// a comment in the resource handler.
 	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), clusterName)
-	var exceptionRecorder = newSecurityExceptionEventRecorder()
+	exceptionRecorder, shutdownRecorder := newSecurityExceptionEventRecorder()
+	if shutdownRecorder != nil {
+		defer shutdownRecorder()
+	}
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, clusterName, excludedNamespaces, includeNamespaces, enableRegoPrint, exceptionRecorder)
 	reportResults.ControlTimeout = controlTimeout
 
