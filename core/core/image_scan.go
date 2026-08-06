@@ -68,37 +68,25 @@ func GetImageExceptionsFromFile(filePath string) ([]VulnerabilitiesIgnorePolicy,
 
 // This function will identify the registry, organization and image tag from the image name
 func getAttributesFromImage(imgName string) (Attributes, error) {
-	canonicalImageName, err := cautils.NormalizeImageName(imgName)
+	ref, err := reference.ParseNormalizedNamed(imgName)
 	if err != nil {
 		return Attributes{}, err
 	}
 
-	// canonicalImageName is registry/[path/...]/name[:tag]. The registry is always
-	// the first component, but the organization path in between is optional (a
-	// registry image can have no organization) and may span multiple segments, so
-	// don't assume a fixed three-token split. See #2391.
-	tokens := strings.Split(canonicalImageName, "/")
-	registry := tokens[0]
+	registry := reference.Domain(ref)
+	path := reference.Path(ref)
 
 	organization := ""
-	nameAndTag := tokens[len(tokens)-1]
-	if len(tokens) > 2 {
-		organization = strings.Join(tokens[1:len(tokens)-1], "/")
+	imageName := path
+	if idx := strings.LastIndex(path, "/"); idx != -1 {
+		organization = path[:idx]
+		imageName = path[idx+1:]
 	}
 
-	// nameAndTag may be "name", "name:tag", "name@algo:digest" (e.g.
-	// "name@sha256:abc123..."), or "name:tag@algo:digest" - a digest-pinned
-	// reference. Split off any "@digest" suffix first: the digest itself
-	// contains a colon ("sha256:..."), so splitting nameAndTag on ":"
-	// without accounting for that left "@sha256" stuck onto imageName and
-	// the raw hash treated as the tag. Because regexStringMatch (below) is
-	// an unanchored match, unanchored policy patterns (the common case,
-	// e.g. "myimage") still matched the old broken ImageName; anchored
-	// patterns (e.g. "^myimage$") did not, and this fixes those.
-	beforeDigest := nameAndTag
 	imageTag := "latest"
-	if at := strings.Index(nameAndTag, "@"); at != -1 {
-		beforeDigest = nameAndTag[:at]
+	if tagged, ok := ref.(reference.Tagged); ok {
+		imageTag = tagged.Tag()
+	} else if digested, ok := ref.(reference.Digested); ok {
 		// No explicit tag on a digest-pinned reference: fall back to the
 		// digest as ImageTag (deliberate choice, not Docker/OCI reference
 		// semantics - Docker resolves a "name:tag@digest" reference by the
@@ -108,13 +96,7 @@ func getAttributesFromImage(imgName string) (Attributes, error) {
 		// cannot match a purely digest-pinned scan, since ImageTag will be
 		// the digest instead; only Registry/Organization/ImageName targets
 		// (and an ImageTag target of "" - "any tag") can match it.
-		imageTag = nameAndTag[at+1:]
-	}
-
-	imageName := beforeDigest
-	if colon := strings.LastIndex(beforeDigest, ":"); colon != -1 {
-		imageName = beforeDigest[:colon]
-		imageTag = beforeDigest[colon+1:] // an explicit tag wins over the digest fallback above
+		imageTag = digested.Digest().String()
 	}
 
 	attributes := Attributes{
