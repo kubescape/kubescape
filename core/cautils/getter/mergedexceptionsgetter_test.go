@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -15,7 +16,7 @@ type exceptionsGetterStub struct {
 	err        error
 }
 
-func (s *exceptionsGetterStub) GetExceptions(_ string) ([]armotypes.PostureExceptionPolicy, error) {
+func (s *exceptionsGetterStub) GetExceptions(ctx context.Context, _ string) ([]armotypes.PostureExceptionPolicy, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -70,13 +71,13 @@ func TestMergedExceptionsGetter(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			out, err := tc.getter.GetExceptions("cluster-a")
+			got, err := tc.getter.GetExceptions(context.TODO(), "cluster-a")
 			if tc.wantErr {
 				require.Error(t, err)
 				return
 			}
 			require.NoError(t, err)
-			assert.Len(t, out, tc.wantLen)
+			assert.Len(t, got, tc.wantLen)
 		})
 	}
 }
@@ -186,7 +187,7 @@ func TestMergedExceptionsGetter_Deduplication(t *testing.T) {
 				&exceptionsGetterStub{exceptions: tc.cloud},
 				&exceptionsGetterStub{exceptions: tc.crd},
 			)
-			got, err := getter.GetExceptions("cluster-a")
+			got, err := getter.GetExceptions(context.TODO(), "cluster-a")
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})

@@ -1,6 +1,8 @@
 package getter
 
 import (
+	"context"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -19,12 +21,12 @@ type (
 
 	// IExceptionsGetter knows how to retrieve exceptions.
 	IExceptionsGetter interface {
-		GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error)
+		GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error)
 	}
 
 	// IControlsInputsGetter knows how to retrieve controls inputs.
 	IControlsInputsGetter interface {
-		GetControlsInputs(clusterName string) (map[string][]string, error)
+		GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error)
 	}
 
 	// IAttackTracksGetter knows how to retrieve attack tracks.

@@ -71,7 +71,7 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 			logger.L().Ctx(ctx).Warning("--controls-version is ignored for exceptions when an account ID is set; exceptions are downloaded from the Kubescape Cloud backend")
 		}
 		// download exceptions from Kubescape Cloud backend
-		primary = getter.GetKSCloudAPIConnector()
+		primary = getter.GetKSCloudAPIAdapter()
 		k8sClient := getExceptionsK8sClient(ctx)
 		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
 	}
@@ -308,14 +308,14 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 		if downloadReleasedPolicy != nil && downloadReleasedPolicy.IsVersionPinned() {
 			logger.L().Ctx(ctx).Warning("--controls-version is ignored for control config when an account ID is set; control config is downloaded from the Kubescape Cloud backend")
 		}
-		g := getter.GetKSCloudAPIConnector() // download config from Kubescape Cloud backend
+		g := getter.GetKSCloudAPIAdapter() // download config from Kubescape Cloud backend
 		return g, false, nil
 	}
 
 	// Try to read control inputs from the ControlInput CRD in-cluster (live cluster scans only)
 	if useCRD {
 		if crdInputs, err := getter.NewCRDControlInputs(); err == nil {
-			if _, crdErr := crdInputs.GetControlsInputs(""); crdErr == nil {
+			if _, crdErr := crdInputs.GetControlsInputs(ctx, ""); crdErr == nil {
 				logger.L().Ctx(ctx).Info("using ControlInput CRD for control configuration")
 				return crdInputs, false, nil
 			}

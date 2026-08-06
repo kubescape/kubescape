@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"context"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -54,7 +55,7 @@ func TestCRDExceptionsGetter_GetExceptions(t *testing.T) {
 	)
 
 	getter := &CRDExceptionsGetter{client: client}
-	exceptions, err := getter.GetExceptions("cluster-a")
+	exceptions, err := getter.GetExceptions(context.TODO(), "cluster-a")
 	require.NoError(t, err)
 	require.Len(t, exceptions, 2)
 
@@ -74,7 +75,7 @@ func TestCRDExceptionsGetter_GetExceptions(t *testing.T) {
 
 func TestCRDExceptionsGetter_NilClient(t *testing.T) {
 	getter := &CRDExceptionsGetter{}
-	exceptions, err := getter.GetExceptions("cluster-a")
+	exceptions, err := getter.GetExceptions(context.TODO(), "cluster-a")
 	require.NoError(t, err)
 	assert.Empty(t, exceptions)
 }
@@ -115,7 +116,7 @@ func TestCRDExceptionsGetter_GetExceptionsResolvesClusterNamespaceSelector(t *te
 	)
 
 	getter := &CRDExceptionsGetter{client: dynamicClient, k8sClient: k8sClient}
-	exceptions, err := getter.GetExceptions("cluster-a")
+	exceptions, err := getter.GetExceptions(context.TODO(), "cluster-a")
 	require.NoError(t, err)
 	require.Len(t, exceptions, 1)
 	require.Len(t, exceptions[0].Resources, 1)
@@ -150,7 +151,7 @@ func TestCRDExceptionsGetter_PartialApplicationOnConversionError(t *testing.T) {
 	)
 
 	getter := &CRDExceptionsGetter{client: client}
-	exceptions, err := getter.GetExceptions("cluster-a")
+	exceptions, err := getter.GetExceptions(context.TODO(), "cluster-a")
 	require.NoError(t, err, "a single malformed CRD must not fail the whole getter")
 	require.Len(t, exceptions, 1, "the valid CRD must still be applied when another one fails to convert")
 	assert.Equal(t, "C-0001", exceptions[0].PosturePolicies[0].ControlID)
@@ -182,7 +183,7 @@ func TestConvertCRDObjectToPosturePolicies_ObjectSelectorWithNamespaceSelector(t
 	// namespaceSelector x resources builds the designator cross product; objectSelector
 	// is carried separately as a policy-level LabelSelector (not flattened into the
 	// designators) and ANDed against it by the exception processor.
-	policies, err := convertCRDObjectToPosturePolicies(obj, "ClusterSecurityException", k8sClient)
+	policies, err := convertCRDObjectToPosturePolicies(context.TODO(), obj, "ClusterSecurityException", k8sClient)
 	require.NoError(t, err)
 	require.Len(t, policies, 1)
 
@@ -210,7 +211,7 @@ func TestConvertCRDObjectToPosturePolicies_DefaultScope(t *testing.T) {
 		},
 	}
 
-	policies, err := convertCRDObjectToPosturePolicies(obj, "ClusterSecurityException", nil)
+	policies, err := convertCRDObjectToPosturePolicies(context.TODO(), obj, "ClusterSecurityException", nil)
 	require.NoError(t, err)
 	require.Len(t, policies, 1)
 	assert.Equal(t, "*", policies[0].Resources[0].Attributes[identifiers.AttributeKind])
@@ -243,7 +244,7 @@ func TestConvertCRDObjectToPosturePolicies_FrameworkName(t *testing.T) {
 				"spec":       map[string]any{"posture": []any{tc.postureItem}},
 			}}
 
-			policies, err := convertCRDObjectToPosturePolicies(obj, "SecurityException", nil)
+			policies, err := convertCRDObjectToPosturePolicies(context.TODO(), obj, "SecurityException", nil)
 			require.NoError(t, err)
 			require.Len(t, policies, 1)
 			assert.Equal(t, tc.wantFramework, policies[0].PosturePolicies[0].FrameworkName)
@@ -294,7 +295,7 @@ func TestBuildResourceDesignators_NamespacedScopeIsNotWidened(t *testing.T) {
 				},
 			}}
 
-			got, err := buildResourceDesignators(obj, "SecurityException", nil)
+			got, err := buildResourceDesignators(context.TODO(), obj, "SecurityException", nil)
 			require.NoError(t, err)
 			assert.ElementsMatch(t, tc.want, got)
 		})
@@ -406,7 +407,7 @@ func TestConvertCRDObjectToPosturePolicies_ObjectSelector(t *testing.T) {
 				},
 			}}
 
-			policies, err := convertCRDObjectToPosturePolicies(obj, tc.kind, nil)
+			policies, err := convertCRDObjectToPosturePolicies(context.TODO(), obj, tc.kind, nil)
 			require.NoError(t, err)
 			require.Len(t, policies, 1)
 
@@ -562,7 +563,7 @@ func TestBuildResourceDesignators_NamespaceSelector(t *testing.T) {
 				},
 			}}
 
-			got, err := buildResourceDesignators(obj, tc.kind, k8sClient)
+			got, err := buildResourceDesignators(context.TODO(), obj, tc.kind, k8sClient)
 			require.NoError(t, err)
 			assert.ElementsMatch(t, tc.want, got)
 		})

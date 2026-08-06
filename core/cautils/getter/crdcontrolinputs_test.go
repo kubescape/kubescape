@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,7 +32,7 @@ func TestGetControlsInputs_WithControls(t *testing.T) {
 	)
 
 	getter := &CRDControlInputs{client: client}
-	inputs, err := getter.GetControlsInputs("")
+	inputs, err := getter.GetControlsInputs(context.TODO(), "")
 	require.NoError(t, err)
 	assert.Len(t, inputs, 2)
 	assert.Equal(t, []string{"docker.io", "quay.io"}, inputs["untrustedRegistries"])
@@ -43,7 +44,7 @@ func TestGetControlsInputs_MissingDefault(t *testing.T) {
 	client := fake.NewSimpleDynamicClient(scheme)
 
 	getter := &CRDControlInputs{client: client}
-	_, err := getter.GetControlsInputs("") // clusterName is unused by the implementation
+	_, err := getter.GetControlsInputs(context.TODO(), "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get ControlInput CRD")
 }

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"context"
+
 
 	"github.com/kubescape/kubescape/v3/internal/testutils"
 	"github.com/stretchr/testify/require"
@@ -326,7 +328,7 @@ func TestLoadPolicy(t *testing.T) {
 			})
 
 			p := NewLoadPolicy([]string{fixture})
-			inputs, err := p.GetControlsInputs(cluster)
+			inputs, err := p.GetControlsInputs(context.TODO(), cluster)
 			require.NoError(t, err)
 			require.EqualValues(t, expected, inputs)
 		})
@@ -336,7 +338,7 @@ func TestLoadPolicy(t *testing.T) {
 
 			const invalidInputs = "invalid-fw"
 			p := NewLoadPolicy([]string{testFrameworkFile(invalidInputs)})
-			_, err := p.GetControlsInputs(cluster)
+			_, err := p.GetControlsInputs(context.TODO(), cluster)
 			require.Error(t, err)
 		})
 
@@ -345,7 +347,7 @@ func TestLoadPolicy(t *testing.T) {
 
 			const invalidInputs = "nowheretobefound"
 			p := NewLoadPolicy([]string{testFrameworkFile(invalidInputs)})
-			_, err := p.GetControlsInputs(cluster)
+			_, err := p.GetControlsInputs(context.TODO(), cluster)
 			require.Error(t, err)
 		})
 	})
@@ -359,7 +361,7 @@ func TestLoadPolicy(t *testing.T) {
 			const exceptions = "exceptions"
 
 			p := NewLoadPolicy([]string{testFrameworkFile(exceptions)})
-			exceptionPolicies, err := p.GetExceptions(cluster)
+			exceptionPolicies, err := p.GetExceptions(context.TODO(), cluster)
 			require.NoError(t, err)
 
 			require.Greater(t, len(exceptionPolicies), 0)
@@ -374,7 +376,7 @@ func TestLoadPolicy(t *testing.T) {
 
 			const invalidInputs = "invalid-fw"
 			p := NewLoadPolicy([]string{testFrameworkFile(invalidInputs)})
-			_, err := p.GetExceptions(cluster)
+			_, err := p.GetExceptions(context.TODO(), cluster)
 			require.Error(t, err)
 		})
 
@@ -383,7 +385,7 @@ func TestLoadPolicy(t *testing.T) {
 
 			const invalidInputs = "nowheretobefound"
 			p := NewLoadPolicy([]string{testFrameworkFile(invalidInputs)})
-			_, err := p.GetExceptions(cluster)
+			_, err := p.GetExceptions(context.TODO(), cluster)
 			require.Error(t, err)
 		})
 	})
