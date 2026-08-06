@@ -209,7 +209,7 @@ func TestAdoptClusterName(t *testing.T) {
 func TestUpdateCloudURLs(t *testing.T) {
 	co := mockConfigObj()
 	mockCloudAPIURL := "1-2-3-4.com"
-	os.Setenv("KS_CLOUD_API_URL", mockCloudAPIURL)
+	t.Setenv("KS_CLOUD_API_URL", mockCloudAPIURL)
 
 	assert.NotEqual(t, co.CloudAPIURL, mockCloudAPIURL)
 	updateCloudURLs(co)
@@ -293,7 +293,7 @@ func TestGetConfigMapNamespace(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.env != "" {
-				_ = os.Setenv("KS_DEFAULT_CONFIGMAP_NAMESPACE", tt.env)
+				t.Setenv("KS_DEFAULT_CONFIGMAP_NAMESPACE", tt.env)
 			}
 			assert.Equalf(t, tt.want, GetConfigMapNamespace(), "GetConfigMapNamespace()")
 		})
