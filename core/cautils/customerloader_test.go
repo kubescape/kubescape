@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"testing"
@@ -439,6 +440,41 @@ func TestUpdateConfigFile_RoundTrip(t *testing.T) {
 	readBack := &ConfigObj{}
 	require.NoError(t, json.Unmarshal(dat, readBack))
 	assert.Equal(t, configObj.AccountID, readBack.AccountID)
+}
+
+func TestUpdateConfigFile_ClusterNameStripped(t *testing.T) {
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	defer func() { getter.DefaultLocalStore = originalStore }()
+
+	configObj := mockConfigObj()
+	require.NoError(t, updateConfigFile(configObj))
+
+	dat, err := os.ReadFile(ConfigFileFullPath())
+	require.NoError(t, err)
+	require.NotEmpty(t, dat, "config file must not be empty after write")
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(dat, &raw))
+	_, present := raw["clusterName"]
+	assert.False(t, present, "clusterName key must be absent from the persisted JSON, not merely empty")
+	assert.Contains(t, raw, "accountID", "accountID must be present in the persisted JSON")
+	assert.Equal(t, "ddd", configObj.ClusterName, "ClusterName must be restored on the in-memory object after write")
+}
+
+func TestUpdateConfigFile_PropagatesMarshalError(t *testing.T) {
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	defer func() { getter.DefaultLocalStore = originalStore }()
+
+	origMarshal := configMarshal
+	sentinel := errors.New("injected marshal failure")
+	configMarshal = func(any) ([]byte, error) { return nil, sentinel }
+	defer func() { configMarshal = origMarshal }()
+
+	err := updateConfigFile(mockConfigObj())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sentinel)
 }
 
 // TestNewLocalConfig_LogsOnMalformedCachedConfigFile guards against a
