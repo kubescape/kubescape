@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/pdf"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -68,12 +69,18 @@ func (pp *PdfPrinter) PrintNextSteps() {
 
 // ActionPrint is responsible for generating a report in pdf format
 func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
-	if opaSessionObj == nil {
+	var outBuff []byte
+	var err error
+
+	if opaSessionObj != nil {
+		outBuff, err = pp.generatePdf(&opaSessionObj.Report.SummaryDetails)
+	} else if len(imageScanData) > 0 {
+		outBuff, err = pp.generateImagePdf(imageScanData)
+	} else {
 		logger.L().Ctx(ctx).Error("failed to print results, missing data")
 		return
 	}
 
-	outBuff, err := pp.generatePdf(&opaSessionObj.Report.SummaryDetails)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to generate pdf format", helpers.Error(err))
 		return
@@ -84,6 +91,41 @@ func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		return
 	}
 	printer.LogOutputFile(pp.writer.Name())
+}
+
+// generateImagePdf builds a CVE-table PDF report for an image scan (#2782)
+func (pp *PdfPrinter) generateImagePdf(imageScanData []cautils.ImageScanData) ([]byte, error) {
+	var allCVEs []imageprinter.CVE
+	var images []string
+	for i := range imageScanData {
+		allCVEs = append(allCVEs, extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)...)
+		images = append(images, imageScanData[i].Image)
+	}
+
+	template := pdf.NewReportTemplate()
+	template.GenerateHeader(fmt.Sprintf("Image scan: %s", strings.Join(images, ", ")), time.Now().Format(time.DateTime))
+
+	rows, fixableCVEs := pp.getImageTableObjects(allCVEs)
+	if err := template.GenerateImageTable(rows, len(allCVEs), fixableCVEs); err != nil {
+		return nil, err
+	}
+
+	return template.GetPdf()
+}
+
+// getImageTableObjects converts CVEs into PDF table rows, returning the rows and how many are fixable
+func (pp *PdfPrinter) getImageTableObjects(cves []imageprinter.CVE) (*[]pdf.ImageTableObject, int) {
+	rows := make([]pdf.ImageTableObject, 0, len(cves))
+	fixableCVEs := 0
+	for _, cve := range cves {
+		fixVersions := "no fix available"
+		if len(cve.FixVersions) > 0 {
+			fixVersions = strings.Join(cve.FixVersions, ", ")
+			fixableCVEs++
+		}
+		rows = append(rows, *pdf.NewImageTableRow(cve.ID, cve.Package, cve.Version, cve.Severity, fixVersions, getSeverityColor))
+	}
+	return &rows, fixableCVEs
 }
 
 func (pp *PdfPrinter) generatePdf(summaryDetails *reportsummary.SummaryDetails) ([]byte, error) {

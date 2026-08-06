@@ -6,6 +6,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -27,6 +28,9 @@ const (
 	metricsResource  metricsName = "resource"
 	metricsResources metricsName = "resources"
 	metricsFramework metricsName = "framework"
+	metricsImage     metricsName = "image"
+	metricsCVE       metricsName = "cve"
+	metricsFixable   metricsName = "fixable"
 )
 
 // ============================================ CLUSTER ============================================================
@@ -197,6 +201,30 @@ func (mrc *mResources) prefix() string {
 	return fmt.Sprintf("%s_%s", ksMetrics, metricsResource)
 }
 
+// ============================================ IMAGE VULNERABILITY =================================================
+func (miv *mImageVulnerability) metrics() []string {
+	/*
+		#### Image vulnerability metrics (image scan only, #2782)
+		kubescape_image_count_cve{image="<image>",severity="<severity>"} <counter>
+		kubescape_image_count_cve_fixable{image="<image>",severity="<severity>"} <counter>
+	*/
+
+	m := []string{}
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s", miv.prefix(), metricsCount, metricsCVE), miv.labels(), miv.cveCount))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", miv.prefix(), metricsCount, metricsCVE, metricsFixable), miv.labels(), miv.fixableCVECount))
+	return m
+}
+
+func (miv *mImageVulnerability) labels() string {
+	r := fmt.Sprintf("image=\"%s\"", miv.image) + ","
+	r += fmt.Sprintf("severity=\"%s\"", miv.severity)
+	return r
+}
+
+func (miv *mImageVulnerability) prefix() string {
+	return fmt.Sprintf("%s_%s", ksMetrics, metricsImage)
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 func toMetricHeader(name, help string) string {
@@ -241,6 +269,9 @@ func (m *Metrics) String() string {
 	}
 	for i := range m.listResources {
 		all = append(all, m.listResources[i].metrics()...)
+	}
+	for i := range m.listImages {
+		all = append(all, m.listImages[i].metrics()...)
 	}
 	return emitMetricFamily(all)
 }
@@ -291,12 +322,20 @@ type mResources struct {
 	controlsCountFailed  int
 	controlsCountSkipped int
 }
+type mImageVulnerability struct {
+	image           string
+	severity        string
+	cveCount        int
+	fixableCVECount int
+}
+
 type Metrics struct {
 	rs             mComplianceScore
 	coverage       mScanCoverage
 	listFrameworks []mFrameworkComplianceScore
 	listControls   []mControlComplianceScore
 	listResources  []mResources
+	listImages     []mImageVulnerability
 }
 
 func (mrs *mComplianceScore) set(resources reportsummary.ICounters, controls reportsummary.ICounters) {
@@ -397,4 +436,23 @@ func (m *Metrics) setResourcesCounters(
 		m.listResources = append(m.listResources, mrc)
 	}
 
+}
+
+// setImageVulnerabilities builds per-image, per-severity CVE counters for an image scan (#2782)
+func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData) {
+	for i := range imageScanData {
+		cves := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
+
+		severityToSummary := map[string]*imageprinter.SeveritySummary{}
+		setSeverityToSummaryMap(cves, severityToSummary)
+
+		for severity, summary := range severityToSummary {
+			m.listImages = append(m.listImages, mImageVulnerability{
+				image:           imageScanData[i].Image,
+				severity:        severity,
+				cveCount:        summary.NumberOfCVEs,
+				fixableCVECount: summary.NumberOfFixableCVEs,
+			})
+		}
+	}
 }

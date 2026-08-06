@@ -201,7 +201,9 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 	if scanType == cautils.ScanTypeImage {
 		// supported types for image scanning
 		switch printFormat {
-		case printer.JsonFormat, printer.SARIFFormat, printer.YamlFormat:
+		case printer.JsonFormat, printer.SARIFFormat, printer.YamlFormat,
+			printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat,
+			printer.HtmlFormat, printer.GitLabSASTFormat:
 			return false, nil
 		case printer.PrettyFormat:
 			return true, nil
