@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -8,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"context"
-
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/kubescape/kubescape/v3/internal/testutils"

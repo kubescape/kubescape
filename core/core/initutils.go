@@ -319,7 +319,7 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 			if _, crdErr := crdInputs.GetControlsInputs(ctx, ""); crdErr == nil {
 				logger.L().Ctx(ctx).Info("using ControlInput CRD for control configuration")
 				return crdInputs, false, nil
-			} else if errors.Is(crdErr, context.Canceled) || errors.Is(crdErr, context.DeadlineExceeded) {
+			} else if isContextErr(crdErr) {
 				return nil, false, crdErr
 			}
 			logger.L().Ctx(ctx).Debug("ControlInput CRD found but default resource not available, falling back")
@@ -414,3 +414,9 @@ func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName s
 
 	return p
 }
+
+// isContextErr reports whether err was caused by context cancellation or a deadline.
+func isContextErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+

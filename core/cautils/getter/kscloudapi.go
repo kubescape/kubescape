@@ -26,7 +26,12 @@ var (
 	_ IControlsInputsGetter = &KSCloudAPIAdapter{}
 )
 
-// KSCloudAPIAdapter wraps v1.KSCloudAPI to implement the context-aware getter interfaces
+// KSCloudAPIAdapter adapts v1.KSCloudAPI to the context-aware getter interfaces.
+//
+// NOTE: the supplied context is intentionally discarded. The upstream client in
+// github.com/kubescape/backend/pkg/client/v1 does not yet expose context-aware
+// methods, so cancellation and deadlines do not reach these HTTP calls. Remove
+// this adapter once the backend client accepts a context.
 type KSCloudAPIAdapter struct {
 	*v1.KSCloudAPI
 }
@@ -38,11 +43,11 @@ func GetKSCloudAPIAdapter() *KSCloudAPIAdapter {
 	}
 }
 
-func (a *KSCloudAPIAdapter) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+func (a *KSCloudAPIAdapter) GetExceptions(_ context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	return a.KSCloudAPI.GetExceptions(clusterName)
 }
 
-func (a *KSCloudAPIAdapter) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
+func (a *KSCloudAPIAdapter) GetControlsInputs(_ context.Context, clusterName string) (map[string][]string, error) {
 	return a.KSCloudAPI.GetControlsInputs(clusterName)
 }
 

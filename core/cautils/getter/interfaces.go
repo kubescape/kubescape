@@ -2,6 +2,7 @@ package getter
 
 import (
 	"context"
+	"errors"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -34,3 +35,8 @@ type (
 		GetAttackTracks() ([]v1alpha1.AttackTrack, error)
 	}
 )
+
+// isContextErr reports whether err was caused by context cancellation or a deadline.
+func isContextErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}

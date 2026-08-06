@@ -26,10 +26,12 @@ func (s *exceptionsGetterStub) GetExceptions(ctx context.Context, _ string) ([]a
 }
 
 func TestMergedExceptionsGetter(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "test-key", "test-value")
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 
 	tests := []struct {
 		name      string
+		nilGetter bool // exercise the nil-receiver path
 		primary   *exceptionsGetterStub
 		secondary *exceptionsGetterStub
 		wantLen   int
@@ -37,8 +39,9 @@ func TestMergedExceptionsGetter(t *testing.T) {
 		wantErrIs error
 	}{
 		{
-			name:    "nil getter returns empty",
-			wantLen: 0,
+			name:      "nil getter returns empty",
+			nilGetter: true,
+			wantLen:   0,
 		},
 		{
 			name:    "primary only",
@@ -82,11 +85,9 @@ func TestMergedExceptionsGetter(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var getter *MergedExceptionsGetter
-			if tc.primary == nil && tc.secondary == nil {
-				if tc.name != "nil getter returns empty" {
-					getter = NewMergedExceptionsGetter(nil, nil)
-				}
-			} else {
+			if !tc.nilGetter {
+				// NOTE: assign through typed locals so a nil *exceptionsGetterStub is passed
+				// as a nil interface, not a non-nil interface holding a nil pointer.
 				var p, s IExceptionsGetter
 				if tc.primary != nil {
 					p = tc.primary

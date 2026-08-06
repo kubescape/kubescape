@@ -2,7 +2,6 @@ package getter
 
 import (
 	"context"
-	"errors"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
@@ -41,7 +40,7 @@ func (g *MergedExceptionsGetter) GetExceptions(ctx context.Context, clusterName 
 
 	crdExceptions, err := g.secondary.GetExceptions(ctx, clusterName)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if isContextErr(err) {
 			return nil, err
 		}
 		// Secondary (CRD) failures must not break the scan, but a swallowed error hides

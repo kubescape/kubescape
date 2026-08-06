@@ -1,12 +1,11 @@
 package getter
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
-	"context"
-
 
 	"github.com/kubescape/kubescape/v3/internal/testutils"
 	"github.com/stretchr/testify/require"

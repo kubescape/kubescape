@@ -14,6 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic/fake"
+	clienttesting "k8s.io/client-go/testing"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	crfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -122,6 +124,79 @@ func TestCRDExceptionsGetter_GetExceptionsResolvesClusterNamespaceSelector(t *te
 	require.Len(t, exceptions[0].Resources, 1)
 	assert.Equal(t, "staging", exceptions[0].Resources[0].Attributes[identifiers.AttributeNamespace])
 	assert.Equal(t, "ClusterSecurityException", exceptions[0].Attributes["securityExceptionKind"])
+}
+
+func TestCRDExceptionsGetter_ContextCancellation(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	k8sClient := crfake.NewClientBuilder().WithScheme(scheme).Build()
+
+	listKinds := map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	}
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds)
+	client.PrependReactor("list", "*", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, context.Canceled
+	})
+
+	getter := &CRDExceptionsGetter{client: client, k8sClient: k8sClient}
+	_, err := getter.GetExceptions(context.TODO(), "cluster-a")
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+type mockListClient struct {
+	client.Client
+}
+
+func (m *mockListClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return m.Client.List(ctx, list, opts...)
+}
+
+func TestCRDExceptionsGetter_ContextCancellationOnConversion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	k8sClient := crfake.NewClientBuilder().WithScheme(scheme).Build()
+	
+	mockClient := &mockListClient{Client: k8sClient}
+
+	// Create a canceled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+
+	listKinds := map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	}
+	dynamicClient := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds,
+		&unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "kubescape.io/v1beta1",
+				"kind":       "ClusterSecurityException",
+				"metadata": map[string]any{
+					"name": "cse-staging",
+				},
+				"spec": map[string]any{
+					"match": map[string]any{
+						"namespaceSelector": map[string]any{
+							"matchLabels": map[string]any{"env": "staging"},
+						},
+					},
+					"posture": []any{
+						map[string]any{"controlID": "C-0003", "action": "alert_only"},
+					},
+				},
+			},
+		},
+	)
+
+	getter := &CRDExceptionsGetter{client: dynamicClient, k8sClient: mockClient}
+	_, err := getter.GetExceptions(ctx, "cluster-a")
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestCRDExceptionsGetter_PartialApplicationOnConversionError(t *testing.T) {
