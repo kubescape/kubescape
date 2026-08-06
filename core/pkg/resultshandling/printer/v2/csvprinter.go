@@ -63,7 +63,7 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverage(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources, &opaSessionObj.ScanCoverage)
 
 	csvWriter := csv.NewWriter(cp.writer)
-	
+
 	// Write Header
 	header := []string{
 		"Control Name",
@@ -96,7 +96,7 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		for _, assocCtrl := range result.AssociatedControls {
 			ctrlID := assocCtrl.GetID()
 			ctrlName := assocCtrl.GetName()
-			
+
 			// Find severity from SummaryDetails if available
 			severity := "Unknown"
 			if ctrlData, ok := reportWithSeverity.SummaryDetails.Controls[ctrlID]; ok {
@@ -139,6 +139,6 @@ func (cp *CsvPrinter) PrintNextSteps() {
 
 func (cp *CsvPrinter) CloseWriter() {
 	if cp.writer != nil && cp.writer != os.Stdout {
-		cp.writer.Close()
+		_ = cp.writer.Close()
 	}
 }
