@@ -2,6 +2,7 @@ package getter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"sort"
@@ -81,6 +82,9 @@ func (g *CRDExceptionsGetter) GetExceptions(ctx context.Context, _ string) ([]ar
 	for i := range seList.Items {
 		policies, convErr := convertCRDObjectToPosturePolicies(ctx, &seList.Items[i], "SecurityException", g.k8sClient)
 		if convErr != nil {
+			if errors.Is(convErr, context.Canceled) || errors.Is(convErr, context.DeadlineExceeded) {
+				return nil, convErr
+			}
 			// Partial application: skip this one CRD but keep the rest, and make the
 			// drop observable instead of silently swallowing it.
 			logger.L().Warning("skipping SecurityException that failed to convert to posture exceptions",
@@ -99,6 +103,9 @@ func (g *CRDExceptionsGetter) GetExceptions(ctx context.Context, _ string) ([]ar
 	for i := range cseList.Items {
 		policies, convErr := convertCRDObjectToPosturePolicies(ctx, &cseList.Items[i], "ClusterSecurityException", g.k8sClient)
 		if convErr != nil {
+			if errors.Is(convErr, context.Canceled) || errors.Is(convErr, context.DeadlineExceeded) {
+				return nil, convErr
+			}
 			// Partial application: skip this one CRD but keep the rest, and make the
 			// drop observable instead of silently swallowing it.
 			logger.L().Warning("skipping ClusterSecurityException that failed to convert to posture exceptions",

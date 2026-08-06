@@ -60,6 +60,22 @@ func TestMergedExceptionsGetter(t *testing.T) {
 			wantLen: 1,
 		},
 		{
+			name: "secondary cancellation error returned",
+			getter: NewMergedExceptionsGetter(
+				&exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "base"}}},
+				&exceptionsGetterStub{err: context.Canceled},
+			),
+			wantErr: true,
+		},
+		{
+			name: "secondary deadline error returned",
+			getter: NewMergedExceptionsGetter(
+				&exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "base"}}},
+				&exceptionsGetterStub{err: context.DeadlineExceeded},
+			),
+			wantErr: true,
+		},
+		{
 			name: "primary error returned",
 			getter: NewMergedExceptionsGetter(
 				&exceptionsGetterStub{err: fmt.Errorf("primary failed")},
