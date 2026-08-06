@@ -12,7 +12,7 @@ type IKubescape interface {
 	Context() context.Context
 	SetContext(ctx context.Context)
 
-	Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) // TODO - use scanInfo from v1
+	Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) // TODO - use scanInfo from v1
 
 	// policies
 	List(listPolicies *metav1.ListPolicies) error     // TODO - return list response

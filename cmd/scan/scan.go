@@ -126,9 +126,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			scanInfo.View = requestedView
 
 			if scanInfo.View == string(cautils.SecurityViewType) {
-				setSecurityViewScanInfo(args, &scanInfo)
+				policyIdentifiers := setSecurityViewScanInfo(args, &scanInfo)
 
-				if err := securityScan(scanInfo, ks); err != nil {
+				if err := securityScan(scanInfo, ks, policyIdentifiers); err != nil {
 					logger.L().Fatal(err.Error())
 				}
 			} else if len(args) == 0 ||
@@ -280,15 +280,14 @@ func registryCredentialFlagChanged(cmd *cobra.Command, names ...string) bool {
 	return false
 }
 
-func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) {
+func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) []cautils.PolicyIdentifier {
 	if len(args) > 0 {
 		scanInfo.SetScanType(cautils.ScanTypeRepo)
 		scanInfo.InputPatterns = args
-		scanInfo.SetPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
-	} else {
-		scanInfo.SetScanType(cautils.ScanTypeCluster)
-		scanInfo.SetPolicyIdentifiers([]string{"clusterscan", "mitre", "nsa"}, v1.KindFramework)
+		return cautils.BuildPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 	}
+	scanInfo.SetScanType(cautils.ScanTypeCluster)
+	return cautils.BuildPolicyIdentifiers([]string{"clusterscan", "mitre", "nsa"}, v1.KindFramework)
 }
 
 // applyTimeout wraps ks with a deadline context when ScanTimeout > 0 and
@@ -310,10 +309,10 @@ func applyTimeout(scanInfo *cautils.ScanInfo, ks meta.IKubescape) func() {
 	}
 }
 
-func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {
+func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
 	defer applyTimeout(&scanInfo, ks)()
 
-	results, err := ks.Scan(&scanInfo)
+	results, err := ks.Scan(&scanInfo, policyIdentifiers)
 	if err != nil {
 		return err
 	}

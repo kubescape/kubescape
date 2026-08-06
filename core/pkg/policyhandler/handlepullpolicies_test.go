@@ -113,26 +113,14 @@ func TestCollectPolicies(t *testing.T) {
 			name:          "Collect Framework policy",
 			policyHandler: NewPolicyHandler("test-cluster"),
 			policyIdent:   []cautils.PolicyIdentifier{{Identifier: FrameworkName, Kind: "Framework"}},
-			scanInfo: &cautils.ScanInfo{
-				Getters: cautils.Getters{
-					PolicyGetter:         &PolicyGetterMock{},
-					ExceptionsGetter:     &ExceptionsGetterMock{},
-					ControlsInputsGetter: &ControlsInputsGetterMock{},
-				},
-			},
+			scanInfo:      &cautils.ScanInfo{},
 			expectedError: nil,
 		},
 		{
 			name:          "Collect Control policy",
 			policyHandler: NewPolicyHandler("test-cluster"),
 			policyIdent:   []cautils.PolicyIdentifier{{Identifier: "", Kind: "Control"}},
-			scanInfo: &cautils.ScanInfo{
-				Getters: cautils.Getters{
-					PolicyGetter:         &PolicyGetterMock{},
-					ExceptionsGetter:     &ExceptionsGetterMock{},
-					ControlsInputsGetter: &ControlsInputsGetterMock{},
-				},
-			},
+			scanInfo:      &cautils.ScanInfo{},
 			expectedError: nil,
 		},
 	}
@@ -146,7 +134,7 @@ func TestCollectPolicies(t *testing.T) {
 				ControlsInputsGetter: &ControlsInputsGetterMock{},
 			}
 
-			opaSessionObj, err := tc.policyHandler.CollectPolicies(ctx, tc.policyIdent, tc.scanInfo)
+			opaSessionObj, err := tc.policyHandler.CollectPolicies(ctx, tc.policyIdent, tc.scanInfo, tc.policyHandler.getters)
 
 			assert.Equal(t, tc.expectedError, err)
 			assert.NotNil(t, opaSessionObj)

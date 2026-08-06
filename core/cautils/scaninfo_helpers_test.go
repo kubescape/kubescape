@@ -259,16 +259,14 @@ func TestScanInfo_SetScanType(t *testing.T) {
 // ScanInfo.contains (unexported helper)
 // ---------------------------------------------------------------------------
 
-func TestScanInfo_contains(t *testing.T) {
-	scanInfo := &ScanInfo{
-		PolicyIdentifier: []PolicyIdentifier{
-			{Identifier: "nsa"},
-			{Identifier: "mitre"},
-		},
+func TestContainsIdentifier(t *testing.T) {
+	policyIdentifiers := []PolicyIdentifier{
+		{Identifier: "nsa"},
+		{Identifier: "mitre"},
 	}
 
-	assert.True(t, scanInfo.contains("nsa"))
-	assert.True(t, scanInfo.contains("mitre"))
-	assert.False(t, scanInfo.contains("cis"))
-	assert.False(t, scanInfo.contains(""))
+	assert.True(t, containsIdentifier(policyIdentifiers, "nsa"))
+	assert.True(t, containsIdentifier(policyIdentifiers, "mitre"))
+	assert.False(t, containsIdentifier(policyIdentifiers, "cis"))
+	assert.False(t, containsIdentifier(policyIdentifiers, ""))
 }

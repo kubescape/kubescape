@@ -16,7 +16,7 @@ func (m *MockIKubescape) Context() context.Context {
 
 func (m *MockIKubescape) SetContext(_ context.Context) {}
 
-func (m *MockIKubescape) Scan(_ *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
+func (m *MockIKubescape) Scan(_ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	return nil, nil
 }
 

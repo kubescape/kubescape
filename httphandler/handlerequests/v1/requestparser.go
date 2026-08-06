@@ -74,13 +74,14 @@ type CancelScanQueryParams struct {
 
 // scanRequestParams params passed to channel
 type scanRequestParams struct {
-	scanInfo        *cautils.ScanInfo // request as received from api
-	scanQueryParams *ScanQueryParams  // request as received from api
-	scanID          string            // generated scan ID
-	ctx             context.Context
-	resp            chan *utilsmetav1.Response // Respose chan; nil if not interested.
-	callbackURL     string                     // validated scan-completion callback URL; empty if not requested.
-	isUserScan      bool                       // true when submitted via the Scan handler, not Metrics
+	scanInfo          *cautils.ScanInfo          // request as received from api
+	policyIdentifiers []cautils.PolicyIdentifier // policies to scan
+	scanQueryParams   *ScanQueryParams           // request as received from api
+	scanID            string                     // generated scan ID
+	ctx               context.Context
+	resp              chan *utilsmetav1.Response // Respose chan; nil if not interested.
+	callbackURL       string                     // validated scan-completion callback URL; empty if not requested.
+	isUserScan        bool                       // true when submitted via the Scan handler, not Metrics
 }
 
 // swagger:parameters triggerScan
@@ -107,11 +108,13 @@ func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParam
 		logger.L().Info("REST API received scan request", helpers.String("scanID", scanID), helpers.String("format", scanRequest.Format))
 	}
 
+	scanInfo, policyIdentifiers := getScanCommand(scanRequest, scanID)
 	p := &scanRequestParams{
-		scanID:          scanID,
-		scanQueryParams: &ScanQueryParams{},
-		scanInfo:        getScanCommand(scanRequest, scanID),
-		isUserScan:      true,
+		scanID:            scanID,
+		scanQueryParams:   &ScanQueryParams{},
+		scanInfo:          scanInfo,
+		policyIdentifiers: policyIdentifiers,
+		isUserScan:        true,
 	}
 	if err := schema.NewDecoder().Decode(p.scanQueryParams, r.URL.Query()); err != nil {
 		return p, fmt.Errorf("failed to parse query params, reason: %s", err.Error())

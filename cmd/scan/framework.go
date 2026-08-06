@@ -121,9 +121,9 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			}
 			scanInfo.SetScanType(cautils.ScanTypeFramework)
 
-			scanInfo.SetPolicyIdentifiers(frameworks, apisv1.KindFramework)
+			policyIdentifiers := cautils.BuildPolicyIdentifiers(frameworks, apisv1.KindFramework)
 
-			results, err := ks.Scan(scanInfo)
+			results, err := ks.Scan(scanInfo, policyIdentifiers)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}
