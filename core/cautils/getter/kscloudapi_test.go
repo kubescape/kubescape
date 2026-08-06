@@ -32,7 +32,9 @@ func TestGlobalKSCloudAPIConnector(t *testing.T) {
 	globalMx.Lock()
 	defer globalMx.Unlock()
 
+	globalKSCloudAPIConnectorMutex.Lock()
 	globalKSCloudAPIConnector = nil
+	globalKSCloudAPIConnectorMutex.Unlock()
 
 	t.Run("uninitialized global connector should yield an empty KS client", func(t *testing.T) {
 		empty := v1.NewEmptyKSCloudAPI()

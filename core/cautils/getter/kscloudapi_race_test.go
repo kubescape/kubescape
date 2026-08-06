@@ -8,10 +8,13 @@ import (
 )
 
 func TestKSCloudAPIConnector_Race(t *testing.T) {
+	globalMx.Lock()
+	defer globalMx.Unlock()
+
 	// Save and restore global state
-	globalKSCloudAPIConnectorMutex.RLock()
+	globalKSCloudAPIConnectorMutex.Lock()
 	original := globalKSCloudAPIConnector
-	globalKSCloudAPIConnectorMutex.RUnlock()
+	globalKSCloudAPIConnectorMutex.Unlock()
 
 	t.Cleanup(func() {
 		globalKSCloudAPIConnectorMutex.Lock()
@@ -25,31 +28,32 @@ func TestKSCloudAPIConnector_Race(t *testing.T) {
 	globalKSCloudAPIConnectorMutex.Unlock()
 
 	var wg sync.WaitGroup
-	var startBarrier sync.WaitGroup
+	startBarrier := make(chan struct{})
 
-	wg.Add(2)
-	startBarrier.Add(1)
+	// 8 writers
+	for w := 0; w < 8; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-startBarrier
+			for i := 0; i < 100000; i++ {
+				SetKSCloudAPIConnector(v1.NewEmptyKSCloudAPI())
+			}
+		}()
+	}
 
-	// Concurrent writer
-	go func() {
-		defer wg.Done()
-		startBarrier.Wait()
-		for i := 0; i < 100000; i++ {
-			SetKSCloudAPIConnector(v1.NewEmptyKSCloudAPI())
-		}
-	}()
+	// 8 readers
+	for r := 0; r < 8; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-startBarrier
+			for i := 0; i < 100000; i++ {
+				_ = GetKSCloudAPIConnector()
+			}
+		}()
+	}
 
-	// Concurrent reader
-	go func() {
-		defer wg.Done()
-		startBarrier.Wait()
-		for i := 0; i < 100000; i++ {
-			_ = GetKSCloudAPIConnector()
-		}
-	}()
-
-	// Release the barrier to start both goroutines simultaneously
-	startBarrier.Done()
-
+	close(startBarrier) // unleash all goroutines
 	wg.Wait()
 }

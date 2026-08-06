@@ -16,7 +16,7 @@ var (
 	// globalKSCloudAPIConnector is a static global instance of the KS Cloud client,
 	// to be initialized with SetKSCloudAPIConnector.
 	globalKSCloudAPIConnector      *v1.KSCloudAPI
-	globalKSCloudAPIConnectorMutex sync.RWMutex
+	globalKSCloudAPIConnectorMutex sync.Mutex
 
 	_ IPolicyGetter         = &v1.KSCloudAPI{}
 	_ IExceptionsGetter     = &v1.KSCloudAPI{}
@@ -43,24 +43,17 @@ func SetKSCloudAPIConnector(ksCloudAPI *v1.KSCloudAPI) {
 //
 // Thread-safe.
 func GetKSCloudAPIConnector() *v1.KSCloudAPI {
-	globalKSCloudAPIConnectorMutex.RLock()
+	globalKSCloudAPIConnectorMutex.Lock()
+	defer globalKSCloudAPIConnectorMutex.Unlock()
+
 	if globalKSCloudAPIConnector == nil {
-		globalKSCloudAPIConnectorMutex.RUnlock()
-		globalKSCloudAPIConnectorMutex.Lock()
-		if globalKSCloudAPIConnector == nil {
-			globalKSCloudAPIConnector = v1.NewEmptyKSCloudAPI()
-		}
-		globalKSCloudAPIConnectorMutex.Unlock()
-		globalKSCloudAPIConnectorMutex.RLock()
+		globalKSCloudAPIConnector = v1.NewEmptyKSCloudAPI()
 	}
 
 	// we return a shallow clone that may be freely modified by the caller.
 	client := *globalKSCloudAPIConnector
-	if globalKSCloudAPIConnector.KsCloudOptions != nil {
-		options := *globalKSCloudAPIConnector.KsCloudOptions
-		client.KsCloudOptions = &options
-	}
-	globalKSCloudAPIConnectorMutex.RUnlock()
+	options := *globalKSCloudAPIConnector.KsCloudOptions
+	client.KsCloudOptions = &options
 
 	return &client
 }
