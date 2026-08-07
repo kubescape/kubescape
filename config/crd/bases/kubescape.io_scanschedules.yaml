@@ -1,0 +1,106 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: scanschedules.kubescape.io
+spec:
+  group: kubescape.io
+  names:
+    kind: ScanSchedule
+    listKind: ScanScheduleList
+    plural: scanschedules
+    singular: scanschedule
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ScanSchedule is the Schema for the scanschedules API.
+          It acts like a CronJob for ScanRequests.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ScanScheduleSpec defines the desired scheduling state.
+            properties:
+              schedule:
+                description: Schedule is a Cron-formatted string (e.g., "0 0 * * *").
+                type: string
+              suspend:
+                description: Suspend allows pausing the schedule without deleting
+                  it.
+                type: boolean
+              template:
+                description: Template defines the ScanRequest to create when the schedule
+                  fires.
+                properties:
+                  excludedNamespaces:
+                    items:
+                      type: string
+                    type: array
+                  frameworks:
+                    items:
+                      type: string
+                    type: array
+                  hostScanner:
+                    type: boolean
+                  includeNamespaces:
+                    items:
+                      type: string
+                    type: array
+                  scanAll:
+                    type: boolean
+                  scanImages:
+                    type: boolean
+                  scanType:
+                    enum:
+                    - cluster
+                    - workload
+                    - repo
+                    - image
+                    type: string
+                  timeout:
+                    default: 10m
+                    type: string
+                  ttlSecondsAfterFinished:
+                    format: int32
+                    type: integer
+                required:
+                - scanType
+                type: object
+            required:
+            - schedule
+            - template
+            type: object
+          status:
+            description: ScanScheduleStatus defines the observed scheduling state.
+            properties:
+              lastScheduleTime:
+                description: LastScheduleTime tracks the last time a ScanRequest was
+                  successfully created.
+                format: date-time
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
