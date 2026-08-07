@@ -127,23 +127,24 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 		}
 
 		it := a.client.ListOccurrences(ctx, req)
-		occurrence, err := it.Next()
-		if err == iterator.Done {
-			statuses = append(statuses, status)
-			continue
-		}
-		if err != nil {
-			logger.L().Warning("skipping image scan status due to api error", helpers.String("repository", imageID.Repository), helpers.Error(err))
-			statuses = append(statuses, status)
-			continue
-		}
+		for {
+			occurrence, err := it.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				logger.L().Warning("skipping image scan status due to api error", helpers.String("repository", imageID.Repository), helpers.Error(err))
+				break
+			}
 
-		if occurrence != nil && occurrence.GetDiscovery() != nil {
-			discovery := occurrence.GetDiscovery()
-			if discovery != nil && discovery.GetAnalysisStatus() == grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS {
-				status.IsScanAvailable = true
-				if occurrence.UpdateTime != nil {
-					status.LastScanDate = occurrence.UpdateTime.AsTime()
+			if occurrence != nil && occurrence.GetDiscovery() != nil {
+				discovery := occurrence.GetDiscovery()
+				if discovery != nil && discovery.GetAnalysisStatus() == grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS {
+					status.IsScanAvailable = true
+					if occurrence.UpdateTime != nil {
+						status.LastScanDate = occurrence.UpdateTime.AsTime()
+					}
+					break
 				}
 			}
 		}
@@ -199,7 +200,6 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 		}
 
 		it := a.client.ListOccurrences(ctx, req)
-		count := 0
 		const maxVulns = 1000
 
 		for {
@@ -212,14 +212,20 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 				break
 			}
 
-			if count >= maxVulns {
+			if len(report.Vulnerabilities) >= maxVulns {
 				logger.L().Warning("truncated vulnerabilities", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxVulns))
 				break
 			}
 
 			if vulnDetails := occurrence.GetVulnerability(); vulnDetails != nil {
+				id := vulnDetails.GetShortDescription()
+				if id == "" && occurrence.GetNoteName() != "" {
+					parts := strings.Split(occurrence.GetNoteName(), "/")
+					id = parts[len(parts)-1]
+				}
+
 				vuln := Vulnerability{
-					ID:          vulnDetails.GetShortDescription(),
+					ID:          id,
 					Severity:    normalizeGCPSeverity(vulnDetails.GetEffectiveSeverity()),
 					Description: vulnDetails.GetLongDescription(),
 					Links:       []string{},
@@ -231,7 +237,6 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 
 				report.Vulnerabilities = append(report.Vulnerabilities, vuln)
 			}
-			count++
 		}
 
 		reports = append(reports, report)
