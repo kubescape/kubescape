@@ -120,9 +120,11 @@ func setPathAndFilename(downloadInfo *metav1.DownloadInfo) {
 	}
 
 	dir, file := filepath.Split(downloadInfo.Path)
-	if dir == "" && file != "." && file != ".." && filepath.Ext(file) != "" {
-		// Bare file name (e.g. "nsa.json" passed straight to the API): save
-		// it to the current directory instead of misreading it as a directory.
+	if dir == "" && file != "." && file != ".." && filepath.Ext(file) == ".json" {
+		// Bare .json file name (e.g. "nsa.json" passed straight to the API):
+		// save it to the current directory instead of misreading it as a
+		// directory. Non-.json bare names keep their directory behavior, since
+		// download artifacts are always .json files.
 		downloadInfo.FileName = file
 		downloadInfo.Path = "."
 		return

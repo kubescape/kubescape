@@ -184,6 +184,15 @@ func TestSetPathAndFilename(t *testing.T) {
 			expectedFilename: "nsa.json",
 		},
 		{
+			// Bare non-.json names stay directories (backward compatible;
+			// download artifacts are always .json files).
+			downloadInfo: &metav1.DownloadInfo{
+				Path: "mydir.txt",
+			},
+			expectedPath:     "mydir.txt",
+			expectedFilename: "",
+		},
+		{
 			// Extension-less bare names stay directories (backward compatible).
 			downloadInfo: &metav1.DownloadInfo{
 				Path: "mydir",
