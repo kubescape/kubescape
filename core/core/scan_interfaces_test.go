@@ -27,7 +27,7 @@ func TestGetInterfaces_ClusterConnectionFailureReturnsError(t *testing.T) {
 	_, err := getInterfaces(context.Background(), scanInfo, nil)
 
 	require.Error(t, err, "an unreachable cluster must be reported to the caller")
-	assert.ErrorContains(t, err, "failed connecting to Kubernetes cluster")
+	assert.ErrorIs(t, err, ErrClusterConnection)
 }
 
 // A caller that survives one unreachable cluster must be able to keep going,

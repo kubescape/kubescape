@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// ErrClusterConnection is returned when a cluster scan cannot reach the
+// Kubernetes API server. Callers embedding Kubescape.Scan can test for it with
+// errors.Is to distinguish an unreachable cluster from other scan failures.
+var ErrClusterConnection = errors.New("failed connecting to Kubernetes cluster")
+
 type componentInterfaces struct {
 	tenantConfig      cautils.ITenantConfig
 	resourceHandler   resourcehandler.IResourceHandler
@@ -53,7 +59,8 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 		if k8s == nil {
 			// Return rather than terminate: Scan already propagates this to the
 			// caller, and the command layer still exits non-zero on it.
-			return componentInterfaces{}, fmt.Errorf("failed connecting to Kubernetes cluster")
+			span.RecordError(ErrClusterConnection)
+			return componentInterfaces{}, ErrClusterConnection
 		}
 		k8sClient = k8s.KubernetesClient
 	}
