@@ -168,6 +168,39 @@ func TestCollectAndStreamBatches_RecordsWholeGVRFailureAlongsideSuccess(t *testi
 	assert.Len(t, defaultBatch.K8SResources[podsGVR], 1)
 }
 
+// TestCollectAndStreamBatches_HostScannerDisabled_MarksControlsSkipped guards
+// against the streaming collector silently dropping host-sensor controls: with
+// HostScanner disabled, GetResources (the non-streaming path) records these
+// controls as skipped with a pointer to the operator. The streaming collector
+// must record the same InfoMap entry, or the control resolves to Passed.
+func TestCollectAndStreamBatches_HostScannerDisabled_MarksControlsSkipped(t *testing.T) {
+	ctx := context.Background()
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		t.Fatalf("unexpected resource: %s", action.GetResource().Resource)
+		return true, nil, nil
+	})
+	scanInfo, session := streamingTestSession(ctx)
+	session.Metadata.ScanMetadata.HostScanner = false
+	batches := make(chan *cautils.ResourceBatch, 1)
+
+	err := handler.collectAndStreamBatches(
+		ctx,
+		QueryableResources{},
+		&EmptySelector{},
+		session,
+		scanInfo,
+		cautils.ExternalResources{"KubeletConfiguration": nil},
+		batches,
+		nil,
+	)
+
+	require.NoError(t, err)
+	info, ok := session.InfoMap["KubeletConfiguration"]
+	require.True(t, ok, "host-sensor resources must be recorded as skipped when the host scanner is disabled")
+	assert.Equal(t, apis.StatusSkipped, info.InnerStatus)
+	assert.Contains(t, info.InnerInfo, "Install the Kubescape operator")
+}
+
 func TestCollectAndStreamBatches_RecordsPartialSelectorFailure(t *testing.T) {
 	ctx := context.Background()
 	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {

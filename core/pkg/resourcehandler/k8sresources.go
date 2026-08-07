@@ -378,16 +378,24 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	}
 
 	hostResources := cautils.MapHostResources(ksResourceMap)
-	if len(hostResources) > 0 && sessionObj.Metadata.ScanMetadata.HostScanner {
-		logger.L().Info("Requesting Host scanner data")
-		infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
-			cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
-		} else {
-			for k, v := range infoMap {
-				sessionObj.InfoMap[k] = v
+	// check that controls use host sensor resources
+	if len(hostResources) > 0 {
+		if sessionObj.Metadata.ScanMetadata.HostScanner {
+			logger.L().Info("Requesting Host scanner data")
+			infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
+				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
+			} else if k8sHandler.hostSensorHandler == nil {
+				// using hostSensor mock
+				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
+			} else {
+				for k, v := range infoMap {
+					sessionObj.InfoMap[k] = v
+				}
 			}
+		} else {
+			cautils.SetInfoMapForResources("This control is scanned exclusively by the Kubescape operator, not the Kubescape CLI. Install the Kubescape operator:\n     https://kubescape.io/docs/install-operator/.", hostResources, sessionObj.InfoMap)
 		}
 	}
 
@@ -396,6 +404,8 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	}
 
 	cloudResources := cautils.MapCloudResources(ksResourceMap)
+
+	setMapNamespaceToNumOfResources(ctx, allResources, sessionObj)
 	if len(cloudResources) > 0 {
 		if err := k8sHandler.collectCloudResources(ctx, sessionObj, allResources, ksResourceMap, cloudResources); err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
