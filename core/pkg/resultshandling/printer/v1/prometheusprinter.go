@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
@@ -15,6 +16,18 @@ import (
 type PrometheusPrinter struct {
 	writer      *os.File
 	verboseMode bool
+}
+
+// statusLabel maps a printDetails status ("failed", "excluded", "passed")
+// to its display form for the "# <label> object from ..." comment. Kept
+// separate from the metric name (which uses status as-is, lowercase) so the
+// "failed" path's comment stays byte-identical to the pre-fix output
+// ("# Failed object ..."), instead of a raw %s interpolation silently
+// lowercasing it to "# failed object ...".
+var statusLabel = map[string]string{
+	"failed":   "Failed",
+	"excluded": "Excluded",
+	"passed":   "Passed",
 }
 
 func NewPrometheusPrinter(verboseMode bool) *PrometheusPrinter {
@@ -42,7 +55,24 @@ func (p *PrometheusPrinter) printResources(allResources map[string]workloadinter
 func (p *PrometheusPrinter) printDetails(allResources map[string]workloadinterface.IMetadata, resourcesIDs []string, frameworkName, controlName, status string) {
 	objs := make(map[string]map[string]map[string]int)
 	for _, resourceID := range resourcesIDs {
-		resource := allResources[resourceID]
+		// allResources may not contain every ID resourcesIDs lists (e.g. a
+		// resource pruned after the report was built): skip it rather than
+		// calling methods on the nil workloadinterface.IMetadata the map
+		// lookup would otherwise return, which panics.
+		resource, ok := allResources[resourceID]
+		if !ok {
+			// Skipping means this control's kubescape_object_<status>_count
+			// lines under-count relative to printReports' own
+			// kubescape_resources_<status>_count line for the same control,
+			// which is computed from the report rather than allResources -
+			// worth a trace when the two disagree in a scrape.
+			logger.L().Debug("resource ID missing from allResources, skipping object-level metric",
+				helpers.String("resourceID", resourceID),
+				helpers.String("status", status),
+				helpers.String("framework", frameworkName),
+				helpers.String("control", controlName))
+			continue
+		}
 
 		gvk := fmt.Sprintf("%s/%s", resource.GetApiVersion(), resource.GetKind())
 
@@ -57,11 +87,17 @@ func (p *PrometheusPrinter) printDetails(allResources map[string]workloadinterfa
 	for gvk, namespaces := range objs {
 		for namespace, names := range namespaces {
 			for name, value := range names {
-				fmt.Fprintf(p.writer, "# Failed object from \"%s\" control \"%s\"\n", frameworkName, controlName)
+				// status ("failed", "excluded", or "passed") must drive both
+				// the comment and the metric name: this function used to
+				// hardcode "Failed"/kubescape_object_failed_count
+				// unconditionally, so callers reporting excluded or (in
+				// verbose mode) passed resources silently mislabeled them as
+				// failed in the emitted Prometheus metrics.
+				fmt.Fprintf(p.writer, "# %s object from \"%s\" control \"%s\"\n", statusLabel[status], frameworkName, controlName)
 				if namespace != "" {
-					fmt.Fprintf(p.writer, "kubescape_object_failed_count{framework=\"%s\",control=\"%s\",namespace=\"%s\",name=\"%s\",groupVersionKind=\"%s\"} %d\n", frameworkName, controlName, namespace, name, gvk, value)
+					fmt.Fprintf(p.writer, "kubescape_object_%s_count{framework=\"%s\",control=\"%s\",namespace=\"%s\",name=\"%s\",groupVersionKind=\"%s\"} %d\n", status, frameworkName, controlName, namespace, name, gvk, value)
 				} else {
-					fmt.Fprintf(p.writer, "kubescape_object_failed_count{framework=\"%s\",control=\"%s\",name=\"%s\",groupVersionKind=\"%s\"} %d\n", frameworkName, controlName, name, gvk, value)
+					fmt.Fprintf(p.writer, "kubescape_object_%s_count{framework=\"%s\",control=\"%s\",name=\"%s\",groupVersionKind=\"%s\"} %d\n", status, frameworkName, controlName, name, gvk, value)
 				}
 			}
 		}
