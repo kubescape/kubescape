@@ -711,7 +711,24 @@ Display version information.
 ### Synopsis
 
 ```bash
+kubescape version [--format text|json]
+```
+
+### Flags
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--format` | `-f` | `text` | Output format. Supported: `text`, `json` |
+
+### Examples
+
+```bash
+# Default human-readable output
 kubescape version
+
+# Machine-readable JSON output (safe to pipe to jq)
+kubescape version --format json
+# {"version":"v3.x.x","commit":"abc123","date":"2024-01-15"}
 ```
 
 ---
