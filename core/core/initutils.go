@@ -155,8 +155,9 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 	switch {
 	case k8s == nil:
 		// k8s is nil exactly when this scan never connected to a cluster (a
-		// non-cluster scan, or getKubernetesApi() failing - which exits the
-		// process via logger.Fatal before we'd get here). Re-checking
+		// non-cluster scan, or a cluster scan that failed to connect, which
+		// getInterfaces returns ErrClusterConnection for before reaching this
+		// point). Re-checking
 		// k8sinterface.IsConnectedToCluster() here as well used to read the
 		// same global connection state a second time, at a later point than
 		// when k8s was obtained, with no synchronization between the two
