@@ -437,14 +437,37 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		return
 	}
 	defer svc.Close()
-
+	creds := registryCredentialsFromScanInfo(scanInfo)
+	var jobs []ImageScanJob
 	for img := range imagesToScan.Iter() {
-		logger.L().Start("Scanning", helpers.String("image", img))
-		if err := scanSingleImage(ctx, img, svc, resultsHandling, scanInfo.RegistryMapping, registryCredentialsFromScanInfo(scanInfo)); err != nil {
-			logger.L().StopError("failed to scan", helpers.String("image", img), helpers.Error(err))
+		jobs = append(jobs, ImageScanJob{
+			Image:               img,
+			RegistryCredentials: creds,
+			RegistryMapping:     scanInfo.RegistryMapping,
+		})
+	}
+
+	concurrency := scanInfo.ImageScanConcurrency
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+
+	logger.L().Info(fmt.Sprintf("Scanning %d images concurrently with %d workers...", len(jobs), concurrency))
+	orchestrator := NewImageScanOrchestrator(svc, concurrency)
+	results := orchestrator.ScanImages(ctx, jobs)
+
+	for _, res := range results {
+		if res.Error != nil {
+			logger.L().Error("failed to scan", helpers.String("image", res.Image), helpers.Error(res.Error))
 			continue
 		}
-		logger.L().StopSuccess("Done scanning", helpers.String("image", img))
+		if res.ScanData != nil {
+			resultsHandling.ImageScanData = append(resultsHandling.ImageScanData, *res.ScanData)
+			logger.L().Success("Done scanning", helpers.String("image", res.Image))
+		}
+	}
+	if agg := orchestrator.GetErrorAggregator(); agg != nil && agg.HasErrors() {
+		logger.L().Warning(agg.Error())
 	}
 }
 
