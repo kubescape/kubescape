@@ -113,6 +113,10 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 						defer os.Remove(tempFile.Name())
 
 						if _, err := io.Copy(tempFile, os.Stdin); err != nil {
+							_ = tempFile.Close()
+							return err
+						}
+						if err := tempFile.Close(); err != nil {
 							return err
 						}
 						scanInfo.InputPatterns = []string{tempFile.Name()}
