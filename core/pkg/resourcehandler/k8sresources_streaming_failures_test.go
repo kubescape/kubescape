@@ -16,7 +16,7 @@ import (
 
 func streamingTestSession(ctx context.Context) (*cautils.ScanInfo, *cautils.OPASessionObj) {
 	scanInfo := &cautils.ScanInfo{InputPatterns: []string{"/not-a-cluster-scan"}}
-	return scanInfo, cautils.NewOPASessionObj(ctx, nil, nil, scanInfo)
+	return scanInfo, cautils.NewOPASessionObj(ctx, nil, nil, scanInfo, nil)
 }
 
 func testPodList(name, namespace string) *unstructured.UnstructuredList {
