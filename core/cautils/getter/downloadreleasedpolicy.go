@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -141,7 +142,7 @@ func (drp *DownloadReleasedPolicy) ListControls() ([]string, error) {
 	return controlsNamesWithIDsandFrameworksList, nil
 }
 
-func (drp *DownloadReleasedPolicy) GetControlsInputs(clusterName string) (map[string][]string, error) {
+func (drp *DownloadReleasedPolicy) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
 	defaultConfigInputs, err := drp.gs.GetDefaultConfigInputs()
 	if err != nil {
 		return nil, err
@@ -176,7 +177,7 @@ func (drp *DownloadReleasedPolicy) SetRegoObjects() error {
 	return nil
 }
 
-func (drp *DownloadReleasedPolicy) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+func (drp *DownloadReleasedPolicy) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	exceptions, err := drp.gs.GetSystemPostureExceptionPolicies()
 	if err != nil {
 		return nil, err

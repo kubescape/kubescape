@@ -225,6 +225,9 @@ kubescape scan --format html --output report.html
 
 # PDF report
 kubescape scan --format pdf --output report.pdf
+
+# CSV report
+kubescape scan --format csv --output results.csv
 ```
 
 ### Image Scanning

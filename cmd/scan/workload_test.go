@@ -13,29 +13,20 @@ import (
 
 func TestSetWorkloadScanInfo(t *testing.T) {
 	tests := []struct {
-		Description string
-		apiVersion  string
-		kind        string
-		name        string
-		namespace   string
-		filePath    string
-		want        *cautils.ScanInfo
+		Description  string
+		apiVersion   string
+		kind         string
+		name         string
+		namespace    string
+		filePath     string
+		want         *cautils.ScanInfo
+		wantPolicies []cautils.PolicyIdentifier
 	}{
 		{
 			Description: "Set workload scan info",
 			kind:        "Deployment",
 			name:        "test",
 			want: &cautils.ScanInfo{
-				PolicyIdentifier: []cautils.PolicyIdentifier{
-					{
-						Identifier: "workloadscan",
-						Kind:       v1.KindFramework,
-					},
-					{
-						Identifier: "allcontrols",
-						Kind:       v1.KindFramework,
-					},
-				},
 				ScanType:   cautils.ScanTypeWorkload,
 				ScanImages: true,
 				ScanObject: &objectsenvelopes.ScanObject{
@@ -43,6 +34,16 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 					Metadata: objectsenvelopes.ScanObjectMetadata{
 						Name: "test",
 					},
+				},
+			},
+			wantPolicies: []cautils.PolicyIdentifier{
+				{
+					Identifier: "workloadscan",
+					Kind:       v1.KindFramework,
+				},
+				{
+					Identifier: "allcontrols",
+					Kind:       v1.KindFramework,
 				},
 			},
 		},
@@ -53,16 +54,6 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 			namespace:   "default",
 			filePath:    "manifests/pod.yaml",
 			want: &cautils.ScanInfo{
-				PolicyIdentifier: []cautils.PolicyIdentifier{
-					{
-						Identifier: "workloadscan",
-						Kind:       v1.KindFramework,
-					},
-					{
-						Identifier: "allcontrols",
-						Kind:       v1.KindFramework,
-					},
-				},
 				ScanType:   cautils.ScanTypeWorkload,
 				ScanImages: true,
 				ScanObject: &objectsenvelopes.ScanObject{
@@ -74,6 +65,16 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 				},
 				InputPatterns: []string{"manifests/pod.yaml"},
 			},
+			wantPolicies: []cautils.PolicyIdentifier{
+				{
+					Identifier: "workloadscan",
+					Kind:       v1.KindFramework,
+				},
+				{
+					Identifier: "allcontrols",
+					Kind:       v1.KindFramework,
+				},
+			},
 		},
 		{
 			Description: "Set workload scan info with apiVersion",
@@ -83,16 +84,6 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 			namespace:   "default",
 			filePath:    "manifests/deployment.yaml",
 			want: &cautils.ScanInfo{
-				PolicyIdentifier: []cautils.PolicyIdentifier{
-					{
-						Identifier: "workloadscan",
-						Kind:       v1.KindFramework,
-					},
-					{
-						Identifier: "allcontrols",
-						Kind:       v1.KindFramework,
-					},
-				},
 				ScanType:   cautils.ScanTypeWorkload,
 				ScanImages: true,
 				ScanObject: &objectsenvelopes.ScanObject{
@@ -105,6 +96,16 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 				},
 				InputPatterns: []string{"manifests/deployment.yaml"},
 			},
+			wantPolicies: []cautils.PolicyIdentifier{
+				{
+					Identifier: "workloadscan",
+					Kind:       v1.KindFramework,
+				},
+				{
+					Identifier: "allcontrols",
+					Kind:       v1.KindFramework,
+				},
+			},
 		},
 	}
 
@@ -113,7 +114,7 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 			tc.Description,
 			func(t *testing.T) {
 				scanInfo := &cautils.ScanInfo{FilePath: tc.filePath, Namespace: tc.namespace}
-				setWorkloadScanInfo(scanInfo, tc.apiVersion, tc.kind, tc.name)
+				policyIdentifiers := setWorkloadScanInfo(scanInfo, tc.apiVersion, tc.kind, tc.name)
 
 				if scanInfo.ScanType != tc.want.ScanType {
 					t.Errorf("got: %v, want: %v", scanInfo.ScanType, tc.want.ScanType)
@@ -143,17 +144,17 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 					assert.Equal(t, tc.want.InputPatterns, scanInfo.InputPatterns)
 				}
 
-				if len(scanInfo.PolicyIdentifier) != len(tc.want.PolicyIdentifier) {
-					t.Errorf("got: %v policy identifiers, want: %v", len(scanInfo.PolicyIdentifier), len(tc.want.PolicyIdentifier))
+				if len(policyIdentifiers) != len(tc.wantPolicies) {
+					t.Errorf("got: %v policy identifiers, want: %v", len(policyIdentifiers), len(tc.wantPolicies))
 				}
 
-				for i, wantPolicy := range tc.want.PolicyIdentifier {
-					if i < len(scanInfo.PolicyIdentifier) {
-						if scanInfo.PolicyIdentifier[i].Identifier != wantPolicy.Identifier {
-							t.Errorf("got: %v, want: %v", scanInfo.PolicyIdentifier[i].Identifier, wantPolicy.Identifier)
+				for i, wantPolicy := range tc.wantPolicies {
+					if i < len(policyIdentifiers) {
+						if policyIdentifiers[i].Identifier != wantPolicy.Identifier {
+							t.Errorf("got: %v, want: %v", policyIdentifiers[i].Identifier, wantPolicy.Identifier)
 						}
-						if scanInfo.PolicyIdentifier[i].Kind != wantPolicy.Kind {
-							t.Errorf("got: %v, want: %v", scanInfo.PolicyIdentifier[i].Kind, wantPolicy.Kind)
+						if policyIdentifiers[i].Kind != wantPolicy.Kind {
+							t.Errorf("got: %v, want: %v", policyIdentifiers[i].Kind, wantPolicy.Kind)
 						}
 					}
 				}

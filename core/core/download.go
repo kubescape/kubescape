@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,7 +34,7 @@ const (
 	downloadDirPerm = 0700
 )
 
-var downloadFunc = map[string]func(context.Context, *metav1.DownloadInfo) error{
+var downloadFunc = map[string]func(context.Context, *metav1.DownloadInfo) ([]string, error){
 	TargetControlsInputs: downloadConfigInputs,
 	TargetExceptions:     downloadExceptions,
 	TargetControl:        downloadControl,
@@ -77,25 +78,27 @@ func DownloadSupportCommands() []string {
 	return commands
 }
 
-func (ks *Kubescape) Download(downloadInfo *metav1.DownloadInfo) error {
+func (ks *Kubescape) Download(downloadInfo *metav1.DownloadInfo) (*metav1.DownloadResult, error) {
 	setPathAndFilename(downloadInfo)
 	if err := os.MkdirAll(downloadInfo.Path, downloadDirPerm); err != nil {
-		return err
+		return nil, err
 	}
-	if err := downloadArtifact(ks.Context(), downloadInfo, downloadFunc); err != nil {
-		return err
+	files, err := downloadArtifact(ks.Context(), downloadInfo, downloadFunc)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	return &metav1.DownloadResult{Files: files}, nil
 }
 
-func downloadArtifact(ctx context.Context, downloadInfo *metav1.DownloadInfo, downloadArtifactFunc map[string]func(context.Context, *metav1.DownloadInfo) error) error {
+func downloadArtifact(ctx context.Context, downloadInfo *metav1.DownloadInfo, downloadArtifactFunc map[string]func(context.Context, *metav1.DownloadInfo) ([]string, error)) ([]string, error) {
 	if f, ok := downloadArtifactFunc[downloadInfo.Target]; ok {
-		if err := f(ctx, downloadInfo); err != nil {
-			return err
+		files, err := f(ctx, downloadInfo)
+		if err != nil {
+			return nil, err
 		}
-		return nil
+		return files, nil
 	}
-	return fmt.Errorf("unknown command to download")
+	return nil, fmt.Errorf("unknown command to download")
 }
 
 func setPathAndFilename(downloadInfo *metav1.DownloadInfo) {
@@ -114,114 +117,130 @@ func setPathAndFilename(downloadInfo *metav1.DownloadInfo) {
 	}
 }
 
-func downloadArtifacts(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
+func downloadArtifacts(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]string, error) {
 	downloadInfo.FileName = ""
-	var artifacts = map[string]func(context.Context, *metav1.DownloadInfo) error{
-		"controls-inputs": downloadConfigInputs,
-		"exceptions":      downloadExceptions,
-		"framework":       downloadFramework,
-		"attack-tracks":   downloadAttackTracks,
+	var artifacts = map[string]func(context.Context, *metav1.DownloadInfo) ([]string, error){
+		TargetControlsInputs: downloadConfigInputs,
+		TargetExceptions:     downloadExceptions,
+		TargetFramework:      downloadFramework,
+		TargetAttackTracks:   downloadAttackTracks,
 	}
+	var files []string
+	var errs []error
 	for artifact := range artifacts {
-		if err := downloadArtifact(ctx, &metav1.DownloadInfo{Target: artifact, Path: downloadInfo.Path, FileName: fmt.Sprintf("%s.json", artifact)}, artifacts); err != nil {
+		artifactFiles, err := downloadArtifact(ctx, &metav1.DownloadInfo{
+			Target:    artifact,
+			Path:      downloadInfo.Path,
+			FileName:  fmt.Sprintf("%s.json", artifact),
+			AccountID: downloadInfo.AccountID,
+			AccessKey: downloadInfo.AccessKey,
+		}, artifacts)
+		if err != nil {
 			logger.L().Ctx(ctx).Warning("error downloading", helpers.String("artifact", artifact), helpers.Error(err))
+			errs = append(errs, err)
+			continue
 		}
+		files = append(files, artifactFiles...)
 	}
-	return nil
+	return files, errors.Join(errs...)
 }
 
-func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
+func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]string, error) {
 	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 
 	controlsInputsGetter, _, err := configInputsGetterFunc(ctx, downloadInfo.Identifier, tenant.GetAccountID(), nil, false, false)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	controlInputs, err := controlsInputsGetter.GetControlsInputs(tenant.GetContextName())
+	controlInputs, err := controlsInputsGetter.GetControlsInputs(ctx, tenant.GetContextName())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if downloadInfo.FileName == "" {
 		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Target)
 	}
 	if controlInputs == nil {
-		return fmt.Errorf("failed to download controlInputs - received empty objects")
+		return nil, fmt.Errorf("failed to download controlInputs - received empty objects")
 	}
 	// save in file
-	err = getter.SaveInFile(controlInputs, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
+	downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
+	err = getter.SaveInFile(controlInputs, downloadTo)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
-	return nil
+	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("path", downloadTo))
+	return []string{downloadTo}, nil
 }
 
-func downloadExceptions(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
+func downloadExceptions(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]string, error) {
 	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 	exceptionsGetter, err := exceptionsGetterFunc(ctx, "", tenant.GetAccountID(), nil, false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	exceptions, err := exceptionsGetter.GetExceptions(tenant.GetContextName())
+	exceptions, err := exceptionsGetter.GetExceptions(ctx, tenant.GetContextName())
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if downloadInfo.FileName == "" {
 		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Target)
 	}
 	// save in file
-	err = getter.SaveInFile(exceptions, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
+	downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
+	err = getter.SaveInFile(exceptions, downloadTo)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	logger.L().Ctx(ctx).Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
-	return nil
+	logger.L().Ctx(ctx).Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("path", downloadTo))
+	return []string{downloadTo}, nil
 }
 
-func downloadAttackTracks(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
+func downloadAttackTracks(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]string, error) {
 	var err error
 	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 
 	attackTracksGetter, err := attackTracksGetterFunc(ctx, "", tenant.GetAccountID(), nil, false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	attackTracks, err := attackTracksGetter.GetAttackTracks()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if downloadInfo.FileName == "" {
 		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Target)
 	}
 	// save in file
-	err = getter.SaveInFile(attackTracks, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
+	downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
+	err = getter.SaveInFile(attackTracks, downloadTo)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	logger.L().Success("Downloaded", helpers.String("attack tracks", downloadInfo.Target), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
-	return nil
+	logger.L().Success("Downloaded", helpers.String("attack tracks", downloadInfo.Target), helpers.String("path", downloadTo))
+	return []string{downloadTo}, nil
 
 }
 
-func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
+func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]string, error) {
 
 	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 
 	g, err := policyGetterFunc(ctx, nil, tenant.GetAccountID(), true, nil, false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if downloadInfo.Identifier == "" {
 		// if framework name not specified - download all frameworks
 		frameworks, err := g.GetFrameworks()
 		if err != nil {
-			return err
+			return nil, err
 		}
+		var files []string
 		for _, fw := range frameworks {
 			filename, err := getter.PolicyCacheFilename(fw.Name)
 			if err != nil {
@@ -231,68 +250,69 @@ func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) e
 			downloadTo := filepath.Join(downloadInfo.Path, filename)
 			err = getter.SaveInFile(fw, downloadTo)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", fw.Name), helpers.String("path", downloadTo))
+			files = append(files, downloadTo)
 		}
-		// return fmt.Errorf("missing framework name")
-	} else {
-		if downloadInfo.FileName == "" {
-			filename, err := getter.PolicyCacheFilename(downloadInfo.Identifier)
-			if err != nil {
-				return err
-			}
-			downloadInfo.FileName = filename
-		}
-		framework, err := g.GetFramework(downloadInfo.Identifier)
-		if err != nil {
-			return err
-		}
-		if framework == nil {
-			return fmt.Errorf("failed to download framework - received empty objects")
-		}
-		downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
-		err = getter.SaveInFile(framework, downloadTo)
-		if err != nil {
-			return err
-		}
-		logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", framework.Name), helpers.String("path", downloadTo))
+		return files, nil
 	}
-	return nil
+
+	if downloadInfo.FileName == "" {
+		filename, err := getter.PolicyCacheFilename(downloadInfo.Identifier)
+		if err != nil {
+			return nil, err
+		}
+		downloadInfo.FileName = filename
+	}
+	framework, err := g.GetFramework(downloadInfo.Identifier)
+	if err != nil {
+		return nil, err
+	}
+	if framework == nil {
+		return nil, fmt.Errorf("failed to download framework - received empty objects")
+	}
+	downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
+	err = getter.SaveInFile(framework, downloadTo)
+	if err != nil {
+		return nil, err
+	}
+	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", framework.Name), helpers.String("path", downloadTo))
+	return []string{downloadTo}, nil
 }
 
-func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
+func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]string, error) {
 
 	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
 
 	g, err := policyGetterFunc(ctx, nil, tenant.GetAccountID(), false, nil, false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if downloadInfo.Identifier == "" {
 		// TODO - support
-		return fmt.Errorf("missing control ID")
+		return nil, fmt.Errorf("missing control ID")
 	}
 	if downloadInfo.FileName == "" {
 		filename, err := getter.PolicyCacheFilename(downloadInfo.Identifier)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		downloadInfo.FileName = filename
 	}
 	controls, err := g.GetControl(downloadInfo.Identifier)
 	if err != nil {
-		return fmt.Errorf("failed to download control ID '%s': %w", downloadInfo.Identifier, err)
+		return nil, fmt.Errorf("failed to download control ID '%s': %w", downloadInfo.Identifier, err)
 	}
 	if controls == nil {
-		return fmt.Errorf("failed to download control id '%s' - received empty objects", downloadInfo.Identifier)
+		return nil, fmt.Errorf("failed to download control id '%s' - received empty objects", downloadInfo.Identifier)
 	}
 	downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
 	err = getter.SaveInFile(controls, downloadTo)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("ID", downloadInfo.Identifier), helpers.String("path", downloadTo))
-	return nil
+	return []string{downloadTo}, nil
 }

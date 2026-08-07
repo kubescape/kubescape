@@ -84,9 +84,9 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				scanInfo.Namespace = namespace
 			}
 
-			setWorkloadScanInfo(scanInfo, apiVersion, kind, name)
+			policyIdentifiers := setWorkloadScanInfo(scanInfo, apiVersion, kind, name)
 
-			results, err := ks.Scan(scanInfo)
+			results, err := ks.Scan(scanInfo, policyIdentifiers)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}
@@ -109,7 +109,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 	return workloadCmd
 }
 
-func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, apiVersion string, kind string, name string) {
+func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, apiVersion string, kind string, name string) []cautils.PolicyIdentifier {
 	scanInfo.SetScanType(cautils.ScanTypeWorkload)
 	scanInfo.ScanImages = true
 
@@ -121,11 +121,13 @@ func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, apiVersion string, kind str
 	scanInfo.ScanObject.SetKind(kind)
 	scanInfo.ScanObject.SetName(name)
 
-	scanInfo.SetPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
+	policyIdentifiers := cautils.BuildPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 
 	if scanInfo.FilePath != "" {
 		scanInfo.InputPatterns = []string{scanInfo.FilePath}
 	}
+
+	return policyIdentifiers
 }
 
 func validateWorkloadIdentifier(workloadIdentifier string) error {

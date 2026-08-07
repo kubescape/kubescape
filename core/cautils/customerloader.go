@@ -3,6 +3,7 @@ package cautils
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -353,6 +354,23 @@ func existsConfigFile() bool {
 // permission tricks, which don't reliably fail for the owning user.
 var chmod = os.Chmod
 
+// configMarshal is a package-level indirection so tests can simulate a
+// marshal failure without needing a struct whose MarshalJSON returns an error.
+// It mirrors the chmod seam used for directory-permission testing.
+var configMarshal = func(v any) ([]byte, error) {
+	return json.MarshalIndent(v, "", "  ") //nolint:gosec,nolintlint // G117: AccessKey is intentionally persisted to the local config file
+}
+
+// marshalConfigObj serializes co for persistence, stripping ClusterName
+// (runtime-only, must not be saved) before marshaling and restoring it after.
+func marshalConfigObj(co *ConfigObj) ([]byte, error) {
+	clusterName := co.ClusterName
+	co.ClusterName = ""
+	b, err := configMarshal(co)
+	co.ClusterName = clusterName
+	return b, err
+}
+
 func updateConfigFile(configObj *ConfigObj) error {
 	fullPath := ConfigFileFullPath()
 	dir := filepath.Dir(fullPath)
@@ -391,7 +409,12 @@ func updateConfigFile(configObj *ConfigObj) error {
 		}
 	}()
 
-	if _, err := tmpFile.Write(configObj.Config()); err != nil {
+	data, err := marshalConfigObj(configObj)
+	if err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+	if _, err := tmpFile.Write(data); err != nil {
 		tmpFile.Close()
 		return err
 	}

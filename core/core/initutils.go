@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"os"
 
 	"github.com/google/uuid"
@@ -16,6 +17,7 @@ import (
 	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
 	reporterv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter/v2"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/rbac-utils/rbacscanner"
 	"go.opentelemetry.io/otel"
 	corev1 "k8s.io/api/core/v1"
@@ -71,7 +73,7 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 			logger.L().Ctx(ctx).Warning("--controls-version is ignored for exceptions when an account ID is set; exceptions are downloaded from the Kubescape Cloud backend")
 		}
 		// download exceptions from Kubescape Cloud backend
-		primary = getter.GetKSCloudAPIConnector()
+		primary = getter.GetKSCloudAPIAdapter()
 		k8sClient := getExceptionsK8sClient(ctx)
 		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
 	}
@@ -153,8 +155,9 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 	switch {
 	case k8s == nil:
 		// k8s is nil exactly when this scan never connected to a cluster (a
-		// non-cluster scan, or getKubernetesApi() failing - which exits the
-		// process via logger.Fatal before we'd get here). Re-checking
+		// non-cluster scan, or a cluster scan that failed to connect, which
+		// getInterfaces returns ErrClusterConnection for before reaching this
+		// point). Re-checking
 		// k8sinterface.IsConnectedToCluster() here as well used to read the
 		// same global connection state a second time, at a later point than
 		// when k8s was obtained, with no synchronization between the two
@@ -308,16 +311,18 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 		if downloadReleasedPolicy != nil && downloadReleasedPolicy.IsVersionPinned() {
 			logger.L().Ctx(ctx).Warning("--controls-version is ignored for control config when an account ID is set; control config is downloaded from the Kubescape Cloud backend")
 		}
-		g := getter.GetKSCloudAPIConnector() // download config from Kubescape Cloud backend
+		g := getter.GetKSCloudAPIAdapter() // download config from Kubescape Cloud backend
 		return g, false, nil
 	}
 
 	// Try to read control inputs from the ControlInput CRD in-cluster (live cluster scans only)
 	if useCRD {
 		if crdInputs, err := getter.NewCRDControlInputs(); err == nil {
-			if _, crdErr := crdInputs.GetControlsInputs(""); crdErr == nil {
+			if _, crdErr := crdInputs.GetControlsInputs(ctx, ""); crdErr == nil {
 				logger.L().Ctx(ctx).Info("using ControlInput CRD for control configuration")
 				return crdInputs, false, nil
+			} else if isContextErr(crdErr) {
+				return nil, false, crdErr
 			}
 			logger.L().Ctx(ctx).Debug("ControlInput CRD found but default resource not available, falling back")
 		}
@@ -353,6 +358,24 @@ func getDefaultFrameworksPaths() []string {
 		fwPaths = append(fwPaths, getter.GetDefaultPath(getter.NativeFrameworks[i]+".json")) // GetDefaultPath expects a filename, not just the framework name
 	}
 	return fwPaths
+}
+
+// resolveDefaultScanAllPolicies expands a ScanAll framework list before ScanInfo.Init runs.
+// Init's setUseFrom resolves a local cache path per identifier, so the ScanAll expansion that
+// happens later - once the policy getter exists - would add frameworks that carry no cached
+// path, leaving an offline scan with a downloader it cannot reach. --use-default makes the
+// local store the policy source, so the expansion is answered from the default framework set
+// instead of the getter, the same set getDefaultFrameworksPaths serves in air-gapped mode.
+//
+// Only framework scans are expanded. `scan control` with no arguments also sets ScanAll, but
+// it is not a framework scan, and injecting KindFramework identifiers there would populate
+// UseFrom and silently turn the scan air-gapped - dropping the downloader that control inputs,
+// exceptions and attack tracks still fall back to.
+func resolveDefaultScanAllPolicies(scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) []cautils.PolicyIdentifier {
+	if !scanInfo.ScanAll || !scanInfo.UseDefault || !scanInfo.FrameworkScan {
+		return policyIdentifiers
+	}
+	return cautils.AppendPolicyIdentifiers(policyIdentifiers, getter.NativeFrameworks, apisv1.KindFramework)
 }
 
 func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
@@ -410,4 +433,9 @@ func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName s
 	}
 
 	return p
+}
+
+// isContextErr reports whether err was caused by context cancellation or a deadline.
+func isContextErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

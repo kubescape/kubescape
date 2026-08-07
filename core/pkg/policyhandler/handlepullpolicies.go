@@ -87,10 +87,10 @@ func (policyHandler *PolicyHandler) Close() {
 	}
 }
 
-func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo) (*cautils.OPASessionObj, error) {
-	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo)
+func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (*cautils.OPASessionObj, error) {
+	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo, policyIdentifier)
 
-	policyHandler.getters = &scanInfo.Getters
+	policyHandler.getters = getters
 
 	// get policies, exceptions and controls inputs
 	policies, exceptions, controlInputs, degradations, err := policyHandler.getPolicies(ctx, policyIdentifier)
@@ -128,7 +128,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	logger.L().Start("Loading exceptions...")
 
 	// get exceptions
-	if exceptions, err = policyHandler.getExceptions(); err != nil {
+	if exceptions, err = policyHandler.getExceptions(ctx); err != nil {
 		logger.L().Ctx(ctx).StopError("Failed to load exceptions", helpers.Error(err))
 		degradations = append(degradations, cautils.PolicyDegradation{Component: "exceptions", Reason: err.Error()})
 		exceptions = []armotypes.PostureExceptionPolicy{}
@@ -139,7 +139,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	logger.L().Start("Loading account configurations...")
 
 	// get account configuration
-	if controlInputs, err = policyHandler.getControlInputs(); err != nil {
+	if controlInputs, err = policyHandler.getControlInputs(ctx); err != nil {
 		logger.L().Ctx(ctx).StopError("Failed to load account configurations", helpers.Error(err))
 		degradations = append(degradations, cautils.PolicyDegradation{Component: "controlInputs", Reason: err.Error()})
 
@@ -257,13 +257,13 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 	return frameworks, nil
 }
 
-func (policyHandler *PolicyHandler) getExceptions() ([]armotypes.PostureExceptionPolicy, error) {
+func (policyHandler *PolicyHandler) getExceptions(ctx context.Context) ([]armotypes.PostureExceptionPolicy, error) {
 	if cachedExceptions, exist := policyHandler.cachedExceptions.Get(); exist {
 		logger.L().Info("Using cached exceptions")
 		return cachedExceptions, nil
 	}
 
-	exceptions, err := policyHandler.getters.ExceptionsGetter.GetExceptions(policyHandler.clusterName)
+	exceptions, err := policyHandler.getters.ExceptionsGetter.GetExceptions(ctx, policyHandler.clusterName)
 	if err == nil {
 		policyHandler.cachedExceptions.Set(exceptions)
 	}
@@ -271,13 +271,13 @@ func (policyHandler *PolicyHandler) getExceptions() ([]armotypes.PostureExceptio
 	return exceptions, err
 }
 
-func (policyHandler *PolicyHandler) getControlInputs() (map[string][]string, error) {
+func (policyHandler *PolicyHandler) getControlInputs(ctx context.Context) (map[string][]string, error) {
 	if cachedControlInputs, exist := policyHandler.cachedControlInputs.Get(); exist {
 		logger.L().Info("Using cached control inputs")
 		return cachedControlInputs, nil
 	}
 
-	controlInputs, err := policyHandler.getters.ControlsInputsGetter.GetControlsInputs(policyHandler.clusterName)
+	controlInputs, err := policyHandler.getters.ControlsInputsGetter.GetControlsInputs(ctx, policyHandler.clusterName)
 	if err != nil {
 		return nil, err
 	}
