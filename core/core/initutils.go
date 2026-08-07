@@ -17,6 +17,7 @@ import (
 	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
 	reporterv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter/v2"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/rbac-utils/rbacscanner"
 	"go.opentelemetry.io/otel"
 	corev1 "k8s.io/api/core/v1"
@@ -356,6 +357,19 @@ func getDefaultFrameworksPaths() []string {
 		fwPaths = append(fwPaths, getter.GetDefaultPath(getter.NativeFrameworks[i]+".json")) // GetDefaultPath expects a filename, not just the framework name
 	}
 	return fwPaths
+}
+
+// resolveDefaultScanAllPolicies expands a ScanAll framework list before ScanInfo.Init runs.
+// Init's setUseFrom resolves a local cache path per identifier, so the ScanAll expansion that
+// happens later - once the policy getter exists - would add frameworks that carry no cached
+// path, leaving an offline scan with a downloader it cannot reach. --use-default makes the
+// local store the policy source, so the expansion is answered from the default framework set
+// instead of the getter, the same set getDefaultFrameworksPaths serves in air-gapped mode.
+func resolveDefaultScanAllPolicies(scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) []cautils.PolicyIdentifier {
+	if !scanInfo.ScanAll || !scanInfo.UseDefault {
+		return policyIdentifiers
+	}
+	return cautils.AppendPolicyIdentifiers(policyIdentifiers, getter.NativeFrameworks, apisv1.KindFramework)
 }
 
 func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
