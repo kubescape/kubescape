@@ -44,8 +44,9 @@ func (g *gcpAPIWrapper) ListOccurrences(ctx context.Context, req *grafeaspb.List
 
 // GCPAdaptor implements IContainerImageVulnerabilityAdaptor for GCP Artifact Registry.
 type GCPAdaptor struct {
-	client    GCPAPI
-	projectID string
+	client       GCPAPI
+	owningClient *containeranalysis.Client
+	projectID    string
 }
 
 // NewGCPAdaptor creates a new GCP adaptor instance.
@@ -73,6 +74,7 @@ func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials Reg
 		return fmt.Errorf("unable to load gcp container analysis client: %w", err)
 	}
 
+	a.owningClient = c
 	a.client = &gcpAPIWrapper{client: c.GetGrafeasClient()}
 
 	// Fail-fast probe to ensure identity is valid
@@ -83,6 +85,9 @@ func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials Reg
 	}
 	it := a.client.ListOccurrences(ctx, req)
 	if _, err := it.Next(); err != nil && err != iterator.Done {
+		a.owningClient.Close()
+		a.owningClient = nil
+		a.client = nil
 		return fmt.Errorf("failed to authenticate or access gcp project %s: %w", a.projectID, err)
 	}
 
@@ -252,4 +257,12 @@ func (a *GCPAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Contai
 	}
 
 	return infos, nil
+}
+
+// Destroy cleans up any persistent resources used by the adaptor.
+func (a *GCPAdaptor) Destroy() error {
+	if a.owningClient != nil {
+		return a.owningClient.Close()
+	}
+	return nil
 }

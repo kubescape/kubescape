@@ -82,8 +82,8 @@ func TestGCPAdaptor_GetImagesScanStatus(t *testing.T) {
 			expectedScan: false,
 		},
 		{
-			name: "api error path ignores failure for one image",
-			mockErr: fmt.Errorf("simulated API error"),
+			name:         "api error path ignores failure for one image",
+			mockErr:      fmt.Errorf("simulated API error"),
 			expectedScan: false,
 		},
 	}
@@ -97,7 +97,7 @@ func TestGCPAdaptor_GetImagesScanStatus(t *testing.T) {
 			}
 
 			images := []ContainerImageIdentifier{
-				{Registry: "us-docker.pkg.dev", Repository: "test-repo", Hash: "sha256:1234"},
+				{Registry: "us-docker.pkg.dev", Repository: "my-project/my-repo/my-image", Hash: "sha256:1234"},
 			}
 
 			statuses, err := adaptor.GetImagesScanStatus(context.Background(), images)
@@ -138,7 +138,7 @@ func TestGCPAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	}
 
 	images := []ContainerImageIdentifier{
-		{Registry: "us-docker.pkg.dev", Repository: "test-repo", Hash: "sha256:1234"},
+		{Registry: "us-docker.pkg.dev", Repository: "my-project/my-repo/my-image", Hash: "sha256:1234"},
 	}
 
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
@@ -173,7 +173,7 @@ func TestGCPAdaptor_GetImagesVulnerabilities_Cap(t *testing.T) {
 	}
 
 	images := []ContainerImageIdentifier{
-		{Registry: "us-docker.pkg.dev", Repository: "test-repo", Hash: "sha256:1234"},
+		{Registry: "us-docker.pkg.dev", Repository: "my-project/my-repo/my-image", Hash: "sha256:1234"},
 	}
 
 	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
