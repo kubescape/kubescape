@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -13,9 +14,11 @@ import (
 type exceptionsGetterStub struct {
 	exceptions []armotypes.PostureExceptionPolicy
 	err        error
+	ctx        context.Context
 }
 
-func (s *exceptionsGetterStub) GetExceptions(_ string) ([]armotypes.PostureExceptionPolicy, error) {
+func (s *exceptionsGetterStub) GetExceptions(ctx context.Context, _ string) ([]armotypes.PostureExceptionPolicy, error) {
+	s.ctx = ctx
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -23,60 +26,94 @@ func (s *exceptionsGetterStub) GetExceptions(_ string) ([]armotypes.PostureExcep
 }
 
 func TestMergedExceptionsGetter(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
 	tests := []struct {
-		name    string
-		getter  *MergedExceptionsGetter
-		wantLen int
-		wantErr bool
+		name      string
+		nilGetter bool // exercise the nil-receiver path
+		primary   *exceptionsGetterStub
+		secondary *exceptionsGetterStub
+		wantLen   int
+		wantErr   bool
+		wantErrIs error
 	}{
 		{
-			name:    "nil getter returns empty",
-			getter:  nil,
-			wantLen: 0,
+			name:      "nil getter returns empty",
+			nilGetter: true,
+			wantLen:   0,
 		},
 		{
-			name: "primary only",
-			getter: NewMergedExceptionsGetter(
-				&exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "base"}}},
-				nil,
-			),
+			name:    "primary only",
+			primary: &exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "base"}}},
 			wantLen: 1,
 		},
 		{
-			name: "merge both",
-			getter: NewMergedExceptionsGetter(
-				&exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "base"}}},
-				&exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "crd"}}},
-			),
-			wantLen: 2,
+			name:      "merge both",
+			primary:   &exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "base"}}},
+			secondary: &exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "crd"}}},
+			wantLen:   2,
 		},
 		{
-			name: "secondary error ignored",
-			getter: NewMergedExceptionsGetter(
-				&exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "base"}}},
-				&exceptionsGetterStub{err: fmt.Errorf("secondary failed")},
-			),
-			wantLen: 1,
+			name:      "secondary error ignored",
+			primary:   &exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "base"}}},
+			secondary: &exceptionsGetterStub{err: fmt.Errorf("secondary failed")},
+			wantLen:   1,
 		},
 		{
-			name: "primary error returned",
-			getter: NewMergedExceptionsGetter(
-				&exceptionsGetterStub{err: fmt.Errorf("primary failed")},
-				&exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "crd"}}},
-			),
-			wantErr: true,
+			name:      "secondary cancellation error returned",
+			primary:   &exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "base"}}},
+			secondary: &exceptionsGetterStub{err: context.Canceled},
+			wantErr:   true,
+			wantErrIs: context.Canceled,
+		},
+		{
+			name:      "secondary deadline error returned",
+			primary:   &exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "base"}}},
+			secondary: &exceptionsGetterStub{err: context.DeadlineExceeded},
+			wantErr:   true,
+			wantErrIs: context.DeadlineExceeded,
+		},
+		{
+			name:      "primary error returned",
+			primary:   &exceptionsGetterStub{err: fmt.Errorf("primary failed")},
+			secondary: &exceptionsGetterStub{exceptions: []armotypes.PostureExceptionPolicy{{PolicyType: "crd"}}},
+			wantErr:   true,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			out, err := tc.getter.GetExceptions("cluster-a")
-			if tc.wantErr {
-				require.Error(t, err)
-				return
+			var getter *MergedExceptionsGetter
+			if !tc.nilGetter {
+				// NOTE: assign through typed locals so a nil *exceptionsGetterStub is passed
+				// as a nil interface, not a non-nil interface holding a nil pointer.
+				var p, s IExceptionsGetter
+				if tc.primary != nil {
+					p = tc.primary
+				}
+				if tc.secondary != nil {
+					s = tc.secondary
+				}
+				getter = NewMergedExceptionsGetter(p, s)
 			}
-			require.NoError(t, err)
-			assert.Len(t, out, tc.wantLen)
+
+			got, err := getter.GetExceptions(ctx, "cluster-a")
+			if tc.wantErrIs != nil {
+				require.ErrorIs(t, err, tc.wantErrIs)
+			} else if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Len(t, got, tc.wantLen)
+			}
+
+			if tc.primary != nil {
+				assert.Equal(t, ctx, tc.primary.ctx)
+			}
+			if tc.secondary != nil && tc.primary != nil && tc.primary.err == nil {
+				assert.Equal(t, ctx, tc.secondary.ctx)
+			}
 		})
 	}
 }
@@ -186,7 +223,7 @@ func TestMergedExceptionsGetter_Deduplication(t *testing.T) {
 				&exceptionsGetterStub{exceptions: tc.cloud},
 				&exceptionsGetterStub{exceptions: tc.crd},
 			)
-			got, err := getter.GetExceptions("cluster-a")
+			got, err := getter.GetExceptions(context.TODO(), "cluster-a")
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})

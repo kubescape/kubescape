@@ -163,7 +163,7 @@ func listExceptions(ctx context.Context, listPolicies *metav1.ListPolicies) ([]s
 	if err != nil {
 		return exceptionsNames, err
 	}
-	exceptions, err := ksCloudAPI.GetExceptions("")
+	exceptions, err := ksCloudAPI.GetExceptions(ctx, "")
 	if err != nil {
 		return exceptionsNames, err
 	}

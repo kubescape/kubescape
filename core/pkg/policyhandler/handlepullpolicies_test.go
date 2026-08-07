@@ -32,10 +32,10 @@ type ExceptionsGetterMock struct{}
 type ControlsInputsGetterMock struct{}
 type PolicyGetterMock struct{}
 
-func (mock *ExceptionsGetterMock) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+func (mock *ExceptionsGetterMock) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	return CachedExceptions, nil
 }
-func (mock *ControlsInputsGetterMock) GetControlsInputs(clusterName string) (map[string][]string, error) {
+func (mock *ControlsInputsGetterMock) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
 	return CachedControlInputs, nil
 }
 func (mock *PolicyGetterMock) GetControl(name string) (*reporthandling.Control, error) {
@@ -233,7 +233,7 @@ func TestGetExceptions(t *testing.T) {
 	policyHandler.getters = &cautils.Getters{
 		ExceptionsGetter: &ExceptionsGetterMock{},
 	}
-	exceptions, err := policyHandler.getExceptions()
+	exceptions, err := policyHandler.getExceptions(context.TODO())
 
 	assert.NoError(t, err)
 	assert.Equal(t, cachedExceptions, exceptions)
@@ -246,7 +246,7 @@ func TestGetControlInputs(t *testing.T) {
 		ControlsInputsGetter: &ControlsInputsGetterMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs()
+	controlInputs, err := policyHandler.getControlInputs(context.TODO())
 
 	assert.NoError(t, err)
 	assert.Equal(t, cachedControlInputs, controlInputs)
@@ -283,7 +283,7 @@ func TestDownloadScanPolicies_LocalCacheBypass(t *testing.T) {
 
 type ControlsInputsGetterEmptyMock struct{}
 
-func (mock *ControlsInputsGetterEmptyMock) GetControlsInputs(clusterName string) (map[string][]string, error) {
+func (mock *ControlsInputsGetterEmptyMock) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
 	return nil, nil
 }
 
@@ -295,7 +295,7 @@ func TestGetControlInputs_EmptyReturnsErrorNotCached(t *testing.T) {
 		ControlsInputsGetter: &ControlsInputsGetterEmptyMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs()
+	controlInputs, err := policyHandler.getControlInputs(context.TODO())
 
 	assert.Error(t, err)
 	assert.Nil(t, controlInputs)
@@ -312,7 +312,7 @@ func TestGetControlInputs_NonNilResultIsCached(t *testing.T) {
 		ControlsInputsGetter: &ControlsInputsGetterMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs()
+	controlInputs, err := policyHandler.getControlInputs(context.TODO())
 
 	assert.NoError(t, err)
 	assert.Equal(t, CachedControlInputs, controlInputs)

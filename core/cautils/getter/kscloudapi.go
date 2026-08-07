@@ -2,10 +2,12 @@ package getter
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"sync"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	v1 "github.com/kubescape/backend/pkg/client/v1"
 	utils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
@@ -19,10 +21,35 @@ var (
 	globalKSCloudAPIConnectorMutex sync.Mutex
 
 	_ IPolicyGetter         = &v1.KSCloudAPI{}
-	_ IExceptionsGetter     = &v1.KSCloudAPI{}
+	_ IExceptionsGetter     = &KSCloudAPIAdapter{}
 	_ IAttackTracksGetter   = &v1.KSCloudAPI{}
-	_ IControlsInputsGetter = &v1.KSCloudAPI{}
+	_ IControlsInputsGetter = &KSCloudAPIAdapter{}
 )
+
+// KSCloudAPIAdapter adapts v1.KSCloudAPI to the context-aware getter interfaces.
+//
+// NOTE: the supplied context is intentionally discarded. The upstream client in
+// github.com/kubescape/backend/pkg/client/v1 does not yet expose context-aware
+// methods, so cancellation and deadlines do not reach these HTTP calls. Remove
+// this adapter once the backend client accepts a context.
+type KSCloudAPIAdapter struct {
+	*v1.KSCloudAPI
+}
+
+// GetKSCloudAPIAdapter returns an adapter wrapping the KS Cloud client registered for this package.
+func GetKSCloudAPIAdapter() *KSCloudAPIAdapter {
+	return &KSCloudAPIAdapter{
+		KSCloudAPI: GetKSCloudAPIConnector(),
+	}
+}
+
+func (a *KSCloudAPIAdapter) GetExceptions(_ context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+	return a.KSCloudAPI.GetExceptions(clusterName)
+}
+
+func (a *KSCloudAPIAdapter) GetControlsInputs(_ context.Context, clusterName string) (map[string][]string, error) {
+	return a.KSCloudAPI.GetControlsInputs(clusterName)
+}
 
 // SetKSCloudAPIConnector registers a global instance of the KS Cloud client.
 //
