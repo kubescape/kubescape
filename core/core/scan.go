@@ -187,6 +187,8 @@ func fileExtForFormat(format string) string {
 		return printer.PdfOutputExt
 	case printer.PrometheusFormat:
 		return printer.PrometheusOutputExt
+	case printer.CsvFormat:
+		return printer.CsvOutputExt
 	default:
 		return printer.PrettyOutputExt
 	}
