@@ -196,7 +196,8 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 	logger.L().Start("Kubescape scanner initializing...")
 
 	// ===================== Initialization =====================
-	scanInfo.Init(ctxInit, policyIdentifiers) // initialize scan info
+	policyIdentifiers = resolveDefaultScanAllPolicies(scanInfo, policyIdentifiers) // resolve the ScanAll expansion while Init can still cache its paths
+	scanInfo.Init(ctxInit, policyIdentifiers)                                      // initialize scan info
 	defer scanInfo.Cleanup()
 
 	interfaces, err := getInterfaces(ctxInit, scanInfo, policyIdentifiers)

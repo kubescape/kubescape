@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -157,6 +158,78 @@ func TestGettersAirGappedUseCache(t *testing.T) {
 			assert.Equal(t, "*getter.MergedExceptionsGetter", reflect.TypeOf(exceptionsGetter).String())
 		})
 	}
+}
+
+func TestResolveDefaultScanAllPolicies(t *testing.T) {
+	nativeIdentifiers := func() []cautils.PolicyIdentifier {
+		return cautils.BuildPolicyIdentifiers(getter.NativeFrameworks, apisv1.KindFramework)
+	}
+
+	tests := []struct {
+		name              string
+		scanInfo          *cautils.ScanInfo
+		policyIdentifiers []cautils.PolicyIdentifier
+		want              []cautils.PolicyIdentifier
+	}{
+		{
+			name:     "ScanAll with UseDefault expands an empty list to the default frameworks",
+			scanInfo: &cautils.ScanInfo{ScanAll: true, UseDefault: true},
+			want:     nativeIdentifiers(),
+		},
+		{
+			name:              "ScanAll with UseDefault keeps the requested frameworks first",
+			scanInfo:          &cautils.ScanInfo{ScanAll: true, UseDefault: true},
+			policyIdentifiers: cautils.BuildPolicyIdentifiers([]string{"cis-v1.23-t1.0.1"}, apisv1.KindFramework),
+			want: append(
+				cautils.BuildPolicyIdentifiers([]string{"cis-v1.23-t1.0.1"}, apisv1.KindFramework),
+				nativeIdentifiers()...,
+			),
+		},
+		{
+			name:              "ScanAll with UseDefault does not re-add differently cased frameworks",
+			scanInfo:          &cautils.ScanInfo{ScanAll: true, UseDefault: true},
+			policyIdentifiers: cautils.BuildPolicyIdentifiers([]string{"NSA", "MITRE"}, apisv1.KindFramework),
+			want: append(
+				cautils.BuildPolicyIdentifiers([]string{"NSA", "MITRE"}, apisv1.KindFramework),
+				cautils.PolicyIdentifier{Identifier: "allcontrols", Kind: apisv1.KindFramework},
+			),
+		},
+		{
+			name:     "ScanAll without UseDefault is left to the policy getter",
+			scanInfo: &cautils.ScanInfo{ScanAll: true},
+			want:     nil,
+		},
+		{
+			name:              "UseDefault without ScanAll leaves the list untouched",
+			scanInfo:          &cautils.ScanInfo{UseDefault: true},
+			policyIdentifiers: cautils.BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework),
+			want:              cautils.BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, resolveDefaultScanAllPolicies(tt.scanInfo, tt.policyIdentifiers))
+		})
+	}
+}
+
+// TestScanAllWithUseDefaultResolvesCachePaths is the regression test for the ordering bug:
+// a ScanAll scan combined with --use-default must reach getPolicyGetter with every framework
+// already resolved to a cache path, so the scan loads locally instead of reaching the network.
+func TestScanAllWithUseDefaultResolvesCachePaths(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: true}
+
+	policyIdentifiers := resolveDefaultScanAllPolicies(scanInfo, nil)
+	scanInfo.Init(context.Background(), policyIdentifiers)
+
+	wantPaths := getDefaultFrameworksPaths()
+	assert.ElementsMatch(t, wantPaths, scanInfo.UseFrom)
+	assert.True(t, isAirGappedMode(scanInfo), "cached paths must put the scan in air-gapped mode")
+
+	policyGetter, err := getPolicyGetter(context.Background(), scanInfo.UseFrom, "123456789012", scanInfo.FrameworkScan, nil, isAirGappedMode(scanInfo))
+	require.NoError(t, err)
+	assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(policyGetter).String())
 }
 
 func TestPolicyIdentifierIdentities(t *testing.T) {

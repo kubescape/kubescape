@@ -315,9 +315,13 @@ func AppendPolicyIdentifiers(existing []PolicyIdentifier, policies []string, kin
 }
 
 // containsIdentifier reports whether the named identifier is already present.
+// The comparison is case-insensitive because the identifier sources disagree on
+// casing - getter.NativeFrameworks is lower case while IPolicyGetter.ListFrameworks
+// returns the framework's declared name ("NSA", "MITRE") - and a duplicate makes
+// downloadScanPolicies fetch and evaluate the same framework twice.
 func containsIdentifier(identifiers []PolicyIdentifier, name string) bool {
 	for _, policy := range identifiers {
-		if policy.Identifier == name {
+		if strings.EqualFold(policy.Identifier, name) {
 			return true
 		}
 	}
