@@ -168,6 +168,82 @@ func TestCollectAndStreamBatches_RecordsWholeGVRFailureAlongsideSuccess(t *testi
 	assert.Len(t, defaultBatch.K8SResources[podsGVR], 1)
 }
 
+// TestCollectAndStreamBatches_HostScannerDisabled_MarksControlsSkipped guards
+// against the streaming collector silently dropping host-sensor controls: with
+// HostScanner disabled, GetResources (the non-streaming path) records these
+// controls as skipped with a pointer to the operator. The streaming collector
+// must record the same InfoMap entry, or the control resolves to Passed.
+func TestCollectAndStreamBatches_HostScannerDisabled_MarksControlsSkipped(t *testing.T) {
+	ctx := context.Background()
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		t.Fatalf("unexpected resource: %s", action.GetResource().Resource)
+		return true, nil, nil
+	})
+	scanInfo, session := streamingTestSession(ctx)
+	session.Metadata.ScanMetadata.HostScanner = false
+	batches := make(chan *cautils.ResourceBatch, 1)
+
+	err := handler.collectAndStreamBatches(
+		ctx,
+		QueryableResources{},
+		&EmptySelector{},
+		session,
+		scanInfo,
+		cautils.ExternalResources{"KubeletConfiguration": nil},
+		batches,
+		nil,
+	)
+
+	require.NoError(t, err)
+	info, ok := session.InfoMap["KubeletConfiguration"]
+	require.True(t, ok, "host-sensor resources must be recorded as skipped when the host scanner is disabled")
+	assert.Equal(t, apis.StatusSkipped, info.InnerStatus)
+	assert.Contains(t, info.InnerInfo, "Install the Kubescape operator")
+}
+
+// TestCollectAndStreamBatches_CountsNamespacedResourcesAcrossBatches guards
+// against setMapNamespaceToNumOfResources being handed only the resident
+// (cluster-scoped) batch: namespaced resources live in namespaceBatches, so
+// counting resident.AllResources alone always yields an empty map.
+func TestCollectAndStreamBatches_CountsNamespacedResourcesAcrossBatches(t *testing.T) {
+	ctx := context.Background()
+	twoPods := &unstructured.UnstructuredList{
+		Object: map[string]any{"apiVersion": "v1", "kind": "PodList"},
+		Items: []unstructured.Unstructured{
+			{Object: map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "a", "namespace": "ns-a"}}},
+			{Object: map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "b", "namespace": "ns-a"}}},
+		},
+	}
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, twoPods, nil
+	})
+	scanInfo, session := streamingTestSession(ctx)
+	namespaced := true
+	const podsGVR = "/v1/pods"
+	queryable := QueryableResources{
+		podsGVR: {
+			GroupVersionResourceTriplet: podsGVR,
+			Namespaced:                  &namespaced,
+		},
+	}
+	batches := make(chan *cautils.ResourceBatch, 3)
+
+	err := handler.collectAndStreamBatches(
+		ctx,
+		queryable,
+		&EmptySelector{},
+		session,
+		scanInfo,
+		cautils.ExternalResources{},
+		batches,
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, session.Metadata.ContextMetadata.ClusterContextMetadata)
+	assert.Equal(t, map[string]int{"ns-a": 2}, session.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources)
+}
+
 func TestCollectAndStreamBatches_RecordsPartialSelectorFailure(t *testing.T) {
 	ctx := context.Background()
 	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
