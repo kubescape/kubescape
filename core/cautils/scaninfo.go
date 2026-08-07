@@ -188,6 +188,10 @@ type Getters struct {
 func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyIdentifier) {
 	scanInfo.setUseFrom(policyIdentifiers)
 	scanInfo.setUseArtifactsFrom(ctx)
+	// setUseFrom and setUseArtifactsFrom can resolve to the same file - --use-default and
+	// --use-artifacts-from both point at the local store on the offline HTTP handler path -
+	// and a repeated path costs an extra read and unmarshal per policy load.
+	scanInfo.UseFrom = unique(scanInfo.UseFrom)
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
 	}
@@ -315,10 +319,11 @@ func AppendPolicyIdentifiers(existing []PolicyIdentifier, policies []string, kin
 }
 
 // containsIdentifier reports whether the named identifier is already present.
-// The comparison is case-insensitive because the identifier sources disagree on
-// casing - getter.NativeFrameworks is lower case while IPolicyGetter.ListFrameworks
-// returns the framework's declared name ("NSA", "MITRE") - and a duplicate makes
-// downloadScanPolicies fetch and evaluate the same framework twice.
+// The comparison is case-insensitive because a cache round-trip changes the casing:
+// the downloader lists regolibrary's lower case "nsa" and writes a file whose name
+// field is "NSA", so LoadPolicy.ListFrameworks reads back a name that no longer matches
+// the lower case getter.NativeFrameworks entry. Matching exactly would leave both in the
+// list and make downloadScanPolicies fetch and evaluate the same framework twice.
 func containsIdentifier(identifiers []PolicyIdentifier, name string) bool {
 	for _, policy := range identifiers {
 		if strings.EqualFold(policy.Identifier, name) {

@@ -173,12 +173,12 @@ func TestResolveDefaultScanAllPolicies(t *testing.T) {
 	}{
 		{
 			name:     "ScanAll with UseDefault expands an empty list to the default frameworks",
-			scanInfo: &cautils.ScanInfo{ScanAll: true, UseDefault: true},
+			scanInfo: &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: true},
 			want:     nativeIdentifiers(),
 		},
 		{
 			name:              "ScanAll with UseDefault keeps the requested frameworks first",
-			scanInfo:          &cautils.ScanInfo{ScanAll: true, UseDefault: true},
+			scanInfo:          &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: true},
 			policyIdentifiers: cautils.BuildPolicyIdentifiers([]string{"cis-v1.23-t1.0.1"}, apisv1.KindFramework),
 			want: append(
 				cautils.BuildPolicyIdentifiers([]string{"cis-v1.23-t1.0.1"}, apisv1.KindFramework),
@@ -187,7 +187,7 @@ func TestResolveDefaultScanAllPolicies(t *testing.T) {
 		},
 		{
 			name:              "ScanAll with UseDefault does not re-add differently cased frameworks",
-			scanInfo:          &cautils.ScanInfo{ScanAll: true, UseDefault: true},
+			scanInfo:          &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: true},
 			policyIdentifiers: cautils.BuildPolicyIdentifiers([]string{"NSA", "MITRE"}, apisv1.KindFramework),
 			want: append(
 				cautils.BuildPolicyIdentifiers([]string{"NSA", "MITRE"}, apisv1.KindFramework),
@@ -204,6 +204,13 @@ func TestResolveDefaultScanAllPolicies(t *testing.T) {
 			scanInfo:          &cautils.ScanInfo{UseDefault: true},
 			policyIdentifiers: cautils.BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework),
 			want:              cautils.BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework),
+		},
+		{
+			// `scan control` with no arguments sets ScanAll but is not a framework scan;
+			// expanding it would populate UseFrom and turn the scan air-gapped.
+			name:     "control scan is not expanded even with ScanAll and UseDefault",
+			scanInfo: &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: false},
+			want:     nil,
 		},
 	}
 
@@ -230,6 +237,21 @@ func TestScanAllWithUseDefaultResolvesCachePaths(t *testing.T) {
 	policyGetter, err := getPolicyGetter(context.Background(), scanInfo.UseFrom, "123456789012", scanInfo.FrameworkScan, nil, isAirGappedMode(scanInfo))
 	require.NoError(t, err)
 	assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(policyGetter).String())
+}
+
+// TestScanAllControlScanWithUseDefaultStaysOnline guards the FrameworkScan gate: `scan control`
+// with no arguments sets ScanAll, and expanding it would resolve cache paths into UseFrom and
+// flip the scan air-gapped, cutting off the download fallback for control inputs, exceptions
+// and attack tracks on a cold cache.
+func TestScanAllControlScanWithUseDefaultStaysOnline(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: false}
+
+	policyIdentifiers := resolveDefaultScanAllPolicies(scanInfo, nil)
+	scanInfo.Init(context.Background(), policyIdentifiers)
+
+	assert.Empty(t, policyIdentifiers, "a control scan must not gain framework identifiers")
+	assert.Empty(t, scanInfo.UseFrom)
+	assert.False(t, isAirGappedMode(scanInfo), "control scans must keep the download fallback")
 }
 
 func TestPolicyIdentifierIdentities(t *testing.T) {

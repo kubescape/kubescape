@@ -380,6 +380,23 @@ func TestSetUseFrom(t *testing.T) {
 	}
 }
 
+// TestInitDeduplicatesUseFrom covers the offline HTTP handler configuration, where UseDefault
+// and UseArtifactsFrom both point at the local store, so setUseFrom and setUseArtifactsFrom
+// resolve the same framework files.
+func TestInitDeduplicatesUseFrom(t *testing.T) {
+	artifactsDir := t.TempDir()
+	framework := []byte(`{"name":"nsa","controls":[]}`)
+	require.NoError(t, os.WriteFile(filepath.Join(artifactsDir, "nsa.json"), framework, 0600))
+
+	scanInfo := &ScanInfo{
+		UseFrom:          []string{filepath.Join(artifactsDir, "nsa.json")},
+		UseArtifactsFrom: artifactsDir,
+	}
+	scanInfo.Init(context.Background(), nil)
+
+	assert.Equal(t, []string{filepath.Join(artifactsDir, "nsa.json")}, scanInfo.UseFrom)
+}
+
 func TestSplitNamespaceList(t *testing.T) {
 	testCases := []struct {
 		name string
