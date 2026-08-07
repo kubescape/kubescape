@@ -31,6 +31,8 @@ func TestDownloadSupportCommands_ReturnsListOfAllAvailableDownloadCommands(t *te
 // Returns a non-empty list of download commands when 'DownloadSupportCommands' is called and 'downloadFunc' is not empty.
 func TestDownloadSupportCommands_ReturnsNonEmptyListOfDownloadCommandsWhenDownloadFuncNotEmpty(t *testing.T) {
 	// Arrange
+	origDownloadFunc := downloadFunc
+	t.Cleanup(func() { downloadFunc = origDownloadFunc })
 	downloadFunc = map[string]func(context.Context, *metav1.DownloadInfo) ([]string, error){
 		"controls-inputs": downloadConfigInputs,
 		"exceptions":      downloadExceptions,
@@ -60,6 +62,8 @@ func TestDownloadSupportCommands_ReturnsListOfStrings(t *testing.T) {
 // Returns an empty list when 'DownloadSupportCommands' is called and 'downloadFunc' is empty.
 func TestDownloadSupportCommands_ReturnsEmptyListWhenDownloadFuncEmpty(t *testing.T) {
 	// Arrange
+	origDownloadFunc := downloadFunc
+	t.Cleanup(func() { downloadFunc = origDownloadFunc })
 	downloadFunc = map[string]func(context.Context, *metav1.DownloadInfo) ([]string, error){}
 
 	// Act
@@ -73,6 +77,8 @@ func TestDownloadSupportCommands_ReturnsEmptyListWhenDownloadFuncEmpty(t *testin
 // Returns an empty list when 'DownloadSupportCommands' is called and 'downloadFunc' is nil.
 func TestDownloadSupportCommands_ReturnsEmptyListWhenDownloadFuncNil(t *testing.T) {
 	// Arrange
+	origDownloadFunc := downloadFunc
+	t.Cleanup(func() { downloadFunc = origDownloadFunc })
 	downloadFunc = nil
 
 	// Act
@@ -158,6 +164,42 @@ func TestSetPathAndFilename(t *testing.T) {
 			expectedPath:     getter.GetDefaultPath(""),
 			expectedFilename: "",
 		},
+		{
+			// Regression for --output <file>.json (the CLI pre-split shape):
+			// Path="" + FileName="nsa.json" must resolve to the current
+			// directory, not the default ~/.kubescape store.
+			downloadInfo: &metav1.DownloadInfo{
+				FileName: "nsa.json",
+			},
+			expectedPath:     ".",
+			expectedFilename: "nsa.json",
+		},
+		{
+			// Bare .json filename passed straight to the API must be a file
+			// in the current directory, not a directory named "nsa.json/".
+			downloadInfo: &metav1.DownloadInfo{
+				Path: "nsa.json",
+			},
+			expectedPath:     ".",
+			expectedFilename: "nsa.json",
+		},
+		{
+			// Extension-less bare names stay directories (backward compatible).
+			downloadInfo: &metav1.DownloadInfo{
+				Path: "mydir",
+			},
+			expectedPath:     "mydir",
+			expectedFilename: "",
+		},
+		{
+			// CLI pre-split of --output sub/nsa.json keeps the directory part.
+			downloadInfo: &metav1.DownloadInfo{
+				Path:     filepath.Dir(filepath.Join("sub", "nsa.json")),
+				FileName: "nsa.json",
+			},
+			expectedPath:     "sub",
+			expectedFilename: "nsa.json",
+		},
 	}
 
 	for _, tt := range tests {
@@ -211,6 +253,66 @@ func TestDownload_CreatesOutputDirectoryWithRestrictivePermissions(t *testing.T)
 	require.NoError(t, err)
 	mode := info.Mode().Perm()
 	assert.Zerof(t, mode&0o077, "directory %s has mode %o, more permissive than 0700", path, mode)
+}
+
+// TestDownload_BareJSONOutputPathIsRespected is a regression test for
+// `kubescape download framework nsa --output nsa.json`: the CLI pre-splits a
+// bare .json output into Path="" + FileName="nsa.json", which must resolve to
+// the current directory (./nsa.json), not the default ~/.kubescape store.
+// getter.DefaultLocalStore is redirected to a temp dir so the buggy and fixed
+// behaviors are distinguishable without touching the real $HOME.
+func TestDownload_BareJSONOutputPathIsRespected(t *testing.T) {
+	withTenantConfig(t, &fakeTenantConfig{})
+	want := &reporthandling.Framework{PortalBase: armotypes.PortalBase{Name: "nsa"}}
+	withPolicyGetter(t, &fakePolicyGetter{framework: want}, nil)
+
+	origDownloadFunc := downloadFunc
+	t.Cleanup(func() { downloadFunc = origDownloadFunc })
+
+	origStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	t.Cleanup(func() { getter.DefaultLocalStore = origStore })
+	t.Chdir(t.TempDir())
+
+	ks := NewKubescape(context.Background())
+	_, err := ks.Download(&metav1.DownloadInfo{
+		Target:     TargetFramework,
+		Identifier: "nsa",
+		FileName:   "nsa.json",
+	})
+	require.NoError(t, err)
+	assert.FileExists(t, "nsa.json")
+}
+
+// TestDownload_ArtifactsJSONOutputWritesToCurrentDirectory pins the behavior
+// for `--output out.json` with the multi-file artifacts target: a single
+// filename cannot hold four artifacts, so they are written to the current
+// directory rather than the default store.
+func TestDownload_ArtifactsJSONOutputWritesToCurrentDirectory(t *testing.T) {
+	withTenantConfig(t, &fakeTenantConfig{})
+	withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"1"}}}, nil)
+	withExceptionsGetter(t, &fakeExceptionsGetter{exceptions: []armotypes.PostureExceptionPolicy{{}}}, nil)
+	withAttackTracksGetter(t, &fakeAttackTracksGetter{tracks: []v1alpha1.AttackTrack{{}}}, nil)
+	withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}}, nil)
+
+	origDownloadFunc := downloadFunc
+	t.Cleanup(func() { downloadFunc = origDownloadFunc })
+
+	origStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	t.Cleanup(func() { getter.DefaultLocalStore = origStore })
+	t.Chdir(t.TempDir())
+
+	ks := NewKubescape(context.Background())
+	_, err := ks.Download(&metav1.DownloadInfo{
+		Target:   TargetArtifacts,
+		FileName: "out.json",
+	})
+	require.NoError(t, err)
+
+	for _, want := range []string{"controls-inputs.json", "exceptions.json", "nsa.json", "attack-tracks.json"} {
+		assert.FileExists(t, want)
+	}
 }
 
 // ---------------------------------------------------------------------------

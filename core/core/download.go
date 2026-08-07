@@ -102,15 +102,38 @@ func downloadArtifact(ctx context.Context, downloadInfo *metav1.DownloadInfo, do
 }
 
 func setPathAndFilename(downloadInfo *metav1.DownloadInfo) {
+	// The CLI (cmd/download/download.go) pre-splits a "--output <file>.json"
+	// into (dir, file): a bare "nsa.json" arrives here as Path="" +
+	// FileName="nsa.json". A FileName set with an empty Path means "current
+	// directory", not "no output path given" — defaulting it to ~/.kubescape
+	// would silently discard the user's --output file.
+	if downloadInfo.FileName != "" {
+		if downloadInfo.Path == "" {
+			downloadInfo.Path = "."
+		}
+		return
+	}
+
 	if downloadInfo.Path == "" {
 		downloadInfo.Path = getter.GetDefaultPath("")
 		return
 	}
+
 	dir, file := filepath.Split(downloadInfo.Path)
+	if dir == "" && file != "." && file != ".." && filepath.Ext(file) != "" {
+		// Bare file name (e.g. "nsa.json" passed straight to the API): save
+		// it to the current directory instead of misreading it as a directory.
+		downloadInfo.FileName = file
+		downloadInfo.Path = "."
+		return
+	}
 	if dir == "" {
+		// Extension-less bare name: keep treating it as a directory.
 		downloadInfo.Path = file
 		return
 	}
+	// Intentionally restricted to ".json" and left as-is: an existing
+	// TestSetPathAndFilename case enshrines .txt-in-dir-as-directory behavior.
 	if strings.Contains(file, ".json") {
 		downloadInfo.Path = filepath.Clean(dir)
 		downloadInfo.FileName = file
