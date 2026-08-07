@@ -232,6 +232,12 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr: nil,
 		},
 		{
+			name:      "csv format for image scan should return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.CsvFormat,
+			expectErr: errors.New("format \"csv\" is not supported for image scanning"),
+		},
+		{
 			name:      "pdf format for cluster scan should not return error",
 			scanType:  cautils.ScanTypeCluster,
 			format:    printer.PdfFormat,
@@ -558,4 +564,28 @@ func TestGetComplianceScoreAndRiskScoreAreIndependent(t *testing.T) {
 	assert.Equal(t, float32(80.0), rh.GetComplianceScore())
 	assert.Equal(t, float32(40.0), rh.GetRiskScore())
 	assert.NotEqual(t, rh.GetComplianceScore(), rh.GetRiskScore())
+}
+
+// TestValidatePrinter_ImageFormatsInvariant pins the invariant itself: every
+// format in printer.ImageFormats must be accepted for image scans, and every
+// format in printer.AllFormats that is NOT in printer.ImageFormats (e.g. csv)
+// must be rejected. This is what stops a future format from silently
+// inheriting image-scan support just by being added to AllFormats (#2782 review).
+func TestValidatePrinter_ImageFormatsInvariant(t *testing.T) {
+	for _, format := range printer.ImageFormats {
+		t.Run("accepted: "+format, func(t *testing.T) {
+			_, err := ValidatePrinter(cautils.ScanTypeImage, cautils.ScanningContext(""), format)
+			assert.NoError(t, err)
+		})
+	}
+
+	for _, format := range printer.AllFormats {
+		if slices.Contains(printer.ImageFormats, format) {
+			continue
+		}
+		t.Run("rejected: "+format, func(t *testing.T) {
+			_, err := ValidatePrinter(cautils.ScanTypeImage, cautils.ScanningContext(""), format)
+			assert.Error(t, err)
+		})
+	}
 }

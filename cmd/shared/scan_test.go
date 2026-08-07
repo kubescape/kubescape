@@ -116,6 +116,8 @@ func TestValidateScanFormat(t *testing.T) {
 		{"mixed valid and invalid formats", "json,xml", ScanFormats, true},
 		{"valid image format", "sarif", ScanFormats, false},
 		{"junit format is now supported for image scanning", "junit", ScanFormats, false},
+		{"junit is supported for image scanning", "junit", ImageScanFormats, false},
+		{"csv is not supported for image scanning", "csv", ImageScanFormats, true},
 	}
 
 	for _, testCase := range testCases {
