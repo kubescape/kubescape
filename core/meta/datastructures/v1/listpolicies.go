@@ -12,6 +12,11 @@ type ListResponse struct {
 	IDs   []string
 }
 
+type ListResult struct {
+	Names    []string
+	Controls []ControlListEntry
+}
+
 // ControlListEntry is a single row emitted by "kubescape list controls --format json".
 type ControlListEntry struct {
 	ID         string   `json:"id"`

@@ -20,12 +20,12 @@ func (m *MockIKubescape) Scan(_ *cautils.ScanInfo, _ []cautils.PolicyIdentifier)
 	return nil, nil
 }
 
-func (m *MockIKubescape) List(_ *metav1.ListPolicies) error {
-	return nil
+func (m *MockIKubescape) List(_ *metav1.ListPolicies) (*metav1.ListResult, error) {
+	return &metav1.ListResult{}, nil
 }
 
-func (m *MockIKubescape) Download(_ *metav1.DownloadInfo) error {
-	return nil
+func (m *MockIKubescape) Download(_ *metav1.DownloadInfo) (*metav1.DownloadResult, error) {
+	return &metav1.DownloadResult{}, nil
 }
 
 func (m *MockIKubescape) SetCachedConfig(_ *metav1.SetConfig) error {

@@ -73,7 +73,8 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 				}
 				downloadInfo.Identifier = args[1]
 			}
-			if err := ks.Download(&downloadInfo); err != nil {
+			_, err := ks.Download(&downloadInfo)
+			if err != nil {
 				return err
 			}
 			return nil
