@@ -113,17 +113,15 @@ type PolicyIdentifier struct {
 }
 
 type ScanInfo struct {
-	Getters                                  // TODO - remove from object
-	PolicyIdentifier      []PolicyIdentifier // TODO - remove from object
-	UseExceptions         string             // Load file with exceptions configuration
-	ControlsInputs        string             // Load file with inputs for controls
-	AttackTracks          string             // Load file with attack tracks
-	UseFrom               []string           // Load framework from local file (instead of download). Use when running offline
-	UseDefault            bool               // Load framework from cached file (instead of download). Use when running offline
-	UseArtifactsFrom      string             // Load artifacts from local path. Use when running offline
-	ControlsVersion       string             // Pin the regolibrary release used to download policies (e.g. "v2.0.301"). Empty uses the latest release
-	VerboseMode           bool               // Display all the input resources and not only failed resources
-	Hide                  bool               // Hide sensitive identifiers (names, namespaces, images) in results
+	UseExceptions         string   // Load file with exceptions configuration
+	ControlsInputs        string   // Load file with inputs for controls
+	AttackTracks          string   // Load file with attack tracks
+	UseFrom               []string // Load framework from local file (instead of download). Use when running offline
+	UseDefault            bool     // Load framework from cached file (instead of download). Use when running offline
+	UseArtifactsFrom      string   // Load artifacts from local path. Use when running offline
+	ControlsVersion       string   // Pin the regolibrary release used to download policies (e.g. "v2.0.301"). Empty uses the latest release
+	VerboseMode           bool     // Display all the input resources and not only failed resources
+	Hide                  bool     // Hide sensitive identifiers (names, namespaces, images) in results
 	EncryptionEnabled     bool
 	View                  string                       //
 	Format                string                       // Format results (table, json, junit ...)
@@ -187,9 +185,13 @@ type Getters struct {
 	AttackTracksGetter   getter.IAttackTracksGetter
 }
 
-func (scanInfo *ScanInfo) Init(ctx context.Context) {
-	scanInfo.setUseFrom()
+func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyIdentifier) {
+	scanInfo.setUseFrom(policyIdentifiers)
 	scanInfo.setUseArtifactsFrom(ctx)
+	// setUseFrom and setUseArtifactsFrom can resolve to the same file - --use-default and
+	// --use-artifacts-from both point at the local store on the offline HTTP handler path -
+	// and a repeated path costs an extra read and unmarshal per policy load.
+	scanInfo.UseFrom = unique(scanInfo.UseFrom)
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
 	}
@@ -246,9 +248,9 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 	}
 }
 
-func (scanInfo *ScanInfo) setUseFrom() {
+func (scanInfo *ScanInfo) setUseFrom(policyIdentifiers []PolicyIdentifier) {
 	if scanInfo.UseDefault {
-		for _, policy := range scanInfo.PolicyIdentifier {
+		for _, policy := range policyIdentifiers {
 			path, err := getter.PolicyCachePath(policy.Identifier)
 			if err != nil {
 				logger.L().Warning("skipping default cache lookup for policy", helpers.String("identifier", policy.Identifier), helpers.Error(err))
@@ -295,20 +297,36 @@ func (scanInfo *ScanInfo) SetScanType(scanType ScanTypes) {
 	scanInfo.ScanType = scanType
 }
 
-func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) {
-	for _, policy := range policies {
-		if !scanInfo.contains(policy) {
-			newPolicy := PolicyIdentifier{}
-			newPolicy.Kind = kind
-			newPolicy.Identifier = policy
-			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
-		}
-	}
+// BuildPolicyIdentifiers builds a list of policy identifiers from the given
+// string identifiers, adding any new ones that are not already present.
+func BuildPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) []PolicyIdentifier {
+	return AppendPolicyIdentifiers(nil, policies, kind)
 }
 
-func (scanInfo *ScanInfo) contains(policyName string) bool {
-	for _, policy := range scanInfo.PolicyIdentifier {
-		if policy.Identifier == policyName {
+// AppendPolicyIdentifiers appends the given string identifiers to the existing
+// list, adding any new ones that are not already present.
+func AppendPolicyIdentifiers(existing []PolicyIdentifier, policies []string, kind apisv1.NotificationPolicyKind) []PolicyIdentifier {
+	result := append([]PolicyIdentifier(nil), existing...)
+	for _, policy := range policies {
+		if !containsIdentifier(result, policy) {
+			result = append(result, PolicyIdentifier{
+				Kind:       kind,
+				Identifier: policy,
+			})
+		}
+	}
+	return result
+}
+
+// containsIdentifier reports whether the named identifier is already present.
+// The comparison is case-insensitive because a cache round-trip changes the casing:
+// the downloader lists regolibrary's lower case "nsa" and writes a file whose name
+// field is "NSA", so LoadPolicy.ListFrameworks reads back a name that no longer matches
+// the lower case getter.NativeFrameworks entry. Matching exactly would leave both in the
+// list and make downloadScanPolicies fetch and evaluate the same framework twice.
+func containsIdentifier(identifiers []PolicyIdentifier, name string) bool {
+	for _, policy := range identifiers {
+		if strings.EqualFold(policy.Identifier, name) {
 			return true
 		}
 	}
@@ -331,7 +349,7 @@ func splitNamespaceList(s string) []string {
 	return out
 }
 
-func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthandlingv2.Metadata {
+func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
 	metadata.ScanMetadata.Formats = []string{scanInfo.Format}
@@ -346,11 +364,11 @@ func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthand
 	}
 
 	// scan type
-	if len(scanInfo.PolicyIdentifier) > 0 {
-		metadata.ScanMetadata.TargetType = string(scanInfo.PolicyIdentifier[0].Kind)
+	if len(policyIdentifiers) > 0 {
+		metadata.ScanMetadata.TargetType = string(policyIdentifiers[0].Kind)
 	}
 	// append frameworks
-	for _, policy := range scanInfo.PolicyIdentifier {
+	for _, policy := range policyIdentifiers {
 		metadata.ScanMetadata.TargetNames = append(metadata.ScanMetadata.TargetNames, policy.Identifier)
 	}
 

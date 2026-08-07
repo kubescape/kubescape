@@ -62,7 +62,7 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	}()
 
 	logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
-	_, err := scanImpl(scanReq.ctx, scanReq.scanInfo, scanReq.scanID, scanReq.scanQueryParams.SkipPersistence)
+	_, err := scanImpl(scanReq.ctx, scanReq.scanInfo, scanReq.policyIdentifiers, scanReq.scanID, scanReq.scanQueryParams.SkipPersistence)
 	if err != nil {
 		if errors.Is(scanReq.ctx.Err(), context.Canceled) {
 			logger.L().Ctx(scanReq.ctx).Info("scan cancelled", helpers.String("ID", scanReq.scanID))
@@ -155,7 +155,7 @@ func (handler *HTTPHandler) watchForScan() {
 		handler.executeScan(scanReq)
 	}
 }
-func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {
+func scan(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier, scanID string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {
 	ctx, spanScan := otel.Tracer("").Start(ctx, "kubescape.scan")
 	defer spanScan.End()
 
@@ -172,7 +172,7 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 		trace.WithAttributes(attribute.String("hostSensorYamlPath", scanInfo.HostSensorYamlPath)),
 	)
 
-	result, err := ks.Scan(scanInfo)
+	result, err := ks.Scan(scanInfo, policyIdentifiers)
 	if err != nil {
 		return nil, writeScanErrorToFile(err, scanID)
 	}
@@ -283,9 +283,9 @@ func removeResultsFile(fileID string) error {
 	return nil
 }
 
-func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *cautils.ScanInfo {
+func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) (*cautils.ScanInfo, []cautils.PolicyIdentifier) {
 
-	scanInfo := ToScanInfo(scanRequest)
+	scanInfo, policyIdentifiers := ToScanInfo(scanRequest)
 	scanInfo.ScanID = scanID
 
 	// *** start ***
@@ -301,7 +301,7 @@ func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *ca
 	scanInfo.Output = filepath.Join(OutputDir, scanID)
 	// *** end ***
 
-	return scanInfo
+	return scanInfo, policyIdentifiers
 }
 
 func defaultScanInfo() *cautils.ScanInfo {
@@ -326,8 +326,8 @@ func defaultScanInfo() *cautils.ScanInfo {
 			logger.L().Warning("ignoring unparsable KS_SUBMIT value", helpers.String("value", raw))
 		}
 	}
-	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)                       // do not publish results to Kubescape SaaS
-	scanInfo.EnableRegoPrint = envToBool("KS_REGO_PRINT", false)             // print rego rules
+	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)           // do not publish results to Kubescape SaaS
+	scanInfo.EnableRegoPrint = envToBool("KS_REGO_PRINT", false) // print rego rules
 	// Only set HostSensorEnabled when explicitly configured; leaving it nil allows
 	// auto-detection of node-agent CRDs in getHostSensorHandler.
 	if val, ok := os.LookupEnv("KS_ENABLE_HOST_SCANNER"); ok {

@@ -137,7 +137,7 @@ func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo
 	if err != nil {
 		return err
 	}
-	controlInputs, err := controlsInputsGetter.GetControlsInputs(tenant.GetContextName())
+	controlInputs, err := controlsInputsGetter.GetControlsInputs(ctx, tenant.GetContextName())
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func downloadExceptions(ctx context.Context, downloadInfo *metav1.DownloadInfo) 
 		return err
 	}
 
-	exceptions, err := exceptionsGetter.GetExceptions(tenant.GetContextName())
+	exceptions, err := exceptionsGetter.GetExceptions(ctx, tenant.GetContextName())
 	if err != nil {
 		return err
 	}

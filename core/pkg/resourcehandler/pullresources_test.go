@@ -354,7 +354,7 @@ func TestRecordFailedQueryStatuses_PartialFailureSessionField(t *testing.T) {
 	framework.Controls = append(framework.Controls, control)
 
 	scanInfo := &cautils.ScanInfo{}
-	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
 	sessionObj.Policies = append(sessionObj.Policies, *framework)
 
 	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
@@ -397,7 +397,7 @@ func TestGetResources_DiscoveryFailureReachesScanCoverage(t *testing.T) {
 	control := mockControl("discovery-coverage", []reporthandling.PolicyRule{rule})
 	framework := mockFramework("discovery-coverage", []reporthandling.Control{control})
 	scanInfo := &cautils.ScanInfo{}
-	sessionObj := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{*framework}, nil, scanInfo)
+	sessionObj := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{*framework}, nil, scanInfo, nil)
 
 	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
 	require.NoError(t, err)

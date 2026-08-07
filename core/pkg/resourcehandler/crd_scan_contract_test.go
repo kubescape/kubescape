@@ -274,7 +274,7 @@ metadata:
 	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0o600))
 
 	scanInfo := &cautils.ScanInfo{InputPatterns: []string{manifestPath}}
-	session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
+	session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
 	session.Policies = []reporthandling.Framework{agentRuntimeFramework()}
 
 	resources, allResources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
@@ -316,7 +316,7 @@ metadata:
 				mockControl("offline-custom-resource", []reporthandling.PolicyRule{mockRule("offline-custom-resource", []reporthandling.RuleMatchObjects{match}, "")}),
 			})
 			scanInfo := &cautils.ScanInfo{InputPatterns: []string{manifestPath}}
-			session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo)
+			session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo, nil)
 
 			resources, allResources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
 			require.NoError(t, err)
@@ -350,7 +350,7 @@ metadata:
 		}),
 	})
 	scanInfo := &cautils.ScanInfo{InputPatterns: []string{manifestPath}}
-	session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo)
+	session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo, nil)
 
 	resources, allResources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
 	require.NoError(t, err)
@@ -382,7 +382,7 @@ metadata:
 		InputPatterns: []string{manifestPath},
 		ScanObject:    scanObject("agents.x-k8s.io/v1alpha1", "Sandbox", "agents", "alpha-sandbox"),
 	}
-	session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo)
+	session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo, nil)
 
 	resources, allResources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
 	require.NoError(t, err)
@@ -497,7 +497,7 @@ metadata:
 		mockControl("current-builtins", []reporthandling.PolicyRule{mockRule("current-builtins", matches, "")}),
 	})
 	scanInfo := &cautils.ScanInfo{InputPatterns: []string{manifestPath}}
-	session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo)
+	session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo, nil)
 
 	resources, allResources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
 	require.NoError(t, err)
@@ -622,7 +622,7 @@ metadata:
 		}),
 	})
 	scanInfo := &cautils.ScanInfo{InputPatterns: []string{manifestPath}}
-	session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo)
+	session := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{framework}, nil, scanInfo, nil)
 
 	resources, allResources, _, _, err := NewFileResourceHandler().GetResources(context.Background(), session, scanInfo)
 	require.NoError(t, err)

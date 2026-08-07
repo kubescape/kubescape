@@ -129,7 +129,7 @@ func TestGetResources_SurfacesMissingGVRFailuresInInfoMap(t *testing.T) {
 	framework.Controls = append(framework.Controls, control)
 
 	scanInfo := &cautils.ScanInfo{}
-	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
 	sessionObj.Policies = append(sessionObj.Policies, *framework)
 
 	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
@@ -158,7 +158,7 @@ func TestGetResources_FailsWhenAllQueriesFail(t *testing.T) {
 	framework.Controls = append(framework.Controls, control)
 
 	scanInfo := &cautils.ScanInfo{}
-	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
 	sessionObj.Policies = append(sessionObj.Policies, *framework)
 
 	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
@@ -196,7 +196,7 @@ func TestGetResources_ScanAbortedOnContextCancellation(t *testing.T) {
 	framework.Controls = append(framework.Controls, control)
 
 	scanInfo := &cautils.ScanInfo{}
-	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
 	sessionObj.Policies = append(sessionObj.Policies, *framework)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -252,7 +252,7 @@ func TestGetResources_HostSensorInfoMapMerged(t *testing.T) {
 
 	scanInfo := &cautils.ScanInfo{}
 	scanInfo.HostSensorEnabled.SetBool(true)
-	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
 	sessionObj.Policies = append(sessionObj.Policies, *framework)
 
 	const preSeededGVR = "/v1/networkpolicies"

@@ -242,7 +242,7 @@ type fakeExceptionsGetter struct {
 	err        error
 }
 
-func (f *fakeExceptionsGetter) GetExceptions(string) ([]armotypes.PostureExceptionPolicy, error) {
+func (f *fakeExceptionsGetter) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	return f.exceptions, f.err
 }
 
@@ -260,7 +260,7 @@ type fakeControlsInputsGetter struct {
 	err    error
 }
 
-func (f *fakeControlsInputsGetter) GetControlsInputs(string) (map[string][]string, error) {
+func (f *fakeControlsInputsGetter) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
 	return f.inputs, f.err
 }
 

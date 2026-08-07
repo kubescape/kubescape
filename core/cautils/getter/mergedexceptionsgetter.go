@@ -1,6 +1,8 @@
 package getter
 
 import (
+	"context"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/go-logger"
@@ -22,12 +24,12 @@ func NewMergedExceptionsGetter(primary, secondary IExceptionsGetter) *MergedExce
 	return &MergedExceptionsGetter{primary: primary, secondary: secondary}
 }
 
-func (g *MergedExceptionsGetter) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+func (g *MergedExceptionsGetter) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	if g == nil || g.primary == nil {
 		return []armotypes.PostureExceptionPolicy{}, nil
 	}
 
-	exceptions, err := g.primary.GetExceptions(clusterName)
+	exceptions, err := g.primary.GetExceptions(ctx, clusterName)
 	if err != nil {
 		return nil, err
 	}
@@ -36,11 +38,14 @@ func (g *MergedExceptionsGetter) GetExceptions(clusterName string) ([]armotypes.
 		return exceptions, nil
 	}
 
-	crdExceptions, err := g.secondary.GetExceptions(clusterName)
+	crdExceptions, err := g.secondary.GetExceptions(ctx, clusterName)
 	if err != nil {
+		if isContextErr(err) {
+			return nil, err
+		}
 		// Secondary (CRD) failures must not break the scan, but a swallowed error hides
 		// version skew or RBAC gaps; surface it at Warning so it is observable.
-		logger.L().Warning("failed to get CRD security exceptions; continuing with primary exceptions only",
+		logger.L().Ctx(ctx).Warning("failed to get CRD security exceptions; continuing with primary exceptions only",
 			helpers.Error(err))
 		return exceptions, nil
 	}
