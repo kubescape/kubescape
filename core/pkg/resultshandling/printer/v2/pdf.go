@@ -115,6 +115,18 @@ func (pp *PdfPrinter) generateImagePdf(imageScanData []cautils.ImageScanData) ([
 
 // getImageTableObjects converts CVEs into PDF table rows, returning the rows and how many are fixable
 func (pp *PdfPrinter) getImageTableObjects(cves []imageprinter.CVE) (*[]pdf.ImageTableObject, int) {
+	if len(cves) == 0 {
+		// maroto's list.Build returns errors.New("empty array") for an
+		// empty slice, so a clean image (zero CVEs) previously produced
+		// no PDF at all — the exact case a pipeline expects to succeed.
+		// A single placeholder row keeps the table non-empty and tells
+		// the reader the scan was clean, instead of failing silently.
+		rows := []pdf.ImageTableObject{
+			*pdf.NewImageTableRow("—", "—", "—", "None", "No vulnerabilities found", getSeverityColor),
+		}
+		return &rows, 0
+	}
+
 	rows := make([]pdf.ImageTableObject, 0, len(cves))
 	fixableCVEs := 0
 	for _, cve := range cves {

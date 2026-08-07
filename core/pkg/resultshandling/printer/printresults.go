@@ -27,6 +27,15 @@ const (
 	CsvFormat         string = "csv"
 )
 
+// AllFormats lists every output format kubescape can emit.
+var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CsvFormat}
+
+// ImageFormats lists formats whose printers support image-scan data. CSV is
+// deliberately excluded: CsvPrinter.ActionPrint requires opaSessionObj and
+// errors out on image scans (#2743) — a format must not be advertised as
+// image-scan-capable unless its printer actually handles that path.
+var ImageFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat}
+
 const (
 	JsonOutputExt       = ".json"
 	JunitOutputExt      = ".xml"

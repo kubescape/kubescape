@@ -114,8 +114,8 @@ func TestValidateScanFormat(t *testing.T) {
 		{"whitespace-and-separator-only input is rejected", " , ", ScanFormats, true},
 		{"invalid format", "xml", ScanFormats, true},
 		{"mixed valid and invalid formats", "json,xml", ScanFormats, true},
-		{"valid image format", "sarif", ImageScanFormats, false},
-		{"format unsupported for image scanning", "junit", ImageScanFormats, true},
+		{"valid image format", "sarif", ScanFormats, false},
+		{"junit format is now supported for image scanning", "junit", ScanFormats, false},
 	}
 
 	for _, testCase := range testCases {

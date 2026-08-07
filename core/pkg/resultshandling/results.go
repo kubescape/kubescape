@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -199,19 +200,14 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 
 func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningContext, printFormat string) (bool, error) {
 	if scanType == cautils.ScanTypeImage {
-		// supported types for image scanning
-		switch printFormat {
-		case printer.JsonFormat, printer.SARIFFormat, printer.YamlFormat,
-			printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat,
-			printer.HtmlFormat, printer.GitLabSASTFormat:
-			return false, nil
-		case printer.PrettyFormat:
+		if printFormat == printer.PrettyFormat {
 			return true, nil
-		default:
-			return false, fmt.Errorf("format \"%s\" is not supported for image scanning", printFormat)
 		}
+		if slices.Contains(printer.ImageFormats, printFormat) {
+			return false, nil
+		}
+		return false, fmt.Errorf("format \"%s\" is not supported for image scanning", printFormat)
 	}
-
 	if printFormat == printer.SARIFFormat || printFormat == printer.GitLabSASTFormat {
 		// SARIF and GitLab SAST resolve file locations, so they only apply to local files
 		switch scanContext {
