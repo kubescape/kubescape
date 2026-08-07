@@ -51,10 +51,11 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
 		k8s = getKubernetesApi()
 		if k8s == nil {
-			logger.L().Ctx(ctx).Fatal("failed connecting to Kubernetes cluster")
-		} else {
-			k8sClient = k8s.KubernetesClient
+			// Return rather than terminate: Scan already propagates this to the
+			// caller, and the command layer still exits non-zero on it.
+			return componentInterfaces{}, fmt.Errorf("failed connecting to Kubernetes cluster")
 		}
+		k8sClient = k8s.KubernetesClient
 	}
 
 	// ================== setup tenant object ======================================
