@@ -259,8 +259,14 @@ func emitMetricFamily(lines []string) string {
 func (m *Metrics) String() string {
 	// collect all metric lines first, then emit headers once per family
 	var all []string
-	all = append(all, m.rs.metrics()...)
-	all = append(all, m.coverage.metrics()...)
+	// Posture-scan metric families (compliance score, coverage) only apply
+	// when this Metrics was built from a posture scan; an image scan never
+	// populates m.rs/m.coverage, so emitting them here would push out a
+	// misleading all-zero compliance score alongside real CVE metrics (#2782).
+	if !m.isImageScan {
+		all = append(all, m.rs.metrics()...)
+		all = append(all, m.coverage.metrics()...)
+	}
 	for i := range m.listFrameworks {
 		all = append(all, m.listFrameworks[i].metrics()...)
 	}
@@ -330,6 +336,7 @@ type mImageVulnerability struct {
 }
 
 type Metrics struct {
+	isImageScan    bool
 	rs             mComplianceScore
 	coverage       mScanCoverage
 	listFrameworks []mFrameworkComplianceScore

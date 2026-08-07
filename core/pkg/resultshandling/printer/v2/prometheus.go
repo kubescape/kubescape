@@ -79,7 +79,7 @@ func (pp *PrometheusPrinter) generatePrometheusFormat(
 
 // generateImagePrometheusFormat builds CVE-count metrics, grouped by image and severity, for an image scan (#2782)
 func (pp *PrometheusPrinter) generateImagePrometheusFormat(imageScanData []cautils.ImageScanData) *Metrics {
-	m := &Metrics{}
+	m := &Metrics{isImageScan: true}
 	m.setImageVulnerabilities(imageScanData)
 	return m
 }

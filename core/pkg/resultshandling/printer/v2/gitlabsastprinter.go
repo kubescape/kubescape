@@ -94,15 +94,16 @@ type gitLabScannerRef struct {
 type gitLabLocation struct {
 	File      string `json:"file,omitempty"`
 	StartLine int    `json:"start_line,omitempty"`
-	// Dependency is set instead of File/StartLine for image-scan (dependency_scanning) findings,
-	// which have no source file location (#2782).
+	// Dependency is set alongside File for image-scan (dependency_scanning) findings. GitLab's
+	// schema requires both location.file and location.dependency.version — there's no source
+	// file for a container image, so File carries the image reference instead (#2782 review).
 	Dependency *gitLabDependency `json:"dependency,omitempty"`
 }
 
 // gitLabDependency identifies the vulnerable package for a dependency_scanning finding
 type gitLabDependency struct {
 	Package gitLabPackage `json:"package"`
-	Version string        `json:"version,omitempty"`
+	Version string        `json:"version"`
 }
 
 type gitLabPackage struct {
@@ -208,6 +209,27 @@ func (gp *GitLabSASTPrinter) printImageScan(imageScanData []cautils.ImageScanDat
 	return nil
 }
 
+// mapGitLabSeverity maps a Grype severity to one of the values the GitLab dependency_scanning
+// schema allows (Info/Unknown/Low/Medium/High/Critical). Grype can return Negligible, which
+// isn't in that list — passed through unmapped, one Negligible CVE invalidates the entire
+// report (#2782 review).
+func mapGitLabSeverity(severity string) string {
+	switch severity {
+	case apis.SeverityCriticalString:
+		return "Critical"
+	case apis.SeverityHighString:
+		return "High"
+	case apis.SeverityMediumString:
+		return "Medium"
+	case apis.SeverityLowString:
+		return "Low"
+	case apis.SeverityNegligibleString:
+		return "Info"
+	default:
+		return "Unknown"
+	}
+}
+
 // toGitLabImageVulnerability maps a CVE found in an image to a GitLab Dependency Scanning vulnerability
 func toGitLabImageVulnerability(image string, cve imageprinter.CVE) gitLabVulnerability {
 	message := fmt.Sprintf("%s in %s %s", cve.ID, cve.Package, cve.Version)
@@ -225,9 +247,10 @@ func toGitLabImageVulnerability(image string, cve imageprinter.CVE) gitLabVulner
 		Name:        message,
 		Message:     message,
 		Description: description,
-		Severity:    cve.Severity,
+		Severity:    mapGitLabSeverity(cve.Severity),
 		Scanner:     gitLabScannerRef{ID: gitLabScannerID, Name: gitLabScannerName},
 		Location: gitLabLocation{
+			File: image,
 			Dependency: &gitLabDependency{
 				Package: gitLabPackage{Name: cve.Package},
 				Version: cve.Version,
