@@ -195,12 +195,82 @@ func TestMergedExceptionsGetter_Deduplication(t *testing.T) {
 			},
 		},
 		{
+			name:  "multiple policies in CRD exception with partial overlap keeps the non-overlapping policy",
+			cloud: []armotypes.PostureExceptionPolicy{posturePolicy("cloud", "C-0034", nginx("production"))},
+			crd: []armotypes.PostureExceptionPolicy{
+				{
+					PolicyType: "crd",
+					Resources: []identifiers.PortalDesignator{
+						{DesignatorType: identifiers.DesignatorAttributes, Attributes: nginx("production")},
+					},
+					PosturePolicies: []armotypes.PosturePolicy{
+						{ControlID: "C-0034"},
+						{ControlID: "C-0035"},
+					},
+				},
+			},
+			want: []armotypes.PostureExceptionPolicy{
+				posturePolicy("cloud", "C-0034", nginx("production")),
+				{
+					PolicyType: "crd",
+					Resources: []identifiers.PortalDesignator{
+						{DesignatorType: identifiers.DesignatorAttributes, Attributes: nginx("production")},
+					},
+					PosturePolicies: []armotypes.PosturePolicy{
+						{ControlID: "C-0035"},
+					},
+				},
+			},
+		},
+		{
 			name:  "CRD exception without resolvable workload keys is kept",
 			cloud: []armotypes.PostureExceptionPolicy{posturePolicy("cloud", "C-0034", nginx("production"))},
 			crd:   []armotypes.PostureExceptionPolicy{{PolicyType: "crd", PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0034"}}}},
 			want: []armotypes.PostureExceptionPolicy{
 				posturePolicy("cloud", "C-0034", nginx("production")),
 				{PolicyType: "crd", PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0034"}}},
+			},
+		},
+		{
+			name: "cross deduplication with multiple policies and resources",
+			cloud: []armotypes.PostureExceptionPolicy{
+				posturePolicy("cloud", "C-0034", nginx("production")),
+				posturePolicy("cloud", "C-0035", redis("production")),
+			},
+			crd: []armotypes.PostureExceptionPolicy{
+				{
+					PolicyType: "crd",
+					Resources: []identifiers.PortalDesignator{
+						{DesignatorType: identifiers.DesignatorAttributes, Attributes: nginx("production")},
+						{DesignatorType: identifiers.DesignatorAttributes, Attributes: redis("production")},
+					},
+					PosturePolicies: []armotypes.PosturePolicy{
+						{ControlID: "C-0034"},
+						{ControlID: "C-0035"},
+					},
+				},
+			},
+			want: []armotypes.PostureExceptionPolicy{
+				posturePolicy("cloud", "C-0034", nginx("production")),
+				posturePolicy("cloud", "C-0035", redis("production")),
+				{
+					PolicyType: "crd",
+					Resources: []identifiers.PortalDesignator{
+						{DesignatorType: identifiers.DesignatorAttributes, Attributes: redis("production")},
+					},
+					PosturePolicies: []armotypes.PosturePolicy{
+						{ControlID: "C-0034"},
+					},
+				},
+				{
+					PolicyType: "crd",
+					Resources: []identifiers.PortalDesignator{
+						{DesignatorType: identifiers.DesignatorAttributes, Attributes: nginx("production")},
+					},
+					PosturePolicies: []armotypes.PosturePolicy{
+						{ControlID: "C-0035"},
+					},
+				},
 			},
 		},
 		{

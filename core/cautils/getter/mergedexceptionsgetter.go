@@ -93,37 +93,29 @@ func deduplicateExceptions(
 			merged = append(merged, crd)
 			continue
 		}
-		filteredResources := make([]identifiers.PortalDesignator, 0, len(crd.Resources))
-		for _, resource := range crd.Resources {
-			if !isResourceCovered(crd.PosturePolicies, resource, covered) {
-				filteredResources = append(filteredResources, resource)
+
+		for _, policy := range crd.PosturePolicies {
+			filteredResources := make([]identifiers.PortalDesignator, 0, len(crd.Resources))
+			for _, resource := range crd.Resources {
+				if policy.ControlID == "" {
+					filteredResources = append(filteredResources, resource)
+					continue
+				}
+				if _, found := covered[exceptionDedupKey(policy.ControlID, resource)]; !found {
+					filteredResources = append(filteredResources, resource)
+				}
 			}
+			if len(filteredResources) == 0 {
+				continue
+			}
+			filteredPolicy := crd
+			filteredPolicy.Resources = filteredResources
+			filteredPolicy.PosturePolicies = []armotypes.PosturePolicy{policy}
+			merged = append(merged, filteredPolicy)
 		}
-		if len(filteredResources) == 0 {
-			continue
-		}
-		filteredPolicy := crd
-		filteredPolicy.Resources = filteredResources
-		merged = append(merged, filteredPolicy)
 	}
 
 	return merged
-}
-
-func isResourceCovered(
-	policies []armotypes.PosturePolicy,
-	resource identifiers.PortalDesignator,
-	covered map[string]struct{},
-) bool {
-	for _, policy := range policies {
-		if policy.ControlID == "" {
-			continue
-		}
-		if _, found := covered[exceptionDedupKey(policy.ControlID, resource)]; found {
-			return true
-		}
-	}
-	return false
 }
 
 func exceptionDedupKey(controlID string, designator identifiers.PortalDesignator) string {
