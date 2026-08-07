@@ -19,6 +19,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
+	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 )
 
 type KubescapeMcpserver struct {
@@ -192,6 +194,28 @@ func createRuntimeToolsAndResources(ksServer *KubescapeMcpserver) {
 	)
 
 	ksServer.s.AddTool(getContainerProfileTool, ksServer.toolHandler(getContainerProfileTool.Name))
+
+	getConfigurationDriftTool := mcp.NewTool(
+		"get_configuration_drift",
+		mcp.WithDescription("Get configuration drift patches (e.g. readOnlyRootFilesystem, drop capabilities) by comparing a workload's runtime ContainerProfile against its static manifest. Useful for suggesting security posture hardening."),
+		mcp.WithString("namespace",
+			mcp.Description("Namespace of the profile/workload (optional, defaults to 'default')"),
+		),
+		mcp.WithString("profile_name",
+			mcp.Required(),
+			mcp.Description("Name of the container profile to compute drift for."),
+		),
+		mcp.WithString("workload_name",
+			mcp.Required(),
+			mcp.Description("Name of the workload to compare against (e.g., my-deployment)."),
+		),
+		mcp.WithString("workload_kind",
+			mcp.Required(),
+			mcp.Description("Kind of the workload (e.g., Pod, Deployment, DaemonSet, StatefulSet)."),
+		),
+	)
+
+	ksServer.s.AddTool(getConfigurationDriftTool, ksServer.toolHandler(getConfigurationDriftTool.Name))
 
 	containerProfileTemplate := mcp.NewResourceTemplate(
 		"kubescape://container-profiles/{namespace}/{profile_name}",
@@ -773,6 +797,81 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 				mcp.TextContent{
 					Type: "text",
 					Text: string(responseJson),
+				},
+			},
+		}, nil
+	case "get_configuration_drift":
+		namespace, ok := arguments["namespace"]
+		if !ok {
+			namespace = "default"
+		}
+		namespaceStr, ok := namespace.(string)
+		if !ok {
+			return mcp.NewToolResultError("namespace must be a string"), nil
+		}
+		profileName, ok := arguments["profile_name"]
+		if !ok {
+			return mcp.NewToolResultError("profile_name is required"), nil
+		}
+		profileNameStr, ok := profileName.(string)
+		if !ok {
+			return mcp.NewToolResultError("profile_name must be a string"), nil
+		}
+		workloadName, ok := arguments["workload_name"]
+		if !ok {
+			return mcp.NewToolResultError("workload_name is required"), nil
+		}
+		workloadNameStr, ok := workloadName.(string)
+		if !ok {
+			return mcp.NewToolResultError("workload_name must be a string"), nil
+		}
+		workloadKind, ok := arguments["workload_kind"]
+		if !ok {
+			return mcp.NewToolResultError("workload_kind is required"), nil
+		}
+		workloadKindStr, ok := workloadKind.(string)
+		if !ok {
+			return mcp.NewToolResultError("workload_kind must be a string"), nil
+		}
+
+		ksClient, ksErr := ksServer.getKsClient()
+		if ksErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to connect to storage client: %v", ksErr)), nil
+		}
+		profile, err := ksClient.ContainerProfiles(namespaceStr).Get(ctx, profileNameStr, metav1.GetOptions{})
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to get container profile: %v", err)), nil
+		}
+
+		var rawManifest []byte
+		var workloadObj any
+		k8sClient := ksServer.getK8sClient()
+		switch strings.ToLower(workloadKindStr) {
+		case "pod":
+			workloadObj, err = k8sClient.KubernetesClient.CoreV1().Pods(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
+		case "deployment":
+			workloadObj, err = k8sClient.KubernetesClient.AppsV1().Deployments(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
+		case "daemonset":
+			workloadObj, err = k8sClient.KubernetesClient.AppsV1().DaemonSets(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
+		case "statefulset":
+			workloadObj, err = k8sClient.KubernetesClient.AppsV1().StatefulSets(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
+		default:
+			return mcp.NewToolResultError(fmt.Sprintf("unsupported workload kind: %s", workloadKindStr)), nil
+		}
+
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to get workload manifest: %v", err)), nil
+		}
+		rawManifest, _ = json.Marshal(workloadObj)
+
+		fixes := fixhandler.DetectProfileDrift(rawManifest, profile)
+		fixesJson, _ := json.MarshalIndent(fixes, "", "  ")
+
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: string(fixesJson),
 				},
 			},
 		}, nil

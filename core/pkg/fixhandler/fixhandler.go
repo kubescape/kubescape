@@ -23,6 +23,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"gopkg.in/op/go-logging.v1"
 )
@@ -277,6 +278,21 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 	h.unfixedControls = h.unfixedControls[:0]
 	h.fixedControlsCount = 0
 
+	var containerProfile *storagev1beta1.ContainerProfile
+	if h.fixInfo != nil && h.fixInfo.ContainerProfilePath != "" {
+		profileData, err := os.ReadFile(h.fixInfo.ContainerProfilePath)
+		if err == nil {
+			var cp storagev1beta1.ContainerProfile
+			if err := json.Unmarshal(profileData, &cp); err == nil {
+				containerProfile = &cp
+			} else {
+				logger.L().Ctx(ctx).Warning("Failed to unmarshal container profile: " + err.Error())
+			}
+		} else {
+			logger.L().Ctx(ctx).Warning("Failed to read container profile: " + err.Error())
+		}
+	}
+
 	for _, result := range h.reportObj.Results {
 		if !result.GetStatus(nil).IsFailed() {
 			continue
@@ -430,6 +446,17 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				continue
 			}
 			h.unfixedControls = append(h.unfixedControls, pu.entry)
+		}
+
+		if containerProfile != nil {
+			var rawManifest []byte
+			if resourceObj != nil && resourceObj.GetObject() != nil {
+				rawManifest, _ = json.Marshal(resourceObj.GetObject())
+			}
+			fixes := DetectProfileDrift(rawManifest, containerProfile)
+			for _, fix := range fixes {
+				rfi.YamlExpressions[fix.YamlExpression] = armotypes.FixPath{Path: fix.YamlExpression, Value: ""}
+			}
 		}
 
 		if len(rfi.YamlExpressions) > 0 {
