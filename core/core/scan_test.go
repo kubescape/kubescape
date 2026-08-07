@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/version"
 )
 
@@ -400,4 +401,32 @@ func TestKubescape_SetContextRestoresOriginal(t *testing.T) {
 	ks.SetContext(originalCtx)
 	_, hasDeadline = ks.Context().Deadline()
 	assert.False(t, hasDeadline)
+}
+
+type streamingCancelMock struct {
+	estimateClusterSizeMock
+	passedCtx context.Context
+}
+
+func (m *streamingCancelMock) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
+	m.passedCtx = ctx
+	batchChan := make(chan *cautils.ResourceBatch, 1)
+	errChan := make(chan error, 1)
+	close(batchChan)
+	close(errChan)
+	return batchChan, errChan, 0, nil
+}
+
+func TestCollectAndProcessResourcesWithStreaming_CancelsProducerContext(t *testing.T) {
+	mockHandler := &streamingCancelMock{}
+	sessionObj := cautils.NewOPASessionObjMock()
+	scanInfo := &cautils.ScanInfo{}
+
+	parentCtx := context.Background()
+
+	_ = collectAndProcessResourcesWithStreaming(parentCtx, mockHandler, sessionObj, scanInfo, "cluster", "", "", false, time.Second, 10)
+
+	require.NotNil(t, mockHandler.passedCtx)
+	assert.NoError(t, parentCtx.Err(), "parent context must remain uncanceled")
+	assert.Equal(t, context.Canceled, mockHandler.passedCtx.Err(), "derived producer context must be canceled when function returns")
 }
