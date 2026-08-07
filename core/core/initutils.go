@@ -365,8 +365,13 @@ func getDefaultFrameworksPaths() []string {
 // path, leaving an offline scan with a downloader it cannot reach. --use-default makes the
 // local store the policy source, so the expansion is answered from the default framework set
 // instead of the getter, the same set getDefaultFrameworksPaths serves in air-gapped mode.
+//
+// Only framework scans are expanded. `scan control` with no arguments also sets ScanAll, but
+// it is not a framework scan, and injecting KindFramework identifiers there would populate
+// UseFrom and silently turn the scan air-gapped - dropping the downloader that control inputs,
+// exceptions and attack tracks still fall back to.
 func resolveDefaultScanAllPolicies(scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) []cautils.PolicyIdentifier {
-	if !scanInfo.ScanAll || !scanInfo.UseDefault {
+	if !scanInfo.ScanAll || !scanInfo.UseDefault || !scanInfo.FrameworkScan {
 		return policyIdentifiers
 	}
 	return cautils.AppendPolicyIdentifiers(policyIdentifiers, getter.NativeFrameworks, apisv1.KindFramework)

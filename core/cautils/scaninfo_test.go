@@ -380,6 +380,28 @@ func TestSetUseFrom(t *testing.T) {
 	}
 }
 
+// TestInitDeduplicatesUseFrom covers the offline HTTP handler configuration, where UseDefault
+// and UseArtifactsFrom both point at the local store: setUseFrom resolves a cache path per
+// identifier and setUseArtifactsFrom then discovers the very same file by reading the directory.
+// The local store is redirected at the temporary directory so both sources genuinely collide.
+func TestInitDeduplicatesUseFrom(t *testing.T) {
+	artifactsDir := t.TempDir()
+	framework := []byte(`{"name":"nsa","controls":[]}`)
+	require.NoError(t, os.WriteFile(filepath.Join(artifactsDir, "nsa.json"), framework, 0600))
+
+	prevStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = artifactsDir
+	t.Cleanup(func() { getter.DefaultLocalStore = prevStore })
+
+	scanInfo := &ScanInfo{
+		UseDefault:       true,
+		UseArtifactsFrom: artifactsDir,
+	}
+	scanInfo.Init(context.Background(), BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework))
+
+	assert.Equal(t, []string{filepath.Join(artifactsDir, "nsa.json")}, scanInfo.UseFrom)
+}
+
 func TestSplitNamespaceList(t *testing.T) {
 	testCases := []struct {
 		name string
