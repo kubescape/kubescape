@@ -178,6 +178,7 @@ type ScanInfo struct {
 	RegistryUsername      string            // Username for workload image registry authentication
 	RegistryPassword      string            // Password for workload image registry authentication
 	RegistryToken         string            // Bearer token for workload image registry authentication
+	ImageScanConcurrency  int               // Number of concurrent workers for image scanning
 }
 
 type Getters struct {

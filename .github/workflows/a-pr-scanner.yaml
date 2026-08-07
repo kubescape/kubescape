@@ -45,7 +45,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Test core pkg
-        run: ${{ env.DOCKER_CMD }} go test -v ./...
+        run: ${{ env.DOCKER_CMD }} go test -race -v ./...
 
       - name: Test httphandler pkg
         run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test -v ./...'

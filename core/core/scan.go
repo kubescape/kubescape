@@ -431,11 +431,6 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		return
 	}
 	defer svc.Close()
-
-	dedup := NewLayerDeduplicator()
-	throttler := NewRegistryThrottler(3, 100*time.Millisecond)
-	dedupSvc := NewDeduplicatingImageScanService(svc, dedup, throttler, nil)
-
 	creds := registryCredentialsFromScanInfo(scanInfo)
 	var jobs []ImageScanJob
 	for img := range imagesToScan.Iter() {
@@ -446,21 +441,25 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		})
 	}
 
-	logger.L().Info(fmt.Sprintf("Scanning %d images concurrently with layer deduplication...", len(jobs)))
-	orchestrator := NewImageScanOrchestrator(dedupSvc, 5)
+	concurrency := scanInfo.ImageScanConcurrency
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+
+	logger.L().Info(fmt.Sprintf("Scanning %d images concurrently with %d workers...", len(jobs), concurrency))
+	orchestrator := NewImageScanOrchestrator(svc, concurrency)
 	results := orchestrator.ScanImages(ctx, jobs)
 
 	for _, res := range results {
 		if res.Error != nil {
-			logger.L().StopError("failed to scan", helpers.String("image", res.Image), helpers.Error(res.Error))
+			logger.L().Error("failed to scan", helpers.String("image", res.Image), helpers.Error(res.Error))
 			continue
 		}
 		if res.ScanData != nil {
 			resultsHandling.ImageScanData = append(resultsHandling.ImageScanData, *res.ScanData)
-			logger.L().StopSuccess("Done scanning", helpers.String("image", res.Image))
+			logger.L().Success("Done scanning", helpers.String("image", res.Image))
 		}
 	}
-
 	if agg := orchestrator.GetErrorAggregator(); agg != nil && agg.HasErrors() {
 		logger.L().Warning(agg.Error())
 	}

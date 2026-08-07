@@ -200,6 +200,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.PrintAttackTree, "print-attack-tree", "", false, "Print attack tree")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.EnableRegoPrint, "enable-rego-prints", "", false, "Enable sending to rego prints to the logs (use with debug log level: -l debug)")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ScanImages, "scan-images", "", false, "Scan resources images")
+	scanCmd.PersistentFlags().IntVar(&scanInfo.ImageScanConcurrency, "image-scan-concurrency", 1, "Number of concurrent workers for image scanning")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.UseDefaultMatchers, "use-default-matchers", "", true, "Use default matchers (true) or CPE matchers (false) for image scanning")
 	scanCmd.PersistentFlags().StringToStringVar(&scanInfo.RegistryMapping, "registry-mapping", nil, "Map internal registry hosts to reachable ones, e.g. --registry-mapping image-registry.openshift-image-registry.svc:5000=registry.company.com (host[:port], no scheme)")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.RegistryUsername, "registry-username", "", "Username for image registry login when no docker config or credential helper is available; can also be set with KUBESCAPE_REGISTRY_USERNAME")
