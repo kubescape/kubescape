@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,6 +40,51 @@ func TestGetResourcesFromPath_SingleFileRelativePathIsRepositoryRelative(t *test
 			"RelativePath must not escape the repository root: %q", rel)
 		assert.Equal(t, "pod.yaml", filepath.Base(rel))
 	}
+}
+
+func TestGetResourcesFromPath_SingleManifestDoesNotRenderUnrelatedKustomizeDirectory(t *testing.T) {
+	root := t.TempDir()
+	manifestPath := filepath.Join(root, "manifest.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: requested
+`), 0o600))
+
+	// listDirs treats a file path as a basename pattern below its parent. A
+	// Kustomize directory with that basename makes the unintended traversal
+	// observable instead of relying on implementation details alone.
+	unrelatedDirectory := filepath.Join(root, "unrelated", "manifest.yaml")
+	require.NoError(t, os.MkdirAll(unrelatedDirectory, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(unrelatedDirectory, "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namePrefix: unrelated-
+resources:
+  - deployment.yaml
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(unrelatedDirectory, "deployment.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.27
+`), 0o600))
+
+	_, workloads, err := getResourcesFromPath(context.Background(), manifestPath, cautils.HelmValueOptions{})
+	require.NoError(t, err)
+	require.Len(t, workloads, 1, "an exact file scan must not add resources from its parent tree")
+	assert.Equal(t, "ConfigMap", workloads[0].GetKind())
+	assert.Equal(t, "requested", workloads[0].GetName())
 }
 
 // newRepoWithUnusableGitMetadata builds a repository that go-git can locate but
@@ -249,6 +295,349 @@ func TestGetResourcesFromPath_KustomizeTransformersDoNotDuplicate(t *testing.T) 
 	assert.Equal(t, reporthandling.SourceTypeKustomizeDirectory, workloadIDToSource[deploymentIDs[0]].FileType)
 	assert.Equal(t, "production", deployment.GetNamespace())
 	assert.Equal(t, "prod-test-app", deployment.GetName())
+}
+
+func TestGetResourcesFromPath_KustomizeOwnsReferencedHelmChart(t *testing.T) {
+	installFakeHelm(t)
+
+	root := t.TempDir()
+	chartDir := filepath.Join(root, "vendor", "charts", "app")
+	templateDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templateDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namePrefix: prod-
+helmGlobals:
+  chartHome: vendor/charts
+helmCharts:
+  - name: app
+    releaseName: first
+  - name: app
+    releaseName: second
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: app\nversion: 0.1.0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("{}\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(templateDir, "configmap.yaml"), []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}
+`), 0o600))
+
+	sources, workloads, err := getResourcesFromPath(context.Background(), root, cautils.HelmValueOptions{})
+	require.NoError(t, err)
+
+	counts := map[string]int{}
+	var configMaps int
+	for _, workload := range workloads {
+		counts[workload.GetKind()+"/"+workload.GetName()]++
+		if workload.GetKind() == "ConfigMap" {
+			configMaps++
+			assert.Equal(t, reporthandling.SourceTypeKustomizeDirectory, sources[workload.GetID()].FileType)
+		}
+	}
+	assert.Equal(t, 1, counts["ConfigMap/prod-first"], "the first Kustomize inflation must survive")
+	assert.Equal(t, 1, counts["ConfigMap/prod-second"], "the second Kustomize inflation must survive")
+	assert.Equal(t, 2, configMaps, "the chart must not also be rendered as a standalone Helm release")
+}
+
+func installFakeHelm(t *testing.T) {
+	t.Helper()
+	if os.PathSeparator == '\\' {
+		t.Skip("the deterministic Helm test double requires a POSIX shell")
+	}
+
+	binDir := t.TempDir()
+	helmPath := filepath.Join(binDir, "helm")
+	//nolint:gosec // The test-owned Helm double must be executable by Kustomize.
+	require.NoError(t, os.WriteFile(helmPath, []byte(`#!/bin/sh
+set -eu
+die() {
+    printf '%s\n' "$*" >&2
+    exit 2
+}
+case "${1:-}" in
+version)
+    [ "$#" -eq 3 ] && [ "$2" = "-c" ] && [ "$3" = "--short" ] || die "unexpected version args: $*"
+    printf '%s\n' 'v3.14.0+gtest'
+    ;;
+template)
+	[ "$#" -ge 3 ] || die "missing template args"
+	release_name=$2
+	chart_path=$3
+	[ -f "$chart_path/Chart.yaml" ] && [ -f "$chart_path/templates/configmap.yaml" ] || die "unexpected chart: $chart_path"
+	printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: %s\n' "$release_name"
+	include_crds=false
+	for arg in "$@"; do
+		if [ "$arg" = "--include-crds" ]; then
+			include_crds=true
+		fi
+	done
+	if [ "$include_crds" = true ] && [ -f "$chart_path/crds/test.yaml" ]; then
+		printf '%s\n' '---'
+		while IFS= read -r line || [ -n "$line" ]; do
+			printf '%s\n' "$line"
+		done < "$chart_path/crds/test.yaml"
+	fi
+    ;;
+*)
+	die "unsupported helm command: ${1:-}"
+    ;;
+esac
+`), 0o750))
+	t.Setenv("PATH", binDir)
+}
+
+func TestGetResourcesFromPath_RendersNestedKustomizeDirectory(t *testing.T) {
+	repoRoot := t.TempDir()
+	appDir := filepath.Join(repoRoot, "app")
+	require.NoError(t, os.MkdirAll(appDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(appDir, "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namePrefix: prod-
+resources:
+  - deployment.yaml
+  - ../shared.yaml
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(appDir, "deployment.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.27
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repoRoot, "shared.yaml"), []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shared
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(appDir, "unreferenced.yaml"), []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: unreferenced
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repoRoot, "standalone.yaml"), []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: standalone
+`), 0o600))
+
+	sources, workloads, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
+	require.NoError(t, err)
+
+	counts := map[string]int{}
+	var renderedDeployment workloadinterface.IMetadata
+	for _, workload := range workloads {
+		counts[workload.GetKind()+"/"+workload.GetName()]++
+		if workload.GetKind() == "Deployment" && workload.GetName() == "prod-app" {
+			renderedDeployment = workload
+		}
+	}
+
+	assert.Equal(t, 1, counts["Deployment/prod-app"], "the nested Kustomize output must be scanned")
+	assert.Zero(t, counts["Deployment/app"], "the untransformed source manifest must not also be scanned")
+	assert.Equal(t, 1, counts["ConfigMap/prod-shared"], "a referenced source outside the Kustomize directory must be owned by the render")
+	assert.Zero(t, counts["ConfigMap/shared"], "the external source must not also be scanned raw")
+	assert.Zero(t, counts["Kustomization/"], "the Kustomization file is build input, not a workload")
+	assert.Equal(t, 1, counts["ConfigMap/unreferenced"], "an unreferenced manifest beside the Kustomization must remain")
+	assert.Equal(t, 1, counts["ConfigMap/standalone"], "plain manifests outside the Kustomize tree must remain")
+
+	require.NotNil(t, renderedDeployment)
+	source, ok := sources[renderedDeployment.GetID()]
+	require.True(t, ok)
+	assert.Equal(t, reporthandling.SourceTypeKustomizeDirectory, source.FileType)
+	assert.Equal(t, "app", filepath.ToSlash(source.RelativePath))
+	assert.Equal(t, appDir, source.KustomizeDirectoryName)
+}
+
+func TestGetResourcesFromPath_NestedKustomizeOwnsReferencedHelmChart(t *testing.T) {
+	installFakeHelm(t)
+
+	repoRoot := t.TempDir()
+	appDir := filepath.Join(repoRoot, "app")
+	ownedChart := filepath.Join(appDir, "charts", "app")
+	standaloneChart := filepath.Join(repoRoot, "standalone-chart")
+
+	writeChart := func(directory, name string) {
+		t.Helper()
+		require.NoError(t, os.MkdirAll(filepath.Join(directory, "templates"), 0o750))
+		require.NoError(t, os.WriteFile(filepath.Join(directory, "Chart.yaml"), []byte("apiVersion: v2\nname: "+name+"\nversion: 0.1.0\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(directory, "values.yaml"), []byte("{}\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(directory, "templates", "configmap.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: "+name+"\n"), 0o600))
+	}
+	writeChart(ownedChart, "app")
+	writeChart(standaloneChart, "standalone")
+	require.NoError(t, os.WriteFile(filepath.Join(appDir, "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namePrefix: prod-
+helmCharts:
+  - name: app
+    releaseName: app
+`), 0o600))
+
+	sources, workloads, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
+	require.NoError(t, err)
+
+	counts := map[string]int{}
+	var transformed workloadinterface.IMetadata
+	var standalone workloadinterface.IMetadata
+	for _, workload := range workloads {
+		counts[workload.GetKind()+"/"+workload.GetName()]++
+		switch workload.GetName() {
+		case "prod-app":
+			transformed = workload
+		case "standalone":
+			standalone = workload
+		}
+	}
+	assert.Equal(t, 1, counts["ConfigMap/prod-app"], "the nested Kustomize Helm output must be scanned exactly once")
+	assert.Zero(t, counts["ConfigMap/app"], "the Kustomize-owned chart must not also be rendered as a standalone release")
+	assert.Equal(t, 1, counts["ConfigMap/standalone"], "an unreferenced sibling chart must remain in generic Helm discovery")
+	require.NotNil(t, transformed)
+	require.NotNil(t, standalone)
+	assert.Equal(t, reporthandling.SourceTypeKustomizeDirectory, sources[transformed.GetID()].FileType)
+	assert.Equal(t, reporthandling.SourceTypeHelmChart, sources[standalone.GetID()].FileType)
+}
+
+func TestGetResourcesFromPath_NestedKustomizeHelmCRDOwnershipFollowsIncludeCRDs(t *testing.T) {
+	for _, includeCRDs := range []bool{false, true} {
+		t.Run(fmt.Sprintf("includeCRDs=%t", includeCRDs), func(t *testing.T) {
+			installFakeHelm(t)
+
+			repoRoot := t.TempDir()
+			appDir := filepath.Join(repoRoot, "app")
+			chartDir := filepath.Join(repoRoot, "vendor", "charts", "app")
+			require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "templates"), 0o750))
+			require.NoError(t, os.MkdirAll(filepath.Join(chartDir, "crds"), 0o750))
+			require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: app\nversion: 0.1.0\n"), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("{}\n"), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(chartDir, "templates", "configmap.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: app\n"), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(chartDir, "crds", "test.yaml"), []byte(`apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.example.com
+spec:
+  group: example.com
+  names:
+    kind: Widget
+    plural: widgets
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+`), 0o600))
+			require.NoError(t, os.MkdirAll(appDir, 0o750))
+			require.NoError(t, os.WriteFile(filepath.Join(appDir, "kustomization.yaml"), []byte(fmt.Sprintf(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmGlobals:
+  chartHome: ../vendor/charts
+helmCharts:
+  - name: app
+    releaseName: app
+    includeCRDs: %t
+`, includeCRDs)), 0o600))
+
+			ctx := context.Background()
+			kustomizeResult, err := cautils.LoadResourcesFromKustomizeDirectories(ctx, repoRoot)
+			require.NoError(t, err)
+			var renderedCRDs int
+			for _, renderedWorkloads := range kustomizeResult.SourceToWorkloads {
+				for _, workload := range renderedWorkloads {
+					if workload.GetKind() == "CustomResourceDefinition" && workload.GetName() == "widgets.example.com" {
+						renderedCRDs++
+					}
+				}
+			}
+
+			rawSources, err := cautils.LoadResourcesFromFiles(ctx, repoRoot, repoRoot, kustomizeResult.OwnedHelmChartDirectories)
+			require.NoError(t, err)
+			var rawCRDs int
+			for source, rawWorkloads := range rawSources {
+				if kustomizeResult.OwnsPlainFile(source) {
+					continue
+				}
+				for _, workload := range rawWorkloads {
+					if workload.GetKind() == "CustomResourceDefinition" && workload.GetName() == "widgets.example.com" {
+						rawCRDs++
+					}
+				}
+			}
+			if includeCRDs {
+				assert.Equal(t, 1, renderedCRDs, "Kustomize must emit the CRD when includeCRDs is true")
+				assert.Zero(t, rawCRDs, "the raw pass must exclude the CRD before identity deduplication")
+			} else {
+				assert.Zero(t, renderedCRDs, "Kustomize must omit the CRD when includeCRDs is false")
+				assert.Equal(t, 1, rawCRDs, "the raw pass must retain the omitted CRD")
+			}
+
+			sources, workloads, err := getResourcesFromPath(ctx, repoRoot, cautils.HelmValueOptions{})
+			require.NoError(t, err)
+
+			var crds []workloadinterface.IMetadata
+			for _, workload := range workloads {
+				if workload.GetKind() == "CustomResourceDefinition" && workload.GetName() == "widgets.example.com" {
+					crds = append(crds, workload)
+				}
+			}
+			require.Len(t, crds, 1, "the final CRD must be present exactly once")
+			expectedSourceType := reporthandling.SourceTypeYaml
+			if includeCRDs {
+				expectedSourceType = reporthandling.SourceTypeKustomizeDirectory
+			}
+			assert.Equal(t, expectedSourceType, sources[crds[0].GetID()].FileType)
+		})
+	}
+}
+
+func TestGetResourcesFromPath_BrokenNestedKustomizeDoesNotAbortBroadScan(t *testing.T) {
+	repoRoot := t.TempDir()
+	brokenDir := filepath.Join(repoRoot, "broken")
+	require.NoError(t, os.MkdirAll(brokenDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(brokenDir, "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - valid.yaml
+  - missing.yaml
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(brokenDir, "valid.yaml"), []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inside-broken
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repoRoot, "standalone.yaml"), []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: standalone
+`), 0o600))
+
+	sources, workloads, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
+	require.NoError(t, err)
+
+	counts := map[string]int{}
+	var insideBroken workloadinterface.IMetadata
+	for _, workload := range workloads {
+		counts[workload.GetKind()+"/"+workload.GetName()]++
+		if workload.GetKind() == "ConfigMap" && workload.GetName() == "inside-broken" {
+			insideBroken = workload
+		}
+	}
+	assert.Equal(t, 1, counts["ConfigMap/standalone"], "an invalid child configuration must not hide valid sibling resources")
+	assert.Equal(t, 1, counts["ConfigMap/inside-broken"], "a valid input in the failed build must remain in the raw fallback")
+	require.NotNil(t, insideBroken)
+	assert.Equal(t, reporthandling.SourceTypeYaml, sources[insideBroken.GetID()].FileType)
 }
 
 func TestGetResourcesFromPathRejectsDirectoryWithoutKubernetesResources(t *testing.T) {
