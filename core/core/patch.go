@@ -220,6 +220,22 @@ func copaPatch(ctx context.Context, timeout time.Duration, buildkitAddr, image, 
 	}
 }
 
+// resolveBuildkitOpts fills bkOpts.Addr from buildkitAddr when it isn't
+// already set. buildkitAddr comes from the --address/-a flag
+// (patchInfo.BuildkitAddress, defaulting to unix:///run/buildkit/buildkitd.sock)
+// and nothing else in this codebase ever populates bkOpts.Addr. Without this,
+// bkOpts.Addr stays "" and buildkit.NewClient takes its autoClient() fallback
+// path instead (tries the docker driver, then buildx, then only then its own
+// hardcoded default socket) - silently ignoring whatever the user passed via
+// --address, including a custom remote buildkitd endpoint. bkOpts.Addr wins
+// if a caller ever does set it directly, so this only fills the gap.
+func resolveBuildkitOpts(buildkitAddr string, bkOpts buildkit.Opts) buildkit.Opts {
+	if bkOpts.Addr == "" {
+		bkOpts.Addr = buildkitAddr
+	}
+	return bkOpts
+}
+
 func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, ignoreError bool, outputMode, outputPath string, bkOpts buildkit.Opts) error {
 	// Ensure working folder exists for call to InstallUpdates
 	if workingFolder == "" {
@@ -247,6 +263,8 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 	if err != nil {
 		return err
 	}
+
+	bkOpts = resolveBuildkitOpts(buildkitAddr, bkOpts)
 
 	bkClient, err := buildkit.NewClient(ctx, bkOpts)
 	if err != nil {
