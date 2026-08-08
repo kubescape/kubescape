@@ -452,6 +452,10 @@ func requireJSONSubset(t *testing.T, want, got any, path string) {
 	}
 }
 
+func asLegacyPostureReport(report *reporthandlingv2.PostureReport) *reporthandlingv2.PostureReport {
+	return report
+}
+
 func TestResultsHandlerToJSONPreservesLegacyFieldsAndAddsEnrichment(t *testing.T) {
 	const controlID = "C-ENRICHED"
 	resource := workloadinterface.NewWorkloadObj(map[string]any{
@@ -550,8 +554,7 @@ func TestResultsHandlerToJSONPreservesLegacyFieldsAndAddsEnrichment(t *testing.T
 
 	// The legacy typed accessor remains source-compatible and retains its
 	// established opa-utils return type.
-	var legacy *reporthandlingv2.PostureReport
-	legacy = rh.GetResults()
+	legacy := asLegacyPostureReport(rh.GetResults())
 	require.NotNil(t, legacy)
 	assert.Equal(t, float32(7), legacy.SummaryDetails.Controls[controlID].ScoreFactor)
 }
