@@ -224,6 +224,63 @@ func TestLoadResourcesFromHelmCharts(t *testing.T) {
 	}
 }
 
+func TestLoadResourcesFromHelmChartsExcludingKustomizeOwnedDirectories(t *testing.T) {
+	root := t.TempDir()
+	chartHome := filepath.Join(root, "charts")
+	base := filepath.Join(root, "base")
+	ownedChart := filepath.Join(base, "charts", "app")
+	ownedSubchart := filepath.Join(ownedChart, "charts", "dependency")
+	standaloneChart := filepath.Join(chartHome, "standalone")
+
+	writeChart := func(directory, name string) {
+		t.Helper()
+		require.NoError(t, os.MkdirAll(filepath.Join(directory, "templates"), 0o750))
+		writeManifestFixture(t, directory, "Chart.yaml", "apiVersion: v2\nname: "+name+"\nversion: 0.1.0\n")
+		writeManifestFixture(t, directory, "values.yaml", "{}\n")
+		writeManifestFixture(t, filepath.Join(directory, "templates"), "configmap.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: "+name+"\n")
+	}
+	writeChart(ownedChart, "app")
+	writeChart(ownedSubchart, "dependency")
+	writeChart(standaloneChart, "standalone")
+	writeManifestFixture(t, root, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - base
+`)
+	writeManifestFixture(t, base, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmCharts:
+  - name: app
+    releaseName: app
+`)
+
+	ownedDirectories, err := KustomizeHelmChartDirectories(root)
+	require.NoError(t, err)
+	require.Equal(t, []string{ownedChart, ownedSubchart}, ownedDirectories)
+
+	standaloneTemplate := filepath.Join(standaloneChart, "templates", "configmap.yaml")
+	remainingFiles := excludeHelmTemplateFiles([]string{
+		filepath.Join(ownedChart, "templates", "configmap.yaml"),
+		filepath.Join(ownedSubchart, "templates", "configmap.yaml"),
+		standaloneTemplate,
+	}, ownedDirectories)
+	require.Equal(t, []string{standaloneTemplate}, remainingFiles)
+
+	workloads, charts, renderedDirectories, err := LoadResourcesFromHelmChartsExcludingDirectories(
+		context.Background(), root, HelmValueOptions{}, ownedDirectories,
+	)
+	require.NoError(t, err)
+	require.Equal(t, []string{standaloneChart}, renderedDirectories)
+	require.Len(t, workloads, 1)
+	require.Len(t, charts, 1)
+	for source, sourceWorkloads := range workloads {
+		require.Len(t, sourceWorkloads, 1)
+		assert.Equal(t, "ConfigMap", sourceWorkloads[0].GetKind())
+		assert.Equal(t, "standalone", sourceWorkloads[0].GetName())
+		assert.Equal(t, standaloneChart, charts[source].Path)
+	}
+}
+
 func TestLoadFiles(t *testing.T) {
 	files, _ := listFiles(onlineBoutiquePath())
 	_, errs := loadFiles("", files)

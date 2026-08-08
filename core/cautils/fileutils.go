@@ -51,9 +51,30 @@ type Chart struct {
 // --set-file path, etc.) the error is returned to the caller. We deliberately do not silently
 // fall back to chart defaults — scanning the wrong manifests is worse than failing fast.
 func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
+	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, nil)
+}
+
+// LoadResourcesFromHelmChartsExcludingDirectories behaves like LoadResourcesFromHelmCharts,
+// but leaves charts at or below excludedChartDirectories to another renderer that owns them.
+// The caller is responsible for including those directories in its plain-file exclusions once
+// that renderer succeeds.
+func LoadResourcesFromHelmChartsExcludingDirectories(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
+	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, excludedChartDirectories)
+}
+
+func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
 	helmDirectories, discoveryErrs := listHelmChartDirs(basePath)
 	for _, err := range discoveryErrs {
 		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(err))
+	}
+	if len(excludedChartDirectories) > 0 {
+		remaining := make([]string, 0, len(helmDirectories))
+		for _, directory := range helmDirectories {
+			if !isUnderAnyDir(directory, excludedChartDirectories) {
+				remaining = append(remaining, directory)
+			}
+		}
+		helmDirectories = remaining
 	}
 
 	// Parse user-supplied value overrides once; reuse for every chart we render.

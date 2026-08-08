@@ -1,12 +1,14 @@
 package cautils
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetKustomizeDirectoryName(t *testing.T) {
@@ -68,6 +70,131 @@ func TestGetKustomizeDirectoryName(t *testing.T) {
 func kustomizeTestdataPath() string {
 	o, _ := os.Getwd()
 	return filepath.Join(o, "testdata", "kustomize")
+}
+
+func TestKustomizeHelmChartDirectories_CustomHomeDeduplicatesPhysicalChart(t *testing.T) {
+	root := t.TempDir()
+	writeManifestFixture(t, root, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmGlobals:
+  chartHome: vendor/charts
+helmCharts:
+  - name: app
+    releaseName: first
+  - name: app
+    releaseName: second
+`)
+
+	directories, err := KustomizeHelmChartDirectories(root)
+	require.NoError(t, err)
+	assert.Equal(t, []string{filepath.Join(root, "vendor", "charts", "app")}, directories)
+}
+
+func TestKustomizeHelmChartDirectories_VersionedRepositoryChart(t *testing.T) {
+	root := t.TempDir()
+	writeManifestFixture(t, root, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmGlobals:
+  chartHome: vendor/charts
+helmCharts:
+  - name: app
+    version: 1.2.3
+    repo: https://charts.example.com
+    releaseName: app
+`)
+
+	directories, err := KustomizeHelmChartDirectories(root)
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		filepath.Join(root, "vendor", "charts", "app-1.2.3", "app"),
+	}, directories)
+}
+
+func TestKustomizeHelmChartDirectories_ChartHomeAndDownloadLayout(t *testing.T) {
+	tests := []struct {
+		name          string
+		chartHome     func(string) string
+		chartFields   string
+		expectedParts []string
+	}{
+		{
+			name:          "absolute chart home",
+			chartHome:     func(root string) string { return filepath.Join(root, "absolute-charts") },
+			expectedParts: []string{"absolute-charts", "app"},
+		},
+		{
+			name:          "repository without version uses regular chart home",
+			chartHome:     func(string) string { return "charts" },
+			chartFields:   "    repo: https://charts.example.com\n",
+			expectedParts: []string{"charts", "app"},
+		},
+		{
+			name:          "version without repository uses regular chart home",
+			chartHome:     func(string) string { return "charts" },
+			chartFields:   "    version: 1.2.3\n",
+			expectedParts: []string{"charts", "app"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			chartHome := tt.chartHome(root)
+			writeManifestFixture(t, root, "kustomization.yaml", fmt.Sprintf(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmGlobals:
+  chartHome: %q
+helmCharts:
+  - name: app
+%s    releaseName: app
+`, chartHome, tt.chartFields))
+
+			directories, err := KustomizeHelmChartDirectories(root)
+			require.NoError(t, err)
+			expected := filepath.Join(append([]string{root}, tt.expectedParts...)...)
+			if filepath.IsAbs(chartHome) {
+				expected = filepath.Join(chartHome, "app")
+			}
+			assert.Equal(t, []string{expected}, directories)
+		})
+	}
+}
+
+func TestKustomizeHelmChartDirectories_TraversesSelectedLocalGraph(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "base")
+	component := filepath.Join(root, "component")
+	require.NoError(t, os.MkdirAll(base, 0o750))
+	require.NoError(t, os.MkdirAll(component, 0o750))
+
+	writeManifestFixture(t, root, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - base
+components:
+  - component
+`)
+	writeManifestFixture(t, base, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmCharts:
+  - name: base-app
+    releaseName: base-app
+`)
+	writeManifestFixture(t, component, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+helmGlobals:
+  chartHome: vendor/charts
+helmCharts:
+  - name: component-app
+    releaseName: component-app
+`)
+
+	directories, err := KustomizeHelmChartDirectories(root)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{
+		filepath.Join(base, "charts", "base-app"),
+		filepath.Join(component, "vendor", "charts", "component-app"),
+	}, directories)
 }
 
 // TestKustomizeOverlayWithBase tests that kustomize overlays can properly load

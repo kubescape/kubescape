@@ -276,16 +276,27 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		repoRoot = filepath.Dir(repoRoot)
 	}
 
+	// A chart referenced by this Kustomization belongs to the Kustomize render. Rendering it through
+	// the generic recursive Helm loader as well would add a standalone release beside the transformed
+	// Kustomize output.
+	kustomizeHelmChartDirectories, err := cautils.KustomizeHelmChartDirectories(path)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	// render helm charts first, so the plain-YAML loader knows which charts' templates the render
 	// already covered and can skip only those. A chart whose render failed is dropped whole here, so
 	// its templates must stay plainly scanned rather than vanish from the scan.
-	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmCharts(ctx, path, helmValueOpts)
+	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmChartsExcludingDirectories(ctx, path, helmValueOpts, kustomizeHelmChartDirectories)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// load resource from local file system
-	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, renderedCharts)
+	// Kustomize-owned charts are excluded here too: their templates are covered by the Kustomize
+	// render even though the generic Helm renderer deliberately left them alone.
+	coveredChartDirectories := append(append([]string{}, renderedCharts...), kustomizeHelmChartDirectories...)
+	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, coveredChartDirectories)
 	if err != nil {
 		return nil, nil, err
 	}
