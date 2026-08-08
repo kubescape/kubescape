@@ -75,6 +75,7 @@ func (tcm *TenantConfigMock) GetAccessKey() string {
 func TestDisplayMessage(t *testing.T) {
 
 	t.Run("should display an empty message", func(t *testing.T) {
+
 		reporter := NewReportEventReceiver(
 			&TenantConfigMock{
 				clusterName: "test",
@@ -98,6 +99,7 @@ func TestDisplayMessage(t *testing.T) {
 	})
 
 	t.Run("should display a non-empty message", func(t *testing.T) {
+
 		reporter := NewReportEventReceiver(
 			&TenantConfigMock{
 				clusterName: "test",
@@ -294,6 +296,7 @@ func TestSubmit(t *testing.T) {
 }
 
 func TestSetters(t *testing.T) {
+
 	pickString := func() string {
 		return strconv.Itoa(rand.Intn(10000)) //nolint:gosec
 	}

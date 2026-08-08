@@ -245,7 +245,7 @@ func TestNewScanServiceWithMatchers(t *testing.T) {
 }
 
 func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
-	if testing.Short() || os.Getenv("KUBESCAPE_INTEGRATION_TESTS") == "" {
+	if testing.Short() || os.Getenv("KUBESCAPE_INTEGRATION_TESTS") != "1" {
 		t.Skip("skipping integration test; set KUBESCAPE_INTEGRATION_TESTS=1 to run")
 	}
 	// Test the actual NewScanServiceWithMatchers function
@@ -530,7 +530,7 @@ func TestGetMatchers(t *testing.T) {
 }
 
 func TestNewScanServiceIntegration(t *testing.T) {
-	if testing.Short() || os.Getenv("KUBESCAPE_INTEGRATION_TESTS") == "" {
+	if testing.Short() || os.Getenv("KUBESCAPE_INTEGRATION_TESTS") != "1" {
 		t.Skip("skipping integration test; set KUBESCAPE_INTEGRATION_TESTS=1 to run")
 	}
 	distCfg, installCfg, _, _ := NewDefaultDBConfig("")
