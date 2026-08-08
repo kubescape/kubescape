@@ -77,7 +77,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if err := validateThresholdsOnly(scanInfo); err != nil {
 				return err
 			}
-			namespace, kind, name, apiVersion, err := parseWorkloadIdentifierString(args[0])
+			namespace, kind, name, workloadAPIVersion, err := parseWorkloadIdentifierString(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid input: %w", err)
 			}
@@ -86,9 +86,13 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				scanInfo.Namespace = namespace
 			}
 
-			setWorkloadScanInfo(scanInfo, kind, name, apiVersion)
+			if apiVersion == "" {
+				apiVersion = workloadAPIVersion
+			}
 
-			results, err := ks.Scan(scanInfo)
+			policyIdentifiers := setWorkloadScanInfo(scanInfo, kind, name, apiVersion)
+
+			results, err := ks.Scan(scanInfo, policyIdentifiers)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}
@@ -113,7 +117,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 	return workloadCmd
 }
 
-func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string, apiVersion string) {
+func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string, apiVersion string) []cautils.PolicyIdentifier {
 	scanInfo.SetScanType(cautils.ScanTypeWorkload)
 	scanInfo.ScanImages = true
 
@@ -124,7 +128,6 @@ func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string, a
 	}
 	scanInfo.ScanObject.SetKind(kind)
 	scanInfo.ScanObject.SetName(name)
-	scanInfo.ScanObject.SetApiVersion(apiVersion)
 
 	policyIdentifiers := cautils.BuildPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 
