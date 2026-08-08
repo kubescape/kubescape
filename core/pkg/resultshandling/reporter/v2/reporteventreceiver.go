@@ -76,7 +76,7 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 	}
 
 	if err := report.prepareReport(opaSessionObj); err != nil {
-		return fmt.Errorf("failed to submit scan results. reason: %s", err.Error())
+		return fmt.Errorf("failed to submit scan results. reason: %w", err)
 	}
 
 	logger.L().Debug("", helpers.String("account ID", report.GetAccountID()))

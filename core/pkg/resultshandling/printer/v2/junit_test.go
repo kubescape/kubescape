@@ -513,7 +513,8 @@ func TestJunitGoldenFile(t *testing.T) {
 
 	goldenPath := filepath.Join("testdata", "junit_golden.xml")
 	if *updateGolden {
-		require.NoError(t, os.WriteFile(goldenPath, got, 0o644))
+		//nolint:gosec // this is a test file writing a golden file
+		require.NoError(t, os.WriteFile(goldenPath, got, 0o600))
 	}
 
 	want, err := os.ReadFile(goldenPath)
