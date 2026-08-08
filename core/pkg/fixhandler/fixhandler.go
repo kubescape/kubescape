@@ -459,8 +459,22 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			if resourceObj != nil {
 				workloadKind = resourceObj.GetKind()
 			}
-			if containerProfile.GetLabels() != nil {
-				containerName = containerProfile.GetLabels()["kubescape.io/workload-container-name"]
+			
+			// Verify resourceObj matches containerProfile's workload labels
+			labels := containerProfile.GetLabels()
+			if labels != nil {
+				containerName = labels["kubescape.io/workload-container-name"]
+				profileKind := labels["kubescape.io/workload-kind"]
+				profileName := labels["kubescape.io/workload-name"]
+				
+				if resourceObj != nil {
+					if profileKind != "" && strings.ToLower(profileKind) != strings.ToLower(resourceObj.GetKind()) {
+						continue // Kind mismatch, skip drift detection for this resource
+					}
+					if profileName != "" && profileName != resourceObj.GetName() {
+						continue // Name mismatch, skip drift detection for this resource
+					}
+				}
 			}
 
 			fixes := DetectProfileDrift(rawManifest, containerProfile, workloadKind, containerName, rfi.DocumentIndex)
