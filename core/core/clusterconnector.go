@@ -105,6 +105,7 @@ func (a *OperatorAdapter) httpPostOperatorScanRequest(body apis.Commands) (strin
 
 	err = a.StartPortForwarder()
 	if err != nil {
+		a.StopPortForwarder()
 		return "", err
 	}
 	defer a.StopPortForwarder()
