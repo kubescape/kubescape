@@ -316,12 +316,10 @@ func TestOperatorAdapter_httpPostOperatorScanRequest(t *testing.T) {
 			// StartPortForwarder is always attempted first, regardless of outcome.
 			assert.Equal(t, 1, connector.startCalls, "StartPortForwarder must be attempted exactly once")
 
-			// StopPortForwarder must run even on failure paths that reach past StartPortForwarder.
-			if tc.startErr == nil {
-				assert.Equal(t, 1, connector.stopCalls, "StopPortForwarder must be called after a successful StartPortForwarder")
-			} else {
-				assert.Equal(t, 0, connector.stopCalls, "StopPortForwarder must not run if StartPortForwarder itself failed")
-			}
+			// StopPortForwarder must run on every path that reaches past StartPortForwarder,
+			// including when StartPortForwarder itself fails, so the ForwardPorts goroutine
+			// it spawned cannot outlive the scan attempt.
+			assert.Equal(t, 1, connector.stopCalls, "StopPortForwarder must be called exactly once after StartPortForwarder")
 
 			if tc.expectPost {
 				require.Equal(t, 1, recorder.calls, "httpPostFunc must be invoked exactly once")
