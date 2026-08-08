@@ -87,14 +87,25 @@ results, err := ks.Scan(scanInfo, policyIdentifiers)
 
 ```go
 // List available policies
-err := ks.List(listPolicies)
+listResult, err := ks.List(listPolicies)
+if err != nil {
+    // Handle list error
+}
+
+// Use listResult.Names for frameworks/exceptions
+// Use listResult.Controls for controls
 ```
 
 ### Downloading Artifacts
 
 ```go
 // Download for offline use
-err := ks.Download(downloadInfo)
+downloadResult, err := ks.Download(downloadInfo)
+if err != nil {
+    // Handle download error
+}
+
+// Use downloadResult.Files for the saved artifact paths
 ```
 
 ### Image Scanning

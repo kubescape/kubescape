@@ -2,6 +2,7 @@ package imagescan
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -244,6 +245,9 @@ func TestNewScanServiceWithMatchers(t *testing.T) {
 }
 
 func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
+	if testing.Short() || os.Getenv("KUBESCAPE_INTEGRATION_TESTS") == "" {
+		t.Skip("skipping integration test; set KUBESCAPE_INTEGRATION_TESTS=1 to run")
+	}
 	// Test the actual NewScanServiceWithMatchers function
 	distCfg, installCfg, _, _ := NewDefaultDBConfig("")
 
@@ -526,6 +530,9 @@ func TestGetMatchers(t *testing.T) {
 }
 
 func TestNewScanServiceIntegration(t *testing.T) {
+	if testing.Short() || os.Getenv("KUBESCAPE_INTEGRATION_TESTS") == "" {
+		t.Skip("skipping integration test; set KUBESCAPE_INTEGRATION_TESTS=1 to run")
+	}
 	distCfg, installCfg, _, _ := NewDefaultDBConfig("")
 
 	svc, err := NewScanService(distCfg, installCfg)

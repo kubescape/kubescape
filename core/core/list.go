@@ -18,7 +18,7 @@ import (
 )
 
 // listFunc handles targets whose output is a flat []string (frameworks, exceptions).
-// "controls" is handled separately via listAndFormatControls because it produces typed structs.
+// "controls" is handled separately via listControls because it produces typed structs.
 var listFunc = map[string]func(context.Context, *metav1.ListPolicies) ([]string, error){
 	"frameworks": listFrameworks,
 	"exceptions": listExceptions,
@@ -40,15 +40,20 @@ func ListSupportActions() []string {
 	return commands
 }
 
-func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
+func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) (*metav1.ListResult, error) {
 	if listPolicies.Target == "controls" {
-		return ks.listAndFormatControls(listPolicies)
+		entries, err := listControls(ks.Context(), listPolicies)
+		if err != nil {
+			return nil, err
+		}
+		entries = naturalSortControls(entries)
+		return &metav1.ListResult{Controls: entries}, nil
 	}
 
 	if policyListerFunc, ok := listFunc[listPolicies.Target]; ok {
 		policies, err := policyListerFunc(ks.Context(), listPolicies)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		policies = naturalSortPolicies(policies)
 
@@ -60,15 +65,15 @@ func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
 
 		return nil
 	}
-	return fmt.Errorf("unknown command to list")
+	return nil, fmt.Errorf("unknown command to list")
 }
 
-func (ks *Kubescape) listAndFormatControls(listPolicies *metav1.ListPolicies) error {
-	entries, err := listControls(ks.Context(), listPolicies)
-	if err != nil {
-		return err
+// PrintListResult writes a ListResult to the configured output using the
+// requested target and format. It is the caller side of Kubescape.List.
+func PrintListResult(ctx context.Context, result *metav1.ListResult, target, format string) error {
+	if result == nil {
+		return nil
 	}
-	entries = naturalSortControls(entries)
 
 	switch listPolicies.Format {
 	case "pretty-print":
@@ -167,7 +172,7 @@ func listExceptions(ctx context.Context, listPolicies *metav1.ListPolicies) ([]s
 	if err != nil {
 		return exceptionsNames, err
 	}
-	exceptions, err := ksCloudAPI.GetExceptions("")
+	exceptions, err := ksCloudAPI.GetExceptions(ctx, "")
 	if err != nil {
 		return exceptionsNames, err
 	}

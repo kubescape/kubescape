@@ -269,4 +269,10 @@ func TestContainsIdentifier(t *testing.T) {
 	assert.True(t, containsIdentifier(policyIdentifiers, "mitre"))
 	assert.False(t, containsIdentifier(policyIdentifiers, "cis"))
 	assert.False(t, containsIdentifier(policyIdentifiers, ""))
+
+	// ListFrameworks returns the framework's declared name, which is cased
+	// differently from the lower case getter.NativeFrameworks entries.
+	assert.True(t, containsIdentifier(policyIdentifiers, "NSA"))
+	assert.True(t, containsIdentifier(policyIdentifiers, "MITRE"))
+	assert.False(t, containsIdentifier(policyIdentifiers, "CIS"))
 }

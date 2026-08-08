@@ -378,16 +378,24 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	}
 
 	hostResources := cautils.MapHostResources(ksResourceMap)
-	if len(hostResources) > 0 && sessionObj.Metadata.ScanMetadata.HostScanner {
-		logger.L().Info("Requesting Host scanner data")
-		infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
-			cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
-		} else {
-			for k, v := range infoMap {
-				sessionObj.InfoMap[k] = v
+	// check that controls use host sensor resources
+	if len(hostResources) > 0 {
+		if sessionObj.Metadata.ScanMetadata.HostScanner {
+			logger.L().Info("Requesting Host scanner data")
+			infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
+				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
+			} else if k8sHandler.hostSensorHandler == nil {
+				// using hostSensor mock
+				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
+			} else {
+				for k, v := range infoMap {
+					sessionObj.InfoMap[k] = v
+				}
 			}
+		} else {
+			cautils.SetInfoMapForResources("This control is scanned exclusively by the Kubescape operator, not the Kubescape CLI. Install the Kubescape operator:\n     https://kubescape.io/docs/install-operator/.", hostResources, sessionObj.InfoMap)
 		}
 	}
 
@@ -396,6 +404,17 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	}
 
 	cloudResources := cautils.MapCloudResources(ksResourceMap)
+
+	// allResources is resident.AllResources, which only ever holds
+	// cluster-scoped resources (see the partition loop above); namespaced
+	// resources live in namespaceBatches. Aggregate both before counting, and
+	// do it here, before namespaceBatches are drained into batchChan below.
+	countable := make(map[string]workloadinterface.IMetadata, len(allResources))
+	maps.Copy(countable, allResources)
+	for _, batch := range namespaceBatches {
+		maps.Copy(countable, batch.AllResources)
+	}
+	setMapNamespaceToNumOfResources(ctx, countable, sessionObj)
 	if len(cloudResources) > 0 {
 		if err := k8sHandler.collectCloudResources(ctx, sessionObj, allResources, ksResourceMap, cloudResources); err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
