@@ -412,25 +412,39 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 
 func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, resultsHandling *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) {
 	imagesToScan := mapset.NewSet[string]()
+	imageToCreds := make(map[string]imagescan.RegistryCredentials)
+	k8sApi := k8sinterface.NewKubernetesApi()
 
 	if scanType == cautils.ScanTypeWorkload {
-		containers, err := workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject()).GetContainers()
+		wl := workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject())
+		containers, err := wl.GetContainers()
 		if err != nil {
 			logger.L().Error("failed to get containers", helpers.Error(err))
 			return
 		}
 		for _, container := range containers {
 			imagesToScan.Add(container.Image)
+			if _, exists := imageToCreds[container.Image]; !exists {
+				if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, container.Image); ok {
+					imageToCreds[container.Image] = creds
+				}
+			}
 		}
 	} else {
 		for _, workload := range scanData.AllResources {
-			containers, err := workloadinterface.NewWorkloadObj(workload.GetObject()).GetContainers()
+			wl := workloadinterface.NewWorkloadObj(workload.GetObject())
+			containers, err := wl.GetContainers()
 			if err != nil {
 				logger.L().Error(fmt.Sprintf("failed to get containers for kind: %s, name: %s, namespace: %s", workload.GetKind(), workload.GetName(), workload.GetNamespace()), helpers.Error(err))
 				continue
 			}
 			for _, container := range containers {
 				imagesToScan.Add(container.Image)
+				if _, exists := imageToCreds[container.Image]; !exists {
+					if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, container.Image); ok {
+						imageToCreds[container.Image] = creds
+					}
+				}
 			}
 		}
 	}
@@ -446,9 +460,15 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		return
 	}
 	defer svc.Close()
-	creds := registryCredentialsFromScanInfo(scanInfo)
+	defaultCreds := registryCredentialsFromScanInfo(scanInfo)
 	var jobs []ImageScanJob
 	for img := range imagesToScan.Iter() {
+		creds := defaultCreds
+		if creds.Token == "" && (creds.Username == "" || creds.Password == "") {
+			if resolvedCreds, ok := imageToCreds[img]; ok {
+				creds = resolvedCreds
+			}
+		}
 		jobs = append(jobs, ImageScanJob{
 			Image:               img,
 			RegistryCredentials: creds,
