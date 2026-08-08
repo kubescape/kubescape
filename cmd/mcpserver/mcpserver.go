@@ -864,7 +864,11 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		rawManifest, _ = json.Marshal(workloadObj)
 
-		fixes := fixhandler.DetectProfileDrift(rawManifest, profile)
+		containerName := ""
+		if profile.GetLabels() != nil {
+			containerName = profile.GetLabels()["kubescape.io/workload-container-name"]
+		}
+		fixes := fixhandler.DetectProfileDrift(rawManifest, profile, workloadKindStr, containerName, 0)
 		fixesJson, _ := json.MarshalIndent(fixes, "", "  ")
 
 		return &mcp.CallToolResult{
