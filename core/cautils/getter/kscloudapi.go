@@ -125,7 +125,6 @@ func HTTPPost(client *http.Client, fullURL string, body []byte, headers map[stri
 		// Restore the body for utils.ErrAPI so it can format the error message
 		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
-
 		return nil, 0, utils.ErrAPI(resp)
 	}
 
