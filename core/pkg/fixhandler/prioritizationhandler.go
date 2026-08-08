@@ -9,6 +9,15 @@ import (
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
 
+func isValidCapability(s string) bool {
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
 // FixSuggestion represents a suggested fix based on drift detection
 type FixSuggestion struct {
 	YamlExpression string
@@ -141,7 +150,9 @@ func DetectProfileDrift(manifest []byte, profile *storagev1beta1.ContainerProfil
 			if dropList, ok := caps["drop"].([]interface{}); ok {
 				for _, d := range dropList {
 					if dStr, ok := d.(string); ok {
-						existingDrops[dStr] = true
+						if isValidCapability(dStr) {
+							existingDrops[dStr] = true
+						}
 					}
 				}
 			}
