@@ -21,6 +21,104 @@ func TestNewFileResourceHandler_InitializesNewInstance(t *testing.T) {
 	assert.NotNil(t, fileHandler)
 }
 
+// This is deliberately a FileResourceHandler test rather than another parser
+// count assertion: list items must survive manifest loading, offline resource
+// resolution, and policy filtering before they become OPA input.
+func TestFileResourceHandlerIndexesListEnvelopeItemsForPolicies(t *testing.T) {
+	tests := []struct {
+		name      string
+		extension string
+		manifest  string
+		wantByGVR map[string]string
+		wantNames map[string]string
+	}{
+		{
+			name:      "JSON generic List",
+			extension: "json",
+			manifest: `{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "listed-pod", "namespace": "default"}},
+    {"apiVersion": "v1", "kind": "Service", "metadata": {"name": "listed-service", "namespace": "default"}}
+  ]
+}`,
+			wantByGVR: map[string]string{
+				"/v1/pods":     "Pod",
+				"/v1/services": "Service",
+			},
+			wantNames: map[string]string{
+				"/v1/pods":     "listed-pod",
+				"/v1/services": "listed-service",
+			},
+		},
+		{
+			name:      "JSON typed list",
+			extension: "json",
+			manifest: `{
+  "apiVersion": "v1",
+  "kind": "PodList",
+  "items": [
+    {"metadata": {"name": "json-typed-pod", "namespace": "default"}}
+  ]
+}`,
+			wantByGVR: map[string]string{"/v1/pods": "Pod"},
+			wantNames: map[string]string{"/v1/pods": "json-typed-pod"},
+		},
+		{
+			name:      "YAML typed list",
+			extension: "yaml",
+			manifest: `apiVersion: v1
+kind: PodList
+items:
+  - metadata:
+      name: yaml-typed-pod
+      namespace: default
+`,
+			wantByGVR: map[string]string{"/v1/pods": "Pod"},
+			wantNames: map[string]string{"/v1/pods": "yaml-typed-pod"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manifestPath := filepath.Join(t.TempDir(), "resources."+tt.extension)
+			require.NoError(t, os.WriteFile(manifestPath, []byte(tt.manifest), 0o600))
+
+			match := reporthandling.RuleMatchObjects{
+				APIGroups:   []string{""},
+				APIVersions: []string{"v1"},
+				Resources:   []string{"pods", "services"},
+			}
+			framework := *mockFramework("list-envelope-input", []reporthandling.Control{
+				mockControl("list-envelope-input", []reporthandling.PolicyRule{
+					mockRule("list-envelope-input", []reporthandling.RuleMatchObjects{match}, ""),
+				}),
+			})
+			scanInfo := &cautils.ScanInfo{InputPatterns: []string{manifestPath}}
+			session := cautils.NewOPASessionObj(
+				context.Background(), []reporthandling.Framework{framework}, nil, scanInfo, nil,
+			)
+
+			resources, allResources, _, _, err := NewFileResourceHandler().GetResources(
+				context.Background(), session, scanInfo,
+			)
+			require.NoError(t, err)
+			require.Len(t, allResources, len(tt.wantByGVR))
+
+			for gvr, wantKind := range tt.wantByGVR {
+				require.Lenf(t, resources[gvr], 1, "expected %s in policy input %s", wantKind, gvr)
+				resourceID := resources[gvr][0]
+				resource, ok := allResources[resourceID]
+				require.Truef(t, ok, "policy input %s referenced missing resource %s", gvr, resourceID)
+				assert.Equal(t, wantKind, resource.GetKind())
+				assert.Equal(t, "v1", resource.GetApiVersion())
+				assert.Equal(t, tt.wantNames[gvr], resource.GetName())
+			}
+		})
+	}
+}
+
 // A single-file scan must yield a repository-relative RelativePath: the SARIF and GitLab SAST printers build the finding's file location from it, and the GitLab printer drops findings whose path is empty, absolute, or escaping the repo root. See #2496.
 func TestGetResourcesFromPath_SingleFileRelativePathIsRepositoryRelative(t *testing.T) {
 	workloadIDToSource, workloads, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/mixed_extensions/pod.yaml", cautils.HelmValueOptions{})

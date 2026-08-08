@@ -20,6 +20,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"gopkg.in/yaml.v3"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 var (
@@ -389,14 +390,10 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 			continue
 		}
 		if obj, ok := j.(map[string]any); ok {
-			if o := objectsenvelopes.NewObject(obj); o != nil {
-				if o.GetObjectType() == workloadinterface.TypeListWorkloads {
-					if list := workloadinterface.NewListWorkloadsObj(o.GetObject()); list != nil {
-						yamlObjs = append(yamlObjs, list.GetItems()...)
-					}
-				} else {
-					yamlObjs = append(yamlObjs, o)
-				}
+			objects, objectErr := manifestObjectToWorkloads(obj)
+			yamlObjs = append(yamlObjs, objects...)
+			if objectErr != nil {
+				parseErrs = append(parseErrs, fmt.Errorf("document %d: %w", i+1, objectErr))
 			}
 		}
 	}
@@ -457,22 +454,116 @@ func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err
 		return workloads, err
 	}
 
-	convertJsonToWorkload(jsonObj, &workloads)
+	if convertErr := convertJsonToWorkload(jsonObj, &workloads); convertErr != nil {
+		return workloads, convertErr
+	}
 
 	return workloads, nil
 }
-func convertJsonToWorkload(jsonObj any, workloads *[]workloadinterface.IMetadata) {
+
+func convertJsonToWorkload(jsonObj any, workloads *[]workloadinterface.IMetadata) error {
 
 	switch x := jsonObj.(type) {
 	case map[string]any:
-		if o := objectsenvelopes.NewObject(x); o != nil {
-			(*workloads) = append(*workloads, o)
-		}
+		objects, err := manifestObjectToWorkloads(x)
+		*workloads = append(*workloads, objects...)
+		return err
 	case []any:
+		var itemErrs []error
 		for i := range x {
-			convertJsonToWorkload(x[i], workloads)
+			if err := convertJsonToWorkload(x[i], workloads); err != nil {
+				itemErrs = append(itemErrs, fmt.Errorf("array item %d: %w", i, err))
+			}
+		}
+		return errors.Join(itemErrs...)
+	}
+	return nil
+}
+
+// manifestObjectToWorkloads normalizes Kubernetes list envelopes before object
+// envelopes are created. Both YAML and JSON readers use it so the accepted
+// manifest shapes do not depend on the input format.
+func manifestObjectToWorkloads(obj map[string]any) ([]workloadinterface.IMetadata, error) {
+	kind, isList, err := listEnvelopeKind(obj)
+	if err != nil {
+		return nil, err
+	}
+	if isList {
+		return expandListEnvelope(obj, kind)
+	}
+
+	if o := objectsenvelopes.NewObject(obj); o != nil {
+		return []workloadinterface.IMetadata{o}, nil
+	}
+	return nil, nil
+}
+
+// listEnvelopeKind recognizes the canonical List kind and typed list
+// envelopes such as PodList. A typed list has no resource identity of its own;
+// requiring that property prevents a normal named CR such as AllowList from
+// being classified as a list merely because its kind ends in "List".
+func listEnvelopeKind(obj map[string]any) (kind string, isList bool, err error) {
+	kindValue, hasKind := obj["kind"]
+	if !hasKind {
+		return "", false, nil
+	}
+	kind, ok := kindValue.(string)
+	if !ok {
+		return "", false, fmt.Errorf("kind must be a string")
+	}
+	if kind == string(workloadinterface.TypeListWorkloads) {
+		return kind, true, nil
+	}
+	if !strings.HasSuffix(kind, string(workloadinterface.TypeListWorkloads)) || manifestHasIdentity(obj) {
+		return kind, false, nil
+	}
+	return kind, true, nil
+}
+
+func manifestHasIdentity(obj map[string]any) bool {
+	metadata, ok := obj["metadata"].(map[string]any)
+	if !ok {
+		return false
+	}
+	for _, field := range []string{"name", "generateName"} {
+		if value, ok := metadata[field].(string); ok && value != "" {
+			return true
 		}
 	}
+	return false
+}
+
+func expandListEnvelope(obj map[string]any, listKind string) ([]workloadinterface.IMetadata, error) {
+	if _, ok := obj["items"].([]any); !ok {
+		return nil, fmt.Errorf("%s.items must be an array", listKind)
+	}
+
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", listKind, err)
+	}
+	decoded, _, err := unstructured.UnstructuredJSONScheme.Decode(data, nil, nil)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", listKind, err)
+	}
+	list, ok := decoded.(*unstructured.UnstructuredList)
+	if !ok {
+		return nil, fmt.Errorf("%s.items must be an array", listKind)
+	}
+
+	workloads := make([]workloadinterface.IMetadata, 0, len(list.Items))
+	for i := range list.Items {
+		normalized, normalizeErr := manifestObjectToWorkloads(list.Items[i].Object)
+		if normalizeErr != nil {
+			return nil, fmt.Errorf("%s.items[%d]: %w", listKind, i, normalizeErr)
+		}
+		if len(normalized) == 0 {
+			return nil, fmt.Errorf("%s.items[%d] is not a Kubernetes object", listKind, i)
+		}
+		workloads = append(workloads, normalized...)
+	}
+
+	return workloads, nil
 }
 func convertYamlToJson(i any) any {
 	switch x := i.(type) {
