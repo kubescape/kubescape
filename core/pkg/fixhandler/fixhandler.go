@@ -468,7 +468,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				profileName := labels["kubescape.io/workload-name"]
 
 				if resourceObj != nil {
-					if profileKind != "" && strings.ToLower(profileKind) != strings.ToLower(resourceObj.GetKind()) {
+					if profileKind != "" && !strings.EqualFold(profileKind, resourceObj.GetKind()) {
 						continue // Kind mismatch, skip drift detection for this resource
 					}
 					if profileName != "" && profileName != resourceObj.GetName() {
@@ -990,7 +990,7 @@ func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int
 	// (lexer_participle.go stringValue) unescapes \" and nothing else, so any
 	// other Go-style escape would be written to the file literally.
 	// Do not quote if the value is meant to be a YAML sequence.
-	if isStringValue && !(strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]")) {
+	if isStringValue && (!strings.HasPrefix(value, "[") || !strings.HasSuffix(value, "]")) {
 		value = `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 	}
 
