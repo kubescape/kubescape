@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"testing"
@@ -208,7 +209,7 @@ func TestAdoptClusterName(t *testing.T) {
 func TestUpdateCloudURLs(t *testing.T) {
 	co := mockConfigObj()
 	mockCloudAPIURL := "1-2-3-4.com"
-	os.Setenv("KS_CLOUD_API_URL", mockCloudAPIURL)
+	t.Setenv("KS_CLOUD_API_URL", mockCloudAPIURL)
 
 	assert.NotEqual(t, co.CloudAPIURL, mockCloudAPIURL)
 	updateCloudURLs(co)
@@ -291,9 +292,9 @@ func TestGetConfigMapNamespace(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.env != "" {
-				_ = os.Setenv("KS_DEFAULT_CONFIGMAP_NAMESPACE", tt.env)
-			}
+			// Set unconditionally, including the empty "no env" case, so the
+			// subtest does not inherit a value from the caller's environment.
+			t.Setenv(defaultConfigMapNamespaceEnvVar, tt.env)
 			assert.Equalf(t, tt.want, GetConfigMapNamespace(), "GetConfigMapNamespace()")
 		})
 	}
@@ -439,6 +440,41 @@ func TestUpdateConfigFile_RoundTrip(t *testing.T) {
 	readBack := &ConfigObj{}
 	require.NoError(t, json.Unmarshal(dat, readBack))
 	assert.Equal(t, configObj.AccountID, readBack.AccountID)
+}
+
+func TestUpdateConfigFile_ClusterNameStripped(t *testing.T) {
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	defer func() { getter.DefaultLocalStore = originalStore }()
+
+	configObj := mockConfigObj()
+	require.NoError(t, updateConfigFile(configObj))
+
+	dat, err := os.ReadFile(ConfigFileFullPath())
+	require.NoError(t, err)
+	require.NotEmpty(t, dat, "config file must not be empty after write")
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(dat, &raw))
+	_, present := raw["clusterName"]
+	assert.False(t, present, "clusterName key must be absent from the persisted JSON, not merely empty")
+	assert.Contains(t, raw, "accountID", "accountID must be present in the persisted JSON")
+	assert.Equal(t, "ddd", configObj.ClusterName, "ClusterName must be restored on the in-memory object after write")
+}
+
+func TestUpdateConfigFile_PropagatesMarshalError(t *testing.T) {
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	defer func() { getter.DefaultLocalStore = originalStore }()
+
+	origMarshal := configMarshal
+	sentinel := errors.New("injected marshal failure")
+	configMarshal = func(any) ([]byte, error) { return nil, sentinel }
+	defer func() { configMarshal = origMarshal }()
+
+	err := updateConfigFile(mockConfigObj())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sentinel)
 }
 
 // TestNewLocalConfig_LogsOnMalformedCachedConfigFile guards against a

@@ -12,6 +12,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	giturl "github.com/kubescape/go-git-url"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -271,7 +272,7 @@ func TestScanInfoFormatsDeduplicatesInOrder(t *testing.T) {
 	}
 }
 
-func TestScanInfoSetPolicyIdentifiers(t *testing.T) {
+func TestAppendPolicyIdentifiers(t *testing.T) {
 	tests := []struct {
 		name     string
 		existing []PolicyIdentifier
@@ -302,17 +303,103 @@ func TestScanInfoSetPolicyIdentifiers(t *testing.T) {
 			existing: []PolicyIdentifier{{Identifier: "C-0001", Kind: apisv1.KindControl}},
 			want:     []PolicyIdentifier{{Identifier: "C-0001", Kind: apisv1.KindControl}},
 		},
+		{
+			name: "skips existing policy regardless of case",
+			existing: []PolicyIdentifier{
+				{Identifier: "nsa", Kind: apisv1.KindFramework},
+			},
+			policies: []string{"NSA", "MITRE"},
+			want: []PolicyIdentifier{
+				{Identifier: "nsa", Kind: apisv1.KindFramework},
+				{Identifier: "MITRE", Kind: apisv1.KindFramework},
+			},
+		},
+		{
+			name:     "deduplicates differently cased policies within the same list",
+			policies: []string{"nsa", "NSA"},
+			want: []PolicyIdentifier{
+				{Identifier: "nsa", Kind: apisv1.KindFramework},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scanInfo := &ScanInfo{PolicyIdentifier: tt.existing}
+			policyIdentifiers := AppendPolicyIdentifiers(tt.existing, tt.policies, apisv1.KindFramework)
 
-			scanInfo.SetPolicyIdentifiers(tt.policies, apisv1.KindFramework)
-
-			assert.Equal(t, tt.want, scanInfo.PolicyIdentifier)
+			assert.Equal(t, tt.want, policyIdentifiers)
 		})
 	}
+}
+
+func TestSetUseFrom(t *testing.T) {
+	cachePath := func(identifier string) string {
+		path, err := getter.PolicyCachePath(identifier)
+		require.NoError(t, err)
+		return path
+	}
+
+	tests := []struct {
+		name              string
+		scanInfo          *ScanInfo
+		policyIdentifiers []PolicyIdentifier
+		want              []string
+	}{
+		{
+			name:              "resolves a cache path per identifier",
+			scanInfo:          &ScanInfo{UseDefault: true},
+			policyIdentifiers: BuildPolicyIdentifiers([]string{"nsa", "mitre"}, apisv1.KindFramework),
+			want:              []string{cachePath("nsa"), cachePath("mitre")},
+		},
+		{
+			name:              "resolves every identifier a ScanAll expansion contributed",
+			scanInfo:          &ScanInfo{UseDefault: true, ScanAll: true},
+			policyIdentifiers: BuildPolicyIdentifiers([]string{"allcontrols", "nsa", "mitre"}, apisv1.KindFramework),
+			want:              []string{cachePath("allcontrols"), cachePath("nsa"), cachePath("mitre")},
+		},
+		{
+			name:              "skips identifiers that cannot be turned into a cache path",
+			scanInfo:          &ScanInfo{UseDefault: true},
+			policyIdentifiers: BuildPolicyIdentifiers([]string{"../etc/passwd", "nsa"}, apisv1.KindFramework),
+			want:              []string{cachePath("nsa")},
+		},
+		{
+			name:              "without UseDefault nothing is resolved",
+			scanInfo:          &ScanInfo{},
+			policyIdentifiers: BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework),
+			want:              nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.scanInfo.setUseFrom(tt.policyIdentifiers)
+
+			assert.Equal(t, tt.want, tt.scanInfo.UseFrom)
+		})
+	}
+}
+
+// TestInitDeduplicatesUseFrom covers the offline HTTP handler configuration, where UseDefault
+// and UseArtifactsFrom both point at the local store: setUseFrom resolves a cache path per
+// identifier and setUseArtifactsFrom then discovers the very same file by reading the directory.
+// The local store is redirected at the temporary directory so both sources genuinely collide.
+func TestInitDeduplicatesUseFrom(t *testing.T) {
+	artifactsDir := t.TempDir()
+	framework := []byte(`{"name":"nsa","controls":[]}`)
+	require.NoError(t, os.WriteFile(filepath.Join(artifactsDir, "nsa.json"), framework, 0600))
+
+	prevStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = artifactsDir
+	t.Cleanup(func() { getter.DefaultLocalStore = prevStore })
+
+	scanInfo := &ScanInfo{
+		UseDefault:       true,
+		UseArtifactsFrom: artifactsDir,
+	}
+	scanInfo.Init(context.Background(), BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework))
+
+	assert.Equal(t, []string{filepath.Join(artifactsDir, "nsa.json")}, scanInfo.UseFrom)
 }
 
 func TestSplitNamespaceList(t *testing.T) {
@@ -339,21 +426,21 @@ func TestSplitNamespaceList(t *testing.T) {
 func TestScanInfoToScanMetadataNamespaces(t *testing.T) {
 	t.Run("populates excluded namespaces", func(t *testing.T) {
 		scanInfo := &ScanInfo{ExcludedNamespaces: "kube-system,kube-public"}
-		md := scanInfoToScanMetadata(context.Background(), scanInfo)
+		md := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
 		assert.Equal(t, []string{"kube-system", "kube-public"}, md.ScanMetadata.ExcludedNamespaces)
 		assert.Empty(t, md.ScanMetadata.IncludeNamespaces)
 	})
 
 	t.Run("populates included namespaces", func(t *testing.T) {
 		scanInfo := &ScanInfo{IncludeNamespaces: "default,prod"}
-		md := scanInfoToScanMetadata(context.Background(), scanInfo)
+		md := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
 		assert.Equal(t, []string{"default", "prod"}, md.ScanMetadata.IncludeNamespaces)
 		assert.Empty(t, md.ScanMetadata.ExcludedNamespaces)
 	})
 
 	t.Run("empty when not set", func(t *testing.T) {
 		scanInfo := &ScanInfo{}
-		md := scanInfoToScanMetadata(context.Background(), scanInfo)
+		md := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
 		assert.Empty(t, md.ScanMetadata.ExcludedNamespaces)
 		assert.Empty(t, md.ScanMetadata.IncludeNamespaces)
 	})

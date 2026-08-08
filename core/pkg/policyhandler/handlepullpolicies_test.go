@@ -32,10 +32,10 @@ type ExceptionsGetterMock struct{}
 type ControlsInputsGetterMock struct{}
 type PolicyGetterMock struct{}
 
-func (mock *ExceptionsGetterMock) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+func (mock *ExceptionsGetterMock) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	return CachedExceptions, nil
 }
-func (mock *ControlsInputsGetterMock) GetControlsInputs(clusterName string) (map[string][]string, error) {
+func (mock *ControlsInputsGetterMock) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
 	return CachedControlInputs, nil
 }
 func (mock *PolicyGetterMock) GetControl(name string) (*reporthandling.Control, error) {
@@ -113,26 +113,14 @@ func TestCollectPolicies(t *testing.T) {
 			name:          "Collect Framework policy",
 			policyHandler: NewPolicyHandler("test-cluster"),
 			policyIdent:   []cautils.PolicyIdentifier{{Identifier: FrameworkName, Kind: "Framework"}},
-			scanInfo: &cautils.ScanInfo{
-				Getters: cautils.Getters{
-					PolicyGetter:         &PolicyGetterMock{},
-					ExceptionsGetter:     &ExceptionsGetterMock{},
-					ControlsInputsGetter: &ControlsInputsGetterMock{},
-				},
-			},
+			scanInfo:      &cautils.ScanInfo{},
 			expectedError: nil,
 		},
 		{
 			name:          "Collect Control policy",
 			policyHandler: NewPolicyHandler("test-cluster"),
 			policyIdent:   []cautils.PolicyIdentifier{{Identifier: "", Kind: "Control"}},
-			scanInfo: &cautils.ScanInfo{
-				Getters: cautils.Getters{
-					PolicyGetter:         &PolicyGetterMock{},
-					ExceptionsGetter:     &ExceptionsGetterMock{},
-					ControlsInputsGetter: &ControlsInputsGetterMock{},
-				},
-			},
+			scanInfo:      &cautils.ScanInfo{},
 			expectedError: nil,
 		},
 	}
@@ -140,13 +128,13 @@ func TestCollectPolicies(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			tc.policyHandler.getters = &cautils.Getters{
+			getters := &cautils.Getters{
 				PolicyGetter:         &PolicyGetterMock{},
 				ExceptionsGetter:     &ExceptionsGetterMock{},
 				ControlsInputsGetter: &ControlsInputsGetterMock{},
 			}
 
-			opaSessionObj, err := tc.policyHandler.CollectPolicies(ctx, tc.policyIdent, tc.scanInfo)
+			opaSessionObj, err := tc.policyHandler.CollectPolicies(ctx, tc.policyIdent, tc.scanInfo, getters)
 
 			assert.Equal(t, tc.expectedError, err)
 			assert.NotNil(t, opaSessionObj)
@@ -245,7 +233,7 @@ func TestGetExceptions(t *testing.T) {
 	policyHandler.getters = &cautils.Getters{
 		ExceptionsGetter: &ExceptionsGetterMock{},
 	}
-	exceptions, err := policyHandler.getExceptions()
+	exceptions, err := policyHandler.getExceptions(context.TODO())
 
 	assert.NoError(t, err)
 	assert.Equal(t, cachedExceptions, exceptions)
@@ -258,7 +246,7 @@ func TestGetControlInputs(t *testing.T) {
 		ControlsInputsGetter: &ControlsInputsGetterMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs()
+	controlInputs, err := policyHandler.getControlInputs(context.TODO())
 
 	assert.NoError(t, err)
 	assert.Equal(t, cachedControlInputs, controlInputs)
@@ -295,7 +283,7 @@ func TestDownloadScanPolicies_LocalCacheBypass(t *testing.T) {
 
 type ControlsInputsGetterEmptyMock struct{}
 
-func (mock *ControlsInputsGetterEmptyMock) GetControlsInputs(clusterName string) (map[string][]string, error) {
+func (mock *ControlsInputsGetterEmptyMock) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
 	return nil, nil
 }
 
@@ -307,7 +295,7 @@ func TestGetControlInputs_EmptyReturnsErrorNotCached(t *testing.T) {
 		ControlsInputsGetter: &ControlsInputsGetterEmptyMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs()
+	controlInputs, err := policyHandler.getControlInputs(context.TODO())
 
 	assert.Error(t, err)
 	assert.Nil(t, controlInputs)
@@ -324,7 +312,7 @@ func TestGetControlInputs_NonNilResultIsCached(t *testing.T) {
 		ControlsInputsGetter: &ControlsInputsGetterMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs()
+	controlInputs, err := policyHandler.getControlInputs(context.TODO())
 
 	assert.NoError(t, err)
 	assert.Equal(t, CachedControlInputs, controlInputs)

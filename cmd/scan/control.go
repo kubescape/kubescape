@@ -72,14 +72,14 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			}
 
 			// flagValidationControl(scanInfo)
-			scanInfo.PolicyIdentifier = []cautils.PolicyIdentifier{}
+			var policyIdentifiers []cautils.PolicyIdentifier
 
 			if len(args) == 0 {
 				scanInfo.ScanAll = true
 			} else { // expected control or list of control separated by ","
 
 				// Read controls from input args
-				scanInfo.SetPolicyIdentifiers(strings.Split(args[0], ","), apisv1.KindControl)
+				policyIdentifiers = cautils.BuildPolicyIdentifiers(strings.Split(args[0], ","), apisv1.KindControl)
 
 				if len(args) > 1 {
 					if len(args[1:]) == 0 || args[1] != "-" {
@@ -92,6 +92,10 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 						defer os.Remove(tempFile.Name())
 
 						if _, err := io.Copy(tempFile, os.Stdin); err != nil {
+							_ = tempFile.Close()
+							return err
+						}
+						if err := tempFile.Close(); err != nil {
 							return err
 						}
 						scanInfo.InputPatterns = []string{tempFile.Name()}
@@ -106,7 +110,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				return err
 			}
 
-			results, err := ks.Scan(scanInfo)
+			results, err := ks.Scan(scanInfo, policyIdentifiers)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}

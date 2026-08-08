@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -17,8 +19,11 @@ func main() {
 		{Target: "framework", Identifier: "security"}, // force add the "security" framework
 	}
 	for _, download := range downloads {
-		if err := ks.Download(&download); err != nil {
+		result, err := ks.Download(&download)
+		if err != nil {
 			logger.L().Error("failed to download artifact", helpers.Error(err), helpers.String("target", download.Target))
+			continue
 		}
+		logger.L().Success("downloaded artifacts", helpers.String("count", fmt.Sprintf("%d", len(result.Files))), helpers.String("files", strings.Join(result.Files, ", ")))
 	}
 }

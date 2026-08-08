@@ -54,7 +54,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resultsFile := filepath.Join(OutputDir, scanID)
-	scanInfo := getPrometheusDefaultScanCommand(scanID, resultsFile, metricsQueryParams.Frameworks)
+	scanInfo, policyIdentifiers := getPrometheusDefaultScanCommand(scanID, resultsFile, metricsQueryParams.Frameworks)
 
 	scanParams := &scanRequestParams{
 		scanQueryParams: &ScanQueryParams{
@@ -62,10 +62,11 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 			KeepResults:     false,
 			SkipPersistence: metricsQueryParams.SkipPersistence,
 		},
-		scanInfo: scanInfo,
-		scanID:   scanID,
-		ctx:      scanCtx,
-		resp:     make(chan *utilsmetav1.Response, 1),
+		scanInfo:          scanInfo,
+		policyIdentifiers: policyIdentifiers,
+		scanID:            scanID,
+		ctx:               scanCtx,
+		resp:              make(chan *utilsmetav1.Response, 1),
 	}
 
 	// send to scan queue
@@ -107,7 +108,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	w.Write(f)
 }
 
-func getPrometheusDefaultScanCommand(scanID, resultsFile, frameworksParam string) *cautils.ScanInfo {
+func getPrometheusDefaultScanCommand(scanID, resultsFile, frameworksParam string) (*cautils.ScanInfo, []cautils.PolicyIdentifier) {
 	scanInfo := defaultScanInfo()
 	scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape from downloading the artifacts every time)
 	scanInfo.Submit.SetBool(false)                       // deliberate opt-out, not left at the default - never flipped into submit mode by backend auto-detection
@@ -120,17 +121,19 @@ func getPrometheusDefaultScanCommand(scanID, resultsFile, frameworksParam string
 	scanInfo.Output = resultsFile                            // results output
 	scanInfo.Format = envToString("KS_FORMAT", "prometheus") // default output format is prometheus
 
+	var policyIdentifiers []cautils.PolicyIdentifier
 	// Check if specific frameworks are requested via query parameter
 	frameworks := splitAndTrim(frameworksParam, ",")
 	if len(frameworks) > 0 {
-		scanInfo.SetPolicyIdentifiers(frameworks, utilsapisv1.KindFramework)
+		// Scan specific frameworks (comma-separated list)
+		policyIdentifiers = cautils.BuildPolicyIdentifiers(frameworks, utilsapisv1.KindFramework)
 	} else {
 		// Default: scan all available frameworks (including CIS)
 		scanInfo.ScanAll = true
 		// Framework identifiers will be set dynamically by the scan process when ScanAll is true
 	}
 
-	return scanInfo
+	return scanInfo, policyIdentifiers
 }
 
 // splitAndTrim splits a string by delimiter and trims whitespace from each element

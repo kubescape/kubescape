@@ -31,7 +31,7 @@ func TestDownloadSupportCommands_ReturnsListOfAllAvailableDownloadCommands(t *te
 // Returns a non-empty list of download commands when 'DownloadSupportCommands' is called and 'downloadFunc' is not empty.
 func TestDownloadSupportCommands_ReturnsNonEmptyListOfDownloadCommandsWhenDownloadFuncNotEmpty(t *testing.T) {
 	// Arrange
-	downloadFunc = map[string]func(context.Context, *metav1.DownloadInfo) error{
+	downloadFunc = map[string]func(context.Context, *metav1.DownloadInfo) ([]string, error){
 		"controls-inputs": downloadConfigInputs,
 		"exceptions":      downloadExceptions,
 		"framework":       downloadFramework,
@@ -60,7 +60,7 @@ func TestDownloadSupportCommands_ReturnsListOfStrings(t *testing.T) {
 // Returns an empty list when 'DownloadSupportCommands' is called and 'downloadFunc' is empty.
 func TestDownloadSupportCommands_ReturnsEmptyListWhenDownloadFuncEmpty(t *testing.T) {
 	// Arrange
-	downloadFunc = map[string]func(context.Context, *metav1.DownloadInfo) error{}
+	downloadFunc = map[string]func(context.Context, *metav1.DownloadInfo) ([]string, error){}
 
 	// Act
 	result := DownloadSupportCommands()
@@ -87,7 +87,8 @@ func TestDownloadArtifact(t *testing.T) {
 	ctx := context.Background()
 	tests := []struct {
 		downloadInfo         *metav1.DownloadInfo
-		downloadArtifactFunc map[string]func(context.Context, *metav1.DownloadInfo) error
+		downloadArtifactFunc map[string]func(context.Context, *metav1.DownloadInfo) ([]string, error)
+		files                []string
 		err                  error
 	}{
 		{
@@ -95,27 +96,30 @@ func TestDownloadArtifact(t *testing.T) {
 				Target: "controls-inputs",
 				Path:   filepath.Join("path", "to", "download"),
 			},
-			downloadArtifactFunc: map[string]func(context.Context, *metav1.DownloadInfo) error{
-				"controls-inputs": func(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
-					return nil
+			downloadArtifactFunc: map[string]func(context.Context, *metav1.DownloadInfo) ([]string, error){
+				"controls-inputs": func(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]string, error) {
+					return []string{filepath.Join(downloadInfo.Path, "controls-inputs.json")}, nil
 				},
 			},
-			err: nil,
+			files: []string{filepath.Join("path", "to", "download", "controls-inputs.json")},
+			err:   nil,
 		},
 		{
 			downloadInfo: &metav1.DownloadInfo{
 				Target: "unknown",
 				Path:   filepath.Join("path", "to", "download"),
 			},
-			downloadArtifactFunc: map[string]func(context.Context, *metav1.DownloadInfo) error{},
+			downloadArtifactFunc: map[string]func(context.Context, *metav1.DownloadInfo) ([]string, error){},
+			files:                nil,
 			err:                  fmt.Errorf("unknown command to download"),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
-			err := downloadArtifact(ctx, tt.downloadInfo, tt.downloadArtifactFunc)
+			files, err := downloadArtifact(ctx, tt.downloadInfo, tt.downloadArtifactFunc)
 			assert.Equal(t, tt.err, err)
+			assert.Equal(t, tt.files, files)
 		})
 	}
 }
@@ -168,7 +172,7 @@ func TestSetPathAndFilename(t *testing.T) {
 // TestDownload_UnknownTargetReturnsError verifies Kubescape.Download surfaces unknown targets.
 func TestDownload_UnknownTargetReturnsError(t *testing.T) {
 	ks := NewKubescape(context.Background())
-	err := ks.Download(&metav1.DownloadInfo{
+	_, err := ks.Download(&metav1.DownloadInfo{
 		Target: "unknown",
 		Path:   t.TempDir(),
 	})
@@ -197,7 +201,7 @@ func TestDownload_CreatesOutputDirectoryWithRestrictivePermissions(t *testing.T)
 	path := filepath.Join(t.TempDir(), "nested", "download-dir")
 
 	ks := NewKubescape(context.Background())
-	err := ks.Download(&metav1.DownloadInfo{
+	_, err := ks.Download(&metav1.DownloadInfo{
 		Target: "unknown",
 		Path:   path,
 	})
@@ -242,7 +246,7 @@ type fakeExceptionsGetter struct {
 	err        error
 }
 
-func (f *fakeExceptionsGetter) GetExceptions(string) ([]armotypes.PostureExceptionPolicy, error) {
+func (f *fakeExceptionsGetter) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	return f.exceptions, f.err
 }
 
@@ -260,7 +264,7 @@ type fakeControlsInputsGetter struct {
 	err    error
 }
 
-func (f *fakeControlsInputsGetter) GetControlsInputs(string) (map[string][]string, error) {
+func (f *fakeControlsInputsGetter) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
 	return f.inputs, f.err
 }
 
@@ -368,7 +372,7 @@ func TestDownloadConfigInputs(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withConfigInputsGetter(t, nil, errors.New("boom"))
 
-		err := downloadConfigInputs(context.Background(), &metav1.DownloadInfo{Target: TargetControlsInputs, Path: t.TempDir()})
+		_, err := downloadConfigInputs(context.Background(), &metav1.DownloadInfo{Target: TargetControlsInputs, Path: t.TempDir()})
 		require.EqualError(t, err, "boom")
 	})
 
@@ -376,7 +380,7 @@ func TestDownloadConfigInputs(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withConfigInputsGetter(t, &fakeControlsInputsGetter{err: errors.New("fetch failed")}, nil)
 
-		err := downloadConfigInputs(context.Background(), &metav1.DownloadInfo{Target: TargetControlsInputs, Path: t.TempDir()})
+		_, err := downloadConfigInputs(context.Background(), &metav1.DownloadInfo{Target: TargetControlsInputs, Path: t.TempDir()})
 		require.EqualError(t, err, "fetch failed")
 	})
 
@@ -384,7 +388,7 @@ func TestDownloadConfigInputs(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: nil}, nil)
 
-		err := downloadConfigInputs(context.Background(), &metav1.DownloadInfo{Target: TargetControlsInputs, Path: t.TempDir()})
+		_, err := downloadConfigInputs(context.Background(), &metav1.DownloadInfo{Target: TargetControlsInputs, Path: t.TempDir()})
 		require.EqualError(t, err, "failed to download controlInputs - received empty objects")
 	})
 
@@ -392,7 +396,7 @@ func TestDownloadConfigInputs(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"b"}}}, nil)
 
-		err := downloadConfigInputs(context.Background(), &metav1.DownloadInfo{Target: TargetControlsInputs, Path: blockedDir(t)})
+		_, err := downloadConfigInputs(context.Background(), &metav1.DownloadInfo{Target: TargetControlsInputs, Path: blockedDir(t)})
 		require.ErrorContains(t, err, "blocker")
 	})
 
@@ -403,7 +407,8 @@ func TestDownloadConfigInputs(t *testing.T) {
 
 		dir := t.TempDir()
 		info := &metav1.DownloadInfo{Target: TargetControlsInputs, Path: dir}
-		require.NoError(t, downloadConfigInputs(context.Background(), info))
+		_, err := downloadConfigInputs(context.Background(), info)
+		require.NoError(t, err)
 		assert.Equal(t, "controls-inputs.json", info.FileName)
 
 		var got map[string][]string
@@ -417,7 +422,7 @@ func TestDownloadExceptions(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withExceptionsGetter(t, nil, errors.New("boom"))
 
-		err := downloadExceptions(context.Background(), &metav1.DownloadInfo{Target: TargetExceptions, Path: t.TempDir()})
+		_, err := downloadExceptions(context.Background(), &metav1.DownloadInfo{Target: TargetExceptions, Path: t.TempDir()})
 		require.EqualError(t, err, "boom")
 	})
 
@@ -425,7 +430,7 @@ func TestDownloadExceptions(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withExceptionsGetter(t, &fakeExceptionsGetter{err: errors.New("fetch failed")}, nil)
 
-		err := downloadExceptions(context.Background(), &metav1.DownloadInfo{Target: TargetExceptions, Path: t.TempDir()})
+		_, err := downloadExceptions(context.Background(), &metav1.DownloadInfo{Target: TargetExceptions, Path: t.TempDir()})
 		require.EqualError(t, err, "fetch failed")
 	})
 
@@ -433,7 +438,7 @@ func TestDownloadExceptions(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withExceptionsGetter(t, &fakeExceptionsGetter{}, nil)
 
-		err := downloadExceptions(context.Background(), &metav1.DownloadInfo{Target: TargetExceptions, Path: blockedDir(t)})
+		_, err := downloadExceptions(context.Background(), &metav1.DownloadInfo{Target: TargetExceptions, Path: blockedDir(t)})
 		require.ErrorContains(t, err, "blocker")
 	})
 
@@ -444,7 +449,8 @@ func TestDownloadExceptions(t *testing.T) {
 
 		dir := t.TempDir()
 		info := &metav1.DownloadInfo{Target: TargetExceptions, Path: dir, FileName: "custom-exceptions.json"}
-		require.NoError(t, downloadExceptions(context.Background(), info))
+		_, err := downloadExceptions(context.Background(), info)
+		require.NoError(t, err)
 		assert.Equal(t, "custom-exceptions.json", info.FileName)
 
 		var got []armotypes.PostureExceptionPolicy
@@ -458,7 +464,7 @@ func TestDownloadAttackTracks(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withAttackTracksGetter(t, nil, errors.New("boom"))
 
-		err := downloadAttackTracks(context.Background(), &metav1.DownloadInfo{Target: TargetAttackTracks, Path: t.TempDir()})
+		_, err := downloadAttackTracks(context.Background(), &metav1.DownloadInfo{Target: TargetAttackTracks, Path: t.TempDir()})
 		require.EqualError(t, err, "boom")
 	})
 
@@ -466,7 +472,7 @@ func TestDownloadAttackTracks(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withAttackTracksGetter(t, &fakeAttackTracksGetter{err: errors.New("fetch failed")}, nil)
 
-		err := downloadAttackTracks(context.Background(), &metav1.DownloadInfo{Target: TargetAttackTracks, Path: t.TempDir()})
+		_, err := downloadAttackTracks(context.Background(), &metav1.DownloadInfo{Target: TargetAttackTracks, Path: t.TempDir()})
 		require.EqualError(t, err, "fetch failed")
 	})
 
@@ -474,7 +480,7 @@ func TestDownloadAttackTracks(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withAttackTracksGetter(t, &fakeAttackTracksGetter{}, nil)
 
-		err := downloadAttackTracks(context.Background(), &metav1.DownloadInfo{Target: TargetAttackTracks, Path: blockedDir(t)})
+		_, err := downloadAttackTracks(context.Background(), &metav1.DownloadInfo{Target: TargetAttackTracks, Path: blockedDir(t)})
 		require.ErrorContains(t, err, "blocker")
 	})
 
@@ -485,7 +491,8 @@ func TestDownloadAttackTracks(t *testing.T) {
 
 		dir := t.TempDir()
 		info := &metav1.DownloadInfo{Target: TargetAttackTracks, Path: dir}
-		require.NoError(t, downloadAttackTracks(context.Background(), info))
+		_, err := downloadAttackTracks(context.Background(), info)
+		require.NoError(t, err)
 		assert.Equal(t, "attack-tracks.json", info.FileName)
 
 		var got []v1alpha1.AttackTrack
@@ -499,7 +506,7 @@ func TestDownloadFramework(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, nil, errors.New("boom"))
 
-		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir()})
+		_, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir()})
 		require.EqualError(t, err, "boom")
 	})
 
@@ -507,7 +514,7 @@ func TestDownloadFramework(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, &fakePolicyGetter{frameworksErr: errors.New("fetch failed")}, nil)
 
-		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir()})
+		_, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir()})
 		require.EqualError(t, err, "fetch failed")
 	})
 
@@ -519,7 +526,7 @@ func TestDownloadFramework(t *testing.T) {
 		}}, nil)
 
 		dir := t.TempDir()
-		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: dir})
+		_, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: dir})
 		require.NoError(t, err)
 
 		entries, err := os.ReadDir(dir)
@@ -534,7 +541,7 @@ func TestDownloadFramework(t *testing.T) {
 			{PortalBase: armotypes.PortalBase{Name: "nsa"}},
 		}}, nil)
 
-		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: blockedDir(t)})
+		_, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: blockedDir(t)})
 		require.ErrorContains(t, err, "blocker")
 	})
 
@@ -542,7 +549,7 @@ func TestDownloadFramework(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, &fakePolicyGetter{}, nil)
 
-		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir(), Identifier: "a/b"})
+		_, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir(), Identifier: "a/b"})
 		require.ErrorContains(t, err, "path separators")
 	})
 
@@ -550,7 +557,7 @@ func TestDownloadFramework(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, &fakePolicyGetter{frameworkErr: errors.New("fetch failed")}, nil)
 
-		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir(), Identifier: "nsa"})
+		_, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir(), Identifier: "nsa"})
 		require.EqualError(t, err, "fetch failed")
 	})
 
@@ -558,7 +565,7 @@ func TestDownloadFramework(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, &fakePolicyGetter{framework: nil}, nil)
 
-		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir(), Identifier: "nsa"})
+		_, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: t.TempDir(), Identifier: "nsa"})
 		require.EqualError(t, err, "failed to download framework - received empty objects")
 	})
 
@@ -569,7 +576,8 @@ func TestDownloadFramework(t *testing.T) {
 
 		dir := t.TempDir()
 		info := &metav1.DownloadInfo{Target: TargetFramework, Path: dir, Identifier: "nsa"}
-		require.NoError(t, downloadFramework(context.Background(), info))
+		_, err := downloadFramework(context.Background(), info)
+		require.NoError(t, err)
 		assert.Equal(t, "nsa.json", info.FileName)
 
 		var got reporthandling.Framework
@@ -581,7 +589,7 @@ func TestDownloadFramework(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, &fakePolicyGetter{framework: &reporthandling.Framework{PortalBase: armotypes.PortalBase{Name: "nsa"}}}, nil)
 
-		err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: blockedDir(t), Identifier: "nsa"})
+		_, err := downloadFramework(context.Background(), &metav1.DownloadInfo{Target: TargetFramework, Path: blockedDir(t), Identifier: "nsa"})
 		require.ErrorContains(t, err, "blocker")
 	})
 }
@@ -591,7 +599,7 @@ func TestDownloadControl(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, nil, errors.New("boom"))
 
-		err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir(), Identifier: "C-0001"})
+		_, err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir(), Identifier: "C-0001"})
 		require.EqualError(t, err, "boom")
 	})
 
@@ -599,7 +607,7 @@ func TestDownloadControl(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, &fakePolicyGetter{}, nil)
 
-		err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir()})
+		_, err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir()})
 		require.EqualError(t, err, "missing control ID")
 	})
 
@@ -607,7 +615,7 @@ func TestDownloadControl(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, &fakePolicyGetter{}, nil)
 
-		err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir(), Identifier: "a/b"})
+		_, err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir(), Identifier: "a/b"})
 		require.ErrorContains(t, err, "path separators")
 	})
 
@@ -615,7 +623,7 @@ func TestDownloadControl(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, &fakePolicyGetter{controlErr: errors.New("fetch failed")}, nil)
 
-		err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir(), Identifier: "C-0001"})
+		_, err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir(), Identifier: "C-0001"})
 		require.ErrorContains(t, err, "C-0001")
 		require.ErrorContains(t, err, "fetch failed")
 	})
@@ -624,7 +632,7 @@ func TestDownloadControl(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, &fakePolicyGetter{control: nil}, nil)
 
-		err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir(), Identifier: "C-0001"})
+		_, err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir(), Identifier: "C-0001"})
 		require.ErrorContains(t, err, "C-0001")
 		require.ErrorContains(t, err, "received empty objects")
 	})
@@ -633,7 +641,7 @@ func TestDownloadControl(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withPolicyGetter(t, &fakePolicyGetter{control: &reporthandling.Control{}}, nil)
 
-		err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: blockedDir(t), Identifier: "C-0001"})
+		_, err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: blockedDir(t), Identifier: "C-0001"})
 		require.ErrorContains(t, err, "blocker")
 	})
 
@@ -644,7 +652,8 @@ func TestDownloadControl(t *testing.T) {
 
 		dir := t.TempDir()
 		info := &metav1.DownloadInfo{Target: TargetControl, Path: dir, Identifier: "C-0001"}
-		require.NoError(t, downloadControl(context.Background(), info))
+		_, err := downloadControl(context.Background(), info)
+		require.NoError(t, err)
 		assert.Equal(t, "c-0001.json", info.FileName)
 
 		var got reporthandling.Control
@@ -662,7 +671,7 @@ func TestDownloadArtifacts(t *testing.T) {
 		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}}, nil)
 
 		dir := t.TempDir()
-		err := downloadArtifacts(context.Background(), &metav1.DownloadInfo{Target: TargetArtifacts, Path: dir})
+		_, err := downloadArtifacts(context.Background(), &metav1.DownloadInfo{Target: TargetArtifacts, Path: dir})
 		require.NoError(t, err)
 
 		for _, want := range []string{"controls-inputs.json", "exceptions.json", "nsa.json", "attack-tracks.json"} {
@@ -671,7 +680,7 @@ func TestDownloadArtifacts(t *testing.T) {
 		}
 	})
 
-	t.Run("continues after one artifact fails", func(t *testing.T) {
+	t.Run("continues after one artifact fails and reports the error", func(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		withConfigInputsGetter(t, &fakeControlsInputsGetter{inputs: map[string][]string{"a": {"1"}}}, nil)
 		withExceptionsGetter(t, nil, errors.New("boom"))
@@ -679,8 +688,9 @@ func TestDownloadArtifacts(t *testing.T) {
 		withPolicyGetter(t, &fakePolicyGetter{frameworks: []reporthandling.Framework{{PortalBase: armotypes.PortalBase{Name: "nsa"}}}}, nil)
 
 		dir := t.TempDir()
-		err := downloadArtifacts(context.Background(), &metav1.DownloadInfo{Target: TargetArtifacts, Path: dir})
-		require.NoError(t, err)
+		files, err := downloadArtifacts(context.Background(), &metav1.DownloadInfo{Target: TargetArtifacts, Path: dir})
+		require.Error(t, err)
+		assert.NotEmpty(t, files)
 
 		_, statErr := os.Stat(filepath.Join(dir, "exceptions.json"))
 		assert.True(t, os.IsNotExist(statErr), "exceptions.json should not have been written")

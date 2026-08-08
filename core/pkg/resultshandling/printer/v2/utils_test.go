@@ -2,6 +2,7 @@ package printer
 
 import (
 	"encoding/json"
+	"sort"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -966,4 +968,49 @@ func TestFinalizeResults_PreservesExistingGenerationTime(t *testing.T) {
 	require.NotNil(t, report)
 	assert.Equal(t, preset, report.ReportGenerationTime)
 	assert.Equal(t, preset, session.Report.ReportGenerationTime)
+}
+
+func TestFinalizeResults_SortsResultsAndResourcesByResourceID(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+
+	resources := []workloadinterface.IMetadata{
+		createWorkloadWithLabels("zeta", "default", nil),
+		createWorkloadWithLabels("alpha", "default", nil),
+		createWorkloadWithLabels("kappa", "default", nil),
+		createWorkloadWithLabels("beta", "default", nil),
+		createWorkloadWithLabels("theta", "default", nil),
+		createWorkloadWithLabels("delta", "default", nil),
+		createWorkloadWithLabels("eta", "default", nil),
+		createWorkloadWithLabels("gamma", "default", nil),
+	}
+	expectedResourceIDs := make([]string, 0, len(resources))
+
+	// Insert resources in a deliberately non-canonical order. FinalizeResults
+	// must define its own stable order instead of exposing Go map iteration.
+	for _, resource := range resources {
+		resourceID := resource.GetID()
+		expectedResourceIDs = append(expectedResourceIDs, resourceID)
+		session.ResourcesResult[resourceID] = resourcesresults.Result{ResourceID: resourceID}
+		session.AllResources[resourceID] = resource
+	}
+	sort.Strings(expectedResourceIDs)
+
+	for i := 0; i < 64; i++ {
+		report := FinalizeResults(session)
+		require.NotNil(t, report)
+		require.Len(t, report.Results, len(expectedResourceIDs))
+		require.Len(t, report.Resources, len(expectedResourceIDs))
+
+		resultResourceIDs := make([]string, 0, len(report.Results))
+		for _, result := range report.Results {
+			resultResourceIDs = append(resultResourceIDs, result.ResourceID)
+		}
+		require.Equalf(t, expectedResourceIDs, resultResourceIDs, "results iteration %d", i)
+
+		resourceIDs := make([]string, 0, len(report.Resources))
+		for _, resource := range report.Resources {
+			resourceIDs = append(resourceIDs, resource.ResourceID)
+		}
+		require.Equalf(t, expectedResourceIDs, resourceIDs, "resources iteration %d", i)
+	}
 }

@@ -95,7 +95,7 @@ func TestGetScanCommand(t *testing.T) {
 	req := utilsmetav1.PostScanRequest{
 		TargetType: apisv1.KindFramework,
 	}
-	s := getScanCommand(&req, "abc")
+	s, _ := getScanCommand(&req, "abc")
 	assert.Equal(t, "", s.AccountID)
 	assert.Equal(t, "abc", s.ScanID)
 	assert.Equal(t, "v2", s.FormatVersion)
@@ -113,7 +113,7 @@ func TestGetScanCommandWithAccessKey(t *testing.T) {
 	req := utilsmetav1.PostScanRequest{
 		TargetType: apisv1.KindFramework,
 	}
-	s := getScanCommand(&req, "abc")
+	s, _ := getScanCommand(&req, "abc")
 	assert.Equal(t, "", s.AccountID)
 	assert.Equal(t, "abc", s.ScanID)
 	assert.Equal(t, "v2", s.FormatVersion)

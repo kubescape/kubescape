@@ -1,7 +1,9 @@
 package cautils
 
 import (
+	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -155,6 +157,94 @@ func TestParseBoolEnvVar(t *testing.T) {
 			}
 
 			actual, err := ParseBoolEnvVar(tc.varName, tc.defaultValue)
+			if tc.expectedErr != "" {
+				assert.NotNil(t, err)
+				assert.ErrorContains(t, err, tc.expectedErr)
+			} else {
+				assert.Nil(t, err)
+			}
+
+			assert.Equalf(t, tc.expected, actual, "unexpected result")
+		})
+	}
+}
+
+func TestParseDurationEnvVar(t *testing.T) {
+	testCases := []struct {
+		expectedErr  string
+		name         string
+		varName      string
+		varValue     string
+		setEnv       bool
+		defaultValue time.Duration
+		expected     time.Duration
+	}{
+		{
+			name:         "Variable does not exist",
+			varName:      "DOES_NOT_EXIST",
+			setEnv:       false,
+			varValue:     "",
+			defaultValue: 5 * time.Minute,
+			expected:     5 * time.Minute,
+			expectedErr:  "",
+		},
+		{
+			name:         "Variable is exported but empty",
+			varName:      "MY_VAR",
+			setEnv:       true,
+			varValue:     "",
+			defaultValue: 5 * time.Minute,
+			expected:     5 * time.Minute,
+			expectedErr:  "failed to parse MY_VAR env var as duration",
+		},
+		{
+			name:         "Variable exists and is a valid duration",
+			varName:      "MY_VAR",
+			setEnv:       true,
+			varValue:     "90s",
+			defaultValue: 5 * time.Minute,
+			expected:     90 * time.Second,
+			expectedErr:  "",
+		},
+		{
+			name:         "Variable exists with compound duration",
+			varName:      "MY_VAR",
+			setEnv:       true,
+			varValue:     "1h30m",
+			defaultValue: 5 * time.Minute,
+			expected:     90 * time.Minute,
+			expectedErr:  "",
+		},
+		{
+			name:         "Variable exists but is not a valid duration",
+			varName:      "MY_VAR",
+			setEnv:       true,
+			varValue:     "not_a_duration",
+			defaultValue: 5 * time.Minute,
+			expected:     5 * time.Minute,
+			expectedErr:  "failed to parse MY_VAR env var as duration",
+		},
+		{
+			name:         "Variable exists with zero value",
+			varName:      "MY_VAR",
+			setEnv:       true,
+			varValue:     "0s",
+			defaultValue: 5 * time.Minute,
+			expected:     0,
+			expectedErr:  "",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.setEnv {
+				t.Setenv(tc.varName, tc.varValue)
+			} else {
+				t.Setenv(tc.varName, "")
+				os.Unsetenv(tc.varName)
+			}
+
+			actual, err := ParseDurationEnvVar(tc.varName, tc.defaultValue)
 			if tc.expectedErr != "" {
 				assert.NotNil(t, err)
 				assert.ErrorContains(t, err, tc.expectedErr)
