@@ -18,6 +18,7 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 		name        string
 		namespace   string
 		filePath    string
+		apiVersion  string
 		want        *cautils.ScanInfo
 	}{
 		{
@@ -51,6 +52,7 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 			name:        "api",
 			namespace:   "default",
 			filePath:    "manifests/pod.yaml",
+			apiVersion:  "",
 			want: &cautils.ScanInfo{
 				PolicyIdentifier: []cautils.PolicyIdentifier{
 					{
@@ -74,6 +76,33 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 				InputPatterns: []string{"manifests/pod.yaml"},
 			},
 		},
+		{
+			Description: "Set workload scan info with API version",
+			kind:        "Deployment",
+			name:        "test",
+			apiVersion:  "apps/v1",
+			want: &cautils.ScanInfo{
+				PolicyIdentifier: []cautils.PolicyIdentifier{
+					{
+						Identifier: "workloadscan",
+						Kind:       v1.KindFramework,
+					},
+					{
+						Identifier: "allcontrols",
+						Kind:       v1.KindFramework,
+					},
+				},
+				ScanType:   cautils.ScanTypeWorkload,
+				ScanImages: true,
+				ScanObject: &objectsenvelopes.ScanObject{
+					ApiVersion: "apps/v1",
+					Kind:       "Deployment",
+					Metadata: objectsenvelopes.ScanObjectMetadata{
+						Name: "test",
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -81,7 +110,7 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 			tc.Description,
 			func(t *testing.T) {
 				scanInfo := &cautils.ScanInfo{FilePath: tc.filePath, Namespace: tc.namespace}
-				setWorkloadScanInfo(scanInfo, tc.kind, tc.name, "")
+				setWorkloadScanInfo(scanInfo, tc.kind, tc.name, tc.apiVersion)
 
 				if scanInfo.ScanType != tc.want.ScanType {
 					t.Errorf("got: %v, want: %v", scanInfo.ScanType, tc.want.ScanType)
@@ -101,6 +130,10 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 
 				if scanInfo.ScanObject.Metadata.Namespace != tc.want.ScanObject.Metadata.Namespace {
 					t.Errorf("got: %v, want: %v", scanInfo.ScanObject.Metadata.Namespace, tc.want.ScanObject.Metadata.Namespace)
+				}
+
+				if scanInfo.ScanObject.GetApiVersion() != tc.apiVersion {
+					t.Errorf("got apiVersion: %v, want: %v", scanInfo.ScanObject.GetApiVersion(), tc.apiVersion)
 				}
 
 				if tc.filePath == "" {
