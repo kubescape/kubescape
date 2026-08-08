@@ -35,7 +35,7 @@ func getCacheFilePath(clusterName, resourceName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	safeClusterName := strings.ReplaceAll(clusterName, "/", "_")
 	safeClusterName = strings.ReplaceAll(safeClusterName, ":", "_")
 	safeClusterName = strings.ReplaceAll(safeClusterName, "\\", "_")
@@ -105,7 +105,7 @@ func saveToCache(clusterName, resourceName string, envelopes []hostsensor.HostSe
 	defer f.Close()
 
 	gw := gzip.NewWriter(f)
-	
+
 	data, err := json.Marshal(envelopes)
 	if err != nil {
 		gw.Close()

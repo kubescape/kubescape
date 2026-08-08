@@ -7,13 +7,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 type mockDynamicClient struct {
@@ -29,17 +29,39 @@ type mockNamespaceableResourceInterface struct {
 }
 
 func (m *mockNamespaceableResourceInterface) Namespace(string) dynamic.ResourceInterface { return m }
-func (m *mockNamespaceableResourceInterface) Create(ctx context.Context, obj *unstructured.Unstructured, options metav1.CreateOptions, subresources ...string) (*unstructured.Unstructured, error) { return nil, nil }
-func (m *mockNamespaceableResourceInterface) Update(ctx context.Context, obj *unstructured.Unstructured, options metav1.UpdateOptions, subresources ...string) (*unstructured.Unstructured, error) { return nil, nil }
-func (m *mockNamespaceableResourceInterface) UpdateStatus(ctx context.Context, obj *unstructured.Unstructured, options metav1.UpdateOptions) (*unstructured.Unstructured, error) { return nil, nil }
-func (m *mockNamespaceableResourceInterface) Delete(ctx context.Context, name string, options metav1.DeleteOptions, subresources ...string) error { return nil }
-func (m *mockNamespaceableResourceInterface) DeleteCollection(ctx context.Context, options metav1.DeleteOptions, listOptions metav1.ListOptions) error { return nil }
-func (m *mockNamespaceableResourceInterface) Get(ctx context.Context, name string, options metav1.GetOptions, subresources ...string) (*unstructured.Unstructured, error) { return nil, nil }
-func (m *mockNamespaceableResourceInterface) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) { return m.listFunc(ctx, opts) }
-func (m *mockNamespaceableResourceInterface) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) { return nil, nil }
-func (m *mockNamespaceableResourceInterface) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, options metav1.PatchOptions, subresources ...string) (*unstructured.Unstructured, error) { return nil, nil }
-func (m *mockNamespaceableResourceInterface) Apply(ctx context.Context, name string, obj *unstructured.Unstructured, options metav1.ApplyOptions, subresources ...string) (*unstructured.Unstructured, error) { return nil, nil }
-func (m *mockNamespaceableResourceInterface) ApplyStatus(ctx context.Context, name string, obj *unstructured.Unstructured, options metav1.ApplyOptions) (*unstructured.Unstructured, error) { return nil, nil }
+func (m *mockNamespaceableResourceInterface) Create(ctx context.Context, obj *unstructured.Unstructured, options metav1.CreateOptions, subresources ...string) (*unstructured.Unstructured, error) {
+	return nil, nil
+}
+func (m *mockNamespaceableResourceInterface) Update(ctx context.Context, obj *unstructured.Unstructured, options metav1.UpdateOptions, subresources ...string) (*unstructured.Unstructured, error) {
+	return nil, nil
+}
+func (m *mockNamespaceableResourceInterface) UpdateStatus(ctx context.Context, obj *unstructured.Unstructured, options metav1.UpdateOptions) (*unstructured.Unstructured, error) {
+	return nil, nil
+}
+func (m *mockNamespaceableResourceInterface) Delete(ctx context.Context, name string, options metav1.DeleteOptions, subresources ...string) error {
+	return nil
+}
+func (m *mockNamespaceableResourceInterface) DeleteCollection(ctx context.Context, options metav1.DeleteOptions, listOptions metav1.ListOptions) error {
+	return nil
+}
+func (m *mockNamespaceableResourceInterface) Get(ctx context.Context, name string, options metav1.GetOptions, subresources ...string) (*unstructured.Unstructured, error) {
+	return nil, nil
+}
+func (m *mockNamespaceableResourceInterface) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	return m.listFunc(ctx, opts)
+}
+func (m *mockNamespaceableResourceInterface) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+	return nil, nil
+}
+func (m *mockNamespaceableResourceInterface) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, options metav1.PatchOptions, subresources ...string) (*unstructured.Unstructured, error) {
+	return nil, nil
+}
+func (m *mockNamespaceableResourceInterface) Apply(ctx context.Context, name string, obj *unstructured.Unstructured, options metav1.ApplyOptions, subresources ...string) (*unstructured.Unstructured, error) {
+	return nil, nil
+}
+func (m *mockNamespaceableResourceInterface) ApplyStatus(ctx context.Context, name string, obj *unstructured.Unstructured, options metav1.ApplyOptions) (*unstructured.Unstructured, error) {
+	return nil, nil
+}
 
 func TestHostSensorPagination(t *testing.T) {
 	totalItems := 525
@@ -72,7 +94,7 @@ func TestHostSensorPagination(t *testing.T) {
 			if opts.Continue != "" {
 				fmt.Sscanf(opts.Continue, "%d", &startIndex)
 			}
-			
+
 			endIndex := startIndex + int(limit)
 			nextContinue := ""
 			if endIndex < totalItems {
@@ -108,7 +130,7 @@ func TestHostSensorPagination(t *testing.T) {
 		items = append(items, page...)
 		return nil
 	})
-	
+
 	require.NoError(t, err)
 	assert.Equal(t, totalItems, len(items))
 	assert.Equal(t, 11, listCount)
@@ -147,7 +169,7 @@ func TestHostSensorRateLimitRetry(t *testing.T) {
 		items = append(items, page...)
 		return nil
 	})
-	
+
 	require.NoError(t, err)
 	assert.Equal(t, 0, len(items))
 	assert.Equal(t, 3, listCount)

@@ -133,7 +133,7 @@ func (hsh *HostSensorHandler) listCRDResources(ctx context.Context, resourceName
 					logger.L().Warning("Rate limited (429) when listing CRDs, retrying",
 						helpers.String("kind", kind),
 						helpers.Int("retry", i+1))
-					
+
 					timer := time.NewTimer(backoff)
 					select {
 					case <-ctx.Done():
