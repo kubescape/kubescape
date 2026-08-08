@@ -550,6 +550,7 @@ func expandListEnvelope(obj map[string]any, listKind string) ([]workloadinterfac
 	if !ok {
 		return nil, fmt.Errorf("%s.items must be an array", listKind)
 	}
+	restoreTypedListItemTypeMeta(list, listKind)
 
 	workloads := make([]workloadinterface.IMetadata, 0, len(list.Items))
 	for i := range list.Items {
@@ -565,6 +566,29 @@ func expandListEnvelope(obj map[string]any, listKind string) ([]workloadinterfac
 
 	return workloads, nil
 }
+
+// restoreTypedListItemTypeMeta fills each missing field independently. The
+// Kubernetes unstructured decoder only inherits the parent type metadata when
+// both fields are absent, so an item that supplies just one of kind or
+// apiVersion would otherwise remain only partially identified. Explicit item
+// values remain authoritative.
+func restoreTypedListItemTypeMeta(list *unstructured.UnstructuredList, listKind string) {
+	if listKind == string(workloadinterface.TypeListWorkloads) {
+		return
+	}
+
+	itemKind := strings.TrimSuffix(listKind, string(workloadinterface.TypeListWorkloads))
+	listAPIVersion := list.GetAPIVersion()
+	for i := range list.Items {
+		if list.Items[i].GetKind() == "" {
+			list.Items[i].SetKind(itemKind)
+		}
+		if list.Items[i].GetAPIVersion() == "" {
+			list.Items[i].SetAPIVersion(listAPIVersion)
+		}
+	}
+}
+
 func convertYamlToJson(i any) any {
 	switch x := i.(type) {
 	case map[any]any:

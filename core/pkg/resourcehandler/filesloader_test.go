@@ -59,7 +59,7 @@ func TestFileResourceHandlerIndexesListEnvelopeItemsForPolicies(t *testing.T) {
   "apiVersion": "v1",
   "kind": "PodList",
   "items": [
-    {"metadata": {"name": "json-typed-pod", "namespace": "default"}}
+    {"apiVersion": "v1", "metadata": {"name": "json-typed-pod", "namespace": "default"}}
   ]
 }`,
 			wantByGVR: map[string]string{"/v1/pods": "Pod"},
@@ -71,7 +71,8 @@ func TestFileResourceHandlerIndexesListEnvelopeItemsForPolicies(t *testing.T) {
 			manifest: `apiVersion: v1
 kind: PodList
 items:
-  - metadata:
+  - kind: Pod
+    metadata:
       name: yaml-typed-pod
       namespace: default
 `,

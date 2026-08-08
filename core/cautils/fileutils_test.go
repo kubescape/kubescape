@@ -651,6 +651,45 @@ metadata:
 			wantKinds: []string{"Pod", "Service"},
 			wantAPIs:  []string{"v1", "v1"},
 		},
+		{
+			name: "typed list fills a missing item kind",
+			read: readJsonFile,
+			content: `{
+				"apiVersion": "v1",
+				"kind": "PodList",
+				"items": [
+					{"apiVersion": "v1", "metadata": {"name": "missing-kind", "namespace": "default"}}
+				]
+			}`,
+			wantKinds: []string{"Pod"},
+			wantAPIs:  []string{"v1"},
+		},
+		{
+			name: "typed list fills a missing item apiVersion",
+			read: readYamlFile,
+			content: `apiVersion: v1
+kind: PodList
+items:
+  - kind: Pod
+    metadata:
+      name: missing-api-version
+      namespace: default`,
+			wantKinds: []string{"Pod"},
+			wantAPIs:  []string{"v1"},
+		},
+		{
+			name: "typed list preserves explicit item type metadata",
+			read: readJsonFile,
+			content: `{
+				"apiVersion": "v1",
+				"kind": "PodList",
+				"items": [
+					{"apiVersion": "example.com/v1", "kind": "Widget", "metadata": {"name": "explicit-type", "namespace": "default"}}
+				]
+			}`,
+			wantKinds: []string{"Widget"},
+			wantAPIs:  []string{"example.com/v1"},
+		},
 	}
 
 	for _, tt := range tests {
