@@ -134,6 +134,10 @@ func (hsh *HostSensorHandler) listCRDResources(ctx context.Context, resourceName
 						helpers.String("kind", kind),
 						helpers.Int("retry", i+1))
 
+					if i == retries-1 {
+						break
+					}
+
 					timer := time.NewTimer(backoff)
 					select {
 					case <-ctx.Done():

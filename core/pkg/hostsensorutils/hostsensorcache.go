@@ -98,11 +98,19 @@ func saveToCache(clusterName, resourceName string, envelopes []hostsensor.HostSe
 		return err
 	}
 
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	tmpPath := path + ".tmp"
+	f, err := os.OpenFile(tmpPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+
+	cleanup := true
+	defer func() {
+		f.Close()
+		if cleanup {
+			os.Remove(tmpPath)
+		}
+	}()
 
 	gw := gzip.NewWriter(f)
 
@@ -120,6 +128,15 @@ func saveToCache(clusterName, resourceName string, envelopes []hostsensor.HostSe
 	if err := gw.Close(); err != nil {
 		return err
 	}
+
+	if err := f.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	cleanup = false
 
 	logger.L().Debug("Saved host sensor envelopes to cache", helpers.String("resource", resourceName), helpers.Int("count", len(envelopes)))
 	return nil
