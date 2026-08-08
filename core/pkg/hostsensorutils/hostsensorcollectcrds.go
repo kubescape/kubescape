@@ -4,6 +4,7 @@ import (
 	"context"
 	stdjson "encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -19,6 +20,13 @@ func (hsh *HostSensorHandler) getCRDResources(ctx context.Context, resourceType 
 	pluralName := k8shostsensor.MapResourceToPlural(resourceType)
 	if pluralName == "" {
 		return nil, fmt.Errorf("unsupported resource type: %s", resourceType)
+	}
+
+	// Try loading from cache first
+	if cachedEnvelopes, err := loadFromCache(resourceType.String()); err == nil {
+		return cachedEnvelopes, nil
+	} else if !os.IsNotExist(err) {
+		logger.L().Warning("Failed to load cache, proceeding to fetch", helpers.Error(err))
 	}
 
 	// List CRD resources
@@ -48,6 +56,11 @@ func (hsh *HostSensorHandler) getCRDResources(ctx context.Context, resourceType 
 	logger.L().Ctx(ctx).Info("Retrieved resources from CRDs",
 		helpers.String("kind", resourceType.String()),
 		helpers.Int("count", len(result)))
+
+	// Save to cache
+	if err := saveToCache(resourceType.String(), result); err != nil {
+		logger.L().Warning("Failed to save to cache", helpers.Error(err))
+	}
 
 	return result, nil
 }
