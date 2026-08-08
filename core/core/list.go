@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/maruel/natural"
+	"sigs.k8s.io/yaml"
 )
 
 // listFunc handles targets whose output is a flat []string (frameworks, exceptions).
@@ -21,6 +22,12 @@ import (
 var listFunc = map[string]func(context.Context, *metav1.ListPolicies) ([]string, error){
 	"frameworks": listFrameworks,
 	"exceptions": listExceptions,
+}
+
+var listFormatFunc = map[string]func(context.Context, string, []string){
+	"pretty-print": prettyPrintListFormat,
+	"json":         jsonListFormat,
+	"yaml":         yamlListFormat,
 }
 
 func ListSupportActions() []string {
@@ -68,24 +75,22 @@ func PrintListResult(ctx context.Context, result *metav1.ListResult, target, for
 			prettyPrintControls(ctx, result.Controls)
 		case "json":
 			jsonControlsFormat(result.Controls)
+		case "yaml":
+			yamlControlsFormat(result.Controls)
 		default:
-			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'", format)
+			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'/'yaml'", format)
 		}
 	case "frameworks", "exceptions":
-		switch format {
-		case "pretty-print":
-			prettyPrintListFormat(ctx, target, result.Names)
-		case "json":
-			jsonListFormat(ctx, target, result.Names)
-		default:
-			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'", format)
+		if listFormatFunction, ok := listFormatFunc[format]; ok {
+			listFormatFunction(ctx, target, result.Names)
+		} else {
+			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'/'yaml' ", format)
 		}
 	default:
 		return fmt.Errorf("invalid target %q, supported targets: 'controls'/'frameworks'/'exceptions'", target)
 	}
 	return nil
 }
-
 func naturalSortPolicies(policies []string) []string {
 	sort.Slice(policies, func(i, j int) bool {
 		return natural.Less(policies[i], policies[j])
@@ -207,6 +212,24 @@ func jsonControlsFormat(entries []metav1.ControlListEntry) {
 	j, _ := json.MarshalIndent(entries, "", "  ")
 
 	fmt.Printf("%s\n", j)
+}
+
+func yamlListFormat(_ context.Context, _ string, policies []string) {
+	y, err := yaml.Marshal(policies)
+	if err != nil {
+		return
+	}
+
+	fmt.Printf("%s\n", y)
+}
+
+func yamlControlsFormat(entries []metav1.ControlListEntry) {
+	y, err := yaml.Marshal(entries)
+	if err != nil {
+		return
+	}
+
+	fmt.Printf("%s\n", y)
 }
 
 func prettyPrintControls(ctx context.Context, entries []metav1.ControlListEntry) {
