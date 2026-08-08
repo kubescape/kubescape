@@ -21,6 +21,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 type ScanningContext string
@@ -169,6 +170,10 @@ type ScanInfo struct {
 	HelmReleaseNamespace  string   // --release-namespace: Helm release namespace made available as .Release.Namespace
 	LabelsToCopy          []string // Labels to copy from workloads to scan reports
 	scanningContext       *ScanningContext
+	kubeconfigPath        string
+	kubeContextOverride   string
+	clusterContextName    string
+	contextResolved       bool
 	cleanups              []func()
 	ListingURL            string            //Grype vulnerability database URL
 	RegistryMapping       map[string]string // Map internal registry URLs to external ones
@@ -420,6 +425,53 @@ func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
 	return *scanInfo.scanningContext
 }
 
+// SetKubeconfigSelection records the CLI kubeconfig selection without loading
+// it. Loading is deferred until Kubescape knows that the target is a live
+// cluster, so an irrelevant kubeconfig cannot break an offline manifest scan.
+func (scanInfo *ScanInfo) SetKubeconfigSelection(path, contextName string) {
+	scanInfo.kubeconfigPath = path
+	scanInfo.kubeContextOverride = contextName
+	scanInfo.clusterContextName = ""
+	scanInfo.contextResolved = false
+}
+
+// ResolveClusterContextName resolves the context from the same explicit
+// kubeconfig selected for the Kubernetes REST client. When no explicit path is
+// configured, the existing k8s-interface loading and in-cluster behavior is
+// retained.
+func (scanInfo *ScanInfo) ResolveClusterContextName() error {
+	if scanInfo.kubeconfigPath == "" {
+		return nil
+	}
+
+	kubeconfig, err := clientcmd.LoadFromFile(scanInfo.kubeconfigPath)
+	if err != nil {
+		return fmt.Errorf("failed to load kubeconfig %q: %w", scanInfo.kubeconfigPath, err)
+	}
+
+	contextName := kubeconfig.CurrentContext
+	if scanInfo.kubeContextOverride != "" {
+		contextName = scanInfo.kubeContextOverride
+	}
+	if _, ok := kubeconfig.Contexts[contextName]; !ok {
+		return fmt.Errorf("context %q does not exist in kubeconfig %q", contextName, scanInfo.kubeconfigPath)
+	}
+
+	scanInfo.clusterContextName = contextName
+	scanInfo.contextResolved = true
+	return nil
+}
+
+// GetClusterContextName returns the context resolved from an explicit CLI
+// kubeconfig, falling back to k8s-interface for KUBECONFIG, default-file, and
+// in-cluster callers.
+func (scanInfo *ScanInfo) GetClusterContextName() string {
+	if scanInfo.contextResolved {
+		return scanInfo.clusterContextName
+	}
+	return k8sinterface.GetContextName()
+}
+
 // getScanningContext get scanning context from the input param
 // this function should be called only once. Call GetScanningContext() to get the scanning context
 func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
@@ -512,7 +564,7 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 	switch scanInfo.GetScanningContext() {
 	case ContextCluster:
 		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
-			ContextName: k8sinterface.GetContextName(),
+			ContextName: scanInfo.GetClusterContextName(),
 		}
 	case ContextDir:
 		// the base path must be the root the file loader anchored the resources'

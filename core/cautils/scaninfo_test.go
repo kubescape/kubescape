@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,14 +13,39 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	giturl "github.com/kubescape/go-git-url"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 func TestSetContextMetadata(t *testing.T) {
+	t.Run("explicit kubeconfig context", func(t *testing.T) {
+		defaultPath := writeScanInfoKubeconfig(t, "context-b")
+		explicitPath := writeScanInfoKubeconfig(t, "context-a")
+		defaultConfig, err := clientcmd.LoadFromFile(defaultPath)
+		require.NoError(t, err)
+		k8sinterface.SetClusterContextName("")
+		k8sinterface.SetClientConfigAPI(defaultConfig)
+		t.Cleanup(func() {
+			k8sinterface.SetClientConfigAPI(nil)
+			k8sinterface.SetClusterContextName("")
+		})
+
+		scanInfo := &ScanInfo{}
+		scanInfo.SetKubeconfigSelection(explicitPath, "")
+		scanInfo.Init(context.Background(), nil)
+		require.NoError(t, scanInfo.ResolveClusterContextName())
+		metadata := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
+		ctx := metadata.ContextMetadata
+
+		require.NotNil(t, ctx.ClusterContextMetadata)
+		assert.Equal(t, "context-a", ctx.ClusterContextMetadata.ContextName)
+	})
+
 	t.Run("empty input cluster context", func(t *testing.T) {
 		ctx := reporthandlingv2.ContextMetadata{}
 		scanInfo := &ScanInfo{}
@@ -70,6 +96,60 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.Nil(t, ctx.HelmContextMetadata)
 		assertRepoContextMetadata(t, ctx.RepoContextMetadata, remoteURL, dir)
 	})
+}
+
+func TestResolveClusterContextNameRejectsInvalidSelection(t *testing.T) {
+	t.Run("missing override", func(t *testing.T) {
+		scanInfo := &ScanInfo{}
+		scanInfo.SetKubeconfigSelection(writeScanInfoKubeconfig(t, "context-a"), "context-missing")
+
+		err := scanInfo.ResolveClusterContextName()
+		require.ErrorContains(t, err, `context "context-missing" does not exist`)
+	})
+
+	t.Run("missing current context", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "config")
+		require.NoError(t, os.WriteFile(path, []byte(`apiVersion: v1
+kind: Config
+clusters:
+- name: cluster
+  cluster:
+    server: https://example.invalid
+contexts:
+- name: context-a
+  context:
+    cluster: cluster
+`), 0o600))
+		scanInfo := &ScanInfo{}
+		scanInfo.SetKubeconfigSelection(path, "")
+
+		err := scanInfo.ResolveClusterContextName()
+		require.ErrorContains(t, err, `context "" does not exist`)
+	})
+}
+
+func writeScanInfoKubeconfig(t *testing.T, contextName string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config")
+	contents := fmt.Sprintf(`apiVersion: v1
+kind: Config
+current-context: %[1]s
+clusters:
+- name: cluster
+  cluster:
+    server: https://example.invalid
+contexts:
+- name: %[1]s
+  context:
+    cluster: cluster
+    user: user
+users:
+- name: user
+  user:
+    token: test
+`, contextName)
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o600))
+	return path
 }
 
 // assertRepoContextMetadata verifies every field metadataGitLocal is expected
