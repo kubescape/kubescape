@@ -106,7 +106,7 @@ func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
 
 	pair, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load key pair: %v", err)
+		return nil, fmt.Errorf("failed to load key pair: %w", err)
 	}
 	return &pair, nil
 }

@@ -70,11 +70,11 @@ var cosignVerifySignatureDeclaration = &rego.Function{
 var cosignVerifySignatureDefinition = func(bctx rego.BuiltinContext, a, b *ast.Term) (*ast.Term, error) {
 	aStr, err := builtins.StringOperand(a.Value, 1)
 	if err != nil {
-		return nil, fmt.Errorf("invalid parameter type: %v", err)
+		return nil, fmt.Errorf("invalid parameter type: %w", err)
 	}
 	bStr, err := builtins.StringOperand(b.Value, 1)
 	if err != nil {
-		return nil, fmt.Errorf("invalid parameter type: %v", err)
+		return nil, fmt.Errorf("invalid parameter type: %w", err)
 	}
 	// Replace double backslashes with single backslashes
 	bbStr := strings.ReplaceAll(string(bStr), "\\n", "\n")
@@ -94,7 +94,7 @@ var cosignHasSignatureDeclaration = &rego.Function{
 var cosignHasSignatureDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (*ast.Term, error) {
 	aStr, err := builtins.StringOperand(a.Value, 1)
 	if err != nil {
-		return nil, fmt.Errorf("invalid parameter type: %v", err)
+		return nil, fmt.Errorf("invalid parameter type: %w", err)
 	}
 	return ast.BooleanTerm(has_signature(bctx.Context, string(aStr))), nil
 }
@@ -107,7 +107,7 @@ var imageNameNormalizeDeclaration = &rego.Function{
 var imageNameNormalizeDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (*ast.Term, error) {
 	aStr, err := builtins.StringOperand(a.Value, 1)
 	if err != nil {
-		return nil, fmt.Errorf("invalid parameter type: %v", err)
+		return nil, fmt.Errorf("invalid parameter type: %w", err)
 	}
 	normalizedName, err := cautils.NormalizeImageName(string(aStr))
 	return ast.StringTerm(normalizedName), err

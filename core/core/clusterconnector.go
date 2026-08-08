@@ -100,7 +100,7 @@ func NewOperatorAdapter(scanInfo cautils.OperatorScanInfo, ns string) (*Operator
 func (a *OperatorAdapter) httpPostOperatorScanRequest(body apis.Commands) (string, error) {
 	reqBody, err := json.Marshal(body)
 	if err != nil {
-		return "", fmt.Errorf("in 'httpPostOperatorScanRequest' failed to json.Marshal, reason: %v", err)
+		return "", fmt.Errorf("in 'httpPostOperatorScanRequest' failed to json.Marshal, reason: %w", err)
 	}
 
 	err = a.StartPortForwarder()

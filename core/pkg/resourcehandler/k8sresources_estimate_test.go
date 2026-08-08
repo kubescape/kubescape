@@ -152,6 +152,7 @@ func TestCountNamespaces_AppliesNamespaceFilters(t *testing.T) {
 	ns := func(name string) *corev1.Namespace {
 		return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
 	}
+	//nolint:staticcheck // deprecated but fine for this test
 	client := fakeclientset.NewSimpleClientset(ns("default"), ns("kube-system"), ns("prod-a"), ns("prod-b"))
 	handler := &K8sResourceHandler{k8s: &k8sinterface.KubernetesApi{KubernetesClient: client}}
 

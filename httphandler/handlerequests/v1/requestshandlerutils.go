@@ -372,7 +372,7 @@ func writeScanErrorToFile(err error, scanID string) (e error) {
 	if _, e = f.Write([]byte(err.Error())); e != nil {
 		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to write. reason: %s", err.Error(), e.Error())
 	}
-	return fmt.Errorf("failed to scan. reason: '%s'", err.Error())
+	return fmt.Errorf("failed to scan. reason: %w", err)
 }
 
 // responseToBytes convert response object to bytes

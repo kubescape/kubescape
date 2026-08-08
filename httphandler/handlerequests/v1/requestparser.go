@@ -99,11 +99,11 @@ func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParam
 	{
 		readBuffer, err := io.ReadAll(r.Body)
 		if err != nil {
-			// handler.writeError(w, fmt.Errorf("failed to read request body, reason: %s", err.Error()), scanID)
+			// handler.writeError(w, fmt.Errorf("failed to read request body, reason: %w", err), scanID)
 			return nil, fmt.Errorf("failed to read request body: %w", err)
 		}
 		if err := json.Unmarshal(readBuffer, &scanRequest); err != nil {
-			return nil, fmt.Errorf("failed to parse request payload, reason: %s", err.Error())
+			return nil, fmt.Errorf("failed to parse request payload, reason: %w", err)
 		}
 		logger.L().Info("REST API received scan request", helpers.String("scanID", scanID), helpers.String("format", scanRequest.Format))
 	}
@@ -117,7 +117,7 @@ func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParam
 		isUserScan:        true,
 	}
 	if err := schema.NewDecoder().Decode(p.scanQueryParams, r.URL.Query()); err != nil {
-		return p, fmt.Errorf("failed to parse query params, reason: %s", err.Error())
+		return p, fmt.Errorf("failed to parse query params, reason: %w", err)
 	}
 	if p.scanQueryParams.ReturnResults {
 		p.resp = make(chan *utilsmetav1.Response, 1)

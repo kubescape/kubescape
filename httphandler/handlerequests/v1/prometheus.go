@@ -50,7 +50,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 
 	metricsQueryParams := &MetricsQueryParams{}
 	if err := schema.NewDecoder().Decode(metricsQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), scanID)
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), scanID)
 		return
 	}
 	resultsFile := filepath.Join(OutputDir, scanID)
