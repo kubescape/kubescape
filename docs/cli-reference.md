@@ -48,6 +48,7 @@ kubescape scan [target] [flags]
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
 | `--host-scan` | Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use `--host-scan=false` to disable host data collection. See the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for a managed alternative. | auto-detect |
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
+| `--label-selector <selector>` | Filter collected resources by Kubernetes label selector. Accepts any expression `kubectl -l` supports, e.g. `app=nginx,env!=dev` or `env in (prod,staging)`. Syntax is validated before scanning begins; filtering is applied during live cluster collection and ignored when scanning local files. | - |
 | `--keep-local` | Don't report results to backend | `false` |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
@@ -110,6 +111,15 @@ kubescape scan --view resource --compliance-threshold 80
 
 # Exclude namespaces
 kubescape scan --exclude-namespaces kube-system,kube-public
+
+# Scan only resources matching a label selector
+kubescape scan --label-selector "app=nginx"
+
+# Combine a label selector with a specific framework
+kubescape scan framework nsa --label-selector "env=prod,team=backend"
+
+# Set-based label selector using the 'in' operator
+kubescape scan framework mitre --label-selector "env in (prod,staging)"
 ```
 ### Score thresholds
 
