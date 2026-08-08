@@ -437,7 +437,7 @@ func TestK8sResourceHandlerUsesDiscoveredGVRsAndNamespaceScope(t *testing.T) {
 		reporthandling.ScopeCluster,
 		resolver,
 	)
-	resources, allResources, failures := handler.pullResources(context.Background(), queryable, NewIncludeSelector("agents"))
+	resources, allResources, failures := handler.pullResources(context.Background(), queryable, NewIncludeSelector("agents"), "")
 
 	assert.Empty(t, failures)
 	require.Len(t, allResources, 4)

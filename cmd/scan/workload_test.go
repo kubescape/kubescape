@@ -422,3 +422,16 @@ func TestGetWorkloadCmd_ApiVersion(t *testing.T) {
 		})
 	}
 }
+
+func TestGetWorkloadCmd_RejectsLabelSelector(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+	cmd := getWorkloadCmd(mockKubescape, &scanInfo)
+
+	scanInfo.LabelSelector = "app=nginx"
+
+	cmd.SetArgs([]string{"Deployment/my-deploy"})
+	err := cmd.RunE(cmd, []string{"Deployment/my-deploy"})
+
+	assert.ErrorContains(t, err, "--label-selector is not supported for workload scans")
+}
