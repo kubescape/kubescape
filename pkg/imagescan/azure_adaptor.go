@@ -340,6 +340,11 @@ func (a *AzureAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Cont
 	return infos, nil
 }
 
+// Destroy cleans up any persistent resources used by the adaptor.
+func (a *AzureAdaptor) Destroy() error {
+	return nil
+}
+
 func getStringSafe(m map[string]interface{}, key string) string {
 	if val, ok := m[key]; ok {
 		if str, ok := val.(string); ok {

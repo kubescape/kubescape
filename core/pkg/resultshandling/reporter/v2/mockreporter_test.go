@@ -30,8 +30,6 @@ import (
 )
 
 func TestReportMockGetURL(t *testing.T) {
-	t.Parallel()
-
 	type fields struct {
 		query   string
 		message string
@@ -63,8 +61,6 @@ func TestReportMockGetURL(t *testing.T) {
 		tc := toPin
 
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
 			var reportMock reporter.IReport = NewReportMock(tc.fields.query, tc.fields.message)
 
 			t.Run("mock reports should support DisplayMessage", func(t *testing.T) {
