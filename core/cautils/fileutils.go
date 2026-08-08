@@ -484,6 +484,16 @@ func convertYamlToJson(i any) any {
 			}
 		}
 		return m2
+	case map[string]any:
+		// Recurse into values: yaml.v3 decodes a nested mapping with a
+		// non-string key (e.g. `1:` or an unquoted YAML 1.1 `on:`) as
+		// map[interface{}]interface{} even under a string-keyed parent; it
+		// would otherwise survive and break json.Marshal when OPA builds its
+		// input (issue #2833).
+		for k, v := range x {
+			x[k] = convertYamlToJson(v)
+		}
+		return x
 	case []any:
 		for i, v := range x {
 			x[i] = convertYamlToJson(v)

@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -281,6 +282,38 @@ func TestConvertYamlToJson(t *testing.T) {
 			assert.Equal(t, tt.jsonObj, convertYamlToJson(tt.yamlObj))
 		})
 	}
+}
+
+// TestConvertYamlToJson_NestedNonStringKey guards against a nested mapping
+// with a non-string key surviving conversion: yaml.v3 decodes such a mapping
+// as map[interface{}]interface{} even under a string-keyed parent, and
+// convertYamlToJson must recurse into map[string]any values so the result
+// stays json.Marshal-able (issue #2833).
+func TestConvertYamlToJson_NestedNonStringKey(t *testing.T) {
+	input := map[string]any{"spec": map[any]any{"1": "enabled"}}
+
+	got := convertYamlToJson(input)
+	_, err := json.Marshal(got)
+	require.NoError(t, err)
+
+	spec, ok := got.(map[string]any)["spec"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "enabled", spec["1"])
+}
+
+// TestReadYamlFile_NestedNonStringKeyIsJSONMarshalable exercises the same bug
+// through readYamlFile: a manifest with a nested non-string key must produce a
+// workload whose object is JSON-serializable (OPA marshals these to build its
+// input, so an unconverted map[interface{}]interface{} breaks evaluation).
+func TestReadYamlFile_NestedNonStringKeyIsJSONMarshalable(t *testing.T) {
+	manifest := []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\ndata:\n  1: enabled\n")
+
+	workloads, err := readYamlFile(manifest)
+	require.NoError(t, err)
+	require.Len(t, workloads, 1)
+
+	_, err = json.Marshal(workloads[0].GetObject())
+	assert.NoError(t, err)
 }
 
 func TestIsYaml(t *testing.T) {
