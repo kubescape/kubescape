@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/url"
 	"strings"
 
 	"github.com/distribution/reference"
@@ -79,12 +80,27 @@ func resolveRegistryCredentials(ctx context.Context, k8sApi *k8sinterface.Kubern
 	return imagescan.RegistryCredentials{}, false
 }
 
+func normalizeRegistry(registry string) string {
+	if !strings.HasPrefix(registry, "http://") && !strings.HasPrefix(registry, "https://") {
+		registry = "https://" + registry
+	}
+	u, err := url.Parse(registry)
+	if err != nil {
+		return ""
+	}
+	host := u.Host
+	if host == "registry-1.docker.io" || host == "index.docker.io" {
+		host = "docker.io"
+	}
+	return host
+}
+
 func extractCredsFromAuths(auths map[string]dockerAuthConfig, domain string) (imagescan.RegistryCredentials, bool) {
 	for registry, auth := range auths {
-		// docker domain might be docker.io but auth might have https://index.docker.io/v1/
-		if strings.Contains(registry, domain) || (domain == "docker.io" && strings.Contains(registry, "index.docker.io")) {
+		normRegistry := normalizeRegistry(registry)
+		if normRegistry == domain {
 			creds := imagescan.RegistryCredentials{
-				Authority: registry,
+				Authority: normRegistry,
 				Username:  auth.Username,
 				Password:  auth.Password,
 			}
