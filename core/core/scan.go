@@ -414,23 +414,23 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 	imagesToScan := mapset.NewSet[string]()
 
 	if scanType == cautils.ScanTypeWorkload {
-		containers, err := workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject()).GetContainers()
+		workload := workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject())
+		images, err := containerImages(workload)
+		imagesToScan.Append(images...)
 		if err != nil {
-			logger.L().Error("failed to get containers", helpers.Error(err))
-			return
-		}
-		for _, container := range containers {
-			imagesToScan.Add(container.Image)
+			logger.L().Error("failed to get container images", helpers.Error(err))
+			if imagesToScan.IsEmpty() {
+				return
+			}
 		}
 	} else {
-		for _, workload := range scanData.AllResources {
-			containers, err := workloadinterface.NewWorkloadObj(workload.GetObject()).GetContainers()
+		for _, resource := range scanData.AllResources {
+			workload := workloadinterface.NewWorkloadObj(resource.GetObject())
+			images, err := containerImages(workload)
+			imagesToScan.Append(images...)
 			if err != nil {
-				logger.L().Error(fmt.Sprintf("failed to get containers for kind: %s, name: %s, namespace: %s", workload.GetKind(), workload.GetName(), workload.GetNamespace()), helpers.Error(err))
+				logger.L().Error(fmt.Sprintf("failed to get container images for kind: %s, name: %s, namespace: %s", resource.GetKind(), resource.GetName(), resource.GetNamespace()), helpers.Error(err))
 				continue
-			}
-			for _, container := range containers {
-				imagesToScan.Add(container.Image)
 			}
 		}
 	}
@@ -478,6 +478,40 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 	if agg := orchestrator.GetErrorAggregator(); agg != nil && agg.HasErrors() {
 		logger.L().Warning(agg.Error())
 	}
+}
+
+func containerImages(workload workloadinterface.IWorkload) ([]string, error) {
+	var images []string
+	var collectionErr error
+
+	containers, err := workload.GetContainers()
+	if err != nil {
+		collectionErr = errors.Join(collectionErr, fmt.Errorf("failed to get regular containers: %w", err))
+	} else {
+		for _, container := range containers {
+			images = append(images, container.Image)
+		}
+	}
+
+	initContainers, err := workload.GetInitContainers()
+	if err != nil {
+		collectionErr = errors.Join(collectionErr, fmt.Errorf("failed to get init containers: %w", err))
+	} else {
+		for _, container := range initContainers {
+			images = append(images, container.Image)
+		}
+	}
+
+	ephemeralContainers, err := workload.GetEphemeralContainers()
+	if err != nil {
+		collectionErr = errors.Join(collectionErr, fmt.Errorf("failed to get ephemeral containers: %w", err))
+	} else {
+		for _, container := range ephemeralContainers {
+			images = append(images, container.Image)
+		}
+	}
+
+	return images, collectionErr
 }
 
 func registryCredentialsFromScanInfo(scanInfo *cautils.ScanInfo) imagescan.RegistryCredentials {
