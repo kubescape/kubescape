@@ -79,7 +79,7 @@ func TestGetImageCmd_RunE_FormatFlagEmpty(t *testing.T) {
 	assert.NoError(t, parent.PersistentFlags().Set("format", ""))
 
 	err := cmd.RunE(cmd, []string{"nginx"})
-	assert.Equal(t, "format cannot be empty, supported formats: pretty-printer, json, sarif", err.Error())
+	assert.Equal(t, "format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml", err.Error())
 }
 
 func TestGetImageCmd_RunE_FormatFlagInvalid(t *testing.T) {
@@ -93,7 +93,7 @@ func TestGetImageCmd_RunE_FormatFlagInvalid(t *testing.T) {
 	assert.NoError(t, parent.PersistentFlags().Set("format", "xml"))
 
 	err := cmd.RunE(cmd, []string{"nginx"})
-	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, sarif, yaml`)
+	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml`)
 }
 
 func TestGetImageCmd_RunE_Success(t *testing.T) {

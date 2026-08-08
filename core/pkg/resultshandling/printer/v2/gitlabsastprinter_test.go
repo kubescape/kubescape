@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anchore/grype/grype/match"
+	grypepkg "github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -350,4 +353,163 @@ func TestGitLabVulnerabilityID(t *testing.T) {
 		"a different control must produce a different id")
 	assert.NotEqual(t, first, gitLabVulnerabilityID("C-0057", "apps/v1/Deployment/default/other", "deploy.yaml"),
 		"a different resource must produce a different id")
+}
+
+// gitLabImageReportFor runs the printer against image scan data and returns the decoded report
+func gitLabImageReportFor(t *testing.T, imageScanData []cautils.ImageScanData) gitLabSASTReport {
+	t.Helper()
+
+	tmp, err := os.CreateTemp("", "gitlab-dependency-scan-*.json")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	})
+
+	gp := NewGitLabSASTPrinter()
+	gp.writer = tmp
+	require.NoError(t, gp.printImageScan(imageScanData))
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var report gitLabSASTReport
+	require.NoError(t, json.Unmarshal(raw, &report))
+	return report
+}
+
+// TestGitLabImageScan_LocationHasFile guards against #2782's schema violation: the
+// dependency_scanning schema requires location.file, but a container image has no
+// source file path — the image reference itself is used instead.
+func TestGitLabImageScan_LocationHasFile(t *testing.T) {
+	imageScanData := []cautils.ImageScanData{
+		{
+			Image: "nginx:1.25",
+			Matches: match.NewMatches(match.Match{
+				Package: grypepkg.Package{ID: "pkg-1", Name: "openssl", Version: "3.0.0"},
+				Vulnerability: vulnerability.Vulnerability{
+					Metadata: &vulnerability.Metadata{ID: "CVE-2026-0001", Severity: "High"},
+					Fix:      vulnerability.Fix{Versions: []string{"3.0.1"}, State: "Fixed"},
+				},
+			}),
+		},
+	}
+
+	report := gitLabImageReportFor(t, imageScanData)
+	require.Len(t, report.Vulnerabilities, 1)
+
+	assert.Equal(t, "dependency_scanning", report.Scan.Type)
+	assert.NotEmpty(t, report.Vulnerabilities[0].Location.File,
+		"location.file is required by the dependency_scanning schema")
+	assert.Equal(t, "nginx:1.25", report.Vulnerabilities[0].Location.File)
+}
+
+// TestGitLabImageScan_VersionKeyAlwaysPresent guards against #2782's schema violation:
+// location.dependency.version is required, but omitempty silently drops it when a
+// package has no version string. Emitting "version": "" is valid; omitting the key isn't.
+func TestGitLabImageScan_VersionKeyAlwaysPresent(t *testing.T) {
+	imageScanData := []cautils.ImageScanData{
+		{
+			Image: "test-image:latest",
+			Matches: match.NewMatches(match.Match{
+				// Package with no version, as Grype can return
+				Package: grypepkg.Package{ID: "pkg-2", Name: "some-lib", Version: ""},
+				Vulnerability: vulnerability.Vulnerability{
+					Metadata: &vulnerability.Metadata{ID: "CVE-2026-0002", Severity: "Medium"},
+				},
+			}),
+		},
+	}
+
+	tmp, err := os.CreateTemp("", "gitlab-dependency-scan-*.json")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	})
+
+	gp := NewGitLabSASTPrinter()
+	gp.writer = tmp
+	require.NoError(t, gp.printImageScan(imageScanData))
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	// Assert on the raw JSON, not the decoded struct: unmarshalling would hide
+	// whether the "version" key was actually present versus absent.
+	var rawReport map[string]interface{}
+	require.NoError(t, json.Unmarshal(raw, &rawReport))
+	vulns := rawReport["vulnerabilities"].([]interface{})
+	require.Len(t, vulns, 1)
+	location := vulns[0].(map[string]interface{})["location"].(map[string]interface{})
+	dependency := location["dependency"].(map[string]interface{})
+
+	_, versionKeyPresent := dependency["version"]
+	assert.True(t, versionKeyPresent, `"version" key must be present even when empty; the schema requires it`)
+	assert.Equal(t, "", dependency["version"])
+}
+
+// TestGitLabImageScan_SeverityMapping guards against #2782's schema violation: GitLab's
+// severity enum is Info/Unknown/Low/Medium/High/Critical. Grype's Negligible severity
+// is not in that list — passed through unmapped, one Negligible CVE invalidates the
+// entire report.
+func TestGitLabImageScan_SeverityMapping(t *testing.T) {
+	gitLabSeverities := []string{"Info", "Unknown", "Low", "Medium", "High", "Critical"}
+
+	tests := []struct {
+		grypeSeverity string
+		want          string
+	}{
+		{grypeSeverity: "Critical", want: "Critical"},
+		{grypeSeverity: "High", want: "High"},
+		{grypeSeverity: "Medium", want: "Medium"},
+		{grypeSeverity: "Low", want: "Low"},
+		{grypeSeverity: "Negligible", want: "Info"},
+		{grypeSeverity: "Unknown", want: "Unknown"},
+		{grypeSeverity: "", want: "Unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.grypeSeverity, func(t *testing.T) {
+			imageScanData := []cautils.ImageScanData{
+				{
+					Image: "test-image:latest",
+					Matches: match.NewMatches(match.Match{
+						Package: grypepkg.Package{ID: "pkg-1", Name: "openssl", Version: "3.0.0"},
+						Vulnerability: vulnerability.Vulnerability{
+							Metadata: &vulnerability.Metadata{ID: "CVE-2026-0003", Severity: tt.grypeSeverity},
+						},
+					}),
+				},
+			}
+
+			report := gitLabImageReportFor(t, imageScanData)
+			require.Len(t, report.Vulnerabilities, 1)
+
+			assert.Equal(t, tt.want, report.Vulnerabilities[0].Severity)
+			assert.Contains(t, gitLabSeverities, report.Vulnerabilities[0].Severity,
+				"severity must be one of GitLab's allowed values or the whole report is rejected")
+		})
+	}
+}
+
+// TestGitLabImageScan_NoData covers the case where ActionPrint is reached with no
+// image scan data at all: it must error rather than write an empty/invalid file.
+func TestGitLabImageScan_NoData(t *testing.T) {
+	tmp, err := os.CreateTemp("", "gitlab-dependency-scan-*.json")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	})
+
+	gp := NewGitLabSASTPrinter()
+	gp.writer = tmp
+
+	gp.ActionPrint(context.Background(), nil, nil)
+	// ActionPrint logs and returns on empty data rather than panicking; a
+	// zero-byte file confirms nothing was (incorrectly) written.
+	info, err := os.Stat(tmp.Name())
+	require.NoError(t, err)
+	assert.Zero(t, info.Size())
 }
