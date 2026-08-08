@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -112,20 +111,26 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 
 			results, err := ks.Scan(scanInfo, policyIdentifiers)
 			if err != nil {
-				logger.L().Fatal(err.Error())
+				return err
 			}
 			if err := results.HandleResults(ks.Context(), scanInfo); err != nil {
-				logger.L().Fatal(err.Error())
+				return err
 			}
 			if !scanInfo.VerboseMode {
 				logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
 			}
 			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-				logger.L().Fatal("scan compliance-score is below permitted threshold", helpers.String("compliance score", cautils.ComplianceScoreToString(results.GetComplianceScore(), 2)), helpers.String("compliance-threshold", fmt.Sprintf("%.2f", scanInfo.ComplianceThreshold)))
+				return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
 			}
-			enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
-			enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetResults().SummaryDetails.Controls), scanInfo)
-			enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo)
+			if err := enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo); err != nil {
+				return err
+			}
+			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetResults().SummaryDetails.Controls), scanInfo); err != nil {
+				return err
+			}
+			if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
+				return err
+			}
 
 			return nil
 		},
