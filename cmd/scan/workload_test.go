@@ -1,10 +1,13 @@
 package scan
 
 import (
+	"context"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/spf13/cobra"
@@ -14,11 +17,11 @@ import (
 func TestSetWorkloadScanInfo(t *testing.T) {
 	tests := []struct {
 		Description  string
-		apiVersion   string
 		kind         string
 		name         string
 		namespace    string
 		filePath     string
+		apiVersion   string
 		want         *cautils.ScanInfo
 		wantPolicies []cautils.PolicyIdentifier
 	}{
@@ -53,6 +56,7 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 			name:        "api",
 			namespace:   "default",
 			filePath:    "manifests/pod.yaml",
+			apiVersion:  "",
 			want: &cautils.ScanInfo{
 				ScanType:   cautils.ScanTypeWorkload,
 				ScanImages: true,
@@ -107,6 +111,33 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 				},
 			},
 		},
+		{
+			Description: "Set workload scan info with API version",
+			kind:        "Deployment",
+			name:        "test",
+			apiVersion:  "apps/v1",
+			want: &cautils.ScanInfo{
+				ScanType:   cautils.ScanTypeWorkload,
+				ScanImages: true,
+				ScanObject: &objectsenvelopes.ScanObject{
+					ApiVersion: "apps/v1",
+					Kind:       "Deployment",
+					Metadata: objectsenvelopes.ScanObjectMetadata{
+						Name: "test",
+					},
+				},
+			},
+			wantPolicies: []cautils.PolicyIdentifier{
+				{
+					Identifier: "workloadscan",
+					Kind:       v1.KindFramework,
+				},
+				{
+					Identifier: "allcontrols",
+					Kind:       v1.KindFramework,
+				},
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -114,7 +145,7 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 			tc.Description,
 			func(t *testing.T) {
 				scanInfo := &cautils.ScanInfo{FilePath: tc.filePath, Namespace: tc.namespace}
-				policyIdentifiers := setWorkloadScanInfo(scanInfo, tc.apiVersion, tc.kind, tc.name)
+				policyIdentifiers := setWorkloadScanInfo(scanInfo, tc.kind, tc.name, tc.apiVersion)
 
 				if scanInfo.ScanType != tc.want.ScanType {
 					t.Errorf("got: %v, want: %v", scanInfo.ScanType, tc.want.ScanType)
@@ -136,7 +167,9 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 					t.Errorf("got: %v, want: %v", scanInfo.ScanObject.Metadata.Namespace, tc.want.ScanObject.Metadata.Namespace)
 				}
 
-				assert.Equal(t, tc.want.ScanObject.GetApiVersion(), scanInfo.ScanObject.GetApiVersion())
+				if scanInfo.ScanObject.GetApiVersion() != tc.apiVersion {
+					t.Errorf("got apiVersion: %v, want: %v", scanInfo.ScanObject.GetApiVersion(), tc.apiVersion)
+				}
 
 				if tc.filePath == "" {
 					assert.Len(t, scanInfo.InputPatterns, 0)
@@ -327,6 +360,65 @@ func Test_parseWorkloadIdentifierString_Values(t *testing.T) {
 			assert.Equal(t, tc.WantKind, kind)
 			assert.Equal(t, tc.WantName, name)
 			assert.Equal(t, tc.WantApiVersion, apiVersion)
+		})
+	}
+}
+
+type fakePrinter struct{}
+
+func (p *fakePrinter) PrintNextSteps() {}
+func (p *fakePrinter) ActionPrint(ctx context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) {
+}
+func (p *fakePrinter) SetWriter(ctx context.Context, _ string) {}
+func (p *fakePrinter) Score(_ float32)                         {}
+
+type recordingKubescape struct {
+	mocks.MockIKubescape
+	captured *cautils.ScanInfo
+}
+
+func (m *recordingKubescape) Scan(scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	m.captured = scanInfo
+	rh := resultshandling.NewResultsHandler(nil, []printer.IPrinter{&fakePrinter{}}, &fakePrinter{})
+	rh.SetData(cautils.NewOPASessionObjMock())
+	return rh, nil
+}
+
+func TestGetWorkloadCmd_ApiVersion(t *testing.T) {
+	tests := []struct {
+		name           string
+		args           []string
+		wantApiVersion string
+	}{
+		{
+			name:           "explicit flag used",
+			args:           []string{"--api-version", "apps/v1", "Deployment/nginx"},
+			wantApiVersion: "apps/v1",
+		},
+		{
+			name:           "parsed identifier used when no flag",
+			args:           []string{"Deployment.v1.apps/nginx"},
+			wantApiVersion: "apps/v1",
+		},
+		{
+			name:           "flag wins over parsed identifier",
+			args:           []string{"--api-version", "custom/v2", "Deployment.v1.apps/nginx"},
+			wantApiVersion: "custom/v2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{}
+			mock := &recordingKubescape{}
+			cmd := getWorkloadCmd(mock, scanInfo)
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetArgs(tt.args)
+			err := cmd.Execute()
+			assert.NoError(t, err)
+			assert.NotNil(t, mock.captured)
+			assert.Equal(t, tt.wantApiVersion, mock.captured.ScanObject.GetApiVersion())
 		})
 	}
 }
