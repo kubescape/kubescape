@@ -71,7 +71,7 @@ func TestPullSingleResource_FieldSelectorDoesNotLeakAcrossIterations(t *testing.
 	_, selectorErrs := handler.pullSingleResource(
 		context.Background(),
 		resource,
-		nil,
+		"",
 		"",
 		fieldSelector,
 		nil,
@@ -133,7 +133,7 @@ func TestPullResources_NonForbiddenErrorRecorded(t *testing.T) {
 		},
 	}
 
-	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
+	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{}, "")
 
 	require.Len(t, failedQueries, 1, "expected one failed query entry")
 	for _, f := range failedQueries {
@@ -157,7 +157,7 @@ func TestPullResources_NotFoundErrorIgnored(t *testing.T) {
 		},
 	}
 
-	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
+	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{}, "")
 
 	assert.Empty(t, failedQueries, "404-style errors should not be recorded as failures")
 }
@@ -207,7 +207,7 @@ func TestPullResources_PartialFailure(t *testing.T) {
 		},
 	}
 
-	k8sResources, allResources, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
+	k8sResources, allResources, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{}, "")
 
 	// failed query is recorded
 	assert.Len(t, failedQueries, 1)
@@ -239,7 +239,7 @@ func TestPullResources_TotalFailure(t *testing.T) {
 		},
 	}
 
-	_, allResources, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
+	_, allResources, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{}, "")
 
 	assert.Empty(t, allResources, "no resources should be collected when all queries fail")
 	assert.Len(t, failedQueries, 2, "both failed GVRs should be recorded")
