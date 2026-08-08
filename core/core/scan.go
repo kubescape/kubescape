@@ -559,7 +559,10 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	reportResults.ControlTimeout = controlTimeout
 
 	// Stream resources in batches
-	batchChan, errChan, expectedNamespaceBatches, err := resourceHandler.StreamResourcesBatches(ctx, scanData, scanInfo)
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	batchChan, errChan, expectedNamespaceBatches, err := resourceHandler.StreamResourcesBatches(streamCtx, scanData, scanInfo)
 	if err != nil {
 		return fmt.Errorf("failed to start resource streaming: %w", err)
 	}
@@ -569,7 +572,7 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	reportResults.SetInitialResourceCount(estimatedClusterSize)
 
 	// Process batches with streaming
-	if err := reportResults.ProcessWithStreaming(ctx, batchChan, errChan, cautils.NewProgressHandler(""), expectedNamespaceBatches); err != nil {
+	if err := reportResults.ProcessWithStreaming(streamCtx, batchChan, errChan, cautils.NewProgressHandler(""), expectedNamespaceBatches); err != nil {
 		return fmt.Errorf("failed to process rules with streaming: %w", err)
 	}
 
