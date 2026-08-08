@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/armosec/utils-go/httputils"
@@ -115,7 +116,10 @@ func (a *OperatorAdapter) httpPostOperatorScanRequest(body apis.Commands) (strin
 		Path:   operatorTriggerPath,
 	}
 
-	resp, err := a.httpPostFunc(http.DefaultClient, urlQuery.String(), map[string]string{"Content-Type": "application/json"}, reqBody)
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+	resp, err := a.httpPostFunc(client, urlQuery.String(), map[string]string{"Content-Type": "application/json"}, reqBody)
 	if err != nil {
 		return "", err
 	}

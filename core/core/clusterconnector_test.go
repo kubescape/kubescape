@@ -230,14 +230,16 @@ type httpPostRecorder struct {
 	url     string
 	headers map[string]string
 	body    []byte
+	client  httputils.IHttpClient
 }
 
 func (r *httpPostRecorder) fakeHTTPPost(statusCode int, postErr error) func(httputils.IHttpClient, string, map[string]string, []byte) (*http.Response, error) {
-	return func(_ httputils.IHttpClient, url string, headers map[string]string, body []byte) (*http.Response, error) {
+	return func(client httputils.IHttpClient, url string, headers map[string]string, body []byte) (*http.Response, error) {
 		r.calls++
 		r.url = url
 		r.headers = headers
 		r.body = body
+		r.client = client
 
 		if postErr != nil {
 			return nil, postErr
@@ -382,6 +384,11 @@ func TestOperatorAdapter_OperatorScan(t *testing.T) {
 		assert.Equal(t, expectedOperatorURL, recorder.url)
 		assert.Equal(t, "application/json", recorder.headers["Content-Type"])
 		assert.JSONEq(t, string(wantBody), string(recorder.body), "the exact GetRequestPayload() value must reach the HTTP call as JSON")
+
+		// Verify that a sensible timeout is set to prevent connection hangs
+		httpClient, ok := recorder.client.(*http.Client)
+		require.True(t, ok, "expected client to be of type *http.Client")
+		assert.Equal(t, 30*time.Second, httpClient.Timeout, "the HTTP client must have a 30 second timeout to prevent hanging")
 	})
 }
 
