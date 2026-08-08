@@ -88,8 +88,10 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	resourceToControl := make(map[string][]string)
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver)
+	policyWarnings := make(map[string]struct{})
+	queryableResources, excludedRulesMap := getQueryableResourceMapFromPoliciesWithWarned(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, policyWarnings)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
+	recordDiscoveryFailureDependencies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, discoveryFailures, resourceToControl, policyWarnings)
 
 	// map of Kubescape resources to control_ids
 	sessionObj.ResourceToControlsMap = resourceToControl
@@ -243,8 +245,10 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 
 	scanningScope := cautils.GetScanningScope(sessionObj.Metadata.ContextMetadata)
 	resourceToControl := make(map[string][]string)
-	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver)
+	policyWarnings := make(map[string]struct{})
+	queryableResources, excludedRulesMap := getQueryableResourceMapFromPoliciesWithWarned(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, policyWarnings)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
+	recordDiscoveryFailureDependencies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, discoveryFailures, resourceToControl, policyWarnings)
 	sessionObj.ResourceToControlsMap = resourceToControl
 	sessionObj.ExcludedRules = excludedRulesMap
 
