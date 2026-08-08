@@ -216,7 +216,7 @@ func (e *ScanFailedError) Error() string {
 	return e.Message
 }
 
-func readResultsFile(fileID string) (*reporthandlingv2.PostureReport, error) {
+func readResultsFile(fileID string) (json.RawMessage, error) {
 	parsedUUID, err := uuid.Parse(fileID)
 	if err != nil {
 		logger.L().Warning("invalid scan ID requested", helpers.String("ID", fileID), helpers.Error(err))
@@ -242,9 +242,13 @@ func readResultsFile(fileID string) (*reporthandlingv2.PostureReport, error) {
 		path := filepath.Join(OutputDir, cleanID+ext)
 		f, err := os.ReadFile(path)
 		if err == nil {
-			postureReport := &reporthandlingv2.PostureReport{}
-			err = json.Unmarshal(f, postureReport)
-			return postureReport, err
+			// Retain the existing structural validation against PostureReport,
+			// then return the original JSON so additive output fields survive.
+			var postureReport reporthandlingv2.PostureReport
+			if err := json.Unmarshal(f, &postureReport); err != nil {
+				return nil, err
+			}
+			return json.RawMessage(f), nil
 		}
 	}
 
