@@ -12,6 +12,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/yaml"
 )
 
@@ -619,9 +620,15 @@ func TestPrintListResult(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "controls yaml is valid",
+			target:  "controls",
+			format:  "yaml",
+			wantErr: false,
+		},
+		{
 			name:      "controls invalid format returns error",
 			target:    "controls",
-			format:    "yaml",
+			format:    "xml",
 			wantErr:   true,
 			errSubstr: "invalid format",
 		},
@@ -638,9 +645,15 @@ func TestPrintListResult(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "frameworks yaml is valid",
+			target:  "frameworks",
+			format:  "yaml",
+			wantErr: false,
+		},
+		{
 			name:      "frameworks invalid format returns error",
 			target:    "frameworks",
-			format:    "yaml",
+			format:    "xml",
 			wantErr:   true,
 			errSubstr: "invalid format",
 		},

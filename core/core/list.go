@@ -56,14 +56,7 @@ func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) (*metav1.ListResult
 			return nil, err
 		}
 		policies = naturalSortPolicies(policies)
-
-		if listFormatFunction, ok := listFormatFunc[listPolicies.Format]; ok {
-			listFormatFunction(ks.Context(), listPolicies.Target, policies)
-		} else {
-			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'/'yaml' ", listPolicies.Format)
-		}
-
-		return nil
+		return &metav1.ListResult{Names: policies}, nil
 	}
 	return nil, fmt.Errorf("unknown command to list")
 }
@@ -75,19 +68,29 @@ func PrintListResult(ctx context.Context, result *metav1.ListResult, target, for
 		return nil
 	}
 
-	switch listPolicies.Format {
-	case "pretty-print":
-		prettyPrintControls(ks.Context(), entries)
-	case "json":
-		jsonControlsFormat(entries)
-	case "yaml":
-		yamlControlsFormat(entries)
+	switch target {
+	case "controls":
+		switch format {
+		case "pretty-print":
+			prettyPrintControls(ctx, result.Controls)
+		case "json":
+			jsonControlsFormat(result.Controls)
+		case "yaml":
+			yamlControlsFormat(result.Controls)
+		default:
+			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'/'yaml'", format)
+		}
+	case "frameworks", "exceptions":
+		if listFormatFunction, ok := listFormatFunc[format]; ok {
+			listFormatFunction(ctx, target, result.Names)
+		} else {
+			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'/'yaml' ", format)
+		}
 	default:
-		return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'/'yaml'", listPolicies.Format)
+		return fmt.Errorf("invalid target %q, supported targets: 'controls'/'frameworks'/'exceptions'", target)
 	}
 	return nil
 }
-
 func naturalSortPolicies(policies []string) []string {
 	sort.Slice(policies, func(i, j int) bool {
 		return natural.Less(policies[i], policies[j])
