@@ -1,6 +1,8 @@
 package cautils
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -85,7 +87,7 @@ helmCharts:
     releaseName: second
 `)
 
-	directories, err := KustomizeHelmChartDirectories(root)
+	directories, err := KustomizeHelmChartDirectories(context.Background(), root)
 	require.NoError(t, err)
 	assert.Equal(t, []string{filepath.Join(root, "vendor", "charts", "app")}, directories)
 }
@@ -103,7 +105,7 @@ helmCharts:
     releaseName: app
 `)
 
-	directories, err := KustomizeHelmChartDirectories(root)
+	directories, err := KustomizeHelmChartDirectories(context.Background(), root)
 	require.NoError(t, err)
 	assert.Equal(t, []string{
 		filepath.Join(root, "vendor", "charts", "app-1.2.3", "app"),
@@ -112,27 +114,27 @@ helmCharts:
 
 func TestKustomizeHelmChartDirectories_ChartHomeAndDownloadLayout(t *testing.T) {
 	tests := []struct {
-		name          string
-		chartHome     func(string) string
-		chartFields   string
-		expectedParts []string
+		name        string
+		chartHome   func(string) string
+		chartFields string
+		expected    func(string) string
 	}{
 		{
-			name:          "absolute chart home",
-			chartHome:     func(root string) string { return filepath.Join(root, "absolute-charts") },
-			expectedParts: []string{"absolute-charts", "app"},
+			name:      "absolute chart home",
+			chartHome: func(root string) string { return filepath.Join(root, "absolute-charts") },
+			expected:  func(root string) string { return filepath.Join(root, "absolute-charts", "app") },
 		},
 		{
-			name:          "repository without version uses regular chart home",
-			chartHome:     func(string) string { return "charts" },
-			chartFields:   "    repo: https://charts.example.com\n",
-			expectedParts: []string{"charts", "app"},
+			name:        "repository without version uses regular chart home",
+			chartHome:   func(string) string { return "charts" },
+			chartFields: "    repo: https://charts.example.com\n",
+			expected:    func(root string) string { return filepath.Join(root, "charts", "app") },
 		},
 		{
-			name:          "version without repository uses regular chart home",
-			chartHome:     func(string) string { return "charts" },
-			chartFields:   "    version: 1.2.3\n",
-			expectedParts: []string{"charts", "app"},
+			name:        "version without repository uses regular chart home",
+			chartHome:   func(string) string { return "charts" },
+			chartFields: "    version: 1.2.3\n",
+			expected:    func(root string) string { return filepath.Join(root, "charts", "app") },
 		},
 	}
 
@@ -149,15 +151,31 @@ helmCharts:
 %s    releaseName: app
 `, chartHome, tt.chartFields))
 
-			directories, err := KustomizeHelmChartDirectories(root)
+			directories, err := KustomizeHelmChartDirectories(context.Background(), root)
 			require.NoError(t, err)
-			expected := filepath.Join(append([]string{root}, tt.expectedParts...)...)
-			if filepath.IsAbs(chartHome) {
-				expected = filepath.Join(chartHome, "app")
-			}
-			assert.Equal(t, []string{expected}, directories)
+			assert.Equal(t, []string{tt.expected(root)}, directories)
 		})
 	}
+}
+
+func TestAppendOwnedHelmChartTree_PreservesPartialDiscovery(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "charts", "dependency")
+	require.NoError(t, os.MkdirAll(nested, 0o750))
+
+	seen := map[string]struct{}{}
+	var directories []string
+	appendOwnedHelmChartTreeWithLister(
+		context.Background(),
+		root,
+		seen,
+		&directories,
+		func(string) ([]string, []error) {
+			return []string{nested}, []error{errors.New("synthetic partial walk failure")}
+		},
+	)
+
+	assert.Equal(t, []string{root, nested}, directories)
 }
 
 func TestKustomizeHelmChartDirectories_TraversesSelectedLocalGraph(t *testing.T) {
@@ -189,7 +207,7 @@ helmCharts:
     releaseName: component-app
 `)
 
-	directories, err := KustomizeHelmChartDirectories(root)
+	directories, err := KustomizeHelmChartDirectories(context.Background(), root)
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{
 		filepath.Join(base, "charts", "base-app"),

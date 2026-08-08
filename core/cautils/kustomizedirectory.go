@@ -1,12 +1,14 @@
 package cautils
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"sigs.k8s.io/kustomize/api/krusty"
@@ -76,7 +78,7 @@ func getKustomizeDirectoryName(path string) string {
 // Kustomize configuration selected by path. Returning only explicitly referenced
 // charts keeps unrelated charts under the same tree available to the generic Helm
 // loader. Nested chart directories are owned by the referenced parent chart too.
-func KustomizeHelmChartDirectories(path string) ([]string, error) {
+func KustomizeHelmChartDirectories(ctx context.Context, path string) ([]string, error) {
 	kustomizationPath := selectedKustomizationFile(path)
 	if kustomizationPath == "" {
 		return nil, nil
@@ -85,6 +87,7 @@ func KustomizeHelmChartDirectories(path string) ([]string, error) {
 	seenKustomizations := map[string]struct{}{}
 	seenChartDirectories := map[string]struct{}{}
 	if err := collectKustomizeHelmChartDirectories(
+		ctx,
 		kustomizationPath,
 		seenKustomizations,
 		seenChartDirectories,
@@ -96,17 +99,15 @@ func KustomizeHelmChartDirectories(path string) ([]string, error) {
 }
 
 func collectKustomizeHelmChartDirectories(
+	ctx context.Context,
 	kustomizationPath string,
 	seenKustomizations map[string]struct{},
 	seenChartDirectories map[string]struct{},
 	chartDirectories *[]string,
 ) error {
-	absKustomizationPath, err := filepath.Abs(kustomizationPath)
+	absKustomizationPath, err := canonicalPath(kustomizationPath)
 	if err != nil {
 		return fmt.Errorf("failed to resolve Kustomization path %q: %w", kustomizationPath, err)
-	}
-	if resolved, err := filepath.EvalSymlinks(absKustomizationPath); err == nil {
-		absKustomizationPath = resolved
 	}
 	if _, ok := seenKustomizations[absKustomizationPath]; ok {
 		return nil
@@ -143,9 +144,7 @@ func collectKustomizeHelmChartDirectories(
 			chartRoot = filepath.Join(chartRoot, fmt.Sprintf("%s-%s", chart.Name, chart.Version))
 		}
 		directory := filepath.Clean(filepath.Join(chartRoot, chart.Name))
-		if err := appendOwnedHelmChartTree(directory, seenChartDirectories, chartDirectories); err != nil {
-			return err
-		}
+		appendOwnedHelmChartTree(ctx, directory, seenChartDirectories, chartDirectories)
 	}
 
 	// A selected Kustomize build can compose local bases and components that carry
@@ -167,6 +166,7 @@ func collectKustomizeHelmChartDirectories(
 			continue
 		}
 		if err := collectKustomizeHelmChartDirectories(
+			ctx,
 			childKustomization,
 			seenKustomizations,
 			seenChartDirectories,
@@ -178,7 +178,19 @@ func collectKustomizeHelmChartDirectories(
 	return nil
 }
 
-func appendOwnedHelmChartTree(directory string, seen map[string]struct{}, directories *[]string) error {
+type helmChartDirectoryLister func(string) ([]string, []error)
+
+func appendOwnedHelmChartTree(ctx context.Context, directory string, seen map[string]struct{}, directories *[]string) {
+	appendOwnedHelmChartTreeWithLister(ctx, directory, seen, directories, listHelmChartDirs)
+}
+
+func appendOwnedHelmChartTreeWithLister(ctx context.Context, directory string, seen map[string]struct{}, directories *[]string, discover helmChartDirectoryLister) {
+	normalizedDirectory, err := canonicalPath(directory)
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(err))
+		normalizedDirectory = filepath.Clean(directory)
+	}
+	directory = normalizedDirectory
 	if _, ok := seen[directory]; !ok {
 		seen[directory] = struct{}{}
 		*directories = append(*directories, directory)
@@ -186,27 +198,30 @@ func appendOwnedHelmChartTree(directory string, seen map[string]struct{}, direct
 
 	info, err := os.Stat(directory)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return
 	}
 	if err != nil {
-		return fmt.Errorf("failed to inspect Kustomize-owned Helm chart %q: %w", directory, err)
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(
+			fmt.Errorf("failed to inspect Kustomize-owned Helm chart %q: %w", directory, err),
+		))
+		return
 	}
 	if !info.IsDir() {
-		return nil
+		return
 	}
 
-	nestedDirectories, discoveryErrs := listHelmChartDirs(directory)
-	if len(discoveryErrs) > 0 {
-		return fmt.Errorf("failed to discover Kustomize-owned Helm chart dependencies below %q: %w", directory, errors.Join(discoveryErrs...))
+	nestedDirectories, discoveryErrs := discover(directory)
+	for _, discoveryErr := range discoveryErrs {
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(discoveryErr))
 	}
 	for _, nestedDirectory := range nestedDirectories {
+		nestedDirectory = normalizePath(nestedDirectory)
 		if _, ok := seen[nestedDirectory]; ok {
 			continue
 		}
 		seen[nestedDirectory] = struct{}{}
 		*directories = append(*directories, nestedDirectory)
 	}
-	return nil
 }
 
 func selectedKustomizationFile(path string) string {

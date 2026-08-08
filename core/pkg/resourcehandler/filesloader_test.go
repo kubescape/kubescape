@@ -252,6 +252,8 @@ func TestGetResourcesFromPath_KustomizeTransformersDoNotDuplicate(t *testing.T) 
 }
 
 func TestGetResourcesFromPath_KustomizeOwnsReferencedHelmChart(t *testing.T) {
+	installFakeHelm(t)
+
 	root := t.TempDir()
 	chartDir := filepath.Join(root, "vendor", "charts", "app")
 	templateDir := filepath.Join(chartDir, "templates")
@@ -276,9 +278,6 @@ metadata:
 `), 0o600))
 
 	sources, workloads, err := getResourcesFromPath(context.Background(), root, cautils.HelmValueOptions{})
-	if err != nil && kustomizeHelmUnavailable(err) {
-		t.Skipf("Kustomize Helm integration is unavailable: %v", err)
-	}
 	require.NoError(t, err)
 
 	counts := map[string]int{}
@@ -295,19 +294,39 @@ metadata:
 	assert.Equal(t, 2, configMaps, "the chart must not also be rendered as a standalone Helm release")
 }
 
-func kustomizeHelmUnavailable(err error) bool {
-	message := err.Error()
-	for _, fragment := range []string{
-		`exec: "helm": executable file not found`,
-		"unknown shorthand flag",
-		"unknown flag",
-		"unable to run: 'helm version -c --short'",
-	} {
-		if strings.Contains(message, fragment) {
-			return true
-		}
+func installFakeHelm(t *testing.T) {
+	t.Helper()
+	if os.PathSeparator == '\\' {
+		t.Skip("the deterministic Helm test double requires a POSIX shell")
 	}
-	return false
+
+	binDir := t.TempDir()
+	helmPath := filepath.Join(binDir, "helm")
+	//nolint:gosec // The test-owned Helm double must be executable by Kustomize.
+	require.NoError(t, os.WriteFile(helmPath, []byte(`#!/bin/sh
+set -eu
+die() {
+    printf '%s\n' "$*" >&2
+    exit 2
+}
+case "${1:-}" in
+version)
+    [ "$#" -eq 3 ] && [ "$2" = "-c" ] && [ "$3" = "--short" ] || die "unexpected version args: $*"
+    printf '%s\n' 'v3.14.0+gtest'
+    ;;
+template)
+	[ "$#" -ge 3 ] || die "missing template args"
+	release_name=$2
+	chart_path=$3
+	[ -f "$chart_path/Chart.yaml" ] && [ -f "$chart_path/templates/configmap.yaml" ] || die "unexpected chart: $chart_path"
+	printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: %s\n' "$release_name"
+    ;;
+*)
+	die "unsupported helm command: ${1:-}"
+    ;;
+esac
+`), 0o750))
+	t.Setenv("PATH", binDir)
 }
 
 func TestGetResourcesFromPathRejectsDirectoryWithoutKubernetesResources(t *testing.T) {

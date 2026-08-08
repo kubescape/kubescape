@@ -224,6 +224,14 @@ func TestLoadResourcesFromHelmCharts(t *testing.T) {
 	}
 }
 
+func writeHelmChartFixture(t *testing.T, directory, name string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Join(directory, "templates"), 0o750))
+	writeManifestFixture(t, directory, "Chart.yaml", "apiVersion: v2\nname: "+name+"\nversion: 0.1.0\n")
+	writeManifestFixture(t, directory, "values.yaml", "{}\n")
+	writeManifestFixture(t, filepath.Join(directory, "templates"), "configmap.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: "+name+"\n")
+}
+
 func TestLoadResourcesFromHelmChartsExcludingKustomizeOwnedDirectories(t *testing.T) {
 	root := t.TempDir()
 	chartHome := filepath.Join(root, "charts")
@@ -232,16 +240,9 @@ func TestLoadResourcesFromHelmChartsExcludingKustomizeOwnedDirectories(t *testin
 	ownedSubchart := filepath.Join(ownedChart, "charts", "dependency")
 	standaloneChart := filepath.Join(chartHome, "standalone")
 
-	writeChart := func(directory, name string) {
-		t.Helper()
-		require.NoError(t, os.MkdirAll(filepath.Join(directory, "templates"), 0o750))
-		writeManifestFixture(t, directory, "Chart.yaml", "apiVersion: v2\nname: "+name+"\nversion: 0.1.0\n")
-		writeManifestFixture(t, directory, "values.yaml", "{}\n")
-		writeManifestFixture(t, filepath.Join(directory, "templates"), "configmap.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: "+name+"\n")
-	}
-	writeChart(ownedChart, "app")
-	writeChart(ownedSubchart, "dependency")
-	writeChart(standaloneChart, "standalone")
+	writeHelmChartFixture(t, ownedChart, "app")
+	writeHelmChartFixture(t, ownedSubchart, "dependency")
+	writeHelmChartFixture(t, standaloneChart, "standalone")
 	writeManifestFixture(t, root, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -254,7 +255,7 @@ helmCharts:
     releaseName: app
 `)
 
-	ownedDirectories, err := KustomizeHelmChartDirectories(root)
+	ownedDirectories, err := KustomizeHelmChartDirectories(context.Background(), root)
 	require.NoError(t, err)
 	require.Equal(t, []string{ownedChart, ownedSubchart}, ownedDirectories)
 
@@ -266,19 +267,86 @@ helmCharts:
 	}, ownedDirectories)
 	require.Equal(t, []string{standaloneTemplate}, remainingFiles)
 
-	workloads, charts, renderedDirectories, err := LoadResourcesFromHelmChartsExcludingDirectories(
-		context.Background(), root, HelmValueOptions{}, ownedDirectories,
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	relativeRoot, err := filepath.Rel(cwd, root)
+	require.NoError(t, err)
+	for _, tt := range []struct {
+		name     string
+		scanPath string
+	}{
+		{name: "absolute scan path", scanPath: root},
+		{name: "relative scan path", scanPath: relativeRoot},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			workloads, charts, renderedDirectories, err := LoadResourcesFromHelmChartsExcludingDirectories(
+				context.Background(), tt.scanPath, HelmValueOptions{}, ownedDirectories,
+			)
+			require.NoError(t, err)
+			require.Equal(t, []string{standaloneChart}, renderedDirectories)
+			require.Len(t, workloads, 1)
+			require.Len(t, charts, 1)
+			for source, sourceWorkloads := range workloads {
+				require.Len(t, sourceWorkloads, 1)
+				assert.Equal(t, "ConfigMap", sourceWorkloads[0].GetKind())
+				assert.Equal(t, "standalone", sourceWorkloads[0].GetName())
+				assert.Equal(t, standaloneChart, charts[source].Path)
+			}
+		})
+	}
+}
+
+func TestLoadResourcesFromHelmChartsExcludingDirectories_CanonicalizesSymlinkedScanPath(t *testing.T) {
+	realParent := t.TempDir()
+	root := filepath.Join(realParent, "project")
+	ownedChart := filepath.Join(root, "charts", "app")
+	standaloneChart := filepath.Join(root, "charts", "standalone")
+	writeHelmChartFixture(t, ownedChart, "app")
+	writeHelmChartFixture(t, standaloneChart, "standalone")
+	writeManifestFixture(t, root, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmCharts:
+  - name: app
+    releaseName: app
+`)
+
+	linkedParent := filepath.Join(t.TempDir(), "linked-parent")
+	if err := os.Symlink(realParent, linkedParent); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	linkedRoot := filepath.Join(linkedParent, "project")
+	ownedDirectories, err := KustomizeHelmChartDirectories(context.Background(), linkedRoot)
+	require.NoError(t, err)
+	require.Equal(t, []string{ownedChart}, ownedDirectories)
+
+	workloads, _, renderedDirectories, err := LoadResourcesFromHelmChartsExcludingDirectories(
+		context.Background(), linkedRoot, HelmValueOptions{}, ownedDirectories,
 	)
 	require.NoError(t, err)
-	require.Equal(t, []string{standaloneChart}, renderedDirectories)
+	require.Equal(t, []string{filepath.Join(linkedRoot, "charts", "standalone")}, renderedDirectories)
 	require.Len(t, workloads, 1)
-	require.Len(t, charts, 1)
-	for source, sourceWorkloads := range workloads {
+	for _, sourceWorkloads := range workloads {
 		require.Len(t, sourceWorkloads, 1)
-		assert.Equal(t, "ConfigMap", sourceWorkloads[0].GetKind())
 		assert.Equal(t, "standalone", sourceWorkloads[0].GetName())
-		assert.Equal(t, standaloneChart, charts[source].Path)
 	}
+}
+
+func TestExcludeHelmTemplateFiles_PreservesLexicalOwnershipOfSymlinkedTemplate(t *testing.T) {
+	root := t.TempDir()
+	templateDir := filepath.Join(root, "chart", "templates")
+	require.NoError(t, os.MkdirAll(templateDir, 0o750))
+
+	externalTemplate := filepath.Join(t.TempDir(), "configmap.yaml")
+	require.NoError(t, os.WriteFile(externalTemplate, []byte("apiVersion: v1\nkind: ConfigMap\n"), 0o600))
+	linkedTemplate := filepath.Join(templateDir, "configmap.yaml")
+	if err := os.Symlink(externalTemplate, linkedTemplate); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	assert.Empty(t, excludeHelmTemplateFiles(
+		[]string{linkedTemplate},
+		[]string{filepath.Dir(templateDir)},
+	), "Helm renders a template symlink by its lexical path below templates")
 }
 
 func TestLoadFiles(t *testing.T) {
