@@ -47,7 +47,7 @@ func DetectProfileDrift(manifest []byte, profile *storagev1beta1.ContainerProfil
 		for _, cap := range profile.Spec.Capabilities {
 			exercised[cap] = true
 		}
-		
+
 		if !exercised["SYS_ADMIN"] {
 			expr := FixPathToValidYamlExpression("spec.containers[0].securityContext.capabilities.drop", "[\"SYS_ADMIN\"]", documentIndexInYaml)
 			fixes = append(fixes, FixSuggestion{YamlExpression: expr})
