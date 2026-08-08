@@ -207,6 +207,7 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 	filteredMatches := match.NewMatches()
 
 	for m := range remainingMatches.Enumerate() {
+		//nolint:staticcheck // deprecated but replacing it requires refactoring
 		metadata, err := vp.VulnerabilityMetadata(m.Vulnerability.Reference)
 		if err != nil {
 			filteredMatches.Add(m)
@@ -263,6 +264,7 @@ func (s *Service) ExceedsSeverityThreshold(severity vulnerability.Severity, matc
 		return false
 	}
 	for m := range matches.Enumerate() {
+		//nolint:staticcheck // deprecated but replacing it requires refactoring
 		metadata, err := s.vp.VulnerabilityMetadata(m.Vulnerability.Reference)
 		if err != nil {
 			continue
