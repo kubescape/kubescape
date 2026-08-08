@@ -56,14 +56,59 @@ func TestEstimateClusterSize_NilDynamicClient(t *testing.T) {
 	assert.Equal(t, 0, size)
 }
 
-func newListWithRemaining(n int64) *unstructured.UnstructuredList {
+func newLimitOneList() *unstructured.UnstructuredList {
 	return &unstructured.UnstructuredList{
-		Object: map[string]any{
-			"metadata": map[string]any{
-				"remainingItemCount": n,
-			},
+		Items: []unstructured.Unstructured{{Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Example",
+			"metadata":   map[string]any{"name": "first"},
+		}}},
+	}
+}
+
+func newLimitOneListWithRemaining(n int64) *unstructured.UnstructuredList {
+	list := newLimitOneList()
+	list.Object = map[string]any{
+		"metadata": map[string]any{
+			"remainingItemCount": n,
 		},
 	}
+	return list
+}
+
+func TestEstimateClusterSize_CountsReturnedItems(t *testing.T) {
+	mockClient := &gvrAwareDynamicClient{
+		listFunc: func(_ schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			assert.Equal(t, int64(1), opts.Limit)
+			return newLimitOneList(), nil
+		},
+	}
+
+	handler := &K8sResourceHandler{
+		k8s: &k8sinterface.KubernetesApi{DynamicClient: mockClient},
+	}
+
+	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
+	require.NoError(t, err)
+	assert.Equal(t, len(namespacedResourcesToEstimate), size,
+		"a returned page item must be counted even when remainingItemCount is absent")
+}
+
+func TestEstimateClusterSize_SuccessfulEmptyLists(t *testing.T) {
+	mockClient := &gvrAwareDynamicClient{
+		listFunc: func(_ schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			assert.Equal(t, int64(1), opts.Limit)
+			return &unstructured.UnstructuredList{}, nil
+		},
+	}
+
+	handler := &K8sResourceHandler{
+		k8s: &k8sinterface.KubernetesApi{DynamicClient: mockClient},
+	}
+
+	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
+	require.NoError(t, err)
+	assert.Zero(t, size, "successfully listed empty resource types form a valid zero-size estimate")
 }
 
 func TestEstimateClusterSize_SmallCluster(t *testing.T) {
@@ -81,7 +126,7 @@ func TestEstimateClusterSize_SmallCluster(t *testing.T) {
 			case "configmaps":
 				n = 20
 			}
-			return newListWithRemaining(n), nil
+			return newLimitOneListWithRemaining(n), nil
 		},
 	}
 
@@ -91,14 +136,14 @@ func TestEstimateClusterSize_SmallCluster(t *testing.T) {
 
 	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
 	require.NoError(t, err)
-	// 50+10+5+20 + (12 other GVRs * 10 each) = 85 + 120 = 205
-	assert.Equal(t, 205, size)
+	// 50+10+5+20 + (12 other GVRs * 10 each) + 16 returned items = 221
+	assert.Equal(t, 221, size)
 }
 
 func TestEstimateClusterSize_LargeCluster(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
 		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
-			return newListWithRemaining(500), nil
+			return newLimitOneListWithRemaining(500), nil
 		},
 	}
 
@@ -108,8 +153,8 @@ func TestEstimateClusterSize_LargeCluster(t *testing.T) {
 
 	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
 	require.NoError(t, err)
-	// 16 GVRs * 500 each = 8000
-	assert.Equal(t, 8000, size)
+	// 16 GVRs * (500 remaining + 1 returned) = 8016
+	assert.Equal(t, 8016, size)
 }
 
 func TestEstimateClusterSize_ListErrors(t *testing.T) {
@@ -118,7 +163,7 @@ func TestEstimateClusterSize_ListErrors(t *testing.T) {
 			if gvr.Resource == "pods" {
 				return nil, errors.New("API server error")
 			}
-			return newListWithRemaining(100), nil
+			return newLimitOneListWithRemaining(100), nil
 		},
 	}
 
@@ -128,8 +173,8 @@ func TestEstimateClusterSize_ListErrors(t *testing.T) {
 
 	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
 	require.NoError(t, err)
-	// 15 GVRs * 100 = 1500 (pods error is skipped)
-	assert.Equal(t, 1500, size)
+	// 15 GVRs * (100 remaining + 1 returned) = 1515 (pods error is skipped)
+	assert.Equal(t, 1515, size)
 }
 
 func TestEstimateClusterSize_AllListErrors(t *testing.T) {
@@ -176,10 +221,10 @@ func TestEstimateClusterSize_NilRemainingItemCount(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
 		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			if gvr.Resource == "pods" {
-				// No metadata at all — GetRemainingItemCount returns nil
-				return &unstructured.UnstructuredList{}, nil
+				// A complete one-item page has no remainingItemCount.
+				return newLimitOneList(), nil
 			}
-			return newListWithRemaining(200), nil
+			return newLimitOneListWithRemaining(200), nil
 		},
 	}
 
@@ -189,6 +234,6 @@ func TestEstimateClusterSize_NilRemainingItemCount(t *testing.T) {
 
 	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
 	require.NoError(t, err)
-	// 15 GVRs * 200 = 3000 (pods with nil remainingItemCount is skipped)
-	assert.Equal(t, 3000, size)
+	// 15 GVRs * (200 remaining + 1 returned) + 1 returned pod = 3016.
+	assert.Equal(t, 3016, size)
 }
