@@ -550,7 +550,8 @@ func TestResultsHandlerToJSONPreservesLegacyFieldsAndAddsEnrichment(t *testing.T
 
 	// The legacy typed accessor remains source-compatible and retains its
 	// established opa-utils return type.
-	var legacy *reporthandlingv2.PostureReport = rh.GetResults()
+	var legacy *reporthandlingv2.PostureReport
+	legacy = rh.GetResults()
 	require.NotNil(t, legacy)
 	assert.Equal(t, float32(7), legacy.SummaryDetails.Controls[controlID].ScoreFactor)
 }
