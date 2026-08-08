@@ -1,0 +1,273 @@
+package imagescan
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	containeranalysis "cloud.google.com/go/containeranalysis/apiv1"
+	grafeas "cloud.google.com/go/grafeas/apiv1"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"google.golang.org/api/iterator"
+	grafeaspb "google.golang.org/genproto/googleapis/grafeas/v1"
+)
+
+// GrafeasIterator defines an interface for iterating over occurrences
+type GrafeasIterator interface {
+	Next() (*grafeaspb.Occurrence, error)
+}
+
+// GrafeasIteratorWrapper wraps the actual *grafeas.OccurrenceIterator to implement GrafeasIterator
+type GrafeasIteratorWrapper struct {
+	it *grafeas.OccurrenceIterator
+}
+
+func (w *GrafeasIteratorWrapper) Next() (*grafeaspb.Occurrence, error) {
+	return w.it.Next()
+}
+
+// GCPAPI defines the interface for the GCP Grafeas functions we use, enabling mocking in tests.
+type GCPAPI interface {
+	ListOccurrences(ctx context.Context, req *grafeaspb.ListOccurrencesRequest, opts ...interface{}) GrafeasIterator
+}
+
+// gcpAPIWrapper implements GCPAPI by wrapping the real grafeas.Client
+type gcpAPIWrapper struct {
+	client *grafeas.Client
+}
+
+func (g *gcpAPIWrapper) ListOccurrences(ctx context.Context, req *grafeaspb.ListOccurrencesRequest, opts ...interface{}) GrafeasIterator {
+	it := g.client.ListOccurrences(ctx, req)
+	return &GrafeasIteratorWrapper{it: it}
+}
+
+// GCPAdaptor implements IContainerImageVulnerabilityAdaptor for GCP Artifact Registry.
+type GCPAdaptor struct {
+	client       GCPAPI
+	owningClient *containeranalysis.Client
+	projectID    string
+}
+
+// NewGCPAdaptor creates a new GCP adaptor instance.
+func NewGCPAdaptor() *GCPAdaptor {
+	return &GCPAdaptor{}
+}
+
+// Login authenticates with GCP. It prioritizes the default application credentials.
+// Explicit credentials passed via RegistryCredentials are intentionally unsupported
+// as GCP SDK relies heavily on Workload Identity and Application Default Credentials.
+func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
+	if credentials.Username != "" || credentials.Password != "" {
+		return fmt.Errorf("explicit credentials are intentionally unsupported for gcp; use Application Default Credentials or Workload Identity")
+	}
+
+	parts := strings.Split(registry, "/")
+	if len(parts) >= 2 {
+		a.projectID = parts[1]
+	} else {
+		return fmt.Errorf("invalid gcp registry format: expected location-docker.pkg.dev/project/repository, got %s", registry)
+	}
+
+	c, err := containeranalysis.NewClient(ctx)
+	if err != nil {
+		return fmt.Errorf("unable to load gcp container analysis client: %w", err)
+	}
+
+	a.owningClient = c
+	a.client = &gcpAPIWrapper{client: c.GetGrafeasClient()}
+
+	// Fail-fast probe to ensure identity is valid
+	req := &grafeaspb.ListOccurrencesRequest{
+		Parent:   fmt.Sprintf("projects/%s", a.projectID),
+		Filter:   "kind=\"DISCOVERY\"",
+		PageSize: 1,
+	}
+	it := a.client.ListOccurrences(ctx, req)
+	if _, err := it.Next(); err != nil && err != iterator.Done {
+		a.owningClient.Close()
+		a.owningClient = nil
+		a.client = nil
+		return fmt.Errorf("failed to authenticate or access gcp project %s: %w", a.projectID, err)
+	}
+
+	return nil
+}
+
+// DescribeAdaptor provides a string description of the adaptor for help purposes.
+func (a *GCPAdaptor) DescribeAdaptor() string {
+	return "GCP Artifact Registry (GAR) Vulnerability Adaptor"
+}
+
+// GetImagesScanStatus retrieves the scan status for a list of image identifiers.
+func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageScanStatus, error) {
+	if a.client == nil {
+		return nil, fmt.Errorf("gcp client not initialized, call login first")
+	}
+
+	var statuses []ContainerImageScanStatus
+
+	for _, imageID := range imageIDs {
+		status := ContainerImageScanStatus{
+			ImageID:         imageID,
+			IsScanAvailable: false,
+			IsBomAvailable:  false,
+		}
+
+		if imageID.Hash == "" {
+			statuses = append(statuses, status)
+			continue
+		}
+
+		resourceURL := fmt.Sprintf("https://%s/%s@%s", imageID.Registry, imageID.Repository, imageID.Hash)
+
+		req := &grafeaspb.ListOccurrencesRequest{
+			Parent: fmt.Sprintf("projects/%s", a.projectID),
+			Filter: fmt.Sprintf("kind=\"DISCOVERY\" AND resourceUrl=\"%s\"", resourceURL),
+		}
+
+		it := a.client.ListOccurrences(ctx, req)
+		for {
+			occurrence, err := it.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				logger.L().Warning("skipping image scan status due to api error", helpers.String("repository", imageID.Repository), helpers.Error(err))
+				break
+			}
+
+			if occurrence != nil && occurrence.GetDiscovery() != nil {
+				discovery := occurrence.GetDiscovery()
+				if discovery != nil && discovery.GetAnalysisStatus() == grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS {
+					status.IsScanAvailable = true
+					if occurrence.UpdateTime != nil {
+						status.LastScanDate = occurrence.UpdateTime.AsTime()
+					}
+					break
+				}
+			}
+		}
+
+		statuses = append(statuses, status)
+	}
+
+	return statuses, nil
+}
+
+// Helper to normalize GCP severity to Kubescape expected severity
+func normalizeGCPSeverity(severity grafeaspb.Severity) string {
+	switch severity {
+	case grafeaspb.Severity_CRITICAL:
+		return "Critical"
+	case grafeaspb.Severity_HIGH:
+		return "High"
+	case grafeaspb.Severity_MEDIUM:
+		return "Medium"
+	case grafeaspb.Severity_LOW:
+		return "Low"
+	case grafeaspb.Severity_MINIMAL:
+		return "Negligible"
+	default:
+		return "Unknown"
+	}
+}
+
+// GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
+func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageVulnerabilityReport, error) {
+	if a.client == nil {
+		return nil, fmt.Errorf("gcp client not initialized, call login first")
+	}
+
+	var reports []ContainerImageVulnerabilityReport
+
+	for _, imageID := range imageIDs {
+		report := ContainerImageVulnerabilityReport{
+			ImageID:         imageID,
+			Vulnerabilities: []Vulnerability{},
+		}
+
+		if imageID.Hash == "" {
+			reports = append(reports, report)
+			continue
+		}
+
+		resourceURL := fmt.Sprintf("https://%s/%s@%s", imageID.Registry, imageID.Repository, imageID.Hash)
+		req := &grafeaspb.ListOccurrencesRequest{
+			Parent:   fmt.Sprintf("projects/%s", a.projectID),
+			Filter:   fmt.Sprintf("kind=\"VULNERABILITY\" AND resourceUrl=\"%s\"", resourceURL),
+			PageSize: 1000,
+		}
+
+		it := a.client.ListOccurrences(ctx, req)
+		const maxVulns = 1000
+
+		for {
+			occurrence, err := it.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				logger.L().Warning("skipping image vulnerabilities due to api error", helpers.String("repository", imageID.Repository), helpers.Error(err))
+				break
+			}
+
+			if len(report.Vulnerabilities) >= maxVulns {
+				logger.L().Warning("truncated vulnerabilities", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxVulns))
+				break
+			}
+
+			if vulnDetails := occurrence.GetVulnerability(); vulnDetails != nil {
+				id := vulnDetails.GetShortDescription()
+				if id == "" && occurrence.GetNoteName() != "" {
+					parts := strings.Split(occurrence.GetNoteName(), "/")
+					id = parts[len(parts)-1]
+				}
+
+				vuln := Vulnerability{
+					ID:          id,
+					Severity:    normalizeGCPSeverity(vulnDetails.GetEffectiveSeverity()),
+					Description: vulnDetails.GetLongDescription(),
+					Links:       []string{},
+				}
+
+				for _, uri := range vulnDetails.GetRelatedUrls() {
+					vuln.Links = append(vuln.Links, uri.GetUrl())
+				}
+
+				report.Vulnerabilities = append(report.Vulnerabilities, vuln)
+			}
+		}
+
+		reports = append(reports, report)
+	}
+
+	return reports, nil
+}
+
+// GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
+func (a *GCPAdaptor) GetImagesInformation(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageInformation, error) {
+	if a.client == nil {
+		return nil, fmt.Errorf("gcp client not initialized, call login first")
+	}
+
+	var infos []ContainerImageInformation
+
+	for _, imageID := range imageIDs {
+		info := ContainerImageInformation{
+			ImageID: imageID,
+			Bom:     []string{},
+		}
+		infos = append(infos, info)
+	}
+
+	return infos, nil
+}
+
+// Destroy cleans up any persistent resources used by the adaptor.
+func (a *GCPAdaptor) Destroy() error {
+	if a.owningClient != nil {
+		return a.owningClient.Close()
+	}
+	return nil
+}

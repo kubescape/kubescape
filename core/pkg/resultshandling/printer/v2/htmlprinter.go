@@ -73,8 +73,8 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 			}
 			return total
 		},
-		"float32ToInt": cautils.Float32ToInt,
-		"lower":        strings.ToLower,
+		"riskScoreToInt": cautils.RiskScoreToInt,
+		"lower":          strings.ToLower,
 		"sortByNamespace": func(resourceTableView ResourceTableView) ResourceTableView {
 			sortedResourceTableView := make(ResourceTableView, len(resourceTableView))
 			copy(sortedResourceTableView, resourceTableView)
@@ -136,7 +136,12 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableV
 	resourceTableView := make(ResourceTableView, 0)
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if result.GetStatus(nil).IsFailed() {
-			resource := opaSessionObj.AllResources[resourceID]
+			resource, ok := opaSessionObj.AllResources[resourceID]
+			if !ok {
+				logger.L().Debug("resource missing from AllResources, skipping",
+					helpers.String("resourceID", resourceID))
+				continue
+			}
 			ctlResults := buildResourceControlResultTable(result.AssociatedControls, &opaSessionObj.Report.SummaryDetails)
 			resourceTableView = append(resourceTableView, ResourceResult{resource, ctlResults})
 		}

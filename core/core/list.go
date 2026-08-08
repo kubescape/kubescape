@@ -17,15 +17,10 @@ import (
 )
 
 // listFunc handles targets whose output is a flat []string (frameworks, exceptions).
-// "controls" is handled separately via listAndFormatControls because it produces typed structs.
+// "controls" is handled separately via listControls because it produces typed structs.
 var listFunc = map[string]func(context.Context, *metav1.ListPolicies) ([]string, error){
 	"frameworks": listFrameworks,
 	"exceptions": listExceptions,
-}
-
-var listFormatFunc = map[string]func(context.Context, string, []string){
-	"pretty-print": prettyPrintListFormat,
-	"json":         jsonListFormat,
 }
 
 func ListSupportActions() []string {
@@ -38,43 +33,55 @@ func ListSupportActions() []string {
 	return commands
 }
 
-func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
+func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) (*metav1.ListResult, error) {
 	if listPolicies.Target == "controls" {
-		return ks.listAndFormatControls(listPolicies)
+		entries, err := listControls(ks.Context(), listPolicies)
+		if err != nil {
+			return nil, err
+		}
+		entries = naturalSortControls(entries)
+		return &metav1.ListResult{Controls: entries}, nil
 	}
 
 	if policyListerFunc, ok := listFunc[listPolicies.Target]; ok {
 		policies, err := policyListerFunc(ks.Context(), listPolicies)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		policies = naturalSortPolicies(policies)
-
-		if listFormatFunction, ok := listFormatFunc[listPolicies.Format]; ok {
-			listFormatFunction(ks.Context(), listPolicies.Target, policies)
-		} else {
-			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json' ", listPolicies.Format)
-		}
-
-		return nil
+		return &metav1.ListResult{Names: policies}, nil
 	}
-	return fmt.Errorf("unknown command to download")
+	return nil, fmt.Errorf("unknown command to list")
 }
 
-func (ks *Kubescape) listAndFormatControls(listPolicies *metav1.ListPolicies) error {
-	entries, err := listControls(ks.Context(), listPolicies)
-	if err != nil {
-		return err
+// PrintListResult writes a ListResult to the configured output using the
+// requested target and format. It is the caller side of Kubescape.List.
+func PrintListResult(ctx context.Context, result *metav1.ListResult, target, format string) error {
+	if result == nil {
+		return nil
 	}
-	entries = naturalSortControls(entries)
 
-	switch listPolicies.Format {
-	case "pretty-print":
-		prettyPrintControls(ks.Context(), entries)
-	case "json":
-		jsonControlsFormat(entries)
+	switch target {
+	case "controls":
+		switch format {
+		case "pretty-print":
+			prettyPrintControls(ctx, result.Controls)
+		case "json":
+			jsonControlsFormat(result.Controls)
+		default:
+			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'", format)
+		}
+	case "frameworks", "exceptions":
+		switch format {
+		case "pretty-print":
+			prettyPrintListFormat(ctx, target, result.Names)
+		case "json":
+			jsonListFormat(ctx, target, result.Names)
+		default:
+			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'", format)
+		}
 	default:
-		return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'", listPolicies.Format)
+		return fmt.Errorf("invalid target %q, supported targets: 'controls'/'frameworks'/'exceptions'", target)
 	}
 	return nil
 }
@@ -94,16 +101,22 @@ func naturalSortControls(entries []metav1.ControlListEntry) []metav1.ControlList
 }
 
 func listFrameworks(ctx context.Context, listPolicies *metav1.ListPolicies) ([]string, error) {
-	tenant := cautils.GetTenantConfig(listPolicies.AccountID, listPolicies.AccessKey, "", "", getKubernetesApi()) // change k8sinterface
-	policyGetter := getPolicyGetter(ctx, nil, tenant.GetAccountID(), true, nil, false)
+	tenant := cautils.GetTenantConfig(ctx, listPolicies.AccountID, listPolicies.AccessKey, "", "", getKubernetesApi()) // change k8sinterface
+	policyGetter, err := getPolicyGetter(ctx, nil, tenant.GetAccountID(), true, nil, false)
+	if err != nil {
+		return nil, err
+	}
 
 	return listFrameworksNames(policyGetter), nil
 }
 
 func listControls(ctx context.Context, listPolicies *metav1.ListPolicies) ([]metav1.ControlListEntry, error) {
-	tenant := cautils.GetTenantConfig(listPolicies.AccountID, listPolicies.AccessKey, "", "", getKubernetesApi()) // change k8sinterface
+	tenant := cautils.GetTenantConfig(ctx, listPolicies.AccountID, listPolicies.AccessKey, "", "", getKubernetesApi()) // change k8sinterface
 
-	policyGetter := getPolicyGetter(ctx, nil, tenant.GetAccountID(), false, nil, false)
+	policyGetter, err := getPolicyGetter(ctx, nil, tenant.GetAccountID(), false, nil, false)
+	if err != nil {
+		return nil, err
+	}
 	pipes, err := policyGetter.ListControls()
 	if err != nil {
 		return nil, err
@@ -150,11 +163,14 @@ func parseControlEntry(pipe string) metav1.ControlListEntry {
 
 func listExceptions(ctx context.Context, listPolicies *metav1.ListPolicies) ([]string, error) {
 	// load tenant metav1
-	tenant := cautils.GetTenantConfig(listPolicies.AccountID, listPolicies.AccessKey, "", "", getKubernetesApi())
+	tenant := cautils.GetTenantConfig(ctx, listPolicies.AccountID, listPolicies.AccessKey, "", "", getKubernetesApi())
 
 	var exceptionsNames []string
-	ksCloudAPI := getExceptionsGetter(ctx, "", tenant.GetAccountID(), nil, false)
-	exceptions, err := ksCloudAPI.GetExceptions("")
+	ksCloudAPI, err := getExceptionsGetter(ctx, "", tenant.GetAccountID(), nil, false)
+	if err != nil {
+		return exceptionsNames, err
+	}
+	exceptions, err := ksCloudAPI.GetExceptions(ctx, "")
 	if err != nil {
 		return exceptionsNames, err
 	}

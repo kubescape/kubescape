@@ -30,6 +30,11 @@ func TestScore_Json(t *testing.T) {
 			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 21\n",
 		},
 		{
+			name:  "Fractional score below perfect",
+			score: 99.5,
+			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 99\n",
+		},
+		{
 			name:  "Score less than 0",
 			score: -20.0,
 			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 0\n",

@@ -100,7 +100,7 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 
 	// We should submit only after printing results, so a user can see
 	// results at all times, even if submission fails
-	if rh.ReporterObj != nil && scanInfo.Submit {
+	if rh.ReporterObj != nil && scanInfo.Submit.GetBool() {
 		if err := rh.ReporterObj.Submit(ctx, rh.ScanData); err != nil {
 			return err
 		}
@@ -122,6 +122,13 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		default:
 			return printerv2.NewJsonPrinter()
 		}
+	case printer.YamlFormat:
+		if scanInfo.FormatVersion == "v1" {
+			logger.L().Ctx(ctx).Warning("Deprecated format version", helpers.String("run", "--format-version=v2"))
+		}
+		return printerv2.NewYamlPrinter()
+	case printer.CsvFormat:
+		return printerv2.NewCsvPrinter()
 	case printer.JunitResultFormat:
 		return printerv2.NewJunitPrinter(scanInfo.VerboseMode)
 	case printer.PrometheusFormat:
@@ -132,6 +139,8 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		return printerv2.NewHtmlPrinter()
 	case printer.SARIFFormat:
 		return printerv2.NewSARIFPrinter()
+	case printer.GitLabSASTFormat:
+		return printerv2.NewGitLabSASTPrinter()
 	default:
 		if printFormat != printer.PrettyFormat {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
@@ -144,7 +153,7 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 	if scanType == cautils.ScanTypeImage {
 		// supported types for image scanning
 		switch printFormat {
-		case printer.JsonFormat, printer.SARIFFormat:
+		case printer.JsonFormat, printer.SARIFFormat, printer.YamlFormat:
 			return false, nil
 		case printer.PrettyFormat:
 			return true, nil
@@ -153,8 +162,8 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 		}
 	}
 
-	if printFormat == printer.SARIFFormat {
-		// supported types for SARIF
+	if printFormat == printer.SARIFFormat || printFormat == printer.GitLabSASTFormat {
+		// SARIF and GitLab SAST resolve file locations, so they only apply to local files
 		switch scanContext {
 		case cautils.ContextDir, cautils.ContextFile, cautils.ContextGitLocal, cautils.ContextGitRemote:
 			return false, nil
@@ -164,7 +173,7 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 	}
 
 	switch printFormat {
-	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat:
+	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat:
 		return false, nil
 	default:
 		return true, nil

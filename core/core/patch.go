@@ -74,8 +74,12 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		return false, err
 	}
 
+	// svc.Scan is called above with no vulnerability/severity exceptions, so scanResults.Matches
+	// is currently the full unfiltered set copa patches against. If exceptions are ever wired into
+	// this flow, keep them out of scanResults.Matches here - the patch document must still see every
+	// CVE so copa can patch it, even ones excepted from the posture report.
 	model, err := models.NewDocument(clio.Identification{}, scanResults.Packages, scanResults.Context,
-		*scanResults.RemainingMatches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
+		scanResults.Matches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
 	if err != nil {
 		return false, fmt.Errorf("failed to create document: %w", err)
 	}
@@ -104,17 +108,12 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		return false, err
 	}
 
-	sout, serr := os.Stdout, os.Stderr
-	if logger.L().GetLevel() != "debug" {
-		disableCopaLogger()
-	}
-
-	if err = copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.OutputMode, patchInfo.OutputPath, patchInfo.BuildKitOpts); err != nil {
+	err = runWithCopaLoggerMuted(logger.L().GetLevel() == "debug", func() error {
+		return copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.OutputMode, patchInfo.OutputPath, patchInfo.BuildKitOpts)
+	})
+	if err != nil {
 		return false, err
 	}
-
-	// Restore the output streams
-	os.Stdout, os.Stderr = sout, serr
 
 	switch patchInfo.OutputMode {
 	case "image":
@@ -176,10 +175,25 @@ func buildPatchedImageName(image, patchedTag string) (string, error) {
 	return fmt.Sprintf("%s:%s", ref.Name(), patchedTag), nil
 }
 
-func disableCopaLogger() {
-	os.Stdout, os.Stderr = nil, nil
-	null, _ := os.Open(os.DevNull)
-	log.SetOutput(null)
+// runWithCopaLoggerMuted mutes copa's logrus output for the duration of fn,
+// unless debug is set. It does not touch os.Stdout/os.Stderr at all: logrus
+// resolves os.Stderr once, by value, at package init, so reassigning the os
+// package variables has no effect on it anyway (only log.SetOutput does),
+// and copaPatch's buildkit/containerd goroutines can still be running after
+// a timeout, so mutating those process-wide globals here would be an
+// unsynchronized write racing with any concurrent reader. The previous
+// logrus writer - whatever it actually was, not assumed to be os.Stderr - is
+// captured and restored before this function returns.
+func runWithCopaLoggerMuted(debug bool, fn func() error) error {
+	if debug {
+		return fn()
+	}
+
+	prevOut := log.StandardLogger().Out
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(prevOut)
+
+	return fn()
 }
 
 // copaPatch is a slightly modified copy of the Patch function from the original "project-copacetic/copacetic" repo
@@ -302,9 +316,8 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 
 		log.Infof("Patching %d vulnerabilities", len(updates.Updates))
 		patchedImageState, errPkgs, err := manager.InstallUpdates(ctx, updates, ignoreError)
-		log.Infof("Error is: %v", err)
 		if err != nil {
-			return nil, nil
+			return nil, fmt.Errorf("copa: error installing updates :: %w", err)
 		}
 
 		platform := platforms.Normalize(platforms.DefaultSpec())

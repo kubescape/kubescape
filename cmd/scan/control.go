@@ -62,7 +62,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				}
 			}
 			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif")
+				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast")
 			}
 			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ScanFormats); err != nil {
 				return err
@@ -72,14 +72,14 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			}
 
 			// flagValidationControl(scanInfo)
-			scanInfo.PolicyIdentifier = []cautils.PolicyIdentifier{}
+			var policyIdentifiers []cautils.PolicyIdentifier
 
 			if len(args) == 0 {
 				scanInfo.ScanAll = true
 			} else { // expected control or list of control separated by ","
 
 				// Read controls from input args
-				scanInfo.SetPolicyIdentifiers(strings.Split(args[0], ","), apisv1.KindControl)
+				policyIdentifiers = cautils.BuildPolicyIdentifiers(strings.Split(args[0], ","), apisv1.KindControl)
 
 				if len(args) > 1 {
 					if len(args[1:]) == 0 || args[1] != "-" {
@@ -92,6 +92,10 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 						defer os.Remove(tempFile.Name())
 
 						if _, err := io.Copy(tempFile, os.Stdin); err != nil {
+							_ = tempFile.Close()
+							return err
+						}
+						if err := tempFile.Close(); err != nil {
 							return err
 						}
 						scanInfo.InputPatterns = []string{tempFile.Name()}
@@ -106,7 +110,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				return err
 			}
 
-			results, err := ks.Scan(scanInfo)
+			results, err := ks.Scan(scanInfo, policyIdentifiers)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}
@@ -116,11 +120,8 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if !scanInfo.VerboseMode {
 				logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
 			}
-			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
-				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
-			}
 			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-				logger.L().Fatal("scan compliance-score is below permitted threshold", helpers.String("compliance score", fmt.Sprintf("%.2f", results.GetComplianceScore())), helpers.String("compliance-threshold", fmt.Sprintf("%.2f", scanInfo.ComplianceThreshold)))
+				logger.L().Fatal("scan compliance-score is below permitted threshold", helpers.String("compliance score", cautils.ComplianceScoreToString(results.GetComplianceScore(), 2)), helpers.String("compliance-threshold", fmt.Sprintf("%.2f", scanInfo.ComplianceThreshold)))
 			}
 			enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
 			enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetResults().SummaryDetails.Controls), scanInfo)
@@ -135,7 +136,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 	severity := scanInfo.FailThresholdSeverity
 
-	if scanInfo.Submit && scanInfo.OmitRawResources {
+	if scanInfo.Submit.GetBool() && scanInfo.OmitRawResources {
 		return ErrOmitRawResourcesOrSubmit
 	}
 

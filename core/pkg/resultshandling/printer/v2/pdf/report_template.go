@@ -20,6 +20,7 @@ import (
 	"github.com/johnfercher/maroto/v2/pkg/consts/pagesize"
 	"github.com/johnfercher/maroto/v2/pkg/core"
 	"github.com/johnfercher/maroto/v2/pkg/props"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 )
 
 var (
@@ -129,7 +130,7 @@ func (t *Template) generateTableTableResult(totalFailed, total int, score float3
 		text.NewCol(5, "Resource summary", defaultProps),
 		text.NewCol(2, fmt.Sprintf("%d", totalFailed), defaultProps),
 		text.NewCol(2, fmt.Sprintf("%d", total), defaultProps),
-		text.NewCol(2, fmt.Sprintf("%.2f%s", score, "%"), defaultProps),
+		text.NewCol(2, cautils.ComplianceScoreToString(score, 2)+"%", defaultProps),
 	)
 }
 

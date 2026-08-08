@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -42,7 +43,7 @@ func TestServerState_InitialState(t *testing.T) {
 
 func TestServerState_SetBusyMakesIDReachable(t *testing.T) {
 	s := newServerState()
-	s.setBusy("scan-abc")
+	s.setBusy("scan-abc", func() {})
 
 	// After setBusy the ID must be visible.
 	if !s.isBusy("scan-abc") {
@@ -64,7 +65,7 @@ func TestServerState_SetBusyMakesIDReachable(t *testing.T) {
 
 func TestServerState_SetNotBusyClearsID(t *testing.T) {
 	s := newServerState()
-	s.setBusy("scan-xyz")
+	s.setBusy("scan-xyz", func() {})
 	s.setNotBusy("scan-xyz")
 
 	// After completion the scan must report not-busy.
@@ -88,8 +89,8 @@ func TestServerState_SetNotBusyClearsID(t *testing.T) {
 
 func TestServerState_LatestIDTracksLastRegisteredScan(t *testing.T) {
 	s := newServerState()
-	s.setBusy("first")
-	s.setBusy("second")
+	s.setBusy("first", func() {})
+	s.setBusy("second", func() {})
 
 	// latestID must always reflect the most recent setBusy call.
 	if id := s.getLatestID(); id != "second" {
@@ -150,7 +151,7 @@ func TestStatus_WhenNoScanHasRun_ReturnsNotBusy(t *testing.T) {
 
 func TestStatus_WhenScanIsRunning_WithExplicitID_ReturnsBusy(t *testing.T) {
 	h := &HTTPHandler{state: newServerState()}
-	h.state.setBusy("scan-123")
+	h.state.setBusy("scan-123", func() {})
 
 	rq := httptest.NewRequest(http.MethodGet, "/status?id=scan-123", nil)
 	w := httptest.NewRecorder()
@@ -176,7 +177,7 @@ func TestStatus_WhenScanIsRunning_WithEmptyID_ResolvesViaLatestID(t *testing.T) 
 	// isBusy("") resolves to statusID[latestID], and then the handler
 	// populates the response ID from getLatestID(). Both steps are untested.
 	h := &HTTPHandler{state: newServerState()}
-	h.state.setBusy("scan-456")
+	h.state.setBusy("scan-456", func() {})
 
 	rq := httptest.NewRequest(http.MethodGet, "/status", nil) // no ?id= param
 	w := httptest.NewRecorder()
@@ -198,7 +199,7 @@ func TestStatus_AfterScanCompletes_ReturnsNotBusy(t *testing.T) {
 	// Without this test a regression where setNotBusy fails to clear the state
 	// would cause the operator to believe a scan is running indefinitely.
 	h := &HTTPHandler{state: newServerState()}
-	h.state.setBusy("scan-789")
+	h.state.setBusy("scan-789", func() {})
 	h.state.setNotBusy("scan-789") // scan finished
 
 	rq := httptest.NewRequest(http.MethodGet, "/status?id=scan-789", nil)
@@ -228,6 +229,33 @@ func TestStatus_NonGetMethod_Returns405(t *testing.T) {
 	}
 }
 
+// TestStatus_InvalidQueryParams_Returns400 guards against a regression where
+// Status called w.WriteHeader(500) before handler.writeError(), which itself
+// calls w.WriteHeader(400) - the second call is a silent no-op in net/http,
+// so the client always got 500 regardless of the intended 400.
+func TestStatus_InvalidQueryParams_Returns400(t *testing.T) {
+	h := &HTTPHandler{state: newServerState()}
+
+	// StatusQueryParams only declares "id"; an unknown key makes gorilla/schema's
+	// decoder return an error.
+	rq := httptest.NewRequest(http.MethodGet, "/status?unknownParam=x", nil)
+	w := httptest.NewRecorder()
+	h.Status(w, rq)
+
+	if w.Result().StatusCode != http.StatusBadRequest {
+		t.Errorf("Status with invalid query params = HTTP %d; want %d", w.Result().StatusCode, http.StatusBadRequest)
+	}
+
+	resp := decodeResponse(t, w)
+	if resp.Type != utilsapisv1.ErrorScanResponseType {
+		t.Errorf("Status with invalid query params: response.Type = %q; want %q", resp.Type, utilsapisv1.ErrorScanResponseType)
+	}
+	message, _ := resp.Response.(string)
+	if !strings.Contains(message, "failed to parse query params") {
+		t.Errorf("Status with invalid query params: response.Response = %q; want it to describe the decode failure", resp.Response)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // executeScan error-path test
 //
@@ -239,7 +267,7 @@ func TestStatus_NonGetMethod_Returns405(t *testing.T) {
 
 func TestScan_WhenScanFails_Returns500WithErrorType(t *testing.T) {
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(_ context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		return nil, fmt.Errorf("rego evaluation failed: module not found")
 	}
 
@@ -272,7 +300,7 @@ func TestScan_WhenScanFails_Returns500WithErrorType(t *testing.T) {
 
 func TestScan_WhenScanPanics_RecoversAndReturns500(t *testing.T) {
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(_ context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		panic("boom")
 	}
 

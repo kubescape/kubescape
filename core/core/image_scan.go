@@ -1,11 +1,18 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strings"
+	"sync"
+	"syscall"
+
+	"github.com/distribution/reference"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -62,31 +69,35 @@ func GetImageExceptionsFromFile(filePath string) ([]VulnerabilitiesIgnorePolicy,
 
 // This function will identify the registry, organization and image tag from the image name
 func getAttributesFromImage(imgName string) (Attributes, error) {
-	canonicalImageName, err := cautils.NormalizeImageName(imgName)
+	ref, err := reference.ParseNormalizedNamed(imgName)
 	if err != nil {
 		return Attributes{}, err
 	}
 
-	// canonicalImageName is registry/[path/...]/name[:tag]. The registry is always
-	// the first component, but the organization path in between is optional (a
-	// registry image can have no organization) and may span multiple segments, so
-	// don't assume a fixed three-token split. See #2391.
-	tokens := strings.Split(canonicalImageName, "/")
-	registry := tokens[0]
+	registry := reference.Domain(ref)
+	path := reference.Path(ref)
 
 	organization := ""
-	nameAndTag := tokens[len(tokens)-1]
-	if len(tokens) > 2 {
-		organization = strings.Join(tokens[1:len(tokens)-1], "/")
+	imageName := path
+	if idx := strings.LastIndex(path, "/"); idx != -1 {
+		organization = path[:idx]
+		imageName = path[idx+1:]
 	}
 
-	imageNameAndTag := strings.Split(nameAndTag, ":")
-	imageName := imageNameAndTag[0]
-
-	// Intialize the image tag with default value
 	imageTag := "latest"
-	if len(imageNameAndTag) > 1 {
-		imageTag = imageNameAndTag[1]
+	if tagged, ok := ref.(reference.Tagged); ok {
+		imageTag = tagged.Tag()
+	} else if digested, ok := ref.(reference.Digested); ok {
+		// No explicit tag on a digest-pinned reference: fall back to the
+		// digest as ImageTag (deliberate choice, not Docker/OCI reference
+		// semantics - Docker resolves a "name:tag@digest" reference by the
+		// digest, ignoring the tag, but for *exception-policy matching* the
+		// tag the user wrote is what they meant to target). This means an
+		// exception policy that targets a specific ImageTag (e.g. "v3.*")
+		// cannot match a purely digest-pinned scan, since ImageTag will be
+		// the digest instead; only Registry/Organization/ImageName targets
+		// (and an ImageTag target of "" - "any tag") can match it.
+		imageTag = digested.Digest().String()
 	}
 
 	attributes := Attributes{
@@ -188,6 +199,101 @@ func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolic
 	return uniqueVulnsList, uniqueSeversList
 }
 
+// applyRegistryMapping replaces the registry part of the image name if a match
+// is found in the provided mapping. The returned bool indicates whether a
+// mapping key actually matched; callers should only retry when matched is true.
+func applyRegistryMapping(imgName string, registryMapping map[string]string) (string, bool, error) {
+	if len(registryMapping) == 0 {
+		return imgName, false, nil
+	}
+	canonicalImageName, err := cautils.NormalizeImageName(imgName)
+	if err != nil {
+		return "", false, err
+	}
+	tokens := strings.Split(canonicalImageName, "/")
+	registry := tokens[0]
+	if altRegistry, ok := registryMapping[registry]; ok {
+		tokens[0] = altRegistry
+		mappedName := strings.Join(tokens, "/")
+		if _, err := reference.ParseNormalizedNamed(mappedName); err != nil {
+			return "", false, fmt.Errorf("invalid image reference after applying registry mapping: %w", err)
+		}
+		return mappedName, true, nil
+	}
+	return imgName, false, nil
+}
+
+// isResolutionError checks if the error is related to unreachable registry hosts
+// (DNS resolution failures, connection refused, timeouts). It uses typed error
+// checks first and falls back to substring matching for wrapped errors.
+func isResolutionError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Typed error checks — stable across Go and library versions.
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EHOSTUNREACH) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	// Belt-and-braces: substring fallback for deeply wrapped errors where
+	// the typed original has been lost.
+	errStr := err.Error()
+	return strings.Contains(errStr, "no such host") ||
+		strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "i/o timeout")
+}
+
+// scanWithRegistryMapping attempts to scan an image and, on a resolution error,
+// retries using a mapped registry if one is configured. It returns the scan
+// results or a combined error preserving both the original and fallback context.
+type imageScanService interface {
+	Scan(context.Context, string, imagescan.RegistryCredentials, []string, []string) (*cautils.ImageScanData, error)
+}
+
+func scanWithRegistryMapping(
+	ctx context.Context,
+	svc imageScanService,
+	img string,
+	creds imagescan.RegistryCredentials,
+	registryMapping map[string]string,
+	vulnExceptions, sevExceptions []string,
+) (*cautils.ImageScanData, error) {
+	scanData, err := svc.Scan(ctx, img, creds, vulnExceptions, sevExceptions)
+	if err == nil {
+		return scanData, nil
+	}
+
+	if len(registryMapping) == 0 || !isResolutionError(err) {
+		return nil, err
+	}
+
+	logger.L().Warning(fmt.Sprintf("Failed to scan image %s: %s. Trying registry mapping...", img, err))
+
+	mappedImage, matched, mapErr := applyRegistryMapping(img, registryMapping)
+	if mapErr != nil {
+		return nil, fmt.Errorf("scan failed for %s (%w) and failed to construct mapped image: %w", img, err, mapErr)
+	}
+	if !matched {
+		return nil, err
+	}
+
+	logger.L().Info(fmt.Sprintf("Scanning mapped image %s (original: %s)...", mappedImage, img))
+	scanData, fallbackErr := svc.Scan(ctx, mappedImage, creds, vulnExceptions, sevExceptions)
+	if fallbackErr != nil {
+		return nil, fmt.Errorf("scan failed for %s (%w) and for mapped image %s: %w", img, err, mappedImage, fallbackErr)
+	}
+	return scanData, nil
+}
+
 func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (bool, error) {
 	logger.L().Start(fmt.Sprintf("Scanning image %s...", imgScanInfo.Image))
 
@@ -204,8 +310,10 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 	defer svc.Close()
 
 	creds := imagescan.RegistryCredentials{
-		Username: imgScanInfo.Username,
-		Password: imgScanInfo.Password,
+		Authority: imgScanInfo.Authority,
+		Username:  imgScanInfo.Username,
+		Password:  imgScanInfo.Password,
+		Token:     imgScanInfo.Token,
 	}
 
 	var vulnerabilityExceptions []string
@@ -220,9 +328,12 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 		vulnerabilityExceptions, severityExceptions = getUniqueVulnerabilitiesAndSeverities(exceptionPolicies, imgScanInfo.Image)
 	}
 
-	imageScanData, err := svc.Scan(ks.Context(), imgScanInfo.Image, creds, vulnerabilityExceptions, severityExceptions)
+	imageScanData, err := scanWithRegistryMapping(
+		ks.Context(), svc, imgScanInfo.Image, creds,
+		scanInfo.RegistryMapping, vulnerabilityExceptions, severityExceptions,
+	)
 	if err != nil {
-		logger.L().StopError(fmt.Sprintf("Failed to scan image: %s", imgScanInfo.Image))
+		logger.L().StopError(fmt.Sprintf("Failed to scan image %s: %s", imgScanInfo.Image, err))
 		return false, err
 	}
 
@@ -242,4 +353,224 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 	resultsHandler.ImageScanData = []cautils.ImageScanData{*imageScanData}
 
 	return svc.ExceedsSeverityThreshold(imagescan.ParseSeverity(scanInfo.FailThresholdSeverity), imageScanData.Matches), resultsHandler.HandleResults(ks.Context(), scanInfo)
+}
+
+// ScanErrorCategory defines distinct vulnerability scan failure categories.
+type ScanErrorCategory string
+
+const (
+	ErrCategoryDNSTimeout ScanErrorCategory = "Registry DNSTimeout/Unreachable"
+	//nolint:gosec // G101: this is a descriptive category label, not a hardcoded credential
+	ErrCategoryCredentials ScanErrorCategory = "Registry Credentials/Authentication"
+	ErrCategoryParser      ScanErrorCategory = "Image Manifest/Parser Issue"
+	ErrCategoryGeneral     ScanErrorCategory = "General Error"
+)
+
+// CategorizeScanError inspects an error and assigns a ScanErrorCategory.
+func CategorizeScanError(err error) ScanErrorCategory {
+	if err == nil {
+		return ""
+	}
+	if isResolutionError(err) {
+		return ErrCategoryDNSTimeout
+	}
+	errStr := strings.ToLower(err.Error())
+	if strings.Contains(errStr, "unauthorized") ||
+		strings.Contains(errStr, "authentication required") ||
+		strings.Contains(errStr, "forbidden") ||
+		strings.Contains(errStr, "401") ||
+		strings.Contains(errStr, "403") ||
+		strings.Contains(errStr, "credentials") ||
+		strings.Contains(errStr, "login") ||
+		strings.Contains(errStr, "auth") {
+		return ErrCategoryCredentials
+	}
+	if strings.Contains(errStr, "manifest") ||
+		strings.Contains(errStr, "parse") ||
+		strings.Contains(errStr, "syntax") ||
+		strings.Contains(errStr, "unmarshal") ||
+		strings.Contains(errStr, "decode") ||
+		strings.Contains(errStr, "unknown format") ||
+		strings.Contains(errStr, "invalid") ||
+		strings.Contains(errStr, "malformed") {
+		return ErrCategoryParser
+	}
+	return ErrCategoryGeneral
+}
+
+// CategorizedScanError groups an error with its target image and classification.
+type CategorizedScanError struct {
+	Image    string
+	Category ScanErrorCategory
+	Err      error
+}
+
+// ScanErrorAggregator collects and aggregates categorized errors across concurrent worker scans.
+type ScanErrorAggregator struct {
+	mu     sync.Mutex
+	Errors []CategorizedScanError
+}
+
+// NewScanErrorAggregator creates a new thread-safe error aggregator.
+func NewScanErrorAggregator() *ScanErrorAggregator {
+	return &ScanErrorAggregator{
+		Errors: make([]CategorizedScanError, 0),
+	}
+}
+
+// Add appends a categorized error to the aggregator.
+func (a *ScanErrorAggregator) Add(image string, err error) {
+	if err == nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.Errors = append(a.Errors, CategorizedScanError{
+		Image:    image,
+		Category: CategorizeScanError(err),
+		Err:      err,
+	})
+}
+
+// Summary returns the tally of errors grouped by category.
+func (a *ScanErrorAggregator) Summary() map[ScanErrorCategory]int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	summary := make(map[ScanErrorCategory]int)
+	for _, e := range a.Errors {
+		summary[e.Category]++
+	}
+	return summary
+}
+
+// HasErrors indicates whether any scan errors occurred.
+func (a *ScanErrorAggregator) HasErrors() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.Errors) > 0
+}
+
+// Error formats the aggregated scan errors as a multiline string.
+func (a *ScanErrorAggregator) Error() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.Errors) == 0 {
+		return ""
+	}
+	summary := make(map[ScanErrorCategory][]string)
+	for _, e := range a.Errors {
+		summary[e.Category] = append(summary[e.Category], fmt.Sprintf("%s (%v)", e.Image, e.Err))
+	}
+	var b strings.Builder
+	b.WriteString("Aggregated image scan errors:\n")
+	for cat, list := range summary {
+		fmt.Fprintf(&b, "[%s]: %d errors\n", cat, len(list))
+		for _, msg := range list {
+			fmt.Fprintf(&b, "  - %s\n", msg)
+		}
+	}
+	return b.String()
+}
+
+// ImageScanJob represents an item of work for the concurrent scanner.
+type ImageScanJob struct {
+	Image                   string
+	RegistryCredentials     imagescan.RegistryCredentials
+	VulnerabilityExceptions []string
+	SeverityExceptions      []string
+	RegistryMapping         map[string]string
+}
+
+// ImageScanResult conveys the scan output and categorized errors from a worker.
+type ImageScanResult struct {
+	Image    string
+	ScanData *cautils.ImageScanData
+	Error    error
+}
+
+// ImageScanOrchestrator coordinates concurrent image scan execution across a worker pool.
+type ImageScanOrchestrator struct {
+	concurrency     int
+	svc             imageScanService
+	errorAggregator *ScanErrorAggregator
+}
+
+// NewImageScanOrchestrator instantiates an orchestrator with a worker pool size.
+func NewImageScanOrchestrator(svc imageScanService, concurrency int) *ImageScanOrchestrator {
+	if concurrency <= 0 {
+		concurrency = 5
+	}
+	return &ImageScanOrchestrator{
+		concurrency:     concurrency,
+		svc:             svc,
+		errorAggregator: NewScanErrorAggregator(),
+	}
+}
+
+// ScanImages processes multiple image scanning jobs concurrently using the worker pool.
+func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScanJob) []ImageScanResult {
+	if len(jobs) == 0 {
+		return nil
+	}
+
+	jobChan := make(chan ImageScanJob, len(jobs))
+	resultChan := make(chan ImageScanResult, len(jobs))
+
+	for _, job := range jobs {
+		jobChan <- job
+	}
+	close(jobChan)
+
+	var wg sync.WaitGroup
+	workers := o.concurrency
+	if workers > len(jobs) {
+		workers = len(jobs)
+	}
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobChan {
+				select {
+				case <-ctx.Done():
+					resultChan <- ImageScanResult{
+						Image: job.Image,
+						Error: fmt.Errorf("scan canceled: %w", ctx.Err()),
+					}
+					continue
+				default:
+				}
+
+				scanData, err := scanWithRegistryMapping(
+					ctx, o.svc, job.Image, job.RegistryCredentials,
+					job.RegistryMapping, job.VulnerabilityExceptions, job.SeverityExceptions,
+				)
+				if err != nil {
+					if o.errorAggregator != nil {
+						o.errorAggregator.Add(job.Image, err)
+					}
+				}
+				resultChan <- ImageScanResult{
+					Image:    job.Image,
+					ScanData: scanData,
+					Error:    err,
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(resultChan)
+
+	results := make([]ImageScanResult, 0, len(jobs))
+	for res := range resultChan {
+		results = append(results, res)
+	}
+	return results
+}
+
+// GetErrorAggregator returns the orchestrator's scan error aggregator.
+func (o *ImageScanOrchestrator) GetErrorAggregator() *ScanErrorAggregator {
+	return o.errorAggregator
 }

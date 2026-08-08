@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"sort"
 	"time"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
@@ -221,15 +222,19 @@ func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureRepor
 	return &report
 }
 func finalizeResults(results []resourcesresults.Result, resourcesResult map[string]resourcesresults.Result, prioritizedResources map[string]prioritization.PrioritizedResource) {
-	index := 0
+	resourceIDs := make([]string, 0, len(resourcesResult))
 	for resourceID := range resourcesResult {
+		resourceIDs = append(resourceIDs, resourceID)
+	}
+	sort.Strings(resourceIDs)
+
+	for index, resourceID := range resourceIDs {
 		results[index] = resourcesResult[resourceID]
 
 		// Add prioritization information to the result
 		if v, exist := prioritizedResources[resourceID]; exist {
 			results[index].PrioritizedResource = &v
 		}
-		index++
 	}
 }
 

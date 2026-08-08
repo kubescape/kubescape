@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anchore/clio"
 	"github.com/anchore/grype/grype/presenter/models"
@@ -22,6 +23,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	v2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -124,7 +126,7 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 
 func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults cautils.ImageScanData) error {
 	model, err := models.NewDocument(clio.Identification{}, scanResults.Packages, scanResults.Context,
-		*scanResults.RemainingMatches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
+		scanResults.Matches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
 	if err != nil {
 		return fmt.Errorf("failed to create document: %w", err)
 	}
@@ -207,16 +209,15 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 			resourceSource := opaSessionObj.ResourceSource[resourceID]
 			relPath := resourceSource.RelativePath
 
-			// Github Code Scanning considers results not associated to a file path meaningless and invalid when uploading
-			if relPath == "" && basePath == "" {
+			// Github Code Scanning considers results not associated to a file path
+			// meaningless and invalid when uploading, and the location written to the
+			// report is the relative path alone, so a base path cannot stand in for a
+			// missing one
+			if relPath == "" {
 				continue
 			}
 
-			effectiveBase := basePath
-			if effectiveBase == "" && resourceSource.Path != "" {
-				effectiveBase = resourceSource.Path
-			}
-			rsrcAbsPath := filepath.Join(effectiveBase, relPath)
+			rsrcAbsPath := filepath.Join(effectiveBasePath(resourceSource, basePath), relPath)
 			locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
 			if err != nil {
 				logger.L().Warning("failed to create location resolver, SARIF locations will default to line 1", helpers.Error(err))
@@ -231,7 +232,7 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 						logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
 						continue
 					}
-					location := sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
+					location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
 					sp.addRule(run, ctl)
 					r := sp.addResult(run, ctl, relPath, location)
 					collectFixes(ctx, r, ac, opaSessionObj, resourceID, relPath, rsrcAbsPath)
@@ -250,12 +251,16 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 
 	report.AddRun(run)
 
-	report.PrettyWrite(sp.writer)
+	// Surface write failures instead of silently leaving an empty/partial file.
+	if err := report.PrettyWrite(sp.writer); err != nil {
+		return fmt.Errorf("failed to write SARIF report: %w", err)
+	}
 
 	return nil
 }
 
-func (sp *SARIFPrinter) resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {
+// resolveFixLocation resolves a failed control's location in the manifest, falling back to line 1. Shared by the SARIF and GitLab SAST printers
+func resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {
 	defaultLocation := locationresolver.Location{Line: 1, Column: 1}
 	if locationResolver == nil {
 		return defaultLocation
@@ -323,8 +328,8 @@ func calculateMove(str string, file []string, endColumn int, endLine int) (int, 
 	if endLine > len(file) {
 		return 0, 0, false
 	}
-	for num+endColumn-1 > len(file[endLine-1]) {
-		num -= len(file[endLine-1]) - endColumn + 2
+	for num+endColumn-1 > utf8.RuneCountInString(file[endLine-1]) {
+		num -= utf8.RuneCountInString(file[endLine-1]) - endColumn + 2
 		endLine++
 		endColumn = 1
 	}
@@ -422,12 +427,20 @@ func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, 
 		return 0, false
 	}
 
-	splittedPath := strings.Split(localworkload.GetPath(), ":")
-	if len(splittedPath) <= 1 {
+	// GetPath() is "<file path>:<document index>". Split on the *last* colon,
+	// not the first/second: strings.Split(path, ":")[1] silently picks the
+	// wrong segment for any path containing more than one colon (e.g. a
+	// Windows path like "C:\repo\deploy.yaml:0"), producing a non-numeric
+	// value that Atoi rejects and this function reporting "no doc index"
+	// even though one exists. This matches how fixhandler.getFilePathAndIndex
+	// parses the same convention.
+	path := localworkload.GetPath()
+	lastColon := strings.LastIndex(path, ":")
+	if lastColon == -1 {
 		return 0, false
 	}
 
-	docIndex, err := strconv.Atoi(splittedPath[1])
+	docIndex, err := strconv.Atoi(path[lastColon+1:])
 	if err != nil {
 		return 0, false
 	}
@@ -435,19 +448,37 @@ func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, 
 }
 
 func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
+	if opaSessionObj.Metadata == nil {
+		return ""
+	}
 	switch opaSessionObj.Metadata.ScanMetadata.ScanningTarget {
 	case v2.GitLocal:
-		return opaSessionObj.Metadata.ContextMetadata.RepoContextMetadata.LocalRootPath
+		if repo := opaSessionObj.Metadata.ContextMetadata.RepoContextMetadata; repo != nil {
+			return repo.LocalRootPath
+		}
+		return ""
 	case v2.Directory:
 		return opaSessionObj.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
 	case v2.File:
 		if opaSessionObj.Metadata.ContextMetadata.FileContextMetadata != nil {
-			return filepath.Dir(opaSessionObj.Metadata.ContextMetadata.FileContextMetadata.FilePath)
+			return cautils.FileScanRootPath(opaSessionObj.Metadata.ContextMetadata.FileContextMetadata.FilePath)
 		}
 		return ""
 	default:
 		return ""
 	}
+}
+
+// effectiveBasePath returns the root a resource's RelativePath resolves against. The
+// resource's own Source.Path is authoritative because it is the root the relative path
+// was computed from, which the scan-wide base path is not: it covers only the first
+// input pattern of a multi-input scan. Sources that intentionally carry no path
+// (cloned repos) fall back to it.
+func effectiveBasePath(resourceSource reporthandling.Source, basePath string) string {
+	if resourceSource.Path != "" {
+		return resourceSource.Path
+	}
+	return basePath
 }
 
 // generateRemediationMessage generates a remediation message for the given control summary

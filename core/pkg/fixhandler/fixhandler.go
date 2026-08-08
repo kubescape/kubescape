@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +15,8 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -39,7 +42,10 @@ func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
 		return nil, err
 	}
 	defer jsonFile.Close()
-	byteValue, _ := io.ReadAll(jsonFile)
+	byteValue, err := io.ReadAll(jsonFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read report file: %w", err)
+	}
 
 	var reportObj reporthandlingv2.PostureReport
 	if err = json.Unmarshal(byteValue, &reportObj); err != nil {
@@ -64,6 +70,27 @@ func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
 	localPath := getLocalPath(&reportObj)
 	if _, err = os.Stat(localPath); err != nil {
 		return nil, err
+	}
+
+	// localPath comes straight out of the report (RepoContextMetadata.LocalRootPath /
+	// DirectoryContextMetadata.BasePath / dirname(FileContextMetadata.FilePath)), which
+	// is untrusted input if fixInfo.ReportFile came from somewhere the caller doesn't
+	// fully control. By default we still trust it, exactly as before - kubescape fix
+	// has no other way to know where a report's files live. If the caller passed
+	// --base-path, though, require the report's claimed location to actually resolve
+	// inside it before accepting it as the fix root.
+	if fixInfo.BasePath != "" {
+		resolvedLocalPath, err := filepath.EvalSymlinks(localPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve report's scan path %q: %w", localPath, err)
+		}
+		resolvedBasePath, err := filepath.EvalSymlinks(fixInfo.BasePath)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --base-path %q: %w", fixInfo.BasePath, err)
+		}
+		if !isPathContained(resolvedBasePath, resolvedLocalPath) {
+			return nil, fmt.Errorf("report's scan path %q is outside --base-path %q; refusing to trust the report's location claim", localPath, fixInfo.BasePath)
+		}
 	}
 
 	backendLoggerLeveled := logging.AddModuleLevel(logging.NewLogBackend(logger.L().GetWriter(), "", 0))
@@ -158,17 +185,53 @@ func isSupportedScanningTarget(report *reporthandlingv2.PostureReport) error {
 }
 
 func getLocalPath(report *reporthandlingv2.PostureReport) string {
-
+	if report == nil {
+		return ""
+	}
 	switch report.Metadata.ScanMetadata.ScanningTarget {
 	case reporthandlingv2.GitLocal:
-		return report.Metadata.ContextMetadata.RepoContextMetadata.LocalRootPath
+		if repo := report.Metadata.ContextMetadata.RepoContextMetadata; repo != nil {
+			return repo.LocalRootPath
+		}
+		return ""
 	case reporthandlingv2.Directory:
 		return report.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
 	case reporthandlingv2.File:
-		return filepath.Dir(report.Metadata.ContextMetadata.FileContextMetadata.FilePath)
+		return cautils.FileScanRootPath(report.Metadata.ContextMetadata.FileContextMetadata.FilePath)
 	default:
 		return ""
 	}
+}
+
+// resourceBasePath returns the root the resource's relative path resolves against. The
+// resource's own Source.Path is the root the scan computed that relative path from, so
+// it stays correct where the report-wide base path does not: multi-input scans record
+// only the first input, and a single-file scan records the file rather than its root. In
+// both, Source.Path is an ancestor of the report-wide path rather than a descendant.
+//
+// Only an absolute root is accepted: the scanner always records one, and a relative value
+// would resolve against the process working directory rather than anything in the report.
+// Reports without a usable root (cloned repos, older reports) keep using the report-wide
+// path. Traversal is contained where it can actually occur, on the join in
+// PrepareResourcesToFix.
+//
+// Source.Path is as report-supplied as the report-wide path, so --base-path has to
+// constrain it too: without this it would be the one way a report could still name a fix
+// root outside the anchor the caller vouched for.
+func (h *FixHandler) resourceBasePath(resourceObj *reporthandling.Resource) string {
+	if resourceObj == nil || resourceObj.Source == nil {
+		return h.localBasePath
+	}
+	sourcePath := resourceObj.Source.Path
+	if sourcePath == "" || !filepath.IsAbs(sourcePath) {
+		return h.localBasePath
+	}
+	if h.fixInfo != nil && h.fixInfo.BasePath != "" && !isPathContained(h.fixInfo.BasePath, sourcePath) {
+		logger.L().Debug("ignoring resource source path outside --base-path",
+			helpers.String("sourcePath", sanitizeForLog(sourcePath)), helpers.String("basePath", h.fixInfo.BasePath))
+		return h.localBasePath
+	}
+	return sourcePath
 }
 
 func (h *FixHandler) buildResourcesMap() map[string]*reporthandling.Resource {
@@ -221,6 +284,25 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 		resourceID := result.ResourceID
 		resourceObj := resourceIdToResource[resourceID]
+		if resourceObj == nil {
+			// The report references a resource ID with no backing resource data.
+			// We cannot fix it, but it is still a failed control the user must
+			// remediate manually — surface it rather than dropping it.
+			logger.L().Ctx(ctx).Warning("Skipping result with no resource data in report: " + sanitizeForLog(resourceID))
+			for i := range result.AssociatedControls {
+				ac := &result.AssociatedControls[i]
+				if !ac.GetStatus(nil).IsFailed() {
+					continue
+				}
+				h.unfixedControls = append(h.unfixedControls, UnfixedControl{
+					ControlID:    ac.GetID(),
+					ControlName:  ac.GetName(),
+					ResourceName: resourceID,
+					Reason:       "skipped: resource data missing from report",
+				})
+			}
+			continue
+		}
 		resourcePath := h.getPathFromRawResource(resourceObj.GetObject())
 
 		// Determine an upfront reason if we already know this resource is not
@@ -237,14 +319,29 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		if skipReason == "" {
 			relativePath, idx, err := h.getFilePathAndIndex(resourcePath)
 			if err != nil {
-				logger.L().Ctx(ctx).Warning("Skipping invalid resource path: " + resourcePath)
+				logger.L().Ctx(ctx).Warning("Skipping invalid resource path: " + sanitizeForLog(resourcePath))
 				skipReason = "skipped: invalid resource path"
 			} else {
-				absolutePath = filepath.Join(h.localBasePath, relativePath)
-				documentIndex = idx
-				if _, err := os.Stat(absolutePath); err != nil {
-					logger.L().Ctx(ctx).Warning("Skipping missing file: " + absolutePath)
+				// the resource's own root, not the report-wide one: a single-file
+				// scan records the file rather than its root, and a multi-input
+				// scan records only the first input. relativePath is report input
+				// and is the field that can carry "..", so the file this package
+				// writes to must still land inside the root it resolved against.
+				basePath := h.resourceBasePath(resourceObj)
+				candidatePath := filepath.Join(basePath, relativePath)
+				if _, err := os.Stat(candidatePath); err != nil {
+					// Checked before containment so EvalSymlinks (inside
+					// isPathContained) has something to resolve, and so a
+					// missing file is reported as such rather than as
+					// "escapes scanned directory".
+					logger.L().Ctx(ctx).Warning("Skipping missing file: " + sanitizeForLog(candidatePath))
 					skipReason = "skipped: file not found"
+				} else if !isPathContained(basePath, candidatePath) {
+					logger.L().Ctx(ctx).Warning("Skipping resource path that escapes the scanned directory: " + sanitizeForLog(resourcePath))
+					skipReason = "skipped: resource path escapes scanned directory"
+				} else {
+					absolutePath = candidatePath
+					documentIndex = idx
 				}
 			}
 		}
@@ -260,7 +357,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 					ControlName:  ac.GetName(),
 					ResourceName: resourceObj.GetName(),
 					ResourceKind: resourceObj.GetKind(),
-					FilePath:     resourcePath,
+					FilePath:     sanitizeForLog(resourcePath),
 					Reason:       skipReason,
 				})
 			}
@@ -314,7 +411,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 					ControlName:  ac.GetName(),
 					ResourceName: resourceObj.GetName(),
 					ResourceKind: resourceObj.GetKind(),
-					FilePath:     absolutePath,
+					FilePath:     sanitizeForLog(absolutePath),
 					Reason:       reason,
 				},
 				ac: ac,
@@ -566,6 +663,46 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 	return len(updatedFiles), errors
 }
 
+// isPathContained reports whether target resolves to a path inside base,
+// preventing a resource path from the (untrusted) scan report from escaping
+// the local scan directory. Both operands are resolved with
+// filepath.EvalSymlinks before comparing: filepath.Rel alone is purely
+// lexical and never touches the filesystem, so a symlink inside base that
+// points outside it - or a dangling symlink - would otherwise be reported as
+// "contained" even though the file it actually reads/writes lives elsewhere,
+// or doesn't resolve at all. Resolution failure (nonexistent path, dangling
+// symlink, permission error) is treated as not contained rather than
+// silently allowed.
+func isPathContained(base, target string) bool {
+	resolvedBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		return false
+	}
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(resolvedBase, resolvedTarget)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// sanitizeForLog strips ASCII control characters (including \r and \n) from
+// report-derived strings before they are interpolated into a log message.
+// The default CLI logger prints messages as plain text, so an
+// attacker-controlled resource path or resource ID containing "\r\n" could
+// otherwise forge additional, spoofed-looking log lines.
+func sanitizeForLog(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath string, documentIndex int, err error) {
 	lastColon := strings.LastIndex(filePathWithIndex, ":")
 	if lastColon == -1 {
@@ -601,7 +738,10 @@ func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string)
 		return "", err
 	}
 
-	fixInfo := getFixInfo(ctx, originalRootNodes, fixedRootNodes)
+	fixInfo, err := getFixInfo(ctx, originalRootNodes, fixedRootNodes)
+	if err != nil {
+		return "", err
+	}
 
 	fixedYamlLines := getFixedYamlLines(yamlLines, fixInfo, newline)
 
@@ -789,15 +929,17 @@ func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int
 	isStringValue := true
 	if _, err := strconv.ParseBool(value); err == nil {
 		isStringValue = false
-	} else if _, err := strconv.ParseFloat(value, 64); err == nil {
+	} else if f, err := strconv.ParseFloat(value, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
 		isStringValue = false
 	} else if _, err := strconv.Atoi(value); err == nil {
 		isStringValue = false
 	}
 
-	// Strings should be quoted
+	// Strings should be quoted. Escape only `"` — yq's expression lexer
+	// (lexer_participle.go stringValue) unescapes \" and nothing else, so any
+	// other Go-style escape would be written to the file literally.
 	if isStringValue {
-		value = fmt.Sprintf("\"%s\"", value)
+		value = `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 	}
 
 	// select document index and add a dot for the root node
@@ -857,11 +999,7 @@ func determineNewlineSeparator(contents string) string {
 // - Since `yaml/v3` fails to serialize documents starting with a document
 // separator, we comment it out to be compatible.
 func sanitizeYaml(fileAsString string) string {
-	if len(fileAsString) < 3 {
-		return fileAsString
-	}
-
-	if fileAsString[:3] == "---" {
+	if strings.HasPrefix(fileAsString, "---") {
 		fileAsString = "# " + fileAsString
 	}
 	return fileAsString
@@ -871,11 +1009,7 @@ func sanitizeYaml(fileAsString string) string {
 //
 // For sanitization details, refer to the sanitizeYaml() function.
 func revertSanitizeYaml(fixedYamlString string) string {
-	if len(fixedYamlString) < 3 {
-		return fixedYamlString
-	}
-
-	if fixedYamlString[:5] == "# ---" {
+	if strings.HasPrefix(fixedYamlString, "# ---") {
 		fixedYamlString = fixedYamlString[2:]
 	}
 	return fixedYamlString

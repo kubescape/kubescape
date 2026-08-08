@@ -22,6 +22,9 @@ const (
 	PdfFormat         string = "pdf"
 	HtmlFormat        string = "html"
 	SARIFFormat       string = "sarif"
+	GitLabSASTFormat  string = "gitlab-sast"
+	YamlFormat        string = "yaml"
+	CsvFormat         string = "csv"
 )
 
 const (
@@ -32,6 +35,8 @@ const (
 	PdfOutputExt        = ".pdf"
 	PrometheusOutputExt = ".txt"
 	PrettyOutputExt     = ".txt"
+	YamlOutputExt       = ".yaml"
+	CsvOutputExt        = ".csv"
 )
 
 type IPrinter interface {
@@ -41,9 +46,15 @@ type IPrinter interface {
 	Score(score float32)
 }
 
+// outputDirPerm restricts created output directories to the owner (rwx------
+// would be too tight for shared setups, so this keeps group read/traverse),
+// instead of os.ModePerm (0777, world-writable) which scan output/report
+// directories have no reason to be.
+const outputDirPerm = 0o750
+
 func GetWriter(ctx context.Context, outputFile string) *os.File {
 	if outputFile != "" {
-		if err := os.MkdirAll(filepath.Dir(outputFile), os.ModePerm); err != nil {
+		if err := os.MkdirAll(filepath.Dir(outputFile), outputDirPerm); err != nil {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to create directory, reason: %s", err.Error()))
 			return os.Stdout
 		}
@@ -66,7 +77,7 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 // It never returns os.Stdout.
 func GetWriterNoStdoutFallback(ctx context.Context, outputFile, tempPattern string) *os.File {
 	if outputFile != "" {
-		if err := os.MkdirAll(filepath.Dir(outputFile), os.ModePerm); err == nil {
+		if err := os.MkdirAll(filepath.Dir(outputFile), outputDirPerm); err == nil {
 			if f, err := os.Create(outputFile); err == nil {
 				return f
 			} else {

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -83,7 +84,7 @@ func initCacheDir(cmd *cobra.Command) {
 		logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
 	}
 }
-func initEnvironment() {
+func initEnvironment(ctx context.Context) {
 	if rootInfo.DiscoveryServerURL == "" {
 		return
 	}
@@ -107,7 +108,7 @@ func initEnvironment() {
 
 	logger.L().Debug("configuring service discovery URLs", helpers.String("cloudAPIURL", services.GetApiServerUrl()), helpers.String("cloudReportURL", services.GetReportReceiverHttpUrl()))
 
-	tenant := cautils.GetTenantConfig("", "", "", "", nil)
+	tenant := cautils.GetTenantConfig(ctx, "", "", "", "", nil)
 	if services.GetApiServerUrl() != "" {
 		tenant.GetConfigObj().CloudAPIURL = services.GetApiServerUrl()
 	}

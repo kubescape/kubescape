@@ -36,12 +36,14 @@ const (
 )
 
 type RegistryCredentials struct {
-	Username string
-	Password string
+	Authority string
+	Username  string
+	Password  string
+	Token     string
 }
 
-func (c RegistryCredentials) IsEmpty() bool {
-	return c.Username == "" || c.Password == ""
+func (c RegistryCredentials) hasAuthenticator() bool {
+	return c.Token != "" || (c.Username != "" && c.Password != "")
 }
 
 func NewDefaultDBConfig(grypeURL string) (distribution.Config, installation.Config, bool, error) {
@@ -130,8 +132,16 @@ func validateDBLoad(loadErr error, status *vulnerability.ProviderStatus) error {
 	return nil
 }
 
-func getProviderConfig(creds RegistryCredentials) pkg.ProviderConfig {
-	syftCreds := []image.RegistryCredentials{{Username: creds.Username, Password: creds.Password}}
+func getProviderConfig(creds RegistryCredentials, sources []string) pkg.ProviderConfig {
+	var syftCreds []image.RegistryCredentials
+	if creds.hasAuthenticator() {
+		syftCreds = append(syftCreds, image.RegistryCredentials{
+			Authority: creds.Authority,
+			Username:  creds.Username,
+			Password:  creds.Password,
+			Token:     creds.Token,
+		})
+	}
 	regOpts := &image.RegistryOptions{
 		Credentials: syftCreds,
 	}
@@ -139,6 +149,7 @@ func getProviderConfig(creds RegistryCredentials) pkg.ProviderConfig {
 		SyftProviderConfig: pkg.SyftProviderConfig{
 			RegistryOptions: regOpts,
 			SBOMOptions:     syft.DefaultCreateSBOMConfig(),
+			Sources:         sources,
 		},
 		SynthesisConfig: pkg.SynthesisConfig{
 			GenerateMissingCPEs: true,
@@ -152,7 +163,10 @@ func getProviderConfig(creds RegistryCredentials) pkg.ProviderConfig {
 // It performs image scanning and everything needed in between.
 type Service struct {
 	useDefaultMatchers bool
-	vp                 vulnerability.Provider
+	// sources specifies allowed provider sources (nil = all providers).
+	// Used by MCP server to restrict scans to remote registry providers.
+	sources []string
+	vp      vulnerability.Provider
 }
 
 func getIgnoredMatches(vulnerabilityExceptions []string, vp vulnerability.Provider, packages []pkg.Package, pkgContext pkg.Context, useDefaultMatchers bool) (*match.Matches, []match.IgnoredMatch, error) {
@@ -195,6 +209,7 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 	for m := range remainingMatches.Enumerate() {
 		metadata, err := vp.VulnerabilityMetadata(m.Vulnerability.Reference)
 		if err != nil {
+			filteredMatches.Add(m)
 			continue
 		}
 
@@ -216,7 +231,7 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 }
 
 func (s *Service) Scan(_ context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string) (*cautils.ImageScanData, error) {
-	packages, pkgContext, sbom, err := pkg.Provide(userInput, getProviderConfig(creds))
+	packages, pkgContext, sbom, err := pkg.Provide(userInput, getProviderConfig(creds, s.sources))
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +249,6 @@ func (s *Service) Scan(_ context.Context, userInput string, creds RegistryCreden
 		Image:                 userInput,
 		Matches:               filteredMatches,
 		Packages:              packages,
-		RemainingMatches:      remainingMatches,
 		SBOM:                  sbom,
 		VulnerabilityProvider: s.vp,
 	}
@@ -274,6 +288,16 @@ func NewScanService(distCfg distribution.Config, installCfg installation.Config)
 }
 
 func NewScanServiceWithMatchers(distCfg distribution.Config, installCfg installation.Config, useDefaultMatchers bool) (*Service, error) {
+	return NewScanServiceWithMatchersAndSources(distCfg, installCfg, useDefaultMatchers, nil)
+}
+
+// NewRemoteOnlyScanService creates a Service restricted to remote registry sources only,
+// preventing resolution of local files or local daemon images (used by MCP server).
+func NewRemoteOnlyScanService(distCfg distribution.Config, installCfg installation.Config) (*Service, error) {
+	return NewScanServiceWithMatchersAndSources(distCfg, installCfg, true, []string{"registry"})
+}
+
+func NewScanServiceWithMatchersAndSources(distCfg distribution.Config, installCfg installation.Config, useDefaultMatchers bool, sources []string) (*Service, error) {
 	vp, status, err := NewVulnerabilityDB(distCfg, installCfg, true)
 	if err = validateDBLoad(err, status); err != nil {
 		return nil, err
@@ -281,6 +305,7 @@ func NewScanServiceWithMatchers(distCfg distribution.Config, installCfg installa
 	return &Service{
 		vp:                 vp,
 		useDefaultMatchers: useDefaultMatchers,
+		sources:            sources,
 	}, nil
 }
 

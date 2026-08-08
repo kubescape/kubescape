@@ -201,6 +201,21 @@ func TestCalculateMove_InvalidString(t *testing.T) {
 	assert.False(t, success)
 }
 
+// Lines containing multi-byte characters must be measured in runes, not bytes,
+// or the computed position drifts past the line's actual length.
+func TestCalculateMove_MultiByteRunes(t *testing.T) {
+	str := "10"
+	file := []string{"héllo world", "line 2", "line 3"}
+	endColumn := 5
+	endLine := 1
+
+	newLine, newColumn, success := calculateMove(str, file, endColumn, endLine)
+
+	assert.True(t, success)
+	assert.Equal(t, 2, newLine)
+	assert.Equal(t, 3, newColumn)
+}
+
 // Adds a new fix to the result with the given filepath, start and end positions, and text.
 func TestAddFix_AddsNewFixToResult(t *testing.T) {
 	result := sarif.Result{}
@@ -296,6 +311,87 @@ func TestPrintConfigurationScan_MissingControl(t *testing.T) {
 	})
 }
 
+// TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath verifies that a resource
+// with no relative path is dropped even when a base path is available: the SARIF
+// location is written from the relative path alone, so such a result would carry an
+// empty artifact location, which GitHub Code Scanning rejects on upload.
+func TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath(t *testing.T) {
+	const controlID = "C-0057"
+	resourceID := "apps/v1/Deployment/default/demo"
+
+	tests := []struct {
+		name           string
+		resourceSource reporthandling.Source
+	}{
+		{name: "no anchor at all", resourceSource: reporthandling.Source{}},
+		{name: "resource path set", resourceSource: reporthandling.Source{Path: t.TempDir()}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session := cautils.NewOPASessionObjMock()
+			session.Metadata = &reporthandlingv2.Metadata{
+				ScanMetadata: reporthandlingv2.ScanMetadata{
+					ScanningTarget: reporthandlingv2.Directory,
+				},
+				ContextMetadata: reporthandlingv2.ContextMetadata{
+					DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{
+						BasePath: t.TempDir(),
+					},
+				},
+			}
+			session.ResourcesResult[resourceID] = resourcesresults.Result{
+				ResourceID: resourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: controlID,
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+					},
+				},
+			}
+			session.ResourceSource = map[string]reporthandling.Source{resourceID: tt.resourceSource}
+			session.Report = &reporthandlingv2.PostureReport{
+				SummaryDetails: reportsummary.SummaryDetails{
+					Controls: reportsummary.ControlSummaries{
+						controlID: reportsummary.ControlSummary{
+							ControlID:   controlID,
+							Name:        "Privileged container",
+							Description: "Do not run privileged containers",
+							ScoreFactor: 8.0,
+						},
+					},
+				},
+			}
+
+			// the base path is non-empty, so only the missing relative path can skip this finding
+			require.NotEmpty(t, getBasePathFromMetadata(*session))
+
+			tmp, err := os.CreateTemp("", "sarif-norelpath-*.sarif")
+			require.NoError(t, err)
+			defer func() {
+				assert.NoError(t, os.Remove(tmp.Name()))
+			}()
+
+			sp := NewSARIFPrinter()
+			sp.writer = tmp
+			require.NoError(t, sp.printConfigurationScan(context.Background(), session))
+			require.NoError(t, tmp.Close())
+
+			raw, err := os.ReadFile(tmp.Name())
+			require.NoError(t, err)
+
+			var report struct {
+				Runs []struct {
+					Results []json.RawMessage `json:"results"`
+				} `json:"runs"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &report))
+			require.Len(t, report.Runs, 1)
+			assert.Empty(t, report.Runs[0].Results, "a result with no file location must not be emitted")
+		})
+	}
+}
+
 // TestPrintConfigurationScan_PopulatesInvocations is the regression test for
 // the SARIF half of kubescape/kubescape#2325: runs[].invocations was absent
 // from every SARIF report, so GitHub code-scanning ingestion collapsed every
@@ -386,6 +482,54 @@ func TestPrintConfigurationScan_InvocationStartTimeUsesReportGenerationTime(t *t
 		"startTimeUtc must reuse ReportGenerationTime, got %s want %s", inv.StartTimeUTC, preset)
 }
 
+// TestGetDocIndex_PathContainingColon guards against a regression where
+// getDocIndex parsed LocalWorkload.GetPath() ("<file path>:<document
+// index>") with strings.Split(path, ":")[1] instead of splitting on the last
+// colon. That silently picked the wrong segment whenever the file path
+// itself contained more than one colon (e.g. a Windows path like
+// "C:\repo\deploy.yaml:0"), so strconv.Atoi failed on a non-numeric segment
+// and getDocIndex reported "no document index" even though one exists. This
+// must match how fixhandler.getFilePathAndIndex parses the same convention
+// (splitting on the last colon).
+func TestGetDocIndex_PathContainingColon(t *testing.T) {
+	resourceID := "apps/v1/Deployment/default/demo"
+	obj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "demo"},
+		"spec":       map[string]interface{}{},
+	}
+
+	tests := []struct {
+		name      string
+		path      string
+		wantIndex int
+		wantOk    bool
+	}{
+		{name: "plain relative path, no colon in file path", path: "deploy.yaml:0", wantIndex: 0, wantOk: true},
+		{name: "nested relative path", path: "charts/app/deploy.yaml:2", wantIndex: 2, wantOk: true},
+		{name: "file path itself contains a colon", path: `C:\repo\deploy.yaml:3`, wantIndex: 3, wantOk: true},
+		{name: "no colon at all", path: "deploy.yaml", wantIndex: 0, wantOk: false},
+		{name: "trailing colon with non-numeric suffix", path: "deploy.yaml:abc", wantIndex: 0, wantOk: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lw := localworkload.NewLocalWorkload(obj)
+			lw.SetPath(tt.path)
+
+			session := cautils.NewOPASessionObjMock()
+			session.AllResources[resourceID] = lw
+
+			gotIndex, gotOk := getDocIndex(session, resourceID)
+			assert.Equal(t, tt.wantOk, gotOk)
+			if tt.wantOk {
+				assert.Equal(t, tt.wantIndex, gotIndex)
+			}
+		})
+	}
+}
+
 func TestGetBasePathFromMetadata(t *testing.T) {
 	tempDir := t.TempDir()
 	absFilePath := filepath.Join(tempDir, "deploy.yaml")
@@ -410,6 +554,22 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 				},
 			},
 			want: tempDir,
+		},
+		{
+			name: "GitLocal without repository metadata",
+			session: cautils.OPASessionObj{
+				Metadata: &reporthandlingv2.Metadata{
+					ScanMetadata: reporthandlingv2.ScanMetadata{
+						ScanningTarget: reporthandlingv2.GitLocal,
+					},
+				},
+			},
+			want: "",
+		},
+		{
+			name:    "missing metadata",
+			session: cautils.OPASessionObj{},
+			want:    "",
 		},
 		{
 			name: "Directory",
@@ -470,6 +630,42 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, getBasePathFromMetadata(tt.session))
+		})
+	}
+}
+
+// TestEffectiveBasePath verifies that a resource's own Source.Path wins over the
+// scan-wide base path, because it is the root its RelativePath was computed from,
+// while the scan-wide path covers only the first input pattern of a multi-input scan.
+func TestEffectiveBasePath(t *testing.T) {
+	tests := []struct {
+		name           string
+		resourceSource reporthandling.Source
+		basePath       string
+		want           string
+	}{
+		{
+			name:           "resource path wins over the scan-wide base path",
+			resourceSource: reporthandling.Source{Path: "/repo", RelativePath: "workloads/deploy.yaml"},
+			basePath:       "/repo/workloads",
+			want:           "/repo",
+		},
+		{
+			name:           "sources without a path fall back to the scan-wide base path",
+			resourceSource: reporthandling.Source{RelativePath: "deploy.yaml"},
+			basePath:       "/repo",
+			want:           "/repo",
+		},
+		{
+			name:           "no anchor at all",
+			resourceSource: reporthandling.Source{RelativePath: "deploy.yaml"},
+			want:           "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, effectiveBasePath(tt.resourceSource, tt.basePath))
 		})
 	}
 }

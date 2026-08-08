@@ -12,6 +12,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Function receives a non-empty list of policies
@@ -515,6 +516,81 @@ func TestNaturalSortPolicies(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := naturalSortPolicies(tt.args.policies); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("sortPolicies() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestList_UnknownTargetReturnsError(t *testing.T) {
+	ks := &Kubescape{}
+	_, err := ks.List(&metav1.ListPolicies{Target: "not-a-valid-target", Format: "json"})
+	assert.EqualError(t, err, "unknown command to list")
+}
+
+func TestPrintListResult(t *testing.T) {
+	tests := []struct {
+		name      string
+		target    string
+		format    string
+		wantErr   bool
+		errSubstr string
+	}{
+		{
+			name:    "controls pretty-print is valid",
+			target:  "controls",
+			format:  "pretty-print",
+			wantErr: false,
+		},
+		{
+			name:    "controls json is valid",
+			target:  "controls",
+			format:  "json",
+			wantErr: false,
+		},
+		{
+			name:      "controls invalid format returns error",
+			target:    "controls",
+			format:    "yaml",
+			wantErr:   true,
+			errSubstr: "invalid format",
+		},
+		{
+			name:    "frameworks pretty-print is valid",
+			target:  "frameworks",
+			format:  "pretty-print",
+			wantErr: false,
+		},
+		{
+			name:    "frameworks json is valid",
+			target:  "frameworks",
+			format:  "json",
+			wantErr: false,
+		},
+		{
+			name:      "frameworks invalid format returns error",
+			target:    "frameworks",
+			format:    "yaml",
+			wantErr:   true,
+			errSubstr: "invalid format",
+		},
+		{
+			name:      "invalid target returns error",
+			target:    "not-a-target",
+			format:    "json",
+			wantErr:   true,
+			errSubstr: "invalid target",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := &metav1.ListResult{Names: []string{"nsa"}, Controls: []metav1.ControlListEntry{{ID: "C-0001", Name: "control"}}}
+			err := PrintListResult(context.Background(), result, tt.target, tt.format)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errSubstr)
+			} else {
+				require.NoError(t, err)
 			}
 		})
 	}

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -68,11 +70,13 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	var err error
 
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
+	resolver, discoveryFailures := newDiscoveryResourceResolver(k8sHandler.k8s.DiscoveryClient)
+	sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, discoveryFailures...)
 
 	if scanInfo.IsDeletedScanObject {
 		sessionObj.SingleResourceScan, err = getWorkloadFromScanObject(scanInfo.ScanObject)
 	} else {
-		sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(ctx, scanInfo.ScanObject, globalFieldSelectors)
+		sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(ctx, scanInfo.ScanObject, globalFieldSelectors, resolver)
 	}
 
 	if err != nil {
@@ -84,8 +88,8 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	resourceToControl := make(map[string][]string)
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope)
-	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl)
+	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver)
+	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
 
 	// map of Kubescape resources to control_ids
 	sessionObj.ResourceToControlsMap = resourceToControl
@@ -99,7 +103,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	// separately so they can be surfaced without overriding the whole-GVR status.
 	partialFailures := recordFailedQueryStatuses(failedQueries, k8sResourcesMap, sessionObj.InfoMap)
 	if len(partialFailures) > 0 {
-		sessionObj.PartialGVRFailures = partialFailures
+		sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, partialFailures...)
 		for _, p := range partialFailures {
 			logger.L().Ctx(ctx).Warning("partial resource collection: some resources may be missing from scan results",
 				helpers.String("gvr", p.GVR),
@@ -131,7 +135,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 
 	// add single resource to k8s resources map (for single resource scan)
 	if !scanInfo.IsDeletedScanObject {
-		addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan)
+		addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan, resolver)
 	}
 
 	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
@@ -202,30 +206,323 @@ func (k8sHandler *K8sResourceHandler) GetCloudProvider() string {
 	return k8sHandler.cloudProvider
 }
 
+// StreamResourcesBatches streams resources in batches so the OPA processor can
+// evaluate one namespace batch at a time, bounding the evaluation input instead
+// of holding the whole cluster in it. This method implements a two-phase
+// approach:
+// 1. First, it collects all cluster-scoped and external resources into a resident batch
+// 2. Then, it streams namespace-scoped resources in batches
+// The resident batch is sent first, followed by namespace batches in sorted order.
+// The producer goroutine never mutates sessionObj's K8SResources,
+// ExternalResources, or AllResources — the collected maps are carried on the
+// resident batch and copied into the session by ProcessWithStreaming once it
+// receives the batch, so NewOPAProcessor (which runs concurrently with the
+// producer) never reads maps another goroutine is writing.
+// Returns the batch channel, error channel, expected number of namespace batches, and any setup error.
+func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
+	logger.L().Start("Streaming Kubernetes objects in batches...")
+
+	batchChan := make(chan *cautils.ResourceBatch, 2)
+	errChan := make(chan error, 1)
+
+	// Setup phase: collect metadata and queryable resources
+	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
+	resolver, discoveryFailures := newDiscoveryResourceResolver(k8sHandler.k8s.DiscoveryClient)
+	sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, discoveryFailures...)
+
+	var setupErr error
+	if scanInfo.IsDeletedScanObject {
+		sessionObj.SingleResourceScan, setupErr = getWorkloadFromScanObject(scanInfo.ScanObject)
+	} else {
+		sessionObj.SingleResourceScan, setupErr = k8sHandler.findScanObjectResource(ctx, scanInfo.ScanObject, globalFieldSelectors, resolver)
+	}
+
+	if setupErr != nil {
+		return nil, nil, 0, setupErr
+	}
+
+	scanningScope := cautils.GetScanningScope(sessionObj.Metadata.ContextMetadata)
+	resourceToControl := make(map[string][]string)
+	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver)
+	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
+	sessionObj.ResourceToControlsMap = resourceToControl
+	sessionObj.ExcludedRules = excludedRulesMap
+
+	// Compute expected namespace count synchronously before launching
+	// the goroutine so the caller has it at return time.
+	expectedNamespaceBatches := k8sHandler.countNamespaces(ctx, scanInfo)
+
+	// Start streaming goroutine
+	go func() {
+		defer close(errChan)
+		defer close(batchChan)
+		defer logger.L().StopSuccess("Done streaming Kubernetes objects")
+
+		if err := k8sHandler.collectAndStreamBatches(ctx, queryableResources, globalFieldSelectors, sessionObj, scanInfo, ksResourceMap, batchChan, resolver); err != nil {
+			errChan <- err
+			return
+		}
+	}()
+
+	return batchChan, errChan, expectedNamespaceBatches, nil
+}
+
+// collectAndStreamBatches pulls every queryable GVR exactly once, partitions
+// the results into a single resident batch (cluster-scoped and external
+// resources) and one batch per namespace, then streams the resident batch
+// followed by each namespace batch in deterministic order.
+//
+// This replaces the previous two-phase approach (collectResidentBatch +
+// streamNamespaceBatches) which re-listed every GVR once per namespace,
+// resulting in O(L × N) API-server LIST calls on large clusters.
+//
+// What this bounds is the evaluation input, not the collection peak: every GVR
+// is pulled and partitioned before the first batch is sent, so the whole
+// cluster is resident in this function at that point. The consumer
+// (OPAProcessor.ProcessWithStreaming) evaluates one namespace batch at a time,
+// so only the resident batch plus one namespace batch are in the evaluation
+// input at any moment. Bounding the collection peak itself would require paged
+// LISTs (metav1.ListOptions{Limit, Continue}) per GVR — a larger change than
+// this one.
+func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, ksResourceMap cautils.ExternalResources, batchChan chan<- *cautils.ResourceBatch, resolver resourceResolver) error {
+	resident := cautils.NewResourceBatch(cautils.ClusterScope)
+	namespaceBatches := make(map[string]*cautils.ResourceBatch)
+	collectedK8sResources := queryableResources.ToK8sResourceMap()
+	failedQueries := make(map[string]queryFailure)
+	collectedAnyResource := false
+
+	// Single pass: pull each GVR once, partition by scope.
+	for key := range queryableResources {
+		qr := queryableResources[key]
+		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
+		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
+
+		result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced)
+		for _, se := range selectorErrs {
+			// Match the eager collection path: controls may reference optional
+			// CRDs which are not installed, so a missing resource is not a scan
+			// coverage failure.
+			if strings.Contains(se.err.Error(), "the server could not find the requested resource") {
+				continue
+			}
+			qualifiedKey := qr.GroupVersionResourceTriplet + "/" + se.selector
+			failedQueries[qualifiedKey] = queryFailure{
+				gvr:      qr.GroupVersionResourceTriplet,
+				selector: se.selector,
+				err:      se.err,
+			}
+		}
+		if len(result) == 0 && len(selectorErrs) > 0 {
+			continue
+		}
+
+		metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
+		if len(metaObjs) > 0 {
+			// recordFailedQueryStatuses only distinguishes an empty GVR from a
+			// non-empty one. Keep one representative ID instead of duplicating
+			// every ID already retained in the streaming batches.
+			collectedK8sResources[qr.GroupVersionResourceTriplet] = []string{metaObjs[0].GetID()}
+			collectedAnyResource = true
+		}
+
+		for _, metaObj := range metaObjs {
+			scope := cautils.ResourceScope(metaObj)
+			if scope == cautils.ClusterScope {
+				resident.K8SResources[qr.GroupVersionResourceTriplet] = append(resident.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
+				resident.AllResources[metaObj.GetID()] = metaObj
+			} else {
+				batch, ok := namespaceBatches[scope]
+				if !ok {
+					batch = cautils.NewResourceBatch(scope)
+					namespaceBatches[scope] = batch
+				}
+				batch.K8SResources[qr.GroupVersionResourceTriplet] = append(batch.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
+				batch.AllResources[metaObj.GetID()] = metaObj
+			}
+		}
+	}
+
+	// Preserve the eager collector's failure contract. Whole-GVR failures feed
+	// InfoMap, while selector failures for a GVR that returned some resources
+	// remain non-fatal and are surfaced as partial coverage.
+	partialFailures := recordFailedQueryStatuses(failedQueries, collectedK8sResources, sessionObj.InfoMap)
+	if len(partialFailures) > 0 {
+		sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, partialFailures...)
+		for _, p := range partialFailures {
+			logger.L().Ctx(ctx).Warning("partial resource collection: some resources may be missing from scan results",
+				helpers.String("gvr", p.GVR),
+				helpers.String("selector", p.Selector),
+				helpers.String("error", p.Error))
+		}
+	}
+	if !collectedAnyResource && len(failedQueries) > 0 {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("scan aborted: %w", ctxErr)
+		}
+		var combined []string
+		for _, f := range failedQueries {
+			combined = append(combined, fmt.Sprintf("%s: %s", f.gvr, f.err.Error()))
+		}
+		return fmt.Errorf("failed to pull any Kubernetes resources: %s", strings.Join(combined, "; "))
+	}
+	for _, f := range failedQueries {
+		logger.L().Ctx(ctx).Warning("failed to pull resource type",
+			helpers.String("gvr", f.gvr), helpers.Error(f.err))
+	}
+
+	// Collect external resources (host, cloud, RBAC, VAP) into the resident batch.
+	allResources := resident.AllResources
+
+	if !scanInfo.IsDeletedScanObject && sessionObj.SingleResourceScan != nil {
+		addSingleResourceToResourceMaps(resident.K8SResources, allResources, sessionObj.SingleResourceScan, resolver)
+	}
+
+	hostResources := cautils.MapHostResources(ksResourceMap)
+	// check that controls use host sensor resources
+	if len(hostResources) > 0 {
+		if sessionObj.Metadata.ScanMetadata.HostScanner {
+			logger.L().Info("Requesting Host scanner data")
+			infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
+				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
+			} else if k8sHandler.hostSensorHandler == nil {
+				// using hostSensor mock
+				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
+			} else {
+				for k, v := range infoMap {
+					sessionObj.InfoMap[k] = v
+				}
+			}
+		} else {
+			cautils.SetInfoMapForResources("This control is scanned exclusively by the Kubescape operator, not the Kubescape CLI. Install the Kubescape operator:\n     https://kubescape.io/docs/install-operator/.", hostResources, sessionObj.InfoMap)
+		}
+	}
+
+	if err := k8sHandler.collectRbacResources(allResources); err != nil {
+		logger.L().Ctx(ctx).Warning("failed to collect rbac resources", helpers.Error(err))
+	}
+
+	cloudResources := cautils.MapCloudResources(ksResourceMap)
+
+	// allResources is resident.AllResources, which only ever holds
+	// cluster-scoped resources (see the partition loop above); namespaced
+	// resources live in namespaceBatches. Aggregate both before counting, and
+	// do it here, before namespaceBatches are drained into batchChan below.
+	countable := make(map[string]workloadinterface.IMetadata, len(allResources))
+	maps.Copy(countable, allResources)
+	for _, batch := range namespaceBatches {
+		maps.Copy(countable, batch.AllResources)
+	}
+	setMapNamespaceToNumOfResources(ctx, countable, sessionObj)
+	if len(cloudResources) > 0 {
+		if err := k8sHandler.collectCloudResources(ctx, sessionObj, allResources, ksResourceMap, cloudResources); err != nil {
+			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
+		}
+	}
+
+	if scanInfo.GetScanningContext() == cautils.ContextCluster {
+		policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
+		} else {
+			sessionObj.VAPPolicies = policies
+			sessionObj.VAPBindings = bindings
+		}
+	}
+
+	for groupResource, ids := range ksResourceMap {
+		for _, id := range ids {
+			if _, ok := allResources[id]; ok {
+				resident.ExternalResources[groupResource] = append(resident.ExternalResources[groupResource], id)
+			}
+		}
+	}
+
+	// Note: the resident batch deliberately carries K8SResources,
+	// ExternalResources, and AllResources instead of the producer writing them
+	// to sessionObj. This goroutine runs concurrently with the caller's
+	// NewOPAProcessor, which snapshots len(sessionObj.AllResources) at
+	// construction; writing those fields here would be an unsynchronised
+	// concurrent write against that read. ProcessWithStreaming copies the
+	// resident batch into the processor (sessionObj) after receiving it, so the
+	// maps still land on the session by the time downstream stages run.
+
+	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
+	if err != nil {
+		logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
+	} else {
+		sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
+		metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
+		metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
+	}
+
+	// Stream resident batch first.
+	select {
+	case batchChan <- resident:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	// Stream namespace batches in deterministic order.
+	sortedNamespaces := make([]string, 0, len(namespaceBatches))
+	for ns := range namespaceBatches {
+		sortedNamespaces = append(sortedNamespaces, ns)
+	}
+	sort.Strings(sortedNamespaces)
+	for _, ns := range sortedNamespaces {
+		select {
+		case batchChan <- namespaceBatches[ns]:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		// Drop the producer's reference to the batch now that it has been
+		// handed off. This bounds the producer's retention during drain when
+		// the consumer is slower than the producer; it is not a peak-memory
+		// reduction — the resources stay reachable via the consumer's
+		// AllResources for downstream stages.
+		delete(namespaceBatches, ns)
+	}
+
+	return nil
+}
+
 // findScanObjectResource pulls the requested k8s object to be scanned from the api server
-func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context, resource *objectsenvelopes.ScanObject, globalFieldSelector IFieldSelector) (workloadinterface.IWorkload, error) {
+func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context, resource *objectsenvelopes.ScanObject, globalFieldSelector IFieldSelector, resolver resourceResolver) (workloadinterface.IWorkload, error) {
 	if resource == nil {
 		return nil, nil
 	}
 
 	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
 
-	gvr, err := k8sinterface.GetGroupVersionResource(resource.GetKind())
-	if err != nil {
-		return nil, err
-	}
-
-	if resource.GetApiVersion() != "" {
+	var resolved []resolvedResource
+	if resource.GetApiVersion() == "" {
+		// Keep the legacy single-resource behavior for built-in objects whose
+		// callers omit apiVersion. CRDs still require their declared apiVersion
+		// so discovery can select an unambiguous GVR.
+		groupVersionResource, err := k8sinterface.GetGroupVersionResource(resource.GetKind())
+		if err == nil {
+			resolved = []resolvedResource{{
+				groupVersionResourceTriplet: k8sinterface.GroupVersionResourceToString(&groupVersionResource),
+			}}
+		} else {
+			return nil, fmt.Errorf("apiVersion is required to resolve non-built-in resource %q for a single-resource scan", resource.GetKind())
+		}
+	} else {
 		g, v := k8sinterface.SplitApiVersion(resource.GetApiVersion())
-		gvr.Group = g
-		gvr.Version = v
+		resolved = resolver(g, v, resource.GetKind())
 	}
+	if len(resolved) != 1 {
+		return nil, fmt.Errorf("resource not found in Kubernetes discovery: %s", getReadableID(resource))
+	}
+	apiGroup, apiVersion, resourceName := k8sinterface.StringToResourceGroup(resolved[0].groupVersionResourceTriplet)
+	gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resourceName}
 
 	fieldSelectors := getNameFieldSelectorString(resource.GetName(), FieldSelectorsEqualsOperator)
-	if resource.GetNamespace() != "" && k8sinterface.IsNamespaceScope(&gvr) {
+	if resource.GetNamespace() != "" && ((resolved[0].namespaced != nil && *resolved[0].namespaced) || (resolved[0].namespaced == nil && k8sinterface.IsNamespaceScope(&gvr))) {
 		fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespaceFieldSelectorString(resource.GetNamespace(), FieldSelectorsEqualsOperator))
 	}
-	result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, fieldSelectors, globalFieldSelector)
+	result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, fieldSelectors, globalFieldSelector, resolved[0].namespaced)
 	if len(result) == 0 && len(selectorErrs) > 0 {
 		return nil, fmt.Errorf("failed to get resource %s, reason: %v", getReadableID(resource), selectorErrs[0].err)
 	}
@@ -414,7 +711,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 
 			apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-			result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, qr.FieldSelectors, globalFieldSelectors)
+			result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced)
 			if err := ctx.Err(); err != nil {
 				mu.Lock()
 				failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
@@ -486,11 +783,11 @@ func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResourc
 	return partials
 }
 
-func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, resource *schema.GroupVersionResource, labels map[string]string, fields string, fieldSelector IFieldSelector) ([]unstructured.Unstructured, []selectorFailure) {
+func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, resource *schema.GroupVersionResource, labels map[string]string, fields string, fieldSelector IFieldSelector, namespaced *bool) ([]unstructured.Unstructured, []selectorFailure) {
 	var resourceList []unstructured.Unstructured
 	var selectorErrs []selectorFailure
 
-	fieldSelectors := fieldSelector.GetNamespacesSelectors(resource)
+	fieldSelectors := fieldSelector.GetNamespacesSelectors(resource, namespaced)
 
 	for i := range fieldSelectors {
 		listOptions := metav1.ListOptions{}
@@ -611,6 +908,56 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 	return nil
 }
 
+// countNamespaces returns the number of namespaces that can contribute a
+// namespace batch to the streaming scan, used as the expected-batch count for
+// progress reporting. It honours the scan's include/exclude namespace filters
+// (mirroring skipNamespace in the OPA processor: include takes precedence).
+// The result is deliberately an upper bound: a namespace batch is only created
+// once a namespace actually holds a queryable resource, so sparse or filtered
+// clusters progress faster than the estimate suggests.
+func (k8sHandler *K8sResourceHandler) countNamespaces(ctx context.Context, scanInfo *cautils.ScanInfo) int {
+	if k8sHandler.k8s == nil || k8sHandler.k8s.KubernetesClient == nil {
+		return 0
+	}
+	nsList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		logger.L().Ctx(ctx).Debug("failed to list namespaces for progress estimate", helpers.Error(err))
+		return 0
+	}
+
+	include := splitNamespaces(scanInfo.IncludeNamespaces)
+	exclude := splitNamespaces(scanInfo.ExcludedNamespaces)
+
+	count := 0
+	for _, ns := range nsList.Items {
+		if len(include) > 0 {
+			if !slices.Contains(include, ns.Name) {
+				continue
+			}
+		} else if slices.Contains(exclude, ns.Name) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+// splitNamespaces parses a comma-separated namespace list (as passed to
+// --include-namespaces / --exclude-namespaces) into a clean slice. Empty
+// entries and surrounding whitespace are dropped.
+func splitNamespaces(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for p := range strings.SplitSeq(s, ",") {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber(ctx context.Context) (int, error) {
 	nodesList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	scheduableNodes := v1.NodeList{}
@@ -629,6 +976,61 @@ func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber(ctx context.Context)
 		return 0, err
 	}
 	return len(scheduableNodes.Items), nil
+}
+
+// namespacedResourcesToEstimate is the set of common namespaced GVRs used to
+// estimate cluster size. These cover the vast majority of resources in a
+// typical cluster and keep the estimate cheap (one limit=1 LIST per type).
+var namespacedResourcesToEstimate = []schema.GroupVersionResource{
+	{Group: "", Version: "v1", Resource: "pods"},
+	{Group: "", Version: "v1", Resource: "services"},
+	{Group: "", Version: "v1", Resource: "configmaps"},
+	{Group: "", Version: "v1", Resource: "secrets"},
+	{Group: "", Version: "v1", Resource: "serviceaccounts"},
+	{Group: "", Version: "v1", Resource: "persistentvolumeclaims"},
+	{Group: "apps", Version: "v1", Resource: "deployments"},
+	{Group: "apps", Version: "v1", Resource: "replicasets"},
+	{Group: "apps", Version: "v1", Resource: "statefulsets"},
+	{Group: "apps", Version: "v1", Resource: "daemonsets"},
+	{Group: "batch", Version: "v1", Resource: "jobs"},
+	{Group: "batch", Version: "v1", Resource: "cronjobs"},
+	{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"},
+	{Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"},
+	{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "roles"},
+	{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"},
+}
+
+// EstimateClusterSize estimates the number of namespaced resources in the
+// cluster by issuing metadata-only LIST requests (limit=1) to the API server
+// and summing the remainingItemCount from each response. A per-GVR failure
+// (type unavailable, or the service account lacking read access) is tolerated,
+// but if no representative type can be listed at all the estimate is useless —
+// returning (0, nil) would be indistinguishable from a genuinely small cluster
+// — so the function reports the failure and lets the caller fall back to
+// non-streaming.
+func (k8sHandler *K8sResourceHandler) EstimateClusterSize(ctx context.Context, scanInfo *cautils.ScanInfo) (int, error) {
+	if k8sHandler.k8s == nil || k8sHandler.k8s.DynamicClient == nil {
+		return 0, fmt.Errorf("kubernetes client not available")
+	}
+
+	var total int
+	var ok int
+	for _, gvr := range namespacedResourcesToEstimate {
+		result, err := k8sHandler.k8s.DynamicClient.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{Limit: 1})
+		if err != nil {
+			continue
+		}
+		ok++
+		if rc := result.GetRemainingItemCount(); rc != nil {
+			total += int(*rc)
+		}
+	}
+
+	if ok == 0 {
+		return 0, fmt.Errorf("no resource types could be listed for cluster size estimate")
+	}
+
+	return total, nil
 }
 
 func (k8sHandler *K8sResourceHandler) setCloudProvider(ctx context.Context) error {

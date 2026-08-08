@@ -68,19 +68,22 @@ func (l *FixPathLocationResolver) ResolveLocation(fixPath string, nodeIndex int)
 	for strings.HasPrefix(yamlExpression, ".") && len(yamlExpression) > 1 {
 		candidateNodes, err := l.yqlibEvaluator.EvaluateNodes(yamlExpression, l.yamlNodes[nodeIndex])
 		if err != nil {
-			return Location{}, err
+			return Location{}, fmt.Errorf("failed to evaluate yaml expression %q: %w", yamlExpression, err)
 		}
 
-		candidateNode := candidateNodes.Back().Value.(*yqlib.CandidateNode).Node
+		if backElement := candidateNodes.Back(); backElement != nil {
+			candidateNode := backElement.Value.(*yqlib.CandidateNode).Node
 
-		if candidateNode.Line != 0 || len(yamlExpression) <= 1 {
-			return Location{Line: candidateNode.Line, Column: candidateNode.Column}, nil
+			if candidateNode.Line != 0 || len(yamlExpression) <= 1 {
+				return Location{Line: candidateNode.Line, Column: candidateNode.Column}, nil
+			}
 		}
 
 		// for non-existent yaml expressions, remove the last part of the expression and try again
 		yamlExpression = regexp.MustCompile(`(.*)(\.[^.]*)`).ReplaceAllString(yamlExpression, `${1}`)
 	}
 	return Location{}, nil
+
 }
 
 func FixPathToValidYamlExpression(fixPath string) string {

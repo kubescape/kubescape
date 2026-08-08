@@ -118,7 +118,7 @@ func (jp *JunitPrinter) Score(score float32) {
 		score = 0
 	}
 
-	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
+	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.ComplianceScoreToInt(score))
 }
 
 func (jp *JunitPrinter) PrintNextSteps() {
@@ -193,7 +193,7 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 		testSuite.Timestamp = timestamp
 		testSuite.ID = 0
 		testSuite.Name = "kubescape"
-		testSuite.Properties = properties(results.Report.SummaryDetails.Score)
+		testSuite.Properties = properties(results.Report.SummaryDetails.ComplianceScore)
 		testSuite.TestCases = testsCases(results, &results.Report.SummaryDetails.Controls, "Kubescape")
 		testSuites = append(testSuites, testSuite)
 		return testSuites
@@ -207,7 +207,7 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 		testSuite.Timestamp = timestamp
 		testSuite.ID = i
 		testSuite.Name = f.Name
-		testSuite.Properties = properties(f.Score)
+		testSuite.Properties = properties(f.GetComplianceScore())
 		testSuite.TestCases = testsCases(results, f.GetControls(), f.GetName())
 		testSuites = append(testSuites, testSuite)
 	}
@@ -240,7 +240,13 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 					continue
 				}
 
-				resource := results.AllResources[rId]
+				resource, ok := results.AllResources[rId]
+				if !ok {
+					logger.L().Debug("resource missing from AllResources, reporting by ID",
+						helpers.String("resourceID", rId))
+					resources[fmt.Sprintf("resourceID: %s", rId)] = nil
+					continue
+				}
 				sourcePath := ""
 				if ResourceSourcePath, ok := results.ResourceSource[rId]; ok {
 					sourcePath = ResourceSourcePath.RelativePath
@@ -304,7 +310,7 @@ func properties(complianceScore float32) []JUnitProperty {
 	return []JUnitProperty{
 		{
 			Name:  "complianceScore",
-			Value: fmt.Sprintf("%.2f", complianceScore),
+			Value: cautils.ComplianceScoreToString(complianceScore, 2),
 		},
 	}
 }

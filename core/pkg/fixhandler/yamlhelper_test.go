@@ -1,7 +1,6 @@
 package fixhandler
 
 import (
-	"fmt"
 	"reflect"
 	"testing"
 
@@ -57,7 +56,7 @@ func TestAdjustContentLines_AdjustsLineNumbersForContentToAddBasedOnEmptyOrComme
 	}
 
 	adjustContentLines(&contentToAdd, &linesSlice)
-	fmt.Println(contentToAdd)
+	t.Log(contentToAdd)
 	assert.Equal(t, 1, contentToAdd[0].line)
 	assert.Equal(t, 2, contentToAdd[1].line)
 	assert.Equal(t, 3, contentToAdd[2].line)

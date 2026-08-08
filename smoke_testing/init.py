@@ -40,7 +40,7 @@ Supported tests:
 
 TODO:
 1. Test formats + output
-2. Test --fail-threshold
+2. Test --compliance-threshold
 3. Test known supported FW
 4. Test FW list
 5. Test Controls list

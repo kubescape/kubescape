@@ -54,7 +54,7 @@ func (jp *JsonPrinter) Score(score float32) {
 		score = 0
 	}
 
-	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
+	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.ComplianceScoreToInt(score))
 
 }
 func (jp *JsonPrinter) convertToImageScanSummary(imageScanData []cautils.ImageScanData) (*imageprinter.ImageScanSummary, error) {
@@ -85,11 +85,11 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 
 	if opaSessionObj != nil {
 		err = printConfigurationsScanning(opaSessionObj, imageScanData, jp)
-	} else if imageScanData != nil {
+	} else if len(imageScanData) > 0 {
 		model, err2 := models.NewDocument(clio.Identification{}, imageScanData[0].Packages, imageScanData[0].Context,
-			*imageScanData[0].RemainingMatches, imageScanData[0].IgnoredMatches, imageScanData[0].VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
+			imageScanData[0].Matches, imageScanData[0].IgnoredMatches, imageScanData[0].VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
 		if err2 != nil {
-			logger.L().Ctx(ctx).Error("failed to create document: %w", helpers.Error(err))
+			logger.L().Ctx(ctx).Error("failed to create document", helpers.Error(err2))
 			return
 		}
 		err = grypejson.NewPresenter(models.PresenterConfig{Document: model, SBOM: imageScanData[0].SBOM}).Present(jp.writer)

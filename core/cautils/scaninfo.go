@@ -83,15 +83,28 @@ func (bpf *BoolPtrFlag) Set(val string) error {
 	return nil
 }
 
-// TODO - UPDATE
+// ViewTypes specifies how scan results are presented by the default (pretty) printer.
 type ViewTypes string
-type EnvScopeTypes string
-type ManageClusterTypes string
 
 const (
+	// ResourceViewType prints one section per failed resource, listing the
+	// controls that failed it. It only takes effect in verbose mode; passed
+	// resources are not shown.
 	ResourceViewType ViewTypes = "resource"
+
+	// SecurityViewType is the default view (see the --view flag). Rather than
+	// changing how results are grouped, it selects a security-oriented set of
+	// frameworks to scan with — workloadscan+allcontrols for a repository or
+	// directory target, clusterscan+mitre+nsa for a cluster — and prints the
+	// standard posture summary without per-control or per-resource detail.
+	// Note: the `scan framework` subcommand rewrites this to ResourceViewType.
 	SecurityViewType ViewTypes = "security"
-	ControlViewType  ViewTypes = "control"
+
+	// ControlViewType groups results by control, showing the compliance status
+	// of every control and the resources that failed it. Failed and
+	// action-required resources are always listed, and passed resources are
+	// listed in verbose mode.
+	ControlViewType ViewTypes = "control"
 )
 
 type PolicyIdentifier struct {
@@ -100,16 +113,15 @@ type PolicyIdentifier struct {
 }
 
 type ScanInfo struct {
-	Getters                                  // TODO - remove from object
-	PolicyIdentifier      []PolicyIdentifier // TODO - remove from object
-	UseExceptions         string             // Load file with exceptions configuration
-	ControlsInputs        string             // Load file with inputs for controls
-	AttackTracks          string             // Load file with attack tracks
-	UseFrom               []string           // Load framework from local file (instead of download). Use when running offline
-	UseDefault            bool               // Load framework from cached file (instead of download). Use when running offline
-	UseArtifactsFrom      string             // Load artifacts from local path. Use when running offline
-	VerboseMode           bool               // Display all the input resources and not only failed resources
-	Hide                  bool               // Hide sensitive identifiers (names, namespaces, images) in results
+	UseExceptions         string   // Load file with exceptions configuration
+	ControlsInputs        string   // Load file with inputs for controls
+	AttackTracks          string   // Load file with attack tracks
+	UseFrom               []string // Load framework from local file (instead of download). Use when running offline
+	UseDefault            bool     // Load framework from cached file (instead of download). Use when running offline
+	UseArtifactsFrom      string   // Load artifacts from local path. Use when running offline
+	ControlsVersion       string   // Pin the regolibrary release used to download policies (e.g. "v2.0.301"). Empty uses the latest release
+	VerboseMode           bool     // Display all the input resources and not only failed resources
+	Hide                  bool     // Hide sensitive identifiers (names, namespaces, images) in results
 	EncryptionEnabled     bool
 	View                  string                       //
 	Format                string                       // Format results (table, json, junit ...)
@@ -126,7 +138,7 @@ type ScanInfo struct {
 	FailThresholdSeverity string                       // Severity at and above which the command should fail
 	FailCoverageThreshold float32                      // Coverage threshold below which the command fails (0 = disabled)
 	FailOnDegradedConfig  bool                         // Fail the scan if control inputs or exceptions could not be loaded and a fallback was used
-	Submit                bool                         // Submit results to Kubescape Cloud BE
+	Submit                BoolPtrFlag                  // Submit results to Kubescape Cloud BE. Get() is nil unless explicitly set by the caller (flag/env/request field)
 	ScanID                string                       // Report id of the current scan
 	HostSensorEnabled     BoolPtrFlag                  // Deploy Kubescape K8s host scanner to collect data from certain controls
 	HostSensorYamlPath    string                       // Path to hostsensor file
@@ -146,6 +158,7 @@ type ScanInfo struct {
 	UseDefaultMatchers    bool
 	ScanTimeout           time.Duration // Maximum duration for the entire scan (0 = no timeout)
 	ControlTimeout        time.Duration // Maximum duration for evaluating a single control (0 = no timeout)
+	EnableStreaming       bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
 	ChartPath             string
 	FilePath              string
 	HelmValueFiles        []string // -f / --values: paths to Helm values YAML files (repeatable)
@@ -157,7 +170,13 @@ type ScanInfo struct {
 	LabelsToCopy          []string // Labels to copy from workloads to scan reports
 	scanningContext       *ScanningContext
 	cleanups              []func()
-	ListingURL            string //Grype vulnerability database URL
+	ListingURL            string            //Grype vulnerability database URL
+	RegistryMapping       map[string]string // Map internal registry URLs to external ones
+	RegistryAuthority     string            // Registry host[:port] explicit credentials apply to
+	RegistryUsername      string            // Username for workload image registry authentication
+	RegistryPassword      string            // Password for workload image registry authentication
+	RegistryToken         string            // Bearer token for workload image registry authentication
+	ImageScanConcurrency  int               // Number of concurrent workers for image scanning
 }
 
 type Getters struct {
@@ -167,9 +186,13 @@ type Getters struct {
 	AttackTracksGetter   getter.IAttackTracksGetter
 }
 
-func (scanInfo *ScanInfo) Init(ctx context.Context) {
-	scanInfo.setUseFrom()
+func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyIdentifier) {
+	scanInfo.setUseFrom(policyIdentifiers)
 	scanInfo.setUseArtifactsFrom(ctx)
+	// setUseFrom and setUseArtifactsFrom can resolve to the same file - --use-default and
+	// --use-artifacts-from both point at the local store on the offline HTTP handler path -
+	// and a repeated path costs an extra read and unmarshal per policy load.
+	scanInfo.UseFrom = unique(scanInfo.UseFrom)
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
 	}
@@ -212,17 +235,23 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 		}
 	}
 	// set config-inputs file
-	scanInfo.ControlsInputs = filepath.Join(scanInfo.UseArtifactsFrom, LocalControlInputsFilename)
+	if scanInfo.ControlsInputs == "" {
+		scanInfo.ControlsInputs = filepath.Join(scanInfo.UseArtifactsFrom, LocalControlInputsFilename)
+	}
 	// set exceptions
-	scanInfo.UseExceptions = filepath.Join(scanInfo.UseArtifactsFrom, LocalExceptionsFilename)
+	if scanInfo.UseExceptions == "" {
+		scanInfo.UseExceptions = filepath.Join(scanInfo.UseArtifactsFrom, LocalExceptionsFilename)
+	}
 
 	// set attack tracks
-	scanInfo.AttackTracks = filepath.Join(scanInfo.UseArtifactsFrom, LocalAttackTracksFilename)
+	if scanInfo.AttackTracks == "" {
+		scanInfo.AttackTracks = filepath.Join(scanInfo.UseArtifactsFrom, LocalAttackTracksFilename)
+	}
 }
 
-func (scanInfo *ScanInfo) setUseFrom() {
+func (scanInfo *ScanInfo) setUseFrom(policyIdentifiers []PolicyIdentifier) {
 	if scanInfo.UseDefault {
-		for _, policy := range scanInfo.PolicyIdentifier {
+		for _, policy := range policyIdentifiers {
 			path, err := getter.PolicyCachePath(policy.Identifier)
 			if err != nil {
 				logger.L().Warning("skipping default cache lookup for policy", helpers.String("identifier", policy.Identifier), helpers.Error(err))
@@ -269,20 +298,36 @@ func (scanInfo *ScanInfo) SetScanType(scanType ScanTypes) {
 	scanInfo.ScanType = scanType
 }
 
-func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) {
-	for _, policy := range policies {
-		if !scanInfo.contains(policy) {
-			newPolicy := PolicyIdentifier{}
-			newPolicy.Kind = kind
-			newPolicy.Identifier = policy
-			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
-		}
-	}
+// BuildPolicyIdentifiers builds a list of policy identifiers from the given
+// string identifiers, adding any new ones that are not already present.
+func BuildPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) []PolicyIdentifier {
+	return AppendPolicyIdentifiers(nil, policies, kind)
 }
 
-func (scanInfo *ScanInfo) contains(policyName string) bool {
-	for _, policy := range scanInfo.PolicyIdentifier {
-		if policy.Identifier == policyName {
+// AppendPolicyIdentifiers appends the given string identifiers to the existing
+// list, adding any new ones that are not already present.
+func AppendPolicyIdentifiers(existing []PolicyIdentifier, policies []string, kind apisv1.NotificationPolicyKind) []PolicyIdentifier {
+	result := append([]PolicyIdentifier(nil), existing...)
+	for _, policy := range policies {
+		if !containsIdentifier(result, policy) {
+			result = append(result, PolicyIdentifier{
+				Kind:       kind,
+				Identifier: policy,
+			})
+		}
+	}
+	return result
+}
+
+// containsIdentifier reports whether the named identifier is already present.
+// The comparison is case-insensitive because a cache round-trip changes the casing:
+// the downloader lists regolibrary's lower case "nsa" and writes a file whose name
+// field is "NSA", so LoadPolicy.ListFrameworks reads back a name that no longer matches
+// the lower case getter.NativeFrameworks entry. Matching exactly would leave both in the
+// list and make downloadScanPolicies fetch and evaluate the same framework twice.
+func containsIdentifier(identifiers []PolicyIdentifier, name string) bool {
+	for _, policy := range identifiers {
+		if strings.EqualFold(policy.Identifier, name) {
 			return true
 		}
 	}
@@ -305,12 +350,12 @@ func splitNamespaceList(s string) []string {
 	return out
 }
 
-func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthandlingv2.Metadata {
+func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
 	metadata.ScanMetadata.Formats = []string{scanInfo.Format}
 	metadata.ScanMetadata.FormatVersion = scanInfo.FormatVersion
-	metadata.ScanMetadata.Submit = scanInfo.Submit
+	metadata.ScanMetadata.Submit = scanInfo.Submit.GetBool()
 
 	if ns := splitNamespaceList(scanInfo.ExcludedNamespaces); len(ns) > 0 {
 		metadata.ScanMetadata.ExcludedNamespaces = ns
@@ -320,11 +365,11 @@ func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthand
 	}
 
 	// scan type
-	if len(scanInfo.PolicyIdentifier) > 0 {
-		metadata.ScanMetadata.TargetType = string(scanInfo.PolicyIdentifier[0].Kind)
+	if len(policyIdentifiers) > 0 {
+		metadata.ScanMetadata.TargetType = string(policyIdentifiers[0].Kind)
 	}
 	// append frameworks
-	for _, policy := range scanInfo.PolicyIdentifier {
+	for _, policy := range policyIdentifiers {
 		metadata.ScanMetadata.TargetNames = append(metadata.ScanMetadata.TargetNames, policy.Identifier)
 	}
 
@@ -388,12 +433,19 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 
 	// git url
 	if _, err := giturl.NewGitURL(input); err == nil {
+		originalInput := input
 		if repo, err := CloneGitRepo(&input); err == nil {
 			if _, err := NewLocalGitRepository(repo); err == nil {
-				scanInfo.cleanups = append(scanInfo.cleanups, func() {
-					_ = os.RemoveAll(repo)
+				scanInfo.AddCleanup(func() {
+					if err := ReleaseClonedRepo(originalInput); err != nil {
+						logger.L().Warning("failed to clean up cloned repository", helpers.String("url", originalInput), helpers.Error(err))
+					}
 				})
+				scanInfo.cloneAdditionalRemoteInputs(originalInput)
 				return ContextGitRemote
+			}
+			if err := ReleaseClonedRepo(originalInput); err != nil {
+				logger.L().Warning("failed to clean up invalid cloned repository", helpers.String("url", originalInput), helpers.Error(err))
 			}
 		}
 		// If giturl.NewGitURL succeeded but cloning failed, the input is a git URL
@@ -430,6 +482,31 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 	return ContextDir
 }
 
+// cloneAdditionalRemoteInputs prepares every remote input before file loading.
+// Previously only the first URL was cloned, so later URL inputs were interpreted
+// as local filesystem paths and silently skipped.
+func (scanInfo *ScanInfo) cloneAdditionalRemoteInputs(firstInput string) {
+	for _, candidate := range scanInfo.InputPatterns {
+		if candidate == firstInput {
+			continue
+		}
+		if _, err := giturl.NewGitURL(candidate); err != nil {
+			continue
+		}
+
+		originalInput := candidate
+		if _, err := CloneGitRepo(&candidate); err != nil {
+			logger.L().Error("failed to clone additional git input", helpers.String("url", originalInput), helpers.Error(err))
+			continue
+		}
+		scanInfo.AddCleanup(func() {
+			if err := ReleaseClonedRepo(originalInput); err != nil {
+				logger.L().Warning("failed to clean up cloned repository", helpers.String("url", originalInput), helpers.Error(err))
+			}
+		})
+	}
+}
+
 func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadata *reporthandlingv2.ContextMetadata) {
 	input := scanInfo.GetInputFiles()
 	switch scanInfo.GetScanningContext() {
@@ -438,8 +515,11 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 			ContextName: k8sinterface.GetContextName(),
 		}
 	case ContextDir:
+		// the base path must be the root the file loader anchored the resources'
+		// relative paths on, or the two no longer compose for anyone joining them
+		basePath := ScanRootPath(input)
 		contextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{
-			BasePath: getAbsPath(input),
+			BasePath: basePath,
 			HostName: getHostname(),
 		}
 		// add repo context for submitting
@@ -449,7 +529,7 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 			Owner:         getHostname(),
 			Branch:        "none",
 			DefaultBranch: "none",
-			LocalRootPath: getAbsPath(input),
+			LocalRootPath: basePath,
 		}
 
 	case ContextFile:
@@ -464,7 +544,7 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 			Owner:         getHostname(),
 			Branch:        "none",
 			DefaultBranch: "none",
-			LocalRootPath: getAbsPath(input),
+			LocalRootPath: ScanRootPath(input),
 		}
 	case ContextGitLocal:
 		// local
@@ -484,25 +564,36 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 }
 
 func metadataGitLocal(input string) (*reporthandlingv2.RepoContextMetadata, error) {
+	repoContext := &reporthandlingv2.RepoContextMetadata{
+		Branch:        "none",
+		DefaultBranch: "none",
+		LocalRootPath: getAbsPath(input),
+	}
 	gitParser, err := NewLocalGitRepository(input)
 	if err != nil {
-		return nil, fmt.Errorf("%w", err)
+		return repoContext, fmt.Errorf("%w", err)
+	}
+	if root, rootErr := gitParser.GetRootDir(); rootErr == nil {
+		repoContext.LocalRootPath = root
 	}
 	remoteURL, err := gitParser.GetRemoteUrl()
 	if err != nil {
-		return nil, fmt.Errorf("%w", err)
+		return repoContext, fmt.Errorf("%w", err)
 	}
-	repoContext := &reporthandlingv2.RepoContextMetadata{}
 	gitParserURL, err := giturl.NewGitURL(remoteURL)
 	if err != nil {
 		return repoContext, fmt.Errorf("%w", err)
 	}
-	gitParserURL.SetBranchName(gitParser.GetBranchName())
+	branchName := gitParser.GetBranchName()
+	if branchName != "" {
+		gitParserURL.SetBranchName(branchName)
+		repoContext.Branch = branchName
+		repoContext.DefaultBranch = ""
+	}
 
 	repoContext.Provider = gitParserURL.GetProvider()
 	repoContext.Repo = gitParserURL.GetRepoName()
 	repoContext.Owner = gitParserURL.GetOwnerName()
-	repoContext.Branch = gitParserURL.GetBranchName()
 	repoContext.RemoteURL = gitParserURL.GetURL().String()
 
 	commit, err := gitParser.GetLastCommit()
@@ -514,8 +605,6 @@ func metadataGitLocal(input string) (*reporthandlingv2.RepoContextMetadata, erro
 		Date:          commit.Committer.Date,
 		CommitterName: commit.Committer.Name,
 	}
-	repoContext.LocalRootPath, _ = gitParser.GetRootDir()
-
 	return repoContext, nil
 }
 func getHostname() string {

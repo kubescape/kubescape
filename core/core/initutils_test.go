@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -106,7 +107,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 				accountID:              "",
 				downloadReleasedPolicy: getter.NewDownloadReleasedPolicy(),
 			},
-			want: "*getter.LoadPolicy",
+			want: "*getter.MergedExceptionsGetter",
 		},
 		{
 			name: "Test GetExceptionsGetter with useExceptions and filled accountID",
@@ -116,7 +117,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 				accountID:              "123456789012",
 				downloadReleasedPolicy: getter.NewDownloadReleasedPolicy(),
 			},
-			want: "*getter.LoadPolicy",
+			want: "*getter.MergedExceptionsGetter",
 		},
 		{
 			name: "Test GetExceptionsGetter with accountID",
@@ -132,7 +133,8 @@ func TestGetExceptionsGetter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := getExceptionsGetter(tt.args.ctx, tt.args.useExceptions, tt.args.accountID, tt.args.downloadReleasedPolicy, false)
+			got, err := getExceptionsGetter(tt.args.ctx, tt.args.useExceptions, tt.args.accountID, tt.args.downloadReleasedPolicy, false)
+			assert.NoError(t, err)
 			assert.Equal(t, tt.want, reflect.TypeOf(got).String())
 		})
 	}
@@ -142,16 +144,114 @@ func TestGettersAirGappedUseCache(t *testing.T) {
 	ctx := context.Background()
 	for _, accountID := range []string{"", "123456789012"} {
 		t.Run("accountID="+accountID, func(t *testing.T) {
-			assert.Equal(t, "*getter.LoadPolicy",
-				reflect.TypeOf(getPolicyGetter(ctx, nil, accountID, true, nil, true)).String())
-			assert.Equal(t, "*getter.LoadPolicy",
-				reflect.TypeOf(getConfigInputsGetter(ctx, "", accountID, nil, false, true)).String())
-			assert.Equal(t, "*getter.LoadPolicy",
-				reflect.TypeOf(getAttackTracksGetter(ctx, "", accountID, nil, true)).String())
-			assert.Equal(t, "*getter.MergedExceptionsGetter",
-				reflect.TypeOf(getExceptionsGetter(ctx, "", accountID, nil, true)).String())
+			policyGetter, err := getPolicyGetter(ctx, nil, accountID, true, nil, true)
+			assert.NoError(t, err)
+			assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(policyGetter).String())
+			configInputsGetter, _, err := getConfigInputsGetter(ctx, "", accountID, nil, false, true)
+			assert.NoError(t, err)
+			assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(configInputsGetter).String())
+			attackTracksGetter, err := getAttackTracksGetter(ctx, "", accountID, nil, true)
+			assert.NoError(t, err)
+			assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(attackTracksGetter).String())
+			exceptionsGetter, err := getExceptionsGetter(ctx, "", accountID, nil, true)
+			assert.NoError(t, err)
+			assert.Equal(t, "*getter.MergedExceptionsGetter", reflect.TypeOf(exceptionsGetter).String())
 		})
 	}
+}
+
+func TestResolveDefaultScanAllPolicies(t *testing.T) {
+	nativeIdentifiers := func() []cautils.PolicyIdentifier {
+		return cautils.BuildPolicyIdentifiers(getter.NativeFrameworks, apisv1.KindFramework)
+	}
+
+	tests := []struct {
+		name              string
+		scanInfo          *cautils.ScanInfo
+		policyIdentifiers []cautils.PolicyIdentifier
+		want              []cautils.PolicyIdentifier
+	}{
+		{
+			name:     "ScanAll with UseDefault expands an empty list to the default frameworks",
+			scanInfo: &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: true},
+			want:     nativeIdentifiers(),
+		},
+		{
+			name:              "ScanAll with UseDefault keeps the requested frameworks first",
+			scanInfo:          &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: true},
+			policyIdentifiers: cautils.BuildPolicyIdentifiers([]string{"cis-v1.23-t1.0.1"}, apisv1.KindFramework),
+			want: append(
+				cautils.BuildPolicyIdentifiers([]string{"cis-v1.23-t1.0.1"}, apisv1.KindFramework),
+				nativeIdentifiers()...,
+			),
+		},
+		{
+			name:              "ScanAll with UseDefault does not re-add differently cased frameworks",
+			scanInfo:          &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: true},
+			policyIdentifiers: cautils.BuildPolicyIdentifiers([]string{"NSA", "MITRE"}, apisv1.KindFramework),
+			want: append(
+				cautils.BuildPolicyIdentifiers([]string{"NSA", "MITRE"}, apisv1.KindFramework),
+				cautils.PolicyIdentifier{Identifier: "allcontrols", Kind: apisv1.KindFramework},
+			),
+		},
+		{
+			name:     "ScanAll without UseDefault is left to the policy getter",
+			scanInfo: &cautils.ScanInfo{ScanAll: true},
+			want:     nil,
+		},
+		{
+			name:              "UseDefault without ScanAll leaves the list untouched",
+			scanInfo:          &cautils.ScanInfo{UseDefault: true},
+			policyIdentifiers: cautils.BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework),
+			want:              cautils.BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework),
+		},
+		{
+			// `scan control` with no arguments sets ScanAll but is not a framework scan;
+			// expanding it would populate UseFrom and turn the scan air-gapped.
+			name:     "control scan is not expanded even with ScanAll and UseDefault",
+			scanInfo: &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: false},
+			want:     nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, resolveDefaultScanAllPolicies(tt.scanInfo, tt.policyIdentifiers))
+		})
+	}
+}
+
+// TestScanAllWithUseDefaultResolvesCachePaths is the regression test for the ordering bug:
+// a ScanAll scan combined with --use-default must reach getPolicyGetter with every framework
+// already resolved to a cache path, so the scan loads locally instead of reaching the network.
+func TestScanAllWithUseDefaultResolvesCachePaths(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: true}
+
+	policyIdentifiers := resolveDefaultScanAllPolicies(scanInfo, nil)
+	scanInfo.Init(context.Background(), policyIdentifiers)
+
+	wantPaths := getDefaultFrameworksPaths()
+	assert.ElementsMatch(t, wantPaths, scanInfo.UseFrom)
+	assert.True(t, isAirGappedMode(scanInfo), "cached paths must put the scan in air-gapped mode")
+
+	policyGetter, err := getPolicyGetter(context.Background(), scanInfo.UseFrom, "123456789012", scanInfo.FrameworkScan, nil, isAirGappedMode(scanInfo))
+	require.NoError(t, err)
+	assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(policyGetter).String())
+}
+
+// TestScanAllControlScanWithUseDefaultStaysOnline guards the FrameworkScan gate: `scan control`
+// with no arguments sets ScanAll, and expanding it would resolve cache paths into UseFrom and
+// flip the scan air-gapped, cutting off the download fallback for control inputs, exceptions
+// and attack tracks on a cold cache.
+func TestScanAllControlScanWithUseDefaultStaysOnline(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: false}
+
+	policyIdentifiers := resolveDefaultScanAllPolicies(scanInfo, nil)
+	scanInfo.Init(context.Background(), policyIdentifiers)
+
+	assert.Empty(t, policyIdentifiers, "a control scan must not gain framework identifiers")
+	assert.Empty(t, scanInfo.UseFrom)
+	assert.False(t, isAirGappedMode(scanInfo), "control scans must keep the download fallback")
 }
 
 func TestPolicyIdentifierIdentities(t *testing.T) {
@@ -502,6 +602,49 @@ func TestSetSubmitBehavior(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			// Regression test for https://github.com/kubescape/kubescape/issues/2555:
+			// an explicit opt-out must not be silently overridden by auto-detection,
+			// even when a CloudReportURL is present and no account is set (the
+			// scenario that would otherwise force Submit=true).
+			name: "Test SetSubmitBehavior explicit opt-out is respected despite CloudReportURL and no AccountID",
+			args: args{
+				scanInfo: &cautils.ScanInfo{
+					ScanType: cautils.ScanTypeCluster,
+					Local:    false,
+					Submit:   cautils.NewBoolPtr(new(false)),
+				},
+				tenantConfig: &TenantConfigMock{
+					clusterName:    "test",
+					accountID:      "",
+					accessKey:      "",
+					cloudReportURL: "https://example.kubescape.com",
+				},
+				isScanTypeForSubmission: true,
+				isLocal:                 false,
+			},
+			want: false,
+		},
+		{
+			// An explicit opt-in must still go through the normal auto-detection -
+			// it does not bypass the "no backend configured" safety check.
+			name: "Test SetSubmitBehavior explicit opt-in does not bypass missing CloudReportURL",
+			args: args{
+				scanInfo: &cautils.ScanInfo{
+					ScanType: cautils.ScanTypeCluster,
+					Local:    false,
+					Submit:   cautils.NewBoolPtr(new(true)),
+				},
+				tenantConfig: &TenantConfigMock{
+					clusterName: "test",
+					accountID:   "",
+					accessKey:   "",
+				},
+				isScanTypeForSubmission: true,
+				isLocal:                 false,
+			},
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -511,7 +654,7 @@ func TestSetSubmitBehavior(t *testing.T) {
 
 			setSubmitBehavior(tt.args.scanInfo, tt.args.tenantConfig)
 
-			assert.Equal(t, tt.want, tt.args.scanInfo.Submit)
+			assert.Equal(t, tt.want, tt.args.scanInfo.Submit.GetBool())
 		})
 	}
 }
@@ -579,7 +722,45 @@ func TestGetDownloadReleasedPolicy(t *testing.T) {
 
 	require.NoError(t, downloadReleasedPolicy.SetRegoObjects())
 
-	result := getDownloadReleasedPolicy(ctx, downloadReleasedPolicy)
+	result, err := getDownloadReleasedPolicy(ctx, downloadReleasedPolicy)
 
+	require.NoError(t, err)
 	assert.NotNil(t, result)
+}
+
+// With a pinned --controls-version whose release does not exist, the download
+// fails and each getter must propagate a hard error (returning nil, err) rather
+// than logging Fatal and falling through with an empty getter. Fatal is a no-op
+// under --logger none, so only real error propagation halts the scan.
+func TestPinnedVersionGettersReturnHardError(t *testing.T) {
+	ctx := context.Background()
+	const pinnedVersion = "v0.0.0-does-not-exist"
+
+	newPinned := func() *getter.DownloadReleasedPolicy {
+		return getter.NewDownloadReleasedPolicyWithVersion(pinnedVersion)
+	}
+
+	t.Run("getPolicyGetter", func(t *testing.T) {
+		g, err := getPolicyGetter(ctx, nil, "", true, newPinned(), false)
+		require.Error(t, err)
+		require.Nil(t, g)
+	})
+
+	t.Run("getConfigInputsGetter", func(t *testing.T) {
+		g, _, err := getConfigInputsGetter(ctx, "", "", newPinned(), false, false)
+		require.Error(t, err)
+		require.Nil(t, g)
+	})
+
+	t.Run("getExceptionsGetter", func(t *testing.T) {
+		g, err := getExceptionsGetter(ctx, "", "", newPinned(), false)
+		require.Error(t, err)
+		require.Nil(t, g)
+	})
+
+	t.Run("getAttackTracksGetter", func(t *testing.T) {
+		g, err := getAttackTracksGetter(ctx, "", "", newPinned(), false)
+		require.Error(t, err)
+		require.Nil(t, g)
+	})
 }

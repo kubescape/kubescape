@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -269,9 +271,10 @@ func Test_terminateOnExceedingSeverity(t *testing.T) {
 
 func TestSetSecurityViewScanInfo(t *testing.T) {
 	tests := []struct {
-		name string
-		args []string
-		want *cautils.ScanInfo
+		name         string
+		args         []string
+		want         *cautils.ScanInfo
+		wantPolicies []cautils.PolicyIdentifier
 	}{
 		{
 			name: "no args",
@@ -279,19 +282,19 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 			want: &cautils.ScanInfo{
 				InputPatterns: []string{},
 				ScanType:      cautils.ScanTypeCluster,
-				PolicyIdentifier: []cautils.PolicyIdentifier{
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "clusterscan",
-					},
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "mitre",
-					},
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "nsa",
-					},
+			},
+			wantPolicies: []cautils.PolicyIdentifier{
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "clusterscan",
+				},
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "mitre",
+				},
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "nsa",
 				},
 			},
 		},
@@ -307,15 +310,15 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 					"file.yaml",
 					"file2.yaml",
 				},
-				PolicyIdentifier: []cautils.PolicyIdentifier{
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "workloadscan",
-					},
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "allcontrols",
-					},
+			},
+			wantPolicies: []cautils.PolicyIdentifier{
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "workloadscan",
+				},
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "allcontrols",
 				},
 			},
 		},
@@ -326,7 +329,7 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 			got := &cautils.ScanInfo{
 				View: string(cautils.SecurityViewType),
 			}
-			setSecurityViewScanInfo(tt.args, got)
+			policyIdentifiers := setSecurityViewScanInfo(tt.args, got)
 
 			if len(tt.want.InputPatterns) != len(got.InputPatterns) {
 				t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.InputPatterns, tt.want.InputPatterns)
@@ -349,16 +352,16 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 				}
 			}
 
-			for i := range tt.want.PolicyIdentifier {
+			for i := range tt.wantPolicies {
 				found := false
-				for j := range got.PolicyIdentifier {
-					if tt.want.PolicyIdentifier[i].Kind == got.PolicyIdentifier[j].Kind && tt.want.PolicyIdentifier[i].Identifier == got.PolicyIdentifier[j].Identifier {
+				for j := range policyIdentifiers {
+					if tt.wantPolicies[i].Kind == policyIdentifiers[j].Kind && tt.wantPolicies[i].Identifier == policyIdentifiers[j].Identifier {
 						found = true
 						break
 					}
 				}
 				if !found {
-					t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.PolicyIdentifier, tt.want.PolicyIdentifier)
+					t.Errorf("in test: %s, got: %v, want: %v", tt.name, policyIdentifiers, tt.wantPolicies)
 				}
 			}
 		})
@@ -379,6 +382,103 @@ func TestGetScanCommand(t *testing.T) {
 	assert.Equal(t, scanCmdExamples, cmd.Example)
 }
 
+func registryFixtureValue(parts ...string) string {
+	return strings.Join(parts, "-")
+}
+
+func TestSubmitFlag_TracksExplicitCommandLineUse(t *testing.T) {
+	// Regression test for https://github.com/kubescape/kubescape/issues/2555:
+	// --submit is bound directly as a cautils.BoolPtrFlag (like --enable-host-scan),
+	// so "not passed" (nil) is structurally distinguishable from "passed with any
+	// value" (non-nil) without any separate hand-rolled bookkeeping that could be
+	// forgotten at a call site or broken by a future PersistentPreRunE change.
+
+	// --submit not passed - flag not Changed
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	f := cmd.PersistentFlags().Lookup("submit")
+	require.NotNil(t, f, "--submit flag must be registered")
+	assert.False(t, f.Changed)
+	assert.Equal(t, "false", f.DefValue)
+
+	// --submit=false passed explicitly
+	mockKubescape = &mocks.MockIKubescape{}
+	cmd = GetScanCommand(mockKubescape)
+	require.NoError(t, cmd.ParseFlags([]string{"--submit=false"}))
+	f = cmd.PersistentFlags().Lookup("submit")
+	assert.True(t, f.Changed)
+	assert.Equal(t, "false", f.Value.String())
+
+	// --submit (bare, no value) passed explicitly - must still imply true, matching
+	// the original BoolVarP-based flag's behavior (NoOptDefVal="true")
+	mockKubescape = &mocks.MockIKubescape{}
+	cmd = GetScanCommand(mockKubescape)
+	require.NoError(t, cmd.ParseFlags([]string{"--submit"}))
+	f = cmd.PersistentFlags().Lookup("submit")
+	assert.True(t, f.Changed)
+	assert.Equal(t, "true", f.Value.String())
+}
+
+func TestSubmitFlag_PropagatesToAllSubcommands(t *testing.T) {
+	// Pins the invariant matthyx flagged in review: --submit must reach every
+	// scan subcommand. Because it's a cobra-inherited persistent flag rather
+	// than something wired through a hand-rolled PersistentPreRunE, this is a
+	// structural guarantee rather than something a future subcommand change
+	// could silently break.
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	for _, sub := range cmd.Commands() {
+		t.Run(sub.Name(), func(t *testing.T) {
+			f := sub.InheritedFlags().Lookup("submit")
+			require.NotNil(t, f, "subcommand %q must inherit --submit from the parent scan command", sub.Name())
+		})
+	}
+}
+
+func TestGetScanCommand_DeprecatedFlagsRemoved(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+
+	cmd := GetScanCommand(mockKubescape)
+	require.NotNil(t, cmd)
+
+	for _, removed := range []string{
+		"fail-threshold",
+		"create-account",
+		"enable-host-scan",
+		"host-scan-yaml",
+	} {
+		assert.Nil(t, cmd.PersistentFlags().Lookup(removed),
+			"deprecated flag %q must no longer be registered", removed)
+	}
+}
+
+func TestGetScanCommand_HostScanFlagTriState(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	// Removing the deprecated --enable-host-scan binding must not remove the
+	// CLI opt-out for host data collection: the initutils.go auto-detect branch
+	// turns host scanning on whenever the tri-state BoolPtrFlag is nil.
+	f := cmd.PersistentFlags().Lookup("host-scan")
+	require.NotNil(t, f, "--host-scan flag must be registered to keep a CLI opt-out for host data collection")
+	assert.Equal(t, "bool", f.Value.Type())
+
+	// not passed -> nil -> auto-detect node-agent CRDs (the default behavior)
+	assert.Equal(t, "", f.Value.String(), "unset --host-scan must leave the BoolPtrFlag nil (auto-detect)")
+
+	// --host-scan (bare) forces host data collection on
+	assert.Equal(t, "true", f.NoOptDefVal, "bare --host-scan must force host data collection on")
+
+	// --host-scan=false is the opt-out
+	require.NoError(t, cmd.PersistentFlags().Set("host-scan", "false"))
+	assert.Equal(t, "false", f.Value.String(), "--host-scan=false must explicitly disable host data collection")
+
+	// --host-scan=true forces it on
+	require.NoError(t, cmd.PersistentFlags().Set("host-scan", "true"))
+	assert.Equal(t, "true", f.Value.String(), "--host-scan=true must force host data collection on")
+}
+
 func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	cmd := GetScanCommand(mockKubescape)
@@ -386,7 +486,8 @@ func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	require.NoError(t, cmd.PersistentFlags().Set("format", "xml"))
 
 	err := cmd.RunE(cmd, []string{"."})
-	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif`)
+	errMessage := "invalid format \"xml\", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml, csv"
+	assert.EqualError(t, err, errMessage)
 }
 
 func TestGetScanCommand_ScanTimeoutFlagRegistered(t *testing.T) {
@@ -473,7 +574,7 @@ type contextTrackingKubescape struct {
 
 func (m *contextTrackingKubescape) Context() context.Context       { return m.ctx }
 func (m *contextTrackingKubescape) SetContext(ctx context.Context) { m.ctx = ctx }
-func (m *contextTrackingKubescape) Scan(_ *cautils.ScanInfo) (*resultshandlingpkg.ResultsHandler, error) {
+func (m *contextTrackingKubescape) Scan(_ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
 	m.scanCalledWith = m.ctx
 	return nil, errors.New("stub: scan not implemented in test")
 }
@@ -482,7 +583,7 @@ func TestSecurityScan_TimeoutDeadlineActiveForScan(t *testing.T) {
 	ks := &contextTrackingKubescape{ctx: context.Background()}
 	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
 
-	_ = securityScan(scanInfo, ks)
+	_ = securityScan(scanInfo, ks, nil)
 
 	_, hasDeadline := ks.scanCalledWith.Deadline()
 	assert.True(t, hasDeadline, "Scan() must receive a context with a deadline when ScanTimeout > 0")
@@ -493,7 +594,7 @@ func TestSecurityScan_TimeoutContextRestoredAfterReturn(t *testing.T) {
 	ks := &contextTrackingKubescape{ctx: originalCtx}
 	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
 
-	_ = securityScan(scanInfo, ks)
+	_ = securityScan(scanInfo, ks, nil)
 
 	_, hasDeadline := ks.Context().Deadline()
 	assert.False(t, hasDeadline, "original context must be restored on ks after securityScan returns")
@@ -503,10 +604,128 @@ func TestSecurityScan_ZeroTimeoutNoDeadline(t *testing.T) {
 	ks := &contextTrackingKubescape{ctx: context.Background()}
 	scanInfo := cautils.ScanInfo{ScanTimeout: 0}
 
-	_ = securityScan(scanInfo, ks)
+	_ = securityScan(scanInfo, ks, nil)
 
 	_, hasDeadline := ks.scanCalledWith.Deadline()
 	assert.False(t, hasDeadline, "Scan() must not receive a deadline when ScanTimeout is 0")
+}
+
+func TestGetScanCommand_RegistryCredentialFlags(t *testing.T) {
+	cmd := GetScanCommand(&mocks.MockIKubescape{})
+
+	for _, name := range []string{"registry-username", "registry-password", "registry-token", "registry-authority"} {
+		flag := cmd.PersistentFlags().Lookup(name)
+		require.NotNil(t, flag, "expected %s flag to be registered", name)
+	}
+
+	registryMapping := cmd.PersistentFlags().Lookup("registry-mapping")
+	require.NotNil(t, registryMapping)
+	assert.NotContains(t, registryMapping.Usage, "anonymous")
+}
+
+func TestGetScanCommand_RunE_RejectsUnscopedRegistryCredentialsForScanImages(t *testing.T) {
+	cmd := GetScanCommand(&mocks.MockIKubescape{})
+
+	require.NoError(t, cmd.PersistentFlags().Set("scan-images", "true"))
+	require.NoError(t, cmd.PersistentFlags().Set("registry-username", "user"))
+	require.NoError(t, cmd.PersistentFlags().Set("registry-password", registryFixtureValue("scan", "credential")))
+
+	err := cmd.RunE(cmd, []string{})
+	assert.Equal(t, shared.ErrRegistryAuthorityMissing, err)
+}
+
+func TestApplyRegistryCredentialsFromEnv(t *testing.T) {
+	envUser := registryFixtureValue("env", "user")
+	envCredential := registryFixtureValue("env", "credential")
+	envBearer := registryFixtureValue("env", "bearer")
+
+	t.Setenv("KUBESCAPE_REGISTRY_USERNAME", envUser)
+	t.Setenv("KUBESCAPE_REGISTRY_PASSWORD", envCredential)
+	t.Setenv("KUBESCAPE_REGISTRY_TOKEN", envBearer)
+
+	scanInfo := cautils.ScanInfo{}
+	cmd := &cobra.Command{Use: "scan"}
+	cmd.PersistentFlags().StringVar(&scanInfo.RegistryUsername, "registry-username", "", "")
+	cmd.PersistentFlags().StringVar(&scanInfo.RegistryPassword, "registry-password", "", "")
+	cmd.PersistentFlags().StringVar(&scanInfo.RegistryToken, "registry-token", "", "")
+
+	applyRegistryCredentialsFromEnv(cmd, &scanInfo)
+
+	assert.Equal(t, envUser, scanInfo.RegistryUsername)
+	assert.Equal(t, envCredential, scanInfo.RegistryPassword)
+	assert.Equal(t, envBearer, scanInfo.RegistryToken)
+}
+
+func TestApplyRegistryCredentialsFromEnv_KeepsFlagPrecedence(t *testing.T) {
+	envUser := registryFixtureValue("env", "user")
+	envCredential := registryFixtureValue("env", "credential")
+	envBearer := registryFixtureValue("env", "bearer")
+	flagUser := registryFixtureValue("flag", "user")
+	flagCredential := registryFixtureValue("flag", "credential")
+
+	t.Setenv("KUBESCAPE_REGISTRY_USERNAME", envUser)
+	t.Setenv("KUBESCAPE_REGISTRY_PASSWORD", envCredential)
+	t.Setenv("KUBESCAPE_REGISTRY_TOKEN", envBearer)
+
+	scanInfo := cautils.ScanInfo{}
+	cmd := &cobra.Command{Use: "scan"}
+	cmd.PersistentFlags().StringVar(&scanInfo.RegistryUsername, "registry-username", "", "")
+	cmd.PersistentFlags().StringVar(&scanInfo.RegistryPassword, "registry-password", "", "")
+	cmd.PersistentFlags().StringVar(&scanInfo.RegistryToken, "registry-token", "", "")
+
+	require.NoError(t, cmd.PersistentFlags().Set("registry-username", flagUser))
+	require.NoError(t, cmd.PersistentFlags().Set("registry-password", flagCredential))
+	require.NoError(t, cmd.PersistentFlags().Set("registry-token", ""))
+
+	applyRegistryCredentialsFromEnv(cmd, &scanInfo)
+
+	assert.Equal(t, flagUser, scanInfo.RegistryUsername)
+	assert.Equal(t, flagCredential, scanInfo.RegistryPassword)
+	assert.Empty(t, scanInfo.RegistryToken)
+}
+
+func TestApplyRegistryCredentialsFromEnv_KeepsExplicitAuthMode(t *testing.T) {
+	envUser := registryFixtureValue("env", "user")
+	envCredential := registryFixtureValue("env", "credential")
+	envBearer := registryFixtureValue("env", "bearer")
+
+	t.Setenv("KUBESCAPE_REGISTRY_USERNAME", envUser)
+	t.Setenv("KUBESCAPE_REGISTRY_PASSWORD", envCredential)
+	t.Setenv("KUBESCAPE_REGISTRY_TOKEN", envBearer)
+
+	t.Run("token flag suppresses basic env credentials", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		cmd := &cobra.Command{Use: "scan"}
+		cmd.PersistentFlags().StringVar(&scanInfo.RegistryUsername, "registry-username", "", "")
+		cmd.PersistentFlags().StringVar(&scanInfo.RegistryPassword, "registry-password", "", "")
+		cmd.PersistentFlags().StringVar(&scanInfo.RegistryToken, "registry-token", "", "")
+
+		flagBearer := registryFixtureValue("flag", "bearer")
+		require.NoError(t, cmd.PersistentFlags().Set("registry-token", flagBearer))
+
+		applyRegistryCredentialsFromEnv(cmd, &scanInfo)
+
+		assert.Empty(t, scanInfo.RegistryUsername)
+		assert.Empty(t, scanInfo.RegistryPassword)
+		assert.Equal(t, flagBearer, scanInfo.RegistryToken)
+	})
+
+	t.Run("basic flag suppresses token env credential", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		cmd := &cobra.Command{Use: "scan"}
+		cmd.PersistentFlags().StringVar(&scanInfo.RegistryUsername, "registry-username", "", "")
+		cmd.PersistentFlags().StringVar(&scanInfo.RegistryPassword, "registry-password", "", "")
+		cmd.PersistentFlags().StringVar(&scanInfo.RegistryToken, "registry-token", "", "")
+
+		flagUser := registryFixtureValue("flag", "user")
+		require.NoError(t, cmd.PersistentFlags().Set("registry-username", flagUser))
+
+		applyRegistryCredentialsFromEnv(cmd, &scanInfo)
+
+		assert.Equal(t, flagUser, scanInfo.RegistryUsername)
+		assert.Equal(t, envCredential, scanInfo.RegistryPassword)
+		assert.Empty(t, scanInfo.RegistryToken)
+	})
 }
 
 // coverageWouldFail mirrors the gate logic in enforceCoverageThreshold so we

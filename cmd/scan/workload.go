@@ -3,6 +3,7 @@ package scan
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -18,11 +19,11 @@ var (
 	workloadExample = fmt.Sprintf(`
   Scan a workload for misconfigurations and image vulnerabilities.
 
-  # Scan an workload
-  %[1]s scan workload <kind>/<name>
+  # Scan a workload
+  %[1]s scan workload <kind>[.<version>[.<group>]]/<name>
 	
-  # Scan an workload in a specific namespace
-  %[1]s scan workload <kind>/<name> --namespace <namespace>
+  # Scan a specific kind, version, and group
+  %[1]s scan workload Deployment.v1.apps/nginx
 
   # Scan an workload from a file path
   %[1]s scan workload <kind>/<name> --file-path <file path>
@@ -30,13 +31,13 @@ var (
   # Scan an workload with a specific API version
   %[1]s scan workload <kind>/<name> --api-version <api version>
   
-  # Scan an workload from a helm-chart template
-  %[1]s scan workload <kind>/<name> --chart-path <chart path> --file-path <file path>
+  # Scan a workload from a helm-chart template
+  %[1]s scan workload <kind>[.<version>[.<group>]]/<name> --chart-path <chart path> --file-path <file path>
 
 
 `, cautils.ExecName())
 
-	ErrInvalidWorkloadIdentifier = errors.New("invalid workload identifier")
+	ErrInvalidWorkloadIdentifier = errors.New("invalid workload identifier, expected <kind>[.<version>[.<group>]]/<name>")
 )
 
 // controlCmd represents the control command
@@ -44,12 +45,12 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 	var apiVersion string
 
 	workloadCmd := &cobra.Command{
-		Use:     "workload <kind>/<name> [`<glob pattern>`/`-`] [flags]",
+		Use:     "workload <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]",
 		Short:   "Scan a workload for misconfigurations and image vulnerabilities",
 		Example: workloadExample,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return fmt.Errorf("usage: <kind>/<name> [`<glob pattern>`/`-`] [flags]")
+				return fmt.Errorf("usage: <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]")
 			}
 
 			// Looks strange, a bug maybe????
@@ -68,7 +69,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				}
 			}
 			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif")
+				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast")
 			}
 			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ScanFormats); err != nil {
 				return err
@@ -76,7 +77,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if err := validateThresholdsOnly(scanInfo); err != nil {
 				return err
 			}
-			namespace, kind, name, err := parseWorkloadIdentifierString(args[0])
+			namespace, kind, name, apiVersion, err := parseWorkloadIdentifierString(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid input: %w", err)
 			}
@@ -118,38 +119,77 @@ func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string, a
 
 	scanInfo.ScanObject = &objectsenvelopes.ScanObject{}
 	scanInfo.ScanObject.SetNamespace(scanInfo.Namespace)
+	if apiVersion != "" {
+		scanInfo.ScanObject.SetApiVersion(apiVersion)
+	}
 	scanInfo.ScanObject.SetKind(kind)
 	scanInfo.ScanObject.SetName(name)
 	scanInfo.ScanObject.SetApiVersion(apiVersion)
 
-	scanInfo.SetPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
+	policyIdentifiers := cautils.BuildPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 
 	if scanInfo.FilePath != "" {
 		scanInfo.InputPatterns = []string{scanInfo.FilePath}
 	}
+
+	return policyIdentifiers
 }
 
 func validateWorkloadIdentifier(workloadIdentifier string) error {
-	_, _, _, err := parseWorkloadIdentifierString(workloadIdentifier)
+	_, _, _, _, err := parseWorkloadIdentifierString(workloadIdentifier)
 	return err
 }
 
-func parseWorkloadIdentifierString(workloadIdentifier string) (namespace, kind, name string, err error) {
+func parseWorkloadIdentifierString(workloadIdentifier string) (namespace, kind, name, apiVersion string, err error) {
 	// workloadIdentifier is in the form of kind/name or namespace/kind/name
 	// example: default/Deployment/nginx-deployment
 	x := strings.Split(workloadIdentifier, "/")
 	if len(x) == 2 {
 		if x[0] == "" || x[1] == "" {
-			return "", "", "", ErrInvalidWorkloadIdentifier
+			return "", "", "", "", ErrInvalidWorkloadIdentifier
 		}
-		return "", x[0], x[1], nil
+		parsedKind, parsedApiVersion, err := parseKindAndApiVersion(x[0])
+		if err != nil {
+			return "", "", "", "", err
+		}
+		return "", parsedKind, x[1], parsedApiVersion, nil
 	}
 	if len(x) == 3 {
 		if x[0] == "" || x[1] == "" || x[2] == "" {
-			return "", "", "", ErrInvalidWorkloadIdentifier
+			return "", "", "", "", ErrInvalidWorkloadIdentifier
 		}
-		return x[0], x[1], x[2], nil
+		parsedKind, parsedApiVersion, err := parseKindAndApiVersion(x[1])
+		if err != nil {
+			return "", "", "", "", err
+		}
+		return x[0], parsedKind, x[2], parsedApiVersion, nil
 	}
 
-	return "", "", "", ErrInvalidWorkloadIdentifier
+	return "", "", "", "", ErrInvalidWorkloadIdentifier
+}
+
+var apiVersionPattern = regexp.MustCompile(`^v\d+((alpha|beta)\d+)?$`)
+
+func parseKindAndApiVersion(kindStr string) (kind, apiVersion string, err error) {
+	parts := strings.Split(kindStr, ".")
+	if len(parts) == 1 {
+		return kindStr, "", nil
+	}
+
+	// Reject empty components
+	for _, part := range parts {
+		if part == "" {
+			return "", "", fmt.Errorf("%w: empty component in %q", ErrInvalidWorkloadIdentifier, kindStr)
+		}
+	}
+
+	if !apiVersionPattern.MatchString(parts[1]) {
+		return "", "", fmt.Errorf("%w: %q is not a valid API version in %q", ErrInvalidWorkloadIdentifier, parts[1], kindStr)
+	}
+
+	if len(parts) >= 3 {
+		group := strings.Join(parts[2:], ".")
+		return parts[0], group + "/" + parts[1], nil // kind.version.group -> group/version
+	}
+	return parts[0], parts[1], nil // kind.version -> version
 }
