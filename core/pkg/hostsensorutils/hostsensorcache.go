@@ -11,6 +11,8 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
+	"strings"
+	"time"
 )
 
 var DefaultCacheDir string
@@ -28,18 +30,35 @@ func getCacheDir() (string, error) {
 	return DefaultCacheDir, nil
 }
 
-func getCacheFilePath(resourceName string) (string, error) {
+func getCacheFilePath(clusterName, resourceName string) (string, error) {
 	dir, err := getCacheDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, fmt.Sprintf("%s.json.gz", resourceName)), nil
+	
+	safeClusterName := strings.ReplaceAll(clusterName, "/", "_")
+	safeClusterName = strings.ReplaceAll(safeClusterName, ":", "_")
+	safeClusterName = strings.ReplaceAll(safeClusterName, "\\", "_")
+	if safeClusterName == "" {
+		safeClusterName = "default"
+	}
+
+	return filepath.Join(dir, fmt.Sprintf("%s-%s-v1.json.gz", safeClusterName, resourceName)), nil
 }
 
-func loadFromCache(resourceName string) ([]hostsensor.HostSensorDataEnvelope, error) {
-	path, err := getCacheFilePath(resourceName)
+func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDataEnvelope, error) {
+	path, err := getCacheFilePath(clusterName, resourceName)
 	if err != nil {
 		return nil, err
+	}
+
+	stat, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if time.Since(stat.ModTime()) > 2*time.Hour {
+		os.Remove(path)
+		return nil, fmt.Errorf("cache expired")
 	}
 
 	f, err := os.Open(path)
@@ -68,18 +87,18 @@ func loadFromCache(resourceName string) ([]hostsensor.HostSensorDataEnvelope, er
 	return envelopes, nil
 }
 
-func saveToCache(resourceName string, envelopes []hostsensor.HostSensorDataEnvelope) error {
-	path, err := getCacheFilePath(resourceName)
+func saveToCache(clusterName, resourceName string, envelopes []hostsensor.HostSensorDataEnvelope) error {
+	path, err := getCacheFilePath(clusterName, resourceName)
 	if err != nil {
 		return err
 	}
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
 
-	f, err := os.Create(path)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}

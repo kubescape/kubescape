@@ -65,8 +65,8 @@ func TestHostSensorPagination(t *testing.T) {
 		listFunc: func(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			listCount++
 			limit := opts.Limit
-			if limit == 0 {
-				limit = 50
+			if limit != 50 {
+				panic(fmt.Sprintf("expected limit 50, got %d", limit))
 			}
 			startIndex := 0
 			if opts.Continue != "" {
@@ -103,7 +103,11 @@ func TestHostSensorPagination(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	items, err := hsh.listCRDResources(ctx, "osreleasefiles", "OsReleaseFile")
+	var items []unstructured.Unstructured
+	err := hsh.listCRDResources(ctx, "osreleasefiles", "OsReleaseFile", func(page []unstructured.Unstructured) error {
+		items = append(items, page...)
+		return nil
+	})
 	
 	require.NoError(t, err)
 	assert.Equal(t, totalItems, len(items))
@@ -138,7 +142,11 @@ func TestHostSensorRateLimitRetry(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	items, err := hsh.listCRDResources(ctx, "osreleasefiles", "OsReleaseFile")
+	var items []unstructured.Unstructured
+	err := hsh.listCRDResources(ctx, "osreleasefiles", "OsReleaseFile", func(page []unstructured.Unstructured) error {
+		items = append(items, page...)
+		return nil
+	})
 	
 	require.NoError(t, err)
 	assert.Equal(t, 0, len(items))
