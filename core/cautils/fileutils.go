@@ -321,6 +321,122 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 	return sourceToWorkloads, kustomizeDirectoryName, nil
 }
 
+// KustomizeRenderResult records the successful Kustomize renders and the input
+// paths they own. Ownership is claimed only after a build succeeds, so a broken
+// nested configuration remains available to the plain-manifest fallback.
+type KustomizeRenderResult struct {
+	SourceToWorkloads         map[string][]workloadinterface.IMetadata
+	OwnedSourcePaths          []string
+	OwnedHelmChartDirectories []string
+	OwnedHelmCRDDirectories   []string
+	ownedSourcePathAliases    []string
+	ownedHelmChartAliases     []string
+	ownedHelmCRDAliases       []string
+}
+
+// OwnsPlainFile reports whether a successfully rendered Kustomize input already
+// covers path. Chart trees are handled specially: templates are removed by the
+// Helm-template exclusion, while raw CRDs are removed here only when the owning
+// helmCharts entry requested includeCRDs.
+func (result KustomizeRenderResult) OwnsPlainFile(path string) bool {
+	if isAnyPathAliasUnderAnyDir(path, result.ownedHelmChartAliases) {
+		return isAnyPathAliasUnderAnyDir(path, result.ownedHelmCRDAliases) ||
+			isAnyPathAliasUnderAnyDir(path, result.ownedSourcePathAliases)
+	}
+	return isAnyPathAliasUnderAnyDir(path, result.ownedSourcePathAliases)
+}
+
+// LoadResourcesFromKustomizeDirectories renders the Kustomize configuration at
+// basePath, or discovers and renders Kustomize configurations below basePath when
+// the input itself is not one. A broad scan treats invalid nested configurations
+// as best-effort misses; an explicitly selected Kustomize input remains a hard
+// error, preserving its existing behavior.
+func LoadResourcesFromKustomizeDirectories(ctx context.Context, basePath string) (KustomizeRenderResult, error) {
+	kustomizeInputs, discoveryErrs := listKustomizeInputs(basePath)
+	explicitKustomizeInput := IsKustomizeFile(basePath) || isKustomizeDirectory(basePath)
+	if explicitKustomizeInput && len(discoveryErrs) > 0 {
+		return KustomizeRenderResult{}, fmt.Errorf("failed to inspect Kustomize input %q: %w", basePath, errors.Join(discoveryErrs...))
+	}
+	for _, err := range discoveryErrs {
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Kustomize configurations", helpers.Error(err))
+	}
+
+	result := KustomizeRenderResult{SourceToWorkloads: map[string][]workloadinterface.IMetadata{}}
+	seenOwnedSourcePaths := map[string]struct{}{}
+	seenOwnedCharts := map[string]struct{}{}
+	seenOwnedCRDs := map[string]struct{}{}
+	for _, input := range kustomizeInputs {
+		directory := input
+		if IsKustomizeFile(input) {
+			directory = filepath.Dir(input)
+		}
+
+		workloads, _, err := LoadResourcesFromKustomizeDirectory(ctx, input)
+		if err != nil {
+			if explicitKustomizeInput {
+				return KustomizeRenderResult{}, err
+			}
+			logger.L().Ctx(ctx).Warning("Skipping nested Kustomize configuration that failed to render", helpers.String("path", directory), helpers.Error(err))
+			continue
+		}
+
+		// Inspect ownership after the build so a remotely pulled chart and its
+		// nested chart tree are present before generic Helm discovery begins.
+		ownership, err := KustomizeInputOwnershipForPath(ctx, input)
+		if err != nil {
+			if explicitKustomizeInput {
+				return KustomizeRenderResult{}, err
+			}
+			logger.L().Ctx(ctx).Warning("Skipping nested Kustomize configuration with unresolved inputs", helpers.String("path", directory), helpers.Error(err))
+			continue
+		}
+
+		maps.Copy(result.SourceToWorkloads, workloads)
+		appendUniquePaths(&result.OwnedSourcePaths, seenOwnedSourcePaths, ownership.SourcePaths...)
+		appendUniquePaths(&result.OwnedHelmChartDirectories, seenOwnedCharts, ownership.HelmChartDirectories...)
+		appendUniquePaths(&result.OwnedHelmCRDDirectories, seenOwnedCRDs, ownership.HelmCRDDirectories...)
+	}
+	result.ownedSourcePathAliases = pathAliasesForPaths(result.OwnedSourcePaths)
+	result.ownedHelmChartAliases = pathAliasesForPaths(result.OwnedHelmChartDirectories)
+	result.ownedHelmCRDAliases = pathAliasesForPaths(result.OwnedHelmCRDDirectories)
+
+	return result, nil
+}
+
+func appendUniquePaths(destination *[]string, seen map[string]struct{}, paths ...string) {
+	for _, path := range paths {
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		*destination = append(*destination, path)
+	}
+}
+
+// listKustomizeInputs preserves exact selection for a Kustomize file or
+// directory. For a broader input it discovers child configurations recursively,
+// matching repository-wide Helm and manifest discovery.
+func listKustomizeInputs(basePath string) ([]string, []error) {
+	if IsKustomizeFile(basePath) || isKustomizeDirectory(basePath) {
+		return []string{basePath}, nil
+	}
+	// A concrete non-Kustomize file is an exact scan target. listDirs interprets
+	// a file path as a parent-directory pattern, which could otherwise discover
+	// an unrelated Kustomize directory sharing the file's basename.
+	if isFile(basePath) {
+		return nil, nil
+	}
+
+	directories, errs := listDirs(basePath)
+	kustomizeDirectories := make([]string, 0)
+	for _, directory := range directories {
+		if isKustomizeDirectory(directory) {
+			kustomizeDirectories = append(kustomizeDirectories, directory)
+		}
+	}
+	return kustomizeDirectories, errs
+}
+
 // LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts
 // are the chart directories LoadResourcesFromHelmCharts already rendered; their templates are left
 // to that render and skipped here. Pass nil to scan everything (e.g. when no charts were rendered).

@@ -276,33 +276,26 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		repoRoot = filepath.Dir(repoRoot)
 	}
 
-	// A chart referenced by this Kustomization belongs to the Kustomize render. Rendering it through
-	// the generic recursive Helm loader as well would add a standalone release beside the transformed
-	// Kustomize output.
-	kustomizeHelmChartDirectories, err := cautils.KustomizeHelmChartDirectories(ctx, path)
+	// A broad directory input may contain Kustomize configurations below its root.
+	// Render them first so the generic Helm and plain-manifest passes can respect
+	// only the configurations whose builds actually succeeded.
+	kustomizeResult, err := cautils.LoadResourcesFromKustomizeDirectories(ctx, path)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// render helm charts first, so the plain-YAML loader knows which charts' templates the render
-	// already covered and can skip only those. A chart whose render failed is dropped whole here, so
-	// its templates must stay plainly scanned rather than vanish from the scan.
-	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmChartsExcludingDirectories(ctx, path, helmValueOpts, kustomizeHelmChartDirectories)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Confirm that the owning Kustomize render succeeds before excluding its chart
-	// templates from the plain-manifest fallback.
-	kustomizeSourceToWorkloads, kustomizeDirectoryName, err := cautils.LoadResourcesFromKustomizeDirectory(ctx, path)
+	// Charts owned by a successful Kustomize build must not also be rendered as
+	// standalone Helm releases. Unreferenced charts remain in generic discovery.
+	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmChartsExcludingDirectories(ctx, path, helmValueOpts, kustomizeResult.OwnedHelmChartDirectories)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// load resource from local file system
-	// Kustomize-owned charts are excluded here too: their templates are covered by the Kustomize
-	// render even though the generic Helm renderer deliberately left them alone.
-	coveredChartDirectories := append(append([]string{}, renderedCharts...), kustomizeHelmChartDirectories...)
+	// Kustomize-owned chart templates are covered by that build even though the
+	// generic Helm renderer left them alone. CRDs are filtered separately according
+	// to includeCRDs, so an omitted CRD remains available to the raw-file pass.
+	coveredChartDirectories := append(append([]string{}, renderedCharts...), kustomizeResult.OwnedHelmChartDirectories...)
 	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, coveredChartDirectories)
 	if err != nil {
 		return nil, nil, err
@@ -311,6 +304,12 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	// update workloads and workloadIDToSource
 	var warnIssued bool
 	for source, ws := range sourceToWorkloads {
+		// Kustomize can transform identity fields, so identity deduplication cannot
+		// reliably remove the corresponding raw input. Exclude only paths covered by
+		// successful builds; broken nested configurations retain their raw fallback.
+		if kustomizeResult.OwnsPlainFile(source) {
+			continue
+		}
 		workloads = append(workloads, ws...)
 
 		relSource, err := filepath.Rel(repoRoot, source)
@@ -401,9 +400,10 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		logger.L().Debug("helm templates found in local storage", helpers.Int("helmTemplates", len(helmSourceToWorkloads)), helpers.Int("workloads", len(workloads)))
 	}
 
-	// update workloads and workloadIDToSource with workloads from Kustomize Directory
-	for source, ws := range kustomizeSourceToWorkloads {
+	// update workloads and workloadIDToSource with workloads from Kustomize directories
+	for source, ws := range kustomizeResult.SourceToWorkloads {
 		workloads = append(workloads, ws...)
+		kustomizeDirectoryName := source
 		relSource, err := filepath.Rel(repoRoot, source)
 
 		if err == nil {
