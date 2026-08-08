@@ -15,6 +15,8 @@ import (
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	fakeclientset "k8s.io/client-go/kubernetes/fake"
+	restclient "k8s.io/client-go/rest"
 )
 
 type TenantConfigMock struct {
@@ -463,6 +465,31 @@ func TestGetSensorHandler(t *testing.T) {
 
 		_, isMock := sensor.(*hostsensorutils.HostSensorHandlerMock)
 		require.True(t, isMock)
+	})
+
+	t.Run("should disable HostSensorEnabled if explicitly enabled but construction fails", func(t *testing.T) {
+		originalK8SConfig := k8sinterface.K8SConfig
+		t.Cleanup(func() { k8sinterface.K8SConfig = originalK8SConfig })
+		k8sinterface.K8SConfig = &restclient.Config{}
+
+		trueFlag := cautils.NewBoolPtr(nil)
+		trueFlag.SetBool(true)
+		scanInfo := &cautils.ScanInfo{
+			HostSensorEnabled: trueFlag,
+		}
+		// A client with no nodes makes NewHostSensorHandler fail its liveness check.
+		k8s := &k8sinterface.KubernetesApi{
+			KubernetesClient: fakeclientset.NewClientset(),
+			Context:          ctx,
+		}
+
+		sensor := getHostSensorHandler(ctx, scanInfo, k8s)
+		require.NotNil(t, sensor)
+
+		_, isMock := sensor.(*hostsensorutils.HostSensorHandlerMock)
+		require.True(t, isMock)
+		assert.False(t, scanInfo.HostSensorEnabled.GetBool(),
+			"a failed explicit host-scan request must not leave HostSensorEnabled true, or the collector will treat the mock's empty result as a clean scan")
 	})
 
 	// TODO(fredbi): need to share the k8s client mock to test a happy path / deployment failure path
