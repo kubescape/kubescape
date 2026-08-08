@@ -1,9 +1,12 @@
 package core
 
 import (
+	"context"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -113,3 +116,29 @@ func TestContainerImagesCollectsOtherCategoriesAfterOneFails(t *testing.T) {
 		})
 	}
 }
+
+func TestScanImagesSkipsInitializationWhenNoImagesFound(t *testing.T) {
+	podWithoutContainers := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "empty-pod", "namespace": "default"},
+		"spec":       map[string]any{},
+	})
+
+	scanData := &cautils.OPASessionObj{
+		SingleResourceScan: podWithoutContainers,
+	}
+
+	scanInfo := &cautils.ScanInfo{
+		ScanImages: true,
+		ListingURL: "invalid://db-url-that-would-fail-if-called",
+	}
+
+	resultsHandling := &resultshandling.ResultsHandler{}
+
+	assert.NotPanics(t, func() {
+		scanImages(cautils.ScanTypeWorkload, scanData, context.Background(), resultsHandling, scanInfo)
+	})
+	assert.Empty(t, resultsHandling.ImageScanData)
+}
+

@@ -419,9 +419,6 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		imagesToScan.Append(images...)
 		if err != nil {
 			logger.L().Error("failed to get container images", helpers.Error(err))
-			if imagesToScan.IsEmpty() {
-				return
-			}
 		}
 	} else {
 		for _, resource := range scanData.AllResources {
@@ -433,6 +430,10 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 				continue
 			}
 		}
+	}
+
+	if imagesToScan.IsEmpty() {
+		return
 	}
 
 	distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL)
