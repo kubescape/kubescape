@@ -69,6 +69,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 					scanInfo.ControlsVersion,
 				)
 			}
+			captureKubeconfigSelection(cmd, &scanInfo)
 			applyRegistryCredentialsFromEnv(cmd, &scanInfo)
 			return nil
 		},

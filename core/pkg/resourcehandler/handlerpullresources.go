@@ -49,7 +49,14 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, opaSess
 }
 
 func setCloudMetadata(opaSessionObj *cautils.OPASessionObj, provider string) {
-	iCloudMetadata := newCloudMetadata(provider)
+	var contextName string
+	if clusterMetadata := opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata; clusterMetadata != nil && clusterMetadata.ContextName != "" {
+		contextName = clusterMetadata.ContextName
+	}
+	if contextName == "" {
+		contextName = k8sinterface.GetContextName()
+	}
+	iCloudMetadata := newCloudMetadata(provider, contextName)
 	if iCloudMetadata == nil {
 		return
 	}
@@ -69,14 +76,14 @@ func setCloudMetadata(opaSessionObj *cautils.OPASessionObj, provider string) {
 // 1. Get cloud provider from API server git version (EKS, GKE)
 // 2. Get cloud provider from kubeconfig by parsing the cluster context (EKS, GKE)
 // 3. Get cloud provider from kubeconfig by parsing the server URL (AKS)
-func newCloudMetadata(provider string) apis.ICloudParser {
+func newCloudMetadata(provider, contextName string) apis.ICloudParser {
 	switch provider {
 	case cloudsupportv1.AKS:
-		return helpersv1.NewAKSMetadata(k8sinterface.GetContextName())
+		return helpersv1.NewAKSMetadata(contextName)
 	case cloudsupportv1.EKS:
-		return helpersv1.NewEKSMetadata(k8sinterface.GetContextName())
+		return helpersv1.NewEKSMetadata(contextName)
 	case cloudsupportv1.GKE:
-		return helpersv1.NewGKEMetadata(k8sinterface.GetContextName())
+		return helpersv1.NewGKEMetadata(contextName)
 	default:
 		return nil
 	}
