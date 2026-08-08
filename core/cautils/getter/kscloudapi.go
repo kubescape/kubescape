@@ -120,7 +120,7 @@ func HTTPPost(client *http.Client, fullURL string, body []byte, headers map[stri
 		if !timer.Stop() {
 			<-timerFired
 		}
-		body.Close()
+		resp.Body.Close()
 
 		// Restore the body for utils.ErrAPI so it can format the error message
 		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
