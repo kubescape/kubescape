@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	v1 "github.com/kubescape/backend/pkg/client/v1"
@@ -102,12 +101,6 @@ func HTTPPost(client *http.Client, fullURL string, body []byte, headers map[stri
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body := resp.Body
-		timerFired := make(chan struct{})
-		// Add a deadline to prevent hanging if the server drips the response slowly.
-		timer := time.AfterFunc(2*time.Second, func() {
-			body.Close()
-			close(timerFired)
-		})
 
 		// Read up to 1024 bytes (the max ErrAPI processes) so it can format the error message.
 		bodyBytes, readErr := io.ReadAll(io.LimitReader(body, 1024))
@@ -117,9 +110,6 @@ func HTTPPost(client *http.Client, fullURL string, body []byte, headers map[stri
 
 		// Fully drain the rest of the response body to ensure the TCP connection can be reused.
 		_, _ = io.Copy(io.Discard, body)
-		if !timer.Stop() {
-			<-timerFired
-		}
 		resp.Body.Close()
 
 		// Restore the body for utils.ErrAPI so it can format the error message
