@@ -1,13 +1,13 @@
 package resultshandling
 
 import (
-    "context"
-    "encoding/json"
-    "errors"
-    "fmt"
-    "slices"
-    "testing"
-    "time"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+	"testing"
+	"time"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
