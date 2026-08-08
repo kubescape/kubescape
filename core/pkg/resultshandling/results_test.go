@@ -4,13 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type DummyReporter struct{}
@@ -418,6 +425,134 @@ func TestToJson(t *testing.T) {
 	// verify it is valid JSON
 	var out map[string]any
 	assert.NoError(t, json.Unmarshal(data, &out))
+}
+
+// requireJSONSubset verifies that every value in the legacy JSON remains at
+// the same path, while allowing the enriched output to add new object fields.
+func requireJSONSubset(t *testing.T, want, got any, path string) {
+	t.Helper()
+	switch want := want.(type) {
+	case map[string]any:
+		gotMap, ok := got.(map[string]any)
+		require.Truef(t, ok, "%s type = %T; want object", path, got)
+		for key, wantValue := range want {
+			gotValue, exists := gotMap[key]
+			require.Truef(t, exists, "legacy JSON path %s.%s disappeared", path, key)
+			requireJSONSubset(t, wantValue, gotValue, path+"."+key)
+		}
+	case []any:
+		gotSlice, ok := got.([]any)
+		require.Truef(t, ok, "%s type = %T; want array", path, got)
+		require.Len(t, gotSlice, len(want), "%s length changed", path)
+		for i := range want {
+			requireJSONSubset(t, want[i], gotSlice[i], fmt.Sprintf("%s[%d]", path, i))
+		}
+	default:
+		assert.Equalf(t, want, got, "legacy JSON value at %s changed", path)
+	}
+}
+
+func TestResultsHandlerToJSONPreservesLegacyFieldsAndAddsEnrichment(t *testing.T) {
+	const controlID = "C-ENRICHED"
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "app",
+			"namespace": "tenant-a",
+			"labels": map[string]any{
+				"team":    "platform",
+				"ignored": "not-copied",
+			},
+		},
+	})
+	resourceID := resource.GetID()
+	scanData := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			ReportGenerationTime: time.Date(2026, time.August, 9, 1, 2, 3, 456789123, time.UTC),
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: reportsummary.ControlSummaries{
+					controlID: {ControlID: controlID, Name: "enriched control", ScoreFactor: 7},
+				},
+			},
+		},
+		Metadata: &reporthandlingv2.Metadata{},
+		AllResources: map[string]workloadinterface.IMetadata{
+			resourceID: resource,
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			resourceID: {
+				ResourceID: resourceID,
+				RawResource: &reporthandling.Resource{
+					ResourceID: resourceID,
+					Object:     map[string]any{"compatibilityMarker": "preserved"},
+				},
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{ControlID: controlID, Name: "enriched control"},
+				},
+			},
+		},
+		LabelsToCopy: []string{"team"},
+		ScanCoverage: cautils.ScanCoverage{
+			PartialGVRPulls: []cautils.PartialGVRPull{
+				{GVR: "/v1/pods", Selector: "metadata.namespace=tenant-b", Error: "forbidden"},
+			},
+			CoverageScore: 98,
+			Degraded:      true,
+		},
+		OmitRawResources: true,
+	}
+	rh := NewResultsHandler(&DummyReporter{}, nil, &SpyPrinter{})
+	rh.SetData(scanData)
+
+	legacyData, err := json.Marshal(printerv2.FinalizeResults(scanData))
+	require.NoError(t, err)
+	var legacyOutput map[string]any
+	require.NoError(t, json.Unmarshal(legacyData, &legacyOutput))
+
+	data, err := rh.ToJson()
+	require.NoError(t, err)
+	var output map[string]any
+	require.NoError(t, json.Unmarshal(data, &output))
+	assert.Contains(t, output, "resourceLabels")
+	assert.Contains(t, output, "scanCoverage")
+	summary, ok := output["summaryDetails"].(map[string]any)
+	require.True(t, ok)
+	controls, ok := summary["controls"].(map[string]any)
+	require.True(t, ok)
+	control, ok := controls[controlID].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "High", control["severity"])
+	results, ok := output["results"].([]any)
+	require.True(t, ok)
+	require.Len(t, results, 1)
+	result, ok := results[0].(map[string]any)
+	require.True(t, ok)
+	resultControls, ok := result["controls"].([]any)
+	require.True(t, ok)
+	require.Len(t, resultControls, 1)
+	resultControl, ok := resultControls[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "High", resultControl["severity"])
+	labels, ok := output["resourceLabels"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "platform", labels[resourceID].(map[string]any)["team"])
+	coverage, ok := output["scanCoverage"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, true, coverage["degraded"])
+
+	// ToJson historically marshaled FinalizeResults directly. All of that JSON
+	// must remain intact; the new fields are additive only.
+	for _, key := range []string{"reportGUID", "jobID", "paginationInfo", "customerGUIDGenerated"} {
+		require.Contains(t, legacyOutput, key)
+	}
+	requireJSONSubset(t, legacyOutput, output, "$")
+
+	// The legacy typed accessor remains source-compatible and retains its
+	// established opa-utils return type.
+	var legacy *reporthandlingv2.PostureReport = rh.GetResults()
+	require.NotNil(t, legacy)
+	assert.Equal(t, float32(7), legacy.SummaryDetails.Controls[controlID].ScoreFactor)
 }
 
 func TestGetComplianceScoreAndRiskScoreAreIndependent(t *testing.T) {
