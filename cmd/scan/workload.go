@@ -25,11 +25,11 @@ var (
   # Scan a specific kind, version, and group
   %[1]s scan workload Deployment.v1.apps/nginx
 
-  # Scan a workload in a specific namespace
-  %[1]s scan workload <kind>[.<version>[.<group>]]/<name> --namespace <namespace>
+  # Scan an workload from a file path
+  %[1]s scan workload <kind>/<name> --file-path <file path>
 
-  # Scan a workload from a file path
-  %[1]s scan workload <kind>[.<version>[.<group>]]/<name> --file-path <file path>
+  # Scan an workload with a specific API version
+  %[1]s scan workload <kind>/<name> --api-version <api version>
   
   # Scan a workload from a helm-chart template
   %[1]s scan workload <kind>[.<version>[.<group>]]/<name> --chart-path <chart path> --file-path <file path>
@@ -42,6 +42,8 @@ var (
 
 // controlCmd represents the control command
 func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
+	var apiVersion string
+
 	workloadCmd := &cobra.Command{
 		Use:     "workload <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]",
 		Short:   "Scan a workload for misconfigurations and image vulnerabilities",
@@ -75,7 +77,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if err := validateThresholdsOnly(scanInfo); err != nil {
 				return err
 			}
-			namespace, kind, name, apiVersion, err := parseWorkloadIdentifierString(args[0])
+			namespace, kind, name, workloadAPIVersion, err := parseWorkloadIdentifierString(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid input: %w", err)
 			}
@@ -84,7 +86,11 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				scanInfo.Namespace = namespace
 			}
 
-			policyIdentifiers := setWorkloadScanInfo(scanInfo, apiVersion, kind, name)
+			if apiVersion == "" {
+				apiVersion = workloadAPIVersion
+			}
+
+			policyIdentifiers := setWorkloadScanInfo(scanInfo, kind, name, apiVersion)
 
 			results, err := ks.Scan(scanInfo, policyIdentifiers)
 			if err != nil {
@@ -102,14 +108,16 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			return nil
 		},
 	}
+
 	workloadCmd.PersistentFlags().StringVarP(&scanInfo.Namespace, "namespace", "n", "", "Namespace of the workload. Default will be empty.")
 	workloadCmd.PersistentFlags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the workload file.")
 	workloadCmd.PersistentFlags().StringVar(&scanInfo.ChartPath, "chart-path", "", "Path to the helm chart the workload is part of. Must be used with --file-path.")
+	workloadCmd.PersistentFlags().StringVar(&apiVersion, "api-version", "", "API version of the workload (e.g. apps/v1). Default will be empty.")
 
 	return workloadCmd
 }
 
-func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, apiVersion string, kind string, name string) []cautils.PolicyIdentifier {
+func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string, apiVersion string) []cautils.PolicyIdentifier {
 	scanInfo.SetScanType(cautils.ScanTypeWorkload)
 	scanInfo.ScanImages = true
 
