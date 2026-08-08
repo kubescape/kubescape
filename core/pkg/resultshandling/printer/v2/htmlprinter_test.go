@@ -87,7 +87,7 @@ func TestBuildResourceControlResultTable_MissingControl(t *testing.T) {
 	}
 
 	assert.NotPanics(t, func() {
-		results := buildResourceControlResultTable([]resourcesresults.ResourceAssociatedControl{ac}, summaryDetails)
+		results := buildResourceControlResultTable([]resourcesresults.ResourceAssociatedControl{ac}, summaryDetails, nil, false)
 		assert.Empty(t, results)
 	})
 }

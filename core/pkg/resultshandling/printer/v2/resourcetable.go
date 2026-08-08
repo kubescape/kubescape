@@ -1,6 +1,8 @@
 package printer
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -17,6 +19,17 @@ import (
 )
 
 var specContainerRegex = regexp.MustCompile(`spec\.containers\[(\d+)]`)
+var pathIndexRegex = regexp.MustCompile(`^([^\[]+)\[(\d+)]$`)
+
+// credentialDetectingControls lists controls whose failed/delete paths
+// point directly at a secret value (e.g. an env var already known to hold
+// a credential). Value resolution is skipped entirely for these controls,
+// so we never print the very secret the scan flagged as sensitive.
+var credentialDetectingControls = map[string]bool{
+	"C-0012": true, // Applications credentials in configuration files
+	"C-0207": true, // same rule family (rule-secrets-in-env-var / rule-credentials-in-env-var)
+	"C-0259": true, // same rule family (rule-secrets-in-env-var / rule-credentials-in-env-var)
+}
 
 const (
 	resourceColumnSeverity = iota
@@ -76,6 +89,8 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata) []table.Row {
 	var rows []table.Row
 
+	root, hasRoot := resolveResourceObject(resource)
+
 	for i := range controls {
 		row := make(table.Row, _resourceRowLen)
 
@@ -85,6 +100,9 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 
 		row[resourceColumnURL] = cautils.GetControlLink(controls[i].GetID())
 		paths := AssistedRemediationPathsToString(&controls[i])
+		if hasRoot {
+			addValueToAssistedRemediation(root, &controls[i], &paths)
+		}
 		addContainerNameToAssistedRemediation(resource, &paths)
 		row[resourceColumnPath] = strings.Join(paths, "\n")
 		row[resourceColumnName] = controls[i].GetName()
@@ -119,6 +137,91 @@ func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata,
 			continue
 		}
 		(*paths)[i] += " (" + containers[index].Name + ")"
+	}
+}
+
+func resolveResourceObject(resource workloadinterface.IMetadata) (interface{}, bool) {
+	raw, err := json.Marshal(resource.GetObject())
+	if err != nil {
+		return nil, false
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+
+	var root interface{}
+	if err := dec.Decode(&root); err != nil {
+		return nil, false
+	}
+
+	return root, true
+}
+
+func resolveValueAtPath(root interface{}, path string) (interface{}, bool) {
+	current := root
+
+	for _, seg := range strings.Split(path, ".") {
+		key, index, hasIndex := splitIndex(seg)
+
+		m, ok := current.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		next, ok := m[key]
+		if !ok {
+			return nil, false
+		}
+		current = next
+
+		if hasIndex {
+			list, ok := current.([]interface{})
+			if !ok || index >= len(list) {
+				return nil, false
+			}
+			current = list[index]
+		}
+	}
+
+	return current, true
+}
+
+func splitIndex(segment string) (key string, index int, hasIndex bool) {
+	match := pathIndexRegex.FindStringSubmatch(segment)
+	if match == nil {
+		return segment, 0, false
+	}
+	index, _ = strconv.Atoi(match[2])
+	return match[1], index, true
+}
+
+func isScalarValue(v interface{}) bool {
+	switch v.(type) {
+	case string, bool, json.Number, nil:
+		return true
+	default:
+		return false
+	}
+}
+
+func addValueToAssistedRemediation(root interface{}, control *resourcesresults.ResourceAssociatedControl, paths *[]string) {
+	if credentialDetectingControls[control.GetID()] {
+		return
+	}
+
+	alreadyValued := make(map[string]bool)
+	for _, p := range fixPathsToString(control, false) {
+		alreadyValued[p] = true
+	}
+
+	for i := range *paths {
+		if alreadyValued[(*paths)[i]] {
+			continue
+		}
+		value, ok := resolveValueAtPath(root, (*paths)[i])
+		if !ok || !isScalarValue(value) {
+			continue
+		}
+		(*paths)[i] = fmt.Sprintf("%s=%v", (*paths)[i], value)
 	}
 }
 
