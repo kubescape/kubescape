@@ -26,6 +26,9 @@ var (
 
   # Scan an workload from a file path
   %[1]s scan workload <kind>/<name> --file-path <file path>
+
+  # Scan an workload with a specific API version
+  %[1]s scan workload <kind>/<name> --api-version <api version>
   
   # Scan an workload from a helm-chart template
   %[1]s scan workload <kind>/<name> --chart-path <chart path> --file-path <file path>
@@ -38,6 +41,8 @@ var (
 
 // controlCmd represents the control command
 func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
+	var apiVersion string
+
 	workloadCmd := &cobra.Command{
 		Use:     "workload <kind>/<name> [`<glob pattern>`/`-`] [flags]",
 		Short:   "Scan a workload for misconfigurations and image vulnerabilities",
@@ -80,9 +85,8 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				scanInfo.Namespace = namespace
 			}
 
-			setWorkloadScanInfo(scanInfo, kind, name)
+			setWorkloadScanInfo(scanInfo, kind, name, apiVersion)
 
-			// todo: add api version if provided
 			results, err := ks.Scan(scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())
@@ -99,14 +103,16 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			return nil
 		},
 	}
+
 	workloadCmd.PersistentFlags().StringVarP(&scanInfo.Namespace, "namespace", "n", "", "Namespace of the workload. Default will be empty.")
 	workloadCmd.PersistentFlags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the workload file.")
 	workloadCmd.PersistentFlags().StringVar(&scanInfo.ChartPath, "chart-path", "", "Path to the helm chart the workload is part of. Must be used with --file-path.")
+	workloadCmd.PersistentFlags().StringVar(&apiVersion, "api-version", "", "API version of the workload (e.g. apps/v1). Default will be empty.")
 
 	return workloadCmd
 }
 
-func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string) {
+func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string, apiVersion string) {
 	scanInfo.SetScanType(cautils.ScanTypeWorkload)
 	scanInfo.ScanImages = true
 
@@ -114,6 +120,7 @@ func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string) {
 	scanInfo.ScanObject.SetNamespace(scanInfo.Namespace)
 	scanInfo.ScanObject.SetKind(kind)
 	scanInfo.ScanObject.SetName(name)
+	scanInfo.ScanObject.SetApiVersion(apiVersion)
 
 	scanInfo.SetPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 

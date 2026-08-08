@@ -81,7 +81,7 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 			tc.Description,
 			func(t *testing.T) {
 				scanInfo := &cautils.ScanInfo{FilePath: tc.filePath, Namespace: tc.namespace}
-				setWorkloadScanInfo(scanInfo, tc.kind, tc.name)
+				setWorkloadScanInfo(scanInfo, tc.kind, tc.name, "")
 
 				if scanInfo.ScanType != tc.want.ScanType {
 					t.Errorf("got: %v, want: %v", scanInfo.ScanType, tc.want.ScanType)
