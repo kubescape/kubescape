@@ -41,10 +41,13 @@ func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResou
 }
 
 func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload, scanningScope reporthandling.ScanningScopeType, resolver resourceResolver) (QueryableResources, map[string]bool) {
+	return getQueryableResourceMapFromPoliciesWithWarned(frameworks, resource, scanningScope, resolver, make(map[string]struct{}))
+}
+
+func getQueryableResourceMapFromPoliciesWithWarned(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload, scanningScope reporthandling.ScanningScopeType, resolver resourceResolver, warned map[string]struct{}) (QueryableResources, map[string]bool) {
 	queryableResources := make(QueryableResources)
 	excludedRulesMap := make(map[string]bool)
 	namespace := getScannedResourceNamespace(resource, resolver)
-	warned := make(map[string]struct{})
 
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {
