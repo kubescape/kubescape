@@ -12,6 +12,7 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
+	"sigs.k8s.io/yaml"
 )
 
 // Function receives a non-empty list of policies
@@ -330,6 +331,77 @@ func TestJsonControlsFormat(t *testing.T) {
 	assert.Contains(t, string(got), `"id"`)
 	assert.Contains(t, string(got), `"name"`)
 	assert.Contains(t, string(got), `"frameworks"`)
+	assert.NotContains(t, string(got), "|")
+}
+
+// yamlListFormat emits valid YAML for a flat list of policy names.
+func TestYamlListFormat(t *testing.T) {
+	policies := []string{"policy1", "policy2", "policy3"}
+
+	rescueStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	yamlListFormat(context.Background(), "", policies)
+
+	w.Close()
+	got, _ := io.ReadAll(r)
+	os.Stdout = rescueStdout
+
+	var result []string
+	assert.NoError(t, yaml.Unmarshal(got, &result))
+	assert.Equal(t, policies, result)
+}
+
+// yamlListFormat handles an empty list without error.
+func TestYamlListFormat_Empty(t *testing.T) {
+	rescueStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	yamlListFormat(context.Background(), "", []string{})
+
+	w.Close()
+	got, _ := io.ReadAll(r)
+	os.Stdout = rescueStdout
+
+	var result []string
+	assert.NoError(t, yaml.Unmarshal(got, &result))
+	assert.Empty(t, result)
+}
+
+// yamlControlsFormat emits valid YAML that unmarshals into typed objects, not pipe-delimited strings.
+func TestYamlControlsFormat(t *testing.T) {
+	entries := []metav1.ControlListEntry{
+		{ID: "C-0001", Name: "Forbidden Container Registries", Frameworks: []string{}},
+		{ID: "C-0002", Name: "Prevent containers from allowing command execution", Frameworks: []string{"NSA", "AllControls", "MITRE"}},
+	}
+
+	rescueStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	yamlControlsFormat(entries)
+
+	w.Close()
+	got, _ := io.ReadAll(r)
+	os.Stdout = rescueStdout
+
+	var result []metav1.ControlListEntry
+	assert.NoError(t, yaml.Unmarshal(got, &result))
+	assert.Len(t, result, 2)
+
+	assert.Equal(t, "C-0001", result[0].ID)
+	assert.Equal(t, "Forbidden Container Registries", result[0].Name)
+	assert.Equal(t, []string{}, result[0].Frameworks)
+
+	assert.Equal(t, "C-0002", result[1].ID)
+	assert.Equal(t, []string{"NSA", "AllControls", "MITRE"}, result[1].Frameworks)
+
+	// Verify the raw output uses YAML key: value syntax, not pipe-delimited strings.
+	assert.Contains(t, string(got), "id:")
+	assert.Contains(t, string(got), "name:")
+	assert.Contains(t, string(got), "frameworks:")
 	assert.NotContains(t, string(got), "|")
 }
 

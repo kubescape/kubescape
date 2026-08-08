@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/maruel/natural"
+	"sigs.k8s.io/yaml"
 )
 
 // listFunc handles targets whose output is a flat []string (frameworks, exceptions).
@@ -26,6 +27,7 @@ var listFunc = map[string]func(context.Context, *metav1.ListPolicies) ([]string,
 var listFormatFunc = map[string]func(context.Context, string, []string){
 	"pretty-print": prettyPrintListFormat,
 	"json":         jsonListFormat,
+	"yaml":         yamlListFormat,
 }
 
 func ListSupportActions() []string {
@@ -53,7 +55,7 @@ func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
 		if listFormatFunction, ok := listFormatFunc[listPolicies.Format]; ok {
 			listFormatFunction(ks.Context(), listPolicies.Target, policies)
 		} else {
-			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json' ", listPolicies.Format)
+			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'/'yaml' ", listPolicies.Format)
 		}
 
 		return nil
@@ -73,8 +75,10 @@ func (ks *Kubescape) listAndFormatControls(listPolicies *metav1.ListPolicies) er
 		prettyPrintControls(ks.Context(), entries)
 	case "json":
 		jsonControlsFormat(entries)
+	case "yaml":
+		yamlControlsFormat(entries)
 	default:
-		return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'", listPolicies.Format)
+		return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'/'yaml'", listPolicies.Format)
 	}
 	return nil
 }
@@ -200,6 +204,24 @@ func jsonControlsFormat(entries []metav1.ControlListEntry) {
 	j, _ := json.MarshalIndent(entries, "", "  ")
 
 	fmt.Printf("%s\n", j)
+}
+
+func yamlListFormat(_ context.Context, _ string, policies []string) {
+	y, err := yaml.Marshal(policies)
+	if err != nil {
+		return
+	}
+
+	fmt.Printf("%s\n", y)
+}
+
+func yamlControlsFormat(entries []metav1.ControlListEntry) {
+	y, err := yaml.Marshal(entries)
+	if err != nil {
+		return
+	}
+
+	fmt.Printf("%s\n", y)
 }
 
 func prettyPrintControls(ctx context.Context, entries []metav1.ControlListEntry) {
