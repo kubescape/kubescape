@@ -155,7 +155,8 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 
 }
 
-// countersExceedSeverityThreshold returns true if severity of failed controls exceed the set severity threshold, else returns false
+// countersExceedSeverityThreshold returns true if a failed control has severity
+// at or above the configured threshold.
 func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCounters, scanInfo *cautils.ScanInfo) (bool, error) {
 	targetSeverity := scanInfo.FailThresholdSeverity
 	if err := shared.ValidateSeverity(targetSeverity); err != nil {
@@ -191,8 +192,6 @@ func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCou
 
 }
 
-// countersExceedSeverityThreshold returns true if severity of failed controls exceed the set severity threshold, else returns false
-
 // enforceCoverageThreshold fails the scan if the scan coverage score is below
 // scanInfo.FailCoverageThreshold. The score is computed once in the scan
 // pipeline (ScanCoverage.ComputeCoverageScore) so this gate agrees with what
@@ -226,7 +225,7 @@ func enforcePolicyDegradation(coverage cautils.ScanCoverage, scanInfo *cautils.S
 
 // enforceSeverityThresholds ensures that the scan results are below the defined severity threshold
 //
-// The function forces the application to terminate with an exit code 1 if at least one control failed control that exceeds the set severity threshold
+// The function returns an error if at least one failed control has a severity at or above the set severity threshold
 func enforceSeverityThresholds(severityCounters reportsummary.ISeverityCounters, scanInfo *cautils.ScanInfo) error {
 	// If a severity threshold is not set, we don’t need to enforce it
 	if scanInfo.FailThresholdSeverity == "" {
