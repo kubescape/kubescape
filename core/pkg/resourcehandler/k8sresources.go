@@ -267,6 +267,26 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 	return batchChan, errChan, expectedNamespaceBatches, nil
 }
 
+// streamingResourceScope returns the batch scope for an object. A non-nil
+// namespaced value comes from Kubernetes discovery and is authoritative. The
+// core/v1 Namespace exception preserves the existing evaluation contract: a
+// Namespace object joins the batch for the namespace it describes.
+func streamingResourceScope(obj workloadinterface.IMetadata, namespaced *bool) string {
+	if obj.GetApiVersion() == "v1" && obj.GetKind() == "Namespace" {
+		return cautils.ResourceScope(obj)
+	}
+	if namespaced == nil {
+		return cautils.ResourceScope(obj)
+	}
+	if !*namespaced {
+		return cautils.ClusterScope
+	}
+	if namespace := obj.GetNamespace(); namespace != "" {
+		return namespace
+	}
+	return cautils.ClusterScope
+}
+
 // collectAndStreamBatches pulls every queryable GVR exactly once, partitions
 // the results into a single resident batch (cluster-scoped and external
 // resources) and one batch per namespace, then streams the resident batch
@@ -326,7 +346,7 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		}
 
 		for _, metaObj := range metaObjs {
-			scope := cautils.ResourceScope(metaObj)
+			scope := streamingResourceScope(metaObj, qr.Namespaced)
 			if scope == cautils.ClusterScope {
 				resident.K8SResources[qr.GroupVersionResourceTriplet] = append(resident.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
 				resident.AllResources[metaObj.GetID()] = metaObj
