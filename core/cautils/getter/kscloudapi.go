@@ -101,23 +101,30 @@ func HTTPPost(client *http.Client, fullURL string, body []byte, headers map[stri
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body := resp.Body
+		timerFired := make(chan struct{})
+		// Add a deadline to prevent hanging if the server drips the response slowly.
+		timer := time.AfterFunc(2*time.Second, func() {
+			body.Close()
+			close(timerFired)
+		})
+
 		// Read up to 1024 bytes (the max ErrAPI processes) so it can format the error message.
-		bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		bodyBytes, readErr := io.ReadAll(io.LimitReader(body, 1024))
 		if readErr != nil {
 			logger.L().Warning("failed to fully read error response body", helpers.Error(readErr))
 		}
 
 		// Fully drain the rest of the response body to ensure the TCP connection can be reused.
-		// Add a deadline to prevent hanging if the server drips the response slowly.
-		timer := time.AfterFunc(2*time.Second, func() {
-			resp.Body.Close()
-		})
-		_, _ = io.Copy(io.Discard, resp.Body)
-		timer.Stop()
-		resp.Body.Close()
+		_, _ = io.Copy(io.Discard, body)
+		if !timer.Stop() {
+			<-timerFired
+		}
+		body.Close()
 
 		// Restore the body for utils.ErrAPI so it can format the error message
 		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
 
 		return nil, 0, utils.ErrAPI(resp)
 	}
