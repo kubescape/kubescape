@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -67,13 +68,34 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 	}
 	releaseOpts := valueOpts.ReleaseOptions()
 
+	// A parent chart owns unpacked dependencies below its charts/ directory. Process
+	// parents before their descendants so a successful parent render can suppress a
+	// second, standalone render of the same dependency. listHelmChartDirs currently
+	// inherits filepath.Walk ordering, but keep the ownership rule independent of that
+	// implementation detail.
+	sort.Slice(helmDirectories, func(i, j int) bool {
+		leftDepth := pathDepth(helmDirectories[i])
+		rightDepth := pathDepth(helmDirectories[j])
+		if leftDepth != rightDepth {
+			return leftDepth < rightDepth
+		}
+		return helmDirectories[i] < helmDirectories[j]
+	})
+
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
 	sourceToChart := make(map[string]Chart, 0)
-	// renderedCharts holds the chart directories that rendered without errors. Rendering is
-	// best-effort: a chart that fails is dropped whole (see the continue below), so callers must
-	// keep plain-scanning its files rather than assume this loader covered them.
+	// renderedCharts holds chart directories covered by a successful Helm render. It includes
+	// dependencies rendered through a successful parent, even when the dependency intentionally
+	// emitted no resources. Callers use this list to keep those templates out of the plain-YAML
+	// fallback. A chart below a failed parent remains eligible for a standalone fallback render.
 	renderedCharts := make([]string, 0, len(helmDirectories))
+	successfulCharts := make([]*HelmChart, 0, len(helmDirectories))
 	for _, helmDir := range helmDirectories {
+		if helmChartOwnedByAny(helmDir, successfulCharts) {
+			renderedCharts = append(renderedCharts, helmDir)
+			continue
+		}
+
 		chart, err := NewHelmChart(helmDir)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("Failed to load Helm chart", helpers.String("path", helmDir), helpers.Error(err))
@@ -89,6 +111,7 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 			continue
 		}
 		renderedCharts = append(renderedCharts, helmDir)
+		successfulCharts = append(successfulCharts, chart)
 		chartName := chart.GetName()
 		prov := chart.Provenance()
 		for k, v := range wls {
@@ -101,6 +124,29 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		}
 	}
 	return sourceToWorkloads, sourceToChart, renderedCharts, nil
+}
+
+// helmChartOwnedByAny reports whether chartDir is inside the unpacked dependency
+// tree of a chart that has already rendered successfully. Merely being nested below
+// another chart is not enough: Helm only owns charts below its charts/ directory.
+func helmChartOwnedByAny(chartDir string, successfulCharts []*HelmChart) bool {
+	for _, chart := range successfulCharts {
+		if chart.ownsUnpackedDependency(chartDir) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathDepth(path string) int {
+	depth := 0
+	for path = filepath.Clean(path); ; path = filepath.Dir(path) {
+		parent := filepath.Dir(path)
+		if parent == path {
+			return depth
+		}
+		depth++
+	}
 }
 
 // listHelmChartDirs scans a given path (recursively) and returns the directories holding a helm chart.
@@ -134,9 +180,9 @@ func listHelmChartDirs(basePath string) ([]string, []error) {
 // "{{ ... }}" actions are not valid YAML. Only templates/ is excluded: helm renders nothing else,
 // so the rest of the chart (crds/ in particular, which helm does apply) stays plainly scanned.
 //
-// renderedCharts must be the chart directories that rendered without errors. A chart that failed
-// to render is dropped whole by LoadResourcesFromHelmCharts, so its templates must NOT be excluded
-// here — otherwise its resources reach neither loader and vanish from the scan silently.
+// renderedCharts must be the chart directories covered by successful renders, including unpacked
+// dependencies covered through a parent. A chart that failed and was not covered by a parent must
+// NOT be included — otherwise its resources reach neither loader and vanish from the scan silently.
 func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
 	if len(renderedCharts) == 0 {
 		return files
