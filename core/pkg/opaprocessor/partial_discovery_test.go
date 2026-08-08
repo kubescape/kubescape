@@ -79,7 +79,7 @@ func TestProcessWithStreaming_PartialDiscoveryFailureDoesNotPassCRDOnlyControl(t
 	)
 
 	k8s := &k8sinterface.KubernetesApi{
-		KubernetesClient: kubernetesfake.NewSimpleClientset(),
+		KubernetesClient: kubernetesfake.NewClientset(),
 		DynamicClient:    dynamicfake.NewSimpleDynamicClient(scheme),
 		DiscoveryClient:  discoveryClient,
 		Context:          ctx,
