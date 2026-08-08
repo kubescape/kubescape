@@ -1,6 +1,8 @@
 package cautils
 
 import (
+	"maps"
+
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
@@ -91,7 +93,7 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 						}
 
 						if fullResource, ok := opaSessionObj.AllResources[resourceID]; ok {
-							tmp := fullResource.GetObject()
+							tmp := maps.Clone(fullResource.GetObject())
 							workloadinterface.RemoveFromMap(tmp, "spec")
 							ruleResponse.AlertObject.K8SApiObjects = append(ruleResponse.AlertObject.K8SApiObjects, tmp)
 						}
