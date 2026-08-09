@@ -3,6 +3,7 @@ package scan
 import (
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 
@@ -49,16 +50,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 		Short:   "Scan a workload for misconfigurations and image vulnerabilities",
 		Example: workloadExample,
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) != 1 {
-				return fmt.Errorf("usage: <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]")
-			}
-
-			// Looks strange, a bug maybe????
-			if scanInfo.ChartPath != "" && scanInfo.FilePath == "" {
-				return fmt.Errorf("usage: --chart-path <chart path> --file-path <file path>")
-			}
-
-			return validateWorkloadIdentifier(args[0])
+			return validateWorkloadArgs(args, scanInfo)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer applyTimeout(scanInfo, ks)()
@@ -85,6 +77,12 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if namespace != "" && scanInfo.Namespace == "" {
 				scanInfo.Namespace = namespace
 			}
+
+			cleanup, err := prepareWorkloadInput(cmd.InOrStdin(), args, scanInfo)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
 
 			if apiVersion == "" {
 				apiVersion = workloadAPIVersion
@@ -117,6 +115,36 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 	return workloadCmd
 }
 
+func validateWorkloadArgs(args []string, scanInfo *cautils.ScanInfo) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]")
+	}
+
+	if scanInfo.ChartPath != "" && scanInfo.FilePath == "" {
+		return fmt.Errorf("usage: --chart-path <chart path> --file-path <file path>")
+	}
+
+	if scanInfo.ChartPath == "" && scanInfo.FilePath != "" && len(args) > 1 {
+		return fmt.Errorf("usage: use either --file-path or positional input paths, not both")
+	}
+
+	for _, arg := range args[1:] {
+		if arg == "-" && len(args) > 2 {
+			return fmt.Errorf("usage: stdin input '-' cannot be combined with other input paths")
+		}
+	}
+
+	return validateWorkloadIdentifier(args[0])
+}
+
+func prepareWorkloadInput(stdin io.Reader, args []string, scanInfo *cautils.ScanInfo) (func(), error) {
+	return prepareScanLocalInput(stdin, args, scanInfo, scanLocalInputOptions{
+		FirstInputArg:    1,
+		FilePath:         scanInfo.FilePath,
+		RejectMixedStdin: true,
+	})
+}
+
 func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string, apiVersion string) []cautils.PolicyIdentifier {
 	scanInfo.SetScanType(cautils.ScanTypeWorkload)
 	scanInfo.ScanImages = true
@@ -131,7 +159,7 @@ func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string, a
 
 	policyIdentifiers := cautils.BuildPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 
-	if scanInfo.FilePath != "" {
+	if scanInfo.FilePath != "" && len(scanInfo.InputPatterns) == 0 {
 		scanInfo.InputPatterns = []string{scanInfo.FilePath}
 	}
 
