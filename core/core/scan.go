@@ -432,6 +432,51 @@ func resolveClusterContext(scanInfo *cautils.ScanInfo) error {
 	return nil
 }
 
+// collectWorkloadImages adds every image referenced by wl's regular, init, and ephemeral
+// containers to imagesToScan, resolving registry credentials for each so init and ephemeral
+// containers get the same credential lookup as regular containers.
+func collectWorkloadImages(ctx context.Context, k8sApi *k8sinterface.KubernetesApi, wl workloadinterface.IWorkload, imagesToScan mapset.Set[string], imageToCreds map[string][]imagescan.RegistryCredentials) error {
+	addImage := func(image string) {
+		imagesToScan.Add(image)
+		creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, image)
+		if !ok {
+			return
+		}
+		for _, c := range imageToCreds[image] {
+			if c == creds {
+				return
+			}
+		}
+		imageToCreds[image] = append(imageToCreds[image], creds)
+	}
+
+	containers, err := wl.GetContainers()
+	if err != nil {
+		return err
+	}
+	for _, container := range containers {
+		addImage(container.Image)
+	}
+
+	initContainers, err := wl.GetInitContainers()
+	if err != nil {
+		return err
+	}
+	for _, container := range initContainers {
+		addImage(container.Image)
+	}
+
+	ephemeralContainers, err := wl.GetEphemeralContainers()
+	if err != nil {
+		return err
+	}
+	for _, container := range ephemeralContainers {
+		addImage(container.Image)
+	}
+
+	return nil
+}
+
 func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, resultsHandling *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo, k8sApi *k8sinterface.KubernetesApi) {
 	imagesToScan, imageToCreds := collectImageScanTargets(scanType, scanData, ctx, scanInfo.GetScanningContext(), k8sApi)
 
@@ -513,48 +558,16 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 
 	if scanType == cautils.ScanTypeWorkload {
 		wl := workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject())
-		containers, err := wl.GetContainers()
-		if err != nil {
+		if err := collectWorkloadImages(ctx, k8sApi, wl, imagesToScan, imageToCreds); err != nil {
 			logger.L().Error("failed to get containers", helpers.Error(err))
 			return imagesToScan, imageToCreds
-		}
-		for _, container := range containers {
-			imagesToScan.Add(container.Image)
-			if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, container.Image); ok {
-				found := false
-				for _, c := range imageToCreds[container.Image] {
-					if c == creds {
-						found = true
-						break
-					}
-				}
-				if !found {
-					imageToCreds[container.Image] = append(imageToCreds[container.Image], creds)
-				}
-			}
 		}
 	} else {
 		for _, workload := range scanData.AllResources {
 			wl := workloadinterface.NewWorkloadObj(workload.GetObject())
-			containers, err := wl.GetContainers()
-			if err != nil {
+			if err := collectWorkloadImages(ctx, k8sApi, wl, imagesToScan, imageToCreds); err != nil {
 				logger.L().Error(fmt.Sprintf("failed to get containers for kind: %s, name: %s, namespace: %s", workload.GetKind(), workload.GetName(), workload.GetNamespace()), helpers.Error(err))
 				continue
-			}
-			for _, container := range containers {
-				imagesToScan.Add(container.Image)
-				if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, container.Image); ok {
-					found := false
-					for _, c := range imageToCreds[container.Image] {
-						if c == creds {
-							found = true
-							break
-						}
-					}
-					if !found {
-						imageToCreds[container.Image] = append(imageToCreds[container.Image], creds)
-					}
-				}
 			}
 		}
 	}
