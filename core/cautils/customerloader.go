@@ -71,16 +71,23 @@ func (co *ConfigObj) Config() []byte {
 }
 
 func (co *ConfigObj) updateEmptyFields(inCO *ConfigObj) error {
-	if inCO.AccountID != "" {
+	if inCO == nil {
+		return nil
+	}
+
+	// Cluster data is a fallback source. Values already loaded from the local
+	// cache or the in-cluster service discovery file have higher precedence and
+	// must not be replaced merely because the ConfigMap also contains them.
+	if co.AccountID == "" && inCO.AccountID != "" {
 		co.AccountID = inCO.AccountID
 	}
-	if inCO.CloudAPIURL != "" {
+	if co.CloudAPIURL == "" && inCO.CloudAPIURL != "" {
 		co.CloudAPIURL = inCO.CloudAPIURL
 	}
-	if inCO.CloudReportURL != "" {
+	if co.CloudReportURL == "" && inCO.CloudReportURL != "" {
 		co.CloudReportURL = inCO.CloudReportURL
 	}
-	if inCO.ClusterName != "" {
+	if co.ClusterName == "" && inCO.ClusterName != "" {
 		co.ClusterName = inCO.ClusterName
 	}
 

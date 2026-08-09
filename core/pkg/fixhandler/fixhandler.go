@@ -290,6 +290,10 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			}
 		} else {
 			logger.L().Ctx(ctx).Warning("Failed to read container profile: " + sanitizeForLog(err.Error()))
+				logger.L().Ctx(ctx).Warning("Failed to unmarshal container profile: " + err.Error())
+			}
+		} else {
+			logger.L().Ctx(ctx).Warning("Failed to read container profile: " + err.Error())
 		}
 	}
 
@@ -483,6 +487,17 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				for _, fix := range fixes {
 					rfi.YamlExpressions[fix.YamlExpression] = armotypes.FixPath{Path: fix.YamlExpression, Value: ""}
 				}
+						continue // Kind mismatch, skip drift detection for this resource
+					}
+					if profileName != "" && profileName != resourceObj.GetName() {
+						continue // Name mismatch, skip drift detection for this resource
+					}
+				}
+			}
+
+			fixes := DetectProfileDrift(rawManifest, containerProfile, workloadKind, containerName, rfi.DocumentIndex)
+			for _, fix := range fixes {
+				rfi.YamlExpressions[fix.YamlExpression] = armotypes.FixPath{Path: fix.YamlExpression, Value: ""}
 			}
 		}
 

@@ -14,6 +14,12 @@ import (
 
 func writeTempReport(t *testing.T, r scanReport) string {
 	t.Helper()
+	if r.Results == nil {
+		r.Results = []resultEntry{}
+	}
+	if r.SummaryDetails.Controls == nil {
+		r.SummaryDetails.Controls = map[string]controlSummary{}
+	}
 	data, err := json.Marshal(r)
 	require.NoError(t, err)
 	f, err := os.CreateTemp(t.TempDir(), "report-*.json")
@@ -25,7 +31,12 @@ func writeTempReport(t *testing.T, r scanReport) string {
 }
 
 func makeReport(entries ...resultEntry) scanReport {
-	return scanReport{Results: entries}
+	return scanReport{
+		Results: entries,
+		SummaryDetails: summaryDetails{
+			Controls: map[string]controlSummary{},
+		},
+	}
 }
 
 func makeResult(resourceID string, controls ...controlEntry) resultEntry {
@@ -106,6 +117,126 @@ func TestCompute_RemovedResourceFromBase(t *testing.T) {
 func TestCompute_MissingFile(t *testing.T) {
 	_, err := Compute(filepath.Join(t.TempDir(), "missing.json"), filepath.Join(t.TempDir(), "also-missing.json"))
 	assert.Error(t, err)
+}
+
+func writeRawReport(t *testing.T, contents string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "report.json")
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o600))
+	return path
+}
+
+func TestComputeRejectsInvalidReportShapes(t *testing.T) {
+	valid := writeTempReport(t, makeReport())
+	tests := []struct {
+		name    string
+		report  string
+		wantErr string
+	}{
+		{
+			name:    "empty object",
+			report:  `{}`,
+			wantErr: "missing required results field",
+		},
+		{
+			name:    "JSON array",
+			report:  `[]`,
+			wantErr: "expected a JSON object",
+		},
+		{
+			name:    "SARIF document",
+			report:  `{"version":"2.1.0","runs":[]}`,
+			wantErr: "missing required results field",
+		},
+		{
+			name:    "results are null",
+			report:  `{"results":null,"summaryDetails":{"controls":{}}}`,
+			wantErr: "results must be an array",
+		},
+		{
+			name:    "results have wrong type",
+			report:  `{"results":{},"summaryDetails":{"controls":{}}}`,
+			wantErr: "invalid report results",
+		},
+		{
+			name:    "missing summary",
+			report:  `{"results":[]}`,
+			wantErr: "missing required summaryDetails field",
+		},
+		{
+			name:    "summary is null",
+			report:  `{"results":[],"summaryDetails":null}`,
+			wantErr: "summaryDetails must be an object",
+		},
+		{
+			name:    "summary controls are missing",
+			report:  `{"results":[],"summaryDetails":{}}`,
+			wantErr: "missing required controls field",
+		},
+		{
+			name:    "summary controls have wrong type",
+			report:  `{"results":[],"summaryDetails":{"controls":[]}}`,
+			wantErr: "invalid report summaryDetails.controls",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Compute(writeRawReport(t, test.report), valid)
+			require.ErrorContains(t, err, test.wantErr)
+		})
+	}
+}
+
+func TestComputeRejectsAmbiguousResultEntries(t *testing.T) {
+	valid := writeTempReport(t, makeReport())
+	tests := []struct {
+		name    string
+		report  scanReport
+		wantErr string
+	}{
+		{
+			name:    "empty resource ID",
+			report:  makeReport(makeResult("", makeControl("C-001", "Control", "failed"))),
+			wantErr: "resourceID is empty",
+		},
+		{
+			name:    "empty control ID",
+			report:  makeReport(makeResult("resource", makeControl("", "Control", "failed"))),
+			wantErr: "controlID is empty",
+		},
+		{
+			name:    "empty status",
+			report:  makeReport(makeResult("resource", makeControl("C-001", "Control", ""))),
+			wantErr: "status.status is empty",
+		},
+		{
+			name: "duplicate resource control pair",
+			report: makeReport(
+				makeResult("resource", makeControl("C-001", "Control", "passed")),
+				makeResult("resource", makeControl("C-001", "Control", "failed")),
+			),
+			wantErr: "duplicate resource and control pair",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Compute(writeTempReport(t, test.report), valid)
+			require.ErrorContains(t, err, test.wantErr)
+		})
+	}
+}
+
+func TestComputeAcceptsEmptyKubescapeReports(t *testing.T) {
+	base := writeTempReport(t, makeReport())
+	head := writeTempReport(t, makeReport())
+
+	changes, err := Compute(base, head)
+	require.NoError(t, err)
+	assert.Empty(t, changes.New)
+	assert.Empty(t, changes.Resolved)
+	assert.Empty(t, changes.Unchanged)
 }
 
 func TestFilterBySeverity(t *testing.T) {
