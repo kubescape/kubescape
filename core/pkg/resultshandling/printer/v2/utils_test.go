@@ -10,6 +10,7 @@ import (
 	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
@@ -968,6 +969,42 @@ func TestFinalizeResults_PreservesExistingGenerationTime(t *testing.T) {
 	require.NotNil(t, report)
 	assert.Equal(t, preset, report.ReportGenerationTime)
 	assert.Equal(t, preset, session.Report.ReportGenerationTime)
+}
+
+// TestFinalizeResults_SetsClusterNameWhenEmpty is the regression test for
+// kubescape/kubescape#2856: JSON reports always had an empty clusterName
+// because nothing on the scan path ever assigned OPASessionObj.Report.ClusterName,
+// even though the context name is known via k8sinterface at scan time.
+func TestFinalizeResults_SetsClusterNameWhenEmpty(t *testing.T) {
+	k8sinterface.SetClusterContextName("test-cluster")
+	defer k8sinterface.SetClusterContextName("")
+
+	session := cautils.NewOPASessionObjMock()
+	require.Empty(t, session.Report.ClusterName,
+		"precondition: mock starts with the empty ClusterName that #2856 reported")
+
+	report := FinalizeResults(session)
+
+	require.NotNil(t, report)
+	assert.Equal(t, "test-cluster", report.ClusterName)
+	assert.Equal(t, "test-cluster", session.Report.ClusterName,
+		"FinalizeResults must also write back to the session so downstream consumers see it")
+}
+
+// TestFinalizeResults_PreservesExistingClusterName ensures we don't clobber a
+// cluster name the caller has already set.
+func TestFinalizeResults_PreservesExistingClusterName(t *testing.T) {
+	k8sinterface.SetClusterContextName("other-cluster")
+	defer k8sinterface.SetClusterContextName("")
+
+	session := cautils.NewOPASessionObjMock()
+	session.Report.ClusterName = "preset-cluster"
+
+	report := FinalizeResults(session)
+
+	require.NotNil(t, report)
+	assert.Equal(t, "preset-cluster", report.ClusterName)
+	assert.Equal(t, "preset-cluster", session.Report.ClusterName)
 }
 
 func TestFinalizeResults_SortsResultsAndResourcesByResourceID(t *testing.T) {

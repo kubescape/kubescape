@@ -186,6 +186,40 @@ func TestClusterConfigLoadsKubernetesSourcesDataDriven(t *testing.T) {
 	}
 }
 
+func TestClusterConfigMapOnlyFillsMissingValues(t *testing.T) {
+	k8s := k8sinterface.NewKubernetesApiMock()
+	k8s.KubernetesClient = fake.NewClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cloud",
+			Namespace: "security",
+			Labels:    map[string]string{"kubescape.io/infra": "config"},
+		},
+		Data: map[string]string{
+			"clusterData": `{
+				"accountID":"configmap-account",
+				"clusterName":"configmap-cluster",
+				"cloudAPIURL":"https://configmap-api.example.com",
+				"cloudReportURL":"https://configmap-report.example.com"
+			}`,
+		},
+	})
+
+	config := &ClusterConfig{
+		k8s: k8s,
+		configObj: &ConfigObj{
+			AccountID:   "cached-account",
+			CloudAPIURL: "https://service-discovery-api.example.com",
+		},
+		configMapNamespace: "security",
+	}
+
+	require.NoError(t, config.updateConfigEmptyFieldsFromKubescapeConfigMap(context.Background()))
+	assert.Equal(t, "cached-account", config.GetAccountID(), "cached tenant identity must not be replaced by fallback data")
+	assert.Equal(t, "https://service-discovery-api.example.com", config.GetCloudAPIURL(), "service discovery must keep precedence")
+	assert.Equal(t, "configmap-cluster", config.GetContextName(), "a missing cluster name should be filled")
+	assert.Equal(t, "https://configmap-report.example.com", config.GetCloudReportURL(), "a missing report URL should be filled")
+}
+
 func Test_GetDefaultNS(t *testing.T) {
 	c := &ClusterConfig{configMapNamespace: "my-namespace"}
 	assert.Equal(t, "my-namespace", c.GetDefaultNS())

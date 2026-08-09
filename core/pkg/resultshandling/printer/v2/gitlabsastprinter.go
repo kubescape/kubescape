@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -33,11 +34,14 @@ const (
 	gitLabScannerURL    = "https://kubescape.io"
 	gitLabScannerVendor = "Kubescape"
 	gitLabControlIDType = "kubescape_control_id"
+	// gitLabCVEIDType is the GitLab identifier type for CVE-based image scan findings (#2782)
+	gitLabCVEIDType = "cve"
 )
 
 var _ printer.IPrinter = &GitLabSASTPrinter{}
 
-// GitLabSASTPrinter emits configuration-scan results as a GitLab SAST report, so findings reach the Security dashboard and MR approval policies rather than the test widget (#2496)
+// GitLabSASTPrinter emits configuration-scan results as a GitLab SAST report, so findings reach the Security dashboard and MR approval policies rather than the test widget (#2496).
+// It also emits image-scan CVEs as a GitLab Dependency Scanning report, which uses the same top-level schema (#2782).
 type GitLabSASTPrinter struct {
 	writer *os.File
 }
@@ -90,6 +94,20 @@ type gitLabScannerRef struct {
 type gitLabLocation struct {
 	File      string `json:"file,omitempty"`
 	StartLine int    `json:"start_line,omitempty"`
+	// Dependency is set alongside File for image-scan (dependency_scanning) findings. GitLab's
+	// schema requires both location.file and location.dependency.version — there's no source
+	// file for a container image, so File carries the image reference instead (#2782 review).
+	Dependency *gitLabDependency `json:"dependency,omitempty"`
+}
+
+// gitLabDependency identifies the vulnerable package for a dependency_scanning finding
+type gitLabDependency struct {
+	Package gitLabPackage `json:"package"`
+	Version string        `json:"version"`
+}
+
+type gitLabPackage struct {
+	Name string `json:"name"`
 }
 
 type gitLabIdentifier struct {
@@ -125,10 +143,19 @@ func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) {
 func (gp *GitLabSASTPrinter) PrintNextSteps() {
 }
 
-// ActionPrint writes the GitLab SAST report for a configuration scan; image scanning is not supported by this format
+// ActionPrint writes a GitLab SAST report for a configuration scan, or a GitLab Dependency Scanning
+// report for an image scan (#2782)
 func (gp *GitLabSASTPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	if opaSessionObj == nil {
-		logger.L().Ctx(ctx).Error("failed to write results in GitLab SAST format: image scanning is not supported")
+		if len(imageScanData) == 0 {
+			logger.L().Ctx(ctx).Error("failed to write results in GitLab dependency scanning format: no data provided")
+			return
+		}
+		if err := gp.printImageScan(imageScanData); err != nil {
+			logger.L().Ctx(ctx).Error("failed to write results in GitLab dependency scanning format", helpers.Error(err))
+			return
+		}
+		printer.LogOutputFile(gp.writer.Name())
 		return
 	}
 
@@ -137,6 +164,112 @@ func (gp *GitLabSASTPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 		return
 	}
 	printer.LogOutputFile(gp.writer.Name())
+}
+
+// printImageScan maps each CVE found in an image scan to a GitLab Dependency Scanning vulnerability and writes the report
+func (gp *GitLabSASTPrinter) printImageScan(imageScanData []cautils.ImageScanData) error {
+	startedAt := time.Now().UTC()
+
+	report := gitLabSASTReport{
+		Version:         gitLabSASTReportVersion,
+		Vulnerabilities: []gitLabVulnerability{},
+	}
+
+	for _, data := range imageScanData {
+		cves := extractCVEs(data.Matches, data.Image)
+		for _, cve := range cves {
+			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabImageVulnerability(data.Image, cve))
+		}
+	}
+
+	finishedAt := time.Now().UTC()
+	scanner := gitLabScanner{
+		ID:      gitLabScannerID,
+		Name:    gitLabScannerName,
+		URL:     gitLabScannerURL,
+		Version: kubescapeVersion(),
+		Vendor:  gitLabVendor{Name: gitLabScannerVendor},
+	}
+	report.Scan = gitLabScan{
+		Analyzer:  scanner,
+		Scanner:   scanner,
+		Type:      "dependency_scanning",
+		StartTime: startedAt.Format(gitLabTimeFormat),
+		EndTime:   finishedAt.Format(gitLabTimeFormat),
+		Status:    "success",
+	}
+
+	encoded, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to encode GitLab dependency scanning report: %w", err)
+	}
+	if _, err := gp.writer.Write(encoded); err != nil {
+		return fmt.Errorf("failed to write GitLab dependency scanning report: %w", err)
+	}
+	return nil
+}
+
+// mapGitLabSeverity maps a Grype severity to one of the values the GitLab dependency_scanning
+// schema allows (Info/Unknown/Low/Medium/High/Critical). Grype can return Negligible, which
+// isn't in that list — passed through unmapped, one Negligible CVE invalidates the entire
+// report (#2782 review).
+func mapGitLabSeverity(severity string) string {
+	switch severity {
+	case apis.SeverityCriticalString:
+		return "Critical"
+	case apis.SeverityHighString:
+		return "High"
+	case apis.SeverityMediumString:
+		return "Medium"
+	case apis.SeverityLowString:
+		return "Low"
+	case apis.SeverityNegligibleString:
+		return "Info"
+	default:
+		return "Unknown"
+	}
+}
+
+// toGitLabImageVulnerability maps a CVE found in an image to a GitLab Dependency Scanning vulnerability
+func toGitLabImageVulnerability(image string, cve imageprinter.CVE) gitLabVulnerability {
+	message := fmt.Sprintf("%s in %s %s", cve.ID, cve.Package, cve.Version)
+
+	description := fmt.Sprintf("Package %s version %s is affected by %s (severity: %s).", cve.Package, cve.Version, cve.ID, cve.Severity)
+	if len(cve.FixVersions) > 0 {
+		description += fmt.Sprintf(" Fix available in version(s): %s.", strings.Join(cve.FixVersions, ", "))
+	} else {
+		description += " No fix is currently available."
+	}
+
+	return gitLabVulnerability{
+		ID:          gitLabImageVulnerabilityID(image, cve.Package, cve.Version, cve.ID),
+		Category:    "dependency_scanning",
+		Name:        message,
+		Message:     message,
+		Description: description,
+		Severity:    mapGitLabSeverity(cve.Severity),
+		Scanner:     gitLabScannerRef{ID: gitLabScannerID, Name: gitLabScannerName},
+		Location: gitLabLocation{
+			File: image,
+			Dependency: &gitLabDependency{
+				Package: gitLabPackage{Name: cve.Package},
+				Version: cve.Version,
+			},
+		},
+		Identifiers: []gitLabIdentifier{
+			{
+				Type:  gitLabCVEIDType,
+				Name:  cve.ID,
+				Value: cve.ID,
+				URL:   fmt.Sprintf("https://nvd.nist.gov/vuln/detail/%s", cve.ID),
+			},
+		},
+	}
+}
+
+// gitLabImageVulnerabilityID returns a stable id so GitLab can track a CVE finding across scans for triage and dismissal
+func gitLabImageVulnerabilityID(image, pkg, version, cveID string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(image+"/"+pkg+"/"+version+"/"+cveID)))
 }
 
 // printConfigurationScan maps each failed control on each failed resource to a GitLab SAST vulnerability and writes the report

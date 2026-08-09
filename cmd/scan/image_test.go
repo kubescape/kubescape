@@ -1,6 +1,8 @@
 package scan
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/cmd/shared"
@@ -79,7 +81,7 @@ func TestGetImageCmd_RunE_FormatFlagEmpty(t *testing.T) {
 	assert.NoError(t, parent.PersistentFlags().Set("format", ""))
 
 	err := cmd.RunE(cmd, []string{"nginx"})
-	assert.Equal(t, "format cannot be empty, supported formats: pretty-printer, json, sarif", err.Error())
+	assert.Equal(t, fmt.Sprintf("format cannot be empty, supported formats: %s", strings.Join(shared.ImageScanFormats, ", ")), err.Error())
 }
 
 func TestGetImageCmd_RunE_FormatFlagInvalid(t *testing.T) {
@@ -93,7 +95,7 @@ func TestGetImageCmd_RunE_FormatFlagInvalid(t *testing.T) {
 	assert.NoError(t, parent.PersistentFlags().Set("format", "xml"))
 
 	err := cmd.RunE(cmd, []string{"nginx"})
-	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, sarif, yaml`)
+	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml`)
 }
 
 func TestGetImageCmd_RunE_Success(t *testing.T) {
