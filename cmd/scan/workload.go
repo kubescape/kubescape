@@ -77,6 +77,9 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if err := validateThresholdsOnly(scanInfo); err != nil {
 				return err
 			}
+			if scanInfo.LabelSelector != "" {
+				return fmt.Errorf("--label-selector is not supported for workload scans: the named resource is fetched by identity, not by label")
+			}
 			namespace, kind, name, workloadAPIVersion, err := parseWorkloadIdentifierString(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid input: %w", err)

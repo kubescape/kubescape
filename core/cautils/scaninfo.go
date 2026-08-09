@@ -131,6 +131,7 @@ type ScanInfo struct {
 	CustomClusterName     string                       // Set the custom name of the cluster
 	ExcludedNamespaces    string                       // used for host scanner namespace
 	IncludeNamespaces     string                       //
+	LabelSelector         string                       // filter collected resources by Kubernetes label selector (e.g. "app=nginx,env!=dev")
 	Namespace             string                       // target namespace for workload scans
 	InputPatterns         []string                     // Yaml files input patterns
 	Silent                bool                         // Silent mode - Do not print progress logs
