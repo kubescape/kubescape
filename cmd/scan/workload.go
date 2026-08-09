@@ -93,7 +93,6 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			}
 			defer cleanup()
 
-			setWorkloadScanInfo(scanInfo, apiVersion, kind, name)
 			if apiVersion == "" {
 				apiVersion = workloadAPIVersion
 			}
@@ -151,7 +150,7 @@ func prepareWorkloadInput(stdin io.Reader, args []string, scanInfo *cautils.Scan
 	cleanup := func() {}
 	if len(args) > 1 {
 		if args[1] == "-" {
-			tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
+			tempFile, err := os.CreateTemp("", "tmp-kubescape*.yaml")
 			if err != nil {
 				return cleanup, err
 			}
@@ -182,7 +181,6 @@ func prepareWorkloadInput(stdin io.Reader, args []string, scanInfo *cautils.Scan
 	return cleanup, nil
 }
 
-func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, apiVersion string, kind string, name string) {
 func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string, apiVersion string) []cautils.PolicyIdentifier {
 	scanInfo.SetScanType(cautils.ScanTypeWorkload)
 	scanInfo.ScanImages = true

@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/mocks"
-	resultshandlingpkg "github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -33,28 +32,21 @@ type workloadScanCaptureKubescape struct {
 	scanInfo *cautils.ScanInfo
 }
 
-func (m *workloadScanCaptureKubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandlingpkg.ResultsHandler, error) {
+func (m *workloadScanCaptureKubescape) Scan(scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	m.scanInfo = scanInfo
-	results := resultshandlingpkg.NewResultsHandler(nil, nil, noOpWorkloadPrinter{})
+	results := resultshandling.NewResultsHandler(nil, nil, noOpWorkloadPrinter{})
 	results.SetData(&cautils.OPASessionObj{Report: &reporthandlingv2.PostureReport{}})
 	return results, nil
 }
 
 func TestSetWorkloadScanInfo(t *testing.T) {
 	tests := []struct {
-		Description string
-		apiVersion  string
-		kind        string
-		name        string
-		namespace   string
-		filePath    string
-		inputPaths  []string
-		want        *cautils.ScanInfo
 		Description  string
 		kind         string
 		name         string
 		namespace    string
 		filePath     string
+		inputPaths   []string
 		apiVersion   string
 		want         *cautils.ScanInfo
 		wantPolicies []cautils.PolicyIdentifier
@@ -181,16 +173,6 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 			filePath:    "manifests/deployment.yaml",
 			inputPaths:  []string{"manifests"},
 			want: &cautils.ScanInfo{
-				PolicyIdentifier: []cautils.PolicyIdentifier{
-					{
-						Identifier: "workloadscan",
-						Kind:       v1.KindFramework,
-					},
-					{
-						Identifier: "allcontrols",
-						Kind:       v1.KindFramework,
-					},
-				},
 				ScanType:   cautils.ScanTypeWorkload,
 				ScanImages: true,
 				ScanObject: &objectsenvelopes.ScanObject{
@@ -203,6 +185,16 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 				},
 				InputPatterns: []string{"manifests"},
 			},
+			wantPolicies: []cautils.PolicyIdentifier{
+				{
+					Identifier: "workloadscan",
+					Kind:       v1.KindFramework,
+				},
+				{
+					Identifier: "allcontrols",
+					Kind:       v1.KindFramework,
+				},
+			},
 		},
 	}
 
@@ -211,8 +203,6 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 			tc.Description,
 			func(t *testing.T) {
 				scanInfo := &cautils.ScanInfo{FilePath: tc.filePath, Namespace: tc.namespace, InputPatterns: tc.inputPaths}
-				setWorkloadScanInfo(scanInfo, tc.apiVersion, tc.kind, tc.name)
-				scanInfo := &cautils.ScanInfo{FilePath: tc.filePath, Namespace: tc.namespace}
 				policyIdentifiers := setWorkloadScanInfo(scanInfo, tc.kind, tc.name, tc.apiVersion)
 
 				if scanInfo.ScanType != tc.want.ScanType {
@@ -354,6 +344,7 @@ func TestPrepareWorkloadInput(t *testing.T) {
 		cleanup, err := prepareWorkloadInput(stdin, []string{"Pod/nginx", "-"}, &scanInfo)
 		require.NoError(t, err)
 		require.Len(t, scanInfo.InputPatterns, 1)
+		assert.Equal(t, filepath.Clean(os.TempDir()), filepath.Dir(scanInfo.InputPatterns[0]))
 
 		got, err := os.ReadFile(scanInfo.InputPatterns[0])
 		require.NoError(t, err)
