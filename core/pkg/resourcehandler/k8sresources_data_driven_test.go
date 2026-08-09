@@ -46,17 +46,24 @@ func unstructuredResource(apiVersion, kind, namespace, name string) *unstructure
 func TestFindScanObjectResourceDataDriven(t *testing.T) {
 	k8sinterface.InitializeMapResourcesMock()
 	deploymentGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
 	listKinds := map[schema.GroupVersionResource]string{
 		deploymentGVR: "DeploymentList",
+		// Secrets are registered so the fake client is genuinely able to serve
+		// them. Without this the client cannot list secrets at all and the
+		// "no API calls were issued" assertion below would hold even for an
+		// implementation that fetches the Secret before rejecting it.
+		secretGVR: "SecretList",
 	}
 
 	tests := []struct {
-		name      string
-		request   *objectsenvelopes.ScanObject
-		objects   []runtime.Object
-		wantName  string
-		wantError string
-		wantNil   bool
+		name             string
+		request          *objectsenvelopes.ScanObject
+		objects          []runtime.Object
+		wantName         string
+		wantError        string
+		wantNil          bool
+		wantNoAPIActions bool
 	}{
 		{name: "nil request is not a single-resource scan", request: nil, wantNil: true},
 		{
@@ -95,16 +102,18 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 			// attacker-chosen name/namespace. It must never live-fetch Secret
 			// objects, since the fetched object (including its data field) is
 			// embedded verbatim in the scan report returned to the caller.
-			name:      "secret is rejected even when it exists",
-			request:   scanObject("v1", "Secret", "shop", "db-creds"),
-			objects:   []runtime.Object{unstructuredResource("v1", "Secret", "shop", "db-creds")},
-			wantError: "scanning Secret resources via single resource scan is not supported",
+			name:             "secret is rejected even when it exists",
+			request:          scanObject("v1", "Secret", "shop", "db-creds"),
+			objects:          []runtime.Object{unstructuredResource("v1", "Secret", "shop", "db-creds")},
+			wantError:        "scanning Secret resources via single resource scan is not supported",
+			wantNoAPIActions: true,
 		},
 		{
-			name:      "secret is rejected via the legacy no-apiVersion path",
-			request:   scanObject("", "Secret", "shop", "db-creds"),
-			objects:   []runtime.Object{unstructuredResource("v1", "Secret", "shop", "db-creds")},
-			wantError: "scanning Secret resources via single resource scan is not supported",
+			name:             "secret is rejected via the legacy no-apiVersion path",
+			request:          scanObject("", "Secret", "shop", "db-creds"),
+			objects:          []runtime.Object{unstructuredResource("v1", "Secret", "shop", "db-creds")},
+			wantError:        "scanning Secret resources via single resource scan is not supported",
+			wantNoAPIActions: true,
 		},
 	}
 
@@ -116,6 +125,12 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 			require.Empty(t, discoveryFailures)
 
 			workload, err := handler.findScanObjectResource(context.Background(), test.request, &EmptySelector{}, resolver)
+			if test.wantNoAPIActions {
+				// The rejection has to happen before the live API pull: if the
+				// object were fetched first and only then refused, the Secret's
+				// data would already have left the cluster.
+				assert.Empty(t, dynamicClient.Actions(), "expected the request to be rejected before any API call")
+			}
 			if test.wantError != "" {
 				require.ErrorContains(t, err, test.wantError)
 				assert.Nil(t, workload)
