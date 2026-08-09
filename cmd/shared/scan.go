@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
@@ -71,9 +70,4 @@ func ValidateScanFormat(format string, supported []string) error {
 		return fmt.Errorf("invalid format %q, supported formats: %s", format, strings.Join(supported, ", "))
 	}
 	return nil
-}
-
-// TerminateOnExceedingSeverity terminates the program if the result exceeds the severity threshold
-func TerminateOnExceedingSeverity(scanInfo *cautils.ScanInfo, l helpers.ILogger) {
-	l.Fatal("result exceeds severity threshold", helpers.String("Set severity threshold", scanInfo.FailThresholdSeverity))
 }

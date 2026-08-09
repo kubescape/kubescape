@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -94,16 +93,22 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 
 			results, err := ks.Scan(scanInfo, policyIdentifiers)
 			if err != nil {
-				logger.L().Fatal(err.Error())
+				return err
 			}
 
 			if err = results.HandleResults(ks.Context(), scanInfo); err != nil {
-				logger.L().Fatal(err.Error())
+				return err
 			}
 
-			enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
-			enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo)
-			enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo)
+			if err := enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo); err != nil {
+				return err
+			}
+			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
+				return err
+			}
+			if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
+				return err
+			}
 
 			return nil
 		},

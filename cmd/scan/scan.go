@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
@@ -131,7 +130,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				policyIdentifiers := setSecurityViewScanInfo(args, &scanInfo)
 
 				if err := securityScan(scanInfo, ks, policyIdentifiers); err != nil {
-					logger.L().Fatal(err.Error())
+					return err
 				}
 			} else if len(args) == 0 ||
 				(args[0] != "framework" && args[0] != "control") {
@@ -151,7 +150,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 						args...,
 					),
 				); err != nil {
-					logger.L().Fatal(err.Error())
+					return err
 				}
 			} else {
 				return fmt.Errorf(
@@ -324,9 +323,15 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifie
 		return err
 	}
 
-	enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), &scanInfo, terminateOnExceedingSeverity)
-	enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), &scanInfo)
-	enforcePolicyDegradation(results.GetData().ScanCoverage, &scanInfo)
+	if err := enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), &scanInfo); err != nil {
+		return err
+	}
+	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), &scanInfo); err != nil {
+		return err
+	}
+	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, &scanInfo); err != nil {
+		return err
+	}
 
 	return nil
 }

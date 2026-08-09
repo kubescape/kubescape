@@ -69,7 +69,7 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 			}
 
 			if exceedsSeverityThreshold {
-				shared.TerminateOnExceedingSeverity(&scanInfo, logger.L())
+				return fmt.Errorf("result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
 			}
 
 			return nil
