@@ -540,3 +540,34 @@ metadata:
 	assert.Equal(t, 1, counts["Deployment/prod-app"])
 	assert.Equal(t, 1, counts["ConfigMap/standalone"], "a manifest outside the Kustomize directory must still be scanned")
 }
+
+// TestExcludeFilesUnderDirectories_SiblingDirSharingPrefixNotExcluded pins the
+// bug a raw strings.HasPrefix(cleanSource, dir) comparison has: "app-extra" is
+// a lexical prefix match for "app" without a separator boundary check, so a
+// file under the sibling directory "app-extra" would be wrongly excluded when
+// only "app" was rendered as a nested Kustomization. IsUnderAnyDir compares
+// through filepath.Rel, which requires the ".." boundary and so does not
+// false-positive on a shared prefix.
+func TestExcludeFilesUnderDirectories_SiblingDirSharingPrefixNotExcluded(t *testing.T) {
+	repoRoot := t.TempDir()
+	sourceToWorkloads := map[string][]workloadinterface.IMetadata{
+		filepath.Join(repoRoot, "app", "deployment.yaml"):      nil,
+		filepath.Join(repoRoot, "app-extra", "configmap.yaml"): nil,
+		filepath.Join(repoRoot, "app", "nested", "job.yaml"):   nil,
+		filepath.Join(repoRoot, "other", "unrelated.yaml"):     nil,
+	}
+
+	excludeFilesUnderDirectories(sourceToWorkloads, []string{filepath.Join(repoRoot, "app")})
+
+	_, underApp := sourceToWorkloads[filepath.Join(repoRoot, "app", "deployment.yaml")]
+	assert.False(t, underApp, "a file directly under the excluded directory must be dropped")
+
+	_, underAppNested := sourceToWorkloads[filepath.Join(repoRoot, "app", "nested", "job.yaml")]
+	assert.False(t, underAppNested, "a file under a nested subdirectory of the excluded directory must be dropped")
+
+	_, sibling := sourceToWorkloads[filepath.Join(repoRoot, "app-extra", "configmap.yaml")]
+	assert.True(t, sibling, "a sibling directory merely sharing a name prefix must not be excluded")
+
+	_, unrelated := sourceToWorkloads[filepath.Join(repoRoot, "other", "unrelated.yaml")]
+	assert.True(t, unrelated, "a file outside every excluded directory must not be excluded")
+}

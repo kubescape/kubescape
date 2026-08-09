@@ -241,9 +241,15 @@ func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
 	return remaining
 }
 
-// isUnderAnyDir reports whether path is inside one of dirs after normalizing
-// relative paths and resolving symlinks where the path already exists.
-func isUnderAnyDir(path string, dirs []string) bool {
+// IsUnderAnyDir reports whether path is inside one of dirs after normalizing
+// relative paths and resolving symlinks where the path already exists. Unlike
+// a plain strings.HasPrefix comparison, this uses filepath.Rel for canonical
+// containment (so a sibling merely sharing a prefix, e.g. "templates-docs"
+// next to "templates", does not falsely match), resolves symlinks so a
+// directory reached through a symlinked parent is still recognized, and
+// handles root directory "/" and Windows drive paths without the
+// double-separator edge cases a raw prefix join would hit.
+func IsUnderAnyDir(path string, dirs []string) bool {
 	return isUnderAnyNormalizedDir(normalizePath(path), normalizePaths(dirs))
 }
 
