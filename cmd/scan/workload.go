@@ -3,6 +3,8 @@ package scan
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"regexp"
 	"strings"
 
@@ -27,6 +29,11 @@ var (
   # Scan an workload from a file path
   %[1]s scan workload <kind>/<name> --file-path <file path>
 
+  # Scan a workload from local manifests
+  %[1]s scan workload <kind>[.<version>[.<group>]]/<name> ./manifests
+
+  # Scan a workload from a specific file path
+  %[1]s scan workload <kind>[.<version>[.<group>]]/<name> --file-path <file path>
   # Scan an workload with a specific API version
   %[1]s scan workload <kind>/<name> --api-version <api version>
   
@@ -48,20 +55,14 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 		Short:   "Scan a workload for misconfigurations and image vulnerabilities",
 		Example: workloadExample,
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) != 1 {
-				return fmt.Errorf("usage: <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]")
-			}
-
-			// Looks strange, a bug maybe????
-			if scanInfo.ChartPath != "" && scanInfo.FilePath == "" {
-				return fmt.Errorf("usage: --chart-path <chart path> --file-path <file path>")
-			}
-
-			return validateWorkloadIdentifier(args[0])
+			return validateWorkloadArgs(args, scanInfo)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer applyTimeout(scanInfo, ks)()
 
+			if err := validateWorkloadArgs(args, scanInfo); err != nil {
+				return err
+			}
 			if scanInfo.FailThresholdSeverity != "" {
 				if err := shared.ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
 					return err
@@ -84,6 +85,12 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if namespace != "" && scanInfo.Namespace == "" {
 				scanInfo.Namespace = namespace
 			}
+
+			cleanup, err := prepareWorkloadInput(os.Stdin, args, scanInfo)
+			if err != nil {
+				return err
+			}
+			defer cleanup()
 
 			if apiVersion == "" {
 				apiVersion = workloadAPIVersion
@@ -122,6 +129,63 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 	return workloadCmd
 }
 
+func validateWorkloadArgs(args []string, scanInfo *cautils.ScanInfo) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]")
+	}
+
+	if scanInfo.ChartPath != "" && scanInfo.FilePath == "" {
+		return fmt.Errorf("usage: --chart-path <chart path> --file-path <file path>")
+	}
+
+	if scanInfo.ChartPath == "" && scanInfo.FilePath != "" && len(args) > 1 {
+		return fmt.Errorf("usage: use either --file-path or positional input paths, not both")
+	}
+
+	for _, arg := range args[1:] {
+		if arg == "-" && len(args) > 2 {
+			return fmt.Errorf("usage: stdin input '-' cannot be combined with other input paths")
+		}
+	}
+
+	return validateWorkloadIdentifier(args[0])
+}
+
+func prepareWorkloadInput(stdin io.Reader, args []string, scanInfo *cautils.ScanInfo) (func(), error) {
+	cleanup := func() {}
+	if len(args) > 1 {
+		if args[1] == "-" {
+			tempFile, err := os.CreateTemp("", "tmp-kubescape*.yaml")
+			if err != nil {
+				return cleanup, err
+			}
+			cleanup = func() {
+				_ = os.Remove(tempFile.Name())
+			}
+
+			if _, err := io.Copy(tempFile, stdin); err != nil {
+				_ = tempFile.Close()
+				cleanup()
+				return func() {}, err
+			}
+			if err := tempFile.Close(); err != nil {
+				cleanup()
+				return func() {}, err
+			}
+			scanInfo.InputPatterns = []string{tempFile.Name()}
+			return cleanup, nil
+		}
+
+		scanInfo.InputPatterns = args[1:]
+		return cleanup, nil
+	}
+
+	if scanInfo.FilePath != "" {
+		scanInfo.InputPatterns = []string{scanInfo.FilePath}
+	}
+	return cleanup, nil
+}
+
 func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string, apiVersion string) []cautils.PolicyIdentifier {
 	scanInfo.SetScanType(cautils.ScanTypeWorkload)
 	scanInfo.ScanImages = true
@@ -136,7 +200,7 @@ func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string, a
 
 	policyIdentifiers := cautils.BuildPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 
-	if scanInfo.FilePath != "" {
+	if scanInfo.FilePath != "" && len(scanInfo.InputPatterns) == 0 {
 		scanInfo.InputPatterns = []string{scanInfo.FilePath}
 	}
 

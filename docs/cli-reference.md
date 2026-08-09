@@ -202,7 +202,7 @@ Scan a specific workload.
 ### Synopsis
 
 ```bash
-kubescape scan workload <kind>[.<version>[.<group>]]/<name> [flags]
+kubescape scan workload <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]
 ```
 
 Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this command requires a **Kind** (e.g. `Deployment.v1.apps`, not `deployments.v1.apps`).
@@ -212,6 +212,8 @@ Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this co
 | Flag | Description |
 |------|-------------|
 | `--namespace <ns>` | Namespace of the workload |
+| `--file-path <path>` | Path to a manifest that contains the workload |
+| `--chart-path <path>` | Path to the Helm chart the workload is part of. Must be used with `--file-path` |
 
 ### Examples
 
@@ -219,6 +221,9 @@ Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this co
 kubescape scan workload Deployment/nginx --namespace default
 kubescape scan workload Deployment.v1.apps/nginx
 kubescape scan workload DaemonSet/fluentd --namespace logging
+kubescape scan workload Deployment/nginx ./manifests
+kubescape scan workload Deployment/nginx --file-path ./manifests/deployment.yaml
+kubescape scan workload Deployment/nginx --chart-path ./chart --file-path ./chart/templates/deployment.yaml
 ```
 
 ---
