@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
@@ -20,42 +21,41 @@ const (
 	PoliciesCacheTtlEnvVar = "POLICIES_CACHE_TTL"
 )
 
-var policyHandlerInstance *PolicyHandler
-
 // PolicyHandler
 type PolicyHandler struct {
 	clusterName             string
 	getters                 *cautils.Getters
+	scanMu                  sync.Mutex // guards getters against concurrent CollectPolicies calls on a shared handler
 	cachedPolicyIdentifiers *TimedCache[[]string]
 	cachedFrameworks        *TimedCache[[]reporthandling.Framework]
 	cachedExceptions        *TimedCache[[]armotypes.PostureExceptionPolicy]
 	cachedControlInputs     *TimedCache[map[string][]string]
 }
 
-// NewPolicyHandler creates and returns an instance of the `PolicyHandler`. The function initializes the `PolicyHandler` only if it hasn't been previously created.
-// The PolicyHandler supports caching of downloaded policies and exceptions by setting the `POLICIES_CACHE_TTL` environment variable (default is no caching).
-//
-// This is a process-wide singleton, reused as long as clusterName does not
-// change, so long-running callers that repeatedly scan the same cluster (the
-// httphandler HTTP service, in particular - see core/core/scan.go) keep the
-// POLICIES_CACHE_TTL caching benefit across requests instead of re-downloading
-// policies/exceptions/control-inputs on every call. When clusterName differs
-// from the cached instance's, exceptions and control-inputs are fetched
-// scoped by clusterName (see getExceptions/getControlInputs below), so
-// blindly reusing an instance built for a different cluster would silently
-// apply the wrong cluster's exception policies to this one; the httphandler
-// service can serve /v1/scan requests for different clusters/accounts across
-// the lifetime of one process, and previously always got the first request's
-// PolicyHandler regardless of what later requests asked for. Close the
-// stale instance first so its background TTL goroutines don't leak.
+// NewPolicyHandler returns the shared, cluster-isolated *PolicyHandler for
+// clusterName from the process-wide registry (see registry.go). Callers that
+// repeatedly scan the same cluster (the httphandler HTTP service, in
+// particular - see core/core/scan.go) keep the POLICIES_CACHE_TTL caching
+// benefit across calls; callers for a different cluster get a completely
+// separate instance, so a later call never silently reuses an earlier
+// cluster's exception/control-input caches. Handlers with nothing actively
+// using them are reclaimed by an idle sweep rather than requiring callers to
+// release them, so this stays memory-bounded even in a long-running process
+// that sees many distinct cluster names over its lifetime.
 func NewPolicyHandler(clusterName string) *PolicyHandler {
-	if policyHandlerInstance == nil || policyHandlerInstance.clusterName != clusterName {
-		if policyHandlerInstance != nil {
-			policyHandlerInstance.Close()
-		}
-		policyHandlerInstance = NewRequestScopedPolicyHandler(clusterName)
-	}
-	return policyHandlerInstance
+	return globalRegistry.getHandler(clusterName)
+}
+
+// NewPolicyHandlerWithRelease returns the shared PolicyHandler for
+// clusterName and a release function that must be deferred. Intended for
+// orchestration paths - e.g. the fleet work in issue #1990 - that scan the
+// same cluster sequentially in one goroutine and want the cache reuse
+// guaranteed for that duration rather than left to the idle sweep.
+// CollectPolicies guards its own state, so concurrent same-cluster calls are
+// safe even without this; acquire/release only controls when an idle entry
+// becomes eligible for eviction.
+func NewPolicyHandlerWithRelease(clusterName string) (*PolicyHandler, func()) {
+	return globalRegistry.acquireHandler(clusterName)
 }
 
 // NewRequestScopedPolicyHandler creates and returns a new, independent instance of the `PolicyHandler`.
@@ -88,6 +88,11 @@ func (policyHandler *PolicyHandler) Close() {
 }
 
 func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (*cautils.OPASessionObj, error) {
+	// A shared handler (same cluster, concurrent callers) must not let one
+	// caller's getters be observed or overwritten mid-scan by another.
+	policyHandler.scanMu.Lock()
+	defer policyHandler.scanMu.Unlock()
+
 	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo, policyIdentifier)
 
 	policyHandler.getters = getters
