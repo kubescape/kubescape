@@ -1,7 +1,7 @@
 package fixhandler
 
 import (
-	"encoding/json"
+	"gopkg.in/yaml.v3"
 	"fmt"
 	"sort"
 	"strings"
@@ -32,9 +32,11 @@ func DetectProfileDrift(manifest []byte, profile *storagev1beta1.ContainerProfil
 	}
 
 	var obj map[string]interface{}
-	if err := json.Unmarshal(manifest, &obj); err != nil {
+	if err := yaml.Unmarshal(manifest, &obj); err != nil {
+		fmt.Println("DETECT: error unmarshaling:", err)
 		return fixes
 	}
+	fmt.Printf("DETECT: manifest len=%d, profile_caps=%v\n", len(manifest), profile.Spec.Capabilities)
 
 	var containersPath string
 	var containersList []interface{}
