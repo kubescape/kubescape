@@ -394,13 +394,17 @@ func collectDiffs(dmp *diffmatchpatch.DiffMatchPatch, diffs []diffmatchpatch.Dif
 }
 
 // closesFixRegion reports whether the segment at index ends the replacement region:
-// it is either the last segment, or the next one resumes unchanged content
+// the next operation segment resumes unchanged content, or there is none left
 func closesFixRegion(delta []string, index int) bool {
-	if index >= len(delta)-1 {
-		return true
+	for i := index + 1; i < len(delta); i++ {
+		// empty segments carry no operation and are skipped by the walk too,
+		// so they cannot hold the region open
+		if delta[i] == "" {
+			continue
+		}
+		return delta[i][0] == '='
 	}
-	next := delta[index+1]
-	return next != "" && next[0] == '='
+	return true
 }
 
 func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults.ResourceAssociatedControl, opaSessionObj *cautils.OPASessionObj, resourceID string, filepath string, rsrcAbsPath string) {

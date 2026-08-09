@@ -312,7 +312,9 @@ func TestClosesFixRegion(t *testing.T) {
 		{"last segment closes the region", []string{"+abc", "=5"}, 1, true},
 		{"next segment resumes unchanged content", []string{"+abc", "=5"}, 0, true},
 		{"next segment continues the edit", []string{"+abc", "-5"}, 0, false},
-		{"empty next segment carries no operation", []string{"+abc", ""}, 0, false},
+		{"trailing empty segment leaves no operation to resume", []string{"+abc", ""}, 0, true},
+		{"empty segments skipped before an equality run", []string{"+abc", "", "", "=5"}, 0, true},
+		{"empty segments skipped before a further edit", []string{"+abc", "", "-5"}, 0, false},
 		{"index past the end of the delta", []string{"+abc"}, 5, true},
 	}
 
