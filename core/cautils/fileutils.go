@@ -52,9 +52,31 @@ type Chart struct {
 // --set-file path, etc.) the error is returned to the caller. We deliberately do not silently
 // fall back to chart defaults — scanning the wrong manifests is worse than failing fast.
 func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
+	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, nil)
+}
+
+// LoadResourcesFromHelmChartsExcludingDirectories behaves like LoadResourcesFromHelmCharts,
+// but leaves charts at or below excludedChartDirectories to another renderer that owns them.
+// The caller is responsible for including those directories in its plain-file exclusions once
+// that renderer succeeds.
+func LoadResourcesFromHelmChartsExcludingDirectories(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
+	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, excludedChartDirectories)
+}
+
+func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
 	helmDirectories, discoveryErrs := listHelmChartDirs(basePath)
 	for _, err := range discoveryErrs {
 		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(err))
+	}
+	if len(excludedChartDirectories) > 0 {
+		normalizedExcludedDirectories := normalizePaths(excludedChartDirectories)
+		remaining := make([]string, 0, len(helmDirectories))
+		for _, directory := range helmDirectories {
+			if !isUnderAnyNormalizedDir(normalizePath(directory), normalizedExcludedDirectories) {
+				remaining = append(remaining, directory)
+			}
+		}
+		helmDirectories = remaining
 	}
 
 	// Parse user-supplied value overrides once; reuse for every chart we render.
@@ -147,19 +169,24 @@ func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
 	for _, helmDir := range renderedCharts {
 		templateDirs = append(templateDirs, filepath.Join(helmDir, "templates"))
 	}
+	templateDirs = pathAliasesForPaths(templateDirs)
 
 	remaining := make([]string, 0, len(files))
 	for _, file := range files {
-		if !isUnderAnyDir(file, templateDirs) {
+		if !isAnyPathAliasUnderAnyDir(file, templateDirs) {
 			remaining = append(remaining, file)
 		}
 	}
 	return remaining
 }
 
-// isUnderAnyDir reports whether path is inside one of dirs. Both are expected to be absolute,
-// as returned by listFiles and listDirs.
+// isUnderAnyDir reports whether path is inside one of dirs after normalizing
+// relative paths and resolving symlinks where the path already exists.
 func isUnderAnyDir(path string, dirs []string) bool {
+	return isUnderAnyNormalizedDir(normalizePath(path), normalizePaths(dirs))
+}
+
+func isUnderAnyNormalizedDir(path string, dirs []string) bool {
 	for _, dir := range dirs {
 		rel, err := filepath.Rel(dir, path)
 		if err != nil {
@@ -171,6 +198,75 @@ func isUnderAnyDir(path string, dirs []string) bool {
 		}
 	}
 	return false
+}
+
+func normalizePaths(paths []string) []string {
+	normalized := make([]string, 0, len(paths))
+	for _, path := range paths {
+		normalized = append(normalized, normalizePath(path))
+	}
+	return normalized
+}
+
+func pathAliasesForPaths(paths []string) []string {
+	aliases := make([]string, 0, len(paths)*2)
+	for _, path := range paths {
+		aliases = append(aliases, pathAliases(path)...)
+	}
+	return aliases
+}
+
+func isAnyPathAliasUnderAnyDir(path string, dirs []string) bool {
+	for _, alias := range pathAliases(path) {
+		if isUnderAnyNormalizedDir(alias, dirs) {
+			return true
+		}
+	}
+	return false
+}
+
+// pathAliases returns both the absolute lexical path and, when different, its
+// physical path. Keeping both matters for a symlinked template file: Helm owns
+// it by its lexical location below templates/, even if the link target is outside
+// the chart. The physical form still matches scans reached through a symlinked
+// parent directory.
+func pathAliases(path string) []string {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return []string{filepath.Clean(path)}
+	}
+	absPath = filepath.Clean(absPath)
+	resolvedPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil || resolvedPath == absPath {
+		return []string{absPath}
+	}
+	return []string{absPath, resolvedPath}
+}
+
+func normalizePath(path string) string {
+	normalized, err := canonicalPath(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return normalized
+}
+
+func canonicalPath(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	resolvedPath, err := filepath.EvalSymlinks(absPath)
+	if err == nil {
+		return resolvedPath, nil
+	}
+	// Missing paths are valid for remote charts that Kustomize has not pulled yet.
+	// The absolute lexical form is still sufficient because generic discovery cannot
+	// return a matching path until it exists.
+	if errors.Is(err, os.ErrNotExist) {
+		return filepath.Clean(absPath), nil
+	}
+	return "", err
 }
 
 // mergeMaps performs a deep merge of override into a copy of base, with override winning on conflicts.
