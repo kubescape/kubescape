@@ -124,7 +124,7 @@ func validateWorkloadArgs(args []string, scanInfo *cautils.ScanInfo) error {
 		return fmt.Errorf("usage: --chart-path <chart path> --file-path <file path>")
 	}
 
-	if scanInfo.ChartPath == "" && scanInfo.FilePath != "" && len(args) > 1 {
+	if scanInfo.FilePath != "" && len(args) > 1 {
 		return fmt.Errorf("usage: use either --file-path or positional input paths, not both")
 	}
 

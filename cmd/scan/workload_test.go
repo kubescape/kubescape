@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSetWorkloadScanInfo(t *testing.T) {
@@ -217,6 +218,19 @@ func TestGetWorkloadCmd_ChartPathAndFilePathEmpty(t *testing.T) {
 	err = cmd.Args(&cobra.Command{}, []string{"nginx"})
 	expectedErrorMessage = "usage: --chart-path <chart path> --file-path <file path>"
 	assert.Equal(t, expectedErrorMessage, err.Error())
+}
+
+func TestGetWorkloadCmd_RejectsFilePathWithPositionalInputPath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getWorkloadCmd(mockKubescape, &scanInfo)
+	require.NoError(t, cmd.PersistentFlags().Set("chart-path", "./chart"))
+	require.NoError(t, cmd.PersistentFlags().Set("file-path", "./chart/templates/deployment.yaml"))
+
+	err := cmd.Args(&cobra.Command{}, []string{"Deployment/nginx", "./manifests"})
+
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
 }
 
 func Test_parseWorkloadIdentifierString_Invalid(t *testing.T) {
