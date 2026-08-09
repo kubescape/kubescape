@@ -45,6 +45,9 @@ func TestMain(m *testing.M) {
 	k8sinterface.InitializeMapResources(&fakeHostSensorDiscovery{
 		FakeDiscovery: &fakediscovery.FakeDiscovery{Fake: &k8stesting.Fake{}},
 	})
+
+	DefaultCacheDir = "" // Disable cache by default for tests
+
 	os.Exit(m.Run())
 }
 
