@@ -30,7 +30,6 @@ import (
 	"github.com/open-policy-agent/opa/v1/storage"
 	opaprint "github.com/open-policy-agent/opa/v1/topdown/print"
 	"go.opentelemetry.io/otel"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/record"
 )
 
@@ -1123,11 +1122,11 @@ func (opap *OPAProcessor) getCELEvaluator() (*cel.Evaluator, error) {
 // the same one stub.go's isNamespaced applies to the same object a moment
 // later: a non-empty metadata.namespace.
 func (opap *OPAProcessor) celNamespaceObjectFor(obj map[string]any) map[string]any {
-	namespace, _, _ := unstructured.NestedString(obj, "metadata", "namespace")
-	if namespace == "" {
+	meta := objectsenvelopes.NewObject(obj)
+	if meta == nil || meta.GetNamespace() == "" {
 		return nil
 	}
-	return opap.celNamespaceIndex[namespace]
+	return opap.celNamespaceIndex[meta.GetNamespace()]
 }
 
 // celRuleResponse builds the RuleResponse for one object that violated a CEL
