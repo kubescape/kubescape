@@ -9,8 +9,10 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -76,7 +78,7 @@ func TestCollectAndStreamBatches_FailsWhenAllQueriesFail(t *testing.T) {
 func TestCollectAndStreamBatches_IgnoresMissingOptionalResource(t *testing.T) {
 	ctx := context.Background()
 	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, fmt.Errorf("the server could not find the requested resource")
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "example.com", Resource: "somecrds"}, "")
 	})
 	scanInfo, session := streamingTestSession(ctx)
 	namespaced := true
