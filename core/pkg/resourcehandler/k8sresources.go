@@ -1043,6 +1043,7 @@ func (k8sHandler *K8sResourceHandler) EstimateClusterSize(ctx context.Context, s
 			continue
 		}
 		ok++
+		total += len(result.Items)
 		if rc := result.GetRemainingItemCount(); rc != nil {
 			total += int(*rc)
 		}
