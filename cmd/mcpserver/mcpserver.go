@@ -20,7 +20,6 @@ import (
 
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
-	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 )
 
 type KubescapeMcpserver struct {
