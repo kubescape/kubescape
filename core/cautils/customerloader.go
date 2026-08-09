@@ -3,6 +3,7 @@ package cautils
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -121,7 +122,9 @@ func NewLocalConfig(accountID, accessKey, clusterName, customClusterName string)
 	}
 	// get from configMap
 	if existsConfigFile() { // get from file
-		loadConfigFromFile(lc.configObj)
+		if err := loadConfigFromFile(lc.configObj); err != nil {
+			logger.L().Debug("failed to load cached config file", helpers.Error(err))
+		}
 	}
 
 	updateCredentials(lc.configObj, accountID, accessKey)
@@ -195,7 +198,7 @@ type ClusterConfig struct {
 	configMapNamespace string
 }
 
-func NewClusterConfig(k8s *k8sinterface.KubernetesApi, accountID, accessKey, clusterName, customClusterName string) *ClusterConfig {
+func NewClusterConfig(ctx context.Context, k8s *k8sinterface.KubernetesApi, accountID, accessKey, clusterName, customClusterName string) *ClusterConfig {
 	c := &ClusterConfig{
 		k8s:                k8s,
 		configObj:          &ConfigObj{},
@@ -204,16 +207,24 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, accountID, accessKey, clu
 
 	// first, load from file
 	if existsConfigFile() { // get from file
-		loadConfigFromFile(c.configObj)
+		if err := loadConfigFromFile(c.configObj); err != nil {
+			logger.L().Debug("failed to load cached config file", helpers.Error(err))
+		}
 	}
 
 	loadUrlsFromFile(c.configObj)
 
 	// second, load urls from config map
-	c.updateConfigEmptyFieldsFromKubescapeConfigMap()
+	if err := c.updateConfigEmptyFieldsFromKubescapeConfigMap(ctx); err != nil {
+		logger.L().Debug("failed to load config from Kubescape ConfigMap in cluster",
+			helpers.String("namespace", c.configMapNamespace), helpers.Error(err))
+	}
 
 	// third, credentials from secret
-	c.updateConfigEmptyFieldsFromCredentialsSecret()
+	if err := c.updateConfigEmptyFieldsFromCredentialsSecret(ctx); err != nil {
+		logger.L().Debug("failed to load credentials from Kubescape Secret in cluster",
+			helpers.String("namespace", c.configMapNamespace), helpers.Error(err))
+	}
 
 	updateCredentials(c.configObj, accountID, accessKey)
 	updateCloudURLs(c.configObj)
@@ -266,8 +277,8 @@ func (c *ClusterConfig) ToMapString() map[string]any {
 	return m
 }
 
-func (c *ClusterConfig) updateConfigEmptyFieldsFromKubescapeConfigMap() error {
-	configMaps, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).List(context.Background(), metav1.ListOptions{
+func (c *ClusterConfig) updateConfigEmptyFieldsFromKubescapeConfigMap(ctx context.Context) error {
+	configMaps, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: cloudConfigMapLabelSelector,
 	})
 	if err != nil {
@@ -276,7 +287,7 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromKubescapeConfigMap() error {
 	var ksConfigMap *corev1.ConfigMap
 	if len(configMaps.Items) == 0 {
 		// try to find configmaps by name (for backward compatibility)
-		ksConfigMap, _ = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), kubescapeConfigMapName, metav1.GetOptions{})
+		ksConfigMap, _ = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(ctx, kubescapeConfigMapName, metav1.GetOptions{})
 	} else {
 		// use the first configmap with the label
 		ksConfigMap = &configMaps.Items[0]
@@ -295,8 +306,8 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromKubescapeConfigMap() error {
 	return err
 }
 
-func (c *ClusterConfig) updateConfigEmptyFieldsFromCredentialsSecret() error {
-	secrets, err := c.k8s.KubernetesClient.CoreV1().Secrets(c.configMapNamespace).List(context.Background(),
+func (c *ClusterConfig) updateConfigEmptyFieldsFromCredentialsSecret(ctx context.Context) error {
+	secrets, err := c.k8s.KubernetesClient.CoreV1().Secrets(c.configMapNamespace).List(ctx,
 		metav1.ListOptions{LabelSelector: credsLabelSelectors})
 	if err != nil {
 		return err
@@ -343,6 +354,23 @@ func existsConfigFile() bool {
 // permission tricks, which don't reliably fail for the owning user.
 var chmod = os.Chmod
 
+// configMarshal is a package-level indirection so tests can simulate a
+// marshal failure without needing a struct whose MarshalJSON returns an error.
+// It mirrors the chmod seam used for directory-permission testing.
+var configMarshal = func(v any) ([]byte, error) {
+	return json.MarshalIndent(v, "", "  ") //nolint:gosec,nolintlint // G117: AccessKey is intentionally persisted to the local config file
+}
+
+// marshalConfigObj serializes co for persistence, stripping ClusterName
+// (runtime-only, must not be saved) before marshaling and restoring it after.
+func marshalConfigObj(co *ConfigObj) ([]byte, error) {
+	clusterName := co.ClusterName
+	co.ClusterName = ""
+	b, err := configMarshal(co)
+	co.ClusterName = clusterName
+	return b, err
+}
+
 func updateConfigFile(configObj *ConfigObj) error {
 	fullPath := ConfigFileFullPath()
 	dir := filepath.Dir(fullPath)
@@ -381,7 +409,12 @@ func updateConfigFile(configObj *ConfigObj) error {
 		}
 	}()
 
-	if _, err := tmpFile.Write(configObj.Config()); err != nil {
+	data, err := marshalConfigObj(configObj)
+	if err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+	if _, err := tmpFile.Write(data); err != nil {
 		tmpFile.Close()
 		return err
 	}
@@ -580,11 +613,11 @@ func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
 	return getter.GetKSCloudAPIConnector()
 }
 
-func GetTenantConfig(accountID, accessKey, clusterName, customClusterName string, k8s *k8sinterface.KubernetesApi) ITenantConfig {
+func GetTenantConfig(ctx context.Context, accountID, accessKey, clusterName, customClusterName string, k8s *k8sinterface.KubernetesApi) ITenantConfig {
 	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
 		return NewLocalConfig(accountID, accessKey, clusterName, customClusterName)
 	}
-	return NewClusterConfig(k8s, accountID, accessKey, clusterName, customClusterName)
+	return NewClusterConfig(ctx, k8s, accountID, accessKey, clusterName, customClusterName)
 }
 
 // firstNonEmpty returns the first non-empty string

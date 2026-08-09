@@ -112,11 +112,11 @@ func enocodeIntoYaml(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) (
 
 	errorEncoding := encoder.Encode(parentForContent)
 	if errorEncoding != nil {
-		return "", fmt.Errorf("error debugging node, %v", errorEncoding.Error())
+		return "", fmt.Errorf("error debugging node, %w", errorEncoding)
 	}
 	errorClosingEncoder := encoder.Close()
 	if errorClosingEncoder != nil {
-		return "", fmt.Errorf("error closing encoder: %v", errorClosingEncoder.Error())
+		return "", fmt.Errorf("error closing encoder: %w", errorClosingEncoder)
 	}
 	return fmt.Sprintf(`%v`, buf.String()), nil
 }

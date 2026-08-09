@@ -174,6 +174,11 @@ func TestGenerateFooter_Short(t *testing.T) {
 			wantContains:    []string{"Compliance-Score", "67.50%"},
 		},
 		{
+			name:            "sub-100 score near 100 does not round to 100.00%",
+			complianceScore: 99.996,
+			wantContains:    []string{"Compliance-Score", "99.99%"},
+		},
+		{
 			name:            "contains resource summary label",
 			complianceScore: 50,
 			wantContains:    []string{"Resource Summary", "Failed Resources", "All Resources"},
@@ -213,6 +218,11 @@ func TestGenerateFooter_Full(t *testing.T) {
 			complianceScore:     75.25,
 			wantComplianceScore: "75.25%",
 		},
+		{
+			name:                "sub-100 score near 100 does not round to 100.00%",
+			complianceScore:     99.996,
+			wantComplianceScore: "99.99%",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -233,6 +243,15 @@ func TestGetComplianceScoreColumnDoesNotRoundFractionalScoreToPerfect(t *testing
 	}
 
 	assert.Equal(t, "99%", GetComplianceScoreColumn(controlSummary, nil))
+}
+
+func TestGetComplianceScoreColumnHandlesUnscoredSentinel(t *testing.T) {
+	score := float32(-1.0)
+	controlSummary := &reportsummary.ControlSummary{
+		ComplianceScore: &score,
+	}
+
+	assert.Equal(t, "N/A", GetComplianceScoreColumn(controlSummary, nil))
 }
 
 func TestGenerateFooter_ShortVsFullDiffer(t *testing.T) {

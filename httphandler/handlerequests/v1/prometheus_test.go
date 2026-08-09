@@ -52,7 +52,7 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			scanID := "1234"
 			outputFile := filepath.Join(OutputDir, scanID)
-			scanInfo := getPrometheusDefaultScanCommand(scanID, outputFile, tt.frameworksParam)
+			scanInfo, policyIdentifiers := getPrometheusDefaultScanCommand(scanID, outputFile, tt.frameworksParam)
 
 			assert.Equal(t, scanID, scanInfo.ScanID)
 			assert.Equal(t, outputFile, scanInfo.Output)
@@ -63,10 +63,10 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 			assert.Equal(t, tt.wantScanAll, scanInfo.ScanAll)
 			assert.False(t, scanInfo.HostSensorEnabled.GetBool())
 			assert.Equal(t, getter.DefaultLocalStore, scanInfo.UseArtifactsFrom)
-			assert.Len(t, scanInfo.PolicyIdentifier, len(tt.wantFrameworkIDs))
+			assert.Len(t, policyIdentifiers, len(tt.wantFrameworkIDs))
 
 			for i, wantFrameworkID := range tt.wantFrameworkIDs {
-				assert.Equal(t, wantFrameworkID, scanInfo.PolicyIdentifier[i].Identifier)
+				assert.Equal(t, wantFrameworkID, policyIdentifiers[i].Identifier)
 			}
 		})
 	}
@@ -80,7 +80,7 @@ func TestMetrics_ScanContextDecoupledFromRequest(t *testing.T) {
 	scanCtxErr := make(chan error, 1)
 
 	reqCtx, cancel := context.WithCancel(context.Background())
-	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		cancel() // simulate the scrape connection going away mid-scan
 		scanCtxErr <- ctx.Err()
 		return nil, nil
@@ -131,7 +131,7 @@ func TestMetrics_UsesDecodedSkipPersistenceQueryParam(t *testing.T) {
 
 			defer func(o scanner) { scanImpl = o }(scanImpl)
 			gotSkipPersistence := make(chan bool, 1)
-			scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {
+			scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {
 				gotSkipPersistence <- skipPersistence
 				require.NoError(t, os.WriteFile(scanInfo.Output, []byte("# metrics\n"), 0o600))
 				return nil, nil
@@ -161,7 +161,7 @@ func TestMetrics_UsesDecodedSkipPersistenceQueryParam(t *testing.T) {
 func TestMetrics_InvalidSkipPersistenceQueryParam(t *testing.T) {
 	defer func(o scanner) { scanImpl = o }(scanImpl)
 	scanCalled := make(chan struct{}, 1)
-	scanImpl = func(context.Context, *cautils.ScanInfo, string, bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier, string, bool) (*reporthandlingv2.PostureReport, error) {
 		scanCalled <- struct{}{}
 		return nil, nil
 	}
@@ -183,7 +183,7 @@ func TestMetrics_InvalidSkipPersistenceQueryParam(t *testing.T) {
 func TestMetrics_NonGetMethodReturns405WithoutScanning(t *testing.T) {
 	defer func(o scanner) { scanImpl = o }(scanImpl)
 	scanCalled := make(chan struct{}, 1)
-	scanImpl = func(context.Context, *cautils.ScanInfo, string, bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier, string, bool) (*reporthandlingv2.PostureReport, error) {
 		scanCalled <- struct{}{}
 		return nil, nil
 	}
@@ -217,7 +217,7 @@ func TestMetricsQueueRejectsRequestsWhenCapacityIsExhausted(t *testing.T) {
 	var once sync.Once
 	var releaseOnce sync.Once
 	releaseScans := func() { releaseOnce.Do(func() { close(release) }) }
-	scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(_ context.Context, scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		once.Do(func() { close(started) })
 		<-release
 		require.NoError(t, os.WriteFile(scanInfo.Output, []byte("# metrics\n"), 0o600))

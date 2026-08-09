@@ -86,7 +86,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				scanInfo.Format == "" {
 
 				return fmt.Errorf(
-					"format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml",
+					"format cannot be empty, supported formats: %s",
+					strings.Join(shared.ScanFormats, ", "),
 				)
 			}
 
@@ -126,9 +127,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			scanInfo.View = requestedView
 
 			if scanInfo.View == string(cautils.SecurityViewType) {
-				setSecurityViewScanInfo(args, &scanInfo)
+				policyIdentifiers := setSecurityViewScanInfo(args, &scanInfo)
 
-				if err := securityScan(scanInfo, ks); err != nil {
+				if err := securityScan(scanInfo, ks, policyIdentifiers); err != nil {
 					logger.L().Fatal(err.Error())
 				}
 			} else if len(args) == 0 ||
@@ -183,7 +184,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	hostF := scanCmd.PersistentFlags().VarPF(&scanInfo.HostSensorEnabled, "host-scan", "", "Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use --host-scan=false to disable host data collection. See https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator for the operator-based alternative")
 	hostF.NoOptDefVal = "true"
 
-	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output file format. Supported formats: "pretty-printer", "json", "junit", "prometheus", "pdf", "html", "sarif", "gitlab-sast", "yaml"`)
+	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", fmt.Sprintf(`Output file format. Supported formats: "%s"`, strings.Join(shared.ScanFormats, `", "`)))
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to configured backend.")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
@@ -200,6 +201,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.PrintAttackTree, "print-attack-tree", "", false, "Print attack tree")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.EnableRegoPrint, "enable-rego-prints", "", false, "Enable sending to rego prints to the logs (use with debug log level: -l debug)")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ScanImages, "scan-images", "", false, "Scan resources images")
+	scanCmd.PersistentFlags().IntVar(&scanInfo.ImageScanConcurrency, "image-scan-concurrency", 1, "Number of concurrent workers for image scanning")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.UseDefaultMatchers, "use-default-matchers", "", true, "Use default matchers (true) or CPE matchers (false) for image scanning")
 	scanCmd.PersistentFlags().StringToStringVar(&scanInfo.RegistryMapping, "registry-mapping", nil, "Map internal registry hosts to reachable ones, e.g. --registry-mapping image-registry.openshift-image-registry.svc:5000=registry.company.com (host[:port], no scheme)")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.RegistryUsername, "registry-username", "", "Username for image registry login when no docker config or credential helper is available; can also be set with KUBESCAPE_REGISTRY_USERNAME")
@@ -280,15 +282,14 @@ func registryCredentialFlagChanged(cmd *cobra.Command, names ...string) bool {
 	return false
 }
 
-func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) {
+func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) []cautils.PolicyIdentifier {
 	if len(args) > 0 {
 		scanInfo.SetScanType(cautils.ScanTypeRepo)
 		scanInfo.InputPatterns = args
-		scanInfo.SetPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
-	} else {
-		scanInfo.SetScanType(cautils.ScanTypeCluster)
-		scanInfo.SetPolicyIdentifiers([]string{"clusterscan", "mitre", "nsa"}, v1.KindFramework)
+		return cautils.BuildPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 	}
+	scanInfo.SetScanType(cautils.ScanTypeCluster)
+	return cautils.BuildPolicyIdentifiers([]string{"clusterscan", "mitre", "nsa"}, v1.KindFramework)
 }
 
 // applyTimeout wraps ks with a deadline context when ScanTimeout > 0 and
@@ -310,10 +311,10 @@ func applyTimeout(scanInfo *cautils.ScanInfo, ks meta.IKubescape) func() {
 	}
 }
 
-func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {
+func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
 	defer applyTimeout(&scanInfo, ks)()
 
-	results, err := ks.Scan(&scanInfo)
+	results, err := ks.Scan(&scanInfo, policyIdentifiers)
 	if err != nil {
 		return err
 	}

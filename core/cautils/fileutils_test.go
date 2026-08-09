@@ -2,11 +2,13 @@ package cautils
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -283,6 +285,38 @@ func TestConvertYamlToJson(t *testing.T) {
 	}
 }
 
+// TestConvertYamlToJson_NestedNonStringKey guards against a nested mapping
+// with a non-string key surviving conversion: yaml.v3 decodes such a mapping
+// as map[interface{}]interface{} even under a string-keyed parent, and
+// convertYamlToJson must recurse into map[string]any values so the result
+// stays json.Marshal-able (issue #2833).
+func TestConvertYamlToJson_NestedNonStringKey(t *testing.T) {
+	input := map[string]any{"spec": map[any]any{"1": "enabled"}}
+
+	got := convertYamlToJson(input)
+	_, err := json.Marshal(got)
+	require.NoError(t, err)
+
+	spec, ok := got.(map[string]any)["spec"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "enabled", spec["1"])
+}
+
+// TestReadYamlFile_NestedNonStringKeyIsJSONMarshalable exercises the same bug
+// through readYamlFile: a manifest with a nested non-string key must produce a
+// workload whose object is JSON-serializable (OPA marshals these to build its
+// input, so an unconverted map[interface{}]interface{} breaks evaluation).
+func TestReadYamlFile_NestedNonStringKeyIsJSONMarshalable(t *testing.T) {
+	manifest := []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\ndata:\n  1: enabled\n")
+
+	workloads, err := readYamlFile(manifest)
+	require.NoError(t, err)
+	require.Len(t, workloads, 1)
+
+	_, err = json.Marshal(workloads[0].GetObject())
+	assert.NoError(t, err)
+}
+
 func TestIsYaml(t *testing.T) {
 	tests := []struct {
 		path string
@@ -433,7 +467,7 @@ func TestGetFileFormat(t *testing.T) {
 func TestIsFileAndIsDir(t *testing.T) {
 	tempDir := t.TempDir()
 	tempFile := filepath.Join(tempDir, "test_file.txt")
-	err := os.WriteFile(tempFile, []byte("test"), 0644)
+	err := os.WriteFile(tempFile, []byte("test"), 0o600)
 	require.NoError(t, err)
 
 	assert.True(t, isDir(tempDir))
@@ -588,6 +622,212 @@ func TestReadJsonFile(t *testing.T) {
 				assert.NoError(t, err)
 			}
 			assert.Equal(t, tt.wantCount, len(got))
+		})
+	}
+}
+
+func TestReadFileExpandsKubernetesListEnvelopes(t *testing.T) {
+	tests := []struct {
+		name      string
+		read      func([]byte) ([]workloadinterface.IMetadata, error)
+		content   string
+		wantKinds []string
+		wantAPIs  []string
+	}{
+		{
+			name: "JSON generic List",
+			read: readJsonFile,
+			content: `{
+				"apiVersion": "v1",
+				"kind": "List",
+				"items": [
+					{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "pod-in-list", "namespace": "default"}},
+					{"apiVersion": "v1", "kind": "Service", "metadata": {"name": "svc-in-list", "namespace": "default"}}
+				]
+			}`,
+			wantKinds: []string{"Pod", "Service"},
+			wantAPIs:  []string{"v1", "v1"},
+		},
+		{
+			name: "JSON typed list inside an array",
+			read: readJsonFile,
+			content: `[
+				{
+					"apiVersion": "v1",
+					"kind": "PodList",
+					"items": [
+						{"metadata": {"name": "pod-in-list", "namespace": "default"}}
+					]
+				},
+				{"apiVersion": "v1", "kind": "Service", "metadata": {"name": "standalone-service", "namespace": "default"}}
+			]`,
+			wantKinds: []string{"Pod", "Service"},
+			wantAPIs:  []string{"v1", "v1"},
+		},
+		{
+			name: "YAML typed list inside a multi-document manifest",
+			read: readYamlFile,
+			content: `apiVersion: v1
+kind: PodList
+items:
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: pod-in-list
+      namespace: default
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: standalone-service
+  namespace: default`,
+			wantKinds: []string{"Pod", "Service"},
+			wantAPIs:  []string{"v1", "v1"},
+		},
+		{
+			name: "typed list fills a missing item kind",
+			read: readJsonFile,
+			content: `{
+				"apiVersion": "v1",
+				"kind": "PodList",
+				"items": [
+					{"apiVersion": "v1", "metadata": {"name": "missing-kind", "namespace": "default"}}
+				]
+			}`,
+			wantKinds: []string{"Pod"},
+			wantAPIs:  []string{"v1"},
+		},
+		{
+			name: "typed list fills a missing item apiVersion",
+			read: readYamlFile,
+			content: `apiVersion: v1
+kind: PodList
+items:
+  - kind: Pod
+    metadata:
+      name: missing-api-version
+      namespace: default`,
+			wantKinds: []string{"Pod"},
+			wantAPIs:  []string{"v1"},
+		},
+		{
+			name: "typed list preserves explicit item type metadata",
+			read: readJsonFile,
+			content: `{
+				"apiVersion": "v1",
+				"kind": "PodList",
+				"items": [
+					{"apiVersion": "example.com/v1", "kind": "Widget", "metadata": {"name": "explicit-type", "namespace": "default"}}
+				]
+			}`,
+			wantKinds: []string{"Widget"},
+			wantAPIs:  []string{"example.com/v1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.read([]byte(tt.content))
+			require.NoError(t, err)
+			require.Len(t, got, len(tt.wantKinds))
+			for i, wantKind := range tt.wantKinds {
+				assert.Equal(t, wantKind, got[i].GetKind())
+				assert.Equal(t, tt.wantAPIs[i], got[i].GetApiVersion())
+			}
+		})
+	}
+}
+
+func TestReadFileDoesNotTreatNamedCustomResourceAsListEnvelope(t *testing.T) {
+	tests := []struct {
+		name          string
+		read          func([]byte) ([]workloadinterface.IMetadata, error)
+		content       string
+		identityField string
+		identityValue string
+	}{
+		{
+			name:          "JSON name",
+			read:          readJsonFile,
+			identityField: "name",
+			identityValue: "production-allow-list",
+			content: `{
+				"apiVersion": "example.com/v1",
+				"kind": "AllowList",
+				"metadata": {"name": "production-allow-list"},
+				"items": ["10.0.0.0/8"]
+			}`,
+		},
+		{
+			name:          "YAML generateName",
+			read:          readYamlFile,
+			identityField: "generateName",
+			identityValue: "production-allow-list-",
+			content: `apiVersion: example.com/v1
+kind: AllowList
+metadata:
+  generateName: production-allow-list-
+items:
+  - 10.0.0.0/8`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.read([]byte(tt.content))
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			assert.Equal(t, "AllowList", got[0].GetKind())
+			metadata, ok := got[0].GetObject()["metadata"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, tt.identityValue, metadata[tt.identityField])
+		})
+	}
+}
+
+func TestReadFileRejectsMalformedListEnvelope(t *testing.T) {
+	tests := []struct {
+		name    string
+		read    func([]byte) ([]workloadinterface.IMetadata, error)
+		content string
+	}{
+		{
+			name:    "JSON generic List",
+			read:    readJsonFile,
+			content: `{"apiVersion":"v1","kind":"List","items":"not-an-array"}`,
+		},
+		{
+			name:    "JSON typed list with null items",
+			read:    readJsonFile,
+			content: `{"apiVersion":"v1","kind":"PodList","items":null}`,
+		},
+		{
+			name: "YAML typed list missing items",
+			read: readYamlFile,
+			content: `apiVersion: v1
+kind: PodList`,
+		},
+		{
+			name:    "JSON typed list with non-object item",
+			read:    readJsonFile,
+			content: `{"apiVersion":"v1","kind":"PodList","items":["not-an-object"]}`,
+		},
+		{
+			name: "YAML generic List with non-Kubernetes item",
+			read: readYamlFile,
+			content: `apiVersion: v1
+kind: List
+items:
+  - metadata:
+      name: missing-kind`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.read([]byte(tt.content))
+			assert.Error(t, err)
+			assert.Empty(t, got)
 		})
 	}
 }

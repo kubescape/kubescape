@@ -18,7 +18,7 @@ func (scanresult *ScanResultReport) Summarize() *ElasticContainerScanSummaryResu
 		Timestamp:                scanresult.Timestamp,
 		ContainerName:            scanresult.ContainerName,
 		ContainerScanID:          scanresult.AsFNVHash(),
-		ListOfDangerousArtifcats: scanresult.ListOfDangerousArtifcats,
+		ListOfDangerousArtifacts: scanresult.ListOfDangerousArtifacts,
 	}
 
 	summary.Cluster = designatorsObj.Attributes[identifiers.AttributeCluster]

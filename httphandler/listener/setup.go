@@ -28,7 +28,7 @@ const (
 	v1ResultsPath           = "/results"
 	v1PrometheusMetricsPath = "/metrics"
 
-	// healtcheck paths
+	// healthcheck paths
 	livePath  = "/livez"
 	readyPath = "/readyz"
 )
@@ -45,7 +45,7 @@ func SetupHTTPListener() error {
 		return err
 	}
 	server := &http.Server{
-		Addr: addr, // TODO - support loading port from config/env
+		Addr: addr,
 		// ReadHeaderTimeout defends against slowloris-style attacks without
 		// capping handler duration. ReadTimeout and WriteTimeout are left at 0
 		// because the synchronous scan path (POST /v1/scan?wait=true) blocks
@@ -106,7 +106,7 @@ func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
 
 	pair, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load key pair: %v", err)
+		return nil, fmt.Errorf("failed to load key pair: %w", err)
 	}
 	return &pair, nil
 }

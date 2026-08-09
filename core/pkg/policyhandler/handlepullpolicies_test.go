@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/mocks"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -31,10 +32,10 @@ type ExceptionsGetterMock struct{}
 type ControlsInputsGetterMock struct{}
 type PolicyGetterMock struct{}
 
-func (mock *ExceptionsGetterMock) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+func (mock *ExceptionsGetterMock) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	return CachedExceptions, nil
 }
-func (mock *ControlsInputsGetterMock) GetControlsInputs(clusterName string) (map[string][]string, error) {
+func (mock *ControlsInputsGetterMock) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
 	return CachedControlInputs, nil
 }
 func (mock *PolicyGetterMock) GetControl(name string) (*reporthandling.Control, error) {
@@ -69,6 +70,30 @@ func TestNewPolicyHandler_MultiplePoliciesWithSameClusterName(t *testing.T) {
 	assert.Equal(t, policyHandler1, policyHandler2)
 }
 
+// TestNewPolicyHandler_DifferentClusterNameGetsFreshInstance guards against a
+// regression where the process-wide singleton was reused unconditionally,
+// regardless of the requested clusterName. getExceptions/getControlInputs
+// fetch data scoped by policyHandler.clusterName, so a long-running caller
+// that serves requests for more than one cluster/account in the same process
+// (the httphandler HTTP service, via core/core/scan.go) would silently keep
+// using whichever cluster's exceptions/control-inputs the *first* request
+// happened to warm the cache with, for every later request regardless of
+// what clusterName it actually asked for.
+func TestNewPolicyHandler_DifferentClusterNameGetsFreshInstance(t *testing.T) {
+	first := NewPolicyHandler("cluster-a")
+	require.Equal(t, "cluster-a", first.clusterName)
+
+	second := NewPolicyHandler("cluster-b")
+	assert.Equal(t, "cluster-b", second.clusterName,
+		"a different clusterName must produce an instance scoped to that cluster, not reuse the previous cluster's instance")
+	assert.NotSame(t, first, second, "a different clusterName must not reuse the previous cluster's PolicyHandler")
+
+	// Same clusterName as the most recent call must still reuse the
+	// instance (the caching behavior this singleton exists to provide).
+	third := NewPolicyHandler("cluster-b")
+	assert.Same(t, second, third)
+}
+
 func TestCollectPolicies(t *testing.T) {
 	testCases := []struct {
 		name          string
@@ -88,26 +113,14 @@ func TestCollectPolicies(t *testing.T) {
 			name:          "Collect Framework policy",
 			policyHandler: NewPolicyHandler("test-cluster"),
 			policyIdent:   []cautils.PolicyIdentifier{{Identifier: FrameworkName, Kind: "Framework"}},
-			scanInfo: &cautils.ScanInfo{
-				Getters: cautils.Getters{
-					PolicyGetter:         &PolicyGetterMock{},
-					ExceptionsGetter:     &ExceptionsGetterMock{},
-					ControlsInputsGetter: &ControlsInputsGetterMock{},
-				},
-			},
+			scanInfo:      &cautils.ScanInfo{},
 			expectedError: nil,
 		},
 		{
 			name:          "Collect Control policy",
 			policyHandler: NewPolicyHandler("test-cluster"),
 			policyIdent:   []cautils.PolicyIdentifier{{Identifier: "", Kind: "Control"}},
-			scanInfo: &cautils.ScanInfo{
-				Getters: cautils.Getters{
-					PolicyGetter:         &PolicyGetterMock{},
-					ExceptionsGetter:     &ExceptionsGetterMock{},
-					ControlsInputsGetter: &ControlsInputsGetterMock{},
-				},
-			},
+			scanInfo:      &cautils.ScanInfo{},
 			expectedError: nil,
 		},
 	}
@@ -115,13 +128,13 @@ func TestCollectPolicies(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			tc.policyHandler.getters = &cautils.Getters{
+			getters := &cautils.Getters{
 				PolicyGetter:         &PolicyGetterMock{},
 				ExceptionsGetter:     &ExceptionsGetterMock{},
 				ControlsInputsGetter: &ControlsInputsGetterMock{},
 			}
 
-			opaSessionObj, err := tc.policyHandler.CollectPolicies(ctx, tc.policyIdent, tc.scanInfo)
+			opaSessionObj, err := tc.policyHandler.CollectPolicies(ctx, tc.policyIdent, tc.scanInfo, getters)
 
 			assert.Equal(t, tc.expectedError, err)
 			assert.NotNil(t, opaSessionObj)
@@ -220,7 +233,7 @@ func TestGetExceptions(t *testing.T) {
 	policyHandler.getters = &cautils.Getters{
 		ExceptionsGetter: &ExceptionsGetterMock{},
 	}
-	exceptions, err := policyHandler.getExceptions()
+	exceptions, err := policyHandler.getExceptions(context.TODO())
 
 	assert.NoError(t, err)
 	assert.Equal(t, cachedExceptions, exceptions)
@@ -233,7 +246,7 @@ func TestGetControlInputs(t *testing.T) {
 		ControlsInputsGetter: &ControlsInputsGetterMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs()
+	controlInputs, err := policyHandler.getControlInputs(context.TODO())
 
 	assert.NoError(t, err)
 	assert.Equal(t, cachedControlInputs, controlInputs)
@@ -270,7 +283,7 @@ func TestDownloadScanPolicies_LocalCacheBypass(t *testing.T) {
 
 type ControlsInputsGetterEmptyMock struct{}
 
-func (mock *ControlsInputsGetterEmptyMock) GetControlsInputs(clusterName string) (map[string][]string, error) {
+func (mock *ControlsInputsGetterEmptyMock) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
 	return nil, nil
 }
 
@@ -282,7 +295,7 @@ func TestGetControlInputs_EmptyReturnsErrorNotCached(t *testing.T) {
 		ControlsInputsGetter: &ControlsInputsGetterEmptyMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs()
+	controlInputs, err := policyHandler.getControlInputs(context.TODO())
 
 	assert.Error(t, err)
 	assert.Nil(t, controlInputs)
@@ -299,7 +312,7 @@ func TestGetControlInputs_NonNilResultIsCached(t *testing.T) {
 		ControlsInputsGetter: &ControlsInputsGetterMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs()
+	controlInputs, err := policyHandler.getControlInputs(context.TODO())
 
 	assert.NoError(t, err)
 	assert.Equal(t, CachedControlInputs, controlInputs)

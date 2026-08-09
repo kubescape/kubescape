@@ -87,10 +87,18 @@ func (l *FixPathLocationResolver) ResolveLocation(fixPath string, nodeIndex int)
 }
 
 func FixPathToValidYamlExpression(fixPath string) string {
-	// remove everything after the first =
-	yamlExpression := regexp.MustCompile(`(.*)=.*`).ReplaceAllString(fixPath, `${1}`)
+	// Remove everything after the first "=": assisted-remediation strings are built
+	// as "<path>=<value>" by fixPathsToString in printer/v2/resourcetable.go, and
+	// only the path half is a valid yaml expression.
+	//
+	// This must split on the *first* separator. Fix values routinely contain "="
+	// themselves — the CIS control-plane rules emit values such as
+	// "--anonymous-auth=false" and "--authorization-mode=RBAC" — so a greedy match
+	// keeps part of the value in the path and produces an unusable expression.
+	if i := strings.Index(fixPath, "="); i >= 0 {
+		fixPath = fixPath[:i]
+	}
 
 	// add a dot for the root node
-	yamlExpression = "." + yamlExpression
-	return yamlExpression
+	return "." + fixPath
 }

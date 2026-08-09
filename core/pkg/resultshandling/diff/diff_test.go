@@ -3,6 +3,7 @@ package diff
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -237,4 +238,99 @@ func TestPrintYAML(t *testing.T) {
 	assert.Contains(t, yamlStr, "resourceID: path-123/api/v1/Pod/demo")
 	assert.Contains(t, yamlStr, "controlID: C-0057")
 	assert.Contains(t, yamlStr, "controlName: Privileged container")
+}
+
+func TestCompute_OutputOrderIsDeterministic(t *testing.T) {
+	const controlsPerResource = 13
+	resourceIDs := []string{"path-1/api/v1/Pod/alpha", "path-2/api/v1/Pod/bravo"}
+	scoreFactors := []float32{9.5, 7.0, 5.0, 2.0}
+
+	controlSummaries := make(map[string]controlSummary, controlsPerResource)
+	baseResults := make([]resultEntry, 0, len(resourceIDs))
+	headResults := make([]resultEntry, 0, len(resourceIDs))
+
+	for _, resourceID := range resourceIDs {
+		baseControls := make([]controlEntry, 0, controlsPerResource)
+		headControls := make([]controlEntry, 0, controlsPerResource)
+
+		for i := 0; i < controlsPerResource; i++ {
+			controlID := fmt.Sprintf("C-%03d", i)
+			controlName := "Control " + controlID
+			controlSummaries[controlID] = controlSummary{ScoreFactor: scoreFactors[i%len(scoreFactors)]}
+
+			baseStatus, headStatus := "failed", "failed"
+			switch i % 3 {
+			case 1:
+				baseStatus, headStatus = "passed", "failed"
+			case 2:
+				baseStatus, headStatus = "failed", "passed"
+			}
+
+			baseControls = append(baseControls, makeControl(controlID, controlName, baseStatus))
+			headControls = append(headControls, makeControl(controlID, controlName, headStatus))
+		}
+
+		baseResults = append(baseResults, makeResult(resourceID, baseControls...))
+		headResults = append(headResults, makeResult(resourceID, headControls...))
+	}
+
+	summary := summaryDetails{Controls: controlSummaries}
+	baseFile := writeTempReport(t, scanReport{Results: baseResults, SummaryDetails: summary})
+	headFile := writeTempReport(t, scanReport{Results: headResults, SummaryDetails: summary})
+
+	first, err := Compute(baseFile, headFile)
+	require.NoError(t, err)
+
+	buckets := []struct {
+		name    string
+		changes []ControlChange
+		want    [][3]string
+	}{
+		{"New", first.New, [][3]string{
+			{"Critical", "path-1/api/v1/Pod/alpha", "C-004"},
+			{"Critical", "path-2/api/v1/Pod/bravo", "C-004"},
+			{"High", "path-1/api/v1/Pod/alpha", "C-001"},
+			{"High", "path-2/api/v1/Pod/bravo", "C-001"},
+			{"Medium", "path-1/api/v1/Pod/alpha", "C-010"},
+			{"Medium", "path-2/api/v1/Pod/bravo", "C-010"},
+			{"Low", "path-1/api/v1/Pod/alpha", "C-007"},
+			{"Low", "path-2/api/v1/Pod/bravo", "C-007"},
+		}},
+		{"Resolved", first.Resolved, [][3]string{
+			{"Critical", "path-1/api/v1/Pod/alpha", "C-008"},
+			{"Critical", "path-2/api/v1/Pod/bravo", "C-008"},
+			{"High", "path-1/api/v1/Pod/alpha", "C-005"},
+			{"High", "path-2/api/v1/Pod/bravo", "C-005"},
+			{"Medium", "path-1/api/v1/Pod/alpha", "C-002"},
+			{"Medium", "path-2/api/v1/Pod/bravo", "C-002"},
+			{"Low", "path-1/api/v1/Pod/alpha", "C-011"},
+			{"Low", "path-2/api/v1/Pod/bravo", "C-011"},
+		}},
+		{"Unchanged", first.Unchanged, [][3]string{
+			{"Critical", "path-1/api/v1/Pod/alpha", "C-000"},
+			{"Critical", "path-1/api/v1/Pod/alpha", "C-012"},
+			{"Critical", "path-2/api/v1/Pod/bravo", "C-000"},
+			{"Critical", "path-2/api/v1/Pod/bravo", "C-012"},
+			{"High", "path-1/api/v1/Pod/alpha", "C-009"},
+			{"High", "path-2/api/v1/Pod/bravo", "C-009"},
+			{"Medium", "path-1/api/v1/Pod/alpha", "C-006"},
+			{"Medium", "path-2/api/v1/Pod/bravo", "C-006"},
+			{"Low", "path-1/api/v1/Pod/alpha", "C-003"},
+			{"Low", "path-2/api/v1/Pod/bravo", "C-003"},
+		}},
+	}
+	for _, bucket := range buckets {
+		require.Len(t, bucket.changes, len(bucket.want), bucket.name)
+		for i, want := range bucket.want {
+			require.Equal(t, want, [3]string{bucket.changes[i].Severity, bucket.changes[i].ResourceID, bucket.changes[i].ControlID}, "%s[%d]", bucket.name, i)
+		}
+	}
+
+	for run := 2; run <= 5; run++ {
+		got, err := Compute(baseFile, headFile)
+		require.NoError(t, err)
+		require.Equal(t, first.New, got.New, "New ordered differently on run %d for identical inputs", run)
+		require.Equal(t, first.Resolved, got.Resolved, "Resolved ordered differently on run %d for identical inputs", run)
+		require.Equal(t, first.Unchanged, got.Unchanged, "Unchanged ordered differently on run %d for identical inputs", run)
+	}
 }

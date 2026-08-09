@@ -113,6 +113,10 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 						defer os.Remove(tempFile.Name())
 
 						if _, err := io.Copy(tempFile, os.Stdin); err != nil {
+							_ = tempFile.Close()
+							return err
+						}
+						if err := tempFile.Close(); err != nil {
 							return err
 						}
 						scanInfo.InputPatterns = []string{tempFile.Name()}
@@ -121,9 +125,9 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			}
 			scanInfo.SetScanType(cautils.ScanTypeFramework)
 
-			scanInfo.SetPolicyIdentifiers(frameworks, apisv1.KindFramework)
+			policyIdentifiers := cautils.BuildPolicyIdentifiers(frameworks, apisv1.KindFramework)
 
-			results, err := ks.Scan(scanInfo)
+			results, err := ks.Scan(scanInfo, policyIdentifiers)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}
@@ -133,7 +137,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			}
 
 			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-				logger.L().Fatal("scan compliance-score is below permitted threshold", helpers.String("compliance-score", fmt.Sprintf("%.2f", results.GetComplianceScore())), helpers.String("compliance-threshold", fmt.Sprintf("%.2f", scanInfo.ComplianceThreshold)))
+				logger.L().Fatal("scan compliance-score is below permitted threshold", helpers.String("compliance-score", cautils.ComplianceScoreToString(results.GetComplianceScore(), 2)), helpers.String("compliance-threshold", fmt.Sprintf("%.2f", scanInfo.ComplianceThreshold)))
 			}
 
 			enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)

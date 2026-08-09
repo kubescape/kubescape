@@ -229,6 +229,41 @@ Run an on-demand, live Network security scan (evaluating network-related control
 }
 ```
 
+#### `scan_container_image`
+
+Run an on-demand container image vulnerability scan and return structured JSON containing deduplicated vulnerabilities, severity counts, and optional match details.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `image_name` | string | Yes | Name of the remote container image to scan (e.g. `"nginx:alpine"`) |
+| `username` | string | No | Username for registry authentication (optional) |
+| `password` | string | No | Password for registry authentication (optional) |
+| `include_matches` | boolean | No | Include detailed match location and package info for each vulnerability (optional, default: `false`) |
+| `severity` | string | No | Filter vulnerabilities by minimum severity (e.g. `"Low"`, `"Medium"`, `"High"`, `"Critical"`) |
+
+**Example Response:**
+```json
+{
+  "image": "nginx:alpine",
+  "total_vulnerabilities": 1,
+  "severities": {
+    "Critical": 1
+  },
+  "vulnerabilities": [
+    {
+      "id": "CVE-2023-12345",
+      "severity": "Critical",
+      "package": {
+        "name": "libssl",
+        "version": "1.1.1"
+      }
+    }
+  ]
+}
+```
+
 ## Resource Templates
 
 The MCP server also exposes resource templates for direct access to data:
@@ -324,6 +359,9 @@ kubescape version
 - It provides read-only access to vulnerability and configuration data
 - No cluster modifications are made through the MCP server
 - Consider running with a service account that has limited permissions in production
+- **Credential Handling**: The `scan_container_image` tool accepts optional registry credentials (`username` and `password`). Be aware that parameters supplied to MCP tools may be retained in client conversation logs or model contexts depending on your client environment.
+- **Image Reference Validation**: The `scan_container_image` tool validates image names as remote image references and rejects local file paths and scheme prefixes (such as `dir:`, `file:`, `sbom:`) to prevent unauthorized local filesystem access.
+- **Air-Gapped Environments**: In air-gapped environments, set the `KS_GRYPE_LISTING_URL` environment variable to point to your internal Grype vulnerability database mirror listing URL.
 
 ## Related Documentation
 

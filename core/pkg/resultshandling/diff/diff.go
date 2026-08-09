@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -128,8 +129,25 @@ func Compute(basePath, headPath string) (*ChangeSet, error) {
 			})
 		}
 	}
+	// Go randomizes map iteration order per run, so kubescape diff returned the
+	// same findings in a different order on every invocation over the same two reports.
+	sortChanges(cs.New)
+	sortChanges(cs.Resolved)
+	sortChanges(cs.Unchanged)
 
 	return cs, nil
+}
+
+func sortChanges(changes []ControlChange) {
+	sort.Slice(changes, func(i, j int) bool {
+		if iRank, jRank := severityRank(changes[i].Severity), severityRank(changes[j].Severity); iRank != jRank {
+			return iRank > jRank
+		}
+		if changes[i].ResourceID != changes[j].ResourceID {
+			return changes[i].ResourceID < changes[j].ResourceID
+		}
+		return changes[i].ControlID < changes[j].ControlID
+	})
 }
 
 func loadReport(path string) (*scanReport, error) {

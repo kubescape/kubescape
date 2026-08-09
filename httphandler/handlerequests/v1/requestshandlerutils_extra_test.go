@@ -57,7 +57,7 @@ func TestWriteScanErrorToFile(t *testing.T) {
 	err := writeScanErrorToFile(errors.New("scan failed"), "scan-id")
 
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "failed to scan. reason: 'scan failed'")
+	assert.ErrorContains(t, err, "failed to scan. reason: scan failed")
 	got, readErr := os.ReadFile(filepath.Join(tmpDir, "scan-id"))
 	require.NoError(t, readErr)
 	assert.Equal(t, "scan failed", string(got))

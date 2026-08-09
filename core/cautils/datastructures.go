@@ -78,7 +78,7 @@ type OPASessionObj struct {
 	VAPBindings           []unstructured.Unstructured // ValidatingAdmissionPolicyBinding resources collected from the cluster
 }
 
-func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo) *OPASessionObj {
+func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *OPASessionObj {
 	clusterSize := max(estimateClusterSize(k8sResources), 100)
 
 	return &OPASessionObj{
@@ -92,7 +92,7 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 		ResourceToControlsMap: make(map[string][]string, clusterSize/2),
 		ResourceSource:        make(map[string]reporthandling.Source, clusterSize),
 		SessionID:             scanInfo.ScanID,
-		Metadata:              scanInfoToScanMetadata(ctx, scanInfo),
+		Metadata:              scanInfoToScanMetadata(ctx, scanInfo, policyIdentifiers),
 		OmitRawResources:      scanInfo.OmitRawResources,
 		TriggeredByCLI:        scanInfo.TriggeredByCLI,
 		LabelsToCopy:          scanInfo.LabelsToCopy,
@@ -109,8 +109,6 @@ func estimateClusterSize(k8sResources K8SResources) int {
 
 // SetTopWorkloads sets the top workloads by score
 func (sessionObj *OPASessionObj) SetTopWorkloads() {
-	count := 0
-
 	topWorkloadsSorted := make([]prioritization.PrioritizedResource, 0)
 
 	// create list in order to sort
@@ -151,7 +149,6 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 		}
 
 		topWorkloads = append(topWorkloads, wlObj)
-		count++
 	}
 
 	sessionObj.TopWorkloadsByScore = topWorkloads

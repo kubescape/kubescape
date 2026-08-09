@@ -20,7 +20,6 @@ import (
 type FileResourceHandler struct{}
 
 func NewFileResourceHandler() *FileResourceHandler {
-	k8sinterface.InitializeMapResourcesMock() // initialize the resource map
 	return &FileResourceHandler{}
 }
 
@@ -74,7 +73,8 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 	// build a resources map, based on the policies
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	resourceToQuery, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, defaultResourceResolver)
+	offlineResolver := newOfflineManifestResourceResolver(mappedResources)
+	resourceToQuery, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, offlineResolver)
 	k8sResources := resourceToQuery.ToK8sResourceMap()
 
 	// save only relevant resources
@@ -91,7 +91,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 	logger.L().StopSuccess("Done accessing local objects")
 	// save input resource in resource maps
-	addSingleResourceToResourceMaps(k8sResources, allResources, sessionObj.SingleResourceScan, defaultResourceResolver)
+	addSingleResourceToResourceMaps(k8sResources, allResources, sessionObj.SingleResourceScan, offlineResolver)
 
 	return k8sResources, allResources, externalResources, excludedRulesMap, nil
 }

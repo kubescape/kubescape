@@ -206,3 +206,8 @@ func (a *AWSECRAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Con
 
 	return infos, nil
 }
+
+// Destroy cleans up any persistent resources used by the adaptor.
+func (a *AWSECRAdaptor) Destroy() error {
+	return nil
+}

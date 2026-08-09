@@ -62,4 +62,7 @@ type IContainerImageVulnerabilityAdaptor interface {
 
 	// GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
 	GetImagesInformation(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageInformation, error)
+
+	// Destroy cleans up any persistent resources (like connections) used by the adaptor.
+	Destroy() error
 }

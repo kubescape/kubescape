@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -22,6 +23,119 @@ type resolvedResource struct {
 }
 
 type resourceResolver func(group, version, resource string) []resolvedResource
+
+type offlineManifestResource struct {
+	group      string
+	version    string
+	kind       string
+	namespaced bool
+}
+
+// newOfflineManifestResourceResolver builds the only discovery information a
+// file scan can trust: the identities declared by the manifests being scanned.
+// It deliberately does not consult the k8s-interface discovery snapshot.
+func newOfflineManifestResourceResolver(mappedResources map[string][]workloadinterface.IMetadata) resourceResolver {
+	resourcesByGVK := make(map[string]offlineManifestResource)
+	seenWorkloads := make(map[string]struct{})
+	for _, workloads := range mappedResources {
+		for _, workload := range workloads {
+			if workload == nil {
+				continue
+			}
+			if _, seen := seenWorkloads[workload.GetID()]; seen {
+				continue
+			}
+			seenWorkloads[workload.GetID()] = struct{}{}
+
+			group, version := k8sinterface.SplitApiVersion(workload.GetApiVersion())
+			kind := workload.GetKind()
+			if version == "" || kind == "" {
+				continue
+			}
+
+			key := k8sinterface.JoinResourceTriplets(group, version, strings.ToLower(kind))
+			entry := resourcesByGVK[key]
+			entry.group = group
+			entry.version = version
+			entry.kind = kind
+			entry.namespaced = entry.namespaced ||
+				workload.GetNamespace() != "" ||
+				k8sinterface.IsResourceInNamespaceScope(kind)
+			resourcesByGVK[key] = entry
+		}
+	}
+
+	resources := make([]offlineManifestResource, 0, len(resourcesByGVK))
+	for _, resource := range resourcesByGVK {
+		resources = append(resources, resource)
+	}
+	sort.Slice(resources, func(i, j int) bool {
+		left := k8sinterface.JoinResourceTriplets(resources[i].group, resources[i].version, resources[i].kind)
+		right := k8sinterface.JoinResourceTriplets(resources[j].group, resources[j].version, resources[j].kind)
+		return left < right
+	})
+
+	return func(group, version, resource string) []resolvedResource {
+		if version == "" || resource == "" {
+			return nil
+		}
+
+		var resolved []resolvedResource
+		for _, manifestResource := range resources {
+			if !matchesOfflineManifestValue(group, manifestResource.group) ||
+				!matchesOfflineManifestValue(version, manifestResource.version) ||
+				!matchesOfflineManifestResource(resource, manifestResource.kind) {
+				continue
+			}
+
+			aliases := offlineManifestResourceTriplets(manifestResource.group, manifestResource.version, manifestResource.kind)
+			primary := aliases[0]
+			if resource != "*" && !strings.EqualFold(resource, manifestResource.kind) {
+				requested := k8sinterface.JoinResourceTriplets(manifestResource.group, manifestResource.version, strings.ToLower(resource))
+				for _, alias := range aliases {
+					if alias == requested {
+						primary = alias
+						break
+					}
+				}
+			}
+
+			comparisons := make([]string, 0, len(aliases)-1)
+			for _, alias := range aliases {
+				if alias != primary {
+					comparisons = append(comparisons, alias)
+				}
+			}
+			namespaced := manifestResource.namespaced
+			resolved = append(resolved, resolvedResource{
+				groupVersionResourceTriplet: primary,
+				comparisonTriplets:          comparisons,
+				namespaced:                  &namespaced,
+			})
+		}
+		return resolved
+	}
+}
+
+func matchesOfflineManifestValue(policyValue, manifestValue string) bool {
+	if policyValue == "*" || policyValue == manifestValue {
+		return true
+	}
+	return policyValue == "core" && manifestValue == ""
+}
+
+func matchesOfflineManifestResource(policyResource, manifestKind string) bool {
+	if policyResource == "*" || strings.EqualFold(policyResource, manifestKind) {
+		return true
+	}
+	policyResource = strings.ToLower(policyResource)
+	for _, alias := range offlineManifestResourceAliases(manifestKind) {
+		if policyResource == alias {
+			return true
+		}
+	}
+	return false
+}
 
 func defaultResourceResolver(group, version, resource string) []resolvedResource {
 	if version == "" || resource == "" {

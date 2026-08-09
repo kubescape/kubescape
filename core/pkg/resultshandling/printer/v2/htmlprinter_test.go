@@ -3,6 +3,7 @@ package printer
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -108,4 +109,39 @@ func TestBuildResourceTableView_SkipsMissingResource(t *testing.T) {
 
 	view := buildResourceTableView(session)
 	assert.Empty(t, view, "missing resource should be skipped, not included with nil")
+}
+
+func TestHtmlPrinter_ActionPrint_RiskScoreRounding(t *testing.T) {
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "report.html")
+
+	hp := NewHtmlPrinter()
+	hp.SetWriter(ctx, out)
+
+	// Fixture counters (FailedResources: 2, AllResources: 100) are intentionally
+	// distinct from the expected risk score (1) so no other numeric cell renders 0 or 1.
+	session := cautils.NewOPASessionObjMock()
+	session.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+		"C-0001": reportsummary.ControlSummary{
+			ControlID:   "C-0001",
+			Name:        "Test Fractional Risk Control",
+			Score:       0.4,
+			ScoreFactor: 1.0,
+			StatusCounters: reportsummary.StatusCounters{
+				FailedResources: 2,
+				PassedResources: 98,
+			},
+		},
+	}
+
+	hp.ActionPrint(ctx, session, nil)
+	hp.CloseWriter()
+
+	content, err := os.ReadFile(out)
+	assert.NoError(t, err)
+	htmlContent := string(content)
+
+	// Fractional risk score 0.4% must round to 1% display, not 0%
+	assert.Contains(t, htmlContent, `<td class="controlRiskCell numericCell">1</td>`)
+	assert.NotContains(t, htmlContent, `<td class="controlRiskCell numericCell">0</td>`)
 }

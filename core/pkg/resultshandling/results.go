@@ -13,6 +13,8 @@ import (
 	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
 	"github.com/kubescape/kubescape/v3/core/pkg/vapreconcile"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
@@ -67,7 +69,53 @@ func (rh *ResultsHandler) GetReporter() reporter.IReport {
 
 // ToJson returns the results in the JSON format
 func (rh *ResultsHandler) ToJson() ([]byte, error) {
-	return json.Marshal(printerv2.FinalizeResults(rh.ScanData))
+	finalizedReport := printerv2.FinalizeResults(rh.ScanData)
+	enrichedReport := printerv2.ConvertToPostureReportWithSeverityLabelsAndCoverage(
+		finalizedReport,
+		rh.ScanData.LabelsToCopy,
+		rh.ScanData.AllResources,
+		&rh.ScanData.ScanCoverage,
+	)
+
+	// Keep the established programmatic JSON contract and override only the two
+	// control collections for which the output printers derive severity.
+	// Marshaling PostureReportWithSeverity directly would omit legacy top-level
+	// fields, rawResource, and nanoseconds from generationTime.
+	type summaryWithEnrichment struct {
+		reportsummary.SummaryDetails
+		Controls map[string]printerv2.ControlSummaryWithSeverity `json:"controls,omitempty"`
+	}
+	type resultWithEnrichment struct {
+		resourcesresults.Result
+		AssociatedControls []printerv2.ResourceAssociatedControlWithSeverity `json:"controls,omitempty"`
+	}
+
+	results := make([]resultWithEnrichment, len(finalizedReport.Results))
+	for i := range finalizedReport.Results {
+		results[i] = resultWithEnrichment{
+			Result:             finalizedReport.Results[i],
+			AssociatedControls: enrichedReport.Results[i].AssociatedControls,
+		}
+	}
+
+	output := struct {
+		*reporthandlingv2.PostureReport
+		SummaryDetails summaryWithEnrichment        `json:"summaryDetails,omitempty"`
+		Results        []resultWithEnrichment       `json:"results,omitempty"`
+		ResourceLabels map[string]map[string]string `json:"resourceLabels,omitempty"`
+		ScanCoverage   *cautils.ScanCoverage        `json:"scanCoverage,omitempty"`
+	}{
+		PostureReport: finalizedReport,
+		SummaryDetails: summaryWithEnrichment{
+			SummaryDetails: finalizedReport.SummaryDetails,
+			Controls:       enrichedReport.SummaryDetails.Controls,
+		},
+		Results:        results,
+		ResourceLabels: enrichedReport.ResourceLabels,
+		ScanCoverage:   enrichedReport.ScanCoverage,
+	}
+
+	return json.Marshal(&output)
 }
 
 // GetResults returns the results
@@ -127,6 +175,8 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 			logger.L().Ctx(ctx).Warning("Deprecated format version", helpers.String("run", "--format-version=v2"))
 		}
 		return printerv2.NewYamlPrinter()
+	case printer.CsvFormat:
+		return printerv2.NewCsvPrinter()
 	case printer.JunitResultFormat:
 		return printerv2.NewJunitPrinter(scanInfo.VerboseMode)
 	case printer.PrometheusFormat:
@@ -171,7 +221,7 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 	}
 
 	switch printFormat {
-	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat:
+	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat:
 		return false, nil
 	default:
 		return true, nil

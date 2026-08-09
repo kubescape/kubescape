@@ -3,8 +3,10 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
+	"github.com/anchore/grype/grype/presenter/models"
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	storagefake "github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -12,6 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 func toolResultText(t *testing.T, result *mcp.CallToolResult) string {
@@ -25,30 +29,44 @@ func toolResultText(t *testing.T, result *mcp.CallToolResult) string {
 
 func TestCallToolValidation(t *testing.T) {
 	ksServer := &KubescapeMcpserver{}
+
+	client := storagefake.NewClientset()
+	client.PrependReactor("list", "*", func(action clienttesting.Action) (handled bool, ret runtime.Object, err error) {
+		return true, nil, fmt.Errorf("simulated list error")
+	})
+	ksErrorServer := &KubescapeMcpserver{ksClient: client.SpdxV1beta1()}
+
 	tests := []struct {
 		name      string
+		server    *KubescapeMcpserver
 		tool      string
 		arguments map[string]any
 		wantError string
 	}{
-		{name: "unknown tool", tool: "missing", arguments: map[string]any{}, wantError: "unknown tool"},
-		{name: "vulnerability namespace type", tool: "list_vulnerability_manifests", arguments: map[string]any{"namespace": 42}, wantError: "namespace must be a string"},
-		{name: "CVE list requires manifest", tool: "list_vulnerabilities_in_manifest", arguments: map[string]any{}, wantError: "manifest_name is required"},
-		{name: "CVE list manifest type", tool: "list_vulnerabilities_in_manifest", arguments: map[string]any{"manifest_name": 42}, wantError: "manifest_name must be a string"},
-		{name: "CVE match requires ID", tool: "list_vulnerability_matches_for_cve", arguments: map[string]any{"manifest_name": "manifest"}, wantError: "cve_id is required"},
-		{name: "CVE match ID type", tool: "list_vulnerability_matches_for_cve", arguments: map[string]any{"manifest_name": "manifest", "cve_id": 42}, wantError: "cve_id must be a string"},
-		{name: "configuration namespace type", tool: "list_configuration_security_scan_manifests", arguments: map[string]any{"namespace": true}, wantError: "namespace must be a string"},
-		{name: "configuration get requires name", tool: "get_configuration_security_scan_manifest", arguments: map[string]any{}, wantError: "manifest_name is required"},
-		{name: "profile namespace type", tool: "list_container_profiles", arguments: map[string]any{"namespace": true}, wantError: "namespace must be a string"},
-		{name: "profile get requires name", tool: "get_container_profile", arguments: map[string]any{}, wantError: "profile_name is required"},
-		{name: "profile name type", tool: "get_container_profile", arguments: map[string]any{"profile_name": 42}, wantError: "profile_name must be a string"},
+		{name: "unknown tool", server: ksServer, tool: "missing", arguments: map[string]any{}, wantError: "unknown tool"},
+		{name: "vulnerability namespace type", server: ksServer, tool: "list_vulnerability_manifests", arguments: map[string]any{"namespace": 42}, wantError: "namespace must be a string"},
+		{name: "CVE list requires manifest", server: ksServer, tool: "list_vulnerabilities_in_manifest", arguments: map[string]any{}, wantError: "manifest_name is required"},
+		{name: "CVE list manifest type", server: ksServer, tool: "list_vulnerabilities_in_manifest", arguments: map[string]any{"manifest_name": 42}, wantError: "manifest_name must be a string"},
+		{name: "CVE match requires ID", server: ksServer, tool: "list_vulnerability_matches_for_cve", arguments: map[string]any{"manifest_name": "manifest"}, wantError: "cve_id is required"},
+		{name: "CVE match ID type", server: ksServer, tool: "list_vulnerability_matches_for_cve", arguments: map[string]any{"manifest_name": "manifest", "cve_id": 42}, wantError: "cve_id must be a string"},
+		{name: "configuration namespace type", server: ksServer, tool: "list_configuration_security_scan_manifests", arguments: map[string]any{"namespace": true}, wantError: "namespace must be a string"},
+		{name: "configuration get requires name", server: ksServer, tool: "get_configuration_security_scan_manifest", arguments: map[string]any{}, wantError: "manifest_name is required"},
+		{name: "profile namespace type", server: ksServer, tool: "list_container_profiles", arguments: map[string]any{"namespace": true}, wantError: "namespace must be a string"},
+		{name: "profile get requires name", server: ksServer, tool: "get_container_profile", arguments: map[string]any{}, wantError: "profile_name is required"},
+		{name: "profile name type", server: ksServer, tool: "get_container_profile", arguments: map[string]any{"profile_name": 42}, wantError: "profile_name must be a string"},
+
+		{name: "vulnerability list kubernetes error", server: ksErrorServer, tool: "list_vulnerability_manifests", arguments: map[string]any{}, wantError: "failed to list vulnerability manifests: simulated list error"},
+		{name: "configuration list kubernetes error", server: ksErrorServer, tool: "list_configuration_security_scan_manifests", arguments: map[string]any{}, wantError: "failed to list configuration scans: simulated list error"},
+		{name: "profile list kubernetes error", server: ksErrorServer, tool: "list_container_profiles", arguments: map[string]any{}, wantError: "failed to list container profiles: simulated list error"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result, err := ksServer.CallTool(context.Background(), test.tool, test.arguments)
-			require.ErrorContains(t, err, test.wantError)
-			assert.Nil(t, result)
+			result, err := test.server.CallTool(context.Background(), test.tool, test.arguments)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.True(t, result.IsError)
+			assert.Contains(t, toolResultText(t, result), test.wantError)
 		})
 	}
 }
@@ -211,4 +229,159 @@ func TestReadResourceWithFakeClient(t *testing.T) {
 			require.ElementsMatch(t, test.wantIDs, ids)
 		})
 	}
+}
+
+func TestScanContainerImageValidation(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+	tests := []struct {
+		name      string
+		arguments map[string]any
+		wantError string
+	}{
+		{name: "missing image_name", arguments: map[string]any{}, wantError: "image_name argument is required and cannot be empty"},
+		{name: "empty image_name", arguments: map[string]any{"image_name": "  "}, wantError: "image_name argument is required and cannot be empty"},
+		{name: "invalid image_name type", arguments: map[string]any{"image_name": 123}, wantError: "image_name argument must be a string"},
+		{name: "invalid username type", arguments: map[string]any{"image_name": "nginx:alpine", "username": true}, wantError: "username argument must be a string"},
+		{name: "invalid password type", arguments: map[string]any{"image_name": "nginx:alpine", "password": 456}, wantError: "password argument must be a string"},
+		{name: "invalid include_matches type", arguments: map[string]any{"image_name": "nginx:alpine", "include_matches": "true"}, wantError: "include_matches argument must be a boolean"},
+		{name: "invalid severity type", arguments: map[string]any{"image_name": "nginx:alpine", "severity": 123}, wantError: "severity argument must be a string"},
+		{name: "invalid severity value typo", arguments: map[string]any{"image_name": "nginx:alpine", "severity": "Hihg"}, wantError: "invalid severity \"Hihg\": must be one of Critical, High, Medium, Low, Negligible, Unknown"},
+		{name: "invalid severity value bogus", arguments: map[string]any{"image_name": "nginx:alpine", "severity": "bogus"}, wantError: "invalid severity \"bogus\": must be one of Critical, High, Medium, Low, Negligible, Unknown"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := ksServer.CallTool(context.Background(), "scan_container_image", test.arguments)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.True(t, result.IsError)
+			assert.Equal(t, test.wantError, toolResultText(t, result))
+		})
+	}
+}
+
+func TestValidateImageReference(t *testing.T) {
+	invalidImages := []struct {
+		name      string
+		imageName string
+	}{
+		{name: "dir prefix", imageName: "dir:/"},
+		{name: "file prefix", imageName: "file:/etc/passwd"},
+		{name: "sbom prefix", imageName: "sbom:/some/file"},
+		{name: "purl prefix", imageName: "purl:/etc/passwd"},
+		{name: "oci-dir prefix", imageName: "oci-dir:/path"},
+		{name: "docker-archive prefix", imageName: "docker-archive:/path"},
+		{name: "absolute path", imageName: "/etc/shadow"},
+		{name: "relative path dot slash", imageName: "./local-image"},
+		{name: "parent path dot dot slash", imageName: "../parent-dir"},
+		{name: "invalid characters", imageName: "invalid reference with spaces"},
+	}
+
+	for _, tt := range invalidImages {
+		t.Run("rejects "+tt.name, func(t *testing.T) {
+			err := validateImageReference(tt.imageName)
+			require.Error(t, err)
+		})
+	}
+
+	validImages := []string{
+		"nginx:alpine",
+		"gcr.io/distroless/static:latest",
+		"ubuntu@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	}
+
+	for _, img := range validImages {
+		t.Run("accepts "+img, func(t *testing.T) {
+			err := validateImageReference(img)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestProcessMatches(t *testing.T) {
+	// Import models for presenter matches
+	matches := []models.Match{
+		{
+			Vulnerability: models.Vulnerability{
+				VulnerabilityMetadata: models.VulnerabilityMetadata{
+					ID:       "CVE-2024-0001",
+					Severity: "High",
+				},
+			},
+		},
+		{
+			// Duplicate CVE match across different package location
+			Vulnerability: models.Vulnerability{
+				VulnerabilityMetadata: models.VulnerabilityMetadata{
+					ID:       "CVE-2024-0001",
+					Severity: "High",
+				},
+			},
+		},
+		{
+			// Lowercase severity
+			Vulnerability: models.Vulnerability{
+				VulnerabilityMetadata: models.VulnerabilityMetadata{
+					ID:       "CVE-2024-0002",
+					Severity: "critical",
+				},
+			},
+		},
+		{
+			// Missing severity
+			Vulnerability: models.Vulnerability{
+				VulnerabilityMetadata: models.VulnerabilityMetadata{
+					ID:       "CVE-2024-0003",
+					Severity: "",
+				},
+			},
+		},
+		{
+			// Low severity
+			Vulnerability: models.Vulnerability{
+				VulnerabilityMetadata: models.VulnerabilityMetadata{
+					ID:       "CVE-2024-0004",
+					Severity: "Low",
+				},
+			},
+		},
+	}
+
+	t.Run("default summary mode without matches array", func(t *testing.T) {
+		resp := processMatches("nginx:alpine", matches, false, "")
+
+		assert.Equal(t, "nginx:alpine", resp.Image)
+		assert.Equal(t, 4, resp.TotalUniqueCVEs)
+		assert.Nil(t, resp.Matches) // omitted when includeMatches is false
+
+		// Verify severity counts match total unique CVEs
+		totalCount := 0
+		for _, count := range resp.Severities {
+			totalCount += count
+		}
+		assert.Equal(t, resp.TotalUniqueCVEs, totalCount)
+
+		assert.Equal(t, 1, resp.Severities["High"])
+		assert.Equal(t, 1, resp.Severities["Critical"])
+		assert.Equal(t, 1, resp.Severities["Unknown"])
+		assert.Equal(t, 1, resp.Severities["Low"])
+	})
+
+	t.Run("include matches mode", func(t *testing.T) {
+		resp := processMatches("nginx:alpine", matches, true, "")
+
+		assert.Equal(t, 4, resp.TotalUniqueCVEs)
+		assert.Len(t, resp.Matches, 5) // all 5 raw matches included
+	})
+
+	t.Run("severity filtering", func(t *testing.T) {
+		resp := processMatches("nginx:alpine", matches, false, "High")
+
+		// Only Critical and High should remain (CVE-2024-0001 and CVE-2024-0002)
+		assert.Equal(t, 2, resp.TotalUniqueCVEs)
+		assert.Equal(t, 1, resp.Severities["High"])
+		assert.Equal(t, 1, resp.Severities["Critical"])
+		assert.Equal(t, 0, resp.Severities["Low"])
+		assert.Equal(t, 0, resp.Severities["Unknown"])
+	})
 }

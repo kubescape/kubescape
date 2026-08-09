@@ -222,6 +222,16 @@ func TestProperties(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:  "Score near 100 does not round to 100.00",
+			score: 99.996,
+			expectedProperty: []JUnitProperty{
+				{
+					Name:  "complianceScore",
+					Value: "99.99",
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -503,7 +513,8 @@ func TestJunitGoldenFile(t *testing.T) {
 
 	goldenPath := filepath.Join("testdata", "junit_golden.xml")
 	if *updateGolden {
-		require.NoError(t, os.WriteFile(goldenPath, got, 0o644))
+		//nolint:gosec // this is a test file writing a golden file
+		require.NoError(t, os.WriteFile(goldenPath, got, 0o600))
 	}
 
 	want, err := os.ReadFile(goldenPath)

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// ErrClusterConnection is returned when a cluster scan cannot reach the
+// Kubernetes API server. Callers embedding Kubescape.Scan can test for it with
+// errors.Is to distinguish an unreachable cluster from other scan failures.
+var ErrClusterConnection = errors.New("failed connecting to Kubernetes cluster")
+
 type componentInterfaces struct {
 	tenantConfig      cautils.ITenantConfig
 	resourceHandler   resourcehandler.IResourceHandler
@@ -41,7 +47,7 @@ type componentInterfaces struct {
 	outputPrinters    []printer.IPrinter
 }
 
-func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentInterfaces, error) {
+func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (componentInterfaces, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "setup interfaces")
 	defer span.End()
 
@@ -51,14 +57,16 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentIn
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
 		k8s = getKubernetesApi()
 		if k8s == nil {
-			logger.L().Ctx(ctx).Fatal("failed connecting to Kubernetes cluster")
-		} else {
-			k8sClient = k8s.KubernetesClient
+			// Return rather than terminate: Scan already propagates this to the
+			// caller, and the command layer still exits non-zero on it.
+			span.RecordError(ErrClusterConnection)
+			return componentInterfaces{}, ErrClusterConnection
 		}
+		k8sClient = k8s.KubernetesClient
 	}
 
 	// ================== setup tenant object ======================================
-	tenantConfig := cautils.GetTenantConfig(scanInfo.AccountID, scanInfo.AccessKey, k8sinterface.GetContextName(), scanInfo.CustomClusterName, getKubernetesApi())
+	tenantConfig := cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, k8sinterface.GetContextName(), scanInfo.CustomClusterName, getKubernetesApi())
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
@@ -74,7 +82,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentIn
 	// Skip version check in air-gapped mode (when keep-local flag is set)
 	if !scanInfo.Local {
 		v := versioncheck.NewIVersionCheckHandler(ctx)
-		_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", string(scanInfo.GetScanningContext()), k8sClient))
+		_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(policyIdentifiers), "", string(scanInfo.GetScanningContext()), k8sClient))
 	}
 
 	// ================== setup host scanner object ======================================
@@ -186,20 +194,23 @@ func fileExtForFormat(format string) string {
 		return printer.PdfOutputExt
 	case printer.PrometheusFormat:
 		return printer.PrometheusOutputExt
+	case printer.CsvFormat:
+		return printer.CsvOutputExt
 	default:
 		return printer.PrettyOutputExt
 	}
 }
 
-func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
+func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ks.Context(), "initialization")
 	logger.L().Start("Kubescape scanner initializing...")
 
 	// ===================== Initialization =====================
-	scanInfo.Init(ctxInit) // initialize scan info
+	policyIdentifiers = resolveDefaultScanAllPolicies(scanInfo, policyIdentifiers) // resolve the ScanAll expansion while Init can still cache its paths
+	scanInfo.Init(ctxInit, policyIdentifiers)                                      // initialize scan info
 	defer scanInfo.Cleanup()
 
-	interfaces, err := getInterfaces(ctxInit, scanInfo)
+	interfaces, err := getInterfaces(ctxInit, scanInfo, policyIdentifiers)
 	if err != nil {
 		spanInit.End()
 		return nil, err
@@ -226,23 +237,24 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	}
 
 	// set policy getter only after setting the customerGUID
-	scanInfo.PolicyGetter, err = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy, airGapped)
+	var getters cautils.Getters
+	getters.PolicyGetter, err = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy, airGapped)
 	if err != nil {
 		spanInit.End()
 		return nil, err
 	}
 	var controlInputsFromCache bool
-	scanInfo.ControlsInputsGetter, controlInputsFromCache, err = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped)
+	getters.ControlsInputsGetter, controlInputsFromCache, err = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped)
 	if err != nil {
 		spanInit.End()
 		return nil, err
 	}
-	scanInfo.ExceptionsGetter, err = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	getters.ExceptionsGetter, err = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
 	if err != nil {
 		spanInit.End()
 		return nil, err
 	}
-	scanInfo.AttackTracksGetter, err = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	getters.AttackTracksGetter, err = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
 	if err != nil {
 		spanInit.End()
 		return nil, err
@@ -250,7 +262,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {
-		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.PolicyGetter), apisv1.KindFramework)
+		policyIdentifiers = cautils.AppendPolicyIdentifiers(policyIdentifiers, listFrameworksNames(getters.PolicyGetter), apisv1.KindFramework)
 	}
 
 	logger.L().StopSuccess("Initialized scanner")
@@ -260,7 +272,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// ===================== policies =====================
 	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies")
 	policyHandler := policyhandler.NewPolicyHandler(interfaces.tenantConfig.GetContextName())
-	scanData, err := policyHandler.CollectPolicies(ctxPolicies, scanInfo.PolicyIdentifier, scanInfo)
+	scanData, err := policyHandler.CollectPolicies(ctxPolicies, policyIdentifiers, scanInfo, &getters)
 	if err != nil {
 		spanInit.End()
 		return resultsHandling, err
@@ -308,7 +320,10 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 		}
 
 		deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
-		var exceptionRecorder = newSecurityExceptionEventRecorder()
+		exceptionRecorder, shutdownRecorder := newSecurityExceptionEventRecorder()
+		if shutdownRecorder != nil {
+			defer shutdownRecorder()
+		}
 		reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, exceptionRecorder)
 		reportResults.ControlTimeout = scanInfo.ControlTimeout
 		if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
@@ -327,7 +342,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// ======================== prioritization ===================
 	if scanInfo.PrintAttackTree || isPrioritizationScanType(scanInfo.ScanType) {
 		_, spanPrioritization := otel.Tracer("").Start(ctxOpa, "prioritization")
-		if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, scanInfo.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
+		if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
 			logger.L().Ctx(ks.Context()).Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
 		} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 			return resultsHandling, fmt.Errorf("%w", err)
@@ -431,14 +446,37 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		return
 	}
 	defer svc.Close()
-
+	creds := registryCredentialsFromScanInfo(scanInfo)
+	var jobs []ImageScanJob
 	for img := range imagesToScan.Iter() {
-		logger.L().Start("Scanning", helpers.String("image", img))
-		if err := scanSingleImage(ctx, img, svc, resultsHandling, scanInfo.RegistryMapping, registryCredentialsFromScanInfo(scanInfo)); err != nil {
-			logger.L().StopError("failed to scan", helpers.String("image", img), helpers.Error(err))
+		jobs = append(jobs, ImageScanJob{
+			Image:               img,
+			RegistryCredentials: creds,
+			RegistryMapping:     scanInfo.RegistryMapping,
+		})
+	}
+
+	concurrency := scanInfo.ImageScanConcurrency
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+
+	logger.L().Info(fmt.Sprintf("Scanning %d images concurrently with %d workers...", len(jobs), concurrency))
+	orchestrator := NewImageScanOrchestrator(svc, concurrency)
+	results := orchestrator.ScanImages(ctx, jobs)
+
+	for _, res := range results {
+		if res.Error != nil {
+			logger.L().Error("failed to scan", helpers.String("image", res.Image), helpers.Error(res.Error))
 			continue
 		}
-		logger.L().StopSuccess("Done scanning", helpers.String("image", img))
+		if res.ScanData != nil {
+			resultsHandling.ImageScanData = append(resultsHandling.ImageScanData, *res.ScanData)
+			logger.L().Success("Done scanning", helpers.String("image", res.Image))
+		}
+	}
+	if agg := orchestrator.GetErrorAggregator(); agg != nil && agg.HasErrors() {
+		logger.L().Warning(agg.Error())
 	}
 }
 
@@ -513,12 +551,18 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	// producer does later — the invariant is enforced by ordering rather than by
 	// a comment in the resource handler.
 	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), clusterName)
-	var exceptionRecorder = newSecurityExceptionEventRecorder()
+	exceptionRecorder, shutdownRecorder := newSecurityExceptionEventRecorder()
+	if shutdownRecorder != nil {
+		defer shutdownRecorder()
+	}
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, clusterName, excludedNamespaces, includeNamespaces, enableRegoPrint, exceptionRecorder)
 	reportResults.ControlTimeout = controlTimeout
 
 	// Stream resources in batches
-	batchChan, errChan, expectedNamespaceBatches, err := resourceHandler.StreamResourcesBatches(ctx, scanData, scanInfo)
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	batchChan, errChan, expectedNamespaceBatches, err := resourceHandler.StreamResourcesBatches(streamCtx, scanData, scanInfo)
 	if err != nil {
 		return fmt.Errorf("failed to start resource streaming: %w", err)
 	}
@@ -528,7 +572,7 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	reportResults.SetInitialResourceCount(estimatedClusterSize)
 
 	// Process batches with streaming
-	if err := reportResults.ProcessWithStreaming(ctx, batchChan, errChan, cautils.NewProgressHandler(""), expectedNamespaceBatches); err != nil {
+	if err := reportResults.ProcessWithStreaming(streamCtx, batchChan, errChan, cautils.NewProgressHandler(""), expectedNamespaceBatches); err != nil {
 		return fmt.Errorf("failed to process rules with streaming: %w", err)
 	}
 

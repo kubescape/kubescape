@@ -8,7 +8,7 @@ import (
 )
 
 func (ks *Kubescape) SetCachedConfig(setConfig *metav1.SetConfig) error {
-	tenant := cautils.GetTenantConfig("", "", "", "", nil)
+	tenant := cautils.GetTenantConfig(ks.Context(), "", "", "", "", nil)
 
 	if setConfig.Account != "" {
 		tenant.GetConfigObj().AccountID = setConfig.Account
@@ -29,13 +29,13 @@ func (ks *Kubescape) SetCachedConfig(setConfig *metav1.SetConfig) error {
 
 // View cached configurations
 func (ks *Kubescape) ViewCachedConfig(viewConfig *metav1.ViewConfig) error {
-	tenant := cautils.GetTenantConfig("", "", "", "", getKubernetesApi()) // change k8sinterface
+	tenant := cautils.GetTenantConfig(ks.Context(), "", "", "", "", getKubernetesApi()) // change k8sinterface
 	fmt.Fprintf(viewConfig.Writer, "%s\n", tenant.GetConfigObj().Config())
 	return nil
 }
 
 func (ks *Kubescape) DeleteCachedConfig(deleteConfig *metav1.DeleteConfig) error {
 
-	tenant := cautils.GetTenantConfig("", "", "", "", nil) // change k8sinterface
+	tenant := cautils.GetTenantConfig(ks.Context(), "", "", "", "", nil) // change k8sinterface
 	return tenant.DeleteCachedConfig(ks.Context())
 }

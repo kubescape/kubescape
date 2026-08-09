@@ -145,3 +145,98 @@ func Test_getWorkloadFromScanObject(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, workload)
 }
+
+func Test_getGroupNVersion(t *testing.T) {
+	tests := []struct {
+		name        string
+		apiVersion  string
+		wantGroup   string
+		wantVersion string
+	}{
+		{
+			name:        "empty apiVersion",
+			apiVersion:  "",
+			wantGroup:   "",
+			wantVersion: "",
+		},
+		{
+			name:        "core api group (no version slash)",
+			apiVersion:  "v1",
+			wantGroup:   "",
+			wantVersion: "v1",
+		},
+		{
+			name:        "standard api group",
+			apiVersion:  "apps/v1",
+			wantGroup:   "apps",
+			wantVersion: "v1",
+		},
+		{
+			name:        "extended api group",
+			apiVersion:  "rbac.authorization.k8s.io/v1beta1",
+			wantGroup:   "rbac.authorization.k8s.io",
+			wantVersion: "v1beta1",
+		},
+		{
+			name:        "malformed apiVersion with extra slashes",
+			apiVersion:  "group/version/extra",
+			wantGroup:   "group",
+			wantVersion: "version",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			group, version := getGroupNVersion(tt.apiVersion)
+			assert.Equal(t, tt.wantGroup, group)
+			assert.Equal(t, tt.wantVersion, version)
+		})
+	}
+}
+
+func TestInsertControls(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+
+	makeControl := func(id string) reporthandling.Control {
+		return reporthandling.Control{
+			PortalBase: *armotypes.MockPortalBase("aaaaaaaa-bbbb-cccc-dddd-000000000001", id, nil),
+			ControlID:  id,
+		}
+	}
+
+	t.Run("first insert creates entry", func(t *testing.T) {
+		m := map[string][]string{}
+		insertControls("KubeletConfiguration", m, makeControl("C-0001"))
+		assert.NotEmpty(t, m, "insertControls must write at least one resource key")
+		for _, ids := range m {
+			assert.Contains(t, ids, "C-0001")
+		}
+	})
+
+	t.Run("duplicate insert is deduped", func(t *testing.T) {
+		m := map[string][]string{}
+		insertControls("KubeletConfiguration", m, makeControl("C-0001"))
+		insertControls("KubeletConfiguration", m, makeControl("C-0001"))
+		assert.NotEmpty(t, m, "insertControls must write at least one resource key")
+		for _, ids := range m {
+			count := 0
+			for _, id := range ids {
+				if id == "C-0001" {
+					count++
+				}
+			}
+			assert.Equal(t, 1, count, "control ID must appear exactly once")
+		}
+	})
+
+	t.Run("distinct controls both appear", func(t *testing.T) {
+		m := map[string][]string{}
+		insertControls("KubeletConfiguration", m, makeControl("C-0001"))
+		insertControls("KubeletConfiguration", m, makeControl("C-0002"))
+		assert.NotEmpty(t, m, "insertControls must write at least one resource key")
+		for _, ids := range m {
+			assert.Contains(t, ids, "C-0001")
+			assert.Contains(t, ids, "C-0002")
+		}
+	})
+}

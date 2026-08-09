@@ -133,7 +133,7 @@ func TestProcessWithStreaming_EndToEndParity(t *testing.T) {
 
 	// Eager path: CollectResources → ProcessRulesListener, as scan.go does for
 	// non-streaming scans.
-	eagerSession := cautils.NewOPASessionObj(context.Background(), frameworks, nil, scanInfo)
+	eagerSession := cautils.NewOPASessionObj(context.Background(), frameworks, nil, scanInfo, nil)
 	eagerSession.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
 	require.NoError(t, resourcehandler.CollectResources(context.Background(), handler, eagerSession, scanInfo))
 
@@ -144,7 +144,7 @@ func TestProcessWithStreaming_EndToEndParity(t *testing.T) {
 	// Streaming path: StreamResourcesBatches → ProcessWithStreaming, as scan.go
 	// does for streaming scans. NewOPAProcessor runs against the live session
 	// the producer goroutine fills — the seam this test exists to cover.
-	streamingSession := cautils.NewOPASessionObj(context.Background(), frameworks, nil, scanInfo)
+	streamingSession := cautils.NewOPASessionObj(context.Background(), frameworks, nil, scanInfo, nil)
 	streamingSession.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
 
 	batchChan, errChan, expectedBatches, err := handler.StreamResourcesBatches(context.Background(), streamingSession, scanInfo)
@@ -380,7 +380,7 @@ func TestProcessWithStreaming_PopulatesCELNamespaceIndex(t *testing.T) {
 	node := mustWorkload(t, `{"apiVersion":"v1","kind":"Node","metadata":{"name":"node-1"}}`)
 
 	scanInfo := &cautils.ScanInfo{}
-	session := cautils.NewOPASessionObj(context.Background(), parityFrameworks(true), nil, scanInfo)
+	session := cautils.NewOPASessionObj(context.Background(), parityFrameworks(true), nil, scanInfo, nil)
 	session.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
 
 	opap := NewOPAProcessor(session, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)

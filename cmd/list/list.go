@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/core"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -56,15 +55,19 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 
 			listPolicies.Target = args[0]
 
-			if err := ks.List(&listPolicies); err != nil {
-				logger.L().Fatal(err.Error())
+			result, err := ks.List(&listPolicies)
+			if err != nil {
+				return err
+			}
+			if err := core.PrintListResult(ks.Context(), result, listPolicies.Target, listPolicies.Format); err != nil {
+				return err
 			}
 			return nil
 		},
 	}
 	listCmd.PersistentFlags().StringVarP(&listPolicies.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
 	listCmd.PersistentFlags().StringVarP(&listPolicies.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
-	listCmd.PersistentFlags().StringVar(&listPolicies.Format, "format", "pretty-print", "output format. supported: 'pretty-print'/'json'")
+	listCmd.PersistentFlags().StringVarP(&listPolicies.Format, "format", "f", "pretty-print", "output format. supported: 'pretty-print'/'json'/'yaml'")
 	listCmd.PersistentFlags().MarkDeprecated("id", "Control ID's are included in list outputs")
 
 	return listCmd

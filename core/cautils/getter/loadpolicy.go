@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -252,7 +253,7 @@ func (lp *LoadPolicy) ListControls() ([]string, error) {
 // GetExceptions retrieves configured exceptions.
 //
 // NOTE: the cluster parameter is not used at this moment.
-func (lp *LoadPolicy) GetExceptions(_ /* clusterName */ string) ([]armotypes.PostureExceptionPolicy, error) {
+func (lp *LoadPolicy) GetExceptions(_ context.Context, _ /* clusterName */ string) ([]armotypes.PostureExceptionPolicy, error) {
 	// NOTE: this assumes that the first path contains a valid exceptions descriptor
 	filePath := lp.filePath()
 
@@ -270,7 +271,7 @@ func (lp *LoadPolicy) GetExceptions(_ /* clusterName */ string) ([]armotypes.Pos
 // GetControlsInputs retrieves the map of control configs.
 //
 // NOTE: the cluster parameter is not used at this moment.
-func (lp *LoadPolicy) GetControlsInputs(_ /* clusterName */ string) (map[string][]string, error) {
+func (lp *LoadPolicy) GetControlsInputs(_ context.Context, _ /* clusterName */ string) (map[string][]string, error) {
 	// NOTE: this assumes that only the first path contains a valid control inputs descriptor
 	filePath := lp.filePath()
 	fileName := filepath.Base(filePath)

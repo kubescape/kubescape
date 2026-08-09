@@ -31,7 +31,7 @@ func TestCancelScan_UnblocksBlockedScan_ReturnsErrorType(t *testing.T) {
 
 	scanStarted := make(chan struct{})
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		close(scanStarted)
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -83,7 +83,7 @@ func TestCancelScan_MarksNotBusy(t *testing.T) {
 	scanStarted := make(chan struct{})
 	releaseScan := make(chan struct{})
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		close(scanStarted)
 		<-ctx.Done()
 		<-releaseScan
@@ -161,7 +161,7 @@ func TestCancelScan_EmptyID_CancelsLatest(t *testing.T) {
 
 	scanStarted := make(chan struct{})
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		close(scanStarted)
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -221,7 +221,7 @@ func TestCancelScan_SkipsCancelledQueuedRequest_UnblocksWaitingCaller(t *testing
 
 	firstStarted := make(chan struct{})
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		close(firstStarted)
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -305,7 +305,7 @@ func TestCancelScan_WaitFalse_NoFailedArtifactLeftBehind(t *testing.T) {
 
 	scanStarted := make(chan struct{})
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, scanID string, _ bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, scanID string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		close(scanStarted)
 		<-ctx.Done()
 		return nil, writeScanErrorToFile(ctx.Err(), scanID)

@@ -110,7 +110,7 @@
           <td class="controlNameCell">{{ $control.Name }}</td>
           <td class="controlRiskCell numericCell">{{ $control.StatusCounters.FailedResources }}</td>
           <td class="controlRiskCell numericCell">{{ sum $control.StatusCounters.SkippedResources $control.StatusCounters.FailedResources $control.StatusCounters.PassedResources }}</td>
-          <td class="controlRiskCell numericCell">{{ float32ToInt $control.Score }}</td>
+          <td class="controlRiskCell numericCell">{{ riskScoreToInt $control.Score }}</td>
         </tr>
       </tr>
       {{ end }}

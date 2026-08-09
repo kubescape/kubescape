@@ -73,11 +73,8 @@ func (tcm *TenantConfigMock) GetAccessKey() string {
 }
 
 func TestDisplayMessage(t *testing.T) {
-	t.Parallel()
 
 	t.Run("should display an empty message", func(t *testing.T) {
-		t.Parallel()
-
 		reporter := NewReportEventReceiver(
 			&TenantConfigMock{
 				clusterName: "test",
@@ -101,8 +98,6 @@ func TestDisplayMessage(t *testing.T) {
 	})
 
 	t.Run("should display a non-empty message", func(t *testing.T) {
-		t.Parallel()
-
 		reporter := NewReportEventReceiver(
 			&TenantConfigMock{
 				clusterName: "test",
@@ -131,7 +126,6 @@ func TestDisplayMessage(t *testing.T) {
 }
 
 func TestPrepareReport(t *testing.T) {
-	t.Parallel()
 
 	t.Run("should keep the original scanning target it received and not mutate it", func(t *testing.T) {
 		testCases := []struct {
@@ -300,8 +294,6 @@ func TestSubmit(t *testing.T) {
 }
 
 func TestSetters(t *testing.T) {
-	t.Parallel()
-
 	pickString := func() string {
 		return strconv.Itoa(rand.Intn(10000)) //nolint:gosec
 	}
