@@ -529,6 +529,16 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 		return nil, fmt.Errorf("resource not found in Kubernetes discovery: %s", getReadableID(resource))
 	}
 	apiGroup, apiVersion, resourceName := k8sinterface.StringToResourceGroup(resolved[0].groupVersionResourceTriplet)
+	if apiGroup == "" && resourceName == "secrets" {
+		// This is resolved from cluster discovery (not the client-supplied kind
+		// string), so it can't be bypassed by casing/aliasing tricks. Single
+		// resource scan is reachable from the unauthenticated httphandler
+		// POST /v1/scan endpoint with an attacker-chosen name/namespace; letting
+		// it live-fetch Secret objects would turn it into an unauthenticated
+		// arbitrary-secret-read primitive, since the fetched object's data is
+		// embedded verbatim in the scan report.
+		return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s", getReadableID(resource))
+	}
 	gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resourceName}
 
 	fieldSelectors := getNameFieldSelectorString(resource.GetName(), FieldSelectorsEqualsOperator)

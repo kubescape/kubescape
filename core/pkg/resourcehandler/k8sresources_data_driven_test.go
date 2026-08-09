@@ -89,6 +89,23 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 			request:   scanObject("", "UnknownKind", "shop", "object"),
 			wantError: "apiVersion is required to resolve non-built-in resource",
 		},
+		{
+			// Regression test: single resource scan is reachable from the
+			// unauthenticated httphandler POST /v1/scan endpoint with an
+			// attacker-chosen name/namespace. It must never live-fetch Secret
+			// objects, since the fetched object (including its data field) is
+			// embedded verbatim in the scan report returned to the caller.
+			name:      "secret is rejected even when it exists",
+			request:   scanObject("v1", "Secret", "shop", "db-creds"),
+			objects:   []runtime.Object{unstructuredResource("v1", "Secret", "shop", "db-creds")},
+			wantError: "scanning Secret resources via single resource scan is not supported",
+		},
+		{
+			name:      "secret is rejected via the legacy no-apiVersion path",
+			request:   scanObject("", "Secret", "shop", "db-creds"),
+			objects:   []runtime.Object{unstructuredResource("v1", "Secret", "shop", "db-creds")},
+			wantError: "scanning Secret resources via single resource scan is not supported",
+		},
 	}
 
 	for _, test := range tests {
