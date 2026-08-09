@@ -300,92 +300,88 @@ func TestGetConfigMapNamespace(t *testing.T) {
 	}
 }
 
-const (
-	anyString       string = "anyString"
-	shouldNotUpdate string = "shouldNotUpdate"
-	shouldUpdate    string = "shouldUpdate"
-)
-
-func checkIsUpdateCorrectly(t *testing.T, beforeField string, afterField string) {
-	switch beforeField {
-	case anyString:
-		assert.Equal(t, anyString, afterField)
-	case "":
-		assert.Equal(t, shouldUpdate, afterField)
-	}
-}
-
 func TestUpdateEmptyFields(t *testing.T) {
-
 	tests := []struct {
-		inCo  *ConfigObj
-		outCo *ConfigObj
+		name     string
+		current  ConfigObj
+		fallback *ConfigObj
+		want     ConfigObj
 	}{
 		{
-			outCo: &ConfigObj{
-				AccountID:      "",
-				ClusterName:    "",
-				CloudReportURL: "",
-				CloudAPIURL:    "",
+			name: "all empty fields are populated",
+			fallback: &ConfigObj{
+				AccountID:      "fallback-account",
+				ClusterName:    "fallback-cluster",
+				CloudReportURL: "https://fallback-report.example.com",
+				CloudAPIURL:    "https://fallback-api.example.com",
 			},
-			inCo: &ConfigObj{
-				AccountID:      shouldUpdate,
-				ClusterName:    shouldUpdate,
-				CloudReportURL: shouldUpdate,
-				CloudAPIURL:    shouldUpdate,
-			},
-		},
-		{
-			outCo: &ConfigObj{
-				AccountID:      anyString,
-				ClusterName:    "",
-				CloudReportURL: "",
-				CloudAPIURL:    "",
-			},
-			inCo: &ConfigObj{
-				AccountID:      shouldNotUpdate,
-				ClusterName:    shouldUpdate,
-				CloudReportURL: shouldUpdate,
-				CloudAPIURL:    shouldUpdate,
+			want: ConfigObj{
+				AccountID:      "fallback-account",
+				ClusterName:    "fallback-cluster",
+				CloudReportURL: "https://fallback-report.example.com",
+				CloudAPIURL:    "https://fallback-api.example.com",
 			},
 		},
 		{
-			outCo: &ConfigObj{
-				AccountID:      "",
-				ClusterName:    anyString,
-				CloudReportURL: anyString,
-				CloudAPIURL:    anyString,
+			name: "existing values keep precedence",
+			current: ConfigObj{
+				AccountID:      "cached-account",
+				ClusterName:    "cached-cluster",
+				CloudReportURL: "https://cached-report.example.com",
+				CloudAPIURL:    "https://cached-api.example.com",
 			},
-			inCo: &ConfigObj{
-				AccountID:      shouldUpdate,
-				ClusterName:    shouldNotUpdate,
-				CloudReportURL: shouldNotUpdate,
-				CloudAPIURL:    shouldNotUpdate,
+			fallback: &ConfigObj{
+				AccountID:      "fallback-account",
+				ClusterName:    "fallback-cluster",
+				CloudReportURL: "https://fallback-report.example.com",
+				CloudAPIURL:    "https://fallback-api.example.com",
+			},
+			want: ConfigObj{
+				AccountID:      "cached-account",
+				ClusterName:    "cached-cluster",
+				CloudReportURL: "https://cached-report.example.com",
+				CloudAPIURL:    "https://cached-api.example.com",
 			},
 		},
 		{
-			outCo: &ConfigObj{
-				AccountID:      anyString,
-				ClusterName:    anyString,
-				CloudReportURL: "",
-				CloudAPIURL:    anyString,
+			name: "only empty fields are populated",
+			current: ConfigObj{
+				AccountID:   "cached-account",
+				CloudAPIURL: "https://cached-api.example.com",
 			},
-			inCo: &ConfigObj{
-				AccountID:      shouldNotUpdate,
-				ClusterName:    shouldNotUpdate,
-				CloudReportURL: shouldUpdate,
-				CloudAPIURL:    shouldNotUpdate,
+			fallback: &ConfigObj{
+				AccountID:      "fallback-account",
+				ClusterName:    "fallback-cluster",
+				CloudReportURL: "https://fallback-report.example.com",
+				CloudAPIURL:    "https://fallback-api.example.com",
 			},
+			want: ConfigObj{
+				AccountID:      "cached-account",
+				ClusterName:    "fallback-cluster",
+				CloudReportURL: "https://fallback-report.example.com",
+				CloudAPIURL:    "https://cached-api.example.com",
+			},
+		},
+		{
+			name:     "empty fallback leaves current values unchanged",
+			current:  ConfigObj{AccountID: "cached-account", ClusterName: "cached-cluster"},
+			fallback: &ConfigObj{},
+			want:     ConfigObj{AccountID: "cached-account", ClusterName: "cached-cluster"},
+		},
+		{
+			name:     "nil fallback leaves current values unchanged",
+			current:  ConfigObj{AccountID: "cached-account", CloudAPIURL: "https://cached-api.example.com"},
+			fallback: nil,
+			want:     ConfigObj{AccountID: "cached-account", CloudAPIURL: "https://cached-api.example.com"},
 		},
 	}
 
-	for i := range tests {
-		beforeChangesOutCO := tests[i].outCo
-		tests[i].outCo.updateEmptyFields(tests[i].inCo)
-		checkIsUpdateCorrectly(t, beforeChangesOutCO.AccountID, tests[i].outCo.AccountID)
-		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudAPIURL, tests[i].outCo.CloudAPIURL)
-		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudReportURL, tests[i].outCo.CloudReportURL)
-		checkIsUpdateCorrectly(t, beforeChangesOutCO.ClusterName, tests[i].outCo.ClusterName)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			current := test.current
+			require.NoError(t, current.updateEmptyFields(test.fallback))
+			assert.Equal(t, test.want, current)
+		})
 	}
 }
 
