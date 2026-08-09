@@ -1,11 +1,16 @@
 package vapreconcile
 
 import (
+	"context"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	discoveryfake "k8s.io/client-go/discovery/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func makeVAP(name, controlID string) unstructured.Unstructured {
@@ -174,4 +179,19 @@ func TestEnrichSummary_NoMatchingControl(t *testing.T) {
 		EnrichSummary(controls, index)
 	})
 	assert.Nil(t, controls["C-0041"].VAPEnforcement)
+}
+
+func TestCollect_GracefulSkip(t *testing.T) {
+	discovery := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	discovery.Resources = []*metav1.APIResourceList{} // No resources
+
+	k8s := &k8sinterface.KubernetesApi{
+		DiscoveryClient: discovery,
+	}
+
+	vaps, vapbs, err := Collect(context.Background(), k8s)
+
+	assert.NoError(t, err)
+	assert.Nil(t, vaps)
+	assert.Nil(t, vapbs)
 }
