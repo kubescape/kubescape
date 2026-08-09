@@ -106,20 +106,17 @@ func TestTryParseScanReport(t *testing.T) {
 }
 
 // TestResolveBuildkitOpts guards against a regression where bkOpts.Addr was
-// never populated from the --address/-a flag anywhere in this codebase, so
-// buildkit.NewClient always saw an empty Addr and silently fell back to its
-// own auto-detection (docker driver, then buildx, then a hardcoded default
-// socket) instead of connecting to the buildkitd endpoint the user asked
-// for via --address.
+// never populated from the --address flag, so buildkit.NewClient always saw
+// an empty Addr and silently ignored the endpoint the user asked for.
 func TestResolveBuildkitOpts(t *testing.T) {
 	t.Run("fills Addr from buildkitAddr when unset", func(t *testing.T) {
 		got := resolveBuildkitOpts("tcp://remote-buildkit:1234", buildkit.Opts{})
 		assert.Equal(t, "tcp://remote-buildkit:1234", got.Addr)
 	})
 
-	t.Run("default flag value is not silently dropped", func(t *testing.T) {
-		got := resolveBuildkitOpts("unix:///run/buildkit/buildkitd.sock", buildkit.Opts{})
-		assert.Equal(t, "unix:///run/buildkit/buildkitd.sock", got.Addr)
+	t.Run("empty buildkitAddr (the flag's default) leaves Addr empty for auto-detection", func(t *testing.T) {
+		got := resolveBuildkitOpts("", buildkit.Opts{})
+		assert.Equal(t, "", got.Addr)
 	})
 
 	t.Run("does not override an already-set Addr", func(t *testing.T) {

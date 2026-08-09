@@ -44,7 +44,7 @@ The patch command can be run in 2 ways:
 | Flag           | Description                                            | Required | Default                             |
 | -------------- | ------------------------------------------------------ | -------- | ----------------------------------- |
 | -i, --image    | Image name to be patched (should be in canonical form) | Yes      |                                     |
-| -a, --addr     | Address of the buildkitd service                       | No       | unix:///run/buildkit/buildkitd.sock |
+| -a, --address  | Address of the buildkitd service                       | No       | none (auto-detects local docker daemon, falling back to unix:///run/buildkit/buildkitd.sock) |
 | -t, --tag      | Tag of the resultant patched image                     | No       | image_name-patched                  |
 | --timeout      | Timeout for the patching process                       | No       | 5m                                  |
 | --ignore-errors| Ignore errors during patching                          | No       | false                               |
