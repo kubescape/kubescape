@@ -107,6 +107,16 @@ func TestResolveClusterContextNameRejectsInvalidSelection(t *testing.T) {
 		require.ErrorContains(t, err, `context "context-missing" does not exist`)
 	})
 
+	t.Run("missing override in default kubeconfig", func(t *testing.T) {
+		defaultPath := writeScanInfoKubeconfig(t, "context-a")
+		t.Setenv(clientcmd.RecommendedConfigPathEnvVar, defaultPath)
+		scanInfo := &ScanInfo{}
+		scanInfo.SetKubeconfigSelection("", "context-missing")
+
+		err := scanInfo.ResolveClusterContextName()
+		require.EqualError(t, err, `context "context-missing" does not exist in kubeconfig`)
+	})
+
 	t.Run("missing current context", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "config")
 		require.NoError(t, os.WriteFile(path, []byte(`apiVersion: v1
@@ -126,6 +136,28 @@ contexts:
 		err := scanInfo.ResolveClusterContextName()
 		require.ErrorContains(t, err, `context "" does not exist`)
 	})
+}
+
+func TestResolveClusterContextNameUsesDefaultLoadingRulesForOverride(t *testing.T) {
+	defaultPath := writeScanInfoMultiContextKubeconfig(t)
+	t.Setenv(clientcmd.RecommendedConfigPathEnvVar, defaultPath)
+	scanInfo := &ScanInfo{}
+	scanInfo.SetKubeconfigSelection("", "context-selected")
+
+	require.NoError(t, scanInfo.ResolveClusterContextName())
+	assert.True(t, scanInfo.contextResolved)
+	assert.Equal(t, "context-selected", scanInfo.GetClusterContextName())
+}
+
+func TestResolveClusterContextNameSkipsDefaultLoadingWithoutSelection(t *testing.T) {
+	invalidPath := filepath.Join(t.TempDir(), "invalid-config")
+	require.NoError(t, os.WriteFile(invalidPath, []byte("not: [valid"), 0o600))
+	t.Setenv(clientcmd.RecommendedConfigPathEnvVar, invalidPath)
+	scanInfo := &ScanInfo{}
+	scanInfo.SetKubeconfigSelection("", "")
+
+	require.NoError(t, scanInfo.ResolveClusterContextName())
+	assert.False(t, scanInfo.contextResolved)
 }
 
 func writeScanInfoKubeconfig(t *testing.T, contextName string) string {
@@ -148,6 +180,37 @@ users:
   user:
     token: test
 `, contextName)
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o600))
+	return path
+}
+
+func writeScanInfoMultiContextKubeconfig(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config")
+	contents := `apiVersion: v1
+kind: Config
+current-context: context-current
+clusters:
+- name: cluster-current
+  cluster:
+    server: https://current.example
+- name: cluster-selected
+  cluster:
+    server: https://selected.example
+contexts:
+- name: context-current
+  context:
+    cluster: cluster-current
+    user: user
+- name: context-selected
+  context:
+    cluster: cluster-selected
+    user: user
+users:
+- name: user
+  user:
+    token: test
+`
 	require.NoError(t, os.WriteFile(path, []byte(contents), 0o600))
 	return path
 }

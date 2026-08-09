@@ -62,6 +62,27 @@ func TestGetScanCommand_CapturesKubeContextOverride(t *testing.T) {
 	assert.Equal(t, "context-selected", mockKubescape.scanInfo.GetClusterContextName())
 }
 
+func TestGetScanCommand_CapturesKubeContextOverrideWithDefaultKubeconfig(t *testing.T) {
+	defaultPath := writeScanMultiContextKubeconfig(t)
+	t.Setenv("KUBECONFIG", defaultPath)
+	restoreKubeconfigFlag(t)
+
+	mockKubescape := &imageScanCaptureKubescape{}
+	rootCmd := &cobra.Command{Use: "kubescape"}
+	rootCmd.PersistentFlags().String("kube-context", "", "")
+	rootCmd.AddCommand(GetScanCommand(mockKubescape))
+	rootCmd.SetArgs([]string{
+		"scan", "image",
+		"--kube-context", "context-selected",
+		"nginx:latest",
+	})
+	require.NoError(t, rootCmd.Execute())
+	require.NotNil(t, mockKubescape.scanInfo)
+
+	require.NoError(t, mockKubescape.scanInfo.ResolveClusterContextName())
+	assert.Equal(t, "context-selected", mockKubescape.scanInfo.GetClusterContextName())
+}
+
 func restoreKubeconfigFlag(t *testing.T) {
 	t.Helper()
 	kubeconfigFlag := flag.Lookup(controllerconfig.KubeconfigFlagName)

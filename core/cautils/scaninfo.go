@@ -435,18 +435,26 @@ func (scanInfo *ScanInfo) SetKubeconfigSelection(path, contextName string) {
 	scanInfo.contextResolved = false
 }
 
-// ResolveClusterContextName resolves the context from the same explicit
-// kubeconfig selected for the Kubernetes REST client. When no explicit path is
-// configured, the existing k8s-interface loading and in-cluster behavior is
-// retained.
+// ResolveClusterContextName resolves the context from the same kubeconfig
+// loading rules selected for the Kubernetes REST client. When neither an
+// explicit path nor a context override is configured, the existing
+// k8s-interface loading and in-cluster behavior is retained.
 func (scanInfo *ScanInfo) ResolveClusterContextName() error {
-	if scanInfo.kubeconfigPath == "" {
+	if scanInfo.kubeconfigPath == "" && scanInfo.kubeContextOverride == "" {
 		return nil
 	}
 
-	kubeconfig, err := clientcmd.LoadFromFile(scanInfo.kubeconfigPath)
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if scanInfo.kubeconfigPath != "" {
+		loadingRules.ExplicitPath = scanInfo.kubeconfigPath
+	}
+
+	kubeconfig, err := loadingRules.Load()
 	if err != nil {
-		return fmt.Errorf("failed to load kubeconfig %q: %w", scanInfo.kubeconfigPath, err)
+		if scanInfo.kubeconfigPath != "" {
+			return fmt.Errorf("failed to load kubeconfig %q: %w", scanInfo.kubeconfigPath, err)
+		}
+		return fmt.Errorf("failed to load kubeconfig: %w", err)
 	}
 
 	contextName := kubeconfig.CurrentContext
@@ -454,7 +462,10 @@ func (scanInfo *ScanInfo) ResolveClusterContextName() error {
 		contextName = scanInfo.kubeContextOverride
 	}
 	if _, ok := kubeconfig.Contexts[contextName]; !ok {
-		return fmt.Errorf("context %q does not exist in kubeconfig %q", contextName, scanInfo.kubeconfigPath)
+		if scanInfo.kubeconfigPath != "" {
+			return fmt.Errorf("context %q does not exist in kubeconfig %q", contextName, scanInfo.kubeconfigPath)
+		}
+		return fmt.Errorf("context %q does not exist in kubeconfig", contextName)
 	}
 
 	scanInfo.clusterContextName = contextName
@@ -462,9 +473,9 @@ func (scanInfo *ScanInfo) ResolveClusterContextName() error {
 	return nil
 }
 
-// GetClusterContextName returns the context resolved from an explicit CLI
-// kubeconfig, falling back to k8s-interface for KUBECONFIG, default-file, and
-// in-cluster callers.
+// GetClusterContextName returns the context resolved from the CLI kubeconfig
+// and context selection, falling back to k8s-interface when neither was
+// resolved by this scan.
 func (scanInfo *ScanInfo) GetClusterContextName() string {
 	if scanInfo.contextResolved {
 		return scanInfo.clusterContextName
