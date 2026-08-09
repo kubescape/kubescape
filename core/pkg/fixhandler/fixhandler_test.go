@@ -243,6 +243,22 @@ func TestApplyFixToContent_EmptyLeadingDocument(t *testing.T) {
 	assert.Empty(t, got)
 }
 
+// TestApplyFixToContent_TopLevelFlowSequence covers a flow collection that is not nested
+// under a key of its own, so it starts on the first line of the document. Resolving the
+// line to replace picked the document node that shares that line and rendered it against
+// its nil parent, panicking out of `kubescape fix` before anything was written. A nested
+// flow sequence never hit this because the document node sits on an earlier line.
+func TestApplyFixToContent_TopLevelFlowSequence(t *testing.T) {
+	yamlContent := "args: [--foo]\n"
+	expression := FixPathToValidYamlExpression("args[1]", "--bar", 0)
+
+	got, err := ApplyFixToContent(context.Background(), yamlContent, expression)
+
+	require.NoError(t, err)
+	// the flow style of the original line is kept
+	assert.Equal(t, "args: [--foo, --bar]\n", got)
+}
+
 func Test_fixPathToValidYamlExpression(t *testing.T) {
 	type args struct {
 		fixPath             string
