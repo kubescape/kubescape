@@ -67,7 +67,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	}
 
 	// ================== setup tenant object ======================================
-	tenantConfig := cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, k8sinterface.GetContextName(), scanInfo.CustomClusterName, getKubernetesApi())
+	tenantConfig := cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, getKubernetesApi())
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
@@ -210,6 +210,10 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 	policyIdentifiers = resolveDefaultScanAllPolicies(scanInfo, policyIdentifiers) // resolve the ScanAll expansion while Init can still cache its paths
 	scanInfo.Init(ctxInit, policyIdentifiers)                                      // initialize scan info
 	defer scanInfo.Cleanup()
+	if err := resolveClusterContext(scanInfo); err != nil {
+		spanInit.End()
+		return nil, err
+	}
 
 	interfaces, err := getInterfaces(ctxInit, scanInfo, policyIdentifiers)
 	if err != nil {
@@ -409,6 +413,16 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 	}
 
 	return resultsHandling, nil
+}
+
+func resolveClusterContext(scanInfo *cautils.ScanInfo) error {
+	if scanInfo.GetScanningContext() != cautils.ContextCluster {
+		return nil
+	}
+	if err := scanInfo.ResolveClusterContextName(); err != nil {
+		return fmt.Errorf("failed to resolve Kubernetes context: %w", err)
+	}
+	return nil
 }
 
 func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, resultsHandling *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) {

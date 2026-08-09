@@ -456,3 +456,87 @@ resources:
 	assert.Nil(t, workloads)
 	assert.Contains(t, err.Error(), "failed to render Kustomize resources")
 }
+
+func TestGetResourcesFromPath_RendersNestedKustomizeDirectory(t *testing.T) {
+	repoRoot := t.TempDir()
+	appDir := filepath.Join(repoRoot, "app")
+	require.NoError(t, os.MkdirAll(appDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(appDir, "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namePrefix: prod-
+resources:
+  - deployment.yaml
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(appDir, "deployment.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.27
+`), 0o600))
+
+	_, workloads, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
+	require.NoError(t, err)
+
+	counts := map[string]int{}
+	for _, workload := range workloads {
+		counts[workload.GetKind()+"/"+workload.GetName()]++
+	}
+	assert.Equal(t, 1, counts["Deployment/prod-app"], "the nested Kustomization's transformed output must be scanned")
+	assert.Zero(t, counts["Deployment/app"], "the untransformed raw manifest must not also be scanned")
+	assert.Zero(t, counts["Kustomization/"], "the Kustomization document itself must not enter the scanned set")
+}
+
+func TestGetResourcesFromPath_NestedKustomizeSiblingFilesStillScanned(t *testing.T) {
+	repoRoot := t.TempDir()
+	appDir := filepath.Join(repoRoot, "app")
+	require.NoError(t, os.MkdirAll(appDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(appDir, "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namePrefix: prod-
+resources:
+  - deployment.yaml
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(appDir, "deployment.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.27
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repoRoot, "standalone.yaml"), []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: standalone
+`), 0o600))
+
+	_, workloads, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
+	require.NoError(t, err)
+
+	counts := map[string]int{}
+	for _, workload := range workloads {
+		counts[workload.GetKind()+"/"+workload.GetName()]++
+	}
+	assert.Equal(t, 1, counts["Deployment/prod-app"])
+	assert.Equal(t, 1, counts["ConfigMap/standalone"], "a manifest outside the Kustomize directory must still be scanned")
+}

@@ -6,6 +6,7 @@ import (
 
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/anchore/grype/grype/match"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
@@ -200,6 +201,9 @@ func extractResourceLabels(allResources map[string]workloadinterface.IMetadata, 
 func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	if data.Report.ReportGenerationTime.IsZero() {
 		data.Report.ReportGenerationTime = time.Now().UTC()
+	}
+	if data.Report.ClusterName == "" {
+		data.Report.ClusterName = cautils.AdoptClusterName(k8sinterface.GetContextName())
 	}
 	report := reporthandlingv2.PostureReport{
 		SummaryDetails:       data.Report.SummaryDetails,
