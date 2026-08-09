@@ -148,3 +148,43 @@ func EnrichSummary(controls reportsummary.ControlSummaries, index map[string]*re
 		}
 	}
 }
+
+// GenerateValidatingAdmissionPolicy creates a ValidatingAdmissionPolicy manifest
+func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[string]interface{}) *unstructured.Unstructured {
+	vap := &unstructured.Unstructured{}
+	vap.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "admissionregistration.k8s.io",
+		Version: "v1",
+		Kind:    "ValidatingAdmissionPolicy",
+	})
+	vap.SetName(name)
+	
+	// Add spec with CEL expression and parameter schema linkage
+	spec := map[string]interface{}{
+		"validations": []interface{}{
+			map[string]interface{}{
+				"expression": celExpr,
+			},
+		},
+	}
+	vap.Object["spec"] = spec
+	return vap
+}
+
+// GenerateValidatingAdmissionPolicyBinding creates a ValidatingAdmissionPolicyBinding manifest
+func GenerateValidatingAdmissionPolicyBinding(name, policyName string) *unstructured.Unstructured {
+	vapb := &unstructured.Unstructured{}
+	vapb.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "admissionregistration.k8s.io",
+		Version: "v1",
+		Kind:    "ValidatingAdmissionPolicyBinding",
+	})
+	vapb.SetName(name)
+	
+	spec := map[string]interface{}{
+		"policyName": policyName,
+		"validationActions": []interface{}{"Deny"},
+	}
+	vapb.Object["spec"] = spec
+	return vapb
+}
