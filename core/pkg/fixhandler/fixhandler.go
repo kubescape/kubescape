@@ -938,7 +938,8 @@ func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int
 	// Strings should be quoted. Escape only `"` — yq's expression lexer
 	// (lexer_participle.go stringValue) unescapes \" and nothing else, so any
 	// other Go-style escape would be written to the file literally.
-	if isStringValue {
+	// Do not quote if the value is meant to be a YAML sequence.
+	if isStringValue && (!strings.HasPrefix(value, "[") || !strings.HasSuffix(value, "]")) {
 		value = `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 	}
 
