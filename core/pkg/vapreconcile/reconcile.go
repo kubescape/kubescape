@@ -7,6 +7,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -20,9 +21,15 @@ func Collect(ctx context.Context, k8s *k8sinterface.KubernetesApi) ([]unstructur
 	version := "v1"
 
 	resources, err := k8s.DiscoveryClient.ServerResourcesForGroupVersion(groupVersion)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return nil, nil, err
+	}
 	if err != nil || !hasVAPResources(resources) {
 		groupVersion = "admissionregistration.k8s.io/v1beta1"
 		resources, err = k8s.DiscoveryClient.ServerResourcesForGroupVersion(groupVersion)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return nil, nil, err
+		}
 		if err != nil || !hasVAPResources(resources) {
 			logger.L().Ctx(ctx).Warning("ValidatingAdmissionPolicies are not supported on this cluster, skipping VAP reconciliation")
 			return nil, nil, nil
