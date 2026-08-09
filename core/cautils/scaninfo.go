@@ -192,9 +192,11 @@ type Getters struct {
 	AttackTracksGetter   getter.IAttackTracksGetter
 }
 
-func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyIdentifier) {
+func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyIdentifier) error {
 	scanInfo.setUseFrom(policyIdentifiers)
-	scanInfo.setUseArtifactsFrom(ctx)
+	if err := scanInfo.setUseArtifactsFrom(ctx); err != nil {
+		return err
+	}
 	// setUseFrom and setUseArtifactsFrom can resolve to the same file - --use-default and
 	// --use-artifacts-from both point at the local store on the offline HTTP handler path -
 	// and a repeated path costs an extra read and unmarshal per policy load.
@@ -202,6 +204,7 @@ func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyId
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
 	}
+	return nil
 }
 
 func (scanInfo *ScanInfo) Cleanup() {
@@ -214,9 +217,9 @@ func (scanInfo *ScanInfo) AddCleanup(cleanup func()) {
 	scanInfo.cleanups = append(scanInfo.cleanups, cleanup)
 }
 
-func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
+func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) error {
 	if scanInfo.UseArtifactsFrom == "" {
-		return
+		return nil
 	}
 	// UseArtifactsFrom must be a path without a filename
 	dir, file := filepath.Split(scanInfo.UseArtifactsFrom)
@@ -228,7 +231,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 	// set frameworks files
 	files, err := os.ReadDir(scanInfo.UseArtifactsFrom)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("failed to read files from directory", helpers.String("dir", scanInfo.UseArtifactsFrom), helpers.Error(err))
+		return fmt.Errorf("failed to read files from directory %q: %w", scanInfo.UseArtifactsFrom, err)
 	}
 	framework := &reporthandling.Framework{}
 	for _, f := range files {
@@ -253,6 +256,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 	if scanInfo.AttackTracks == "" {
 		scanInfo.AttackTracks = filepath.Join(scanInfo.UseArtifactsFrom, LocalAttackTracksFilename)
 	}
+	return nil
 }
 
 func (scanInfo *ScanInfo) setUseFrom(policyIdentifiers []PolicyIdentifier) {

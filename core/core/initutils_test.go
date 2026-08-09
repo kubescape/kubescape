@@ -230,7 +230,7 @@ func TestScanAllWithUseDefaultResolvesCachePaths(t *testing.T) {
 	scanInfo := &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: true}
 
 	policyIdentifiers := resolveDefaultScanAllPolicies(scanInfo, nil)
-	scanInfo.Init(context.Background(), policyIdentifiers)
+	require.NoError(t, scanInfo.Init(context.Background(), policyIdentifiers))
 
 	wantPaths := getDefaultFrameworksPaths()
 	assert.ElementsMatch(t, wantPaths, scanInfo.UseFrom)
@@ -249,7 +249,7 @@ func TestScanAllControlScanWithUseDefaultStaysOnline(t *testing.T) {
 	scanInfo := &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: false}
 
 	policyIdentifiers := resolveDefaultScanAllPolicies(scanInfo, nil)
-	scanInfo.Init(context.Background(), policyIdentifiers)
+	require.NoError(t, scanInfo.Init(context.Background(), policyIdentifiers))
 
 	assert.Empty(t, policyIdentifiers, "a control scan must not gain framework identifiers")
 	assert.Empty(t, scanInfo.UseFrom)

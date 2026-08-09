@@ -612,7 +612,8 @@ func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
 			c.GetAccountID(),
 			c.GetAccessKey())
 		if err != nil {
-			logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
+			logger.L().Error("failed to create KS Cloud client", helpers.Error(err))
+			return nil
 		}
 		getter.SetKSCloudAPIConnector(cloud)
 	}

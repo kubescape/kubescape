@@ -37,7 +37,7 @@ func TestSetContextMetadata(t *testing.T) {
 
 		scanInfo := &ScanInfo{}
 		scanInfo.SetKubeconfigSelection(explicitPath, "")
-		scanInfo.Init(context.Background(), nil)
+		require.NoError(t, scanInfo.Init(context.Background(), nil))
 		require.NoError(t, scanInfo.ResolveClusterContextName())
 		metadata := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
 		ctx := metadata.ContextMetadata
@@ -540,7 +540,7 @@ func TestInitDeduplicatesUseFrom(t *testing.T) {
 		UseDefault:       true,
 		UseArtifactsFrom: artifactsDir,
 	}
-	scanInfo.Init(context.Background(), BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework))
+	require.NoError(t, scanInfo.Init(context.Background(), BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework)))
 
 	assert.Equal(t, []string{filepath.Join(artifactsDir, "nsa.json")}, scanInfo.UseFrom)
 }
