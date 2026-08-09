@@ -116,7 +116,11 @@ func TestListCRDResources(t *testing.T) {
 		dynamicClient: newCRDDynamicClient(t, item),
 	}
 
-	got, err := hsh.listCRDResources(context.Background(), "osreleasefiles", k8shostsensor.OsReleaseFile.String())
+	var got []unstructured.Unstructured
+	err := hsh.listCRDResources(context.Background(), "osreleasefiles", k8shostsensor.OsReleaseFile.String(), func(items []unstructured.Unstructured) error {
+		got = append(got, items...)
+		return nil
+	})
 
 	require.NoError(t, err)
 	require.Len(t, got, 1)

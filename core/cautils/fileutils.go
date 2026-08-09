@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -52,9 +53,31 @@ type Chart struct {
 // --set-file path, etc.) the error is returned to the caller. We deliberately do not silently
 // fall back to chart defaults — scanning the wrong manifests is worse than failing fast.
 func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
+	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, nil)
+}
+
+// LoadResourcesFromHelmChartsExcludingDirectories behaves like LoadResourcesFromHelmCharts,
+// but leaves charts at or below excludedChartDirectories to another renderer that owns them.
+// The caller is responsible for including those directories in its plain-file exclusions once
+// that renderer succeeds.
+func LoadResourcesFromHelmChartsExcludingDirectories(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
+	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, excludedChartDirectories)
+}
+
+func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
 	helmDirectories, discoveryErrs := listHelmChartDirs(basePath)
 	for _, err := range discoveryErrs {
 		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(err))
+	}
+	if len(excludedChartDirectories) > 0 {
+		normalizedExcludedDirectories := normalizePaths(excludedChartDirectories)
+		remaining := make([]string, 0, len(helmDirectories))
+		for _, directory := range helmDirectories {
+			if !isUnderAnyNormalizedDir(normalizePath(directory), normalizedExcludedDirectories) {
+				remaining = append(remaining, directory)
+			}
+		}
+		helmDirectories = remaining
 	}
 
 	// Parse user-supplied value overrides once; reuse for every chart we render.
@@ -68,13 +91,34 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 	}
 	releaseOpts := valueOpts.ReleaseOptions()
 
+	// A parent chart owns unpacked dependencies below its charts/ directory. Process
+	// parents before their descendants so a successful parent render can suppress a
+	// second, standalone render of the same dependency. listHelmChartDirs currently
+	// inherits filepath.Walk ordering, but keep the ownership rule independent of that
+	// implementation detail.
+	sort.Slice(helmDirectories, func(i, j int) bool {
+		leftDepth := pathDepth(helmDirectories[i])
+		rightDepth := pathDepth(helmDirectories[j])
+		if leftDepth != rightDepth {
+			return leftDepth < rightDepth
+		}
+		return helmDirectories[i] < helmDirectories[j]
+	})
+
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
 	sourceToChart := make(map[string]Chart, 0)
-	// renderedCharts holds the chart directories that rendered without errors. Rendering is
-	// best-effort: a chart that fails is dropped whole (see the continue below), so callers must
-	// keep plain-scanning its files rather than assume this loader covered them.
+	// renderedCharts holds chart directories covered by a successful Helm render. It includes
+	// dependencies rendered through a successful parent, even when the dependency intentionally
+	// emitted no resources. Callers use this list to keep those templates out of the plain-YAML
+	// fallback. A chart below a failed parent remains eligible for a standalone fallback render.
 	renderedCharts := make([]string, 0, len(helmDirectories))
+	successfulCharts := make([]*HelmChart, 0, len(helmDirectories))
 	for _, helmDir := range helmDirectories {
+		if helmChartOwnedByAny(helmDir, successfulCharts) {
+			renderedCharts = append(renderedCharts, helmDir)
+			continue
+		}
+
 		chart, err := NewHelmChart(helmDir)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("Failed to load Helm chart", helpers.String("path", helmDir), helpers.Error(err))
@@ -90,6 +134,7 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 			continue
 		}
 		renderedCharts = append(renderedCharts, helmDir)
+		successfulCharts = append(successfulCharts, chart)
 		chartName := chart.GetName()
 		prov := chart.Provenance()
 		for k, v := range wls {
@@ -102,6 +147,29 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		}
 	}
 	return sourceToWorkloads, sourceToChart, renderedCharts, nil
+}
+
+// helmChartOwnedByAny reports whether chartDir is inside the unpacked dependency
+// tree of a chart that has already rendered successfully. Merely being nested below
+// another chart is not enough: Helm only owns charts below its charts/ directory.
+func helmChartOwnedByAny(chartDir string, successfulCharts []*HelmChart) bool {
+	for _, chart := range successfulCharts {
+		if chart.ownsUnpackedDependency(chartDir) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathDepth(path string) int {
+	depth := 0
+	for path = filepath.Clean(path); ; path = filepath.Dir(path) {
+		parent := filepath.Dir(path)
+		if parent == path {
+			return depth
+		}
+		depth++
+	}
 }
 
 // listHelmChartDirs scans a given path (recursively) and returns the directories holding a helm chart.
@@ -129,15 +197,30 @@ func listHelmChartDirs(basePath string) ([]string, []error) {
 	return helmDirectories, errs
 }
 
+// listKustomizeDirs scans a given path (recursively) and returns the directories holding a
+// Kustomize configuration (a kustomization.yaml/kustomization.yml/Kustomization file). Each
+// carries its own Kustomization file, so an overlay nested below basePath is found on its own
+// even when basePath itself is not a Kustomize directory.
+func listKustomizeDirs(basePath string) ([]string, []error) {
+	directories, errs := listDirs(basePath)
+	kustomizeDirectories := make([]string, 0)
+	for _, dir := range directories {
+		if isKustomizeDirectory(dir) {
+			kustomizeDirectories = append(kustomizeDirectories, dir)
+		}
+	}
+	return kustomizeDirectories, errs
+}
+
 // excludeHelmTemplateFiles drops the files living under the templates/ directory of a helm chart.
 // LoadResourcesFromHelmCharts renders those templates, so passing them to the plain-YAML loader
 // as well duplicates the workloads it already renders, and warns on every raw template whose
 // "{{ ... }}" actions are not valid YAML. Only templates/ is excluded: helm renders nothing else,
 // so the rest of the chart (crds/ in particular, which helm does apply) stays plainly scanned.
 //
-// renderedCharts must be the chart directories that rendered without errors. A chart that failed
-// to render is dropped whole by LoadResourcesFromHelmCharts, so its templates must NOT be excluded
-// here — otherwise its resources reach neither loader and vanish from the scan silently.
+// renderedCharts must be the chart directories covered by successful renders, including unpacked
+// dependencies covered through a parent. A chart that failed and was not covered by a parent must
+// NOT be included — otherwise its resources reach neither loader and vanish from the scan silently.
 func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
 	if len(renderedCharts) == 0 {
 		return files
@@ -147,19 +230,24 @@ func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
 	for _, helmDir := range renderedCharts {
 		templateDirs = append(templateDirs, filepath.Join(helmDir, "templates"))
 	}
+	templateDirs = pathAliasesForPaths(templateDirs)
 
 	remaining := make([]string, 0, len(files))
 	for _, file := range files {
-		if !isUnderAnyDir(file, templateDirs) {
+		if !isAnyPathAliasUnderAnyDir(file, templateDirs) {
 			remaining = append(remaining, file)
 		}
 	}
 	return remaining
 }
 
-// isUnderAnyDir reports whether path is inside one of dirs. Both are expected to be absolute,
-// as returned by listFiles and listDirs.
+// isUnderAnyDir reports whether path is inside one of dirs after normalizing
+// relative paths and resolving symlinks where the path already exists.
 func isUnderAnyDir(path string, dirs []string) bool {
+	return isUnderAnyNormalizedDir(normalizePath(path), normalizePaths(dirs))
+}
+
+func isUnderAnyNormalizedDir(path string, dirs []string) bool {
 	for _, dir := range dirs {
 		rel, err := filepath.Rel(dir, path)
 		if err != nil {
@@ -171,6 +259,75 @@ func isUnderAnyDir(path string, dirs []string) bool {
 		}
 	}
 	return false
+}
+
+func normalizePaths(paths []string) []string {
+	normalized := make([]string, 0, len(paths))
+	for _, path := range paths {
+		normalized = append(normalized, normalizePath(path))
+	}
+	return normalized
+}
+
+func pathAliasesForPaths(paths []string) []string {
+	aliases := make([]string, 0, len(paths)*2)
+	for _, path := range paths {
+		aliases = append(aliases, pathAliases(path)...)
+	}
+	return aliases
+}
+
+func isAnyPathAliasUnderAnyDir(path string, dirs []string) bool {
+	for _, alias := range pathAliases(path) {
+		if isUnderAnyNormalizedDir(alias, dirs) {
+			return true
+		}
+	}
+	return false
+}
+
+// pathAliases returns both the absolute lexical path and, when different, its
+// physical path. Keeping both matters for a symlinked template file: Helm owns
+// it by its lexical location below templates/, even if the link target is outside
+// the chart. The physical form still matches scans reached through a symlinked
+// parent directory.
+func pathAliases(path string) []string {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return []string{filepath.Clean(path)}
+	}
+	absPath = filepath.Clean(absPath)
+	resolvedPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil || resolvedPath == absPath {
+		return []string{absPath}
+	}
+	return []string{absPath, resolvedPath}
+}
+
+func normalizePath(path string) string {
+	normalized, err := canonicalPath(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return normalized
+}
+
+func canonicalPath(path string) (string, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	resolvedPath, err := filepath.EvalSymlinks(absPath)
+	if err == nil {
+		return resolvedPath, nil
+	}
+	// Missing paths are valid for remote charts that Kustomize has not pulled yet.
+	// The absolute lexical form is still sufficient because generic discovery cannot
+	// return a matching path until it exists.
+	if errors.Is(err, os.ErrNotExist) {
+		return filepath.Clean(absPath), nil
+	}
+	return "", err
 }
 
 // mergeMaps performs a deep merge of override into a copy of base, with override winning on conflicts.
@@ -224,6 +381,41 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 
 	maps.Copy(sourceToWorkloads, wls)
 	return sourceToWorkloads, kustomizeDirectoryName, nil
+}
+
+// LoadResourcesFromNestedKustomizeDirectories discovers and renders Kustomize configurations
+// found below basePath, for the case where basePath itself is a broader directory (e.g. a
+// repository root) rather than a Kustomize directory or file — that direct-input case is already
+// handled by LoadResourcesFromKustomizeDirectory. Every discovered directory carries its own
+// Kustomization file, so each is rendered independently; a directory whose render fails is
+// skipped with a warning rather than aborting the scan, leaving its files to the plain-manifest
+// loader as a fallback. The returned directories are exactly those that rendered successfully,
+// for the caller to exclude from the plain-manifest pass.
+func LoadResourcesFromNestedKustomizeDirectories(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, []string, error) {
+	if isKustomizeDirectory(basePath) || IsKustomizeFile(basePath) {
+		// The direct-input case is handled by LoadResourcesFromKustomizeDirectory.
+		return nil, nil, nil
+	}
+
+	kustomizeDirs, errs := listKustomizeDirs(basePath)
+	if len(errs) > 0 {
+		return nil, nil, fmt.Errorf("failed to discover Kustomize configurations under %q: %w", basePath, errors.Join(errs...))
+	}
+
+	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
+	renderedDirs := make([]string, 0, len(kustomizeDirs))
+	for _, dir := range kustomizeDirs {
+		wls, _, err := LoadResourcesFromKustomizeDirectory(ctx, dir)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("Skipping Kustomize directory that failed to render; its files remain available to the plain-manifest loader",
+				helpers.String("path", dir), helpers.Error(err))
+			continue
+		}
+		maps.Copy(sourceToWorkloads, wls)
+		renderedDirs = append(renderedDirs, dir)
+	}
+
+	return sourceToWorkloads, renderedDirs, nil
 }
 
 // LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts

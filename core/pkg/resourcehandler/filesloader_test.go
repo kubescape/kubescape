@@ -350,6 +350,84 @@ func TestGetResourcesFromPath_KustomizeTransformersDoNotDuplicate(t *testing.T) 
 	assert.Equal(t, "prod-test-app", deployment.GetName())
 }
 
+func TestGetResourcesFromPath_KustomizeOwnsReferencedHelmChart(t *testing.T) {
+	installFakeHelm(t)
+
+	root := t.TempDir()
+	chartDir := filepath.Join(root, "vendor", "charts", "app")
+	templateDir := filepath.Join(chartDir, "templates")
+	require.NoError(t, os.MkdirAll(templateDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namePrefix: prod-
+helmGlobals:
+  chartHome: vendor/charts
+helmCharts:
+  - name: app
+    releaseName: first
+  - name: app
+    releaseName: second
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte("apiVersion: v2\nname: app\nversion: 0.1.0\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(chartDir, "values.yaml"), []byte("{}\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(templateDir, "configmap.yaml"), []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}
+`), 0o600))
+
+	sources, workloads, err := getResourcesFromPath(context.Background(), root, cautils.HelmValueOptions{})
+	require.NoError(t, err)
+
+	counts := map[string]int{}
+	var configMaps int
+	for _, workload := range workloads {
+		counts[workload.GetKind()+"/"+workload.GetName()]++
+		if workload.GetKind() == "ConfigMap" {
+			configMaps++
+			assert.Equal(t, reporthandling.SourceTypeKustomizeDirectory, sources[workload.GetID()].FileType)
+		}
+	}
+	assert.Equal(t, 1, counts["ConfigMap/prod-first"], "the first Kustomize inflation must survive")
+	assert.Equal(t, 1, counts["ConfigMap/prod-second"], "the second Kustomize inflation must survive")
+	assert.Equal(t, 2, configMaps, "the chart must not also be rendered as a standalone Helm release")
+}
+
+func installFakeHelm(t *testing.T) {
+	t.Helper()
+	if os.PathSeparator == '\\' {
+		t.Skip("the deterministic Helm test double requires a POSIX shell")
+	}
+
+	binDir := t.TempDir()
+	helmPath := filepath.Join(binDir, "helm")
+	//nolint:gosec // The test-owned Helm double must be executable by Kustomize.
+	require.NoError(t, os.WriteFile(helmPath, []byte(`#!/bin/sh
+set -eu
+die() {
+    printf '%s\n' "$*" >&2
+    exit 2
+}
+case "${1:-}" in
+version)
+    [ "$#" -eq 3 ] && [ "$2" = "-c" ] && [ "$3" = "--short" ] || die "unexpected version args: $*"
+    printf '%s\n' 'v3.14.0+gtest'
+    ;;
+template)
+	[ "$#" -ge 3 ] || die "missing template args"
+	release_name=$2
+	chart_path=$3
+	[ -f "$chart_path/Chart.yaml" ] && [ -f "$chart_path/templates/configmap.yaml" ] || die "unexpected chart: $chart_path"
+	printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: %s\n' "$release_name"
+    ;;
+*)
+	die "unsupported helm command: ${1:-}"
+    ;;
+esac
+`), 0o750))
+	t.Setenv("PATH", binDir)
+}
+
 func TestGetResourcesFromPathRejectsDirectoryWithoutKubernetesResources(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "values.yaml"), []byte("replicas: 3\n"), 0o600))
@@ -377,4 +455,88 @@ resources:
 	assert.Nil(t, sources)
 	assert.Nil(t, workloads)
 	assert.Contains(t, err.Error(), "failed to render Kustomize resources")
+}
+
+func TestGetResourcesFromPath_RendersNestedKustomizeDirectory(t *testing.T) {
+	repoRoot := t.TempDir()
+	appDir := filepath.Join(repoRoot, "app")
+	require.NoError(t, os.MkdirAll(appDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(appDir, "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namePrefix: prod-
+resources:
+  - deployment.yaml
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(appDir, "deployment.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.27
+`), 0o600))
+
+	_, workloads, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
+	require.NoError(t, err)
+
+	counts := map[string]int{}
+	for _, workload := range workloads {
+		counts[workload.GetKind()+"/"+workload.GetName()]++
+	}
+	assert.Equal(t, 1, counts["Deployment/prod-app"], "the nested Kustomization's transformed output must be scanned")
+	assert.Zero(t, counts["Deployment/app"], "the untransformed raw manifest must not also be scanned")
+	assert.Zero(t, counts["Kustomization/"], "the Kustomization document itself must not enter the scanned set")
+}
+
+func TestGetResourcesFromPath_NestedKustomizeSiblingFilesStillScanned(t *testing.T) {
+	repoRoot := t.TempDir()
+	appDir := filepath.Join(repoRoot, "app")
+	require.NoError(t, os.MkdirAll(appDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(appDir, "kustomization.yaml"), []byte(`apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namePrefix: prod-
+resources:
+  - deployment.yaml
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(appDir, "deployment.yaml"), []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.27
+`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(repoRoot, "standalone.yaml"), []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: standalone
+`), 0o600))
+
+	_, workloads, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
+	require.NoError(t, err)
+
+	counts := map[string]int{}
+	for _, workload := range workloads {
+		counts[workload.GetKind()+"/"+workload.GetName()]++
+	}
+	assert.Equal(t, 1, counts["Deployment/prod-app"])
+	assert.Equal(t, 1, counts["ConfigMap/standalone"], "a manifest outside the Kustomize directory must still be scanned")
 }

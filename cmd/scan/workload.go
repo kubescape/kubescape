@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -29,6 +28,11 @@ var (
   # Scan an workload from a file path
   %[1]s scan workload <kind>/<name> --file-path <file path>
 
+  # Scan a workload from local manifests
+  %[1]s scan workload <kind>[.<version>[.<group>]]/<name> ./manifests
+
+  # Scan a workload from a specific file path
+  %[1]s scan workload <kind>[.<version>[.<group>]]/<name> --file-path <file path>
   # Scan an workload with a specific API version
   %[1]s scan workload <kind>/<name> --api-version <api version>
   
@@ -55,19 +59,25 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer applyTimeout(scanInfo, ks)()
 
+			if err := validateWorkloadArgs(args, scanInfo); err != nil {
+				return err
+			}
 			if scanInfo.FailThresholdSeverity != "" {
 				if err := shared.ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
 					return err
 				}
 			}
 			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast")
+				return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(shared.ScanFormats, ", "))
 			}
 			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ScanFormats); err != nil {
 				return err
 			}
 			if err := validateThresholdsOnly(scanInfo); err != nil {
 				return err
+			}
+			if scanInfo.LabelSelector != "" {
+				return fmt.Errorf("--label-selector is not supported for workload scans: the named resource is fetched by identity, not by label")
 			}
 			namespace, kind, name, workloadAPIVersion, err := parseWorkloadIdentifierString(args[0])
 			if err != nil {
@@ -92,16 +102,22 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 
 			results, err := ks.Scan(scanInfo, policyIdentifiers)
 			if err != nil {
-				logger.L().Fatal(err.Error())
+				return err
 			}
 
 			if err = results.HandleResults(ks.Context(), scanInfo); err != nil {
-				logger.L().Fatal(err.Error())
+				return err
 			}
 
-			enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
-			enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo)
-			enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo)
+			if err := enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo); err != nil {
+				return err
+			}
+			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
+				return err
+			}
+			if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
+				return err
+			}
 
 			return nil
 		},

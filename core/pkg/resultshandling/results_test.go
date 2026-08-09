@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -148,15 +149,9 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr: nil,
 		},
 		{
-			name:      "junit format for image scan should return error",
+			name:      "junit format for image scan should not return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.JunitResultFormat,
-			expectErr: errors.New("format \"junit\" is not supported for image scanning"),
-		},
-		{
-			name:      "sarif format for image scan should not return error",
-			scanType:  cautils.ScanTypeImage,
-			format:    printer.SARIFFormat,
 			expectErr: nil,
 		},
 		{
@@ -166,16 +161,16 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr: nil,
 		},
 		{
-			name:      "html format for image scan should return error",
+			name:      "html format for image scan should not return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.HtmlFormat,
-			expectErr: errors.New("format \"html\" is not supported for image scanning"),
+			expectErr: nil,
 		},
 		{
-			name:      "prometheus format for image scan should return error",
+			name:      "prometheus format for image scan should not return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.PrometheusFormat,
-			expectErr: errors.New("format \"prometheus\" is not supported for image scanning"),
+			expectErr: nil,
 		},
 		{
 			name:        "sarif format for cluster context should return error",
@@ -226,16 +221,22 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr:   nil,
 		},
 		{
-			name:      "gitlab-sast format for image scan should return error",
+			name:      "gitlab-sast format for image scan should not return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.GitLabSASTFormat,
-			expectErr: errors.New("format \"gitlab-sast\" is not supported for image scanning"),
+			expectErr: nil,
 		},
 		{
-			name:      "pdf format for image scan should return error",
+			name:      "pdf format for image scan should not return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.PdfFormat,
-			expectErr: errors.New("format \"pdf\" is not supported for image scanning"),
+			expectErr: nil,
+		},
+		{
+			name:      "csv format for image scan should return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.CsvFormat,
+			expectErr: errors.New("format \"csv\" is not supported for image scanning"),
 		},
 		{
 			name:      "pdf format for cluster scan should not return error",
@@ -564,4 +565,28 @@ func TestGetComplianceScoreAndRiskScoreAreIndependent(t *testing.T) {
 	assert.Equal(t, float32(80.0), rh.GetComplianceScore())
 	assert.Equal(t, float32(40.0), rh.GetRiskScore())
 	assert.NotEqual(t, rh.GetComplianceScore(), rh.GetRiskScore())
+}
+
+// TestValidatePrinter_ImageFormatsInvariant pins the invariant itself: every
+// format in printer.ImageFormats must be accepted for image scans, and every
+// format in printer.AllFormats that is NOT in printer.ImageFormats (e.g. csv)
+// must be rejected. This is what stops a future format from silently
+// inheriting image-scan support just by being added to AllFormats (#2782 review).
+func TestValidatePrinter_ImageFormatsInvariant(t *testing.T) {
+	for _, format := range printer.ImageFormats {
+		t.Run("accepted: "+format, func(t *testing.T) {
+			_, err := ValidatePrinter(cautils.ScanTypeImage, cautils.ScanningContext(""), format)
+			assert.NoError(t, err)
+		})
+	}
+
+	for _, format := range printer.AllFormats {
+		if slices.Contains(printer.ImageFormats, format) {
+			continue
+		}
+		t.Run("rejected: "+format, func(t *testing.T) {
+			_, err := ValidatePrinter(cautils.ScanTypeImage, cautils.ScanningContext(""), format)
+			assert.Error(t, err)
+		})
+	}
 }

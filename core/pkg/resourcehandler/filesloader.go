@@ -254,6 +254,29 @@ func resolveHelmRemotePath(clonedRepo string, gitRepo *cautils.LocalGitRepositor
 	return strings.TrimSuffix(url, ".git")
 }
 
+// excludeFilesUnderDirectories drops entries from sourceToWorkloads whose source path falls
+// under any of dirs. Used to keep a nested Kustomize directory's local inputs out of the
+// plain-manifest results once that directory has already been rendered on its own, so the
+// transformed and raw identities of the same resource don't both end up in the scan.
+func excludeFilesUnderDirectories(sourceToWorkloads map[string][]workloadinterface.IMetadata, dirs []string) {
+	if len(dirs) == 0 {
+		return
+	}
+	cleanDirs := make([]string, len(dirs))
+	for i, dir := range dirs {
+		cleanDirs[i] = filepath.Clean(dir) + string(filepath.Separator)
+	}
+	for source := range sourceToWorkloads {
+		cleanSource := filepath.Clean(source)
+		for _, dir := range cleanDirs {
+			if strings.HasPrefix(cleanSource, dir) {
+				delete(sourceToWorkloads, source)
+				break
+			}
+		}
+	}
+}
+
 // getResourcesFromPath loads every scannable resource under path, from plain
 // manifests, helm charts and kustomize directories, and maps each workload to the
 // source file it came from.
@@ -276,19 +299,54 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		repoRoot = filepath.Dir(repoRoot)
 	}
 
-	// render helm charts first, so the plain-YAML loader knows which charts' templates the render
-	// already covered and can skip only those. A chart whose render failed is dropped whole here, so
-	// its templates must stay plainly scanned rather than vanish from the scan.
-	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmCharts(ctx, path, helmValueOpts)
+	// A chart referenced by this Kustomization belongs to the Kustomize render. Rendering it through
+	// the generic recursive Helm loader as well would add a standalone release beside the transformed
+	// Kustomize output.
+	kustomizeHelmChartDirectories, err := cautils.KustomizeHelmChartDirectories(ctx, path)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// load resource from local file system
-	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, renderedCharts)
+	// render helm charts first, so the plain-YAML loader knows which charts' templates the render
+	// already covered and can skip only those. A chart whose render failed is dropped whole here, so
+	// its templates must stay plainly scanned rather than vanish from the scan.
+	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmChartsExcludingDirectories(ctx, path, helmValueOpts, kustomizeHelmChartDirectories)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// Confirm that the owning Kustomize render succeeds before excluding its chart
+	// templates from the plain-manifest fallback.
+	kustomizeSourceToWorkloads, _, err := cautils.LoadResourcesFromKustomizeDirectory(ctx, path)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// path itself may not be a Kustomize directory (e.g. a repository root), but a child
+	// directory below it can still hold its own Kustomization. Discover and render those too,
+	// so a broad scan applies their transformations instead of falling through to raw manifests.
+	nestedKustomizeSourceToWorkloads, nestedKustomizeDirs, err := cautils.LoadResourcesFromNestedKustomizeDirectories(ctx, path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(nestedKustomizeSourceToWorkloads) > 0 {
+		if kustomizeSourceToWorkloads == nil {
+			kustomizeSourceToWorkloads = map[string][]workloadinterface.IMetadata{}
+		}
+		maps.Copy(kustomizeSourceToWorkloads, nestedKustomizeSourceToWorkloads)
+	}
+
+	// load resource from local file system
+	// Kustomize-owned charts are excluded here too: their templates are covered by the Kustomize
+	// render even though the generic Helm renderer deliberately left them alone.
+	coveredChartDirectories := append(append([]string{}, renderedCharts...), kustomizeHelmChartDirectories...)
+	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, coveredChartDirectories)
+	if err != nil {
+		return nil, nil, err
+	}
+	// A nested Kustomization owns the local inputs it rendered; keep them from also being
+	// consumed by the plain-manifest loader as untransformed raw manifests.
+	excludeFilesUnderDirectories(sourceToWorkloads, nestedKustomizeDirs)
 
 	// update workloads and workloadIDToSource
 	var warnIssued bool
@@ -383,16 +441,13 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		logger.L().Debug("helm templates found in local storage", helpers.Int("helmTemplates", len(helmSourceToWorkloads)), helpers.Int("workloads", len(workloads)))
 	}
 
-	//patch, get value from env
-	// Load resources from Kustomize directory
-	kustomizeSourceToWorkloads, kustomizeDirectoryName, err := cautils.LoadResourcesFromKustomizeDirectory(ctx, path)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	// update workloads and workloadIDToSource with workloads from Kustomize Directory
 	for source, ws := range kustomizeSourceToWorkloads {
 		workloads = append(workloads, ws...)
+		// GetWorkloads keys its result by the rendered Kustomize directory's own path, so source
+		// (before it is rewritten to a repo-relative path below) is that directory's name — the
+		// correct owner for each entry even when several Kustomize directories were rendered.
+		kustomizeDirectoryName := source
 		relSource, err := filepath.Rel(repoRoot, source)
 
 		if err == nil {

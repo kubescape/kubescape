@@ -263,35 +263,41 @@ func scanWithRegistryMapping(
 	ctx context.Context,
 	svc imageScanService,
 	img string,
-	creds imagescan.RegistryCredentials,
+	credsList []imagescan.RegistryCredentials,
 	registryMapping map[string]string,
 	vulnExceptions, sevExceptions []string,
 ) (*cautils.ImageScanData, error) {
-	scanData, err := svc.Scan(ctx, img, creds, vulnExceptions, sevExceptions)
-	if err == nil {
-		return scanData, nil
+	if len(credsList) == 0 {
+		credsList = []imagescan.RegistryCredentials{{}}
 	}
 
-	if len(registryMapping) == 0 || !isResolutionError(err) {
-		return nil, err
+	var lastErr error
+	var scanData *cautils.ImageScanData
+
+	for _, creds := range credsList {
+		scanData, lastErr = svc.Scan(ctx, img, creds, vulnExceptions, sevExceptions)
+		if lastErr == nil {
+			return scanData, nil
+		}
+
+		if len(registryMapping) > 0 && isResolutionError(lastErr) {
+			logger.L().Warning(fmt.Sprintf("Failed to scan image %s: %s. Trying registry mapping...", img, lastErr))
+
+			mappedImage, matched, mapErr := applyRegistryMapping(img, registryMapping)
+			if mapErr == nil && matched {
+				logger.L().Info(fmt.Sprintf("Scanning mapped image %s (original: %s)...", mappedImage, img))
+				scanData, fallbackErr := svc.Scan(ctx, mappedImage, creds, vulnExceptions, sevExceptions)
+				if fallbackErr == nil {
+					return scanData, nil
+				}
+				lastErr = fmt.Errorf("scan failed for %s (%w) and for mapped image %s: %w", img, lastErr, mappedImage, fallbackErr)
+			} else if mapErr != nil {
+				lastErr = fmt.Errorf("scan failed for %s (%w) and failed to construct mapped image: %w", img, lastErr, mapErr)
+			}
+		}
 	}
 
-	logger.L().Warning(fmt.Sprintf("Failed to scan image %s: %s. Trying registry mapping...", img, err))
-
-	mappedImage, matched, mapErr := applyRegistryMapping(img, registryMapping)
-	if mapErr != nil {
-		return nil, fmt.Errorf("scan failed for %s (%w) and failed to construct mapped image: %w", img, err, mapErr)
-	}
-	if !matched {
-		return nil, err
-	}
-
-	logger.L().Info(fmt.Sprintf("Scanning mapped image %s (original: %s)...", mappedImage, img))
-	scanData, fallbackErr := svc.Scan(ctx, mappedImage, creds, vulnExceptions, sevExceptions)
-	if fallbackErr != nil {
-		return nil, fmt.Errorf("scan failed for %s (%w) and for mapped image %s: %w", img, err, mappedImage, fallbackErr)
-	}
-	return scanData, nil
+	return nil, lastErr
 }
 
 func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (bool, error) {
@@ -329,7 +335,7 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 	}
 
 	imageScanData, err := scanWithRegistryMapping(
-		ks.Context(), svc, imgScanInfo.Image, creds,
+		ks.Context(), svc, imgScanInfo.Image, []imagescan.RegistryCredentials{creds},
 		scanInfo.RegistryMapping, vulnerabilityExceptions, severityExceptions,
 	)
 	if err != nil {
@@ -475,7 +481,7 @@ func (a *ScanErrorAggregator) Error() string {
 // ImageScanJob represents an item of work for the concurrent scanner.
 type ImageScanJob struct {
 	Image                   string
-	RegistryCredentials     imagescan.RegistryCredentials
+	RegistryCredentials     []imagescan.RegistryCredentials
 	VulnerabilityExceptions []string
 	SeverityExceptions      []string
 	RegistryMapping         map[string]string

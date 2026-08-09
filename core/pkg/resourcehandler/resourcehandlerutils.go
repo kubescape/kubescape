@@ -41,10 +41,13 @@ func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResou
 }
 
 func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload, scanningScope reporthandling.ScanningScopeType, resolver resourceResolver) (QueryableResources, map[string]bool) {
+	return getQueryableResourceMapFromPoliciesWithWarned(frameworks, resource, scanningScope, resolver, make(map[string]struct{}))
+}
+
+func getQueryableResourceMapFromPoliciesWithWarned(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload, scanningScope reporthandling.ScanningScopeType, resolver resourceResolver, warned map[string]struct{}) (QueryableResources, map[string]bool) {
 	queryableResources := make(QueryableResources)
 	excludedRulesMap := make(map[string]bool)
 	namespace := getScannedResourceNamespace(resource, resolver)
-	warned := make(map[string]struct{})
 
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {
@@ -66,11 +69,28 @@ func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, 
 				for i := range rule.Match {
 					updateQueryableResourcesMapFromRuleMatchObject(&rule.Match[i], resourcesFilterMap, queryableResources, namespace, resolver)
 				}
+				addCELNamespaceQuery(rule, resource, namespace, queryableResources, resolver)
 			}
 		}
 	}
 
 	return queryableResources, excludedRulesMap
+}
+
+func addCELNamespaceQuery(rule reporthandling.PolicyRule, resource workloadinterface.IWorkload, namespace string, queryableResources QueryableResources, resolver resourceResolver) {
+	if rule.RuleLanguage != reporthandling.CELLanguage {
+		return
+	}
+	if resource != nil && namespace == "" {
+		return
+	}
+
+	namespaceMatch := reporthandling.RuleMatchObjects{
+		APIGroups:   []string{""},
+		APIVersions: []string{"v1"},
+		Resources:   []string{"Namespace"},
+	}
+	updateQueryableResourcesMapFromRuleMatchObject(&namespaceMatch, nil, queryableResources, namespace, resolver)
 }
 
 // getScannedResourceNamespace returns the namespace of the scanned resource.
