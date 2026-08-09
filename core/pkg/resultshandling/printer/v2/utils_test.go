@@ -648,6 +648,82 @@ func TestSetPkgNameToScoreMap_NoCollisionWithoutSeparator(t *testing.T) {
 	assert.Contains(t, names, "foo/12.3")
 }
 
+// TestSetPkgNameToScoreMap_NoCollisionWithAtInNameOrVersion verifies that
+// the "@" delimiter itself does not reintroduce the collision class it was
+// meant to fix. Package names can legitimately contain "@" (e.g. npm scoped
+// packages such as "@angular/core"), so without escaping, name="foo@bar"
+// + version="baz" and name="foo" + version="bar@baz" would both join to the
+// same raw string "foo@bar@baz" and collide.
+func TestSetPkgNameToScoreMap_NoCollisionWithAtInNameOrVersion(t *testing.T) {
+	matches := match.NewMatches([]match.Match{
+		{
+			Package: pkg.Package{
+				ID:      "1",
+				Name:    "foo@bar",
+				Version: "baz",
+			},
+			Vulnerability: vulnerability.Vulnerability{
+				Metadata: &vulnerability.Metadata{
+					Severity: "High",
+				},
+			},
+		},
+		{
+			Package: pkg.Package{
+				ID:      "2",
+				Name:    "foo",
+				Version: "bar@baz",
+			},
+			Vulnerability: vulnerability.Vulnerability{
+				Metadata: &vulnerability.Metadata{
+					Severity: "Critical",
+				},
+			},
+		},
+	}...)
+
+	pkgScores := make(map[string]*imageprinter.PackageScore)
+	setPkgNameToScoreMap(matches, pkgScores)
+
+	require.Len(t, pkgScores, 2, "both packages must have their own entry, not collide into one")
+
+	names := make(map[string]string)
+	for _, score := range pkgScores {
+		names[score.Name+"/"+score.Version] = score.Name
+	}
+	assert.Contains(t, names, "foo@bar/baz")
+	assert.Contains(t, names, "foo/bar@baz")
+}
+
+// TestPkgScoreKeyIsCollisionFree exercises pkgScoreKey directly against a
+// broader set of adversarial (name, version) pairs - including values
+// containing the delimiter and the escape character itself - and asserts
+// every pair maps to a distinct key.
+func TestPkgScoreKeyIsCollisionFree(t *testing.T) {
+	type nameVersion struct{ name, version string }
+	pairs := []nameVersion{
+		{"foo1", "2.3"},
+		{"foo", "12.3"},
+		{"foo@bar", "baz"},
+		{"foo", "bar@baz"},
+		{"@angular/core", "12.3"},
+		{"@angular/core@12", "3"},
+		{`foo\`, "bar"},
+		{"foo", `\bar`},
+		{`foo\@`, "bar"},
+		{"foo", `\@bar`},
+	}
+
+	seen := make(map[string]nameVersion)
+	for _, p := range pairs {
+		key := pkgScoreKey(p.name, p.version)
+		if prev, ok := seen[key]; ok {
+			t.Fatalf("key collision: (%q,%q) and (%q,%q) both produced key %q", prev.name, prev.version, p.name, p.version, key)
+		}
+		seen[key] = p
+	}
+}
+
 func TestSetSeverityToSummaryMap(t *testing.T) {
 	tests := []struct {
 		name        string
