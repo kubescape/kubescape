@@ -330,7 +330,7 @@ kubescape patch [flags]
 |------|-------------|---------|
 | `-i, --image <image>` | Image to patch (required) | - |
 | `-t, --tag <tag>` | Output image tag | `<image>-patched` |
-| `-a, --addr <addr>` | BuildKit daemon address | `unix:///run/buildkit/buildkitd.sock` |
+| `-a, --address <address>` | BuildKit daemon address | none (auto-detects local docker daemon, falling back to `unix:///run/buildkit/buildkitd.sock`) |
 | `--timeout <duration>` | Patching timeout | `5m` |
 | `--ignore-errors` | Continue on errors | `false` |
 | `--push` | Push the patched image to the source registry | `false` |
