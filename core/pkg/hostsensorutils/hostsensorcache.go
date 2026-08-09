@@ -8,11 +8,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"strings"
+	"time"
+
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
-	"strings"
-	"time"
 )
 
 var DefaultCacheDir string
