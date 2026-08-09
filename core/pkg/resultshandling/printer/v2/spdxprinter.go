@@ -3,7 +3,6 @@ package printer
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/anchore/syft/syft/format"
