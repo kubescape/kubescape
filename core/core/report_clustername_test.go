@@ -9,35 +9,34 @@ import (
 	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
-// #2841 made scan attribution follow the kubeconfig the scan actually selected,
-// via ScanInfo.GetClusterContextName(). #2866 then populated the report's
-// clusterName from the process-global k8sinterface.GetContextName() instead.
+// setAmbientContext pins the process-global context name so these tests do not
+// depend on the machine having a kubeconfig. k8sinterface.GetContextName()
+// returns clusterContextName when it is set, and only falls back to loading a
+// kubeconfig otherwise — which yields "" on a CI runner.
+func setAmbientContext(t *testing.T, name string) {
+	t.Helper()
+	original := k8sinterface.GetContextName()
+	t.Cleanup(func() { k8sinterface.SetClusterContextName(original) })
+	k8sinterface.SetClusterContextName(name)
+	require.Equal(t, name, k8sinterface.GetContextName())
+}
+
+// #2841 made scan attribution follow the kubeconfig the scan selected, via
+// ScanInfo.GetClusterContextName(), and records it on the session metadata.
+// #2866 merged 22 minutes later and populated the report's clusterName from
+// the process-global k8sinterface.GetContextName() instead.
 //
-// When --kubeconfig selects a file whose current-context differs from the
-// ambient kubeconfig, those two disagree: the tenant config attributes the scan
-// to the selected context while the emitted report is labelled with the ambient
-// one. A report labelled with the wrong cluster is worse than the empty field
-// #2866 replaced, because it looks authoritative.
+// When --kubeconfig or --kube-context selects a context other than the ambient
+// one, those disagree: the tenant config attributes the scan to the selected
+// context while the emitted report is labelled with the ambient one. A report
+// labelled with the wrong cluster is worse than the empty field #2866
+// replaced, because it looks authoritative.
 func TestFinalizeResults_ClusterNameFollowsScanSelectedContext(t *testing.T) {
-	ambientPath := writeContextKubeconfig(t, "context-b", "https://b.example")
+	setAmbientContext(t, "context-b")
+
 	explicitPath := writeContextKubeconfig(t, "context-a", "https://a.example")
-
-	t.Setenv("KUBECONFIG", ambientPath)
-	ambientConfig, err := clientcmd.LoadFromFile(ambientPath)
-	require.NoError(t, err)
-	k8sinterface.SetClusterContextName("")
-	k8sinterface.SetClientConfigAPI(ambientConfig)
-	t.Cleanup(func() {
-		k8sinterface.SetClientConfigAPI(nil)
-		k8sinterface.SetClusterContextName("")
-	})
-
-	// Sanity: the ambient global really does resolve to the other context.
-	require.Equal(t, "context-b", k8sinterface.GetContextName())
-
 	scanInfo := &cautils.ScanInfo{}
 	scanInfo.SetKubeconfigSelection(explicitPath, "")
 	require.NoError(t, scanInfo.ResolveClusterContextName())
@@ -51,19 +50,25 @@ func TestFinalizeResults_ClusterNameFollowsScanSelectedContext(t *testing.T) {
 		"the report must be labelled with the context the scan actually used, not the ambient one")
 }
 
-// A scan that made no explicit kubeconfig selection must keep the existing
-// behaviour introduced by #2866: fall back to the ambient context name.
+// The same holds for an explicit --kube-context override.
+func TestFinalizeResults_ClusterNameFollowsContextOverride(t *testing.T) {
+	setAmbientContext(t, "context-b")
+
+	multiPath := writeContextKubeconfig(t, "context-a", "https://a.example")
+	scanInfo := &cautils.ScanInfo{}
+	scanInfo.SetKubeconfigSelection(multiPath, "context-a")
+	require.NoError(t, scanInfo.ResolveClusterContextName())
+
+	session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+	report := printerv2.FinalizeResults(session)
+
+	assert.Equal(t, "context-a", report.ClusterName)
+}
+
+// A scan that made no explicit kubeconfig selection must keep the behaviour
+// #2866 introduced: fall back to the ambient context name.
 func TestFinalizeResults_ClusterNameFallsBackToAmbientContext(t *testing.T) {
-	ambientPath := writeContextKubeconfig(t, "context-b", "https://b.example")
-	t.Setenv("KUBECONFIG", ambientPath)
-	ambientConfig, err := clientcmd.LoadFromFile(ambientPath)
-	require.NoError(t, err)
-	k8sinterface.SetClusterContextName("")
-	k8sinterface.SetClientConfigAPI(ambientConfig)
-	t.Cleanup(func() {
-		k8sinterface.SetClientConfigAPI(nil)
-		k8sinterface.SetClusterContextName("")
-	})
+	setAmbientContext(t, "context-b")
 
 	scanInfo := &cautils.ScanInfo{}
 	session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
@@ -72,8 +77,10 @@ func TestFinalizeResults_ClusterNameFallsBackToAmbientContext(t *testing.T) {
 	assert.Equal(t, "context-b", report.ClusterName)
 }
 
-// An explicitly supplied cluster name must still win, as before.
+// An already-populated cluster name must still win, as #2866 established.
 func TestFinalizeResults_ClusterNameDoesNotOverwriteExisting(t *testing.T) {
+	setAmbientContext(t, "context-b")
+
 	scanInfo := &cautils.ScanInfo{}
 	session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
 	session.Report.ClusterName = "already-set"
