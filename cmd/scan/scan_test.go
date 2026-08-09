@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anchore/grype/grype/match"
+	grypepkg "github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/mocks"
@@ -662,6 +665,90 @@ func Test_enforceCoverageThreshold(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.wantFail, coverageWouldFail(tt.notEvaluated, tt.totalControls, tt.threshold))
+		})
+	}
+}
+
+type mockVulnerabilityProvider struct {
+	severity string
+}
+
+func (m mockVulnerabilityProvider) VulnerabilityMetadata(ref vulnerability.Reference) (*vulnerability.Metadata, error) {
+	return &vulnerability.Metadata{Severity: m.severity}, nil
+}
+func (m mockVulnerabilityProvider) PackageSearchNames(grypepkg.Package) []string { return nil }
+func (m mockVulnerabilityProvider) FindVulnerabilities(criteria ...vulnerability.Criteria) ([]vulnerability.Vulnerability, error) {
+	return nil, nil
+}
+func (m mockVulnerabilityProvider) Close() error { return nil }
+
+func TestEnforceImageSeverityThresholds(t *testing.T) {
+	tests := []struct {
+		name          string
+		threshold     string
+		matchSeverity string
+		expectedError bool
+	}{
+		{
+			name:          "no threshold",
+			threshold:     "",
+			matchSeverity: "Critical",
+			expectedError: false,
+		},
+		{
+			name:          "threshold unknown",
+			threshold:     "unknown",
+			matchSeverity: "Critical",
+			expectedError: false,
+		},
+		{
+			name:          "threshold met exactly",
+			threshold:     "high",
+			matchSeverity: "High",
+			expectedError: true,
+		},
+		{
+			name:          "threshold exceeded",
+			threshold:     "high",
+			matchSeverity: "Critical",
+			expectedError: true,
+		},
+		{
+			name:          "below threshold",
+			threshold:     "critical",
+			matchSeverity: "High",
+			expectedError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				FailThresholdSeverity: tt.threshold,
+			}
+
+			matches := match.NewMatches()
+			if tt.matchSeverity != "" {
+				matches.Add(match.Match{
+					Vulnerability: vulnerability.Vulnerability{
+						Reference: vulnerability.Reference{ID: "CVE-TEST"},
+					},
+				})
+			}
+
+			imgData := []cautils.ImageScanData{
+				{
+					Matches:               matches,
+					VulnerabilityProvider: mockVulnerabilityProvider{severity: tt.matchSeverity},
+				},
+			}
+
+			err := enforceImageSeverityThresholds(imgData, scanInfo)
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }
