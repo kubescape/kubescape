@@ -65,12 +65,17 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 		Use:     "kubescape",
 		Short:   "Kubescape is a tool for testing Kubernetes security posture. Docs: https://kubescape.io/docs/",
 		Example: ksExamples,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			k8sinterface.SetClusterContextName(rootInfo.KubeContext)
 			initLogger()
-			initLoggerLevel(cmd)
-			initEnvironment(ks.Context())
+			if err := initLoggerLevel(cmd); err != nil {
+				return err
+			}
+			if err := initEnvironment(ks.Context()); err != nil {
+				return err
+			}
 			initCacheDir(cmd)
+			return nil
 		},
 	}
 

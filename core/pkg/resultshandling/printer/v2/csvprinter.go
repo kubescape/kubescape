@@ -52,10 +52,9 @@ func (cp *CsvPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.ComplianceScoreToInt(score))
 }
 
-func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if opaSessionObj == nil {
-		logger.L().Ctx(ctx).Error("no data provided for CSV output")
-		return
+		return fmt.Errorf("no data provided for CSV output")
 	}
 
 	finalizedReport := FinalizeResults(opaSessionObj)
@@ -76,7 +75,7 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 	}
 	if err := csvWriter.Write(header); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write CSV header", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
 
 	for _, result := range reportWithSeverity.Results {
@@ -119,7 +118,7 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 			}
 			if err := csvWriter.Write(row); err != nil {
 				logger.L().Ctx(ctx).Error("failed to write CSV row", helpers.Error(err))
-				return
+				return fmt.Errorf("failed to write CSV row: %w", err)
 			}
 		}
 	}
@@ -127,10 +126,11 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 	csvWriter.Flush()
 	if err := csvWriter.Error(); err != nil {
 		logger.L().Ctx(ctx).Error("failed to flush CSV writer", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to flush CSV writer: %w", err)
 	}
 
 	printer.LogOutputFile(cp.writer.Name())
+	return nil
 }
 
 func (cp *CsvPrinter) PrintNextSteps() {

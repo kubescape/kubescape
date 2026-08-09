@@ -167,27 +167,27 @@ func (sp *SARIFPrinter) PrintNextSteps() {
 
 }
 
-func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if opaSessionObj == nil {
 		if len(imageScanData) == 0 {
-			logger.L().Ctx(ctx).Fatal("failed to write results in sarif format: no data provided")
-			return
+			return fmt.Errorf("failed to write results in sarif format: no data provided")
 		}
 
 		// image scan
 		if err := sp.printImageScan(ctx, imageScanData[0]); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
-			return
+			return fmt.Errorf("failed to write results in sarif format: %w", err)
 		}
 	} else {
 		// configuration scan
 		if err := sp.printConfigurationScan(ctx, opaSessionObj); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
-			return
+			return fmt.Errorf("failed to write results in sarif format: %w", err)
 		}
 
 	}
 	printer.LogOutputFile(sp.writer.Name())
+	return nil
 }
 
 func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {

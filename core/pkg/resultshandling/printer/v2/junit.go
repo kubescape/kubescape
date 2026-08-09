@@ -126,7 +126,7 @@ func (jp *JunitPrinter) PrintNextSteps() {
 
 }
 
-func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	var junitResult *JUnitTestSuites
 
 	if opaSessionObj != nil {
@@ -134,24 +134,24 @@ func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 	} else if len(imageScanData) > 0 {
 		junitResult = imageTestsSuites(imageScanData)
 	} else {
-		logger.L().Ctx(ctx).Error("failed to print results, missing data")
-		return
+		return fmt.Errorf("failed to print results, missing data")
 	}
 
 	postureReportStr, err := xml.MarshalIndent(junitResult, "", "  ")
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("failed to Marshal xml result object", helpers.Error(err))
+		return fmt.Errorf("failed to marshal xml result object: %w", err)
 	}
 
 	if _, err := jp.writer.Write([]byte(xml.Header)); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to write xml header: %w", err)
 	}
 	if _, err := jp.writer.Write(postureReportStr); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to write results: %w", err)
 	}
 	printer.LogOutputFile(jp.writer.Name())
+	return nil
 }
 
 // iso8601Timestamp returns the report generation time in ISO 8601 format,
