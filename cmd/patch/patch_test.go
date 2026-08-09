@@ -6,6 +6,7 @@ import (
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 
 	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -68,6 +69,43 @@ func Test_validateImagePatchInfo_Image(t *testing.T) {
 	}
 	err := validateImagePatchInfo(patchInfo)
 	assert.Nil(t, err)
+}
+
+// TestPatchCmd_FormatFlagValidation verifies --format accepts every format supported for image
+// scans (printer.ImageFormats) and rejects formats that are not (e.g. csv, which requires posture
+// scan data that patch's image-only results never populate), plus the empty-value case.
+func TestPatchCmd_FormatFlagValidation(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+
+	for _, format := range printer.ImageFormats {
+		t.Run("accepts_"+format, func(t *testing.T) {
+			cmd := GetPatchCmd(mockKubescape)
+			cmd.SetArgs([]string{"--image", "nginx:1.23", "--format", format})
+			err := cmd.Execute()
+			// Past the format check, execution fails later (no buildkit/registry available
+			// in this test environment) - what matters is the error is NOT a format complaint.
+			if err != nil {
+				assert.NotContains(t, err.Error(), "invalid format")
+			}
+		})
+	}
+
+	t.Run("rejects_csv", func(t *testing.T) {
+		cmd := GetPatchCmd(mockKubescape)
+		cmd.SetArgs([]string{"--image", "nginx:1.23", "--format", "csv"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `invalid format "csv"`)
+		assert.Contains(t, err.Error(), "pretty-printer")
+	})
+
+	t.Run("rejects_empty", func(t *testing.T) {
+		cmd := GetPatchCmd(mockKubescape)
+		cmd.SetArgs([]string{"--image", "nginx:1.23", "--format", ""})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "format cannot be empty")
+	})
 }
 
 // TestPatchCmd_OutputModeFlags verifies the --output-mode and --output-path flags exist, default correctly, and
