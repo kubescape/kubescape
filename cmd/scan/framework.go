@@ -3,8 +3,6 @@ package scan
 import (
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"slices"
 	"strings"
 
@@ -102,26 +100,16 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 					frameworks = getter.NativeFrameworks
 
 				}
-				if len(args) > 1 {
-					if args[1] != "-" {
-						scanInfo.InputPatterns = args[1:]
-						logger.L().Debug("List of input files", helpers.Interface("patterns", scanInfo.InputPatterns))
-					} else { // store stdin to file - do NOT move to separate function !!
-						tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
-						if err != nil {
-							return err
-						}
-						defer os.Remove(tempFile.Name())
-
-						if _, err := io.Copy(tempFile, os.Stdin); err != nil {
-							_ = tempFile.Close()
-							return err
-						}
-						if err := tempFile.Close(); err != nil {
-							return err
-						}
-						scanInfo.InputPatterns = []string{tempFile.Name()}
-					}
+				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, scanInfo, scanLocalInputOptions{
+					FirstInputArg:    1,
+					RejectMixedStdin: true,
+				})
+				if err != nil {
+					return err
+				}
+				defer cleanup()
+				if len(scanInfo.InputPatterns) > 0 {
+					logger.L().Debug("List of input files", helpers.Interface("patterns", scanInfo.InputPatterns))
 				}
 			}
 			scanInfo.SetScanType(cautils.ScanTypeFramework)

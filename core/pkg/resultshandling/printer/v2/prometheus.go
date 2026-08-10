@@ -84,7 +84,7 @@ func (pp *PrometheusPrinter) generateImagePrometheusFormat(imageScanData []cauti
 	return m
 }
 
-func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	var metrics *Metrics
 
 	if opaSessionObj != nil {
@@ -92,15 +92,15 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 	} else if len(imageScanData) > 0 {
 		metrics = pp.generateImagePrometheusFormat(imageScanData)
 	} else {
-		logger.L().Ctx(ctx).Error("failed to print results, missing data")
-		return
+		return fmt.Errorf("failed to print results, missing data")
 	}
 
 	if _, err := pp.writer.Write([]byte(metrics.String())); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to write results: %w", err)
 	}
 	printer.LogOutputFile(pp.writer.Name())
+	return nil
 }
 
 func (p *PrometheusPrinter) CloseWriter() {

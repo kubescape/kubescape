@@ -68,7 +68,7 @@ func (pp *PdfPrinter) PrintNextSteps() {
 }
 
 // ActionPrint is responsible for generating a report in pdf format
-func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	var outBuff []byte
 	var err error
 
@@ -77,20 +77,20 @@ func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 	} else if len(imageScanData) > 0 {
 		outBuff, err = pp.generateImagePdf(imageScanData)
 	} else {
-		logger.L().Ctx(ctx).Error("failed to print results, missing data")
-		return
+		return fmt.Errorf("failed to print results, missing data")
 	}
 
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to generate pdf format", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to generate pdf format: %w", err)
 	}
 
 	if _, err := pp.writer.Write(outBuff); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to write results: %w", err)
 	}
 	printer.LogOutputFile(pp.writer.Name())
+	return nil
 }
 
 // generateImagePdf builds a CVE-table PDF report for an image scan (#2782)

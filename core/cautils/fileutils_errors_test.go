@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -172,4 +173,54 @@ func TestLoadResourcesFromKustomizeDirectoryNoopsForPlainDirectory(t *testing.T)
 	require.NoError(t, err)
 	assert.Nil(t, workloads)
 	assert.Empty(t, name)
+}
+
+// TestLoadResourcesFromNestedKustomizeDirectories_DiscoveryErrorDoesNotAbortScan
+// pins that a directory discovery error (e.g. an unreadable subdirectory hit
+// during the tree walk) is logged as a warning, matching
+// loadResourcesFromHelmCharts, rather than failing the whole broad scan. A
+// Kustomize directory discovered before the unreadable one was hit must still
+// be rendered.
+func TestLoadResourcesFromNestedKustomizeDirectories_DiscoveryErrorDoesNotAbortScan(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits are not enforced the same way on windows")
+	}
+
+	root := t.TempDir()
+
+	// "app" sorts before "unreadable" lexically, so the walk records it
+	// before hitting the permission error.
+	appDir := filepath.Join(root, "app")
+	require.NoError(t, os.MkdirAll(appDir, 0o750))
+	writeManifestFixture(t, appDir, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+`)
+	writeManifestFixture(t, appDir, "deployment.yaml", `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  selector:
+    matchLabels:
+      app: app
+  template:
+    metadata:
+      labels:
+        app: app
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.27
+`)
+
+	unreadableDir := filepath.Join(root, "unreadable")
+	require.NoError(t, os.MkdirAll(unreadableDir, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(unreadableDir, 0o750) })
+
+	sourceToWorkloads, renderedDirs := LoadResourcesFromNestedKustomizeDirectories(context.Background(), root)
+
+	assert.Contains(t, renderedDirs, appDir, "a directory discovered before the permission error must still be rendered")
+	assert.NotEmpty(t, sourceToWorkloads, "the successfully rendered directory's workloads must still be returned")
 }

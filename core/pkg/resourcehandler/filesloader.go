@@ -262,17 +262,9 @@ func excludeFilesUnderDirectories(sourceToWorkloads map[string][]workloadinterfa
 	if len(dirs) == 0 {
 		return
 	}
-	cleanDirs := make([]string, len(dirs))
-	for i, dir := range dirs {
-		cleanDirs[i] = filepath.Clean(dir) + string(filepath.Separator)
-	}
 	for source := range sourceToWorkloads {
-		cleanSource := filepath.Clean(source)
-		for _, dir := range cleanDirs {
-			if strings.HasPrefix(cleanSource, dir) {
-				delete(sourceToWorkloads, source)
-				break
-			}
+		if cautils.IsUnderAnyDir(source, dirs) {
+			delete(sourceToWorkloads, source)
 		}
 	}
 }
@@ -325,10 +317,7 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	// path itself may not be a Kustomize directory (e.g. a repository root), but a child
 	// directory below it can still hold its own Kustomization. Discover and render those too,
 	// so a broad scan applies their transformations instead of falling through to raw manifests.
-	nestedKustomizeSourceToWorkloads, nestedKustomizeDirs, err := cautils.LoadResourcesFromNestedKustomizeDirectories(ctx, path)
-	if err != nil {
-		return nil, nil, err
-	}
+	nestedKustomizeSourceToWorkloads, nestedKustomizeDirs := cautils.LoadResourcesFromNestedKustomizeDirectories(ctx, path)
 	if len(nestedKustomizeSourceToWorkloads) > 0 {
 		if kustomizeSourceToWorkloads == nil {
 			kustomizeSourceToWorkloads = map[string][]workloadinterface.IMetadata{}

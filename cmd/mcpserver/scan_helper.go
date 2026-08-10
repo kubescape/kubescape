@@ -46,10 +46,11 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 
 	var client *k8sinterface.KubernetesApi
 	if rsrcHandler == nil {
-		if !k8sinterface.IsConnectedToCluster() {
-			return nil, fmt.Errorf("no reachable kubernetes cluster: ensure KUBECONFIG is set or the server is running inside a cluster")
+		var err error
+		client, err = ksServer.getK8sClient()
+		if err != nil {
+			return nil, err
 		}
-		client = ksServer.getK8sClient()
 	}
 
 	timeout := 10 * time.Second

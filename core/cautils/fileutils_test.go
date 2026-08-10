@@ -193,6 +193,87 @@ func TestExcludeHelmTemplateFiles_NoCharts(t *testing.T) {
 	assert.Equal(t, files, excludeHelmTemplateFiles(files, nil))
 }
 
+// TestIsUnderAnyDir asserts that containment is decided by canonical relative
+// paths, not by string prefix equality: siblings that merely share a directory
+// prefix must not be reported as contained, and a directory named "." must stay
+// confined to its location (#2889).
+func TestIsUnderAnyDir(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		dirs      []string
+		contained bool
+	}{
+		{
+			name:      "file directly inside directory",
+			path:      "/repo/app/deployment.yaml",
+			dirs:      []string{"/repo/app"},
+			contained: true,
+		},
+		{
+			name:      "file nested below directory",
+			path:      "/repo/app/config/base/pod.yaml",
+			dirs:      []string{"/repo/app"},
+			contained: true,
+		},
+		{
+			name:      "sibling sharing a prefix is outside",
+			path:      "/repo/app-docs/deployment.yaml",
+			dirs:      []string{"/repo/app"},
+			contained: false,
+		},
+		{
+			name:      "unrelated path is outside",
+			path:      "/repo/other/pod.yaml",
+			dirs:      []string{"/repo/app"},
+			contained: false,
+		},
+		{
+			name:      "every path is under the root directory",
+			path:      "/repo/app/deployment.yaml",
+			dirs:      []string{string(filepath.Separator)},
+			contained: true,
+		},
+		{
+			name:      "parent directory does not claim a sibling",
+			path:      "/repo/app/deployment.yaml",
+			dirs:      []string{"/repo"},
+			contained: true,
+		},
+		{
+			name:      "relative path is resolved against the working directory",
+			path:      "app/deployment.yaml",
+			dirs:      []string{"app"},
+			contained: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.contained, IsUnderAnyDir(tt.path, tt.dirs))
+		})
+	}
+}
+
+// TestIsUnderAnyDir_CanonicalizesSymlinks asserts that a path reached through a
+// symlinked parent is still reported contained when only the physical layout
+// matches one of dirs.
+func TestIsUnderAnyDir_CanonicalizesSymlinks(t *testing.T) {
+	realParent := t.TempDir()
+	dir := filepath.Join(realParent, "app")
+	require.NoError(t, os.MkdirAll(dir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "deployment.yaml"), []byte("apiVersion: v1\n"), 0o600))
+
+	linkedParent := filepath.Join(t.TempDir(), "linked-parent")
+	if err := os.Symlink(realParent, linkedParent); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	assert.True(t, IsUnderAnyDir(
+		filepath.Join(linkedParent, "app", "deployment.yaml"), []string{dir},
+	), "a symlinked copy of the directory must still be treated as contained")
+}
+
 func TestLoadResourcesFromHelmCharts(t *testing.T) {
 	sourceToWorkloads, sourceToChartName, _, err := LoadResourcesFromHelmCharts(context.Background(), helmChartPath(), HelmValueOptions{})
 	assert.NoError(t, err)
