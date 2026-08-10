@@ -2,9 +2,11 @@ package resourcehandler
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	gitv5 "github.com/go-git/go-git/v5"
@@ -19,6 +21,102 @@ import (
 func TestNewFileResourceHandler_InitializesNewInstance(t *testing.T) {
 	fileHandler := NewFileResourceHandler()
 	assert.NotNil(t, fileHandler)
+}
+
+func drainFileResourceStream(batchChan <-chan *cautils.ResourceBatch, errChan <-chan error, setupErr error) ([]*cautils.ResourceBatch, []error) {
+	var batches []*cautils.ResourceBatch
+	if batchChan != nil {
+		for batch := range batchChan {
+			batches = append(batches, batch)
+		}
+	}
+
+	var streamErrs []error
+	if setupErr != nil {
+		streamErrs = append(streamErrs, setupErr)
+	}
+	if errChan != nil {
+		for streamErr := range errChan {
+			streamErrs = append(streamErrs, streamErr)
+		}
+	}
+	return batches, streamErrs
+}
+
+func TestFileResourceHandlerStreamResourcesBatchesPreCanceled(t *testing.T) {
+	manifestPath := filepath.Join(t.TempDir(), "pod.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(singlePodManifest), 0o600))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	scanInfo := &cautils.ScanInfo{InputPatterns: []string{manifestPath}}
+	session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+	batchChan, errChan, _, err := NewFileResourceHandler().StreamResourcesBatches(ctx, session, scanInfo)
+	batches, streamErrs := drainFileResourceStream(batchChan, errChan, err)
+
+	assert.Empty(t, batches, "a pre-canceled stream must not emit a resource batch")
+	assert.Nil(t, batchChan, "a setup error must not return a batch channel")
+	assert.Nil(t, errChan, "a setup error must not return an error channel")
+	require.Len(t, streamErrs, 1)
+	assert.True(t, errors.Is(streamErrs[0], context.Canceled), "stream error = %v", streamErrs[0])
+}
+
+// cancelAfterEntryPreflightContext models cancellation immediately after the
+// stream's entry preflight observes an active context. The post-collection
+// preflight must observe the transition before the batch producer starts.
+type cancelAfterEntryPreflightContext struct {
+	context.Context
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+func (c *cancelAfterEntryPreflightContext) Err() error {
+	err := c.Context.Err()
+	c.once.Do(c.cancel)
+	return err
+}
+
+func TestFileResourceHandlerStreamResourcesBatchesCanceledAfterEntryPreflight(t *testing.T) {
+	manifestPath := filepath.Join(t.TempDir(), "pod.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(singlePodManifest), 0o600))
+
+	baseCtx, cancel := context.WithCancel(context.Background())
+	ctx := &cancelAfterEntryPreflightContext{Context: baseCtx, cancel: cancel}
+	t.Cleanup(cancel)
+
+	scanInfo := &cautils.ScanInfo{InputPatterns: []string{manifestPath}}
+	session := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+	batchChan, errChan, _, err := NewFileResourceHandler().StreamResourcesBatches(ctx, session, scanInfo)
+	batches, streamErrs := drainFileResourceStream(batchChan, errChan, err)
+
+	assert.Empty(t, batches, "a stream canceled after entry preflight must not emit a resource batch")
+	assert.Nil(t, batchChan, "a setup error must not return a batch channel")
+	assert.Nil(t, errChan, "a setup error must not return an error channel")
+	require.Len(t, streamErrs, 1)
+	assert.True(t, errors.Is(streamErrs[0], context.Canceled), "stream error = %v", streamErrs[0])
+}
+
+func TestPublishFileResourceBatchPropagatesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	batchChan := make(chan *cautils.ResourceBatch, 1)
+	errChan := make(chan error, 1)
+	publishFileResourceBatch(ctx, batchChan, errChan, cautils.NewResourceBatch(cautils.ClusterScope))
+
+	select {
+	case batch := <-batchChan:
+		t.Fatalf("canceled producer emitted batch: %#v", batch)
+	default:
+	}
+
+	select {
+	case err := <-errChan:
+		assert.ErrorIs(t, err, context.Canceled)
+	default:
+		t.Fatal("canceled producer did not report an error")
+	}
 }
 
 // This is deliberately a FileResourceHandler test rather than another parser
@@ -539,4 +637,70 @@ metadata:
 	}
 	assert.Equal(t, 1, counts["Deployment/prod-app"])
 	assert.Equal(t, 1, counts["ConfigMap/standalone"], "a manifest outside the Kustomize directory must still be scanned")
+}
+
+// TestExcludeFilesUnderDirectories asserts that only sources inside the given
+// directories are dropped: siblings that merely share an ancestor, or unrelated
+// files, survive. The containment check is directory-aware, so a root located
+// just above the scan tree must not swallow unrelated inputs.
+func TestExcludeFilesUnderDirectories(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	nestedDir := filepath.Join(appDir, "config", "base")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o750))
+
+	sources := map[string][]workloadinterface.IMetadata{
+		filepath.Join(nestedDir, "deployment.yaml"):    {localWorkloadWithPath("apps/v1", "Deployment", "", "app", filepath.Join(nestedDir, "deployment.yaml"))},
+		filepath.Join(appDir, "service.yaml"):          {localWorkloadWithPath("v1", "Service", "", "app", filepath.Join(appDir, "service.yaml"))},
+		filepath.Join(root, "app-docs", "policy.yaml"): {localWorkloadWithPath("v1", "Pod", "default", "docs", filepath.Join(root, "app-docs", "policy.yaml"))},
+		filepath.Join(root, "standalone.yaml"):         {localWorkloadWithPath("v1", "ConfigMap", "default", "standalone", filepath.Join(root, "standalone.yaml"))},
+	}
+
+	excludeFilesUnderDirectories(sources, []string{appDir})
+
+	assert.NotContains(t, sources, filepath.Join(nestedDir, "deployment.yaml"), "a file nested below the directory must be excluded")
+	assert.NotContains(t, sources, filepath.Join(appDir, "service.yaml"), "a file directly inside the directory must be excluded")
+	assert.Contains(t, sources, filepath.Join(root, "app-docs", "policy.yaml"), "a sibling sharing a name prefix must survive")
+	assert.Contains(t, sources, filepath.Join(root, "standalone.yaml"), "an unrelated file must survive")
+}
+
+// TestExcludeFilesUnderDirectories_RootDirectory asserts that a directory at the
+// filesystem root matches through the canonical relative-path comparison, where
+// the old string-prefix approach mangled the joined separator (#2889).
+func TestExcludeFilesUnderDirectories_RootDirectory(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "deployment.yaml")
+	sources := map[string][]workloadinterface.IMetadata{
+		source: {localWorkloadWithPath("apps/v1", "Deployment", "", "app", source)},
+	}
+
+	excludeFilesUnderDirectories(sources, []string{string(filepath.Separator)})
+
+	assert.NotContains(t, sources, source, "every absolute path lives under the root directory")
+}
+
+// TestExcludeFilesUnderDirectories_CanonicalizesSymlinkedDirs asserts that a Kustomize
+// directory discovered under a symlinked scan path still excludes its inputs, which are
+// reported with the symlinked (lexical) prefix while the directory is reported physically.
+// The old string-prefix comparison could not see the match across the link (#2889).
+func TestExcludeFilesUnderDirectories_CanonicalizesSymlinkedDirs(t *testing.T) {
+	realParent := t.TempDir()
+	physicalApp := filepath.Join(realParent, "app")
+	source := filepath.Join(physicalApp, "deployment.yaml")
+	require.NoError(t, os.MkdirAll(physicalApp, 0o750))
+	require.NoError(t, os.WriteFile(source, []byte(singlePodManifest), 0o600))
+
+	linkedParent := filepath.Join(t.TempDir(), "linked-parent")
+	if err := os.Symlink(realParent, linkedParent); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	lexicalSource := filepath.Join(linkedParent, "app", "deployment.yaml")
+
+	sources := map[string][]workloadinterface.IMetadata{
+		lexicalSource: {localWorkloadWithPath("apps/v1", "Deployment", "", "app", lexicalSource)},
+	}
+
+	excludeFilesUnderDirectories(sources, []string{physicalApp})
+
+	assert.NotContains(t, sources, lexicalSource, "the input is under the physical directory, so it must be excluded")
 }

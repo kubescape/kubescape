@@ -59,6 +59,15 @@ func TestGetControlCmdWithNonExistentControl(t *testing.T) {
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }
 
+func TestGetControlCmd_RunERejectsStdinMixedWithOtherInputs(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getControlCmd(&mocks.MockIKubescape{}, &scanInfo)
+
+	err := cmd.RunE(cmd, []string{"C-0058", "-", "manifests/app.yaml"})
+
+	assert.EqualError(t, err, "usage: stdin input '-' cannot be combined with other input paths")
+}
+
 // TestControlCmdHasCoverageFlag ensures scan control registers --fail-coverage-below
 // so the flag is not silently ignored when passed to this subcommand.
 func TestControlCmdHasCoverageFlag(t *testing.T) {

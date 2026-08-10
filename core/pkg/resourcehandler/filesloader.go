@@ -112,6 +112,9 @@ func (fileHandler *FileResourceHandler) EstimateClusterSize(ctx context.Context,
 // non-streaming path. File-based scans should not rely on --enable-streaming for
 // memory reduction.
 func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, 0, err
+	}
 	batchChan := make(chan *cautils.ResourceBatch, 1)
 	errChan := make(chan error, 1)
 
@@ -121,6 +124,9 @@ func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Conte
 	// producer goroutine like the eager path did. File collection is local and
 	// fast, so this blocks no longer than the old async body did.
 	k8sResources, allResources, externalResources, excludedRulesMap, err := fileHandler.GetResources(ctx, sessionObj, scanInfo)
+	if err := ctx.Err(); err != nil {
+		return nil, nil, 0, err
+	}
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -136,13 +142,23 @@ func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Conte
 		batch.AllResources = allResources
 		batch.ExternalResources = externalResources
 
-		select {
-		case batchChan <- batch:
-		case <-ctx.Done():
-		}
+		publishFileResourceBatch(ctx, batchChan, errChan, batch)
 	}()
 
 	return batchChan, errChan, 0, nil
+}
+
+func publishFileResourceBatch(ctx context.Context, batchChan chan<- *cautils.ResourceBatch, errChan chan<- error, batch *cautils.ResourceBatch) {
+	if err := ctx.Err(); err != nil {
+		errChan <- err
+		return
+	}
+
+	select {
+	case batchChan <- batch:
+	case <-ctx.Done():
+		errChan <- ctx.Err()
+	}
 }
 
 // helmValueOptionsFromScanInfo extracts the user-supplied Helm value/release flags from ScanInfo
@@ -262,17 +278,9 @@ func excludeFilesUnderDirectories(sourceToWorkloads map[string][]workloadinterfa
 	if len(dirs) == 0 {
 		return
 	}
-	cleanDirs := make([]string, len(dirs))
-	for i, dir := range dirs {
-		cleanDirs[i] = filepath.Clean(dir) + string(filepath.Separator)
-	}
 	for source := range sourceToWorkloads {
-		cleanSource := filepath.Clean(source)
-		for _, dir := range cleanDirs {
-			if strings.HasPrefix(cleanSource, dir) {
-				delete(sourceToWorkloads, source)
-				break
-			}
+		if cautils.IsUnderAnyDir(source, dirs) {
+			delete(sourceToWorkloads, source)
 		}
 	}
 }
@@ -325,10 +333,7 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	// path itself may not be a Kustomize directory (e.g. a repository root), but a child
 	// directory below it can still hold its own Kustomization. Discover and render those too,
 	// so a broad scan applies their transformations instead of falling through to raw manifests.
-	nestedKustomizeSourceToWorkloads, nestedKustomizeDirs, err := cautils.LoadResourcesFromNestedKustomizeDirectories(ctx, path)
-	if err != nil {
-		return nil, nil, err
-	}
+	nestedKustomizeSourceToWorkloads, nestedKustomizeDirs := cautils.LoadResourcesFromNestedKustomizeDirectories(ctx, path)
 	if len(nestedKustomizeSourceToWorkloads) > 0 {
 		if kustomizeSourceToWorkloads == nil {
 			kustomizeSourceToWorkloads = map[string][]workloadinterface.IMetadata{}

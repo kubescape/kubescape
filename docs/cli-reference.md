@@ -179,6 +179,7 @@ kubescape scan framework <framework-name> [target] [flags]
 kubescape scan framework nsa
 kubescape scan framework mitre --include-namespaces production
 kubescape scan framework cis-v1.23-t1.0.1 /path/to/manifests
+cat ./manifests/deployment.yaml | kubescape scan framework nsa -
 ```
 
 ---
@@ -201,6 +202,9 @@ kubescape scan control C-0057 -v
 
 # Scan specific files for a control
 kubescape scan control C-0013 /path/to/deployment.yaml
+
+# Scan a manifest from stdin
+cat ./manifests/deployment.yaml | kubescape scan control C-0013 -
 ```
 
 ---
@@ -232,6 +236,7 @@ kubescape scan workload Deployment/nginx --namespace default
 kubescape scan workload Deployment.v1.apps/nginx
 kubescape scan workload DaemonSet/fluentd --namespace logging
 kubescape scan workload Deployment/nginx ./manifests
+cat ./manifests/deployment.yaml | kubescape scan workload Deployment/nginx -
 kubescape scan workload Deployment/nginx --file-path ./manifests/deployment.yaml
 kubescape scan workload Deployment/nginx --chart-path ./chart --file-path ./chart/templates/deployment.yaml
 ```

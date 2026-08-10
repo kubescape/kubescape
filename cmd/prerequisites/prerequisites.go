@@ -1,6 +1,8 @@
 package prerequisites
 
 import (
+	"fmt"
+
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -19,10 +21,10 @@ func GetPreReqCmd(ks meta.IKubescape) *cobra.Command {
 	preReqCmd := &cobra.Command{
 		Use:   "prerequisites",
 		Short: "Check prerequisites for installing Kubescape Operator",
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			clientSet, inCluster := common.BuildKubeClient(*kubeconfigPath)
 			if clientSet == nil {
-				logger.L().Fatal("Could not create kube client. Exiting.")
+				return fmt.Errorf("could not create kube client")
 			}
 
 			// 1) Collect cluster data
@@ -42,6 +44,7 @@ func GetPreReqCmd(ks meta.IKubescape) *cobra.Command {
 			finalReport.InCluster = inCluster
 
 			common.GenerateOutput(finalReport, inCluster)
+			return nil
 		},
 	}
 
