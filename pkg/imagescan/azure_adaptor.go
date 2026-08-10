@@ -63,7 +63,7 @@ func resolveAzureCloudConfig(registryHost string) (cloud.Configuration, error) {
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as Azure SDK relies heavily on Managed Identities and Azure CLI credentials.
 func (a *AzureAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
-	if credentials.Username != "" || credentials.Password != "" {
+	if credentials.Username != "" || credentials.Password != "" || credentials.Token != "" {
 		return fmt.Errorf("explicit credentials are intentionally unsupported for Azure; use DefaultAzureCredential")
 	}
 

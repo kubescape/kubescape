@@ -59,7 +59,7 @@ func NewGCPAdaptor() *GCPAdaptor {
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as GCP SDK relies heavily on Workload Identity and Application Default Credentials.
 func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
-	if credentials.Username != "" || credentials.Password != "" {
+	if credentials.Username != "" || credentials.Password != "" || credentials.Token != "" {
 		return fmt.Errorf("explicit credentials are intentionally unsupported for gcp; use Application Default Credentials or Workload Identity")
 	}
 
