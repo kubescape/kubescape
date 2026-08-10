@@ -26,8 +26,7 @@ func TestRegistry_DifferentClustersGetIsolatedHandlers(t *testing.T) {
 	assert.NotSame(t, hA, hB)
 	assert.NotSame(t, hA.cachedExceptions, hB.cachedExceptions)
 	assert.NotSame(t, hA.cachedControlInputs, hB.cachedControlInputs)
-	assert.NotSame(t, hA.cachedFrameworks, hB.cachedFrameworks)
-	assert.NotSame(t, hA.cachedPolicyIdentifiers, hB.cachedPolicyIdentifiers)
+	assert.NotSame(t, hA.cachedPolicies, hB.cachedPolicies)
 }
 
 // TestRegistry_GetHandlerNeverLeavesMoreThanOneEntryPerActiveCluster is the

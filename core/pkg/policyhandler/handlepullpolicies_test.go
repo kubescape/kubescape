@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -319,4 +320,31 @@ func TestGetControlInputs_NonNilResultIsCached(t *testing.T) {
 
 	_, cacheHit := policyHandler.cachedControlInputs.Get()
 	assert.True(t, cacheHit, "non-nil control inputs should be cached")
+}
+
+func TestGetScanPolicies_ConcurrentDifferentFrameworksAtomicCache(t *testing.T) {
+	policyHandler := NewRequestScopedPolicyHandler("test-cluster-atomic")
+	defer policyHandler.Close()
+
+	getters := &cautils.Getters{
+		PolicyGetter: &PolicyGetterMock{},
+	}
+
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	goroutines := 20
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			frameworkName := fmt.Sprintf("framework-%d", idx%3)
+			policyIdent := []cautils.PolicyIdentifier{{Identifier: frameworkName, Kind: "Framework"}}
+			res, err := policyHandler.getScanPolicies(ctx, policyIdent, getters)
+			assert.NoError(t, err)
+			assert.NotNil(t, res)
+		}(i)
+	}
+
+	wg.Wait()
 }

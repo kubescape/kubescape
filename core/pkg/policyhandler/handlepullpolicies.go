@@ -20,13 +20,17 @@ const (
 	PoliciesCacheTtlEnvVar = "POLICIES_CACHE_TTL"
 )
 
+type cachedPoliciesEntry struct {
+	identifiers []string
+	frameworks  []reporthandling.Framework
+}
+
 // PolicyHandler
 type PolicyHandler struct {
-	clusterName             string
-	cachedPolicyIdentifiers *TimedCache[[]string]
-	cachedFrameworks        *TimedCache[[]reporthandling.Framework]
-	cachedExceptions        *TimedCache[[]armotypes.PostureExceptionPolicy]
-	cachedControlInputs     *TimedCache[map[string][]string]
+	clusterName         string
+	cachedPolicies      *TimedCache[cachedPoliciesEntry]
+	cachedExceptions    *TimedCache[[]armotypes.PostureExceptionPolicy]
+	cachedControlInputs *TimedCache[map[string][]string]
 }
 
 // NewPolicyHandler returns the shared, cluster-isolated *PolicyHandler for
@@ -58,21 +62,17 @@ func NewPolicyHandlerWithRelease(clusterName string) (*PolicyHandler, func()) {
 func NewRequestScopedPolicyHandler(clusterName string) *PolicyHandler {
 	cacheTtl := getPoliciesCacheTtl()
 	return &PolicyHandler{
-		clusterName:             clusterName,
-		cachedPolicyIdentifiers: NewTimedCache[[]string](cacheTtl),
-		cachedFrameworks:        NewTimedCache[[]reporthandling.Framework](cacheTtl),
-		cachedExceptions:        NewTimedCache[[]armotypes.PostureExceptionPolicy](cacheTtl),
-		cachedControlInputs:     NewTimedCache[map[string][]string](cacheTtl),
+		clusterName:         clusterName,
+		cachedPolicies:      NewTimedCache[cachedPoliciesEntry](cacheTtl),
+		cachedExceptions:    NewTimedCache[[]armotypes.PostureExceptionPolicy](cacheTtl),
+		cachedControlInputs: NewTimedCache[map[string][]string](cacheTtl),
 	}
 }
 
 // Close stops all internal caches and background goroutines to prevent leaks.
 func (policyHandler *PolicyHandler) Close() {
-	if policyHandler.cachedPolicyIdentifiers != nil {
-		policyHandler.cachedPolicyIdentifiers.Stop()
-	}
-	if policyHandler.cachedFrameworks != nil {
-		policyHandler.cachedFrameworks.Stop()
+	if policyHandler.cachedPolicies != nil {
+		policyHandler.cachedPolicies.Stop()
 	}
 	if policyHandler.cachedExceptions != nil {
 		policyHandler.cachedExceptions.Stop()
@@ -152,23 +152,24 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 // getScanPolicies - get policies from cache or downloads them. The function returns an error if the policies could not be downloaded.
 func (policyHandler *PolicyHandler) getScanPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, getters *cautils.Getters) ([]reporthandling.Framework, error) {
 	policyIdentifiersSlice := policyIdentifierToSlice(policyIdentifier)
-	// check if policies are cached
-	if cachedPolicies, policiesExist := policyHandler.cachedFrameworks.Get(); policiesExist {
-		// check if the cached policies are the same as the requested policies, otherwise download the policies
-		if cachedIdentifiers, identifiersExist := policyHandler.cachedPolicyIdentifiers.Get(); identifiersExist && cautils.StringSlicesAreEqual(cachedIdentifiers, policyIdentifiersSlice) {
+	// check if policies are cached atomically
+	if entry, exist := policyHandler.cachedPolicies.Get(); exist {
+		// check if the cached policies match the requested policy identifiers
+		if cautils.StringSlicesAreEqual(entry.identifiers, policyIdentifiersSlice) {
 			logger.L().Info("Using cached policies")
-			return deepCopyPolicies(cachedPolicies)
+			return deepCopyPolicies(entry.frameworks)
 		}
 
 		logger.L().Debug("Cached policies are not the same as the requested policies")
-		policyHandler.cachedPolicyIdentifiers.Invalidate()
-		policyHandler.cachedFrameworks.Invalidate()
+		policyHandler.cachedPolicies.Invalidate()
 	}
 
 	policies, err := policyHandler.downloadScanPolicies(ctx, policyIdentifier, getters)
 	if err == nil {
-		policyHandler.cachedFrameworks.Set(policies)
-		policyHandler.cachedPolicyIdentifiers.Set(policyIdentifiersSlice)
+		policyHandler.cachedPolicies.Set(cachedPoliciesEntry{
+			identifiers: policyIdentifiersSlice,
+			frameworks:  policies,
+		})
 	}
 
 	return policies, err
