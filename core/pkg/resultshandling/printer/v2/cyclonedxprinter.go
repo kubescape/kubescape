@@ -44,34 +44,35 @@ func (cp *CycloneDXPrinter) SetWriter(ctx context.Context, outputFile string) {
 // against image scans, so it is never invoked in practice.
 func (cp *CycloneDXPrinter) Score(score float32) {}
 
-func (cp *CycloneDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (cp *CycloneDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if opaSessionObj != nil || len(imageScanData) == 0 {
 		logger.L().Ctx(ctx).Error("cyclonedx-json output is only supported for image scans")
-		return
+		return nil
 	}
 	if imageScanData[0].SBOM == nil {
 		logger.L().Ctx(ctx).Error("no SBOM data available for cyclonedx-json output")
-		return
+		return nil
 	}
 
 	encoder, err := cyclonedxjson.NewFormatEncoderWithConfig(cyclonedxjson.DefaultEncoderConfig())
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to create cyclonedx-json encoder", helpers.Error(err))
-		return
+		return err
 	}
 
 	data, err := format.Encode(*imageScanData[0].SBOM, encoder)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to encode SBOM as cyclonedx-json", helpers.Error(err))
-		return
+		return err
 	}
 
 	if _, err := cp.writer.Write(data); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write cyclonedx-json output", helpers.Error(err))
-		return
+		return err
 	}
 
 	printer.LogOutputFile(cp.writer.Name())
+	return nil
 }
 
 func (cp *CycloneDXPrinter) PrintNextSteps() {}
