@@ -213,13 +213,13 @@ func TestDownloadScanPolicies(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			tc.policyHandler.getters = &cautils.Getters{
+			getters := &cautils.Getters{
 				PolicyGetter:         &PolicyGetterMock{},
 				ExceptionsGetter:     &ExceptionsGetterMock{},
 				ControlsInputsGetter: &ControlsInputsGetterMock{},
 			}
 
-			frameworks, err := tc.policyHandler.downloadScanPolicies(ctx, tc.policyIdent)
+			frameworks, err := tc.policyHandler.downloadScanPolicies(ctx, tc.policyIdent, getters)
 
 			assert.Equal(t, tc.expectedError, err)
 			assert.Equal(t, tc.expectedResult, frameworks)
@@ -230,10 +230,10 @@ func TestDownloadScanPolicies(t *testing.T) {
 func TestGetExceptions(t *testing.T) {
 	cachedExceptions := CachedExceptions
 	policyHandler := NewPolicyHandler("test-cluster")
-	policyHandler.getters = &cautils.Getters{
+	getters := &cautils.Getters{
 		ExceptionsGetter: &ExceptionsGetterMock{},
 	}
-	exceptions, err := policyHandler.getExceptions(context.TODO())
+	exceptions, err := policyHandler.getExceptions(context.TODO(), getters)
 
 	assert.NoError(t, err)
 	assert.Equal(t, cachedExceptions, exceptions)
@@ -242,11 +242,11 @@ func TestGetExceptions(t *testing.T) {
 func TestGetControlInputs(t *testing.T) {
 	cachedControlInputs := CachedControlInputs
 	policyHandler := NewPolicyHandler("test-cluster")
-	policyHandler.getters = &cautils.Getters{
+	getters := &cautils.Getters{
 		ControlsInputsGetter: &ControlsInputsGetterMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs(context.TODO())
+	controlInputs, err := policyHandler.getControlInputs(context.TODO(), getters)
 
 	assert.NoError(t, err)
 	assert.Equal(t, cachedControlInputs, controlInputs)
@@ -261,7 +261,7 @@ func TestDownloadScanPolicies_LocalCacheBypass(t *testing.T) {
 	lp := getter.NewLoadPolicy([]string{tempFile})
 
 	policyHandler := NewPolicyHandler("test-cluster-bypass")
-	policyHandler.getters = &cautils.Getters{
+	getters := &cautils.Getters{
 		PolicyGetter: lp,
 	}
 	policyIdent := []cautils.PolicyIdentifier{{Identifier: "control1", Kind: "Control"}}
@@ -272,7 +272,7 @@ func TestDownloadScanPolicies_LocalCacheBypass(t *testing.T) {
 	getter.DefaultLocalStore = cacheDir
 	defer func() { getter.DefaultLocalStore = originalLocalStore }()
 
-	_, err = policyHandler.downloadScanPolicies(context.Background(), policyIdent)
+	_, err = policyHandler.downloadScanPolicies(context.Background(), policyIdent, getters)
 	assert.NoError(t, err)
 
 	// Verify that the cache dir is empty (cache bypassed)
@@ -291,11 +291,11 @@ func TestGetControlInputs_EmptyReturnsErrorNotCached(t *testing.T) {
 	t.Setenv("POLICIES_CACHE_TTL", "10")
 	policyHandler := NewRequestScopedPolicyHandler("test-cluster")
 	defer policyHandler.Close()
-	policyHandler.getters = &cautils.Getters{
+	getters := &cautils.Getters{
 		ControlsInputsGetter: &ControlsInputsGetterEmptyMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs(context.TODO())
+	controlInputs, err := policyHandler.getControlInputs(context.TODO(), getters)
 
 	assert.Error(t, err)
 	assert.Nil(t, controlInputs)
@@ -308,11 +308,11 @@ func TestGetControlInputs_NonNilResultIsCached(t *testing.T) {
 	t.Setenv("POLICIES_CACHE_TTL", "10")
 	policyHandler := NewRequestScopedPolicyHandler("test-cluster")
 	defer policyHandler.Close()
-	policyHandler.getters = &cautils.Getters{
+	getters := &cautils.Getters{
 		ControlsInputsGetter: &ControlsInputsGetterMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs(context.TODO())
+	controlInputs, err := policyHandler.getControlInputs(context.TODO(), getters)
 
 	assert.NoError(t, err)
 	assert.Equal(t, CachedControlInputs, controlInputs)
