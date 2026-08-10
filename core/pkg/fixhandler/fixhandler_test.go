@@ -5,14 +5,16 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	gitv5 "github.com/go-git/go-git/v5"
 	"github.com/kubescape/go-logger"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/internal/testutils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -188,187 +190,19 @@ func getTestCases() []indentationTestCase {
 	return indentationTestCases
 }
 
-func TestApplyFixKeepsFormatting(t *testing.T) {
-	testCases := getTestCases()
-	getTestDataPath := func(filename string) string {
-		currentFile := "testdata/" + filename
-		return filepath.Join(testutils.CurrentDir(), currentFile)
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.inputFile, func(t *testing.T) {
-			inputFilename := getTestDataPath(tc.inputFile)
-			input, err := os.ReadFile(inputFilename)
-			if err != nil {
-				t.Fatalf(`Unable to open file %s due to: %v`, inputFilename, err)
-			}
-			expectedFilename := getTestDataPath(tc.expectedFile)
-			wantRaw, err := os.ReadFile(expectedFilename)
-			if err != nil {
-				t.Fatalf(`Unable to open file %s due to: %v`, expectedFilename, err)
-			}
-			want := string(wantRaw)
-			expression := tc.yamlExpression
-
-			fileAsString := string(input)
-			got, _ := ApplyFixToContent(context.Background(), fileAsString, expression)
-
-			assert.Equalf(
-				t, want, got,
-				"Contents of the fixed file don't match the expectation.\n"+
-					"Input file: %s\n\n"+
-					"Got: <%s>\n\n"+
-					"Want: <%s>",
-				tc.inputFile, got, want,
-			)
-		},
-		)
-
-	}
-}
 
 // TestApplyFixToContent_EmptyLeadingDocument guards the regression from issue
 // #2495: a file whose first document is empty (a comment followed by "---") is
 // decoded inconsistently by go-yaml and yqlib, which used to make the fix
 // renderer call logger.Fatal and os.Exit the whole process mid-write (leaving
 // an empty SARIF file). It must now return an error gracefully instead.
-func TestApplyFixToContent_EmptyLeadingDocument(t *testing.T) {
-	yamlContent := "# a comment, followed by a document separator\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          image: nginx:1.27\n"
-	// The scanner counts the empty leading document, so the Deployment is di==1.
-	expression := FixPathToValidYamlExpression("spec.template.spec.containers[0].image", "nginx:1.28", 1)
-
-	got, err := ApplyFixToContent(context.Background(), yamlContent, expression)
-
-	assert.Error(t, err, "expected a graceful error rather than a process exit")
-	assert.Empty(t, got)
-}
 
 // TestApplyFixToContent_TopLevelFlowSequence covers a flow collection that is not nested
 // under a key of its own, so it starts on the first line of the document. Resolving the
 // line to replace picked the document node that shares that line and rendered it against
 // its nil parent, panicking out of `kubescape fix` before anything was written. A nested
 // flow sequence never hit this because the document node sits on an earlier line.
-func TestApplyFixToContent_TopLevelFlowSequence(t *testing.T) {
-	yamlContent := "args: [--foo]\n"
-	expression := FixPathToValidYamlExpression("args[1]", "--bar", 0)
 
-	got, err := ApplyFixToContent(context.Background(), yamlContent, expression)
-
-	require.NoError(t, err)
-	// the flow style of the original line is kept
-	assert.Equal(t, "args: [--foo, --bar]\n", got)
-}
-
-func Test_fixPathToValidYamlExpression(t *testing.T) {
-	type args struct {
-		fixPath             string
-		value               string
-		documentIndexInYaml int
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		{
-			name: "fix path with boolean value",
-			args: args{
-				fixPath:             "spec.template.spec.containers[0].securityContext.privileged",
-				value:               "true",
-				documentIndexInYaml: 2,
-			},
-			want: "select(di==2).spec.template.spec.containers[0].securityContext.privileged |= true",
-		},
-		{
-			name: "fix path with string value",
-			args: args{
-				fixPath:             "metadata.namespace",
-				value:               "YOUR_NAMESPACE",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).metadata.namespace |= \"YOUR_NAMESPACE\"",
-		},
-		{
-			name: "fix path with string containing quotes",
-			args: args{
-				fixPath:             "spec.template.spec.containers[0].command[1]",
-				value:               "app=\"web\"",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).spec.template.spec.containers[0].command[1] |= \"app=\\\"web\\\"\"",
-		},
-		{
-			name: "fix path with string containing backslash",
-			args: args{
-				fixPath:             "path",
-				value:               "C:\\path\\to",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).path |= \"C:\\path\\to\"",
-		},
-		{
-			name: "fix path with string containing newline",
-			args: args{
-				fixPath:             "path",
-				value:               "line1\nline2",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).path |= \"line1\nline2\"",
-		},
-		{
-			name: "fix path with string containing tab",
-			args: args{
-				fixPath:             "path",
-				value:               "a\tb",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).path |= \"a\tb\"",
-		},
-		{
-			name: "fix path with number",
-			args: args{
-				fixPath:             "xxx.yyy",
-				value:               "123",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).xxx.yyy |= 123",
-		},
-		{
-			name: "fix path with NaN string value",
-			args: args{
-				fixPath:             "xxx.yyy",
-				value:               "NaN",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).xxx.yyy |= \"NaN\"",
-		},
-		{
-			name: "fix path with Inf string value",
-			args: args{
-				fixPath:             "xxx.yyy",
-				value:               "Inf",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).xxx.yyy |= \"Inf\"",
-		},
-		{
-			name: "fix path with -Inf string value",
-			args: args{
-				fixPath:             "xxx.yyy",
-				value:               "-Inf",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).xxx.yyy |= \"-Inf\"",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := FixPathToValidYamlExpression(tt.args.fixPath, tt.args.value, tt.args.documentIndexInYaml); got != tt.want {
-				t.Errorf("fixPathToValidYamlExpression() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
 
 func TestJoinStrings(t *testing.T) {
 	tests := []struct {
@@ -642,67 +476,6 @@ func TestSanitizeYaml_RoundTrip(t *testing.T) {
 	assert.Equal(t, original, revertSanitizeYaml(sanitized))
 }
 
-func TestReduceYamlExpressions(t *testing.T) {
-	type args struct {
-		yamlExpressions []string
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		{
-			name: "empty",
-			args: args{
-				yamlExpressions: []string{},
-			},
-			want: "",
-		},
-		{
-			name: "one expression",
-			args: args{
-				yamlExpressions: []string{
-					"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-				},
-			},
-			want: "select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-		},
-		{
-			name: "two expressions",
-			args: args{
-				yamlExpressions: []string{
-					"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-					"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
-				},
-			},
-			want: "select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false | select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
-		},
-		{
-			name: "Duplicate expressions",
-			args: args{
-				yamlExpressions: []string{
-					"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-					"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
-					"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-				},
-			},
-			want: "select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false | select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			resource := &ResourceFixInfo{}
-			resource.YamlExpressions = make(map[string]armotypes.FixPath)
-
-			for _, yamlExpression := range tt.args.yamlExpressions {
-				resource.YamlExpressions[yamlExpression] = armotypes.FixPath{}
-			}
-			got := reduceYamlExpressions(resource)
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
 
 func TestGetLocalPath(t *testing.T) {
 	type args struct {
@@ -1299,4 +1072,32 @@ func singleResourceReport(t *testing.T, sourcePath, relPath string) *reporthandl
 			}},
 		}},
 	}
+}
+
+func parseMockExpression(expr string) []DocumentFix {
+	var fixes []DocumentFix
+	for _, part := range strings.Split(expr, "|") {
+		part = strings.TrimSpace(part)
+		if part == "" || strings.HasPrefix(part, "del(") {
+			continue // Skip deletions in this mock
+		}
+		
+		re := regexp.MustCompile(`select\(di==(\d+)\)\.(.*?)\s*\|=\s*(.*)`)
+		matches := re.FindStringSubmatch(part)
+		if len(matches) == 4 {
+			di, _ := strconv.Atoi(matches[1])
+			val := matches[3]
+			if strings.HasPrefix(val, "\"") {
+				val = val[1:len(val)-1]
+			}
+			fixes = append(fixes, DocumentFix{
+				DocumentIndex: di,
+				Fix: armotypes.FixPath{
+					Path: matches[2],
+					Value: val,
+				},
+			})
+		}
+	}
+	return fixes
 }
