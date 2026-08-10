@@ -325,10 +325,7 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	// path itself may not be a Kustomize directory (e.g. a repository root), but a child
 	// directory below it can still hold its own Kustomization. Discover and render those too,
 	// so a broad scan applies their transformations instead of falling through to raw manifests.
-	nestedKustomizeSourceToWorkloads, nestedKustomizeDirs, err := cautils.LoadResourcesFromNestedKustomizeDirectories(ctx, path)
-	if err != nil {
-		return nil, nil, err
-	}
+	nestedKustomizeSourceToWorkloads, nestedKustomizeDirs := cautils.LoadResourcesFromNestedKustomizeDirectories(ctx, path)
 	if len(nestedKustomizeSourceToWorkloads) > 0 {
 		if kustomizeSourceToWorkloads == nil {
 			kustomizeSourceToWorkloads = map[string][]workloadinterface.IMetadata{}
