@@ -1,0 +1,79 @@
+package hostsensorutils
+
+import (
+	"os"
+	"testing"
+
+	restclient "k8s.io/client-go/rest"
+
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func withK8sHost(t *testing.T, host string) {
+	t.Helper()
+	original := k8sinterface.K8SConfig
+	t.Cleanup(func() { k8sinterface.K8SConfig = original })
+	if host == "" {
+		k8sinterface.K8SConfig = nil
+		return
+	}
+	k8sinterface.K8SConfig = &restclient.Config{Host: host}
+}
+
+// TestLoadFromCache_DisabledByDefault guards against host sensor data being
+// served from disk when HOSTSENSOR_CACHE_TTL is unset: caching used to be
+// unconditional, which meant a scan could silently report node state from up
+// to two hours earlier.
+func TestLoadFromCache_DisabledByDefault(t *testing.T) {
+	DefaultCacheDir = t.TempDir()
+	withK8sHost(t, "https://cluster-a.example.com")
+
+	env := hostsensor.HostSensorDataEnvelope{}
+	env.SetName("node-a")
+	require.NoError(t, saveToCache("ctx", "KubeletInfo", []hostsensor.HostSensorDataEnvelope{env}))
+
+	_, err := loadFromCache("ctx", "KubeletInfo")
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+// TestCacheFilePath_DiffersByClusterHost guards against two clusters that
+// share a kubeconfig context name (the kubeadm/kind/minikube default)
+// colliding on the same cache file.
+func TestCacheFilePath_DiffersByClusterHost(t *testing.T) {
+	DefaultCacheDir = t.TempDir()
+
+	withK8sHost(t, "https://cluster-a.example.com")
+	pathA, err := getCacheFilePath("kubernetes-admin@kubernetes", "KubeletInfo")
+	require.NoError(t, err)
+
+	withK8sHost(t, "https://cluster-b.example.com")
+	pathB, err := getCacheFilePath("kubernetes-admin@kubernetes", "KubeletInfo")
+	require.NoError(t, err)
+
+	assert.NotEqual(t, pathA, pathB)
+}
+
+// TestHostSensorCache_OptInRoundTrip verifies that with the opt-in TTL set,
+// data written by one cluster is not readable under a different cluster's
+// identity, even when the context name is identical.
+func TestHostSensorCache_OptInRoundTrip(t *testing.T) {
+	DefaultCacheDir = t.TempDir()
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+
+	withK8sHost(t, "https://cluster-a.example.com")
+	env := hostsensor.HostSensorDataEnvelope{}
+	env.SetName("node-a")
+	require.NoError(t, saveToCache("kubernetes-admin@kubernetes", "KubeletInfo", []hostsensor.HostSensorDataEnvelope{env}))
+
+	got, err := loadFromCache("kubernetes-admin@kubernetes", "KubeletInfo")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "node-a", got[0].GetName())
+
+	withK8sHost(t, "https://cluster-b.example.com")
+	_, err = loadFromCache("kubernetes-admin@kubernetes", "KubeletInfo")
+	assert.Error(t, err, "cluster B must not read cluster A's cached host data")
+}
