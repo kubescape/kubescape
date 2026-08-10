@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	spinnerpkg "github.com/briandowns/spinner"
@@ -65,12 +66,19 @@ func StarDisplay(w io.Writer, format string, a ...any) {
 	fmt.Fprintf(w, gchalk.WithAnsi256(238).Bold("* ")+gchalk.White(format), a...)
 }
 
-var spinner *spinnerpkg.Spinner
+var (
+	spinner   *spinnerpkg.Spinner
+	spinnerMu sync.Mutex
+)
 
+// StartSpinner initializes and starts the terminal progress spinner in a thread-safe manner.
 func StartSpinner() {
 	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
 		return
 	}
+
+	spinnerMu.Lock()
+	defer spinnerMu.Unlock()
 
 	if spinner != nil {
 		if !spinner.Active() {
@@ -84,7 +92,11 @@ func StartSpinner() {
 	}
 }
 
+// StopSpinner stops the active terminal progress spinner in a thread-safe manner.
 func StopSpinner() {
+	spinnerMu.Lock()
+	defer spinnerMu.Unlock()
+
 	if spinner == nil || !spinner.Active() {
 		return
 	}
