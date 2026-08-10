@@ -138,7 +138,8 @@ type NotEvaluatedControl struct {
 // entries whose key is also a key in ResourceToControlsMap are considered.
 //
 // partialPulls carries per-selector LIST failures for GVRs that were partially
-// collected; they are included as-is in ScanCoverage.PartialGVRPulls. A
+// collected; they are included in canonical order in
+// ScanCoverage.PartialGVRPulls. A
 // discovery-stage failure that has a synthetic ResourceToControlsMap edge also
 // participates in the all-dependencies-failed check without being duplicated
 // in FailedGVRPulls.
@@ -147,8 +148,18 @@ type NotEvaluatedControl struct {
 // exceptions) that were served from a fallback; they are included as-is in
 // ScanCoverage.PolicyDegradations.
 func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap map[string][]string, timedOutControls map[string]string, partialPulls []PartialGVRPull, policyDegradations []PolicyDegradation) ScanCoverage {
+	sortedPartialPulls := append([]PartialGVRPull(nil), partialPulls...)
+	sort.Slice(sortedPartialPulls, func(i, j int) bool {
+		if sortedPartialPulls[i].GVR != sortedPartialPulls[j].GVR {
+			return sortedPartialPulls[i].GVR < sortedPartialPulls[j].GVR
+		}
+		if sortedPartialPulls[i].Selector != sortedPartialPulls[j].Selector {
+			return sortedPartialPulls[i].Selector < sortedPartialPulls[j].Selector
+		}
+		return sortedPartialPulls[i].Error < sortedPartialPulls[j].Error
+	})
 	coverage := ScanCoverage{
-		PartialGVRPulls:    partialPulls,
+		PartialGVRPulls:    sortedPartialPulls,
 		PolicyDegradations: policyDegradations,
 	}
 
