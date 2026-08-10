@@ -14,6 +14,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// lastPathSegment matches an expression's trailing ".<segment>", stripped to walk
+// back up a path that does not exist. Compiled once rather than per step.
+var lastPathSegment = regexp.MustCompile(`(.*)(\.[^.]*)`)
+
 type FixPathLocationResolver struct {
 	yqlibEvaluator yqlib.Evaluator
 	yamlPath       string
@@ -80,7 +84,7 @@ func (l *FixPathLocationResolver) ResolveLocation(fixPath string, nodeIndex int)
 		}
 
 		// for non-existent yaml expressions, remove the last part of the expression and try again
-		yamlExpression = regexp.MustCompile(`(.*)(\.[^.]*)`).ReplaceAllString(yamlExpression, `${1}`)
+		yamlExpression = lastPathSegment.ReplaceAllString(yamlExpression, `${1}`)
 	}
 	return Location{}, nil
 

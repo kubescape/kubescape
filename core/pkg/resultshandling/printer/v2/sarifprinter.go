@@ -203,40 +203,48 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 
 	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
 	basePath := getBasePathFromMetadata(*opaSessionObj)
-
+	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		if result.GetStatus(nil).IsFailed() {
-			resourceSource := opaSessionObj.ResourceSource[resourceID]
-			relPath := resourceSource.RelativePath
+		if !result.GetStatus(nil).IsFailed() {
+			continue
+		}
 
-			// Github Code Scanning considers results not associated to a file path
-			// meaningless and invalid when uploading, and the location written to the
-			// report is the relative path alone, so a base path cannot stand in for a
-			// missing one
-			if relPath == "" {
-				continue
-			}
+		resourceSource := opaSessionObj.ResourceSource[resourceID]
+		relPath := resourceSource.RelativePath
 
-			rsrcAbsPath := filepath.Join(effectiveBasePath(resourceSource, basePath), relPath)
-			locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
-			if err != nil {
-				logger.L().Warning("failed to create location resolver, SARIF locations will default to line 1", helpers.Error(err))
-			}
+		// Github Code Scanning considers results not associated to a file path
+		// meaningless and invalid when uploading, and the location written to the
+		// report is the relative path alone, so a base path cannot stand in for a
+		// missing one
+		if relPath == "" {
+			continue
+		}
 
-			for _, toPin := range result.AssociatedControls {
-				ac := toPin
+		failed = append(failed, scannedResource{
+			resourceID: resourceID,
+			relPath:    relPath,
+			absPath:    filepath.Join(effectiveBasePath(resourceSource, basePath), relPath),
+		})
+	}
 
-				if ac.GetStatus(nil).IsFailed() {
-					ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
-					if ctl == nil {
-						logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
-						continue
-					}
-					location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
-					sp.addRule(run, ctl)
-					r := sp.addResult(run, ctl, relPath, location)
-					collectFixes(ctx, r, ac, opaSessionObj, resourceID, relPath, rsrcAbsPath)
+	var caches manifestCache
+	for _, resource := range groupByManifest(failed) {
+		cache := caches.get(resource.absPath)
+		locationResolver := cache.locationResolver(resource.absPath, "SARIF")
+
+		for _, toPin := range opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls {
+			ac := toPin
+
+			if ac.GetStatus(nil).IsFailed() {
+				ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
+				if ctl == nil {
+					logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
+					continue
 				}
+				location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
+				sp.addRule(run, ctl)
+				r := sp.addResult(run, ctl, resource.relPath, location)
+				collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath)
 			}
 		}
 	}
@@ -306,10 +314,12 @@ func addFix(result *sarif.Result, filepath string, startLine, startColumn, endLi
 		sarif.NewSimpleArtifactLocation(filepath),
 	).WithReplacement(replacement)
 
-	// check if the fix is already added
+	// check if the fix is already added. The incoming change is hashed once, not
+	// per comparison: the hash marshals and SHA-256s the same value every time.
+	changeHash := hashArtifactChange(artifactChange)
 	for _, fix := range result.Fixes {
 		for _, ac := range fix.ArtifactChanges {
-			if hashArtifactChange(ac) == hashArtifactChange(artifactChange) {
+			if hashArtifactChange(ac) == changeHash {
 				return
 			}
 		}
@@ -344,7 +354,16 @@ func calculateMove(str string, file []string, endColumn int, endLine int) (int, 
 }
 
 func collectDiffs(dmp *diffmatchpatch.DiffMatchPatch, diffs []diffmatchpatch.Diff, result *sarif.Result, filepath string, fileAsString string) {
+	addFixRegions(result, filepath, diffRegions(dmp, diffs, fileAsString))
+}
+
+// diffRegions walks the diff delta and returns the replacement regions it
+// describes. Kept separate from attaching them to a result so the walk depends on
+// nothing but the manifest and the diff, which is what lets it be cached per
+// (manifest, fix expression) and reused across controls (see fixReportCache).
+func diffRegions(dmp *diffmatchpatch.DiffMatchPatch, diffs []diffmatchpatch.Diff, fileAsString string) []fixRegion {
 	file := strings.Split(fileAsString, "\n")
+	regions := []fixRegion{}
 	text := ""
 	startLine := 1
 	startColumn := 1
@@ -367,7 +386,7 @@ func collectDiffs(dmp *diffmatchpatch.DiffMatchPatch, diffs []diffmatchpatch.Dif
 				continue
 			}
 			if closesFixRegion(delta, index) {
-				addFix(result, filepath, startLine, startColumn, endLine, endColumn, text)
+				regions = append(regions, fixRegion{startLine, startColumn, endLine, endColumn, text})
 			}
 		case '-':
 			// commit the position only on success: the (0, 0) failure return
@@ -378,7 +397,7 @@ func collectDiffs(dmp *diffmatchpatch.DiffMatchPatch, diffs []diffmatchpatch.Dif
 			}
 			endLine, endColumn = newLine, newColumn
 			if closesFixRegion(delta, index) {
-				addFix(result, filepath, startLine, startColumn, endLine, endColumn, text)
+				regions = append(regions, fixRegion{startLine, startColumn, endLine, endColumn, text})
 			}
 		case '=':
 			newLine, newColumn, ok := calculateMove(seg[1:], file, endColumn, endLine)
@@ -390,6 +409,16 @@ func collectDiffs(dmp *diffmatchpatch.DiffMatchPatch, diffs []diffmatchpatch.Dif
 			startColumn = endColumn
 			text = ""
 		}
+	}
+
+	return regions
+}
+
+// addFixRegions attaches regions to a result in delta-walk order, so the
+// duplicate check in addFix sees them as it did when the walk added them itself.
+func addFixRegions(result *sarif.Result, filepath string, regions []fixRegion) {
+	for _, region := range regions {
+		addFix(result, filepath, region.startLine, region.startColumn, region.endLine, region.endColumn, region.text)
 	}
 }
 
@@ -407,7 +436,14 @@ func closesFixRegion(delta []string, index int) bool {
 	return true
 }
 
-func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults.ResourceAssociatedControl, opaSessionObj *cautils.OPASessionObj, resourceID string, filepath string, rsrcAbsPath string) {
+func collectFixes(ctx context.Context, cache *fixReportCache, result *sarif.Result, ac resourcesresults.ResourceAssociatedControl, opaSessionObj *cautils.OPASessionObj, resourceID string, filepath string, rsrcAbsPath string) {
+	// the index is the resource's, not a fix path's, so without one there is
+	// nothing to report
+	documentIndex, ok := getDocIndex(opaSessionObj, resourceID)
+	if !ok {
+		return
+	}
+
 	for _, rule := range ac.ResourceAssociatedRules {
 		if !rule.GetStatus(nil).IsFailed() {
 			continue
@@ -419,30 +455,8 @@ func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults
 				continue
 			}
 
-			fileAsString, err := fixhandler.GetFileString(rsrcAbsPath)
-			if err != nil {
-				logger.L().Debug("failed to access "+filepath, helpers.Error(err))
-				continue
-			}
-
-			var fixedYamlString string
-
-			documentIndex, ok := getDocIndex(opaSessionObj, resourceID)
-			if !ok {
-				continue
-			}
-
 			yamlExpression := fixhandler.FixPathToValidYamlExpression(fixPath, rulePaths.FixPath.Value, documentIndex)
-
-			fixedYamlString, err = fixhandler.ApplyFixToContent(ctx, fileAsString, yamlExpression)
-			if err != nil {
-				logger.L().Debug("failed to fix "+filepath+" with "+yamlExpression, helpers.Error(err))
-				continue
-			}
-
-			dmp := diffmatchpatch.New()
-			diffs := dmp.DiffMain(fileAsString, fixedYamlString, false)
-			collectDiffs(dmp, diffs, result, filepath, fileAsString)
+			addFixRegions(result, filepath, cache.fixRegions(ctx, rsrcAbsPath, yamlExpression))
 		}
 	}
 }
