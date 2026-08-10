@@ -339,18 +339,6 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromCredentialsSecret(ctx context
 	return nil
 }
 
-func loadConfigFromData(co *ConfigObj, data map[string]string) error {
-	var e error
-	if jsonConf, ok := data["config.json"]; ok {
-		e = readConfig([]byte(jsonConf), co)
-	}
-	if bData, err := json.Marshal(data); err == nil {
-		e = readConfig(bData, co)
-	}
-
-	return e
-}
-
 func existsConfigFile() bool {
 	_, err := os.ReadFile(ConfigFileFullPath())
 	return err == nil
