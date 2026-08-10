@@ -627,5 +627,3 @@ func GetTenantConfig(ctx context.Context, accountID, accessKey, clusterName, cus
 	}
 	return NewClusterConfig(ctx, k8s, accountID, accessKey, clusterName, customClusterName)
 }
-
-// firstNonEmpty returns the first non-empty string
