@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -44,7 +43,7 @@ func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
 			diffInfo.HeadFile = args[1]
 
 			// diff honors a single output format, so validate against the exact value rather than scan's comma-separated multi-format set.
-			supportedFormats := []string{printer.PrettyFormat, printer.JsonFormat}
+			supportedFormats := []string{printer.PrettyFormat, printer.JsonFormat, printer.YamlFormat}
 			if !slices.Contains(supportedFormats, diffInfo.Format) {
 				return fmt.Errorf("invalid format %q, supported formats: %s", diffInfo.Format, strings.Join(supportedFormats, ", "))
 			}
@@ -61,8 +60,8 @@ func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
 			}
 
 			if diffInfo.FailOnNew && newFailures > 0 {
-				logger.L().Fatal(fmt.Sprintf("found %d new failure(s) at or above severity threshold %q",
-					newFailures, severityLabel(diffInfo.SeverityThreshold)))
+				return fmt.Errorf("found %d new failure(s) at or above severity threshold %q",
+					newFailures, severityLabel(diffInfo.SeverityThreshold))
 			}
 
 			return nil
@@ -71,7 +70,7 @@ func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
 
 	diffCmd.Flags().BoolVar(&diffInfo.FailOnNew, "fail-on-new", false, "Exit with code 1 when new failures are found (combine with --severity-threshold to limit the gate)")
 	diffCmd.Flags().StringVar(&diffInfo.SeverityThreshold, "severity-threshold", "", "Only count failures at or above this severity when using --fail-on-new (low, medium, high, critical)")
-	diffCmd.Flags().StringVarP(&diffInfo.Format, "format", "f", "pretty-printer", `Output format: "pretty-printer" or "json"`)
+	diffCmd.Flags().StringVarP(&diffInfo.Format, "format", "f", "pretty-printer", `Output format: "pretty-printer", "json", or "yaml"`)
 	diffCmd.Flags().StringVarP(&diffInfo.Output, "output", "o", "", "Output file; defaults to stdout")
 
 	return diffCmd

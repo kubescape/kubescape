@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"sigs.k8s.io/yaml"
 )
 
 // PrintPretty writes a human-readable diff summary to w.
@@ -35,4 +37,14 @@ func PrintJSON(w io.Writer, cs *ChangeSet) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(cs)
+}
+
+// PrintYAML writes the ChangeSet as YAML to w.
+func PrintYAML(w io.Writer, cs *ChangeSet) error {
+	b, err := yaml.Marshal(cs)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(b)
+	return err
 }

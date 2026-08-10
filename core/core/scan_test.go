@@ -2,12 +2,118 @@ package core
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/version"
 )
+
+type recordingImageScanService struct {
+	image              string
+	credentials        imagescan.RegistryCredentials
+	registryMappingErr error
+}
+
+func (s *recordingImageScanService) Scan(_ context.Context, image string, credentials imagescan.RegistryCredentials, _, _ []string) (*cautils.ImageScanData, error) {
+	s.image = image
+	s.credentials = credentials
+	if s.registryMappingErr != nil {
+		return nil, s.registryMappingErr
+	}
+	return &cautils.ImageScanData{Image: image}, nil
+}
+
+// estimateClusterSizeMock implements resourcehandler.IResourceHandler with a
+// controllable EstimateClusterSize return value. All other methods are stubs.
+type estimateClusterSizeMock struct {
+	size int
+	err  error
+}
+
+func (m estimateClusterSizeMock) GetResources(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
+	return nil, nil, nil, nil, nil
+}
+
+func (m estimateClusterSizeMock) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
+	return nil, nil, 0, nil
+}
+
+func (m estimateClusterSizeMock) EstimateClusterSize(ctx context.Context, scanInfo *cautils.ScanInfo) (int, error) {
+	return m.size, m.err
+}
+
+func (m estimateClusterSizeMock) GetClusterAPIServerInfo(ctx context.Context) *version.Info {
+	return nil
+}
+
+func (m estimateClusterSizeMock) GetCloudProvider() string {
+	return ""
+}
+
+func TestEstimateClusterSize(t *testing.T) {
+	// A ScanInfo with no input patterns is treated as a cluster scan.
+	clusterScanInfo := &cautils.ScanInfo{}
+
+	// A ScanInfo with an explicit file input is treated as a file scan.
+	fileScanInfo := &cautils.ScanInfo{
+		InputPatterns: []string{"deployment.yaml"},
+	}
+
+	tests := []struct {
+		name     string
+		handler  resourcehandler.IResourceHandler
+		scanInfo *cautils.ScanInfo
+		want     int
+	}{
+		{
+			name:     "non-cluster context returns 0",
+			handler:  estimateClusterSizeMock{size: 5000},
+			scanInfo: fileScanInfo,
+			want:     0,
+		},
+		{
+			name:     "handler error falls back to 0",
+			handler:  estimateClusterSizeMock{err: errors.New("API unavailable")},
+			scanInfo: clusterScanInfo,
+			want:     0,
+		},
+		{
+			name:     "small cluster estimate",
+			handler:  estimateClusterSizeMock{size: 500},
+			scanInfo: clusterScanInfo,
+			want:     500,
+		},
+		{
+			name:     "large cluster estimate",
+			handler:  estimateClusterSizeMock{size: 10000},
+			scanInfo: clusterScanInfo,
+			want:     10000,
+		},
+		{
+			name:     "zero estimate (empty cluster)",
+			handler:  estimateClusterSizeMock{size: 0},
+			scanInfo: clusterScanInfo,
+			want:     0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := estimateClusterSize(tt.handler, context.Background(), tt.scanInfo)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
 
 func TestGetOutputPrinters(t *testing.T) {
 	ctx := context.Background()
@@ -34,6 +140,65 @@ func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "output path collision")
+}
+
+func TestResolvedOutputPath(t *testing.T) {
+	tests := []struct {
+		name, format, outputFile, want string
+	}{
+		{"append JSON", printer.JsonFormat, "report", "report.json"},
+		{"preserve JSON", printer.JsonFormat, "report.json", "report.json"},
+		{"preserve YAML alias", printer.YamlFormat, "report.yml", "report.yml"},
+		{"preserve CycloneDX", printer.CycloneDXFormat, "report.cdx.json", "report.cdx.json"},
+		{"append CycloneDX", printer.CycloneDXFormat, "report.json", "report.json.cdx.json"},
+		{"preserve SPDX", printer.SPDXFormat, "report.spdx.json", "report.spdx.json"},
+		{"append SPDX", printer.SPDXFormat, "report.json", "report.json.spdx.json"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, resolvedOutputPath(test.format, test.outputFile))
+		})
+	}
+}
+
+func TestResolvedOutputPathExposesSBOMCollisions(t *testing.T) {
+	tests := []struct {
+		sbomFormat, outputFile string
+	}{
+		{printer.CycloneDXFormat, "report.cdx.json"},
+		{printer.SPDXFormat, "report.spdx.json"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.sbomFormat, func(t *testing.T) {
+			jsonPath := resolvedOutputPath(printer.JsonFormat, test.outputFile)
+			sbomPath := resolvedOutputPath(test.sbomFormat, test.outputFile)
+			assert.Equal(t, jsonPath, sbomPath)
+		})
+	}
+}
+
+func TestGetOutputPrintersRejectsSBOMMultipartExtensionCollisions(t *testing.T) {
+	tests := []struct {
+		format, outputFile string
+	}{
+		{"json,cyclonedx-json", "report.cdx.json"},
+		{"json,spdx-json", "report.spdx.json"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.format, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				ScanType: cautils.ScanTypeImage,
+				Format:   test.format,
+				Output:   filepath.Join(t.TempDir(), test.outputFile),
+			}
+
+			_, err := GetOutputPrinters(scanInfo, context.Background(), "")
+			require.ErrorContains(t, err, "output path collision")
+		})
+	}
 }
 
 func TestIsPrioritizationScanType(t *testing.T) {
@@ -74,6 +239,54 @@ func TestIsPrioritizationScanType(t *testing.T) {
 	}
 }
 
+func TestRegistryCredentialsFromScanInfo(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{
+		RegistryAuthority: "registry.example.com",
+		RegistryUsername:  "user",
+		RegistryPassword:  "pass",
+		RegistryToken:     "token",
+	}
+
+	creds := registryCredentialsFromScanInfo(scanInfo)
+
+	assert.Equal(t, imagescan.RegistryCredentials{
+		Authority: "registry.example.com",
+		Username:  "user",
+		Password:  "pass",
+		Token:     "token",
+	}, creds)
+	assert.Equal(t, imagescan.RegistryCredentials{}, registryCredentialsFromScanInfo(nil))
+}
+
+func TestScanSingleImageForwardsRegistryCredentials(t *testing.T) {
+	svc := &recordingImageScanService{}
+	results := &resultshandling.ResultsHandler{}
+	creds := imagescan.RegistryCredentials{
+		Authority: "registry.example.com",
+		Username:  "user",
+		Password:  "pass",
+	}
+
+	err := scanSingleImage(context.Background(), "registry.example.com/app:tag", svc, results, nil, creds)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "registry.example.com/app:tag", svc.image)
+	assert.Equal(t, creds, svc.credentials)
+	assert.Len(t, results.ImageScanData, 1)
+	assert.Equal(t, "registry.example.com/app:tag", results.ImageScanData[0].Image)
+}
+
+func TestScanSingleImageReturnsScannerError(t *testing.T) {
+	expectedErr := errors.New("scan failed")
+	svc := &recordingImageScanService{registryMappingErr: expectedErr}
+	results := &resultshandling.ResultsHandler{}
+
+	err := scanSingleImage(context.Background(), "registry.example.com/app:tag", svc, results, nil, imagescan.RegistryCredentials{})
+
+	assert.ErrorIs(t, err, expectedErr)
+	assert.Empty(t, results.ImageScanData)
+}
+
 func TestIsAirGappedMode(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -95,25 +308,25 @@ func TestIsAirGappedMode(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "air-gapped with ControlsInputs",
+			name: "not air-gapped with ControlsInputs",
 			scanInfo: &cautils.ScanInfo{
 				ControlsInputs: "/path/to/controls",
 			},
-			want: true,
+			want: false,
 		},
 		{
-			name: "air-gapped with UseExceptions",
+			name: "not air-gapped with UseExceptions",
 			scanInfo: &cautils.ScanInfo{
 				UseExceptions: "/path/to/exceptions",
 			},
-			want: true,
+			want: false,
 		},
 		{
-			name: "air-gapped with AttackTracks",
+			name: "not air-gapped with AttackTracks",
 			scanInfo: &cautils.ScanInfo{
 				AttackTracks: "/path/to/attack-tracks",
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name:     "not air-gapped - all empty",
@@ -249,4 +462,32 @@ func TestKubescape_SetContextRestoresOriginal(t *testing.T) {
 	ks.SetContext(originalCtx)
 	_, hasDeadline = ks.Context().Deadline()
 	assert.False(t, hasDeadline)
+}
+
+type streamingCancelMock struct {
+	estimateClusterSizeMock
+	passedCtx context.Context
+}
+
+func (m *streamingCancelMock) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
+	m.passedCtx = ctx
+	batchChan := make(chan *cautils.ResourceBatch, 1)
+	errChan := make(chan error, 1)
+	close(batchChan)
+	close(errChan)
+	return batchChan, errChan, 0, nil
+}
+
+func TestCollectAndProcessResourcesWithStreaming_CancelsProducerContext(t *testing.T) {
+	mockHandler := &streamingCancelMock{}
+	sessionObj := cautils.NewOPASessionObjMock()
+	scanInfo := &cautils.ScanInfo{}
+
+	parentCtx := context.Background()
+
+	_ = collectAndProcessResourcesWithStreaming(parentCtx, mockHandler, sessionObj, scanInfo, "cluster", "", "", false, time.Second, 10)
+
+	require.NotNil(t, mockHandler.passedCtx)
+	assert.NoError(t, parentCtx.Err(), "parent context must remain uncanceled")
+	assert.Equal(t, context.Canceled, mockHandler.passedCtx.Err(), "derived producer context must be canceled when function returns")
 }

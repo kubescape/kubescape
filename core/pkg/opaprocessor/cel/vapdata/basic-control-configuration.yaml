@@ -45,10 +45,10 @@ settings:
   - 5
   maxHighVulnerabilities:
   - 10
-  memoryLimitMax: 4294967296
-  memoryLimitMin: 0
-  memoryRequestMax: 4294967296
-  memoryRequestMin: 0
+  memoryLimitMax: 4Gi
+  memoryLimitMin: 0.25Gi
+  memoryRequestMax: 4Gi
+  memoryRequestMin: 0.125Gi
   publicRegistries:
   - docker.io
   - gcr.io
@@ -92,6 +92,7 @@ settings:
   - Bearer
   - _key_
   - _secret_
+  sensitiveKeyNamesAllowed: []
   sensitiveValuesAllowed:
   - ''
   servicesNames:

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -201,6 +202,131 @@ func TestCalculateMove_InvalidString(t *testing.T) {
 	assert.False(t, success)
 }
 
+// Lines containing multi-byte characters must be measured in runes, not bytes,
+// or the computed position drifts past the line's actual length.
+func TestCalculateMove_MultiByteRunes(t *testing.T) {
+	str := "10"
+	file := []string{"héllo world", "line 2", "line 3"}
+	endColumn := 5
+	endLine := 1
+
+	newLine, newColumn, success := calculateMove(str, file, endColumn, endLine)
+
+	assert.True(t, success)
+	assert.Equal(t, 2, newLine)
+	assert.Equal(t, 3, newColumn)
+}
+
+// The end line is 1-indexed, so values below 1 are as out of range as values past the end of the file and both return false.
+func TestCalculateMove_EndLineOutOfRange(t *testing.T) {
+	file := []string{"line 1", "line 2", "line 3"}
+
+	tc := []struct {
+		name      string
+		file      []string
+		endLine   int
+		endColumn int
+	}{
+		{"zero end line, as left behind by a failed move", file, 0, 0},
+		{"negative end line", file, -1, 1},
+		{"end line one past the last line", file, 4, 1},
+		{"any end line into an empty file", []string{}, 1, 1},
+	}
+
+	for _, testCase := range tc {
+		t.Run(testCase.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				newLine, newColumn, success := calculateMove("5", testCase.file, testCase.endColumn, testCase.endLine)
+
+				assert.False(t, success)
+				assert.Equal(t, 0, newLine)
+				assert.Equal(t, 0, newColumn)
+			})
+		})
+	}
+}
+
+// A move that claims more characters than the file holds walks past the last line and returns false.
+func TestCalculateMove_WalkPastLastLine(t *testing.T) {
+	file := []string{"line 1", "line 2", "line 3"}
+
+	assert.NotPanics(t, func() {
+		newLine, newColumn, success := calculateMove("50", file, 1, 3)
+
+		assert.False(t, success)
+		assert.Equal(t, 0, newLine)
+		assert.Equal(t, 0, newColumn)
+	})
+}
+
+// A move that fails mid-delta leaves the position untouched, so later fixes keep 1-indexed regions instead of landing on line 0.
+func TestCollectDiffs_FailedMoveKeepsRegionOneIndexed(t *testing.T) {
+	// the equality run claims more content than the file holds, so the first move fails
+	diffs := []diffmatchpatch.Diff{
+		{Type: diffmatchpatch.DiffEqual, Text: strings.Repeat("a", 44)},
+		{Type: diffmatchpatch.DiffInsert, Text: "x"},
+	}
+
+	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+	result := run.CreateResultForRule("0")
+
+	assert.NotPanics(t, func() {
+		collectDiffs(diffmatchpatch.New(), diffs, result, "", "short")
+	})
+
+	require.Len(t, result.Fixes, 1)
+	replacements := result.Fixes[0].ArtifactChanges[0].Replacements
+	require.Len(t, replacements, 1)
+
+	region := replacements[0].DeletedRegion
+	assert.Equal(t, 1, *region.StartLine)
+	assert.Equal(t, 1, *region.StartColumn)
+	assert.Equal(t, 1, *region.EndLine)
+	assert.Equal(t, 1, *region.EndColumn)
+}
+
+// An empty diff set yields a single empty delta segment and collects no fixes.
+func TestCollectDiffs_EmptyDelta(t *testing.T) {
+	dmp := diffmatchpatch.New()
+	diffs := dmp.DiffMain("", "", false)
+	require.Empty(t, diffs)
+
+	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+	result := run.CreateResultForRule("0")
+
+	assert.NotPanics(t, func() {
+		collectDiffs(dmp, diffs, result, "", "")
+	})
+
+	assert.Empty(t, result.Fixes)
+}
+
+// The region lookahead reports the last segment and an equality run as closing, and tolerates an empty neighbor.
+func TestClosesFixRegion(t *testing.T) {
+	tc := []struct {
+		name     string
+		delta    []string
+		index    int
+		expected bool
+	}{
+		{"last segment closes the region", []string{"+abc", "=5"}, 1, true},
+		{"next segment resumes unchanged content", []string{"+abc", "=5"}, 0, true},
+		{"next segment continues the edit", []string{"+abc", "-5"}, 0, false},
+		{"trailing empty segment leaves no operation to resume", []string{"+abc", ""}, 0, true},
+		{"empty segments skipped before an equality run", []string{"+abc", "", "", "=5"}, 0, true},
+		{"empty segments skipped before a further edit", []string{"+abc", "", "-5"}, 0, false},
+		{"index past the end of the delta", []string{"+abc"}, 5, true},
+	}
+
+	for _, testCase := range tc {
+		t.Run(testCase.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				assert.Equal(t, testCase.expected, closesFixRegion(testCase.delta, testCase.index))
+			})
+		})
+	}
+}
+
 // Adds a new fix to the result with the given filepath, start and end positions, and text.
 func TestAddFix_AddsNewFixToResult(t *testing.T) {
 	result := sarif.Result{}
@@ -296,6 +422,87 @@ func TestPrintConfigurationScan_MissingControl(t *testing.T) {
 	})
 }
 
+// TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath verifies that a resource
+// with no relative path is dropped even when a base path is available: the SARIF
+// location is written from the relative path alone, so such a result would carry an
+// empty artifact location, which GitHub Code Scanning rejects on upload.
+func TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath(t *testing.T) {
+	const controlID = "C-0057"
+	resourceID := "apps/v1/Deployment/default/demo"
+
+	tests := []struct {
+		name           string
+		resourceSource reporthandling.Source
+	}{
+		{name: "no anchor at all", resourceSource: reporthandling.Source{}},
+		{name: "resource path set", resourceSource: reporthandling.Source{Path: t.TempDir()}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session := cautils.NewOPASessionObjMock()
+			session.Metadata = &reporthandlingv2.Metadata{
+				ScanMetadata: reporthandlingv2.ScanMetadata{
+					ScanningTarget: reporthandlingv2.Directory,
+				},
+				ContextMetadata: reporthandlingv2.ContextMetadata{
+					DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{
+						BasePath: t.TempDir(),
+					},
+				},
+			}
+			session.ResourcesResult[resourceID] = resourcesresults.Result{
+				ResourceID: resourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: controlID,
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+					},
+				},
+			}
+			session.ResourceSource = map[string]reporthandling.Source{resourceID: tt.resourceSource}
+			session.Report = &reporthandlingv2.PostureReport{
+				SummaryDetails: reportsummary.SummaryDetails{
+					Controls: reportsummary.ControlSummaries{
+						controlID: reportsummary.ControlSummary{
+							ControlID:   controlID,
+							Name:        "Privileged container",
+							Description: "Do not run privileged containers",
+							ScoreFactor: 8.0,
+						},
+					},
+				},
+			}
+
+			// the base path is non-empty, so only the missing relative path can skip this finding
+			require.NotEmpty(t, getBasePathFromMetadata(*session))
+
+			tmp, err := os.CreateTemp("", "sarif-norelpath-*.sarif")
+			require.NoError(t, err)
+			defer func() {
+				assert.NoError(t, os.Remove(tmp.Name()))
+			}()
+
+			sp := NewSARIFPrinter()
+			sp.writer = tmp
+			require.NoError(t, sp.printConfigurationScan(context.Background(), session))
+			require.NoError(t, tmp.Close())
+
+			raw, err := os.ReadFile(tmp.Name())
+			require.NoError(t, err)
+
+			var report struct {
+				Runs []struct {
+					Results []json.RawMessage `json:"results"`
+				} `json:"runs"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &report))
+			require.Len(t, report.Runs, 1)
+			assert.Empty(t, report.Runs[0].Results, "a result with no file location must not be emitted")
+		})
+	}
+}
+
 // TestPrintConfigurationScan_PopulatesInvocations is the regression test for
 // the SARIF half of kubescape/kubescape#2325: runs[].invocations was absent
 // from every SARIF report, so GitHub code-scanning ingestion collapsed every
@@ -386,6 +593,54 @@ func TestPrintConfigurationScan_InvocationStartTimeUsesReportGenerationTime(t *t
 		"startTimeUtc must reuse ReportGenerationTime, got %s want %s", inv.StartTimeUTC, preset)
 }
 
+// TestGetDocIndex_PathContainingColon guards against a regression where
+// getDocIndex parsed LocalWorkload.GetPath() ("<file path>:<document
+// index>") with strings.Split(path, ":")[1] instead of splitting on the last
+// colon. That silently picked the wrong segment whenever the file path
+// itself contained more than one colon (e.g. a Windows path like
+// "C:\repo\deploy.yaml:0"), so strconv.Atoi failed on a non-numeric segment
+// and getDocIndex reported "no document index" even though one exists. This
+// must match how fixhandler.getFilePathAndIndex parses the same convention
+// (splitting on the last colon).
+func TestGetDocIndex_PathContainingColon(t *testing.T) {
+	resourceID := "apps/v1/Deployment/default/demo"
+	obj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "demo"},
+		"spec":       map[string]interface{}{},
+	}
+
+	tests := []struct {
+		name      string
+		path      string
+		wantIndex int
+		wantOk    bool
+	}{
+		{name: "plain relative path, no colon in file path", path: "deploy.yaml:0", wantIndex: 0, wantOk: true},
+		{name: "nested relative path", path: "charts/app/deploy.yaml:2", wantIndex: 2, wantOk: true},
+		{name: "file path itself contains a colon", path: `C:\repo\deploy.yaml:3`, wantIndex: 3, wantOk: true},
+		{name: "no colon at all", path: "deploy.yaml", wantIndex: 0, wantOk: false},
+		{name: "trailing colon with non-numeric suffix", path: "deploy.yaml:abc", wantIndex: 0, wantOk: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lw := localworkload.NewLocalWorkload(obj)
+			lw.SetPath(tt.path)
+
+			session := cautils.NewOPASessionObjMock()
+			session.AllResources[resourceID] = lw
+
+			gotIndex, gotOk := getDocIndex(session, resourceID)
+			assert.Equal(t, tt.wantOk, gotOk)
+			if tt.wantOk {
+				assert.Equal(t, tt.wantIndex, gotIndex)
+			}
+		})
+	}
+}
+
 func TestGetBasePathFromMetadata(t *testing.T) {
 	tempDir := t.TempDir()
 	absFilePath := filepath.Join(tempDir, "deploy.yaml")
@@ -410,6 +665,22 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 				},
 			},
 			want: tempDir,
+		},
+		{
+			name: "GitLocal without repository metadata",
+			session: cautils.OPASessionObj{
+				Metadata: &reporthandlingv2.Metadata{
+					ScanMetadata: reporthandlingv2.ScanMetadata{
+						ScanningTarget: reporthandlingv2.GitLocal,
+					},
+				},
+			},
+			want: "",
+		},
+		{
+			name:    "missing metadata",
+			session: cautils.OPASessionObj{},
+			want:    "",
 		},
 		{
 			name: "Directory",
@@ -470,6 +741,42 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, getBasePathFromMetadata(tt.session))
+		})
+	}
+}
+
+// TestEffectiveBasePath verifies that a resource's own Source.Path wins over the
+// scan-wide base path, because it is the root its RelativePath was computed from,
+// while the scan-wide path covers only the first input pattern of a multi-input scan.
+func TestEffectiveBasePath(t *testing.T) {
+	tests := []struct {
+		name           string
+		resourceSource reporthandling.Source
+		basePath       string
+		want           string
+	}{
+		{
+			name:           "resource path wins over the scan-wide base path",
+			resourceSource: reporthandling.Source{Path: "/repo", RelativePath: "workloads/deploy.yaml"},
+			basePath:       "/repo/workloads",
+			want:           "/repo",
+		},
+		{
+			name:           "sources without a path fall back to the scan-wide base path",
+			resourceSource: reporthandling.Source{RelativePath: "deploy.yaml"},
+			basePath:       "/repo",
+			want:           "/repo",
+		},
+		{
+			name:           "no anchor at all",
+			resourceSource: reporthandling.Source{RelativePath: "deploy.yaml"},
+			want:           "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, effectiveBasePath(tt.resourceSource, tt.basePath))
 		})
 	}
 }

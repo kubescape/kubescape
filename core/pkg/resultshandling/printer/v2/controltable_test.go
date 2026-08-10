@@ -66,6 +66,15 @@ func Test_generateRowPdf(t *testing.T) {
 
 }
 
+func TestGetComplianceScoreColumnDoesNotRoundFractionalScoreToPerfect(t *testing.T) {
+	score := float32(99.5)
+	controlSummary := &reportsummary.ControlSummary{
+		ComplianceScore: &score,
+	}
+
+	assert.Equal(t, "99%", getComplianceScoreColumn(controlSummary, nil))
+}
+
 func mockSummaryDetails() (*reportsummary.SummaryDetails, error) {
 	data, err := os.ReadFile(filepath.Join(testutils.CurrentDir(), "testdata", "mock_summaryDetails.json"))
 	if err != nil {

@@ -53,7 +53,7 @@ func GetOperatorCmd(ks meta.IKubescape) *cobra.Command {
 		},
 	}
 
-	operatorCmd.AddCommand(getOperatorScanCmd(ks, operatorInfo))
+	operatorCmd.AddCommand(getOperatorScanCmd(ks, &operatorInfo))
 	operatorCmd.AddCommand(getOperatorRemediateCmd(ks, operatorInfo))
 
 	return operatorCmd

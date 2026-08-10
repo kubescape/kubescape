@@ -1,10 +1,13 @@
 package printer
 
 import (
+	"sort"
+	"strings"
 	"time"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/anchore/grype/grype/match"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
@@ -195,10 +198,30 @@ func extractResourceLabels(allResources map[string]workloadinterface.IMetadata, 
 	return resourceLabels
 }
 
+// scanContextName returns the kube context this scan actually ran against.
+//
+// ScanInfo.GetClusterContextName() resolves the context from the kubeconfig the
+// scan selected, and that value is recorded on the session metadata. Reading the
+// process-global k8sinterface.GetContextName() instead would label the report
+// with the ambient context, which differs whenever --kubeconfig or
+// --kube-context points somewhere else. The global remains the fallback for
+// sessions that carry no cluster context metadata.
+func scanContextName(data *cautils.OPASessionObj) string {
+	if data.Metadata != nil {
+		if cluster := data.Metadata.ContextMetadata.ClusterContextMetadata; cluster != nil && cluster.ContextName != "" {
+			return cluster.ContextName
+		}
+	}
+	return k8sinterface.GetContextName()
+}
+
 // FinalizeResults finalize the results objects by copying data from map to lists
 func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	if data.Report.ReportGenerationTime.IsZero() {
 		data.Report.ReportGenerationTime = time.Now().UTC()
+	}
+	if data.Report.ClusterName == "" {
+		data.Report.ClusterName = cautils.AdoptClusterName(scanContextName(data))
 	}
 	report := reporthandlingv2.PostureReport{
 		SummaryDetails:       data.Report.SummaryDetails,
@@ -221,15 +244,19 @@ func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureRepor
 	return &report
 }
 func finalizeResults(results []resourcesresults.Result, resourcesResult map[string]resourcesresults.Result, prioritizedResources map[string]prioritization.PrioritizedResource) {
-	index := 0
+	resourceIDs := make([]string, 0, len(resourcesResult))
 	for resourceID := range resourcesResult {
+		resourceIDs = append(resourceIDs, resourceID)
+	}
+	sort.Strings(resourceIDs)
+
+	for index, resourceID := range resourceIDs {
 		results[index] = resourcesResult[resourceID]
 
 		// Add prioritization information to the result
 		if v, exist := prioritizedResources[resourceID]; exist {
 			results[index].PrioritizedResource = &v
 		}
-		index++
 	}
 }
 
@@ -285,10 +312,27 @@ func setSeverityToSummaryMap(cves []imageprinter.CVE, mapSeverityToSummary map[s
 	}
 }
 
+// pkgScoreKey builds a collision-free map key from a package name and
+// version. A plain "name@version" join is not enough on its own: Name and
+// Version are free-form strings from Grype, and real-world values can
+// contain "@" (e.g. npm scoped package names like "@angular/core"), so two
+// different (name, version) pairs could still join to the same string -
+// e.g. name="foo@bar", version="baz" and name="foo", version="bar@baz"
+// both become "foo@bar@baz". Escaping "@" (and the escape character
+// itself) in each part before joining ensures the delimiter "@" can always
+// be told apart from an escaped literal one, so distinct pairs never
+// collide.
+func pkgScoreKey(name, version string) string {
+	escape := func(s string) string {
+		s = strings.ReplaceAll(s, `\`, `\\`)
+		return strings.ReplaceAll(s, "@", `\@`)
+	}
+	return escape(name) + "@" + escape(version)
+}
+
 func setPkgNameToScoreMap(matches match.Matches, pkgScores map[string]*imageprinter.PackageScore) {
 	for _, m := range matches.Sorted() {
-		// key is pkg name + version to avoid version conflicts
-		key := m.Package.Name + m.Package.Version
+		key := pkgScoreKey(m.Package.Name, m.Package.Version)
 
 		if _, ok := pkgScores[key]; !ok {
 			pkgScores[key] = &imageprinter.PackageScore{

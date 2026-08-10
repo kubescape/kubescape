@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
@@ -20,38 +21,81 @@ const (
 	PoliciesCacheTtlEnvVar = "POLICIES_CACHE_TTL"
 )
 
-var policyHandlerInstance *PolicyHandler
-
 // PolicyHandler
 type PolicyHandler struct {
 	clusterName             string
 	getters                 *cautils.Getters
+	scanMu                  sync.Mutex // guards getters against concurrent CollectPolicies calls on a shared handler
 	cachedPolicyIdentifiers *TimedCache[[]string]
 	cachedFrameworks        *TimedCache[[]reporthandling.Framework]
 	cachedExceptions        *TimedCache[[]armotypes.PostureExceptionPolicy]
 	cachedControlInputs     *TimedCache[map[string][]string]
 }
 
-// NewPolicyHandler creates and returns an instance of the `PolicyHandler`. The function initializes the `PolicyHandler` only if it hasn't been previously created.
-// The PolicyHandler supports caching of downloaded policies and exceptions by setting the `POLICIES_CACHE_TTL` environment variable (default is no caching).
+// NewPolicyHandler returns the shared, cluster-isolated *PolicyHandler for
+// clusterName from the process-wide registry (see registry.go). Callers that
+// repeatedly scan the same cluster (the httphandler HTTP service, in
+// particular - see core/core/scan.go) keep the POLICIES_CACHE_TTL caching
+// benefit across calls; callers for a different cluster get a completely
+// separate instance, so a later call never silently reuses an earlier
+// cluster's exception/control-input caches. Handlers with nothing actively
+// using them are reclaimed by an idle sweep rather than requiring callers to
+// release them, so this stays memory-bounded even in a long-running process
+// that sees many distinct cluster names over its lifetime.
 func NewPolicyHandler(clusterName string) *PolicyHandler {
-	if policyHandlerInstance == nil {
-		cacheTtl := getPoliciesCacheTtl()
-		policyHandlerInstance = &PolicyHandler{
-			clusterName:             clusterName,
-			cachedPolicyIdentifiers: NewTimedCache[[]string](cacheTtl),
-			cachedFrameworks:        NewTimedCache[[]reporthandling.Framework](cacheTtl),
-			cachedExceptions:        NewTimedCache[[]armotypes.PostureExceptionPolicy](cacheTtl),
-			cachedControlInputs:     NewTimedCache[map[string][]string](cacheTtl),
-		}
-	}
-	return policyHandlerInstance
+	return globalRegistry.getHandler(clusterName)
 }
 
-func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo) (*cautils.OPASessionObj, error) {
-	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo)
+// NewPolicyHandlerWithRelease returns the shared PolicyHandler for
+// clusterName and a release function that must be deferred. Intended for
+// orchestration paths - e.g. the fleet work in issue #1990 - that scan the
+// same cluster sequentially in one goroutine and want the cache reuse
+// guaranteed for that duration rather than left to the idle sweep.
+// CollectPolicies guards its own state, so concurrent same-cluster calls are
+// safe even without this; acquire/release only controls when an idle entry
+// becomes eligible for eviction.
+func NewPolicyHandlerWithRelease(clusterName string) (*PolicyHandler, func()) {
+	return globalRegistry.acquireHandler(clusterName)
+}
 
-	policyHandler.getters = &scanInfo.Getters
+// NewRequestScopedPolicyHandler creates and returns a new, independent instance of the `PolicyHandler`.
+// This is required for concurrent use cases (like MCP servers) to prevent race conditions on shared state.
+func NewRequestScopedPolicyHandler(clusterName string) *PolicyHandler {
+	cacheTtl := getPoliciesCacheTtl()
+	return &PolicyHandler{
+		clusterName:             clusterName,
+		cachedPolicyIdentifiers: NewTimedCache[[]string](cacheTtl),
+		cachedFrameworks:        NewTimedCache[[]reporthandling.Framework](cacheTtl),
+		cachedExceptions:        NewTimedCache[[]armotypes.PostureExceptionPolicy](cacheTtl),
+		cachedControlInputs:     NewTimedCache[map[string][]string](cacheTtl),
+	}
+}
+
+// Close stops all internal caches and background goroutines to prevent leaks.
+func (policyHandler *PolicyHandler) Close() {
+	if policyHandler.cachedPolicyIdentifiers != nil {
+		policyHandler.cachedPolicyIdentifiers.Stop()
+	}
+	if policyHandler.cachedFrameworks != nil {
+		policyHandler.cachedFrameworks.Stop()
+	}
+	if policyHandler.cachedExceptions != nil {
+		policyHandler.cachedExceptions.Stop()
+	}
+	if policyHandler.cachedControlInputs != nil {
+		policyHandler.cachedControlInputs.Stop()
+	}
+}
+
+func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (*cautils.OPASessionObj, error) {
+	// A shared handler (same cluster, concurrent callers) must not let one
+	// caller's getters be observed or overwritten mid-scan by another.
+	policyHandler.scanMu.Lock()
+	defer policyHandler.scanMu.Unlock()
+
+	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo, policyIdentifier)
+
+	policyHandler.getters = getters
 
 	// get policies, exceptions and controls inputs
 	policies, exceptions, controlInputs, degradations, err := policyHandler.getPolicies(ctx, policyIdentifier)
@@ -89,7 +133,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	logger.L().Start("Loading exceptions...")
 
 	// get exceptions
-	if exceptions, err = policyHandler.getExceptions(); err != nil {
+	if exceptions, err = policyHandler.getExceptions(ctx); err != nil {
 		logger.L().Ctx(ctx).StopError("Failed to load exceptions", helpers.Error(err))
 		degradations = append(degradations, cautils.PolicyDegradation{Component: "exceptions", Reason: err.Error()})
 		exceptions = []armotypes.PostureExceptionPolicy{}
@@ -100,7 +144,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	logger.L().Start("Loading account configurations...")
 
 	// get account configuration
-	if controlInputs, err = policyHandler.getControlInputs(); err != nil {
+	if controlInputs, err = policyHandler.getControlInputs(ctx); err != nil {
 		logger.L().Ctx(ctx).StopError("Failed to load account configurations", helpers.Error(err))
 		degradations = append(degradations, cautils.PolicyDegradation{Component: "controlInputs", Reason: err.Error()})
 
@@ -218,13 +262,13 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 	return frameworks, nil
 }
 
-func (policyHandler *PolicyHandler) getExceptions() ([]armotypes.PostureExceptionPolicy, error) {
+func (policyHandler *PolicyHandler) getExceptions(ctx context.Context) ([]armotypes.PostureExceptionPolicy, error) {
 	if cachedExceptions, exist := policyHandler.cachedExceptions.Get(); exist {
 		logger.L().Info("Using cached exceptions")
 		return cachedExceptions, nil
 	}
 
-	exceptions, err := policyHandler.getters.ExceptionsGetter.GetExceptions(policyHandler.clusterName)
+	exceptions, err := policyHandler.getters.ExceptionsGetter.GetExceptions(ctx, policyHandler.clusterName)
 	if err == nil {
 		policyHandler.cachedExceptions.Set(exceptions)
 	}
@@ -232,16 +276,20 @@ func (policyHandler *PolicyHandler) getExceptions() ([]armotypes.PostureExceptio
 	return exceptions, err
 }
 
-func (policyHandler *PolicyHandler) getControlInputs() (map[string][]string, error) {
+func (policyHandler *PolicyHandler) getControlInputs(ctx context.Context) (map[string][]string, error) {
 	if cachedControlInputs, exist := policyHandler.cachedControlInputs.Get(); exist {
 		logger.L().Info("Using cached control inputs")
 		return cachedControlInputs, nil
 	}
 
-	controlInputs, err := policyHandler.getters.ControlsInputsGetter.GetControlsInputs(policyHandler.clusterName)
-	if err == nil {
-		policyHandler.cachedControlInputs.Set(controlInputs)
+	controlInputs, err := policyHandler.getters.ControlsInputsGetter.GetControlsInputs(ctx, policyHandler.clusterName)
+	if err != nil {
+		return nil, err
+	}
+	if len(controlInputs) == 0 {
+		return nil, fmt.Errorf("no control configuration inputs available")
 	}
 
-	return controlInputs, err
+	policyHandler.cachedControlInputs.Set(controlInputs)
+	return controlInputs, nil
 }

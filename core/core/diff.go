@@ -27,6 +27,10 @@ func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (int, error) {
 		if err := diff.PrintJSON(w, cs); err != nil {
 			return 0, fmt.Errorf("writing JSON diff: %w", err)
 		}
+	case printer.YamlFormat:
+		if err := diff.PrintYAML(w, cs); err != nil {
+			return 0, fmt.Errorf("writing YAML diff: %w", err)
+		}
 	default:
 		diff.PrintPretty(w, cs)
 	}

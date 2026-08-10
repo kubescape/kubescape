@@ -32,6 +32,14 @@ import (
 
 var rootInfo cautils.RootInfo
 
+func init() {
+	// root.go and scan/scan.go both define PersistentPreRun(E) hooks. Cobra's default
+	// behavior only runs the closest one in the command chain, silently skipping root's
+	// (logger/cache-dir/kube-context init and --server service discovery) for any
+	// `kubescape scan ...` invocation. Enable full root-to-leaf traversal so both run.
+	cobra.EnableTraverseRunHooks = true
+}
+
 var ksExamples = fmt.Sprintf(`
   # Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations
   %[1]s scan
@@ -57,12 +65,17 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 		Use:     "kubescape",
 		Short:   "Kubescape is a tool for testing Kubernetes security posture. Docs: https://kubescape.io/docs/",
 		Example: ksExamples,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			k8sinterface.SetClusterContextName(rootInfo.KubeContext)
 			initLogger()
-			initLoggerLevel(cmd)
-			initEnvironment()
+			if err := initLoggerLevel(cmd); err != nil {
+				return err
+			}
+			if err := initEnvironment(ks.Context()); err != nil {
+				return err
+			}
 			initCacheDir(cmd)
+			return nil
 		},
 	}
 
@@ -78,10 +91,13 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 
 	rootCmd.PersistentFlags().StringVar(&rootInfo.DiscoveryServerURL, "server", "", "Backend discovery server URL")
 
-	rootCmd.PersistentFlags().MarkDeprecated("environment", "'environment' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
-	rootCmd.PersistentFlags().MarkDeprecated("env", "'env' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
-	rootCmd.PersistentFlags().MarkHidden("environment")
-	rootCmd.PersistentFlags().MarkHidden("env")
+	var dummyEnvironment, dummyEnv string
+	rootCmd.PersistentFlags().StringVar(&dummyEnvironment, "environment", "", "'environment' is no longer supported, Use 'server' instead.")
+	rootCmd.PersistentFlags().StringVar(&dummyEnv, "env", "", "'env' is no longer supported, Use 'server' instead.")
+	_ = rootCmd.PersistentFlags().MarkDeprecated("environment", "'environment' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
+	_ = rootCmd.PersistentFlags().MarkDeprecated("env", "'env' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
+	_ = rootCmd.PersistentFlags().MarkHidden("environment")
+	_ = rootCmd.PersistentFlags().MarkHidden("env")
 
 	rootCmd.PersistentFlags().StringVar(&rootInfo.LoggerName, "logger-name", "", fmt.Sprintf("Logger name. Supported: %s [$KS_LOGGER_NAME]", strings.Join(logger.ListLoggersNames(), "/")))
 	rootCmd.PersistentFlags().MarkHidden("logger-name")

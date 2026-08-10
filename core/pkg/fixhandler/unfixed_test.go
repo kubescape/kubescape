@@ -333,6 +333,43 @@ func TestPrepareResourcesToFix_MissingFile(t *testing.T) {
 	}
 }
 
+// TestPrepareResourcesToFix_UnresolvableResourceID guards against a panic
+// (nil pointer dereference on resourceObj.GetObject()) when a failed Result's
+// ResourceID has no backing resource — e.g. RawResource is nil and there is no
+// matching entry in the report's top-level Resources list, which can happen
+// with hand-edited or partially-trimmed report JSON. The fix must not merely
+// avoid the panic: the failed controls have to still show up in
+// UnfixedControls(), since dropping them silently reintroduces the
+// under-reporting bug from #2108.
+func TestPrepareResourcesToFix_UnresolvableResourceID(t *testing.T) {
+	dir := t.TempDir()
+
+	results := []resourcesresults.Result{
+		{
+			ResourceID: "no-such-resource",
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0057", "Privileged",
+					failedRuleWithFix("spec.privileged", "false"),
+				),
+				failedControl("C-0041", "HostNetwork", failedRuleNoFix()),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+
+	assert.NotPanics(t, func() {
+		rtf := h.PrepareResourcesToFix(context.Background())
+		assert.Empty(t, rtf)
+	})
+
+	if assert.Len(t, h.UnfixedControls(), 2) {
+		for _, u := range h.UnfixedControls() {
+			assert.Equal(t, "no-such-resource", u.ResourceName)
+			assert.Contains(t, u.Reason, "resource data missing")
+		}
+	}
+}
+
 func TestPrepareResourcesToFix_NonYamlSource(t *testing.T) {
 	dir := t.TempDir()
 	manifest := writeManifest(t, dir, "deploy.json", "{}")

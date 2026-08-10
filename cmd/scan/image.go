@@ -2,8 +2,8 @@ package scan
 
 import (
 	"fmt"
+	"strings"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -30,8 +30,6 @@ var (
 
 // getImageCmd returns the scan image command
 func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
-	var imgCredentials shared.ImageCredentials
-
 	cmd := &cobra.Command{
 		Use:     "image <image>:<tag> [flags]",
 		Short:   "Scan an image for vulnerabilities",
@@ -50,7 +48,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			}
 
 			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, sarif")
+				return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(shared.ImageScanFormats, ", "))
 			}
 			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ImageScanFormats); err != nil {
 				return err
@@ -58,11 +56,22 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			if err := shared.ValidateImageScanInfo(scanInfo); err != nil {
 				return err
 			}
+			credentials := shared.ImageCredentials{
+				Authority: scanInfo.RegistryAuthority,
+				Username:  scanInfo.RegistryUsername,
+				Password:  scanInfo.RegistryPassword,
+				Token:     scanInfo.RegistryToken,
+			}
+			if err := shared.ValidateImageCredentials(credentials); err != nil {
+				return err
+			}
 
 			imgScanInfo := &metav1.ImageScanInfo{
+				Authority:          credentials.Authority,
 				Image:              args[0],
-				Username:           imgCredentials.Username,
-				Password:           imgCredentials.Password,
+				Username:           credentials.Username,
+				Password:           credentials.Password,
+				Token:              credentials.Token,
 				Exceptions:         scanInfo.UseExceptions,
 				UseDefaultMatchers: scanInfo.UseDefaultMatchers,
 			}
@@ -73,15 +82,15 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			}
 
 			if exceedsSeverityThreshold {
-				shared.TerminateOnExceedingSeverity(scanInfo, logger.L())
+				return fmt.Errorf("result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
 			}
 
 			return nil
 		},
 	}
 
-	cmd.PersistentFlags().StringVarP(&imgCredentials.Username, "username", "u", "", "Username for registry login")
-	cmd.PersistentFlags().StringVarP(&imgCredentials.Password, "password", "p", "", "Password for registry login")
+	cmd.PersistentFlags().StringVarP(&scanInfo.RegistryUsername, "username", "u", "", "Username for registry login")
+	cmd.PersistentFlags().StringVarP(&scanInfo.RegistryPassword, "password", "p", "", "Password for registry login")
 
 	return cmd
 }

@@ -3,24 +3,35 @@ package cautils
 import (
 	"errors"
 	"fmt"
-	"os"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/go-git/go-git/v5"
 	giturl "github.com/kubescape/go-git-url"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsGitRepoPublic(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/public" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(server.Close)
 	tests := []struct {
 		url  string
 		want bool
 	}{
 		{
-			url:  "https://github.com/kubescape/kubescape/",
+			url:  server.URL + "/public",
 			want: true,
 		},
 		{
-			url:  "http://invalidurl",
+			url:  server.URL + "/private",
 			want: false,
 		},
 		{
@@ -68,30 +79,17 @@ func TestGetProviderError(t *testing.T) {
 }
 
 func TestCloneRepo(t *testing.T) {
-	tests := []struct {
-		url string
-		err error
-	}{
-		{
-			url: "https://github.com/kubescape/kubescape/",
-			err: nil,
-		},
-	}
+	resetRepoWorkspaceState(t)
+	useFakeClone(t, func(path string, _ bool, options *git.CloneOptions) (*git.Repository, error) {
+		return initializeCloneWorkspace(path, options)
+	})
+	gitURL := authenticatedGitURL(t, "https://github.com/kubescape/kubescape/")
 
-	for _, tt := range tests {
-		t.Run(tt.url, func(t *testing.T) {
-			// Create a temporary directory
-			tmpDir, err := os.MkdirTemp("", "")
-			if err != nil {
-				t.Fatalf("failed to create temporary directory: %v", err)
-			}
+	tempDir, err := cloneRepo(gitURL)
 
-			gitURL, _ := giturl.NewGitAPI(tt.url)
-			tempDir, err := cloneRepo(gitURL)
-			assert.NotEqual(t, tmpDir, tempDir)
-			assert.Equal(t, tt.err, err)
-		})
-	}
+	require.NoError(t, err)
+	assert.DirExists(t, tempDir)
+	require.NoError(t, ReleaseClonedRepo("https://github.com/kubescape/kubescape/"))
 }
 func TestGetClonedPath(t *testing.T) {
 	testCases := []struct {
@@ -110,8 +108,10 @@ func TestGetClonedPath(t *testing.T) {
 			expected: "",
 		},
 	}
+	clonedPath := t.TempDir()
 	tmpDirPaths = make(map[string]string)
-	tmpDirPaths[hashRepoURL("https://github.com/kubescape/kubescape.git")] = "/path/to/cloned/repo" // replace with the actual path
+	tmpDirPaths[hashRepoURL("https://github.com/kubescape/kubescape.git")] = clonedPath
+	testCases[0].expected = clonedPath
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -141,8 +141,10 @@ func TestGetDirPath(t *testing.T) {
 	}
 
 	// Initialize tmpDirPaths
+	clonedPath := t.TempDir()
 	tmpDirPaths = make(map[string]string)
-	tmpDirPaths[hashRepoURL("https://github.com/user/repo.git")] = "/path/to/cloned/repo" // replace with the actual path
+	tmpDirPaths[hashRepoURL("https://github.com/user/repo.git")] = clonedPath
+	testCases[0].expected = clonedPath
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

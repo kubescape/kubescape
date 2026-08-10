@@ -1,6 +1,9 @@
 package cautils
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -71,6 +74,172 @@ func getKustomizeDirectoryName(path string) string {
 	return path
 }
 
+// KustomizeHelmChartDirectories returns the local chart directories owned by the
+// Kustomize configuration selected by path. Returning only explicitly referenced
+// charts keeps unrelated charts under the same tree available to the generic Helm
+// loader. Nested chart directories are owned by the referenced parent chart too.
+func KustomizeHelmChartDirectories(ctx context.Context, path string) ([]string, error) {
+	kustomizationPath := selectedKustomizationFile(path)
+	if kustomizationPath == "" {
+		return nil, nil
+	}
+	var chartDirectories []string
+	seenKustomizations := map[string]struct{}{}
+	seenChartDirectories := map[string]struct{}{}
+	if err := collectKustomizeHelmChartDirectories(
+		ctx,
+		kustomizationPath,
+		seenKustomizations,
+		seenChartDirectories,
+		&chartDirectories,
+	); err != nil {
+		return nil, err
+	}
+	return chartDirectories, nil
+}
+
+func collectKustomizeHelmChartDirectories(
+	ctx context.Context,
+	kustomizationPath string,
+	seenKustomizations map[string]struct{},
+	seenChartDirectories map[string]struct{},
+	chartDirectories *[]string,
+) error {
+	absKustomizationPath, err := canonicalPath(kustomizationPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve Kustomization path %q: %w", kustomizationPath, err)
+	}
+	if _, ok := seenKustomizations[absKustomizationPath]; ok {
+		return nil
+	}
+	seenKustomizations[absKustomizationPath] = struct{}{}
+
+	contents, err := os.ReadFile(absKustomizationPath)
+	if err != nil {
+		return fmt.Errorf("failed to read Kustomization %q: %w", absKustomizationPath, err)
+	}
+	var kustomization types.Kustomization
+	if err := kustomization.Unmarshal(contents); err != nil {
+		return fmt.Errorf("failed to parse Kustomization %q: %w", absKustomizationPath, err)
+	}
+	kustomization.FixKustomization()
+
+	chartHome := types.HelmDefaultHome
+	if kustomization.HelmGlobals != nil && kustomization.HelmGlobals.ChartHome != "" {
+		chartHome = kustomization.HelmGlobals.ChartHome
+	}
+	if !filepath.IsAbs(chartHome) {
+		chartHome = filepath.Join(filepath.Dir(absKustomizationPath), chartHome)
+	}
+
+	for _, chart := range kustomization.HelmCharts {
+		if chart.Name == "" {
+			continue
+		}
+		chartRoot := chartHome
+		// Kustomize isolates a versioned chart fetched from a repository below
+		// <name>-<version> before untarring it. Mirror absChartHome in the Helm
+		// inflator so a chart left there from an earlier build has the same owner.
+		if chart.Repo != "" && chart.Version != "" {
+			chartRoot = filepath.Join(chartRoot, fmt.Sprintf("%s-%s", chart.Name, chart.Version))
+		}
+		directory := filepath.Clean(filepath.Join(chartRoot, chart.Name))
+		appendOwnedHelmChartTree(ctx, directory, seenChartDirectories, chartDirectories)
+	}
+
+	// A selected Kustomize build can compose local bases and components that carry
+	// their own helmCharts. Follow only those explicit local graph edges; do not
+	// discover unrelated Kustomizations elsewhere below the scan root.
+	references := make([]string, 0, len(kustomization.Resources)+len(kustomization.Components))
+	references = append(references, kustomization.Resources...)
+	references = append(references, kustomization.Components...)
+	for _, reference := range references {
+		candidate := reference
+		if !filepath.IsAbs(candidate) {
+			candidate = filepath.Join(filepath.Dir(absKustomizationPath), candidate)
+		}
+		if _, err := os.Stat(candidate); err != nil {
+			continue
+		}
+		childKustomization := selectedKustomizationFile(candidate)
+		if childKustomization == "" {
+			continue
+		}
+		if err := collectKustomizeHelmChartDirectories(
+			ctx,
+			childKustomization,
+			seenKustomizations,
+			seenChartDirectories,
+			chartDirectories,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type helmChartDirectoryLister func(string) ([]string, []error)
+
+func appendOwnedHelmChartTree(ctx context.Context, directory string, seen map[string]struct{}, directories *[]string) {
+	appendOwnedHelmChartTreeWithLister(ctx, directory, seen, directories, listHelmChartDirs)
+}
+
+func appendOwnedHelmChartTreeWithLister(ctx context.Context, directory string, seen map[string]struct{}, directories *[]string, discover helmChartDirectoryLister) {
+	normalizedDirectory, err := canonicalPath(directory)
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(err))
+		normalizedDirectory = filepath.Clean(directory)
+	}
+	directory = normalizedDirectory
+	if _, ok := seen[directory]; !ok {
+		seen[directory] = struct{}{}
+		*directories = append(*directories, directory)
+	}
+
+	info, err := os.Stat(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(
+			fmt.Errorf("failed to inspect Kustomize-owned Helm chart %q: %w", directory, err),
+		))
+		return
+	}
+	if !info.IsDir() {
+		return
+	}
+
+	nestedDirectories, discoveryErrs := discover(directory)
+	for _, discoveryErr := range discoveryErrs {
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(discoveryErr))
+	}
+	for _, nestedDirectory := range nestedDirectories {
+		nestedDirectory = normalizePath(nestedDirectory)
+		if _, ok := seen[nestedDirectory]; ok {
+			continue
+		}
+		seen[nestedDirectory] = struct{}{}
+		*directories = append(*directories, nestedDirectory)
+	}
+}
+
+func selectedKustomizationFile(path string) string {
+	if IsKustomizeFile(path) {
+		return path
+	}
+	if !isKustomizeDirectory(path) {
+		return ""
+	}
+	for _, matcher := range kustomizationFileMatchers {
+		candidate := filepath.Join(path, matcher)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
 // Get Workloads, creates the yaml files(K8s resources) using Kustomize and
 // renders the workloads from the yaml files (k8s resources)
 func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[string][]workloadinterface.IMetadata, []error) {
@@ -101,7 +270,7 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	wls, e := ReadFile(yml, YAML_FILE_FORMAT)
 
 	if e != nil {
-		logger.L().Debug("failed to read rendered yaml file", helpers.String("file", kustomizeDirectoryPath), helpers.Error(e))
+		errs = append(errs, e)
 	}
 
 	if len(wls) != 0 {

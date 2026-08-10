@@ -2,6 +2,7 @@ package imagescan
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/anchore/grype/grype/match"
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -58,6 +60,12 @@ func makeThresholdTestMatch(id string) match.Match {
 			Version: "1.0.0",
 		},
 	}
+}
+
+func makeThresholdTestMatchWithFixState(id string, state vulnerability.FixState) match.Match {
+	m := makeThresholdTestMatch(id)
+	m.Vulnerability.Fix.State = state
+	return m
 }
 
 type stubVulnerabilityProvider struct {
@@ -151,61 +159,11 @@ func TestParseSeverity(t *testing.T) {
 	}
 }
 
-func TestIsEmpty(t *testing.T) {
-	tests := []struct {
-		name  string
-		creds RegistryCredentials
-		want  bool
-	}{
-		{
-			name: "Both Non Empty",
-			creds: RegistryCredentials{
-				Username: "username",
-				Password: "password",
-			},
-			want: false,
-		},
-		{
-			name: "Password Empty",
-			creds: RegistryCredentials{
-				Username: "username",
-				Password: "",
-			},
-			want: true,
-		},
-		{
-			name: "Username Empty",
-			creds: RegistryCredentials{
-				Username: "",
-				Password: "password",
-			},
-			want: true,
-		},
-		{
-			name: "Both empty",
-			creds: RegistryCredentials{
-				Username: "",
-				Password: "",
-			},
-			want: true,
-		},
-		{
-			name:  "Empty struct",
-			creds: RegistryCredentials{},
-			want:  true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, tt.creds.IsEmpty())
-		})
-	}
-}
-
 func TestGetProviderConfig(t *testing.T) {
 	tests := []struct {
-		name  string
-		creds RegistryCredentials
+		name      string
+		creds     RegistryCredentials
+		wantCreds []image.RegistryCredentials
 	}{
 		{
 			name: "Both Non Empty",
@@ -213,6 +171,7 @@ func TestGetProviderConfig(t *testing.T) {
 				Username: "username",
 				Password: "password",
 			},
+			wantCreds: []image.RegistryCredentials{{Username: "username", Password: "password"}},
 		},
 		{
 			name: "Password Empty",
@@ -220,6 +179,7 @@ func TestGetProviderConfig(t *testing.T) {
 				Username: "username",
 				Password: "",
 			},
+			wantCreds: nil,
 		},
 		{
 			name: "Username Empty",
@@ -227,6 +187,7 @@ func TestGetProviderConfig(t *testing.T) {
 				Username: "",
 				Password: "password",
 			},
+			wantCreds: nil,
 		},
 		{
 			name: "Both empty",
@@ -234,13 +195,23 @@ func TestGetProviderConfig(t *testing.T) {
 				Username: "",
 				Password: "",
 			},
+			wantCreds: nil,
+		},
+		{
+			name: "Token with authority",
+			creds: RegistryCredentials{
+				Authority: "registry.example.com",
+				Token:     "token",
+			},
+			wantCreds: []image.RegistryCredentials{{Authority: "registry.example.com", Token: "token"}},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			providerConfig := getProviderConfig(tt.creds)
+			providerConfig := getProviderConfig(tt.creds, nil)
 			assert.NotNil(t, providerConfig)
 			assert.Equal(t, true, providerConfig.GenerateMissingCPEs)
+			assert.Equal(t, tt.wantCreds, providerConfig.RegistryOptions.Credentials)
 		})
 	}
 }
@@ -280,6 +251,9 @@ func TestNewScanServiceWithMatchers(t *testing.T) {
 }
 
 func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
+	if testing.Short() || os.Getenv("KUBESCAPE_INTEGRATION_TESTS") != "1" {
+		t.Skip("skipping integration test; set KUBESCAPE_INTEGRATION_TESTS=1 to run")
+	}
 	// Test the actual NewScanServiceWithMatchers function
 	distCfg, installCfg, _, _ := NewDefaultDBConfig("")
 
@@ -299,8 +273,10 @@ func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
 func TestExceedsSeverityThreshold(t *testing.T) {
 	provider := thresholdStubVulnerabilityProvider{
 		metadataByID: map[string]*vulnerability.Metadata{
-			"CVE-high": {Severity: vulnerability.HighSeverity.String()},
-			"CVE-low":  {Severity: vulnerability.LowSeverity.String()},
+			"CVE-high":         {Severity: vulnerability.HighSeverity.String()},
+			"CVE-low":          {Severity: vulnerability.LowSeverity.String()},
+			"CVE-high-fixed":   {Severity: vulnerability.HighSeverity.String()},
+			"CVE-high-unfixed": {Severity: vulnerability.HighSeverity.String()},
 		},
 		errByID: map[string]error{
 			"CVE-error": errors.New("lookup failed"),
@@ -308,10 +284,11 @@ func TestExceedsSeverityThreshold(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		threshold vulnerability.Severity
-		matches   match.Matches
-		want      bool
+		name        string
+		threshold   vulnerability.Severity
+		matches     match.Matches
+		onlyFixable bool
+		want        bool
 	}{
 		{
 			name:      "unknown threshold never fails the scan",
@@ -319,7 +296,8 @@ func TestExceedsSeverityThreshold(t *testing.T) {
 			matches: match.NewMatches(
 				makeThresholdTestMatch("CVE-high"),
 			),
-			want: false,
+			onlyFixable: false,
+			want:        false,
 		},
 		{
 			name:      "match equal to threshold fails the scan",
@@ -328,7 +306,8 @@ func TestExceedsSeverityThreshold(t *testing.T) {
 				makeThresholdTestMatch("CVE-high"),
 				makeThresholdTestMatch("CVE-low"),
 			),
-			want: true,
+			onlyFixable: false,
+			want:        true,
 		},
 		{
 			name:      "metadata errors are ignored when no remaining match exceeds threshold",
@@ -337,7 +316,26 @@ func TestExceedsSeverityThreshold(t *testing.T) {
 				makeThresholdTestMatch("CVE-error"),
 				makeThresholdTestMatch("CVE-low"),
 			),
-			want: false,
+			onlyFixable: false,
+			want:        false,
+		},
+		{
+			name:      "onlyFixable ignores an unfixable CVE at or above threshold",
+			threshold: vulnerability.HighSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatchWithFixState("CVE-high-unfixed", vulnerability.FixStateNotFixed),
+			),
+			onlyFixable: true,
+			want:        false,
+		},
+		{
+			name:      "onlyFixable still fails on a fixable CVE at or above threshold",
+			threshold: vulnerability.HighSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatchWithFixState("CVE-high-fixed", vulnerability.FixStateFixed),
+			),
+			onlyFixable: true,
+			want:        true,
 		},
 	}
 
@@ -345,7 +343,7 @@ func TestExceedsSeverityThreshold(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, svc.ExceedsSeverityThreshold(tt.threshold, tt.matches))
+			assert.Equal(t, tt.want, svc.ExceedsSeverityThreshold(tt.threshold, tt.matches, tt.onlyFixable))
 		})
 	}
 }
@@ -541,9 +539,9 @@ func TestFilterMatchesBasedOnSeverity(t *testing.T) {
 		assert.ElementsMatch(t, []string{"CVE-high", "CVE-medium", "CVE-error"}, matchIDs(filtered))
 	})
 
-	t.Run("excluded severities are removed and metadata errors are skipped", func(t *testing.T) {
+	t.Run("metadata lookup errors preserve matches", func(t *testing.T) {
 		filtered := filterMatchesBasedOnSeverity([]string{"HIGH"}, remainingMatches, provider)
-		assert.ElementsMatch(t, []string{"CVE-medium"}, matchIDs(filtered))
+		assert.ElementsMatch(t, []string{"CVE-medium", "CVE-error"}, matchIDs(filtered))
 	})
 }
 
@@ -562,6 +560,9 @@ func TestGetMatchers(t *testing.T) {
 }
 
 func TestNewScanServiceIntegration(t *testing.T) {
+	if testing.Short() || os.Getenv("KUBESCAPE_INTEGRATION_TESTS") != "1" {
+		t.Skip("skipping integration test; set KUBESCAPE_INTEGRATION_TESTS=1 to run")
+	}
 	distCfg, installCfg, _, _ := NewDefaultDBConfig("")
 
 	svc, err := NewScanService(distCfg, installCfg)

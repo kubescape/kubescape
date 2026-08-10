@@ -63,14 +63,25 @@ type StatusQueryParams struct {
 	ScanID string `schema:"id" json:"id"`
 }
 
+// swagger:parameters cancelScan
+type CancelScanQueryParams struct {
+	// ID of the scan to cancel. If empty, the latest scan is cancelled.
+	//
+	// in:query
+	// swagger:strfmt uuid4
+	ScanID string `schema:"id" json:"id"`
+}
+
 // scanRequestParams params passed to channel
 type scanRequestParams struct {
-	scanInfo        *cautils.ScanInfo // request as received from api
-	scanQueryParams *ScanQueryParams  // request as received from api
-	scanID          string            // generated scan ID
-	ctx             context.Context
-	resp            chan *utilsmetav1.Response // Respose chan; nil if not interested.
-	callbackURL     string                     // validated scan-completion callback URL; empty if not requested.
+	scanInfo          *cautils.ScanInfo          // request as received from api
+	policyIdentifiers []cautils.PolicyIdentifier // policies to scan
+	scanQueryParams   *ScanQueryParams           // request as received from api
+	scanID            string                     // generated scan ID
+	ctx               context.Context
+	resp              chan *utilsmetav1.Response // Respose chan; nil if not interested.
+	callbackURL       string                     // validated scan-completion callback URL; empty if not requested.
+	isUserScan        bool                       // true when submitted via the Scan handler, not Metrics
 }
 
 // swagger:parameters triggerScan
@@ -88,22 +99,25 @@ func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParam
 	{
 		readBuffer, err := io.ReadAll(r.Body)
 		if err != nil {
-			// handler.writeError(w, fmt.Errorf("failed to read request body, reason: %s", err.Error()), scanID)
-			return nil, fmt.Errorf("failed to read request body, reason: %s", err.Error())
+			// handler.writeError(w, fmt.Errorf("failed to read request body, reason: %w", err), scanID)
+			return nil, fmt.Errorf("failed to read request body: %w", err)
 		}
 		if err := json.Unmarshal(readBuffer, &scanRequest); err != nil {
-			return nil, fmt.Errorf("failed to parse request payload, reason: %s", err.Error())
+			return nil, fmt.Errorf("failed to parse request payload, reason: %w", err)
 		}
 		logger.L().Info("REST API received scan request", helpers.String("scanID", scanID), helpers.String("format", scanRequest.Format))
 	}
 
+	scanInfo, policyIdentifiers := getScanCommand(scanRequest, scanID)
 	p := &scanRequestParams{
-		scanID:          scanID,
-		scanQueryParams: &ScanQueryParams{},
-		scanInfo:        getScanCommand(scanRequest, scanID),
+		scanID:            scanID,
+		scanQueryParams:   &ScanQueryParams{},
+		scanInfo:          scanInfo,
+		policyIdentifiers: policyIdentifiers,
+		isUserScan:        true,
 	}
 	if err := schema.NewDecoder().Decode(p.scanQueryParams, r.URL.Query()); err != nil {
-		return p, fmt.Errorf("failed to parse query params, reason: %s", err.Error())
+		return p, fmt.Errorf("failed to parse query params, reason: %w", err)
 	}
 	if p.scanQueryParams.ReturnResults {
 		p.resp = make(chan *utilsmetav1.Response, 1)

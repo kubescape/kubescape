@@ -71,6 +71,7 @@
   <body>
     <img class="logo" src="https://raw.githubusercontent.com/kubescape/kubescape/master/core/pkg/resultshandling/printer/v2/pdf/logo.png">
     <h1>Kubescape Scan Report</h1>
+    {{ if .OPASessionObj }}
     {{ with .OPASessionObj.Report.SummaryDetails }}
     </br>
     <h2>Summary:</h2>
@@ -110,7 +111,7 @@
           <td class="controlNameCell">{{ $control.Name }}</td>
           <td class="controlRiskCell numericCell">{{ $control.StatusCounters.FailedResources }}</td>
           <td class="controlRiskCell numericCell">{{ sum $control.StatusCounters.SkippedResources $control.StatusCounters.FailedResources $control.StatusCounters.PassedResources }}</td>
-          <td class="controlRiskCell numericCell">{{ float32ToInt $control.Score }}</td>
+          <td class="controlRiskCell numericCell">{{ riskScoreToInt $control.Score }}</td>
         </tr>
       </tr>
       {{ end }}
@@ -148,6 +149,36 @@
         </tbody>
       </table>
     </div>
+    {{ end }}
+    {{ end }}
+    {{ if .ImageScanSummary }}
+    </br>
+    <h2>Images scanned:</h2>
+    <p>{{ range .ImageScanSummary.Images }}{{ . }} {{ end }}</p>
+    </br>
+    <h2>Vulnerabilities:</h2>
+    <table>
+      <thead>
+      <tr>
+        <th class="resourceSeverityCell">Severity</th>
+        <th class="resourceNameCell">CVE</th>
+        <th class="resourceNameCell">Package</th>
+        <th class="resourceURLCell">Version</th>
+        <th class="resourceRemediationCell">Fixed In</th>
+      </tr>
+      </thead>
+      <tbody>
+      {{ range .ImageScanSummary.CVEs }}
+        <tr>
+          <td class="resourceSeverityCell">{{ .Severity }}</td>
+          <td class="resourceNameCell">{{ .ID }}</td>
+          <td class="resourceNameCell">{{ .Package }}</td>
+          <td class="resourceURLCell">{{ .Version }}</td>
+          <td class="resourceRemediationCell">{{ range .FixVersions }} <p>{{ . }}</p> {{ end }}</td>
+        </tr>
+      {{ end }}
+      </tbody>
+    </table>
     {{ end }}
   </body>
 </html>

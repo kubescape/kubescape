@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 )
@@ -99,12 +102,14 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framew
 	for _, filePath := range lp.filePaths {
 		buf, err := os.ReadFile(filePath)
 		if err != nil {
-			return nil, err
+			logger.L().Debug("skipping unreadable policy file", helpers.String("path", filePath), helpers.Error(err))
+			continue
 		}
 
 		var framework reporthandling.Framework
 		if err = json.Unmarshal(buf, &framework); err != nil {
-			return nil, err
+			logger.L().Debug("skipping unparsable policy file", helpers.String("path", filePath), helpers.Error(err))
+			continue
 		}
 
 		if strings.EqualFold(frameworkName, framework.Name) {
@@ -123,7 +128,8 @@ func (lp *LoadPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
 	for _, f := range lp.filePaths {
 		buf, err := os.ReadFile(f)
 		if err != nil {
-			return nil, err
+			logger.L().Debug("skipping unreadable policy file", helpers.String("path", f), helpers.Error(err))
+			continue
 		}
 
 		var framework reporthandling.Framework
@@ -152,7 +158,8 @@ func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
 	for _, f := range lp.filePaths {
 		buf, err := os.ReadFile(f)
 		if err != nil {
-			return nil, err
+			logger.L().Debug("skipping unreadable policy file", helpers.String("path", f), helpers.Error(err))
+			continue
 		}
 
 		var framework reporthandling.Framework
@@ -246,7 +253,7 @@ func (lp *LoadPolicy) ListControls() ([]string, error) {
 // GetExceptions retrieves configured exceptions.
 //
 // NOTE: the cluster parameter is not used at this moment.
-func (lp *LoadPolicy) GetExceptions(_ /* clusterName */ string) ([]armotypes.PostureExceptionPolicy, error) {
+func (lp *LoadPolicy) GetExceptions(_ context.Context, _ /* clusterName */ string) ([]armotypes.PostureExceptionPolicy, error) {
 	// NOTE: this assumes that the first path contains a valid exceptions descriptor
 	filePath := lp.filePath()
 
@@ -264,7 +271,7 @@ func (lp *LoadPolicy) GetExceptions(_ /* clusterName */ string) ([]armotypes.Pos
 // GetControlsInputs retrieves the map of control configs.
 //
 // NOTE: the cluster parameter is not used at this moment.
-func (lp *LoadPolicy) GetControlsInputs(_ /* clusterName */ string) (map[string][]string, error) {
+func (lp *LoadPolicy) GetControlsInputs(_ context.Context, _ /* clusterName */ string) (map[string][]string, error) {
 	// NOTE: this assumes that only the first path contains a valid control inputs descriptor
 	filePath := lp.filePath()
 	fileName := filepath.Base(filePath)
