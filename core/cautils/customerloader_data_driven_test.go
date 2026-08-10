@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"testing"
 
 	"github.com/google/uuid"
@@ -59,7 +60,11 @@ func TestTenantConfigCacheLifecycleDataDriven(t *testing.T) {
 			require.NoError(t, config.UpdateCachedConfig())
 			info, err := os.Stat(ConfigFileFullPath())
 			require.NoError(t, err)
-			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+			// Windows has no Unix permission bits: os.Chmod only toggles the
+			// read-only attribute, so a file created 0600 reports 0666.
+			if goruntime.GOOS != "windows" {
+				assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+			}
 
 			var persisted ConfigObj
 			contents, err := os.ReadFile(ConfigFileFullPath())
