@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,7 +39,9 @@ func TestLoadResourcesFromFilesReturnsErrorForMissingInput(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, workloads)
 	assert.Contains(t, err.Error(), "no YAML or JSON manifest files")
-	assert.Contains(t, err.Error(), missing)
+	// The error formats the input with %q, which escapes the separators in a
+	// Windows path, so the raw path is not a substring of it.
+	assert.Contains(t, err.Error(), strconv.Quote(missing))
 }
 
 func TestLoadResourcesFromFilesReturnsErrorForEmptyDirectory(t *testing.T) {
@@ -59,7 +62,7 @@ func TestLoadResourcesFromFilesReturnsJSONParseErrorWithPath(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Empty(t, workloads)
-	assert.Contains(t, err.Error(), broken)
+	assert.Contains(t, err.Error(), strconv.Quote(broken))
 	assert.Contains(t, err.Error(), "failed to parse")
 }
 
@@ -74,7 +77,7 @@ func TestLoadResourcesFromFilesReturnsYAMLDocumentNumber(t *testing.T) {
 	require.Contains(t, workloads, path)
 	assert.Len(t, workloads[path], 1, "valid documents should remain available for diagnostics")
 	assert.Contains(t, err.Error(), "document 2")
-	assert.Contains(t, err.Error(), path)
+	assert.Contains(t, err.Error(), strconv.Quote(path))
 }
 
 func TestLoadResourcesFromFilesKeepsValidResourcesFromMixedDirectory(t *testing.T) {
