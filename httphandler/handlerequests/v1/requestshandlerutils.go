@@ -37,7 +37,7 @@ import (
 
 var scanImpl = scan // Override for testing
 func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
-	response := &utilsmetav1.Response{}
+	response := &utilsmetav1.Response{ID: scanReq.scanID}
 
 	defer func() {
 		if r := recover(); r != nil {
