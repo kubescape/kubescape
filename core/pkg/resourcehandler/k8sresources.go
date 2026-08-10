@@ -530,13 +530,18 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 	}
 	apiGroup, apiVersion, resourceName := k8sinterface.StringToResourceGroup(resolved[0].groupVersionResourceTriplet)
 	if apiGroup == "" && resourceName == "secrets" {
-		// This is resolved from cluster discovery (not the client-supplied kind
-		// string), so it can't be bypassed by casing/aliasing tricks. Single
-		// resource scan is reachable from the unauthenticated httphandler
-		// POST /v1/scan endpoint with an attacker-chosen name/namespace; letting
-		// it live-fetch Secret objects would turn it into an unauthenticated
-		// arbitrary-secret-read primitive, since the fetched object's data is
-		// embedded verbatim in the scan report.
+		// Defense in depth: a Secret is not a useful single-resource scan
+		// target, so reject it here instead of fetching it and discarding it
+		// later. Rejecting before pullSingleResource avoids an unnecessary
+		// Kubernetes API call (and the RBAC it requires) and guarantees Secret
+		// objects are never retrieved from the cluster in single-resource scan
+		// mode, rather than relying solely on downstream sanitization
+		// (removeData()/removeSecretData(), which redacts "data" and
+		// "stringData" to "XXXXXX").
+		//
+		// The GVR is resolved from cluster discovery, not from the
+		// client-supplied kind string, so this check cannot be sidestepped with
+		// casing or aliasing tricks.
 		return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s", getReadableID(resource))
 	}
 	gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resourceName}

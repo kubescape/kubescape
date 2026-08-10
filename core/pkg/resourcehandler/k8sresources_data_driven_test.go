@@ -97,11 +97,12 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 			wantError: "apiVersion is required to resolve non-built-in resource",
 		},
 		{
-			// Regression test: single resource scan is reachable from the
-			// unauthenticated httphandler POST /v1/scan endpoint with an
-			// attacker-chosen name/namespace. It must never live-fetch Secret
-			// objects, since the fetched object (including its data field) is
-			// embedded verbatim in the scan report returned to the caller.
+			// Defense in depth: a Secret is not a useful single-resource scan
+			// target, so it must be rejected before retrieval rather than
+			// fetched and then sanitized downstream. Rejecting early also
+			// avoids an unnecessary Kubernetes API call. The Secret exists in
+			// the fake client here, so the rejection is proven to be a policy
+			// decision and not a lookup miss.
 			name:             "secret is rejected even when it exists",
 			request:          scanObject("v1", "Secret", "shop", "db-creds"),
 			objects:          []runtime.Object{unstructuredResource("v1", "Secret", "shop", "db-creds")},
@@ -126,9 +127,11 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 
 			workload, err := handler.findScanObjectResource(context.Background(), test.request, &EmptySelector{}, resolver)
 			if test.wantNoAPIActions {
-				// The rejection has to happen before the live API pull: if the
-				// object were fetched first and only then refused, the Secret's
-				// data would already have left the cluster.
+				// Defense in depth: the rejection must happen before the live
+				// API pull, so no Kubernetes API/RBAC operation is issued for a
+				// Secret at all. Fetching first and refusing afterwards would
+				// still pass the error assertion below, so the absence of
+				// client actions is what actually pins the ordering.
 				assert.Empty(t, dynamicClient.Actions(), "expected the request to be rejected before any API call")
 			}
 			if test.wantError != "" {
