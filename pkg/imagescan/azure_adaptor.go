@@ -276,8 +276,10 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 			if res.Data != nil {
 				dataList, ok := res.Data.([]interface{})
 				if !ok {
-					return nil, fmt.Errorf("failed to decode ARG response data format")
+					aggErr = errors.Join(aggErr, fmt.Errorf("failed to decode ARG response data format for repository %s", imageID.Repository))
+					break
 				}
+				malformed := false
 				for _, item := range dataList {
 					if count >= maxVulns {
 						// Log truncation rather than failing hard
@@ -287,7 +289,9 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 
 					row, ok := item.(map[string]interface{})
 					if !ok {
-						return nil, fmt.Errorf("malformed vulnerability row: expected map[string]interface{}, got %T", item)
+						aggErr = errors.Join(aggErr, fmt.Errorf("malformed vulnerability row for repository %s: expected map[string]interface{}, got %T", imageID.Repository, item))
+						malformed = true
+						break
 					}
 
 					vuln := Vulnerability{
@@ -312,6 +316,9 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 						report.Vulnerabilities = append(report.Vulnerabilities, vuln)
 						count++
 					}
+				}
+				if malformed {
+					break
 				}
 			}
 
