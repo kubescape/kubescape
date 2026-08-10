@@ -2,6 +2,7 @@ package printer
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 
@@ -44,34 +45,35 @@ func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) {
 // against image scans, so it is never invoked in practice.
 func (sp *SPDXPrinter) Score(score float32) {}
 
-func (sp *SPDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (sp *SPDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if opaSessionObj != nil || len(imageScanData) == 0 {
 		logger.L().Ctx(ctx).Error("spdx-json output is only supported for image scans")
-		return
+		return fmt.Errorf("spdx-json output is only supported for image scans")
 	}
 	if imageScanData[0].SBOM == nil {
 		logger.L().Ctx(ctx).Error("no SBOM data available for spdx-json output")
-		return
+		return fmt.Errorf("no SBOM data available for spdx-json output")
 	}
 
 	encoder, err := spdxjson.NewFormatEncoderWithConfig(spdxjson.DefaultEncoderConfig())
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to create spdx-json encoder", helpers.Error(err))
-		return
+		return err
 	}
 
 	data, err := format.Encode(*imageScanData[0].SBOM, encoder)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to encode SBOM as spdx-json", helpers.Error(err))
-		return
+		return err
 	}
 
 	if _, err := sp.writer.Write(data); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write spdx-json output", helpers.Error(err))
-		return
+		return err
 	}
 
 	printer.LogOutputFile(sp.writer.Name())
+	return nil
 }
 
 func (sp *SPDXPrinter) PrintNextSteps() {}
