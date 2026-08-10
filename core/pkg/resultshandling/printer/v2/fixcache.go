@@ -2,6 +2,8 @@ package printer
 
 import (
 	"context"
+	"slices"
+	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -44,6 +46,46 @@ type fixReportCache struct {
 	reads     map[string]readResult
 	resolvers map[string]*locationresolver.FixPathLocationResolver
 	regions   map[fixCacheKey][]fixRegion
+}
+
+// scannedResource is one failed resource paired with the manifest it came from.
+type scannedResource struct {
+	resourceID string
+	relPath    string
+	absPath    string
+}
+
+// groupByManifest orders failed resources so every resource of one manifest is
+// visited consecutively, which is what lets a cache serve a whole file and then
+// be dropped. Held across the report instead, the caches would retain a decoded
+// document tree per file, making memory proportional to everything scanned
+// rather than to the largest file. Sorting also makes the report order
+// deterministic, which map iteration was not.
+func groupByManifest(resources []scannedResource) []scannedResource {
+	ordered := slices.Clone(resources)
+	slices.SortFunc(ordered, func(a, b scannedResource) int {
+		if a.absPath != b.absPath {
+			return strings.Compare(a.absPath, b.absPath)
+		}
+		return strings.Compare(a.resourceID, b.resourceID)
+	})
+	return ordered
+}
+
+// manifestCache hands out one cache per manifest, dropping the previous one when
+// the walk reaches the next file, so only one manifest's decoded documents are
+// held at a time. Callers must visit a manifest's resources consecutively.
+type manifestCache struct {
+	path    string
+	current *fixReportCache
+}
+
+func (m *manifestCache) get(path string) *fixReportCache {
+	if m.current == nil || m.path != path {
+		m.path = path
+		m.current = newFixReportCache()
+	}
+	return m.current
 }
 
 func newFixReportCache() *fixReportCache {

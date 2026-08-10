@@ -203,38 +203,48 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 
 	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
 	basePath := getBasePathFromMetadata(*opaSessionObj)
-	cache := newFixReportCache()
-
+	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
-		if result.GetStatus(nil).IsFailed() {
-			resourceSource := opaSessionObj.ResourceSource[resourceID]
-			relPath := resourceSource.RelativePath
+		if !result.GetStatus(nil).IsFailed() {
+			continue
+		}
 
-			// Github Code Scanning considers results not associated to a file path
-			// meaningless and invalid when uploading, and the location written to the
-			// report is the relative path alone, so a base path cannot stand in for a
-			// missing one
-			if relPath == "" {
-				continue
-			}
+		resourceSource := opaSessionObj.ResourceSource[resourceID]
+		relPath := resourceSource.RelativePath
 
-			rsrcAbsPath := filepath.Join(effectiveBasePath(resourceSource, basePath), relPath)
-			locationResolver := cache.locationResolver(rsrcAbsPath, "SARIF")
+		// Github Code Scanning considers results not associated to a file path
+		// meaningless and invalid when uploading, and the location written to the
+		// report is the relative path alone, so a base path cannot stand in for a
+		// missing one
+		if relPath == "" {
+			continue
+		}
 
-			for _, toPin := range result.AssociatedControls {
-				ac := toPin
+		failed = append(failed, scannedResource{
+			resourceID: resourceID,
+			relPath:    relPath,
+			absPath:    filepath.Join(effectiveBasePath(resourceSource, basePath), relPath),
+		})
+	}
 
-				if ac.GetStatus(nil).IsFailed() {
-					ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
-					if ctl == nil {
-						logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
-						continue
-					}
-					location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
-					sp.addRule(run, ctl)
-					r := sp.addResult(run, ctl, relPath, location)
-					collectFixes(ctx, cache, r, ac, opaSessionObj, resourceID, relPath, rsrcAbsPath)
+	var caches manifestCache
+	for _, resource := range groupByManifest(failed) {
+		cache := caches.get(resource.absPath)
+		locationResolver := cache.locationResolver(resource.absPath, "SARIF")
+
+		for _, toPin := range opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls {
+			ac := toPin
+
+			if ac.GetStatus(nil).IsFailed() {
+				ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
+				if ctl == nil {
+					logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
+					continue
 				}
+				location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
+				sp.addRule(run, ctl)
+				r := sp.addResult(run, ctl, resource.relPath, location)
+				collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath)
 			}
 		}
 	}

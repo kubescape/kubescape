@@ -440,3 +440,49 @@ spec:
 
 	return session
 }
+
+func TestGroupByManifest_VisitsEachManifestConsecutively(t *testing.T) {
+	resources := []scannedResource{
+		{resourceID: "r3", absPath: "/repo/b.yaml"},
+		{resourceID: "r1", absPath: "/repo/a.yaml"},
+		{resourceID: "r4", absPath: "/repo/b.yaml"},
+		{resourceID: "r2", absPath: "/repo/a.yaml"},
+	}
+
+	ordered := groupByManifest(resources)
+
+	paths := make([]string, 0, len(ordered))
+	ids := make([]string, 0, len(ordered))
+	for _, resource := range ordered {
+		paths = append(paths, resource.absPath)
+		ids = append(ids, resource.resourceID)
+	}
+
+	assert.Equal(t, []string{"/repo/a.yaml", "/repo/a.yaml", "/repo/b.yaml", "/repo/b.yaml"}, paths)
+	assert.Equal(t, []string{"r1", "r2", "r3", "r4"}, ids, "resources of a manifest are ordered, so the report is deterministic")
+
+	seen := map[string]bool{}
+	previous := ""
+	for _, resource := range ordered {
+		if resource.absPath != previous {
+			require.False(t, seen[resource.absPath], "manifest %s is revisited after moving on", resource.absPath)
+			seen[resource.absPath] = true
+			previous = resource.absPath
+		}
+	}
+}
+
+// TestManifestCache_HoldsOneManifestAtATime is the memory guard: a cache kept for
+// the whole report retains a decoded document tree per file, so it must be
+// dropped when the walk reaches the next manifest.
+func TestManifestCache_HoldsOneManifestAtATime(t *testing.T) {
+	var caches manifestCache
+
+	first := caches.get("/repo/a.yaml")
+	assert.Same(t, first, caches.get("/repo/a.yaml"), "the same manifest reuses its cache")
+
+	second := caches.get("/repo/b.yaml")
+	assert.NotSame(t, first, second, "a new manifest starts a fresh cache")
+
+	assert.NotSame(t, second, caches.get("/repo/a.yaml"), "returning to a manifest does not resurrect its cache")
+}

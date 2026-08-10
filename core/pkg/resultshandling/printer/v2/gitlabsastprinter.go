@@ -285,9 +285,9 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 	}
 
 	basePath := getBasePathFromMetadata(*opaSessionObj)
-	cache := newFixReportCache()
 
 	var withoutFilePath, outsideRepository int
+	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if !result.GetStatus(nil).IsFailed() {
 			continue
@@ -308,10 +308,18 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 			continue
 		}
 
-		rsrcAbsPath := filepath.Join(effectiveBasePath(resourceSource, basePath), relPath)
-		locationResolver := cache.locationResolver(rsrcAbsPath, "GitLab SAST")
+		failed = append(failed, scannedResource{
+			resourceID: resourceID,
+			relPath:    relPath,
+			absPath:    filepath.Join(effectiveBasePath(resourceSource, basePath), relPath),
+		})
+	}
 
-		for _, toPin := range result.AssociatedControls {
+	var caches manifestCache
+	for _, resource := range groupByManifest(failed) {
+		locationResolver := caches.get(resource.absPath).locationResolver(resource.absPath, "GitLab SAST")
+
+		for _, toPin := range opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls {
 			ac := toPin
 			if !ac.GetStatus(nil).IsFailed() {
 				continue
@@ -323,8 +331,8 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 				continue
 			}
 
-			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
-			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, resourceID, relPath, location))
+			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
+			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, resource.resourceID, resource.relPath, location))
 		}
 	}
 
