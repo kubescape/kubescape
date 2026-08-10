@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -71,7 +72,7 @@ func TestPullSingleResource_FieldSelectorDoesNotLeakAcrossIterations(t *testing.
 	_, selectorErrs := handler.pullSingleResource(
 		context.Background(),
 		resource,
-		nil,
+		"",
 		"",
 		fieldSelector,
 		nil,
@@ -133,7 +134,7 @@ func TestPullResources_NonForbiddenErrorRecorded(t *testing.T) {
 		},
 	}
 
-	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
+	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{}, "")
 
 	require.Len(t, failedQueries, 1, "expected one failed query entry")
 	for _, f := range failedQueries {
@@ -142,11 +143,32 @@ func TestPullResources_NonForbiddenErrorRecorded(t *testing.T) {
 	}
 }
 
-// TestPullResources_NotFoundErrorIgnored verifies that a "server could not find
-// the requested resource" error (CRD not installed) is silently ignored and does
-// NOT appear in failedQueries — this is expected behaviour when a control
+// TestPullResources_NotFoundErrorIgnored verifies that a canonical NotFound
+// API status error (CRD not installed) is silently ignored and does NOT
+// appear in failedQueries — this is expected behaviour when a control
 // references an optional CRD that isn't present on the cluster.
 func TestPullResources_NotFoundErrorIgnored(t *testing.T) {
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "example.com", Resource: "somecrds"}, "")
+	})
+
+	qrs := QueryableResources{
+		"/v1/somecrd": QueryableResource{
+			GroupVersionResourceTriplet: "/v1/somecrd",
+		},
+	}
+
+	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{}, "")
+
+	assert.Empty(t, failedQueries, "404-style errors should not be recorded as failures")
+}
+
+// TestPullResources_SimilarMessageButNotTypedNotFoundIsRecorded verifies that
+// an untyped transport/proxy error whose message happens to resemble the
+// classic "resource not found" sentence is still recorded as a failure.
+// Message-based matching would have silently swallowed this; typed
+// apierrors.IsNotFound classification does not.
+func TestPullResources_SimilarMessageButNotTypedNotFoundIsRecorded(t *testing.T) {
 	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("the server could not find the requested resource")
 	})
@@ -157,9 +179,9 @@ func TestPullResources_NotFoundErrorIgnored(t *testing.T) {
 		},
 	}
 
-	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
+	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{}, "")
 
-	assert.Empty(t, failedQueries, "404-style errors should not be recorded as failures")
+	require.Len(t, failedQueries, 1, "an untyped error must not be classified as NotFound just because its message resembles one")
 }
 
 // TestPullResources_PartialFailure verifies that when one GVR succeeds and
@@ -207,7 +229,7 @@ func TestPullResources_PartialFailure(t *testing.T) {
 		},
 	}
 
-	k8sResources, allResources, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
+	k8sResources, allResources, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{}, "")
 
 	// failed query is recorded
 	assert.Len(t, failedQueries, 1)
@@ -239,7 +261,7 @@ func TestPullResources_TotalFailure(t *testing.T) {
 		},
 	}
 
-	_, allResources, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
+	_, allResources, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{}, "")
 
 	assert.Empty(t, allResources, "no resources should be collected when all queries fail")
 	assert.Len(t, failedQueries, 2, "both failed GVRs should be recorded")

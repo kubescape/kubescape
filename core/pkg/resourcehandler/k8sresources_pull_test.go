@@ -84,7 +84,7 @@ func TestPullResources_PartialFailureSurface(t *testing.T) {
 		},
 	}
 
-	k8sResourcesMap, allResources, failedQueries := handler.pullResources(context.Background(), queryableResources, &EmptySelector{})
+	k8sResourcesMap, allResources, failedQueries := handler.pullResources(context.Background(), queryableResources, &EmptySelector{}, "")
 
 	// Verify that the successful selector populated the shared raw-GVR bucket.
 	assert.Len(t, allResources, 1)

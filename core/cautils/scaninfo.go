@@ -131,12 +131,14 @@ type ScanInfo struct {
 	CustomClusterName     string                       // Set the custom name of the cluster
 	ExcludedNamespaces    string                       // used for host scanner namespace
 	IncludeNamespaces     string                       //
+	LabelSelector         string                       // filter collected resources by Kubernetes label selector (e.g. "app=nginx,env!=dev")
 	Namespace             string                       // target namespace for workload scans
 	InputPatterns         []string                     // Yaml files input patterns
 	Silent                bool                         // Silent mode - Do not print progress logs
 	FailThreshold         float32                      // DEPRECATED - Failure score threshold
 	ComplianceThreshold   float32                      // Compliance score threshold
 	FailThresholdSeverity string                       // Severity at and above which the command should fail
+	OnlyFixable           bool                         // Gate the severity threshold to only count CVEs that have an available fix
 	FailCoverageThreshold float32                      // Coverage threshold below which the command fails (0 = disabled)
 	FailOnDegradedConfig  bool                         // Fail the scan if control inputs or exceptions could not be loaded and a fallback was used
 	Submit                BoolPtrFlag                  // Submit results to Kubescape Cloud BE. Get() is nil unless explicitly set by the caller (flag/env/request field)
@@ -191,9 +193,11 @@ type Getters struct {
 	AttackTracksGetter   getter.IAttackTracksGetter
 }
 
-func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyIdentifier) {
+func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyIdentifier) error {
 	scanInfo.setUseFrom(policyIdentifiers)
-	scanInfo.setUseArtifactsFrom(ctx)
+	if err := scanInfo.setUseArtifactsFrom(ctx); err != nil {
+		return err
+	}
 	// setUseFrom and setUseArtifactsFrom can resolve to the same file - --use-default and
 	// --use-artifacts-from both point at the local store on the offline HTTP handler path -
 	// and a repeated path costs an extra read and unmarshal per policy load.
@@ -201,6 +205,7 @@ func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyId
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
 	}
+	return nil
 }
 
 func (scanInfo *ScanInfo) Cleanup() {
@@ -213,9 +218,9 @@ func (scanInfo *ScanInfo) AddCleanup(cleanup func()) {
 	scanInfo.cleanups = append(scanInfo.cleanups, cleanup)
 }
 
-func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
+func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) error {
 	if scanInfo.UseArtifactsFrom == "" {
-		return
+		return nil
 	}
 	// UseArtifactsFrom must be a path without a filename
 	dir, file := filepath.Split(scanInfo.UseArtifactsFrom)
@@ -227,7 +232,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 	// set frameworks files
 	files, err := os.ReadDir(scanInfo.UseArtifactsFrom)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("failed to read files from directory", helpers.String("dir", scanInfo.UseArtifactsFrom), helpers.Error(err))
+		return fmt.Errorf("failed to read files from directory %q: %w", scanInfo.UseArtifactsFrom, err)
 	}
 	framework := &reporthandling.Framework{}
 	for _, f := range files {
@@ -252,6 +257,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 	if scanInfo.AttackTracks == "" {
 		scanInfo.AttackTracks = filepath.Join(scanInfo.UseArtifactsFrom, LocalAttackTracksFilename)
 	}
+	return nil
 }
 
 func (scanInfo *ScanInfo) setUseFrom(policyIdentifiers []PolicyIdentifier) {

@@ -1,0 +1,83 @@
+package printer
+
+import (
+	"context"
+	"os"
+	"strings"
+
+	"github.com/anchore/syft/syft/format"
+	"github.com/anchore/syft/syft/format/spdxjson"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+)
+
+const (
+	spdxOutputFile = "sbom"
+)
+
+var _ printer.IPrinter = &SPDXPrinter{}
+
+type SPDXPrinter struct {
+	writer *os.File
+}
+
+func NewSPDXPrinter() *SPDXPrinter {
+	return &SPDXPrinter{}
+}
+
+func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) {
+	if outputFile != "" {
+		if strings.TrimSpace(outputFile) == "" {
+			outputFile = spdxOutputFile
+		}
+		if !strings.HasSuffix(strings.TrimSpace(outputFile), printer.SPDXOutputExt) {
+			outputFile = outputFile + printer.SPDXOutputExt
+		}
+	}
+	sp.writer = printer.GetWriter(ctx, outputFile)
+}
+
+// Score is a no-op: HandleResults only calls Score when opaSessionObj != nil
+// (core/pkg/resultshandling/results.go), and this printer only ever runs
+// against image scans, so it is never invoked in practice.
+func (sp *SPDXPrinter) Score(score float32) {}
+
+func (sp *SPDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+	if opaSessionObj != nil || len(imageScanData) == 0 {
+		logger.L().Ctx(ctx).Error("spdx-json output is only supported for image scans")
+		return
+	}
+	if imageScanData[0].SBOM == nil {
+		logger.L().Ctx(ctx).Error("no SBOM data available for spdx-json output")
+		return
+	}
+
+	encoder, err := spdxjson.NewFormatEncoderWithConfig(spdxjson.DefaultEncoderConfig())
+	if err != nil {
+		logger.L().Ctx(ctx).Error("failed to create spdx-json encoder", helpers.Error(err))
+		return
+	}
+
+	data, err := format.Encode(*imageScanData[0].SBOM, encoder)
+	if err != nil {
+		logger.L().Ctx(ctx).Error("failed to encode SBOM as spdx-json", helpers.Error(err))
+		return
+	}
+
+	if _, err := sp.writer.Write(data); err != nil {
+		logger.L().Ctx(ctx).Error("failed to write spdx-json output", helpers.Error(err))
+		return
+	}
+
+	printer.LogOutputFile(sp.writer.Name())
+}
+
+func (sp *SPDXPrinter) PrintNextSteps() {}
+
+func (sp *SPDXPrinter) CloseWriter() {
+	if sp.writer != nil && sp.writer != os.Stdout {
+		sp.writer.Close()
+	}
+}

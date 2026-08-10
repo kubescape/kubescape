@@ -197,6 +197,21 @@ func listHelmChartDirs(basePath string) ([]string, []error) {
 	return helmDirectories, errs
 }
 
+// listKustomizeDirs scans a given path (recursively) and returns the directories holding a
+// Kustomize configuration (a kustomization.yaml/kustomization.yml/Kustomization file). Each
+// carries its own Kustomization file, so an overlay nested below basePath is found on its own
+// even when basePath itself is not a Kustomize directory.
+func listKustomizeDirs(basePath string) ([]string, []error) {
+	directories, errs := listDirs(basePath)
+	kustomizeDirectories := make([]string, 0)
+	for _, dir := range directories {
+		if isKustomizeDirectory(dir) {
+			kustomizeDirectories = append(kustomizeDirectories, dir)
+		}
+	}
+	return kustomizeDirectories, errs
+}
+
 // excludeHelmTemplateFiles drops the files living under the templates/ directory of a helm chart.
 // LoadResourcesFromHelmCharts renders those templates, so passing them to the plain-YAML loader
 // as well duplicates the workloads it already renders, and warns on every raw template whose
@@ -219,16 +234,16 @@ func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
 
 	remaining := make([]string, 0, len(files))
 	for _, file := range files {
-		if !isAnyPathAliasUnderAnyDir(file, templateDirs) {
+		if !IsAnyPathAliasUnderAnyDir(file, templateDirs) {
 			remaining = append(remaining, file)
 		}
 	}
 	return remaining
 }
 
-// isUnderAnyDir reports whether path is inside one of dirs after normalizing
+// IsUnderAnyDir reports whether path is inside one of dirs after normalizing
 // relative paths and resolving symlinks where the path already exists.
-func isUnderAnyDir(path string, dirs []string) bool {
+func IsUnderAnyDir(path string, dirs []string) bool {
 	return isUnderAnyNormalizedDir(normalizePath(path), normalizePaths(dirs))
 }
 
@@ -262,7 +277,12 @@ func pathAliasesForPaths(paths []string) []string {
 	return aliases
 }
 
-func isAnyPathAliasUnderAnyDir(path string, dirs []string) bool {
+// IsAnyPathAliasUnderAnyDir reports whether any alias of path (its absolute
+// lexical form and, when different, its symlink-resolved physical form) is
+// inside one of dirs. dirs must already be normalized. Keeping the lexical
+// alias matters for a symlinked file whose link target lives elsewhere: it is
+// still owned by the directory that lexically contains it.
+func IsAnyPathAliasUnderAnyDir(path string, dirs []string) bool {
 	for _, alias := range pathAliases(path) {
 		if isUnderAnyNormalizedDir(alias, dirs) {
 			return true
@@ -366,6 +386,44 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 
 	maps.Copy(sourceToWorkloads, wls)
 	return sourceToWorkloads, kustomizeDirectoryName, nil
+}
+
+// LoadResourcesFromNestedKustomizeDirectories discovers and renders Kustomize configurations
+// found below basePath, for the case where basePath itself is a broader directory (e.g. a
+// repository root) rather than a Kustomize directory or file — that direct-input case is already
+// handled by LoadResourcesFromKustomizeDirectory. Every discovered directory carries its own
+// Kustomization file, so each is rendered independently; a directory whose render fails is
+// skipped with a warning rather than aborting the scan, leaving its files to the plain-manifest
+// loader as a fallback. Directory discovery errors (e.g. an unreadable subdirectory hit during the
+// tree walk) are likewise logged as warnings rather than aborting the scan, matching
+// loadResourcesFromHelmCharts: a permission error on one subtree should not cost the whole scan
+// the Kustomize directories that were discovered successfully. The returned directories are
+// exactly those that rendered successfully, for the caller to exclude from the plain-manifest pass.
+func LoadResourcesFromNestedKustomizeDirectories(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, []string) {
+	if isKustomizeDirectory(basePath) || IsKustomizeFile(basePath) {
+		// The direct-input case is handled by LoadResourcesFromKustomizeDirectory.
+		return nil, nil
+	}
+
+	kustomizeDirs, discoveryErrs := listKustomizeDirs(basePath)
+	for _, err := range discoveryErrs {
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Kustomize directories", helpers.Error(err))
+	}
+
+	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
+	renderedDirs := make([]string, 0, len(kustomizeDirs))
+	for _, dir := range kustomizeDirs {
+		wls, _, err := LoadResourcesFromKustomizeDirectory(ctx, dir)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("Skipping Kustomize directory that failed to render; its files remain available to the plain-manifest loader",
+				helpers.String("path", dir), helpers.Error(err))
+			continue
+		}
+		maps.Copy(sourceToWorkloads, wls)
+		renderedDirs = append(renderedDirs, dir)
+	}
+
+	return sourceToWorkloads, renderedDirs
 }
 
 // LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts

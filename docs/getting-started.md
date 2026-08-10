@@ -445,7 +445,7 @@ sudo kubescape patch --image docker.io/library/nginx:1.22
 |------|-------------|---------|
 | `-i, --image` | Image name to patch (required) | - |
 | `-t, --tag` | Tag for the patched image | `<image>-patched` |
-| `-a, --addr` | BuildKit daemon address | `unix:///run/buildkit/buildkitd.sock` |
+| `-a, --address` | BuildKit daemon address | none (auto-detects local docker daemon, falling back to `unix:///run/buildkit/buildkitd.sock`) |
 | `--timeout` | Patching timeout | `5m` |
 | `-u, --username` | Registry username | - |
 | `-p, --password` | Registry password | - |

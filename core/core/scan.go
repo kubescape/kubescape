@@ -197,6 +197,10 @@ func fileExtForFormat(format string) string {
 		return printer.PrometheusOutputExt
 	case printer.CsvFormat:
 		return printer.CsvOutputExt
+	case printer.CycloneDXFormat:
+		return printer.CycloneDXOutputExt
+	case printer.SPDXFormat:
+		return printer.SPDXOutputExt
 	default:
 		return printer.PrettyOutputExt
 	}
@@ -208,7 +212,10 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 
 	// ===================== Initialization =====================
 	policyIdentifiers = resolveDefaultScanAllPolicies(scanInfo, policyIdentifiers) // resolve the ScanAll expansion while Init can still cache its paths
-	scanInfo.Init(ctxInit, policyIdentifiers)                                      // initialize scan info
+	if err := scanInfo.Init(ctxInit, policyIdentifiers); err != nil {              // initialize scan info
+		spanInit.End()
+		return nil, err
+	}
 	defer scanInfo.Cleanup()
 	if err := resolveClusterContext(scanInfo); err != nil {
 		spanInit.End()

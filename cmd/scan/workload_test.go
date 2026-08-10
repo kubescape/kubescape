@@ -22,7 +22,8 @@ import (
 type noOpWorkloadPrinter struct{}
 
 func (noOpWorkloadPrinter) PrintNextSteps() {}
-func (noOpWorkloadPrinter) ActionPrint(context.Context, *cautils.OPASessionObj, []cautils.ImageScanData) {
+func (noOpWorkloadPrinter) ActionPrint(context.Context, *cautils.OPASessionObj, []cautils.ImageScanData) error {
+	return nil
 }
 func (noOpWorkloadPrinter) SetWriter(context.Context, string) {}
 func (noOpWorkloadPrinter) Score(float32)                     {}
@@ -277,6 +278,19 @@ func TestGetWorkloadCmd_ChartPathAndFilePathEmpty(t *testing.T) {
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }
 
+func TestGetWorkloadCmd_RejectsFilePathWithPositionalInputPath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getWorkloadCmd(mockKubescape, &scanInfo)
+	require.NoError(t, cmd.PersistentFlags().Set("chart-path", "./chart"))
+	require.NoError(t, cmd.PersistentFlags().Set("file-path", "./chart/templates/deployment.yaml"))
+
+	err := cmd.Args(&cobra.Command{}, []string{"Deployment/nginx", "./manifests"})
+
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
+}
+
 func TestGetWorkloadCmd_ArgsAcceptsPositionalLocalInputs(t *testing.T) {
 	scanInfo := cautils.ScanInfo{}
 	cmd := getWorkloadCmd(&mocks.MockIKubescape{}, &scanInfo)
@@ -296,7 +310,7 @@ func TestGetWorkloadCmd_ArgsRejectsAmbiguousFilePathAndPositionalInputs(t *testi
 	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
 }
 
-func TestGetWorkloadCmd_ArgsAllowsChartPathWithScanRoot(t *testing.T) {
+func TestGetWorkloadCmd_ArgsRejectsChartPathFilePathAndPositionalInputs(t *testing.T) {
 	scanInfo := cautils.ScanInfo{}
 	cmd := getWorkloadCmd(&mocks.MockIKubescape{}, &scanInfo)
 	scanInfo.ChartPath = "charts/app"
@@ -304,7 +318,7 @@ func TestGetWorkloadCmd_ArgsAllowsChartPathWithScanRoot(t *testing.T) {
 
 	err := cmd.Args(cmd, []string{"Deployment/nginx", "."})
 
-	assert.NoError(t, err)
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
 }
 
 func TestGetWorkloadCmd_ArgsRejectsStdinMixedWithOtherInputs(t *testing.T) {
@@ -519,7 +533,8 @@ func Test_parseWorkloadIdentifierString_Values(t *testing.T) {
 type fakePrinter struct{}
 
 func (p *fakePrinter) PrintNextSteps() {}
-func (p *fakePrinter) ActionPrint(ctx context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) {
+func (p *fakePrinter) ActionPrint(ctx context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
+	return nil
 }
 func (p *fakePrinter) SetWriter(ctx context.Context, _ string) {}
 func (p *fakePrinter) Score(_ float32)                         {}
@@ -573,4 +588,17 @@ func TestGetWorkloadCmd_ApiVersion(t *testing.T) {
 			assert.Equal(t, tt.wantApiVersion, mock.captured.ScanObject.GetApiVersion())
 		})
 	}
+}
+
+func TestGetWorkloadCmd_RejectsLabelSelector(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+	cmd := getWorkloadCmd(mockKubescape, &scanInfo)
+
+	scanInfo.LabelSelector = "app=nginx"
+
+	cmd.SetArgs([]string{"Deployment/my-deploy"})
+	err := cmd.RunE(cmd, []string{"Deployment/my-deploy"})
+
+	assert.ErrorContains(t, err, "--label-selector is not supported for workload scans")
 }
