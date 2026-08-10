@@ -234,16 +234,16 @@ func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
 
 	remaining := make([]string, 0, len(files))
 	for _, file := range files {
-		if !isAnyPathAliasUnderAnyDir(file, templateDirs) {
+		if !IsAnyPathAliasUnderAnyDir(file, templateDirs) {
 			remaining = append(remaining, file)
 		}
 	}
 	return remaining
 }
 
-// isUnderAnyDir reports whether path is inside one of dirs after normalizing
+// IsUnderAnyDir reports whether path is inside one of dirs after normalizing
 // relative paths and resolving symlinks where the path already exists.
-func isUnderAnyDir(path string, dirs []string) bool {
+func IsUnderAnyDir(path string, dirs []string) bool {
 	return isUnderAnyNormalizedDir(normalizePath(path), normalizePaths(dirs))
 }
 
@@ -277,7 +277,12 @@ func pathAliasesForPaths(paths []string) []string {
 	return aliases
 }
 
-func isAnyPathAliasUnderAnyDir(path string, dirs []string) bool {
+// IsAnyPathAliasUnderAnyDir reports whether any alias of path (its absolute
+// lexical form and, when different, its symlink-resolved physical form) is
+// inside one of dirs. dirs must already be normalized. Keeping the lexical
+// alias matters for a symlinked file whose link target lives elsewhere: it is
+// still owned by the directory that lexically contains it.
+func IsAnyPathAliasUnderAnyDir(path string, dirs []string) bool {
 	for _, alias := range pathAliases(path) {
 		if isUnderAnyNormalizedDir(alias, dirs) {
 			return true

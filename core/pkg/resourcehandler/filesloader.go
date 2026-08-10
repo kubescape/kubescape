@@ -262,17 +262,9 @@ func excludeFilesUnderDirectories(sourceToWorkloads map[string][]workloadinterfa
 	if len(dirs) == 0 {
 		return
 	}
-	cleanDirs := make([]string, len(dirs))
-	for i, dir := range dirs {
-		cleanDirs[i] = filepath.Clean(dir) + string(filepath.Separator)
-	}
 	for source := range sourceToWorkloads {
-		cleanSource := filepath.Clean(source)
-		for _, dir := range cleanDirs {
-			if strings.HasPrefix(cleanSource, dir) {
-				delete(sourceToWorkloads, source)
-				break
-			}
+		if cautils.IsUnderAnyDir(source, dirs) {
+			delete(sourceToWorkloads, source)
 		}
 	}
 }

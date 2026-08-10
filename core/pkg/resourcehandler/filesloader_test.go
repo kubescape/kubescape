@@ -540,3 +540,69 @@ metadata:
 	assert.Equal(t, 1, counts["Deployment/prod-app"])
 	assert.Equal(t, 1, counts["ConfigMap/standalone"], "a manifest outside the Kustomize directory must still be scanned")
 }
+
+// TestExcludeFilesUnderDirectories asserts that only sources inside the given
+// directories are dropped: siblings that merely share an ancestor, or unrelated
+// files, survive. The containment check is directory-aware, so a root located
+// just above the scan tree must not swallow unrelated inputs.
+func TestExcludeFilesUnderDirectories(t *testing.T) {
+	root := t.TempDir()
+	appDir := filepath.Join(root, "app")
+	nestedDir := filepath.Join(appDir, "config", "base")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o750))
+
+	sources := map[string][]workloadinterface.IMetadata{
+		filepath.Join(nestedDir, "deployment.yaml"):    {localWorkloadWithPath("apps/v1", "Deployment", "", "app", filepath.Join(nestedDir, "deployment.yaml"))},
+		filepath.Join(appDir, "service.yaml"):          {localWorkloadWithPath("v1", "Service", "", "app", filepath.Join(appDir, "service.yaml"))},
+		filepath.Join(root, "app-docs", "policy.yaml"): {localWorkloadWithPath("v1", "Pod", "default", "docs", filepath.Join(root, "app-docs", "policy.yaml"))},
+		filepath.Join(root, "standalone.yaml"):         {localWorkloadWithPath("v1", "ConfigMap", "default", "standalone", filepath.Join(root, "standalone.yaml"))},
+	}
+
+	excludeFilesUnderDirectories(sources, []string{appDir})
+
+	assert.NotContains(t, sources, filepath.Join(nestedDir, "deployment.yaml"), "a file nested below the directory must be excluded")
+	assert.NotContains(t, sources, filepath.Join(appDir, "service.yaml"), "a file directly inside the directory must be excluded")
+	assert.Contains(t, sources, filepath.Join(root, "app-docs", "policy.yaml"), "a sibling sharing a name prefix must survive")
+	assert.Contains(t, sources, filepath.Join(root, "standalone.yaml"), "an unrelated file must survive")
+}
+
+// TestExcludeFilesUnderDirectories_RootDirectory asserts that a directory at the
+// filesystem root matches through the canonical relative-path comparison, where
+// the old string-prefix approach mangled the joined separator (#2889).
+func TestExcludeFilesUnderDirectories_RootDirectory(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "deployment.yaml")
+	sources := map[string][]workloadinterface.IMetadata{
+		source: {localWorkloadWithPath("apps/v1", "Deployment", "", "app", source)},
+	}
+
+	excludeFilesUnderDirectories(sources, []string{string(filepath.Separator)})
+
+	assert.NotContains(t, sources, source, "every absolute path lives under the root directory")
+}
+
+// TestExcludeFilesUnderDirectories_CanonicalizesSymlinkedDirs asserts that a Kustomize
+// directory discovered under a symlinked scan path still excludes its inputs, which are
+// reported with the symlinked (lexical) prefix while the directory is reported physically.
+// The old string-prefix comparison could not see the match across the link (#2889).
+func TestExcludeFilesUnderDirectories_CanonicalizesSymlinkedDirs(t *testing.T) {
+	realParent := t.TempDir()
+	physicalApp := filepath.Join(realParent, "app")
+	source := filepath.Join(physicalApp, "deployment.yaml")
+	require.NoError(t, os.MkdirAll(physicalApp, 0o750))
+	require.NoError(t, os.WriteFile(source, []byte(singlePodManifest), 0o600))
+
+	linkedParent := filepath.Join(t.TempDir(), "linked-parent")
+	if err := os.Symlink(realParent, linkedParent); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	lexicalSource := filepath.Join(linkedParent, "app", "deployment.yaml")
+
+	sources := map[string][]workloadinterface.IMetadata{
+		lexicalSource: {localWorkloadWithPath("apps/v1", "Deployment", "", "app", lexicalSource)},
+	}
+
+	excludeFilesUnderDirectories(sources, []string{physicalApp})
+
+	assert.NotContains(t, sources, lexicalSource, "the input is under the physical directory, so it must be excluded")
+}
