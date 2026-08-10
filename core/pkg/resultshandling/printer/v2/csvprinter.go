@@ -54,7 +54,7 @@ func (cp *CsvPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.ComplianceScoreToInt(score))
 }
 
-func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) (err error) {
 func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) (err error) {
 	if opaSessionObj == nil {
 		return fmt.Errorf("no data provided for CSV output")
@@ -164,13 +164,6 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		}
 	}
 
-	csvWriter.Flush()
-	if err := csvWriter.Error(); err != nil {
-		logger.L().Ctx(ctx).Error("failed to flush CSV writer", helpers.Error(err))
-		return fmt.Errorf("failed to flush CSV writer: %w", err)
-	}
-
-	printer.LogOutputFile(cp.writer.Name())
 	return nil
 }
 
