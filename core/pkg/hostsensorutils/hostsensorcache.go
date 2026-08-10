@@ -126,7 +126,10 @@ func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDat
 }
 
 func saveToCache(clusterName, resourceName string, envelopes []hostsensor.HostSensorDataEnvelope) error {
-	if getHostSensorCacheTtl() <= 0 {
+	if getHostSensorCacheTtl() <= 0 || clusterIdentity() == "unknown" {
+		// An unresolved API server host is a shared cache key across every
+		// caller in that state; loadFromCache always refuses to read it back,
+		// so writing it is dead I/O and unnecessary disk data at rest.
 		return nil
 	}
 

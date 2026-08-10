@@ -16,10 +16,10 @@ func withK8sHost(t *testing.T, host string) {
 	t.Helper()
 	original := k8sinterface.K8SConfig
 	t.Cleanup(func() { k8sinterface.K8SConfig = original })
-	if host == "" {
-		k8sinterface.K8SConfig = nil
-		return
-	}
+	// Always set a non-nil config, even for the empty-host case: a nil
+	// K8SConfig makes IsConnectedToCluster() lazily load ~/.kube/config from
+	// disk, which on a machine that has one would resolve a real host and
+	// defeat the "unresolved identity" scenario this helper is meant to set up.
 	k8sinterface.K8SConfig = &restclient.Config{Host: host}
 }
 
@@ -37,6 +37,7 @@ func withTempCacheDir(t *testing.T) {
 // users who never opted into caching at all.
 func TestLoadFromCache_DisabledByDefault(t *testing.T) {
 	withTempCacheDir(t)
+	t.Setenv(HostSensorCacheTtlEnvVar, "")
 	withK8sHost(t, "https://cluster-a.example.com")
 
 	env := hostsensor.HostSensorDataEnvelope{}
@@ -94,7 +95,9 @@ func TestHostSensorCache_OptInRoundTrip(t *testing.T) {
 // TestLoadFromCache_UnresolvedClusterIdentityIsRejected guards against the
 // "unknown" fallback in clusterIdentity acting as a shared cache key: every
 // caller with no resolvable API server host would otherwise land on the same
-// file, and a read there could return another cluster's data.
+// file, and a read there could return another cluster's data. saveToCache is
+// expected to skip the write entirely, since loadFromCache would never serve
+// it back.
 func TestLoadFromCache_UnresolvedClusterIdentityIsRejected(t *testing.T) {
 	withTempCacheDir(t)
 	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
@@ -104,6 +107,11 @@ func TestLoadFromCache_UnresolvedClusterIdentityIsRejected(t *testing.T) {
 	env.SetName("node-a")
 	require.NoError(t, saveToCache("kubernetes-admin@kubernetes", "KubeletInfo", []hostsensor.HostSensorDataEnvelope{env}))
 
-	_, err := loadFromCache("kubernetes-admin@kubernetes", "KubeletInfo")
+	path, err := getCacheFilePath("kubernetes-admin@kubernetes", "KubeletInfo")
+	require.NoError(t, err)
+	_, statErr := os.Stat(path)
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "saveToCache must not write to disk when cluster identity cannot be resolved")
+
+	_, err = loadFromCache("kubernetes-admin@kubernetes", "KubeletInfo")
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
