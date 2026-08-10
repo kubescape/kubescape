@@ -27,7 +27,6 @@ import (
 	"github.com/kubescape/opa-utils/resources"
 	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/open-policy-agent/opa/v1/rego"
-	"github.com/open-policy-agent/opa/v1/storage"
 	opaprint "github.com/open-policy-agent/opa/v1/topdown/print"
 	"go.opentelemetry.io/otel"
 	"k8s.io/client-go/tools/record"
@@ -1280,6 +1279,9 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 		}
 
 		opap.preparedQueriesMu.Lock()
+		if opap.preparedQueries == nil {
+			opap.preparedQueries = make(map[string]rego.PreparedEvalQuery)
+		}
 		opap.preparedQueries[cacheKey] = pq
 		opap.preparedQueriesMu.Unlock()
 	}
