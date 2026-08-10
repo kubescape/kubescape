@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -138,6 +140,65 @@ func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "output path collision")
+}
+
+func TestResolvedOutputPath(t *testing.T) {
+	tests := []struct {
+		name, format, outputFile, want string
+	}{
+		{"append JSON", printer.JsonFormat, "report", "report.json"},
+		{"preserve JSON", printer.JsonFormat, "report.json", "report.json"},
+		{"preserve YAML alias", printer.YamlFormat, "report.yml", "report.yml"},
+		{"preserve CycloneDX", printer.CycloneDXFormat, "report.cdx.json", "report.cdx.json"},
+		{"append CycloneDX", printer.CycloneDXFormat, "report.json", "report.json.cdx.json"},
+		{"preserve SPDX", printer.SPDXFormat, "report.spdx.json", "report.spdx.json"},
+		{"append SPDX", printer.SPDXFormat, "report.json", "report.json.spdx.json"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, resolvedOutputPath(test.format, test.outputFile))
+		})
+	}
+}
+
+func TestResolvedOutputPathExposesSBOMCollisions(t *testing.T) {
+	tests := []struct {
+		sbomFormat, outputFile string
+	}{
+		{printer.CycloneDXFormat, "report.cdx.json"},
+		{printer.SPDXFormat, "report.spdx.json"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.sbomFormat, func(t *testing.T) {
+			jsonPath := resolvedOutputPath(printer.JsonFormat, test.outputFile)
+			sbomPath := resolvedOutputPath(test.sbomFormat, test.outputFile)
+			assert.Equal(t, jsonPath, sbomPath)
+		})
+	}
+}
+
+func TestGetOutputPrintersRejectsSBOMMultipartExtensionCollisions(t *testing.T) {
+	tests := []struct {
+		format, outputFile string
+	}{
+		{"json,cyclonedx-json", "report.cdx.json"},
+		{"json,spdx-json", "report.spdx.json"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.format, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				ScanType: cautils.ScanTypeImage,
+				Format:   test.format,
+				Output:   filepath.Join(t.TempDir(), test.outputFile),
+			}
+
+			_, err := GetOutputPrinters(scanInfo, context.Background(), "")
+			require.ErrorContains(t, err, "output path collision")
+		})
+	}
 }
 
 func TestIsPrioritizationScanType(t *testing.T) {
