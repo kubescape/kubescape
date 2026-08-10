@@ -101,7 +101,7 @@ func TestPublishFileResourceBatchPropagatesCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	batchChan := make(chan *cautils.ResourceBatch)
+	batchChan := make(chan *cautils.ResourceBatch, 1)
 	errChan := make(chan error, 1)
 	publishFileResourceBatch(ctx, batchChan, errChan, cautils.NewResourceBatch(cautils.ClusterScope))
 

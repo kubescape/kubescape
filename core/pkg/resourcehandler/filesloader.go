@@ -149,6 +149,11 @@ func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Conte
 }
 
 func publishFileResourceBatch(ctx context.Context, batchChan chan<- *cautils.ResourceBatch, errChan chan<- error, batch *cautils.ResourceBatch) {
+	if err := ctx.Err(); err != nil {
+		errChan <- err
+		return
+	}
+
 	select {
 	case batchChan <- batch:
 	case <-ctx.Done():
