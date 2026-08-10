@@ -55,7 +55,6 @@ func (cp *CsvPrinter) Score(score float32) {
 }
 
 func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) (err error) {
-func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) (err error) {
 	if opaSessionObj == nil {
 		return fmt.Errorf("no data provided for CSV output")
 	}

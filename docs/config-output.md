@@ -79,11 +79,11 @@ Example output:
 
 ```json
 {
+  "accessKey": "",
   "accountID": "1234567890",
   "clusterName": "",
-  "cloudReportURL": "https://report.example.com",
   "cloudAPIURL": "https://api.example.com",
-  "accessKey": ""
+  "cloudReportURL": "https://report.example.com"
 }
 ```
 

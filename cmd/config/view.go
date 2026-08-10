@@ -17,9 +17,6 @@ func getViewCmd(ks meta.IKubescape) *cobra.Command {
 			outputFormat, _ := cmd.Flags().GetString("output")
 			includeEmpty, _ := cmd.Flags().GetBool("include-empty")
 			return ks.ViewCachedConfig(&v1.ViewConfig{Writer: os.Stdout, OutputFormat: outputFormat, IncludeEmpty: includeEmpty})
-		Long:  ``,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return ks.ViewCachedConfig(&v1.ViewConfig{Writer: os.Stdout})
 		},
 	}
 
