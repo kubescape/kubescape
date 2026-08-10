@@ -426,6 +426,22 @@ func LoadResourcesFromNestedKustomizeDirectories(ctx context.Context, basePath s
 	return sourceToWorkloads, renderedDirs
 }
 
+func LoadResourcesFromTerraform(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, error) {
+	if !isTerraformDirectory(basePath) && !IsTerraformFile(basePath) {
+		return nil, nil
+	}
+	dir := basePath
+	if IsTerraformFile(basePath) {
+		dir = filepath.Dir(basePath)
+	}
+	td := NewTerraformDirectory(dir)
+	wls, errs := td.GetWorkloads(dir)
+	if len(errs) > 0 {
+		return wls, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
+	}
+	return wls, nil
+}
+
 // LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts
 // are the chart directories LoadResourcesFromHelmCharts already rendered; their templates are left
 // to that render and skipped here. Pass nil to scan everything (e.g. when no charts were rendered).
@@ -650,7 +666,9 @@ func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err
 	}()
 
 	var jsonObj any
-	if err := json.Unmarshal(jsonFile, &jsonObj); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(jsonFile))
+	decoder.UseNumber()
+	if err := decoder.Decode(&jsonObj); err != nil {
 		return workloads, err
 	}
 
