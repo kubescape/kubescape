@@ -91,7 +91,7 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	statusQueryParams := &StatusQueryParams{}
 	if err := schema.NewDecoder().Decode(statusQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), "")
 		return
 	}
 	logger.L().Info("requesting status", helpers.String("scanID", statusQueryParams.ScanID), helpers.String("api", "v1/status"))
@@ -211,7 +211,7 @@ func (handler *HTTPHandler) CancelScan(w http.ResponseWriter, r *http.Request) {
 
 	cancelQueryParams := &CancelScanQueryParams{}
 	if err := schema.NewDecoder().Decode(cancelQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), "")
 		return
 	}
 
@@ -249,7 +249,7 @@ func (handler *HTTPHandler) CancelScan(w http.ResponseWriter, r *http.Request) {
 func (handler *HTTPHandler) parseResultsQueryParams(w http.ResponseWriter, r *http.Request) (*ResultsQueryParams, bool) {
 	resultsQueryParams := &ResultsQueryParams{}
 	if err := schema.NewDecoder().Decode(resultsQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), "")
 		return nil, false
 	}
 	logger.L().Info("requesting results", helpers.String("scanID", resultsQueryParams.ScanID), helpers.String("api", "v1/results"), helpers.String("method", r.Method))

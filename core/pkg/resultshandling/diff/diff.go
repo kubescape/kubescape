@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -162,11 +163,90 @@ func loadReport(path string) (*scanReport, error) {
 		return nil, err
 	}
 
-	var r scanReport
-	if err := json.Unmarshal(data, &r); err != nil {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, fmt.Errorf("invalid report: expected a JSON object")
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
 		return nil, fmt.Errorf("invalid JSON: %w", err)
 	}
+	if fields == nil {
+		return nil, fmt.Errorf("invalid report: expected a JSON object")
+	}
+
+	resultsJSON, ok := fields["results"]
+	if !ok {
+		return nil, fmt.Errorf("invalid report: missing required results field; provide JSON output from kubescape scan")
+	}
+	if isJSONNull(resultsJSON) {
+		return nil, fmt.Errorf("invalid report: results must be an array, not null")
+	}
+
+	summaryJSON, ok := fields["summaryDetails"]
+	if !ok {
+		return nil, fmt.Errorf("invalid report: missing required summaryDetails field; provide JSON output from kubescape scan")
+	}
+	if isJSONNull(summaryJSON) {
+		return nil, fmt.Errorf("invalid report: summaryDetails must be an object, not null")
+	}
+
+	var r scanReport
+	if err := json.Unmarshal(resultsJSON, &r.Results); err != nil {
+		return nil, fmt.Errorf("invalid report results: %w", err)
+	}
+	if err := validateReport(&r, summaryJSON); err != nil {
+		return nil, err
+	}
 	return &r, nil
+}
+
+func isJSONNull(raw json.RawMessage) bool {
+	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+}
+
+func validateReport(r *scanReport, summaryJSON json.RawMessage) error {
+	var summaryFields map[string]json.RawMessage
+	if err := json.Unmarshal(summaryJSON, &summaryFields); err != nil {
+		return fmt.Errorf("invalid report summaryDetails: %w", err)
+	}
+	if summaryFields == nil {
+		return fmt.Errorf("invalid report: summaryDetails must be an object")
+	}
+	controlsJSON, ok := summaryFields["controls"]
+	if !ok {
+		return fmt.Errorf("invalid report: summaryDetails is missing required controls field")
+	}
+	if isJSONNull(controlsJSON) {
+		return fmt.Errorf("invalid report: summaryDetails.controls must be an object, not null")
+	}
+	var controls map[string]controlSummary
+	if err := json.Unmarshal(controlsJSON, &controls); err != nil {
+		return fmt.Errorf("invalid report summaryDetails.controls: %w", err)
+	}
+	r.SummaryDetails.Controls = controls
+
+	seen := make(map[key]struct{})
+	for resultIndex, result := range r.Results {
+		if strings.TrimSpace(result.ResourceID) == "" {
+			return fmt.Errorf("invalid report: results[%d].resourceID is empty", resultIndex)
+		}
+		for controlIndex, control := range result.AssociatedControls {
+			if strings.TrimSpace(control.ControlID) == "" {
+				return fmt.Errorf("invalid report: results[%d].controls[%d].controlID is empty", resultIndex, controlIndex)
+			}
+			if strings.TrimSpace(control.Status.InnerStatus) == "" {
+				return fmt.Errorf("invalid report: results[%d].controls[%d].status.status is empty", resultIndex, controlIndex)
+			}
+			controlKey := key{resourceID: result.ResourceID, controlID: control.ControlID}
+			if _, exists := seen[controlKey]; exists {
+				return fmt.Errorf("invalid report: duplicate resource and control pair %q / %q", result.ResourceID, control.ControlID)
+			}
+			seen[controlKey] = struct{}{}
+		}
+	}
+	return nil
 }
 
 func buildMap(r *scanReport) map[key]controlEntry {

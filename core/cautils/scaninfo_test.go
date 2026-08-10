@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,14 +13,39 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	giturl "github.com/kubescape/go-git-url"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 func TestSetContextMetadata(t *testing.T) {
+	t.Run("explicit kubeconfig context", func(t *testing.T) {
+		defaultPath := writeScanInfoKubeconfig(t, "context-b")
+		explicitPath := writeScanInfoKubeconfig(t, "context-a")
+		defaultConfig, err := clientcmd.LoadFromFile(defaultPath)
+		require.NoError(t, err)
+		k8sinterface.SetClusterContextName("")
+		k8sinterface.SetClientConfigAPI(defaultConfig)
+		t.Cleanup(func() {
+			k8sinterface.SetClientConfigAPI(nil)
+			k8sinterface.SetClusterContextName("")
+		})
+
+		scanInfo := &ScanInfo{}
+		scanInfo.SetKubeconfigSelection(explicitPath, "")
+		require.NoError(t, scanInfo.Init(context.Background(), nil))
+		require.NoError(t, scanInfo.ResolveClusterContextName())
+		metadata := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
+		ctx := metadata.ContextMetadata
+
+		require.NotNil(t, ctx.ClusterContextMetadata)
+		assert.Equal(t, "context-a", ctx.ClusterContextMetadata.ContextName)
+	})
+
 	t.Run("empty input cluster context", func(t *testing.T) {
 		ctx := reporthandlingv2.ContextMetadata{}
 		scanInfo := &ScanInfo{}
@@ -70,6 +96,123 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.Nil(t, ctx.HelmContextMetadata)
 		assertRepoContextMetadata(t, ctx.RepoContextMetadata, remoteURL, dir)
 	})
+}
+
+func TestResolveClusterContextNameRejectsInvalidSelection(t *testing.T) {
+	t.Run("missing override", func(t *testing.T) {
+		scanInfo := &ScanInfo{}
+		scanInfo.SetKubeconfigSelection(writeScanInfoKubeconfig(t, "context-a"), "context-missing")
+
+		err := scanInfo.ResolveClusterContextName()
+		require.ErrorContains(t, err, `context "context-missing" does not exist`)
+	})
+
+	t.Run("missing override in default kubeconfig", func(t *testing.T) {
+		defaultPath := writeScanInfoKubeconfig(t, "context-a")
+		t.Setenv(clientcmd.RecommendedConfigPathEnvVar, defaultPath)
+		scanInfo := &ScanInfo{}
+		scanInfo.SetKubeconfigSelection("", "context-missing")
+
+		err := scanInfo.ResolveClusterContextName()
+		require.EqualError(t, err, `context "context-missing" does not exist in kubeconfig`)
+	})
+
+	t.Run("missing current context", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "config")
+		require.NoError(t, os.WriteFile(path, []byte(`apiVersion: v1
+kind: Config
+clusters:
+- name: cluster
+  cluster:
+    server: https://example.invalid
+contexts:
+- name: context-a
+  context:
+    cluster: cluster
+`), 0o600))
+		scanInfo := &ScanInfo{}
+		scanInfo.SetKubeconfigSelection(path, "")
+
+		err := scanInfo.ResolveClusterContextName()
+		require.ErrorContains(t, err, `context "" does not exist`)
+	})
+}
+
+func TestResolveClusterContextNameUsesDefaultLoadingRulesForOverride(t *testing.T) {
+	defaultPath := writeScanInfoMultiContextKubeconfig(t)
+	t.Setenv(clientcmd.RecommendedConfigPathEnvVar, defaultPath)
+	scanInfo := &ScanInfo{}
+	scanInfo.SetKubeconfigSelection("", "context-selected")
+
+	require.NoError(t, scanInfo.ResolveClusterContextName())
+	assert.True(t, scanInfo.contextResolved)
+	assert.Equal(t, "context-selected", scanInfo.GetClusterContextName())
+}
+
+func TestResolveClusterContextNameSkipsDefaultLoadingWithoutSelection(t *testing.T) {
+	invalidPath := filepath.Join(t.TempDir(), "invalid-config")
+	require.NoError(t, os.WriteFile(invalidPath, []byte("not: [valid"), 0o600))
+	t.Setenv(clientcmd.RecommendedConfigPathEnvVar, invalidPath)
+	scanInfo := &ScanInfo{}
+	scanInfo.SetKubeconfigSelection("", "")
+
+	require.NoError(t, scanInfo.ResolveClusterContextName())
+	assert.False(t, scanInfo.contextResolved)
+}
+
+func writeScanInfoKubeconfig(t *testing.T, contextName string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config")
+	contents := fmt.Sprintf(`apiVersion: v1
+kind: Config
+current-context: %[1]s
+clusters:
+- name: cluster
+  cluster:
+    server: https://example.invalid
+contexts:
+- name: %[1]s
+  context:
+    cluster: cluster
+    user: user
+users:
+- name: user
+  user:
+    token: test
+`, contextName)
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o600))
+	return path
+}
+
+func writeScanInfoMultiContextKubeconfig(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config")
+	contents := `apiVersion: v1
+kind: Config
+current-context: context-current
+clusters:
+- name: cluster-current
+  cluster:
+    server: https://current.example
+- name: cluster-selected
+  cluster:
+    server: https://selected.example
+contexts:
+- name: context-current
+  context:
+    cluster: cluster-current
+    user: user
+- name: context-selected
+  context:
+    cluster: cluster-selected
+    user: user
+users:
+- name: user
+  user:
+    token: test
+`
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o600))
+	return path
 }
 
 // assertRepoContextMetadata verifies every field metadataGitLocal is expected
@@ -272,6 +415,45 @@ func TestScanInfoFormatsDeduplicatesInOrder(t *testing.T) {
 	}
 }
 
+func TestScanInfoToScanMetadataFormats(t *testing.T) {
+	testCases := []struct {
+		name   string
+		format string
+		want   []string
+	}{
+		{
+			name:   "multiple formats are separate metadata entries",
+			format: "json,junit,html",
+			want:   []string{"json", "junit", "html"},
+		},
+		{
+			name:   "formats are trimmed and deduplicated",
+			format: " json, ,pdf,json,pdf ",
+			want:   []string{"json", "pdf"},
+		},
+		{
+			name:   "single format is preserved",
+			format: "sarif",
+			want:   []string{"sarif"},
+		},
+		{
+			name:   "empty format does not produce an empty metadata entry",
+			format: "",
+			want:   []string{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			scanInfo := &ScanInfo{Format: tc.format}
+
+			metadata := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
+
+			assert.Equal(t, tc.want, metadata.ScanMetadata.Formats)
+		})
+	}
+}
+
 func TestAppendPolicyIdentifiers(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -397,7 +579,7 @@ func TestInitDeduplicatesUseFrom(t *testing.T) {
 		UseDefault:       true,
 		UseArtifactsFrom: artifactsDir,
 	}
-	scanInfo.Init(context.Background(), BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework))
+	require.NoError(t, scanInfo.Init(context.Background(), BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework)))
 
 	assert.Equal(t, []string{filepath.Join(artifactsDir, "nsa.json")}, scanInfo.UseFrom)
 }

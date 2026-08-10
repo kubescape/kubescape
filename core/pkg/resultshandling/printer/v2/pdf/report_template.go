@@ -100,6 +100,37 @@ func (t *Template) GenerateTable(tableRows *[]TableObject, totalFailed, total in
 	return nil
 }
 
+// GenerateImageTable is responsible for adding CVE data in table format to the pdf for an image scan (#2782)
+func (t *Template) GenerateImageTable(tableRows *[]ImageTableObject, totalCVEs, fixableCVEs int) error {
+	rows, err := list.Build[ImageTableObject](*tableRows)
+	if err != nil {
+		return err
+	}
+	t.maroto.AddRows(rows...)
+	t.maroto.AddRows(
+		line.NewAutoRow(props.Line{Thickness: 0.3, SizePercent: 100}),
+		row.New(2),
+	)
+	t.generateImageTableResult(totalCVEs, fixableCVEs)
+
+	return nil
+}
+
+func (t *Template) generateImageTableResult(totalCVEs, fixableCVEs int) {
+	defaultProps := props.Text{
+		Align:  align.Left,
+		Size:   8,
+		Style:  fontstyle.Bold,
+		Family: fontfamily.Arial,
+	}
+
+	t.maroto.AddRow(10,
+		text.NewCol(6, "Vulnerability summary", defaultProps),
+		text.NewCol(3, fmt.Sprintf("%d CVEs", totalCVEs), defaultProps),
+		text.NewCol(3, fmt.Sprintf("%d fixable", fixableCVEs), defaultProps),
+	)
+}
+
 // GenerateInfoRows is responsible for adding the information in pdf
 func (t *Template) GenerateInfoRows(rows []string) *Template {
 	for _, row := range rows {
@@ -180,6 +211,59 @@ func (t TableObject) GetContent(i int) core.Row {
 		text.NewCol(1, t.counterFailed, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
 		text.NewCol(1, t.counterAll, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
 		text.NewCol(2, t.complianceScore, props.Text{VerticalPadding: 1, Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
+	)
+
+	if i%2 == 0 {
+		r.WithStyle(&props.Cell{
+			BackgroundColor: &props.Color{
+				Red:   224,
+				Green: 224,
+				Blue:  224,
+			},
+		})
+	}
+
+	return r
+}
+
+// ImageTableObject maps a single CVE row for the image-scan PDF report (#2782)
+type ImageTableObject struct {
+	cveID        string
+	packageName  string
+	version      string
+	severity     string
+	fixVersions  string
+	getTextColor getTextColorFunc
+}
+
+func NewImageTableRow(cveID, packageName, version, severity, fixVersions string, getTextColor getTextColorFunc) *ImageTableObject {
+	return &ImageTableObject{
+		cveID:        cveID,
+		packageName:  packageName,
+		version:      version,
+		severity:     severity,
+		fixVersions:  fixVersions,
+		getTextColor: getTextColor,
+	}
+}
+
+func (t ImageTableObject) GetHeader() core.Row {
+	return row.New(10).Add(
+		text.NewCol(1, "Severity", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
+		text.NewCol(2, "CVE ID", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
+		text.NewCol(4, "Package", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
+		text.NewCol(2, "Version", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
+		text.NewCol(3, "Fixed in", props.Text{Size: 6, Family: fontfamily.Arial, Style: fontstyle.Bold}),
+	)
+}
+
+func (t ImageTableObject) GetContent(i int) core.Row {
+	r := row.New(3).Add(
+		text.NewCol(1, t.severity, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6, Color: t.getTextColor(t.severity)}),
+		text.NewCol(2, t.cveID, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6, Color: &props.Color{}}),
+		text.NewCol(4, t.packageName, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
+		text.NewCol(2, t.version, props.Text{Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
+		text.NewCol(3, t.fixVersions, props.Text{VerticalPadding: 1, Style: fontstyle.Normal, Family: fontfamily.Courier, Size: 6}),
 	)
 
 	if i%2 == 0 {

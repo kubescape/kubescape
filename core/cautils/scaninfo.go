@@ -21,6 +21,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 type ScanningContext string
@@ -130,12 +131,14 @@ type ScanInfo struct {
 	CustomClusterName     string                       // Set the custom name of the cluster
 	ExcludedNamespaces    string                       // used for host scanner namespace
 	IncludeNamespaces     string                       //
+	LabelSelector         string                       // filter collected resources by Kubernetes label selector (e.g. "app=nginx,env!=dev")
 	Namespace             string                       // target namespace for workload scans
 	InputPatterns         []string                     // Yaml files input patterns
 	Silent                bool                         // Silent mode - Do not print progress logs
 	FailThreshold         float32                      // DEPRECATED - Failure score threshold
 	ComplianceThreshold   float32                      // Compliance score threshold
 	FailThresholdSeverity string                       // Severity at and above which the command should fail
+	OnlyFixable           bool                         // Gate the severity threshold to only count CVEs that have an available fix
 	FailCoverageThreshold float32                      // Coverage threshold below which the command fails (0 = disabled)
 	FailOnDegradedConfig  bool                         // Fail the scan if control inputs or exceptions could not be loaded and a fallback was used
 	Submit                BoolPtrFlag                  // Submit results to Kubescape Cloud BE. Get() is nil unless explicitly set by the caller (flag/env/request field)
@@ -169,6 +172,10 @@ type ScanInfo struct {
 	HelmReleaseNamespace  string   // --release-namespace: Helm release namespace made available as .Release.Namespace
 	LabelsToCopy          []string // Labels to copy from workloads to scan reports
 	scanningContext       *ScanningContext
+	kubeconfigPath        string
+	kubeContextOverride   string
+	clusterContextName    string
+	contextResolved       bool
 	cleanups              []func()
 	ListingURL            string            //Grype vulnerability database URL
 	RegistryMapping       map[string]string // Map internal registry URLs to external ones
@@ -186,9 +193,11 @@ type Getters struct {
 	AttackTracksGetter   getter.IAttackTracksGetter
 }
 
-func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyIdentifier) {
+func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyIdentifier) error {
 	scanInfo.setUseFrom(policyIdentifiers)
-	scanInfo.setUseArtifactsFrom(ctx)
+	if err := scanInfo.setUseArtifactsFrom(ctx); err != nil {
+		return err
+	}
 	// setUseFrom and setUseArtifactsFrom can resolve to the same file - --use-default and
 	// --use-artifacts-from both point at the local store on the offline HTTP handler path -
 	// and a repeated path costs an extra read and unmarshal per policy load.
@@ -196,6 +205,7 @@ func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyId
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
 	}
+	return nil
 }
 
 func (scanInfo *ScanInfo) Cleanup() {
@@ -208,9 +218,9 @@ func (scanInfo *ScanInfo) AddCleanup(cleanup func()) {
 	scanInfo.cleanups = append(scanInfo.cleanups, cleanup)
 }
 
-func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
+func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) error {
 	if scanInfo.UseArtifactsFrom == "" {
-		return
+		return nil
 	}
 	// UseArtifactsFrom must be a path without a filename
 	dir, file := filepath.Split(scanInfo.UseArtifactsFrom)
@@ -222,7 +232,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 	// set frameworks files
 	files, err := os.ReadDir(scanInfo.UseArtifactsFrom)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("failed to read files from directory", helpers.String("dir", scanInfo.UseArtifactsFrom), helpers.Error(err))
+		return fmt.Errorf("failed to read files from directory %q: %w", scanInfo.UseArtifactsFrom, err)
 	}
 	framework := &reporthandling.Framework{}
 	for _, f := range files {
@@ -247,6 +257,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 	if scanInfo.AttackTracks == "" {
 		scanInfo.AttackTracks = filepath.Join(scanInfo.UseArtifactsFrom, LocalAttackTracksFilename)
 	}
+	return nil
 }
 
 func (scanInfo *ScanInfo) setUseFrom(policyIdentifiers []PolicyIdentifier) {
@@ -353,7 +364,7 @@ func splitNamespaceList(s string) []string {
 func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
-	metadata.ScanMetadata.Formats = []string{scanInfo.Format}
+	metadata.ScanMetadata.Formats = scanInfo.Formats()
 	metadata.ScanMetadata.FormatVersion = scanInfo.FormatVersion
 	metadata.ScanMetadata.Submit = scanInfo.Submit.GetBool()
 
@@ -414,10 +425,72 @@ func (scanInfo *ScanInfo) GetInputFiles() string {
 
 func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
 	if scanInfo.scanningContext == nil {
-		scanningContext := scanInfo.getScanningContext(scanInfo.GetInputFiles())
+		input := scanInfo.GetInputFiles()
+		scanningContext := scanInfo.getScanningContext(input)
+		if input != "" {
+			scanInfo.cloneAdditionalRemoteInputs(input)
+		}
 		scanInfo.scanningContext = &scanningContext
 	}
 	return *scanInfo.scanningContext
+}
+
+// SetKubeconfigSelection records the CLI kubeconfig selection without loading
+// it. Loading is deferred until Kubescape knows that the target is a live
+// cluster, so an irrelevant kubeconfig cannot break an offline manifest scan.
+func (scanInfo *ScanInfo) SetKubeconfigSelection(path, contextName string) {
+	scanInfo.kubeconfigPath = path
+	scanInfo.kubeContextOverride = contextName
+	scanInfo.clusterContextName = ""
+	scanInfo.contextResolved = false
+}
+
+// ResolveClusterContextName resolves the context from the same kubeconfig
+// loading rules selected for the Kubernetes REST client. When neither an
+// explicit path nor a context override is configured, the existing
+// k8s-interface loading and in-cluster behavior is retained.
+func (scanInfo *ScanInfo) ResolveClusterContextName() error {
+	if scanInfo.kubeconfigPath == "" && scanInfo.kubeContextOverride == "" {
+		return nil
+	}
+
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if scanInfo.kubeconfigPath != "" {
+		loadingRules.ExplicitPath = scanInfo.kubeconfigPath
+	}
+
+	kubeconfig, err := loadingRules.Load()
+	if err != nil {
+		if scanInfo.kubeconfigPath != "" {
+			return fmt.Errorf("failed to load kubeconfig %q: %w", scanInfo.kubeconfigPath, err)
+		}
+		return fmt.Errorf("failed to load kubeconfig: %w", err)
+	}
+
+	contextName := kubeconfig.CurrentContext
+	if scanInfo.kubeContextOverride != "" {
+		contextName = scanInfo.kubeContextOverride
+	}
+	if _, ok := kubeconfig.Contexts[contextName]; !ok {
+		if scanInfo.kubeconfigPath != "" {
+			return fmt.Errorf("context %q does not exist in kubeconfig %q", contextName, scanInfo.kubeconfigPath)
+		}
+		return fmt.Errorf("context %q does not exist in kubeconfig", contextName)
+	}
+
+	scanInfo.clusterContextName = contextName
+	scanInfo.contextResolved = true
+	return nil
+}
+
+// GetClusterContextName returns the context resolved from the CLI kubeconfig
+// and context selection, falling back to k8s-interface when neither was
+// resolved by this scan.
+func (scanInfo *ScanInfo) GetClusterContextName() string {
+	if scanInfo.contextResolved {
+		return scanInfo.clusterContextName
+	}
+	return k8sinterface.GetContextName()
 }
 
 // getScanningContext get scanning context from the input param
@@ -441,7 +514,6 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 						logger.L().Warning("failed to clean up cloned repository", helpers.String("url", originalInput), helpers.Error(err))
 					}
 				})
-				scanInfo.cloneAdditionalRemoteInputs(originalInput)
 				return ContextGitRemote
 			}
 			if err := ReleaseClonedRepo(originalInput); err != nil {
@@ -512,7 +584,7 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 	switch scanInfo.GetScanningContext() {
 	case ContextCluster:
 		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
-			ContextName: k8sinterface.GetContextName(),
+			ContextName: scanInfo.GetClusterContextName(),
 		}
 	case ContextDir:
 		// the base path must be the root the file loader anchored the resources'

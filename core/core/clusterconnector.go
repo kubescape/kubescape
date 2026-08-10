@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/armosec/utils-go/httputils"
@@ -100,11 +101,12 @@ func NewOperatorAdapter(scanInfo cautils.OperatorScanInfo, ns string) (*Operator
 func (a *OperatorAdapter) httpPostOperatorScanRequest(body apis.Commands) (string, error) {
 	reqBody, err := json.Marshal(body)
 	if err != nil {
-		return "", fmt.Errorf("in 'httpPostOperatorScanRequest' failed to json.Marshal, reason: %v", err)
+		return "", fmt.Errorf("in 'httpPostOperatorScanRequest' failed to json.Marshal, reason: %w", err)
 	}
 
 	err = a.StartPortForwarder()
 	if err != nil {
+		a.StopPortForwarder()
 		return "", err
 	}
 	defer a.StopPortForwarder()
@@ -115,7 +117,10 @@ func (a *OperatorAdapter) httpPostOperatorScanRequest(body apis.Commands) (strin
 		Path:   operatorTriggerPath,
 	}
 
-	resp, err := a.httpPostFunc(http.DefaultClient, urlQuery.String(), map[string]string{"Content-Type": "application/json"}, reqBody)
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+	resp, err := a.httpPostFunc(client, urlQuery.String(), map[string]string{"Content-Type": "application/json"}, reqBody)
 	if err != nil {
 		return "", err
 	}

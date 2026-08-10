@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/opa-utils/reporthandling"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
@@ -263,6 +265,97 @@ func getDiscoveryFailures(err error) []cautils.PartialGVRPull {
 		})
 	}
 	return failures
+}
+
+// recordDiscoveryFailureDependencies links unresolved policy dependencies to the
+// discovery failure that prevented them from being resolved. Discovery errors
+// remain partial pulls because they describe the discovery stage. The synthetic
+// dependency key lets scan coverage determine whether a control had any other
+// successfully resolved input.
+func recordDiscoveryFailureDependencies(
+	frameworks []reporthandling.Framework,
+	scannedResource workloadinterface.IWorkload,
+	scanningScope reporthandling.ScanningScopeType,
+	resolver resourceResolver,
+	discoveryFailures []cautils.PartialGVRPull,
+	resourceToControls map[string][]string,
+	warned map[string]struct{},
+) {
+	if len(discoveryFailures) == 0 || len(frameworks) == 0 {
+		return
+	}
+
+	for _, framework := range frameworks {
+		for _, control := range framework.Controls {
+			for _, rule := range control.Rules {
+				if cautils.ShouldSkipRuleWithWarned(control, rule, scanningScope, warned) {
+					continue
+				}
+
+				var resourcesFilterMap map[string]bool
+				if scannedResource != nil {
+					resourcesFilterMap = filterRuleMatchesForResource(scannedResource.GetKind(), rule.Match)
+					if resourcesFilterMap == nil {
+						continue
+					}
+				}
+
+				for _, match := range rule.Match {
+					for _, group := range match.APIGroups {
+						for _, version := range match.APIVersions {
+							for _, resource := range match.Resources {
+								if resourcesFilterMap != nil && !resourcesFilterMap[resource] {
+									continue
+								}
+								resolved := resolver(group, version, resource)
+
+								for _, failure := range discoveryFailures {
+									failedGroupVersion, matches := matchingDiscoveryFailureGroupVersion(failure, group, version)
+									if !matches || resolvesGroupVersion(resolved, failedGroupVersion) {
+										continue
+									}
+									if !slices.Contains(resourceToControls[failure.GVR], control.ControlID) {
+										resourceToControls[failure.GVR] = append(resourceToControls[failure.GVR], control.ControlID)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func matchingDiscoveryFailureGroupVersion(failure cautils.PartialGVRPull, group, version string) (schema.GroupVersion, bool) {
+	if failure.Selector != "discovery" || !strings.HasPrefix(failure.GVR, "discovery:") {
+		return schema.GroupVersion{}, false
+	}
+	failedGroupVersion := strings.TrimPrefix(failure.GVR, "discovery:")
+	if failedGroupVersion == "*" {
+		return schema.GroupVersion{}, false
+	}
+
+	groupVersion, err := schema.ParseGroupVersion(failedGroupVersion)
+	if err != nil {
+		return schema.GroupVersion{}, false
+	}
+	groupMatches := group == "*" || group == groupVersion.Group || (group == "core" && groupVersion.Group == "")
+	versionMatches := version == "*" || version == groupVersion.Version
+	return groupVersion, groupMatches && versionMatches
+}
+
+func resolvesGroupVersion(resolved []resolvedResource, groupVersion schema.GroupVersion) bool {
+	for _, candidate := range resolved {
+		group, version, _ := k8sinterface.StringToResourceGroup(candidate.groupVersionResourceTriplet)
+		if group == "core" {
+			group = ""
+		}
+		if group == groupVersion.Group && version == groupVersion.Version {
+			return true
+		}
+	}
+	return false
 }
 
 func collectDiscoveredResources(resourceLists []*metav1.APIResourceList) []discoveredAPIResource {

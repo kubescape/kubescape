@@ -152,6 +152,7 @@ func TestCountNamespaces_AppliesNamespaceFilters(t *testing.T) {
 	ns := func(name string) *corev1.Namespace {
 		return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
 	}
+	//nolint:staticcheck // deprecated but fine for this test
 	client := fakeclientset.NewSimpleClientset(ns("default"), ns("kube-system"), ns("prod-a"), ns("prod-b"))
 	handler := &K8sResourceHandler{k8s: &k8sinterface.KubernetesApi{KubernetesClient: client}}
 
@@ -191,4 +192,51 @@ func TestEstimateClusterSize_NilRemainingItemCount(t *testing.T) {
 	require.NoError(t, err)
 	// 15 GVRs * 200 = 3000 (pods with nil remainingItemCount is skipped)
 	assert.Equal(t, 3000, size)
+}
+
+func newListWithItem(gvr schema.GroupVersionResource) unstructured.Unstructured {
+	return unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Example",
+		"metadata":   map[string]any{"name": gvr.Resource + "-1"},
+	}}
+}
+
+func TestEstimateClusterSize_CountsReturnedItems(t *testing.T) {
+	mockClient := &gvrAwareDynamicClient{
+		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			assert.Equal(t, int64(1), opts.Limit)
+			// No remainingItemCount at all: a cluster with exactly one object of
+			// this type still returns that one object in Items.
+			return &unstructured.UnstructuredList{Items: []unstructured.Unstructured{newListWithItem(gvr)}}, nil
+		},
+	}
+
+	handler := &K8sResourceHandler{
+		k8s: &k8sinterface.KubernetesApi{DynamicClient: mockClient},
+	}
+
+	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
+	require.NoError(t, err)
+	assert.Equal(t, len(namespacedResourcesToEstimate), size,
+		"a returned page item must be counted even when remainingItemCount is absent")
+}
+
+func TestEstimateClusterSize_CountsReturnedItemPlusRemaining(t *testing.T) {
+	mockClient := &gvrAwareDynamicClient{
+		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			list := newListWithRemaining(9)
+			list.Items = []unstructured.Unstructured{newListWithItem(gvr)}
+			return list, nil
+		},
+	}
+
+	handler := &K8sResourceHandler{
+		k8s: &k8sinterface.KubernetesApi{DynamicClient: mockClient},
+	}
+
+	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
+	require.NoError(t, err)
+	// each successful GVR contributes 1 returned item + 9 remaining = 10
+	assert.Equal(t, len(namespacedResourcesToEstimate)*10, size)
 }

@@ -170,6 +170,7 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, scanInfo.HostSensorYamlPath)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("failed to create host scanner", helpers.Error(err))
+			scanInfo.HostSensorEnabled.SetBool(false)
 			return hostsensorutils.NewHostSensorHandlerMock()
 		}
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
@@ -87,16 +86,16 @@ func (p *PrometheusPrinter) printReports(allResources map[string]workloadinterfa
 	return nil
 }
 
-func (p *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (p *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
 	report := cautils.ReportV2ToV1(opaSessionObj)
 
 	err := p.printReports(opaSessionObj.AllResources, report.FrameworkReports)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal(err.Error())
-	} else {
-		printer.LogOutputFile(p.writer.Name())
+		return err
 	}
 
+	printer.LogOutputFile(p.writer.Name())
+	return nil
 }
 
 func (p *PrometheusPrinter) CloseWriter() {

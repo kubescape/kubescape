@@ -1065,6 +1065,19 @@ func TestCELNamespaceObjectFor(t *testing.T) {
 		assert.Nil(t, opap.celNamespaceObjectFor(podIn("")))
 	})
 
+	t.Run("enveloped resource resolves through object metadata accessors", func(t *testing.T) {
+		enveloped := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+			"apiVersion":     "v1",
+			"kind":           "Pod",
+			"name":           "p",
+			"namespace":      "prod",
+			"relatedObjects": []map[string]any{},
+		})
+		got := opap.celNamespaceObjectFor(enveloped.GetObject())
+		require.NotNil(t, got)
+		assert.Equal(t, "prod", got["metadata"].(map[string]any)["name"])
+	})
+
 	t.Run("no session resolves to nil without panicking", func(t *testing.T) {
 		// Both the zero value and a constructor call with no session: the second
 		// is the one a caller can actually reach.

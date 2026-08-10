@@ -86,6 +86,12 @@ func mockRule(ruleName string, matches []reporthandling.RuleMatchObjects, ruleRe
 	return rule
 }
 
+func mockCELRule(ruleName string, matches []reporthandling.RuleMatchObjects) reporthandling.PolicyRule {
+	rule := mockRule(ruleName, matches, "")
+	rule.RuleLanguage = reporthandling.CELLanguage
+	return rule
+}
+
 func mockControl(controlName string, rules []reporthandling.PolicyRule) reporthandling.Control {
 	return reporthandling.Control{
 		PortalBase: *armotypes.MockPortalBase("aaaaaaaa-bbbb-cccc-dddd-000000000001", controlName, nil),
@@ -263,6 +269,34 @@ func TestGetQueryableResourceMapFromPolicies(t *testing.T) {
 				"/v1/namespaces",
 				"apps/v1/deployments",
 				"apps/v1/replicasets",
+			},
+		},
+		{
+			name:     "CEL rule adds namespace lookup for namespaced workload scans",
+			workload: mockWorkload("apps/v1", "Deployment", "ns1", "deploy1"),
+			controls: []reporthandling.Control{
+				mockControl("1", []reporthandling.PolicyRule{
+					mockCELRule("cel-rule", []reporthandling.RuleMatchObjects{mockMatch(2)}),
+				}),
+			},
+			expectedExcludedRules: []string{},
+			expectedResourceGroups: []string{
+				"/v1/namespaces/metadata.name=ns1",
+			},
+		},
+		{
+			name:     "CEL rule adds namespace lookup for cluster scans",
+			workload: nil,
+			controls: []reporthandling.Control{
+				mockControl("1", []reporthandling.PolicyRule{
+					mockCELRule("cel-rule", []reporthandling.RuleMatchObjects{mockMatch(2)}),
+				}),
+			},
+			expectedExcludedRules: []string{},
+			expectedResourceGroups: []string{
+				"apps/v1/deployments",
+				"apps/v1/replicasets",
+				"/v1/namespaces",
 			},
 		},
 	}

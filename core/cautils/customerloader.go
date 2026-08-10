@@ -71,16 +71,23 @@ func (co *ConfigObj) Config() []byte {
 }
 
 func (co *ConfigObj) updateEmptyFields(inCO *ConfigObj) error {
-	if inCO.AccountID != "" {
+	if inCO == nil {
+		return nil
+	}
+
+	// Cluster data is a fallback source. Values already loaded from the local
+	// cache or the in-cluster service discovery file have higher precedence and
+	// must not be replaced merely because the ConfigMap also contains them.
+	if co.AccountID == "" && inCO.AccountID != "" {
 		co.AccountID = inCO.AccountID
 	}
-	if inCO.CloudAPIURL != "" {
+	if co.CloudAPIURL == "" && inCO.CloudAPIURL != "" {
 		co.CloudAPIURL = inCO.CloudAPIURL
 	}
-	if inCO.CloudReportURL != "" {
+	if co.CloudReportURL == "" && inCO.CloudReportURL != "" {
 		co.CloudReportURL = inCO.CloudReportURL
 	}
-	if inCO.ClusterName != "" {
+	if co.ClusterName == "" && inCO.ClusterName != "" {
 		co.ClusterName = inCO.ClusterName
 	}
 
@@ -332,17 +339,6 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromCredentialsSecret(ctx context
 	return nil
 }
 
-func loadConfigFromData(co *ConfigObj, data map[string]string) error {
-	var e error
-	if jsonConf, ok := data["config.json"]; ok {
-		e = readConfig([]byte(jsonConf), co)
-	}
-	if bData, err := json.Marshal(data); err == nil {
-		e = readConfig(bData, co)
-	}
-
-	return e
-}
 
 func existsConfigFile() bool {
 	_, err := os.ReadFile(ConfigFileFullPath())
@@ -605,7 +601,8 @@ func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
 			c.GetAccountID(),
 			c.GetAccessKey())
 		if err != nil {
-			logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
+			logger.L().Error("failed to create KS Cloud client", helpers.Error(err))
+			return nil
 		}
 		getter.SetKSCloudAPIConnector(cloud)
 	}
@@ -620,4 +617,3 @@ func GetTenantConfig(ctx context.Context, accountID, accessKey, clusterName, cus
 	return NewClusterConfig(ctx, k8s, accountID, accessKey, clusterName, customClusterName)
 }
 
-// firstNonEmpty returns the first non-empty string

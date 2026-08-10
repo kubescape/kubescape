@@ -15,7 +15,7 @@ func TestGetPreReqCmd(t *testing.T) {
 	assert.NotNil(t, cmd)
 	assert.Equal(t, "prerequisites", cmd.Use)
 	assert.Equal(t, "Check prerequisites for installing Kubescape Operator", cmd.Short)
-	assert.NotNil(t, cmd.Run)
+	assert.NotNil(t, cmd.RunE)
 }
 
 func TestGetPreReqCmdKubeconfigFlag(t *testing.T) {

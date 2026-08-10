@@ -7,12 +7,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kubescape/go-logger"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/meta"
 	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
+	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -69,6 +70,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 					scanInfo.ControlsVersion,
 				)
 			}
+			captureKubeconfigSelection(cmd, &scanInfo)
 			applyRegistryCredentialsFromEnv(cmd, &scanInfo)
 			return nil
 		},
@@ -130,7 +132,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				policyIdentifiers := setSecurityViewScanInfo(args, &scanInfo)
 
 				if err := securityScan(scanInfo, ks, policyIdentifiers); err != nil {
-					logger.L().Fatal(err.Error())
+					return err
 				}
 			} else if len(args) == 0 ||
 				(args[0] != "framework" && args[0] != "control") {
@@ -150,7 +152,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 						args...,
 					),
 				); err != nil {
-					logger.L().Fatal(err.Error())
+					return err
 				}
 			} else {
 				return fmt.Errorf(
@@ -176,6 +178,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.FailOnDegradedConfig, "fail-on-degraded-config", false, "Fail the scan (exit code 1) if control configurations or exceptions could not be loaded from their configured source and bundled defaults were used instead")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.OnlyFixable, "only-fixable", false, "When used with --severity-threshold on image scans, only count CVEs that have an available fix toward the pass/fail decision")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsVersion, "controls-version", "", "Pin the regolibrary release tag used to download controls (see https://github.com/kubescape/regolibrary/releases). If not used will download the latest release. Has no effect when --account is set (cloud backend is used instead)")
 
 	// Tri-state flag bound to the same BoolPtrFlag as the removed --enable-host-scan:
@@ -186,6 +189,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", fmt.Sprintf(`Output file format. Supported formats: "%s"`, strings.Join(shared.ScanFormats, `", "`)))
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.LabelSelector, "label-selector", "", "Filter collected Kubernetes resources by label selector. Accepts any selector that kubectl -l supports, e.g: --label-selector app=nginx,env!=dev")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to configured backend.")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.VerboseMode, "verbose", "v", false, "Display all of the input resources and not only failed resources")
@@ -323,9 +327,50 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifie
 		return err
 	}
 
-	enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), &scanInfo, terminateOnExceedingSeverity)
-	enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), &scanInfo)
-	enforcePolicyDegradation(results.GetData().ScanCoverage, &scanInfo)
+	if err := enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), &scanInfo); err != nil {
+		return err
+	}
+	if scanInfo.ScanImages {
+		if err := enforceImageSeverityThresholds(results.ImageScanData, &scanInfo); err != nil {
+			return err
+		}
+	}
+	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), &scanInfo); err != nil {
+		return err
+	}
+	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, &scanInfo); err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func enforceImageSeverityThresholds(imageScanData []cautils.ImageScanData, scanInfo *cautils.ScanInfo) error {
+	if scanInfo.FailThresholdSeverity == "" {
+		return nil
+	}
+
+	thresholdSeverity := imagescan.ParseSeverity(scanInfo.FailThresholdSeverity)
+	if thresholdSeverity == vulnerability.UnknownSeverity {
+		return nil
+	}
+
+	for _, data := range imageScanData {
+		if data.VulnerabilityProvider == nil {
+			continue
+		}
+		for m := range data.Matches.Enumerate() {
+			//nolint:staticcheck // deprecated but replacing it requires refactoring
+			metadata, err := data.VulnerabilityProvider.VulnerabilityMetadata(m.Vulnerability.Reference)
+			if err != nil {
+				continue
+			}
+
+			if imagescan.ParseSeverity(metadata.Severity) >= thresholdSeverity &&
+				(!scanInfo.OnlyFixable || m.Vulnerability.Fix.State == vulnerability.FixStateFixed) {
+				return fmt.Errorf("image scan result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
+			}
+		}
+	}
 	return nil
 }

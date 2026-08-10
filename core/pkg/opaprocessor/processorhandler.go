@@ -31,7 +31,6 @@ import (
 	"github.com/open-policy-agent/opa/v1/storage"
 	opaprint "github.com/open-policy-agent/opa/v1/topdown/print"
 	"go.opentelemetry.io/otel"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/record"
 )
 
@@ -201,7 +200,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	// edit results
 	opap.updateResults(ctx)
 
-	opap.markTimedOutControlsSkipped()
+	opap.markNotEvaluatedControlsSkipped()
 
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
@@ -372,7 +371,7 @@ done:
 
 	// Update results
 	opap.updateResults(ctx)
-	opap.markTimedOutControlsSkipped()
+	opap.markNotEvaluatedControlsSkipped()
 
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
@@ -882,15 +881,38 @@ func (opap *OPAProcessor) markResourcesSkipped(out map[string]*resourcesresults.
 	}
 }
 
+func (opap *OPAProcessor) markNotEvaluatedControlsSkipped() {
+	if len(opap.ScanCoverage.NotEvaluatedControls) == 0 {
+		return
+	}
+	controlIDs := make([]string, 0, len(opap.ScanCoverage.NotEvaluatedControls))
+	for _, notEvaluated := range opap.ScanCoverage.NotEvaluatedControls {
+		controlIDs = append(controlIDs, notEvaluated.ControlID)
+	}
+	opap.markControlsSkipped(controlIDs)
+}
+
+// markTimedOutControlsSkipped is retained for callers and focused tests that
+// operate before ScanCoverage is rebuilt. Normal processing uses
+// markNotEvaluatedControlsSkipped so collection failures and timeouts share the
+// same final-summary behavior.
 func (opap *OPAProcessor) markTimedOutControlsSkipped() {
 	if len(opap.TimedOutControls) == 0 {
 		return
 	}
+	controlIDs := make([]string, 0, len(opap.TimedOutControls))
+	for controlID := range opap.TimedOutControls {
+		controlIDs = append(controlIDs, controlID)
+	}
+	opap.markControlsSkipped(controlIDs)
+}
+
+func (opap *OPAProcessor) markControlsSkipped(controlIDs []string) {
 	status := &apis.StatusInfo{
 		InnerStatus: apis.StatusSkipped,
 		SubStatus:   apis.SubStatusNotEvaluated,
 	}
-	for controlID := range opap.TimedOutControls {
+	for _, controlID := range controlIDs {
 		if ctrl, ok := opap.Report.SummaryDetails.Controls[controlID]; ok {
 			ctrl.SetStatus(status)
 			opap.Report.SummaryDetails.Controls[controlID] = ctrl
@@ -1148,11 +1170,11 @@ func (opap *OPAProcessor) getCELEvaluator() (*cel.Evaluator, error) {
 // the same one stub.go's isNamespaced applies to the same object a moment
 // later: a non-empty metadata.namespace.
 func (opap *OPAProcessor) celNamespaceObjectFor(obj map[string]any) map[string]any {
-	namespace, _, _ := unstructured.NestedString(obj, "metadata", "namespace")
-	if namespace == "" {
+	meta := objectsenvelopes.NewObject(obj)
+	if meta == nil || meta.GetNamespace() == "" {
 		return nil
 	}
-	return opap.celNamespaceIndex[namespace]
+	return opap.celNamespaceIndex[meta.GetNamespace()]
 }
 
 // celRuleResponse builds the RuleResponse for one object that violated a CEL

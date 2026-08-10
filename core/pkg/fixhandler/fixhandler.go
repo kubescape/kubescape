@@ -454,6 +454,31 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				rawManifest, _ = json.Marshal(resourceObj.GetObject())
 			}
 			fixes := DetectProfileDrift(rawManifest, containerProfile)
+			var workloadKind string
+			var containerName string
+
+			if resourceObj != nil {
+				workloadKind = resourceObj.GetKind()
+			}
+
+			// Verify resourceObj matches containerProfile's workload labels
+			labels := containerProfile.GetLabels()
+			if labels != nil {
+				containerName = labels["kubescape.io/workload-container-name"]
+				profileKind := labels["kubescape.io/workload-kind"]
+				profileName := labels["kubescape.io/workload-name"]
+
+				if resourceObj != nil {
+					if profileKind != "" && !strings.EqualFold(profileKind, resourceObj.GetKind()) {
+						continue // Kind mismatch, skip drift detection for this resource
+					}
+					if profileName != "" && profileName != resourceObj.GetName() {
+						continue // Name mismatch, skip drift detection for this resource
+					}
+				}
+			}
+
+			fixes := DetectProfileDrift(rawManifest, containerProfile, workloadKind, containerName, rfi.DocumentIndex)
 			for _, fix := range fixes {
 				rfi.YamlExpressions[fix.YamlExpression] = armotypes.FixPath{Path: fix.YamlExpression, Value: ""}
 			}
@@ -965,7 +990,8 @@ func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int
 	// Strings should be quoted. Escape only `"` — yq's expression lexer
 	// (lexer_participle.go stringValue) unescapes \" and nothing else, so any
 	// other Go-style escape would be written to the file literally.
-	if isStringValue {
+	// Do not quote if the value is meant to be a YAML sequence.
+	if isStringValue && (!strings.HasPrefix(value, "[") || !strings.HasSuffix(value, "]")) {
 		value = `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 	}
 

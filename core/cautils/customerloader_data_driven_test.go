@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"testing"
 
 	"github.com/google/uuid"
@@ -59,7 +60,11 @@ func TestTenantConfigCacheLifecycleDataDriven(t *testing.T) {
 			require.NoError(t, config.UpdateCachedConfig())
 			info, err := os.Stat(ConfigFileFullPath())
 			require.NoError(t, err)
-			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+			// Windows has no Unix permission bits: os.Chmod only toggles the
+			// read-only attribute, so a file created 0600 reports 0666.
+			if goruntime.GOOS != "windows" {
+				assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+			}
 
 			var persisted ConfigObj
 			contents, err := os.ReadFile(ConfigFileFullPath())
@@ -184,6 +189,40 @@ func TestClusterConfigLoadsKubernetesSourcesDataDriven(t *testing.T) {
 			assert.Equal(t, test.wantConfig, *config.configObj)
 		})
 	}
+}
+
+func TestClusterConfigMapOnlyFillsMissingValues(t *testing.T) {
+	k8s := k8sinterface.NewKubernetesApiMock()
+	k8s.KubernetesClient = fake.NewClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cloud",
+			Namespace: "security",
+			Labels:    map[string]string{"kubescape.io/infra": "config"},
+		},
+		Data: map[string]string{
+			"clusterData": `{
+				"accountID":"configmap-account",
+				"clusterName":"configmap-cluster",
+				"cloudAPIURL":"https://configmap-api.example.com",
+				"cloudReportURL":"https://configmap-report.example.com"
+			}`,
+		},
+	})
+
+	config := &ClusterConfig{
+		k8s: k8s,
+		configObj: &ConfigObj{
+			AccountID:   "cached-account",
+			CloudAPIURL: "https://service-discovery-api.example.com",
+		},
+		configMapNamespace: "security",
+	}
+
+	require.NoError(t, config.updateConfigEmptyFieldsFromKubescapeConfigMap(context.Background()))
+	assert.Equal(t, "cached-account", config.GetAccountID(), "cached tenant identity must not be replaced by fallback data")
+	assert.Equal(t, "https://service-discovery-api.example.com", config.GetCloudAPIURL(), "service discovery must keep precedence")
+	assert.Equal(t, "configmap-cluster", config.GetContextName(), "a missing cluster name should be filled")
+	assert.Equal(t, "https://configmap-report.example.com", config.GetCloudReportURL(), "a missing report URL should be filled")
 }
 
 func Test_GetDefaultNS(t *testing.T) {

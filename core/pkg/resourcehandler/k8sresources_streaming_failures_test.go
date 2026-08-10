@@ -9,8 +9,10 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -76,7 +78,7 @@ func TestCollectAndStreamBatches_FailsWhenAllQueriesFail(t *testing.T) {
 func TestCollectAndStreamBatches_IgnoresMissingOptionalResource(t *testing.T) {
 	ctx := context.Background()
 	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, fmt.Errorf("the server could not find the requested resource")
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "example.com", Resource: "somecrds"}, "")
 	})
 	scanInfo, session := streamingTestSession(ctx)
 	namespaced := true
@@ -332,4 +334,56 @@ func TestCollectAndStreamBatches_CleanSuccessHasNoFailureMetadata(t *testing.T) 
 	assert.Equal(t, cautils.ClusterScope, resident.Scope)
 	assert.Equal(t, "default", defaultBatch.Scope)
 	assert.Len(t, defaultBatch.K8SResources[podsGVR], 1)
+}
+
+// TestCollectAndStreamBatches_LabelSelectorReachesStreamingPath verifies that
+// scanInfo.LabelSelector is forwarded to listOptions.LabelSelector in the
+// collectAndStreamBatches code path, which is exercised by StreamResourcesBatches
+// and is separate from the pullResources eager-collection path.
+func TestCollectAndStreamBatches_LabelSelectorReachesStreamingPath(t *testing.T) {
+	ctx := context.Background()
+
+	var (
+		podsSelectorCaptured bool
+		capturedPodsLabel    string
+	)
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.GetResource().Resource != "pods" {
+			return true, &unstructured.UnstructuredList{}, nil
+		}
+		listAction, ok := action.(k8stesting.ListAction)
+		require.True(t, ok)
+		podsSelectorCaptured = true
+		capturedPodsLabel = listAction.GetListRestrictions().Labels.String()
+		return true, testPodList("web", "default"), nil
+	})
+
+	scanInfo, session := streamingTestSession(ctx)
+	scanInfo.LabelSelector = "app=nginx"
+
+	namespaced := true
+	const podsGVR = "/v1/pods"
+	queryable := QueryableResources{
+		podsGVR: {
+			GroupVersionResourceTriplet: podsGVR,
+			Namespaced:                  &namespaced,
+		},
+	}
+	batches := make(chan *cautils.ResourceBatch, 3)
+
+	err := handler.collectAndStreamBatches(
+		ctx,
+		queryable,
+		&EmptySelector{},
+		session,
+		scanInfo,
+		cautils.ExternalResources{},
+		batches,
+		nil,
+	)
+
+	require.NoError(t, err)
+	require.True(t, podsSelectorCaptured, "expected at least one pods LIST action to be intercepted")
+	assert.Equal(t, "app=nginx", capturedPodsLabel,
+		"label selector from scanInfo must reach listOptions.LabelSelector in the streaming path")
 }

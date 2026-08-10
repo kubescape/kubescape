@@ -3,13 +3,13 @@ package scan
 import (
 	"context"
 	"errors"
-	"os"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/kubescape/go-logger/helpers"
+	"github.com/anchore/grype/grype/match"
+	grypepkg "github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/mocks"
@@ -168,101 +168,10 @@ func Test_enforceSeverityThresholds(t *testing.T) {
 				scanInfo := tc.ScanInfo
 				want := tc.Want
 
-				got := false
-				onExceed := func(*cautils.ScanInfo, helpers.ILogger) {
-					got = true
-				}
+				err := enforceSeverityThresholds(severityCounters, scanInfo)
 
-				enforceSeverityThresholds(severityCounters, scanInfo, onExceed)
-
-				if got != want {
-					t.Errorf("got: %v, want %v", got, want)
-				}
-			},
-		)
-	}
-}
-
-type spyLogMessage struct {
-	Message string
-	Details map[string]string
-}
-
-type spyLogger struct {
-	setItems []spyLogMessage
-}
-
-var _ helpers.ILogger = &spyLogger{}
-
-func (l *spyLogger) Error(msg string, details ...helpers.IDetails)                    {}
-func (l *spyLogger) Success(msg string, details ...helpers.IDetails)                  {}
-func (l *spyLogger) Warning(msg string, details ...helpers.IDetails)                  {}
-func (l *spyLogger) Info(msg string, details ...helpers.IDetails)                     {}
-func (l *spyLogger) Debug(msg string, details ...helpers.IDetails)                    {}
-func (l *spyLogger) SetLevel(level string) error                                      { return nil }
-func (l *spyLogger) GetLevel() string                                                 { return "" }
-func (l *spyLogger) SetWriter(w *os.File)                                             {}
-func (l *spyLogger) GetWriter() *os.File                                              { return &os.File{} }
-func (l *spyLogger) LoggerName() string                                               { return "" }
-func (l *spyLogger) Ctx(_ context.Context) helpers.ILogger                            { return l }
-func (l *spyLogger) Start(msg string, details ...helpers.IDetails)                    {}
-func (l *spyLogger) StopSuccess(msg string, details ...helpers.IDetails)              {}
-func (l *spyLogger) StopError(msg string, details ...helpers.IDetails)                {}
-func (l *spyLogger) TimedWrapper(funcName string, timeout time.Duration, task func()) {}
-
-func (l *spyLogger) Fatal(msg string, details ...helpers.IDetails) {
-	firstDetail := details[0]
-	detailsMap := map[string]string{firstDetail.Key(): firstDetail.Value().(string)}
-
-	newMsg := spyLogMessage{msg, detailsMap}
-	l.setItems = append(l.setItems, newMsg)
-}
-
-func (l *spyLogger) GetSpiedItems() []spyLogMessage {
-	return l.setItems
-}
-
-func Test_terminateOnExceedingSeverity(t *testing.T) {
-	expectedMessage := "compliance result exceeds severity threshold"
-	expectedKey := "set severity threshold"
-
-	testCases := []struct {
-		Description     string
-		ExpectedMessage string
-		ExpectedKey     string
-		ExpectedValue   string
-		Logger          *spyLogger
-	}{
-		{
-			"Should log the Critical threshold that was set in scan info",
-			expectedMessage,
-			expectedKey,
-			apis.SeverityCriticalString,
-			&spyLogger{},
-		},
-		{
-			"Should log the High threshold that was set in scan info",
-			expectedMessage,
-			expectedKey,
-			apis.SeverityHighString,
-			&spyLogger{},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(
-			tc.Description,
-			func(t *testing.T) {
-				want := []spyLogMessage{
-					{tc.ExpectedMessage, map[string]string{tc.ExpectedKey: tc.ExpectedValue}},
-				}
-				scanInfo := &cautils.ScanInfo{FailThresholdSeverity: tc.ExpectedValue}
-
-				terminateOnExceedingSeverity(scanInfo, tc.Logger)
-
-				got := tc.Logger.GetSpiedItems()
-				if !reflect.DeepEqual(got, want) {
-					t.Errorf("got: %v, want: %v", got, want)
+				if (err != nil) != want {
+					t.Errorf("got error: %v, want error: %v", err != nil, want)
 				}
 			},
 		)
@@ -486,7 +395,7 @@ func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	require.NoError(t, cmd.PersistentFlags().Set("format", "xml"))
 
 	err := cmd.RunE(cmd, []string{"."})
-	errMessage := "invalid format \"xml\", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml, csv"
+	errMessage := "invalid format \"xml\", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml, csv, cyclonedx-json, spdx-json"
 	assert.EqualError(t, err, errMessage)
 }
 
@@ -756,6 +665,117 @@ func Test_enforceCoverageThreshold(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.wantFail, coverageWouldFail(tt.notEvaluated, tt.totalControls, tt.threshold))
+		})
+	}
+}
+
+type mockVulnerabilityProvider struct {
+	severity string
+}
+
+func (m mockVulnerabilityProvider) VulnerabilityMetadata(ref vulnerability.Reference) (*vulnerability.Metadata, error) {
+	return &vulnerability.Metadata{Severity: m.severity}, nil
+}
+func (m mockVulnerabilityProvider) PackageSearchNames(grypepkg.Package) []string { return nil }
+func (m mockVulnerabilityProvider) FindVulnerabilities(criteria ...vulnerability.Criteria) ([]vulnerability.Vulnerability, error) {
+	return nil, nil
+}
+func (m mockVulnerabilityProvider) Close() error { return nil }
+
+func TestEnforceImageSeverityThresholds(t *testing.T) {
+	tests := []struct {
+		name          string
+		threshold     string
+		matchSeverity string
+		fixState      vulnerability.FixState
+		onlyFixable   bool
+		expectedError bool
+	}{
+		{
+			name:          "no threshold",
+			threshold:     "",
+			matchSeverity: "Critical",
+			expectedError: false,
+		},
+		{
+			name:          "threshold unknown",
+			threshold:     "unknown",
+			matchSeverity: "Critical",
+			expectedError: false,
+		},
+		{
+			name:          "threshold met exactly",
+			threshold:     "high",
+			matchSeverity: "High",
+			expectedError: true,
+		},
+		{
+			name:          "threshold exceeded",
+			threshold:     "high",
+			matchSeverity: "Critical",
+			expectedError: true,
+		},
+		{
+			name:          "below threshold",
+			threshold:     "critical",
+			matchSeverity: "High",
+			expectedError: false,
+		},
+		{
+			name:          "unfixed vulnerability at threshold is ignored when only fixable is enabled",
+			threshold:     "high",
+			matchSeverity: "High",
+			fixState:      vulnerability.FixStateNotFixed,
+			onlyFixable:   true,
+			expectedError: false,
+		},
+		{
+			name:          "fixed vulnerability at threshold fails when only fixable is enabled",
+			threshold:     "high",
+			matchSeverity: "High",
+			fixState:      vulnerability.FixStateFixed,
+			onlyFixable:   true,
+			expectedError: true,
+		},
+		{
+			name:          "unfixed vulnerability at threshold still fails when only fixable is disabled",
+			threshold:     "high",
+			matchSeverity: "High",
+			fixState:      vulnerability.FixStateNotFixed,
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				FailThresholdSeverity: tt.threshold,
+				OnlyFixable:           tt.onlyFixable,
+			}
+
+			matches := match.NewMatches()
+			if tt.matchSeverity != "" {
+				matches.Add(match.Match{
+					Vulnerability: vulnerability.Vulnerability{
+						Reference: vulnerability.Reference{ID: "CVE-TEST"},
+						Fix:       vulnerability.Fix{State: tt.fixState},
+					},
+				})
+			}
+
+			imgData := []cautils.ImageScanData{
+				{
+					Matches:               matches,
+					VulnerabilityProvider: mockVulnerabilityProvider{severity: tt.matchSeverity},
+				},
+			}
+
+			err := enforceImageSeverityThresholds(imgData, scanInfo)
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }

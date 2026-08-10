@@ -447,6 +447,7 @@ helm upgrade --install kubescape kubescape/kubescape-operator \
 | **GitHub Actions** | [kubescape/github-action](https://github.com/marketplace/actions/kubescape) |
 | **GitLab CI** | [Documentation](https://kubescape.io/docs/integrations/gitlab/) |
 | **Jenkins** | [Documentation](https://kubescape.io/docs/integrations/jenkins/) |
+| **MegaLinter** | [Documentation](https://megalinter.io/latest/descriptors/kubernetes_kubescape/) — open-source linters aggregator that embeds Kubescape and runs it when Kubernetes files are detected |
 
 ### IDE Extensions
 

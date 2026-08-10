@@ -44,6 +44,6 @@ func main() {
 
 	if err := cmd.Execute(ctx, version, commit, date); err != nil {
 		cancel()
-		logger.L().Fatal(err.Error())
+		os.Exit(1)
 	}
 }
