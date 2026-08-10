@@ -2,6 +2,7 @@ package imagescan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -122,6 +123,7 @@ func (a *AzureAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Conta
 	}
 
 	var statuses []ContainerImageScanStatus
+	var aggErr error
 	parts := strings.Split(a.registryHost, ".")
 	registryName := parts[0]
 
@@ -163,7 +165,9 @@ func (a *AzureAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Conta
 
 		res, err := a.client.Resources(ctx, req, nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
+			aggErr = errors.Join(aggErr, fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err))
+			statuses = append(statuses, status)
+			continue
 		}
 
 		if res.TotalRecords != nil && *res.TotalRecords > 0 {
@@ -184,7 +188,7 @@ func (a *AzureAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Conta
 		statuses = append(statuses, status)
 	}
 
-	return statuses, nil
+	return statuses, aggErr
 }
 
 // Helper to normalize Azure severity to Kubescape expected severity
@@ -212,6 +216,7 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 	}
 
 	var reports []ContainerImageVulnerabilityReport
+	var aggErr error
 	parts := strings.Split(a.registryHost, ".")
 	registryName := parts[0]
 
@@ -264,7 +269,8 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 
 			res, err := a.client.Resources(ctx, req, nil)
 			if err != nil {
-				return nil, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, err)
+				aggErr = errors.Join(aggErr, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, err))
+				break
 			}
 
 			if res.Data != nil {
@@ -318,7 +324,7 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 		reports = append(reports, report)
 	}
 
-	return reports, nil
+	return reports, aggErr
 }
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
