@@ -150,11 +150,14 @@ func EnrichSummary(controls reportsummary.ControlSummaries, index map[string]*re
 }
 
 // GenerateValidatingAdmissionPolicy creates a ValidatingAdmissionPolicy manifest
-func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[string]interface{}) *unstructured.Unstructured {
+func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[string]interface{}, apiVersion string) *unstructured.Unstructured {
+	if apiVersion == "" {
+		apiVersion = "v1"
+	}
 	vap := &unstructured.Unstructured{}
 	vap.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "admissionregistration.k8s.io",
-		Version: "v1",
+		Version: apiVersion,
 		Kind:    "ValidatingAdmissionPolicy",
 	})
 	vap.SetName(name)
@@ -166,17 +169,30 @@ func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[str
 				"expression": celExpr,
 			},
 		},
+		"matchConstraints": map[string]interface{}{
+			"resourceRules": []interface{}{
+				map[string]interface{}{
+					"apiGroups":   []interface{}{"*"},
+					"apiVersions": []interface{}{"*"},
+					"operations":  []interface{}{"CREATE", "UPDATE"},
+					"resources":   []interface{}{"*"},
+				},
+			},
+		},
 	}
 	vap.Object["spec"] = spec
 	return vap
 }
 
 // GenerateValidatingAdmissionPolicyBinding creates a ValidatingAdmissionPolicyBinding manifest
-func GenerateValidatingAdmissionPolicyBinding(name, policyName string) *unstructured.Unstructured {
+func GenerateValidatingAdmissionPolicyBinding(name, policyName, apiVersion string) *unstructured.Unstructured {
+	if apiVersion == "" {
+		apiVersion = "v1"
+	}
 	vapb := &unstructured.Unstructured{}
 	vapb.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "admissionregistration.k8s.io",
-		Version: "v1",
+		Version: apiVersion,
 		Kind:    "ValidatingAdmissionPolicyBinding",
 	})
 	vapb.SetName(name)

@@ -13,13 +13,16 @@ func Transpile(body *ast.Body) (string, error) {
 		return "", fmt.Errorf("empty Rego body")
 	}
 
-	// This is a naive conversion. A real implementation maps relations to CEL functions.
-	celExpression := "object.metadata.name != ''" // default fallback
+	celExpression := ""
 	
 	for _, expr := range *body {
 		if strings.Contains(expr.String(), "every") {
 			celExpression = "object.spec.containers.all(c, c.image != '')"
 		}
+	}
+
+	if celExpression == "" {
+		return "", fmt.Errorf("unsupported Rego expression: no exact AST conversion exists")
 	}
 
 	return celExpression, nil
