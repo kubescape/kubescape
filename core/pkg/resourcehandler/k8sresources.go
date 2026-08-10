@@ -26,6 +26,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -323,19 +324,8 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 
 		result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, scanInfo.LabelSelector, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced)
-		for _, se := range selectorErrs {
-			// Match the eager collection path: controls may reference optional
-			// CRDs which are not installed, so a missing resource is not a scan
-			// coverage failure.
-			if strings.Contains(se.err.Error(), "the server could not find the requested resource") {
-				continue
-			}
-			qualifiedKey := qr.GroupVersionResourceTriplet + "/" + se.selector
-			failedQueries[qualifiedKey] = queryFailure{
-				gvr:      qr.GroupVersionResourceTriplet,
-				selector: se.selector,
-				err:      se.err,
-			}
+		for k, v := range classifySelectorFailures(qr.GroupVersionResourceTriplet, selectorErrs) {
+			failedQueries[k] = v
 		}
 		if len(result) == 0 && len(selectorErrs) > 0 {
 			continue
@@ -700,6 +690,33 @@ type selectorFailure struct {
 	err      error
 }
 
+// classifySelectorFailures keys selectorErrs by "<gvrTriplet>/<selector>" for
+// a caller's failedQueries map, dropping failures whose wrapped cause is a
+// missing-resource 404: controls may reference optional CRDs that are not
+// installed, so a missing resource is not a scan coverage failure. Using the
+// typed API status (rather than matching the error message text) avoids
+// missing a NotFound whose message differs, and avoids silently swallowing an
+// unrelated transport/proxy error that happens to contain the same sentence.
+func classifySelectorFailures(gvrTriplet string, selectorErrs []selectorFailure) map[string]queryFailure {
+	if len(selectorErrs) == 0 {
+		return nil
+	}
+
+	failures := make(map[string]queryFailure, len(selectorErrs))
+	for _, se := range selectorErrs {
+		if apierrors.IsNotFound(se.err) {
+			continue
+		}
+		qualifiedKey := gvrTriplet + "/" + se.selector
+		failures[qualifiedKey] = queryFailure{
+			gvr:      gvrTriplet,
+			selector: se.selector,
+			err:      se.err,
+		}
+	}
+	return failures
+}
+
 const maxParallelResourcePulls = 8
 
 func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, labelSelector string) (cautils.K8SResources, map[string]workloadinterface.IMetadata, map[string]queryFailure) {
@@ -759,18 +776,10 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 				return
 			}
 
-			if len(selectorErrs) > 0 {
+			if failures := classifySelectorFailures(qr.GroupVersionResourceTriplet, selectorErrs); len(failures) > 0 {
 				mu.Lock()
-				for _, se := range selectorErrs {
-					if strings.Contains(se.err.Error(), "the server could not find the requested resource") {
-						continue
-					}
-					qualifiedKey := qr.GroupVersionResourceTriplet + "/" + se.selector
-					failedQueries[qualifiedKey] = queryFailure{
-						gvr:      qr.GroupVersionResourceTriplet,
-						selector: se.selector,
-						err:      se.err,
-					}
+				for k, v := range failures {
+					failedQueries[k] = v
 				}
 				mu.Unlock()
 			}

@@ -145,25 +145,25 @@ func (gp *GitLabSASTPrinter) PrintNextSteps() {
 
 // ActionPrint writes a GitLab SAST report for a configuration scan, or a GitLab Dependency Scanning
 // report for an image scan (#2782)
-func (gp *GitLabSASTPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (gp *GitLabSASTPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if opaSessionObj == nil {
 		if len(imageScanData) == 0 {
-			logger.L().Ctx(ctx).Error("failed to write results in GitLab dependency scanning format: no data provided")
-			return
+			return fmt.Errorf("failed to write results in GitLab dependency scanning format: no data provided")
 		}
 		if err := gp.printImageScan(imageScanData); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in GitLab dependency scanning format", helpers.Error(err))
-			return
+			return fmt.Errorf("failed to write results in GitLab dependency scanning format: %w", err)
 		}
 		printer.LogOutputFile(gp.writer.Name())
-		return
+		return nil
 	}
 
 	if err := gp.printConfigurationScan(ctx, opaSessionObj); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results in GitLab SAST format", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to write results in GitLab SAST format: %w", err)
 	}
 	printer.LogOutputFile(gp.writer.Name())
+	return nil
 }
 
 // printImageScan maps each CVE found in an image scan to a GitLab Dependency Scanning vulnerability and writes the report

@@ -2,6 +2,7 @@ package imagescan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -62,7 +63,7 @@ func resolveAzureCloudConfig(registryHost string) (cloud.Configuration, error) {
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as Azure SDK relies heavily on Managed Identities and Azure CLI credentials.
 func (a *AzureAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
-	if credentials.Username != "" || credentials.Password != "" {
+	if credentials.Username != "" || credentials.Password != "" || credentials.Token != "" {
 		return fmt.Errorf("explicit credentials are intentionally unsupported for Azure; use DefaultAzureCredential")
 	}
 
@@ -122,6 +123,7 @@ func (a *AzureAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Conta
 	}
 
 	var statuses []ContainerImageScanStatus
+	var aggErr error
 	parts := strings.Split(a.registryHost, ".")
 	registryName := parts[0]
 
@@ -163,7 +165,9 @@ func (a *AzureAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Conta
 
 		res, err := a.client.Resources(ctx, req, nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
+			aggErr = errors.Join(aggErr, fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err))
+			statuses = append(statuses, status)
+			continue
 		}
 
 		if res.TotalRecords != nil && *res.TotalRecords > 0 {
@@ -184,7 +188,7 @@ func (a *AzureAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Conta
 		statuses = append(statuses, status)
 	}
 
-	return statuses, nil
+	return statuses, aggErr
 }
 
 // Helper to normalize Azure severity to Kubescape expected severity
@@ -212,6 +216,7 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 	}
 
 	var reports []ContainerImageVulnerabilityReport
+	var aggErr error
 	parts := strings.Split(a.registryHost, ".")
 	registryName := parts[0]
 
@@ -264,14 +269,17 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 
 			res, err := a.client.Resources(ctx, req, nil)
 			if err != nil {
-				return nil, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, err)
+				aggErr = errors.Join(aggErr, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, err))
+				break
 			}
 
 			if res.Data != nil {
 				dataList, ok := res.Data.([]interface{})
 				if !ok {
-					return nil, fmt.Errorf("failed to decode ARG response data format")
+					aggErr = errors.Join(aggErr, fmt.Errorf("failed to decode ARG response data format for repository %s", imageID.Repository))
+					break
 				}
+				malformed := false
 				for _, item := range dataList {
 					if count >= maxVulns {
 						// Log truncation rather than failing hard
@@ -281,7 +289,9 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 
 					row, ok := item.(map[string]interface{})
 					if !ok {
-						return nil, fmt.Errorf("malformed vulnerability row: expected map[string]interface{}, got %T", item)
+						aggErr = errors.Join(aggErr, fmt.Errorf("malformed vulnerability row for repository %s: expected map[string]interface{}, got %T", imageID.Repository, item))
+						malformed = true
+						break
 					}
 
 					vuln := Vulnerability{
@@ -307,6 +317,9 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 						count++
 					}
 				}
+				if malformed {
+					break
+				}
 			}
 
 			if count >= maxVulns || res.SkipToken == nil || *res.SkipToken == "" {
@@ -318,7 +331,7 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 		reports = append(reports, report)
 	}
 
-	return reports, nil
+	return reports, aggErr
 }
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.

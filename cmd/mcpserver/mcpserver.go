@@ -22,38 +22,86 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
 )
 
-type KubescapeMcpserver struct {
-	s             *server.MCPServer
-	ksClient      spdxv1beta1.SpdxV1beta1Interface
-	ksClientOnce  sync.Once
-	ksClientErr   error
-	k8sClient     *k8sinterface.KubernetesApi
-	k8sClientOnce sync.Once
-	policyGetter  *getter.DownloadReleasedPolicy
+// newKsClient creates the Kubescape storage client. It is a package-level
+// var so tests can override it to simulate initialization failures without a
+// real connection attempt, while production always goes through this same
+// value instead of a per-call fallback.
+var newKsClient = func() (spdxv1beta1.SpdxV1beta1Interface, error) {
+	return CreateKsObjectConnection("default", 10*time.Second)
 }
 
+var loadK8sConfig = k8sinterface.LoadK8sConfig
+
+var setConnectedToCluster = k8sinterface.SetConnectedToCluster
+
+var newK8sClient = k8sinterface.NewKubernetesApi
+
+type KubescapeMcpserver struct {
+	s          *server.MCPServer
+	ksClientMu sync.Mutex
+	ksClient   spdxv1beta1.SpdxV1beta1Interface
+	// ksClientInit overrides newKsClient for this server instance; used by
+	// tests. Nil means use newKsClient.
+	ksClientInit func() (spdxv1beta1.SpdxV1beta1Interface, error)
+	k8sClientMu  sync.Mutex
+	k8sClient    *k8sinterface.KubernetesApi
+	policyGetter *getter.DownloadReleasedPolicy
+}
+
+// getKsClient lazily initializes the Kubescape storage client. A transient
+// initialization failure is not cached, so the next call retries instead of
+// returning the same error forever.
 func (ksServer *KubescapeMcpserver) getKsClient() (spdxv1beta1.SpdxV1beta1Interface, error) {
-	ksServer.ksClientOnce.Do(func() {
-		if ksServer.ksClient == nil {
-			ksServer.ksClient, ksServer.ksClientErr = CreateKsObjectConnection("default", 10*time.Second)
-		}
-	})
-	if ksServer.ksClientErr != nil {
-		return nil, ksServer.ksClientErr
+	ksServer.ksClientMu.Lock()
+	defer ksServer.ksClientMu.Unlock()
+	if ksServer.ksClient != nil {
+		return ksServer.ksClient, nil
 	}
-	if ksServer.ksClient == nil {
+	init := ksServer.ksClientInit
+	if init == nil {
+		init = newKsClient
+	}
+	client, err := init()
+	if err != nil {
+		return nil, err
+	}
+	if client == nil {
+		// Belt-and-braces: CreateKsObjectConnection never returns (nil, nil)
+		// today, but this guards against a future/injected implementation
+		// doing so. It only catches an untyped nil interface value; a typed
+		// nil pointer wrapped in the interface would still slip through and
+		// be cached, since the error contract is what init() implementations
+		// are expected to honor.
 		return nil, fmt.Errorf("kubernetes client initialization returned nil")
 	}
+	ksServer.ksClient = client
 	return ksServer.ksClient, nil
 }
 
-func (ksServer *KubescapeMcpserver) getK8sClient() *k8sinterface.KubernetesApi {
-	ksServer.k8sClientOnce.Do(func() {
-		if ksServer.k8sClient == nil {
-			ksServer.k8sClient = k8sinterface.NewKubernetesApi()
-		}
-	})
-	return ksServer.k8sClient
+// getK8sClient lazily initializes the Kubernetes API client. It probes with
+// loadK8sConfig (genuinely retryable, unlike k8sinterface.IsConnectedToCluster,
+// which latches to false forever after its first failure) and only calls
+// k8sinterface.NewKubernetesApi (which terminates the process via
+// logger.L().Fatal on most internal failures) once a kubeconfig is confirmed
+// loadable, so a missing/invalid KUBECONFIG returns an error instead of
+// killing the server. On success it also clears any stale "not connected"
+// latch left over from an earlier transient failure, since k8sinterface never
+// resets that global on its own. Once a client is built it is cached; there
+// is no retry for failures inside NewKubernetesApi itself, since those are
+// fatal by construction and cannot be recovered from in-process.
+func (ksServer *KubescapeMcpserver) getK8sClient() (*k8sinterface.KubernetesApi, error) {
+	ksServer.k8sClientMu.Lock()
+	defer ksServer.k8sClientMu.Unlock()
+	if ksServer.k8sClient != nil {
+		return ksServer.k8sClient, nil
+	}
+	if err := loadK8sConfig(); err != nil {
+		setConnectedToCluster(false)
+		return nil, fmt.Errorf("no reachable kubernetes cluster: ensure KUBECONFIG is set or the server is running inside a cluster: %w", err)
+	}
+	setConnectedToCluster(true)
+	ksServer.k8sClient = newK8sClient()
+	return ksServer.k8sClient, nil
 }
 
 // toolHandler binds a registered tool to its declared name and normalizes an
@@ -844,7 +892,10 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 
 		var rawManifest []byte
 		var workloadObj any
-		k8sClient := ksServer.getK8sClient()
+		k8sClient, k8sErr := ksServer.getK8sClient()
+		if k8sErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to connect to Kubernetes cluster: %v", k8sErr)), nil
+		}
 		switch strings.ToLower(workloadKindStr) {
 		case "pod":
 			workloadObj, err = k8sClient.KubernetesClient.CoreV1().Pods(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
@@ -934,16 +985,8 @@ func mcpServerEntrypoint() error {
 		server.WithRecovery(),
 	)
 
-	// Build the k8s API client once at startup. IsConnectedToCluster() is checked
-	// inside RunRBACScan before this is used, so it is safe to store here.
-	var k8sApi *k8sinterface.KubernetesApi
-	if k8sinterface.IsConnectedToCluster() {
-		k8sApi = k8sinterface.NewKubernetesApi()
-	}
-
 	ksServer := &KubescapeMcpserver{
 		s:            s,
-		k8sClient:    k8sApi,
 		policyGetter: getter.NewDownloadReleasedPolicy(),
 	}
 

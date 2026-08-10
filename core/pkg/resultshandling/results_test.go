@@ -33,12 +33,14 @@ func (dr *DummyReporter) GetURL() string                          { return "" }
 type SpyPrinter struct {
 	ActionPrintCalls int
 	ScoreCalls       int
+	ActionPrintErr   error
 }
 
 func (sp *SpyPrinter) SetWriter(_ context.Context, _ string) {}
 func (sp *SpyPrinter) PrintNextSteps()                       {}
-func (sp *SpyPrinter) ActionPrint(_ context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) {
+func (sp *SpyPrinter) ActionPrint(_ context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
 	sp.ActionPrintCalls += 1
+	return sp.ActionPrintErr
 }
 func (sp *SpyPrinter) Score(_ float32) {
 	sp.ScoreCalls += 1
@@ -94,6 +96,23 @@ func TestResultsHandlerHandleResultsImageScanNilScanData(t *testing.T) {
 	assert.Equal(t, 1, outputPrinter.ActionPrintCalls)
 	// ...but the compliance score is skipped, as it requires ScanData.
 	assert.Equal(t, 0, outputPrinter.ScoreCalls)
+}
+
+func TestResultsHandlerHandleResultsReturnsPrinterErrors(t *testing.T) {
+	uiErr := errors.New("ui print failed")
+	outputErr := errors.New("output print failed")
+	uiPrinter := &SpyPrinter{ActionPrintErr: uiErr}
+	outputPrinter := &SpyPrinter{ActionPrintErr: outputErr}
+	rh := NewResultsHandler(nil, []printer.IPrinter{outputPrinter}, uiPrinter)
+	rh.SetData(cautils.NewOPASessionObjMock())
+
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, uiErr)
+	assert.ErrorIs(t, err, outputErr)
+	assert.Equal(t, 1, uiPrinter.ActionPrintCalls)
+	assert.Equal(t, 1, outputPrinter.ActionPrintCalls)
 }
 
 func TestValidatePrinter(t *testing.T) {
@@ -244,6 +263,30 @@ func TestValidatePrinter(t *testing.T) {
 			format:    printer.PdfFormat,
 			expectErr: nil,
 		},
+		{
+			name:      "cyclonedx-json format for image scan should not return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.CycloneDXFormat,
+			expectErr: nil,
+		},
+		{
+			name:      "spdx-json format for image scan should not return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.SPDXFormat,
+			expectErr: nil,
+		},
+		{
+			name:      "cyclonedx-json format for cluster scan should return error",
+			scanType:  cautils.ScanTypeCluster,
+			format:    printer.CycloneDXFormat,
+			expectErr: errors.New("format \"cyclonedx-json\" is only supported for image scanning"),
+		},
+		{
+			name:      "spdx-json format for cluster scan should return error",
+			scanType:  cautils.ScanTypeCluster,
+			format:    printer.SPDXFormat,
+			expectErr: errors.New("format \"spdx-json\" is only supported for image scanning"),
+		},
 	}
 
 	for _, tt := range tests {
@@ -315,6 +358,18 @@ func TestNewPrinter(t *testing.T) {
 		{
 			name:     "GitLab SAST printer",
 			format:   "gitlab-sast",
+			viewType: "resource",
+			version:  defaultVersion,
+		},
+		{
+			name:     "CycloneDX printer",
+			format:   "cyclonedx-json",
+			viewType: "resource",
+			version:  defaultVersion,
+		},
+		{
+			name:     "SPDX printer",
+			format:   "spdx-json",
 			viewType: "resource",
 			version:  defaultVersion,
 		},

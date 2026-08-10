@@ -19,9 +19,7 @@ var operatorScanVulnerabilitiesExamples = fmt.Sprintf(`
 `, cautils.ExecName())
 
 func getOperatorScanVulnerabilitiesCmd(ks meta.IKubescape, operatorInfo *cautils.OperatorInfo) *cobra.Command {
-	vulnerabilitiesScanInfo := &cautils.VulnerabilitiesScanInfo{
-		ClusterName: k8sinterface.GetContextName(),
-	}
+	vulnerabilitiesScanInfo := &cautils.VulnerabilitiesScanInfo{}
 
 	configCmd := &cobra.Command{
 		Use:     "vulnerabilities",
@@ -33,6 +31,7 @@ func getOperatorScanVulnerabilitiesCmd(ks meta.IKubescape, operatorInfo *cautils
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			vulnerabilitiesScanInfo.ClusterName = k8sinterface.GetContextName()
 			operatorAdapter, err := newOperatorAdapter(vulnerabilitiesScanInfo, operatorInfo.Namespace)
 			if err != nil {
 				return err

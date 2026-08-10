@@ -2,6 +2,7 @@ package imagescan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -58,7 +59,7 @@ func NewGCPAdaptor() *GCPAdaptor {
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as GCP SDK relies heavily on Workload Identity and Application Default Credentials.
 func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
-	if credentials.Username != "" || credentials.Password != "" {
+	if credentials.Username != "" || credentials.Password != "" || credentials.Token != "" {
 		return fmt.Errorf("explicit credentials are intentionally unsupported for gcp; use Application Default Credentials or Workload Identity")
 	}
 
@@ -106,6 +107,7 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 	}
 
 	var statuses []ContainerImageScanStatus
+	var aggErr error
 
 	for _, imageID := range imageIDs {
 		status := ContainerImageScanStatus{
@@ -133,7 +135,9 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 				break
 			}
 			if err != nil {
-				logger.L().Warning("skipping image scan status due to api error", helpers.String("repository", imageID.Repository), helpers.Error(err))
+				fetchErr := fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
+				logger.L().Warning("skipping image scan status due to api error", helpers.Error(fetchErr))
+				aggErr = errors.Join(aggErr, fetchErr)
 				break
 			}
 
@@ -152,7 +156,7 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 		statuses = append(statuses, status)
 	}
 
-	return statuses, nil
+	return statuses, aggErr
 }
 
 // Helper to normalize GCP severity to Kubescape expected severity
@@ -180,6 +184,7 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 	}
 
 	var reports []ContainerImageVulnerabilityReport
+	var aggErr error
 
 	for _, imageID := range imageIDs {
 		report := ContainerImageVulnerabilityReport{
@@ -208,7 +213,9 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 				break
 			}
 			if err != nil {
-				logger.L().Warning("skipping image vulnerabilities due to api error", helpers.String("repository", imageID.Repository), helpers.Error(err))
+				fetchErr := fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, err)
+				logger.L().Warning("skipping image vulnerabilities due to api error", helpers.Error(fetchErr))
+				aggErr = errors.Join(aggErr, fetchErr)
 				break
 			}
 
@@ -242,7 +249,7 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 		reports = append(reports, report)
 	}
 
-	return reports, nil
+	return reports, aggErr
 }
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.

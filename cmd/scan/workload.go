@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"regexp"
 	"strings"
 
@@ -89,7 +88,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				scanInfo.Namespace = namespace
 			}
 
-			cleanup, err := prepareWorkloadInput(os.Stdin, args, scanInfo)
+			cleanup, err := prepareWorkloadInput(cmd.InOrStdin(), args, scanInfo)
 			if err != nil {
 				return err
 			}
@@ -112,6 +111,11 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 
 			if err := enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo); err != nil {
 				return err
+			}
+			if scanInfo.ScanImages {
+				if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+					return err
+				}
 			}
 			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
 				return err
@@ -141,7 +145,7 @@ func validateWorkloadArgs(args []string, scanInfo *cautils.ScanInfo) error {
 		return fmt.Errorf("usage: --chart-path <chart path> --file-path <file path>")
 	}
 
-	if scanInfo.ChartPath == "" && scanInfo.FilePath != "" && len(args) > 1 {
+	if scanInfo.FilePath != "" && len(args) > 1 {
 		return fmt.Errorf("usage: use either --file-path or positional input paths, not both")
 	}
 
@@ -155,38 +159,11 @@ func validateWorkloadArgs(args []string, scanInfo *cautils.ScanInfo) error {
 }
 
 func prepareWorkloadInput(stdin io.Reader, args []string, scanInfo *cautils.ScanInfo) (func(), error) {
-	cleanup := func() {}
-	if len(args) > 1 {
-		if args[1] == "-" {
-			tempFile, err := os.CreateTemp("", "tmp-kubescape*.yaml")
-			if err != nil {
-				return cleanup, err
-			}
-			cleanup = func() {
-				_ = os.Remove(tempFile.Name())
-			}
-
-			if _, err := io.Copy(tempFile, stdin); err != nil {
-				_ = tempFile.Close()
-				cleanup()
-				return func() {}, err
-			}
-			if err := tempFile.Close(); err != nil {
-				cleanup()
-				return func() {}, err
-			}
-			scanInfo.InputPatterns = []string{tempFile.Name()}
-			return cleanup, nil
-		}
-
-		scanInfo.InputPatterns = args[1:]
-		return cleanup, nil
-	}
-
-	if scanInfo.FilePath != "" {
-		scanInfo.InputPatterns = []string{scanInfo.FilePath}
-	}
-	return cleanup, nil
+	return prepareScanLocalInput(stdin, args, scanInfo, scanLocalInputOptions{
+		FirstInputArg:    1,
+		FilePath:         scanInfo.FilePath,
+		RejectMixedStdin: true,
+	})
 }
 
 func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string, apiVersion string) []cautils.PolicyIdentifier {

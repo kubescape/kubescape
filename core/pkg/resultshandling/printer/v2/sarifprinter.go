@@ -167,27 +167,27 @@ func (sp *SARIFPrinter) PrintNextSteps() {
 
 }
 
-func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if opaSessionObj == nil {
 		if len(imageScanData) == 0 {
-			logger.L().Ctx(ctx).Fatal("failed to write results in sarif format: no data provided")
-			return
+			return fmt.Errorf("failed to write results in sarif format: no data provided")
 		}
 
 		// image scan
 		if err := sp.printImageScan(ctx, imageScanData[0]); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
-			return
+			return fmt.Errorf("failed to write results in sarif format: %w", err)
 		}
 	} else {
 		// configuration scan
 		if err := sp.printConfigurationScan(ctx, opaSessionObj); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
-			return
+			return fmt.Errorf("failed to write results in sarif format: %w", err)
 		}
 
 	}
 	printer.LogOutputFile(sp.writer.Name())
+	return nil
 }
 
 func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
@@ -325,13 +325,19 @@ func calculateMove(str string, file []string, endColumn int, endLine int) (int, 
 		logger.L().Debug(fmt.Sprintf("failed to get move from string %s", str), helpers.Error(err))
 		return 0, 0, false
 	}
-	if endLine > len(file) {
+	// endLine is 1-indexed, so 0 is as out of range as len(file)+1
+	if endLine < 1 || endLine > len(file) {
 		return 0, 0, false
 	}
 	for num+endColumn-1 > utf8.RuneCountInString(file[endLine-1]) {
 		num -= utf8.RuneCountInString(file[endLine-1]) - endColumn + 2
 		endLine++
 		endColumn = 1
+		// the delta can claim more characters than the file holds, so the
+		// bound needs re-checking on every step of the walk
+		if endLine > len(file) {
+			return 0, 0, false
+		}
 	}
 	endColumn += num
 	return endLine, endColumn, true
@@ -347,6 +353,11 @@ func collectDiffs(dmp *diffmatchpatch.DiffMatchPatch, diffs []diffmatchpatch.Dif
 
 	delta := strings.Split(dmp.DiffToDelta(diffs), "\t")
 	for index, seg := range delta {
+		// DiffToDelta returns "" for an empty diff set, which Split turns into
+		// a single empty segment carrying no operation byte
+		if seg == "" {
+			continue
+		}
 		switch seg[0] {
 		case '+':
 			var err error
@@ -355,29 +366,45 @@ func collectDiffs(dmp *diffmatchpatch.DiffMatchPatch, diffs []diffmatchpatch.Dif
 				logger.L().Debug("failed to unescape string", helpers.Error(err))
 				continue
 			}
-			if index >= len(delta)-1 || delta[index+1][0] == '=' {
+			if closesFixRegion(delta, index) {
 				addFix(result, filepath, startLine, startColumn, endLine, endColumn, text)
 			}
 		case '-':
-			var ok bool
-			endLine, endColumn, ok = calculateMove(seg[1:], file, endColumn, endLine)
+			// commit the position only on success: the (0, 0) failure return
+			// is not a valid SARIF location and breaks the next move
+			newLine, newColumn, ok := calculateMove(seg[1:], file, endColumn, endLine)
 			if !ok {
 				continue
 			}
-			if index >= len(delta)-1 || delta[index+1][0] == '=' {
+			endLine, endColumn = newLine, newColumn
+			if closesFixRegion(delta, index) {
 				addFix(result, filepath, startLine, startColumn, endLine, endColumn, text)
 			}
 		case '=':
-			var ok bool
-			endLine, endColumn, ok = calculateMove(seg[1:], file, endColumn, endLine)
+			newLine, newColumn, ok := calculateMove(seg[1:], file, endColumn, endLine)
 			if !ok {
 				continue
 			}
+			endLine, endColumn = newLine, newColumn
 			startLine = endLine
 			startColumn = endColumn
 			text = ""
 		}
 	}
+}
+
+// closesFixRegion reports whether the segment at index ends the replacement region:
+// the next operation segment resumes unchanged content, or there is none left
+func closesFixRegion(delta []string, index int) bool {
+	for i := index + 1; i < len(delta); i++ {
+		// empty segments carry no operation and are skipped by the walk too,
+		// so they cannot hold the region open
+		if delta[i] == "" {
+			continue
+		}
+		return delta[i][0] == '='
+	}
+	return true
 }
 
 func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults.ResourceAssociatedControl, opaSessionObj *cautils.OPASessionObj, resourceID string, filepath string, rsrcAbsPath string) {

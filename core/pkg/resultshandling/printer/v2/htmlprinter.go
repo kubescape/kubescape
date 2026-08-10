@@ -3,6 +3,7 @@ package printer
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"html/template"
 	"os"
 	"path/filepath"
@@ -64,10 +65,9 @@ func (hp *HtmlPrinter) PrintNextSteps() {
 
 }
 
-func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if opaSessionObj == nil && len(imageScanData) == 0 {
-		logger.L().Ctx(ctx).Error("failed to print results, missing data")
-		return
+		return fmt.Errorf("failed to print results, missing data")
 	}
 
 	tplFuncMap := template.FuncMap{
@@ -135,10 +135,11 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 	err := tpl.Execute(hp.writer, reportingCtx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to render template", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to render template: %w", err)
 	}
 	printer.LogOutputFile(hp.writer.Name())
 
+	return nil
 }
 
 func (hp *HtmlPrinter) Score(score float32) {
