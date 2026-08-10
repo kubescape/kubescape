@@ -57,7 +57,7 @@ const (
 
 type IPrinter interface {
 	PrintNextSteps()
-	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData)
+	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error
 	SetWriter(ctx context.Context, outputFile string)
 	Score(score float32)
 }
