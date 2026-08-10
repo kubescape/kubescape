@@ -2,6 +2,7 @@ package printer
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
@@ -311,10 +312,27 @@ func setSeverityToSummaryMap(cves []imageprinter.CVE, mapSeverityToSummary map[s
 	}
 }
 
+// pkgScoreKey builds a collision-free map key from a package name and
+// version. A plain "name@version" join is not enough on its own: Name and
+// Version are free-form strings from Grype, and real-world values can
+// contain "@" (e.g. npm scoped package names like "@angular/core"), so two
+// different (name, version) pairs could still join to the same string -
+// e.g. name="foo@bar", version="baz" and name="foo", version="bar@baz"
+// both become "foo@bar@baz". Escaping "@" (and the escape character
+// itself) in each part before joining ensures the delimiter "@" can always
+// be told apart from an escaped literal one, so distinct pairs never
+// collide.
+func pkgScoreKey(name, version string) string {
+	escape := func(s string) string {
+		s = strings.ReplaceAll(s, `\`, `\\`)
+		return strings.ReplaceAll(s, "@", `\@`)
+	}
+	return escape(name) + "@" + escape(version)
+}
+
 func setPkgNameToScoreMap(matches match.Matches, pkgScores map[string]*imageprinter.PackageScore) {
 	for _, m := range matches.Sorted() {
-		// key is pkg name + version to avoid version conflicts
-		key := m.Package.Name + m.Package.Version
+		key := pkgScoreKey(m.Package.Name, m.Package.Version)
 
 		if _, ok := pkgScores[key]; !ok {
 			pkgScores[key] = &imageprinter.PackageScore{
