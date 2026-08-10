@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/time/rate"
+
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/cloudsupport"
@@ -711,7 +713,9 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 		wg sync.WaitGroup
 	)
 
+	// Bounded worker pool with token-bucket rate limiting against the k8s API
 	sem := make(chan struct{}, maxParallelResourcePulls)
+	apiLimiter := rate.NewLimiter(rate.Limit(50), 100) // 50 requests/sec, burst of 100
 
 	for key := range queryableResources {
 		qr := queryableResources[key]
@@ -731,6 +735,16 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 				return
 			}
 			defer func() { <-sem }()
+
+			if err := apiLimiter.Wait(ctx); err != nil {
+				mu.Lock()
+				failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
+					gvr: qr.GroupVersionResourceTriplet,
+					err: err,
+				}
+				mu.Unlock()
+				return
+			}
 
 			apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
