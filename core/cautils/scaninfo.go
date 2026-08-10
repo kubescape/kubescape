@@ -425,7 +425,11 @@ func (scanInfo *ScanInfo) GetInputFiles() string {
 
 func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
 	if scanInfo.scanningContext == nil {
-		scanningContext := scanInfo.getScanningContext(scanInfo.GetInputFiles())
+		input := scanInfo.GetInputFiles()
+		scanningContext := scanInfo.getScanningContext(input)
+		if input != "" {
+			scanInfo.cloneAdditionalRemoteInputs(input)
+		}
 		scanInfo.scanningContext = &scanningContext
 	}
 	return *scanInfo.scanningContext
@@ -510,7 +514,6 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 						logger.L().Warning("failed to clean up cloned repository", helpers.String("url", originalInput), helpers.Error(err))
 					}
 				})
-				scanInfo.cloneAdditionalRemoteInputs(originalInput)
 				return ContextGitRemote
 			}
 			if err := ReleaseClonedRepo(originalInput); err != nil {

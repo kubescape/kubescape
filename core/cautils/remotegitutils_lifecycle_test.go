@@ -250,3 +250,26 @@ func TestScanningContextClonesAndCleansEveryRemoteInput(t *testing.T) {
 		assert.NoDirExists(t, workspaces[i])
 	}
 }
+
+func TestScanningContextClonesTrailingRemoteInputAfterLocalInput(t *testing.T) {
+	resetRepoWorkspaceState(t)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	var cloneCalls atomic.Int32
+	useFakeClone(t, func(path string, _ bool, options *git.CloneOptions) (*git.Repository, error) {
+		cloneCalls.Add(1)
+		return initializeCloneWorkspace(path, options)
+	})
+
+	remoteInput := "https://github.com/example/remote"
+	scanInfo := &ScanInfo{InputPatterns: []string{t.TempDir(), remoteInput}}
+	require.Equal(t, ContextDir, scanInfo.GetScanningContext())
+	assert.Equal(t, int32(1), cloneCalls.Load())
+
+	workspace := GetClonedPath(remoteInput)
+	require.NotEmpty(t, workspace)
+	assert.DirExists(t, workspace)
+
+	scanInfo.Cleanup()
+	assert.Empty(t, GetClonedPath(remoteInput))
+	assert.NoDirExists(t, workspace)
+}
