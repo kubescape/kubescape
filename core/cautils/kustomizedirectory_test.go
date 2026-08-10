@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -295,18 +295,38 @@ func TestKustomizeDirectoryWithHelmCharts(t *testing.T) {
 
 	assert.True(t, isKustomizeDirectory(helmPath), "helm directory should be detected as kustomize directory")
 
-	kd := NewKustomizeDirectory(helmPath)
-	workloads, errs := kd.GetWorkloads(helmPath)
-
-	for _, err := range errs {
-		assert.NotContains(t, err.Error(), "must specify --enable-helm", "kustomize should run with helm enabled")
-		if strings.Contains(err.Error(), `exec: "helm": executable file not found`) {
-			t.Skip("helm is not installed in test environment")
-		}
-		if strings.Contains(err.Error(), "unknown shorthand flag") || strings.Contains(err.Error(), "unknown flag") || strings.Contains(err.Error(), "unable to run: 'helm version -c --short'") {
-			t.Skip("installed helm version is incompatible with the kustomize version used (removed -c/--short flags)")
-		}
+	if runtime.GOOS == "windows" {
+		t.Skip("fake helm script not implemented for Windows")
 	}
+
+	helmDir := t.TempDir()
+	fakeHelm := filepath.Join(helmDir, "helm")
+	rendered := `---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-config
+data:
+  key: value
+`
+	script := `#!/bin/sh
+if [ "$1" = "version" ]; then
+    echo "v3.12.0"
+    exit 0
+fi
+cat <<'EOF'
+` + rendered + `EOF
+`
+	if err := os.WriteFile(fakeHelm, []byte(script), 0600); err != nil {
+		t.Fatalf("failed to write fake helm: %v", err)
+	}
+	if err := os.Chmod(fakeHelm, 0755); err != nil {
+		t.Fatalf("failed to chmod fake helm: %v", err)
+	}
+
+	kd := NewKustomizeDirectory(helmPath)
+	kd.SetHelmCommand(fakeHelm)
+	workloads, errs := kd.GetWorkloads(helmPath)
 
 	assert.Empty(t, errs, "kustomize with helm charts should render without errors")
 	assert.NotEmpty(t, workloads, "rendered workloads should include resources from helm chart")
