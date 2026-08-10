@@ -415,6 +415,45 @@ func TestScanInfoFormatsDeduplicatesInOrder(t *testing.T) {
 	}
 }
 
+func TestScanInfoToScanMetadataFormats(t *testing.T) {
+	testCases := []struct {
+		name   string
+		format string
+		want   []string
+	}{
+		{
+			name:   "multiple formats are separate metadata entries",
+			format: "json,junit,html",
+			want:   []string{"json", "junit", "html"},
+		},
+		{
+			name:   "formats are trimmed and deduplicated",
+			format: " json, ,pdf,json,pdf ",
+			want:   []string{"json", "pdf"},
+		},
+		{
+			name:   "single format is preserved",
+			format: "sarif",
+			want:   []string{"sarif"},
+		},
+		{
+			name:   "empty format does not produce an empty metadata entry",
+			format: "",
+			want:   []string{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			scanInfo := &ScanInfo{Format: tc.format}
+
+			metadata := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
+
+			assert.Equal(t, tc.want, metadata.ScanMetadata.Formats)
+		})
+	}
+}
+
 func TestAppendPolicyIdentifiers(t *testing.T) {
 	tests := []struct {
 		name     string
