@@ -75,6 +75,10 @@ func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials Reg
 		return fmt.Errorf("unable to load gcp container analysis client: %w", err)
 	}
 
+	if a.owningClient != nil {
+		_ = a.owningClient.Close()
+	}
+
 	a.owningClient = c
 	a.client = &gcpAPIWrapper{client: c.GetGrafeasClient()}
 
