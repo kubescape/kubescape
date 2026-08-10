@@ -152,7 +152,5 @@ spec:
 	}
 
 	fixes2 := h2.PrepareResourcesToFix(context.Background())
-	if len(fixes2) > 0 {
-		assert.Len(t, fixes2[0].YamlExpressions, 0)
-	}
+	assert.Len(t, fixes2, 0)
 }

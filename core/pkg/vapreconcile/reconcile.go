@@ -3,15 +3,33 @@ package vapreconcile
 import (
 	"context"
 	"fmt"
+	"errors"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
 )
+
+func isDiscoveryMissingError(err error) bool {
+	if apierrors.IsNotFound(err) {
+		return true
+	}
+	var discoveryErr *discovery.ErrGroupDiscoveryFailed
+	if errors.As(err, &discoveryErr) {
+		return true
+	}
+	var noMatchErr *meta.NoResourceMatchError
+	if errors.As(err, &noMatchErr) {
+		return true
+	}
+	return false
+}
 
 // Collect lists ValidatingAdmissionPolicy and ValidatingAdmissionPolicyBinding
 // resources from the live cluster. Both resource types are cluster-scoped so no
@@ -21,13 +39,13 @@ func Collect(ctx context.Context, k8s *k8sinterface.KubernetesApi) ([]unstructur
 	version := "v1"
 
 	resources, err := k8s.DiscoveryClient.ServerResourcesForGroupVersion(groupVersion)
-	if err != nil && !apierrors.IsNotFound(err) {
+	if err != nil && !isDiscoveryMissingError(err) {
 		return nil, nil, err
 	}
 	if err != nil || !hasVAPResources(resources) {
 		groupVersion = "admissionregistration.k8s.io/v1beta1"
 		resources, err = k8s.DiscoveryClient.ServerResourcesForGroupVersion(groupVersion)
-		if err != nil && !apierrors.IsNotFound(err) {
+		if err != nil && !isDiscoveryMissingError(err) {
 			return nil, nil, err
 		}
 		if err != nil || !hasVAPResources(resources) {
@@ -150,7 +168,7 @@ func EnrichSummary(controls reportsummary.ControlSummaries, index map[string]*re
 }
 
 // GenerateValidatingAdmissionPolicy creates a ValidatingAdmissionPolicy manifest
-func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[string]interface{}, apiVersion string) *unstructured.Unstructured {
+func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[string]interface{}, apiVersion string, targetResource string) *unstructured.Unstructured {
 	if apiVersion == "" {
 		apiVersion = "v1"
 	}
@@ -175,10 +193,16 @@ func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[str
 					"apiGroups":   []interface{}{"*"},
 					"apiVersions": []interface{}{"*"},
 					"operations":  []interface{}{"CREATE", "UPDATE"},
-					"resources":   []interface{}{"*"},
+					"resources":   []interface{}{targetResource},
 				},
 			},
 		},
+	}
+	if paramSchema != nil && len(paramSchema) > 0 {
+		spec["paramKind"] = map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+		}
 	}
 	vap.Object["spec"] = spec
 	return vap

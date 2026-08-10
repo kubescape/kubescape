@@ -10,7 +10,7 @@ import (
 type dummyEstimator struct{}
 
 func (d dummyEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {
-	return &checker.SizeEstimate{Min: 10, Max: 100}
+	return &checker.SizeEstimate{Min: 0, Max: 100000}
 }
 
 func (d dummyEstimator) EstimateCallCost(function, overloadID string, target *checker.AstNode, args []checker.AstNode) *checker.CallEstimate {

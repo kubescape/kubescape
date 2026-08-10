@@ -28,3 +28,6 @@ tallation.md
 nginx:latest.json
 results.json
 customFilename.txt
+*.orig
+*.rej
+

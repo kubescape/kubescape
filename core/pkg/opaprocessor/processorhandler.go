@@ -66,7 +66,6 @@ type OPAProcessor struct {
 	printEnabled           bool
 	compiledModules        map[string]compiledRule
 	compiledMu             sync.RWMutex
-	preparedQueries        map[string]rego.PreparedEvalQuery
 	preparedQueriesMu      sync.RWMutex
 	// ControlTimeout, when non-zero, bounds the evaluation time of a single
 	// control. If exceeded, the control is recorded as not evaluated instead
@@ -123,7 +122,6 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		includeNamespaces:      split(includeNamespaces),
 		printEnabled:           enableRegoPrint,
 		compiledModules:        make(map[string]compiledRule),
-		preparedQueries:        make(map[string]rego.PreparedEvalQuery),
 		TimedOutControls:       make(map[string]string),
 		initialResourceCount:   initialResourceCount,
 		celNamespaceIndex:      indexNamespaces(sessionObj),
@@ -708,8 +706,13 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		inputRawResources = append(inputRawResources, ir.GetObject())
 	}
 	defer func() {
-		*bufPtr = inputRawResources
-		astEvalBufferPool.Put(bufPtr)
+		for i := range inputRawResources {
+			inputRawResources[i] = nil
+		}
+		if cap(inputRawResources) <= 1024 {
+			*bufPtr = inputRawResources[:0]
+			astEvalBufferPool.Put(bufPtr)
+		}
 	}()
 
 	// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data
@@ -1248,42 +1251,28 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 	registerOPABuiltins()
 
 	ruleData := getRuleData(rule)
-	cacheKey := fmt.Sprintf("%s:%s", controlID, rule.Name)
-	opap.preparedQueriesMu.RLock()
-	pq, ok := opap.preparedQueries[cacheKey]
-	opap.preparedQueriesMu.RUnlock()
+	compiled, regoVersion, err := opap.getCompiledRule(ctx, rule.Name, ruleData, opap.printEnabled)
+	if err != nil {
+		return nil, fmt.Errorf("rule: '%s', %w", rule.Name, err)
+	}
 
-	if !ok {
-		compiled, regoVersion, err := opap.getCompiledRule(ctx, rule.Name, ruleData, opap.printEnabled)
-		if err != nil {
-			return nil, fmt.Errorf("rule: '%s', %w", rule.Name, err)
-		}
+	store, err := ruleRegoDependenciesData.TOStorage()
+	if err != nil {
+		return nil, err
+	}
 
-		store, err := ruleRegoDependenciesData.TOStorage()
-		if err != nil {
-			return nil, err
-		}
+	regoInst := rego.New(
+		rego.SetRegoVersion(regoVersion),
+		rego.Query("data.armo_builtins"),
+		rego.Compiler(compiled),
+		rego.Store(store),
+		rego.EnablePrintStatements(opap.printEnabled),
+		rego.PrintHook(opap),
+	)
 
-		regoInst := rego.New(
-			rego.SetRegoVersion(regoVersion),
-			rego.Query("data.armo_builtins"),
-			rego.Compiler(compiled),
-			rego.Store(store),
-			rego.EnablePrintStatements(opap.printEnabled),
-			rego.PrintHook(opap),
-		)
-
-		pq, err = regoInst.PrepareForEval(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("rule '%s': failed to prepare query: %w", rule.Name, err)
-		}
-
-		opap.preparedQueriesMu.Lock()
-		if opap.preparedQueries == nil {
-			opap.preparedQueries = make(map[string]rego.PreparedEvalQuery)
-		}
-		opap.preparedQueries[cacheKey] = pq
-		opap.preparedQueriesMu.Unlock()
+	pq, err := regoInst.PrepareForEval(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("rule '%s': failed to prepare query: %w", rule.Name, err)
 	}
 
 	results, err := opap.regoEval(ctx, k8sObjects, pq)
