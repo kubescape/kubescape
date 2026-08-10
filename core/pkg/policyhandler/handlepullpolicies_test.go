@@ -322,12 +322,43 @@ func TestGetControlInputs_NonNilResultIsCached(t *testing.T) {
 	assert.True(t, cacheHit, "non-nil control inputs should be cached")
 }
 
+type DynamicPolicyGetterMock struct{}
+
+func (mock *DynamicPolicyGetterMock) GetControl(name string) (*reporthandling.Control, error) {
+	return &reporthandling.Control{}, nil
+}
+
+func (mock *DynamicPolicyGetterMock) GetFramework(name string) (*reporthandling.Framework, error) {
+	return &reporthandling.Framework{
+		PortalBase: armotypes.PortalBase{
+			Name: name,
+		},
+		Controls: []reporthandling.Control{{
+			PortalBase: armotypes.PortalBase{
+				Name: "control-mock",
+			},
+		}},
+	}, nil
+}
+
+func (mock *DynamicPolicyGetterMock) GetFrameworks() ([]reporthandling.Framework, error) {
+	return nil, nil
+}
+
+func (mock *DynamicPolicyGetterMock) ListControls() ([]string, error) {
+	return nil, nil
+}
+
+func (mock *DynamicPolicyGetterMock) ListFrameworks() ([]string, error) {
+	return nil, nil
+}
+
 func TestGetScanPolicies_ConcurrentDifferentFrameworksAtomicCache(t *testing.T) {
 	policyHandler := NewRequestScopedPolicyHandler("test-cluster-atomic")
 	defer policyHandler.Close()
 
 	getters := &cautils.Getters{
-		PolicyGetter: &PolicyGetterMock{},
+		PolicyGetter: &DynamicPolicyGetterMock{},
 	}
 
 	ctx := context.Background()
@@ -342,7 +373,8 @@ func TestGetScanPolicies_ConcurrentDifferentFrameworksAtomicCache(t *testing.T) 
 			policyIdent := []cautils.PolicyIdentifier{{Identifier: frameworkName, Kind: "Framework"}}
 			res, err := policyHandler.getScanPolicies(ctx, policyIdent, getters)
 			assert.NoError(t, err)
-			assert.NotNil(t, res)
+			require.NotEmpty(t, res)
+			assert.Equal(t, frameworkName, res[0].Name)
 		}(i)
 	}
 
