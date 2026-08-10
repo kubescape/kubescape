@@ -244,6 +244,30 @@ func TestValidatePrinter(t *testing.T) {
 			format:    printer.PdfFormat,
 			expectErr: nil,
 		},
+		{
+			name:      "cyclonedx-json format for image scan should not return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.CycloneDXFormat,
+			expectErr: nil,
+		},
+		{
+			name:      "spdx-json format for image scan should not return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.SPDXFormat,
+			expectErr: nil,
+		},
+		{
+			name:      "cyclonedx-json format for cluster scan should return error",
+			scanType:  cautils.ScanTypeCluster,
+			format:    printer.CycloneDXFormat,
+			expectErr: errors.New("format \"cyclonedx-json\" is only supported for image scanning"),
+		},
+		{
+			name:      "spdx-json format for cluster scan should return error",
+			scanType:  cautils.ScanTypeCluster,
+			format:    printer.SPDXFormat,
+			expectErr: errors.New("format \"spdx-json\" is only supported for image scanning"),
+		},
 	}
 
 	for _, tt := range tests {
@@ -315,6 +339,18 @@ func TestNewPrinter(t *testing.T) {
 		{
 			name:     "GitLab SAST printer",
 			format:   "gitlab-sast",
+			viewType: "resource",
+			version:  defaultVersion,
+		},
+		{
+			name:     "CycloneDX printer",
+			format:   "cyclonedx-json",
+			viewType: "resource",
+			version:  defaultVersion,
+		},
+		{
+			name:     "SPDX printer",
+			format:   "spdx-json",
 			viewType: "resource",
 			version:  defaultVersion,
 		},

@@ -197,6 +197,10 @@ func fileExtForFormat(format string) string {
 		return printer.PrometheusOutputExt
 	case printer.CsvFormat:
 		return printer.CsvOutputExt
+	case printer.CycloneDXFormat:
+		return printer.CycloneDXOutputExt
+	case printer.SPDXFormat:
+		return printer.SPDXOutputExt
 	default:
 		return printer.PrettyOutputExt
 	}
