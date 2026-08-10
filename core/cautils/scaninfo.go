@@ -138,6 +138,7 @@ type ScanInfo struct {
 	FailThreshold         float32                      // DEPRECATED - Failure score threshold
 	ComplianceThreshold   float32                      // Compliance score threshold
 	FailThresholdSeverity string                       // Severity at and above which the command should fail
+	OnlyFixable           bool                         // Gate the severity threshold to only count CVEs that have an available fix
 	FailCoverageThreshold float32                      // Coverage threshold below which the command fails (0 = disabled)
 	FailOnDegradedConfig  bool                         // Fail the scan if control inputs or exceptions could not be loaded and a fallback was used
 	Submit                BoolPtrFlag                  // Submit results to Kubescape Cloud BE. Get() is nil unless explicitly set by the caller (flag/env/request field)
@@ -363,7 +364,7 @@ func splitNamespaceList(s string) []string {
 func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
-	metadata.ScanMetadata.Formats = []string{scanInfo.Format}
+	metadata.ScanMetadata.Formats = scanInfo.Formats()
 	metadata.ScanMetadata.FormatVersion = scanInfo.FormatVersion
 	metadata.ScanMetadata.Submit = scanInfo.Submit.GetBool()
 
@@ -424,7 +425,11 @@ func (scanInfo *ScanInfo) GetInputFiles() string {
 
 func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
 	if scanInfo.scanningContext == nil {
-		scanningContext := scanInfo.getScanningContext(scanInfo.GetInputFiles())
+		input := scanInfo.GetInputFiles()
+		scanningContext := scanInfo.getScanningContext(input)
+		if input != "" {
+			scanInfo.cloneAdditionalRemoteInputs(input)
+		}
 		scanInfo.scanningContext = &scanningContext
 	}
 	return *scanInfo.scanningContext
@@ -509,7 +514,6 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 						logger.L().Warning("failed to clean up cloned repository", helpers.String("url", originalInput), helpers.Error(err))
 					}
 				})
-				scanInfo.cloneAdditionalRemoteInputs(originalInput)
 				return ContextGitRemote
 			}
 			if err := ReleaseClonedRepo(originalInput); err != nil {

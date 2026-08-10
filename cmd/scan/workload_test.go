@@ -278,6 +278,19 @@ func TestGetWorkloadCmd_ChartPathAndFilePathEmpty(t *testing.T) {
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }
 
+func TestGetWorkloadCmd_RejectsFilePathWithPositionalInputPath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getWorkloadCmd(mockKubescape, &scanInfo)
+	require.NoError(t, cmd.PersistentFlags().Set("chart-path", "./chart"))
+	require.NoError(t, cmd.PersistentFlags().Set("file-path", "./chart/templates/deployment.yaml"))
+
+	err := cmd.Args(&cobra.Command{}, []string{"Deployment/nginx", "./manifests"})
+
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
+}
+
 func TestGetWorkloadCmd_ArgsAcceptsPositionalLocalInputs(t *testing.T) {
 	scanInfo := cautils.ScanInfo{}
 	cmd := getWorkloadCmd(&mocks.MockIKubescape{}, &scanInfo)
@@ -297,7 +310,7 @@ func TestGetWorkloadCmd_ArgsRejectsAmbiguousFilePathAndPositionalInputs(t *testi
 	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
 }
 
-func TestGetWorkloadCmd_ArgsAllowsChartPathWithScanRoot(t *testing.T) {
+func TestGetWorkloadCmd_ArgsRejectsChartPathFilePathAndPositionalInputs(t *testing.T) {
 	scanInfo := cautils.ScanInfo{}
 	cmd := getWorkloadCmd(&mocks.MockIKubescape{}, &scanInfo)
 	scanInfo.ChartPath = "charts/app"
@@ -305,7 +318,7 @@ func TestGetWorkloadCmd_ArgsAllowsChartPathWithScanRoot(t *testing.T) {
 
 	err := cmd.Args(cmd, []string{"Deployment/nginx", "."})
 
-	assert.NoError(t, err)
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
 }
 
 func TestGetWorkloadCmd_ArgsRejectsStdinMixedWithOtherInputs(t *testing.T) {

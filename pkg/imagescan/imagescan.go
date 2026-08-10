@@ -258,8 +258,9 @@ func (s *Service) Scan(_ context.Context, userInput string, creds RegistryCreden
 
 // ExceedsSeverityThreshold returns true if vulnerabilities in the scan results exceed the severity threshold, false otherwise.
 //
-// Values equal to the threshold are considered failing, too.
-func (s *Service) ExceedsSeverityThreshold(severity vulnerability.Severity, matches match.Matches) bool {
+// Values equal to the threshold are considered failing, too. When onlyFixable is true, a CVE only
+// counts toward the threshold if grype reports a fix state of "fixed" for it.
+func (s *Service) ExceedsSeverityThreshold(severity vulnerability.Severity, matches match.Matches, onlyFixable bool) bool {
 	if severity == vulnerability.UnknownSeverity {
 		return false
 	}
@@ -270,9 +271,15 @@ func (s *Service) ExceedsSeverityThreshold(severity vulnerability.Severity, matc
 			continue
 		}
 
-		if vulnerability.ParseSeverity(metadata.Severity) >= severity {
-			return true
+		if vulnerability.ParseSeverity(metadata.Severity) < severity {
+			continue
 		}
+
+		if onlyFixable && m.Vulnerability.Fix.State != vulnerability.FixStateFixed {
+			continue
+		}
+
+		return true
 	}
 	return false
 }

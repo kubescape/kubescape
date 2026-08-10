@@ -211,6 +211,7 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 		if retryErr != nil {
 			logger.L().Ctx(ctx).Warning("failed to update WorkloadConfigurationScan manifest in storage", helpers.Error(retryErr),
 				helpers.String("name", manifest.Name))
+			return retryErr
 		} else {
 			logger.L().Debug("updated WorkloadConfigurationScan manifest in storage", helpers.String("name", manifest.Name))
 		}
@@ -310,6 +311,7 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 		if retryErr != nil {
 			logger.L().Ctx(ctx).Warning("failed to update WorkloadConfigurationScanSummary manifest in storage", helpers.Error(retryErr),
 				helpers.String("name", manifest.Name))
+			return nil, retryErr
 		} else {
 			logger.L().Debug("updated WorkloadConfigurationScanSummary manifest in storage",
 				helpers.String("name", manifest.Name))

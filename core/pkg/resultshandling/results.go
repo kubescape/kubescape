@@ -201,6 +201,10 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		return printerv2.NewSARIFPrinter()
 	case printer.GitLabSASTFormat:
 		return printerv2.NewGitLabSASTPrinter()
+	case printer.CycloneDXFormat:
+		return printerv2.NewCycloneDXPrinter()
+	case printer.SPDXFormat:
+		return printerv2.NewSPDXPrinter()
 	default:
 		if printFormat != printer.PrettyFormat {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
@@ -227,6 +231,9 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 		default:
 			return false, fmt.Errorf("format \"%s\" is only supported when scanning local files", printFormat)
 		}
+	}
+	if printFormat == printer.CycloneDXFormat || printFormat == printer.SPDXFormat {
+		return false, fmt.Errorf("format \"%s\" is only supported for image scanning", printFormat)
 	}
 
 	switch printFormat {

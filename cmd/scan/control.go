@@ -2,8 +2,6 @@ package scan
 
 import (
 	"fmt"
-	"io"
-	"os"
 	"slices"
 	"strings"
 
@@ -80,26 +78,14 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				// Read controls from input args
 				policyIdentifiers = cautils.BuildPolicyIdentifiers(strings.Split(args[0], ","), apisv1.KindControl)
 
-				if len(args) > 1 {
-					if len(args[1:]) == 0 || args[1] != "-" {
-						scanInfo.InputPatterns = args[1:]
-					} else { // store stdin to file - do NOT move to separate function !!
-						tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
-						if err != nil {
-							return err
-						}
-						defer os.Remove(tempFile.Name())
-
-						if _, err := io.Copy(tempFile, os.Stdin); err != nil {
-							_ = tempFile.Close()
-							return err
-						}
-						if err := tempFile.Close(); err != nil {
-							return err
-						}
-						scanInfo.InputPatterns = []string{tempFile.Name()}
-					}
+				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, scanInfo, scanLocalInputOptions{
+					FirstInputArg:    1,
+					RejectMixedStdin: true,
+				})
+				if err != nil {
+					return err
 				}
+				defer cleanup()
 			}
 
 			scanInfo.FrameworkScan = false
@@ -124,6 +110,11 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			}
 			if err := enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo); err != nil {
 				return err
+			}
+			if scanInfo.ScanImages {
+				if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+					return err
+				}
 			}
 			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetResults().SummaryDetails.Controls), scanInfo); err != nil {
 				return err
@@ -150,6 +141,9 @@ func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 	}
 
 	if err := shared.ValidateSeverity(severity); severity != "" && err != nil {
+		return err
+	}
+	if err := validateThresholdsOnly(scanInfo); err != nil {
 		return err
 	}
 	return nil

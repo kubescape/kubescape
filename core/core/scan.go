@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -165,13 +164,12 @@ func resolvedOutputPath(format, outputFile string) string {
 		return ""
 	}
 	ext := fileExtForFormat(format)
-	fileExt := filepath.Ext(trimmed)
 
-	if ext == printer.YamlOutputExt && fileExt == ".yml" {
+	if ext == printer.YamlOutputExt && strings.HasSuffix(trimmed, ".yml") {
 		return trimmed
 	}
 
-	if ext != "" && fileExt != ext {
+	if ext != "" && !strings.HasSuffix(trimmed, ext) {
 		return trimmed + ext
 	}
 	return trimmed
@@ -197,6 +195,10 @@ func fileExtForFormat(format string) string {
 		return printer.PrometheusOutputExt
 	case printer.CsvFormat:
 		return printer.CsvOutputExt
+	case printer.CycloneDXFormat:
+		return printer.CycloneDXOutputExt
+	case printer.SPDXFormat:
+		return printer.SPDXOutputExt
 	default:
 		return printer.PrettyOutputExt
 	}
@@ -381,7 +383,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 			}
 
 			return nil, fmt.Errorf(
-				"failed to generate encryption key",
+				"failed to generate encryption key: %w", err,
 			)
 		}
 

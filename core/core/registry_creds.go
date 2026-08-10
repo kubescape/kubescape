@@ -122,7 +122,9 @@ func extractCredsFromAuths(auths map[string]dockerAuthConfig, domain string) (im
 					}
 				}
 			}
-			return creds, true
+			if creds.Token != "" || (creds.Username != "" && creds.Password != "") {
+				return creds, true
+			}
 		}
 	}
 	return imagescan.RegistryCredentials{}, false

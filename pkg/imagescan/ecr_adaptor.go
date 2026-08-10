@@ -2,6 +2,7 @@ package imagescan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -30,7 +31,7 @@ func NewAWSECRAdaptor() *AWSECRAdaptor {
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as AWS SDK v2 relies heavily on IAM Roles for Service Accounts (IRSA) and default configuration.
 func (a *AWSECRAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
-	if credentials.Username != "" || credentials.Password != "" {
+	if credentials.Username != "" || credentials.Password != "" || credentials.Token != "" {
 		return fmt.Errorf("explicit credentials are intentionally unsupported for AWS ECR; use AWS IRSA or default credential chain")
 	}
 
@@ -63,6 +64,7 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 	}
 
 	var statuses []ContainerImageScanStatus
+	var aggErr error
 
 	for _, imageID := range imageIDs {
 		var ecrImageID types.ImageIdentifier
@@ -86,7 +88,9 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 
 		out, err := a.client.DescribeImageScanFindings(ctx, input)
 		if err != nil {
-			return nil, fmt.Errorf("failed to describe image scan findings for repository %s: %w", imageID.Repository, err)
+			aggErr = errors.Join(aggErr, fmt.Errorf("failed to describe image scan findings for repository %s: %w", imageID.Repository, err))
+			statuses = append(statuses, status)
+			continue
 		}
 
 		if out.ImageScanStatus != nil && out.ImageScanStatus.Status == types.ScanStatusComplete {
@@ -98,7 +102,7 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 		statuses = append(statuses, status)
 	}
 
-	return statuses, nil
+	return statuses, aggErr
 }
 
 // Helper to normalize ECR severity to Kubescape expected severity
@@ -128,6 +132,7 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 	}
 
 	var reports []ContainerImageVulnerabilityReport
+	var aggErr error
 
 	for _, imageID := range imageIDs {
 		report := ContainerImageVulnerabilityReport{
@@ -178,13 +183,14 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 		}
 
 		if fetchErr != nil {
-			return nil, fmt.Errorf("failed to fetch vulnerabilities for repository %s: %w", imageID.Repository, fetchErr)
+			aggErr = errors.Join(aggErr, fmt.Errorf("failed to fetch vulnerabilities for repository %s: %w", imageID.Repository, fetchErr))
+			// we don't return nil, we append the partial report
 		}
 
 		reports = append(reports, report)
 	}
 
-	return reports, nil
+	return reports, aggErr
 }
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
