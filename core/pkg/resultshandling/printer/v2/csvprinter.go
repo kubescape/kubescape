@@ -73,6 +73,9 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 				err = fmt.Errorf("failed to flush CSV writer: %w", flushErr)
 			}
 		}
+		if err == nil {
+			printer.LogOutputFile(cp.writer.Name())
+		}
 	}()
 
 	header := []string{
@@ -160,7 +163,6 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		}
 	}
 
-	printer.LogOutputFile(cp.writer.Name())
 	return nil
 }
 
