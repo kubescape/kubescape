@@ -13,7 +13,6 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/project-copacetic/copacetic/pkg/buildkit"
 	"github.com/spf13/cobra"
 )
@@ -45,12 +44,10 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(printer.ImageFormats, ", "))
+				return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(shared.ImageScanFormats, ", "))
 			}
-			if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && scanInfo.Format != "" {
-				if !slices.Contains(printer.ImageFormats, scanInfo.Format) {
-					return fmt.Errorf("invalid format %q, supported formats: %s", scanInfo.Format, strings.Join(printer.ImageFormats, ", "))
-				}
+			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ImageScanFormats); err != nil {
+				return err
 			}
 			if err := shared.ValidateImageScanInfo(&scanInfo); err != nil {
 				return err
@@ -89,7 +86,7 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.Password, "password", "p", "", "Password for registry login")
 
 	patchCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "",
-		fmt.Sprintf("Output file format. Supported formats: %s", strings.Join(printer.ImageFormats, ", ")))
+		fmt.Sprintf("Output file format. Supported formats: %s", strings.Join(shared.ImageScanFormats, ", ")))
 	patchCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
 	patchCmd.PersistentFlags().BoolVarP(&scanInfo.VerboseMode, "verbose", "v", false, "Display full report. Default to false")
 
