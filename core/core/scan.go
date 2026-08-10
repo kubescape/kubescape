@@ -613,6 +613,11 @@ func estimateClusterSize(resourceHandler resourcehandler.IResourceHandler, ctx c
 // count because sessionObj.AllResources is populated asynchronously by the
 // producer goroutine.
 func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandler resourcehandler.IResourceHandler, scanData *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, clusterName string, excludedNamespaces string, includeNamespaces string, enableRegoPrint bool, controlTimeout time.Duration, estimatedClusterSize int) error {
+	// The eager collector initializes this metadata before constructing the OPA
+	// processor. Do the same here because the cloud provider is a policy input,
+	// not only report metadata.
+	resourcehandler.CollectClusterMetadata(ctx, resourceHandler, scanData)
+
 	// Construct the processor before starting the producer goroutine. The
 	// producer does not touch scanData's resource maps (it carries them on the
 	// resident batch instead), but constructing first means the constructor's
