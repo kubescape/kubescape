@@ -385,7 +385,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 			}
 
 			return nil, fmt.Errorf(
-				"failed to generate encryption key",
+				"failed to generate encryption key: %w", err,
 			)
 		}
 
