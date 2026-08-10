@@ -112,6 +112,9 @@ func (fileHandler *FileResourceHandler) EstimateClusterSize(ctx context.Context,
 // non-streaming path. File-based scans should not rely on --enable-streaming for
 // memory reduction.
 func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, 0, err
+	}
 	batchChan := make(chan *cautils.ResourceBatch, 1)
 	errChan := make(chan error, 1)
 
@@ -121,6 +124,9 @@ func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Conte
 	// producer goroutine like the eager path did. File collection is local and
 	// fast, so this blocks no longer than the old async body did.
 	k8sResources, allResources, externalResources, excludedRulesMap, err := fileHandler.GetResources(ctx, sessionObj, scanInfo)
+	if err := ctx.Err(); err != nil {
+		return nil, nil, 0, err
+	}
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -136,13 +142,18 @@ func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Conte
 		batch.AllResources = allResources
 		batch.ExternalResources = externalResources
 
-		select {
-		case batchChan <- batch:
-		case <-ctx.Done():
-		}
+		publishFileResourceBatch(ctx, batchChan, errChan, batch)
 	}()
 
 	return batchChan, errChan, 0, nil
+}
+
+func publishFileResourceBatch(ctx context.Context, batchChan chan<- *cautils.ResourceBatch, errChan chan<- error, batch *cautils.ResourceBatch) {
+	select {
+	case batchChan <- batch:
+	case <-ctx.Done():
+		errChan <- ctx.Err()
+	}
 }
 
 // helmValueOptionsFromScanInfo extracts the user-supplied Helm value/release flags from ScanInfo
