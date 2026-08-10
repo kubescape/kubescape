@@ -79,6 +79,12 @@ func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDat
 		return nil, os.ErrNotExist
 	}
 
+	if clusterIdentity() == "unknown" {
+		// Without a resolvable API server host, every caller collapses onto the
+		// same cache key; serving it would risk mixing in another cluster's data.
+		return nil, os.ErrNotExist
+	}
+
 	path, err := getCacheFilePath(clusterName, resourceName)
 	if err != nil {
 		return nil, err

@@ -23,12 +23,19 @@ func withK8sHost(t *testing.T, host string) {
 	k8sinterface.K8SConfig = &restclient.Config{Host: host}
 }
 
+func withTempCacheDir(t *testing.T) {
+	t.Helper()
+	original := DefaultCacheDir
+	t.Cleanup(func() { DefaultCacheDir = original })
+	DefaultCacheDir = t.TempDir()
+}
+
 // TestLoadFromCache_DisabledByDefault guards against host sensor data being
 // served from disk when HOSTSENSOR_CACHE_TTL is unset: caching used to be
 // unconditional, which meant a scan could silently report node state from up
 // to two hours earlier.
 func TestLoadFromCache_DisabledByDefault(t *testing.T) {
-	DefaultCacheDir = t.TempDir()
+	withTempCacheDir(t)
 	withK8sHost(t, "https://cluster-a.example.com")
 
 	env := hostsensor.HostSensorDataEnvelope{}
@@ -43,7 +50,7 @@ func TestLoadFromCache_DisabledByDefault(t *testing.T) {
 // share a kubeconfig context name (the kubeadm/kind/minikube default)
 // colliding on the same cache file.
 func TestCacheFilePath_DiffersByClusterHost(t *testing.T) {
-	DefaultCacheDir = t.TempDir()
+	withTempCacheDir(t)
 
 	withK8sHost(t, "https://cluster-a.example.com")
 	pathA, err := getCacheFilePath("kubernetes-admin@kubernetes", "KubeletInfo")
@@ -60,7 +67,7 @@ func TestCacheFilePath_DiffersByClusterHost(t *testing.T) {
 // data written by one cluster is not readable under a different cluster's
 // identity, even when the context name is identical.
 func TestHostSensorCache_OptInRoundTrip(t *testing.T) {
-	DefaultCacheDir = t.TempDir()
+	withTempCacheDir(t)
 	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
 
 	withK8sHost(t, "https://cluster-a.example.com")
@@ -76,4 +83,21 @@ func TestHostSensorCache_OptInRoundTrip(t *testing.T) {
 	withK8sHost(t, "https://cluster-b.example.com")
 	_, err = loadFromCache("kubernetes-admin@kubernetes", "KubeletInfo")
 	assert.Error(t, err, "cluster B must not read cluster A's cached host data")
+}
+
+// TestLoadFromCache_UnresolvedClusterIdentityIsRejected guards against the
+// "unknown" fallback in clusterIdentity acting as a shared cache key: every
+// caller with no resolvable API server host would otherwise land on the same
+// file, and a read there could return another cluster's data.
+func TestLoadFromCache_UnresolvedClusterIdentityIsRejected(t *testing.T) {
+	withTempCacheDir(t)
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+	withK8sHost(t, "")
+
+	env := hostsensor.HostSensorDataEnvelope{}
+	env.SetName("node-a")
+	require.NoError(t, saveToCache("kubernetes-admin@kubernetes", "KubeletInfo", []hostsensor.HostSensorDataEnvelope{env}))
+
+	_, err := loadFromCache("kubernetes-admin@kubernetes", "KubeletInfo")
+	assert.ErrorIs(t, err, os.ErrNotExist)
 }
