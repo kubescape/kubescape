@@ -285,6 +285,7 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 	}
 
 	basePath := getBasePathFromMetadata(*opaSessionObj)
+	cache := newFixReportCache()
 
 	var withoutFilePath, outsideRepository int
 	for resourceID, result := range opaSessionObj.ResourcesResult {
@@ -308,10 +309,7 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 		}
 
 		rsrcAbsPath := filepath.Join(effectiveBasePath(resourceSource, basePath), relPath)
-		locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
-		if err != nil {
-			logger.L().Warning("failed to create location resolver, GitLab SAST locations will default to line 1", helpers.Error(err))
-		}
+		locationResolver := cache.locationResolver(rsrcAbsPath, "GitLab SAST")
 
 		for _, toPin := range result.AssociatedControls {
 			ac := toPin
