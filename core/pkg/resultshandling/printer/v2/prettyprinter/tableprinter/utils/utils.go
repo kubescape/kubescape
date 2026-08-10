@@ -196,3 +196,13 @@ func GetColorForVulnerabilitySeverity(severity string) func(...string) string {
 		return gchalk.WithAnsi256(7).Bold
 	}
 }
+
+const MaxControlNameLen = 50
+
+func TruncateName(name string, maxLen int) string {
+	runes := []rune(name)
+	if len(runes) <= maxLen {
+		return name
+	}
+	return string(runes[:maxLen]) + "..."
+}
