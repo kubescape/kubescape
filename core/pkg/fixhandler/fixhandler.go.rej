@@ -1,0 +1,13 @@
+@@ -290,10 +290,10 @@
+ 		}
+ 	} else {
+ 		if containerProfileBytes, err := os.ReadFile(profilePath); err == nil {
+ 			if err := json.Unmarshal(containerProfileBytes, containerProfile); err != nil {
+-				logger.L().Ctx(ctx).Warning("Failed to unmarshal container profile: " + err.Error())
++				logger.L().Ctx(ctx).Warning("Failed to unmarshal container profile: " + sanitizeForLog(err.Error()))
+ 			}
+ 		} else {
+-			logger.L().Ctx(ctx).Warning("Failed to read container profile: " + err.Error())
++			logger.L().Ctx(ctx).Warning("Failed to read container profile: " + sanitizeForLog(err.Error()))
+ 		}
+ 	}
