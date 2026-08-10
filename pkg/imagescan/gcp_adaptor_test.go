@@ -82,10 +82,10 @@ func TestGCPAdaptor_GetImagesScanStatus(t *testing.T) {
 			expectedScan: false,
 		},
 		{
-			name:         "api error path aggregates failure",
-			mockErr:      fmt.Errorf("simulated API error"),
+			name:          "api error path aggregates failure",
+			mockErr:       fmt.Errorf("simulated API error"),
 			expectedError: true,
-			expectedScan: false,
+			expectedScan:  false,
 		},
 	}
 

@@ -3,6 +3,7 @@ package imagescan
 import (
 	"context"
 	"testing"
+
 	"github.com/stretchr/testify/assert"
 )
 
@@ -23,7 +24,7 @@ func TestCloudAdaptors_IgnoreTokens_Bug(t *testing.T) {
 	}
 
 	err = azureAdaptor.Login(context.Background(), "test.azurecr.io", credsToken)
-	
+
 	// BUG FIXED: The adaptor now properly rejects the token!
 	assert.ErrorContains(t, err, "explicit credentials are intentionally unsupported")
 
