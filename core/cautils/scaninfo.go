@@ -364,7 +364,7 @@ func splitNamespaceList(s string) []string {
 func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
-	metadata.ScanMetadata.Formats = []string{scanInfo.Format}
+	metadata.ScanMetadata.Formats = scanInfo.Formats()
 	metadata.ScanMetadata.FormatVersion = scanInfo.FormatVersion
 	metadata.ScanMetadata.Submit = scanInfo.Submit.GetBool()
 
