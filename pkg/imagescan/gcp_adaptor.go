@@ -76,7 +76,9 @@ func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials Reg
 	}
 
 	if a.owningClient != nil {
-		_ = a.owningClient.Close()
+		if err := a.owningClient.Close(); err != nil {
+			return fmt.Errorf("failed to close previous container analysis client: %w", err)
+		}
 	}
 
 	a.owningClient = c
