@@ -197,13 +197,30 @@ func extractResourceLabels(allResources map[string]workloadinterface.IMetadata, 
 	return resourceLabels
 }
 
+// scanContextName returns the kube context this scan actually ran against.
+//
+// ScanInfo.GetClusterContextName() resolves the context from the kubeconfig the
+// scan selected, and that value is recorded on the session metadata. Reading the
+// process-global k8sinterface.GetContextName() instead would label the report
+// with the ambient context, which differs whenever --kubeconfig or
+// --kube-context points somewhere else. The global remains the fallback for
+// sessions that carry no cluster context metadata.
+func scanContextName(data *cautils.OPASessionObj) string {
+	if data.Metadata != nil {
+		if cluster := data.Metadata.ContextMetadata.ClusterContextMetadata; cluster != nil && cluster.ContextName != "" {
+			return cluster.ContextName
+		}
+	}
+	return k8sinterface.GetContextName()
+}
+
 // FinalizeResults finalize the results objects by copying data from map to lists
 func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	if data.Report.ReportGenerationTime.IsZero() {
 		data.Report.ReportGenerationTime = time.Now().UTC()
 	}
 	if data.Report.ClusterName == "" {
-		data.Report.ClusterName = cautils.AdoptClusterName(k8sinterface.GetContextName())
+		data.Report.ClusterName = cautils.AdoptClusterName(scanContextName(data))
 	}
 	report := reporthandlingv2.PostureReport{
 		SummaryDetails:       data.Report.SummaryDetails,
