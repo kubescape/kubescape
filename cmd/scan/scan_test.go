@@ -687,6 +687,8 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 		name          string
 		threshold     string
 		matchSeverity string
+		fixState      vulnerability.FixState
+		onlyFixable   bool
 		expectedError bool
 	}{
 		{
@@ -719,12 +721,36 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 			matchSeverity: "High",
 			expectedError: false,
 		},
+		{
+			name:          "unfixed vulnerability at threshold is ignored when only fixable is enabled",
+			threshold:     "high",
+			matchSeverity: "High",
+			fixState:      vulnerability.FixStateNotFixed,
+			onlyFixable:   true,
+			expectedError: false,
+		},
+		{
+			name:          "fixed vulnerability at threshold fails when only fixable is enabled",
+			threshold:     "high",
+			matchSeverity: "High",
+			fixState:      vulnerability.FixStateFixed,
+			onlyFixable:   true,
+			expectedError: true,
+		},
+		{
+			name:          "unfixed vulnerability at threshold still fails when only fixable is disabled",
+			threshold:     "high",
+			matchSeverity: "High",
+			fixState:      vulnerability.FixStateNotFixed,
+			expectedError: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			scanInfo := &cautils.ScanInfo{
 				FailThresholdSeverity: tt.threshold,
+				OnlyFixable:           tt.onlyFixable,
 			}
 
 			matches := match.NewMatches()
@@ -732,6 +758,7 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 				matches.Add(match.Match{
 					Vulnerability: vulnerability.Vulnerability{
 						Reference: vulnerability.Reference{ID: "CVE-TEST"},
+						Fix:       vulnerability.Fix{State: tt.fixState},
 					},
 				})
 			}
