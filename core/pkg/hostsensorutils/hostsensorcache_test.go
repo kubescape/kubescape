@@ -31,9 +31,10 @@ func withTempCacheDir(t *testing.T) {
 }
 
 // TestLoadFromCache_DisabledByDefault guards against host sensor data being
-// served from disk when HOSTSENSOR_CACHE_TTL is unset: caching used to be
-// unconditional, which meant a scan could silently report node state from up
-// to two hours earlier.
+// written to or served from disk when HOSTSENSOR_CACHE_TTL is unset: caching
+// used to be unconditional, which meant a scan could silently report node
+// state from up to two hours earlier, and wrote host data to disk even for
+// users who never opted into caching at all.
 func TestLoadFromCache_DisabledByDefault(t *testing.T) {
 	withTempCacheDir(t)
 	withK8sHost(t, "https://cluster-a.example.com")
@@ -42,7 +43,12 @@ func TestLoadFromCache_DisabledByDefault(t *testing.T) {
 	env.SetName("node-a")
 	require.NoError(t, saveToCache("ctx", "KubeletInfo", []hostsensor.HostSensorDataEnvelope{env}))
 
-	_, err := loadFromCache("ctx", "KubeletInfo")
+	path, err := getCacheFilePath("ctx", "KubeletInfo")
+	require.NoError(t, err)
+	_, statErr := os.Stat(path)
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "saveToCache must not write to disk when caching is disabled")
+
+	_, err = loadFromCache("ctx", "KubeletInfo")
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 

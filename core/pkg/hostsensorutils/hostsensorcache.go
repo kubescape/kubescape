@@ -126,6 +126,10 @@ func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDat
 }
 
 func saveToCache(clusterName, resourceName string, envelopes []hostsensor.HostSensorDataEnvelope) error {
+	if getHostSensorCacheTtl() <= 0 {
+		return nil
+	}
+
 	path, err := getCacheFilePath(clusterName, resourceName)
 	if err != nil {
 		return err
