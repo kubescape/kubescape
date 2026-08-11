@@ -222,12 +222,17 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) error {
 	if scanInfo.UseArtifactsFrom == "" {
 		return nil
 	}
-	// UseArtifactsFrom must be a path without a filename
-	dir, file := filepath.Split(scanInfo.UseArtifactsFrom)
-	if dir == "" {
-		scanInfo.UseArtifactsFrom = file
-	} else if strings.Contains(file, ".json") {
-		scanInfo.UseArtifactsFrom = dir
+	// UseArtifactsFrom must be a directory. If it points at a single file,
+	// fall back to its parent directory based on the filesystem, not a name
+	// heuristic (a directory named "*.json" is still a directory). A bare
+	// filename with no path separator is left untouched so os.ReadDir below
+	// surfaces the existing clear error instead of silently scanning ".".
+	// An explicit current-directory path like "./<file>" has a separator, so
+	// it falls back to "." as its parent directory.
+	if info, err := os.Stat(scanInfo.UseArtifactsFrom); err == nil && !info.IsDir() {
+		if filepath.Base(scanInfo.UseArtifactsFrom) != scanInfo.UseArtifactsFrom {
+			scanInfo.UseArtifactsFrom = filepath.Dir(scanInfo.UseArtifactsFrom)
+		}
 	}
 	// set frameworks files
 	files, err := os.ReadDir(scanInfo.UseArtifactsFrom)
