@@ -65,12 +65,12 @@ func TestAzureAdaptor_GetImagesInformation_Guards(t *testing.T) {
 }
 
 func TestAzureAdaptor_NormalizeSeverity(t *testing.T) {
-	assert.Equal(t, "Critical", normalizeAzureSeverity("Critical"))
-	assert.Equal(t, "High", normalizeAzureSeverity("High"))
-	assert.Equal(t, "Medium", normalizeAzureSeverity("Medium"))
-	assert.Equal(t, "Low", normalizeAzureSeverity("Low"))
-	assert.Equal(t, "Negligible", normalizeAzureSeverity("Informational"))
-	assert.Equal(t, "Unknown", normalizeAzureSeverity("SomethingElse"))
+	assert.Equal(t, "Critical", NormalizeSeverity("Critical"))
+	assert.Equal(t, "High", NormalizeSeverity("High"))
+	assert.Equal(t, "Medium", NormalizeSeverity("Medium"))
+	assert.Equal(t, "Low", NormalizeSeverity("Low"))
+	assert.Equal(t, "Negligible", NormalizeSeverity("Informational"))
+	assert.Equal(t, "Unknown", NormalizeSeverity("SomethingElse"))
 }
 
 func TestAzureAdaptor_GetImagesScanStatus(t *testing.T) {

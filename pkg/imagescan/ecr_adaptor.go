@@ -2,7 +2,6 @@ package imagescan
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -64,66 +63,49 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 		return nil, fmt.Errorf("ECR client not initialized, call Login first")
 	}
 
-	var statuses []ContainerImageScanStatus
-	var aggErr error
-
-	for _, imageID := range imageIDs {
-		var ecrImageID types.ImageIdentifier
-		if imageID.Hash != "" {
-			ecrImageID.ImageDigest = aws.String(imageID.Hash)
-		} else if imageID.Tag != "" {
-			ecrImageID.ImageTag = aws.String(imageID.Tag)
-		}
-
-		input := &ecr.DescribeImageScanFindingsInput{
-			RepositoryName: aws.String(imageID.Repository),
-			ImageId:        &ecrImageID,
-			MaxResults:     aws.Int32(1),
-		}
-
-		status := ContainerImageScanStatus{
-			ImageID:         imageID,
-			IsScanAvailable: false,
-			IsBomAvailable:  false,
-		}
-
-		out, err := a.client.DescribeImageScanFindings(ctx, input)
-		if err != nil {
-			aggErr = errors.Join(aggErr, fmt.Errorf("failed to describe image scan findings for repository %s: %w", imageID.Repository, err))
-			statuses = append(statuses, status)
-			continue
-		}
-
-		if out.ImageScanStatus != nil && (out.ImageScanStatus.Status == types.ScanStatusComplete || out.ImageScanStatus.Status == types.ScanStatusActive) {
-			status.IsScanAvailable = true
-			if out.ImageScanFindings != nil && out.ImageScanFindings.ImageScanCompletedAt != nil {
-				status.LastScanDate = *out.ImageScanFindings.ImageScanCompletedAt
+	return ProcessImages(imageIDs,
+		func(id ContainerImageIdentifier) ContainerImageScanStatus {
+			return ContainerImageScanStatus{
+				ImageID:         id,
+				IsScanAvailable: false,
+				IsBomAvailable:  false,
 			}
-		}
-		statuses = append(statuses, status)
-	}
+		},
+		func(imageID ContainerImageIdentifier) (ContainerImageScanStatus, error) {
+			status := ContainerImageScanStatus{
+				ImageID:         imageID,
+				IsScanAvailable: false,
+				IsBomAvailable:  false,
+			}
 
-	return statuses, aggErr
-}
+			var ecrImageID types.ImageIdentifier
+			if imageID.Hash != "" {
+				ecrImageID.ImageDigest = aws.String(imageID.Hash)
+			} else if imageID.Tag != "" {
+				ecrImageID.ImageTag = aws.String(imageID.Tag)
+			}
 
-// Helper to normalize ECR severity to Kubescape expected severity
-func normalizeSeverity(ecrSeverity string) string {
-	switch ecrSeverity {
-	case "CRITICAL":
-		return "Critical"
-	case "HIGH":
-		return "High"
-	case "MEDIUM":
-		return "Medium"
-	case "LOW":
-		return "Low"
-	case "INFORMATIONAL":
-		return "Negligible"
-	case "UNDEFINED":
-		fallthrough
-	default:
-		return "Unknown"
-	}
+			input := &ecr.DescribeImageScanFindingsInput{
+				RepositoryName: aws.String(imageID.Repository),
+				ImageId:        &ecrImageID,
+				MaxResults:     aws.Int32(1),
+			}
+
+			out, err := a.client.DescribeImageScanFindings(ctx, input)
+			if err != nil {
+				return status, fmt.Errorf("failed to describe image scan findings for repository %s: %w", imageID.Repository, err)
+			}
+
+			if out.ImageScanStatus != nil && (out.ImageScanStatus.Status == types.ScanStatusComplete || out.ImageScanStatus.Status == types.ScanStatusActive) {
+				status.IsScanAvailable = true
+				if out.ImageScanFindings != nil && out.ImageScanFindings.ImageScanCompletedAt != nil {
+					status.LastScanDate = *out.ImageScanFindings.ImageScanCompletedAt
+				}
+			}
+
+			return status, nil
+		},
+	)
 }
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
@@ -132,86 +114,88 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 		return nil, fmt.Errorf("ECR client not initialized, call Login first")
 	}
 
-	var reports []ContainerImageVulnerabilityReport
-	var aggErr error
-
-	for _, imageID := range imageIDs {
-		report := ContainerImageVulnerabilityReport{
-			ImageID:         imageID,
-			Vulnerabilities: []Vulnerability{},
-		}
-
-		var ecrImageID types.ImageIdentifier
-		if imageID.Hash != "" {
-			ecrImageID.ImageDigest = aws.String(imageID.Hash)
-		} else if imageID.Tag != "" {
-			ecrImageID.ImageTag = aws.String(imageID.Tag)
-		}
-
-		input := &ecr.DescribeImageScanFindingsInput{
-			RepositoryName: aws.String(imageID.Repository),
-			ImageId:        &ecrImageID,
-		}
-
-		var fetchErr error
-		const maxPages = 1000
-
-		for page := 0; ; page++ {
-			out, err := a.client.DescribeImageScanFindings(ctx, input)
-			if err != nil {
-				fetchErr = err
-				break
+	return ProcessImages(imageIDs,
+		func(id ContainerImageIdentifier) ContainerImageVulnerabilityReport {
+			return ContainerImageVulnerabilityReport{
+				ImageID:         id,
+				Vulnerabilities: []Vulnerability{},
 			}
-			if out.ImageScanFindings != nil {
-				for _, finding := range out.ImageScanFindings.Findings {
-					report.Vulnerabilities = append(report.Vulnerabilities, Vulnerability{
-						ID:          aws.ToString(finding.Name),
-						Severity:    normalizeSeverity(string(finding.Severity)),
-						Description: aws.ToString(finding.Description),
-						Links:       []string{aws.ToString(finding.Uri)},
-					})
+		},
+		func(imageID ContainerImageIdentifier) (ContainerImageVulnerabilityReport, error) {
+			report := ContainerImageVulnerabilityReport{
+				ImageID:         imageID,
+				Vulnerabilities: []Vulnerability{},
+			}
+
+			var ecrImageID types.ImageIdentifier
+			if imageID.Hash != "" {
+				ecrImageID.ImageDigest = aws.String(imageID.Hash)
+			} else if imageID.Tag != "" {
+				ecrImageID.ImageTag = aws.String(imageID.Tag)
+			}
+
+			input := &ecr.DescribeImageScanFindingsInput{
+				RepositoryName: aws.String(imageID.Repository),
+				ImageId:        &ecrImageID,
+			}
+
+			var fetchErr error
+			const maxPages = 1000
+
+			for page := 0; ; page++ {
+				out, err := a.client.DescribeImageScanFindings(ctx, input)
+				if err != nil {
+					fetchErr = err
+					break
 				}
-				for _, finding := range out.ImageScanFindings.EnhancedFindings {
-					vulnerability := Vulnerability{
-						Severity:    normalizeSeverity(aws.ToString(finding.Severity)),
-						Description: aws.ToString(finding.Description),
+				if out.ImageScanFindings != nil {
+					for _, finding := range out.ImageScanFindings.Findings {
+						report.Vulnerabilities = append(report.Vulnerabilities, Vulnerability{
+							ID:          aws.ToString(finding.Name),
+							Severity:    NormalizeSeverity(string(finding.Severity)),
+							Description: aws.ToString(finding.Description),
+							Links:       []string{aws.ToString(finding.Uri)},
+						})
 					}
-
-					if details := finding.PackageVulnerabilityDetails; details != nil {
-						vulnerability.ID = aws.ToString(details.VulnerabilityId)
-						vulnerability.Links = append(vulnerability.Links, details.ReferenceUrls...)
-
-						if sourceURL := aws.ToString(details.SourceUrl); sourceURL != "" && !slices.Contains(vulnerability.Links, sourceURL) {
-							vulnerability.Links = append(vulnerability.Links, sourceURL)
+					for _, finding := range out.ImageScanFindings.EnhancedFindings {
+						vulnerability := Vulnerability{
+							Severity:    NormalizeSeverity(aws.ToString(finding.Severity)),
+							Description: aws.ToString(finding.Description),
 						}
-					}
-					if vulnerability.ID == "" {
-						vulnerability.ID = aws.ToString(finding.Title)
-					}
 
-					report.Vulnerabilities = append(report.Vulnerabilities, vulnerability)
+						if details := finding.PackageVulnerabilityDetails; details != nil {
+							vulnerability.ID = aws.ToString(details.VulnerabilityId)
+							vulnerability.Links = append(vulnerability.Links, details.ReferenceUrls...)
+
+							if sourceURL := aws.ToString(details.SourceUrl); sourceURL != "" && !slices.Contains(vulnerability.Links, sourceURL) {
+								vulnerability.Links = append(vulnerability.Links, sourceURL)
+							}
+						}
+						if vulnerability.ID == "" {
+							vulnerability.ID = aws.ToString(finding.Title)
+						}
+
+						report.Vulnerabilities = append(report.Vulnerabilities, vulnerability)
+					}
 				}
+
+				if out.NextToken == nil {
+					break
+				}
+				if page >= maxPages {
+					fetchErr = fmt.Errorf("exceeded max pages (%d) fetching vulnerabilities for image %s", maxPages, imageID.Repository)
+					break
+				}
+				input.NextToken = out.NextToken
 			}
 
-			if out.NextToken == nil {
-				break
+			if fetchErr != nil {
+				return report, fmt.Errorf("failed to fetch vulnerabilities for repository %s: %w", imageID.Repository, fetchErr)
 			}
-			if page >= maxPages {
-				fetchErr = fmt.Errorf("exceeded max pages (%d) fetching vulnerabilities for image %s", maxPages, imageID.Repository)
-				break
-			}
-			input.NextToken = out.NextToken
-		}
 
-		if fetchErr != nil {
-			aggErr = errors.Join(aggErr, fmt.Errorf("failed to fetch vulnerabilities for repository %s: %w", imageID.Repository, fetchErr))
-			// we don't return nil, we append the partial report
-		}
-
-		reports = append(reports, report)
-	}
-
-	return reports, aggErr
+			return report, nil
+		},
+	)
 }
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
@@ -219,19 +203,7 @@ func (a *AWSECRAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Con
 	if a.client == nil {
 		return nil, fmt.Errorf("ECR client not initialized, call Login first")
 	}
-
-	var infos []ContainerImageInformation
-
-	for _, imageID := range imageIDs {
-		info := ContainerImageInformation{
-			ImageID: imageID,
-			Bom:     []string{},
-		}
-
-		infos = append(infos, info)
-	}
-
-	return infos, nil
+	return FetchImagesInformation(imageIDs)
 }
 
 // Destroy cleans up any persistent resources used by the adaptor.
