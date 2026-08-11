@@ -15,7 +15,23 @@ deny contains msga if {
 	rolebinding := subjectVector.relatedObjects[j]
 	endswith(role.kind, "Role")
 	endswith(rolebinding.kind, "Binding")
+	is_referenced_role(role, rolebinding)
 
+	rule := role.rules[p]
+
+is_referenced_role(role, rolebinding) if {
+	role.kind == "ClusterRole"
+	rolebinding.roleRef.kind == role.kind
+	rolebinding.roleRef.name == role.metadata.name
+}
+
+is_referenced_role(role, rolebinding) if {
+	role.kind == "Role"
+	rolebinding.kind == "RoleBinding"
+	rolebinding.roleRef.kind == role.kind
+	rolebinding.roleRef.name == role.metadata.name
+	rolebinding.metadata.namespace == role.metadata.namespace
+}
 	rule := role.rules[p]
 
 	subject := rolebinding.subjects[k]
