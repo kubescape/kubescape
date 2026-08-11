@@ -12,10 +12,11 @@ type scanEntry struct {
 }
 
 type serverState struct {
-	statusID         map[string]*scanEntry
-	latestID         string
-	latestUserScanID string
-	mtx              sync.RWMutex
+	statusID          map[string]*scanEntry
+	latestID          string
+	latestUserScanID  string
+	runningUserScanID string
+	mtx               sync.RWMutex
 }
 
 // isBusy is server busy with ID, if id is empty will check for latest ID
@@ -39,8 +40,8 @@ func (s *serverState) setBusy(id string, cancel context.CancelFunc) {
 func (s *serverState) setNotBusy(id string) {
 	s.mtx.Lock()
 	delete(s.statusID, id)
-	if s.latestUserScanID == id {
-		s.latestUserScanID = ""
+	if s.runningUserScanID == id {
+		s.runningUserScanID = ""
 	}
 	s.mtx.Unlock()
 }
@@ -52,10 +53,12 @@ func (s *serverState) getLatestID() string {
 	return id
 }
 
-// setLatestUserScanID records id as the scan currently executing on behalf of
-// the Scan handler (not Metrics). watchForScan calls this when it dequeues a
-// user-submitted request, so it always reflects the scan actually running,
-// not merely the last one accepted into the queue.
+// setLatestUserScanID records id as the most recent scan accepted from the Scan
+// handler. It is the user-scan counterpart of latestID: Scan calls it once the
+// request is queued, and it is deliberately never cleared, so Status and the
+// offline Results fallback can still resolve "latest" after the scan finishes.
+// Metrics never calls it, which is what keeps a /v1/metrics scrape from
+// hijacking those two endpoints.
 func (s *serverState) setLatestUserScanID(id string) {
 	s.mtx.Lock()
 	s.latestUserScanID = id
@@ -65,6 +68,24 @@ func (s *serverState) setLatestUserScanID(id string) {
 func (s *serverState) getLatestUserScanID() string {
 	s.mtx.RLock()
 	id := s.latestUserScanID
+	s.mtx.RUnlock()
+	return id
+}
+
+// setRunningUserScanID records id as the scan currently executing on behalf of
+// the Scan handler (not Metrics). watchForScan calls this when it dequeues a
+// user-submitted request, so it always reflects the scan actually running, not
+// merely the last one accepted into the queue -- which is what CancelScan needs
+// to target. setNotBusy clears it when that scan stops running.
+func (s *serverState) setRunningUserScanID(id string) {
+	s.mtx.Lock()
+	s.runningUserScanID = id
+	s.mtx.Unlock()
+}
+
+func (s *serverState) getRunningUserScanID() string {
+	s.mtx.RLock()
+	id := s.runningUserScanID
 	s.mtx.RUnlock()
 	return id
 }

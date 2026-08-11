@@ -171,13 +171,14 @@ func TestStatus_WhenScanIsRunning_WithExplicitID_ReturnsBusy(t *testing.T) {
 	}
 }
 
-func TestStatus_WhenScanIsRunning_WithEmptyID_ResolvesViaLatestID(t *testing.T) {
+func TestStatus_WhenScanIsRunning_WithEmptyID_ResolvesViaLatestUserScanID(t *testing.T) {
 	// This is the critical path for the in-cluster operator: it calls /status
-	// without an ID to check whether any scan is currently running.
-	// isBusy("") resolves to statusID[latestID], and then the handler
-	// populates the response ID from getLatestID(). Both steps are untested.
+	// without an ID to check whether any scan is currently running. The empty
+	// ID resolves via latestUserScanID (set by Scan when the request is
+	// queued), and the handler echoes that ID back in the response.
 	h := &HTTPHandler{state: newServerState()}
 	h.state.setBusy("scan-456", func() {})
+	h.state.setLatestUserScanID("scan-456")
 
 	rq := httptest.NewRequest(http.MethodGet, "/status", nil) // no ?id= param
 	w := httptest.NewRecorder()
@@ -185,12 +186,85 @@ func TestStatus_WhenScanIsRunning_WithEmptyID_ResolvesViaLatestID(t *testing.T) 
 
 	resp := decodeResponse(t, w)
 	if resp.Type != utilsapisv1.BusyScanResponseType {
-		t.Errorf("Status with empty ID during scan: response.Type = %q; want %q: operator cannot detect running scan without latestID resolution",
+		t.Errorf("Status with empty ID during scan: response.Type = %q; want %q: operator cannot detect running scan without latest-user-scan resolution",
 			resp.Type, utilsapisv1.BusyScanResponseType)
 	}
 	if resp.ID != "scan-456" {
-		t.Errorf("Status with empty ID during scan: response.ID = %q; want \"scan-456\": latestID must be reflected in response",
+		t.Errorf("Status with empty ID during scan: response.ID = %q; want \"scan-456\": latestUserScanID must be reflected in response",
 			resp.ID)
+	}
+}
+
+// TestStatus_EmptyID_IgnoresMetricsScan guards the /v1/status half of the
+// hijack: Metrics() calls setBusy but never setLatestUserScanID, so a scrape
+// running on its own must not make /v1/status report a scan the caller never
+// asked for.
+func TestStatus_EmptyID_IgnoresMetricsScan(t *testing.T) {
+	h := &HTTPHandler{state: newServerState()}
+	h.state.setBusy("metrics-scan", func() {}) // what Metrics() does, and only that
+
+	rq := httptest.NewRequest(http.MethodGet, "/status", nil)
+	w := httptest.NewRecorder()
+	h.Status(w, rq)
+
+	resp := decodeResponse(t, w)
+	if resp.Type != utilsapisv1.NotBusyScanResponseType {
+		t.Errorf("Status with empty ID during a metrics-only scan: response.Type = %q; want %q: a /v1/metrics scrape must not be reported as the caller's scan",
+			resp.Type, utilsapisv1.NotBusyScanResponseType)
+	}
+	if resp.ID != "" {
+		t.Errorf("Status with empty ID during a metrics-only scan: response.ID = %q; want empty", resp.ID)
+	}
+}
+
+// TestStatus_EmptyID_PrefersUserScanOverConcurrentMetricsScan is the exact
+// race from the bug report: a metrics scrape lands while a user scan is still
+// running, overwriting latestID. /v1/status must still report the user scan.
+func TestStatus_EmptyID_PrefersUserScanOverConcurrentMetricsScan(t *testing.T) {
+	h := &HTTPHandler{state: newServerState()}
+	h.state.setBusy("user-scan", func() {})
+	h.state.setLatestUserScanID("user-scan")
+	h.state.setBusy("metrics-scan", func() {}) // scrape lands second, wins latestID
+
+	if got := h.state.getLatestID(); got != "metrics-scan" {
+		t.Fatalf("precondition: getLatestID() = %q; want \"metrics-scan\"", got)
+	}
+
+	rq := httptest.NewRequest(http.MethodGet, "/status", nil)
+	w := httptest.NewRecorder()
+	h.Status(w, rq)
+
+	resp := decodeResponse(t, w)
+	if resp.Type != utilsapisv1.BusyScanResponseType {
+		t.Errorf("Status with empty ID: response.Type = %q; want %q", resp.Type, utilsapisv1.BusyScanResponseType)
+	}
+	if resp.ID != "user-scan" {
+		t.Errorf("Status with empty ID: response.ID = %q; want \"user-scan\": a concurrent /v1/metrics scrape must not hijack the response",
+			resp.ID)
+	}
+}
+
+// TestServerState_UserScanIDLifecycle pins the split between the two
+// user-scan fields. latestUserScanID must outlive the scan so the offline
+// /v1/results fallback can still resolve it, while runningUserScanID must be
+// cleared so CancelScan with no ID does not target a finished scan.
+func TestServerState_UserScanIDLifecycle(t *testing.T) {
+	s := newServerState()
+	s.setBusy("user-scan", func() {})
+	s.setLatestUserScanID("user-scan")  // Scan(), at enqueue
+	s.setRunningUserScanID("user-scan") // watchForScan(), at dequeue
+
+	if id := s.getRunningUserScanID(); id != "user-scan" {
+		t.Errorf("getRunningUserScanID() while running = %q; want \"user-scan\"", id)
+	}
+
+	s.setNotBusy("user-scan") // scan finished
+
+	if id := s.getLatestUserScanID(); id != "user-scan" {
+		t.Errorf("getLatestUserScanID() after setNotBusy = %q; want \"user-scan\": must survive for the offline results fallback", id)
+	}
+	if id := s.getRunningUserScanID(); id != "" {
+		t.Errorf("getRunningUserScanID() after setNotBusy = %q; want empty: no user scan is running", id)
 	}
 }
 
