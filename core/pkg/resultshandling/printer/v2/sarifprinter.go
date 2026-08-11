@@ -132,33 +132,38 @@ func (sp *SARIFPrinter) printImageScan(scanResults cautils.ImageScanData) error 
 		return fmt.Errorf("failed to create document: %w", err)
 	}
 
-	pres := grypesarif.NewPresenter(models.PresenterConfig{Document: model, SBOM: scanResults.SBOM})
+	// Render into an in-memory buffer rather than sp.writer directly: when no
+	// --output file is given, sp.writer is os.Stdout, and reopening it by
+	// name below to patch the driver name would deadlock if stdout is a pipe
+	// (this process still holds the write end open, so a second reader on
+	// the same pipe never sees EOF). Rendering and patching in memory, then
+	// writing to sp.writer exactly once, avoids that entirely.
 	var rendered bytes.Buffer
+	pres := grypesarif.NewPresenter(models.PresenterConfig{Document: model, SBOM: scanResults.SBOM})
 	if err := pres.Present(&rendered); err != nil {
 		return err
 	}
 
-	// Change driver name to Kubescape
 	var sarifReport sarif.Report
 	if err := json.Unmarshal(rendered.Bytes(), &sarifReport); err != nil {
 		return err
 	}
 
-	// Patch driver name
+	// Patch driver name to Kubescape
 	for i := range sarifReport.Runs {
 		sarifReport.Runs[i].Tool.Driver.Name = "Kubescape"
 	}
 
-	// Write the patched report to the configured destination once. Rendering and
-	// patching in memory is required for non-file destinations such as stdout:
-	// reopening /dev/stdout for reading blocks when stdout is a pipe or terminal.
 	updatedSarifReport, err := json.MarshalIndent(sarifReport, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	_, err = sp.writer.Write(updatedSarifReport)
-	return err
+	if _, err := sp.writer.Write(updatedSarifReport); err != nil {
+		return fmt.Errorf("failed to write SARIF report: %w", err)
+	}
+
+	return nil
 }
 
 func (sp *SARIFPrinter) PrintNextSteps() {

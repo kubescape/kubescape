@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -290,18 +291,18 @@ func TestKustomizeBaseDirectory(t *testing.T) {
 	assert.NotEmpty(t, workloads, "should have workloads from base directory")
 }
 
-func TestKustomizeDirectoryWithHelmCharts(t *testing.T) {
-	helmPath := filepath.Join(kustomizeTestdataPath(), "helm")
+// fakeHelmVersionOutput is what the stub prints for `helm version -c --short`.
+// Kustomize's helm chart inflator (sigs.k8s.io/kustomize/api/internal/builtins
+// HelmChartInflationGenerator.checkHelmVersion) requires the output to match
+// `v?\d+(\.\d+)+` with a major version of 3.
+const fakeHelmVersionOutput = "v3.14.0+gfake0000"
 
-	assert.True(t, isKustomizeDirectory(helmPath), "helm directory should be detected as kustomize directory")
-
-	if runtime.GOOS == "windows" {
-		t.Skip("fake helm script not implemented for Windows")
-	}
-
-	helmDir := t.TempDir()
-	fakeHelm := filepath.Join(helmDir, "helm")
-	rendered := `---
+// fakeHelmTemplateOutput is what the stub prints for `helm template ...`. It
+// mirrors the rendered output of the test-chart fixture
+// (testdata/kustomize/helm/charts/test-chart), so the kustomize helm inflator
+// receives real YAML without ever invoking a real Helm binary.
+const fakeHelmTemplateOutput = `---
+# Source: test-chart/templates/configmap.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -309,26 +310,68 @@ metadata:
 data:
   key: value
 `
-	script := `#!/bin/sh
-if [ "$1" = "version" ]; then
-    echo "v3.12.0"
-    exit 0
-fi
-cat <<'EOF'
-` + rendered + `EOF
-`
-	if err := os.WriteFile(fakeHelm, []byte(script), 0600); err != nil {
-		t.Fatalf("failed to write fake helm: %v", err)
+
+// installFakeHelmBinary puts a stub "helm" executable on PATH for the
+// duration of the test, so TestKustomizeDirectoryWithHelmCharts exercises the
+// real kustomize-invokes-helm code path without depending on a real Helm
+// installation. It only understands the two subcommands the kustomize helm
+// inflator actually issues for this fixture: `version -c --short` and
+// `template ...`.
+func installFakeHelmBinary(t *testing.T) {
+	t.Helper()
+
+	binDir := t.TempDir()
+
+	var script string
+	var name string
+	if runtime.GOOS == "windows" {
+		name = "helm.bat"
+		// fakeHelmTemplateOutput is multi-line; `echo` only applies to a single
+		// line, so each line needs its own `echo` or cmd.exe would try to
+		// execute lines 2+ as commands.
+		var echoLines []string
+		for _, line := range strings.Split(strings.TrimSuffix(fakeHelmTemplateOutput, "\n"), "\n") {
+			echoLines = append(echoLines, "echo "+line)
+		}
+		script = "@echo off\r\n" +
+			"if \"%1\"==\"version\" (\r\n" +
+			"  echo " + fakeHelmVersionOutput + "\r\n" +
+			"  exit /b 0\r\n" +
+			")\r\n" +
+			strings.Join(echoLines, "\r\n") + "\r\n"
+	} else {
+		name = "helm"
+		script = "#!/bin/sh\n" +
+			"if [ \"$1\" = \"version\" ]; then\n" +
+			"  echo '" + fakeHelmVersionOutput + "'\n" +
+			"  exit 0\n" +
+			"fi\n" +
+			"cat <<'EOF'\n" +
+			fakeHelmTemplateOutput +
+			"EOF\n"
 	}
-	if err := os.Chmod(fakeHelm, 0755); err != nil {
-		t.Fatalf("failed to chmod fake helm: %v", err)
-	}
+
+	binPath := filepath.Join(binDir, name)
+	require.NoError(t, os.WriteFile(binPath, []byte(script), 0o600))
+	require.NoError(t, os.Chmod(binPath, 0o700))
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestKustomizeDirectoryWithHelmCharts(t *testing.T) {
+	installFakeHelmBinary(t)
+
+	helmPath := filepath.Join(kustomizeTestdataPath(), "helm")
+
+	assert.True(t, isKustomizeDirectory(helmPath), "helm directory should be detected as kustomize directory")
 
 	kd := NewKustomizeDirectory(helmPath)
-	kd.SetHelmCommand(fakeHelm)
 	workloads, errs := kd.GetWorkloads(helmPath)
 
-	assert.Empty(t, errs, "kustomize with helm charts should render without errors")
+	for _, err := range errs {
+		assert.NotContains(t, err.Error(), "must specify --enable-helm", "kustomize should run with helm enabled")
+	}
+	require.Empty(t, errs, "kustomize with helm charts should render without errors")
 	assert.NotEmpty(t, workloads, "rendered workloads should include resources from helm chart")
 
 	var configMapFound bool

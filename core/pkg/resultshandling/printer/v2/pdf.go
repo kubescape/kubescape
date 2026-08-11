@@ -146,7 +146,7 @@ func (pp *PdfPrinter) generatePdf(summaryDetails *reportsummary.SummaryDetails) 
 
 	template := pdf.NewReportTemplate()
 	template.GenerateHeader(utils.FrameworksScoresToString(summaryDetails.ListFrameworks()), time.Now().Format(time.DateTime))
-	err := template.GenerateTable(pp.getTableObjects(summaryDetails, sortedControlIDs),
+	err := template.GenerateTable(pp.getTableObjects(summaryDetails, sortedControlIDs, infoToPrintInfo),
 		summaryDetails.NumberOfResources().Failed(), summaryDetails.NumberOfResources().All(), summaryDetails.ComplianceScore)
 
 	if err != nil {
@@ -166,9 +166,9 @@ func (pp *PdfPrinter) getFormattedInformation(infoMap []infoStars) []string {
 	return rows
 }
 
-// getTableData is responsible for getting the table data in a standardized format
-func (pp *PdfPrinter) getTableObjects(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) *[]pdf.TableObject {
-	infoToPrintInfoMap := mapInfoToPrintInfo(summaryDetails.Controls)
+// getTableData is responsible for getting the table data in a standardized format.
+// The markers are taken from the caller so the table and the legend share one list.
+func (pp *PdfPrinter) getTableObjects(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, infoToPrintInfoMap []infoStars) *[]pdf.TableObject {
 	var controls []pdf.TableObject
 	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
 		for _, c := range sortedControlID {

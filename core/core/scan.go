@@ -513,46 +513,36 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 
 	if scanType == cautils.ScanTypeWorkload {
 		wl := workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject())
-		containers, err := wl.GetContainers()
-		if err != nil {
-			logger.L().Error("failed to get containers", helpers.Error(err))
-			return imagesToScan, imageToCreds
-		}
-		for _, container := range containers {
-			imagesToScan.Add(container.Image)
-			if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, container.Image); ok {
+		for _, image := range getAllWorkloadImages(wl) {
+			imagesToScan.Add(image)
+			if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, image); ok {
 				found := false
-				for _, c := range imageToCreds[container.Image] {
+				for _, c := range imageToCreds[image] {
 					if c == creds {
 						found = true
 						break
 					}
 				}
 				if !found {
-					imageToCreds[container.Image] = append(imageToCreds[container.Image], creds)
+					imageToCreds[image] = append(imageToCreds[image], creds)
 				}
 			}
 		}
 	} else {
 		for _, workload := range scanData.AllResources {
 			wl := workloadinterface.NewWorkloadObj(workload.GetObject())
-			containers, err := wl.GetContainers()
-			if err != nil {
-				logger.L().Error(fmt.Sprintf("failed to get containers for kind: %s, name: %s, namespace: %s", workload.GetKind(), workload.GetName(), workload.GetNamespace()), helpers.Error(err))
-				continue
-			}
-			for _, container := range containers {
-				imagesToScan.Add(container.Image)
-				if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, container.Image); ok {
+			for _, image := range getAllWorkloadImages(wl) {
+				imagesToScan.Add(image)
+				if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, image); ok {
 					found := false
-					for _, c := range imageToCreds[container.Image] {
+					for _, c := range imageToCreds[image] {
 						if c == creds {
 							found = true
 							break
 						}
 					}
 					if !found {
-						imageToCreds[container.Image] = append(imageToCreds[container.Image], creds)
+						imageToCreds[image] = append(imageToCreds[image], creds)
 					}
 				}
 			}
@@ -664,4 +654,30 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	}
 
 	return nil
+}
+
+func getAllWorkloadImages(wl *workloadinterface.Workload) []string {
+	var images []string
+	if containers, err := wl.GetContainers(); err == nil {
+		for _, c := range containers {
+			if c.Image != "" {
+				images = append(images, c.Image)
+			}
+		}
+	}
+	if initContainers, err := wl.GetInitContainers(); err == nil {
+		for _, c := range initContainers {
+			if c.Image != "" {
+				images = append(images, c.Image)
+			}
+		}
+	}
+	if ephemeralContainers, err := wl.GetEphemeralContainers(); err == nil {
+		for _, c := range ephemeralContainers {
+			if c.Image != "" {
+				images = append(images, c.Image)
+			}
+		}
+	}
+	return images
 }

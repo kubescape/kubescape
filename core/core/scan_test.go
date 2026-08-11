@@ -535,3 +535,41 @@ func TestCollectAndProcessResourcesWithStreaming_CancelsProducerContext(t *testi
 	assert.NoError(t, parentCtx.Err(), "parent context must remain uncanceled")
 	assert.Equal(t, context.Canceled, mockHandler.passedCtx.Err(), "derived producer context must be canceled when function returns")
 }
+
+func TestGetAllWorkloadImages(t *testing.T) {
+	podData := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]interface{}{
+			"name": "test-pod",
+		},
+		"spec": map[string]interface{}{
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name":  "main-app",
+					"image": "app:v1",
+				},
+			},
+			"initContainers": []interface{}{
+				map[string]interface{}{
+					"name":  "init-setup",
+					"image": "init:v1",
+				},
+			},
+			"ephemeralContainers": []interface{}{
+				map[string]interface{}{
+					"name":  "debug-tool",
+					"image": "debug:v1",
+				},
+			},
+		},
+	}
+
+	wl := workloadinterface.NewWorkloadObj(podData)
+	images := getAllWorkloadImages(wl)
+
+	assert.Contains(t, images, "app:v1")
+	assert.Contains(t, images, "init:v1")
+	assert.Contains(t, images, "debug:v1")
+	assert.Len(t, images, 3)
+}
