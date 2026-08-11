@@ -185,3 +185,57 @@ func TestUpdateConfigEmptyFieldsFromKubescapeConfigMap_LoadsClusterData(t *testi
 	assert.Equal(t, "acc-123", c.configObj.AccountID)
 	assert.Equal(t, "https://api.example.com", c.configObj.CloudAPIURL)
 }
+
+func TestUpdateConfigEmptyFieldsFromKubescapeConfigMap_LegacyGetErrors(t *testing.T) {
+	emptyList := `{"apiVersion":"v1","kind":"ConfigMapList","items":[]}`
+
+	tests := []struct {
+		name       string
+		getStatus  int
+		getBody    string
+		wantErr    bool
+		wantErrSub string
+	}{
+		{
+			name:       "forbidden get is returned",
+			getStatus:  http.StatusForbidden,
+			getBody:    `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"configmaps \"kubescape-config\" is forbidden","reason":"Forbidden","code":403}`,
+			wantErr:    true,
+			wantErrSub: "forbidden",
+		},
+		{
+			name:      "not found get is ignored",
+			getStatus: http.StatusNotFound,
+			getBody:   `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"configmaps \"kubescape-config\" not found","reason":"NotFound","code":404}`,
+			wantErr:   false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+				// Labeled list (no resource name in path) vs Get by name.
+				if strings.Contains(req.URL.RawQuery, "labelSelector=") || !strings.Contains(req.URL.Path, "/"+kubescapeConfigMapName) {
+					return jsonResponse(req, emptyList), nil
+				}
+				return &http.Response{
+					StatusCode: tc.getStatus,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(bytes.NewReader([]byte(tc.getBody))),
+					Request:    req,
+				}, nil
+			})
+
+			c := newTestClusterConfig(t, rt)
+			err := c.updateConfigEmptyFieldsFromKubescapeConfigMap(context.Background())
+
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, strings.ToLower(err.Error()), tc.wantErrSub)
+				assert.Empty(t, c.configObj.AccountID)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}

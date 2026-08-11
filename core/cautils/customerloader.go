@@ -18,6 +18,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -294,23 +295,28 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromKubescapeConfigMap(ctx contex
 	var ksConfigMap *corev1.ConfigMap
 	if len(configMaps.Items) == 0 {
 		// try to find configmaps by name (for backward compatibility)
-		ksConfigMap, _ = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(ctx, kubescapeConfigMapName, metav1.GetOptions{})
+		cm, getErr := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(ctx, kubescapeConfigMapName, metav1.GetOptions{})
+		if getErr != nil {
+			if apierrors.IsNotFound(getErr) {
+				return nil
+			}
+			return getErr
+		}
+		ksConfigMap = cm
 	} else {
 		// use the first configmap with the label
 		ksConfigMap = &configMaps.Items[0]
 	}
 
-	if ksConfigMap != nil {
-		if jsonConf, ok := ksConfigMap.Data["clusterData"]; ok {
-			tempCO := ConfigObj{}
-			if err = json.Unmarshal([]byte(jsonConf), &tempCO); err != nil {
-				return err
-			}
-			c.configObj.updateEmptyFields(&tempCO)
+	if jsonConf, ok := ksConfigMap.Data["clusterData"]; ok {
+		tempCO := ConfigObj{}
+		if err = json.Unmarshal([]byte(jsonConf), &tempCO); err != nil {
+			return err
 		}
+		c.configObj.updateEmptyFields(&tempCO)
 	}
 
-	return err
+	return nil
 }
 
 func (c *ClusterConfig) updateConfigEmptyFieldsFromCredentialsSecret(ctx context.Context) error {
