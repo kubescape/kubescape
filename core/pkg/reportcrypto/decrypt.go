@@ -427,18 +427,27 @@ func DecryptResourceMetadata(
 	return nil
 }
 
+// decryptIfEncrypted decrypts value when it carries the ENC[...] envelope and
+// returns it untouched otherwise.
+//
+// Surrounding whitespace is tolerated when detecting and decrypting an
+// envelope, but a value that is not an envelope is returned exactly as it was
+// received. Trimming it would silently rewrite plaintext that was never
+// encrypted in the first place — annotation values such as
+// kubectl.kubernetes.io/last-applied-configuration routinely carry a trailing
+// newline that is part of the data.
 func decryptIfEncrypted(value string, dek []byte) (string, error) {
 	if value == "" {
 		return value, nil
 	}
 
-	value = strings.TrimSpace(value)
+	trimmed := strings.TrimSpace(value)
 
-	if !strings.HasPrefix(value, "ENC[") {
+	if !strings.HasPrefix(trimmed, "ENC[") {
 		return value, nil
 	}
 
-	return DecryptString(value, dek)
+	return DecryptString(trimmed, dek)
 }
 
 // DecryptResourceLabels restores encrypted resource label values.
