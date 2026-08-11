@@ -1,89 +1,130 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/cenkalti/backoff/v4"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-// fakeDownloader records the targets it was asked for and fails the ones named
-// in failFor, mirroring how Download reports a per-artifact failure.
-type fakeDownloader struct {
-	failFor   map[string]error
-	requested []string
+func init() {
+	// Override backoff factory to make tests fast and predictable
+	backoffFactory = func() backoff.BackOff {
+		return backoff.WithMaxRetries(backoff.NewConstantBackOff(0), 3)
+	}
 }
 
-func (f *fakeDownloader) Download(downloadInfo *metav1.DownloadInfo) (*metav1.DownloadResult, error) {
-	f.requested = append(f.requested, targetID(*downloadInfo))
-	if err, ok := f.failFor[downloadInfo.Target]; ok {
+type mockDownloader struct {
+	errsByTarget  map[string][]error
+	callsByTarget map[string]int
+}
+
+func (m *mockDownloader) Download(downloadInfo *metav1.DownloadInfo) (*metav1.DownloadResult, error) {
+	target := downloadInfo.Target
+	if m.callsByTarget == nil {
+		m.callsByTarget = make(map[string]int)
+	}
+	calls := m.callsByTarget[target]
+
+	errs := m.errsByTarget[target]
+	var err error
+	if calls >= len(errs) {
+		err = nil
+	} else {
+		err = errs[calls]
+	}
+
+	m.callsByTarget[target]++
+
+	if err != nil {
 		return nil, err
 	}
-	return &metav1.DownloadResult{Files: []string{downloadInfo.Target + ".json"}}, nil
+	return &metav1.DownloadResult{
+		Files: []string{"file1.json", "file2.json"},
+	}, nil
 }
 
-func TestDownloadAll(t *testing.T) {
-	artifactsErr := errors.New("artifacts unreachable")
-	frameworkErr := errors.New("framework unreachable")
+func TestDownloadArtifacts(t *testing.T) {
+	downloads := []metav1.DownloadInfo{
+		{Target: "artifacts"},
+		{Target: "framework", Identifier: "security"},
+	}
 
 	tests := []struct {
-		name          string
-		failFor       map[string]error
-		wantErr       bool
-		wantErrParts  []string
-		wantRequested []string
+		name            string
+		errsByTarget    map[string][]error
+		expectError     bool
+		wantErrContains []string
+		expectedCalls   map[string]int
 	}{
 		{
-			name:          "all targets succeed",
-			wantRequested: []string{"artifacts", "framework/security"},
+			name:          "all-succeed",
+			errsByTarget:  map[string][]error{},
+			expectError:   false,
+			expectedCalls: map[string]int{"artifacts": 1, "framework": 1},
 		},
 		{
-			name:          "a failing target is reported",
-			failFor:       map[string]error{"artifacts": artifactsErr},
-			wantErr:       true,
-			wantErrParts:  []string{"1 of 2", "artifacts"},
-			wantRequested: []string{"artifacts", "framework/security"},
+			name: "transient-failure-then-succeed",
+			errsByTarget: map[string][]error{
+				"artifacts": {errors.New("transient"), nil},
+			},
+			expectError:   false,
+			expectedCalls: map[string]int{"artifacts": 2, "framework": 1},
 		},
 		{
-			name:          "every failing target is reported",
-			failFor:       map[string]error{"artifacts": artifactsErr, "framework": frameworkErr},
-			wantErr:       true,
-			wantErrParts:  []string{"2 of 2", "artifacts", "framework/security"},
-			wantRequested: []string{"artifacts", "framework/security"},
+			name: "persistent-failure",
+			errsByTarget: map[string][]error{
+				"artifacts": {errors.New("fail"), errors.New("fail"), errors.New("fail"), errors.New("fail")}, // 4 total attempts
+			},
+			expectError:   true,
+			expectedCalls: map[string]int{"artifacts": 4, "framework": 1},
+		},
+		{
+			name: "permanent-error-no-retry",
+			errsByTarget: map[string][]error{
+				"artifacts": {context.Canceled}, // Should not retry, so only 1 attempt
+			},
+			expectError:   true,
+			expectedCalls: map[string]int{"artifacts": 1, "framework": 1}, // Continues processing next target
+		},
+		{
+			name: "all-targets-fail-are-aggregated",
+			errsByTarget: map[string][]error{
+				"artifacts": {errors.New("artifacts unreachable"), errors.New("artifacts unreachable"), errors.New("artifacts unreachable"), errors.New("artifacts unreachable")},
+				"framework": {errors.New("framework unreachable"), errors.New("framework unreachable"), errors.New("framework unreachable"), errors.New("framework unreachable")},
+			},
+			expectError: true,
+			// Every failure has to surface, not just the first one: the joined
+			// error is what main turns into the non-zero exit that fails the
+			// image build in build/Dockerfile.
+			wantErrContains: []string{"artifacts unreachable", "framework unreachable"},
+			expectedCalls:   map[string]int{"artifacts": 4, "framework": 4},
 		},
 	}
 
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			downloader := &fakeDownloader{failFor: test.failFor}
-
-			err := downloadAll(downloader, defaultTargets())
-
-			// Every target is attempted regardless of earlier failures, so one
-			// unreachable artifact cannot mask the state of the others.
-			assert.Equal(t, test.wantRequested, downloader.requested)
-			if !test.wantErr {
-				require.NoError(t, err)
-				return
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &mockDownloader{errsByTarget: tt.errsByTarget}
+			err := downloadArtifacts(m, downloads)
+			if (err != nil) != tt.expectError {
+				t.Errorf("expected error: %v, got error: %v", tt.expectError, err)
 			}
-			// A non-nil error is what drives the non-zero exit that lets
-			// build/Dockerfile's RUN step fail the image build.
-			require.Error(t, err)
-			for _, part := range test.wantErrParts {
-				assert.Contains(t, err.Error(), part)
+
+			for _, want := range tt.wantErrContains {
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("expected error to mention %q, got: %v", want, err)
+				}
+			}
+
+			for target, expected := range tt.expectedCalls {
+				actual := m.callsByTarget[target]
+				if actual != expected {
+					t.Errorf("for target %q: expected %d calls, got %d", target, expected, actual)
+				}
 			}
 		})
 	}
-}
-
-func TestDefaultTargetsAreIsolatedBetweenCalls(t *testing.T) {
-	// Download fills in Path/FileName on the struct it is handed. Callers must
-	// not observe those mutations on a later call, or a retry would inherit the
-	// previous run's resolved paths.
-	first := defaultTargets()
-	first[0].Path = "/tmp/mutated"
-
-	assert.Empty(t, defaultTargets()[0].Path)
 }

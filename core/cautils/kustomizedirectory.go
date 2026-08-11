@@ -17,7 +17,8 @@ import (
 )
 
 type KustomizeDirectory struct {
-	path string
+	path        string
+	helmCommand string
 }
 
 // Used for checking if there is "Kustomization" file in the given Directory
@@ -64,6 +65,10 @@ func NewKustomizeDirectory(path string) *KustomizeDirectory {
 	return &KustomizeDirectory{
 		path: path,
 	}
+}
+
+func (kd *KustomizeDirectory) SetHelmCommand(cmd string) {
+	kd.helmCommand = cmd
 }
 
 func getKustomizeDirectoryName(path string) string {
@@ -250,7 +255,11 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	opts := krusty.MakeDefaultOptions()
 	opts.LoadRestrictions = types.LoadRestrictionsNone
 	opts.PluginConfig = types.EnabledPluginConfig(types.BploUseStaticallyLinked)
-	opts.PluginConfig.HelmConfig.Command = "helm"
+	helmCommand := "helm"
+	if kd.helmCommand != "" {
+		helmCommand = kd.helmCommand
+	}
+	opts.PluginConfig.HelmConfig.Command = helmCommand
 	kustomizer := krusty.MakeKustomizer(opts)
 	resmap, err := kustomizer.Run(fSys, kustomizeDirectoryPath)
 

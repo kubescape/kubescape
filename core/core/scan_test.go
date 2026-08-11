@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,7 +11,10 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/pkg/imagescan"
+	"github.com/kubescape/opa-utils/reporthandling"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/version"
@@ -138,6 +142,65 @@ func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "output path collision")
+}
+
+func TestResolvedOutputPath(t *testing.T) {
+	tests := []struct {
+		name, format, outputFile, want string
+	}{
+		{"append JSON", printer.JsonFormat, "report", "report.json"},
+		{"preserve JSON", printer.JsonFormat, "report.json", "report.json"},
+		{"preserve YAML alias", printer.YamlFormat, "report.yml", "report.yml"},
+		{"preserve CycloneDX", printer.CycloneDXFormat, "report.cdx.json", "report.cdx.json"},
+		{"append CycloneDX", printer.CycloneDXFormat, "report.json", "report.json.cdx.json"},
+		{"preserve SPDX", printer.SPDXFormat, "report.spdx.json", "report.spdx.json"},
+		{"append SPDX", printer.SPDXFormat, "report.json", "report.json.spdx.json"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, resolvedOutputPath(test.format, test.outputFile))
+		})
+	}
+}
+
+func TestResolvedOutputPathExposesSBOMCollisions(t *testing.T) {
+	tests := []struct {
+		sbomFormat, outputFile string
+	}{
+		{printer.CycloneDXFormat, "report.cdx.json"},
+		{printer.SPDXFormat, "report.spdx.json"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.sbomFormat, func(t *testing.T) {
+			jsonPath := resolvedOutputPath(printer.JsonFormat, test.outputFile)
+			sbomPath := resolvedOutputPath(test.sbomFormat, test.outputFile)
+			assert.Equal(t, jsonPath, sbomPath)
+		})
+	}
+}
+
+func TestGetOutputPrintersRejectsSBOMMultipartExtensionCollisions(t *testing.T) {
+	tests := []struct {
+		format, outputFile string
+	}{
+		{"json,cyclonedx-json", "report.cdx.json"},
+		{"json,spdx-json", "report.spdx.json"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.format, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				ScanType: cautils.ScanTypeImage,
+				Format:   test.format,
+				Output:   filepath.Join(t.TempDir(), test.outputFile),
+			}
+
+			_, err := GetOutputPrinters(scanInfo, context.Background(), "")
+			require.ErrorContains(t, err, "output path collision")
+		})
+	}
 }
 
 func TestIsPrioritizationScanType(t *testing.T) {
@@ -405,16 +468,58 @@ func TestKubescape_SetContextRestoresOriginal(t *testing.T) {
 
 type streamingCancelMock struct {
 	estimateClusterSizeMock
-	passedCtx context.Context
+	passedCtx                     context.Context
+	apiServerInfo                 *version.Info
+	cloudProvider                 string
+	providerAtStreamingSetup      string
+	apiServerInfoAtStreamingSetup *version.Info
+	scanningScopeAtStreamingSetup reporthandling.ScanningScopeType
 }
 
 func (m *streamingCancelMock) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
 	m.passedCtx = ctx
+	m.providerAtStreamingSetup = sessionObj.Report.ClusterCloudProvider
+	m.apiServerInfoAtStreamingSetup = sessionObj.Report.ClusterAPIServerInfo
+	m.scanningScopeAtStreamingSetup = cautils.GetScanningScope(sessionObj.Metadata.ContextMetadata)
 	batchChan := make(chan *cautils.ResourceBatch, 1)
 	errChan := make(chan error, 1)
+	batchChan <- cautils.NewResourceBatch(cautils.ClusterScope)
 	close(batchChan)
 	close(errChan)
 	return batchChan, errChan, 0, nil
+}
+
+func (m *streamingCancelMock) GetClusterAPIServerInfo(context.Context) *version.Info {
+	return m.apiServerInfo
+}
+
+func (m *streamingCancelMock) GetCloudProvider() string {
+	return m.cloudProvider
+}
+
+func TestCollectAndProcessResourcesWithStreaming_InitializesProviderScope(t *testing.T) {
+	apiServerInfo := &version.Info{GitVersion: "v1.31.0-eks"}
+	mockHandler := &streamingCancelMock{
+		apiServerInfo: apiServerInfo,
+		cloudProvider: "eks",
+	}
+	sessionObj := cautils.NewOPASessionObjMock()
+	sessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
+		ContextName: "arn:aws:eks:us-east-1:123456789012:cluster/production",
+	}
+
+	err := collectAndProcessResourcesWithStreaming(context.Background(), mockHandler, sessionObj, &cautils.ScanInfo{}, "cluster", "", "", false, time.Second, 3000)
+
+	require.NoError(t, err)
+	assert.Same(t, apiServerInfo, sessionObj.Report.ClusterAPIServerInfo)
+	assert.Equal(t, "EKS", sessionObj.Report.ClusterCloudProvider)
+	require.NotNil(t, sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudMetadata)
+	assert.Equal(t, "EKS", mockHandler.providerAtStreamingSetup,
+		"cloud provider must be available before streaming starts")
+	assert.Same(t, apiServerInfo, mockHandler.apiServerInfoAtStreamingSetup,
+		"API server info must be available before streaming starts")
+	assert.Equal(t, reporthandling.ScopeCloudEKS, mockHandler.scanningScopeAtStreamingSetup,
+		"provider-scoped frameworks must not be filtered from streaming scans")
 }
 
 func TestCollectAndProcessResourcesWithStreaming_CancelsProducerContext(t *testing.T) {
@@ -429,4 +534,42 @@ func TestCollectAndProcessResourcesWithStreaming_CancelsProducerContext(t *testi
 	require.NotNil(t, mockHandler.passedCtx)
 	assert.NoError(t, parentCtx.Err(), "parent context must remain uncanceled")
 	assert.Equal(t, context.Canceled, mockHandler.passedCtx.Err(), "derived producer context must be canceled when function returns")
+}
+
+func TestGetAllWorkloadImages(t *testing.T) {
+	podData := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]interface{}{
+			"name": "test-pod",
+		},
+		"spec": map[string]interface{}{
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name":  "main-app",
+					"image": "app:v1",
+				},
+			},
+			"initContainers": []interface{}{
+				map[string]interface{}{
+					"name":  "init-setup",
+					"image": "init:v1",
+				},
+			},
+			"ephemeralContainers": []interface{}{
+				map[string]interface{}{
+					"name":  "debug-tool",
+					"image": "debug:v1",
+				},
+			},
+		},
+	}
+
+	wl := workloadinterface.NewWorkloadObj(podData)
+	images := getAllWorkloadImages(wl)
+
+	assert.Contains(t, images, "app:v1")
+	assert.Contains(t, images, "init:v1")
+	assert.Contains(t, images, "debug:v1")
+	assert.Len(t, images, 3)
 }

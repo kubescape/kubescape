@@ -2,6 +2,7 @@ package imagescan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -54,19 +55,45 @@ func NewGCPAdaptor() *GCPAdaptor {
 	return &GCPAdaptor{}
 }
 
+// setOwningClient installs c as the adaptor's owning containeranalysis
+// client, closing any previously held client first. Without this, repeated
+// Login calls on the same adaptor instance would leak the previous client's
+// underlying gRPC connection pool.
+func (a *GCPAdaptor) setOwningClient(c *containeranalysis.Client) {
+	if a.owningClient != nil {
+		if closeErr := a.owningClient.Close(); closeErr != nil {
+			logger.L().Warning("failed to close previous gcp container analysis client", helpers.Error(closeErr))
+		}
+	}
+
+	a.owningClient = c
+	a.client = &gcpAPIWrapper{client: c.GetGrafeasClient()}
+}
+
 // Login authenticates with GCP. It prioritizes the default application credentials.
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as GCP SDK relies heavily on Workload Identity and Application Default Credentials.
 func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
-	if credentials.Username != "" || credentials.Password != "" {
+	if credentials.Username != "" || credentials.Password != "" || credentials.Token != "" {
 		return fmt.Errorf("explicit credentials are intentionally unsupported for gcp; use Application Default Credentials or Workload Identity")
 	}
 
 	parts := strings.Split(registry, "/")
+	var newProjectID string
 	if len(parts) >= 2 {
-		a.projectID = parts[1]
+		newProjectID = parts[1]
 	} else {
 		return fmt.Errorf("invalid gcp registry format: expected location-docker.pkg.dev/project/repository, got %s", registry)
+	}
+
+	if a.owningClient != nil {
+		a.client = nil // Stage clearing of client
+		if err := a.owningClient.Close(); err != nil {
+			return fmt.Errorf("failed to close previous container analysis client: %w", err)
+		}
+		a.owningClient = nil
+	} else {
+		a.client = nil
 	}
 
 	c, err := containeranalysis.NewClient(ctx)
@@ -74,8 +101,8 @@ func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials Reg
 		return fmt.Errorf("unable to load gcp container analysis client: %w", err)
 	}
 
-	a.owningClient = c
-	a.client = &gcpAPIWrapper{client: c.GetGrafeasClient()}
+	a.projectID = newProjectID
+	a.setOwningClient(c)
 
 	// Fail-fast probe to ensure identity is valid
 	req := &grafeaspb.ListOccurrencesRequest{
@@ -106,6 +133,7 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 	}
 
 	var statuses []ContainerImageScanStatus
+	var aggErr error
 
 	for _, imageID := range imageIDs {
 		status := ContainerImageScanStatus{
@@ -133,7 +161,9 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 				break
 			}
 			if err != nil {
-				logger.L().Warning("skipping image scan status due to api error", helpers.String("repository", imageID.Repository), helpers.Error(err))
+				fetchErr := fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
+				logger.L().Warning("skipping image scan status due to api error", helpers.Error(fetchErr))
+				aggErr = errors.Join(aggErr, fetchErr)
 				break
 			}
 
@@ -152,7 +182,7 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 		statuses = append(statuses, status)
 	}
 
-	return statuses, nil
+	return statuses, aggErr
 }
 
 // Helper to normalize GCP severity to Kubescape expected severity
@@ -180,6 +210,7 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 	}
 
 	var reports []ContainerImageVulnerabilityReport
+	var aggErr error
 
 	for _, imageID := range imageIDs {
 		report := ContainerImageVulnerabilityReport{
@@ -208,7 +239,9 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 				break
 			}
 			if err != nil {
-				logger.L().Warning("skipping image vulnerabilities due to api error", helpers.String("repository", imageID.Repository), helpers.Error(err))
+				fetchErr := fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, err)
+				logger.L().Warning("skipping image vulnerabilities due to api error", helpers.Error(fetchErr))
+				aggErr = errors.Join(aggErr, fetchErr)
 				break
 			}
 
@@ -242,7 +275,7 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 		reports = append(reports, report)
 	}
 
-	return reports, nil
+	return reports, aggErr
 }
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
@@ -267,7 +300,10 @@ func (a *GCPAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Contai
 // Destroy cleans up any persistent resources used by the adaptor.
 func (a *GCPAdaptor) Destroy() error {
 	if a.owningClient != nil {
-		return a.owningClient.Close()
+		err := a.owningClient.Close()
+		a.owningClient = nil
+		a.client = nil
+		return err
 	}
 	return nil
 }

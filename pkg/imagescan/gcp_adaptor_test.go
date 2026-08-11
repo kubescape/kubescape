@@ -6,9 +6,14 @@ import (
 	"testing"
 	"time"
 
+	containeranalysis "cloud.google.com/go/containeranalysis/apiv1"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
 	grafeaspb "google.golang.org/genproto/googleapis/grafeas/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -82,9 +87,10 @@ func TestGCPAdaptor_GetImagesScanStatus(t *testing.T) {
 			expectedScan: false,
 		},
 		{
-			name:         "api error path ignores failure for one image",
-			mockErr:      fmt.Errorf("simulated API error"),
-			expectedScan: false,
+			name:          "api error path aggregates failure",
+			mockErr:       fmt.Errorf("simulated API error"),
+			expectedError: true,
+			expectedScan:  false,
 		},
 	}
 
@@ -180,4 +186,57 @@ func TestGCPAdaptor_GetImagesVulnerabilities_Cap(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, reports, 1)
 	assert.Len(t, reports[0].Vulnerabilities, 1000) // Should truncate at 1000 without returning an error
+}
+
+// newFakeContainerAnalysisClient builds a real *containeranalysis.Client
+// backed by a non-blocking, unauthenticated local dial target, so tests can
+// exercise client lifecycle (in particular Close()) without needing live GCP
+// credentials or network access.
+func newFakeContainerAnalysisClient(t *testing.T) *containeranalysis.Client {
+	t.Helper()
+	c, err := containeranalysis.NewClient(context.Background(),
+		option.WithoutAuthentication(),
+		option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
+		option.WithEndpoint("localhost:0"),
+	)
+	require.NoError(t, err)
+	return c
+}
+
+func TestGCPAdaptor_setOwningClient_ClosesPreviousClient(t *testing.T) {
+	adaptor := NewGCPAdaptor()
+
+	first := newFakeContainerAnalysisClient(t)
+	adaptor.setOwningClient(first)
+	require.Same(t, first, adaptor.owningClient)
+
+	second := newFakeContainerAnalysisClient(t)
+	adaptor.setOwningClient(second)
+	require.Same(t, second, adaptor.owningClient)
+
+	// setOwningClient must have already closed the first client when it was
+	// replaced; closing an already-closed connection returns an error, which
+	// proves it wasn't leaked open.
+	assert.Error(t, first.Close(), "previous client should already be closed by setOwningClient")
+
+	assert.NoError(t, adaptor.Destroy())
+}
+
+func TestGCPAdaptor_Login_CloseFailureStateClearing(t *testing.T) {
+	adaptor := NewGCPAdaptor()
+	first := newFakeContainerAnalysisClient(t)
+	adaptor.setOwningClient(first)
+
+	// Close it manually so the next Close() inside Login() fails.
+	_ = first.Close()
+
+	// Login should fail because closing the previous client fails.
+	err := adaptor.Login(context.Background(), "location-docker.pkg.dev/project/repository", RegistryCredentials{})
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to close previous container analysis client")
+
+	// State clearing check: client must be nil, owningClient must be retained
+	assert.Nil(t, adaptor.client, "a.client should be cleared before Close()")
+	assert.NotNil(t, adaptor.owningClient, "a.owningClient should be retained when close fails")
 }

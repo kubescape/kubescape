@@ -347,6 +347,26 @@ func TestBuildScanCoverage_PartialGVRPullsPassedThrough(t *testing.T) {
 	assert.Empty(t, coverage.NotEvaluatedControls)
 }
 
+func TestBuildScanCoverage_SortsPartialGVRPullsWithoutMutatingInput(t *testing.T) {
+	partials := []PartialGVRPull{
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==b", Error: "z error"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==b", Error: "a error"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==a", Error: "forbidden"},
+		{GVR: "/v1/pods", Selector: "metadata.namespace==z", Error: "denied"},
+	}
+	original := append([]PartialGVRPull(nil), partials...)
+
+	coverage := BuildScanCoverage(nil, nil, nil, partials, nil)
+
+	assert.Equal(t, []PartialGVRPull{
+		{GVR: "/v1/pods", Selector: "metadata.namespace==z", Error: "denied"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==a", Error: "forbidden"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==b", Error: "a error"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==b", Error: "z error"},
+	}, coverage.PartialGVRPulls)
+	assert.Equal(t, original, partials)
+}
+
 func TestComputeCoverageScore_Float32PrecisionLoss(t *testing.T) {
 	// 53 out of 100 evaluated controls: float32(53)/float32(100)*100
 	// evaluates to 52.999996 internally, but Float32ToIntFloor snaps it

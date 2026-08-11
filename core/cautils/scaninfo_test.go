@@ -415,6 +415,45 @@ func TestScanInfoFormatsDeduplicatesInOrder(t *testing.T) {
 	}
 }
 
+func TestScanInfoToScanMetadataFormats(t *testing.T) {
+	testCases := []struct {
+		name   string
+		format string
+		want   []string
+	}{
+		{
+			name:   "multiple formats are separate metadata entries",
+			format: "json,junit,html",
+			want:   []string{"json", "junit", "html"},
+		},
+		{
+			name:   "formats are trimmed and deduplicated",
+			format: " json, ,pdf,json,pdf ",
+			want:   []string{"json", "pdf"},
+		},
+		{
+			name:   "single format is preserved",
+			format: "sarif",
+			want:   []string{"sarif"},
+		},
+		{
+			name:   "empty format does not produce an empty metadata entry",
+			format: "",
+			want:   []string{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			scanInfo := &ScanInfo{Format: tc.format}
+
+			metadata := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
+
+			assert.Equal(t, tc.want, metadata.ScanMetadata.Formats)
+		})
+	}
+}
+
 func TestAppendPolicyIdentifiers(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -521,6 +560,54 @@ func TestSetUseFrom(t *testing.T) {
 			assert.Equal(t, tt.want, tt.scanInfo.UseFrom)
 		})
 	}
+}
+
+func TestSetUseArtifactsFrom(t *testing.T) {
+	t.Run("directory whose name contains .json is kept as-is", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "my.json-artifacts")
+		require.NoError(t, os.MkdirAll(dir, 0755))
+
+		scanInfo := &ScanInfo{UseArtifactsFrom: dir}
+		require.NoError(t, scanInfo.setUseArtifactsFrom(context.Background()))
+
+		assert.Equal(t, dir, scanInfo.UseArtifactsFrom)
+	})
+
+	t.Run("a file path falls back to its parent directory", func(t *testing.T) {
+		parent := t.TempDir()
+		file := filepath.Join(parent, "controls-inputs.json")
+		require.NoError(t, os.WriteFile(file, []byte(`{}`), 0600))
+
+		scanInfo := &ScanInfo{UseArtifactsFrom: file}
+		require.NoError(t, scanInfo.setUseArtifactsFrom(context.Background()))
+
+		assert.Equal(t, parent, scanInfo.UseArtifactsFrom)
+	})
+
+	t.Run("bare filename without separator is left untouched", func(t *testing.T) {
+		t.Chdir(t.TempDir()) // hermetic: behavior must not depend on the package dir contents
+
+		scanInfo := &ScanInfo{UseArtifactsFrom: "controls-inputs.json"}
+		require.Error(t, scanInfo.setUseArtifactsFrom(context.Background()))
+		assert.Equal(t, "controls-inputs.json", scanInfo.UseArtifactsFrom)
+	})
+
+	t.Run("explicit current-directory file path falls back to .", func(t *testing.T) {
+		t.Chdir(t.TempDir()) // hermetic: behavior must not depend on the package dir contents
+		require.NoError(t, os.WriteFile("./controls-inputs.json", []byte(`{}`), 0600))
+
+		scanInfo := &ScanInfo{UseArtifactsFrom: "./controls-inputs.json"}
+		require.NoError(t, scanInfo.setUseArtifactsFrom(context.Background()))
+
+		assert.Equal(t, ".", scanInfo.UseArtifactsFrom)
+	})
+
+	t.Run("nonexistent path is left untouched", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "missing")
+		scanInfo := &ScanInfo{UseArtifactsFrom: path}
+		require.Error(t, scanInfo.setUseArtifactsFrom(context.Background()))
+		assert.Equal(t, path, scanInfo.UseArtifactsFrom)
+	})
 }
 
 // TestInitDeduplicatesUseFrom covers the offline HTTP handler configuration, where UseDefault

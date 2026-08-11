@@ -222,12 +222,17 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) error {
 	if scanInfo.UseArtifactsFrom == "" {
 		return nil
 	}
-	// UseArtifactsFrom must be a path without a filename
-	dir, file := filepath.Split(scanInfo.UseArtifactsFrom)
-	if dir == "" {
-		scanInfo.UseArtifactsFrom = file
-	} else if strings.Contains(file, ".json") {
-		scanInfo.UseArtifactsFrom = dir
+	// UseArtifactsFrom must be a directory. If it points at a single file,
+	// fall back to its parent directory based on the filesystem, not a name
+	// heuristic (a directory named "*.json" is still a directory). A bare
+	// filename with no path separator is left untouched so os.ReadDir below
+	// surfaces the existing clear error instead of silently scanning ".".
+	// An explicit current-directory path like "./<file>" has a separator, so
+	// it falls back to "." as its parent directory.
+	if info, err := os.Stat(scanInfo.UseArtifactsFrom); err == nil && !info.IsDir() {
+		if filepath.Base(scanInfo.UseArtifactsFrom) != scanInfo.UseArtifactsFrom {
+			scanInfo.UseArtifactsFrom = filepath.Dir(scanInfo.UseArtifactsFrom)
+		}
 	}
 	// set frameworks files
 	files, err := os.ReadDir(scanInfo.UseArtifactsFrom)
@@ -364,7 +369,7 @@ func splitNamespaceList(s string) []string {
 func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
-	metadata.ScanMetadata.Formats = []string{scanInfo.Format}
+	metadata.ScanMetadata.Formats = scanInfo.Formats()
 	metadata.ScanMetadata.FormatVersion = scanInfo.FormatVersion
 	metadata.ScanMetadata.Submit = scanInfo.Submit.GetBool()
 
@@ -425,7 +430,11 @@ func (scanInfo *ScanInfo) GetInputFiles() string {
 
 func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
 	if scanInfo.scanningContext == nil {
-		scanningContext := scanInfo.getScanningContext(scanInfo.GetInputFiles())
+		input := scanInfo.GetInputFiles()
+		scanningContext := scanInfo.getScanningContext(input)
+		if input != "" {
+			scanInfo.cloneAdditionalRemoteInputs(input)
+		}
 		scanInfo.scanningContext = &scanningContext
 	}
 	return *scanInfo.scanningContext
@@ -510,7 +519,6 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 						logger.L().Warning("failed to clean up cloned repository", helpers.String("url", originalInput), helpers.Error(err))
 					}
 				})
-				scanInfo.cloneAdditionalRemoteInputs(originalInput)
 				return ContextGitRemote
 			}
 			if err := ReleaseClonedRepo(originalInput); err != nil {

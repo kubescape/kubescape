@@ -132,6 +132,11 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			if err := enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo); err != nil {
 				return err
 			}
+			if scanInfo.ScanImages {
+				if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+					return err
+				}
+			}
 			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
 				return err
 			}

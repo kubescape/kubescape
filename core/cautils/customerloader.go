@@ -339,17 +339,6 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromCredentialsSecret(ctx context
 	return nil
 }
 
-func loadConfigFromData(co *ConfigObj, data map[string]string) error {
-	var e error
-	if jsonConf, ok := data["config.json"]; ok {
-		e = readConfig([]byte(jsonConf), co)
-	}
-	if bData, err := json.Marshal(data); err == nil {
-		e = readConfig(bData, co)
-	}
-
-	return e
-}
 
 func existsConfigFile() bool {
 	_, err := os.ReadFile(ConfigFileFullPath())
@@ -628,4 +617,3 @@ func GetTenantConfig(ctx context.Context, accountID, accessKey, clusterName, cus
 	return NewClusterConfig(ctx, k8s, accountID, accessKey, clusterName, customClusterName)
 }
 
-// firstNonEmpty returns the first non-empty string

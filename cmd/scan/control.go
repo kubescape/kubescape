@@ -111,6 +111,11 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if err := enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo); err != nil {
 				return err
 			}
+			if scanInfo.ScanImages {
+				if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+					return err
+				}
+			}
 			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetResults().SummaryDetails.Controls), scanInfo); err != nil {
 				return err
 			}
@@ -136,6 +141,9 @@ func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 	}
 
 	if err := shared.ValidateSeverity(severity); severity != "" && err != nil {
+		return err
+	}
+	if err := validateThresholdsOnly(scanInfo); err != nil {
 		return err
 	}
 	return nil

@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 )
 
 const (
@@ -39,6 +40,7 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, _ string) (*HostSe
 	if config == nil {
 		return nil, fmt.Errorf("failed to get k8s config")
 	}
+	config = rest.CopyConfig(config)
 	// force GRPC
 	config.AcceptContentTypes = "application/vnd.kubernetes.protobuf"
 	config.ContentType = "application/vnd.kubernetes.protobuf"

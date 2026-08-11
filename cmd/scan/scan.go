@@ -356,6 +356,9 @@ func enforceImageSeverityThresholds(imageScanData []cautils.ImageScanData, scanI
 	}
 
 	for _, data := range imageScanData {
+		if data.VulnerabilityProvider == nil {
+			continue
+		}
 		for m := range data.Matches.Enumerate() {
 			//nolint:staticcheck // deprecated but replacing it requires refactoring
 			metadata, err := data.VulnerabilityProvider.VulnerabilityMetadata(m.Vulnerability.Reference)
@@ -363,7 +366,8 @@ func enforceImageSeverityThresholds(imageScanData []cautils.ImageScanData, scanI
 				continue
 			}
 
-			if imagescan.ParseSeverity(metadata.Severity) >= thresholdSeverity {
+			if imagescan.ParseSeverity(metadata.Severity) >= thresholdSeverity &&
+				(!scanInfo.OnlyFixable || m.Vulnerability.Fix.State == vulnerability.FixStateFixed) {
 				return fmt.Errorf("image scan result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
 			}
 		}
