@@ -24,6 +24,6 @@
   ],
   "ruleDependencies": [],
   "description": "determines which subjects can create/update ephemeral containers on pods, which is equivalent to gaining exec-level code execution and can be used to break out to the node via a privileged ephemeral container",
-  "remediation": "",
+  "remediation": "Restrict update/patch access to the pods/ephemeralcontainers subresource to a small, trusted set of subjects. Avoid granting update/patch/* on pods/* or cluster-wide wildcards, and prefer namespace-scoped Roles over ClusterRoles for debugging permissions.",
   "ruleQuery": "armo_builtins"
 }

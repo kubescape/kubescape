@@ -1,6 +1,6 @@
 [
     {
-        "alertMessage": "Subject: User-dave can attach ephemeral containers to pods",
+        "alertMessage": "Subject: ServiceAccount-debugger-sa can attach ephemeral containers to pods",
         "reviewPaths": [
             "relatedObjects[1].rules[0].resources[0]",
             "relatedObjects[1].rules[0].verbs[0]",
@@ -21,48 +21,29 @@
         "alertScore": 8,
         "alertObject": {
             "externalObjects": {
-                "apiGroup": "rbac.authorization.k8s.io",
-                "kind": "User",
-                "name": "dave",
+                "kind": "ServiceAccount",
+                "name": "debugger-sa",
+                "namespace": "kube-system",
                 "relatedObjects": [
                     {
                         "apiVersion": "rbac.authorization.k8s.io/v1",
-                        "kind": "RoleBinding",
-                        "metadata": {
-                            "name": "read-secrets",
-                            "namespace": "default"
-                        },
+                        "kind": "ClusterRoleBinding",
+                        "metadata": { "name": "debugger-crb" },
                         "roleRef": {
                             "apiGroup": "rbac.authorization.k8s.io",
                             "kind": "ClusterRole",
-                            "name": "pod-debugger-cluster"
+                            "name": "ephemeral-debugger"
                         },
                         "subjects": [
-                            {
-                                "apiGroup": "rbac.authorization.k8s.io",
-                                "kind": "User",
-                                "name": "dave"
-                            }
+                            { "kind": "ServiceAccount", "name": "debugger-sa", "namespace": "kube-system" }
                         ]
                     },
                     {
                         "apiVersion": "rbac.authorization.k8s.io/v1",
                         "kind": "ClusterRole",
-                        "metadata": {
-                            "name": "pod-debugger-cluster"
-                        },
+                        "metadata": { "name": "ephemeral-debugger" },
                         "rules": [
-                            {
-                                "apiGroups": [
-                                    ""
-                                ],
-                                "resources": [
-                                    "pods/*"
-                                ],
-                                "verbs": [
-                                    "update"
-                                ]
-                            }
+                            { "apiGroups": [""], "resources": ["pods/ephemeralcontainers"], "verbs": ["patch"] }
                         ]
                     }
                 ]
