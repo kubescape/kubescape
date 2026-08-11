@@ -3,10 +3,8 @@ resource "kubernetes_manifest" "bignum_test" {
     apiVersion = "v1"
     kind       = "ConfigMap"
     metadata = {
-      name = "bignum-test"
-      annotations = {
-        "big-number" = 9007199254740993
-      }
+      name       = "bignum-test"
+      generation = 9007199254740993
     }
     data = {}
   }

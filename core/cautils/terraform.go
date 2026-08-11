@@ -75,6 +75,11 @@ func (td *TerraformDirectory) GetWorkloads(path string) (map[string][]workloadin
 	for i, file := range files {
 		manifests, fileErrs := extractKubernetesManifests(file.Body, evalCtx)
 		errs = append(errs, fileErrs...)
+
+		typedManifests, typedErrs := extractTypedResources(file.Body, evalCtx)
+		errs = append(errs, typedErrs...)
+		manifests = append(manifests, typedManifests...)
+
 		src := parsedPaths[i]
 		for j, m := range manifests {
 			data, err := json.Marshal(m)
