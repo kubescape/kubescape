@@ -265,11 +265,22 @@ type infoStars struct {
 	info  string
 }
 
+// mapInfoToPrintInfo assigns a footnote marker to every distinct skip reason.
+// Controls are walked in ID order: marker assignment follows iteration order, so
+// ranging over the map directly gives a different marker per run and lets two
+// calls over the same controls disagree.
 func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) []infoStars {
+	controlIDs := make([]string, 0, len(controls))
+	for controlID := range controls {
+		controlIDs = append(controlIDs, controlID)
+	}
+	sort.Strings(controlIDs)
+
 	infoToPrintInfo := []infoStars{}
 	infoToPrintInfoMap := map[string]any{}
 	starCount := indicator
-	for _, control := range controls {
+	for _, controlID := range controlIDs {
+		control := controls[controlID]
 		if control.GetStatus().IsSkipped() && control.GetStatus().Info() != "" {
 			if _, ok := infoToPrintInfoMap[control.GetStatus().Info()]; !ok {
 				infoToPrintInfo = append(infoToPrintInfo, infoStars{
