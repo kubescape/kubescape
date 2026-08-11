@@ -249,8 +249,7 @@ func collectKustomizeInputOwnership(
 	inputReferences := make([]string, 0,
 		len(kustomization.Crds)+len(kustomization.Configurations)+len(kustomization.Generators)+
 			len(kustomization.Transformers)+len(kustomization.Validators)+
-			len(kustomization.Patches)+len(kustomization.PatchesJson6902)+
-			len(kustomization.PatchesStrategicMerge)+len(kustomization.Replacements),
+			len(kustomization.Patches)+len(kustomization.Replacements),
 	)
 	inputReferences = append(inputReferences, kustomization.Crds...)
 	inputReferences = append(inputReferences, kustomization.Configurations...)
@@ -260,10 +259,14 @@ func collectKustomizeInputOwnership(
 	for _, patch := range kustomization.Patches {
 		inputReferences = append(inputReferences, patch.Path)
 	}
-	for _, patch := range kustomization.PatchesJson6902 {
+	// FixKustomization intentionally leaves the deprecated patch fields intact;
+	// only FixKustomizationPreMarshalling migrates them, and that requires a
+	// Kustomize filesystem. Track their local files here so legacy builds get the
+	// same ownership behavior as the normalized Patches field.
+	for _, patch := range kustomization.PatchesJson6902 { //nolint:staticcheck // Required for legacy Kustomization input ownership.
 		inputReferences = append(inputReferences, patch.Path)
 	}
-	for _, patch := range kustomization.PatchesStrategicMerge {
+	for _, patch := range kustomization.PatchesStrategicMerge { //nolint:staticcheck // Required for legacy Kustomization input ownership.
 		inputReferences = append(inputReferences, string(patch))
 	}
 	for _, replacement := range kustomization.Replacements {
