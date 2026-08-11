@@ -1,0 +1,29 @@
+{
+  "name": "attach-ephemeral-container-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Privilege Escalation::Attach ephemeral container",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        "rbac.authorization.k8s.io"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "RoleBinding",
+        "ClusterRoleBinding",
+        "Role",
+        "ClusterRole"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can create/update ephemeral containers on pods, which is equivalent to gaining exec-level code execution and can be used to break out to the node via a privileged ephemeral container",
+  "remediation": "",
+  "ruleQuery": "armo_builtins"
+}
