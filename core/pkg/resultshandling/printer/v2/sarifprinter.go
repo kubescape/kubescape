@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -124,7 +125,7 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 		})
 }
 
-func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults cautils.ImageScanData) error {
+func (sp *SARIFPrinter) printImageScan(scanResults cautils.ImageScanData) error {
 	model, err := models.NewDocument(clio.Identification{}, scanResults.Packages, scanResults.Context,
 		scanResults.Matches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
 	if err != nil {
@@ -132,20 +133,14 @@ func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults cautils.
 	}
 
 	pres := grypesarif.NewPresenter(models.PresenterConfig{Document: model, SBOM: scanResults.SBOM})
-	if err := pres.Present(sp.writer); err != nil {
+	var rendered bytes.Buffer
+	if err := pres.Present(&rendered); err != nil {
 		return err
 	}
 
 	// Change driver name to Kubescape
-
-	jsonReport, err := os.ReadFile(sp.writer.Name())
-	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to read json file - results will not be patched", helpers.Error(err))
-		return nil
-	}
-
 	var sarifReport sarif.Report
-	if err := json.Unmarshal(jsonReport, &sarifReport); err != nil {
+	if err := json.Unmarshal(rendered.Bytes(), &sarifReport); err != nil {
 		return err
 	}
 
@@ -154,13 +149,16 @@ func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults cautils.
 		sarifReport.Runs[i].Tool.Driver.Name = "Kubescape"
 	}
 
-	// Write back to file
+	// Write the patched report to the configured destination once. Rendering and
+	// patching in memory is required for non-file destinations such as stdout:
+	// reopening /dev/stdout for reading blocks when stdout is a pipe or terminal.
 	updatedSarifReport, err := json.MarshalIndent(sarifReport, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(sp.writer.Name(), updatedSarifReport, 0644) //nolint:gosec // Read-only report output, acceptable permissions
+	_, err = sp.writer.Write(updatedSarifReport)
+	return err
 }
 
 func (sp *SARIFPrinter) PrintNextSteps() {
@@ -174,7 +172,7 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 		}
 
 		// image scan
-		if err := sp.printImageScan(ctx, imageScanData[0]); err != nil {
+		if err := sp.printImageScan(imageScanData[0]); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
 			return fmt.Errorf("failed to write results in sarif format: %w", err)
 		}
