@@ -75,7 +75,7 @@ func kustomizeTestdataPath() string {
 }
 
 func TestKustomizeHelmChartDirectories_CustomHomeDeduplicatesPhysicalChart(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	writeManifestFixture(t, root, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 helmGlobals:
@@ -93,7 +93,7 @@ helmCharts:
 }
 
 func TestKustomizeHelmChartDirectories_VersionedRepositoryChart(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	writeManifestFixture(t, root, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 helmGlobals:
@@ -140,7 +140,7 @@ func TestKustomizeHelmChartDirectories_ChartHomeAndDownloadLayout(t *testing.T) 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			root := t.TempDir()
+			root := resolvedTempDir(t)
 			chartHome := tt.chartHome(root)
 			writeManifestFixture(t, root, "kustomization.yaml", fmt.Sprintf(`apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -159,7 +159,7 @@ helmCharts:
 }
 
 func TestAppendOwnedHelmChartTree_PreservesPartialDiscovery(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	nested := filepath.Join(root, "charts", "dependency")
 	require.NoError(t, os.MkdirAll(nested, 0o750))
 
@@ -179,7 +179,7 @@ func TestAppendOwnedHelmChartTree_PreservesPartialDiscovery(t *testing.T) {
 }
 
 func TestKustomizeHelmChartDirectories_TraversesSelectedLocalGraph(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	base := filepath.Join(root, "base")
 	component := filepath.Join(root, "component")
 	require.NoError(t, os.MkdirAll(base, 0o750))
@@ -340,4 +340,20 @@ cat <<'EOF'
 		}
 	}
 	assert.True(t, configMapFound, "helm chart ConfigMap should be present in rendered workloads")
+}
+
+// resolvedTempDir returns t.TempDir() with symlinks resolved.
+//
+// The loaders under test canonicalise their inputs with filepath.EvalSymlinks
+// (fileutils.go), while t.TempDir() hands back an unresolved path: /var/... on
+// macOS where the real directory is /private/var/..., and the 8.3 short form on
+// Windows. Comparing a resolved result against an unresolved expectation fails
+// on both, and passes on Linux only because the two spellings coincide there.
+// localgitrepository_test.go already resolves the expected side for the same
+// reason.
+func resolvedTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	return dir
 }
