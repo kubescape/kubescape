@@ -49,7 +49,7 @@ var (
 	MapResourceToApiGroupCloud = map[string][]string{
 		ClusterDescribe:         {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"},
 		DescribeRepositories:    {"eks.amazonaws.com/v1"}, //TODO - add google and azure when they are supported
-		ListEntitiesForPolicies: {"eks.amazonaws.com/v1"}, //TODO - add google and azure when they are supported
+		ListEntitiesForPolicies: {"eks.amazonaws.com/v1", "management.azure.com/v1"}, //TODO - add google when it is supported
 	}
 )
 
