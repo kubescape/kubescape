@@ -47,17 +47,20 @@ var typedResourceGVK = map[string]struct{ apiVersion, kind string }{
 // (block "container" -> field "containers"). Anything not listed here just
 // gets its singular name camelCased.
 var pluralOverrides = map[string]string{
-	"container":          "containers",
-	"init_container":     "initContainers",
-	"volume":             "volumes",
-	"volume_mount":       "volumeMounts",
-	"env_from":           "envFrom",
-	"port":               "ports",
-	"toleration":         "tolerations",
-	"host_alias":         "hostAliases",
-	"rule":               "rules",
-	"subject":            "subjects",
-	"image_pull_secrets": "imagePullSecrets",
+	"container":             "containers",
+	"init_container":        "initContainers",
+	"volume":                "volumes",
+	"volume_mount":          "volumeMounts",
+	"env_from":              "envFrom",
+	"port":                  "ports",
+	"toleration":            "tolerations",
+	"host_alias":            "hostAliases",
+	"rule":                  "rules",
+	"subject":               "subjects",
+	"image_pull_secrets":    "imagePullSecrets",
+	"match_expressions":     "matchExpressions",
+	"volume_claim_template": "volumeClaimTemplates",
+	"http_header":           "httpHeaders",
 }
 
 // repeatableBlocks lists HCL block labels that always encode as a JSON array,
@@ -67,6 +70,29 @@ var repeatableBlocks = map[string]bool{
 	"container": true, "init_container": true, "volume": true, "volume_mount": true,
 	"env": true, "env_from": true, "port": true, "toleration": true,
 	"host_alias": true, "rule": true, "subject": true, "image_pull_secrets": true,
+	"match_expressions": true, "volume_claim_template": true, "http_header": true,
+}
+
+// resourceMetaAttributes are Terraform meta-argument attributes valid on any
+// resource block (they configure Terraform itself, not the K8s object).
+// depends_on and provider in particular reference other resources/providers
+// that the var-only evalCtx can never resolve, so they must be stripped
+// before expression evaluation rather than left to fail into errs.
+var resourceMetaAttributes = map[string]bool{
+	"depends_on": true,
+	"provider":   true,
+	"count":      true,
+	"for_each":   true,
+}
+
+// resourceMetaBlocks are Terraform meta-argument blocks valid on any resource
+// block, stripped for the same reason. This is applied ONLY at the resource's
+// top level — a nested "lifecycle" block (e.g. a container's postStart/
+// preStop hooks) is a legitimate K8s field and must still be converted.
+var resourceMetaBlocks = map[string]bool{
+	"lifecycle":   true,
+	"provisioner": true,
+	"connection":  true,
 }
 
 func snakeToCamel(s string) string {
@@ -132,6 +158,57 @@ func hclBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error,
 	return out
 }
 
+// hclResourceBodyToMap converts the top-level body of a resource block. It
+// strips Terraform meta-arguments (depends_on, provider, count, for_each,
+// lifecycle, provisioner, connection) before delegating each remaining
+// attribute/block to the same conversion hclBodyToMap uses, so nested
+// Kubernetes fields with the same names (e.g. a container's own "lifecycle"
+// block) are unaffected.
+func hclResourceBodyToMap(body *hclsyntax.Body, evalCtx *hcl.EvalContext, errs *[]error, path string) map[string]interface{} {
+	out := map[string]interface{}{}
+
+	for name, attr := range body.Attributes {
+		if resourceMetaAttributes[name] {
+			continue
+		}
+		val, diags := attr.Expr.Value(evalCtx)
+		if diags.HasErrors() {
+			*errs = append(*errs, fmt.Errorf("%s: attribute %q: %w", path, name, diags))
+			continue
+		}
+		out[fieldNameFor(name)] = ctyToGo(val)
+	}
+
+	grouped := map[string][]*hclsyntax.Block{}
+	var order []string
+	for _, b := range body.Blocks {
+		if resourceMetaBlocks[b.Type] {
+			continue
+		}
+		if _, seen := grouped[b.Type]; !seen {
+			order = append(order, b.Type)
+		}
+		grouped[b.Type] = append(grouped[b.Type], b)
+	}
+
+	for _, blockType := range order {
+		blocks := grouped[blockType]
+		field := fieldNameFor(blockType)
+
+		if len(blocks) > 1 || repeatableBlocks[blockType] {
+			var arr []interface{}
+			for _, b := range blocks {
+				arr = append(arr, hclBodyToMap(b.Body, evalCtx, errs, path+"."+blockType))
+			}
+			out[field] = arr
+			continue
+		}
+		out[field] = hclBodyToMap(blocks[0].Body, evalCtx, errs, path+"."+blockType)
+	}
+
+	return out
+}
+
 // extractTypedResources finds resource "kubernetes_<type>" "name" { ... }
 // blocks for the typed provider resources listed in typedResourceGVK and
 // converts each into a K8s manifest map. Resource types with no entry in the
@@ -154,7 +231,7 @@ func extractTypedResources(body hcl.Body, evalCtx *hcl.EvalContext) ([]map[strin
 			continue
 		}
 
-		obj := hclBodyToMap(block.Body, evalCtx, &errs, block.Labels[0]+"."+block.Labels[1])
+		obj := hclResourceBodyToMap(block.Body, evalCtx, &errs, block.Labels[0]+"."+block.Labels[1])
 		obj["apiVersion"] = gvk.apiVersion
 		obj["kind"] = gvk.kind
 
