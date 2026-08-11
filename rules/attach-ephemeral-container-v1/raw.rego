@@ -51,8 +51,8 @@ is_referenced_role(role, rolebinding) if {
 	path := array.concat(resources_path, verb_path)
 	path2 := array.concat(path, api_groups_path)
 	finalpath := array.concat(path2, [
-		sprintf("relatedObjects[%d].subjects[%d]", [j, k]),
 		sprintf("relatedObjects[%d].roleRef.name", [j]),
+		sprintf("relatedObjects[%d].subjects[%d]", [j, k]),
 	])
 
 	msga := {
