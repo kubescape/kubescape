@@ -10,7 +10,7 @@ import (
 )
 
 func TestListKustomizeInputsDiscoversNestedHelmOwnership(t *testing.T) {
-	repoRoot := t.TempDir()
+	repoRoot := resolvedTempDir(t)
 	appDir := filepath.Join(repoRoot, "app")
 	require.NoError(t, os.MkdirAll(appDir, 0o750))
 	writeManifestFixture(t, appDir, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
@@ -32,7 +32,7 @@ helmCharts:
 }
 
 func TestKustomizeInputOwnershipIncludesCRDAndHelmValuesInputs(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	for _, directory := range []string{
 		filepath.Join(root, "charts", "explicit"),
 		filepath.Join(root, "charts", "defaulted"),

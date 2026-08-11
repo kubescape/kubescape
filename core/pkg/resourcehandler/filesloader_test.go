@@ -584,7 +584,7 @@ esac
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func TestGetResourcesFromPath_RendersNestedKustomizeDirectory(t *testing.T) {
+func TestGetResourcesFromPath_RendersNestedKustomizeDirectoryWithPreciseOwnership(t *testing.T) {
 	repoRoot := t.TempDir()
 	appDir := filepath.Join(repoRoot, "app")
 	require.NoError(t, os.MkdirAll(appDir, 0o750))

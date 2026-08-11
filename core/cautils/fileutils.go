@@ -312,6 +312,9 @@ func pathAliases(path string) []string {
 func normalizePath(path string) string {
 	normalized, err := canonicalPath(path)
 	if err != nil {
+		if absPath, absErr := filepath.Abs(path); absErr == nil {
+			return filepath.Clean(absPath)
+		}
 		return filepath.Clean(path)
 	}
 	return normalized
@@ -499,6 +502,35 @@ func listKustomizeInputs(basePath string) ([]string, []error) {
 		}
 	}
 	return kustomizeDirectories, errs
+}
+
+// LoadResourcesFromNestedKustomizeDirectories preserves the existing nested-rendering API.
+// New callers that also need precise source and Helm ownership should use
+// LoadResourcesFromKustomizeDirectories.
+func LoadResourcesFromNestedKustomizeDirectories(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, []string) {
+	if isKustomizeDirectory(basePath) || IsKustomizeFile(basePath) {
+		return nil, nil
+	}
+
+	kustomizeDirs, discoveryErrs := listKustomizeDirs(basePath)
+	for _, err := range discoveryErrs {
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Kustomize directories", helpers.Error(err))
+	}
+
+	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
+	renderedDirs := make([]string, 0, len(kustomizeDirs))
+	for _, dir := range kustomizeDirs {
+		wls, _, err := LoadResourcesFromKustomizeDirectory(ctx, dir)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("Skipping Kustomize directory that failed to render; its files remain available to the plain-manifest loader",
+				helpers.String("path", dir), helpers.Error(err))
+			continue
+		}
+		maps.Copy(sourceToWorkloads, wls)
+		renderedDirs = append(renderedDirs, dir)
+	}
+
+	return sourceToWorkloads, renderedDirs
 }
 
 func LoadResourcesFromTerraform(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, error) {

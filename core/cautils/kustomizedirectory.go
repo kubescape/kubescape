@@ -44,7 +44,7 @@ func isKustomizeDirectory(path string) bool {
 	case 1:
 		return true
 	default:
-		logger.L().Info("Multiple kustomize files found while checking the Kustomize Directory")
+		logger.L().Debug("Multiple kustomize files found while checking the Kustomize Directory")
 		return false
 	}
 }
@@ -375,7 +375,7 @@ func appendOwnedHelmChartTreeWithLister(ctx context.Context, directory string, s
 }
 
 func selectedKustomizationFile(path string) string {
-	if IsKustomizeFile(path) {
+	if IsKustomizeFile(path) && isFile(path) {
 		return path
 	}
 	if !isKustomizeDirectory(path) {
@@ -383,7 +383,7 @@ func selectedKustomizationFile(path string) string {
 	}
 	for _, matcher := range kustomizationFileMatchers {
 		candidate := filepath.Join(path, matcher)
-		if _, err := os.Stat(candidate); err == nil {
+		if isFile(candidate) {
 			return candidate
 		}
 	}
