@@ -35,7 +35,14 @@ func downloadArtifacts(ks Downloader, downloads []metav1.DownloadInfo) error {
 
 		operation := func() error {
 			result, err = ks.Download(&d)
-			return err
+			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+					errors.Is(err, os.ErrPermission) || errors.Is(err, os.ErrNotExist) {
+					return backoff.Permanent(err)
+				}
+				return err
+			}
+			return nil
 		}
 
 		b := backoffFactory()

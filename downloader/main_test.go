@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -78,6 +79,14 @@ func TestDownloadArtifacts(t *testing.T) {
 			},
 			expectError:   true,
 			expectedCalls: map[string]int{"artifacts": 4, "framework": 1},
+		},
+		{
+			name: "permanent-error-no-retry",
+			errsByTarget: map[string][]error{
+				"artifacts": {context.Canceled}, // Should not retry, so only 1 attempt
+			},
+			expectError:   true,
+			expectedCalls: map[string]int{"artifacts": 1, "framework": 1}, // Continues processing next target
 		},
 	}
 
