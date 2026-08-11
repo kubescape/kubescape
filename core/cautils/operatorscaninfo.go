@@ -89,9 +89,6 @@ func (c *ConfigScanInfo) ValidatePayload(commands *apis.Commands) error {
 }
 
 func (c *ConfigScanInfo) GetRequestPayload() *apis.Commands {
-	if len(c.Frameworks) == 0 {
-		c.Frameworks = append(c.Frameworks, "all")
-	}
 	return &apis.Commands{
 		Commands: []apis.Command{
 			{

@@ -221,3 +221,22 @@ func TestGCPAdaptor_setOwningClient_ClosesPreviousClient(t *testing.T) {
 
 	assert.NoError(t, adaptor.Destroy())
 }
+
+func TestGCPAdaptor_Login_CloseFailureStateClearing(t *testing.T) {
+	adaptor := NewGCPAdaptor()
+	first := newFakeContainerAnalysisClient(t)
+	adaptor.setOwningClient(first)
+
+	// Close it manually so the next Close() inside Login() fails.
+	_ = first.Close()
+
+	// Login should fail because closing the previous client fails.
+	err := adaptor.Login(context.Background(), "location-docker.pkg.dev/project/repository", RegistryCredentials{})
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to close previous container analysis client")
+
+	// State clearing check: client must be nil, owningClient must be retained
+	assert.Nil(t, adaptor.client, "a.client should be cleared before Close()")
+	assert.NotNil(t, adaptor.owningClient, "a.owningClient should be retained when close fails")
+}
