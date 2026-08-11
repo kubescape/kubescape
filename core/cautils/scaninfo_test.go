@@ -592,6 +592,16 @@ func TestSetUseArtifactsFrom(t *testing.T) {
 		assert.Equal(t, "controls-inputs.json", scanInfo.UseArtifactsFrom)
 	})
 
+	t.Run("explicit current-directory file path falls back to .", func(t *testing.T) {
+		t.Chdir(t.TempDir()) // hermetic: behavior must not depend on the package dir contents
+		require.NoError(t, os.WriteFile("./controls-inputs.json", []byte(`{}`), 0600))
+
+		scanInfo := &ScanInfo{UseArtifactsFrom: "./controls-inputs.json"}
+		require.NoError(t, scanInfo.setUseArtifactsFrom(context.Background()))
+
+		assert.Equal(t, ".", scanInfo.UseArtifactsFrom)
+	})
+
 	t.Run("nonexistent path is left untouched", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "missing")
 		scanInfo := &ScanInfo{UseArtifactsFrom: path}
