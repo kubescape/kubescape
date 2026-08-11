@@ -70,6 +70,13 @@ func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials Reg
 		return fmt.Errorf("invalid gcp registry format: expected location-docker.pkg.dev/project/repository, got %s", registry)
 	}
 
+	if a.owningClient != nil {
+		if err := a.owningClient.Close(); err != nil {
+			return fmt.Errorf("failed to close previous container analysis client: %w", err)
+		}
+		a.owningClient = nil
+	}
+
 	c, err := containeranalysis.NewClient(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to load gcp container analysis client: %w", err)
@@ -274,7 +281,10 @@ func (a *GCPAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Contai
 // Destroy cleans up any persistent resources used by the adaptor.
 func (a *GCPAdaptor) Destroy() error {
 	if a.owningClient != nil {
-		return a.owningClient.Close()
+		err := a.owningClient.Close()
+		a.owningClient = nil
+		a.client = nil
+		return err
 	}
 	return nil
 }
