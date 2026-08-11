@@ -444,7 +444,7 @@ func TestNewDefaultDBConfig(t *testing.T) {
 
 func TestDefaultMatcherConfig(t *testing.T) {
 	cfg := defaultMatcherConfig()
-	assert.Equal(t, "https://search.maven.org/solrsearch/select", cfg.Java.ExternalSearchConfig.MavenBaseURL)
+	assert.Equal(t, "https://search.maven.org/solrsearch/select", cfg.Java.MavenBaseURL)
 	assert.False(t, cfg.Java.UseCPEs)
 	assert.False(t, cfg.Ruby.UseCPEs)
 	assert.False(t, cfg.Python.UseCPEs)

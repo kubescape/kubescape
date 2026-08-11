@@ -45,12 +45,12 @@ func TestDownloadArtifacts(t *testing.T) {
 		{
 			name:        "partial-failure",
 			errs:        []error{nil, errors.New("download failed")},
-			expectError: true, // Test should fail here because the bug causes it to return nil
+			expectError: true,
 		},
 		{
 			name:        "all-fail",
 			errs:        []error{errors.New("fail 1"), errors.New("fail 2")},
-			expectError: true, // Test should fail here as well
+			expectError: true,
 		},
 	}
 
@@ -60,6 +60,16 @@ func TestDownloadArtifacts(t *testing.T) {
 			err := downloadArtifacts(m, downloads)
 			if (err != nil) != tt.expectError {
 				t.Errorf("expected error: %v, got error: %v", tt.expectError, err)
+			}
+
+			if m.calls != len(downloads) {
+				t.Errorf("expected %d calls, got %d", len(downloads), m.calls)
+			}
+
+			for _, configuredErr := range tt.errs {
+				if configuredErr != nil && !errors.Is(err, configuredErr) {
+					t.Errorf("expected error to contain %v, got %v", configuredErr, err)
+				}
 			}
 		})
 	}
