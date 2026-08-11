@@ -65,9 +65,6 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 		// summarize the resources
 		opap.Report.AppendResourceResultToSummary(&t)
 
-		// Add score
-		// TODO
-
 		// save changes
 		opap.ResourcesResult[i] = t
 	}
