@@ -79,17 +79,21 @@ func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials Reg
 	}
 
 	parts := strings.Split(registry, "/")
+	var newProjectID string
 	if len(parts) >= 2 {
-		a.projectID = parts[1]
+		newProjectID = parts[1]
 	} else {
 		return fmt.Errorf("invalid gcp registry format: expected location-docker.pkg.dev/project/repository, got %s", registry)
 	}
 
 	if a.owningClient != nil {
+		a.client = nil // Stage clearing of client
 		if err := a.owningClient.Close(); err != nil {
 			return fmt.Errorf("failed to close previous container analysis client: %w", err)
 		}
 		a.owningClient = nil
+	} else {
+		a.client = nil
 	}
 
 	c, err := containeranalysis.NewClient(ctx)
@@ -97,6 +101,7 @@ func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials Reg
 		return fmt.Errorf("unable to load gcp container analysis client: %w", err)
 	}
 
+	a.projectID = newProjectID
 	a.setOwningClient(c)
 
 	// Fail-fast probe to ensure identity is valid
