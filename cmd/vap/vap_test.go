@@ -566,7 +566,7 @@ func TestGetDeployLibraryCmd(t *testing.T) {
 
 	timeoutFlag := cmd.Flags().Lookup("timeout")
 	require.NotNil(t, timeoutFlag)
-	assert.Equal(t, "0s", timeoutFlag.DefValue)
+	assert.Equal(t, "30s", timeoutFlag.DefValue)
 
 	fromReleaseFlag := cmd.Flags().Lookup("from-release")
 	require.NotNil(t, fromReleaseFlag)
@@ -759,10 +759,25 @@ func TestCreatePolicyBindingCmdRequiredFlags(t *testing.T) {
 func TestDeployLibraryCmdTimeoutFlag(t *testing.T) {
 	cmd := getDeployLibraryCmd()
 
-	t.Run("timeout flag is registered with default 0s", func(t *testing.T) {
+	t.Run("timeout flag defaults to a bounded value", func(t *testing.T) {
 		timeoutFlag := cmd.Flags().Lookup("timeout")
 		require.NotNil(t, timeoutFlag)
-		assert.Equal(t, "0s", timeoutFlag.DefValue)
+		assert.Equal(t, "30s", timeoutFlag.DefValue)
+
+		// The default must actually bound the request; a zero default would
+		// leave http.Client unbounded and let a stalled download hang forever.
+		got, err := cmd.Flags().GetDuration("timeout")
+		require.NoError(t, err)
+		assert.Equal(t, defaultDownloadTimeout, got)
+		assert.NotZero(t, got)
+	})
+
+	t.Run("timeout can still be disabled explicitly", func(t *testing.T) {
+		cmd := getDeployLibraryCmd()
+		require.NoError(t, cmd.ParseFlags([]string{"--timeout", "0"}))
+		got, err := cmd.Flags().GetDuration("timeout")
+		require.NoError(t, err)
+		assert.Zero(t, got, "--timeout 0 must remain the opt-out")
 	})
 
 	t.Run("timeout flag can be set via args", func(t *testing.T) {

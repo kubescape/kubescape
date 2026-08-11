@@ -53,6 +53,11 @@ func GetVapHelperCmd() *cobra.Command {
 	return vapHelperCmd
 }
 
+// defaultDownloadTimeout bounds each --from-release download. It matches the
+// 30s used by the other outbound HTTP clients in the codebase (the repository
+// scanner and the cluster connector).
+const defaultDownloadTimeout = 30 * time.Second
+
 func getDeployLibraryCmd() *cobra.Command {
 	var outputFile string
 	var fromRelease string
@@ -72,7 +77,7 @@ func getDeployLibraryCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file instead of stdout")
 	cmd.Flags().StringVar(&fromRelease, "from-release", "", "Download the library from this cel-admission-library release tag (e.g. v0.11) instead of using the embedded copy")
-	cmd.Flags().DurationVar(&timeout, "timeout", 0, "HTTP request timeout per download, only used with --from-release (e.g. 30s, 1m)")
+	cmd.Flags().DurationVar(&timeout, "timeout", defaultDownloadTimeout, "HTTP request timeout per download, only used with --from-release (e.g. 30s, 1m). 0 disables the timeout")
 
 	return cmd
 }
