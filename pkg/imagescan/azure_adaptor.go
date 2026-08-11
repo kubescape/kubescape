@@ -35,15 +35,31 @@ func (a *azureAPIWrapper) Resources(ctx context.Context, query armresourcegraph.
 	return a.client.Resources(ctx, query, options)
 }
 
+type azureCredentialProvider func(options *azidentity.DefaultAzureCredentialOptions) (azcore.TokenCredential, error)
+type azureClientFactory func(cred azcore.TokenCredential, options *arm.ClientOptions) (AzureAPI, error)
+
 // AzureAdaptor implements IContainerImageVulnerabilityAdaptor for Azure Container Registry (ACR).
 type AzureAdaptor struct {
-	client       AzureAPI
-	registryHost string
+	client        AzureAPI
+	registryHost  string
+	credProvider  azureCredentialProvider
+	clientFactory azureClientFactory
 }
 
 // NewAzureAdaptor creates a new Azure adaptor instance.
 func NewAzureAdaptor() *AzureAdaptor {
-	return &AzureAdaptor{}
+	return &AzureAdaptor{
+		credProvider: func(options *azidentity.DefaultAzureCredentialOptions) (azcore.TokenCredential, error) {
+			return azidentity.NewDefaultAzureCredential(options)
+		},
+		clientFactory: func(cred azcore.TokenCredential, options *arm.ClientOptions) (AzureAPI, error) {
+			c, err := armresourcegraph.NewClient(cred, options)
+			if err != nil {
+				return nil, err
+			}
+			return &azureAPIWrapper{client: c}, nil
+		},
+	}
 }
 
 func resolveAzureCloudConfig(registryHost string) (cloud.Configuration, error) {
@@ -74,20 +90,20 @@ func (a *AzureAdaptor) Login(ctx context.Context, registry string, credentials R
 
 	clientOpts := azcore.ClientOptions{Cloud: cloudConfig}
 
-	cred, err := azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
+	cred, err := a.credProvider(&azidentity.DefaultAzureCredentialOptions{
 		ClientOptions: clientOpts,
 	})
 	if err != nil {
 		return fmt.Errorf("unable to load azure credentials: %w", err)
 	}
 
-	c, err := armresourcegraph.NewClient(cred, &arm.ClientOptions{
+	c, err := a.clientFactory(cred, &arm.ClientOptions{
 		ClientOptions: clientOpts,
 	})
 	if err != nil {
 		return fmt.Errorf("unable to load azure resource graph client: %w", err)
 	}
-	a.client = &azureAPIWrapper{client: c}
+	a.client = c
 
 	// Cheap probe query so Login fails fast on bad/missing identity
 	probeReq := armresourcegraph.QueryRequest{

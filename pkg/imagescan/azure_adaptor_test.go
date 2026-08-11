@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resourcegraph/armresourcegraph"
 	"github.com/stretchr/testify/assert"
 )
@@ -20,6 +23,21 @@ func (m *mockAzureClient) Resources(ctx context.Context, query armresourcegraph.
 		return m.resourcesOut(query)
 	}
 	return armresourcegraph.ClientResourcesResponse{}, nil
+}
+
+func TestAzureAdaptor_Login_Success(t *testing.T) {
+	adaptor := NewAzureAdaptor()
+
+	adaptor.credProvider = func(options *azidentity.DefaultAzureCredentialOptions) (azcore.TokenCredential, error) {
+		return nil, nil // mock credential
+	}
+	adaptor.clientFactory = func(cred azcore.TokenCredential, options *arm.ClientOptions) (AzureAPI, error) {
+		return &mockAzureClient{}, nil
+	}
+
+	err := adaptor.Login(context.Background(), "test.azurecr.io", RegistryCredentials{})
+	assert.NoError(t, err)
+	assert.NotNil(t, adaptor.client)
 }
 
 func TestAzureAdaptor_Login_ExplicitCreds(t *testing.T) {

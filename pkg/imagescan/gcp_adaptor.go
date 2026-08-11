@@ -42,16 +42,28 @@ func (g *gcpAPIWrapper) ListOccurrences(ctx context.Context, req *grafeaspb.List
 	return &GrafeasIteratorWrapper{it: it}
 }
 
-// GCPAdaptor implements IContainerImageVulnerabilityAdaptor for GCP Artifact Registry.
+type gcpClientFactory func(ctx context.Context) (*containeranalysis.Client, error)
+type gcpAPIFactory func(c *containeranalysis.Client) GCPAPI
+
+// GCPAdaptor implements IContainerImageVulnerabilityAdaptor for Google Cloud Artifact Registry.
 type GCPAdaptor struct {
-	client       GCPAPI
-	owningClient *containeranalysis.Client
-	projectID    string
+	client        GCPAPI
+	owningClient  *containeranalysis.Client
+	projectID     string
+	clientFactory gcpClientFactory
+	apiFactory    gcpAPIFactory
 }
 
 // NewGCPAdaptor creates a new GCP adaptor instance.
 func NewGCPAdaptor() *GCPAdaptor {
-	return &GCPAdaptor{}
+	return &GCPAdaptor{
+		clientFactory: func(ctx context.Context) (*containeranalysis.Client, error) {
+			return containeranalysis.NewClient(ctx)
+		},
+		apiFactory: func(c *containeranalysis.Client) GCPAPI {
+			return &gcpAPIWrapper{client: c.GetGrafeasClient()}
+		},
+	}
 }
 
 // setOwningClient installs c as the adaptor's owning containeranalysis
@@ -66,7 +78,7 @@ func (a *GCPAdaptor) setOwningClient(c *containeranalysis.Client) {
 	}
 
 	a.owningClient = c
-	a.client = &gcpAPIWrapper{client: c.GetGrafeasClient()}
+	a.client = a.apiFactory(c)
 }
 
 // Login authenticates with GCP. It prioritizes the default application credentials.
@@ -95,7 +107,7 @@ func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials Reg
 		a.client = nil
 	}
 
-	c, err := containeranalysis.NewClient(ctx)
+	c, err := a.clientFactory(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to load gcp container analysis client: %w", err)
 	}
