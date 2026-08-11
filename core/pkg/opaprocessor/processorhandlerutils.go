@@ -201,50 +201,126 @@ func isEmptyResources(counters reportsummary.ICounters) bool {
 	return counters.Failed() == 0 && counters.Skipped() == 0 && counters.Passed() == 0
 }
 
-func getKubernetesObjectsFromExternalResources(externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
-	return getKubernetesObjects(cautils.K8SResources(externalResources), allResources, match)
+// indexedObject is one resolved object in a resourceGroupIndex. kind is cached
+// so matching does not re-read it, and ordinal is the object's slot in the
+// index's de-duplicated ID space.
+type indexedObject struct {
+	object  workloadinterface.IMetadata
+	kind    string
+	ordinal int
+}
+
+// resourceGroup is one collected GVR key, parsed, with the objects under it.
+type resourceGroup struct {
+	group    string
+	version  string
+	resource string
+	objects  []indexedObject
+}
+
+// resourceGroupIndex holds a scope's resources ready for matching: GVR keys
+// parsed and sorted, IDs resolved to objects, ordinals assigned.
+//
+// Matching runs once per rule per scope, but none of that work depends on the
+// rule, and a scope's resources do not change during a scan. Doing it per call
+// made it the scan's dominant source of allocations on large clusters, so it is
+// done once per scope instead (see newEvaluationScope).
+type resourceGroupIndex struct {
+	groups []resourceGroup
+	// objectCount is the number of distinct objects, sizing the emitted bitset.
+	objectCount int
+}
+
+// newResourceGroupIndex parses and sorts a scope's GVR keys and resolves the IDs
+// under them. Keys are sorted raw, the order the match loop used to establish,
+// so a rule's input array keeps the same resource ordering. An ID that
+// allResources does not hold is dropped, as the per-match lookup used to.
+func newResourceGroupIndex(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata) resourceGroupIndex {
+	keys := make([]string, 0, len(k8sResources))
+	for key := range k8sResources {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	index := resourceGroupIndex{groups: make([]resourceGroup, 0, len(keys))}
+	// One ID can be collected under several GVR keys, so ordinals are assigned
+	// per ID rather than per slot, keeping the dedup in getKubernetesObjects.
+	ordinals := make(map[string]int)
+
+	for _, key := range keys {
+		// Match the collected GVR keys directly. Re-resolving policy matches
+		// through k8s-interface here would make file scans depend on its
+		// discovery snapshot again and would lose manifest versions that the
+		// snapshot does not contain.
+		group, version, resource := k8sinterface.StringToResourceGroup(key)
+		ids := k8sResources[key]
+
+		objects := make([]indexedObject, 0, len(ids))
+		for _, id := range ids {
+			object, ok := allResources[id]
+			if !ok || object == nil {
+				continue
+			}
+			ordinal, seen := ordinals[id]
+			if !seen {
+				ordinal = index.objectCount
+				ordinals[id] = ordinal
+				index.objectCount++
+			}
+			objects = append(objects, indexedObject{
+				object:  object,
+				kind:    object.GetKind(),
+				ordinal: ordinal,
+			})
+		}
+
+		index.groups = append(index.groups, resourceGroup{
+			group:    group,
+			version:  version,
+			resource: resource,
+			objects:  objects,
+		})
+	}
+
+	return index
 }
 
 // getKubernetesObjects returns the objects of a single scope that the rule
 // matches, in match-declaration order. Callers evaluate one scope at a time,
 // so no per-namespace bucketing happens here: the caller's batch already is
 // the bucket (see cautils.PartitionResources).
-func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+func getKubernetesObjects(index resourceGroupIndex, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
-	seenResourceIDs := make(map[string]struct{})
-	// Match the collected GVR keys directly. Re-resolving policy matches through
-	// k8s-interface here would make file scans depend on its discovery snapshot
-	// again and would lose manifest versions that the snapshot does not contain.
-	resourceGroups := make([]string, 0, len(k8sResources))
-	for resourceGroup := range k8sResources {
-		resourceGroups = append(resourceGroups, resourceGroup)
-	}
-	sort.Strings(resourceGroups)
+	// A match block often names the same object under several combinations, so
+	// emitted objects are tracked by ordinal to keep the input free of
+	// duplicates. Allocated on first emission: most rules match nothing in a
+	// given scope, and those must not pay for a buffer sized to the index.
+	var emitted []bool
 
 	for m := range match {
 		for _, groups := range match[m].APIGroups {
 			for _, version := range match[m].APIVersions {
 				for _, resource := range match[m].Resources {
-					for _, resourceGroup := range resourceGroups {
-						objectGroup, objectVersion, objectResource := k8sinterface.StringToResourceGroup(resourceGroup)
-						if !matchesKubernetesObjectValue(groups, objectGroup) || !matchesKubernetesObjectValue(version, objectVersion) {
+					for g := range index.groups {
+						group := &index.groups[g]
+						if !matchesKubernetesObjectValue(groups, group.group) || !matchesKubernetesObjectValue(version, group.version) {
 							continue
 						}
 
-						directResourceMatch := resource == "*" || strings.EqualFold(resource, objectResource)
-						for _, id := range k8sResources[resourceGroup] {
-							if _, seen := seenResourceIDs[id]; seen {
+						directResourceMatch := resource == "*" || strings.EqualFold(resource, group.resource)
+						for i := range group.objects {
+							object := &group.objects[i]
+							if len(emitted) != 0 && emitted[object.ordinal] {
 								continue
 							}
-							object, ok := allResources[id]
-							if !ok || object == nil {
+							if !directResourceMatch && !strings.EqualFold(resource, object.kind) {
 								continue
 							}
-							if !directResourceMatch && !strings.EqualFold(resource, object.GetKind()) {
-								continue
+							if emitted == nil {
+								emitted = make([]bool, index.objectCount)
 							}
-							k8sObjects = append(k8sObjects, object)
-							seenResourceIDs[id] = struct{}{}
+							k8sObjects = append(k8sObjects, object.object)
+							emitted[object.ordinal] = true
 						}
 					}
 				}
