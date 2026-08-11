@@ -11,6 +11,20 @@ Do not edit these files by hand. They are a verbatim copy of a pinned release
 make sync-vap
 ```
 
+Because these files are compiled into the binary, `sync-vap` verifies every
+download against the SHA256 digests pinned in `CEL_VAP_DIGESTS` (the upstream
+release publishes no checksum manifest of its own) and refuses to install a
+bundle that does not match, so a tampered release asset cannot silently change
+the policies kubescape enforces. Nothing is written unless every file verifies.
+
+To move to a new release, bump `CEL_LIBRARY_VERSION`, then regenerate the
+digests and check them against the upstream release before committing both
+changes together:
+
+```sh
+make sync-vap-digests
+```
+
 Files:
 
 - `kubescape-validating-admission-policies.yaml` — the ValidatingAdmissionPolicy
