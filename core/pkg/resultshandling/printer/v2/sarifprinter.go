@@ -19,6 +19,7 @@ import (
 	grypesarif "github.com/anchore/grype/grype/presenter/sarif"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/locationresolver"
@@ -110,9 +111,15 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 }
 
 // addResult adds a result of checking a rule to the scan run based on the given control summary
-func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location) *sarif.Result {
+func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) *sarif.Result {
+	msg := ctl.GetDescription()
+	if resource != nil {
+		if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
+			msg += "\n\nAffected fields:\n" + strings.Join(paths, "\n")
+		}
+	}
 	return scanRun.CreateResultForRule(ctl.GetID()).
-		WithMessage(sarif.NewTextMessage(ctl.GetDescription())).
+		WithMessage(sarif.NewTextMessage(msg)).
 		WithLocations([]*sarif.Location{
 			sarif.NewLocationWithPhysicalLocation(
 				sarif.NewPhysicalLocation().
@@ -246,7 +253,8 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 				}
 				location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
 				sp.addRule(run, ctl)
-				r := sp.addResult(run, ctl, resource.relPath, location)
+				rsrc := opaSessionObj.AllResources[resource.resourceID]
+				r := sp.addResult(run, ctl, resource.relPath, location, &ac, rsrc)
 				collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath)
 			}
 		}
