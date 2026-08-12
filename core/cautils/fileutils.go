@@ -244,7 +244,7 @@ func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
 // IsUnderAnyDir reports whether path is inside one of dirs after normalizing
 // relative paths and resolving symlinks where the path already exists.
 func IsUnderAnyDir(path string, dirs []string) bool {
-	return isUnderAnyNormalizedDir(normalizePath(path), normalizePaths(dirs))
+	return IsAnyPathAliasUnderAnyDir(path, pathAliasesForPaths(dirs))
 }
 
 func isUnderAnyNormalizedDir(path string, dirs []string) bool {
