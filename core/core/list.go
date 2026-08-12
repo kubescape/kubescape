@@ -2,8 +2,10 @@ package core
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -28,6 +30,7 @@ var listFormatFunc = map[string]func(context.Context, string, []string){
 	"pretty-print": prettyPrintListFormat,
 	"json":         jsonListFormat,
 	"yaml":         yamlListFormat,
+	"csv":          csvListFormat,
 }
 
 func ListSupportActions() []string {
@@ -77,14 +80,16 @@ func PrintListResult(ctx context.Context, result *metav1.ListResult, target, for
 			jsonControlsFormat(result.Controls)
 		case "yaml":
 			yamlControlsFormat(result.Controls)
+		case "csv":
+			csvControlsFormat(result.Controls)
 		default:
-			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'/'yaml'", format)
+			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'/'yaml'/'csv'", format)
 		}
 	case "frameworks", "exceptions":
 		if listFormatFunction, ok := listFormatFunc[format]; ok {
 			listFormatFunction(ctx, target, result.Names)
 		} else {
-			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'/'yaml' ", format)
+			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json'/'yaml'/'csv'", format)
 		}
 	default:
 		return fmt.Errorf("invalid target %q, supported targets: 'controls'/'frameworks'/'exceptions'", target)
@@ -230,6 +235,31 @@ func yamlControlsFormat(entries []metav1.ControlListEntry) {
 	}
 
 	fmt.Printf("%s\n", y)
+}
+
+func csvListFormat(_ context.Context, _ string, policies []string) {
+	writer := csv.NewWriter(os.Stdout)
+	_ = writer.Write([]string{"name"})
+	for _, policy := range policies {
+		_ = writer.Write([]string{policy})
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write csv output: %v\n", err)
+	}
+}
+
+func csvControlsFormat(entries []metav1.ControlListEntry) {
+	writer := csv.NewWriter(os.Stdout)
+	_ = writer.Write([]string{"id", "name", "frameworks"})
+	for _, entry := range entries {
+		frameworks := strings.Join(entry.Frameworks, ";")
+		_ = writer.Write([]string{entry.ID, entry.Name, frameworks})
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write csv output: %v\n", err)
+	}
 }
 
 func prettyPrintControls(ctx context.Context, entries []metav1.ControlListEntry) {
