@@ -1205,3 +1205,51 @@ func Test_mapInfoToPrintInfo_stableMarkers(t *testing.T) {
 		require.Equalf(t, want, mapInfoToPrintInfo(controls), "iteration %d", i)
 	}
 }
+
+func TestFilterBySeverity(t *testing.T) {
+	report := &PostureReportWithSeverity{
+		SummaryDetails: SummaryDetailsWithSeverity{
+			Controls: map[string]ControlSummaryWithSeverity{
+				"C-0001": {Severity: "Critical"},
+				"C-0002": {Severity: "High"},
+				"C-0003": {Severity: "Medium"},
+				"C-0004": {Severity: "Low"},
+			},
+		},
+		Results: []ResultWithSeverity{
+			{
+				ResourceID: "res-1",
+				AssociatedControls: []ResourceAssociatedControlWithSeverity{
+					{Severity: "Critical"},
+					{Severity: "High"},
+					{Severity: "Medium"},
+					{Severity: "Low"},
+				},
+			},
+		},
+	}
+
+	FilterBySeverity(report, "high")
+
+	assert.Len(t, report.SummaryDetails.Controls, 2)
+	assert.Contains(t, report.SummaryDetails.Controls, "C-0001")
+	assert.Contains(t, report.SummaryDetails.Controls, "C-0002")
+	assert.NotContains(t, report.SummaryDetails.Controls, "C-0003")
+
+	assert.Len(t, report.Results[0].AssociatedControls, 2)
+	for _, c := range report.Results[0].AssociatedControls {
+		assert.Contains(t, []string{"Critical", "High"}, c.Severity)
+	}
+}
+
+func TestFilterBySeverity_EmptyMinSeverityNoOp(t *testing.T) {
+	report := &PostureReportWithSeverity{
+		SummaryDetails: SummaryDetailsWithSeverity{
+			Controls: map[string]ControlSummaryWithSeverity{
+				"C-0001": {Severity: "Low"},
+			},
+		},
+	}
+	FilterBySeverity(report, "")
+	assert.Len(t, report.SummaryDetails.Controls, 1)
+}
