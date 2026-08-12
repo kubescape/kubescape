@@ -75,28 +75,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if scanInfo.FailThresholdSeverity != "" {
-				if err := shared.ValidateSeverity(
-					scanInfo.FailThresholdSeverity,
-				); err != nil {
-					return err
-				}
-			}
-
-			if f := cmd.Flags().Lookup("format"); f != nil &&
-				f.Changed &&
-				scanInfo.Format == "" {
-
-				return fmt.Errorf(
-					"format cannot be empty, supported formats: %s",
-					strings.Join(shared.ScanFormats, ", "),
-				)
-			}
-
-			if err := shared.ValidateScanFormat(
-				scanInfo.Format,
-				shared.ScanFormats,
-			); err != nil {
+			if err := shared.ValidateCommonScanFlags(cmd, &scanInfo, shared.ScanFormats); err != nil {
 				return err
 			}
 			if scanInfo.ScanImages {
