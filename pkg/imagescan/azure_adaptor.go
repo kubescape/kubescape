@@ -244,6 +244,7 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 			count := 0
 			const maxVulns = 1000
 			const maxPages = 50
+			truncatedByPageLimit := false
 
 			for page := 0; page < maxPages; page++ {
 				req := armresourcegraph.QueryRequest{
@@ -311,6 +312,16 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 					break
 				}
 				skipToken = res.SkipToken
+
+				if page == maxPages-1 {
+					// About to exit the loop solely because maxPages was reached,
+					// while the server still has more pages (SkipToken is set).
+					truncatedByPageLimit = true
+				}
+			}
+
+			if truncatedByPageLimit {
+				return report, fmt.Errorf("exceeded max pages (%d) fetching vulnerabilities for repository %s", maxPages, imageID.Repository)
 			}
 
 			return report, nil

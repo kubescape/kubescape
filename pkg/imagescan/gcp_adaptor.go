@@ -124,7 +124,11 @@ func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials Reg
 	it := a.client.ListOccurrences(ctx, req)
 	if _, err := it.Next(); err != nil { // #nosec G104 -- iterator.Done is the expected end-of-iteration sentinel, not an error
 		if err != iterator.Done {
-			a.owningClient.Close()
+			if a.owningClient != nil {
+				if closeErr := a.owningClient.Close(); closeErr != nil {
+					logger.L().Warning("failed to close gcp container analysis client after failed probe", helpers.Error(closeErr))
+				}
+			}
 			a.owningClient = nil
 			a.client = nil
 			return fmt.Errorf("failed to authenticate or access gcp project %s: %w", a.projectID, err)
