@@ -38,10 +38,9 @@ func NormalizeSeverity(severity string) string {
 	}
 }
 
-// ProcessImages iterates over imageIDs and calls the provided fetch function, handling boilerplate nil-hashes and errors.
+// ProcessImages iterates over imageIDs and calls the provided fetch function, handling errors and aggregating results.
 func ProcessImages[T any](
 	imageIDs []ContainerImageIdentifier,
-	emptyResult func(imageID ContainerImageIdentifier) T,
 	processFunc func(imageID ContainerImageIdentifier) (T, error),
 ) ([]T, error) {
 	var results []T
@@ -52,8 +51,6 @@ func ProcessImages[T any](
 		if err != nil {
 			logger.L().Warning("skipping image due to api error", helpers.Error(err))
 			aggErr = errors.Join(aggErr, err)
-			results = append(results, emptyResult(imageID))
-			continue
 		}
 
 		results = append(results, res)

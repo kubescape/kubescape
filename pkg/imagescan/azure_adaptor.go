@@ -125,13 +125,6 @@ func (a *AzureAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Conta
 	registryName := parts[0]
 
 	return ProcessImages(imageIDs,
-		func(id ContainerImageIdentifier) ContainerImageScanStatus {
-			return ContainerImageScanStatus{
-				ImageID:         id,
-				IsScanAvailable: false,
-				IsBomAvailable:  false,
-			}
-		},
 		func(imageID ContainerImageIdentifier) (ContainerImageScanStatus, error) {
 			status := ContainerImageScanStatus{
 				ImageID:         imageID,
@@ -144,7 +137,8 @@ func (a *AzureAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Conta
 			}
 
 			if err := a.validateImageID(imageID); err != nil {
-				return status, fmt.Errorf("invalid image id: %w", err)
+				logger.L().Warning("skipping image", helpers.String("repository", imageID.Repository), helpers.Error(err))
+				return status, nil
 			}
 
 			// Query ARG for parent assessment to determine scan availability
@@ -200,12 +194,6 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 	registryName := parts[0]
 
 	return ProcessImages(imageIDs,
-		func(id ContainerImageIdentifier) ContainerImageVulnerabilityReport {
-			return ContainerImageVulnerabilityReport{
-				ImageID:         id,
-				Vulnerabilities: []Vulnerability{},
-			}
-		},
 		func(imageID ContainerImageIdentifier) (ContainerImageVulnerabilityReport, error) {
 			report := ContainerImageVulnerabilityReport{
 				ImageID:         imageID,
@@ -217,7 +205,8 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 			}
 
 			if err := a.validateImageID(imageID); err != nil {
-				return report, fmt.Errorf("invalid image id: %w", err)
+				logger.L().Warning("skipping image", helpers.String("repository", imageID.Repository), helpers.Error(err))
+				return report, nil
 			}
 
 			queryStr := fmt.Sprintf(`

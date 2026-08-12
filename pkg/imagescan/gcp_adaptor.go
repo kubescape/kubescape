@@ -132,13 +132,6 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 	}
 
 	return ProcessImages(imageIDs,
-		func(id ContainerImageIdentifier) ContainerImageScanStatus {
-			return ContainerImageScanStatus{
-				ImageID:         id,
-				IsScanAvailable: false,
-				IsBomAvailable:  false,
-			}
-		},
 		func(imageID ContainerImageIdentifier) (ContainerImageScanStatus, error) {
 			status := ContainerImageScanStatus{
 				ImageID:         imageID,
@@ -191,12 +184,6 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 	}
 
 	return ProcessImages(imageIDs,
-		func(id ContainerImageIdentifier) ContainerImageVulnerabilityReport {
-			return ContainerImageVulnerabilityReport{
-				ImageID:         id,
-				Vulnerabilities: []Vulnerability{},
-			}
-		},
 		func(imageID ContainerImageIdentifier) (ContainerImageVulnerabilityReport, error) {
 			report := ContainerImageVulnerabilityReport{
 				ImageID:         imageID,
