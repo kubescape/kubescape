@@ -16,8 +16,9 @@ import (
 //   - status precedence is failed > skipped > passed: a resource that failed
 //     in any scope failed, and an evaluation error in any scope downgrades a
 //     pass to skipped but never overrides a failure;
-//   - paths accumulate across scopes, because a rule can report a different
-//     failed path per scope;
+//   - paths accumulate as a set, because a rule can report a different failed
+//     path per scope but reports the same path in every scope for a resident
+//     resource;
 //   - related resource IDs accumulate as a set, preserving first-seen order.
 
 // ruleStatusRank orders statuses by how definitive they are.
@@ -59,7 +60,7 @@ func mergeAssociatedRule(existing, incoming *resourcesresults.ResourceAssociated
 		existing.ControlConfigurations = incoming.ControlConfigurations
 	}
 
-	existing.Paths = append(existing.Paths, incoming.Paths...)
+	existing.Paths = appendUnique(existing.Paths, incoming.Paths)
 	existing.RelatedResourcesIDs = appendUnique(existing.RelatedResourcesIDs, incoming.RelatedResourcesIDs)
 
 	return existing
@@ -113,13 +114,14 @@ func mergeAssociatedControls(existing []resourcesresults.ResourceAssociatedContr
 }
 
 // appendUnique appends the values of incoming that existing does not already
-// hold, preserving order.
-func appendUnique(existing, incoming []string) []string {
+// hold, preserving order. One pass over each slice, so merging a resident
+// resource across many scopes stays linear in the number of distinct values.
+func appendUnique[T comparable](existing, incoming []T) []T {
 	if len(incoming) == 0 {
 		return existing
 	}
 
-	seen := make(map[string]struct{}, len(existing)+len(incoming))
+	seen := make(map[T]struct{}, len(existing)+len(incoming))
 	for _, value := range existing {
 		seen[value] = struct{}{}
 	}
