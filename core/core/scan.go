@@ -433,7 +433,14 @@ func resolveClusterContext(scanInfo *cautils.ScanInfo) error {
 }
 
 func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, resultsHandling *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo, k8sApi *k8sinterface.KubernetesApi) {
-	imagesToScan, imageToCreds := collectImageScanTargets(scanType, scanData, ctx, scanInfo.GetScanningContext(), k8sApi)
+	var scanningContext cautils.ScanningContext
+	if scanInfo != nil {
+		scanningContext = scanInfo.GetScanningContext()
+	}
+	imagesToScan, imageToCreds := collectImageScanTargets(scanType, scanData, ctx, scanningContext, k8sApi)
+	if imagesToScan.IsEmpty() {
+		return
+	}
 
 	distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL)
 	if err != nil {

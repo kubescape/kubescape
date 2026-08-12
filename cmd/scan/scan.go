@@ -140,9 +140,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				if err := securityScan(scanInfo, ks, policyIdentifiers); err != nil {
 					return err
 				}
-			} else if len(args) == 0 ||
-				(args[0] != "framework" && args[0] != "control") {
-
+			} else {
 				if err := getFrameworkCmd(
 					ks,
 					&scanInfo,
@@ -160,10 +158,6 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				); err != nil {
 					return err
 				}
-			} else {
-				return fmt.Errorf(
-					"kubescape did not do anything",
-				)
 			}
 
 			return nil

@@ -287,6 +287,18 @@ func TestValidatePrinter(t *testing.T) {
 			format:    printer.SPDXFormat,
 			expectErr: errors.New("format \"spdx-json\" is only supported for image scanning"),
 		},
+		{
+			name:      "markdown format for cluster scan should not return error",
+			scanType:  cautils.ScanTypeCluster,
+			format:    printer.MarkdownFormat,
+			expectErr: nil,
+		},
+		{
+			name:      "markdown format for image scan should return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.MarkdownFormat,
+			expectErr: errors.New("format \"markdown\" is not supported for image scanning"),
+		},
 	}
 
 	for _, tt := range tests {
@@ -296,6 +308,14 @@ func TestValidatePrinter(t *testing.T) {
 			assert.Equal(t, tt.expectErr, got)
 		})
 	}
+}
+
+func TestNewPrinter_MarkdownFormat(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{Format: printer.MarkdownFormat}
+	p := NewPrinter(context.TODO(), printer.MarkdownFormat, scanInfo, "")
+	require.NotNil(t, p)
+	_, ok := p.(*printerv2.MarkdownPrinter)
+	assert.True(t, ok, "NewPrinter(MarkdownFormat) must return a *MarkdownPrinter")
 }
 
 func TestNewPrinter(t *testing.T) {
