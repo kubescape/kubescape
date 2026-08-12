@@ -155,24 +155,27 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		scanRequestParams.scanInfo.UseArtifactsFrom = getter.DefaultLocalStore
 	}
 
-	handler.state.setBusy(scanID, cancel)
-
-	select {
-	case handler.scanRequestChan <- scanRequestParams:
-		// Record the accepted user scan so Status and the offline Results
-		// fallback resolve "latest" to it rather than to a /v1/metrics scrape.
-		// Done here, not before the send, so a rejected (queue-full) request
-		// does not become the latest user scan.
-		handler.state.setLatestUserScanID(scanID)
-		logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
-	default:
-		handler.state.setNotBusy(scanID)
+	// Mark busy, enqueue, and record the accepted user scan as one atomic
+	// admission step. Status and the offline Results fallback resolve "latest"
+	// through latestUserScanID, so it has to be written in the same critical
+	// section that decides acceptance -- otherwise two concurrent requests can
+	// be accepted in one order and recorded in the other.
+	admitted := handler.state.admitUserScan(scanID, cancel, func() bool {
+		select {
+		case handler.scanRequestChan <- scanRequestParams:
+			return true
+		default:
+			return false
+		}
+	})
+	if !admitted {
 		w.Header().Set("Retry-After", "1")
 		handler.writeErrorWithStatus(w,
 			fmt.Errorf("scan queue is full; retry the request later"),
 			"", http.StatusTooManyRequests)
 		return
 	}
+	logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
 
 	response := &utilsmetav1.Response{
 		ID:       scanID,

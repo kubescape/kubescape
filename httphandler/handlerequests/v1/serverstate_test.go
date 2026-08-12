@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -265,6 +268,105 @@ func TestServerState_UserScanIDLifecycle(t *testing.T) {
 	}
 	if id := s.getRunningUserScanID(); id != "" {
 		t.Errorf("getRunningUserScanID() after setNotBusy = %q; want empty: no user scan is running", id)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// admitUserScan concurrency tests
+//
+// Scan() runs one goroutine per HTTP request, so nothing orders two handlers
+// against each other. If the enqueue and the latestUserScanID write are not in
+// the same critical section, two requests accepted as A-then-B can record
+// themselves as B-then-A, leaving "latest" on the older scan -- the same wrong
+// -scan-reported-as-latest bug as the metrics hijack, from a different source.
+// ---------------------------------------------------------------------------
+
+func TestServerState_AdmitUserScan_BookkeepingFollowsAcceptanceOrder(t *testing.T) {
+	s := newServerState()
+
+	inFirstEnqueue := make(chan struct{})
+	firstDone := make(chan struct{})
+	secondDone := make(chan struct{})
+
+	go func() {
+		defer close(firstDone)
+		// scan-A is accepted first and stalls inside its enqueue step. That
+		// stall is the window the race needs: with the steps unserialized,
+		// scan-B runs to completion during it and scan-A's write still lands
+		// last, so "latest" ends up on scan-A.
+		s.admitUserScan("scan-A", func() {}, func() bool {
+			close(inFirstEnqueue)
+			time.Sleep(100 * time.Millisecond)
+			return true
+		})
+	}()
+
+	<-inFirstEnqueue
+	go func() {
+		defer close(secondDone)
+		s.admitUserScan("scan-B", func() {}, func() bool { return true })
+	}()
+
+	<-firstDone
+	<-secondDone
+
+	if id := s.getLatestUserScanID(); id != "scan-B" {
+		t.Errorf("getLatestUserScanID() = %q; want \"scan-B\": latestUserScanID must follow acceptance order, not handler-goroutine scheduling", id)
+	}
+}
+
+// TestServerState_AdmitUserScan_RejectedScanNeverBecomesLatest covers the
+// rollback half: a request that loses the queue-full race must leave no trace,
+// or a 429'd scan becomes the one Status and Results resolve to.
+func TestServerState_AdmitUserScan_RejectedScanNeverBecomesLatest(t *testing.T) {
+	s := newServerState()
+
+	if !s.admitUserScan("accepted", func() {}, func() bool { return true }) {
+		t.Fatal("admitUserScan returned false for a successful enqueue")
+	}
+	if s.admitUserScan("rejected", func() {}, func() bool { return false }) {
+		t.Fatal("admitUserScan returned true for a failed enqueue")
+	}
+
+	if id := s.getLatestUserScanID(); id != "accepted" {
+		t.Errorf("getLatestUserScanID() = %q; want \"accepted\": a rejected scan must not become the latest user scan", id)
+	}
+	if s.isBusy("rejected") {
+		t.Errorf("isBusy(\"rejected\") = true; want false: a failed admission must roll its busy entry back")
+	}
+	if l := s.len(); l != 1 {
+		t.Errorf("len() = %d; want 1: only the accepted scan may remain registered", l)
+	}
+}
+
+// TestServerState_AdmitUserScan_ConcurrentAdmissions is the stress form, most
+// useful under -race: every concurrent admission must register exactly once,
+// and "latest" must be one of the scans that was actually accepted.
+func TestServerState_AdmitUserScan_ConcurrentAdmissions(t *testing.T) {
+	s := newServerState()
+
+	const admissions = 50
+	ids := make([]string, admissions)
+	var wg sync.WaitGroup
+	for i := range ids {
+		ids[i] = fmt.Sprintf("scan-%02d", i)
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			if !s.admitUserScan(id, func() {}, func() bool { return true }) {
+				t.Errorf("admitUserScan(%q) = false; want true", id)
+			}
+		}(ids[i])
+	}
+	wg.Wait()
+
+	if l := s.len(); l != admissions {
+		t.Errorf("len() = %d; want %d: every accepted scan must be registered exactly once", l, admissions)
+	}
+
+	latest := s.getLatestUserScanID()
+	if !slices.Contains(ids, latest) {
+		t.Errorf("getLatestUserScanID() = %q; want one of the admitted scan IDs", latest)
 	}
 }
 
