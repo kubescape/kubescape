@@ -353,6 +353,54 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	// consumed by the plain-manifest loader as untransformed raw manifests.
 	excludeFilesUnderDirectories(sourceToWorkloads, nestedKustomizeDirs)
 
+	terraformSourceToWorkloads, err := cautils.LoadResourcesFromTerraform(ctx, path)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// merge Terraform-derived workloads, same pattern as the Kustomize block below
+	for source, ws := range terraformSourceToWorkloads {
+		workloads = append(workloads, ws...)
+		relSource, err := filepath.Rel(repoRoot, source)
+		if err == nil {
+			source = relSource
+		}
+
+		var lastCommit reporthandling.LastCommit
+		if gitRepo != nil {
+			if commitInfo, _ := gitRepo.GetFileLastCommit(source); commitInfo != nil {
+				lastCommit = reporthandling.LastCommit{
+					Hash:           commitInfo.SHA,
+					Date:           commitInfo.Author.Date,
+					CommitterName:  commitInfo.Author.Name,
+					CommitterEmail: commitInfo.Author.Email,
+					Message:        commitInfo.Message,
+				}
+			}
+		}
+
+		var workloadSource reporthandling.Source
+		if clonedRepo != "" {
+			workloadSource = reporthandling.Source{
+				Path:         "",
+				RelativePath: source,
+				FileType:     "Terraform",
+				LastCommit:   lastCommit,
+			}
+		} else {
+			workloadSource = reporthandling.Source{
+				Path:         repoRoot,
+				RelativePath: source,
+				FileType:     "Terraform",
+				LastCommit:   lastCommit,
+			}
+		}
+
+		for i := range ws {
+			workloadIDToSource[ws[i].GetID()] = workloadSource
+		}
+	}
+
 	// update workloads and workloadIDToSource
 	var warnIssued bool
 	for source, ws := range sourceToWorkloads {

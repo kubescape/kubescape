@@ -203,6 +203,35 @@ func TestCollectAndStreamBatches_HostScannerDisabled_MarksControlsSkipped(t *tes
 	assert.Contains(t, info.InnerInfo, "Install the Kubescape operator")
 }
 
+func TestCollectAndStreamBatches_HostScannerEnabled_NilHandler_NoPanic(t *testing.T) {
+	ctx := context.Background()
+	handler := &K8sResourceHandler{
+		hostSensorHandler: nil, // Nil handler must NOT cause a nil pointer panic when HostScanner is true
+	}
+	scanInfo, session := streamingTestSession(ctx)
+	session.Metadata.ScanMetadata.HostScanner = true
+	batches := make(chan *cautils.ResourceBatch, 1)
+
+	assert.NotPanics(t, func() {
+		err := handler.collectAndStreamBatches(
+			ctx,
+			QueryableResources{},
+			&EmptySelector{},
+			session,
+			scanInfo,
+			cautils.ExternalResources{"KubeletConfiguration": nil},
+			batches,
+			nil,
+		)
+		require.NoError(t, err)
+	})
+
+	info, ok := session.InfoMap["KubeletConfiguration"]
+	require.True(t, ok)
+	assert.Equal(t, apis.StatusSkipped, info.InnerStatus)
+	assert.Equal(t, "failed to init host scanner", info.InnerInfo)
+}
+
 // TestCollectAndStreamBatches_CountsNamespacedResourcesAcrossBatches guards
 // against setMapNamespaceToNumOfResources being handed only the resident
 // (cluster-scoped) batch: namespaced resources live in namespaceBatches, so

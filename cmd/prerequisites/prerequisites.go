@@ -1,6 +1,7 @@
 package prerequisites
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/kubescape/go-logger"
@@ -14,6 +15,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	buildKubeClient    = common.BuildKubeClient
+	collectClusterData = common.CollectClusterData
+)
+
 func GetPreReqCmd(ks meta.IKubescape) *cobra.Command {
 	var kubeconfigPath *string
 
@@ -22,33 +28,39 @@ func GetPreReqCmd(ks meta.IKubescape) *cobra.Command {
 		Use:   "prerequisites",
 		Short: "Check prerequisites for installing Kubescape Operator",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			clientSet, inCluster := common.BuildKubeClient(*kubeconfigPath)
-			if clientSet == nil {
-				return fmt.Errorf("could not create kube client")
-			}
-
-			// 1) Collect cluster data
-			clusterData, err := common.CollectClusterData(ks.Context(), clientSet)
-			if err != nil {
-				logger.L().Error("Failed to collect cluster data", helpers.Error(err))
-			}
-
-			// 2) Run checks
-			sizingResult := sizing.RunSizingChecker(clusterData)
-			pvResult := pvcheck.RunPVProvisioningCheck(ks.Context(), clientSet, clusterData, inCluster)
-			connectivityResult := connectivitycheck.RunConnectivityChecks(ks.Context(), clientSet, clusterData, inCluster)
-			ebpfResult := ebpfcheck.RunEbpfCheck(ks.Context(), clientSet, clusterData, inCluster)
-
-			// 3) Build and export the final ReportData
-			finalReport := common.BuildReportData(clusterData, sizingResult, pvResult, connectivityResult, ebpfResult)
-			finalReport.InCluster = inCluster
-
-			common.GenerateOutput(finalReport, inCluster)
-			return nil
+			return runPrerequisites(ks.Context(), *kubeconfigPath)
 		},
 	}
 
 	kubeconfigPath = preReqCmd.PersistentFlags().String("kubeconfig", "", "Path to the kubeconfig file. If not set, in-cluster config is used or $HOME/.kube/config if outside a cluster.")
 
 	return preReqCmd
+}
+
+// runPrerequisites collects cluster data and runs operator prerequisite checks.
+// Collection failures must abort before checks/report generation: partial data
+// previously produced false-negative PV results and unsafe Helm recommendations
+// while still exiting 0.
+func runPrerequisites(ctx context.Context, kubeconfigPath string) error {
+	clientSet, inCluster := buildKubeClient(kubeconfigPath)
+	if clientSet == nil {
+		return fmt.Errorf("could not create kube client")
+	}
+
+	clusterData, err := collectClusterData(ctx, clientSet)
+	if err != nil {
+		logger.L().Error("Failed to collect cluster data", helpers.Error(err))
+		return fmt.Errorf("failed to collect cluster data: %w", err)
+	}
+
+	sizingResult := sizing.RunSizingChecker(clusterData)
+	pvResult := pvcheck.RunPVProvisioningCheck(ctx, clientSet, clusterData, inCluster)
+	connectivityResult := connectivitycheck.RunConnectivityChecks(ctx, clientSet, clusterData, inCluster)
+	ebpfResult := ebpfcheck.RunEbpfCheck(ctx, clientSet, clusterData, inCluster)
+
+	finalReport := common.BuildReportData(clusterData, sizingResult, pvResult, connectivityResult, ebpfResult)
+	finalReport.InCluster = inCluster
+
+	common.GenerateOutput(finalReport, inCluster)
+	return nil
 }

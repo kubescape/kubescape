@@ -2,6 +2,8 @@ package scan
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -62,9 +64,16 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 				return err
 			}
 
+			imageName := args[0]
+			if strings.HasSuffix(imageName, ".tar") && !strings.HasPrefix(imageName, "docker-archive:") && !strings.HasPrefix(imageName, "oci-archive:") {
+				if _, err := os.Stat(imageName); err == nil {
+					imageName = "docker-archive:" + imageName
+				}
+			}
+
 			imgScanInfo := &metav1.ImageScanInfo{
 				Authority:          credentials.Authority,
-				Image:              args[0],
+				Image:              imageName,
 				Username:           credentials.Username,
 				Password:           credentials.Password,
 				Token:              credentials.Token,

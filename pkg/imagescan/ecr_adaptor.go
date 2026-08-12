@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -93,7 +94,7 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 			continue
 		}
 
-		if out.ImageScanStatus != nil && out.ImageScanStatus.Status == types.ScanStatusComplete {
+		if out.ImageScanStatus != nil && (out.ImageScanStatus.Status == types.ScanStatusComplete || out.ImageScanStatus.Status == types.ScanStatusActive) {
 			status.IsScanAvailable = true
 			if out.ImageScanFindings != nil && out.ImageScanFindings.ImageScanCompletedAt != nil {
 				status.LastScanDate = *out.ImageScanFindings.ImageScanCompletedAt
@@ -169,6 +170,26 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 						Description: aws.ToString(finding.Description),
 						Links:       []string{aws.ToString(finding.Uri)},
 					})
+				}
+				for _, finding := range out.ImageScanFindings.EnhancedFindings {
+					vulnerability := Vulnerability{
+						Severity:    normalizeSeverity(aws.ToString(finding.Severity)),
+						Description: aws.ToString(finding.Description),
+					}
+
+					if details := finding.PackageVulnerabilityDetails; details != nil {
+						vulnerability.ID = aws.ToString(details.VulnerabilityId)
+						vulnerability.Links = append(vulnerability.Links, details.ReferenceUrls...)
+
+						if sourceURL := aws.ToString(details.SourceUrl); sourceURL != "" && !slices.Contains(vulnerability.Links, sourceURL) {
+							vulnerability.Links = append(vulnerability.Links, sourceURL)
+						}
+					}
+					if vulnerability.ID == "" {
+						vulnerability.ID = aws.ToString(finding.Title)
+					}
+
+					report.Vulnerabilities = append(report.Vulnerabilities, vulnerability)
 				}
 			}
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -75,7 +76,7 @@ func kustomizeTestdataPath() string {
 }
 
 func TestKustomizeHelmChartDirectories_CustomHomeDeduplicatesPhysicalChart(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	writeManifestFixture(t, root, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 helmGlobals:
@@ -93,7 +94,7 @@ helmCharts:
 }
 
 func TestKustomizeHelmChartDirectories_VersionedRepositoryChart(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	writeManifestFixture(t, root, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 helmGlobals:
@@ -140,7 +141,7 @@ func TestKustomizeHelmChartDirectories_ChartHomeAndDownloadLayout(t *testing.T) 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			root := t.TempDir()
+			root := resolvedTempDir(t)
 			chartHome := tt.chartHome(root)
 			writeManifestFixture(t, root, "kustomization.yaml", fmt.Sprintf(`apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -159,7 +160,7 @@ helmCharts:
 }
 
 func TestAppendOwnedHelmChartTree_PreservesPartialDiscovery(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	nested := filepath.Join(root, "charts", "dependency")
 	require.NoError(t, os.MkdirAll(nested, 0o750))
 
@@ -179,7 +180,7 @@ func TestAppendOwnedHelmChartTree_PreservesPartialDiscovery(t *testing.T) {
 }
 
 func TestKustomizeHelmChartDirectories_TraversesSelectedLocalGraph(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	base := filepath.Join(root, "base")
 	component := filepath.Join(root, "component")
 	require.NoError(t, os.MkdirAll(base, 0o750))
@@ -290,7 +291,76 @@ func TestKustomizeBaseDirectory(t *testing.T) {
 	assert.NotEmpty(t, workloads, "should have workloads from base directory")
 }
 
+// fakeHelmVersionOutput is what the stub prints for `helm version -c --short`.
+// Kustomize's helm chart inflator (sigs.k8s.io/kustomize/api/internal/builtins
+// HelmChartInflationGenerator.checkHelmVersion) requires the output to match
+// `v?\d+(\.\d+)+` with a major version of 3.
+const fakeHelmVersionOutput = "v3.14.0+gfake0000"
+
+// fakeHelmTemplateOutput is what the stub prints for `helm template ...`. It
+// mirrors the rendered output of the test-chart fixture
+// (testdata/kustomize/helm/charts/test-chart), so the kustomize helm inflator
+// receives real YAML without ever invoking a real Helm binary.
+const fakeHelmTemplateOutput = `---
+# Source: test-chart/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-config
+data:
+  key: value
+`
+
+// installFakeHelmBinary puts a stub "helm" executable on PATH for the
+// duration of the test, so TestKustomizeDirectoryWithHelmCharts exercises the
+// real kustomize-invokes-helm code path without depending on a real Helm
+// installation. It only understands the two subcommands the kustomize helm
+// inflator actually issues for this fixture: `version -c --short` and
+// `template ...`.
+func installFakeHelmBinary(t *testing.T) {
+	t.Helper()
+
+	binDir := t.TempDir()
+
+	var script string
+	var name string
+	if runtime.GOOS == "windows" {
+		name = "helm.bat"
+		// fakeHelmTemplateOutput is multi-line; `echo` only applies to a single
+		// line, so each line needs its own `echo` or cmd.exe would try to
+		// execute lines 2+ as commands.
+		var echoLines []string
+		for _, line := range strings.Split(strings.TrimSuffix(fakeHelmTemplateOutput, "\n"), "\n") {
+			echoLines = append(echoLines, "echo "+line)
+		}
+		script = "@echo off\r\n" +
+			"if \"%1\"==\"version\" (\r\n" +
+			"  echo " + fakeHelmVersionOutput + "\r\n" +
+			"  exit /b 0\r\n" +
+			")\r\n" +
+			strings.Join(echoLines, "\r\n") + "\r\n"
+	} else {
+		name = "helm"
+		script = "#!/bin/sh\n" +
+			"if [ \"$1\" = \"version\" ]; then\n" +
+			"  echo '" + fakeHelmVersionOutput + "'\n" +
+			"  exit 0\n" +
+			"fi\n" +
+			"cat <<'EOF'\n" +
+			fakeHelmTemplateOutput +
+			"EOF\n"
+	}
+
+	binPath := filepath.Join(binDir, name)
+	require.NoError(t, os.WriteFile(binPath, []byte(script), 0o600))
+	require.NoError(t, os.Chmod(binPath, 0o700))
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 func TestKustomizeDirectoryWithHelmCharts(t *testing.T) {
+	installFakeHelmBinary(t)
+
 	helmPath := filepath.Join(kustomizeTestdataPath(), "helm")
 
 	assert.True(t, isKustomizeDirectory(helmPath), "helm directory should be detected as kustomize directory")
@@ -300,15 +370,8 @@ func TestKustomizeDirectoryWithHelmCharts(t *testing.T) {
 
 	for _, err := range errs {
 		assert.NotContains(t, err.Error(), "must specify --enable-helm", "kustomize should run with helm enabled")
-		if strings.Contains(err.Error(), `exec: "helm": executable file not found`) {
-			t.Skip("helm is not installed in test environment")
-		}
-		if strings.Contains(err.Error(), "unknown shorthand flag") || strings.Contains(err.Error(), "unknown flag") || strings.Contains(err.Error(), "unable to run: 'helm version -c --short'") {
-			t.Skip("installed helm version is incompatible with the kustomize version used (removed -c/--short flags)")
-		}
 	}
-
-	assert.Empty(t, errs, "kustomize with helm charts should render without errors")
+	require.Empty(t, errs, "kustomize with helm charts should render without errors")
 	assert.NotEmpty(t, workloads, "rendered workloads should include resources from helm chart")
 
 	var configMapFound bool
@@ -320,4 +383,20 @@ func TestKustomizeDirectoryWithHelmCharts(t *testing.T) {
 		}
 	}
 	assert.True(t, configMapFound, "helm chart ConfigMap should be present in rendered workloads")
+}
+
+// resolvedTempDir returns t.TempDir() with symlinks resolved.
+//
+// The loaders under test canonicalise their inputs with filepath.EvalSymlinks
+// (fileutils.go), while t.TempDir() hands back an unresolved path: /var/... on
+// macOS where the real directory is /private/var/..., and the 8.3 short form on
+// Windows. Comparing a resolved result against an unresolved expectation fails
+// on both, and passes on Linux only because the two spellings coincide there.
+// localgitrepository_test.go already resolves the expected side for the same
+// reason.
+func resolvedTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	return dir
 }

@@ -259,12 +259,12 @@ func TestIsUnderAnyDir(t *testing.T) {
 // symlinked parent is still reported contained when only the physical layout
 // matches one of dirs.
 func TestIsUnderAnyDir_CanonicalizesSymlinks(t *testing.T) {
-	realParent := t.TempDir()
+	realParent := resolvedTempDir(t)
 	dir := filepath.Join(realParent, "app")
 	require.NoError(t, os.MkdirAll(dir, 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "deployment.yaml"), []byte("apiVersion: v1\n"), 0o600))
 
-	linkedParent := filepath.Join(t.TempDir(), "linked-parent")
+	linkedParent := filepath.Join(resolvedTempDir(t), "linked-parent")
 	if err := os.Symlink(realParent, linkedParent); err != nil {
 		t.Skipf("symlinks are unavailable: %v", err)
 	}
@@ -316,7 +316,7 @@ func writeHelmChartFixture(t *testing.T, directory, name string) {
 }
 
 func TestLoadResourcesFromHelmChartsExcludingKustomizeOwnedDirectories(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	chartHome := filepath.Join(root, "charts")
 	base := filepath.Join(root, "base")
 	ownedChart := filepath.Join(base, "charts", "app")
@@ -380,7 +380,7 @@ helmCharts:
 }
 
 func TestLoadResourcesFromHelmChartsExcludingDirectories_CanonicalizesSymlinkedScanPath(t *testing.T) {
-	realParent := t.TempDir()
+	realParent := resolvedTempDir(t)
 	root := filepath.Join(realParent, "project")
 	ownedChart := filepath.Join(root, "charts", "app")
 	standaloneChart := filepath.Join(root, "charts", "standalone")
@@ -393,7 +393,7 @@ helmCharts:
     releaseName: app
 `)
 
-	linkedParent := filepath.Join(t.TempDir(), "linked-parent")
+	linkedParent := filepath.Join(resolvedTempDir(t), "linked-parent")
 	if err := os.Symlink(realParent, linkedParent); err != nil {
 		t.Skipf("symlinks are unavailable: %v", err)
 	}
@@ -415,11 +415,11 @@ helmCharts:
 }
 
 func TestExcludeHelmTemplateFiles_PreservesLexicalOwnershipOfSymlinkedTemplate(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	templateDir := filepath.Join(root, "chart", "templates")
 	require.NoError(t, os.MkdirAll(templateDir, 0o750))
 
-	externalTemplate := filepath.Join(t.TempDir(), "configmap.yaml")
+	externalTemplate := filepath.Join(resolvedTempDir(t), "configmap.yaml")
 	require.NoError(t, os.WriteFile(externalTemplate, []byte("apiVersion: v1\nkind: ConfigMap\n"), 0o600))
 	linkedTemplate := filepath.Join(templateDir, "configmap.yaml")
 	if err := os.Symlink(externalTemplate, linkedTemplate); err != nil {
@@ -671,7 +671,7 @@ func TestGetFileFormat(t *testing.T) {
 }
 
 func TestIsFileAndIsDir(t *testing.T) {
-	tempDir := t.TempDir()
+	tempDir := resolvedTempDir(t)
 	tempFile := filepath.Join(tempDir, "test_file.txt")
 	err := os.WriteFile(tempFile, []byte("test"), 0o600)
 	require.NoError(t, err)

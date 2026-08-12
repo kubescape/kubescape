@@ -304,8 +304,12 @@ haveResident:
 	// so CEL's namespaceObject binding is populated for this scope's objects.
 	opap.indexNamespacesFrom(residentBatch.AllResources)
 
+	// Index the resident batch once: every namespace scope below is evaluated
+	// together with it and reads the same index.
+	residentGroups := newResidentIndex(residentBatch)
+
 	// Process resident batch first
-	residentScope := evaluationScope{name: residentBatch.Scope, resident: residentBatch}
+	residentScope := newEvaluationScope(residentBatch.Scope, nil, residentGroups)
 	if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, residentScope, progressListener); err != nil {
 		return err
 	}
@@ -327,7 +331,7 @@ haveResident:
 			opap.indexNamespacesFrom(batch.AllResources)
 
 			// Process this namespace batch
-			namespaceScope := evaluationScope{name: batch.Scope, batch: batch, resident: residentBatch}
+			namespaceScope := newEvaluationScope(batch.Scope, batch, residentGroups)
 			if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, namespaceScope, progressListener); err != nil {
 				return err
 			}
@@ -486,11 +490,45 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 // the resident batch every scope depends on.
 type evaluationScope struct {
 	name string
-	// batch holds the scope's own resources. It is nil for the resident scope,
-	// which is evaluated on its own so that cluster-scoped resources are still
-	// assessed on clusters with no namespaced resources at all.
-	batch    *cautils.ResourceBatch
-	resident *cautils.ResourceBatch
+	// ownBatch reports whether the scope brings resources of its own. It is
+	// false for the resident scope, which is evaluated on its own so that
+	// cluster-scoped resources are still assessed on clusters with no namespaced
+	// resources at all.
+	ownBatch bool
+	// batchGroups indexes the scope's own batch, zero when ownBatch is false.
+	batchGroups resourceGroupIndex
+	// residentGroups indexes the resident batch, shared by every scope.
+	residentGroups *residentIndex
+}
+
+// residentIndex holds the resident batch indexed for matching. Every scope is
+// evaluated together with the resident batch, so it is built once per scan and
+// shared, rather than re-indexed once per namespace.
+type residentIndex struct {
+	k8s      resourceGroupIndex
+	external resourceGroupIndex
+}
+
+func newResidentIndex(resident *cautils.ResourceBatch) *residentIndex {
+	return &residentIndex{
+		k8s:      newResourceGroupIndex(resident.K8SResources, resident.AllResources),
+		external: newResourceGroupIndex(cautils.K8SResources(resident.ExternalResources), resident.AllResources),
+	}
+}
+
+// newEvaluationScope builds a scope and the index its rule matching reads,
+// keeping that work off the per-rule path (see resourceGroupIndex). batch is nil
+// for the resident scope, which is already indexed in residentGroups.
+func newEvaluationScope(name string, batch *cautils.ResourceBatch, residentGroups *residentIndex) evaluationScope {
+	scope := evaluationScope{
+		name:           name,
+		residentGroups: residentGroups,
+	}
+	if batch != nil {
+		scope.ownBatch = true
+		scope.batchGroups = newResourceGroupIndex(batch.K8SResources, batch.AllResources)
+	}
+	return scope
 }
 
 // matchedObjects returns the rule's input for this scope: the scope's own
@@ -502,14 +540,14 @@ type evaluationScope struct {
 // which the resident scope already did.
 func (scope evaluationScope) matchedObjects(rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
 	var objects []workloadinterface.IMetadata
-	if scope.batch != nil {
-		objects = getKubernetesObjects(scope.batch.K8SResources, scope.batch.AllResources, rule.Match)
+	if scope.ownBatch {
+		objects = getKubernetesObjects(scope.batchGroups, rule.Match)
 		if len(objects) == 0 {
 			return nil
 		}
 	}
-	objects = append(objects, getKubernetesObjects(scope.resident.K8SResources, scope.resident.AllResources, rule.Match)...)
-	objects = append(objects, getKubernetesObjectsFromExternalResources(scope.resident.ExternalResources, scope.resident.AllResources, rule.DynamicMatch)...)
+	objects = append(objects, getKubernetesObjects(scope.residentGroups.k8s, rule.Match)...)
+	objects = append(objects, getKubernetesObjects(scope.residentGroups.external, rule.DynamicMatch)...)
 	return objects
 }
 
@@ -522,10 +560,12 @@ func (scope evaluationScope) matchedObjects(rule *reporthandling.PolicyRule) []w
 func (opap *OPAProcessor) evaluationScopes() []evaluationScope {
 	resident, batches := cautils.PartitionResources(opap.initialResourceCount, opap.K8SResources, opap.ExternalResources, opap.AllResources)
 
+	residentGroups := newResidentIndex(resident)
+
 	scopes := make([]evaluationScope, 0, len(batches)+1)
-	scopes = append(scopes, evaluationScope{name: resident.Scope, resident: resident})
+	scopes = append(scopes, newEvaluationScope(resident.Scope, nil, residentGroups))
 	for _, batch := range batches {
-		scopes = append(scopes, evaluationScope{name: batch.Scope, batch: batch, resident: resident})
+		scopes = append(scopes, newEvaluationScope(batch.Scope, batch, residentGroups))
 	}
 
 	logger.L().Debug("partitioned resources for evaluation",

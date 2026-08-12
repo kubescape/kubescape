@@ -715,6 +715,7 @@ func TestMakeRegoDeps_InputIsolation(t *testing.T) {
 	_, runtimeExists := opap.regoDependenciesData.PostureControlInputs["runtime"]
 
 	assert.False(t, runtimeExists)
+	assert.Equal(t, "aws", deps.DataControlInputs["cloudProvider"])
 }
 
 func TestRunOPAOnSingleRuleDispatch(t *testing.T) {
