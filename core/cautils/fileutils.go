@@ -552,29 +552,29 @@ func LoadResourcesFromTerraform(ctx context.Context, basePath string) (map[strin
 // LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts
 // are the chart directories LoadResourcesFromHelmCharts already rendered; their templates are left
 // to that render and skipped here. Pass nil to scan everything (e.g. when no charts were rendered).
-func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, renderedCharts []string) (map[string][]workloadinterface.IMetadata, error) {
+func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, renderedCharts []string) (map[string][]workloadinterface.IMetadata, []SkippedManifest, error) {
 	// skip the plain-YAML glob for a kustomize directory; the kustomize render handles it
 	if isKustomizeDirectory(input) {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	files, errs := listFiles(input)
 	if len(errs) > 0 {
 		discoveryErr := fmt.Errorf("failed to discover all manifest files for %q: %w", input, errors.Join(errs...))
 		if len(files) == 0 {
-			return nil, discoveryErr
+			return nil, nil, discoveryErr
 		}
 		logger.L().Ctx(ctx).Warning("Continuing with manifest files found before a discovery error", helpers.Error(discoveryErr))
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("no YAML or JSON manifest files found for input %q", input)
+		return nil, nil, fmt.Errorf("no YAML or JSON manifest files found for input %q", input)
 	}
 
 	// skip the plain-YAML glob for the templates of charts the helm render already covered; a chart
 	// whose render failed is absent from renderedCharts, so its templates stay plainly scanned.
 	files = excludeHelmTemplateFiles(files, renderedCharts)
 
-	workloads, errs := loadFiles(rootPath, files)
+	workloads, skips, errs := loadFiles(rootPath, files)
 	if len(errs) > 0 {
 		loadErr := fmt.Errorf("failed to load one or more manifests from %q: %w", input, errors.Join(errs...))
 		// Directory and glob scans have historically been best effort. Keep the
@@ -583,21 +583,23 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, rendere
 		// remains a hard failure because returning success would scan nothing or
 		// conceal corruption in the exact file the user requested.
 		if isFile(input) || len(workloads) == 0 {
-			return workloads, loadErr
+			return workloads, skips, loadErr
 		}
 		logger.L().Ctx(ctx).Warning("Skipping invalid manifest files", helpers.Error(loadErr))
 	}
 
-	return workloads, nil
+	return workloads, skips, nil
 }
 
-func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterface.IMetadata, []error) {
+func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterface.IMetadata, []SkippedManifest, []error) {
 	workloads := make(map[string][]workloadinterface.IMetadata, 0)
 	errs := []error{}
+	skips := []SkippedManifest{}
 	for i := range filePaths {
 		f, err := loadFile(filePaths[i])
 		if err != nil {
 			errs = append(errs, err)
+			skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "read error: " + err.Error()})
 			continue
 		}
 		if len(f) == 0 {
@@ -612,6 +614,7 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 			// standalone manifests.
 			if !bytes.Contains(f, []byte("{{")) {
 				errs = append(errs, fmt.Errorf("failed to parse %q: %w", filePaths[i], e))
+				skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "parse error: " + e.Error()})
 			}
 		}
 		if len(w) != 0 {
@@ -632,7 +635,7 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 			workloads[path] = wSlice
 		}
 	}
-	return workloads, errs
+	return workloads, skips, errs
 }
 
 func loadFile(filePath string) ([]byte, error) {
@@ -819,6 +822,14 @@ func manifestObjectToWorkloads(obj map[string]any) ([]workloadinterface.IMetadat
 
 	if o := objectsenvelopes.NewObject(obj); o != nil {
 		return []workloadinterface.IMetadata{o}, nil
+	}
+
+	// Only surface as skipped when the document looks like an attempted
+	// Kubernetes manifest (has apiVersion). Files without apiVersion —
+	// Chart.yaml, values.yaml, CI configs, docker-compose.yaml — are
+	// silently ignored as before.
+	if _, hasAPIVersion := obj["apiVersion"]; hasAPIVersion {
+		return nil, fmt.Errorf("not a valid Kubernetes object")
 	}
 	return nil, nil
 }

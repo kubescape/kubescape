@@ -34,7 +34,7 @@ func TestListFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
-	workloads, err := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "", nil)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "", nil)
 	require.NoError(t, err)
 	assert.Equal(t, 12, len(workloads))
 
@@ -51,7 +51,7 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 func TestLoadResourcesFromFiles_SupportsMixedCaseExtensions(t *testing.T) {
 	o, _ := os.Getwd()
 	testDir := filepath.Join(o, "testdata", "mixed_extensions")
-	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, "", nil)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), testDir, "", nil)
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(workloads))
 
@@ -80,7 +80,7 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplates(t *testing.T) {
 		filepath.Join(testDir, "mychart"),
 		filepath.Join(testDir, "mychart", "charts", "mysubchart"),
 	}
-	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
 	require.NoError(t, err)
 
 	expectedFiles := []string{
@@ -99,7 +99,7 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplates(t *testing.T) {
 func TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart(t *testing.T) {
 	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
 	renderedCharts := []string{testDir, filepath.Join(testDir, "charts", "mysubchart")}
-	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
 	require.NoError(t, err)
 
 	expectedFile := filepath.Join(testDir, "crds", "widget.yaml")
@@ -114,7 +114,7 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart(t *testing.T) {
 func TestLoadResourcesFromFiles_ScansTemplatesOfUnrenderedChart(t *testing.T) {
 	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
 	// no charts rendered successfully, so nothing may be excluded
-	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, nil)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, nil)
 	require.NoError(t, err)
 
 	staticTemplate := filepath.Join(testDir, "templates", "serviceaccount.yaml")
@@ -434,7 +434,7 @@ func TestExcludeHelmTemplateFiles_PreservesLexicalOwnershipOfSymlinkedTemplate(t
 
 func TestLoadFiles(t *testing.T) {
 	files, _ := listFiles(onlineBoutiquePath())
-	_, errs := loadFiles("", files)
+	_, _, errs := loadFiles("", files)
 	assert.Len(t, errs, 1)
 	assert.Contains(t, errs[0].Error(), "invalid.yaml")
 }
