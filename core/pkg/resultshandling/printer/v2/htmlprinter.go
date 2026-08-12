@@ -13,6 +13,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
@@ -155,7 +156,7 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableV
 					helpers.String("resourceID", resourceID))
 				continue
 			}
-			ctlResults := buildResourceControlResultTable(result.AssociatedControls, &opaSessionObj.Report.SummaryDetails)
+			ctlResults := buildResourceControlResultTable(result.AssociatedControls, &opaSessionObj.Report.SummaryDetails, resource)
 			resourceTableView = append(resourceTableView, ResourceResult{resource, ctlResults})
 		}
 	}
@@ -186,17 +187,17 @@ func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.
 	return imageScanSummary
 }
 
-func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary) ResourceControlResult {
+func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary, resource workloadinterface.IMetadata) ResourceControlResult {
 	ctlSeverity := apis.ControlSeverityToString(control.GetScoreFactor())
 	ctlName := resourceControl.GetName()
 	ctlID := resourceControl.GetID()
 	ctlURL := cautils.GetControlLink(resourceControl.GetID())
-	failedPaths := AssistedRemediationPathsToString(&resourceControl)
+	failedPaths := AssistedRemediationPathsWithCurrentValues(&resourceControl, resource)
 
 	return ResourceControlResult{ctlSeverity, ctlName, ctlID, ctlURL, failedPaths}
 }
 
-func buildResourceControlResultTable(resourceControls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails) []ResourceControlResult {
+func buildResourceControlResultTable(resourceControls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata) []ResourceControlResult {
 	var ctlResults []ResourceControlResult
 	for _, resourceControl := range resourceControls {
 		if resourceControl.GetStatus(nil).IsFailed() {
@@ -204,7 +205,7 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 			if control == nil {
 				continue
 			}
-			ctlResult := buildResourceControlResult(resourceControl, control)
+			ctlResult := buildResourceControlResult(resourceControl, control, resource)
 
 			ctlResults = append(ctlResults, ctlResult)
 		}
