@@ -20,9 +20,11 @@ import (
 type mockGCPClient struct {
 	occurrences []*grafeaspb.Occurrence
 	mockErr     error
+	lastReq     *grafeaspb.ListOccurrencesRequest
 }
 
 func (m *mockGCPClient) ListOccurrences(ctx context.Context, req *grafeaspb.ListOccurrencesRequest, opts ...interface{}) GrafeasIterator {
+	m.lastReq = req
 	return &mockGrafeasIterator{
 		occurrences: m.occurrences,
 		err:         m.mockErr,
@@ -239,4 +241,36 @@ func TestGCPAdaptor_Login_CloseFailureStateClearing(t *testing.T) {
 	// State clearing check: client must be nil, owningClient must be retained
 	assert.Nil(t, adaptor.client, "a.client should be cleared before Close()")
 	assert.NotNil(t, adaptor.owningClient, "a.owningClient should be retained when close fails")
+}
+
+func TestGCPAdaptor_FilterInjectionPrevention(t *testing.T) {
+	mockClient := &mockGCPClient{
+		occurrences: []*grafeaspb.Occurrence{},
+	}
+	adaptor := NewGCPAdaptor()
+	adaptor.client = mockClient
+	adaptor.projectID = "test-project"
+
+	// Create an image ID with a malicious hash containing a double quote
+	images := []ContainerImageIdentifier{
+		{Registry: "us-docker.pkg.dev", Repository: "proj/repo/img", Hash: "sha256:malicious\"injection"},
+	}
+
+	// Test GetImagesScanStatus
+	_, err := adaptor.GetImagesScanStatus(context.Background(), images)
+	assert.NoError(t, err)
+	require.NotNil(t, mockClient.lastReq)
+
+	// The filter should have the double quote escaped
+	expectedResourceURL := "https://us-docker.pkg.dev/proj/repo/img@sha256:malicious\\\"injection"
+	expectedFilter := fmt.Sprintf("kind=\"DISCOVERY\" AND resourceUrl=\"%s\"", expectedResourceURL)
+	assert.Equal(t, expectedFilter, mockClient.lastReq.Filter)
+
+	// Test GetImagesVulnerabilities
+	_, err = adaptor.GetImagesVulnerabilities(context.Background(), images)
+	assert.NoError(t, err)
+	require.NotNil(t, mockClient.lastReq)
+
+	expectedVulnFilter := fmt.Sprintf("kind=\"VULNERABILITY\" AND resourceUrl=\"%s\"", expectedResourceURL)
+	assert.Equal(t, expectedVulnFilter, mockClient.lastReq.Filter)
 }
