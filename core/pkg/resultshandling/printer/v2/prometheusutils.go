@@ -235,23 +235,42 @@ func toRowInMetrics(name string, row string, value int) string {
 	return fmt.Sprintf("%s{%s} %d", name, row, value)
 
 }
+
+// emitMetricFamily renders lines as one group per metric family: the HELP/TYPE
+// header followed by every sample of that family. Grouping is required because
+// each item contributes one line to several families (a resource emits a failed
+// and a skipped counter), so writing the lines in the order they were collected
+// interleaves the families once there is more than one item. The text exposition
+// format requires a family's samples to be contiguous.
+//
+// Families keep the order in which they were first seen, so the metric layout
+// still follows the order the caller collected the lines in.
 func emitMetricFamily(lines []string) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	emitted := map[string]bool{}
-	var r strings.Builder
+	// keyed by family, not by sample: a scan emits a fixed handful of families and a
+	// line per item within each, so both stay small next to len(lines).
+	var order []string
+	samples := map[string][]string{}
 	for _, line := range lines {
 		// extract metric name (everything before '{')
 		name := line
 		if before, _, ok := strings.Cut(line, "{"); ok {
 			name = before
 		}
-		if !emitted[name] {
-			r.WriteString(toMetricHeader(name, name) + "\n")
-			emitted[name] = true
+		if _, seen := samples[name]; !seen {
+			order = append(order, name)
 		}
-		r.WriteString(line + "\n")
+		samples[name] = append(samples[name], line)
+	}
+
+	var r strings.Builder
+	for _, name := range order {
+		r.WriteString(toMetricHeader(name, name) + "\n")
+		for _, line := range samples[name] {
+			r.WriteString(line + "\n")
+		}
 	}
 	return r.String()
 }
