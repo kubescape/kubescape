@@ -30,6 +30,7 @@ func TestRecoverFunc_WithStringPanic(t *testing.T) {
 
 	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
 	assert.NotEmpty(t, recorder.Body.String())
+	assert.Contains(t, recorder.Body.String(), "something went wrong")
 }
 
 func TestRecoverFunc_WithErrorPanic(t *testing.T) {
@@ -40,6 +41,8 @@ func TestRecoverFunc_WithErrorPanic(t *testing.T) {
 	}()
 
 	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+	assert.NotEmpty(t, recorder.Body.String())
+	assert.Contains(t, recorder.Body.String(), assert.AnError.Error())
 }
 
 func TestRecoverFunc_WithIntPanic(t *testing.T) {
@@ -50,4 +53,6 @@ func TestRecoverFunc_WithIntPanic(t *testing.T) {
 	}()
 
 	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+	assert.NotEmpty(t, recorder.Body.String())
+	assert.Contains(t, recorder.Body.String(), "42")
 }
