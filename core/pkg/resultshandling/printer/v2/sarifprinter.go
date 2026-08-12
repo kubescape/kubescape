@@ -427,12 +427,17 @@ func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, 
 		return 0, false
 	}
 
-	splittedPath := strings.Split(localworkload.GetPath(), ":")
-	if len(splittedPath) <= 1 {
+	path := localworkload.GetPath()
+	volume := filepath.VolumeName(path)
+	pathWithoutVolume := path[len(volume):]
+
+	lastColon := strings.LastIndex(pathWithoutVolume, ":")
+	if lastColon == -1 {
 		return 0, false
 	}
+	lastColon += len(volume)
 
-	docIndex, err := strconv.Atoi(splittedPath[1])
+	docIndex, err := strconv.Atoi(path[lastColon+1:])
 	if err != nil {
 		return 0, false
 	}
