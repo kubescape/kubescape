@@ -114,8 +114,10 @@ func mergeAssociatedControls(existing []resourcesresults.ResourceAssociatedContr
 }
 
 // appendUnique appends the values of incoming that existing does not already
-// hold, preserving order. One pass over each slice, so merging a resident
-// resource across many scopes stays linear in the number of distinct values.
+// hold, preserving order. A call costs O(len(existing)+len(incoming)). A
+// resident resource reports the same paths in every scope, so existing stays at
+// the distinct count and merging it across scopes stays linear in the number of
+// scopes.
 func appendUnique[T comparable](existing, incoming []T) []T {
 	if len(incoming) == 0 {
 		return existing
