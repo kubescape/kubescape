@@ -147,11 +147,9 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 			continue
 		}
 
-		resourceURL := fmt.Sprintf("https://%s/%s@%s", imageID.Registry, imageID.Repository, imageID.Hash)
-
 		req := &grafeaspb.ListOccurrencesRequest{
 			Parent: fmt.Sprintf("projects/%s", a.projectID),
-			Filter: fmt.Sprintf("kind=\"DISCOVERY\" AND resourceUrl=%q", resourceURL),
+			Filter: buildGrafeasFilter("DISCOVERY", imageID),
 		}
 
 		it := a.client.ListOccurrences(ctx, req)
@@ -183,6 +181,11 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 	}
 
 	return statuses, aggErr
+}
+
+func buildGrafeasFilter(kind string, imageID ContainerImageIdentifier) string {
+	resourceURL := fmt.Sprintf("https://%s/%s@%s", imageID.Registry, imageID.Repository, imageID.Hash)
+	return fmt.Sprintf("kind=%q AND resourceUrl=%q", kind, resourceURL)
 }
 
 // Helper to normalize GCP severity to Kubescape expected severity
@@ -223,10 +226,9 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 			continue
 		}
 
-		resourceURL := fmt.Sprintf("https://%s/%s@%s", imageID.Registry, imageID.Repository, imageID.Hash)
 		req := &grafeaspb.ListOccurrencesRequest{
 			Parent:   fmt.Sprintf("projects/%s", a.projectID),
-			Filter:   fmt.Sprintf("kind=\"VULNERABILITY\" AND resourceUrl=%q", resourceURL),
+			Filter:   buildGrafeasFilter("VULNERABILITY", imageID),
 			PageSize: 1000,
 		}
 
