@@ -525,14 +525,16 @@ kubescape list <type> [flags]
 |------|-------------|---------|
 | `--account <id>` | Account ID for custom frameworks | - |
 | `--access-key <key>` | Access key | - |
-| `--format <format>` | Output format: `pretty-print`, `json` | `pretty-print` |
+| `--format <format>` | Output format: `pretty-print`, `json`, `yaml`, `csv` | `pretty-print` |
 
 ### Examples
 
 ```bash
 kubescape list frameworks
+kubescape list frameworks --format csv
 kubescape list controls
 kubescape list controls --format json
+kubescape list controls --format csv
 ```
 
 ---
@@ -595,6 +597,12 @@ Manage Kubescape configuration.
 ```bash
 # View configuration
 kubescape config view
+
+# View configuration as JSON
+kubescape config view -o json
+
+# View configuration as YAML
+kubescape config view -o yaml
 
 # Set account ID
 kubescape config set accountID <account-id>

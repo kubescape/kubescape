@@ -25,12 +25,13 @@ const (
 	GitLabSASTFormat  string = "gitlab-sast"
 	YamlFormat        string = "yaml"
 	CsvFormat         string = "csv"
+	MarkdownFormat    string = "markdown"
 	CycloneDXFormat   string = "cyclonedx-json"
 	SPDXFormat        string = "spdx-json"
 )
 
 // AllFormats lists every output format kubescape can emit.
-var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CsvFormat, CycloneDXFormat, SPDXFormat}
+var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat}
 
 // ImageFormats lists formats whose printers support image-scan data. CSV is
 // deliberately excluded: CsvPrinter.ActionPrint requires opaSessionObj and
@@ -51,6 +52,7 @@ const (
 	PrettyOutputExt     = ".txt"
 	YamlOutputExt       = ".yaml"
 	CsvOutputExt        = ".csv"
+	MarkdownOutputExt   = ".md"
 	CycloneDXOutputExt  = ".cdx.json"
 	SPDXOutputExt       = ".spdx.json"
 )

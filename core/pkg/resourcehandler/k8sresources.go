@@ -533,6 +533,21 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 		return nil, fmt.Errorf("resource not found in Kubernetes discovery: %s", getReadableID(resource))
 	}
 	apiGroup, apiVersion, resourceName := k8sinterface.StringToResourceGroup(resolved[0].groupVersionResourceTriplet)
+	if apiGroup == "" && resourceName == "secrets" {
+		// Defense in depth: a Secret is not a useful single-resource scan
+		// target, so reject it here instead of fetching it and discarding it
+		// later. Rejecting before pullSingleResource avoids an unnecessary
+		// Kubernetes API call (and the RBAC it requires) and guarantees Secret
+		// objects are never retrieved from the cluster in single-resource scan
+		// mode, rather than relying solely on downstream sanitization
+		// (removeData()/removeSecretData(), which redacts "data" and
+		// "stringData" to "XXXXXX").
+		//
+		// The GVR is resolved from cluster discovery, not from the
+		// client-supplied kind string, so this check cannot be sidestepped with
+		// casing or aliasing tricks.
+		return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s", getReadableID(resource))
+	}
 	gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resourceName}
 
 	fieldSelectors := getNameFieldSelectorString(resource.GetName(), FieldSelectorsEqualsOperator)
@@ -1036,8 +1051,8 @@ var namespacedResourcesToEstimate = []schema.GroupVersionResource{
 }
 
 // EstimateClusterSize estimates the number of namespaced resources in the
-// cluster by issuing metadata-only LIST requests (limit=1) to the API server
-// and summing the remainingItemCount from each response. A per-GVR failure
+// cluster by issuing LIST requests (limit=1) to the API server and summing the
+// returned items and remainingItemCount from each response. A per-GVR failure
 // (type unavailable, or the service account lacking read access) is tolerated,
 // but if no representative type can be listed at all the estimate is useless —
 // returning (0, nil) would be indistinguishable from a genuinely small cluster

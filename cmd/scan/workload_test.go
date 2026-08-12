@@ -278,6 +278,19 @@ func TestGetWorkloadCmd_ChartPathAndFilePathEmpty(t *testing.T) {
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }
 
+func TestGetWorkloadCmd_FilePathWithoutChartPath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getWorkloadCmd(mockKubescape, &scanInfo)
+	scanInfo.ChartPath = ""
+	scanInfo.FilePath = "manifests/app.yaml"
+
+	// Should not return an error when FilePath is set without ChartPath
+	err := cmd.Args(cmd, []string{"Deployment/nginx"})
+	assert.NoError(t, err)
+}
+
 func TestGetWorkloadCmd_RejectsFilePathWithPositionalInputPath(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	scanInfo := cautils.ScanInfo{}

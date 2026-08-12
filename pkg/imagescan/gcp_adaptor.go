@@ -143,11 +143,9 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 				return status, nil
 			}
 
-			resourceURL := fmt.Sprintf("https://%s/%s@%s", imageID.Registry, imageID.Repository, imageID.Hash)
-
 			req := &grafeaspb.ListOccurrencesRequest{
 				Parent: fmt.Sprintf("projects/%s", a.projectID),
-				Filter: fmt.Sprintf("kind=\"DISCOVERY\" AND resourceUrl=\"%s\"", resourceURL),
+				Filter: buildGrafeasFilter("DISCOVERY", imageID),
 			}
 
 			it := a.client.ListOccurrences(ctx, req)
@@ -177,6 +175,11 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 	)
 }
 
+func buildGrafeasFilter(kind string, imageID ContainerImageIdentifier) string {
+	resourceURL := fmt.Sprintf("https://%s/%s@%s", imageID.Registry, imageID.Repository, imageID.Hash)
+	return fmt.Sprintf("kind=%q AND resourceUrl=%q", kind, resourceURL)
+}
+
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
 func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []ContainerImageIdentifier) ([]ContainerImageVulnerabilityReport, error) {
 	if a.client == nil {
@@ -194,10 +197,9 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 				return report, nil
 			}
 
-			resourceURL := fmt.Sprintf("https://%s/%s@%s", imageID.Registry, imageID.Repository, imageID.Hash)
 			req := &grafeaspb.ListOccurrencesRequest{
 				Parent:   fmt.Sprintf("projects/%s", a.projectID),
-				Filter:   fmt.Sprintf("kind=\"VULNERABILITY\" AND resourceUrl=\"%s\"", resourceURL),
+				Filter:   buildGrafeasFilter("VULNERABILITY", imageID),
 				PageSize: 1000,
 			}
 

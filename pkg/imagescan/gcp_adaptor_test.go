@@ -20,9 +20,11 @@ import (
 type mockGCPClient struct {
 	occurrences []*grafeaspb.Occurrence
 	mockErr     error
+	lastReq     *grafeaspb.ListOccurrencesRequest
 }
 
 func (m *mockGCPClient) ListOccurrences(ctx context.Context, req *grafeaspb.ListOccurrencesRequest, opts ...interface{}) GrafeasIterator {
+	m.lastReq = req
 	return &mockGrafeasIterator{
 		occurrences: m.occurrences,
 		err:         m.mockErr,
@@ -239,4 +241,65 @@ func TestGCPAdaptor_Login_CloseFailureStateClearing(t *testing.T) {
 	// State clearing check: client must be nil, owningClient must be retained
 	assert.Nil(t, adaptor.client, "a.client should be cleared before Close()")
 	assert.NotNil(t, adaptor.owningClient, "a.owningClient should be retained when close fails")
+}
+
+func TestGCPAdaptor_FilterInjectionPrevention(t *testing.T) {
+	mockClient := &mockGCPClient{
+		occurrences: []*grafeaspb.Occurrence{},
+	}
+	adaptor := NewGCPAdaptor()
+	adaptor.client = mockClient
+	adaptor.projectID = "test-project"
+
+	tests := []struct {
+		name         string
+		hash         string
+		expectedHash string
+	}{
+		{
+			name:         "quote only",
+			hash:         "sha256:malicious\"injection",
+			expectedHash: "sha256:malicious\\\"injection",
+		},
+		{
+			name:         "backslash before quote",
+			hash:         "sha256:malicious\\\"injection",
+			expectedHash: "sha256:malicious\\\\\\\"injection",
+		},
+		{
+			name:         "trailing backslash",
+			hash:         "sha256:malicious\\",
+			expectedHash: "sha256:malicious\\\\",
+		},
+		{
+			name:         "raw line break",
+			hash:         "sha256:malicious\ninjection",
+			expectedHash: "sha256:malicious\\ninjection",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			images := []ContainerImageIdentifier{
+				{Registry: "us-docker.pkg.dev", Repository: "proj/repo/img", Hash: tc.hash},
+			}
+
+			// Test GetImagesScanStatus
+			_, err := adaptor.GetImagesScanStatus(context.Background(), images)
+			assert.NoError(t, err)
+			require.NotNil(t, mockClient.lastReq)
+
+			expectedResourceURL := "https://us-docker.pkg.dev/proj/repo/img@" + tc.expectedHash
+			expectedFilter := fmt.Sprintf("kind=\"DISCOVERY\" AND resourceUrl=\"%s\"", expectedResourceURL)
+			assert.Equal(t, expectedFilter, mockClient.lastReq.Filter)
+
+			// Test GetImagesVulnerabilities
+			_, err = adaptor.GetImagesVulnerabilities(context.Background(), images)
+			assert.NoError(t, err)
+			require.NotNil(t, mockClient.lastReq)
+
+			expectedVulnFilter := fmt.Sprintf("kind=\"VULNERABILITY\" AND resourceUrl=\"%s\"", expectedResourceURL)
+			assert.Equal(t, expectedVulnFilter, mockClient.lastReq.Filter)
+		})
+	}
 }

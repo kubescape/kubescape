@@ -386,6 +386,61 @@ func TestMetrics_String_MultiItem_NoDuplicateHeaders(t *testing.T) {
 	assert.Contains(t, output, "kubescape_resource_count_controls_failed{apiVersion=\"v1\",kind=\"Pod\",namespace=\"ns2\",name=\"Resource B\"} 4")
 }
 
+func TestMetrics_String_MultiItem_SamplesGroupedPerFamily(t *testing.T) {
+	// The exposition format requires a family's samples to be contiguous. Each item
+	// contributes a line to several families, so collecting them item by item and
+	// writing them in that order splits every family once there is a second item.
+	m := Metrics{
+		listFrameworks: []mFrameworkComplianceScore{
+			{frameworkName: "Framework A", complianceScore: 80, resourcesCountFailed: 5},
+			{frameworkName: "Framework B", complianceScore: 60, resourcesCountFailed: 10},
+		},
+		listControls: []mControlComplianceScore{
+			{controlName: "Control A", severity: "high", link: "https://link-a.com", complianceScore: 50},
+			{controlName: "Control B", severity: "low", link: "https://link-b.com", complianceScore: 90},
+		},
+		listResources: []mResources{
+			{name: "Resource A", namespace: "ns1", apiVersion: "v1", kind: "Pod", controlsCountFailed: 2},
+			{name: "Resource B", namespace: "ns2", apiVersion: "v1", kind: "Pod", controlsCountFailed: 4},
+		},
+		listImages: []mImageVulnerability{
+			{image: "nginx:latest", severity: "High", cveCount: 3, fixableCVECount: 1},
+			{image: "nginx:latest", severity: "Low", cveCount: 7, fixableCVECount: 2},
+		},
+	}
+
+	// closed records a family that a later sample would reopen: a family is closed
+	// once a line belonging to a different family follows it.
+	seen := map[string]bool{}
+	closed := map[string]bool{}
+	current := ""
+	for _, line := range strings.Split(m.String(), "\n") {
+		if line == "" || strings.HasPrefix(line, "# ") {
+			continue
+		}
+		name, _, ok := strings.Cut(line, "{")
+		assert.True(t, ok, "sample %q has no labels", line)
+
+		assert.False(t, closed[name], "family %q is split: sample %q comes after another family", name, line)
+		if current != "" && current != name {
+			closed[current] = true
+		}
+		seen[name] = true
+		current = name
+	}
+
+	// the families the fixture populates, so a silently empty output fails too
+	for _, name := range []string{
+		"kubescape_framework_complianceScore",
+		"kubescape_control_complianceScore",
+		"kubescape_resource_count_controls_failed",
+		"kubescape_image_count_cve",
+		"kubescape_image_count_cve_fixable",
+	} {
+		assert.True(t, seen[name], "family %q is missing from the output", name)
+	}
+}
+
 func TestSetComplianceScores_ClusterMetricUsesComplianceScore(t *testing.T) {
 	// The cluster gauge is named complianceScore, so it must not be fed the risk score.
 	summaryDetails := &reportsummary.SummaryDetails{

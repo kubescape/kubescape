@@ -53,6 +53,9 @@ func ValidateRegistryCredentials(username, password, token, authority string) er
 	hasToken := token != ""
 
 	if hasUsernamePassword && !hasCompleteUsernamePassword {
+		if hasToken {
+			return ErrRegistryAuthConflict
+		}
 		return ErrRegistryUsernamePassword
 	}
 	if hasCompleteUsernamePassword && hasToken {
