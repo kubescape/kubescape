@@ -196,3 +196,17 @@ func GetColorForVulnerabilitySeverity(severity string) func(...string) string {
 		return gchalk.WithAnsi256(7).Bold
 	}
 }
+
+// MaxControlNameLen is the maximum number of runes to display for a control name.
+const MaxControlNameLen = 50
+
+// TruncateName truncates a name to the given rune length, appending "..." only
+// when the name is longer. It is safe for multi-byte UTF-8 input because it
+// slices on rune boundaries, not bytes.
+func TruncateName(name string, maxLen int) string {
+	runes := []rune(name)
+	if len(runes) <= maxLen {
+		return name
+	}
+	return string(runes[:maxLen]) + "..."
+}

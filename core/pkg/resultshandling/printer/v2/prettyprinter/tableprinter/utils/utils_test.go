@@ -3,7 +3,9 @@ package utils
 import (
 	"io"
 	"os"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jwalton/gchalk"
@@ -398,6 +400,47 @@ func TestCheckShortTerminalWidth(t *testing.T) {
 			}()
 			// Call the function - we just want to ensure it doesn't panic
 			_ = CheckShortTerminalWidth(tt.rows, tt.headers)
+		})
+	}
+}
+
+func TestTruncateName(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		maxLen int
+		want   string
+	}{
+		{
+			name:   "short name is returned unchanged",
+			input:  "short",
+			maxLen: 50,
+			want:   "short",
+		},
+		{
+			name:   "long ascii name is truncated with ellipsis",
+			input:  strings.Repeat("a", 75),
+			maxLen: 50,
+			want:   strings.Repeat("a", 50) + "...",
+		},
+		{
+			name:   "multibyte rune at boundary is not split",
+			input:  strings.Repeat("é", 100),
+			maxLen: 50,
+			want:   strings.Repeat("é", 50) + "...",
+		},
+		{
+			name:   "original repro name stays valid UTF-8",
+			input:  strings.Repeat("a", 69) + "é" + strings.Repeat("b", 20),
+			maxLen: 70,
+			want:   strings.Repeat("a", 69) + "é...",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TruncateName(tt.input, tt.maxLen)
+			assert.Equal(t, tt.want, got)
+			assert.True(t, utf8.ValidString(got), "truncated string must be valid UTF-8")
 		})
 	}
 }
