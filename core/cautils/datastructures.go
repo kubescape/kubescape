@@ -9,6 +9,8 @@ import (
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
 	apis "github.com/kubescape/opa-utils/reporthandling/apis"
@@ -29,7 +31,6 @@ type ImageScanData struct {
 	Image                 string
 	Matches               match.Matches
 	Packages              []pkg.Package
-	RemainingMatches      *match.Matches
 	SBOM                  *sbom.SBOM
 	VulnerabilityProvider vulnerability.Provider
 }
@@ -77,7 +78,7 @@ type OPASessionObj struct {
 	VAPBindings           []unstructured.Unstructured // ValidatingAdmissionPolicyBinding resources collected from the cluster
 }
 
-func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo) *OPASessionObj {
+func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *OPASessionObj {
 	clusterSize := max(estimateClusterSize(k8sResources), 100)
 
 	return &OPASessionObj{
@@ -91,7 +92,7 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 		ResourceToControlsMap: make(map[string][]string, clusterSize/2),
 		ResourceSource:        make(map[string]reporthandling.Source, clusterSize),
 		SessionID:             scanInfo.ScanID,
-		Metadata:              scanInfoToScanMetadata(ctx, scanInfo),
+		Metadata:              scanInfoToScanMetadata(ctx, scanInfo, policyIdentifiers),
 		OmitRawResources:      scanInfo.OmitRawResources,
 		TriggeredByCLI:        scanInfo.TriggeredByCLI,
 		LabelsToCopy:          scanInfo.LabelsToCopy,
@@ -108,8 +109,6 @@ func estimateClusterSize(k8sResources K8SResources) int {
 
 // SetTopWorkloads sets the top workloads by score
 func (sessionObj *OPASessionObj) SetTopWorkloads() {
-	count := 0
-
 	topWorkloadsSorted := make([]prioritization.PrioritizedResource, 0)
 
 	// create list in order to sort
@@ -131,20 +130,25 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 
 	// set top workloads according to number of top workloads
 	topWorkloads := make([]reporthandling.IResource, 0, TopWorkloadsNumber)
-	for i := range TopWorkloadsNumber {
-		if i >= len(topWorkloadsSorted) {
+	for _, wl := range topWorkloadsSorted {
+		if len(topWorkloads) >= TopWorkloadsNumber {
 			break
 		}
 
-		source := sessionObj.ResourceSource[topWorkloadsSorted[i].ResourceID]
+		source := sessionObj.ResourceSource[wl.ResourceID]
 
+		res, ok := sessionObj.AllResources[wl.ResourceID]
+		if !ok {
+			logger.L().Debug("resource missing from AllResources, skipping",
+				helpers.String("resourceID", wl.ResourceID))
+			continue
+		}
 		wlObj := &reporthandling.Resource{
-			IMetadata: sessionObj.AllResources[topWorkloadsSorted[i].ResourceID],
+			IMetadata: res,
 			Source:    &source,
 		}
 
 		topWorkloads = append(topWorkloads, wlObj)
-		count++
 	}
 
 	sessionObj.TopWorkloadsByScore = topWorkloads

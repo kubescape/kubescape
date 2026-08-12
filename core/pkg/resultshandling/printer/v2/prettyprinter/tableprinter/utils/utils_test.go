@@ -11,7 +11,40 @@ import (
 	"github.com/jwalton/gchalk"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestTruncateName(t *testing.T) {
+	t.Run("short name is unchanged", func(t *testing.T) {
+		assert.Equal(t, "short", TruncateName("short", 50))
+	})
+
+	t.Run("ASCII name longer than max is truncated with ellipsis", func(t *testing.T) {
+		name := strings.Repeat("a", 60)
+		got := TruncateName(name, 50)
+		assert.Equal(t, strings.Repeat("a", 50)+"...", got)
+	})
+
+	t.Run("name exactly at max length is unchanged", func(t *testing.T) {
+		name := strings.Repeat("a", 50)
+		assert.Equal(t, name, TruncateName(name, 50))
+	})
+
+	// Regression: byte-index slicing (name[:50]) can split a multi-byte
+	// UTF-8 rune in half, producing invalid UTF-8. Truncating by rune count
+	// must never do that.
+	t.Run("multi-byte UTF-8 name is truncated on a rune boundary", func(t *testing.T) {
+		name := strings.Repeat("héllo-世界-", 10) // multi-byte runes throughout, > 50 bytes and > 50 runes
+		require.Greater(t, len([]byte(name)), 50)
+		require.Greater(t, len([]rune(name)), 50)
+
+		got := TruncateName(name, 50)
+
+		require.True(t, utf8.ValidString(got), "truncated name must be valid UTF-8")
+		require.True(t, strings.HasSuffix(got, "..."))
+		require.Equal(t, 50, len([]rune(strings.TrimSuffix(got, "..."))), "must truncate by rune count, not byte count")
+	})
+}
 
 func TestGetColor(t *testing.T) {
 	type args struct {
@@ -134,7 +167,7 @@ func TestPrintInfo(t *testing.T) {
 					Info:  "Critical Info",
 				},
 			},
-			expected: "🚨 5 Critical Info\n",
+			expected: "\n🚨 5 Critical Info\n",
 		},
 		{
 			name: "Medium and high info",
@@ -148,7 +181,7 @@ func TestPrintInfo(t *testing.T) {
 					Info:  "High Info",
 				},
 			},
-			expected: "🚨 3 Medium Info\n🚨 4 High Info\n",
+			expected: "\n🚨 3 Medium Info\n🚨 4 High Info\n",
 		},
 		{
 			name: "Negligible and low info",
@@ -162,20 +195,18 @@ func TestPrintInfo(t *testing.T) {
 					Info:  "Low Info",
 				},
 			},
-			expected: "🚨 1 Negligible Info\n🚨 2 Low Info\n",
+			expected: "\n🚨 1 Negligible Info\n🚨 2 Low Info\n",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a temporary file to capture output
 			f, err := os.CreateTemp("", "pdfPrinter-score-output")
 			if err != nil {
 				panic(err)
 			}
 			defer f.Close()
 
-			// Redirect stderr to the temporary file
 			oldStderr := os.Stderr
 			defer func() {
 				os.Stderr = oldStderr
@@ -184,7 +215,6 @@ func TestPrintInfo(t *testing.T) {
 
 			PrintInfo(f, tt.infoToPrintInfo)
 
-			// Read the contents of the temporary file
 			f.Seek(0, 0)
 			got, err := io.ReadAll(f)
 			if err != nil {
@@ -264,6 +294,7 @@ func TestGetStatusIcon(t *testing.T) {
 			status:   apis.StatusFailed,
 			expected: "❌",
 		},
+
 		{
 			name:     "Status passed",
 			status:   apis.StatusPassed,

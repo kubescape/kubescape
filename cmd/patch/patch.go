@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/project-copacetic/copacetic/pkg/buildkit"
 	"github.com/spf13/cobra"
 )
 
@@ -43,14 +44,10 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, sarif")
+				return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(shared.ImageScanFormats, ", "))
 			}
-			if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && scanInfo.Format != "" {
-				supported := []string{"pretty-printer", "json", "sarif"}
-				valid := slices.Contains(supported, scanInfo.Format)
-				if !valid {
-					return fmt.Errorf("invalid format %q, supported formats: pretty-printer, json, sarif", scanInfo.Format)
-				}
+			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ImageScanFormats); err != nil {
+				return err
 			}
 			if err := shared.ValidateImageScanInfo(&scanInfo); err != nil {
 				return err
@@ -69,7 +66,7 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 			}
 
 			if exceedsSeverityThreshold {
-				shared.TerminateOnExceedingSeverity(&scanInfo, logger.L())
+				return fmt.Errorf("result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
 			}
 
 			return nil
@@ -78,7 +75,7 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.Image, "image", "i", "", "Application image name and tag to patch")
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.PatchedImageTag, "tag", "t", "", "Tag for the patched image. Defaults to '<image-tag>-patched' ")
-	patchCmd.PersistentFlags().StringVarP(&patchInfo.BuildkitAddress, "address", "a", "unix:///run/buildkit/buildkitd.sock", "Address of buildkitd service, defaults to local buildkitd.sock")
+	patchCmd.PersistentFlags().StringVarP(&patchInfo.BuildkitAddress, "address", "a", "", "Address of buildkitd service, defaults to the local docker daemon with fallback to "+buildkit.DefaultAddr)
 	patchCmd.PersistentFlags().DurationVar(&patchInfo.Timeout, "timeout", 5*time.Minute, "Timeout for the operation, defaults to '5m'")
 	patchCmd.PersistentFlags().BoolVar(&patchInfo.IgnoreError, "ignore-errors", false, "Ignore errors and continue patching other images. Default to false")
 	patchCmd.PersistentFlags().BoolVar(&patchInfo.Push, "push", false, "Push the patched image to the source registry. Default to false (the patched image is only loaded into the local image store). If set, this overrides output-mode to 'image'.")
@@ -88,7 +85,8 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.Username, "username", "u", "", "Username for registry login")
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.Password, "password", "p", "", "Password for registry login")
 
-	patchCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "", `Output file format. Supported formats: "pretty-printer", "json", "sarif"`)
+	patchCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "",
+		fmt.Sprintf("Output file format. Supported formats: %s", strings.Join(shared.ImageScanFormats, ", ")))
 	patchCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
 	patchCmd.PersistentFlags().BoolVarP(&scanInfo.VerboseMode, "verbose", "v", false, "Display full report. Default to false")
 

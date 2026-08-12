@@ -235,7 +235,7 @@ func (scan *ScanResultReport) UnmarshalJSONObject(dec *gojay.Decoder, key string
 		err = dec.Array(&(scan.Layers))
 
 	case "listOfDangerousArtifcats":
-		err = dec.SliceString(&(scan.ListOfDangerousArtifcats))
+		err = dec.SliceString(&(scan.ListOfDangerousArtifacts))
 
 	}
 	return err

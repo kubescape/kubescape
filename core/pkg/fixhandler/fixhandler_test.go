@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	gitv5 "github.com/go-git/go-git/v5"
 	"github.com/kubescape/go-logger"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v3/internal/testutils"
@@ -226,6 +227,38 @@ func TestApplyFixKeepsFormatting(t *testing.T) {
 	}
 }
 
+// TestApplyFixToContent_EmptyLeadingDocument guards the regression from issue
+// #2495: a file whose first document is empty (a comment followed by "---") is
+// decoded inconsistently by go-yaml and yqlib, which used to make the fix
+// renderer call logger.Fatal and os.Exit the whole process mid-write (leaving
+// an empty SARIF file). It must now return an error gracefully instead.
+func TestApplyFixToContent_EmptyLeadingDocument(t *testing.T) {
+	yamlContent := "# a comment, followed by a document separator\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          image: nginx:1.27\n"
+	// The scanner counts the empty leading document, so the Deployment is di==1.
+	expression := FixPathToValidYamlExpression("spec.template.spec.containers[0].image", "nginx:1.28", 1)
+
+	got, err := ApplyFixToContent(context.Background(), yamlContent, expression)
+
+	assert.Error(t, err, "expected a graceful error rather than a process exit")
+	assert.Empty(t, got)
+}
+
+// TestApplyFixToContent_TopLevelFlowSequence covers a flow collection that is not nested
+// under a key of its own, so it starts on the first line of the document. Resolving the
+// line to replace picked the document node that shares that line and rendered it against
+// its nil parent, panicking out of `kubescape fix` before anything was written. A nested
+// flow sequence never hit this because the document node sits on an earlier line.
+func TestApplyFixToContent_TopLevelFlowSequence(t *testing.T) {
+	yamlContent := "args: [--foo]\n"
+	expression := FixPathToValidYamlExpression("args[1]", "--bar", 0)
+
+	got, err := ApplyFixToContent(context.Background(), yamlContent, expression)
+
+	require.NoError(t, err)
+	// the flow style of the original line is kept
+	assert.Equal(t, "args: [--foo, --bar]\n", got)
+}
+
 func Test_fixPathToValidYamlExpression(t *testing.T) {
 	type args struct {
 		fixPath             string
@@ -256,6 +289,42 @@ func Test_fixPathToValidYamlExpression(t *testing.T) {
 			want: "select(di==0).metadata.namespace |= \"YOUR_NAMESPACE\"",
 		},
 		{
+			name: "fix path with string containing quotes",
+			args: args{
+				fixPath:             "spec.template.spec.containers[0].command[1]",
+				value:               "app=\"web\"",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).spec.template.spec.containers[0].command[1] |= \"app=\\\"web\\\"\"",
+		},
+		{
+			name: "fix path with string containing backslash",
+			args: args{
+				fixPath:             "path",
+				value:               "C:\\path\\to",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).path |= \"C:\\path\\to\"",
+		},
+		{
+			name: "fix path with string containing newline",
+			args: args{
+				fixPath:             "path",
+				value:               "line1\nline2",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).path |= \"line1\nline2\"",
+		},
+		{
+			name: "fix path with string containing tab",
+			args: args{
+				fixPath:             "path",
+				value:               "a\tb",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).path |= \"a\tb\"",
+		},
+		{
 			name: "fix path with number",
 			args: args{
 				fixPath:             "xxx.yyy",
@@ -263,6 +332,33 @@ func Test_fixPathToValidYamlExpression(t *testing.T) {
 				documentIndexInYaml: 0,
 			},
 			want: "select(di==0).xxx.yyy |= 123",
+		},
+		{
+			name: "fix path with NaN string value",
+			args: args{
+				fixPath:             "xxx.yyy",
+				value:               "NaN",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).xxx.yyy |= \"NaN\"",
+		},
+		{
+			name: "fix path with Inf string value",
+			args: args{
+				fixPath:             "xxx.yyy",
+				value:               "Inf",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).xxx.yyy |= \"Inf\"",
+		},
+		{
+			name: "fix path with -Inf string value",
+			args: args{
+				fixPath:             "xxx.yyy",
+				value:               "-Inf",
+				documentIndexInYaml: 0,
+			},
+			want: "select(di==0).xxx.yyy |= \"-Inf\"",
 		},
 	}
 	for _, tt := range tests {
@@ -508,6 +604,44 @@ metadata:
 	}
 }
 
+// TestRevertSanitizeYaml guards the `< 5` / `[:5]` pairing: the guard was
+// previously `< 3` while the slice was `[:5]`, so any 3-4 byte input panicked
+// with "slice bounds out of range". Covers every length from 0 up to and past
+// the "# ---" marker, since that boundary is exactly where the bug lived.
+func TestRevertSanitizeYaml(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "length 0", in: "", want: ""},
+		{name: "length 1", in: "-", want: "-"},
+		{name: "length 2", in: "--", want: "--"},
+		{name: "length 3 (previously panicked)", in: "# -", want: "# -"},
+		{name: "length 4 (previously panicked)", in: "# --", want: "# --"},
+		{name: "length 5, marker present", in: "# ---", want: "---"},
+		{name: "length 5, marker absent", in: "# abc", want: "# abc"},
+		{name: "marker with trailing content", in: "# ---\nkind: Pod\n", want: "---\nkind: Pod\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				got := revertSanitizeYaml(tt.in)
+				assert.Equal(t, tt.want, got)
+			})
+		})
+	}
+}
+
+// TestSanitizeYaml_RoundTrip confirms revertSanitizeYaml undoes sanitizeYaml
+// for the case both were built for: a document starting with "---".
+func TestSanitizeYaml_RoundTrip(t *testing.T) {
+	original := "---\napiVersion: v1\nkind: Pod\n"
+	sanitized := sanitizeYaml(original)
+	assert.Equal(t, "# ---\napiVersion: v1\nkind: Pod\n", sanitized)
+	assert.Equal(t, original, revertSanitizeYaml(sanitized))
+}
+
 func TestReduceYamlExpressions(t *testing.T) {
 	type args struct {
 		yamlExpressions []string
@@ -614,6 +748,26 @@ func TestGetLocalPath(t *testing.T) {
 				},
 			},
 			want: os.TempDir(),
+		},
+		{
+			name: "Scan target GitLocal without repository metadata",
+			args: args{
+				report: &reporthandlingv2.PostureReport{
+					Metadata: reporthandlingv2.Metadata{
+						ScanMetadata: reporthandlingv2.ScanMetadata{
+							ScanningTarget: reporthandlingv2.GitLocal,
+						},
+					},
+				},
+			},
+			want: "",
+		},
+		{
+			name: "nil report",
+			args: args{
+				report: nil,
+			},
+			want: "",
 		},
 		{
 			name: "Scan target Directory",
@@ -987,5 +1141,162 @@ func TestNewFixHandler_EmptyReportGUID(t *testing.T) {
 	// Should NOT fail with "invalid report file" — may fail on localPath stat, but not on empty ReportID
 	if err != nil {
 		assert.NotContains(t, err.Error(), "invalid report file: not a valid kubescape scan report. Please provide a JSON file generated by 'kubescape scan --format json'")
+	}
+}
+
+// TestResourceBasePath covers the shapes the report-wide path gets wrong. In both of
+// them the resource's own root is an ancestor of the report-wide path rather than a
+// descendant, so it must be honoured, not rejected: a single-file scan records the file
+// instead of its root, and a multi-input scan records only the first input.
+func TestResourceBasePath(t *testing.T) {
+	base := t.TempDir()
+	ancestor := filepath.Dir(base)
+	unrelated := t.TempDir()
+
+	tests := []struct {
+		name   string
+		source *reporthandling.Source
+		want   string
+	}{
+		{name: "no source at all falls back", source: nil, want: base},
+		{name: "empty source path falls back", source: &reporthandling.Source{}, want: base},
+		{name: "the report-wide root itself", source: &reporthandling.Source{Path: base}, want: base},
+		{name: "an ancestor is honoured, as in a single-file scan", source: &reporthandling.Source{Path: ancestor}, want: ancestor},
+		{name: "an unrelated root is honoured, as in a multi-input scan", source: &reporthandling.Source{Path: unrelated}, want: unrelated},
+		{name: "a relative root falls back rather than resolving against the cwd", source: &reporthandling.Source{Path: "relative/dir"}, want: base},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &FixHandler{localBasePath: base, fixInfo: &metav1.FixInfo{}}
+			assert.Equal(t, tt.want, h.resourceBasePath(&reporthandling.Resource{Source: tt.source}))
+		})
+	}
+}
+
+// TestResourceBasePath_ConstrainedByBasePath covers --base-path, the anchor the caller
+// vouches for rather than one the report supplies. Source.Path is report input like any
+// other, so it must be held to that anchor too; without this it would be the one way a
+// report could still name a fix root outside it.
+func TestResourceBasePath_ConstrainedByBasePath(t *testing.T) {
+	trusted, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	inside := filepath.Join(trusted, "repo")
+	require.NoError(t, os.MkdirAll(inside, 0o750))
+
+	outside, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	tests := []struct {
+		name       string
+		basePath   string
+		sourcePath string
+		want       string
+	}{
+		{name: "inside the trusted anchor is honoured", basePath: trusted, sourcePath: inside, want: inside},
+		{name: "the anchor itself is honoured", basePath: trusted, sourcePath: trusted, want: trusted},
+		{name: "outside the trusted anchor falls back", basePath: trusted, sourcePath: outside, want: inside},
+		{name: "without an anchor any absolute root is honoured", basePath: "", sourcePath: outside, want: outside},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := &FixHandler{
+				localBasePath: inside,
+				fixInfo:       &metav1.FixInfo{BasePath: tt.basePath},
+			}
+			resource := &reporthandling.Resource{Source: &reporthandling.Source{Path: tt.sourcePath}}
+			assert.Equal(t, tt.want, h.resourceBasePath(resource))
+		})
+	}
+}
+
+// TestPrepareResourcesToFix_SingleFileScanInsideRepository is the regression test for a
+// single-file scan of a manifest inside a repository whose git metadata is unusable. The
+// loader anchors on the repository root, so the report's relative path carries the
+// manifest's full path from that root while the File target records only the file. If
+// `fix` derives a different anchor than the scan did, the join doubles the intermediate
+// directories and every control comes back as "file not found".
+func TestPrepareResourcesToFix_SingleFileScanInsideRepository(t *testing.T) {
+	repoRoot, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	_, err = gitv5.PlainInit(repoRoot, false)
+	require.NoError(t, err)
+
+	relPath := filepath.Join("workloads", "apps", "base", "app", "cronjobs.yaml")
+	absPath := filepath.Join(repoRoot, relPath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(absPath), 0o750))
+	require.NoError(t, os.WriteFile(absPath, []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: p\n"), 0o600))
+
+	report := singleResourceReport(t, repoRoot, filepath.ToSlash(relPath))
+	report.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
+	report.Metadata.ContextMetadata.FileContextMetadata = &reporthandlingv2.FileContextMetadata{FilePath: absPath}
+
+	h, err := NewFixHandlerMock()
+	require.NoError(t, err)
+	h.reportObj = report
+	// what NewFixHandler would derive for this report
+	h.localBasePath = getLocalPath(report)
+
+	rfi := h.PrepareResourcesToFix(context.TODO())
+	require.Len(t, rfi, 1, "the manifest must resolve; unfixed: %+v", h.unfixedControls)
+	assert.Equal(t, absPath, rfi[0].FilePath)
+}
+
+// TestPrepareResourcesToFix_RejectsTraversingRelativePath pins the traversal defence on
+// the field that can actually carry "..": the relative path recorded for the resource.
+func TestPrepareResourcesToFix_RejectsTraversingRelativePath(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+
+	outside := filepath.Join(filepath.Dir(base), "outside.yaml")
+	require.NoError(t, os.WriteFile(outside, []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: p\n"), 0o600))
+	t.Cleanup(func() { _ = os.Remove(outside) })
+
+	report := singleResourceReport(t, base, "../"+filepath.Base(outside))
+
+	h, err := NewFixHandlerMock()
+	require.NoError(t, err)
+	h.reportObj = report
+	h.localBasePath = base
+
+	rfi := h.PrepareResourcesToFix(context.TODO())
+	assert.Empty(t, rfi, "a resource path escaping its root must not be queued for a write")
+	require.Len(t, h.unfixedControls, 1)
+	assert.Equal(t, "skipped: resource path escapes scanned directory", h.unfixedControls[0].Reason)
+}
+
+// singleResourceReport builds a report with one failed YAML resource rooted at
+// sourcePath and recorded at relPath.
+func singleResourceReport(t *testing.T, sourcePath, relPath string) *reporthandlingv2.PostureReport {
+	t.Helper()
+
+	resource := &reporthandling.Resource{
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata":   map[string]any{"name": "p"},
+			"sourcePath": relPath + ":0",
+		},
+		Source: &reporthandling.Source{FileType: reporthandling.SourceTypeYaml, Path: sourcePath, RelativePath: relPath},
+	}
+
+	return &reporthandlingv2.PostureReport{
+		Resources: []reporthandling.Resource{*resource},
+		Results: []resourcesresults.Result{{
+			ResourceID:  resource.GetID(),
+			RawResource: resource,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{{
+				ControlID: "C-0001",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{
+					Name:   "rule-x",
+					Status: apis.StatusFailed,
+					Paths: []armotypes.PosturePaths{{
+						FixPath: armotypes.FixPath{Path: "spec.containers[0].securityContext.runAsNonRoot", Value: "true"},
+					}},
+				}},
+			}},
+		}},
 	}
 }

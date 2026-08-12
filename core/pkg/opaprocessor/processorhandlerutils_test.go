@@ -7,13 +7,65 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/exceptions"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 )
+
+func TestGetKubernetesObjectsDeduplicatesResourceAliases(t *testing.T) {
+	workload := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "agents.x-k8s.io/v1alpha1",
+		"kind":       "Sandbox",
+		"metadata": map[string]any{
+			"name":      "agent-sandbox",
+			"namespace": "default",
+		},
+	})
+	resourceID := workload.GetID()
+	resources := cautils.K8SResources{
+		"agents.x-k8s.io/v1alpha1/sandbox":   {resourceID},
+		"agents.x-k8s.io/v1alpha1/sandboxes": {resourceID},
+	}
+	allResources := map[string]workloadinterface.IMetadata{resourceID: workload}
+	match := []reporthandling.RuleMatchObjects{{
+		APIGroups:   []string{"agents.x-k8s.io"},
+		APIVersions: []string{"v1alpha1"},
+		Resources:   []string{"Sandbox", "sandboxes"},
+	}}
+
+	objects := getKubernetesObjects(newResourceGroupIndex(resources, allResources), match)
+	assert.Equal(t, 1, len(objects))
+}
+
+func TestGetKubernetesObjectsMatchesFutureAPIVersionWithWildcards(t *testing.T) {
+	workload := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "autoscaling/v99",
+		"kind":       "HorizontalPodAutoscaler",
+		"metadata": map[string]any{
+			"name":      "future-hpa",
+			"namespace": "default",
+		},
+	})
+	resourceID := workload.GetID()
+	resources := cautils.K8SResources{
+		"autoscaling/v99/horizontalpodautoscaler": {resourceID},
+	}
+	allResources := map[string]workloadinterface.IMetadata{resourceID: workload}
+	match := []reporthandling.RuleMatchObjects{{
+		APIGroups:   []string{"*"},
+		APIVersions: []string{"*"},
+		Resources:   []string{"HorizontalPodAutoscaler"},
+	}}
+
+	objects := getKubernetesObjects(newResourceGroupIndex(resources, allResources), match)
+	require.Len(t, objects, 1)
+	assert.Same(t, workload, objects[0])
+}
 
 func TestRemoveData(t *testing.T) {
 	type args struct {
@@ -39,6 +91,12 @@ func TestRemoveData(t *testing.T) {
 			name: "remove secret data",
 			args: args{
 				w: `{"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "example-secret", "namespace": "default", "annotations": {"kubectl.kubernetes.io/last-applied-configuration": "{}"}}, "type": "Opaque", "data": {"username": "dXNlcm5hbWU=", "password": "cGFzc3dvcmQ="}}`,
+			},
+		},
+		{
+			name: "remove secret stringData",
+			args: args{
+				w: `{"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "example-secret", "namespace": "default"}, "type": "Opaque", "stringData": {"token": "supersecret", "apiKey": "abc123"}}`,
 			},
 		},
 		{
@@ -72,6 +130,14 @@ func TestRemoveData(t *testing.T) {
 				}
 			}
 
+			if sd, ok := workloadinterface.InspectMap(workload.GetObject(), "stringData"); ok {
+				stringData, ok := sd.(map[string]any)
+				assert.True(t, ok)
+				for key := range stringData {
+					assert.Equalf(t, "XXXXXX", stringData[key], "stringData[%q] was not redacted", key)
+				}
+			}
+
 			if c, _ := workload.GetContainers(); c != nil {
 				for i := range c {
 					for _, e := range c[i].Env {
@@ -97,6 +163,47 @@ func TestRemoveData(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRemoveSecretData(t *testing.T) {
+	t.Run("stringData values are redacted", func(t *testing.T) {
+		raw := `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s","namespace":"default"},"type":"Opaque","stringData":{"token":"supersecret","apiKey":"abc123"}}`
+		obj, err := workloadinterface.NewWorkload([]byte(raw))
+		assert.NoError(t, err)
+		removeData(obj)
+		sd, ok := workloadinterface.InspectMap(obj.GetObject(), "stringData")
+		assert.True(t, ok, "stringData key must still be present after redaction")
+		stringData, ok := sd.(map[string]any)
+		assert.True(t, ok)
+		assert.Equal(t, "XXXXXX", stringData["token"])
+		assert.Equal(t, "XXXXXX", stringData["apiKey"])
+	})
+
+	t.Run("data and stringData are both redacted", func(t *testing.T) {
+		raw := `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s","namespace":"default"},"type":"Opaque","data":{"user":"dXNlcg=="},"stringData":{"pass":"cleartext"}}`
+		obj, err := workloadinterface.NewWorkload([]byte(raw))
+		assert.NoError(t, err)
+		removeData(obj)
+		d, ok := workloadinterface.InspectMap(obj.GetObject(), "data")
+		assert.True(t, ok)
+		data, ok := d.(map[string]any)
+		assert.True(t, ok)
+		assert.Equal(t, "XXXXXX", data["user"])
+		sd, ok := workloadinterface.InspectMap(obj.GetObject(), "stringData")
+		assert.True(t, ok)
+		stringData, ok := sd.(map[string]any)
+		assert.True(t, ok)
+		assert.Equal(t, "XXXXXX", stringData["pass"])
+	})
+
+	t.Run("absent stringData does not panic", func(t *testing.T) {
+		raw := `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s","namespace":"default"},"type":"Opaque","data":{"key":"dmFsdWU="}}`
+		obj, err := workloadinterface.NewWorkload([]byte(raw))
+		assert.NoError(t, err)
+		assert.NotPanics(t, func() { removeData(obj) })
+		_, ok := workloadinterface.InspectMap(obj.GetObject(), "stringData")
+		assert.False(t, ok, "stringData must not appear when it was not present originally")
+	})
 }
 
 func TestRemoveContainersData(t *testing.T) {
@@ -832,110 +939,6 @@ func TestMapControlToInfo(t *testing.T) {
 	assert.Equal(t, map[string]apis.StatusInfo{
 		"C-0001": infoMap["resource-with-empty-control"],
 	}, got)
-}
-
-func TestIsLargeCluster(t *testing.T) {
-	orig := largeClusterSize
-	t.Cleanup(func() { largeClusterSize = orig })
-	t.Setenv("LARGE_CLUSTER_SIZE", "2500")
-
-	tests := []struct {
-		name        string
-		clusterSize int
-		want        bool
-	}{
-		{
-			name:        "zero nodes — not large",
-			clusterSize: 0,
-			want:        false,
-		},
-		{
-			name:        "below threshold — not large",
-			clusterSize: 100,
-			want:        false,
-		},
-		{
-			name:        "at threshold — not large (exclusive)",
-			clusterSize: 2500,
-			want:        false,
-		},
-		{
-			name:        "above threshold — large",
-			clusterSize: 2501,
-			want:        true,
-		},
-		{
-			name:        "well above threshold — large",
-			clusterSize: 10000,
-			want:        true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			largeClusterSize = -1
-			assert.Equal(t, tt.want, isLargeCluster(tt.clusterSize))
-		})
-	}
-}
-
-func TestGetNamespaceName(t *testing.T) {
-	orig := largeClusterSize
-	t.Cleanup(func() { largeClusterSize = orig })
-	t.Setenv("LARGE_CLUSTER_SIZE", "2500")
-
-	podJSON := `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"mypod","namespace":"mynamespace"}}`
-	namespaceJSON := `{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"mynamespace"}}`
-	nodeJSON := `{"apiVersion":"v1","kind":"Node","metadata":{"name":"mynode"}}`
-
-	pod, err := workloadinterface.NewWorkload([]byte(podJSON))
-	require.NoError(t, err)
-	require.NotNil(t, pod)
-
-	ns, err := workloadinterface.NewWorkload([]byte(namespaceJSON))
-	require.NoError(t, err)
-	require.NotNil(t, ns)
-
-	node, err := workloadinterface.NewWorkload([]byte(nodeJSON))
-	require.NoError(t, err)
-	require.NotNil(t, node)
-
-	tests := []struct {
-		name        string
-		obj         workloadinterface.IMetadata
-		clusterSize int
-		want        string
-	}{
-		{
-			name:        "small cluster — always clusterScope",
-			obj:         pod,
-			clusterSize: 10,
-			want:        clusterScope,
-		},
-		{
-			name:        "large cluster — namespaced resource returns namespace",
-			obj:         pod,
-			clusterSize: 3000,
-			want:        "mynamespace",
-		},
-		{
-			name:        "large cluster — Namespace kind returns its name",
-			obj:         ns,
-			clusterSize: 3000,
-			want:        "mynamespace",
-		},
-		{
-			name:        "large cluster — cluster-scoped resource returns clusterScope",
-			obj:         node,
-			clusterSize: 3000,
-			want:        clusterScope,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			largeClusterSize = -1
-			assert.Equal(t, tt.want, getNamespaceName(tt.obj, tt.clusterSize))
-		})
-	}
 }
 
 func TestFilterExpiredExceptions(t *testing.T) {

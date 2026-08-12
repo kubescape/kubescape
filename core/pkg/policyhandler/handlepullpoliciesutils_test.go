@@ -3,7 +3,6 @@ package policyhandler
 import (
 	"errors"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -147,12 +146,19 @@ func TestGetPoliciesCacheTtl_Set(t *testing.T) {
 			envVarValue: "text",
 			want:        time.Duration(0),
 		},
+		{
+			envVarValue: "5m",
+			want:        5 * time.Minute,
+		},
+		{
+			envVarValue: "90s",
+			want:        90 * time.Second,
+		},
 	}
 
 	for _, tt := range tests {
-		t.Run("", func(t *testing.T) {
-			os.Setenv(PoliciesCacheTtlEnvVar, tt.envVarValue)
-			defer os.Unsetenv(PoliciesCacheTtlEnvVar)
+		t.Run(tt.envVarValue, func(t *testing.T) {
+			t.Setenv(PoliciesCacheTtlEnvVar, tt.envVarValue)
 
 			assert.Equal(t, tt.want, getPoliciesCacheTtl())
 		})

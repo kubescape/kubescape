@@ -1,6 +1,8 @@
 package cautils
 
 import (
+	"maps"
+
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
@@ -41,7 +43,7 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 }
 
 func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, controls map[string]reportsummary.ControlSummary) []reporthandling.ControlReport {
-	controlRepors := []reporthandling.ControlReport{}
+	controlReports := []reporthandling.ControlReport{}
 	for controlID, crv2 := range controls {
 		crv1 := reporthandling.ControlReport{}
 		crv1.ControlID = controlID
@@ -90,8 +92,8 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 							ruleResponse.Exception = &rulev2.Exception[0]
 						}
 
-						if fullRessource, ok := opaSessionObj.AllResources[resourceID]; ok {
-							tmp := fullRessource.GetObject()
+						if fullResource, ok := opaSessionObj.AllResources[resourceID]; ok {
+							tmp := maps.Clone(fullResource.GetObject())
 							workloadinterface.RemoveFromMap(tmp, "spec")
 							ruleResponse.AlertObject.K8SApiObjects = append(ruleResponse.AlertObject.K8SApiObjects, tmp)
 						}
@@ -112,7 +114,7 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 		if len(crv1.RuleReports) == 0 {
 			crv1.RuleReports = []reporthandling.RuleReport{}
 		}
-		controlRepors = append(controlRepors, crv1)
+		controlReports = append(controlReports, crv1)
 	}
-	return controlRepors
+	return controlReports
 }

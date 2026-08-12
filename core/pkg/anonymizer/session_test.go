@@ -1,9 +1,9 @@
 package anonymizer
 
 import (
-	"testing"
-
 	"errors"
+	"strings"
+	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -83,16 +83,16 @@ func TestResolveMappedID(t *testing.T) {
 	}
 }
 
-func TestAnonymizeSession_NilSession(t *testing.T) {
+func TestTransformSession_NilSession(t *testing.T) {
 	mapping := NewMapping()
 
 	require.NoError(
 		t,
-		anonymizeSession(nil, mapping, NewMappingTransformer()),
+		transformSession(nil, mapping, NewMappingTransformer()),
 	)
 }
 
-func TestAnonymizeSession_NamesAndNamespacesReplaced(t *testing.T) {
+func TestTransformSession_NamesAndNamespacesReplaced(t *testing.T) {
 	pod := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
@@ -114,7 +114,7 @@ func TestAnonymizeSession_NamesAndNamespacesReplaced(t *testing.T) {
 
 	mapping := NewMapping()
 
-	err := anonymizeSession(session, mapping, NewMappingTransformer())
+	err := transformSession(session, mapping, NewMappingTransformer())
 	require.NoError(t, err)
 
 	for _, resource := range session.AllResources {
@@ -125,7 +125,7 @@ func TestAnonymizeSession_NamesAndNamespacesReplaced(t *testing.T) {
 	}
 }
 
-func TestAnonymizeSession_IDConsistencyAcrossMaps(t *testing.T) {
+func TestTransformSession_IDConsistencyAcrossMaps(t *testing.T) {
 	pod := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
@@ -204,7 +204,7 @@ func TestAnonymizeSession_IDConsistencyAcrossMaps(t *testing.T) {
 	}
 
 	mapping := NewMapping()
-	err := anonymizeSession(session, mapping, NewMappingTransformer())
+	err := transformSession(session, mapping, NewMappingTransformer())
 	require.NoError(t, err)
 
 	var newID string
@@ -327,7 +327,7 @@ func TestAnonymizeSession_IDConsistencyAcrossMaps(t *testing.T) {
 	assert.True(t, ok)
 }
 
-func TestAnonymizeSession_LabelHandling(t *testing.T) {
+func TestTransformSession_LabelHandling(t *testing.T) {
 	tests := []struct {
 		name         string
 		labelsToCopy []string
@@ -379,7 +379,7 @@ func TestAnonymizeSession_LabelHandling(t *testing.T) {
 			}
 
 			mapping := NewMapping()
-			err := anonymizeSession(session, mapping, NewMappingTransformer())
+			err := transformSession(session, mapping, NewMappingTransformer())
 			require.NoError(t, err)
 
 			for _, resource := range session.AllResources {
@@ -408,16 +408,16 @@ func TestAnonymizeResourceLabels_Guards(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			mapping := NewMapping()
 
 			assert.NotPanics(t, func() {
-				anonymizeResourceLabels(test.resource, []string{"team"}, mapping)
+				err := transformResourceLabels(test.resource, []string{"team"}, NewMappingTransformer())
+				require.NoError(t, err)
 			})
 		})
 	}
 }
 
-func TestAnonymizeSession_Annotations(t *testing.T) {
+func TestTransformSession_Annotations(t *testing.T) {
 	tests := []struct {
 		name     string
 		resource map[string]any
@@ -565,7 +565,7 @@ func TestAnonymizeSession_Annotations(t *testing.T) {
 			mapping := NewMapping()
 
 			assert.NotPanics(t, func() {
-				err := anonymizeSession(session, mapping, NewMappingTransformer())
+				err := transformSession(session, mapping, NewMappingTransformer())
 				require.NoError(t, err)
 			})
 
@@ -576,7 +576,7 @@ func TestAnonymizeSession_Annotations(t *testing.T) {
 	}
 }
 
-func TestAnonymizeSession_RepoContextMetadata(t *testing.T) {
+func TestTransformSession_RepoContextMetadata(t *testing.T) {
 	repoContext := &reporthandlingv2.RepoContextMetadata{
 		Provider:      "github",
 		Repo:          "kubescape",
@@ -634,7 +634,7 @@ func TestAnonymizeSession_RepoContextMetadata(t *testing.T) {
 	}
 
 	mapping := NewMapping()
-	err := anonymizeSession(session, mapping, NewMappingTransformer())
+	err := transformSession(session, mapping, NewMappingTransformer())
 	require.NoError(t, err)
 
 	for _, repo := range []*reporthandlingv2.RepoContextMetadata{
@@ -925,7 +925,7 @@ func TestTransformResourceSource_Error(
 	assert.Equal(t, "/workspace/private/app.yaml", source.Path)
 }
 
-func TestAnonymizeSession_ResourceSourceEncryption(
+func TestTransformSession_ResourceSourceEncryption(
 	t *testing.T,
 ) {
 	dek, err := reportcrypto.GenerateDEK()
@@ -965,7 +965,7 @@ func TestAnonymizeSession_ResourceSourceEncryption(
 		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
 	}
 
-	err = anonymizeSession(
+	err = transformSession(
 		session,
 		NewMapping(),
 		NewEncryptionTransformer(dek),
@@ -1089,5 +1089,146 @@ func TestTransformResourceMetadata_Error(
 		t,
 		"production",
 		resource.GetNamespace(),
+	)
+}
+
+func TestTransformResourceLabels_EncryptionTransformer(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"labels": map[string]any{
+				"team": "payments",
+				"env":  "production",
+			},
+		},
+	})
+
+	err = transformResourceLabels(
+		resource,
+		[]string{"team", "env"},
+		NewEncryptionTransformer(dek),
+	)
+	require.NoError(t, err)
+
+	labels := resource.GetLabels()
+
+	assert.Contains(t, labels["team"], "ENC[AES256_GCM,")
+	assert.Contains(t, labels["env"], "ENC[AES256_GCM,")
+
+	team, err := reportcrypto.DecryptString(labels["team"], dek)
+	require.NoError(t, err)
+
+	env, err := reportcrypto.DecryptString(labels["env"], dek)
+	require.NoError(t, err)
+
+	assert.Equal(t, "payments", team)
+	assert.Equal(t, "production", env)
+}
+
+func TestTransformResourceAnnotations_EncryptionTransformer(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"annotations": map[string]any{
+				"vault.hashicorp.com/path": "secret/prod/payment",
+				"example.com/token":        "my-secret-token",
+			},
+		},
+	})
+
+	err = transformResourceAnnotations(
+		resource,
+		NewEncryptionTransformer(dek),
+	)
+	require.NoError(t, err)
+
+	metadata := resource.GetObject()["metadata"].(map[string]any)
+	annotations := metadata["annotations"].(map[string]any)
+
+	value1 := annotations["vault.hashicorp.com/path"].(string)
+	value2 := annotations["example.com/token"].(string)
+
+	assert.Contains(t, value1, "ENC[AES256_GCM,")
+	assert.Contains(t, value2, "ENC[AES256_GCM,")
+
+	decrypted1, err := reportcrypto.DecryptString(value1, dek)
+	require.NoError(t, err)
+
+	decrypted2, err := reportcrypto.DecryptString(value2, dek)
+	require.NoError(t, err)
+
+	assert.Equal(t, "secret/prod/payment", decrypted1)
+	assert.Equal(t, "my-secret-token", decrypted2)
+}
+
+func TestTransformResourceObjectSourcePath_EncryptionTransformer(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"sourcePath": "/workspace/manifests/payment.yaml:42",
+	})
+
+	err = transformResourceObjectSourcePath(
+		resource,
+		NewEncryptionTransformer(dek),
+	)
+	require.NoError(t, err)
+
+	sourcePath := resource.GetObject()["sourcePath"].(string)
+
+	assert.Contains(t, sourcePath, "ENC[AES256_GCM,")
+	assert.True(t, len(sourcePath) > 3)
+	assert.Equal(t, ":42", sourcePath[len(sourcePath)-3:])
+
+	encryptedPath := sourcePath[:len(sourcePath)-3]
+
+	decrypted, err := reportcrypto.DecryptString(encryptedPath, dek)
+	require.NoError(t, err)
+
+	assert.Equal(t, "/workspace/manifests/payment.yaml", decrypted)
+}
+
+func TestTransformSourcePath_EncryptionTransformer(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	transformer := NewEncryptionTransformer(dek)
+
+	transformed, err := transformSourcePath(
+		"/workspace/manifests/payment.yaml:42",
+		transformer,
+	)
+	require.NoError(t, err)
+
+	lastColon := strings.LastIndex(transformed, ":")
+	require.NotEqual(t, -1, lastColon)
+
+	encryptedPath := transformed[:lastColon]
+	linePart := transformed[lastColon:]
+
+	assert.Contains(t, encryptedPath, "ENC[AES256_GCM,")
+	assert.Equal(t, ":42", linePart)
+
+	decryptedPath, err := reportcrypto.DecryptString(
+		encryptedPath,
+		dek,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		"/workspace/manifests/payment.yaml",
+		decryptedPath,
 	)
 }
