@@ -30,7 +30,22 @@ func (ks *Kubescape) SetCachedConfig(setConfig *metav1.SetConfig) error {
 // View cached configurations
 func (ks *Kubescape) ViewCachedConfig(viewConfig *metav1.ViewConfig) error {
 	tenant := cautils.GetTenantConfig(ks.Context(), "", "", "", "", getKubernetesApi()) // change k8sinterface
-	fmt.Fprintf(viewConfig.Writer, "%s\n", tenant.GetConfigObj().Config())
+	configObj := tenant.GetConfigObj()
+	outputFormat := viewConfig.OutputFormat
+	if outputFormat == "" {
+		outputFormat = "text"
+	}
+
+	formatted, err := cautils.FormatConfigOutput(configObj, outputFormat, viewConfig.IncludeEmpty)
+	if err != nil {
+		return err
+	}
+
+	if viewConfig.Writer != nil {
+		_, err = fmt.Fprint(viewConfig.Writer, string(formatted))
+		return err
+	}
+
 	return nil
 }
 
