@@ -180,7 +180,7 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 			logger.L().Ctx(ctx).Warning("Deprecated format version", helpers.String("run", "--format-version=v2"))
 			return printerv1.NewJsonPrinter()
 		default:
-			return printerv2.NewJsonPrinter()
+			return printerv2.NewJsonPrinter(scanInfo.MinSeverity)
 		}
 	case printer.YamlFormat:
 		if scanInfo.FormatVersion == "v1" {

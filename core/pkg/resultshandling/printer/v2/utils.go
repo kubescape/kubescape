@@ -108,6 +108,47 @@ func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummari
 	return enrichedResults
 }
 
+// severityRank returns a comparable rank for a severity string; unknown values rank lowest.
+func severityRank(severity string) int {
+	switch severity {
+	case "Critical":
+		return 4
+	case "High":
+		return 3
+	case "Medium":
+		return 2
+	case "Low":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// FilterBySeverity drops controls (and matching associated controls in results)
+// that are below minSeverity. Pass an empty minSeverity to disable filtering.
+func FilterBySeverity(report *PostureReportWithSeverity, minSeverity string) {
+	if minSeverity == "" || report == nil {
+		return
+	}
+	threshold := severityRank(strings.Title(strings.ToLower(minSeverity)))
+
+	for id, control := range report.SummaryDetails.Controls {
+		if severityRank(control.Severity) < threshold {
+			delete(report.SummaryDetails.Controls, id)
+		}
+	}
+
+	for i, result := range report.Results {
+		filtered := result.AssociatedControls[:0]
+		for _, control := range result.AssociatedControls {
+			if severityRank(control.Severity) >= threshold {
+				filtered = append(filtered, control)
+			}
+		}
+		report.Results[i].AssociatedControls = filtered
+	}
+}
+
 // ConvertToPostureReportWithSeverity converts PostureReport to PostureReportWithSeverity
 func ConvertToPostureReportWithSeverity(report *reporthandlingv2.PostureReport) *PostureReportWithSeverity {
 	return ConvertToPostureReportWithSeverityAndLabels(report, nil, nil)
