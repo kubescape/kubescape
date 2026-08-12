@@ -71,6 +71,10 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 				IsBomAvailable:  false,
 			}
 
+			if imageID.Hash == "" && imageID.Tag == "" {
+				return status, nil
+			}
+
 			var ecrImageID types.ImageIdentifier
 			if imageID.Hash != "" {
 				ecrImageID.ImageDigest = aws.String(imageID.Hash)
@@ -112,6 +116,10 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			report := ContainerImageVulnerabilityReport{
 				ImageID:         imageID,
 				Vulnerabilities: []Vulnerability{},
+			}
+
+			if imageID.Hash == "" && imageID.Tag == "" {
+				return report, nil
 			}
 
 			var ecrImageID types.ImageIdentifier

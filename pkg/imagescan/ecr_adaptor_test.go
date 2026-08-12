@@ -17,6 +17,9 @@ type mockECRClient struct {
 }
 
 func (m *mockECRClient) DescribeImageScanFindings(ctx context.Context, params *ecr.DescribeImageScanFindingsInput, optFns ...func(*ecr.Options)) (*ecr.DescribeImageScanFindingsOutput, error) {
+	if params.ImageId != nil && params.ImageId.ImageDigest == nil && params.ImageId.ImageTag == nil {
+		panic("InvalidParameterException: imageId must contain either imageDigest or imageTag")
+	}
 	return m.describeFindingsOut, m.describeFindingsErr
 }
 
@@ -68,6 +71,13 @@ func TestAWSECRAdaptor_GetImagesScanStatus(t *testing.T) {
 			},
 			expectedScan: false,
 		},
+		{
+			name:    "empty hash and tag should not panic",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				// the mock client will panic if it reaches DescribeImageScanFindings
+			},
+			expectedScan: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -80,6 +90,10 @@ func TestAWSECRAdaptor_GetImagesScanStatus(t *testing.T) {
 
 			images := []ContainerImageIdentifier{
 				{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "test-repo", Tag: "latest"},
+			}
+
+			if tt.name == "empty hash and tag should not panic" {
+				images[0].Tag = ""
 			}
 
 			statuses, err := adaptor.GetImagesScanStatus(context.Background(), images)
@@ -203,4 +217,18 @@ func TestAWSECRAdaptor_GetImagesVulnerabilities_EnhancedFindingsFallsBackToTitle
 	assert.Len(t, reports[0].Vulnerabilities, 2)
 	assert.Equal(t, "CVE-2026-1234", reports[0].Vulnerabilities[0].ID)
 	assert.Equal(t, "CVE-2026-5678", reports[0].Vulnerabilities[1].ID)
+}
+
+func TestAWSECRAdaptor_GetImagesVulnerabilities_EmptyHashAndTagShouldNotPanic(t *testing.T) {
+	adaptor := NewAWSECRAdaptor()
+	adaptor.client = &mockECRClient{}
+
+	images := []ContainerImageIdentifier{
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "test-repo"},
+	}
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
+	assert.NoError(t, err)
+	assert.Len(t, reports, 1)
+	assert.Empty(t, reports[0].Vulnerabilities)
 }
