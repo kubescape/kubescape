@@ -69,6 +69,15 @@ func Test_generateRowPdf(t *testing.T) {
 
 }
 
+func TestGetComplianceScoreColumnDoesNotRoundFractionalScoreToPerfect(t *testing.T) {
+	score := float32(99.5)
+	controlSummary := &reportsummary.ControlSummary{
+		ComplianceScore: &score,
+	}
+
+	assert.Equal(t, "99%", getComplianceScoreColumn(controlSummary, nil))
+}
+
 func Test_generateTableRow_UTF8(t *testing.T) {
 	name := strings.Repeat("a", 69) + "é" + strings.Repeat("b", 20)
 	ctrl := &reportsummary.ControlSummary{
