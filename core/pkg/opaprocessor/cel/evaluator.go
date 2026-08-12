@@ -2,6 +2,7 @@ package cel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -48,6 +49,25 @@ type ValidationResult struct {
 	// passing or unknown verdict has nothing to remediate. Empty is normal: an
 	// expression we cannot read a path out of reports none rather than guess.
 	Paths []PathHint
+}
+
+// expressionError wraps a validation error the CEL expression itself produced
+// while running — a runtime evaluation error or a non-bool result — as opposed
+// to an offline-only failure such as a compile error, an exhausted cost budget,
+// or a cancelled scan. Only the former is a verdict the apiserver can reach, so
+// only it is governed by the policy's failurePolicy.
+type expressionError struct{ err error }
+
+func (e *expressionError) Error() string { return e.err.Error() }
+func (e *expressionError) Unwrap() error { return e.err }
+
+// IsExpressionError reports whether a validation's error was produced by the
+// expression itself. Compile errors, budget exhaustion and cancellation return
+// false; the scanner leaves those as unknown/skipped verdicts rather than
+// letting failurePolicy turn them into a deny.
+func IsExpressionError(err error) bool {
+	var ee *expressionError
+	return errors.As(err, &ee)
 }
 
 // Evaluator runs a VAP's variables and validations against scanned objects. The
@@ -298,7 +318,7 @@ func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, acti
 
 	passed, ok := out.Value().(bool)
 	if !ok {
-		res.Err = fmt.Errorf("validation expression must return bool, got %T", out.Value())
+		res.Err = &expressionError{fmt.Errorf("validation expression must return bool, got %T", out.Value())}
 		return res
 	}
 
@@ -389,7 +409,7 @@ func (e *Evaluator) evalExpression(ctx context.Context, expr string, activation 
 		return nil, err
 	}
 	if evalErr != nil {
-		return nil, evalErr
+		return nil, &expressionError{evalErr}
 	}
 	return out, nil
 }
