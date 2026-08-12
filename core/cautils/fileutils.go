@@ -22,6 +22,8 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/scheme"
 )
 
 var (
@@ -713,6 +715,9 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 			continue
 		}
 		if obj, ok := j.(map[string]any); ok {
+			if validationErr := validateManifestAgainstScheme(obj); validationErr != nil {
+				parseErrs = append(parseErrs, fmt.Errorf("document %d: %w", i+1, validationErr))
+			}
 			objects, objectErr := manifestObjectToWorkloads(obj)
 			yamlObjs = append(yamlObjs, objects...)
 			if objectErr != nil {
@@ -940,6 +945,64 @@ func convertYamlToJson(i any) any {
 		}
 	}
 	return i
+}
+
+// validateManifestAgainstScheme checks a parsed YAML document against the
+// Kubernetes type scheme bundled with client-go. It is intentionally narrow:
+//
+//   - Documents without an apiVersion (values.yaml, Chart.yaml, CI configs)
+//     are ignored, matching the existing non-manifest handling.
+//   - Documents whose group is not registered in the client-go scheme are
+//     custom resources (CRDs) and are ignored — a CRD is not a typo.
+//   - A kind that no version of a built-in group registers is reported:
+//     Kubernetes forbids CRDs in built-in groups, so such a kind is reliably
+//     a typo (e.g. apps/v1 kind Deplyment).
+//   - A known kind in an unknown version (e.g. a future apiVersion) is left
+//     alone, since kubescape deliberately scans resources newer than the
+//     bundled scheme.
+//   - A registered kind that fails to decode (for example a string where a
+//     number is expected) is reported as structurally invalid.
+//
+// The document is still loaded and scanned by the caller; this only surfaces
+// the missing diagnostic through the existing error path.
+func validateManifestAgainstScheme(obj map[string]any) error {
+	apiVersion, _ := obj["apiVersion"].(string)
+	kind, _ := obj["kind"].(string)
+	if apiVersion == "" || kind == "" {
+		// Not a Kubernetes manifest (or missing type metadata); nothing to
+		// validate against the scheme.
+		return nil
+	}
+
+	gvk := schema.FromAPIVersionAndKind(apiVersion, kind)
+
+	if !scheme.Scheme.IsGroupRegistered(gvk.Group) {
+		// Unregistered group: a custom resource that is not part of the
+		// client-go scheme by design. Skip silently to avoid false positives.
+		return nil
+	}
+
+	if len(scheme.Scheme.VersionsForGroupKind(gvk.GroupKind())) == 0 {
+		// The group is built-in but no version of it registers this kind, so
+		// the kind itself is a typo rather than a future apiVersion.
+		return fmt.Errorf("%s %q is not a valid Kubernetes kind", apiVersion, kind)
+	}
+
+	if !scheme.Scheme.Recognizes(gvk) {
+		// A known kind in a version the bundled scheme does not register yet
+		// (e.g. autoscaling/v99): there is no concrete type to decode into, so
+		// structural validation is not possible. This is not a typo.
+		return nil
+	}
+
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return fmt.Errorf("failed to re-encode %s %q for validation: %w", apiVersion, kind, err)
+	}
+	if _, _, err := scheme.Codecs.UniversalDeserializer().Decode(data, nil, nil); err != nil {
+		return fmt.Errorf("%s %q is structurally invalid: %w", apiVersion, kind, err)
+	}
+	return nil
 }
 
 func IsYaml(filePath string) bool {

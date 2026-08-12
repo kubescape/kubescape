@@ -772,6 +772,107 @@ metadata:
 	}
 }
 
+func TestReadYamlFileValidatesAgainstScheme(t *testing.T) {
+	tests := []struct {
+		name          string
+		content       string
+		wantCount     int
+		wantErrSubstr string
+	}{
+		{
+			name: "valid Pod is accepted",
+			content: `apiVersion: v1
+kind: Pod
+metadata:
+  name: valid-pod
+  namespace: default`,
+			wantCount: 1,
+		},
+		{
+			name: "valid custom resource is ignored",
+			content: `apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tls-cert
+spec:
+  secretName: tls-cert`,
+			wantCount: 1,
+		},
+		{
+			name: "wrong field type is surfaced",
+			content: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bad-deployment
+spec:
+  replicas: "not-a-number"`,
+			wantCount:     1,
+			wantErrSubstr: "structurally invalid",
+		},
+		{
+			name: "typo'd kind in a built-in group is surfaced",
+			content: `apiVersion: apps/v1
+kind: Deplyment
+metadata:
+  name: typo-deployment`,
+			wantCount:     1,
+			wantErrSubstr: "is not a valid Kubernetes kind",
+		},
+		{
+			name: "typo'd kind in the core group is surfaced",
+			content: `apiVersion: v1
+kind: Pods
+metadata:
+  name: typo-pod`,
+			wantCount:     1,
+			wantErrSubstr: "is not a valid Kubernetes kind",
+		},
+		{
+			name: "known kind in a future apiVersion is ignored",
+			content: `apiVersion: autoscaling/v99
+kind: HorizontalPodAutoscaler
+metadata:
+  name: future-hpa
+  namespace: default`,
+			wantCount: 1,
+		},
+		{
+			name: "non-manifest YAML without apiVersion is ignored",
+			content: `foo: bar
+baz: qux`,
+			wantCount: 0,
+		},
+		{
+			name: "multi-document manifest keeps valid docs and surfaces invalid ones",
+			content: `apiVersion: v1
+kind: Pod
+metadata:
+  name: good-pod
+  namespace: default
+---
+apiVersion: apps/v1
+kind: Deplyment
+metadata:
+  name: typo-deployment`,
+			wantCount:     2,
+			wantErrSubstr: "is not a valid Kubernetes kind",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := readYamlFile([]byte(tt.content))
+			if tt.wantErrSubstr != "" {
+				require.Error(t, err)
+				assert.ErrorContains(t, err, tt.wantErrSubstr)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantCount, len(got))
+		})
+	}
+}
+
 func TestReadJsonFile(t *testing.T) {
 	tests := []struct {
 		name      string
