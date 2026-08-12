@@ -75,6 +75,25 @@ func kustomizeTestdataPath() string {
 	return filepath.Join(o, "testdata", "kustomize")
 }
 
+func TestSelectedKustomizationFileRequiresRegularFile(t *testing.T) {
+	for _, basename := range kustomizationFileMatchers {
+		t.Run(basename, func(t *testing.T) {
+			root := resolvedTempDir(t)
+			fileParent := filepath.Join(root, "file")
+			directoryParent := filepath.Join(root, "directory")
+			require.NoError(t, os.MkdirAll(fileParent, 0o750))
+			require.NoError(t, os.MkdirAll(filepath.Join(directoryParent, basename), 0o750))
+
+			filePath := filepath.Join(fileParent, basename)
+			require.NoError(t, os.WriteFile(filePath, []byte("kind: Kustomization\n"), 0o600))
+
+			assert.Equal(t, filePath, selectedKustomizationFile(filePath))
+			assert.Empty(t, selectedKustomizationFile(filepath.Join(directoryParent, basename)))
+			assert.Empty(t, selectedKustomizationFile(directoryParent))
+		})
+	}
+}
+
 func TestKustomizeHelmChartDirectories_CustomHomeDeduplicatesPhysicalChart(t *testing.T) {
 	root := resolvedTempDir(t)
 	writeManifestFixture(t, root, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
