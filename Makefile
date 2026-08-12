@@ -38,7 +38,14 @@ CEL_VAP_DIGESTS := \
 	policy-configuration-definition.yaml=f1e1d0bda1e82ef880223a429fc5ecf99c957b5069b1ec759a9b65ab8620c7ef
 
 # sha256sum on GNU coreutils, shasum on macOS; both print "<digest>  <file>".
-CEL_SHA256_FN := sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$$1"; else shasum -a 256 "$$1"; fi | awk '{ print $$1 }'; }
+# Each branch pipes its own command into awk so a missing tool surfaces as a
+# non-zero return instead of an empty digest: piping the whole if/else into awk
+# would let awk's zero exit status mask "command not found".
+CEL_SHA256_FN := sha256() { \
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$$1" | awk '{ print $$1 }'; \
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$$1" | awk '{ print $$1 }'; \
+  else echo "sync-vap: neither sha256sum nor shasum is available; cannot verify downloads" >&2; return 1; fi; \
+}
 
 # Every file is downloaded and verified before any of them is installed, so a
 # mismatch on the last asset cannot leave vapdata/ holding a half-updated
@@ -78,9 +85,10 @@ sync-vap-digests:
 	echo "CEL_VAP_DIGESTS := \\"; \
 	for f in $(CEL_VAP_FILES); do \
 		curl -fsSL "$(CEL_LIBRARY_BASE_URL)/$$f" -o "$$tmp/$$f"; \
+		d="$$(sha256 "$$tmp/$$f")"; \
 		if [ "$$f" = "$$last" ]; then \
-			printf '\t%s=%s\n' "$$f" "$$(sha256 "$$tmp/$$f")"; \
+			printf '\t%s=%s\n' "$$f" "$$d"; \
 		else \
-			printf '\t%s=%s \\\n' "$$f" "$$(sha256 "$$tmp/$$f")"; \
+			printf '\t%s=%s \\\n' "$$f" "$$d"; \
 		fi; \
 	done

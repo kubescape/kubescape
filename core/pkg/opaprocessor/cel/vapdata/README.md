@@ -17,13 +17,17 @@ release publishes no checksum manifest of its own) and refuses to install a
 bundle that does not match, so a tampered release asset cannot silently change
 the policies kubescape enforces. Nothing is written unless every file verifies.
 
-To move to a new release, bump `CEL_LIBRARY_VERSION`, then regenerate the
-digests and check them against the upstream release before committing both
-changes together:
+To move to a new release, bump `CEL_LIBRARY_VERSION` in the Makefile, then:
 
 ```sh
-make sync-vap-digests
+make sync-vap-digests   # prints a CEL_VAP_DIGESTS block for the new version
+make sync-vap           # refreshes the files here, once the digests are pasted in
 ```
+
+The first target only computes digests; it does not touch this directory. Check
+the printed values against the upstream release and paste them into
+`CEL_VAP_DIGESTS` before running the second. Commit the version bump, the new
+digests, and the refreshed files together.
 
 Files:
 
