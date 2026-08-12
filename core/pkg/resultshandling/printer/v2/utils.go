@@ -110,14 +110,14 @@ func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummari
 
 // severityRank returns a comparable rank for a severity string; unknown values rank lowest.
 func severityRank(severity string) int {
-	switch severity {
-	case "Critical":
+	switch strings.ToLower(severity) {
+	case "critical":
 		return 4
-	case "High":
+	case "high":
 		return 3
-	case "Medium":
+	case "medium":
 		return 2
-	case "Low":
+	case "low":
 		return 1
 	default:
 		return 0
@@ -130,7 +130,7 @@ func FilterBySeverity(report *PostureReportWithSeverity, minSeverity string) {
 	if minSeverity == "" || report == nil {
 		return
 	}
-	threshold := severityRank(strings.Title(strings.ToLower(minSeverity)))
+	threshold := severityRank(minSeverity)
 
 	for id, control := range report.SummaryDetails.Controls {
 		if severityRank(control.Severity) < threshold {
