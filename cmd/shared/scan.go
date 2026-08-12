@@ -6,17 +6,17 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
-// ScanFormats and ImageScanFormats list the output formats supported by the scan commands.
-// They are built from the printer.*Format constants to keep a single source of truth.
+// ScanFormats and ImageScanFormats are derived from printer.AllFormats and
+// printer.ImageFormats to keep a single source of truth — see printresults.go
+// for why the two lists differ (not every printer supports image scans, e.g. CSV).
 var (
-	ScanFormats      = []string{printer.PrettyFormat, printer.JsonFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.HtmlFormat, printer.SARIFFormat}
-	ImageScanFormats = []string{printer.PrettyFormat, printer.JsonFormat, printer.SARIFFormat}
+	ScanFormats      = printer.AllFormats
+	ImageScanFormats = printer.ImageFormats
 )
 
 var ErrUnknownSeverity = fmt.Errorf("unknown severity. Supported severities are: %s", strings.Join(reporthandlingapis.GetSupportedSeverities(), ", "))
@@ -70,9 +70,4 @@ func ValidateScanFormat(format string, supported []string) error {
 		return fmt.Errorf("invalid format %q, supported formats: %s", format, strings.Join(supported, ", "))
 	}
 	return nil
-}
-
-// TerminateOnExceedingSeverity terminates the program if the result exceeds the severity threshold
-func TerminateOnExceedingSeverity(scanInfo *cautils.ScanInfo, l helpers.ILogger) {
-	l.Fatal("result exceeds severity threshold", helpers.String("Set severity threshold", scanInfo.FailThresholdSeverity))
 }

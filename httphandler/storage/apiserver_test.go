@@ -21,6 +21,8 @@ import (
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func NewFakeAPIServerStorage(namespace string) *APIServerStore {
@@ -28,6 +30,44 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
 		namespace:     namespace,
 	}
+}
+
+func TestStoreWorkloadConfigurationScanResult_PropagatesUpdateError(t *testing.T) {
+	ctx := context.Background()
+	existing := &v1beta1.WorkloadConfigurationScan{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-scan", Namespace: "default"},
+	}
+	client := fake.NewSimpleClientset(existing)
+	updateErr := errors.New("update failed")
+	client.PrependReactor("update", "workloadconfigurationscans", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, updateErr
+	})
+	store := &APIServerStore{StorageClient: client.SpdxV1beta1()}
+
+	err := store.StoreWorkloadConfigurationScanResult(ctx, &v1beta1.WorkloadConfigurationScan{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-scan", Namespace: "default"},
+	})
+
+	assert.ErrorIs(t, err, updateErr)
+}
+
+func TestStoreWorkloadConfigurationScanResultSummary_PropagatesUpdateError(t *testing.T) {
+	ctx := context.Background()
+	existing := &v1beta1.WorkloadConfigurationScanSummary{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-scan", Namespace: "default"},
+	}
+	client := fake.NewSimpleClientset(existing)
+	updateErr := errors.New("update failed")
+	client.PrependReactor("update", "workloadconfigurationscansummaries", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, updateErr
+	})
+	store := &APIServerStore{StorageClient: client.SpdxV1beta1()}
+
+	_, err := store.StoreWorkloadConfigurationScanResultSummary(ctx, &v1beta1.WorkloadConfigurationScan{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-scan", Namespace: "default"},
+	})
+
+	assert.ErrorIs(t, err, updateErr)
 }
 
 func Test_getControlsMapFromResult(t *testing.T) {

@@ -16,7 +16,7 @@ func TestGetOperatorScanConfigCmd(t *testing.T) {
 		Namespace: "namespace",
 	}
 
-	cmd := getOperatorScanConfigCmd(mockKubescape, operatorInfo)
+	cmd := getOperatorScanConfigCmd(mockKubescape, &operatorInfo)
 
 	// Verify the command name and short description
 	assert.Equal(t, "configurations", cmd.Use)

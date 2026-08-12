@@ -36,5 +36,5 @@ func TestGetListCmd(t *testing.T) {
 	assert.Nil(t, err)
 
 	err = listCmd.RunE(&cobra.Command{}, []string{"some-value"})
-	assert.Nil(t, err)
+	assert.ErrorContains(t, err, "invalid target")
 }

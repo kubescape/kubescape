@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/meta"
 	v1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
@@ -16,10 +15,8 @@ func getViewCmd(ks meta.IKubescape) *cobra.Command {
 		Use:   "view",
 		Short: "View cached configurations",
 		Long:  ``,
-		Run: func(cmd *cobra.Command, args []string) {
-			if err := ks.ViewCachedConfig(&v1.ViewConfig{Writer: os.Stdout}); err != nil {
-				logger.L().Fatal(err.Error())
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return ks.ViewCachedConfig(&v1.ViewConfig{Writer: os.Stdout})
 		},
 	}
 }

@@ -3,9 +3,11 @@ package printer
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"html/template"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -30,6 +33,9 @@ var _ printer.IPrinter = &HtmlPrinter{}
 type HTMLReportingCtx struct {
 	OPASessionObj     *cautils.OPASessionObj
 	ResourceTableView ResourceTableView
+	// ImageScanSummary is set instead of the two fields above when this report
+	// is for an image scan rather than a posture scan (#2782).
+	ImageScanSummary *imageprinter.ImageScanSummary
 }
 
 type HtmlPrinter struct {
@@ -59,10 +65,9 @@ func (hp *HtmlPrinter) PrintNextSteps() {
 
 }
 
-func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
-	if opaSessionObj == nil {
-		logger.L().Ctx(ctx).Error("failed to print results, missing data")
-		return
+func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if opaSessionObj == nil && len(imageScanData) == 0 {
+		return fmt.Errorf("failed to print results, missing data")
 	}
 
 	tplFuncMap := template.FuncMap{
@@ -73,8 +78,8 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 			}
 			return total
 		},
-		"float32ToInt": cautils.Float32ToInt,
-		"lower":        strings.ToLower,
+		"riskScoreToInt": cautils.RiskScoreToInt,
+		"lower":          strings.ToLower,
 		"sortByNamespace": func(resourceTableView ResourceTableView) ResourceTableView {
 			sortedResourceTableView := make(ResourceTableView, len(resourceTableView))
 			copy(sortedResourceTableView, resourceTableView)
@@ -118,15 +123,23 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		template.New("htmlReport").Funcs(tplFuncMap).Parse(reportTemplate),
 	)
 
-	resourceTableView := buildResourceTableView(opaSessionObj)
-	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView}
+	var resourceTableView ResourceTableView
+	var imageScanSummary *imageprinter.ImageScanSummary
+	if opaSessionObj != nil {
+		resourceTableView = buildResourceTableView(opaSessionObj)
+	} else {
+		imageScanSummary = buildImageScanSummary(imageScanData)
+	}
+
+	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView, imageScanSummary}
 	err := tpl.Execute(hp.writer, reportingCtx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to render template", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to render template: %w", err)
 	}
 	printer.LogOutputFile(hp.writer.Name())
 
+	return nil
 }
 
 func (hp *HtmlPrinter) Score(score float32) {
@@ -136,13 +149,41 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableV
 	resourceTableView := make(ResourceTableView, 0)
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if result.GetStatus(nil).IsFailed() {
-			resource := opaSessionObj.AllResources[resourceID]
+			resource, ok := opaSessionObj.AllResources[resourceID]
+			if !ok {
+				logger.L().Debug("resource missing from AllResources, skipping",
+					helpers.String("resourceID", resourceID))
+				continue
+			}
 			ctlResults := buildResourceControlResultTable(result.AssociatedControls, &opaSessionObj.Report.SummaryDetails)
 			resourceTableView = append(resourceTableView, ResourceResult{resource, ctlResults})
 		}
 	}
 
 	return resourceTableView
+}
+
+// buildImageScanSummary aggregates CVE, package-score, and severity data for an image scan report (#2782)
+func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.ImageScanSummary {
+	imageScanSummary := &imageprinter.ImageScanSummary{
+		CVEs:                  []imageprinter.CVE{},
+		PackageScores:         map[string]*imageprinter.PackageScore{},
+		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
+	}
+
+	for i := range imageScanData {
+		if !slices.Contains(imageScanSummary.Images, imageScanData[i].Image) {
+			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
+		}
+
+		cves := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
+		imageScanSummary.CVEs = append(imageScanSummary.CVEs, cves...)
+
+		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
+		setSeverityToSummaryMap(cves, imageScanSummary.MapsSeverityToSummary)
+	}
+
+	return imageScanSummary
 }
 
 func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary) ResourceControlResult {

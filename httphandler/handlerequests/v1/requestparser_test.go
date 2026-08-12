@@ -42,7 +42,7 @@ func TestGetScanParamsFromRequest(t *testing.T) {
 		assert.True(t, req.scanQueryParams.KeepResults)
 		assert.True(t, req.scanQueryParams.ReturnResults)
 		assert.True(t, req.scanInfo.HostSensorEnabled.GetBool())
-		assert.True(t, req.scanInfo.Submit)
+		assert.True(t, req.scanInfo.Submit.GetBool())
 		assert.Equal(t, "aaaaaaaaaa", req.scanInfo.AccountID)
 	}
 
@@ -72,7 +72,7 @@ func TestGetScanParamsFromRequest(t *testing.T) {
 		assert.False(t, req.scanQueryParams.KeepResults)
 		assert.False(t, req.scanQueryParams.ReturnResults)
 		assert.False(t, req.scanInfo.HostSensorEnabled.GetBool())
-		assert.False(t, req.scanInfo.Submit)
+		assert.False(t, req.scanInfo.Submit.GetBool())
 		assert.Equal(t, "aaaaaaaaaa", req.scanInfo.AccountID)
 	}
 }
