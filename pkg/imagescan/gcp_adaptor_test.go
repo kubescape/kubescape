@@ -251,26 +251,55 @@ func TestGCPAdaptor_FilterInjectionPrevention(t *testing.T) {
 	adaptor.client = mockClient
 	adaptor.projectID = "test-project"
 
-	// Create an image ID with a malicious hash containing a double quote
-	images := []ContainerImageIdentifier{
-		{Registry: "us-docker.pkg.dev", Repository: "proj/repo/img", Hash: "sha256:malicious\"injection"},
+	tests := []struct {
+		name         string
+		hash         string
+		expectedHash string
+	}{
+		{
+			name:         "quote only",
+			hash:         "sha256:malicious\"injection",
+			expectedHash: "sha256:malicious\\\"injection",
+		},
+		{
+			name:         "backslash before quote",
+			hash:         "sha256:malicious\\\"injection",
+			expectedHash: "sha256:malicious\\\\\\\"injection",
+		},
+		{
+			name:         "trailing backslash",
+			hash:         "sha256:malicious\\",
+			expectedHash: "sha256:malicious\\\\",
+		},
+		{
+			name:         "raw line break",
+			hash:         "sha256:malicious\ninjection",
+			expectedHash: "sha256:malicious\\ninjection",
+		},
 	}
 
-	// Test GetImagesScanStatus
-	_, err := adaptor.GetImagesScanStatus(context.Background(), images)
-	assert.NoError(t, err)
-	require.NotNil(t, mockClient.lastReq)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			images := []ContainerImageIdentifier{
+				{Registry: "us-docker.pkg.dev", Repository: "proj/repo/img", Hash: tc.hash},
+			}
 
-	// The filter should have the double quote escaped
-	expectedResourceURL := "https://us-docker.pkg.dev/proj/repo/img@sha256:malicious\\\"injection"
-	expectedFilter := fmt.Sprintf("kind=\"DISCOVERY\" AND resourceUrl=\"%s\"", expectedResourceURL)
-	assert.Equal(t, expectedFilter, mockClient.lastReq.Filter)
+			// Test GetImagesScanStatus
+			_, err := adaptor.GetImagesScanStatus(context.Background(), images)
+			assert.NoError(t, err)
+			require.NotNil(t, mockClient.lastReq)
 
-	// Test GetImagesVulnerabilities
-	_, err = adaptor.GetImagesVulnerabilities(context.Background(), images)
-	assert.NoError(t, err)
-	require.NotNil(t, mockClient.lastReq)
+			expectedResourceURL := "https://us-docker.pkg.dev/proj/repo/img@" + tc.expectedHash
+			expectedFilter := fmt.Sprintf("kind=\"DISCOVERY\" AND resourceUrl=\"%s\"", expectedResourceURL)
+			assert.Equal(t, expectedFilter, mockClient.lastReq.Filter)
 
-	expectedVulnFilter := fmt.Sprintf("kind=\"VULNERABILITY\" AND resourceUrl=\"%s\"", expectedResourceURL)
-	assert.Equal(t, expectedVulnFilter, mockClient.lastReq.Filter)
+			// Test GetImagesVulnerabilities
+			_, err = adaptor.GetImagesVulnerabilities(context.Background(), images)
+			assert.NoError(t, err)
+			require.NotNil(t, mockClient.lastReq)
+
+			expectedVulnFilter := fmt.Sprintf("kind=\"VULNERABILITY\" AND resourceUrl=\"%s\"", expectedResourceURL)
+			assert.Equal(t, expectedVulnFilter, mockClient.lastReq.Filter)
+		})
+	}
 }

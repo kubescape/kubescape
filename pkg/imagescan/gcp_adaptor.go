@@ -148,11 +148,10 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 		}
 
 		resourceURL := fmt.Sprintf("https://%s/%s@%s", imageID.Registry, imageID.Repository, imageID.Hash)
-		safeResourceURL := strings.ReplaceAll(resourceURL, "\"", "\\\"")
 
 		req := &grafeaspb.ListOccurrencesRequest{
 			Parent: fmt.Sprintf("projects/%s", a.projectID),
-			Filter: fmt.Sprintf("kind=\"DISCOVERY\" AND resourceUrl=\"%s\"", safeResourceURL),
+			Filter: fmt.Sprintf("kind=\"DISCOVERY\" AND resourceUrl=%q", resourceURL),
 		}
 
 		it := a.client.ListOccurrences(ctx, req)
@@ -225,10 +224,9 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 		}
 
 		resourceURL := fmt.Sprintf("https://%s/%s@%s", imageID.Registry, imageID.Repository, imageID.Hash)
-		safeResourceURL := strings.ReplaceAll(resourceURL, "\"", "\\\"")
 		req := &grafeaspb.ListOccurrencesRequest{
 			Parent:   fmt.Sprintf("projects/%s", a.projectID),
-			Filter:   fmt.Sprintf("kind=\"VULNERABILITY\" AND resourceUrl=\"%s\"", safeResourceURL),
+			Filter:   fmt.Sprintf("kind=\"VULNERABILITY\" AND resourceUrl=%q", resourceURL),
 			PageSize: 1000,
 		}
 
