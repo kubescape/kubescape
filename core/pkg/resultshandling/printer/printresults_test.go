@@ -176,3 +176,11 @@ func TestLogOutputFile(t *testing.T) {
 		assert.Empty(t, strings.TrimSpace(out), "expected no log for %s", sink)
 	}
 }
+
+func TestFormatOutputExtCoversAllFormats(t *testing.T) {
+	for _, format := range AllFormats {
+		ext, ok := FormatOutputExt[format]
+		assert.True(t, ok, "format %q has no entry in FormatOutputExt", format)
+		assert.NotEmpty(t, ext, "format %q maps to an empty extension", format)
+	}
+}

@@ -155,11 +155,31 @@ func TestResolvedOutputPath(t *testing.T) {
 		{"append CycloneDX", printer.CycloneDXFormat, "report.json", "report.json.cdx.json"},
 		{"preserve SPDX", printer.SPDXFormat, "report.spdx.json", "report.spdx.json"},
 		{"append SPDX", printer.SPDXFormat, "report.json", "report.json.spdx.json"},
+		{"append markdown", printer.MarkdownFormat, "report", "report.md"},
+		{"preserve markdown", printer.MarkdownFormat, "report.md", "report.md"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			assert.Equal(t, test.want, resolvedOutputPath(test.format, test.outputFile))
+		})
+	}
+}
+
+// markdown writes report.md and pretty-printer writes report.txt, so sharing
+// an --output must not be rejected as a collision.
+func TestGetOutputPrintersAllowsMarkdownAlongsideTextFormats(t *testing.T) {
+	for _, format := range []string{printer.PrettyFormat, printer.PrometheusFormat} {
+		t.Run(format, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				ScanType: cautils.ScanTypeControl,
+				Format:   printer.MarkdownFormat + "," + format,
+				Output:   filepath.Join(t.TempDir(), "report"),
+			}
+
+			outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "")
+			require.NoError(t, err)
+			assert.Len(t, outputPrinters, 2)
 		})
 	}
 }
