@@ -2,6 +2,10 @@ package shared
 
 import (
 	"testing"
+
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestValidateScanFormat(t *testing.T) {
@@ -64,6 +68,69 @@ func TestValidateSeverity(t *testing.T) {
 
 			if got != want {
 				t.Errorf("got: %v, want: %v", got, want)
+			}
+		})
+	}
+}
+
+func TestValidateCommonScanFlags(t *testing.T) {
+	tests := []struct {
+		name          string
+		severity      string
+		format        string
+		formatChanged bool
+		expectedErr   string
+	}{
+		{
+			name:          "Valid setup",
+			severity:      "High",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
+		{
+			name:          "Invalid severity",
+			severity:      "Extreme",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "unknown severity",
+		},
+		{
+			name:          "Empty format flag explicitly passed",
+			severity:      "High",
+			format:        "",
+			formatChanged: true,
+			expectedErr:   "format cannot be empty, supported formats",
+		},
+		{
+			name:          "Invalid format",
+			severity:      "High",
+			format:        "fake-format",
+			formatChanged: true,
+			expectedErr:   "invalid format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				FailThresholdSeverity: tt.severity,
+				Format:                tt.format,
+			}
+
+			cmd := &cobra.Command{}
+			cmd.Flags().String("format", "", "")
+			if tt.formatChanged {
+				cmd.Flags().Set("format", tt.format)
+			}
+
+			err := ValidateCommonScanFlags(cmd, scanInfo, ScanFormats)
+
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
 			}
 		})
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/spf13/cobra"
 )
 
 // ScanFormats and ImageScanFormats are derived from printer.AllFormats and
@@ -68,6 +69,26 @@ func ValidateScanFormat(format string, supported []string) error {
 	// A truly empty value is left to the caller's "format cannot be empty" check.
 	if entries == 0 && strings.TrimSpace(format) != "" {
 		return fmt.Errorf("invalid format %q, supported formats: %s", format, strings.Join(supported, ", "))
+	}
+	return nil
+}
+
+// ValidateCommonScanFlags validates flags that are common to all scan subcommands
+func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, supportedFormats []string) error {
+	if scanInfo.FailThresholdSeverity != "" {
+		if err := ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
+			return err
+		}
+	}
+	f := cmd.Flags().Lookup("format")
+	if f == nil {
+		f = cmd.InheritedFlags().Lookup("format")
+	}
+	if f != nil && f.Changed && scanInfo.Format == "" {
+		return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(supportedFormats, ", "))
+	}
+	if err := ValidateScanFormat(scanInfo.Format, supportedFormats); err != nil {
+		return err
 	}
 	return nil
 }
