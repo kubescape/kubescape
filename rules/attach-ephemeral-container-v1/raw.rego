@@ -3,9 +3,6 @@ package armo_builtins
 
 import rego.v1
 
-# input: regoResponseVectorObject
-# returns subjects that can create/update ephemeral containers on pods (equivalent to gaining exec-level code execution, and can potentially be used to break out to the node via a privileged ephemeral container)
-
 deny contains msga if {
 	verbs := ["update", "patch", "*"]
 	api_groups := ["", "*"]
@@ -15,6 +12,10 @@ deny contains msga if {
 	rolebinding := subjectVector.relatedObjects[j]
 	endswith(role.kind, "Role")
 	endswith(rolebinding.kind, "Binding")
+
+	rolebinding.roleRef.kind == role.kind
+	rolebinding.roleRef.name == role.metadata.name
+	is_same_namespace(role, rolebinding)
 
 	rule := role.rules[p]
 
@@ -35,8 +36,8 @@ deny contains msga if {
 	path := array.concat(resources_path, verb_path)
 	path2 := array.concat(path, api_groups_path)
 	finalpath := array.concat(path2, [
-		sprintf("relatedObjects[%d].subjects[%d]", [j, k]),
 		sprintf("relatedObjects[%d].roleRef.name", [j]),
+		sprintf("relatedObjects[%d].subjects[%d]", [j, k]),
 	])
 
 	msga := {
@@ -53,14 +54,21 @@ deny contains msga if {
 	}
 }
 
-# for service accounts
+is_same_namespace(role, rolebinding) if {
+	role.kind == "ClusterRole"
+}
+
+is_same_namespace(role, rolebinding) if {
+	role.kind == "Role"
+	role.metadata.namespace == rolebinding.metadata.namespace
+}
+
 is_same_subjects(subjectVector, subject) if {
 	subjectVector.kind == subject.kind
 	subjectVector.name == subject.name
 	subjectVector.namespace == subject.namespace
 }
 
-# for users/ groups
 is_same_subjects(subjectVector, subject) if {
 	subjectVector.kind == subject.kind
 	subjectVector.name == subject.name
