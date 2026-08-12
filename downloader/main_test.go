@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/cenkalti/backoff/v4"
@@ -53,10 +54,11 @@ func TestDownloadArtifacts(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		errsByTarget  map[string][]error
-		expectError   bool
-		expectedCalls map[string]int
+		name            string
+		errsByTarget    map[string][]error
+		expectError     bool
+		wantErrContains []string
+		expectedCalls   map[string]int
 	}{
 		{
 			name:          "all-succeed",
@@ -88,6 +90,19 @@ func TestDownloadArtifacts(t *testing.T) {
 			expectError:   true,
 			expectedCalls: map[string]int{"artifacts": 1, "framework": 1}, // Continues processing next target
 		},
+		{
+			name: "all-targets-fail-are-aggregated",
+			errsByTarget: map[string][]error{
+				"artifacts": {errors.New("artifacts unreachable"), errors.New("artifacts unreachable"), errors.New("artifacts unreachable"), errors.New("artifacts unreachable")},
+				"framework": {errors.New("framework unreachable"), errors.New("framework unreachable"), errors.New("framework unreachable"), errors.New("framework unreachable")},
+			},
+			expectError: true,
+			// Every failure has to surface, not just the first one: the joined
+			// error is what main turns into the non-zero exit that fails the
+			// image build in build/Dockerfile.
+			wantErrContains: []string{"artifacts unreachable", "framework unreachable"},
+			expectedCalls:   map[string]int{"artifacts": 4, "framework": 4},
+		},
 	}
 
 	for _, tt := range tests {
@@ -96,6 +111,12 @@ func TestDownloadArtifacts(t *testing.T) {
 			err := downloadArtifacts(m, downloads)
 			if (err != nil) != tt.expectError {
 				t.Errorf("expected error: %v, got error: %v", tt.expectError, err)
+			}
+
+			for _, want := range tt.wantErrContains {
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("expected error to mention %q, got: %v", want, err)
+				}
 			}
 
 			for target, expected := range tt.expectedCalls {
