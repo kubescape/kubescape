@@ -296,11 +296,15 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 
 	if scanInfo.DryRun {
 		spanInit.End()
+		resultsHandling.SetData(scanData)
 		result, err := interfaces.resourceHandler.Preflight(ctxInit, scanData, scanInfo)
 		if err != nil {
 			return resultsHandling, err
 		}
 		printPreflightResult(result)
+		if denied := result.Denied(); len(denied) > 0 {
+			return resultsHandling, fmt.Errorf("dry-run: %d required resource type(s) cannot be listed with the current credentials", len(denied))
+		}
 		return resultsHandling, nil
 	}
 
