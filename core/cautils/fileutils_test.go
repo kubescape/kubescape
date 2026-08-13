@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -252,6 +253,57 @@ func TestIsUnderAnyDir(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.contained, IsUnderAnyDir(tt.path, tt.dirs))
 		})
+	}
+}
+
+// TestDirSetContains asserts that the ancestor walk decides containment exactly
+// as the per-directory relative-path comparison it replaces, including for a
+// sibling sharing a name prefix and for a directory absent from the set.
+func TestDirSetContains(t *testing.T) {
+	set := newDirSet([]string{"/repo/app", "/repo/charts/web/templates"})
+
+	tests := []struct {
+		name      string
+		path      string
+		contained bool
+	}{
+		{name: "the directory itself", path: "/repo/app", contained: true},
+		{name: "file directly inside", path: "/repo/app/deployment.yaml", contained: true},
+		{name: "file nested below", path: "/repo/app/config/base/pod.yaml", contained: true},
+		{name: "second member of the set", path: "/repo/charts/web/templates/svc.yaml", contained: true},
+		{name: "sibling sharing a prefix", path: "/repo/app-docs/deployment.yaml", contained: false},
+		{name: "parent of a member", path: "/repo/charts/web/Chart.yaml", contained: false},
+		{name: "unrelated path", path: "/other/pod.yaml", contained: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.contained, set.contains(tt.path))
+		})
+	}
+
+	assert.False(t, newDirSet(nil).contains("/repo/app/deployment.yaml"), "an empty set contains nothing")
+	assert.True(t, newDirSet([]string{string(filepath.Separator)}).contains("/repo/app/deployment.yaml"),
+		"every absolute path is under the filesystem root")
+}
+
+// BenchmarkExcludeHelmTemplateFiles covers the repository-scan shape the lookup
+// is built for: many files checked against many rendered chart directories.
+func BenchmarkExcludeHelmTemplateFiles(b *testing.B) {
+	root := b.TempDir()
+
+	charts := make([]string, 0, 200)
+	for i := range 200 {
+		charts = append(charts, filepath.Join(root, "charts", strconv.Itoa(i)))
+	}
+	files := make([]string, 0, 2000)
+	for i := range 2000 {
+		files = append(files, filepath.Join(root, "manifests", strconv.Itoa(i), "deployment.yaml"))
+	}
+
+	b.ResetTimer()
+	for range b.N {
+		excludeHelmTemplateFiles(files, charts)
 	}
 }
 
