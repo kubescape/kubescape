@@ -157,8 +157,10 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	// --fail-threshold was removed as a functioning flag, but its registration must stay so
 	// pflag/cobra keep accepting it instead of erroring with "unknown flag" for callers who
 	// still pass it (e.g. existing CI pipelines). Same pattern as the --id/--environment/--env
-	// deprecated-flag fix in cmd/list/list.go and cmd/root.go.
-	scanCmd.PersistentFlags().Float32VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 100, "Deprecated, use '--compliance-threshold' instead")
+	// deprecated-flag fix in cmd/list/list.go and cmd/root.go: bind to a standalone variable,
+	// not scanInfo, so legacy input can't leak into report metadata or threshold validation.
+	var dummyFailThreshold float32
+	scanCmd.PersistentFlags().Float32VarP(&dummyFailThreshold, "fail-threshold", "t", 100, "Deprecated, use '--compliance-threshold' instead")
 	_ = scanCmd.PersistentFlags().MarkHidden("fail-threshold")
 	_ = scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead")
 

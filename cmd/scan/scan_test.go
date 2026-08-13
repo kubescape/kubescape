@@ -372,9 +372,12 @@ func TestGetScanCommand_FailThresholdKeptAsHiddenDeprecatedFlag(t *testing.T) {
 	f := cmd.PersistentFlags().Lookup("fail-threshold")
 	require.NotNil(t, f, "--fail-threshold must stay registered so it doesn't fail with 'unknown flag'")
 	assert.True(t, f.Hidden, "--fail-threshold must be hidden from help output")
-	assert.NotEmpty(t, f.Deprecated, "--fail-threshold must be marked deprecated")
+	assert.Equal(t, "use '--compliance-threshold' flag instead", f.Deprecated)
 
 	require.NoError(t, cmd.ParseFlags([]string{"--fail-threshold", "20"}))
+	assert.Equal(t, "20", f.Value.String())
+
+	require.NoError(t, cmd.ParseFlags([]string{"-t", "20"}))
 	assert.Equal(t, "20", f.Value.String())
 }
 
