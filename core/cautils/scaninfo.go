@@ -115,6 +115,7 @@ type PolicyIdentifier struct {
 
 type ScanInfo struct {
 	UseExceptions         string   // Load file with exceptions configuration
+	AuditExceptions       bool     // Include exception usage audit in supported scan outputs
 	ControlsInputs        string   // Load file with inputs for controls
 	AttackTracks          string   // Load file with attack tracks
 	UseFrom               []string // Load framework from local file (instead of download). Use when running offline
