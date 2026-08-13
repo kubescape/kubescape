@@ -20,6 +20,8 @@ import (
 
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
+	"golang.org/x/sync/semaphore"
+	"golang.org/x/sync/singleflight"
 )
 
 // newKsClient creates the Kubescape storage client. It is a package-level
@@ -46,6 +48,18 @@ type KubescapeMcpserver struct {
 	k8sClientMu  sync.Mutex
 	k8sClient    *k8sinterface.KubernetesApi
 	policyGetter *getter.DownloadReleasedPolicy
+	scanSemMu    sync.Mutex
+	scanSem      *semaphore.Weighted
+	scanGroup    singleflight.Group
+}
+
+func (ksServer *KubescapeMcpserver) getScanSem() *semaphore.Weighted {
+	ksServer.scanSemMu.Lock()
+	defer ksServer.scanSemMu.Unlock()
+	if ksServer.scanSem == nil {
+		ksServer.scanSem = semaphore.NewWeighted(2)
+	}
+	return ksServer.scanSem
 }
 
 // getKsClient lazily initializes the Kubescape storage client. A transient
@@ -453,10 +467,18 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			namespace = nsStr
 		}
 
-		responseBytes, err := ksServer.RunRBACScan(ctx, namespace)
+		key := fmt.Sprintf("rbac_scan:%s", namespace)
+		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
+			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
+				return nil, err
+			}
+			defer ksServer.getScanSem().Release(1)
+			return ksServer.RunRBACScan(ctx, namespace)
+		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run RBAC scan: %v", err)), nil
 		}
+		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "scan_local_iac":
 		path := ""
@@ -479,10 +501,18 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			framework = strings.TrimSpace(fwStr)
 		}
 
-		responseBytes, err := ksServer.runIaCScan(ctx, path, framework)
+		key := fmt.Sprintf("scan_local_iac:%s:%s", path, framework)
+		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
+			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
+				return nil, err
+			}
+			defer ksServer.getScanSem().Release(1)
+			return ksServer.runIaCScan(ctx, path, framework)
+		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run IaC scan: %v", err)), nil
 		}
+		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "run_network_security_scan":
 		namespace := ""
@@ -494,10 +524,18 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			namespace = nsStr
 		}
 
-		responseBytes, err := ksServer.RunNetworkScan(ctx, namespace)
+		key := fmt.Sprintf("network_scan:%s", namespace)
+		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
+			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
+				return nil, err
+			}
+			defer ksServer.getScanSem().Release(1)
+			return ksServer.RunNetworkScan(ctx, namespace)
+		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run Network scan: %v", err)), nil
 		}
+		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "list_vulnerability_manifests":
 		namespace := metav1.NamespaceAll
@@ -955,10 +993,18 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return mcp.NewToolResultError("framework_name argument must not be empty"), nil
 		}
 
-		responseBytes, err := ksServer.RunFrameworkScan(ctx, namespace, frameworkNameStr)
+		key := fmt.Sprintf("framework_scan:%s:%s", namespace, frameworkNameStr)
+		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
+			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
+				return nil, err
+			}
+			defer ksServer.getScanSem().Release(1)
+			return ksServer.RunFrameworkScan(ctx, namespace, frameworkNameStr)
+		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run framework scan: %v", err)), nil
 		}
+		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
