@@ -195,6 +195,6 @@ func getSeverityColor(severity string) *props.Color {
 
 func (p *PdfPrinter) CloseWriter() {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
 	}
 }

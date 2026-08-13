@@ -80,6 +80,6 @@ func (sp *SPDXPrinter) PrintNextSteps() {}
 
 func (sp *SPDXPrinter) CloseWriter() {
 	if sp.writer != nil && sp.writer != os.Stdout {
-		sp.writer.Close()
+		sp.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
 	}
 }

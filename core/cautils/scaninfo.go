@@ -243,7 +243,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) error {
 	framework := &reporthandling.Framework{}
 	for _, f := range files {
 		filePath := filepath.Join(scanInfo.UseArtifactsFrom, f.Name())
-		file, err := os.ReadFile(filePath)
+		file, err := os.ReadFile(filepath.Clean(filePath))
 		if err == nil {
 			if err := json.Unmarshal(file, framework); err == nil {
 				scanInfo.UseFrom = append(scanInfo.UseFrom, filepath.Join(scanInfo.UseArtifactsFrom, f.Name()))

@@ -404,6 +404,6 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 
 func (p *PrettyPrinter) CloseWriter() {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
 	}
 }

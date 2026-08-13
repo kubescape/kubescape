@@ -248,9 +248,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmReleaseNamespace, "release-namespace", "", "Helm release namespace made available as .Release.Namespace when rendering the chart")
 
 	// hidden flags
-	scanCmd.PersistentFlags().MarkHidden("omit-raw-resources")
-	scanCmd.PersistentFlags().MarkHidden("print-attack-tree")
-	scanCmd.PersistentFlags().MarkHidden("format-version")
+	_ = scanCmd.PersistentFlags().MarkHidden("omit-raw-resources") // #nosec G104 -- flag defined on this command; MarkHidden only errors for an unknown flag
+	_ = scanCmd.PersistentFlags().MarkHidden("print-attack-tree")  // #nosec G104 -- flag defined on this command; MarkHidden only errors for an unknown flag
+	_ = scanCmd.PersistentFlags().MarkHidden("format-version")     // #nosec G104 -- flag defined on this command; MarkHidden only errors for an unknown flag
 
 	// Retrieve --kubeconfig flag from https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/cmd.go
 	scanCmd.PersistentFlags().AddGoFlag(flag.Lookup("kubeconfig"))

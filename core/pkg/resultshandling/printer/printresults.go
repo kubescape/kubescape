@@ -96,7 +96,7 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to create directory, reason: %s", err.Error()))
 			return os.Stdout
 		}
-		f, err := os.Create(outputFile)
+		f, err := os.Create(filepath.Clean(outputFile))
 		if err != nil {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
 			return os.Stdout
@@ -116,7 +116,7 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 func GetWriterNoStdoutFallback(ctx context.Context, outputFile, tempPattern string) *os.File {
 	if outputFile != "" {
 		if err := os.MkdirAll(filepath.Dir(outputFile), outputDirPerm); err == nil {
-			if f, err := os.Create(outputFile); err == nil {
+			if f, err := os.Create(filepath.Clean(outputFile)); err == nil {
 				return f
 			} else {
 				logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))

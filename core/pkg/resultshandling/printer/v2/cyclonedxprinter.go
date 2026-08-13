@@ -78,8 +78,9 @@ func (cp *CycloneDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *caut
 
 func (cp *CycloneDXPrinter) PrintNextSteps() {}
 
-func (cp *CycloneDXPrinter) CloseWriter() {
+func (cp *CycloneDXPrinter) CloseWriter() error {
 	if cp.writer != nil && cp.writer != os.Stdout {
-		cp.writer.Close()
+		return cp.writer.Close()
 	}
+	return nil
 }
