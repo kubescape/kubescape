@@ -70,6 +70,23 @@ func IsExpressionError(err error) bool {
 	return errors.As(err, &ee)
 }
 
+// isContextError reports whether a validation's evaluation error came from a
+// cancelled or expired context rather than from the expression itself. The
+// apiserver never reaches a verdict on a request it did not finish evaluating,
+// so a context error must stay an unknown/skipped verdict, never an
+// expressionError that failurePolicy could turn into a deny.
+//
+// ContextEval reports an interrupt as an error wrapping context.Cause(ctx)
+// (context.Canceled or context.DeadlineExceeded), so errors.Is catches the
+// case where the interrupt fired mid-expression. ctx.Err() covers the same
+// cancellation once it has landed, including an error a lazy variable surfaced
+// whose original cause was flattened into a CEL error value on the way out.
+func isContextError(ctx context.Context, err error) bool {
+	return ctx.Err() != nil ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded)
+}
+
 // Evaluator runs a VAP's variables and validations against scanned objects. The
 // CEL env is built once and reused for every object, since compiling the env is
 // far more expensive than evaluating against it.
@@ -296,6 +313,9 @@ func (e *Evaluator) lazyVariables(ctx context.Context, variables []Variable, act
 				return types.NewErr("variable %q: %v", v.Name, reportErr)
 			}
 			if evalErr != nil {
+				if isContextError(ctx, evalErr) {
+					return types.WrapErr(fmt.Errorf("variable %q: %w", v.Name, evalErr))
+				}
 				return types.NewErr("variable %q: %v", v.Name, evalErr)
 			}
 			return out
@@ -409,6 +429,9 @@ func (e *Evaluator) evalExpression(ctx context.Context, expr string, activation 
 		return nil, err
 	}
 	if evalErr != nil {
+		if isContextError(ctx, evalErr) {
+			return nil, evalErr
+		}
 		return nil, &expressionError{evalErr}
 	}
 	return out, nil
