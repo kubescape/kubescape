@@ -352,7 +352,6 @@ func TestGetScanCommand_DeprecatedFlagsRemoved(t *testing.T) {
 	require.NotNil(t, cmd)
 
 	for _, removed := range []string{
-		"fail-threshold",
 		"create-account",
 		"enable-host-scan",
 		"host-scan-yaml",
@@ -360,6 +359,26 @@ func TestGetScanCommand_DeprecatedFlagsRemoved(t *testing.T) {
 		assert.Nil(t, cmd.PersistentFlags().Lookup(removed),
 			"deprecated flag %q must no longer be registered", removed)
 	}
+}
+
+func TestGetScanCommand_FailThresholdKeptAsHiddenDeprecatedFlag(t *testing.T) {
+	// --fail-threshold's gating logic was removed, but the flag must stay registered
+	// (hidden + deprecated) so cobra keeps accepting it instead of erroring with
+	// "unknown flag" for existing callers - see https://github.com/kubescape/kubescape/issues/3056
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	require.NotNil(t, cmd)
+
+	f := cmd.PersistentFlags().Lookup("fail-threshold")
+	require.NotNil(t, f, "--fail-threshold must stay registered so it doesn't fail with 'unknown flag'")
+	assert.True(t, f.Hidden, "--fail-threshold must be hidden from help output")
+	assert.Equal(t, "use '--compliance-threshold' flag instead", f.Deprecated)
+
+	require.NoError(t, cmd.ParseFlags([]string{"--fail-threshold", "20"}))
+	assert.Equal(t, "20", f.Value.String())
+
+	require.NoError(t, cmd.ParseFlags([]string{"-t", "20"}))
+	assert.Equal(t, "20", f.Value.String())
 }
 
 func TestGetScanCommand_HostScanFlagTriState(t *testing.T) {

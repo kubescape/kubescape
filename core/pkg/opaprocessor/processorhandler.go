@@ -35,6 +35,24 @@ import (
 
 const ScoreConfigPath = "/resources/config"
 
+// ControlAttributeRequiresWholeClusterInput marks a control whose rules join
+// objects that live in different namespaces. Such a control must be evaluated
+// once against the whole cluster — after per-namespace evaluation has merged
+// every batch — rather than once per namespace, or the join silently
+// disappears and the control passes resources it should flag. The value is a
+// boolean (or the string "true").
+const ControlAttributeRequiresWholeClusterInput = "requiresWholeClusterInput"
+
+// wholeClusterControlIDsFallback lists the shipped controls known to require
+// whole-cluster input until the regolibrary ships the
+// requiresWholeClusterInput attribute on them. Keep it in sync with the
+// regolibrary: remove an ID once its control carries the attribute.
+var wholeClusterControlIDsFallback = map[string]struct{}{
+	"C-0266": {}, // Exposure to internet via Gateway API or Istio Ingress (Gateway/Service/VirtualService across namespaces)
+	"C-0267": {}, // Workload with cluster takeover roles (RoleBinding -> ServiceAccount in another namespace)
+	"C-0272": {}, // Workload with administrative roles (RoleBinding -> ServiceAccount in another namespace)
+}
+
 type IJobProgressNotificationClient interface {
 	Start(allSteps int)
 	ProgressJob(step int, message string)
@@ -235,10 +253,11 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-
 	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.ExcludedRules, cautils.GetScanningScope(opap.Metadata.ContextMetadata))
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
-	controlIDs := sortedControlIDs(opap.AllPolicies)
+	scopeControlIDs, wholeClusterControlIDs := splitWholeClusterControls(opap.AllPolicies, sortedControlIDs(opap.AllPolicies))
 
-	// Calculate total progress steps: controls × (resident scope + namespace scopes)
-	totalSteps := len(controlIDs) * (1 + expectedNamespaceBatches)
+	// Calculate total progress steps: per-scope controls × (resident scope +
+	// namespace scopes), plus one whole-cluster pass per deferred control.
+	totalSteps := len(scopeControlIDs)*(1+expectedNamespaceBatches) + len(wholeClusterControlIDs)
 	if progressListener != nil {
 		progressListener.Start(totalSteps)
 		defer progressListener.Stop()
@@ -310,7 +329,7 @@ haveResident:
 
 	// Process resident batch first
 	residentScope := newEvaluationScope(residentBatch.Scope, nil, residentGroups)
-	if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, residentScope, progressListener); err != nil {
+	if err := opap.processScope(ctx, opap.AllPolicies, scopeControlIDs, residentScope, progressListener); err != nil {
 		return err
 	}
 
@@ -332,7 +351,7 @@ haveResident:
 
 			// Process this namespace batch
 			namespaceScope := newEvaluationScope(batch.Scope, batch, residentGroups)
-			if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, namespaceScope, progressListener); err != nil {
+			if err := opap.processScope(ctx, opap.AllPolicies, scopeControlIDs, namespaceScope, progressListener); err != nil {
 				return err
 			}
 
@@ -365,6 +384,19 @@ done:
 			return err
 		}
 	default:
+	}
+
+	// Every namespace batch has been merged into the session resource maps, so
+	// the whole-cluster controls can now be evaluated once against the full
+	// input. Doing this after the merge (rather than per namespace) keeps their
+	// cross-namespace joins intact.
+	if len(wholeClusterControlIDs) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := opap.processScope(ctx, opap.AllPolicies, wholeClusterControlIDs, opap.wholeClusterScope(), progressListener); err != nil {
+			return err
+		}
 	}
 
 	// Rebuild scan coverage
@@ -463,10 +495,10 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 	defer opap.loggerDoneScanning()
 
 	scopes := opap.evaluationScopes()
-	controlIDs := sortedControlIDs(policies)
+	scopeControlIDs, wholeClusterControlIDs := splitWholeClusterControls(policies, sortedControlIDs(policies))
 
 	if progressListener != nil {
-		progressListener.Start(len(controlIDs) * len(scopes))
+		progressListener.Start(len(scopeControlIDs)*len(scopes) + len(wholeClusterControlIDs))
 		defer progressListener.Stop()
 	}
 
@@ -478,7 +510,18 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 			processErrs = append(processErrs, err)
 			break
 		}
-		if err := opap.processScope(ctx, policies, controlIDs, scope, progressListener); err != nil {
+		if err := opap.processScope(ctx, policies, scopeControlIDs, scope, progressListener); err != nil {
+			processErrs = append(processErrs, err)
+		}
+	}
+
+	// Whole-cluster controls are evaluated once against the full input, after
+	// the per-scope pass, so a cross-namespace join is never lost to
+	// partitioning.
+	if len(wholeClusterControlIDs) > 0 {
+		if err := ctx.Err(); err != nil {
+			processErrs = append(processErrs, err)
+		} else if err := opap.processScope(ctx, policies, wholeClusterControlIDs, opap.wholeClusterScope(), progressListener); err != nil {
 			processErrs = append(processErrs, err)
 		}
 	}
@@ -575,6 +618,23 @@ func (opap *OPAProcessor) evaluationScopes() []evaluationScope {
 	return scopes
 }
 
+// wholeClusterScope returns a scope whose input is every resource the scan
+// collected, independent of namespace. It is the scope used to evaluate
+// whole-cluster controls once, after per-namespace evaluation has merged every
+// batch, reproducing the single-input behaviour of clusters below the
+// large-cluster threshold. Indexing everything as the resident batch means
+// matchedObjects returns all matching objects, mirroring the small-cluster
+// eager path exactly.
+func (opap *OPAProcessor) wholeClusterScope() evaluationScope {
+	batch := &cautils.ResourceBatch{
+		Scope:             cautils.ClusterScope,
+		K8SResources:      opap.K8SResources,
+		ExternalResources: opap.ExternalResources,
+		AllResources:      opap.AllResources,
+	}
+	return newEvaluationScope(cautils.ClusterScope, nil, newResidentIndex(batch))
+}
+
 type policyControl struct {
 	key     string
 	control reporthandling.Control
@@ -618,6 +678,40 @@ func policyControlSortKey(item policyControl) string {
 		return item.control.ControlID
 	}
 	return item.key
+}
+
+// controlRequiresWholeClusterInput reports whether a control joins objects
+// across namespaces and therefore must see the whole cluster as one input.
+func controlRequiresWholeClusterInput(control *reporthandling.Control) bool {
+	if control == nil {
+		return false
+	}
+	if flag, ok := control.Attributes[ControlAttributeRequiresWholeClusterInput]; ok {
+		switch v := flag.(type) {
+		case bool:
+			return v
+		case string:
+			return strings.EqualFold(v, "true")
+		}
+	}
+	_, ok := wholeClusterControlIDsFallback[control.ControlID]
+	return ok
+}
+
+// splitWholeClusterControls partitions controlIDs into the controls evaluated
+// once per scope and the controls deferred to a single whole-cluster pass. The
+// order within each returned slice follows the input order, so the evaluation
+// order remains deterministic.
+func splitWholeClusterControls(policies *cautils.Policies, controlIDs []string) (scopeControlIDs, wholeClusterControlIDs []string) {
+	for _, id := range controlIDs {
+		control, ok := policies.Controls[id]
+		if ok && controlRequiresWholeClusterInput(&control) {
+			wholeClusterControlIDs = append(wholeClusterControlIDs, id)
+			continue
+		}
+		scopeControlIDs = append(scopeControlIDs, id)
+	}
+	return scopeControlIDs, wholeClusterControlIDs
 }
 
 func (opap *OPAProcessor) loggerStartScanning() {

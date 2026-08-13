@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -39,6 +40,12 @@ var setConnectedToCluster = k8sinterface.SetConnectedToCluster
 
 var newK8sClient = k8sinterface.NewKubernetesApi
 
+type scanCtxState struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	count  int
+}
+
 type KubescapeMcpserver struct {
 	s          *server.MCPServer
 	ksClientMu sync.Mutex
@@ -52,6 +59,8 @@ type KubescapeMcpserver struct {
 	scanSemMu    sync.Mutex
 	scanSem      *semaphore.Weighted
 	scanGroup    singleflight.Group
+	scanCtxMu    sync.Mutex
+	scanCtxs     map[string]*scanCtxState
 }
 
 func (ksServer *KubescapeMcpserver) getScanSem() *semaphore.Weighted {
@@ -64,12 +73,38 @@ func (ksServer *KubescapeMcpserver) getScanSem() *semaphore.Weighted {
 }
 
 func (ksServer *KubescapeMcpserver) doScanChan(ctx context.Context, key string, scanFunc func(context.Context) (interface{}, error)) (interface{}, error) {
+	ksServer.scanCtxMu.Lock()
+	if ksServer.scanCtxs == nil {
+		ksServer.scanCtxs = make(map[string]*scanCtxState)
+	}
+	state, ok := ksServer.scanCtxs[key]
+	if !ok {
+		scanCtx, cancel := context.WithCancel(context.Background())
+		state = &scanCtxState{
+			ctx:    scanCtx,
+			cancel: cancel,
+		}
+		ksServer.scanCtxs[key] = state
+	}
+	state.count++
+	ksServer.scanCtxMu.Unlock()
+
+	defer func() {
+		ksServer.scanCtxMu.Lock()
+		defer ksServer.scanCtxMu.Unlock()
+		state.count--
+		if state.count <= 0 {
+			state.cancel()
+			delete(ksServer.scanCtxs, key)
+		}
+	}()
+
 	ch := ksServer.scanGroup.DoChan(key, func() (interface{}, error) {
-		if err := ksServer.getScanSem().Acquire(context.Background(), 1); err != nil {
+		if err := ksServer.getScanSem().Acquire(state.ctx, 1); err != nil {
 			return nil, err
 		}
 		defer ksServer.getScanSem().Release(1)
-		return scanFunc(context.Background())
+		return scanFunc(state.ctx)
 	})
 
 	select {
@@ -484,6 +519,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			}
 			namespace = nsStr
 		}
+		if namespace == "*" {
+			namespace = ""
+		}
 
 		if namespace == "*" {
 			namespace = ""
@@ -535,6 +573,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 				return mcp.NewToolResultError("namespace argument must be a string"), nil
 			}
 			namespace = nsStr
+		}
+		if namespace == "*" {
+			namespace = ""
 		}
 
 		if namespace == "*" {
@@ -1004,6 +1045,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if frameworkNameStr == "" {
 			return mcp.NewToolResultError("framework_name argument must not be empty"), nil
 		}
+		if namespace == "*" {
+			namespace = ""
+		}
 
 		if namespace == "*" {
 			namespace = ""
@@ -1041,7 +1085,9 @@ func mcpServerEntrypoint() error {
 	// Initialize the policy getter to load the local ~/.kubescape cache.
 	// Without this, the getter will always hit the GitHub API directly for every scan,
 	// defeating offline scanning and causing rate limits.
-	_, _ = ksServer.policyGetter.SetRegoObjectsWithFallback()
+	if _, err := ksServer.policyGetter.SetRegoObjectsWithFallback(); err != nil {
+		logger.L().Warning("Failed to initialize policy store at startup (falling back to direct download later)", helpers.Error(err))
+	}
 
 	// Creating Kubescape tools and resources
 

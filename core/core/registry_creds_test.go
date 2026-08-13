@@ -259,7 +259,7 @@ func TestCollectImageScanTargetsScopesPullSecretsToLiveCluster(t *testing.T) {
 				scanData.AllResources[workload.GetID()] = workload
 			}
 
-			images, credentials := collectImageScanTargets(
+			images, credentials, containerErrors := collectImageScanTargets(
 				tt.scanType,
 				scanData,
 				context.Background(),
@@ -267,6 +267,7 @@ func TestCollectImageScanTargetsScopesPullSecretsToLiveCluster(t *testing.T) {
 				k8sAPI,
 			)
 
+			assert.Empty(t, containerErrors)
 			assert.True(t, images.Contains(image))
 			if tt.expectSecretRead {
 				require.Len(t, client.Actions(), 1)

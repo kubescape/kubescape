@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -406,12 +407,18 @@ func toGitLabVulnerability(ctl reportsummary.IControlSummary, resourceID, filePa
 	}
 }
 
-// isRepositoryRelative reports whether path is a repository-relative file path, i.e. not empty, absolute, or escaping the repository root via ".."
-func isRepositoryRelative(path string) bool {
-	if path == "" || filepath.IsAbs(path) {
+// isRepositoryRelative reports whether p is a repository-relative file path, i.e. not empty, absolute, or escaping the repository root via ".."
+func isRepositoryRelative(p string) bool {
+	// GitLab resolves these paths against a repository tree using POSIX
+	// semantics, so what counts as absolute must not depend on the host that
+	// produced the report. filepath.IsAbs alone is host-dependent: on Windows
+	// it reports false for "/etc/x", because it wants a drive letter or a UNC
+	// prefix, and such a path would then be emitted as if it were relative.
+	slashed := filepath.ToSlash(p)
+	if p == "" || filepath.IsAbs(p) || path.IsAbs(slashed) {
 		return false
 	}
-	cleaned := filepath.ToSlash(filepath.Clean(path))
+	cleaned := path.Clean(slashed)
 	return cleaned != ".." && !strings.HasPrefix(cleaned, "../")
 }
 

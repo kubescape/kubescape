@@ -113,9 +113,77 @@ func TestPathPlanElementFields(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			plan := planFor(t, tc.expr)
 			require.NotNil(t, plan.elements)
-			assert.Equal(t, tc.collection, plan.elements.collection)
+			assert.Equal(t, []string{tc.collection}, plan.elements.candidatePaths())
 			assert.Equal(t, tc.want, plan.elements.fields)
 			assert.Empty(t, plan.direct, "the iterated list is not a path of its own")
+		})
+	}
+}
+
+// concatRangeExpr is the shape the bundle's container walks have converged on:
+// a kind-dispatch ternary whose BRANCHES are `+` concatenations of the three
+// container lists, each optional one wrapped in a presence guard. The two
+// shapes have to compose, which is why this is one expression rather than a
+// concatenation test and a ternary test sitting next to each other.
+const concatRangeExpr = "(object.kind == 'Pod'" +
+	" ? object.spec.containers" +
+	" + (has(object.spec.initContainers) ? object.spec.initContainers : [])" +
+	" + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])" +
+	" : object.kind in ['Deployment','ReplicaSet','StatefulSet']" +
+	" ? object.spec.template.spec.containers" +
+	" + (has(object.spec.template.spec.initContainers) ? object.spec.template.spec.initContainers : [])" +
+	" : []" +
+	").all(c, has(c.securityContext) && c.securityContext.privileged == false)"
+
+func TestPathPlanReadsConcatenatedContainerLists(t *testing.T) {
+	plan := planFor(t, concatRangeExpr)
+	require.NotNil(t, plan.elements)
+	require.Len(t, plan.elements.candidates, 2, "one candidate per branch of the kind dispatch")
+
+	// Order is load-bearing: it is what lets an index into the flattened
+	// concatenation be attributed back to the list the element came from.
+	assert.Equal(t, rangeCandidate{
+		{path: "spec.containers"},
+		{path: "spec.initContainers", optional: true},
+		{path: "spec.ephemeralContainers", optional: true},
+	}, plan.elements.candidates[0])
+	assert.Equal(t, rangeCandidate{
+		{path: "spec.template.spec.containers"},
+		{path: "spec.template.spec.initContainers", optional: true},
+	}, plan.elements.candidates[1])
+
+	assert.Equal(t, []fieldRef{{path: "securityContext.privileged", value: "false"}}, plan.elements.fields)
+	assert.Empty(t, plan.direct, "the lists a range concatenates are not paths of their own")
+}
+
+func TestPathPlanReadsAPresenceGuardedListAsTheWholeRange(t *testing.T) {
+	// The same guard the concatenation wraps its optional operands in, standing
+	// alone as the entire range. It is one candidate holding one optional
+	// operand, which is also the case that needs presenceDefaultCondition to
+	// accept an empty LIST default rather than only an empty map.
+	plan := planFor(t, "(has(object.spec.containers) ? object.spec.containers : []).all(c, has(c.image))")
+	require.NotNil(t, plan.elements)
+	assert.Equal(t, []rangeCandidate{{{path: "spec.containers", optional: true}}}, plan.elements.candidates)
+	assert.Equal(t, []fieldRef{{path: "image"}}, plan.elements.fields)
+}
+
+func TestPathPlanIgnoresConcatenatedRangeWithAnUnattributableOperand(t *testing.T) {
+	// An operand that is not a plain list cannot be attributed by any amount of
+	// index arithmetic, and skipping it would shift every later index onto the
+	// wrong element. So the whole range is dropped: no element hints, and the
+	// constituent lists do not leak out as direct fields either.
+	cases := map[string]string{
+		"a filtered operand": "(object.spec.containers.filter(c, c.name != 'x') + object.spec.initContainers)" +
+			".all(c, has(c.securityContext))",
+		"a literal splice": "(object.spec.containers + [{'name': 'injected'}])" +
+			".all(c, has(c.securityContext))",
+	}
+
+	for name, expr := range cases {
+		t.Run(name, func(t *testing.T) {
+			plan := planFor(t, expr)
+			assert.Nil(t, plan.elements, "no element may be blamed from a range we cannot read")
+			assert.Empty(t, plan.direct, "an unreadable range must not leak its lists as direct fields")
 		})
 	}
 }
@@ -145,7 +213,7 @@ func TestPathPlanAttributesElementsForNegatedExists(t *testing.T) {
 	// so its literal is not a value to write.
 	plan := planFor(t, "object.kind != 'Pod' || !object.spec.containers.exists(c, c.name == 'bad')")
 	require.NotNil(t, plan.elements)
-	assert.Equal(t, "spec.containers", plan.elements.collection)
+	assert.Equal(t, []string{"spec.containers"}, plan.elements.candidatePaths())
 	require.Len(t, plan.elements.fields, 1)
 	assert.Equal(t, "name", plan.elements.fields[0].path)
 	assert.Empty(t, plan.elements.fields[0].value, "an exists alternative is not a fix value")
@@ -334,6 +402,85 @@ func TestViolationPathsStillPinElementsWhenTheSiblingPasses(t *testing.T) {
 	}, resolvePlan(t, expr, obj))
 }
 
+func unprivilegedContainer(name string) map[string]any {
+	return map[string]any{"name": name, "securityContext": map[string]any{"privileged": false}}
+}
+
+func privilegedContainer(name string) map[string]any {
+	return map[string]any{"name": name, "securityContext": map[string]any{"privileged": true}}
+}
+
+func podWithSpec(spec map[string]any) map[string]any {
+	return map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "p"},
+		"spec":       spec,
+	}
+}
+
+func TestViolationPathsAttributeToTheConcatenatedListTheElementCameFrom(t *testing.T) {
+	// The offender is the second initContainer, which sits at flat index 3 of the
+	// concatenation. spec.containers[3] would point into a list that only has two
+	// elements, and spec.initContainers[3] into one that only has two: splitting
+	// the index back across the operands is the whole job.
+	obj := podWithSpec(map[string]any{
+		"containers":     []any{unprivilegedContainer("a"), unprivilegedContainer("b")},
+		"initContainers": []any{unprivilegedContainer("init-a"), privilegedContainer("init-b")},
+	})
+
+	assert.Equal(t, []PathHint{
+		{Path: "spec.initContainers[1].securityContext.privileged", Value: "false"},
+	}, resolvePlan(t, concatRangeExpr, obj))
+}
+
+func TestViolationPathsEmptyTheOtherOperandsWhileTestingOne(t *testing.T) {
+	// Mirror of the test above, and the one that fails if the operands not under
+	// test are left populated: every compliant initContainer would be re-checked
+	// alongside the offending container, still fail, and be blamed for it.
+	obj := podWithSpec(map[string]any{
+		"containers":     []any{privilegedContainer("a"), unprivilegedContainer("b")},
+		"initContainers": []any{unprivilegedContainer("init-a"), unprivilegedContainer("init-b")},
+	})
+
+	assert.Equal(t, []PathHint{
+		{Path: "spec.containers[0].securityContext.privileged", Value: "false"},
+	}, resolvePlan(t, concatRangeExpr, obj))
+}
+
+func TestViolationPathsResolveConcatenationWithAnAbsentOptionalOperand(t *testing.T) {
+	// No initContainers and no ephemeralContainers at all. Both contributed the
+	// empty list their has() guard already produced, so the candidate still
+	// resolves off the required operand rather than being written off as the
+	// wrong branch.
+	obj := podWithSpec(map[string]any{
+		"containers": []any{unprivilegedContainer("a"), privilegedContainer("b")},
+	})
+
+	assert.Equal(t, []PathHint{
+		{Path: "spec.containers[1].securityContext.privileged", Value: "false"},
+	}, resolvePlan(t, concatRangeExpr, obj))
+}
+
+func TestViolationPathsBlameNoElementOfAConcatenationWhenASiblingFails(t *testing.T) {
+	// Same guard as the single-list case, generalized: emptying EVERY operand
+	// makes the concatenation empty and the comprehension vacuous, so a
+	// validation that still fails is failing on the conjunctive sibling and no
+	// container is blamed.
+	expr := "object.spec.hostNetwork == false && " + concatRangeExpr
+	obj := podWithSpec(map[string]any{
+		"hostNetwork":    true, // the real failure, independent of any container
+		"containers":     []any{unprivilegedContainer("a")},
+		"initContainers": []any{unprivilegedContainer("init-a")},
+	})
+
+	hints := resolvePlan(t, expr, obj)
+	for _, h := range hints {
+		assert.NotContainsf(t, h.Path, "[", "a compliant container was blamed for a failure caused by hostNetwork: %s", h.Path)
+	}
+	assert.Contains(t, hints, PathHint{Path: "spec.hostNetwork", Value: "false"}, "the real cause is still reported")
+}
+
 func TestViolationPathsBlameNoElementWhenTheFailureIsElsewhere(t *testing.T) {
 	// C-0034 fails on the pod's own automountServiceAccountToken. Its
 	// containers have nothing to do with the verdict and none is named.
@@ -395,14 +542,15 @@ func TestPassingResultsCarryNoPaths(t *testing.T) {
 // and TestEveryBundleValidationYieldsAPath turns that into a `make sync-vap`
 // failure instead of findings that quietly lose their remediation paths.
 //
-// KNOWN LIMITATION for a future sync: the plan is derived from the validation
-// expression's AST only, not from any `variables:` block it references. The
-// embedded bundle inlines its object access today, but upstream controls are
-// moving to the variables pattern; a validation whose object access lives in a
-// variable (validation is just `variables.foo`) derives no path and will fail
-// this test at sync time. That failure is the signal to either teach the
-// derivation to inline variable definitions or exempt the policy here - not a
-// silent loss of paths.
+// KNOWN LIMITATION for a future sync: what is left here is the shapes the AST
+// walk genuinely cannot attribute, not shapes it has not been taught yet. A
+// range that mixes an unreadable operand into a list (a filter(), a map(), a
+// literal splice) cannot be indexed by any amount of arithmetic, and a
+// comprehension over a map has no field path to point at because a map key is
+// not a field. Those are the exemptions below. An upstream rewrite into some
+// other unreadable shape will fail this test at sync time, and that failure is
+// the signal to either teach the derivation the new shape or exempt the policy
+// here with the reason - not a silent loss of paths.
 var pathlessPolicies = map[string]string{
 	"cluster-policy-deny-attach":      "denies outright (the expression is the constant false), so there is no field to point at",
 	"cluster-policy-deny-exec":        "denies outright, same as attach",
@@ -417,12 +565,6 @@ var pathlessPolicies = map[string]string{
 	"kubescape-c-0012-deny-resources-with-sensitive-information-in-environment-variables": "one of its two validations " +
 		"iterates the ConfigMap data/binaryData maps by key, same as C-0076: a map key is not a field path. The " +
 		"other validation (container env vars) still derives normally",
-
-	"kubescape-c-0198-deny-root-containers":            "iterates object.spec.containers + initContainers + ephemeralContainers concatenated with `+`, same reason as C-0210",
-	"kubescape-c-0210-deny-seccomp-profile-unconfined": "the container list is a `+` concatenation of containers, initContainers and ephemeralContainers; which of the three a failing index came from cannot be recovered from the concatenated list alone",
-	"kubescape-c-0199-deny-net-raw-capability":         "same `+`-concatenated container list as C-0210, hand-inlined per kind rather than through a variable",
-	"kubescape-c-0200-deny-added-capabilities":         "same `+`-concatenated container list as C-0210, hand-inlined per kind rather than through a variable",
-	"kubescape-c-0201-deny-capabilities-assigned":      "same `+`-concatenated container list as C-0210, hand-inlined per kind rather than through a variable",
 }
 
 func TestEveryBundleValidationYieldsAPath(t *testing.T) {
@@ -472,11 +614,7 @@ func TestEveryDerivedBundlePathIsWellFormed(t *testing.T) {
 			if plan.elements == nil {
 				continue
 			}
-			collections := plan.elements.collections
-			if len(collections) == 0 {
-				collections = []string{plan.elements.collection}
-			}
-			for _, collection := range collections {
+			for _, collection := range plan.elements.candidatePaths() {
 				assertPath(name, collection)
 			}
 			for _, ref := range plan.elements.fields {
@@ -550,11 +688,7 @@ func TestEveryBundleFixValueIsExpected(t *testing.T) {
 			if plan.elements == nil {
 				continue
 			}
-			collections := plan.elements.collections
-			if len(collections) == 0 {
-				collections = []string{plan.elements.collection}
-			}
-			for _, collection := range collections {
+			for _, collection := range plan.elements.candidatePaths() {
 				for _, ref := range plan.elements.fields {
 					if ref.value != "" {
 						seen[collection+"[]."+ref.path+"="+ref.value] = true
