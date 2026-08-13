@@ -164,6 +164,46 @@ func TestGetAttributesFromImage(t *testing.T) {
 			},
 			expectedErr: nil,
 		},
+		{
+			// Regression: a digest-pinned reference's digest ("sha256:...")
+			// contains a colon. Splitting the name:tag segment on ":" without
+			// accounting for the digest used to leave "@sha256" stuck onto
+			// ImageName and the raw hash treated as ImageTag, which silently
+			// broke isTargetImage's exception-policy matching for these images.
+			imageName: "myregistry.io/myimage@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+			expectedAttributes: Attributes{
+				Registry:     "myregistry.io",
+				Organization: "",
+				ImageName:    "myimage",
+				ImageTag:     "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+			},
+			expectedErr: nil,
+		},
+		{
+			// Both an explicit tag and a digest: the explicit tag must win
+			// over the digest for ImageTag, and ImageName must still exclude
+			// both suffixes.
+			imageName: "myregistry.io/myimage:v1@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+			expectedAttributes: Attributes{
+				Registry:     "myregistry.io",
+				Organization: "",
+				ImageName:    "myimage",
+				ImageTag:     "v1",
+			},
+			expectedErr: nil,
+		},
+		{
+			// Docker Hub short form, digest only: exercises the "library"
+			// organization default landing alongside a digest fallback tag.
+			imageName: "alpine@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+			expectedAttributes: Attributes{
+				Registry:     "docker.io",
+				Organization: "library",
+				ImageName:    "alpine",
+				ImageTag:     "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+			},
+			expectedErr: nil,
+		},
 	}
 
 	for _, tt := range tests {
@@ -310,6 +350,76 @@ func TestIsTargetImage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.attributes.Registry+"/"+tt.attributes.ImageName, func(t *testing.T) {
 			assert.Equal(t, tt.expected, isTargetImage(tt.targets, tt.attributes))
+		})
+	}
+}
+
+// TestIsTargetImage_DigestPinnedImage exercises isTargetImage against
+// attributes computed by getAttributesFromImage from a real digest-pinned
+// image reference, rather than hand-built Attributes - a hand-built
+// Attributes{ImageName: "kubescape-cli"} would already encode the post-fix
+// parsing result and pass regardless of whether getAttributesFromImage is
+// actually fixed, defeating the point of a regression test.
+func TestIsTargetImage_DigestPinnedImage(t *testing.T) {
+	const digestPinnedImage = "quay.io/kubescape/kubescape-cli@sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+
+	attributes, err := getAttributesFromImage(digestPinnedImage)
+	assert.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		target   Attributes
+		expected bool
+	}{
+		{
+			// regexStringMatch is unanchored, so an unanchored pattern
+			// matched even against the pre-fix parser (whose ImageName was
+			// "kubescape-cli@sha256") - this case is not a regression,
+			// unanchored patterns worked both before and after the fix.
+			name: "unanchored imageName target matches (not a regression)",
+			target: Attributes{
+				Registry:     "quay.io",
+				Organization: "kubescape",
+				ImageName:    "kubescape-cli",
+			},
+			expected: true,
+		},
+		{
+			// This is the case the parsing fix actually changes: pre-fix,
+			// ImageName was "kubescape-cli@sha256" and "^kubescape-cli$"
+			// would not match it; post-fix, ImageName is the clean
+			// "kubescape-cli" and the anchored pattern matches.
+			name: "anchored imageName target matches (the actual fix)",
+			target: Attributes{
+				Registry:     "quay.io",
+				Organization: "kubescape",
+				ImageName:    "^kubescape-cli$",
+			},
+			expected: true,
+		},
+		{
+			// Pins the documented ImageTag-fallback limitation: a policy
+			// that targets a specific tag (not "") cannot match a purely
+			// digest-pinned image, because ImageTag holds the digest rather
+			// than a tag the policy author could have written. This is a
+			// known, documented gap (see the ImageTag-fallback comment in
+			// getAttributesFromImage), not something this test expects to
+			// start passing.
+			name: "tag-targeting policy does not match (documented gap)",
+			target: Attributes{
+				Registry:     "quay.io",
+				Organization: "kubescape",
+				ImageName:    "kubescape-cli",
+				ImageTag:     "v3.*",
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			targets := []Target{{Attributes: tt.target}}
+			assert.Equal(t, tt.expected, isTargetImage(targets, attributes))
 		})
 	}
 }

@@ -3,6 +3,7 @@ package printer
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -129,6 +130,9 @@ func TestPrintScanCoverage_AllSectionsRendered(t *testing.T) {
 }
 
 func TestSetWriter_Pretty(t *testing.T) {
+	sourceTreeArtifact := "customFilename.txt"
+	require.NoFileExists(t, sourceTreeArtifact, "test setup requires no leftover output file in the package directory")
+
 	tests := []struct {
 		name       string
 		outputFile string
@@ -160,10 +164,20 @@ func TestSetWriter_Pretty(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.outputFile != "" && tt.outputFile != os.DevNull {
+				tmpDir := t.TempDir()
+				tt.outputFile = filepath.Join(tmpDir, tt.outputFile)
+				tt.expected = filepath.Join(tmpDir, tt.expected)
+			}
 			pp := NewPrettyPrinter(false, "v2", false, cautils.ViewTypes("control"), cautils.ScanTypes("cluster"), []string{}, "")
 
 			pp.SetWriter(ctx, tt.outputFile)
+			if tt.outputFile != "" && tt.outputFile != os.DevNull {
+				t.Cleanup(func() { _ = pp.writer.Close() })
+			}
 			assert.Equal(t, tt.expected, pp.writer.Name())
 		})
 	}
+
+	assert.NoFileExists(t, sourceTreeArtifact)
 }

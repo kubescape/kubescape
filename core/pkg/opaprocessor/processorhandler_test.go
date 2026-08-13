@@ -121,8 +121,79 @@ func NewOPAProcessorMock(opaSessionObjMock string, resourcesMock []byte) *OPAPro
 	for i := range allResources {
 		opap.AllResources[i] = workloadinterface.NewWorkloadObj(allResources[i])
 	}
+	// mirror NewOPAProcessor: freeze the bucketing input after AllResources is populated
+	opap.initialResourceCount = len(opap.AllResources)
 
 	return opap
+}
+
+func TestSortedPolicyControls(t *testing.T) {
+	controls := map[string]reporthandling.Control{
+		"control-c": {
+			ControlID: "C-0003",
+		},
+		"control-a": {
+			ControlID: "C-0001",
+		},
+		"fallback-id": {},
+		"control-b": {
+			ControlID: "C-0002",
+		},
+	}
+
+	got := sortedPolicyControls(controls)
+
+	require.Len(t, got, 4)
+	assert.Equal(t, "C-0001", got[0].control.ControlID)
+	assert.Equal(t, "C-0002", got[1].control.ControlID)
+	assert.Equal(t, "C-0003", got[2].control.ControlID)
+	assert.Equal(t, "fallback-id", got[3].key)
+	assert.Empty(t, got[3].control.ControlID)
+	assert.Empty(t, controls["fallback-id"].ControlID, "sorting must not mutate the source controls map")
+}
+
+type recordingProgressListener struct {
+	started  int
+	messages []string
+	stopped  bool
+}
+
+func (r *recordingProgressListener) Start(allSteps int) {
+	r.started = allSteps
+}
+
+func (r *recordingProgressListener) ProgressJob(_ int, message string) {
+	r.messages = append(r.messages, message)
+}
+
+func (r *recordingProgressListener) Stop() {
+	r.stopped = true
+}
+
+func TestProcessReportsControlsInSortedOrder(t *testing.T) {
+	opaSessionObj := cautils.NewOPASessionObjMock()
+	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+
+	policies := &cautils.Policies{
+		Controls: map[string]reporthandling.Control{
+			"C-0003": {ControlID: "C-0003"},
+			"C-0001": {ControlID: "C-0001"},
+			"C-0002": {ControlID: "C-0002"},
+		},
+	}
+	opap.AllPolicies = policies
+
+	progress := &recordingProgressListener{}
+	err := opap.Process(context.Background(), policies, progress)
+
+	require.NoError(t, err)
+	assert.Equal(t, 3, progress.started)
+	assert.True(t, progress.stopped)
+	assert.Equal(t, []string{
+		"Control: C-0001",
+		"Control: C-0002",
+		"Control: C-0003",
+	}, progress.messages)
 }
 
 func monitorHeapSpace(maxHeap *uint64, quitChan chan bool) {
@@ -441,7 +512,7 @@ func TestProcessRule(t *testing.T) {
 		// since all resources JSON is a large file, we need to unzip it and set the variable before running the benchmark
 		unzipAllResourcesTestDataAndSetVar("testdata/allResourcesMock.json.zip", "testdata/allResourcesMock.json")
 		opap := NewOPAProcessorMock(tc.opaSessionObjMock, tc.resourcesMock)
-		resources, err := opap.processRule(context.Background(), &tc.rule, nil, "")
+		resources, err := opap.processRule(context.Background(), &tc.rule, nil, evaluationScope{}, "")
 		assert.NoError(t, err)
 		assert.Equal(t, tc.expectedResult, resources, t.Name)
 	}
@@ -644,6 +715,7 @@ func TestMakeRegoDeps_InputIsolation(t *testing.T) {
 	_, runtimeExists := opap.regoDependenciesData.PostureControlInputs["runtime"]
 
 	assert.False(t, runtimeExists)
+	assert.Equal(t, "aws", deps.DataControlInputs["cloudProvider"])
 }
 
 func TestRunOPAOnSingleRuleDispatch(t *testing.T) {
@@ -931,5 +1003,86 @@ func TestRunCELOnK8s(t *testing.T) {
 		assert.Empty(t, responses)
 		assert.Empty(t, outcome.skipped)
 		assert.Empty(t, outcome.excluded)
+	})
+}
+
+// TestCELNamespaceObjectFor covers the resolver behind the evaluator's
+// namespaceObject binding: the scanned resource's Namespace object out of the
+// scan's collected resources, and nil on every path where the scan cannot
+// know it (cluster-scoped resource, uncollected namespace, no session at
+// all) — the evaluator then binds null, which is the pre-wiring behaviour.
+func TestCELNamespaceObjectFor(t *testing.T) {
+	nsObject := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]any{
+			"name":   "prod",
+			"labels": map[string]any{"pod-security.kubernetes.io/enforce": "restricted"},
+		},
+	}
+	nsMeta := objectsenvelopes.NewObject(nsObject)
+	require.NotNil(t, nsMeta)
+
+	// A namespaced resource whose NAME matches a namespace must not be mistaken
+	// for the Namespace object itself.
+	decoy := objectsenvelopes.NewObject(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "prod", "namespace": "prod"},
+	})
+	require.NotNil(t, decoy)
+
+	// Built through the constructor on purpose: that is where the index is
+	// snapshotted, so this also pins that NewOPAProcessor wires it.
+	opap := NewOPAProcessor(&cautils.OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{
+			nsMeta.GetID(): nsMeta,
+			decoy.GetID():  decoy,
+		},
+	}, &resources.RegoDependenciesData{}, "", "", "", false, nil)
+
+	podIn := func(namespace string) map[string]any {
+		metadata := map[string]any{"name": "p"}
+		if namespace != "" {
+			metadata["namespace"] = namespace
+		}
+		return map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": metadata, "spec": map[string]any{}}
+	}
+
+	t.Run("resolves the collected Namespace object", func(t *testing.T) {
+		got := opap.celNamespaceObjectFor(podIn("prod"))
+		require.NotNil(t, got)
+		assert.Equal(t, "Namespace", got["kind"])
+		labels := got["metadata"].(map[string]any)["labels"].(map[string]any)
+		assert.Equal(t, "restricted", labels["pod-security.kubernetes.io/enforce"],
+			"the binding must carry the real Namespace object, labels included")
+	})
+
+	t.Run("uncollected namespace resolves to nil", func(t *testing.T) {
+		assert.Nil(t, opap.celNamespaceObjectFor(podIn("staging")))
+	})
+
+	t.Run("cluster-scoped resource resolves to nil", func(t *testing.T) {
+		assert.Nil(t, opap.celNamespaceObjectFor(podIn("")))
+	})
+
+	t.Run("enveloped resource resolves through object metadata accessors", func(t *testing.T) {
+		enveloped := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+			"apiVersion":     "v1",
+			"kind":           "Pod",
+			"name":           "p",
+			"namespace":      "prod",
+			"relatedObjects": []map[string]any{},
+		})
+		got := opap.celNamespaceObjectFor(enveloped.GetObject())
+		require.NotNil(t, got)
+		assert.Equal(t, "prod", got["metadata"].(map[string]any)["name"])
+	})
+
+	t.Run("no session resolves to nil without panicking", func(t *testing.T) {
+		// Both the zero value and a constructor call with no session: the second
+		// is the one a caller can actually reach.
+		assert.Nil(t, (&OPAProcessor{}).celNamespaceObjectFor(podIn("prod")))
+		assert.Nil(t, NewOPAProcessor(nil, nil, "", "", "", false, nil).celNamespaceObjectFor(podIn("prod")))
 	})
 }

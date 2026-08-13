@@ -2,10 +2,14 @@ package cautils
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"testing"
 
 	v1 "github.com/kubescape/backend/pkg/client/v1"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -91,85 +95,6 @@ func TestReadConfig(t *testing.T) {
 	assert.Equal(t, com.CloudAPIURL, co.CloudAPIURL)
 }
 
-func TestLoadConfigFromData(t *testing.T) {
-
-	// use case: all data is in base config
-	{
-		c := mockClusterConfig()
-		co := mockConfigObj()
-
-		configMap := &corev1.ConfigMap{}
-
-		c.updateConfigData(configMap)
-
-		c.configObj = &ConfigObj{}
-
-		loadConfigFromData(c.configObj, configMap.Data)
-
-		assert.Equal(t, c.GetAccountID(), co.AccountID)
-		assert.Equal(t, c.GetContextName(), co.ClusterName)
-		assert.Equal(t, c.GetCloudReportURL(), co.CloudReportURL)
-		assert.Equal(t, c.GetCloudAPIURL(), co.CloudAPIURL)
-	}
-
-	// use case: all data is in config.json
-	{
-		c := mockClusterConfig()
-
-		co := mockConfigObj()
-		configMap := &corev1.ConfigMap{
-			Data: make(map[string]string),
-		}
-
-		configMap.Data["config.json"] = string(c.GetConfigObj().Config())
-		c.configObj = &ConfigObj{}
-
-		loadConfigFromData(c.configObj, configMap.Data)
-
-		assert.Equal(t, c.GetAccountID(), co.AccountID)
-		assert.Equal(t, c.GetCloudReportURL(), co.CloudReportURL)
-		assert.Equal(t, c.GetCloudAPIURL(), co.CloudAPIURL)
-	}
-
-	// use case: some data is in config.json
-	{
-		c := mockClusterConfig()
-		configMap := &corev1.ConfigMap{
-			Data: make(map[string]string),
-		}
-
-		// add to map
-		configMap.Data["cloudReportURL"] = c.configObj.CloudReportURL
-
-		// delete the content
-		c.configObj.CloudReportURL = ""
-
-		configMap.Data["config.json"] = string(c.GetConfigObj().Config())
-		loadConfigFromData(c.configObj, configMap.Data)
-
-		assert.NotEmpty(t, c.GetAccountID())
-		assert.NotEmpty(t, c.GetCloudReportURL())
-	}
-
-	// use case: some data is in config.json
-	{
-		c := mockClusterConfig()
-		configMap := &corev1.ConfigMap{
-			Data: make(map[string]string),
-		}
-
-		c.configObj.AccountID = "tttt"
-
-		// add to map
-		configMap.Data["accountID"] = mockConfigObj().AccountID
-
-		configMap.Data["config.json"] = string(c.GetConfigObj().Config())
-		loadConfigFromData(c.configObj, configMap.Data)
-
-		assert.Equal(t, mockConfigObj().AccountID, c.GetAccountID())
-	}
-
-}
 
 func TestAdoptClusterName(t *testing.T) {
 	tests := []struct {
@@ -205,7 +130,7 @@ func TestAdoptClusterName(t *testing.T) {
 func TestUpdateCloudURLs(t *testing.T) {
 	co := mockConfigObj()
 	mockCloudAPIURL := "1-2-3-4.com"
-	os.Setenv("KS_CLOUD_API_URL", mockCloudAPIURL)
+	t.Setenv("KS_CLOUD_API_URL", mockCloudAPIURL)
 
 	assert.NotEqual(t, co.CloudAPIURL, mockCloudAPIURL)
 	updateCloudURLs(co)
@@ -288,100 +213,96 @@ func TestGetConfigMapNamespace(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.env != "" {
-				_ = os.Setenv("KS_DEFAULT_CONFIGMAP_NAMESPACE", tt.env)
-			}
+			// Set unconditionally, including the empty "no env" case, so the
+			// subtest does not inherit a value from the caller's environment.
+			t.Setenv(defaultConfigMapNamespaceEnvVar, tt.env)
 			assert.Equalf(t, tt.want, GetConfigMapNamespace(), "GetConfigMapNamespace()")
 		})
 	}
 }
 
-const (
-	anyString       string = "anyString"
-	shouldNotUpdate string = "shouldNotUpdate"
-	shouldUpdate    string = "shouldUpdate"
-)
-
-func checkIsUpdateCorrectly(t *testing.T, beforeField string, afterField string) {
-	switch beforeField {
-	case anyString:
-		assert.Equal(t, anyString, afterField)
-	case "":
-		assert.Equal(t, shouldUpdate, afterField)
-	}
-}
-
 func TestUpdateEmptyFields(t *testing.T) {
-
 	tests := []struct {
-		inCo  *ConfigObj
-		outCo *ConfigObj
+		name     string
+		current  ConfigObj
+		fallback *ConfigObj
+		want     ConfigObj
 	}{
 		{
-			outCo: &ConfigObj{
-				AccountID:      "",
-				ClusterName:    "",
-				CloudReportURL: "",
-				CloudAPIURL:    "",
+			name: "all empty fields are populated",
+			fallback: &ConfigObj{
+				AccountID:      "fallback-account",
+				ClusterName:    "fallback-cluster",
+				CloudReportURL: "https://fallback-report.example.com",
+				CloudAPIURL:    "https://fallback-api.example.com",
 			},
-			inCo: &ConfigObj{
-				AccountID:      shouldUpdate,
-				ClusterName:    shouldUpdate,
-				CloudReportURL: shouldUpdate,
-				CloudAPIURL:    shouldUpdate,
-			},
-		},
-		{
-			outCo: &ConfigObj{
-				AccountID:      anyString,
-				ClusterName:    "",
-				CloudReportURL: "",
-				CloudAPIURL:    "",
-			},
-			inCo: &ConfigObj{
-				AccountID:      shouldNotUpdate,
-				ClusterName:    shouldUpdate,
-				CloudReportURL: shouldUpdate,
-				CloudAPIURL:    shouldUpdate,
+			want: ConfigObj{
+				AccountID:      "fallback-account",
+				ClusterName:    "fallback-cluster",
+				CloudReportURL: "https://fallback-report.example.com",
+				CloudAPIURL:    "https://fallback-api.example.com",
 			},
 		},
 		{
-			outCo: &ConfigObj{
-				AccountID:      "",
-				ClusterName:    anyString,
-				CloudReportURL: anyString,
-				CloudAPIURL:    anyString,
+			name: "existing values keep precedence",
+			current: ConfigObj{
+				AccountID:      "cached-account",
+				ClusterName:    "cached-cluster",
+				CloudReportURL: "https://cached-report.example.com",
+				CloudAPIURL:    "https://cached-api.example.com",
 			},
-			inCo: &ConfigObj{
-				AccountID:      shouldUpdate,
-				ClusterName:    shouldNotUpdate,
-				CloudReportURL: shouldNotUpdate,
-				CloudAPIURL:    shouldNotUpdate,
+			fallback: &ConfigObj{
+				AccountID:      "fallback-account",
+				ClusterName:    "fallback-cluster",
+				CloudReportURL: "https://fallback-report.example.com",
+				CloudAPIURL:    "https://fallback-api.example.com",
+			},
+			want: ConfigObj{
+				AccountID:      "cached-account",
+				ClusterName:    "cached-cluster",
+				CloudReportURL: "https://cached-report.example.com",
+				CloudAPIURL:    "https://cached-api.example.com",
 			},
 		},
 		{
-			outCo: &ConfigObj{
-				AccountID:      anyString,
-				ClusterName:    anyString,
-				CloudReportURL: "",
-				CloudAPIURL:    anyString,
+			name: "only empty fields are populated",
+			current: ConfigObj{
+				AccountID:   "cached-account",
+				CloudAPIURL: "https://cached-api.example.com",
 			},
-			inCo: &ConfigObj{
-				AccountID:      shouldNotUpdate,
-				ClusterName:    shouldNotUpdate,
-				CloudReportURL: shouldUpdate,
-				CloudAPIURL:    shouldNotUpdate,
+			fallback: &ConfigObj{
+				AccountID:      "fallback-account",
+				ClusterName:    "fallback-cluster",
+				CloudReportURL: "https://fallback-report.example.com",
+				CloudAPIURL:    "https://fallback-api.example.com",
 			},
+			want: ConfigObj{
+				AccountID:      "cached-account",
+				ClusterName:    "fallback-cluster",
+				CloudReportURL: "https://fallback-report.example.com",
+				CloudAPIURL:    "https://cached-api.example.com",
+			},
+		},
+		{
+			name:     "empty fallback leaves current values unchanged",
+			current:  ConfigObj{AccountID: "cached-account", ClusterName: "cached-cluster"},
+			fallback: &ConfigObj{},
+			want:     ConfigObj{AccountID: "cached-account", ClusterName: "cached-cluster"},
+		},
+		{
+			name:     "nil fallback leaves current values unchanged",
+			current:  ConfigObj{AccountID: "cached-account", CloudAPIURL: "https://cached-api.example.com"},
+			fallback: nil,
+			want:     ConfigObj{AccountID: "cached-account", CloudAPIURL: "https://cached-api.example.com"},
 		},
 	}
 
-	for i := range tests {
-		beforeChangesOutCO := tests[i].outCo
-		tests[i].outCo.updateEmptyFields(tests[i].inCo)
-		checkIsUpdateCorrectly(t, beforeChangesOutCO.AccountID, tests[i].outCo.AccountID)
-		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudAPIURL, tests[i].outCo.CloudAPIURL)
-		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudReportURL, tests[i].outCo.CloudReportURL)
-		checkIsUpdateCorrectly(t, beforeChangesOutCO.ClusterName, tests[i].outCo.ClusterName)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			current := test.current
+			require.NoError(t, current.updateEmptyFields(test.fallback))
+			assert.Equal(t, test.want, current)
+		})
 	}
 }
 
@@ -436,6 +357,74 @@ func TestUpdateConfigFile_RoundTrip(t *testing.T) {
 	readBack := &ConfigObj{}
 	require.NoError(t, json.Unmarshal(dat, readBack))
 	assert.Equal(t, configObj.AccountID, readBack.AccountID)
+}
+
+func TestUpdateConfigFile_ClusterNameStripped(t *testing.T) {
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	defer func() { getter.DefaultLocalStore = originalStore }()
+
+	configObj := mockConfigObj()
+	require.NoError(t, updateConfigFile(configObj))
+
+	dat, err := os.ReadFile(ConfigFileFullPath())
+	require.NoError(t, err)
+	require.NotEmpty(t, dat, "config file must not be empty after write")
+
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(dat, &raw))
+	_, present := raw["clusterName"]
+	assert.False(t, present, "clusterName key must be absent from the persisted JSON, not merely empty")
+	assert.Contains(t, raw, "accountID", "accountID must be present in the persisted JSON")
+	assert.Equal(t, "ddd", configObj.ClusterName, "ClusterName must be restored on the in-memory object after write")
+}
+
+func TestUpdateConfigFile_PropagatesMarshalError(t *testing.T) {
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	defer func() { getter.DefaultLocalStore = originalStore }()
+
+	origMarshal := configMarshal
+	sentinel := errors.New("injected marshal failure")
+	configMarshal = func(any) ([]byte, error) { return nil, sentinel }
+	defer func() { configMarshal = origMarshal }()
+
+	err := updateConfigFile(mockConfigObj())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sentinel)
+}
+
+// TestNewLocalConfig_LogsOnMalformedCachedConfigFile guards against a
+// regression where a malformed cached config file (~/.kubescape/config.json)
+// caused loadConfigFromFile to return an error that NewLocalConfig discarded
+// completely - config loading silently fell back to defaults with no trace
+// anywhere that the cache was broken, which is confusing to debug ("why
+// isn't my configured account being picked up?").
+func TestNewLocalConfig_LogsOnMalformedCachedConfigFile(t *testing.T) {
+	originalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = t.TempDir()
+	defer func() { getter.DefaultLocalStore = originalStore }()
+
+	require.NoError(t, os.MkdirAll(getter.DefaultLocalStore, 0o700))
+	require.NoError(t, os.WriteFile(ConfigFileFullPath(), []byte("not valid json"), 0o600))
+
+	originalLevel := logger.L().GetLevel()
+	require.NoError(t, logger.L().SetLevel(helpers.DebugLevel.String()))
+	defer func() { _ = logger.L().SetLevel(originalLevel) }()
+
+	originalWriter := logger.L().GetWriter()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	logger.L().SetWriter(w)
+
+	NewLocalConfig("", "", "", "")
+
+	require.NoError(t, w.Close())
+	logger.L().SetWriter(originalWriter)
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+
+	assert.Contains(t, string(out), "failed to load cached config file")
 }
 
 func TestUpdateConfigFile_ToleratesDirectoryChmodFailure(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -19,40 +20,103 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
+	"golang.org/x/sync/semaphore"
+	"golang.org/x/sync/singleflight"
 )
 
-type KubescapeMcpserver struct {
-	s             *server.MCPServer
-	ksClient      spdxv1beta1.SpdxV1beta1Interface
-	ksClientOnce  sync.Once
-	ksClientErr   error
-	k8sClient     *k8sinterface.KubernetesApi
-	k8sClientOnce sync.Once
-	policyGetter  *getter.DownloadReleasedPolicy
+// newKsClient creates the Kubescape storage client. It is a package-level
+// var so tests can override it to simulate initialization failures without a
+// real connection attempt, while production always goes through this same
+// value instead of a per-call fallback.
+var newKsClient = func() (spdxv1beta1.SpdxV1beta1Interface, error) {
+	return CreateKsObjectConnection("default", 10*time.Second)
 }
 
-func (ksServer *KubescapeMcpserver) getKsClient() (spdxv1beta1.SpdxV1beta1Interface, error) {
-	ksServer.ksClientOnce.Do(func() {
-		if ksServer.ksClient == nil {
-			ksServer.ksClient, ksServer.ksClientErr = CreateKsObjectConnection("default", 10*time.Second)
-		}
-	})
-	if ksServer.ksClientErr != nil {
-		return nil, ksServer.ksClientErr
+var loadK8sConfig = k8sinterface.LoadK8sConfig
+
+var setConnectedToCluster = k8sinterface.SetConnectedToCluster
+
+var newK8sClient = k8sinterface.NewKubernetesApi
+
+type KubescapeMcpserver struct {
+	s          *server.MCPServer
+	ksClientMu sync.Mutex
+	ksClient   spdxv1beta1.SpdxV1beta1Interface
+	// ksClientInit overrides newKsClient for this server instance; used by
+	// tests. Nil means use newKsClient.
+	ksClientInit func() (spdxv1beta1.SpdxV1beta1Interface, error)
+	k8sClientMu  sync.Mutex
+	k8sClient    *k8sinterface.KubernetesApi
+	policyGetter *getter.DownloadReleasedPolicy
+	scanSemMu    sync.Mutex
+	scanSem      *semaphore.Weighted
+	scanGroup    singleflight.Group
+}
+
+func (ksServer *KubescapeMcpserver) getScanSem() *semaphore.Weighted {
+	ksServer.scanSemMu.Lock()
+	defer ksServer.scanSemMu.Unlock()
+	if ksServer.scanSem == nil {
+		ksServer.scanSem = semaphore.NewWeighted(2)
 	}
-	if ksServer.ksClient == nil {
+	return ksServer.scanSem
+}
+
+// getKsClient lazily initializes the Kubescape storage client. A transient
+// initialization failure is not cached, so the next call retries instead of
+// returning the same error forever.
+func (ksServer *KubescapeMcpserver) getKsClient() (spdxv1beta1.SpdxV1beta1Interface, error) {
+	ksServer.ksClientMu.Lock()
+	defer ksServer.ksClientMu.Unlock()
+	if ksServer.ksClient != nil {
+		return ksServer.ksClient, nil
+	}
+	init := ksServer.ksClientInit
+	if init == nil {
+		init = newKsClient
+	}
+	client, err := init()
+	if err != nil {
+		return nil, err
+	}
+	if client == nil {
+		// Belt-and-braces: CreateKsObjectConnection never returns (nil, nil)
+		// today, but this guards against a future/injected implementation
+		// doing so. It only catches an untyped nil interface value; a typed
+		// nil pointer wrapped in the interface would still slip through and
+		// be cached, since the error contract is what init() implementations
+		// are expected to honor.
 		return nil, fmt.Errorf("kubernetes client initialization returned nil")
 	}
+	ksServer.ksClient = client
 	return ksServer.ksClient, nil
 }
 
-func (ksServer *KubescapeMcpserver) getK8sClient() *k8sinterface.KubernetesApi {
-	ksServer.k8sClientOnce.Do(func() {
-		if ksServer.k8sClient == nil {
-			ksServer.k8sClient = k8sinterface.NewKubernetesApi()
-		}
-	})
-	return ksServer.k8sClient
+// getK8sClient lazily initializes the Kubernetes API client. It probes with
+// loadK8sConfig (genuinely retryable, unlike k8sinterface.IsConnectedToCluster,
+// which latches to false forever after its first failure) and only calls
+// k8sinterface.NewKubernetesApi (which terminates the process via
+// logger.L().Fatal on most internal failures) once a kubeconfig is confirmed
+// loadable, so a missing/invalid KUBECONFIG returns an error instead of
+// killing the server. On success it also clears any stale "not connected"
+// latch left over from an earlier transient failure, since k8sinterface never
+// resets that global on its own. Once a client is built it is cached; there
+// is no retry for failures inside NewKubernetesApi itself, since those are
+// fatal by construction and cannot be recovered from in-process.
+func (ksServer *KubescapeMcpserver) getK8sClient() (*k8sinterface.KubernetesApi, error) {
+	ksServer.k8sClientMu.Lock()
+	defer ksServer.k8sClientMu.Unlock()
+	if ksServer.k8sClient != nil {
+		return ksServer.k8sClient, nil
+	}
+	if err := loadK8sConfig(); err != nil {
+		setConnectedToCluster(false)
+		return nil, fmt.Errorf("no reachable kubernetes cluster: ensure KUBECONFIG is set or the server is running inside a cluster: %w", err)
+	}
+	setConnectedToCluster(true)
+	ksServer.k8sClient = newK8sClient()
+	return ksServer.k8sClient, nil
 }
 
 // toolHandler binds a registered tool to its declared name and normalizes an
@@ -68,7 +132,11 @@ func (ksServer *KubescapeMcpserver) toolHandler(name string) server.ToolHandlerF
 		if args == nil {
 			args = map[string]any{}
 		}
-		return ksServer.CallTool(ctx, name, args)
+		res, err := ksServer.CallTool(ctx, name, args)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return res, nil
 	}
 }
 
@@ -192,6 +260,28 @@ func createRuntimeToolsAndResources(ksServer *KubescapeMcpserver) {
 	)
 
 	ksServer.s.AddTool(getContainerProfileTool, ksServer.toolHandler(getContainerProfileTool.Name))
+
+	getConfigurationDriftTool := mcp.NewTool(
+		"get_configuration_drift",
+		mcp.WithDescription("Get configuration drift patches (e.g. readOnlyRootFilesystem, drop capabilities) by comparing a workload's runtime ContainerProfile against its static manifest. Useful for suggesting security posture hardening."),
+		mcp.WithString("namespace",
+			mcp.Description("Namespace of the profile/workload (optional, defaults to 'default')"),
+		),
+		mcp.WithString("profile_name",
+			mcp.Required(),
+			mcp.Description("Name of the container profile to compute drift for."),
+		),
+		mcp.WithString("workload_name",
+			mcp.Required(),
+			mcp.Description("Name of the workload to compare against (e.g., my-deployment)."),
+		),
+		mcp.WithString("workload_kind",
+			mcp.Required(),
+			mcp.Description("Kind of the workload (e.g., Pod, Deployment, DaemonSet, StatefulSet)."),
+		),
+	)
+
+	ksServer.s.AddTool(getConfigurationDriftTool, ksServer.toolHandler(getConfigurationDriftTool.Name))
 
 	containerProfileTemplate := mcp.NewResourceTemplate(
 		"kubescape://container-profiles/{namespace}/{profile_name}",
@@ -377,11 +467,22 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			}
 			namespace = nsStr
 		}
+		if namespace == "*" {
+			namespace = ""
+		}
 
-		responseBytes, err := ksServer.RunRBACScan(ctx, namespace)
+		key := fmt.Sprintf("rbac_scan:%s", namespace)
+		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
+			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
+				return nil, err
+			}
+			defer ksServer.getScanSem().Release(1)
+			return ksServer.RunRBACScan(ctx, namespace)
+		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run RBAC scan: %v", err)), nil
 		}
+		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "scan_local_iac":
 		path := ""
@@ -404,10 +505,18 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			framework = strings.TrimSpace(fwStr)
 		}
 
-		responseBytes, err := ksServer.runIaCScan(ctx, path, framework)
+		key := fmt.Sprintf("scan_local_iac:%s:%s", path, framework)
+		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
+			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
+				return nil, err
+			}
+			defer ksServer.getScanSem().Release(1)
+			return ksServer.runIaCScan(ctx, path, framework)
+		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run IaC scan: %v", err)), nil
 		}
+		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "run_network_security_scan":
 		namespace := ""
@@ -418,11 +527,22 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			}
 			namespace = nsStr
 		}
+		if namespace == "*" {
+			namespace = ""
+		}
 
-		responseBytes, err := ksServer.RunNetworkScan(ctx, namespace)
+		key := fmt.Sprintf("network_scan:%s", namespace)
+		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
+			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
+				return nil, err
+			}
+			defer ksServer.getScanSem().Release(1)
+			return ksServer.RunNetworkScan(ctx, namespace)
+		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run Network scan: %v", err)), nil
 		}
+		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "list_vulnerability_manifests":
 		namespace := metav1.NamespaceAll
@@ -776,6 +896,88 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 				},
 			},
 		}, nil
+	case "get_configuration_drift":
+		namespace, ok := arguments["namespace"]
+		if !ok {
+			namespace = "default"
+		}
+		namespaceStr, ok := namespace.(string)
+		if !ok {
+			return mcp.NewToolResultError("namespace must be a string"), nil
+		}
+		profileName, ok := arguments["profile_name"]
+		if !ok {
+			return mcp.NewToolResultError("profile_name is required"), nil
+		}
+		profileNameStr, ok := profileName.(string)
+		if !ok {
+			return mcp.NewToolResultError("profile_name must be a string"), nil
+		}
+		workloadName, ok := arguments["workload_name"]
+		if !ok {
+			return mcp.NewToolResultError("workload_name is required"), nil
+		}
+		workloadNameStr, ok := workloadName.(string)
+		if !ok {
+			return mcp.NewToolResultError("workload_name must be a string"), nil
+		}
+		workloadKind, ok := arguments["workload_kind"]
+		if !ok {
+			return mcp.NewToolResultError("workload_kind is required"), nil
+		}
+		workloadKindStr, ok := workloadKind.(string)
+		if !ok {
+			return mcp.NewToolResultError("workload_kind must be a string"), nil
+		}
+
+		ksClient, ksErr := ksServer.getKsClient()
+		if ksErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to connect to storage client: %v", ksErr)), nil
+		}
+		profile, err := ksClient.ContainerProfiles(namespaceStr).Get(ctx, profileNameStr, metav1.GetOptions{})
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to get container profile: %v", err)), nil
+		}
+
+		var rawManifest []byte
+		var workloadObj any
+		k8sClient, k8sErr := ksServer.getK8sClient()
+		if k8sErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to connect to Kubernetes cluster: %v", k8sErr)), nil
+		}
+		switch strings.ToLower(workloadKindStr) {
+		case "pod":
+			workloadObj, err = k8sClient.KubernetesClient.CoreV1().Pods(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
+		case "deployment":
+			workloadObj, err = k8sClient.KubernetesClient.AppsV1().Deployments(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
+		case "daemonset":
+			workloadObj, err = k8sClient.KubernetesClient.AppsV1().DaemonSets(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
+		case "statefulset":
+			workloadObj, err = k8sClient.KubernetesClient.AppsV1().StatefulSets(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
+		default:
+			return mcp.NewToolResultError(fmt.Sprintf("unsupported workload kind: %s", workloadKindStr)), nil
+		}
+
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to get workload manifest: %v", err)), nil
+		}
+		rawManifest, _ = json.Marshal(workloadObj)
+
+		containerName := ""
+		if profile.GetLabels() != nil {
+			containerName = profile.GetLabels()["kubescape.io/workload-container-name"]
+		}
+		fixes := fixhandler.DetectProfileDrift(rawManifest, profile, workloadKindStr, containerName, 0)
+		fixesJson, _ := json.MarshalIndent(fixes, "", "  ")
+
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: string(fixesJson),
+				},
+			},
+		}, nil
 	case "run_framework_security_scan":
 		namespace := ""
 		if ns, ok := arguments["namespace"]; ok {
@@ -797,11 +999,22 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if frameworkNameStr == "" {
 			return mcp.NewToolResultError("framework_name argument must not be empty"), nil
 		}
+		if namespace == "*" {
+			namespace = ""
+		}
 
-		responseBytes, err := ksServer.RunFrameworkScan(ctx, namespace, frameworkNameStr)
+		key := fmt.Sprintf("framework_scan:%s:%s", namespace, frameworkNameStr)
+		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
+			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
+				return nil, err
+			}
+			defer ksServer.getScanSem().Release(1)
+			return ksServer.RunFrameworkScan(ctx, namespace, frameworkNameStr)
+		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run framework scan: %v", err)), nil
 		}
+		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
@@ -819,23 +1032,17 @@ func mcpServerEntrypoint() error {
 		server.WithRecovery(),
 	)
 
-	// Build the k8s API client once at startup. IsConnectedToCluster() is checked
-	// inside RunRBACScan before this is used, so it is safe to store here.
-	var k8sApi *k8sinterface.KubernetesApi
-	if k8sinterface.IsConnectedToCluster() {
-		k8sApi = k8sinterface.NewKubernetesApi()
-	}
-
 	ksServer := &KubescapeMcpserver{
 		s:            s,
-		k8sClient:    k8sApi,
 		policyGetter: getter.NewDownloadReleasedPolicy(),
 	}
 
 	// Initialize the policy getter to load the local ~/.kubescape cache.
 	// Without this, the getter will always hit the GitHub API directly for every scan,
 	// defeating offline scanning and causing rate limits.
-	_, _ = ksServer.policyGetter.SetRegoObjectsWithFallback()
+	if _, err := ksServer.policyGetter.SetRegoObjectsWithFallback(); err != nil {
+		logger.L().Warning("Failed to initialize policy store at startup (falling back to direct download later)", helpers.Error(err))
+	}
 
 	// Creating Kubescape tools and resources
 

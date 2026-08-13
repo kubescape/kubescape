@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/shared"
@@ -118,34 +119,39 @@ func (jp *JunitPrinter) Score(score float32) {
 		score = 0
 	}
 
-	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
+	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.ComplianceScoreToInt(score))
 }
 
 func (jp *JunitPrinter) PrintNextSteps() {
 
 }
 
-func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
-	if opaSessionObj == nil {
-		logger.L().Ctx(ctx).Error("failed to print results, missing data")
-		return
+func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	var junitResult *JUnitTestSuites
+
+	if opaSessionObj != nil {
+		junitResult = testsSuites(opaSessionObj)
+	} else if len(imageScanData) > 0 {
+		junitResult = imageTestsSuites(imageScanData)
+	} else {
+		return fmt.Errorf("failed to print results, missing data")
 	}
 
-	junitResult := testsSuites(opaSessionObj)
 	postureReportStr, err := xml.MarshalIndent(junitResult, "", "  ")
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("failed to Marshal xml result object", helpers.Error(err))
+		return fmt.Errorf("failed to marshal xml result object: %w", err)
 	}
 
 	if _, err := jp.writer.Write([]byte(xml.Header)); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to write xml header: %w", err)
 	}
 	if _, err := jp.writer.Write(postureReportStr); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to write results: %w", err)
 	}
 	printer.LogOutputFile(jp.writer.Name())
+	return nil
 }
 
 // iso8601Timestamp returns the report generation time in ISO 8601 format,
@@ -214,6 +220,57 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 
 	return testSuites
 }
+
+// imageTestsSuites builds a JUnitTestSuites document for an image scan, one testsuite
+// per scanned image and one failed testcase per CVE found in that image (#2782).
+func imageTestsSuites(imageScanData []cautils.ImageScanData) *JUnitTestSuites {
+	timestamp := iso8601Timestamp(time.Now())
+
+	suites := make([]JUnitTestSuite, 0, len(imageScanData))
+	for i := range imageScanData {
+		cves := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
+		suites = append(suites, JUnitTestSuite{
+			ID:        i,
+			Name:      imageScanData[i].Image,
+			Tests:     len(cves),
+			Failures:  len(cves),
+			Timestamp: timestamp,
+			TestCases: imageTestCases(cves),
+		})
+	}
+
+	tests, failures, errs := aggregateSuiteCounts(suites)
+	return &JUnitTestSuites{
+		Suites:   suites,
+		Tests:    tests,
+		Failures: failures,
+		Errors:   errs,
+		Name:     "Kubescape Image Scanning",
+	}
+}
+
+// imageTestCases converts a set of CVEs into failed JUnit test cases, one per CVE.
+func imageTestCases(cves []imageprinter.CVE) []JUnitTestCase {
+	testCases := make([]JUnitTestCase, 0, len(cves))
+	for _, cve := range cves {
+		fixMsg := "no fix available"
+		if len(cve.FixVersions) > 0 {
+			fixMsg = fmt.Sprintf("fixed in: %s", strings.Join(cve.FixVersions, ", "))
+		}
+
+		testCases = append(testCases, JUnitTestCase{
+			Classname: cve.Image,
+			Name:      fmt.Sprintf("%s (%s)", cve.ID, cve.Package),
+			Failure: &JUnitFailure{
+				Type:    "Vulnerability",
+				Message: fmt.Sprintf("%s severity vulnerability found in package %s", cve.Severity, cve.Package),
+				Contents: fmt.Sprintf("CVE: %s\nPackage: %s\nVersion: %s\nSeverity: %s\n%s",
+					cve.ID, cve.Package, cve.Version, cve.Severity, fixMsg),
+			},
+		})
+	}
+	return testCases
+}
 func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControlsSummaries, classname string) []JUnitTestCase {
 	var testCases []JUnitTestCase
 
@@ -240,7 +297,13 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 					continue
 				}
 
-				resource := results.AllResources[rId]
+				resource, ok := results.AllResources[rId]
+				if !ok {
+					logger.L().Debug("resource missing from AllResources, reporting by ID",
+						helpers.String("resourceID", rId))
+					resources[fmt.Sprintf("resourceID: %s", rId)] = nil
+					continue
+				}
 				sourcePath := ""
 				if ResourceSourcePath, ok := results.ResourceSource[rId]; ok {
 					sourcePath = ResourceSourcePath.RelativePath
@@ -304,7 +367,7 @@ func properties(complianceScore float32) []JUnitProperty {
 	return []JUnitProperty{
 		{
 			Name:  "complianceScore",
-			Value: fmt.Sprintf("%.2f", complianceScore),
+			Value: cautils.ComplianceScoreToString(complianceScore, 2),
 		},
 	}
 }

@@ -2,11 +2,14 @@ package cautils
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -191,6 +194,151 @@ func TestExcludeHelmTemplateFiles_NoCharts(t *testing.T) {
 	assert.Equal(t, files, excludeHelmTemplateFiles(files, nil))
 }
 
+// TestIsUnderAnyDir asserts that containment is decided by canonical relative
+// paths, not by string prefix equality: siblings that merely share a directory
+// prefix must not be reported as contained, and a directory named "." must stay
+// confined to its location (#2889).
+func TestIsUnderAnyDir(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		dirs      []string
+		contained bool
+	}{
+		{
+			name:      "file directly inside directory",
+			path:      "/repo/app/deployment.yaml",
+			dirs:      []string{"/repo/app"},
+			contained: true,
+		},
+		{
+			name:      "file nested below directory",
+			path:      "/repo/app/config/base/pod.yaml",
+			dirs:      []string{"/repo/app"},
+			contained: true,
+		},
+		{
+			name:      "sibling sharing a prefix is outside",
+			path:      "/repo/app-docs/deployment.yaml",
+			dirs:      []string{"/repo/app"},
+			contained: false,
+		},
+		{
+			name:      "unrelated path is outside",
+			path:      "/repo/other/pod.yaml",
+			dirs:      []string{"/repo/app"},
+			contained: false,
+		},
+		{
+			name:      "every path is under the root directory",
+			path:      "/repo/app/deployment.yaml",
+			dirs:      []string{string(filepath.Separator)},
+			contained: true,
+		},
+		{
+			name:      "parent directory does not claim a sibling",
+			path:      "/repo/app/deployment.yaml",
+			dirs:      []string{"/repo"},
+			contained: true,
+		},
+		{
+			name:      "relative path is resolved against the working directory",
+			path:      "app/deployment.yaml",
+			dirs:      []string{"app"},
+			contained: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.contained, IsUnderAnyDir(tt.path, tt.dirs))
+		})
+	}
+}
+
+// TestDirSetContains asserts that the ancestor walk decides containment exactly
+// as the per-directory relative-path comparison it replaces, including for a
+// sibling sharing a name prefix and for a directory absent from the set.
+func TestDirSetContains(t *testing.T) {
+	set := newDirSet([]string{"/repo/app", "/repo/charts/web/templates"})
+
+	tests := []struct {
+		name      string
+		path      string
+		contained bool
+	}{
+		{name: "the directory itself", path: "/repo/app", contained: true},
+		{name: "file directly inside", path: "/repo/app/deployment.yaml", contained: true},
+		{name: "file nested below", path: "/repo/app/config/base/pod.yaml", contained: true},
+		{name: "second member of the set", path: "/repo/charts/web/templates/svc.yaml", contained: true},
+		{name: "sibling sharing a prefix", path: "/repo/app-docs/deployment.yaml", contained: false},
+		{name: "parent of a member", path: "/repo/charts/web/Chart.yaml", contained: false},
+		{name: "unrelated path", path: "/other/pod.yaml", contained: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.contained, set.contains(tt.path))
+		})
+	}
+
+	assert.False(t, newDirSet(nil).contains("/repo/app/deployment.yaml"), "an empty set contains nothing")
+	assert.True(t, newDirSet([]string{string(filepath.Separator)}).contains("/repo/app/deployment.yaml"),
+		"every absolute path is under the filesystem root")
+}
+
+// TestDirSetContains_UncleanDirs asserts that a member that is not lexically
+// clean still claims the paths below it, matching the filepath.Rel comparison
+// this lookup replaced, which cleaned its arguments itself.
+func TestDirSetContains_UncleanDirs(t *testing.T) {
+	for _, dir := range []string{"/repo/app/", "/repo/./app", "/repo//app", "/repo/other/../app"} {
+		t.Run(dir, func(t *testing.T) {
+			set := newDirSet([]string{dir})
+			assert.True(t, set.contains("/repo/app/deployment.yaml"), "an unclean member must still claim files below it")
+			assert.False(t, set.contains("/repo/app-docs/deployment.yaml"), "a prefix sibling stays outside")
+		})
+	}
+}
+
+// BenchmarkExcludeHelmTemplateFiles covers the repository-scan shape the lookup
+// is built for: many files checked against many rendered chart directories.
+func BenchmarkExcludeHelmTemplateFiles(b *testing.B) {
+	root := b.TempDir()
+
+	charts := make([]string, 0, 200)
+	for i := range 200 {
+		charts = append(charts, filepath.Join(root, "charts", strconv.Itoa(i)))
+	}
+	files := make([]string, 0, 2000)
+	for i := range 2000 {
+		files = append(files, filepath.Join(root, "manifests", strconv.Itoa(i), "deployment.yaml"))
+	}
+
+	b.ResetTimer()
+	for range b.N {
+		excludeHelmTemplateFiles(files, charts)
+	}
+}
+
+// TestIsUnderAnyDir_CanonicalizesSymlinks asserts that a path reached through a
+// symlinked parent is still reported contained when only the physical layout
+// matches one of dirs.
+func TestIsUnderAnyDir_CanonicalizesSymlinks(t *testing.T) {
+	realParent := resolvedTempDir(t)
+	dir := filepath.Join(realParent, "app")
+	require.NoError(t, os.MkdirAll(dir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "deployment.yaml"), []byte("apiVersion: v1\n"), 0o600))
+
+	linkedParent := filepath.Join(resolvedTempDir(t), "linked-parent")
+	if err := os.Symlink(realParent, linkedParent); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	assert.True(t, IsUnderAnyDir(
+		filepath.Join(linkedParent, "app", "deployment.yaml"), []string{dir},
+	), "a symlinked copy of the directory must still be treated as contained")
+}
+
 func TestLoadResourcesFromHelmCharts(t *testing.T) {
 	sourceToWorkloads, sourceToChartName, _, err := LoadResourcesFromHelmCharts(context.Background(), helmChartPath(), HelmValueOptions{})
 	assert.NoError(t, err)
@@ -222,6 +370,131 @@ func TestLoadResourcesFromHelmCharts(t *testing.T) {
 			assert.Failf(t, "missing case for file: %s", filepath.Base(file))
 		}
 	}
+}
+
+func writeHelmChartFixture(t *testing.T, directory, name string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Join(directory, "templates"), 0o750))
+	writeManifestFixture(t, directory, "Chart.yaml", "apiVersion: v2\nname: "+name+"\nversion: 0.1.0\n")
+	writeManifestFixture(t, directory, "values.yaml", "{}\n")
+	writeManifestFixture(t, filepath.Join(directory, "templates"), "configmap.yaml", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: "+name+"\n")
+}
+
+func TestLoadResourcesFromHelmChartsExcludingKustomizeOwnedDirectories(t *testing.T) {
+	root := resolvedTempDir(t)
+	chartHome := filepath.Join(root, "charts")
+	base := filepath.Join(root, "base")
+	ownedChart := filepath.Join(base, "charts", "app")
+	ownedSubchart := filepath.Join(ownedChart, "charts", "dependency")
+	standaloneChart := filepath.Join(chartHome, "standalone")
+
+	writeHelmChartFixture(t, ownedChart, "app")
+	writeHelmChartFixture(t, ownedSubchart, "dependency")
+	writeHelmChartFixture(t, standaloneChart, "standalone")
+	writeManifestFixture(t, root, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - base
+`)
+	writeManifestFixture(t, base, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmCharts:
+  - name: app
+    releaseName: app
+`)
+
+	ownedDirectories, err := KustomizeHelmChartDirectories(context.Background(), root)
+	require.NoError(t, err)
+	require.Equal(t, []string{ownedChart, ownedSubchart}, ownedDirectories)
+
+	standaloneTemplate := filepath.Join(standaloneChart, "templates", "configmap.yaml")
+	remainingFiles := excludeHelmTemplateFiles([]string{
+		filepath.Join(ownedChart, "templates", "configmap.yaml"),
+		filepath.Join(ownedSubchart, "templates", "configmap.yaml"),
+		standaloneTemplate,
+	}, ownedDirectories)
+	require.Equal(t, []string{standaloneTemplate}, remainingFiles)
+
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	relativeRoot, err := filepath.Rel(cwd, root)
+	require.NoError(t, err)
+	for _, tt := range []struct {
+		name     string
+		scanPath string
+	}{
+		{name: "absolute scan path", scanPath: root},
+		{name: "relative scan path", scanPath: relativeRoot},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			workloads, charts, renderedDirectories, err := LoadResourcesFromHelmChartsExcludingDirectories(
+				context.Background(), tt.scanPath, HelmValueOptions{}, ownedDirectories,
+			)
+			require.NoError(t, err)
+			require.Equal(t, []string{standaloneChart}, renderedDirectories)
+			require.Len(t, workloads, 1)
+			require.Len(t, charts, 1)
+			for source, sourceWorkloads := range workloads {
+				require.Len(t, sourceWorkloads, 1)
+				assert.Equal(t, "ConfigMap", sourceWorkloads[0].GetKind())
+				assert.Equal(t, "standalone", sourceWorkloads[0].GetName())
+				assert.Equal(t, standaloneChart, charts[source].Path)
+			}
+		})
+	}
+}
+
+func TestLoadResourcesFromHelmChartsExcludingDirectories_CanonicalizesSymlinkedScanPath(t *testing.T) {
+	realParent := resolvedTempDir(t)
+	root := filepath.Join(realParent, "project")
+	ownedChart := filepath.Join(root, "charts", "app")
+	standaloneChart := filepath.Join(root, "charts", "standalone")
+	writeHelmChartFixture(t, ownedChart, "app")
+	writeHelmChartFixture(t, standaloneChart, "standalone")
+	writeManifestFixture(t, root, "kustomization.yaml", `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+helmCharts:
+  - name: app
+    releaseName: app
+`)
+
+	linkedParent := filepath.Join(resolvedTempDir(t), "linked-parent")
+	if err := os.Symlink(realParent, linkedParent); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	linkedRoot := filepath.Join(linkedParent, "project")
+	ownedDirectories, err := KustomizeHelmChartDirectories(context.Background(), linkedRoot)
+	require.NoError(t, err)
+	require.Equal(t, []string{ownedChart}, ownedDirectories)
+
+	workloads, _, renderedDirectories, err := LoadResourcesFromHelmChartsExcludingDirectories(
+		context.Background(), linkedRoot, HelmValueOptions{}, ownedDirectories,
+	)
+	require.NoError(t, err)
+	require.Equal(t, []string{filepath.Join(linkedRoot, "charts", "standalone")}, renderedDirectories)
+	require.Len(t, workloads, 1)
+	for _, sourceWorkloads := range workloads {
+		require.Len(t, sourceWorkloads, 1)
+		assert.Equal(t, "standalone", sourceWorkloads[0].GetName())
+	}
+}
+
+func TestExcludeHelmTemplateFiles_PreservesLexicalOwnershipOfSymlinkedTemplate(t *testing.T) {
+	root := resolvedTempDir(t)
+	templateDir := filepath.Join(root, "chart", "templates")
+	require.NoError(t, os.MkdirAll(templateDir, 0o750))
+
+	externalTemplate := filepath.Join(resolvedTempDir(t), "configmap.yaml")
+	require.NoError(t, os.WriteFile(externalTemplate, []byte("apiVersion: v1\nkind: ConfigMap\n"), 0o600))
+	linkedTemplate := filepath.Join(templateDir, "configmap.yaml")
+	if err := os.Symlink(externalTemplate, linkedTemplate); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	assert.Empty(t, excludeHelmTemplateFiles(
+		[]string{linkedTemplate},
+		[]string{filepath.Dir(templateDir)},
+	), "Helm renders a template symlink by its lexical path below templates")
 }
 
 func TestLoadFiles(t *testing.T) {
@@ -281,6 +554,38 @@ func TestConvertYamlToJson(t *testing.T) {
 			assert.Equal(t, tt.jsonObj, convertYamlToJson(tt.yamlObj))
 		})
 	}
+}
+
+// TestConvertYamlToJson_NestedNonStringKey guards against a nested mapping
+// with a non-string key surviving conversion: yaml.v3 decodes such a mapping
+// as map[interface{}]interface{} even under a string-keyed parent, and
+// convertYamlToJson must recurse into map[string]any values so the result
+// stays json.Marshal-able (issue #2833).
+func TestConvertYamlToJson_NestedNonStringKey(t *testing.T) {
+	input := map[string]any{"spec": map[any]any{"1": "enabled"}}
+
+	got := convertYamlToJson(input)
+	_, err := json.Marshal(got)
+	require.NoError(t, err)
+
+	spec, ok := got.(map[string]any)["spec"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "enabled", spec["1"])
+}
+
+// TestReadYamlFile_NestedNonStringKeyIsJSONMarshalable exercises the same bug
+// through readYamlFile: a manifest with a nested non-string key must produce a
+// workload whose object is JSON-serializable (OPA marshals these to build its
+// input, so an unconverted map[interface{}]interface{} breaks evaluation).
+func TestReadYamlFile_NestedNonStringKeyIsJSONMarshalable(t *testing.T) {
+	manifest := []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\ndata:\n  1: enabled\n")
+
+	workloads, err := readYamlFile(manifest)
+	require.NoError(t, err)
+	require.Len(t, workloads, 1)
+
+	_, err = json.Marshal(workloads[0].GetObject())
+	assert.NoError(t, err)
 }
 
 func TestIsYaml(t *testing.T) {
@@ -431,9 +736,9 @@ func TestGetFileFormat(t *testing.T) {
 }
 
 func TestIsFileAndIsDir(t *testing.T) {
-	tempDir := t.TempDir()
+	tempDir := resolvedTempDir(t)
 	tempFile := filepath.Join(tempDir, "test_file.txt")
-	err := os.WriteFile(tempFile, []byte("test"), 0644)
+	err := os.WriteFile(tempFile, []byte("test"), 0o600)
 	require.NoError(t, err)
 
 	assert.True(t, isDir(tempDir))
@@ -588,6 +893,212 @@ func TestReadJsonFile(t *testing.T) {
 				assert.NoError(t, err)
 			}
 			assert.Equal(t, tt.wantCount, len(got))
+		})
+	}
+}
+
+func TestReadFileExpandsKubernetesListEnvelopes(t *testing.T) {
+	tests := []struct {
+		name      string
+		read      func([]byte) ([]workloadinterface.IMetadata, error)
+		content   string
+		wantKinds []string
+		wantAPIs  []string
+	}{
+		{
+			name: "JSON generic List",
+			read: readJsonFile,
+			content: `{
+				"apiVersion": "v1",
+				"kind": "List",
+				"items": [
+					{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "pod-in-list", "namespace": "default"}},
+					{"apiVersion": "v1", "kind": "Service", "metadata": {"name": "svc-in-list", "namespace": "default"}}
+				]
+			}`,
+			wantKinds: []string{"Pod", "Service"},
+			wantAPIs:  []string{"v1", "v1"},
+		},
+		{
+			name: "JSON typed list inside an array",
+			read: readJsonFile,
+			content: `[
+				{
+					"apiVersion": "v1",
+					"kind": "PodList",
+					"items": [
+						{"metadata": {"name": "pod-in-list", "namespace": "default"}}
+					]
+				},
+				{"apiVersion": "v1", "kind": "Service", "metadata": {"name": "standalone-service", "namespace": "default"}}
+			]`,
+			wantKinds: []string{"Pod", "Service"},
+			wantAPIs:  []string{"v1", "v1"},
+		},
+		{
+			name: "YAML typed list inside a multi-document manifest",
+			read: readYamlFile,
+			content: `apiVersion: v1
+kind: PodList
+items:
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: pod-in-list
+      namespace: default
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: standalone-service
+  namespace: default`,
+			wantKinds: []string{"Pod", "Service"},
+			wantAPIs:  []string{"v1", "v1"},
+		},
+		{
+			name: "typed list fills a missing item kind",
+			read: readJsonFile,
+			content: `{
+				"apiVersion": "v1",
+				"kind": "PodList",
+				"items": [
+					{"apiVersion": "v1", "metadata": {"name": "missing-kind", "namespace": "default"}}
+				]
+			}`,
+			wantKinds: []string{"Pod"},
+			wantAPIs:  []string{"v1"},
+		},
+		{
+			name: "typed list fills a missing item apiVersion",
+			read: readYamlFile,
+			content: `apiVersion: v1
+kind: PodList
+items:
+  - kind: Pod
+    metadata:
+      name: missing-api-version
+      namespace: default`,
+			wantKinds: []string{"Pod"},
+			wantAPIs:  []string{"v1"},
+		},
+		{
+			name: "typed list preserves explicit item type metadata",
+			read: readJsonFile,
+			content: `{
+				"apiVersion": "v1",
+				"kind": "PodList",
+				"items": [
+					{"apiVersion": "example.com/v1", "kind": "Widget", "metadata": {"name": "explicit-type", "namespace": "default"}}
+				]
+			}`,
+			wantKinds: []string{"Widget"},
+			wantAPIs:  []string{"example.com/v1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.read([]byte(tt.content))
+			require.NoError(t, err)
+			require.Len(t, got, len(tt.wantKinds))
+			for i, wantKind := range tt.wantKinds {
+				assert.Equal(t, wantKind, got[i].GetKind())
+				assert.Equal(t, tt.wantAPIs[i], got[i].GetApiVersion())
+			}
+		})
+	}
+}
+
+func TestReadFileDoesNotTreatNamedCustomResourceAsListEnvelope(t *testing.T) {
+	tests := []struct {
+		name          string
+		read          func([]byte) ([]workloadinterface.IMetadata, error)
+		content       string
+		identityField string
+		identityValue string
+	}{
+		{
+			name:          "JSON name",
+			read:          readJsonFile,
+			identityField: "name",
+			identityValue: "production-allow-list",
+			content: `{
+				"apiVersion": "example.com/v1",
+				"kind": "AllowList",
+				"metadata": {"name": "production-allow-list"},
+				"items": ["10.0.0.0/8"]
+			}`,
+		},
+		{
+			name:          "YAML generateName",
+			read:          readYamlFile,
+			identityField: "generateName",
+			identityValue: "production-allow-list-",
+			content: `apiVersion: example.com/v1
+kind: AllowList
+metadata:
+  generateName: production-allow-list-
+items:
+  - 10.0.0.0/8`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.read([]byte(tt.content))
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			assert.Equal(t, "AllowList", got[0].GetKind())
+			metadata, ok := got[0].GetObject()["metadata"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, tt.identityValue, metadata[tt.identityField])
+		})
+	}
+}
+
+func TestReadFileRejectsMalformedListEnvelope(t *testing.T) {
+	tests := []struct {
+		name    string
+		read    func([]byte) ([]workloadinterface.IMetadata, error)
+		content string
+	}{
+		{
+			name:    "JSON generic List",
+			read:    readJsonFile,
+			content: `{"apiVersion":"v1","kind":"List","items":"not-an-array"}`,
+		},
+		{
+			name:    "JSON typed list with null items",
+			read:    readJsonFile,
+			content: `{"apiVersion":"v1","kind":"PodList","items":null}`,
+		},
+		{
+			name: "YAML typed list missing items",
+			read: readYamlFile,
+			content: `apiVersion: v1
+kind: PodList`,
+		},
+		{
+			name:    "JSON typed list with non-object item",
+			read:    readJsonFile,
+			content: `{"apiVersion":"v1","kind":"PodList","items":["not-an-object"]}`,
+		},
+		{
+			name: "YAML generic List with non-Kubernetes item",
+			read: readYamlFile,
+			content: `apiVersion: v1
+kind: List
+items:
+  - metadata:
+      name: missing-kind`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.read([]byte(tt.content))
+			assert.Error(t, err)
+			assert.Empty(t, got)
 		})
 	}
 }

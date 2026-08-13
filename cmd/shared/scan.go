@@ -6,17 +6,18 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/spf13/cobra"
 )
 
-// ScanFormats and ImageScanFormats list the output formats supported by the scan commands.
-// They are built from the printer.*Format constants to keep a single source of truth.
+// ScanFormats and ImageScanFormats are derived from printer.AllFormats and
+// printer.ImageFormats to keep a single source of truth — see printresults.go
+// for why the two lists differ (not every printer supports image scans, e.g. CSV).
 var (
-	ScanFormats      = []string{printer.PrettyFormat, printer.JsonFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.HtmlFormat, printer.SARIFFormat, printer.GitLabSASTFormat}
-	ImageScanFormats = []string{printer.PrettyFormat, printer.JsonFormat, printer.SARIFFormat}
+	ScanFormats      = printer.AllFormats
+	ImageScanFormats = printer.ImageFormats
 )
 
 var ErrUnknownSeverity = fmt.Errorf("unknown severity. Supported severities are: %s", strings.Join(reporthandlingapis.GetSupportedSeverities(), ", "))
@@ -72,7 +73,22 @@ func ValidateScanFormat(format string, supported []string) error {
 	return nil
 }
 
-// TerminateOnExceedingSeverity terminates the program if the result exceeds the severity threshold
-func TerminateOnExceedingSeverity(scanInfo *cautils.ScanInfo, l helpers.ILogger) {
-	l.Fatal("result exceeds severity threshold", helpers.String("Set severity threshold", scanInfo.FailThresholdSeverity))
+// ValidateCommonScanFlags validates flags that are common to all scan subcommands
+func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, supportedFormats []string) error {
+	if scanInfo.FailThresholdSeverity != "" {
+		if err := ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
+			return err
+		}
+	}
+	f := cmd.Flags().Lookup("format")
+	if f == nil {
+		f = cmd.InheritedFlags().Lookup("format")
+	}
+	if f != nil && f.Changed && scanInfo.Format == "" {
+		return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(supportedFormats, ", "))
+	}
+	if err := ValidateScanFormat(scanInfo.Format, supportedFormats); err != nil {
+		return err
+	}
+	return nil
 }

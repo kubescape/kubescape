@@ -1,14 +1,17 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/moby/buildkit/client"
+	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -329,4 +332,30 @@ func TestRunWithCopaLoggerMuted(t *testing.T) {
 		require.NotNil(t, os.Stdout)
 		require.NotNil(t, os.Stderr)
 	})
+}
+
+// TestRunWithCopaLoggerMuted_RestoresActualPriorLogrusWriter guards against a
+// regression where the logrus writer was restored to a value assumed to
+// equal os.Stderr, rather than to whatever logrus was actually configured
+// with beforehand. If something in the process had pointed logrus at a file,
+// buffer, or hook writer before Patch() ran, that destination would be
+// silently replaced with os.Stderr after a single "kubescape patch" call.
+func TestRunWithCopaLoggerMuted_RestoresActualPriorLogrusWriter(t *testing.T) {
+	prevOut := log.StandardLogger().Out
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	var customWriter bytes.Buffer
+	log.SetOutput(&customWriter)
+
+	var duringCallWriter io.Writer
+	err := runWithCopaLoggerMuted(false, func() error {
+		duringCallWriter = log.StandardLogger().Out
+		log.Error("this must not reach customWriter or os.Stderr")
+		return nil
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, io.Discard, duringCallWriter, "logrus output must be discarded while fn runs")
+	assert.Empty(t, customWriter.String(), "logrus output during fn must not leak to the pre-existing writer")
+	assert.Same(t, &customWriter, log.StandardLogger().Out, "logrus writer must be restored to what it actually was, not assumed to be os.Stderr")
 }

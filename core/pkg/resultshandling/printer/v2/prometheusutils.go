@@ -6,6 +6,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -27,6 +28,9 @@ const (
 	metricsResource  metricsName = "resource"
 	metricsResources metricsName = "resources"
 	metricsFramework metricsName = "framework"
+	metricsImage     metricsName = "image"
+	metricsCVE       metricsName = "cve"
+	metricsFixable   metricsName = "fixable"
 )
 
 // ============================================ CLUSTER ============================================================
@@ -197,6 +201,30 @@ func (mrc *mResources) prefix() string {
 	return fmt.Sprintf("%s_%s", ksMetrics, metricsResource)
 }
 
+// ============================================ IMAGE VULNERABILITY =================================================
+func (miv *mImageVulnerability) metrics() []string {
+	/*
+		#### Image vulnerability metrics (image scan only, #2782)
+		kubescape_image_count_cve{image="<image>",severity="<severity>"} <counter>
+		kubescape_image_count_cve_fixable{image="<image>",severity="<severity>"} <counter>
+	*/
+
+	m := []string{}
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s", miv.prefix(), metricsCount, metricsCVE), miv.labels(), miv.cveCount))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", miv.prefix(), metricsCount, metricsCVE, metricsFixable), miv.labels(), miv.fixableCVECount))
+	return m
+}
+
+func (miv *mImageVulnerability) labels() string {
+	r := fmt.Sprintf("image=\"%s\"", miv.image) + ","
+	r += fmt.Sprintf("severity=\"%s\"", miv.severity)
+	return r
+}
+
+func (miv *mImageVulnerability) prefix() string {
+	return fmt.Sprintf("%s_%s", ksMetrics, metricsImage)
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 func toMetricHeader(name, help string) string {
@@ -207,23 +235,42 @@ func toRowInMetrics(name string, row string, value int) string {
 	return fmt.Sprintf("%s{%s} %d", name, row, value)
 
 }
+
+// emitMetricFamily renders lines as one group per metric family: the HELP/TYPE
+// header followed by every sample of that family. Grouping is required because
+// each item contributes one line to several families (a resource emits a failed
+// and a skipped counter), so writing the lines in the order they were collected
+// interleaves the families once there is more than one item. The text exposition
+// format requires a family's samples to be contiguous.
+//
+// Families keep the order in which they were first seen, so the metric layout
+// still follows the order the caller collected the lines in.
 func emitMetricFamily(lines []string) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	emitted := map[string]bool{}
-	var r strings.Builder
+	// keyed by family, not by sample: a scan emits a fixed handful of families and a
+	// line per item within each, so both stay small next to len(lines).
+	var order []string
+	samples := map[string][]string{}
 	for _, line := range lines {
 		// extract metric name (everything before '{')
 		name := line
 		if before, _, ok := strings.Cut(line, "{"); ok {
 			name = before
 		}
-		if !emitted[name] {
-			r.WriteString(toMetricHeader(name, name) + "\n")
-			emitted[name] = true
+		if _, seen := samples[name]; !seen {
+			order = append(order, name)
 		}
-		r.WriteString(line + "\n")
+		samples[name] = append(samples[name], line)
+	}
+
+	var r strings.Builder
+	for _, name := range order {
+		r.WriteString(toMetricHeader(name, name) + "\n")
+		for _, line := range samples[name] {
+			r.WriteString(line + "\n")
+		}
 	}
 	return r.String()
 }
@@ -231,8 +278,14 @@ func emitMetricFamily(lines []string) string {
 func (m *Metrics) String() string {
 	// collect all metric lines first, then emit headers once per family
 	var all []string
-	all = append(all, m.rs.metrics()...)
-	all = append(all, m.coverage.metrics()...)
+	// Posture-scan metric families (compliance score, coverage) only apply
+	// when this Metrics was built from a posture scan; an image scan never
+	// populates m.rs/m.coverage, so emitting them here would push out a
+	// misleading all-zero compliance score alongside real CVE metrics (#2782).
+	if !m.isImageScan {
+		all = append(all, m.rs.metrics()...)
+		all = append(all, m.coverage.metrics()...)
+	}
 	for i := range m.listFrameworks {
 		all = append(all, m.listFrameworks[i].metrics()...)
 	}
@@ -241,6 +294,9 @@ func (m *Metrics) String() string {
 	}
 	for i := range m.listResources {
 		all = append(all, m.listResources[i].metrics()...)
+	}
+	for i := range m.listImages {
+		all = append(all, m.listImages[i].metrics()...)
 	}
 	return emitMetricFamily(all)
 }
@@ -291,12 +347,21 @@ type mResources struct {
 	controlsCountFailed  int
 	controlsCountSkipped int
 }
+type mImageVulnerability struct {
+	image           string
+	severity        string
+	cveCount        int
+	fixableCVECount int
+}
+
 type Metrics struct {
+	isImageScan    bool
 	rs             mComplianceScore
 	coverage       mScanCoverage
 	listFrameworks []mFrameworkComplianceScore
 	listControls   []mControlComplianceScore
 	listResources  []mResources
+	listImages     []mImageVulnerability
 }
 
 func (mrs *mComplianceScore) set(resources reportsummary.ICounters, controls reportsummary.ICounters) {
@@ -325,12 +390,12 @@ func (mcrs *mControlComplianceScore) set(resources reportsummary.ICounters) {
 func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetails) {
 	m.rs.set(summaryDetails.NumberOfResources(), summaryDetails.NumberOfControls())
 	// GetScore() returns the risk score; the metric is the compliance score.
-	m.rs.complianceScore = cautils.Float32ToInt(summaryDetails.ComplianceScore)
+	m.rs.complianceScore = cautils.ComplianceScoreToInt(summaryDetails.ComplianceScore)
 
 	for _, fw := range summaryDetails.ListFrameworks() {
 		mfrs := mFrameworkComplianceScore{
 			frameworkName:   fw.GetName(),
-			complianceScore: cautils.Float32ToInt(fw.GetComplianceScore()),
+			complianceScore: cautils.ComplianceScoreToInt(fw.GetComplianceScore()),
 		}
 		mfrs.set(fw.NumberOfResources(), fw.NumberOfControls())
 		m.listFrameworks = append(m.listFrameworks, mfrs)
@@ -340,7 +405,7 @@ func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetai
 		mcrs := mControlComplianceScore{
 			controlName:     control.GetName(),
 			controlID:       control.GetID(),
-			complianceScore: cautils.Float32ToInt(control.GetComplianceScore()),
+			complianceScore: cautils.ComplianceScoreToInt(control.GetComplianceScore()),
 			link:            cautils.GetControlLink(control.GetID()),
 			severity:        apis.ControlSeverityToString(control.GetScoreFactor()),
 			remediation:     control.GetRemediation(),
@@ -397,4 +462,23 @@ func (m *Metrics) setResourcesCounters(
 		m.listResources = append(m.listResources, mrc)
 	}
 
+}
+
+// setImageVulnerabilities builds per-image, per-severity CVE counters for an image scan (#2782)
+func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData) {
+	for i := range imageScanData {
+		cves := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
+
+		severityToSummary := map[string]*imageprinter.SeveritySummary{}
+		setSeverityToSummaryMap(cves, severityToSummary)
+
+		for severity, summary := range severityToSummary {
+			m.listImages = append(m.listImages, mImageVulnerability{
+				image:           imageScanData[i].Image,
+				severity:        severity,
+				cveCount:        summary.NumberOfCVEs,
+				fixableCVECount: summary.NumberOfFixableCVEs,
+			})
+		}
+	}
 }

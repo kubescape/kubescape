@@ -15,6 +15,7 @@ import (
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -45,6 +46,11 @@ func TestScore_Junit(t *testing.T) {
 			name:  "Score not an integer",
 			score: 20.7,
 			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 21\n",
+		},
+		{
+			name:  "Fractional score below perfect",
+			score: 99.5,
+			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 99\n",
 		},
 		{
 			name:  "Score less than 0",
@@ -213,6 +219,16 @@ func TestProperties(t *testing.T) {
 				{
 					Name:  "complianceScore",
 					Value: fmt.Sprintf("%.2f", 100.0),
+				},
+			},
+		},
+		{
+			name:  "Score near 100 does not round to 100.00",
+			score: 99.996,
+			expectedProperty: []JUnitProperty{
+				{
+					Name:  "complianceScore",
+					Value: "99.99",
 				},
 			},
 		},
@@ -497,7 +513,8 @@ func TestJunitGoldenFile(t *testing.T) {
 
 	goldenPath := filepath.Join("testdata", "junit_golden.xml")
 	if *updateGolden {
-		require.NoError(t, os.WriteFile(goldenPath, got, 0o644))
+		//nolint:gosec // this is a test file writing a golden file
+		require.NoError(t, os.WriteFile(goldenPath, got, 0o600))
 	}
 
 	want, err := os.ReadFile(goldenPath)
@@ -737,4 +754,42 @@ func TestJunitActionPrintComplianceScore(t *testing.T) {
 				"complianceScore must come from ComplianceScore (%s), not Score", tt.want)
 		})
 	}
+}
+
+func TestJunitActionPrintMissingResourceNoPanic(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+
+	resourceIDs := helpersv1.AllLists{}
+	resourceIDs.Append(apis.StatusFailed, "r-1")
+
+	control := reportsummary.ControlSummary{
+		ControlID: "C-0001",
+		Name:      "Test Control",
+		Status:    apis.StatusFailed,
+		StatusInfo: apis.StatusInfo{
+			InnerStatus: apis.StatusFailed,
+		},
+		ResourceIDs: resourceIDs,
+	}
+
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				"C-0001": control,
+			},
+		},
+	}
+
+	tmp, err := os.CreateTemp("", "junit-test-*.xml")
+	require.NoError(t, err)
+	defer os.Remove(tmp.Name())
+
+	jp := NewJunitPrinter(false)
+	jp.writer = tmp
+
+	assert.NotPanics(t, func() {
+		jp.ActionPrint(context.Background(), session, nil)
+	})
+
+	require.NoError(t, tmp.Close())
 }

@@ -47,7 +47,7 @@ func TestExecuteScan_CallbackOnSuccess(t *testing.T) {
 	// httptest listens on loopback, so the allowlist must explicitly permit it.
 	t.Setenv(callbackAllowlistEnv, "127.0.0.1/32")
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(context.Context, *cautils.ScanInfo, string, bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier, string, bool) (*reporthandlingv2.PostureReport, error) {
 		return nil, nil
 	}
 
@@ -74,7 +74,7 @@ func TestExecuteScan_CallbackOnSuccess(t *testing.T) {
 func TestExecuteScan_CallbackOnFailure(t *testing.T) {
 	t.Setenv(callbackAllowlistEnv, "127.0.0.1/32")
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(context.Context, *cautils.ScanInfo, string, bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier, string, bool) (*reporthandlingv2.PostureReport, error) {
 		return nil, fmt.Errorf("collection boom")
 	}
 

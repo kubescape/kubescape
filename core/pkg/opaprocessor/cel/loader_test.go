@@ -180,3 +180,81 @@ spec:
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "matchConditions")
 }
+
+// TestLoadVAPRefusesNarrowingSelectors pins which selector is refused and which
+// is not. namespaceSelector reads the NAMESPACE's labels, which the scan only
+// has when some control's match happened to collect Namespaces, so a policy
+// narrowing with it is refused (a loud skip) rather than evaluated against an
+// input that may be absent (a silent parity break). objectSelector reads the
+// scanned object's own labels, which the scan always has, so it is evaluated in
+// appliesTo instead of refused — see TestVAPAppliesToObjectSelector. An empty
+// selector matches everything (it is what the apiserver defaults an omitted one
+// to), so it must not trip the refusal either.
+func TestLoadVAPRefusesNarrowingSelectors(t *testing.T) {
+	policy := func(selectorYAML string) string {
+		return `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kubescape-c-1002
+  labels:
+    controlId: C-1002
+spec:
+  matchConstraints:
+` + selectorYAML + `    resourceRules:
+    - apiGroups: [""]
+      apiVersions: ["v1"]
+      operations: ["CREATE"]
+      resources: ["pods"]
+  validations:
+  - expression: "false"
+`
+	}
+
+	cases := []struct {
+		name         string
+		selectorYAML string
+		refusedFor   string // empty: must be supported
+	}{
+		{
+			name: "namespaceSelector with labels is refused",
+			selectorYAML: `    namespaceSelector:
+      matchLabels:
+        env: prod
+`,
+			refusedFor: "namespaceSelector",
+		},
+		{
+			name: "objectSelector with expressions is supported, not refused",
+			selectorYAML: `    objectSelector:
+      matchExpressions:
+      - key: app
+        operator: Exists
+`,
+			refusedFor: "",
+		},
+		{
+			name: "empty selectors match everything and are supported",
+			selectorYAML: `    namespaceSelector: {}
+    objectSelector: {}
+`,
+			refusedFor: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			catalog, err := parseVAPBundle([]byte(policy(tc.selectorYAML)))
+			require.NoError(t, err)
+			vap := catalog.byControl["C-1002"]
+			require.NotNil(t, vap)
+
+			err = vap.requireSupported()
+			if tc.refusedFor == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.refusedFor)
+		})
+	}
+}

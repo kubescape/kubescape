@@ -231,6 +231,9 @@ kubescape scan /path/to/kustomize/directory
 > **Note**  
 > Kubescape will generate Kubernetes YAML objects using the 
 > `kustomization.yaml` file and scan them for security.
+> A broader directory scan also builds nested Kustomizations. Kustomize may
+> follow references outside the scan root, and a nested `helmCharts.repo` may
+> fetch remote chart content, so scan only source you trust to build.
 > If a directory contains both `Chart.yaml` and 
 > `kustomization.yaml`, Kubescape will treat it as a Helm chart.
 
@@ -445,7 +448,7 @@ sudo kubescape patch --image docker.io/library/nginx:1.22
 |------|-------------|---------|
 | `-i, --image` | Image name to patch (required) | - |
 | `-t, --tag` | Tag for the patched image | `<image>-patched` |
-| `-a, --addr` | BuildKit daemon address | `unix:///run/buildkit/buildkitd.sock` |
+| `-a, --address` | BuildKit daemon address | none (auto-detects local docker daemon, falling back to `unix:///run/buildkit/buildkitd.sock`) |
 | `--timeout` | Patching timeout | `5m` |
 | `-u, --username` | Registry username | - |
 | `-p, --password` | Registry password | - |

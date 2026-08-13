@@ -1,6 +1,9 @@
 package getter
 
 import (
+	"context"
+	"errors"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -19,12 +22,12 @@ type (
 
 	// IExceptionsGetter knows how to retrieve exceptions.
 	IExceptionsGetter interface {
-		GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error)
+		GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error)
 	}
 
 	// IControlsInputsGetter knows how to retrieve controls inputs.
 	IControlsInputsGetter interface {
-		GetControlsInputs(clusterName string) (map[string][]string, error)
+		GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error)
 	}
 
 	// IAttackTracksGetter knows how to retrieve attack tracks.
@@ -32,3 +35,8 @@ type (
 		GetAttackTracks() ([]v1alpha1.AttackTrack, error)
 	}
 )
+
+// isContextErr reports whether err was caused by context cancellation or a deadline.
+func isContextErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
