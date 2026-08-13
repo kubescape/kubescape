@@ -177,6 +177,30 @@ func TestEstimateClusterSize_ListErrors(t *testing.T) {
 	assert.Equal(t, 1515, size)
 }
 
+func TestEstimateClusterSize_ContextCancellationDiscardsPartialEstimate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	mockClient := &gvrAwareDynamicClient{
+		listFunc: func(_ schema.GroupVersionResource, _ context.Context, _ metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			calls++
+			if calls == 1 {
+				cancel()
+				return newLimitOneListWithRemaining(100), nil
+			}
+			return nil, context.Canceled
+		},
+	}
+
+	handler := &K8sResourceHandler{
+		k8s: &k8sinterface.KubernetesApi{DynamicClient: mockClient},
+	}
+
+	size, err := handler.EstimateClusterSize(ctx, &cautils.ScanInfo{})
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Zero(t, size, "a canceled estimate must not be mistaken for a successful partial count")
+	assert.Equal(t, 1, calls, "estimation should not issue another LIST after cancellation")
+}
+
 func TestEstimateClusterSize_AllListErrors(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
 		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {

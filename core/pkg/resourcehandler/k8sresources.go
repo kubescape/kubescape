@@ -1066,8 +1066,17 @@ func (k8sHandler *K8sResourceHandler) EstimateClusterSize(ctx context.Context, s
 	var total int
 	var ok int
 	for _, gvr := range namespacedResourcesToEstimate {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
 		result, err := k8sHandler.k8s.DynamicClient.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{Limit: 1})
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return 0, ctxErr
+			}
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return 0, err
+			}
 			continue
 		}
 		ok++
@@ -1075,6 +1084,9 @@ func (k8sHandler *K8sResourceHandler) EstimateClusterSize(ctx context.Context, s
 		if rc := result.GetRemainingItemCount(); rc != nil {
 			total += int(*rc)
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
 	}
 
 	if ok == 0 {
