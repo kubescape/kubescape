@@ -191,7 +191,34 @@ func TestScanResultReportValidate(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "same vulnerability in different packages should return true",
+			name: "same vulnerability and package with different versions should return true",
+			in: ScanResultReport{
+				CustomerGUID: "aaa",
+				ImgHash:      "bbb",
+				ImgTag:       "ccc",
+				Timestamp:    1,
+				Layers: LayersList{
+					{
+						LayerHash: "ddd",
+						Vulnerabilities: VulnerabilitiesList{
+							{
+								Name:               "CVE-2024-1234",
+								RelatedPackageName: "pkgA",
+								PackageVersion:     "1.0",
+							},
+							{
+								Name:               "CVE-2024-1234",
+								RelatedPackageName: "pkgA",
+								PackageVersion:     "2.0",
+							},
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "same vulnerability and version in different packages should return true",
 			in: ScanResultReport{
 				CustomerGUID: "aaa",
 				ImgHash:      "bbb",
@@ -209,7 +236,7 @@ func TestScanResultReportValidate(t *testing.T) {
 							{
 								Name:               "CVE-2024-1234",
 								RelatedPackageName: "pkgB",
-								PackageVersion:     "2.0",
+								PackageVersion:     "1.0",
 							},
 						},
 					},
