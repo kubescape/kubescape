@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/opa-utils/resources"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -425,4 +426,130 @@ func slicesOfKeys(results map[string]resourcesresults.Result) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// wholeClusterAggregatingControl is the aggregating control fixture marked
+// requiresWholeClusterInput, so it must be evaluated once against the whole
+// cluster regardless of how the scan is partitioned.
+func wholeClusterAggregatingControl() reporthandling.Control {
+	control := reporthandling.Control{
+		ControlID: "C-AGGREGATE",
+		Rules: []reporthandling.PolicyRule{
+			{
+				Rule:         aggregatingRule,
+				RuleLanguage: reporthandling.RegoLanguage,
+				Match: []reporthandling.RuleMatchObjects{
+					{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Pod"}},
+				},
+			},
+		},
+	}
+	control.Name = "aggregating control"
+	control.Rules[0].Name = "aggregating-rule"
+	control.Attributes = map[string]interface{}{
+		ControlAttributeRequiresWholeClusterInput: true,
+	}
+	return control
+}
+
+func wholeClusterAggregatingPolicies() (*cautils.Policies, []reporthandling.Framework) {
+	frameworks := []reporthandling.Framework{{Controls: []reporthandling.Control{wholeClusterAggregatingControl()}}}
+	return convertFrameworksToPolicies(frameworks, nil, reporthandling.ScopeCluster), frameworks
+}
+
+// TestWholeClusterControlParityAcrossPaths pins the fix for #2871: a control
+// that joins objects across namespaces must reach the same verdict whether the
+// cluster is evaluated as a single input, partitioned per namespace (eager), or
+// streamed namespace by namespace. The aggregating rule only fires when more
+// than one Pod is in the input, so it silently passes under per-namespace
+// evaluation unless the control is deferred to a whole-cluster pass.
+func TestWholeClusterControlParityAcrossPaths(t *testing.T) {
+	policies, frameworks := wholeClusterAggregatingPolicies()
+	const podID = "/v1/ns-a/Pod/clean"
+
+	t.Run("single scope", func(t *testing.T) {
+		t.Setenv("LARGE_CLUSTER_SIZE", "100000")
+		opap := newParityProcessor(policies)
+		require.NoError(t, opap.Process(context.Background(), policies, nil))
+		require.Contains(t, opap.ResourcesResult, podID)
+		singleResult := opap.ResourcesResult[podID]
+		require.True(t, singleResult.GetStatus(nil).IsFailed(),
+			"single input holds every namespace's pods, so the rule fires")
+	})
+
+	t.Run("partitioned eager", func(t *testing.T) {
+		t.Setenv("LARGE_CLUSTER_SIZE", "1")
+		opap := newParityProcessor(policies)
+		require.Greater(t, len(opap.evaluationScopes()), 1, "fixture must be split into scopes")
+		require.NoError(t, opap.Process(context.Background(), policies, nil))
+		require.Contains(t, opap.ResourcesResult, podID)
+		partitionedResult := opap.ResourcesResult[podID]
+		require.True(t, partitionedResult.GetStatus(nil).IsFailed(),
+			"whole-cluster control must be evaluated once after the scopes merge")
+	})
+
+	t.Run("streaming", func(t *testing.T) {
+		t.Setenv("LARGE_CLUSTER_SIZE", "1")
+
+		k8sResources, allResources := parityFixture()
+		sessionObj := cautils.NewOPASessionObjMock()
+		sessionObj.Policies = frameworks
+		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
+
+		opap := NewOPAProcessor(sessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+
+		resident, batches := cautils.PartitionResources(len(allResources), k8sResources, nil, allResources)
+		require.NotEmpty(t, batches, "fixture must be split into namespace batches")
+
+		batchChan := make(chan *cautils.ResourceBatch, len(batches)+1)
+		errChan := make(chan error, 1)
+		close(errChan)
+		batchChan <- resident
+		for _, batch := range batches {
+			batchChan <- batch
+		}
+		close(batchChan)
+
+		require.NoError(t, opap.ProcessWithStreaming(context.Background(), batchChan, errChan, cautils.NewProgressHandler(""), len(batches)))
+		require.Contains(t, opap.ResourcesResult, podID)
+		streamingResult := opap.ResourcesResult[podID]
+		require.True(t, streamingResult.GetStatus(nil).IsFailed(),
+			"whole-cluster control must be evaluated once after streaming merges every batch")
+	})
+}
+
+func TestControlRequiresWholeClusterInput(t *testing.T) {
+	withAttr := func(controlID string, value any) *reporthandling.Control {
+		c := &reporthandling.Control{ControlID: controlID}
+		c.Attributes = map[string]interface{}{ControlAttributeRequiresWholeClusterInput: value}
+		return c
+	}
+
+	tests := []struct {
+		name    string
+		control *reporthandling.Control
+		want    bool
+	}{
+		{name: "nil control", control: nil, want: false},
+		{
+			name:    "no attribute, no fallback",
+			control: &reporthandling.Control{ControlID: "C-0001"},
+			want:    false,
+		},
+		{name: "boolean attribute true", control: withAttr("C-X", true), want: true},
+		{name: "boolean attribute false", control: withAttr("C-X", false), want: false},
+		{name: "string attribute true", control: withAttr("C-X", "true"), want: true},
+		{name: "string attribute false", control: withAttr("C-X", "false"), want: false},
+		{
+			name:    "fallback control ID",
+			control: &reporthandling.Control{ControlID: "C-0267"},
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, controlRequiresWholeClusterInput(tt.control))
+		})
+	}
 }
