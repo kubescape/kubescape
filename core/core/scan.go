@@ -177,33 +177,14 @@ func resolvedOutputPath(format, outputFile string) string {
 	return trimmed
 }
 
+// fileExtForFormat returns the extension the format's printer appends to
+// --output. An unknown format falls back to the pretty extension because
+// NewPrinter falls back to the pretty printer for it.
 func fileExtForFormat(format string) string {
-	switch format {
-	case printer.JsonFormat:
-		return printer.JsonOutputExt
-	case printer.YamlFormat:
-		return printer.YamlOutputExt
-	case printer.JunitResultFormat:
-		return printer.JunitOutputExt
-	case printer.SARIFFormat:
-		return printer.SARIFOutputExt
-	case printer.GitLabSASTFormat:
-		return printer.JsonOutputExt
-	case printer.HtmlFormat:
-		return printer.HtmlOutputExt
-	case printer.PdfFormat:
-		return printer.PdfOutputExt
-	case printer.PrometheusFormat:
-		return printer.PrometheusOutputExt
-	case printer.CsvFormat:
-		return printer.CsvOutputExt
-	case printer.CycloneDXFormat:
-		return printer.CycloneDXOutputExt
-	case printer.SPDXFormat:
-		return printer.SPDXOutputExt
-	default:
-		return printer.PrettyOutputExt
+	if ext, ok := printer.FormatOutputExt[format]; ok {
+		return ext
 	}
+	return printer.PrettyOutputExt
 }
 
 func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {

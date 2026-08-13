@@ -57,6 +57,26 @@ const (
 	SPDXOutputExt       = ".spdx.json"
 )
 
+// FormatOutputExt maps a format to the extension its printer enforces in
+// SetWriter. Callers resolving an --output path must read it from here rather
+// than re-deriving it, so a format can never resolve to a path its printer
+// does not write. Every entry in AllFormats is covered.
+var FormatOutputExt = map[string]string{
+	PrettyFormat:      PrettyOutputExt,
+	JsonFormat:        JsonOutputExt,
+	JunitResultFormat: JunitOutputExt,
+	PrometheusFormat:  PrometheusOutputExt,
+	PdfFormat:         PdfOutputExt,
+	HtmlFormat:        HtmlOutputExt,
+	SARIFFormat:       SARIFOutputExt,
+	GitLabSASTFormat:  JsonOutputExt,
+	YamlFormat:        YamlOutputExt,
+	CsvFormat:         CsvOutputExt,
+	MarkdownFormat:    MarkdownOutputExt,
+	CycloneDXFormat:   CycloneDXOutputExt,
+	SPDXFormat:        SPDXOutputExt,
+}
+
 type IPrinter interface {
 	PrintNextSteps()
 	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error
