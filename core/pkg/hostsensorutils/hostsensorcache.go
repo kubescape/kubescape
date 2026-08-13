@@ -143,11 +143,11 @@ func saveToCache(clusterName, resourceName string, envelopes []hostsensor.HostSe
 		return err
 	}
 
-	tmpPath := path + ".tmp"
-	f, err := os.OpenFile(tmpPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	f, err := os.CreateTemp(dir, ".hostsensor-cache-*.tmp")
 	if err != nil {
 		return err
 	}
+	tmpPath := f.Name()
 
 	cleanup := true
 	defer func() {

@@ -92,6 +92,26 @@ func TestHostSensorCache_OptInRoundTrip(t *testing.T) {
 	assert.Error(t, err, "cluster B must not read cluster A's cached host data")
 }
 
+func TestSaveToCache_DoesNotReuseFixedTemporaryPath(t *testing.T) {
+	withTempCacheDir(t)
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+	withK8sHost(t, "https://cluster-a.example.com")
+
+	path, err := getCacheFilePath("ctx", "KubeletInfo")
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(path+".tmp", 0700))
+
+	env := hostsensor.HostSensorDataEnvelope{}
+	env.SetName("node-a")
+	require.NoError(t, saveToCache("ctx", "KubeletInfo", []hostsensor.HostSensorDataEnvelope{env}))
+
+	got, err := loadFromCache("ctx", "KubeletInfo")
+	require.NoError(t, err)
+	if assert.Len(t, got, 1) {
+		assert.Equal(t, "node-a", got[0].GetName())
+	}
+}
+
 // TestLoadFromCache_UnresolvedClusterIdentityIsRejected guards against the
 // "unknown" fallback in clusterIdentity acting as a shared cache key: every
 // caller with no resolvable API server host would otherwise land on the same
