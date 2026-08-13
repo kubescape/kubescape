@@ -8,6 +8,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type configOutputField struct {
+	name  string
+	value string
+}
+
 // FormatConfigOutput renders configuration data in the requested output format.
 // Supported values: json, yaml, text. The default format is text.
 func FormatConfigOutput(cfg *ConfigObj, format string, includeEmpty bool) ([]byte, error) {
@@ -34,16 +39,7 @@ func FormatConfigOutput(cfg *ConfigObj, format string, includeEmpty bool) ([]byt
 
 func formatConfigOutputJSON(cfg *ConfigObj, includeEmpty bool) ([]byte, error) {
 	payload := map[string]string{}
-	for _, field := range []struct {
-		name  string
-		value string
-	}{
-		{name: "accountID", value: cfg.AccountID},
-		{name: "clusterName", value: cfg.ClusterName},
-		{name: "cloudReportURL", value: cfg.CloudReportURL},
-		{name: "cloudAPIURL", value: cfg.CloudAPIURL},
-		{name: "accessKey", value: cfg.AccessKey},
-	} {
+	for _, field := range configOutputFields(cfg) {
 		if includeEmpty || field.value != "" {
 			payload[field.name] = field.value
 		}
@@ -53,16 +49,7 @@ func formatConfigOutputJSON(cfg *ConfigObj, includeEmpty bool) ([]byte, error) {
 
 func formatConfigOutputYAML(cfg *ConfigObj, includeEmpty bool) ([]byte, error) {
 	payload := map[string]string{}
-	for _, field := range []struct {
-		name  string
-		value string
-	}{
-		{name: "accountID", value: cfg.AccountID},
-		{name: "clusterName", value: cfg.ClusterName},
-		{name: "cloudReportURL", value: cfg.CloudReportURL},
-		{name: "cloudAPIURL", value: cfg.CloudAPIURL},
-		{name: "accessKey", value: cfg.AccessKey},
-	} {
+	for _, field := range configOutputFields(cfg) {
 		if includeEmpty || field.value != "" {
 			payload[field.name] = field.value
 		}
@@ -72,19 +59,20 @@ func formatConfigOutputYAML(cfg *ConfigObj, includeEmpty bool) ([]byte, error) {
 
 func formatConfigOutputText(cfg *ConfigObj, includeEmpty bool) ([]byte, error) {
 	var lines []string
-	for _, field := range []struct {
-		name  string
-		value string
-	}{
-		{name: "accountID", value: cfg.AccountID},
-		{name: "clusterName", value: cfg.ClusterName},
-		{name: "cloudReportURL", value: cfg.CloudReportURL},
-		{name: "cloudAPIURL", value: cfg.CloudAPIURL},
-		{name: "accessKey", value: cfg.AccessKey},
-	} {
+	for _, field := range configOutputFields(cfg) {
 		if includeEmpty || field.value != "" {
 			lines = append(lines, fmt.Sprintf("%s: %s", field.name, field.value))
 		}
 	}
 	return []byte(strings.Join(lines, "\n") + "\n"), nil
+}
+
+func configOutputFields(cfg *ConfigObj) []configOutputField {
+	return []configOutputField{
+		{name: "accountID", value: cfg.AccountID},
+		{name: "clusterName", value: cfg.ClusterName},
+		{name: "cloudReportURL", value: cfg.CloudReportURL},
+		{name: "cloudAPIURL", value: cfg.CloudAPIURL},
+		{name: "accessKey", value: cfg.AccessKey},
+	}
 }
