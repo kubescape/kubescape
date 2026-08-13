@@ -467,6 +467,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			}
 			namespace = nsStr
 		}
+		if namespace == "*" {
+			namespace = ""
+		}
 
 		key := fmt.Sprintf("rbac_scan:%s", namespace)
 		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
@@ -523,6 +526,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 				return mcp.NewToolResultError("namespace argument must be a string"), nil
 			}
 			namespace = nsStr
+		}
+		if namespace == "*" {
+			namespace = ""
 		}
 
 		key := fmt.Sprintf("network_scan:%s", namespace)
@@ -992,6 +998,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		frameworkNameStr = strings.TrimSpace(frameworkNameStr)
 		if frameworkNameStr == "" {
 			return mcp.NewToolResultError("framework_name argument must not be empty"), nil
+		}
+		if namespace == "*" {
+			namespace = ""
 		}
 
 		key := fmt.Sprintf("framework_scan:%s:%s", namespace, frameworkNameStr)
