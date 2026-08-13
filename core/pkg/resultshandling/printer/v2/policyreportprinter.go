@@ -29,6 +29,7 @@ const (
 
 	policyReportResultPass = "pass"
 	policyReportResultFail = "fail"
+	policyReportResultSkip = "skip"
 )
 
 var _ printer.IPrinter = &PolicyReportPrinter{}
@@ -178,8 +179,9 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 			policyResult := policyReportResultFail
 			if status.IsPassed() {
 				policyResult = policyReportResultPass
+			} else if status.IsSkipped() {
+				policyResult = policyReportResultSkip
 			}
-
 			severity := "Unknown"
 			message := ac.GetName()
 			if ctl := summaryControls.GetControl(reportsummary.EControlCriteriaID, ac.GetID()); ctl != nil {
@@ -204,9 +206,12 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 			})
 
 			s := summaries[namespace]
-			if policyResult == policyReportResultPass {
+			switch policyResult {
+			case policyReportResultPass:
 				s.Pass++
-			} else {
+			case policyReportResultSkip:
+				s.Skip++
+			default:
 				s.Fail++
 			}
 			summaries[namespace] = s
