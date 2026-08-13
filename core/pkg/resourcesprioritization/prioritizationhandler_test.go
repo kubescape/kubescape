@@ -81,14 +81,20 @@ func OPASessionObjMock(allPoliciesControls map[string]reporthandling.Control, mo
 }
 
 func WorkloadMockWithKind(kind string) workloadinterface.IMetadata {
-	mock := workloadinterface.NewWorkloadMock(nil)
-	mock.SetKind(kind)
-	return mock
+	raw := fmt.Sprintf(`{"apiVersion":"v1","kind":"%s","metadata":{"name":"mock-%s"}}`, kind, kind)
+	w, err := workloadinterface.NewWorkload([]byte(raw))
+	if err != nil {
+		panic(fmt.Sprintf("failed to create workload mock: %v", err))
+	}
+	return w
 }
 
 func DeploymentWorkloadMock(replicas int) workloadinterface.IMetadata {
 	var deploymentMock = fmt.Sprintf(`{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"privileged-deployment","labels":{"app":"nginx"}},"spec":{"replicas":%v,"selector":{"matchLabels":{"app":"nginx"}},"template":{"metadata":{"labels":{"app":"nginx"}},"spec":{"containers":[{"name":"nginx","image":"nginx:1.18.0","ports":[{"containerPort":80}],"securityContext":{"privileged":true}}]}}}}`, replicas)
-	w, _ := workloadinterface.NewWorkload([]byte(deploymentMock))
+	w, err := workloadinterface.NewWorkload([]byte(deploymentMock))
+	if err != nil {
+		panic(fmt.Sprintf("failed to create deployment workload mock: %v", err))
+	}
 	return w
 }
 
@@ -110,6 +116,8 @@ func TestNewResourcesPrioritizationHandler(t *testing.T) {
 	assert.Equal(t, handler.attackTracks[0].GetName(), "TestAttackTrack")
 	assert.Equal(t, handler.attackTracks[1].GetName(), "TestAttackTrack_2")
 	assert.Equal(t, handler.attackTracks[2].GetName(), "TestAttackTrack_3")
+	assert.True(t, handler.GetPodTemplateFallback())
+	assert.Equal(t, DefaultSupportedKinds(), handler.GetSupportedKinds())
 }
 
 func TestResourcesPrioritizationHandler_PrioritizeResources(t *testing.T) {
@@ -210,6 +218,15 @@ func TestResourcesPrioritizationHandler_PrioritizeResources(t *testing.T) {
 	}
 }
 
+func RolloutWorkloadMock(replicas int) workloadinterface.IMetadata {
+	var rolloutMock = fmt.Sprintf(`{"apiVersion":"argoproj.io/v1alpha1","kind":"Rollout","metadata":{"name":"vulnerable-rollout","namespace":"default"},"spec":{"replicas":%v,"template":{"spec":{"containers":[{"name":"web","image":"nginx:1.18.0","securityContext":{"privileged":true}}]}}}}`, replicas)
+	w, err := workloadinterface.NewWorkload([]byte(rolloutMock))
+	if err != nil {
+		panic(fmt.Sprintf("failed to create rollout workload mock: %v", err))
+	}
+	return w
+}
+
 func TestResourcesPrioritizationHandler_isSupportedKind(t *testing.T) {
 	handler := &ResourcesPrioritizationHandler{}
 	assert.True(t, handler.isSupportedKind(WorkloadMockWithKind("Deployment")))
@@ -222,6 +239,116 @@ func TestResourcesPrioritizationHandler_isSupportedKind(t *testing.T) {
 	assert.False(t, handler.isSupportedKind(nil))
 	assert.False(t, handler.isSupportedKind(WorkloadMockWithKind("ConfigMap")))
 	assert.False(t, handler.isSupportedKind(WorkloadMockWithKind("ServiceAccount")))
+}
+
+func TestResourcesPrioritizationHandler_ConfigurableSupportedKinds(t *testing.T) {
+	handler := &ResourcesPrioritizationHandler{}
+
+	// Default supported kinds check (unset slice)
+	assert.True(t, handler.isSupportedKind(WorkloadMockWithKind("Deployment")))
+	assert.False(t, handler.isSupportedKind(WorkloadMockWithKind("MyCustomKind")))
+
+	// Add supported kind onto zero-value handler seeds DefaultSupportedKinds
+	handler.AddSupportedKinds("MyCustomKind")
+	assert.True(t, handler.isSupportedKind(WorkloadMockWithKind("MyCustomKind")))
+	assert.True(t, handler.isSupportedKind(WorkloadMockWithKind("Deployment")), "Deployment should remain supported after AddSupportedKinds on zero-value handler")
+
+	// Override supported kinds
+	handler.SetSupportedKinds([]string{"Rollout"})
+	assert.True(t, handler.isSupportedKind(WorkloadMockWithKind("Rollout")))
+	assert.Contains(t, handler.GetSupportedKinds(), "Rollout")
+
+	// Defensive copy verification on GetSupportedKinds
+	kinds := handler.GetSupportedKinds()
+	kinds[0] = "MODIFIED"
+	assert.NotEqual(t, "MODIFIED", handler.GetSupportedKinds()[0])
+
+	defaultKinds := DefaultSupportedKinds()
+	defaultKinds[0] = "MODIFIED"
+	assert.NotEqual(t, "MODIFIED", DefaultSupportedKinds()[0])
+}
+
+func TestResourcesPrioritizationHandler_DynamicPodTemplateSpecFallback(t *testing.T) {
+	handler := &ResourcesPrioritizationHandler{
+		podTemplateFallback: true,
+	}
+
+	// ArgoCD Rollout with spec.template.spec.containers (not in supportedKinds list)
+	rolloutWorkload := RolloutWorkloadMock(2)
+	assert.True(t, handler.isSupportedKind(rolloutWorkload), "ArgoCD Rollout manifest with pod template spec should be dynamically detected")
+
+	// Direct spec.containers branch for Pod-shaped custom workload
+	podSpecRaw := `{"apiVersion":"v1","kind":"CustomPod","metadata":{"name":"custom-pod"},"spec":{"containers":[{"name":"app","image":"nginx"}]}}`
+	customPod, err := workloadinterface.NewWorkload([]byte(podSpecRaw))
+	assert.NoError(t, err)
+	assert.True(t, handler.isSupportedKind(customPod), "Custom workload with direct spec.containers should be dynamically detected")
+
+	// ConfigMap workload without pod template spec
+	configMapYAML := `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm"},"data":{"key":"val"}}`
+	cmWorkload, err := workloadinterface.NewWorkload([]byte(configMapYAML))
+	assert.NoError(t, err)
+	assert.False(t, handler.isSupportedKind(cmWorkload), "ConfigMap should not be detected as supported workload")
+}
+
+func TestResourcesPrioritizationHandler_PodTemplateFallbackKnobAndScope(t *testing.T) {
+	handler := &ResourcesPrioritizationHandler{
+		podTemplateFallback: true,
+	}
+
+	// Dynamic fallback runs when fallback is enabled
+	rolloutWorkload := RolloutWorkloadMock(1)
+	assert.True(t, handler.isSupportedKind(rolloutWorkload))
+
+	// Narrow scope with SetSupportedKinds to only "Deployment"
+	handler.SetSupportedKinds([]string{"Deployment"})
+
+	// While fallback is true, Rollout is still prioritized due to pod template spec
+	assert.True(t, handler.isSupportedKind(rolloutWorkload))
+
+	// Turn fallback off
+	handler.SetPodTemplateFallback(false)
+	assert.False(t, handler.GetPodTemplateFallback())
+	assert.False(t, handler.isSupportedKind(rolloutWorkload), "Rollout should be rejected when fallback is false and not in configured kinds")
+	assert.True(t, handler.isSupportedKind(WorkloadMockWithKind("Deployment")), "Deployment should still be supported")
+
+	// Explicitly empty supportedKinds with fallback off
+	handler.SetSupportedKinds([]string{})
+	assert.False(t, handler.isSupportedKind(WorkloadMockWithKind("Deployment")), "explicitly empty supported kinds should match no kind")
+	assert.Empty(t, handler.GetSupportedKinds())
+
+	// Reset to nil (unset -> default kinds)
+	handler.SetSupportedKinds(nil)
+	assert.Equal(t, DefaultSupportedKinds(), handler.GetSupportedKinds())
+}
+
+func TestResourcesPrioritizationHandler_PrioritizeCustomWorkload(t *testing.T) {
+	handler, _ := NewResourcesPrioritizationHandler(context.Background(), &AttackTracksGetterMock{}, false)
+
+	allPoliciesControls := map[string]reporthandling.Control{
+		"C-001": ControlMock("C-001", 3, []string{"security"}, []string{"D"}),
+		"C-002": ControlMock("C-002", 4, []string{"security"}, []string{"B", "C"}),
+	}
+	results := map[string]resourcesresults.Result{
+		"rollout1": {
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedControlMock("C-001", apis.StatusFailed),
+				ResourceAssociatedControlMock("C-002", apis.StatusFailed),
+			},
+		},
+	}
+	controls := map[string]reportsummary.ControlSummary{
+		"C-001": {ControlID: "C-001", ScoreFactor: 3},
+		"C-002": {ControlID: "C-002", ScoreFactor: 4},
+	}
+	resources := map[string]workloadinterface.IMetadata{
+		"rollout1": RolloutWorkloadMock(1),
+	}
+
+	sessionObj := OPASessionObjMock(allPoliciesControls, results, controls, resources)
+	err := handler.PrioritizeResources(sessionObj)
+	assert.NoError(t, err)
+	assert.Len(t, sessionObj.ResourcesPrioritized, 1, "custom rollout workload should be prioritized")
+	assert.Contains(t, sessionObj.ResourcesPrioritized, "rollout1")
 }
 
 type AttackTrackControlsLookupMock struct {

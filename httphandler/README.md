@@ -58,6 +58,11 @@ Triggers a Kubescape scan. By default, scans run asynchronously and return a sca
 
 **Response (sync with `wait=true`):** Same as [Get Results](#get-results) response.
 
+The service accepts a bounded number of pending scans. If the queue is full,
+the endpoint returns `429 Too Many Requests` with a `Retry-After` header. A
+request body larger than the configured limit returns `413 Request Entity Too
+Large` before the scan is admitted.
+
 ---
 
 ### Get Results
@@ -165,8 +170,6 @@ Delete cached scan results.
   "includeNamespaces": ["production", "staging"],
   "useCachedArtifacts": false,
   "keepLocal": true,
-  "account": "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
-  "accessKey": "your-access-key",
   "targetType": "framework",
   "targetNames": ["nsa", "mitre"]
 }
@@ -179,10 +182,15 @@ Delete cached scan results.
 | `includeNamespaces` | []string | Namespaces to include in scan |
 | `useCachedArtifacts` | bool | Use cached artifacts (offline mode) |
 | `keepLocal` | bool | Don't submit results to backend |
-| `account` | string | Kubescape SaaS account ID |
-| `accessKey` | string | Kubescape SaaS access key |
 | `targetType` | string | `"framework"` or `"control"` |
 | `targetNames` | []string | Frameworks/controls to scan |
+
+> **`account` / `accessKey` are ignored.** These endpoints are unauthenticated,
+> so the server never takes its Kubescape SaaS identity from the request body —
+> otherwise any caller could redirect results to an account they control. The
+> identity comes from the server's own configuration (`KS_ACCOUNT_ID` /
+> `KS_ACCESS_KEY`, or the credentials loaded at startup). The fields are still
+> accepted in the payload for backward compatibility, but have no effect.
 
 ### Response Object
 
@@ -252,12 +260,20 @@ curl -X POST http://127.0.0.1:8080/v1/scan \
 
 ### Scan with Account Integration
 
+The account and access key are configured on the server, not sent per request
+(see the note under [Trigger Scan Object](#trigger-scan-object)):
+
+```bash
+# on the server / in the Helm values
+export KS_ACCOUNT_ID="YOUR-ACCOUNT-ID"
+export KS_ACCESS_KEY="YOUR-ACCESS-KEY"
+```
+
 ```bash
 curl -X POST http://127.0.0.1:8080/v1/scan \
   -H "Content-Type: application/json" \
   -d '{
-    "account": "YOUR-ACCOUNT-ID",
-    "accessKey": "YOUR-ACCESS-KEY",
+    "submit": true,
     "targetType": "framework",
     "targetNames": ["nsa"]
   }'
@@ -277,13 +293,18 @@ Configure the HTTP handler using environment variables:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `KS_ACCOUNT` | Default account ID | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| `KS_ACCOUNT_ID` | Kubescape SaaS account ID used for every scan | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| `KS_ACCESS_KEY` | Kubescape SaaS access key used for every scan | `your-access-key` |
 | `KS_EXCLUDE_NAMESPACES` | Default namespaces to exclude | `kube-system,kube-public` |
 | `KS_INCLUDE_NAMESPACES` | Default namespaces to include | `production,staging` |
 | `KS_FORMAT` | Default output format | `json` |
 | `KS_LOGGER_NAME` | Logger name | `kubescape` |
 | `KS_LOGGER_LEVEL` | Log level | `info`, `debug`, `warning`, `error` |
 | `KS_DOWNLOAD_ARTIFACTS` | Download artifacts on each scan | `true`, `false` |
+| `KS_SCAN_QUEUE_CAPACITY` | Maximum number of scans waiting behind the active scan | `10` |
+| `KS_SCAN_REQUEST_MAX_BYTES` | Maximum size in bytes of a `POST /v1/scan` request body | `1048576` |
+| `KS_PPROF_ENABLED` | Enable the pprof debug server (off by default; binds to loopback only) | `true`, `false` |
+| `KS_PPROF_ADDR` | Address the pprof debug server binds to when enabled | `127.0.0.1:6060` |
 
 ---
 
@@ -315,18 +336,27 @@ export KS_LOGGER_LEVEL=debug
 
 ### Performance Profiling
 
-The HTTP handler exposes pprof endpoints for performance analysis:
+The pprof debug server is **off by default** and binds to `127.0.0.1` only, so it's
+reachable from inside the pod's network namespace but not from the network. Enable it
+and reach it via `kubectl port-forward`:
 
 ```bash
+export KS_PPROF_ENABLED=true
+# then, e.g.: kubectl port-forward <pod> 6060:6060
+
 # Heap profile
-go tool pprof http://localhost:6060/debug/pprof/heap
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap
 
 # CPU profile
-go tool pprof http://localhost:6060/debug/pprof/profile?seconds=30
+go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=30
 
 # Goroutine profile
-go tool pprof http://localhost:6060/debug/pprof/goroutine
+go tool pprof http://127.0.0.1:6060/debug/pprof/goroutine
 ```
+
+Set `KS_PPROF_ADDR` to change the bind address (e.g. if `6060` collides with a sidecar
+in the pod). Binding to anything other than loopback is a deliberate, explicit choice —
+do so only on a trusted network.
 
 For more information on pprof, see the [pprof documentation](https://pkg.go.dev/net/http/pprof).
 

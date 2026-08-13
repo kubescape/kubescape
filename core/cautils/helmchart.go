@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -33,27 +34,40 @@ func IsHelmDirectory(path string) (bool, error) {
 	return helmchartutil.IsChartDir(path)
 }
 
-// newRegistryClient creates a Helm registry client for chart authentication
-func newRegistryClient(certFile, keyFile, caFile string, insecureSkipTLS, plainHTTP bool, username, password string) (*helmregistry.Client, error) {
+// newRegistryClient creates a Helm registry client for chart authentication.
+//
+// Only plainHTTP and basic-auth credentials are exposed here, because those
+// are the only options the sole call site (buildDependencies, below) ever
+// varies - it currently always passes plainHTTP=false and empty credentials.
+// An earlier version of this function also accepted certFile, keyFile,
+// caFile, and insecureSkipTLS, but those were broken rather than merely
+// unused: certFile/keyFile/caFile were passed to
+// helmregistry.ClientOptCredentialsFile, which sets the client's
+// *credentials store* path (e.g. ~/.docker/config.json), not TLS material -
+// caFile silently clobbered whatever certFile/keyFile had set (same
+// underlying field), and any of the three made helmregistry.NewClient fail
+// outright on a real PEM path ("invalid config format"). insecureSkipTLS was
+// left unwired entirely. Wiring TLS material correctly requires either
+// building a *tls.Config locally and passing it via
+// helmregistry.ClientOptHTTPClient, or using helm's own
+// registry.NewRegistryClientWithTLS(...) (helm.sh/helm/v3/pkg/registry/util.go)
+// for the whole client construction. Add that machinery back if a caller
+// ever needs cert/key/CA/insecureSkipTLS again, rather than reintroducing
+// unwired or miswired parameters.
+func newRegistryClient(plainHTTP bool, username, password string) (*helmregistry.Client, error) {
 	// Basic client options with debug disabled
 	opts := []helmregistry.ClientOption{
 		helmregistry.ClientOptDebug(false),
 		helmregistry.ClientOptWriter(io.Discard),
 	}
 
-	// Add TLS certificates if provided
-	if certFile != "" && keyFile != "" {
-		opts = append(opts, helmregistry.ClientOptCredentialsFile(certFile))
-	}
-
-	// Add CA certificate if provided
-	if caFile != "" {
-		opts = append(opts, helmregistry.ClientOptCredentialsFile(caFile))
-	}
-
-	// Enable plain HTTP if needed
-	if insecureSkipTLS {
+	if plainHTTP {
 		opts = append(opts, helmregistry.ClientOptPlainHTTP())
+	}
+
+	// Add basic auth credentials if provided
+	if username != "" && password != "" {
+		opts = append(opts, helmregistry.ClientOptBasicAuth(username, password))
 	}
 
 	registryClient, err := helmregistry.NewClient(opts...)
@@ -92,7 +106,7 @@ func NewHelmChart(path string) (*HelmChart, error) {
 // buildDependencies builds chart dependencies using the downloader manager
 func buildDependencies(chartPath string) error {
 	// Create registry client for authentication
-	registryClient, err := newRegistryClient("", "", "", false, false, "", "")
+	registryClient, err := newRegistryClient(false, "", "")
 	if err != nil {
 		return fmt.Errorf("failed to create registry client: %w", err)
 	}
@@ -120,6 +134,66 @@ func buildDependencies(chartPath string) error {
 
 func (hc *HelmChart) GetName() string {
 	return hc.chart.Name()
+}
+
+// ownsUnpackedDependency reports whether candidate is a chart directory loaded
+// through hc's on-disk charts/ dependency tree. It follows the loaded chart graph
+// instead of relying on the path alone: a directory excluded by .helmignore is not
+// owned by the parent and remains eligible for a standalone fallback render.
+func (hc *HelmChart) ownsUnpackedDependency(candidate string) bool {
+	rel, err := filepath.Rel(hc.path, candidate)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(filepath.Clean(rel), string(filepath.Separator))
+	current := hc.chart
+	for len(parts) > 0 {
+		if len(parts) < 2 || parts[0] != "charts" {
+			return false
+		}
+
+		current = loadedUnpackedDependency(current, parts[1])
+		if current == nil {
+			return false
+		}
+		parts = parts[2:]
+	}
+	return true
+}
+
+// loadedUnpackedDependency matches a direct charts/<directory> tree from the
+// parent's raw, post-.helmignore file set to the dependency object Helm loaded
+// from those same files. Comparing the complete file set avoids assuming that
+// the directory name equals Chart.yaml's name or that chart names are unique.
+func loadedUnpackedDependency(parent *helmchart.Chart, directory string) *helmchart.Chart {
+	prefix := filepath.ToSlash(filepath.Join("charts", directory)) + "/"
+	files := make(map[string][]byte)
+	for _, file := range parent.Raw {
+		if strings.HasPrefix(file.Name, prefix) {
+			files[strings.TrimPrefix(file.Name, prefix)] = file.Data
+		}
+	}
+	if len(files) == 0 {
+		return nil
+	}
+
+	for _, dependency := range parent.Dependencies() {
+		if len(dependency.Raw) != len(files) {
+			continue
+		}
+		matches := true
+		for _, file := range dependency.Raw {
+			data, ok := files[file.Name]
+			if !ok || !bytes.Equal(data, file.Data) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return dependency
+		}
+	}
+	return nil
 }
 
 func (hc *HelmChart) GetDefaultValues() map[string]any {
@@ -181,6 +255,7 @@ func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]any, releaseOpts 
 		wls, e := ReadFile([]byte(renderedYaml), YAML_FILE_FORMAT)
 		if e != nil {
 			logger.L().Debug("failed to read rendered yaml file", helpers.String("file", path), helpers.Error(e))
+			errs = append(errs, fmt.Errorf("failed to parse rendered Helm template %q: %w", path, e))
 		}
 		if len(wls) == 0 {
 			continue

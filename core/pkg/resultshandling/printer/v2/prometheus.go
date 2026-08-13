@@ -60,7 +60,7 @@ func (pp *PrometheusPrinter) Score(score float32) {
 
 	fmt.Fprintf(pp.writer, "# HELP kubescape_score Overall compliance score (100 Excellent, 0 All failed)\n")
 	fmt.Fprintf(pp.writer, "# TYPE kubescape_score gauge\n")
-	fmt.Fprintf(pp.writer, "kubescape_score %d\n", cautils.Float32ToInt(score))
+	fmt.Fprintf(pp.writer, "kubescape_score %d\n", cautils.ComplianceScoreToInt(score))
 }
 
 func (pp *PrometheusPrinter) generatePrometheusFormat(
@@ -77,19 +77,30 @@ func (pp *PrometheusPrinter) generatePrometheusFormat(
 	return m
 }
 
-func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
-	if opaSessionObj == nil {
-		logger.L().Ctx(ctx).Error("failed to print results, missing data")
-		return
-	}
+// generateImagePrometheusFormat builds CVE-count metrics, grouped by image and severity, for an image scan (#2782)
+func (pp *PrometheusPrinter) generateImagePrometheusFormat(imageScanData []cautils.ImageScanData) *Metrics {
+	m := &Metrics{isImageScan: true}
+	m.setImageVulnerabilities(imageScanData)
+	return m
+}
 
-	metrics := pp.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails, opaSessionObj.ScanCoverage)
+func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	var metrics *Metrics
+
+	if opaSessionObj != nil {
+		metrics = pp.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails, opaSessionObj.ScanCoverage)
+	} else if len(imageScanData) > 0 {
+		metrics = pp.generateImagePrometheusFormat(imageScanData)
+	} else {
+		return fmt.Errorf("failed to print results, missing data")
+	}
 
 	if _, err := pp.writer.Write([]byte(metrics.String())); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to write results: %w", err)
 	}
 	printer.LogOutputFile(pp.writer.Name())
+	return nil
 }
 
 func (p *PrometheusPrinter) CloseWriter() {

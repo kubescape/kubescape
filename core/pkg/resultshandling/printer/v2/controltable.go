@@ -6,6 +6,7 @@ import (
 
 	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -25,14 +26,11 @@ type TableRow struct {
 func generateTableRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) *TableRow {
 	tableRow := &TableRow{
 		ref:             controlSummary.GetID(),
-		name:            controlSummary.GetName(),
+		name:            utils.TruncateName(controlSummary.GetName(), controlNameMaxLength),
 		counterFailed:   fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed()),
 		counterAll:      fmt.Sprintf("%d", controlSummary.NumberOfResources().All()),
 		severity:        apis.ControlSeverityToString(controlSummary.GetScoreFactor()),
 		complianceScore: getComplianceScoreColumn(controlSummary, infoToPrintInfo),
-	}
-	if len(controlSummary.GetName()) > controlNameMaxLength {
-		tableRow.name = controlSummary.GetName()[:controlNameMaxLength] + "..."
 	}
 
 	return tableRow
@@ -51,10 +49,10 @@ func getComplianceScoreColumn(controlSummary reportsummary.IControlSummary, info
 	if controlSummary.GetStatus().IsSkipped() {
 		return fmt.Sprintf("%s %s", "Action Required", getInfoColumn(controlSummary, infoToPrintInfo))
 	}
-	if compliance := cautils.Float32ToInt(controlSummary.GetComplianceScore()); compliance < 0 {
+	if compliance := cautils.ComplianceScoreToInt(controlSummary.GetComplianceScore()); compliance < 0 {
 		return "N/A"
 	} else {
-		return fmt.Sprintf("%d", cautils.Float32ToInt(controlSummary.GetComplianceScore())) + "%"
+		return fmt.Sprintf("%d", compliance) + "%"
 	}
 
 }

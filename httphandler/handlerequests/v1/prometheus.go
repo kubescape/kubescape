@@ -36,35 +36,51 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	scanID := uuid.NewString()
 	defer handler.recover(r.Context(), w, scanID)
 
-	handler.state.setBusy(scanID)
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	scanCtx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
+	defer cancel()
+
+	handler.state.setBusy(scanID, cancel)
 	defer handler.state.setNotBusy(scanID)
 
 	metricsQueryParams := &MetricsQueryParams{}
 	if err := schema.NewDecoder().Decode(metricsQueryParams, r.URL.Query()); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), scanID)
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), scanID)
 		return
 	}
-	skipPersistence := r.URL.Query().Get("skipPersistence") == "true"
-
 	resultsFile := filepath.Join(OutputDir, scanID)
-	scanInfo := getPrometheusDefaultScanCommand(scanID, resultsFile, metricsQueryParams.Frameworks)
+	scanInfo, policyIdentifiers := getPrometheusDefaultScanCommand(scanID, resultsFile, metricsQueryParams.Frameworks)
 
 	scanParams := &scanRequestParams{
 		scanQueryParams: &ScanQueryParams{
 			ReturnResults:   true,
 			KeepResults:     false,
-			SkipPersistence: skipPersistence,
+			SkipPersistence: metricsQueryParams.SkipPersistence,
 		},
-		scanInfo: scanInfo,
-		scanID:   scanID,
-		ctx:      context.WithoutCancel(r.Context()),
-		resp:     make(chan *utilsmetav1.Response, 1),
+		scanInfo:          scanInfo,
+		policyIdentifiers: policyIdentifiers,
+		scanID:            scanID,
+		ctx:               scanCtx,
+		resp:              make(chan *utilsmetav1.Response, 1),
 	}
 
 	// send to scan queue
 	logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/metrics"))
-	handler.scanRequestChan <- scanParams
+	select {
+	case handler.scanRequestChan <- scanParams:
+	default:
+		handler.state.setNotBusy(scanID)
+		w.Header().Set("Retry-After", "1")
+		handler.writeErrorWithStatus(w,
+			fmt.Errorf("scan queue is full; retry the request later"),
+			"", http.StatusTooManyRequests)
+		return
+	}
 
 	// wait for scan to complete
 	results := <-scanParams.resp
@@ -92,10 +108,10 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	w.Write(f)
 }
 
-func getPrometheusDefaultScanCommand(scanID, resultsFile, frameworksParam string) *cautils.ScanInfo {
+func getPrometheusDefaultScanCommand(scanID, resultsFile, frameworksParam string) (*cautils.ScanInfo, []cautils.PolicyIdentifier) {
 	scanInfo := defaultScanInfo()
 	scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape from downloading the artifacts every time)
-	scanInfo.Submit = false                              // do not submit results every scan
+	scanInfo.Submit.SetBool(false)                       // deliberate opt-out, not left at the default - never flipped into submit mode by backend auto-detection
 	scanInfo.Local = true                                // do not submit results every scan
 	scanInfo.FrameworkScan = true
 	scanInfo.HostSensorEnabled.SetBool(false)                // disable host scanner
@@ -105,18 +121,19 @@ func getPrometheusDefaultScanCommand(scanID, resultsFile, frameworksParam string
 	scanInfo.Output = resultsFile                            // results output
 	scanInfo.Format = envToString("KS_FORMAT", "prometheus") // default output format is prometheus
 
+	var policyIdentifiers []cautils.PolicyIdentifier
 	// Check if specific frameworks are requested via query parameter
-	if frameworksParam != "" {
+	frameworks := splitAndTrim(frameworksParam, ",")
+	if len(frameworks) > 0 {
 		// Scan specific frameworks (comma-separated list)
-		frameworks := splitAndTrim(frameworksParam, ",")
-		scanInfo.SetPolicyIdentifiers(frameworks, utilsapisv1.KindFramework)
+		policyIdentifiers = cautils.BuildPolicyIdentifiers(frameworks, utilsapisv1.KindFramework)
 	} else {
 		// Default: scan all available frameworks (including CIS)
 		scanInfo.ScanAll = true
 		// Framework identifiers will be set dynamically by the scan process when ScanAll is true
 	}
 
-	return scanInfo
+	return scanInfo, policyIdentifiers
 }
 
 // splitAndTrim splits a string by delimiter and trims whitespace from each element

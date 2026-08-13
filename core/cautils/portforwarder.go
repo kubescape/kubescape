@@ -66,14 +66,18 @@ func CreatePortForwarder(k8sClient *k8sinterface.KubernetesApi, pod *v1.Pod, for
 	stopChan, readyChan := make(chan struct{}, 1), make(chan struct{})
 	out, errOut := new(bytes.Buffer), new(bytes.Buffer)
 
-	forwarder, err := portforward.NewOnAddresses(dialer, []string{"localhost"}, []string{fmt.Sprintf("%s:%s", getPortForwardingPort(), forwardingPort)}, stopChan, readyChan, out, errOut)
+	// Resolve the requested port once, so the forwarder and the fallback in
+	// GetPortForwardLocalhost cannot disagree if the environment changes.
+	localPort := getPortForwardingPort()
+
+	forwarder, err := portforward.NewOnAddresses(dialer, []string{"localhost"}, []string{fmt.Sprintf("%s:%s", localPort, forwardingPort)}, stopChan, readyChan, out, errOut)
 	if err != nil {
 		return nil, err
 	}
 
 	return &portForward{
 		PortForwarder: forwarder,
-		localPort:     getPortForwardingPort(),
+		localPort:     localPort,
 		stopChan:      stopChan,
 		readyChan:     readyChan,
 		errChan:       make(chan error, 1),
@@ -94,8 +98,14 @@ func (p *portForward) waitForPortForwardReadiness() error {
 	}
 }
 
+// GetPortForwardLocalhost reports the bound port, which differs from the
+// requested one when DEFAULT_PORT_FORWARDER_PORT is 0. GetPorts() errors out
+// until the listeners are ready, hence the fallback.
 func (p *portForward) GetPortForwardLocalhost() string {
-	return "localhost:" + getPortForwardingPort()
+	if ports, err := p.GetPorts(); err == nil && len(ports) > 0 {
+		return fmt.Sprintf("localhost:%d", ports[0].Local)
+	}
+	return "localhost:" + p.localPort
 }
 
 func (p *portForward) StopPortForwarder() {

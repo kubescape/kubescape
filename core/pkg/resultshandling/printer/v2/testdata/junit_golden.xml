@@ -2,7 +2,7 @@
 <testsuites errors="0" failures="16" tests="24" name="Kubescape Scanning">
   <testsuite tests="24" name="NSA" errors="0" failures="16" id="0" skipped="3" timestamp="2024-03-14T09:15:26Z">
     <properties>
-      <property name="complianceScore" value="19.65"></property>
+      <property name="complianceScore" value="73.25"></property>
     </properties>
     <testcase classname="NSA" name="Exec into container">
       <failure message="Exec into container failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0002&#xA;&#xA;</failure>

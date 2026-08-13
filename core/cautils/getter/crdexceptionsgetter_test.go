@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"context"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -12,7 +13,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	crfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -54,7 +57,7 @@ func TestCRDExceptionsGetter_GetExceptions(t *testing.T) {
 	)
 
 	getter := &CRDExceptionsGetter{client: client}
-	exceptions, err := getter.GetExceptions("cluster-a")
+	exceptions, err := getter.GetExceptions(context.TODO(), "cluster-a")
 	require.NoError(t, err)
 	require.Len(t, exceptions, 2)
 
@@ -74,7 +77,7 @@ func TestCRDExceptionsGetter_GetExceptions(t *testing.T) {
 
 func TestCRDExceptionsGetter_NilClient(t *testing.T) {
 	getter := &CRDExceptionsGetter{}
-	exceptions, err := getter.GetExceptions("cluster-a")
+	exceptions, err := getter.GetExceptions(context.TODO(), "cluster-a")
 	require.NoError(t, err)
 	assert.Empty(t, exceptions)
 }
@@ -115,12 +118,120 @@ func TestCRDExceptionsGetter_GetExceptionsResolvesClusterNamespaceSelector(t *te
 	)
 
 	getter := &CRDExceptionsGetter{client: dynamicClient, k8sClient: k8sClient}
-	exceptions, err := getter.GetExceptions("cluster-a")
+	exceptions, err := getter.GetExceptions(context.TODO(), "cluster-a")
 	require.NoError(t, err)
 	require.Len(t, exceptions, 1)
 	require.Len(t, exceptions[0].Resources, 1)
 	assert.Equal(t, "staging", exceptions[0].Resources[0].Attributes[identifiers.AttributeNamespace])
 	assert.Equal(t, "ClusterSecurityException", exceptions[0].Attributes["securityExceptionKind"])
+}
+
+type mockDynamicClient struct {
+	dynamic.Interface
+}
+
+func (m *mockDynamicClient) Resource(resource schema.GroupVersionResource) dynamic.NamespaceableResourceInterface {
+	return &mockNamespaceableResource{NamespaceableResourceInterface: m.Interface.Resource(resource)}
+}
+
+type mockNamespaceableResource struct {
+	dynamic.NamespaceableResourceInterface
+}
+
+func (m *mockNamespaceableResource) Namespace(s string) dynamic.ResourceInterface {
+	return &mockResource{ResourceInterface: m.NamespaceableResourceInterface.Namespace(s)}
+}
+
+func (m *mockNamespaceableResource) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return m.NamespaceableResourceInterface.List(ctx, opts)
+}
+
+type mockResource struct {
+	dynamic.ResourceInterface
+}
+
+func (m *mockResource) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return m.ResourceInterface.List(ctx, opts)
+}
+
+func TestCRDExceptionsGetter_ContextCancellation(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	k8sClient := crfake.NewClientBuilder().WithScheme(scheme).Build()
+
+	listKinds := map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	}
+	fakeClient := fake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds)
+	mockClient := &mockDynamicClient{Interface: fakeClient}
+
+	// Create a canceled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	getter := &CRDExceptionsGetter{client: mockClient, k8sClient: k8sClient}
+	_, err := getter.GetExceptions(ctx, "cluster-a")
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+type mockListClient struct {
+	client.Client
+}
+
+func (m *mockListClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return m.Client.List(ctx, list, opts...)
+}
+
+func TestCRDExceptionsGetter_ContextCancellationOnConversion(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	k8sClient := crfake.NewClientBuilder().WithScheme(scheme).Build()
+
+	mockClient := &mockListClient{Client: k8sClient}
+
+	// Create a canceled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	listKinds := map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	}
+	dynamicClient := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds,
+		&unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "kubescape.io/v1beta1",
+				"kind":       "ClusterSecurityException",
+				"metadata": map[string]any{
+					"name": "cse-staging",
+				},
+				"spec": map[string]any{
+					"match": map[string]any{
+						"namespaceSelector": map[string]any{
+							"matchLabels": map[string]any{"env": "staging"},
+						},
+					},
+					"posture": []any{
+						map[string]any{"controlID": "C-0003", "action": "alert_only"},
+					},
+				},
+			},
+		},
+	)
+
+	getter := &CRDExceptionsGetter{client: dynamicClient, k8sClient: mockClient}
+	_, err := getter.GetExceptions(ctx, "cluster-a")
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestCRDExceptionsGetter_PartialApplicationOnConversionError(t *testing.T) {
@@ -150,7 +261,7 @@ func TestCRDExceptionsGetter_PartialApplicationOnConversionError(t *testing.T) {
 	)
 
 	getter := &CRDExceptionsGetter{client: client}
-	exceptions, err := getter.GetExceptions("cluster-a")
+	exceptions, err := getter.GetExceptions(context.TODO(), "cluster-a")
 	require.NoError(t, err, "a single malformed CRD must not fail the whole getter")
 	require.Len(t, exceptions, 1, "the valid CRD must still be applied when another one fails to convert")
 	assert.Equal(t, "C-0001", exceptions[0].PosturePolicies[0].ControlID)
@@ -182,7 +293,7 @@ func TestConvertCRDObjectToPosturePolicies_ObjectSelectorWithNamespaceSelector(t
 	// namespaceSelector x resources builds the designator cross product; objectSelector
 	// is carried separately as a policy-level LabelSelector (not flattened into the
 	// designators) and ANDed against it by the exception processor.
-	policies, err := convertCRDObjectToPosturePolicies(obj, "ClusterSecurityException", k8sClient)
+	policies, err := convertCRDObjectToPosturePolicies(context.TODO(), obj, "ClusterSecurityException", k8sClient)
 	require.NoError(t, err)
 	require.Len(t, policies, 1)
 
@@ -210,7 +321,7 @@ func TestConvertCRDObjectToPosturePolicies_DefaultScope(t *testing.T) {
 		},
 	}
 
-	policies, err := convertCRDObjectToPosturePolicies(obj, "ClusterSecurityException", nil)
+	policies, err := convertCRDObjectToPosturePolicies(context.TODO(), obj, "ClusterSecurityException", nil)
 	require.NoError(t, err)
 	require.Len(t, policies, 1)
 	assert.Equal(t, "*", policies[0].Resources[0].Attributes[identifiers.AttributeKind])
@@ -243,7 +354,7 @@ func TestConvertCRDObjectToPosturePolicies_FrameworkName(t *testing.T) {
 				"spec":       map[string]any{"posture": []any{tc.postureItem}},
 			}}
 
-			policies, err := convertCRDObjectToPosturePolicies(obj, "SecurityException", nil)
+			policies, err := convertCRDObjectToPosturePolicies(context.TODO(), obj, "SecurityException", nil)
 			require.NoError(t, err)
 			require.Len(t, policies, 1)
 			assert.Equal(t, tc.wantFramework, policies[0].PosturePolicies[0].FrameworkName)
@@ -294,7 +405,7 @@ func TestBuildResourceDesignators_NamespacedScopeIsNotWidened(t *testing.T) {
 				},
 			}}
 
-			got, err := buildResourceDesignators(obj, "SecurityException", nil)
+			got, err := buildResourceDesignators(context.TODO(), obj, "SecurityException", nil)
 			require.NoError(t, err)
 			assert.ElementsMatch(t, tc.want, got)
 		})
@@ -406,7 +517,7 @@ func TestConvertCRDObjectToPosturePolicies_ObjectSelector(t *testing.T) {
 				},
 			}}
 
-			policies, err := convertCRDObjectToPosturePolicies(obj, tc.kind, nil)
+			policies, err := convertCRDObjectToPosturePolicies(context.TODO(), obj, tc.kind, nil)
 			require.NoError(t, err)
 			require.Len(t, policies, 1)
 
@@ -562,7 +673,7 @@ func TestBuildResourceDesignators_NamespaceSelector(t *testing.T) {
 				},
 			}}
 
-			got, err := buildResourceDesignators(obj, tc.kind, k8sClient)
+			got, err := buildResourceDesignators(context.TODO(), obj, tc.kind, k8sClient)
 			require.NoError(t, err)
 			assert.ElementsMatch(t, tc.want, got)
 		})

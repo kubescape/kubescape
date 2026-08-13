@@ -13,7 +13,7 @@ import (
 )
 
 func TestNewJsonPrinter(t *testing.T) {
-	pp := NewJsonPrinter()
+	pp := NewJsonPrinter("")
 	assert.NotNil(t, pp)
 	assert.Empty(t, pp)
 }
@@ -28,6 +28,11 @@ func TestScore_Json(t *testing.T) {
 			name:  "Score not an integer",
 			score: 20.7,
 			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 21\n",
+		},
+		{
+			name:  "Fractional score below perfect",
+			score: 99.5,
+			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 99\n",
 		},
 		{
 			name:  "Score less than 0",
@@ -56,7 +61,7 @@ func TestScore_Json(t *testing.T) {
 		},
 	}
 
-	jp := NewJsonPrinter()
+	jp := NewJsonPrinter("")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	stdjson "encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -21,8 +22,31 @@ func (hsh *HostSensorHandler) getCRDResources(ctx context.Context, resourceType 
 		return nil, fmt.Errorf("unsupported resource type: %s", resourceType)
 	}
 
-	// List CRD resources
-	items, err := hsh.listCRDResources(ctx, pluralName, resourceType.String())
+	clusterName := k8sinterface.GetContextName()
+	// Try loading from cache first
+	if cachedEnvelopes, err := loadFromCache(clusterName, resourceType.String()); err == nil {
+		return cachedEnvelopes, nil
+	} else if !os.IsNotExist(err) {
+		logger.L().Warning("Failed to load cache, proceeding to fetch", helpers.Error(err))
+	}
+
+	// List CRD resources and process them page by page
+	result := make([]hostsensor.HostSensorDataEnvelope, 0)
+	err := hsh.listCRDResources(ctx, pluralName, resourceType.String(), func(items []unstructured.Unstructured) error {
+		for _, item := range items {
+			envelope, err := hsh.convertCRDToEnvelope(item, resourceType)
+			if err != nil {
+				logger.L().Warning("Failed to convert CRD to envelope",
+					helpers.String("kind", resourceType.String()),
+					helpers.String("name", item.GetName()),
+					helpers.Error(err))
+				continue
+			}
+			result = append(result, envelope)
+		}
+		return nil
+	})
+
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to list CRD resources",
 			helpers.String("kind", resourceType.String()),
@@ -31,23 +55,14 @@ func (hsh *HostSensorHandler) getCRDResources(ctx context.Context, resourceType 
 		return nil, err
 	}
 
-	// Convert to HostSensorDataEnvelope format
-	result := make([]hostsensor.HostSensorDataEnvelope, 0, len(items))
-	for _, item := range items {
-		envelope, err := hsh.convertCRDToEnvelope(item, resourceType)
-		if err != nil {
-			logger.L().Warning("Failed to convert CRD to envelope",
-				helpers.String("kind", resourceType.String()),
-				helpers.String("name", item.GetName()),
-				helpers.Error(err))
-			continue
-		}
-		result = append(result, envelope)
-	}
-
 	logger.L().Ctx(ctx).Info("Retrieved resources from CRDs",
 		helpers.String("kind", resourceType.String()),
 		helpers.Int("count", len(result)))
+
+	// Save to cache
+	if err := saveToCache(clusterName, resourceType.String(), result); err != nil {
+		logger.L().Warning("Failed to save to cache", helpers.Error(err))
+	}
 
 	return result, nil
 }
