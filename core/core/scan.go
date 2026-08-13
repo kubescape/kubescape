@@ -705,8 +705,13 @@ func printPreflightResult(result *resourcehandler.PreflightResult) {
 		fmt.Printf("DISCOVERY FAILED  %s: %s\n", f.GVR, f.Error)
 	}
 
+	errored := result.Errored()
+	for _, c := range errored {
+		fmt.Printf("CHECK FAILED  list %s: %s\n", c.GVR, c.Reason)
+	}
+
 	denied := result.Denied()
-	if len(denied) == 0 {
+	if len(denied) == 0 && len(errored) == 0 {
 		fmt.Printf("All %d required resource type(s) can be listed with the current credentials.\n", len(result.Checks))
 		return
 	}
@@ -717,5 +722,7 @@ func printPreflightResult(result *resourcehandler.PreflightResult) {
 			fmt.Printf("        -> %s will not evaluate\n", strings.Join(c.AffectedControls, ", "))
 		}
 	}
-	fmt.Printf("\n%d/%d required resource type(s) can be listed. %d denied.\n", len(result.Checks)-len(denied), len(result.Checks), len(denied))
+
+	allowed := len(result.Checks) - len(denied) - len(errored)
+	fmt.Printf("\n%d/%d required resource type(s) can be listed. %d denied, %d could not be checked.\n", allowed, len(result.Checks), len(denied), len(errored))
 }

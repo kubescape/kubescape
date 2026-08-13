@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -14,11 +15,17 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
-// ssarReactor allows "list" access for every resource except those named in denied.
-func ssarReactor(denied map[string]bool) k8stesting.ReactionFunc {
+// ssarReactor allows "list" access for every resource except those named in
+// denied. It also asserts that Preflight always asks for the cluster-wide
+// "list" access the real collector needs, not a namespace-scoped one.
+func ssarReactor(t *testing.T, denied map[string]bool) k8stesting.ReactionFunc {
+	t.Helper()
 	return func(action k8stesting.Action) (bool, runtime.Object, error) {
 		createAction := action.(k8stesting.CreateAction)
 		ssar := createAction.GetObject().(*authorizationv1.SelfSubjectAccessReview)
+		require.Equal(t, "list", ssar.Spec.ResourceAttributes.Verb)
+		require.Empty(t, ssar.Spec.ResourceAttributes.Namespace)
+
 		ssar.Status.Allowed = !denied[ssar.Spec.ResourceAttributes.Resource]
 		if !ssar.Status.Allowed {
 			ssar.Status.Reason = "forbidden"
@@ -33,7 +40,7 @@ func TestPreflight_ReportsDeniedResourceWithAffectedControls(t *testing.T) {
 		return true, nil, nil
 	})
 	fakeClient := handler.k8s.KubernetesClient.(*fakeclientset.Clientset)
-	fakeClient.PrependReactor("create", "selfsubjectaccessreviews", ssarReactor(map[string]bool{"clusterrolebindings": true}))
+	fakeClient.PrependReactor("create", "selfsubjectaccessreviews", ssarReactor(t, map[string]bool{"clusterrolebindings": true}))
 
 	podRule := mockRule("pod-rule", []reporthandling.RuleMatchObjects{mockMatch(1)}, "")
 	podControl := mockControl("C-0001", []reporthandling.PolicyRule{podRule})
@@ -61,7 +68,7 @@ func TestPreflight_AllAllowed(t *testing.T) {
 		return true, nil, nil
 	})
 	fakeClient := handler.k8s.KubernetesClient.(*fakeclientset.Clientset)
-	fakeClient.PrependReactor("create", "selfsubjectaccessreviews", ssarReactor(nil))
+	fakeClient.PrependReactor("create", "selfsubjectaccessreviews", ssarReactor(t, nil))
 
 	podRule := mockRule("pod-rule", []reporthandling.RuleMatchObjects{mockMatch(1)}, "")
 	podControl := mockControl("C-0001", []reporthandling.PolicyRule{podRule})
@@ -74,6 +81,37 @@ func TestPreflight_AllAllowed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, result.Denied())
 	assert.NotEmpty(t, result.Checks)
+}
+
+// TestPreflight_RequestFailureIsNotADenial guards against a failed
+// SelfSubjectAccessReview request (timeout, API error, ...) being reported as
+// the API server denying "list" - the two are not the same thing, and only
+// the latter should count as a real denial.
+func TestPreflight_RequestFailureIsNotADenial(t *testing.T) {
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		t.Fatalf("preflight must not list resources: %s", action.GetResource().Resource)
+		return true, nil, nil
+	})
+	fakeClient := handler.k8s.KubernetesClient.(*fakeclientset.Clientset)
+	fakeClient.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("connection reset")
+	})
+
+	podRule := mockRule("pod-rule", []reporthandling.RuleMatchObjects{mockMatch(1)}, "")
+	podControl := mockControl("C-0001", []reporthandling.PolicyRule{podRule})
+	framework := mockFramework("test-framework", []reporthandling.Control{podControl})
+
+	scanInfo := &cautils.ScanInfo{}
+	sessionObj := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{*framework}, nil, scanInfo, nil)
+
+	result, err := handler.Preflight(context.Background(), sessionObj, scanInfo)
+	require.NoError(t, err)
+
+	assert.Empty(t, result.Denied(), "a failed request must not be reported as a denial")
+	require.NotEmpty(t, result.Errored())
+	for _, c := range result.Errored() {
+		assert.Contains(t, c.Reason, "connection reset")
+	}
 }
 
 func TestFileResourceHandler_PreflightNotSupported(t *testing.T) {

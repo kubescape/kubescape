@@ -12,9 +12,14 @@ import (
 )
 
 // GVRCheck is the preflight result for a single resource type the scan needs to list.
+// Errored is set when the SelfSubjectAccessReview request itself could not be
+// completed (timeout, API failure, ...), which is not the same as the API
+// server answering that "list" is denied — Allowed stays false in both cases,
+// so callers must check Errored before treating a check as a real denial.
 type GVRCheck struct {
 	GVR              string
 	Allowed          bool
+	Errored          bool
 	Reason           string
 	AffectedControls []string
 }
@@ -26,15 +31,29 @@ type PreflightResult struct {
 	DiscoveryFailures []cautils.PartialGVRPull
 }
 
-// Denied returns the checks that failed, in the order they were checked.
+// Denied returns the checks the API server answered with "not allowed", in
+// the order they were checked. Checks whose request itself failed are
+// excluded — see Errored.
 func (r *PreflightResult) Denied() []GVRCheck {
 	var denied []GVRCheck
 	for _, c := range r.Checks {
-		if !c.Allowed {
+		if !c.Allowed && !c.Errored {
 			denied = append(denied, c)
 		}
 	}
 	return denied
+}
+
+// Errored returns the checks whose SelfSubjectAccessReview request itself
+// failed, so no access decision was obtained.
+func (r *PreflightResult) Errored() []GVRCheck {
+	var errored []GVRCheck
+	for _, c := range r.Checks {
+		if c.Errored {
+			errored = append(errored, c)
+		}
+	}
+	return errored
 }
 
 // ErrPreflightNotSupported is returned by resource handlers that cannot
@@ -88,6 +107,7 @@ func (k8sHandler *K8sResourceHandler) checkListAccess(ctx context.Context, gvrTr
 
 	resp, err := k8sHandler.k8s.KubernetesClient.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, ssar, metav1.CreateOptions{})
 	if err != nil {
+		check.Errored = true
 		check.Reason = err.Error()
 		return check
 	}
