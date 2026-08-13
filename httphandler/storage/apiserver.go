@@ -127,7 +127,7 @@ func (a *APIServerStore) GetWorkloadConfigurationScanResult(ctx context.Context,
 	case err != nil:
 		logger.L().Ctx(ctx).Warning("failed to get workload configuration scan manifest from apiserver", helpers.Error(err),
 			helpers.String("name", name))
-		return &v1beta1.WorkloadConfigurationScan{}, nil
+		return nil, fmt.Errorf("get workload configuration scan %q from namespace %q: %w", name, namespace, err)
 	}
 
 	logger.L().Debug("got workload configuration scan manifest from storage", helpers.String("name", name))

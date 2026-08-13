@@ -32,6 +32,31 @@ func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 	}
 }
 
+func TestGetWorkloadConfigurationScanResult_PropagatesAPIServerError(t *testing.T) {
+	ctx := context.Background()
+	client := fake.NewSimpleClientset()
+	getErr := errors.New("apiserver unavailable")
+	client.PrependReactor("get", "workloadconfigurationscans", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, getErr
+	})
+	store := &APIServerStore{StorageClient: client.SpdxV1beta1()}
+
+	manifest, err := store.GetWorkloadConfigurationScanResult(ctx, "test-scan", "default")
+
+	assert.Nil(t, manifest)
+	assert.ErrorIs(t, err, getErr)
+}
+
+func TestGetWorkloadConfigurationScanResult_NotFoundRemainsEmpty(t *testing.T) {
+	store := NewFakeAPIServerStorage("default")
+
+	manifest, err := store.GetWorkloadConfigurationScanResult(context.Background(), "missing", "default")
+
+	assert.NoError(t, err)
+	assert.NotNil(t, manifest)
+	assert.Empty(t, manifest.Name)
+}
+
 func TestStoreWorkloadConfigurationScanResult_PropagatesUpdateError(t *testing.T) {
 	ctx := context.Background()
 	existing := &v1beta1.WorkloadConfigurationScan{
