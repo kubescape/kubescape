@@ -521,8 +521,15 @@ func parseWorkloadScanRelatedObjectList(relatedObjects []workloadinterface.IMeta
 	return r
 }
 
-// mergeMaps merges new into existing, overwriting existing keys with new values
+// mergeMaps merges new into existing, overwriting existing keys with new values.
+// Both parameters are safe to pass as nil.
 func mergeMaps(existing, new map[string]string) map[string]string {
+	if new == nil {
+		if existing == nil {
+			return make(map[string]string)
+		}
+		return existing
+	}
 	if existing == nil {
 		existing = make(map[string]string)
 	}

@@ -674,6 +674,12 @@ func TestMergeMaps(t *testing.T) {
 			new:      nil,
 			expected: map[string]string{},
 		},
+		{
+			name:     "merge with nil new map preserves existing",
+			existing: map[string]string{"key1": "value1", "key2": "value2"},
+			new:      nil,
+			expected: map[string]string{"key1": "value1", "key2": "value2"},
+		},
 	}
 
 	for _, tt := range tests {
