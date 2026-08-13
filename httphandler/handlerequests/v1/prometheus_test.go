@@ -330,3 +330,26 @@ func TestSplitAndTrim(t *testing.T) {
 		})
 	}
 }
+
+func TestMetrics_Panic(t *testing.T) {
+	defer func(o scanner) { scanImpl = o }(scanImpl)
+	
+	scanImpl = func(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier, string, bool) (*reporthandlingv2.PostureReport, error) {
+		panic("metrics panic")
+	}
+
+	h := NewHTTPHandler(false)
+	
+	// Create a recorder and request
+	rq := httptest.NewRequest(http.MethodGet, "/v1/metrics", nil)
+	w := httptest.NewRecorder()
+
+	// Call the handler
+	h.Metrics(w, rq)
+
+	// It should recover and return a 500
+	require.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+
+	// Ensure the scan is no longer marked as busy
+	assert.Equal(t, "", h.state.getRunningUserScanID())
+}

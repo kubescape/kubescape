@@ -34,7 +34,7 @@ type MetricsQueryParams struct {
 func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 
 	scanID := uuid.NewString()
-	defer handler.recover(r.Context(), w, scanID)
+	defer handler.recover(r.Context(), w, "")
 
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
@@ -50,7 +50,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 
 	metricsQueryParams := &MetricsQueryParams{}
 	if err := schema.NewDecoder().Decode(metricsQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), scanID)
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err))
 		return
 	}
 	resultsFile := filepath.Join(OutputDir, scanID)
@@ -74,11 +74,10 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	select {
 	case handler.scanRequestChan <- scanParams:
 	default:
-		handler.state.setNotBusy(scanID)
 		w.Header().Set("Retry-After", "1")
 		handler.writeErrorWithStatus(w,
 			fmt.Errorf("scan queue is full; retry the request later"),
-			"", http.StatusTooManyRequests)
+			http.StatusTooManyRequests)
 		return
 	}
 

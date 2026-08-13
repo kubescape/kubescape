@@ -91,7 +91,7 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	statusQueryParams := &StatusQueryParams{}
 	if err := schema.NewDecoder().Decode(statusQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), "")
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err))
 		return
 	}
 	logger.L().Info("requesting status", helpers.String("scanID", statusQueryParams.ScanID), helpers.String("api", "v1/status"))
@@ -141,10 +141,10 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &maxBytesErr) {
 			handler.writeErrorWithStatus(w,
 				fmt.Errorf("scan request body exceeds the %d byte limit", handler.maxRequestBodyBytes),
-				"", http.StatusRequestEntityTooLarge)
+				http.StatusRequestEntityTooLarge)
 			return
 		}
-		handler.writeError(w, err, "")
+		handler.writeError(w, err)
 		return
 	}
 	cancelCtx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
@@ -172,7 +172,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "1")
 		handler.writeErrorWithStatus(w,
 			fmt.Errorf("scan queue is full; retry the request later"),
-			"", http.StatusTooManyRequests)
+			http.StatusTooManyRequests)
 		return
 	}
 	logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
@@ -224,7 +224,7 @@ func (handler *HTTPHandler) CancelScan(w http.ResponseWriter, r *http.Request) {
 
 	cancelQueryParams := &CancelScanQueryParams{}
 	if err := schema.NewDecoder().Decode(cancelQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), "")
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err))
 		return
 	}
 
@@ -262,7 +262,7 @@ func (handler *HTTPHandler) CancelScan(w http.ResponseWriter, r *http.Request) {
 func (handler *HTTPHandler) parseResultsQueryParams(w http.ResponseWriter, r *http.Request) (*ResultsQueryParams, bool) {
 	resultsQueryParams := &ResultsQueryParams{}
 	if err := schema.NewDecoder().Decode(resultsQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), "")
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err))
 		return nil, false
 	}
 	logger.L().Info("requesting results", helpers.String("scanID", resultsQueryParams.ScanID), helpers.String("api", "v1/results"), helpers.String("method", r.Method))
@@ -414,7 +414,9 @@ func (handler *HTTPHandler) Ready(w http.ResponseWriter, r *http.Request) {
 func (handler *HTTPHandler) recover(ctx context.Context, w http.ResponseWriter, scanID string) {
 	response := utilsmetav1.Response{}
 	if err := recover(); err != nil {
-		handler.state.setNotBusy(scanID)
+		if scanID != "" {
+			handler.state.setNotBusy(scanID)
+		}
 		logger.L().Ctx(ctx).Error("recover", helpers.Error(fmt.Errorf("%v", err)))
 		w.WriteHeader(http.StatusInternalServerError)
 		response.Response = fmt.Sprintf("%v", err)
@@ -423,15 +425,14 @@ func (handler *HTTPHandler) recover(ctx context.Context, w http.ResponseWriter, 
 	}
 }
 
-func (handler *HTTPHandler) writeError(w http.ResponseWriter, err error, scanID string) {
-	handler.writeErrorWithStatus(w, err, scanID, http.StatusBadRequest)
+func (handler *HTTPHandler) writeError(w http.ResponseWriter, err error) {
+	handler.writeErrorWithStatus(w, err, http.StatusBadRequest)
 }
 
-func (handler *HTTPHandler) writeErrorWithStatus(w http.ResponseWriter, err error, scanID string, status int) {
+func (handler *HTTPHandler) writeErrorWithStatus(w http.ResponseWriter, err error, status int) {
 	response := utilsmetav1.Response{}
 	w.WriteHeader(status)
 	response.Response = err.Error()
 	response.Type = utilsapisv1.ErrorScanResponseType
 	w.Write(responseToBytes(&response))
-	handler.state.setNotBusy(scanID)
 }
