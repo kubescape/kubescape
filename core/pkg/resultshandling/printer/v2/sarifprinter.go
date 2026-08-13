@@ -466,7 +466,12 @@ func collectFixes(ctx context.Context, cache *fixReportCache, result *sarif.Resu
 				continue
 			}
 
+			// Empty means the path is not a plain yaml path and must not be
+			// evaluated as a yq expression.
 			yamlExpression := fixhandler.FixPathToValidYamlExpression(fixPath, rulePaths.FixPath.Value, documentIndex)
+			if yamlExpression == "" {
+				continue
+			}
 			addFixRegions(result, filepath, cache.fixRegions(ctx, rsrcAbsPath, yamlExpression))
 		}
 	}
