@@ -26,6 +26,7 @@ type ResultsHandler struct {
 	ScanData      *cautils.OPASessionObj
 	PrinterObjs   []printer.IPrinter
 	ImageScanData []cautils.ImageScanData
+	scanError     error
 }
 
 func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrinter, uiPrinter printer.IPrinter) *ResultsHandler {
@@ -57,6 +58,13 @@ func (rh *ResultsHandler) GetData() *cautils.OPASessionObj {
 // SetData sets the scan/action related data
 func (rh *ResultsHandler) SetData(data *cautils.OPASessionObj) {
 	rh.ScanData = data
+}
+
+// SetScanError records a scan error that must be returned after any partial
+// results have been printed. This lets callers preserve useful scan output
+// without reporting a successful exit status for incomplete results.
+func (rh *ResultsHandler) SetScanError(err error) {
+	rh.scanError = err
 }
 
 // GetPrinters returns all printers
@@ -154,8 +162,8 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 		closePrinter(p)
 	}
 
-	if printErr != nil {
-		return printErr
+	if err := errors.Join(printErr, rh.scanError); err != nil {
+		return err
 	}
 
 	// We should submit only after printing results, so a user can see
