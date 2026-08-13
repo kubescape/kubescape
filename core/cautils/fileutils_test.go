@@ -193,6 +193,26 @@ func TestExcludeHelmTemplateFiles_NoCharts(t *testing.T) {
 	assert.Equal(t, files, excludeHelmTemplateFiles(files, nil))
 }
 
+// TestExcludeHelmChartMetadataFiles asserts that the fixed Helm chart-metadata
+// files are dropped by name while all other files survive, regardless of depth.
+func TestExcludeHelmChartMetadataFiles(t *testing.T) {
+	files := []string{
+		filepath.Join("repo", "chart", "Chart.yaml"),
+		filepath.Join("repo", "chart", "Chart.lock"),
+		filepath.Join("repo", "chart", "values.yaml"),
+		filepath.Join("repo", "chart", "templates", "deployment.yaml"),
+		filepath.Join("repo", "chart-docs", "Chart.yaml.example"),
+		filepath.Join("repo", "pod.yaml"),
+	}
+	remaining := excludeHelmChartMetadataFiles(files)
+	assert.Equal(t, []string{
+		filepath.Join("repo", "chart", "values.yaml"),
+		filepath.Join("repo", "chart", "templates", "deployment.yaml"),
+		filepath.Join("repo", "chart-docs", "Chart.yaml.example"),
+		filepath.Join("repo", "pod.yaml"),
+	}, remaining)
+}
+
 // TestIsUnderAnyDir asserts that containment is decided by canonical relative
 // paths, not by string prefix equality: siblings that merely share a directory
 // prefix must not be reported as contained, and a directory named "." must stay

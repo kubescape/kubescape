@@ -241,6 +241,25 @@ func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
 	return remaining
 }
 
+// excludeHelmChartMetadataFiles removes the fixed Helm chart-metadata files
+// (Chart.yaml, Chart.lock) from a plain-manifest glob. Chart.yaml always
+// declares a top-level apiVersion per Helm's own schema but is not a
+// Kubernetes manifest, so without this exclusion it would be flagged as a
+// skipped manifest on every directory scan that contains a chart. The files
+// are identified by their well-known name, the same way templates/ is
+// excluded by location.
+func excludeHelmChartMetadataFiles(files []string) []string {
+	remaining := make([]string, 0, len(files))
+	for _, file := range files {
+		switch filepath.Base(file) {
+		case "Chart.yaml", "Chart.lock":
+			continue
+		}
+		remaining = append(remaining, file)
+	}
+	return remaining
+}
+
 // IsUnderAnyDir reports whether path is inside one of dirs after normalizing
 // relative paths and resolving symlinks where the path already exists.
 func IsUnderAnyDir(path string, dirs []string) bool {
@@ -574,6 +593,11 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, rendere
 	// whose render failed is absent from renderedCharts, so its templates stay plainly scanned.
 	files = excludeHelmTemplateFiles(files, renderedCharts)
 
+	// chart metadata files (Chart.yaml, Chart.lock) are not manifests and carry
+	// a top-level apiVersion per Helm's own schema; drop them so they are never
+	// flagged as skipped manifests.
+	files = excludeHelmChartMetadataFiles(files)
+
 	workloads, skips, errs := loadFiles(rootPath, files)
 	if len(errs) > 0 {
 		loadErr := fmt.Errorf("failed to load one or more manifests from %q: %w", input, errors.Join(errs...))
@@ -825,13 +849,13 @@ func manifestObjectToWorkloads(obj map[string]any) ([]workloadinterface.IMetadat
 	}
 
 	// Only surface as skipped when the document looks like an attempted
-	// Kubernetes manifest (has both apiVersion and kind). Files without
-	// kind — Chart.yaml, values.yaml, CI configs, docker-compose.yaml —
-	// are silently ignored as before.
+	// Kubernetes manifest (has apiVersion). Files without apiVersion —
+	// values.yaml, CI configs, docker-compose.yaml — are silently ignored
+	// as before. The known Helm chart-metadata files (Chart.yaml,
+	// Chart.lock) are removed earlier by filename in LoadResourcesFromFiles,
+	// so they are never flagged here.
 	if _, hasAPIVersion := obj["apiVersion"]; hasAPIVersion {
-		if _, hasKind := obj["kind"]; hasKind {
-			return nil, fmt.Errorf("not a valid Kubernetes object")
-		}
+		return nil, fmt.Errorf("not a valid Kubernetes object")
 	}
 	return nil, nil
 }

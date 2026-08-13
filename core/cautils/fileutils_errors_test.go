@@ -237,28 +237,32 @@ spec:
 	assert.NotEmpty(t, sourceToWorkloads, "the successfully rendered directory's workloads must still be returned")
 }
 
-func TestLoadResourcesFromFiles_IgnoresNoKindYamlDocument(t *testing.T) {
+func TestLoadResourcesFromFilesSurfacesNoKindYamlDocument(t *testing.T) {
 	dir := t.TempDir()
 	writeManifestFixture(t, dir, "valid.yaml", validPodManifest)
-	writeManifestFixture(t, dir, "no-kind.yaml", "apiVersion: v1\nmetadata:\n  name: test\nspec:\n  containers: []\n")
+	noKind := writeManifestFixture(t, dir, "no-kind.yaml", "apiVersion: v1\nmetadata:\n  name: test\nspec:\n  containers: []\n")
 
 	workloads, skips, err := LoadResourcesFromFiles(context.Background(), dir, dir, nil)
 
 	require.NoError(t, err)
 	require.Contains(t, workloads, filepath.Join(dir, "valid.yaml"))
-	assert.Empty(t, skips, "a document without kind is ambiguous (Chart.yaml, CI configs) and must stay silent")
+	require.Len(t, skips, 1)
+	assert.Equal(t, noKind, skips[0].Path)
+	assert.Contains(t, skips[0].Reason, "not a valid Kubernetes object")
 }
 
-func TestLoadResourcesFromFiles_IgnoresNoKindJsonFile(t *testing.T) {
+func TestLoadResourcesFromFilesSurfacesNoKindJsonFile(t *testing.T) {
 	dir := t.TempDir()
 	writeManifestFixture(t, dir, "valid.yaml", validPodManifest)
-	writeManifestFixture(t, dir, "no-kind.json", `{"apiVersion":"v1","metadata":{"name":"test"},"spec":{"containers":[]}}`)
+	noKind := writeManifestFixture(t, dir, "no-kind.json", `{"apiVersion":"v1","metadata":{"name":"test"},"spec":{"containers":[]}}`)
 
 	workloads, skips, err := LoadResourcesFromFiles(context.Background(), dir, dir, nil)
 
 	require.NoError(t, err)
 	require.Contains(t, workloads, filepath.Join(dir, "valid.yaml"))
-	assert.Empty(t, skips, "a document without kind is ambiguous (Chart.yaml, CI configs) and must stay silent")
+	require.Len(t, skips, 1)
+	assert.Equal(t, noKind, skips[0].Path)
+	assert.Contains(t, skips[0].Reason, "not a valid Kubernetes object")
 }
 
 func TestLoadResourcesFromFiles_LoadsCustomResourceWithoutSkip(t *testing.T) {
@@ -297,11 +301,12 @@ func TestLoadResourcesFromFiles_IgnoresChartMetadata(t *testing.T) {
 	dir := t.TempDir()
 	writeManifestFixture(t, dir, "valid.yaml", validPodManifest)
 	writeManifestFixture(t, dir, "Chart.yaml", "apiVersion: v2\nname: mychart\nversion: 0.1.0\n")
+	writeManifestFixture(t, dir, "Chart.lock", "dependencies: []\ndigest: sha256:abc\n")
 	writeManifestFixture(t, dir, "values.yaml", "{}\n")
 
 	workloads, skips, err := LoadResourcesFromFiles(context.Background(), dir, dir, nil)
 
 	require.NoError(t, err)
 	require.Contains(t, workloads, filepath.Join(dir, "valid.yaml"))
-	assert.Empty(t, skips, "Chart.yaml and values.yaml must not be reported as skipped manifests")
+	assert.Empty(t, skips, "Chart.yaml, Chart.lock and values.yaml must not be reported as skipped manifests")
 }
