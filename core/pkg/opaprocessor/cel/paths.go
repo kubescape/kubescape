@@ -73,24 +73,65 @@ type fieldAlternative struct {
 // to be alternatives later.
 type fieldAlternativeGroup []fieldAlternative
 
+// concatOperand is one operand of a `+`-concatenated iteration range: a dotted,
+// object-rooted path to a list, plus whether the expression wrapped it in a
+// presence guard. An absent optional operand contributed nothing to the
+// concatenation, so there is nothing to narrow and nothing to blame; an absent
+// required operand means this candidate is not the branch that ran.
+type concatOperand struct {
+	path     string
+	optional bool
+}
+
+// rangeCandidate is one iteration range the expression could have walked: the
+// ordered operands whose concatenation the comprehension iterates. A range that
+// is a single plain list is a candidate holding one required operand, which is
+// how the pre-concatenation shapes stay expressible without a special case.
+type rangeCandidate []concatOperand
+
+// resolvedOperand is a concatenation operand that is actually present on the
+// object being resolved, with its list read out.
+type resolvedOperand struct {
+	path     string
+	segments []string
+	list     []any
+}
+
 // elementPlan describes a validation that iterates a list on the object, which
 // is the shape almost every workload policy in the bundle has
 // (`object.spec.containers.all(container, ...)`). fields are element-relative,
 // joined to a collection path with an index once we know which element
 // failed.
 //
-// The list itself is usually one fixed path (collection). A validation that
-// goes through a variable inlined by inlineVariables can instead iterate a
-// ternary that picks the list by the object's kind (`object.kind == 'Pod' ?
-// object.spec.containers : ...`) - see objectRootedPaths. Which branch is real
-// depends on the object, not the expression, so that shape sets collections
-// instead: every candidate path, at most one of which is an actual list on any
-// given object (the bundle's matchConstraints already narrowed evaluation to
-// one kind). Exactly one of the two is ever set.
+// Two independent things can make that list more than one fixed path, and the
+// bundle uses them together, so candidates models both at once (see
+// objectRootedRangeCandidates):
+//
+//   - a validation that goes through a variable inlined by inlineVariables can
+//     iterate a ternary picking the list by the object's kind (`object.kind ==
+//     'Pod' ? object.spec.containers : ...`). Which branch is real depends on
+//     the object, so each branch is a separate candidate and at most one is ever
+//     an actual list on a given object - the bundle's matchConstraints already
+//     narrowed evaluation to one kind.
+//   - a branch is commonly a `+` concatenation of the container lists
+//     (`containers + initContainers + ephemeralContainers`). Those are all live
+//     at once, so a candidate is an ordered list of operands rather than a
+//     single path, and a flat index has to be split back across them.
 type elementPlan struct {
-	collection  string
-	collections []string
-	fields      []fieldRef
+	candidates []rangeCandidate
+	fields     []fieldRef
+}
+
+// candidatePaths flattens every operand path across every candidate, for tests
+// and diagnostics that only care which lists an expression can reach.
+func (p *elementPlan) candidatePaths() []string {
+	paths := make([]string, 0, len(p.candidates))
+	for _, candidate := range p.candidates {
+		for _, operand := range candidate {
+			paths = append(paths, operand.path)
+		}
+	}
+	return paths
 }
 
 // pathPlan is everything one validation expression can say about where it
@@ -104,13 +145,17 @@ type pathPlan struct {
 	// while building the plan. Independent fields never enter these groups even
 	// when their dotted paths happen to share a suffix.
 	directAlternatives []fieldAlternativeGroup
-	// elements is set only when the expression iterates exactly one list on the
-	// object AND narrowing that list to one element and re-checking is an exact
-	// test of that element (see narrowingIsExact). With no such list there is
-	// nothing to index; with more than one we cannot tell which list a failure
-	// came from; with a list whose quantifier makes the elements alternatives
-	// rather than requirements, blaming one would be a guess. All three fall
-	// back to direct paths only.
+	// elements is set only when the expression has exactly one object-rooted
+	// comprehension AND narrowing its range to one element and re-checking is an
+	// exact test of that element (see narrowingIsExact). With no such
+	// comprehension there is nothing to index; with more than one we cannot tell
+	// which one a failure came from; with a quantifier that makes the elements
+	// alternatives rather than requirements, blaming one would be a guess. All
+	// three fall back to direct paths only.
+	//
+	// One comprehension is not the same as one list: its range may concatenate
+	// several (see elementPlan), which is still a single iteration to attribute
+	// a failure within.
 	elements *elementPlan
 }
 
@@ -198,7 +243,7 @@ func newPathPlan(ast *cel.Ast) pathPlan {
 	// params lists and inline kind lists too) tell us nothing about where the
 	// object is wrong, so only object-rooted ones count.
 	var iterated []celast.NavigableExpr
-	var iteratedPaths [][]string
+	var iteratedCandidates [][]rangeCandidate
 	ranges := map[string]bool{}
 	for _, node := range celast.MatchDescendants(root, celast.KindMatcher(celast.ComprehensionKind)) {
 		rangeExpr := node.AsComprehension().IterRange()
@@ -208,8 +253,8 @@ func newPathPlan(ast *cel.Ast) pathPlan {
 		// a concatenation of several lists, ...), never a value the policy is
 		// asking the user to set - so none of them belong in plan.direct,
 		// whether or not the shape below resolves to an elementPlan. Without
-		// this a range objectRootedPaths cannot fully read (e.g. one that
-		// concatenates several lists with `+`) would otherwise leak its
+		// this a range objectRootedRangeCandidates cannot fully read (e.g. one
+		// concatenating a filter() with a list) would otherwise leak its
 		// constituent paths as spurious direct fields.
 		for _, sel := range celast.MatchDescendants(celast.NavigateExpr(native, rangeExpr), celast.KindMatcher(celast.SelectKind)) {
 			if parent, ok := sel.Parent(); ok && parent.Kind() == celast.SelectKind {
@@ -220,12 +265,12 @@ func newPathPlan(ast *cel.Ast) pathPlan {
 			}
 		}
 
-		paths, ok := objectRootedPaths(rangeExpr, "object")
+		candidates, ok := objectRootedRangeCandidates(rangeExpr, "object")
 		if !ok {
 			continue
 		}
 		iterated = append(iterated, node)
-		iteratedPaths = append(iteratedPaths, paths)
+		iteratedCandidates = append(iteratedCandidates, candidates)
 	}
 
 	plan := pathPlan{}
@@ -235,7 +280,6 @@ func newPathPlan(ast *cel.Ast) pathPlan {
 	// guessing, so we do not try.
 	if len(iterated) == 1 && narrowingIsExact(iterated[0]) {
 		comprehension := iterated[0].AsComprehension()
-		paths := iteratedPaths[0]
 
 		// A field the element predicate reads is element-relative and joined to
 		// the pinned index. This includes a collection the predicate iterates in
@@ -246,15 +290,10 @@ func newPathPlan(ast *cel.Ast) pathPlan {
 		// at, unlike the object-level list we index into, which is not a hint
 		// because we are about to point at one of its elements instead.
 		loopStep := celast.NavigateExpr(native, comprehension.LoopStep())
-		elements := &elementPlan{
-			fields: fieldsRootedAt(native, loopStep, comprehension.IterVar(), nil),
+		plan.elements = &elementPlan{
+			fields:     fieldsRootedAt(native, loopStep, comprehension.IterVar(), nil),
+			candidates: iteratedCandidates[0],
 		}
-		if len(paths) == 1 {
-			elements.collection = paths[0]
-		} else {
-			elements.collections = paths
-		}
-		plan.elements = elements
 	}
 
 	// The iterated list itself is not a direct hint: either we are about to
@@ -482,33 +521,128 @@ func selectPath(expr celast.Expr, ident string) (string, bool) {
 	return strings.Join(parts, "."), true
 }
 
-// objectRootedPaths reads the list of straight ident-rooted paths a
-// comprehension's range expression could resolve to at runtime. The common
-// case is selectPath's single path; inlineVariables can also hand this a
-// ternary chain choosing among several kind-specific lists (the shape the
-// bundle's "containers" variable uses: `object.kind == 'Pod' ? object.spec.containers
-// : object.kind in [...] ? object.spec.template.spec.containers : ... : []`),
-// in which case every true-branch path is returned, in branch order.
+// objectRootedRangeCandidates reads a comprehension's range expression into the
+// set of list shapes it could have walked. Three shapes compose here, and the
+// bundle uses all three together: a plain path, a `+` concatenation, and a
+// kind-dispatch ternary whose branches are either of those (the shape the
+// bundle's "containers" variable produces once inlineVariables expands it).
 //
-// ok is false whenever a branch is neither a plain path nor another ternary of
-// the same shape: an opaque branch means we cannot enumerate every list the
-// range could be, and guessing which ones matter would risk missing the real
-// one, so the whole comprehension is left alone (falls back to no element
-// attribution) rather than reporting a partial candidate set.
+//	object.spec.containers
+//	object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : [])
+//	object.kind == 'Pod' ? <Pod lists> : object.kind in [...] ? <template lists> : []
+//
+// So the result is a set of candidates - ternary arms, at most one of which is
+// real on a given object, since matchConstraints already narrowed evaluation to
+// one kind - each an ordered operand list whose members are all real at once.
+//
+// ok is false whenever a branch is none of those shapes: an opaque branch means
+// we cannot enumerate every list the range could be, and a partially read range
+// would blame the wrong list, so the whole comprehension is left alone (falls
+// back to no element attribution) rather than reporting a partial candidate set.
 //
 // The final else of a kind-dispatch ternary is usually a catch-all that is not
 // itself a list on any object (an empty list literal, for a kind none of the
-// earlier branches matched); a bare final else that is not a path is treated
-// as that catch-all rather than disqualifying the whole chain, since resolve
-// only ever uses a candidate that actually is a list on the object it checks.
-func objectRootedPaths(expr celast.Expr, ident string) ([]string, bool) {
-	paths, _, ok := objectRootedPathCandidates(expr, ident)
-	return paths, ok
+// earlier branches matched); a bare final else we cannot read is treated as that
+// catch-all rather than disqualifying the whole chain, since resolve only ever
+// uses a candidate that actually is a list on the object it checks.
+func objectRootedRangeCandidates(expr celast.Expr, ident string) ([]rangeCandidate, bool) {
+	if operands, ok := rangeOperands(expr, ident); ok {
+		return []rangeCandidate{operands}, true
+	}
+	if expr.Kind() != celast.CallKind {
+		return nil, false
+	}
+	call := expr.AsCall()
+	if call.FunctionName() != operators.Conditional || len(call.Args()) != 3 {
+		return nil, false
+	}
+
+	trueCandidates, ok := objectRootedRangeCandidates(call.Args()[1], ident)
+	if !ok {
+		return nil, false
+	}
+
+	elseBranch := call.Args()[2]
+	if elseBranch.Kind() == celast.CallKind && elseBranch.AsCall().FunctionName() == operators.Conditional {
+		elseCandidates, ok := objectRootedRangeCandidates(elseBranch, ident)
+		if !ok {
+			return nil, false
+		}
+		return append(trueCandidates, elseCandidates...), true
+	}
+	if elseCandidates, ok := objectRootedRangeCandidates(elseBranch, ident); ok {
+		return append(trueCandidates, elseCandidates...), true
+	}
+	return trueCandidates, true
 }
 
-// objectRootedPathCandidates is objectRootedPaths with an extra flag reporting
-// whether every ternary condition is an explicit scope dispatch on kind or API
-// version. Plain paths return true for that flag as the neutral recursive case.
+// rangeOperands reads one iteration range that is not a kind dispatch: a single
+// list, or a `+` concatenation of several. Concatenation is left-associative in
+// CEL (`a + b + c` parses as `(a + b) + c`), but recursing on both sides costs
+// nothing and keeps a parenthesized grouping readable too.
+//
+// Order matters and is preserved: it is what lets an index into the flattened
+// concatenation be attributed back to the operand it came from.
+func rangeOperands(expr celast.Expr, ident string) (rangeCandidate, bool) {
+	if expr.Kind() == celast.CallKind && expr.AsCall().FunctionName() == operators.Add {
+		args := expr.AsCall().Args()
+		if len(args) != 2 {
+			return nil, false
+		}
+		left, ok := rangeOperands(args[0], ident)
+		if !ok {
+			return nil, false
+		}
+		right, ok := rangeOperands(args[1], ident)
+		if !ok {
+			return nil, false
+		}
+		return append(left, right...), true
+	}
+
+	operand, ok := concatOperandOf(expr, ident)
+	if !ok {
+		return nil, false
+	}
+	return rangeCandidate{operand}, true
+}
+
+// concatOperandOf recognizes one operand of a concatenated range: either a plain
+// object-rooted select chain, or the presence-guarded form
+// `has(object.p) ? object.p : []` the bundle wraps its optional container lists
+// in. Anything else - a filter(), a map(), a non-empty list literal - cannot be
+// attributed by any amount of index arithmetic, and disqualifies the whole
+// concatenation rather than being silently skipped, because skipping an operand
+// would shift every index after it onto the wrong element.
+func concatOperandOf(expr celast.Expr, ident string) (concatOperand, bool) {
+	if path, ok := selectPath(expr, ident); ok {
+		return concatOperand{path: path}, true
+	}
+	if expr.Kind() != celast.CallKind {
+		return concatOperand{}, false
+	}
+	call := expr.AsCall()
+	if call.FunctionName() != operators.Conditional || len(call.Args()) != 3 {
+		return concatOperand{}, false
+	}
+	if !presenceDefaultCondition(call.Args()[0], call.Args()[1], call.Args()[2], ident) {
+		return concatOperand{}, false
+	}
+	path, ok := selectPath(call.Args()[1], ident)
+	if !ok {
+		return concatOperand{}, false
+	}
+	return concatOperand{path: path, optional: true}, true
+}
+
+// objectRootedPathCandidates reads the straight ident-rooted paths a ternary
+// chain could resolve to at runtime, in branch order, plus a flag reporting
+// whether every condition in the chain is an explicit scope dispatch on kind or
+// API version. Plain paths return true for that flag as the neutral recursive
+// case. Unlike objectRootedRangeCandidates this reads scalar-valued bases (see
+// selectPathAlternatives), so it has no concatenation case: adding two selected
+// objects is not a shape any policy has, and a list-valued range goes through
+// the range reader instead.
 func objectRootedPathCandidates(expr celast.Expr, ident string) (paths []string, scopeDispatch bool, ok bool) {
 	if path, ok := selectPath(expr, ident); ok {
 		return []string{path}, true, true
@@ -547,10 +681,11 @@ func objectRootedPathCandidates(expr celast.Expr, ident string) (paths []string,
 }
 
 // presenceDefaultCondition recognizes the safe presence-guard shape used by
-// the policy bundle: `has(object.path) ? object.path : {}`. It is neutral when
-// nested beneath a kind or API-version dispatch because it does not choose
-// between different remediation paths; it only supplies an empty default when
-// the already-selected path is absent. Other has()-guarded ternaries remain
+// the policy bundle: `has(object.path) ? object.path : {}` for an object and
+// `has(object.path) ? object.path : []` for a list. It is neutral when nested
+// beneath a kind or API-version dispatch because it does not choose between
+// different remediation paths; it only supplies an empty default when the
+// already-selected path is absent. Other has()-guarded ternaries remain
 // ordinary conditions so their arms are preserved rather than guessed.
 func presenceDefaultCondition(condition, trueBranch, elseBranch celast.Expr, ident string) bool {
 	if condition.Kind() != celast.SelectKind || !condition.AsSelect().IsTestOnly() {
@@ -564,7 +699,14 @@ func presenceDefaultCondition(condition, trueBranch, elseBranch celast.Expr, ide
 	if !ok || selectedPath != guardedPath {
 		return false
 	}
-	return elseBranch.Kind() == celast.MapKind && len(elseBranch.AsMap().Entries()) == 0
+	switch elseBranch.Kind() {
+	case celast.MapKind:
+		return len(elseBranch.AsMap().Entries()) == 0
+	case celast.ListKind:
+		return elseBranch.AsList().Size() == 0
+	default:
+		return false
+	}
 }
 
 // scopeDispatchCondition reports whether a ternary condition is composed only
@@ -823,7 +965,10 @@ func literalString(val ref.Val) (string, bool) {
 // whose narrowing is exact (see narrowingIsExact), replacing the list with a
 // single element and re-checking says whether that element is one of the
 // offenders. Elements that pass on their own are not blamed, and if the failure
-// came from somewhere else entirely no element is blamed at all.
+// came from somewhere else entirely no element is blamed at all. When the range
+// is a concatenation of several lists the other operands are emptied at the same
+// time, so the concatenation still yields exactly one element and the hint names
+// the list that element actually came from (see narrowOperands).
 //
 // KNOWN IMPRECISION, deliberate: which ELEMENT failed is pinned, which of
 // several CONJUNCTIVE FIELDS failed is not. A validation requiring both
@@ -853,29 +998,32 @@ func (p pathPlan) resolve(obj map[string]any, violates func(map[string]any) bool
 		return hints
 	}
 
-	collection, segments, list, ok := p.elements.resolveCollection(obj)
+	operands, ok := p.elements.resolveRange(obj)
 	if !ok {
 		return hints
 	}
 
 	// narrowingIsExact establishes the element is conjunctive with the verdict,
 	// but re-running the whole validation is only a test of an element when the
-	// comprehension is also the reason it failed. Emptying the list makes the
-	// comprehension satisfied (all over nothing is vacuously true, and so is the
-	// !exists we also attribute); if the validation still fails then, the cause
-	// is a sibling reading the object, not any element, so none is blamed.
-	if emptied, ok := narrow(obj, segments, []any{}); ok && violates(emptied) {
+	// comprehension is also the reason it failed. Emptying every operand makes
+	// the concatenation empty and so the comprehension satisfied (all over
+	// nothing is vacuously true, and so is the !exists we also attribute); if
+	// the validation still fails then, the cause is a sibling reading the
+	// object, not any element, so none is blamed.
+	if emptied, ok := narrowOperands(obj, operands, -1, nil); ok && violates(emptied) {
 		return hints
 	}
 
-	for i, element := range list {
-		candidate, ok := narrow(obj, segments, []any{element})
-		if !ok || !violates(candidate) {
-			continue
-		}
-		prefix := collection + "[" + strconv.Itoa(i) + "]."
-		for _, ref := range p.elements.fields {
-			hints = append(hints, PathHint{Path: prefix + ref.path, Value: ref.value})
+	for k, operand := range operands {
+		for i, element := range operand.list {
+			candidate, ok := narrowOperands(obj, operands, k, []any{element})
+			if !ok || !violates(candidate) {
+				continue
+			}
+			prefix := operand.path + "[" + strconv.Itoa(i) + "]."
+			for _, ref := range p.elements.fields {
+				hints = append(hints, PathHint{Path: prefix + ref.path, Value: ref.value})
+			}
 		}
 	}
 	return hints
@@ -950,24 +1098,75 @@ func objectPathExists(obj map[string]any, path string) bool {
 	return true
 }
 
-// resolveCollection picks which candidate list path is a real list on obj. The
-// common case (collection set, collections nil) has exactly one candidate;
-// collections holds several kind-dependent candidates when the range came from
-// a ternary (see objectRootedPaths), of which at most one is ever an actual
-// list on a given object - matchConstraints already narrowed evaluation to one
-// kind, so the rest simply are not present. ok is false when none resolve.
-func (p *elementPlan) resolveCollection(obj map[string]any) (collection string, segments []string, list []any, ok bool) {
-	candidates := p.collections
-	if len(candidates) == 0 {
-		candidates = []string{p.collection}
-	}
-	for _, candidate := range candidates {
-		segs := strings.Split(candidate, ".")
-		if l, ok := lookupList(obj, segs); ok {
-			return candidate, segs, l, true
+// resolveRange picks the candidate branch that ran for this object and reads
+// each of its operands. First match wins: matchConstraints already narrowed
+// evaluation to one kind before we got here, so the branches are mutually
+// exclusive in practice - a Pod has spec.containers and no
+// spec.template.spec.containers, and vice versa. ok is false when none resolve.
+func (p *elementPlan) resolveRange(obj map[string]any) ([]resolvedOperand, bool) {
+	for _, candidate := range p.candidates {
+		if resolved, ok := resolveCandidate(obj, candidate); ok {
+			return resolved, true
 		}
 	}
-	return "", nil, nil, false
+	return nil, false
+}
+
+// resolveCandidate reads every operand of one candidate that is present on the
+// object. A candidate with no present operand at all is not the branch that ran.
+func resolveCandidate(obj map[string]any, candidate rangeCandidate) ([]resolvedOperand, bool) {
+	resolved := make([]resolvedOperand, 0, len(candidate))
+	for _, operand := range candidate {
+		segments := strings.Split(operand.path, ".")
+		list, found := lookupList(obj, segments)
+		if !found {
+			// An absent optional operand contributed the empty list its has()
+			// guard already produced: nothing to narrow, nothing to blame.
+			if operand.optional {
+				continue
+			}
+			return nil, false
+		}
+		resolved = append(resolved, resolvedOperand{path: operand.path, segments: segments, list: list})
+	}
+	if len(resolved) == 0 {
+		return nil, false
+	}
+	return resolved, true
+}
+
+// narrowOperands copies obj with every resolved operand's list replaced by the
+// empty list, except operand keep, which is replaced by value. keep = -1 empties
+// all of them.
+//
+// Emptying the operands not under test is the whole point of this function. The
+// comprehension iterates the CONCATENATION, so leaving a sibling operand
+// populated would keep re-running the predicate over its elements and attribute
+// their failures to whichever operand happened to be under test.
+//
+// Chaining narrow calls is safe and stays cheap: each one copies the top-level
+// map and the maps along its own path, sharing everything else, so the cost is
+// O(operands x depth) per element rather than a deep copy.
+//
+// The has() guard survives this. Setting spec.initContainers to [] leaves the
+// key present, so the guard's condition stays true and it yields []; an operand
+// that was absent to begin with is not in operands at all, its guard is false,
+// and it yields [] too. Both routes agree, which is why an emptied operand
+// contributes nothing to the concatenation either way.
+func narrowOperands(obj map[string]any, operands []resolvedOperand, keep int, value []any) (map[string]any, bool) {
+	out := obj
+	for i, operand := range operands {
+		replacement := []any{}
+		if i == keep {
+			replacement = value
+		}
+		narrowed, ok := narrow(out, operand.segments, replacement)
+		if !ok {
+			return nil, false
+		}
+		out = narrowed
+	}
+	return out, true
 }
 
 // lookupList reads the list at a dotted path, reporting false when the path is
