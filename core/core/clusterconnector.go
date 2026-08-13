@@ -125,7 +125,7 @@ func (a *OperatorAdapter) httpPostOperatorScanRequest(body apis.Commands) (strin
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return "", fmt.Errorf("http-error: %d", resp.StatusCode)
 	}
 	return "success", nil

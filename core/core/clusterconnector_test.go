@@ -274,6 +274,18 @@ func TestOperatorAdapter_httpPostOperatorScanRequest(t *testing.T) {
 			expectPost:  true,
 		},
 		{
+			name:        "accepted response is successful",
+			statusCode:  http.StatusAccepted,
+			expectValue: "success",
+			expectPost:  true,
+		},
+		{
+			name:        "no-content response is successful",
+			statusCode:  http.StatusNoContent,
+			expectValue: "success",
+			expectPost:  true,
+		},
+		{
 			name:      "port forwarder fails to start",
 			startErr:  errors.New("boom"),
 			expectErr: "boom",
@@ -287,9 +299,21 @@ func TestOperatorAdapter_httpPostOperatorScanRequest(t *testing.T) {
 			expectPost: true,
 		},
 		{
-			name:       "non-200 status",
+			name:       "server error is not successful",
 			statusCode: http.StatusInternalServerError,
 			expectErr:  "http-error: 500",
+			expectPost: true,
+		},
+		{
+			name:       "redirect is not successful",
+			statusCode: http.StatusMultipleChoices,
+			expectErr:  "http-error: 300",
+			expectPost: true,
+		},
+		{
+			name:       "informational response is not successful",
+			statusCode: 199,
+			expectErr:  "http-error: 199",
 			expectPost: true,
 		},
 	}
