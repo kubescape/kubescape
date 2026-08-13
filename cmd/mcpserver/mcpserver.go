@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -20,6 +21,8 @@ import (
 
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
+	"golang.org/x/sync/semaphore"
+	"golang.org/x/sync/singleflight"
 )
 
 // newKsClient creates the Kubescape storage client. It is a package-level
@@ -46,6 +49,18 @@ type KubescapeMcpserver struct {
 	k8sClientMu  sync.Mutex
 	k8sClient    *k8sinterface.KubernetesApi
 	policyGetter *getter.DownloadReleasedPolicy
+	scanSemMu    sync.Mutex
+	scanSem      *semaphore.Weighted
+	scanGroup    singleflight.Group
+}
+
+func (ksServer *KubescapeMcpserver) getScanSem() *semaphore.Weighted {
+	ksServer.scanSemMu.Lock()
+	defer ksServer.scanSemMu.Unlock()
+	if ksServer.scanSem == nil {
+		ksServer.scanSem = semaphore.NewWeighted(2)
+	}
+	return ksServer.scanSem
 }
 
 // getKsClient lazily initializes the Kubescape storage client. A transient
@@ -117,7 +132,11 @@ func (ksServer *KubescapeMcpserver) toolHandler(name string) server.ToolHandlerF
 		if args == nil {
 			args = map[string]any{}
 		}
-		return ksServer.CallTool(ctx, name, args)
+		res, err := ksServer.CallTool(ctx, name, args)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return res, nil
 	}
 }
 
@@ -448,11 +467,22 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			}
 			namespace = nsStr
 		}
+		if namespace == "*" {
+			namespace = ""
+		}
 
-		responseBytes, err := ksServer.RunRBACScan(ctx, namespace)
+		key := fmt.Sprintf("rbac_scan:%s", namespace)
+		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
+			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
+				return nil, err
+			}
+			defer ksServer.getScanSem().Release(1)
+			return ksServer.RunRBACScan(ctx, namespace)
+		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run RBAC scan: %v", err)), nil
 		}
+		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "scan_local_iac":
 		path := ""
@@ -475,10 +505,18 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			framework = strings.TrimSpace(fwStr)
 		}
 
-		responseBytes, err := ksServer.runIaCScan(ctx, path, framework)
+		key := fmt.Sprintf("scan_local_iac:%s:%s", path, framework)
+		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
+			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
+				return nil, err
+			}
+			defer ksServer.getScanSem().Release(1)
+			return ksServer.runIaCScan(ctx, path, framework)
+		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run IaC scan: %v", err)), nil
 		}
+		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "run_network_security_scan":
 		namespace := ""
@@ -489,11 +527,22 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			}
 			namespace = nsStr
 		}
+		if namespace == "*" {
+			namespace = ""
+		}
 
-		responseBytes, err := ksServer.RunNetworkScan(ctx, namespace)
+		key := fmt.Sprintf("network_scan:%s", namespace)
+		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
+			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
+				return nil, err
+			}
+			defer ksServer.getScanSem().Release(1)
+			return ksServer.RunNetworkScan(ctx, namespace)
+		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run Network scan: %v", err)), nil
 		}
+		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "list_vulnerability_manifests":
 		namespace := metav1.NamespaceAll
@@ -950,11 +999,22 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if frameworkNameStr == "" {
 			return mcp.NewToolResultError("framework_name argument must not be empty"), nil
 		}
+		if namespace == "*" {
+			namespace = ""
+		}
 
-		responseBytes, err := ksServer.RunFrameworkScan(ctx, namespace, frameworkNameStr)
+		key := fmt.Sprintf("framework_scan:%s:%s", namespace, frameworkNameStr)
+		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
+			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
+				return nil, err
+			}
+			defer ksServer.getScanSem().Release(1)
+			return ksServer.RunFrameworkScan(ctx, namespace, frameworkNameStr)
+		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run framework scan: %v", err)), nil
 		}
+		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
@@ -980,7 +1040,9 @@ func mcpServerEntrypoint() error {
 	// Initialize the policy getter to load the local ~/.kubescape cache.
 	// Without this, the getter will always hit the GitHub API directly for every scan,
 	// defeating offline scanning and causing rate limits.
-	_, _ = ksServer.policyGetter.SetRegoObjectsWithFallback()
+	if _, err := ksServer.policyGetter.SetRegoObjectsWithFallback(); err != nil {
+		logger.L().Warning("Failed to initialize policy store at startup (falling back to direct download later)", helpers.Error(err))
+	}
 
 	// Creating Kubescape tools and resources
 

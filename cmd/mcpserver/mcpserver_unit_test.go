@@ -228,4 +228,3 @@ func TestReadResourceWithFakeClient(t *testing.T) {
 		})
 	}
 }
-
