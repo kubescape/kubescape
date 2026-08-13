@@ -825,11 +825,13 @@ func manifestObjectToWorkloads(obj map[string]any) ([]workloadinterface.IMetadat
 	}
 
 	// Only surface as skipped when the document looks like an attempted
-	// Kubernetes manifest (has apiVersion). Files without apiVersion —
-	// Chart.yaml, values.yaml, CI configs, docker-compose.yaml — are
-	// silently ignored as before.
+	// Kubernetes manifest (has both apiVersion and kind). Files without
+	// kind — Chart.yaml, values.yaml, CI configs, docker-compose.yaml —
+	// are silently ignored as before.
 	if _, hasAPIVersion := obj["apiVersion"]; hasAPIVersion {
-		return nil, fmt.Errorf("not a valid Kubernetes object")
+		if _, hasKind := obj["kind"]; hasKind {
+			return nil, fmt.Errorf("not a valid Kubernetes object")
+		}
 	}
 	return nil, nil
 }
