@@ -15,7 +15,7 @@ import (
 )
 
 // BenchmarkRBACScan_Isolation measures the OPA engine evaluation overhead for the
-// two RBAC controls (C-0015, C-0016) against a representative set of RBAC resources.
+// two RBAC controls (C-0015, C-0035) against a representative set of RBAC resources.
 // Policy download is excluded from timing via b.StopTimer/b.StartTimer, so only the
 // actual scan evaluation path — the dominant in-process cost — is benchmarked.
 func BenchmarkRBACScan_Isolation(b *testing.B) {
@@ -36,13 +36,13 @@ func BenchmarkRBACScan_Isolation(b *testing.B) {
 		ScanAll: false,
 		PolicyIdentifier: []cautils.PolicyIdentifier{
 			{Kind: apisv1.KindControl, Identifier: "C-0015"},
-			{Kind: apisv1.KindControl, Identifier: "C-0016"},
+			{Kind: apisv1.KindControl, Identifier: "C-0035"},
 		},
 		ScanTimeout: 10 * time.Second,
 	}
 
 	// A representative ClusterRoleBinding granting cluster-admin to a service account —
-	// exactly the kind of resource C-0016 flags. Gives the OPA engine a real payload
+	// exactly the kind of resource C-0035 flags. Gives the OPA engine a real payload
 	// to evaluate rather than an empty no-op.
 	rbacResource := workloadinterface.NewWorkloadObj(map[string]interface{}{
 		"apiVersion": "rbac.authorization.k8s.io/v1",
