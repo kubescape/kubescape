@@ -30,7 +30,42 @@ func (scanresult *ScanResultReport) Validate() bool {
 		return false
 	}
 
-	//TODO validate layers & vuls
+	if scanresult.Layers == nil {
+		return false
+	}
+
+	type vulnerabilityKey struct {
+		Name               string
+		RelatedPackageName string
+		PackageVersion     string
+	}
+	layerHashes := make(map[string]bool)
+
+	for _, layer := range scanresult.Layers {
+		if layer.LayerHash != "" {
+			if layerHashes[layer.LayerHash] {
+				return false
+			}
+			layerHashes[layer.LayerHash] = true
+		}
+
+		vulnKeys := make(map[vulnerabilityKey]bool)
+
+		for _, vul := range layer.Vulnerabilities {
+			if vul.Name == "" {
+				return false
+			}
+			key := vulnerabilityKey{
+				Name:               vul.Name,
+				RelatedPackageName: vul.RelatedPackageName,
+				PackageVersion:     vul.PackageVersion,
+			}
+			if vulnKeys[key] {
+				return false
+			}
+			vulnKeys[key] = true
+		}
+	}
 
 	return true
 }
