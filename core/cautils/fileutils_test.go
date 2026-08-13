@@ -287,6 +287,19 @@ func TestDirSetContains(t *testing.T) {
 		"every absolute path is under the filesystem root")
 }
 
+// TestDirSetContains_UncleanDirs asserts that a member that is not lexically
+// clean still claims the paths below it, matching the filepath.Rel comparison
+// this lookup replaced, which cleaned its arguments itself.
+func TestDirSetContains_UncleanDirs(t *testing.T) {
+	for _, dir := range []string{"/repo/app/", "/repo/./app", "/repo//app", "/repo/other/../app"} {
+		t.Run(dir, func(t *testing.T) {
+			set := newDirSet([]string{dir})
+			assert.True(t, set.contains("/repo/app/deployment.yaml"), "an unclean member must still claim files below it")
+			assert.False(t, set.contains("/repo/app-docs/deployment.yaml"), "a prefix sibling stays outside")
+		})
+	}
+}
+
 // BenchmarkExcludeHelmTemplateFiles covers the repository-scan shape the lookup
 // is built for: many files checked against many rendered chart directories.
 func BenchmarkExcludeHelmTemplateFiles(b *testing.B) {

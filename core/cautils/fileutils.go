@@ -253,10 +253,14 @@ func IsUnderAnyDir(path string, dirs []string) bool {
 // Members must already be normalized, as must the paths passed to contains.
 type dirSet map[string]struct{}
 
+// newDirSet indexes dirs for lookup. Members are cleaned because the ancestor
+// walk compares exact strings, where the filepath.Rel comparison it replaces
+// cleaned its arguments itself: without this a trailing separator or a "."
+// segment would stop a directory matching the paths below it.
 func newDirSet(normalizedDirs []string) dirSet {
 	set := make(dirSet, len(normalizedDirs))
 	for _, dir := range normalizedDirs {
-		set[dir] = struct{}{}
+		set[filepath.Clean(dir)] = struct{}{}
 	}
 	return set
 }
