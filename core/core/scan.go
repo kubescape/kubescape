@@ -294,6 +294,16 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 	}
 	spanPolicies.End()
 
+	if scanInfo.DryRun {
+		spanInit.End()
+		result, err := interfaces.resourceHandler.Preflight(ctxInit, scanData, scanInfo)
+		if err != nil {
+			return resultsHandling, err
+		}
+		printPreflightResult(result)
+		return resultsHandling, nil
+	}
+
 	// ===================== resources =====================
 	ctxResources, spanResources := otel.Tracer("").Start(ctxInit, "resources")
 
@@ -687,4 +697,25 @@ func getAllWorkloadImages(wl *workloadinterface.Workload) []string {
 		}
 	}
 	return images
+}
+
+// printPreflightResult prints the --dry-run RBAC check to stdout.
+func printPreflightResult(result *resourcehandler.PreflightResult) {
+	for _, f := range result.DiscoveryFailures {
+		fmt.Printf("DISCOVERY FAILED  %s: %s\n", f.GVR, f.Error)
+	}
+
+	denied := result.Denied()
+	if len(denied) == 0 {
+		fmt.Printf("All %d required resource type(s) can be listed with the current credentials.\n", len(result.Checks))
+		return
+	}
+
+	for _, c := range denied {
+		fmt.Printf("DENIED  list %s\n", c.GVR)
+		if len(c.AffectedControls) > 0 {
+			fmt.Printf("        -> %s will not evaluate\n", strings.Join(c.AffectedControls, ", "))
+		}
+	}
+	fmt.Printf("\n%d/%d required resource type(s) can be listed. %d denied.\n", len(result.Checks)-len(denied), len(result.Checks), len(denied))
 }
