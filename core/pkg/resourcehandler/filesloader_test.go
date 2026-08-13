@@ -956,7 +956,8 @@ metadata:
 // files, survive. The containment check is directory-aware, so a root located
 // just above the scan tree must not swallow unrelated inputs.
 func TestExcludeFilesUnderDirectories(t *testing.T) {
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	appDir := filepath.Join(root, "app")
 	nestedDir := filepath.Join(appDir, "config", "base")
 	require.NoError(t, os.MkdirAll(nestedDir, 0o750))
