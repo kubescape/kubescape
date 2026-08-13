@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -1030,7 +1031,9 @@ func mcpServerEntrypoint() error {
 	// Initialize the policy getter to load the local ~/.kubescape cache.
 	// Without this, the getter will always hit the GitHub API directly for every scan,
 	// defeating offline scanning and causing rate limits.
-	_, _ = ksServer.policyGetter.SetRegoObjectsWithFallback()
+	if _, err := ksServer.policyGetter.SetRegoObjectsWithFallback(); err != nil {
+		logger.L().Warning("Failed to initialize policy store at startup (falling back to direct download later)", helpers.Error(err))
+	}
 
 	// Creating Kubescape tools and resources
 
