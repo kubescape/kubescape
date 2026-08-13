@@ -72,6 +72,11 @@ func (ksServer *KubescapeMcpserver) getScanSem() *semaphore.Weighted {
 	return ksServer.scanSem
 }
 
+// doScanChan executes a singleflight scan wrapped with context cancellation reference counting.
+// TODO: There is a narrow race condition here if the last waiter cancels and deletes the scanCtxs entry
+// while singleflight is still cleaning up its internal map. A new caller arriving in this tiny window
+// will create a fresh context but get attached to the dying singleflight call, receiving a spurious
+// cancellation error. This self-heals on retry.
 func (ksServer *KubescapeMcpserver) doScanChan(ctx context.Context, key string, scanFunc func(context.Context) (interface{}, error)) (interface{}, error) {
 	ksServer.scanCtxMu.Lock()
 	if ksServer.scanCtxs == nil {
