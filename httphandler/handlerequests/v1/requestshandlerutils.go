@@ -140,7 +140,7 @@ func (handler *HTTPHandler) watchForScan() {
 	for {
 		scanReq := <-handler.scanRequestChan
 		if scanReq.isUserScan {
-			handler.state.setLatestUserScanID(scanReq.scanID)
+			handler.state.setRunningUserScanID(scanReq.scanID)
 		}
 		if handler.state.isCancelled(scanReq.scanID) {
 			logger.L().Info("skipping cancelled scan", helpers.String("scanID", scanReq.scanID))
