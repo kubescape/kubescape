@@ -126,7 +126,7 @@ func TestActionPrint_Yaml(t *testing.T) {
 		_ = os.Remove(tmpJson.Name())
 	}()
 
-	jp := NewJsonPrinter()
+	jp := NewJsonPrinter("")
 	jp.writer = tmpJson
 	jp.ActionPrint(context.Background(), session, nil)
 	assert.NoError(t, tmpJson.Close())
@@ -169,7 +169,7 @@ func TestActionPrint_ImageScan_Yaml(t *testing.T) {
 		_ = os.Remove(tmpJson.Name())
 	}()
 
-	jp := NewJsonPrinter()
+	jp := NewJsonPrinter("")
 	jp.writer = tmpJson
 	jp.ActionPrint(context.Background(), nil, imageScanData)
 	assert.NoError(t, tmpJson.Close())

@@ -115,6 +115,21 @@ func TestResultsHandlerHandleResultsReturnsPrinterErrors(t *testing.T) {
 	assert.Equal(t, 1, outputPrinter.ActionPrintCalls)
 }
 
+func TestResultsHandlerHandleResultsPrintsBeforeReturningScanError(t *testing.T) {
+	scanErr := errors.New("image scan failed")
+	uiPrinter := &SpyPrinter{}
+	outputPrinter := &SpyPrinter{}
+	rh := NewResultsHandler(nil, []printer.IPrinter{outputPrinter}, uiPrinter)
+	rh.SetData(cautils.NewOPASessionObjMock())
+	rh.SetScanError(scanErr)
+
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{})
+
+	require.ErrorIs(t, err, scanErr)
+	assert.Equal(t, 1, uiPrinter.ActionPrintCalls)
+	assert.Equal(t, 1, outputPrinter.ActionPrintCalls)
+}
+
 func TestValidatePrinter(t *testing.T) {
 	tests := []struct {
 		name        string

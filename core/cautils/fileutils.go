@@ -70,10 +70,10 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(err))
 	}
 	if len(excludedChartDirectories) > 0 {
-		normalizedExcludedDirectories := normalizePaths(excludedChartDirectories)
+		excludedDirectories := newDirSet(normalizePaths(excludedChartDirectories))
 		remaining := make([]string, 0, len(helmDirectories))
 		for _, directory := range helmDirectories {
-			if !isUnderAnyNormalizedDir(normalizePath(directory), normalizedExcludedDirectories) {
+			if !excludedDirectories.contains(normalizePath(directory)) {
 				remaining = append(remaining, directory)
 			}
 		}
@@ -230,11 +230,11 @@ func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
 	for _, helmDir := range renderedCharts {
 		templateDirs = append(templateDirs, filepath.Join(helmDir, "templates"))
 	}
-	templateDirs = pathAliasesForPaths(templateDirs)
+	templates := newDirSet(pathAliasesForPaths(templateDirs))
 
 	remaining := make([]string, 0, len(files))
 	for _, file := range files {
-		if !IsAnyPathAliasUnderAnyDir(file, templateDirs) {
+		if !templates.containsAnyAlias(file) {
 			remaining = append(remaining, file)
 		}
 	}
@@ -245,20 +245,62 @@ func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
 // relative paths and resolving symlinks where the path already exists.
 func IsUnderAnyDir(path string, dirs []string) bool {
 	return IsAnyPathAliasUnderAnyDir(path, pathAliasesForPaths(dirs))
+	return newDirSet(normalizePaths(dirs)).contains(normalizePath(path))
 }
 
-func isUnderAnyNormalizedDir(path string, dirs []string) bool {
-	for _, dir := range dirs {
-		rel, err := filepath.Rel(dir, path)
-		if err != nil {
-			continue
+// dirSet decides containment by walking a path's ancestors, so a lookup costs
+// path depth instead of one filepath.Rel per directory. Callers scanning many
+// paths against the same directories must build it once and reuse it.
+// Members must already be normalized, as must the paths passed to contains.
+type dirSet map[string]struct{}
+
+// newDirSet indexes dirs for lookup. Members are cleaned because the ancestor
+// walk compares exact strings, where the filepath.Rel comparison it replaces
+// cleaned its arguments itself: without this a trailing separator or a "."
+// segment would stop a directory matching the paths below it.
+func newDirSet(normalizedDirs []string) dirSet {
+	set := make(dirSet, len(normalizedDirs))
+	for _, dir := range normalizedDirs {
+		set[filepath.Clean(dir)] = struct{}{}
+	}
+	return set
+}
+
+// contains reports whether path is the set's member directory or lives below
+// it. A sibling merely sharing a prefix ("templates-docs" next to "templates")
+// is not an ancestor, so it stays outside.
+func (s dirSet) contains(path string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for dir := path; ; {
+		if _, ok := s[dir]; ok {
+			return true
 		}
-		// a sibling merely sharing a prefix (e.g. "templates-docs" next to "templates") escapes with ".."
-		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
+}
+
+// containsAny reports whether any of the already-normalized paths is contained.
+func (s dirSet) containsAny(paths []string) bool {
+	for _, path := range paths {
+		if s.contains(path) {
 			return true
 		}
 	}
 	return false
+}
+
+// containsAnyAlias resolves path's aliases and reports whether any is contained.
+func (s dirSet) containsAnyAlias(path string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	return s.containsAny(pathAliases(path))
 }
 
 func normalizePaths(paths []string) []string {
@@ -283,12 +325,7 @@ func pathAliasesForPaths(paths []string) []string {
 // alias matters for a symlinked file whose link target lives elsewhere: it is
 // still owned by the directory that lexically contains it.
 func IsAnyPathAliasUnderAnyDir(path string, dirs []string) bool {
-	for _, alias := range pathAliases(path) {
-		if isUnderAnyNormalizedDir(alias, dirs) {
-			return true
-		}
-	}
-	return false
+	return newDirSet(dirs).containsAnyAlias(path)
 }
 
 // pathAliases returns both the absolute lexical path and, when different, its
@@ -399,9 +436,9 @@ type KustomizeRenderResult struct {
 	OwnedSourcePaths          []string
 	OwnedHelmChartDirectories []string
 	OwnedHelmCRDDirectories   []string
-	ownedSourcePathAliases    []string
-	ownedHelmChartAliases     []string
-	ownedHelmCRDAliases       []string
+	ownedSourcePathSet        dirSet
+	ownedHelmChartSet         dirSet
+	ownedHelmCRDSet           dirSet
 }
 
 // OwnsPlainFile reports whether a successfully rendered Kustomize input already
@@ -409,11 +446,13 @@ type KustomizeRenderResult struct {
 // Helm-template exclusion, while raw CRDs are removed here only when the owning
 // helmCharts entry requested includeCRDs.
 func (result KustomizeRenderResult) OwnsPlainFile(path string) bool {
-	if IsAnyPathAliasUnderAnyDir(path, result.ownedHelmChartAliases) {
-		return IsAnyPathAliasUnderAnyDir(path, result.ownedHelmCRDAliases) ||
-			IsAnyPathAliasUnderAnyDir(path, result.ownedSourcePathAliases)
+	// Resolve once: every alias resolution walks the path's symlinks.
+	aliases := pathAliases(path)
+	if result.ownedHelmChartSet.containsAny(aliases) {
+		return result.ownedHelmCRDSet.containsAny(aliases) ||
+			result.ownedSourcePathSet.containsAny(aliases)
 	}
-	return IsAnyPathAliasUnderAnyDir(path, result.ownedSourcePathAliases)
+	return result.ownedSourcePathSet.containsAny(aliases)
 }
 
 // LoadResourcesFromKustomizeDirectories renders the Kustomize configuration at
@@ -463,9 +502,9 @@ func LoadResourcesFromKustomizeDirectories(ctx context.Context, basePath string)
 		appendUniquePaths(&result.OwnedHelmChartDirectories, seenOwnedCharts, ownership.HelmChartDirectories...)
 		appendUniquePaths(&result.OwnedHelmCRDDirectories, seenOwnedCRDs, ownership.HelmCRDDirectories...)
 	}
-	result.ownedSourcePathAliases = pathAliasesForPaths(result.OwnedSourcePaths)
-	result.ownedHelmChartAliases = pathAliasesForPaths(result.OwnedHelmChartDirectories)
-	result.ownedHelmCRDAliases = pathAliasesForPaths(result.OwnedHelmCRDDirectories)
+	result.ownedSourcePathSet = newDirSet(pathAliasesForPaths(result.OwnedSourcePaths))
+	result.ownedHelmChartSet = newDirSet(pathAliasesForPaths(result.OwnedHelmChartDirectories))
+	result.ownedHelmCRDSet = newDirSet(pathAliasesForPaths(result.OwnedHelmCRDDirectories))
 
 	return result, nil
 }

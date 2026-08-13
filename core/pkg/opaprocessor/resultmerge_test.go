@@ -59,6 +59,40 @@ func TestMergeAssociatedRule_AccumulatesFindings(t *testing.T) {
 	assert.Equal(t, []string{"related-1", "related-2"}, got.RelatedResourcesIDs, "related resources must be a set")
 }
 
+// TestMergeAssociatedRule_DeduplicatesPaths covers a resident resource, which is
+// evaluated once per namespace scope and reports the same path every time.
+func TestMergeAssociatedRule_DeduplicatesPaths(t *testing.T) {
+	merged := &resourcesresults.ResourceAssociatedRule{
+		Name:   "rule",
+		Status: apis.StatusFailed,
+		Paths:  []armotypes.PosturePaths{failedPath("spec.hostNetwork")},
+	}
+	for range 3 {
+		merged = mergeAssociatedRule(merged, &resourcesresults.ResourceAssociatedRule{
+			Name:   "rule",
+			Status: apis.StatusFailed,
+			Paths:  []armotypes.PosturePaths{failedPath("spec.hostNetwork")},
+		})
+	}
+
+	assert.Equal(t, []armotypes.PosturePaths{failedPath("spec.hostNetwork")}, merged.Paths)
+}
+
+func TestAppendUniquePaths(t *testing.T) {
+	assert.Equal(t,
+		[]armotypes.PosturePaths{failedPath("a"), failedPath("b")},
+		appendUnique([]armotypes.PosturePaths{failedPath("a")}, []armotypes.PosturePaths{failedPath("a"), failedPath("b")}),
+	)
+	assert.Equal(t,
+		[]armotypes.PosturePaths{{FixPath: armotypes.FixPath{Path: "a", Value: "1"}}, {FixPath: armotypes.FixPath{Path: "a", Value: "2"}}},
+		appendUnique(
+			[]armotypes.PosturePaths{{FixPath: armotypes.FixPath{Path: "a", Value: "1"}}},
+			[]armotypes.PosturePaths{{FixPath: armotypes.FixPath{Path: "a", Value: "2"}}},
+		),
+		"paths differing only in fix value are distinct findings",
+	)
+}
+
 // TestMergeAssociatedRule_KeepsSubStatus pins that a sub-status recorded by an
 // earlier scope is not erased by a later, more definitive verdict that carries
 // none — the previous in-place update had the same effect.
