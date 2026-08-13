@@ -24,7 +24,23 @@ const (
 	SARIFFormat       string = "sarif"
 	GitLabSASTFormat  string = "gitlab-sast"
 	YamlFormat        string = "yaml"
+	CsvFormat         string = "csv"
+	MarkdownFormat    string = "markdown"
+	CycloneDXFormat   string = "cyclonedx-json"
+	SPDXFormat        string = "spdx-json"
 )
+
+// AllFormats lists every output format kubescape can emit.
+var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat}
+
+// ImageFormats lists formats whose printers support image-scan data. CSV is
+// deliberately excluded: CsvPrinter.ActionPrint requires opaSessionObj and
+// errors out on image scans (#2743) — a format must not be advertised as
+// image-scan-capable unless its printer actually handles that path.
+//
+// CycloneDXFormat and SPDXFormat are the inverse: they encode the SBOM that
+// only exists on image scans, so they are image-scan-only (see ValidatePrinter).
+var ImageFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CycloneDXFormat, SPDXFormat}
 
 const (
 	JsonOutputExt       = ".json"
@@ -35,11 +51,15 @@ const (
 	PrometheusOutputExt = ".txt"
 	PrettyOutputExt     = ".txt"
 	YamlOutputExt       = ".yaml"
+	CsvOutputExt        = ".csv"
+	MarkdownOutputExt   = ".md"
+	CycloneDXOutputExt  = ".cdx.json"
+	SPDXOutputExt       = ".spdx.json"
 )
 
 type IPrinter interface {
 	PrintNextSteps()
-	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData)
+	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error
 	SetWriter(ctx context.Context, outputFile string)
 	Score(score float32)
 }

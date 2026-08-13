@@ -715,6 +715,7 @@ func TestMakeRegoDeps_InputIsolation(t *testing.T) {
 	_, runtimeExists := opap.regoDependenciesData.PostureControlInputs["runtime"]
 
 	assert.False(t, runtimeExists)
+	assert.Equal(t, "aws", deps.DataControlInputs["cloudProvider"])
 }
 
 func TestRunOPAOnSingleRuleDispatch(t *testing.T) {
@@ -1063,6 +1064,19 @@ func TestCELNamespaceObjectFor(t *testing.T) {
 
 	t.Run("cluster-scoped resource resolves to nil", func(t *testing.T) {
 		assert.Nil(t, opap.celNamespaceObjectFor(podIn("")))
+	})
+
+	t.Run("enveloped resource resolves through object metadata accessors", func(t *testing.T) {
+		enveloped := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+			"apiVersion":     "v1",
+			"kind":           "Pod",
+			"name":           "p",
+			"namespace":      "prod",
+			"relatedObjects": []map[string]any{},
+		})
+		got := opap.celNamespaceObjectFor(enveloped.GetObject())
+		require.NotNil(t, got)
+		assert.Equal(t, "prod", got["metadata"].(map[string]any)["name"])
 	})
 
 	t.Run("no session resolves to nil without panicking", func(t *testing.T) {

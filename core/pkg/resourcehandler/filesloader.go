@@ -112,6 +112,9 @@ func (fileHandler *FileResourceHandler) EstimateClusterSize(ctx context.Context,
 // non-streaming path. File-based scans should not rely on --enable-streaming for
 // memory reduction.
 func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, 0, err
+	}
 	batchChan := make(chan *cautils.ResourceBatch, 1)
 	errChan := make(chan error, 1)
 
@@ -121,6 +124,9 @@ func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Conte
 	// producer goroutine like the eager path did. File collection is local and
 	// fast, so this blocks no longer than the old async body did.
 	k8sResources, allResources, externalResources, excludedRulesMap, err := fileHandler.GetResources(ctx, sessionObj, scanInfo)
+	if err := ctx.Err(); err != nil {
+		return nil, nil, 0, err
+	}
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -136,13 +142,23 @@ func (fileHandler *FileResourceHandler) StreamResourcesBatches(ctx context.Conte
 		batch.AllResources = allResources
 		batch.ExternalResources = externalResources
 
-		select {
-		case batchChan <- batch:
-		case <-ctx.Done():
-		}
+		publishFileResourceBatch(ctx, batchChan, errChan, batch)
 	}()
 
 	return batchChan, errChan, 0, nil
+}
+
+func publishFileResourceBatch(ctx context.Context, batchChan chan<- *cautils.ResourceBatch, errChan chan<- error, batch *cautils.ResourceBatch) {
+	if err := ctx.Err(); err != nil {
+		errChan <- err
+		return
+	}
+
+	select {
+	case batchChan <- batch:
+	case <-ctx.Done():
+		errChan <- ctx.Err()
+	}
 }
 
 // helmValueOptionsFromScanInfo extracts the user-supplied Helm value/release flags from ScanInfo
@@ -254,6 +270,21 @@ func resolveHelmRemotePath(clonedRepo string, gitRepo *cautils.LocalGitRepositor
 	return strings.TrimSuffix(url, ".git")
 }
 
+// excludeFilesUnderDirectories drops entries from sourceToWorkloads whose source path falls
+// under any of dirs. Used to keep a nested Kustomize directory's local inputs out of the
+// plain-manifest results once that directory has already been rendered on its own, so the
+// transformed and raw identities of the same resource don't both end up in the scan.
+func excludeFilesUnderDirectories(sourceToWorkloads map[string][]workloadinterface.IMetadata, dirs []string) {
+	if len(dirs) == 0 {
+		return
+	}
+	for source := range sourceToWorkloads {
+		if cautils.IsUnderAnyDir(source, dirs) {
+			delete(sourceToWorkloads, source)
+		}
+	}
+}
+
 // getResourcesFromPath loads every scannable resource under path, from plain
 // manifests, helm charts and kustomize directories, and maps each workload to the
 // source file it came from.
@@ -276,23 +307,87 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		repoRoot = filepath.Dir(repoRoot)
 	}
 
-	// render helm charts first, so the plain-YAML loader knows which charts' templates the render
-	// already covered and can skip only those. A chart whose render failed is dropped whole here, so
-	// its templates must stay plainly scanned rather than vanish from the scan.
-	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmCharts(ctx, path, helmValueOpts)
+	// A broad directory input may contain Kustomize configurations below its root.
+	// Render them first so the generic Helm and plain-manifest passes can respect
+	// only the configurations whose builds actually succeeded.
+	kustomizeResult, err := cautils.LoadResourcesFromKustomizeDirectories(ctx, path)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Charts owned by a successful Kustomize build must not also be rendered as
+	// standalone Helm releases. Unreferenced charts remain in generic discovery.
+	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmChartsExcludingDirectories(ctx, path, helmValueOpts, kustomizeResult.OwnedHelmChartDirectories)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// load resource from local file system
-	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, renderedCharts)
+	// Kustomize-owned chart templates are covered by that build even though the
+	// generic Helm renderer left them alone. CRDs are filtered separately according
+	// to includeCRDs, so an omitted CRD remains available to the raw-file pass.
+	coveredChartDirectories := append(append([]string{}, renderedCharts...), kustomizeResult.OwnedHelmChartDirectories...)
+	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, coveredChartDirectories)
 	if err != nil {
 		return nil, nil, err
+	}
+	terraformSourceToWorkloads, err := cautils.LoadResourcesFromTerraform(ctx, path)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// merge Terraform-derived workloads, same pattern as the Kustomize block below
+	for source, ws := range terraformSourceToWorkloads {
+		workloads = append(workloads, ws...)
+		relSource, err := filepath.Rel(repoRoot, source)
+		if err == nil {
+			source = relSource
+		}
+
+		var lastCommit reporthandling.LastCommit
+		if gitRepo != nil {
+			if commitInfo, _ := gitRepo.GetFileLastCommit(source); commitInfo != nil {
+				lastCommit = reporthandling.LastCommit{
+					Hash:           commitInfo.SHA,
+					Date:           commitInfo.Author.Date,
+					CommitterName:  commitInfo.Author.Name,
+					CommitterEmail: commitInfo.Author.Email,
+					Message:        commitInfo.Message,
+				}
+			}
+		}
+
+		var workloadSource reporthandling.Source
+		if clonedRepo != "" {
+			workloadSource = reporthandling.Source{
+				Path:         "",
+				RelativePath: source,
+				FileType:     "Terraform",
+				LastCommit:   lastCommit,
+			}
+		} else {
+			workloadSource = reporthandling.Source{
+				Path:         repoRoot,
+				RelativePath: source,
+				FileType:     "Terraform",
+				LastCommit:   lastCommit,
+			}
+		}
+
+		for i := range ws {
+			workloadIDToSource[ws[i].GetID()] = workloadSource
+		}
 	}
 
 	// update workloads and workloadIDToSource
 	var warnIssued bool
 	for source, ws := range sourceToWorkloads {
+		// Kustomize can transform identity fields, so identity deduplication cannot
+		// reliably remove the corresponding raw input. Exclude only paths covered by
+		// successful builds; broken nested configurations retain their raw fallback.
+		if kustomizeResult.OwnsPlainFile(source) {
+			continue
+		}
 		workloads = append(workloads, ws...)
 
 		relSource, err := filepath.Rel(repoRoot, source)
@@ -383,16 +478,13 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		logger.L().Debug("helm templates found in local storage", helpers.Int("helmTemplates", len(helmSourceToWorkloads)), helpers.Int("workloads", len(workloads)))
 	}
 
-	//patch, get value from env
-	// Load resources from Kustomize directory
-	kustomizeSourceToWorkloads, kustomizeDirectoryName, err := cautils.LoadResourcesFromKustomizeDirectory(ctx, path)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// update workloads and workloadIDToSource with workloads from Kustomize Directory
-	for source, ws := range kustomizeSourceToWorkloads {
+	// update workloads and workloadIDToSource with workloads from Kustomize directories
+	for source, ws := range kustomizeResult.SourceToWorkloads {
 		workloads = append(workloads, ws...)
+		// GetWorkloads keys its result by the rendered Kustomize directory's own path, so source
+		// (before it is rewritten to a repo-relative path below) is that directory's name — the
+		// correct owner for each entry even when several Kustomize directories were rendered.
+		kustomizeDirectoryName := source
 		relSource, err := filepath.Rel(repoRoot, source)
 
 		if err == nil {

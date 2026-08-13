@@ -17,18 +17,18 @@ import (
 
 func TestToScanInfo_SubmitExplicitlySet(t *testing.T) {
 	// no submit field in the request - not explicitly set
-	s := ToScanInfo(&utilsmetav1.PostScanRequest{TargetType: apisv1.KindFramework})
+	s, _ := ToScanInfo(&utilsmetav1.PostScanRequest{TargetType: apisv1.KindFramework})
 	assert.Nil(t, s.Submit.Get())
 
 	// submit:false explicitly requested
 	falseVal := false
-	s = ToScanInfo(&utilsmetav1.PostScanRequest{TargetType: apisv1.KindFramework, Submit: &falseVal})
+	s, _ = ToScanInfo(&utilsmetav1.PostScanRequest{TargetType: apisv1.KindFramework, Submit: &falseVal})
 	require.NotNil(t, s.Submit.Get())
 	assert.False(t, s.Submit.GetBool())
 
 	// submit:true explicitly requested
 	trueVal := true
-	s = ToScanInfo(&utilsmetav1.PostScanRequest{TargetType: apisv1.KindFramework, Submit: &trueVal})
+	s, _ = ToScanInfo(&utilsmetav1.PostScanRequest{TargetType: apisv1.KindFramework, Submit: &trueVal})
 	require.NotNil(t, s.Submit.Get())
 	assert.True(t, s.Submit.GetBool())
 }
@@ -44,11 +44,11 @@ func TestToScanInfo(t *testing.T) {
 			ExcludedNamespaces: []string{"kube-system", "kube-public"},
 			TargetNames:        []string{"nsa", "mitre"},
 		}
-		s := ToScanInfo(req)
+		s, policyIdentifiers := ToScanInfo(req)
 		assert.Equal(t, "abc", s.AccountID)
 		assert.Equal(t, "v2", s.FormatVersion)
 		assert.Equal(t, "pdf", s.Format)
-		assert.Equal(t, 2, len(s.PolicyIdentifier))
+		assert.Equal(t, 2, len(policyIdentifiers))
 		assert.Equal(t, "kube-system,kube-public", s.ExcludedNamespaces)
 
 		assert.False(t, s.HostSensorEnabled.GetBool())
@@ -56,10 +56,10 @@ func TestToScanInfo(t *testing.T) {
 		assert.False(t, s.Submit.GetBool())
 		assert.False(t, s.ScanAll)
 		assert.True(t, s.FrameworkScan)
-		assert.Equal(t, "nsa", s.PolicyIdentifier[0].Identifier)
-		assert.Equal(t, apisv1.KindFramework, s.PolicyIdentifier[0].Kind)
-		assert.Equal(t, "mitre", s.PolicyIdentifier[1].Identifier)
-		assert.Equal(t, apisv1.KindFramework, s.PolicyIdentifier[1].Kind)
+		assert.Equal(t, "nsa", policyIdentifiers[0].Identifier)
+		assert.Equal(t, apisv1.KindFramework, policyIdentifiers[0].Kind)
+		assert.Equal(t, "mitre", policyIdentifiers[1].Identifier)
+		assert.Equal(t, apisv1.KindFramework, policyIdentifiers[1].Kind)
 	}
 	{
 		req := &utilsmetav1.PostScanRequest{
@@ -67,18 +67,18 @@ func TestToScanInfo(t *testing.T) {
 			TargetNames:       []string{"c-0001"},
 			IncludeNamespaces: []string{"kube-system", "kube-public"},
 		}
-		s := ToScanInfo(req)
+		s, policyIdentifiers := ToScanInfo(req)
 		assert.False(t, s.ScanAll)
 		assert.False(t, s.FrameworkScan)
 		assert.Equal(t, "kube-system,kube-public", s.IncludeNamespaces)
 		assert.Equal(t, "", s.ExcludedNamespaces)
-		assert.Equal(t, 1, len(s.PolicyIdentifier))
-		assert.Equal(t, "c-0001", s.PolicyIdentifier[0].Identifier)
-		assert.Equal(t, apisv1.KindControl, s.PolicyIdentifier[0].Kind)
+		assert.Equal(t, 1, len(policyIdentifiers))
+		assert.Equal(t, "c-0001", policyIdentifiers[0].Identifier)
+		assert.Equal(t, apisv1.KindControl, policyIdentifiers[0].Kind)
 	}
 	{
 		req := &utilsmetav1.PostScanRequest{}
-		s := ToScanInfo(req)
+		s, _ := ToScanInfo(req)
 		assert.True(t, s.ScanAll)
 		assert.True(t, s.FrameworkScan)
 		assert.Nil(t, s.ScanObject)
@@ -94,7 +94,7 @@ func TestToScanInfo(t *testing.T) {
 				},
 			},
 		}
-		s := ToScanInfo(req)
+		s, _ := ToScanInfo(req)
 		assert.NotNil(t, s.ScanObject)
 		assert.Equal(t, "apps/v1", s.ScanObject.GetApiVersion())
 		assert.Equal(t, "Deployment", s.ScanObject.GetKind())
@@ -109,7 +109,7 @@ func TestToScanInfoExceptionsCleanup(t *testing.T) {
 			{PortalBase: armotypes.PortalBase{Name: "ex"}},
 		},
 	}
-	s := ToScanInfo(req)
+	s, _ := ToScanInfo(req)
 	require.NotEmpty(t, s.UseExceptions)
 	_, err := os.Stat(s.UseExceptions)
 	require.NoError(t, err)
@@ -201,10 +201,10 @@ func TestSetTargetInScanInfo(t *testing.T) {
 			TargetNames: []string{""},
 		}
 		scanInfo := &cautils.ScanInfo{}
-		setTargetInScanInfo(req, scanInfo)
+		policyIdentifiers := setTargetInScanInfo(req, scanInfo)
 		assert.True(t, scanInfo.FrameworkScan)
 		assert.True(t, scanInfo.ScanAll)
-		assert.Equal(t, 0, len(scanInfo.PolicyIdentifier))
+		assert.Equal(t, 0, len(policyIdentifiers))
 	}
 	{
 		req := &utilsmetav1.PostScanRequest{
@@ -212,10 +212,10 @@ func TestSetTargetInScanInfo(t *testing.T) {
 			TargetNames: []string{"", "security"},
 		}
 		scanInfo := &cautils.ScanInfo{}
-		setTargetInScanInfo(req, scanInfo)
+		policyIdentifiers := setTargetInScanInfo(req, scanInfo)
 		assert.True(t, scanInfo.FrameworkScan)
 		assert.True(t, scanInfo.ScanAll)
-		assert.Equal(t, 1, len(scanInfo.PolicyIdentifier))
+		assert.Equal(t, 1, len(policyIdentifiers))
 	}
 	{
 		req := &utilsmetav1.PostScanRequest{
@@ -223,10 +223,10 @@ func TestSetTargetInScanInfo(t *testing.T) {
 			TargetNames: []string{},
 		}
 		scanInfo := &cautils.ScanInfo{}
-		setTargetInScanInfo(req, scanInfo)
+		policyIdentifiers := setTargetInScanInfo(req, scanInfo)
 		assert.True(t, scanInfo.FrameworkScan)
 		assert.True(t, scanInfo.ScanAll)
-		assert.Equal(t, 0, len(scanInfo.PolicyIdentifier))
+		assert.Equal(t, 0, len(policyIdentifiers))
 	}
 	{
 		req := &utilsmetav1.PostScanRequest{
@@ -234,10 +234,10 @@ func TestSetTargetInScanInfo(t *testing.T) {
 			TargetNames: []string{"nsa", "mitre"},
 		}
 		scanInfo := &cautils.ScanInfo{}
-		setTargetInScanInfo(req, scanInfo)
+		policyIdentifiers := setTargetInScanInfo(req, scanInfo)
 		assert.True(t, scanInfo.FrameworkScan)
 		assert.False(t, scanInfo.ScanAll)
-		assert.Equal(t, 2, len(scanInfo.PolicyIdentifier))
+		assert.Equal(t, 2, len(policyIdentifiers))
 	}
 	{
 		req := &utilsmetav1.PostScanRequest{
@@ -245,18 +245,18 @@ func TestSetTargetInScanInfo(t *testing.T) {
 			TargetNames: []string{"all"},
 		}
 		scanInfo := &cautils.ScanInfo{}
-		setTargetInScanInfo(req, scanInfo)
+		policyIdentifiers := setTargetInScanInfo(req, scanInfo)
 		assert.True(t, scanInfo.FrameworkScan)
 		assert.True(t, scanInfo.ScanAll)
-		assert.Equal(t, 0, len(scanInfo.PolicyIdentifier))
+		assert.Equal(t, 0, len(policyIdentifiers))
 	}
 	{
 		req := &utilsmetav1.PostScanRequest{}
 		scanInfo := &cautils.ScanInfo{}
-		setTargetInScanInfo(req, scanInfo)
+		policyIdentifiers := setTargetInScanInfo(req, scanInfo)
 		assert.True(t, scanInfo.FrameworkScan)
 		assert.True(t, scanInfo.ScanAll)
-		assert.Equal(t, 0, len(scanInfo.PolicyIdentifier))
+		assert.Equal(t, 0, len(policyIdentifiers))
 	}
 	{
 		req := &utilsmetav1.PostScanRequest{
@@ -264,9 +264,9 @@ func TestSetTargetInScanInfo(t *testing.T) {
 			TargetNames: []string{"c-0001"},
 		}
 		scanInfo := &cautils.ScanInfo{}
-		setTargetInScanInfo(req, scanInfo)
+		policyIdentifiers := setTargetInScanInfo(req, scanInfo)
 		assert.False(t, scanInfo.FrameworkScan)
 		assert.False(t, scanInfo.ScanAll)
-		assert.Equal(t, 1, len(scanInfo.PolicyIdentifier))
+		assert.Equal(t, 1, len(policyIdentifiers))
 	}
 }

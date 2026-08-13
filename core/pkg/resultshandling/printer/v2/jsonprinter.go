@@ -27,11 +27,12 @@ const (
 var _ printer.IPrinter = &JsonPrinter{}
 
 type JsonPrinter struct {
-	writer *os.File
+	writer      *os.File
+	minSeverity string
 }
 
-func NewJsonPrinter() *JsonPrinter {
-	return &JsonPrinter{}
+func NewJsonPrinter(minSeverity string) *JsonPrinter {
+	return &JsonPrinter{minSeverity: minSeverity}
 }
 
 func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) {
@@ -80,7 +81,7 @@ func (jp *JsonPrinter) convertToImageScanSummary(imageScanData []cautils.ImageSc
 	return &imageScanSummary, nil
 }
 
-func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	var err error
 
 	if opaSessionObj != nil {
@@ -89,8 +90,7 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		model, err2 := models.NewDocument(clio.Identification{}, imageScanData[0].Packages, imageScanData[0].Context,
 			imageScanData[0].Matches, imageScanData[0].IgnoredMatches, imageScanData[0].VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
 		if err2 != nil {
-			logger.L().Ctx(ctx).Error("failed to create document", helpers.Error(err2))
-			return
+			return fmt.Errorf("failed to create document: %w", err2)
 		}
 		err = grypejson.NewPresenter(models.PresenterConfig{Document: model, SBOM: imageScanData[0].SBOM}).Present(jp.writer)
 	} else {
@@ -99,10 +99,11 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results in json format", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to write results in json format: %w", err)
 	}
 
 	printer.LogOutputFile(jp.writer.Name())
+	return nil
 }
 
 func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData, jp *JsonPrinter) error {
@@ -123,6 +124,7 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScan
 	// extract specified labels from workloads, and attach scan coverage gaps.
 	finalizedReport := FinalizeResults(opaSessionObj)
 	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverage(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources, &opaSessionObj.ScanCoverage)
+	FilterBySeverity(reportWithSeverity, jp.minSeverity)
 
 	r, err := json.Marshal(reportWithSeverity)
 	if err != nil {

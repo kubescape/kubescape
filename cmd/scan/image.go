@@ -2,8 +2,9 @@ package scan
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -47,10 +48,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 				return fmt.Errorf("the command takes exactly one image name as an argument")
 			}
 
-			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, sarif")
-			}
-			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ImageScanFormats); err != nil {
+			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ImageScanFormats); err != nil {
 				return err
 			}
 			if err := shared.ValidateImageScanInfo(scanInfo); err != nil {
@@ -66,9 +64,16 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 				return err
 			}
 
+			imageName := args[0]
+			if strings.HasSuffix(imageName, ".tar") && !strings.HasPrefix(imageName, "docker-archive:") && !strings.HasPrefix(imageName, "oci-archive:") {
+				if _, err := os.Stat(imageName); err == nil {
+					imageName = "docker-archive:" + imageName
+				}
+			}
+
 			imgScanInfo := &metav1.ImageScanInfo{
 				Authority:          credentials.Authority,
-				Image:              args[0],
+				Image:              imageName,
 				Username:           credentials.Username,
 				Password:           credentials.Password,
 				Token:              credentials.Token,
@@ -82,7 +87,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			}
 
 			if exceedsSeverityThreshold {
-				shared.TerminateOnExceedingSeverity(scanInfo, logger.L())
+				return fmt.Errorf("result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
 			}
 
 			return nil

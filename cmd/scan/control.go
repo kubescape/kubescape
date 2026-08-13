@@ -2,13 +2,10 @@ package scan
 
 import (
 	"fmt"
-	"io"
-	"os"
 	"slices"
 	"strings"
 
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -56,15 +53,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer applyTimeout(scanInfo, ks)()
 
-			if scanInfo.FailThresholdSeverity != "" {
-				if err := shared.ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
-					return err
-				}
-			}
-			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast")
-			}
-			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ScanFormats); err != nil {
+			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ScanFormats); err != nil {
 				return err
 			}
 			if err := validateFrameworkScanInfo(scanInfo); err != nil {
@@ -72,31 +61,23 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			}
 
 			// flagValidationControl(scanInfo)
-			scanInfo.PolicyIdentifier = []cautils.PolicyIdentifier{}
+			var policyIdentifiers []cautils.PolicyIdentifier
 
 			if len(args) == 0 {
 				scanInfo.ScanAll = true
 			} else { // expected control or list of control separated by ","
 
 				// Read controls from input args
-				scanInfo.SetPolicyIdentifiers(strings.Split(args[0], ","), apisv1.KindControl)
+				policyIdentifiers = cautils.BuildPolicyIdentifiers(strings.Split(args[0], ","), apisv1.KindControl)
 
-				if len(args) > 1 {
-					if len(args[1:]) == 0 || args[1] != "-" {
-						scanInfo.InputPatterns = args[1:]
-					} else { // store stdin to file - do NOT move to separate function !!
-						tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
-						if err != nil {
-							return err
-						}
-						defer os.Remove(tempFile.Name())
-
-						if _, err := io.Copy(tempFile, os.Stdin); err != nil {
-							return err
-						}
-						scanInfo.InputPatterns = []string{tempFile.Name()}
-					}
+				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, scanInfo, scanLocalInputOptions{
+					FirstInputArg:    1,
+					RejectMixedStdin: true,
+				})
+				if err != nil {
+					return err
 				}
+				defer cleanup()
 			}
 
 			scanInfo.FrameworkScan = false
@@ -106,22 +87,33 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				return err
 			}
 
-			results, err := ks.Scan(scanInfo)
+			results, err := ks.Scan(scanInfo, policyIdentifiers)
 			if err != nil {
-				logger.L().Fatal(err.Error())
+				return err
 			}
 			if err := results.HandleResults(ks.Context(), scanInfo); err != nil {
-				logger.L().Fatal(err.Error())
+				return err
 			}
 			if !scanInfo.VerboseMode {
 				logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
 			}
 			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-				logger.L().Fatal("scan compliance-score is below permitted threshold", helpers.String("compliance score", cautils.ComplianceScoreToString(results.GetComplianceScore(), 2)), helpers.String("compliance-threshold", fmt.Sprintf("%.2f", scanInfo.ComplianceThreshold)))
+				return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
 			}
-			enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
-			enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetResults().SummaryDetails.Controls), scanInfo)
-			enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo)
+			if err := enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo); err != nil {
+				return err
+			}
+			if scanInfo.ScanImages {
+				if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+					return err
+				}
+			}
+			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetResults().SummaryDetails.Controls), scanInfo); err != nil {
+				return err
+			}
+			if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
+				return err
+			}
 
 			return nil
 		},
@@ -141,6 +133,9 @@ func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 	}
 
 	if err := shared.ValidateSeverity(severity); severity != "" && err != nil {
+		return err
+	}
+	if err := validateThresholdsOnly(scanInfo); err != nil {
 		return err
 	}
 	return nil

@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/pdf"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -67,23 +68,76 @@ func (pp *PdfPrinter) PrintNextSteps() {
 }
 
 // ActionPrint is responsible for generating a report in pdf format
-func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
-	if opaSessionObj == nil {
-		logger.L().Ctx(ctx).Error("failed to print results, missing data")
-		return
+func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	var outBuff []byte
+	var err error
+
+	if opaSessionObj != nil {
+		outBuff, err = pp.generatePdf(&opaSessionObj.Report.SummaryDetails)
+	} else if len(imageScanData) > 0 {
+		outBuff, err = pp.generateImagePdf(imageScanData)
+	} else {
+		return fmt.Errorf("failed to print results, missing data")
 	}
 
-	outBuff, err := pp.generatePdf(&opaSessionObj.Report.SummaryDetails)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to generate pdf format", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to generate pdf format: %w", err)
 	}
 
 	if _, err := pp.writer.Write(outBuff); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to write results: %w", err)
 	}
 	printer.LogOutputFile(pp.writer.Name())
+	return nil
+}
+
+// generateImagePdf builds a CVE-table PDF report for an image scan (#2782)
+func (pp *PdfPrinter) generateImagePdf(imageScanData []cautils.ImageScanData) ([]byte, error) {
+	var allCVEs []imageprinter.CVE
+	var images []string
+	for i := range imageScanData {
+		allCVEs = append(allCVEs, extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)...)
+		images = append(images, imageScanData[i].Image)
+	}
+
+	template := pdf.NewReportTemplate()
+	template.GenerateHeader(fmt.Sprintf("Image scan: %s", strings.Join(images, ", ")), time.Now().Format(time.DateTime))
+
+	rows, fixableCVEs := pp.getImageTableObjects(allCVEs)
+	if err := template.GenerateImageTable(rows, len(allCVEs), fixableCVEs); err != nil {
+		return nil, err
+	}
+
+	return template.GetPdf()
+}
+
+// getImageTableObjects converts CVEs into PDF table rows, returning the rows and how many are fixable
+func (pp *PdfPrinter) getImageTableObjects(cves []imageprinter.CVE) (*[]pdf.ImageTableObject, int) {
+	if len(cves) == 0 {
+		// maroto's list.Build returns errors.New("empty array") for an
+		// empty slice, so a clean image (zero CVEs) previously produced
+		// no PDF at all — the exact case a pipeline expects to succeed.
+		// A single placeholder row keeps the table non-empty and tells
+		// the reader the scan was clean, instead of failing silently.
+		rows := []pdf.ImageTableObject{
+			*pdf.NewImageTableRow("—", "—", "—", "None", "No vulnerabilities found", getSeverityColor),
+		}
+		return &rows, 0
+	}
+
+	rows := make([]pdf.ImageTableObject, 0, len(cves))
+	fixableCVEs := 0
+	for _, cve := range cves {
+		fixVersions := "no fix available"
+		if len(cve.FixVersions) > 0 {
+			fixVersions = strings.Join(cve.FixVersions, ", ")
+			fixableCVEs++
+		}
+		rows = append(rows, *pdf.NewImageTableRow(cve.ID, cve.Package, cve.Version, cve.Severity, fixVersions, getSeverityColor))
+	}
+	return &rows, fixableCVEs
 }
 
 func (pp *PdfPrinter) generatePdf(summaryDetails *reportsummary.SummaryDetails) ([]byte, error) {
@@ -92,7 +146,7 @@ func (pp *PdfPrinter) generatePdf(summaryDetails *reportsummary.SummaryDetails) 
 
 	template := pdf.NewReportTemplate()
 	template.GenerateHeader(utils.FrameworksScoresToString(summaryDetails.ListFrameworks()), time.Now().Format(time.DateTime))
-	err := template.GenerateTable(pp.getTableObjects(summaryDetails, sortedControlIDs),
+	err := template.GenerateTable(pp.getTableObjects(summaryDetails, sortedControlIDs, infoToPrintInfo),
 		summaryDetails.NumberOfResources().Failed(), summaryDetails.NumberOfResources().All(), summaryDetails.ComplianceScore)
 
 	if err != nil {
@@ -112,9 +166,9 @@ func (pp *PdfPrinter) getFormattedInformation(infoMap []infoStars) []string {
 	return rows
 }
 
-// getTableData is responsible for getting the table data in a standardized format
-func (pp *PdfPrinter) getTableObjects(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) *[]pdf.TableObject {
-	infoToPrintInfoMap := mapInfoToPrintInfo(summaryDetails.Controls)
+// getTableData is responsible for getting the table data in a standardized format.
+// The markers are taken from the caller so the table and the legend share one list.
+func (pp *PdfPrinter) getTableObjects(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, infoToPrintInfoMap []infoStars) *[]pdf.TableObject {
 	var controls []pdf.TableObject
 	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
 		for _, c := range sortedControlID {

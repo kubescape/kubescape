@@ -12,4 +12,5 @@ type FixInfo struct {
 	// CI artifact) - without it, the report's recorded location is trusted
 	// as-is, as it always has been.
 	BasePath string
+	ContainerProfilePath string // Path to an optional ContainerProfile JSON file
 }

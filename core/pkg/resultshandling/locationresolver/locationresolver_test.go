@@ -83,6 +83,64 @@ func TestResolveLocation_ZeroCandidateNodesDoesNotPanic(t *testing.T) {
 	})
 }
 
+func TestFixPathToValidYamlExpression(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixPath string
+		want    string
+	}{
+		{
+			name:    "path with no value is prefixed only",
+			fixPath: "spec.template.spec.containers[0].image",
+			want:    ".spec.template.spec.containers[0].image",
+		},
+		{
+			name:    "value is stripped",
+			fixPath: "spec.template.spec.containers[0].securityContext.privileged=true",
+			want:    ".spec.template.spec.containers[0].securityContext.privileged",
+		},
+		{
+			name:    "placeholder value is stripped",
+			fixPath: "spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE",
+			want:    ".spec.template.spec.containers[0].resources.limits.cpu",
+		},
+		{
+			// The CIS control-plane rules emit flag-style fix values that themselves
+			// contain "=". Splitting on the last "=" leaves "--anonymous-auth" glued
+			// to the path and yields an expression yq cannot evaluate.
+			name:    "flag-style value containing = is fully stripped",
+			fixPath: "spec.containers[0].command[3]=--anonymous-auth=false",
+			want:    ".spec.containers[0].command[3]",
+		},
+		{
+			name:    "value with multiple = is fully stripped",
+			fixPath: "spec.containers[0].command[0]=--enable-admission-plugins=NodeRestriction",
+			want:    ".spec.containers[0].command[0]",
+		},
+		{
+			name:    "value containing = and a path separator is fully stripped",
+			fixPath: "spec.containers[0].command[1]=--encryption-provider-config=/etc/kubernetes/enc.yaml",
+			want:    ".spec.containers[0].command[1]",
+		},
+		{
+			name:    "empty value after separator",
+			fixPath: "metadata.namespace=",
+			want:    ".metadata.namespace",
+		},
+		{
+			name:    "empty input",
+			fixPath: "",
+			want:    ".",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, FixPathToValidYamlExpression(tt.fixPath))
+		})
+	}
+}
+
 func TestFixPathLocationResolver_NonExistentYaml(t *testing.T) {
 	yamlFilePath := filepath.Join(onlineBoutiquePath(), "adservice_invalid.yaml")
 	resolver, err := NewFixPathLocationResolver(yamlFilePath)

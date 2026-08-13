@@ -2,11 +2,15 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/mark3labs/mcp-go/mcp"
+
+	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 )
 
 func TestParseVulnManifestURI(t *testing.T) {
@@ -110,9 +114,10 @@ func TestParseVulnManifestURI(t *testing.T) {
 func TestReadConfigurationResource_URIParsing(t *testing.T) {
 	expectedErr := fmt.Errorf("sentinel connection error")
 	ksServer := &KubescapeMcpserver{
-		ksClientErr: expectedErr,
+		ksClientInit: func() (spdxv1beta1.SpdxV1beta1Interface, error) {
+			return nil, expectedErr
+		},
 	}
-	ksServer.ksClientOnce.Do(func() {}) // Mark as done to prevent real connection
 
 	tests := []struct {
 		name      string
@@ -181,9 +186,10 @@ func TestReadConfigurationResource_URIParsing(t *testing.T) {
 func TestReadContainerProfileResource_URIParsing(t *testing.T) {
 	expectedErr := fmt.Errorf("sentinel connection error")
 	ksServer := &KubescapeMcpserver{
-		ksClientErr: expectedErr,
+		ksClientInit: func() (spdxv1beta1.SpdxV1beta1Interface, error) {
+			return nil, expectedErr
+		},
 	}
-	ksServer.ksClientOnce.Do(func() {}) // Mark as done to prevent real connection
 
 	tests := []struct {
 		name      string
@@ -313,5 +319,193 @@ func TestCallTool_RunFrameworkScan(t *testing.T) {
 				t.Errorf("expected error containing %q, got %q", tt.wantErrString, res.Content[0].(mcp.TextContent).Text)
 			}
 		})
+	}
+}
+
+func TestGetKsClient_RetriesAfterTransientFailure(t *testing.T) {
+	sentinelErr := fmt.Errorf("transient init failure")
+	calls := 0
+	fakeClient := struct {
+		spdxv1beta1.SpdxV1beta1Interface
+	}{}
+	ksServer := &KubescapeMcpserver{
+		ksClientInit: func() (spdxv1beta1.SpdxV1beta1Interface, error) {
+			calls++
+			if calls == 1 {
+				return nil, sentinelErr
+			}
+			return fakeClient, nil
+		},
+	}
+
+	_, err := ksServer.getKsClient()
+	if err == nil || !strings.Contains(err.Error(), "transient init failure") {
+		t.Fatalf("expected transient init failure on first call, got: %v", err)
+	}
+
+	client, err := ksServer.getKsClient()
+	if err != nil {
+		t.Fatalf("expected retry to succeed after transient failure, got error: %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected non-nil client after successful retry")
+	}
+	if calls != 2 {
+		t.Fatalf("expected init to be called twice (once failing, once succeeding), got %d calls", calls)
+	}
+
+	// A subsequent call must reuse the cached successful client, not re-init.
+	if _, err := ksServer.getKsClient(); err != nil {
+		t.Fatalf("unexpected error on cached client call: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("expected init not to be called again once a client is cached, got %d calls", calls)
+	}
+}
+
+func TestGetKsClient_DefaultInitializerIsUsedAndCached(t *testing.T) {
+	origNewKsClient := newKsClient
+	t.Cleanup(func() { newKsClient = origNewKsClient })
+
+	calls := 0
+	fakeClient := struct {
+		spdxv1beta1.SpdxV1beta1Interface
+	}{}
+	newKsClient = func() (spdxv1beta1.SpdxV1beta1Interface, error) {
+		calls++
+		return fakeClient, nil
+	}
+
+	ksServer := &KubescapeMcpserver{}
+	first, err := ksServer.getKsClient()
+	if err != nil {
+		t.Fatalf("unexpected error from default initializer: %v", err)
+	}
+	second, err := ksServer.getKsClient()
+	if err != nil {
+		t.Fatalf("unexpected error from cached default initializer: %v", err)
+	}
+	if first != fakeClient || second != fakeClient {
+		t.Fatal("expected the default initializer client to be cached and reused")
+	}
+	if calls != 1 {
+		t.Fatalf("expected default initializer to run once, got %d calls", calls)
+	}
+}
+
+func TestGetK8sClient_NotConnectedReturnsError(t *testing.T) {
+	origLoadK8sConfig := loadK8sConfig
+	origSetConnectedToCluster := setConnectedToCluster
+	origNewK8sClient := newK8sClient
+	t.Cleanup(func() {
+		loadK8sConfig = origLoadK8sConfig
+		setConnectedToCluster = origSetConnectedToCluster
+		newK8sClient = origNewK8sClient
+	})
+
+	loadK8sConfig = func() error { return errors.New("no kubeconfig") }
+	setConnectedToCluster = func(bool) {}
+	calledConstructor := false
+	newK8sClient = func() *k8sinterface.KubernetesApi {
+		calledConstructor = true
+		return &k8sinterface.KubernetesApi{}
+	}
+
+	ksServer := &KubescapeMcpserver{}
+	client, err := ksServer.getK8sClient()
+	if err == nil {
+		t.Fatal("expected error when no cluster is reachable, got nil")
+	}
+	if client != nil {
+		t.Fatalf("expected nil client on error, got %v", client)
+	}
+	if calledConstructor {
+		t.Fatal("expected constructor not to run when cluster connectivity is absent")
+	}
+}
+
+func TestGetK8sClient_InitializesOnceAndCachesClient(t *testing.T) {
+	origLoadK8sConfig := loadK8sConfig
+	origSetConnectedToCluster := setConnectedToCluster
+	origNewK8sClient := newK8sClient
+	t.Cleanup(func() {
+		loadK8sConfig = origLoadK8sConfig
+		setConnectedToCluster = origSetConnectedToCluster
+		newK8sClient = origNewK8sClient
+	})
+
+	loadK8sConfig = func() error { return nil }
+	setConnectedToCluster = func(bool) {}
+	calls := 0
+	fakeClient := &k8sinterface.KubernetesApi{}
+	newK8sClient = func() *k8sinterface.KubernetesApi {
+		calls++
+		return fakeClient
+	}
+
+	ksServer := &KubescapeMcpserver{}
+	first, err := ksServer.getK8sClient()
+	if err != nil {
+		t.Fatalf("unexpected error creating client: %v", err)
+	}
+	second, err := ksServer.getK8sClient()
+	if err != nil {
+		t.Fatalf("unexpected error reusing cached client: %v", err)
+	}
+	if first != fakeClient || second != fakeClient {
+		t.Fatal("expected constructed client to be cached and reused")
+	}
+	if calls != 1 {
+		t.Fatalf("expected constructor to run once, got %d calls", calls)
+	}
+}
+
+// TestGetK8sClient_RetriesAfterTransientLoadFailure guards against
+// k8sinterface.IsConnectedToCluster's one-way latch: it only ever moves to
+// false, so a naive connectivity check would return the same error forever
+// after one transient kubeconfig read failure. getK8sClient must retry via
+// loadK8sConfig instead, which has no such latch.
+func TestGetK8sClient_RetriesAfterTransientLoadFailure(t *testing.T) {
+	origLoadK8sConfig := loadK8sConfig
+	origSetConnectedToCluster := setConnectedToCluster
+	origNewK8sClient := newK8sClient
+	t.Cleanup(func() {
+		loadK8sConfig = origLoadK8sConfig
+		setConnectedToCluster = origSetConnectedToCluster
+		newK8sClient = origNewK8sClient
+	})
+
+	loadErr := errors.New("transient kubeconfig read failure")
+	shouldFail := true
+	loadK8sConfig = func() error {
+		if shouldFail {
+			return loadErr
+		}
+		return nil
+	}
+	var latch bool
+	setConnectedToCluster = func(connected bool) { latch = connected }
+	fakeClient := &k8sinterface.KubernetesApi{}
+	newK8sClient = func() *k8sinterface.KubernetesApi { return fakeClient }
+
+	ksServer := &KubescapeMcpserver{}
+
+	if _, err := ksServer.getK8sClient(); err == nil {
+		t.Fatal("expected error on first, transient failure")
+	}
+	if latch {
+		t.Fatal("expected the connectivity latch to be false after a failed load")
+	}
+
+	shouldFail = false
+	client, err := ksServer.getK8sClient()
+	if err != nil {
+		t.Fatalf("expected retry to succeed after the transient condition cleared, got: %v", err)
+	}
+	if client != fakeClient {
+		t.Fatalf("expected retried call to return the constructed client, got %v", client)
+	}
+	if !latch {
+		t.Fatal("expected the connectivity latch to be cleared to true on successful retry")
 	}
 }

@@ -46,10 +46,11 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 
 	var client *k8sinterface.KubernetesApi
 	if rsrcHandler == nil {
-		if !k8sinterface.IsConnectedToCluster() {
-			return nil, fmt.Errorf("no reachable kubernetes cluster: ensure KUBECONFIG is set or the server is running inside a cluster")
+		var err error
+		client, err = ksServer.getK8sClient()
+		if err != nil {
+			return nil, err
 		}
-		client = ksServer.getK8sClient()
 	}
 
 	timeout := 10 * time.Second
@@ -75,9 +76,7 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 	}
 
 	scanInfo := &cautils.ScanInfo{
-		Getters:           getters,
 		ScanAll:           false,
-		PolicyIdentifier:  policyIdentifiers,
 		IncludeNamespaces: namespace,
 		ScanTimeout:       timeout,
 		InputPatterns:     inputPatterns,
@@ -88,7 +87,7 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 
 	policyHandler := policyhandler.NewRequestScopedPolicyHandler("")
 	defer policyHandler.Close()
-	scanData, err := policyHandler.CollectPolicies(scanCtx, scanInfo.PolicyIdentifier, scanInfo)
+	scanData, err := policyHandler.CollectPolicies(scanCtx, policyIdentifiers, scanInfo, &getters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect %s policies: %w", label, err)
 	}
