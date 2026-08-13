@@ -1,0 +1,35 @@
+name: repo-hygiene
+permissions:
+  contents: read
+on:
+  workflow_dispatch: {}
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    # 00-pr-scanner.yaml skips a PR whose every file matches its paths-ignore
+    # list, and ".github/dependabot.yaml" matches two entries there ("**.yaml"
+    # and ".github/*"). A PR touching only that file therefore runs no checks
+    # at all, which is how an invalid config disabled Dependabot for three
+    # months. This workflow uses `paths` - an allow-list - to cover exactly the
+    # blind spot the other workflow's deny-list leaves open.
+    paths:
+      - ".github/**"
+      - "internal/ghworkflows/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-config:
+    name: validate repository configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        name: Installing go
+        with:
+          go-version-file: go.mod
+
+      - name: Validate workflow and Dependabot configuration
+        run: go test -v ./internal/ghworkflows/...
