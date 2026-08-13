@@ -947,6 +947,18 @@ func convertYamlToJson(i any) any {
 	return i
 }
 
+// removedButRealKinds are built-in Kubernetes kinds the bundled client-go scheme
+// no longer registers because the API itself was removed — not renamed, not
+// mistyped. A manifest still carrying one of these is legitimate historical
+// input (PodSecurityPolicy YAMLs are still common in older Helm charts), so it
+// must not be reported as a typo.
+var removedButRealKinds = map[schema.GroupKind]struct{}{
+	{Group: "policy", Kind: "PodSecurityPolicy"}:               {}, // removed in Kubernetes 1.25
+	{Group: "policy", Kind: "PodSecurityPolicyList"}:           {},
+	{Group: "auditregistration.k8s.io", Kind: "AuditSink"}:     {}, // removed in Kubernetes 1.19
+	{Group: "auditregistration.k8s.io", Kind: "AuditSinkList"}: {},
+}
+
 // validateManifestAgainstScheme checks a parsed YAML document against the
 // Kubernetes type scheme bundled with client-go. It is intentionally narrow:
 //
@@ -956,16 +968,38 @@ func convertYamlToJson(i any) any {
 //     custom resources (CRDs) and are ignored — a CRD is not a typo.
 //   - A kind that no version of a built-in group registers is reported:
 //     Kubernetes forbids CRDs in built-in groups, so such a kind is reliably
-//     a typo (e.g. apps/v1 kind Deplyment).
+//     a typo (e.g. apps/v1 kind Deplyment) — unless the kind is a known
+//     removal (see removedButRealKinds), which is left alone.
 //   - A known kind in an unknown version (e.g. a future apiVersion) is left
 //     alone, since kubescape deliberately scans resources newer than the
 //     bundled scheme.
 //   - A registered kind that fails to decode (for example a string where a
 //     number is expected) is reported as structurally invalid.
 //
-// The document is still loaded and scanned by the caller; this only surfaces
-// the missing diagnostic through the existing error path.
+// List envelopes are recursed into so a bad built-in resource nested inside a
+// List or typed list is surfaced too. The document is still loaded and scanned
+// by the caller; this only surfaces the missing diagnostic through the existing
+// error path.
 func validateManifestAgainstScheme(obj map[string]any) error {
+	var errs []error
+	if err := validateSingleManifest(obj); err != nil {
+		errs = append(errs, err)
+	}
+	if items, ok := obj["items"].([]any); ok {
+		for i, item := range items {
+			if itemObj, ok := item.(map[string]any); ok {
+				if err := validateManifestAgainstScheme(itemObj); err != nil {
+					errs = append(errs, fmt.Errorf("item %d: %w", i, err))
+				}
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// validateSingleManifest validates one document's own type metadata and
+// structure, without descending into a list envelope.
+func validateSingleManifest(obj map[string]any) error {
 	apiVersion, _ := obj["apiVersion"].(string)
 	kind, _ := obj["kind"].(string)
 	if apiVersion == "" || kind == "" {
@@ -983,6 +1017,10 @@ func validateManifestAgainstScheme(obj map[string]any) error {
 	}
 
 	if len(scheme.Scheme.VersionsForGroupKind(gvk.GroupKind())) == 0 {
+		if _, removed := removedButRealKinds[gvk.GroupKind()]; removed {
+			// A real kind dropped from the bundled scheme, not a typo.
+			return nil
+		}
 		// The group is built-in but no version of it registers this kind, so
 		// the kind itself is a typo rather than a future apiVersion.
 		return fmt.Errorf("%s %q is not a valid Kubernetes kind", apiVersion, kind)

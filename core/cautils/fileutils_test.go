@@ -837,6 +837,50 @@ metadata:
 			wantCount: 1,
 		},
 		{
+			name: "removed-but-real kind is not flagged as a typo",
+			content: `apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: legacy-psp
+spec:
+  privileged: false`,
+			wantCount: 1,
+		},
+		{
+			name: "invalid built-in kind inside a List is surfaced",
+			content: `apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: good-pod
+      namespace: default
+  - apiVersion: apps/v1
+    kind: Deplyment
+    metadata:
+      name: typo-deployment`,
+			wantCount:     2,
+			wantErrSubstr: "is not a valid Kubernetes kind",
+		},
+		{
+			name: "valid List is accepted without errors",
+			content: `apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: good-pod
+      namespace: default
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: good-svc
+      namespace: default`,
+			wantCount: 2,
+		},
+		{
 			name: "non-manifest YAML without apiVersion is ignored",
 			content: `foo: bar
 baz: qux`,
