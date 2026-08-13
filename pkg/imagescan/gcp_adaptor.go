@@ -2,7 +2,6 @@ package imagescan
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -132,78 +131,53 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 		return nil, fmt.Errorf("gcp client not initialized, call login first")
 	}
 
-	var statuses []ContainerImageScanStatus
-	var aggErr error
-
-	for _, imageID := range imageIDs {
-		status := ContainerImageScanStatus{
-			ImageID:         imageID,
-			IsScanAvailable: false,
-			IsBomAvailable:  false,
-		}
-
-		if imageID.Hash == "" {
-			statuses = append(statuses, status)
-			continue
-		}
-
-		req := &grafeaspb.ListOccurrencesRequest{
-			Parent: fmt.Sprintf("projects/%s", a.projectID),
-			Filter: buildGrafeasFilter("DISCOVERY", imageID),
-		}
-
-		it := a.client.ListOccurrences(ctx, req)
-		for {
-			occurrence, err := it.Next()
-			if err == iterator.Done {
-				break
-			}
-			if err != nil {
-				fetchErr := fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
-				logger.L().Warning("skipping image scan status due to api error", helpers.Error(fetchErr))
-				aggErr = errors.Join(aggErr, fetchErr)
-				break
+	return ProcessImages(imageIDs,
+		func(imageID ContainerImageIdentifier) (ContainerImageScanStatus, error) {
+			status := ContainerImageScanStatus{
+				ImageID:         imageID,
+				IsScanAvailable: false,
+				IsBomAvailable:  false,
 			}
 
-			if occurrence != nil && occurrence.GetDiscovery() != nil {
-				discovery := occurrence.GetDiscovery()
-				if discovery != nil && discovery.GetAnalysisStatus() == grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS {
-					status.IsScanAvailable = true
-					if occurrence.UpdateTime != nil {
-						status.LastScanDate = occurrence.UpdateTime.AsTime()
-					}
+			if imageID.Hash == "" {
+				return status, nil
+			}
+
+			req := &grafeaspb.ListOccurrencesRequest{
+				Parent: fmt.Sprintf("projects/%s", a.projectID),
+				Filter: buildGrafeasFilter("DISCOVERY", imageID),
+			}
+
+			it := a.client.ListOccurrences(ctx, req)
+			for {
+				occurrence, err := it.Next()
+				if err == iterator.Done {
 					break
 				}
+				if err != nil {
+					return status, fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
+				}
+
+				if occurrence != nil && occurrence.GetDiscovery() != nil {
+					discovery := occurrence.GetDiscovery()
+					if discovery != nil && discovery.GetAnalysisStatus() == grafeaspb.DiscoveryOccurrence_FINISHED_SUCCESS {
+						status.IsScanAvailable = true
+						if occurrence.UpdateTime != nil {
+							status.LastScanDate = occurrence.UpdateTime.AsTime()
+						}
+						break
+					}
+				}
 			}
-		}
 
-		statuses = append(statuses, status)
-	}
-
-	return statuses, aggErr
+			return status, nil
+		},
+	)
 }
 
 func buildGrafeasFilter(kind string, imageID ContainerImageIdentifier) string {
 	resourceURL := fmt.Sprintf("https://%s/%s@%s", imageID.Registry, imageID.Repository, imageID.Hash)
 	return fmt.Sprintf("kind=%q AND resourceUrl=%q", kind, resourceURL)
-}
-
-// Helper to normalize GCP severity to Kubescape expected severity
-func normalizeGCPSeverity(severity grafeaspb.Severity) string {
-	switch severity {
-	case grafeaspb.Severity_CRITICAL:
-		return "Critical"
-	case grafeaspb.Severity_HIGH:
-		return "High"
-	case grafeaspb.Severity_MEDIUM:
-		return "Medium"
-	case grafeaspb.Severity_LOW:
-		return "Low"
-	case grafeaspb.Severity_MINIMAL:
-		return "Negligible"
-	default:
-		return "Unknown"
-	}
 }
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
@@ -212,72 +186,65 @@ func (a *GCPAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []Co
 		return nil, fmt.Errorf("gcp client not initialized, call login first")
 	}
 
-	var reports []ContainerImageVulnerabilityReport
-	var aggErr error
-
-	for _, imageID := range imageIDs {
-		report := ContainerImageVulnerabilityReport{
-			ImageID:         imageID,
-			Vulnerabilities: []Vulnerability{},
-		}
-
-		if imageID.Hash == "" {
-			reports = append(reports, report)
-			continue
-		}
-
-		req := &grafeaspb.ListOccurrencesRequest{
-			Parent:   fmt.Sprintf("projects/%s", a.projectID),
-			Filter:   buildGrafeasFilter("VULNERABILITY", imageID),
-			PageSize: 1000,
-		}
-
-		it := a.client.ListOccurrences(ctx, req)
-		const maxVulns = 1000
-
-		for {
-			occurrence, err := it.Next()
-			if err == iterator.Done {
-				break
-			}
-			if err != nil {
-				fetchErr := fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, err)
-				logger.L().Warning("skipping image vulnerabilities due to api error", helpers.Error(fetchErr))
-				aggErr = errors.Join(aggErr, fetchErr)
-				break
+	return ProcessImages(imageIDs,
+		func(imageID ContainerImageIdentifier) (ContainerImageVulnerabilityReport, error) {
+			report := ContainerImageVulnerabilityReport{
+				ImageID:         imageID,
+				Vulnerabilities: []Vulnerability{},
 			}
 
-			if len(report.Vulnerabilities) >= maxVulns {
-				logger.L().Warning("truncated vulnerabilities", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxVulns))
-				break
+			if imageID.Hash == "" {
+				return report, nil
 			}
 
-			if vulnDetails := occurrence.GetVulnerability(); vulnDetails != nil {
-				id := vulnDetails.GetShortDescription()
-				if id == "" && occurrence.GetNoteName() != "" {
-					parts := strings.Split(occurrence.GetNoteName(), "/")
-					id = parts[len(parts)-1]
+			req := &grafeaspb.ListOccurrencesRequest{
+				Parent:   fmt.Sprintf("projects/%s", a.projectID),
+				Filter:   buildGrafeasFilter("VULNERABILITY", imageID),
+				PageSize: 1000,
+			}
+
+			it := a.client.ListOccurrences(ctx, req)
+			const maxVulns = 1000
+
+			for {
+				occurrence, err := it.Next()
+				if err == iterator.Done {
+					break
+				}
+				if err != nil {
+					return report, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, err)
 				}
 
-				vuln := Vulnerability{
-					ID:          id,
-					Severity:    normalizeGCPSeverity(vulnDetails.GetEffectiveSeverity()),
-					Description: vulnDetails.GetLongDescription(),
-					Links:       []string{},
+				if len(report.Vulnerabilities) >= maxVulns {
+					logger.L().Warning("truncated vulnerabilities", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxVulns))
+					break
 				}
 
-				for _, uri := range vulnDetails.GetRelatedUrls() {
-					vuln.Links = append(vuln.Links, uri.GetUrl())
-				}
+				if vulnDetails := occurrence.GetVulnerability(); vulnDetails != nil {
+					id := vulnDetails.GetShortDescription()
+					if id == "" && occurrence.GetNoteName() != "" {
+						parts := strings.Split(occurrence.GetNoteName(), "/")
+						id = parts[len(parts)-1]
+					}
 
-				report.Vulnerabilities = append(report.Vulnerabilities, vuln)
+					vuln := Vulnerability{
+						ID:          id,
+						Severity:    NormalizeSeverity(vulnDetails.GetEffectiveSeverity().String()),
+						Description: vulnDetails.GetLongDescription(),
+						Links:       []string{},
+					}
+
+					for _, uri := range vulnDetails.GetRelatedUrls() {
+						vuln.Links = append(vuln.Links, uri.GetUrl())
+					}
+
+					report.Vulnerabilities = append(report.Vulnerabilities, vuln)
+				}
 			}
-		}
 
-		reports = append(reports, report)
-	}
-
-	return reports, aggErr
+			return report, nil
+		},
+	)
 }
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
@@ -285,18 +252,7 @@ func (a *GCPAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Contai
 	if a.client == nil {
 		return nil, fmt.Errorf("gcp client not initialized, call login first")
 	}
-
-	var infos []ContainerImageInformation
-
-	for _, imageID := range imageIDs {
-		info := ContainerImageInformation{
-			ImageID: imageID,
-			Bom:     []string{},
-		}
-		infos = append(infos, info)
-	}
-
-	return infos, nil
+	return FetchImagesInformation(imageIDs)
 }
 
 // Destroy cleans up any persistent resources used by the adaptor.

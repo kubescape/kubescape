@@ -155,11 +155,31 @@ func TestResolvedOutputPath(t *testing.T) {
 		{"append CycloneDX", printer.CycloneDXFormat, "report.json", "report.json.cdx.json"},
 		{"preserve SPDX", printer.SPDXFormat, "report.spdx.json", "report.spdx.json"},
 		{"append SPDX", printer.SPDXFormat, "report.json", "report.json.spdx.json"},
+		{"append markdown", printer.MarkdownFormat, "report", "report.md"},
+		{"preserve markdown", printer.MarkdownFormat, "report.md", "report.md"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			assert.Equal(t, test.want, resolvedOutputPath(test.format, test.outputFile))
+		})
+	}
+}
+
+// markdown writes report.md and pretty-printer writes report.txt, so sharing
+// an --output must not be rejected as a collision.
+func TestGetOutputPrintersAllowsMarkdownAlongsideTextFormats(t *testing.T) {
+	for _, format := range []string{printer.PrettyFormat, printer.PrometheusFormat} {
+		t.Run(format, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				ScanType: cautils.ScanTypeControl,
+				Format:   printer.MarkdownFormat + "," + format,
+				Output:   filepath.Join(t.TempDir(), "report"),
+			}
+
+			outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "")
+			require.NoError(t, err)
+			assert.Len(t, outputPrinters, 2)
 		})
 	}
 }
@@ -566,10 +586,74 @@ func TestGetAllWorkloadImages(t *testing.T) {
 	}
 
 	wl := workloadinterface.NewWorkloadObj(podData)
-	images := getAllWorkloadImages(wl)
+	images, containerErrors := getAllWorkloadImages(wl)
 
+	require.Empty(t, containerErrors)
 	assert.Contains(t, images, "app:v1")
 	assert.Contains(t, images, "init:v1")
 	assert.Contains(t, images, "debug:v1")
 	assert.Len(t, images, 3)
+}
+
+func TestGetAllWorkloadImagesReturnsGetterErrorsAndPreservesOtherClasses(t *testing.T) {
+	tests := []struct {
+		name           string
+		malformedField string
+		containerClass string
+		wantImages     []string
+	}{
+		{
+			name:           "regular containers",
+			malformedField: "containers",
+			containerClass: "containers",
+			wantImages:     []string{"init:v1", "debug:v1"},
+		},
+		{
+			name:           "init containers",
+			malformedField: "initContainers",
+			containerClass: "init containers",
+			wantImages:     []string{"app:v1", "debug:v1"},
+		},
+		{
+			name:           "ephemeral containers",
+			malformedField: "ephemeralContainers",
+			containerClass: "ephemeral containers",
+			wantImages:     []string{"app:v1", "init:v1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{"name": "main-app", "image": "app:v1"},
+				},
+				"initContainers": []interface{}{
+					map[string]interface{}{"name": "init-setup", "image": "init:v1"},
+				},
+				"ephemeralContainers": []interface{}{
+					map[string]interface{}{"name": "debug-tool", "image": "debug:v1"},
+				},
+			}
+			spec[tt.malformedField] = "not-a-container-list"
+			wl := workloadinterface.NewWorkloadObj(map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]interface{}{
+					"name":      "malformed",
+					"namespace": "image-scan-test",
+				},
+				"spec": spec,
+			})
+
+			images, containerErrors := getAllWorkloadImages(wl)
+
+			assert.ElementsMatch(t, tt.wantImages, images)
+			require.Len(t, containerErrors, 1)
+			assert.Contains(t, containerErrors[0].Error(), "failed to get "+tt.containerClass)
+			assert.Contains(t, containerErrors[0].Error(), "kind: Pod")
+			assert.Contains(t, containerErrors[0].Error(), "name: malformed")
+			assert.Contains(t, containerErrors[0].Error(), "namespace: image-scan-test")
+		})
+	}
 }

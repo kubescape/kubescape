@@ -182,6 +182,16 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.OnlyFixable, "only-fixable", false, "When used with --severity-threshold on image scans, only count CVEs that have an available fix toward the pass/fail decision")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsVersion, "controls-version", "", "Pin the regolibrary release tag used to download controls (see https://github.com/kubescape/regolibrary/releases). If not used will download the latest release. Has no effect when --account is set (cloud backend is used instead)")
 
+	// --fail-threshold was removed as a functioning flag, but its registration must stay so
+	// pflag/cobra keep accepting it instead of erroring with "unknown flag" for callers who
+	// still pass it (e.g. existing CI pipelines). Same pattern as the --id/--environment/--env
+	// deprecated-flag fix in cmd/list/list.go and cmd/root.go: bind to a standalone variable,
+	// not scanInfo, so legacy input can't leak into report metadata or threshold validation.
+	var dummyFailThreshold float32
+	scanCmd.PersistentFlags().Float32VarP(&dummyFailThreshold, "fail-threshold", "t", 100, "Deprecated, use '--compliance-threshold' instead")
+	_ = scanCmd.PersistentFlags().MarkHidden("fail-threshold")
+	_ = scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead")
+
 	// Tri-state flag bound to the same BoolPtrFlag as the removed --enable-host-scan:
 	// not passed -> auto-detect node-agent CRDs; --host-scan=false -> opt out of
 	// host data collection; --host-scan=true -> force host data collection on.

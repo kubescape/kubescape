@@ -20,8 +20,9 @@ func TestScanImagesSkipsInitializationWhenNoImagesFound(t *testing.T) {
 			"ephemeralContainers": []any{},
 		},
 	})
-	images := getAllWorkloadImages(emptyPod)
+	images, containerErrors := getAllWorkloadImages(emptyPod)
 	assert.Empty(t, images)
+	assert.Empty(t, containerErrors)
 
 	tests := []struct {
 		name     string
@@ -45,7 +46,7 @@ func TestScanImagesSkipsInitializationWhenNoImagesFound(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.NotPanics(t, func() {
-				scanImages(tt.scanType, tt.scanData, context.Background(), nil, nil, nil)
+				assert.NoError(t, scanImages(tt.scanType, tt.scanData, context.Background(), nil, nil, nil))
 			})
 		})
 	}

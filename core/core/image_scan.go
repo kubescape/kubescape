@@ -540,9 +540,13 @@ func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScan
 			for job := range jobChan {
 				select {
 				case <-ctx.Done():
+					cancelErr := fmt.Errorf("scan canceled: %w", ctx.Err())
+					if o.errorAggregator != nil {
+						o.errorAggregator.Add(job.Image, cancelErr)
+					}
 					resultChan <- ImageScanResult{
 						Image: job.Image,
-						Error: fmt.Errorf("scan canceled: %w", ctx.Err()),
+						Error: cancelErr,
 					}
 					continue
 				default:

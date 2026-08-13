@@ -133,6 +133,11 @@ func TestSetWriter_Pdf(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pp.SetWriter(ctx, tt.outputFile)
+			// Each call opens a new file and overwrites the previous writer,
+			// so every iteration leaks a handle. Windows will not remove the
+			// temp dir these land in while any of them is still open.
+			w := pp.writer
+			defer w.Close()
 			assert.Equal(t, tt.expected, pp.writer.Name())
 			assert.NotEqual(t, "/dev/stdout", pp.writer.Name(),
 				"PDF printer must never write to stdout")
