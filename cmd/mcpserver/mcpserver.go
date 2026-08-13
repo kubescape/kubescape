@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +61,23 @@ func (ksServer *KubescapeMcpserver) getScanSem() *semaphore.Weighted {
 		ksServer.scanSem = semaphore.NewWeighted(2)
 	}
 	return ksServer.scanSem
+}
+
+func (ksServer *KubescapeMcpserver) doScanChan(ctx context.Context, key string, scanFunc func(context.Context) (interface{}, error)) (interface{}, error) {
+	ch := ksServer.scanGroup.DoChan(key, func() (interface{}, error) {
+		if err := ksServer.getScanSem().Acquire(context.Background(), 1); err != nil {
+			return nil, err
+		}
+		defer ksServer.getScanSem().Release(1)
+		return scanFunc(context.Background())
+	})
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		return res.Val, res.Err
+	}
 }
 
 // getKsClient lazily initializes the Kubescape storage client. A transient
@@ -467,13 +485,12 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			namespace = nsStr
 		}
 
+		if namespace == "*" {
+			namespace = ""
+		}
 		key := fmt.Sprintf("rbac_scan:%s", namespace)
-		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
-			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
-				return nil, err
-			}
-			defer ksServer.getScanSem().Release(1)
-			return ksServer.RunRBACScan(ctx, namespace)
+		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return ksServer.RunRBACScan(scanCtx, namespace)
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run RBAC scan: %v", err)), nil
@@ -501,13 +518,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			framework = strings.TrimSpace(fwStr)
 		}
 
-		key := fmt.Sprintf("scan_local_iac:%s:%s", path, framework)
-		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
-			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
-				return nil, err
-			}
-			defer ksServer.getScanSem().Release(1)
-			return ksServer.runIaCScan(ctx, path, framework)
+		key := fmt.Sprintf("scan_local_iac:%s:%s", url.QueryEscape(path), url.QueryEscape(framework))
+		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return ksServer.runIaCScan(scanCtx, path, framework)
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run IaC scan: %v", err)), nil
@@ -524,13 +537,12 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			namespace = nsStr
 		}
 
+		if namespace == "*" {
+			namespace = ""
+		}
 		key := fmt.Sprintf("network_scan:%s", namespace)
-		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
-			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
-				return nil, err
-			}
-			defer ksServer.getScanSem().Release(1)
-			return ksServer.RunNetworkScan(ctx, namespace)
+		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return ksServer.RunNetworkScan(scanCtx, namespace)
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run Network scan: %v", err)), nil
@@ -993,13 +1005,12 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return mcp.NewToolResultError("framework_name argument must not be empty"), nil
 		}
 
-		key := fmt.Sprintf("framework_scan:%s:%s", namespace, frameworkNameStr)
-		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
-			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
-				return nil, err
-			}
-			defer ksServer.getScanSem().Release(1)
-			return ksServer.RunFrameworkScan(ctx, namespace, frameworkNameStr)
+		if namespace == "*" {
+			namespace = ""
+		}
+		key := fmt.Sprintf("framework_scan:%s:%s", namespace, url.QueryEscape(frameworkNameStr))
+		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return ksServer.RunFrameworkScan(scanCtx, namespace, frameworkNameStr)
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run framework scan: %v", err)), nil
