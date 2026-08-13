@@ -68,6 +68,18 @@ type VAP struct {
 	// non-matching kind, which the scan would otherwise record as a pass live
 	// admission never made (the object would not be matched at all).
 	matchConstraints *admissionregistrationv1.MatchResources
+
+	// failurePolicy mirrors spec.failurePolicy: how an evaluation error is
+	// treated. The apiserver defaults an omitted policy to Fail, so newVAP
+	// stores the resolved value (Fail when nil) rather than the raw pointer.
+	failurePolicy admissionregistrationv1.FailurePolicyType
+}
+
+// failOnError reports whether an evaluation error denies the request. Only an
+// explicit failurePolicy: Ignore changes that; every policy in the embedded
+// bundle defaults to Fail.
+func (v *VAP) failOnError() bool {
+	return v.failurePolicy != admissionregistrationv1.Ignore
 }
 
 // requireSupported reports whether the offline engine can honor this policy with
@@ -263,15 +275,22 @@ func indexUnique(index map[string]*VAP, duplicates map[string]struct{}, key stri
 // spec.matchConstraints is kept so the scan can scope evaluation to the kinds
 // the policy actually applies to (see appliesTo); without it a non-matching
 // object slips through the validations' self-guards as a pass. spec.failurePolicy
-// is still dropped: eval errors are always mapped to an errored/skipped status
-// regardless of failurePolicy, which is the parity-safe direction.
+// is resolved here (the apiserver defaults an omitted policy to Fail) so the
+// evaluator can report a validation whose expression errored as a deny, the
+// parity-safe direction that matches admission.
 func newVAP(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *VAP {
+	failurePolicy := admissionregistrationv1.Fail
+	if policy.Spec.FailurePolicy != nil {
+		failurePolicy = *policy.Spec.FailurePolicy
+	}
+
 	vap := &VAP{
 		ControlID:        policy.Labels[controlIDLabel],
 		PolicyName:       policy.Name,
 		matchConditions:  policy.Spec.MatchConditions,
 		paramKind:        policy.Spec.ParamKind,
 		matchConstraints: policy.Spec.MatchConstraints,
+		failurePolicy:    failurePolicy,
 	}
 	for _, v := range policy.Spec.Variables {
 		vap.Variables = append(vap.Variables, Variable{Name: v.Name, Expression: v.Expression})

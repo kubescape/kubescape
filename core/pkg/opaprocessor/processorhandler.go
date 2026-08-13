@@ -1174,9 +1174,17 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 		var messages []string
 		var hints []cel.PathHint
 		var objErrs []error
+		var denyErrs []error
 		for _, res := range eval.Results {
 			if res.Err != nil {
 				objErrs = append(objErrs, res.Err)
+				// Under failurePolicy Fail, a validation whose expression
+				// errored denies the object at admission. Compile errors, budget
+				// exhaustion and cancellation stay unknown verdicts: the cluster
+				// never produces them, so failurePolicy does not apply.
+				if eval.FailOnError && cel.IsExpressionError(res.Err) {
+					denyErrs = append(denyErrs, res.Err)
+				}
 				continue
 			}
 			if !res.Passed {
@@ -1198,6 +1206,11 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 					helpers.String("resource", celResourceID(obj)),
 					helpers.Error(errors.Join(objErrs...)))
 			}
+		case len(denyErrs) > 0:
+			// failurePolicy Fail turned the eval error into a deny, exactly as
+			// admission would. Report it as a failure whose message is the error,
+			// so the finding is visible instead of silently downgraded to a skip.
+			responses = append(responses, celErrorRuleResponse(rule, obj, errors.Join(denyErrs...)))
 		case len(objErrs) > 0:
 			outcome.skipped = append(outcome.skipped, skippedCELResource{obj: obj, err: errors.Join(objErrs...)})
 		}
@@ -1275,6 +1288,23 @@ func celRuleResponse(rule *reporthandling.PolicyRule, obj map[string]any, messag
 		RuleStatus:          reporthandling.StatusFailed,
 		PackageName:         rule.Name,
 		Rulename:            rule.Name,
+		AlertObject: reporthandling.AlertObject{
+			K8SApiObjects: []map[string]any{obj},
+		},
+	}
+}
+
+// celErrorRuleResponse builds the failure a validation's eval error produces
+// under failurePolicy Fail: the object is denied with the error as the message,
+// matching what admission does. There is no remediation to offer — the
+// expression never reached a verdict — so the finding carries no paths and is
+// informational rather than fixable.
+func celErrorRuleResponse(rule *reporthandling.PolicyRule, obj map[string]any, err error) reporthandling.RuleResponse {
+	return reporthandling.RuleResponse{
+		AlertMessage: err.Error(),
+		RuleStatus:   reporthandling.StatusFailed,
+		PackageName:  rule.Name,
+		Rulename:     rule.Name,
 		AlertObject: reporthandling.AlertObject{
 			K8SApiObjects: []map[string]any{obj},
 		},
