@@ -6,7 +6,10 @@ import (
 	"testing"
 
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestComplianceScore_MetricsLabelsAndPrefix(t *testing.T) {
@@ -56,6 +59,80 @@ func TestComplianceScore_MetricsLabelsAndPrefix(t *testing.T) {
 			assert.Equal(t, "kubescape_cluster", tt.mrs.prefix())
 		})
 	}
+}
+
+func TestMetricsString_EscapesDynamicLabelValues(t *testing.T) {
+	value := "quote\" slash\\ newline\nnext"
+	parse := func(t *testing.T, exposition string) func(string) map[string]string {
+		t.Helper()
+		parser := expfmt.NewTextParser(model.LegacyValidation)
+		families, err := parser.TextToMetricFamilies(strings.NewReader(exposition))
+		require.NoErrorf(t, err, "invalid Prometheus exposition:\n%s", exposition)
+
+		return func(familyName string) map[string]string {
+			t.Helper()
+			family, ok := families[familyName]
+			require.Truef(t, ok, "metric family %q is missing", familyName)
+			require.Len(t, family.Metric, 1)
+			labels := map[string]string{}
+			for _, label := range family.Metric[0].Label {
+				labels[label.GetName()] = label.GetValue()
+			}
+			return labels
+		}
+	}
+
+	t.Run("posture scan", func(t *testing.T) {
+		// Custom policies loaded with --use-from can define framework and
+		// control names containing any JSON string. Drive the same
+		// SummaryDetails -> Metrics path as the Prometheus printer.
+		controlScore := float32(50)
+		summary := &reportsummary.SummaryDetails{
+			Frameworks: []reportsummary.FrameworkSummary{{Name: value, ComplianceScore: 50}},
+			Controls: reportsummary.ControlSummaries{
+				"C-ESCAPE": {
+					ControlID:       "C-ESCAPE",
+					Name:            value,
+					ComplianceScore: &controlScore,
+				},
+			},
+		}
+		metricsOutput := &Metrics{}
+		metricsOutput.setComplianceScores(summary)
+		metricsOutput.listResources = []mResources{{
+			apiVersion: value,
+			kind:       value,
+			namespace:  value,
+			name:       value,
+		}}
+
+		labelsFor := parse(t, metricsOutput.String())
+		assert.Equal(t, value, labelsFor("kubescape_framework_complianceScore")["name"])
+		assert.Equal(t, value, labelsFor("kubescape_control_complianceScore")["name"])
+		assert.Equal(t, map[string]string{
+			"apiVersion": value,
+			"kind":       value,
+			"namespace":  value,
+			"name":       value,
+		}, labelsFor("kubescape_resource_count_controls_failed"))
+	})
+
+	t.Run("image scan", func(t *testing.T) {
+		metricsOutput := &Metrics{
+			isImageScan: true,
+			listImages: []mImageVulnerability{{
+				image:    value,
+				severity: value,
+				cveCount: 1,
+			}},
+		}
+
+		labelsFor := parse(t, metricsOutput.String())
+		assert.Equal(t, map[string]string{
+			"image":    value,
+			"severity": value,
+		}, labelsFor("kubescape_image_count_cve"))
+	})
 }
 
 func TestControlComplianceScore_MetricsLabelsAndPrefix(t *testing.T) {
