@@ -3,9 +3,9 @@ package armo_builtins
 import rego.v1
 
 deny contains msga if {
-	verbs := ["create"]
-	api_groups := [""]
-	resources := ["persistentvolumes"]
+	verbs := ["create", "*"]
+	api_groups := ["", "*"]
+	resources := ["persistentvolumes", "*"]
 	subjectVector := input[_]
 	role := subjectVector.relatedObjects[i]
 	rolebinding := subjectVector.relatedObjects[j]

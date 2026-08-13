@@ -3,9 +3,9 @@ package armo_builtins
 import rego.v1
 
 deny contains msga if {
-	verbs := ["escalate"]
-	api_groups := ["rbac.authorization.k8s.io"]
-	resources := ["roles", "clusterroles"]
+	verbs := ["escalate", "*"]
+	api_groups := ["rbac.authorization.k8s.io", "*"]
+	resources := ["roles", "clusterroles", "*"]
 	subjectVector := input[_]
 	role := subjectVector.relatedObjects[i]
 	rolebinding := subjectVector.relatedObjects[j]
