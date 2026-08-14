@@ -8,7 +8,7 @@ Kubescape's default branch is `master`; open every PR against `master`.
 
 ### Opening a PR
 
-Opening a PR triggers `00-pr-scanner.yaml`, which calls the reusable `a-pr-scanner.yaml` workflow. That runs, in order: `go test -race ./...`; a second race-enabled run over `./core/cautils/...` with `CGO_ENABLED=1`; the `httphandler` module tests, which run without the race detector; a cross-platform GoReleaser snapshot build; the `smoke_testing/init.py` smoke test against the built binary; and `golangci-lint` in `only-new-issues` mode.
+Opening a PR triggers `00-pr-scanner.yaml`, which calls the reusable `a-pr-scanner.yaml` workflow. That runs, in order: `go test -race ./...`; a second race-enabled run over `./core/cautils/...` with `CGO_ENABLED=1`; the `httphandler` module tests, which run without the race detector; a GoReleaser snapshot build for the runner's own platform only (`build --clean --snapshot --single-target`); the `smoke_testing/init.py` smoke test against that binary; and `golangci-lint` in `only-new-issues` mode. Note that the job is named "Create cross-platform build" — it is not one. The cross-platform build happens in `02-release.yaml`.
 
 Two GitHub Apps report alongside it: the DCO check, which requires a `Signed-off-by:` trailer on every commit, and GitGuardian secret scanning.
 
