@@ -58,6 +58,7 @@ require (
 	github.com/moby/buildkit v0.29.0
 	github.com/open-policy-agent/opa v1.14.1
 	github.com/owenrumney/go-sarif/v2 v2.2.0
+	github.com/prometheus/common v0.67.5
 	github.com/project-copacetic/copacetic v0.10.0
 	github.com/quay/claircore v1.5.35
 	github.com/schollz/progressbar/v3 v3.13.0
@@ -467,7 +468,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/quay/claircore/toolkit v1.2.4 // indirect
 	github.com/quay/zlog v1.1.8 // indirect

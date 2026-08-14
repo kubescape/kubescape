@@ -121,9 +121,9 @@ func (mcrs *mControlComplianceScore) metrics() []string {
 	return m
 }
 func (mcrs *mControlComplianceScore) labels() string {
-	r := fmt.Sprintf("name=\"%s\"", mcrs.controlName) + ","
-	r += fmt.Sprintf("severity=\"%s\"", mcrs.severity) + ","
-	r += fmt.Sprintf("link=\"%s\"", mcrs.link)
+	r := fmt.Sprintf("name=\"%s\"", escapePrometheusLabelValue(mcrs.controlName)) + ","
+	r += fmt.Sprintf("severity=\"%s\"", escapePrometheusLabelValue(mcrs.severity)) + ","
+	r += fmt.Sprintf("link=\"%s\"", escapePrometheusLabelValue(mcrs.link))
 	return r
 }
 func (mcrs *mControlComplianceScore) prefix() string {
@@ -166,7 +166,7 @@ func (mfrs *mFrameworkComplianceScore) metrics() []string {
 	return m
 }
 func (mfrs *mFrameworkComplianceScore) labels() string {
-	r := fmt.Sprintf("name=\"%s\"", mfrs.frameworkName)
+	r := fmt.Sprintf("name=\"%s\"", escapePrometheusLabelValue(mfrs.frameworkName))
 	return r
 }
 func (mfrs *mFrameworkComplianceScore) prefix() string {
@@ -191,10 +191,10 @@ func (mrc *mResources) metrics() []string {
 }
 
 func (mrc *mResources) labels() string {
-	r := fmt.Sprintf("apiVersion=\"%s\"", mrc.apiVersion) + ","
-	r += fmt.Sprintf("kind=\"%s\"", mrc.kind) + ","
-	r += fmt.Sprintf("namespace=\"%s\"", mrc.namespace) + ","
-	r += fmt.Sprintf("name=\"%s\"", mrc.name)
+	r := fmt.Sprintf("apiVersion=\"%s\"", escapePrometheusLabelValue(mrc.apiVersion)) + ","
+	r += fmt.Sprintf("kind=\"%s\"", escapePrometheusLabelValue(mrc.kind)) + ","
+	r += fmt.Sprintf("namespace=\"%s\"", escapePrometheusLabelValue(mrc.namespace)) + ","
+	r += fmt.Sprintf("name=\"%s\"", escapePrometheusLabelValue(mrc.name))
 	return r
 }
 func (mrc *mResources) prefix() string {
@@ -216,8 +216,8 @@ func (miv *mImageVulnerability) metrics() []string {
 }
 
 func (miv *mImageVulnerability) labels() string {
-	r := fmt.Sprintf("image=\"%s\"", miv.image) + ","
-	r += fmt.Sprintf("severity=\"%s\"", miv.severity)
+	r := fmt.Sprintf("image=\"%s\"", escapePrometheusLabelValue(miv.image)) + ","
+	r += fmt.Sprintf("severity=\"%s\"", escapePrometheusLabelValue(miv.severity))
 	return r
 }
 
@@ -226,6 +226,14 @@ func (miv *mImageVulnerability) prefix() string {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+func escapePrometheusLabelValue(value string) string {
+	return strings.NewReplacer(
+		`\`, `\\`,
+		"\n", `\n`,
+		`"`, `\"`,
+	).Replace(value)
+}
 
 func toMetricHeader(name, help string) string {
 	return fmt.Sprintf("# HELP %s %s\n# TYPE %s gauge", name, help, name)
