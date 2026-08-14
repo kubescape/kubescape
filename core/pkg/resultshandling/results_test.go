@@ -36,8 +36,8 @@ type SpyPrinter struct {
 	ActionPrintErr   error
 }
 
-func (sp *SpyPrinter) SetWriter(_ context.Context, _ string) {}
-func (sp *SpyPrinter) PrintNextSteps()                       {}
+func (sp *SpyPrinter) SetWriter(_ context.Context, _ string) error { return nil }
+func (sp *SpyPrinter) PrintNextSteps()                             {}
 func (sp *SpyPrinter) ActionPrint(_ context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
 	sp.ActionPrintCalls += 1
 	return sp.ActionPrintErr

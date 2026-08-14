@@ -47,7 +47,8 @@ func NewHtmlPrinter() *HtmlPrinter {
 	return &HtmlPrinter{}
 }
 
-func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	outputFile = strings.TrimSpace(outputFile)
 	if outputFile == "" {
 		// Raw HTML markup must never fall back to stdout on a TTY.
@@ -57,9 +58,14 @@ func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
 	} else if filepath.Ext(outputFile) != printer.HtmlOutputExt {
 		outputFile = outputFile + printer.HtmlOutputExt
 	}
-	// HTML must never fall back to stdout on file-create errors either
-	// (e.g. read-only cwd) — use the no-stdout-fallback helper.
+	if explicitOutput {
+		var err error
+		hp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
+	// Preserve the temp-file fallback for the implicit HTML destination.
 	hp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+printer.HtmlOutputExt)
+	return nil
 }
 
 func (hp *HtmlPrinter) PrintNextSteps() {

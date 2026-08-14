@@ -3,7 +3,9 @@ package core
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,6 +131,36 @@ func TestGetOutputPrinters(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, outputPrinters)
 	assert.Equal(t, 3, len(outputPrinters))
+}
+
+func TestGetOutputPrintersReturnsExplicitSetupErrorsForEveryFormat(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-directory")
+	require.NoError(t, os.WriteFile(blocker, []byte("block"), 0o600))
+	requestedOutput := filepath.Join(blocker, "report")
+
+	for _, format := range printer.AllFormats {
+		t.Run(format, func(t *testing.T) {
+			scanType := cautils.ScanTypeControl
+			if format == printer.CycloneDXFormat || format == printer.SPDXFormat {
+				scanType = cautils.ScanTypeImage
+			}
+			scanInfo := &cautils.ScanInfo{
+				ScanType:      scanType,
+				Format:        format,
+				Output:        requestedOutput,
+				InputPatterns: []string{dir},
+			}
+
+			outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+
+			require.Error(t, err)
+			assert.Nil(t, outputPrinters)
+			assert.Contains(t, err.Error(), "configure \""+format+"\" output")
+			assert.True(t, strings.Contains(err.Error(), "create output directory") || strings.Contains(err.Error(), "open output file"))
+			assert.NoFileExists(t, resolvedOutputPath(format, requestedOutput))
+		})
+	}
 }
 
 func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {

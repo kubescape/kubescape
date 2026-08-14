@@ -162,12 +162,17 @@ func TestMarkdownPrinter_PrintNextSteps(t *testing.T) {
 	assert.NotPanics(t, func() { mp.PrintNextSteps() })
 }
 
-func TestMarkdownPrinter_SetWriter_NoStdoutFallback(t *testing.T) {
+func TestMarkdownPrinter_SetWriter_ReturnsExplicitSetupError(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-directory")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
+	target := filepath.Join(blocker, "report.md")
 	mp := NewMarkdownPrinter()
-	mp.SetWriter(context.TODO(), "/nonexistent-kubescape-dir/bad.md")
-	require.NotNil(t, mp.writer)
-	assert.NotEqual(t, os.Stdout, mp.writer, "SetWriter must never assign os.Stdout")
-	mp.CloseWriter()
+	err := mp.SetWriter(context.TODO(), target)
+
+	require.Error(t, err)
+	assert.Nil(t, mp.writer)
+	assert.NoFileExists(t, target)
 }
 
 func TestMarkdownPrinter_ActionPrint_NilSession(t *testing.T) {

@@ -28,7 +28,8 @@ func NewSPDXPrinter() *SPDXPrinter {
 	return &SPDXPrinter{}
 }
 
-func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = spdxOutputFile
@@ -37,7 +38,13 @@ func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) {
 			outputFile = outputFile + printer.SPDXOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		sp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	sp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 // Score is a no-op: HandleResults only calls Score when opaSessionObj != nil
