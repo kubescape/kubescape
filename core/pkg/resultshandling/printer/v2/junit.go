@@ -138,6 +138,15 @@ func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 
 	if opaSessionObj != nil {
 		junitResult = testsSuites(opaSessionObj)
+		if len(imageScanData) > 0 {
+			imageResult := imageTestsSuites(imageScanData)
+			suiteIDOffset := len(junitResult.Suites)
+			for i := range imageResult.Suites {
+				imageResult.Suites[i].ID += suiteIDOffset
+			}
+			junitResult.Suites = append(junitResult.Suites, imageResult.Suites...)
+			junitResult.Tests, junitResult.Failures, junitResult.Errors = aggregateSuiteCounts(junitResult.Suites)
+		}
 	} else if len(imageScanData) > 0 {
 		junitResult = imageTestsSuites(imageScanData)
 	} else {
