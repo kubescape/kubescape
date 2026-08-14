@@ -77,6 +77,7 @@ func TestValidateCommonScanFlags(t *testing.T) {
 	tests := []struct {
 		name          string
 		severity      string
+		minSeverity   string
 		format        string
 		formatChanged bool
 		expectedErr   string
@@ -84,6 +85,7 @@ func TestValidateCommonScanFlags(t *testing.T) {
 		{
 			name:          "Valid setup",
 			severity:      "High",
+			minSeverity:   "Medium",
 			format:        "json",
 			formatChanged: true,
 			expectedErr:   "",
@@ -91,6 +93,14 @@ func TestValidateCommonScanFlags(t *testing.T) {
 		{
 			name:          "Invalid severity",
 			severity:      "Extreme",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "unknown severity",
+		},
+		{
+			name:          "Invalid minimum severity",
+			severity:      "High",
+			minSeverity:   "Extreme",
 			format:        "json",
 			formatChanged: true,
 			expectedErr:   "unknown severity",
@@ -115,6 +125,7 @@ func TestValidateCommonScanFlags(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			scanInfo := &cautils.ScanInfo{
 				FailThresholdSeverity: tt.severity,
+				MinSeverity:           tt.minSeverity,
 				Format:                tt.format,
 			}
 

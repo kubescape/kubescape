@@ -80,6 +80,11 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 			return err
 		}
 	}
+	if scanInfo.MinSeverity != "" {
+		if err := ValidateSeverity(scanInfo.MinSeverity); err != nil {
+			return err
+		}
+	}
 	f := cmd.Flags().Lookup("format")
 	if f == nil {
 		f = cmd.InheritedFlags().Lookup("format")
