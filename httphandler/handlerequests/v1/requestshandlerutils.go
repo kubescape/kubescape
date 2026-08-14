@@ -322,7 +322,11 @@ func writeScanErrorToFile(err error, scanID string) (e error) {
 
 // responseToBytes convert response object to bytes
 func responseToBytes(res *utilsmetav1.Response) []byte {
-	b, _ := json.Marshal(res)
+	b, err := json.Marshal(res)
+	if err != nil {
+		logger.L().Error("failed to marshal response", helpers.Error(err))
+		return []byte(`{"response":"internal error: failed to marshal response","type":"error"}`)
+	}
 	return b
 }
 
