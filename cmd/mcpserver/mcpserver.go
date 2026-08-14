@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,12 @@ var setConnectedToCluster = k8sinterface.SetConnectedToCluster
 
 var newK8sClient = k8sinterface.NewKubernetesApi
 
+type scanCtxState struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	count  int
+}
+
 type KubescapeMcpserver struct {
 	s          *server.MCPServer
 	ksClientMu sync.Mutex
@@ -52,6 +59,8 @@ type KubescapeMcpserver struct {
 	scanSemMu    sync.Mutex
 	scanSem      *semaphore.Weighted
 	scanGroup    singleflight.Group
+	scanCtxMu    sync.Mutex
+	scanCtxs     map[string]*scanCtxState
 }
 
 func (ksServer *KubescapeMcpserver) getScanSem() *semaphore.Weighted {
@@ -61,6 +70,54 @@ func (ksServer *KubescapeMcpserver) getScanSem() *semaphore.Weighted {
 		ksServer.scanSem = semaphore.NewWeighted(2)
 	}
 	return ksServer.scanSem
+}
+
+// doScanChan executes a singleflight scan wrapped with context cancellation reference counting.
+// TODO: There is a narrow race condition here if the last waiter cancels and deletes the scanCtxs entry
+// while singleflight is still cleaning up its internal map. A new caller arriving in this tiny window
+// will create a fresh context but get attached to the dying singleflight call, receiving a spurious
+// cancellation error. This self-heals on retry.
+func (ksServer *KubescapeMcpserver) doScanChan(ctx context.Context, key string, scanFunc func(context.Context) (interface{}, error)) (interface{}, error) {
+	ksServer.scanCtxMu.Lock()
+	if ksServer.scanCtxs == nil {
+		ksServer.scanCtxs = make(map[string]*scanCtxState)
+	}
+	state, ok := ksServer.scanCtxs[key]
+	if !ok {
+		scanCtx, cancel := context.WithCancel(context.Background())
+		state = &scanCtxState{
+			ctx:    scanCtx,
+			cancel: cancel,
+		}
+		ksServer.scanCtxs[key] = state
+	}
+	state.count++
+	ksServer.scanCtxMu.Unlock()
+
+	defer func() {
+		ksServer.scanCtxMu.Lock()
+		defer ksServer.scanCtxMu.Unlock()
+		state.count--
+		if state.count <= 0 {
+			state.cancel()
+			delete(ksServer.scanCtxs, key)
+		}
+	}()
+
+	ch := ksServer.scanGroup.DoChan(key, func() (interface{}, error) {
+		if err := ksServer.getScanSem().Acquire(state.ctx, 1); err != nil {
+			return nil, err
+		}
+		defer ksServer.getScanSem().Release(1)
+		return scanFunc(state.ctx)
+	})
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case res := <-ch:
+		return res.Val, res.Err
+	}
 }
 
 // getKsClient lazily initializes the Kubescape storage client. A transient
@@ -471,13 +528,12 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			namespace = ""
 		}
 
+		if namespace == "*" {
+			namespace = ""
+		}
 		key := fmt.Sprintf("rbac_scan:%s", namespace)
-		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
-			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
-				return nil, err
-			}
-			defer ksServer.getScanSem().Release(1)
-			return ksServer.RunRBACScan(ctx, namespace)
+		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return ksServer.RunRBACScan(scanCtx, namespace)
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run RBAC scan: %v", err)), nil
@@ -505,13 +561,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			framework = strings.TrimSpace(fwStr)
 		}
 
-		key := fmt.Sprintf("scan_local_iac:%s:%s", path, framework)
-		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
-			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
-				return nil, err
-			}
-			defer ksServer.getScanSem().Release(1)
-			return ksServer.runIaCScan(ctx, path, framework)
+		key := fmt.Sprintf("scan_local_iac:%s:%s", url.QueryEscape(path), url.QueryEscape(framework))
+		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return ksServer.runIaCScan(scanCtx, path, framework)
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run IaC scan: %v", err)), nil
@@ -531,13 +583,12 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			namespace = ""
 		}
 
+		if namespace == "*" {
+			namespace = ""
+		}
 		key := fmt.Sprintf("network_scan:%s", namespace)
-		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
-			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
-				return nil, err
-			}
-			defer ksServer.getScanSem().Release(1)
-			return ksServer.RunNetworkScan(ctx, namespace)
+		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return ksServer.RunNetworkScan(scanCtx, namespace)
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run Network scan: %v", err)), nil
@@ -1003,13 +1054,12 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			namespace = ""
 		}
 
-		key := fmt.Sprintf("framework_scan:%s:%s", namespace, frameworkNameStr)
-		v, err, _ := ksServer.scanGroup.Do(key, func() (interface{}, error) {
-			if err := ksServer.getScanSem().Acquire(ctx, 1); err != nil {
-				return nil, err
-			}
-			defer ksServer.getScanSem().Release(1)
-			return ksServer.RunFrameworkScan(ctx, namespace, frameworkNameStr)
+		if namespace == "*" {
+			namespace = ""
+		}
+		key := fmt.Sprintf("framework_scan:%s:%s", namespace, url.QueryEscape(frameworkNameStr))
+		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return ksServer.RunFrameworkScan(scanCtx, namespace, frameworkNameStr)
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run framework scan: %v", err)), nil
