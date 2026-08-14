@@ -245,6 +245,14 @@ Ensure your kubeconfig user has sufficient permissions. At minimum, you need rea
 
    For `kubescape scan --scan-images`, also pass `--registry-authority myregistry.io` so the credentials are only used for that registry.
 
+   `kubescape patch` reads `KUBESCAPE_REGISTRY_USERNAME` / `KUBESCAPE_REGISTRY_PASSWORD` too (it has no token flag). Prefer them over `--password`, which is visible to other users on the host via `ps` and is written to your shell history:
+
+   ```bash
+   export KUBESCAPE_REGISTRY_USERNAME=<registry-username>
+   export KUBESCAPE_REGISTRY_PASSWORD=<registry-password>
+   kubescape patch --image myregistry.io/myimage:tag
+   ```
+
 ### Vulnerability database outdated
 
 **Symptom:** Known CVEs are not being detected.

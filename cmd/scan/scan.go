@@ -16,7 +16,6 @@ import (
 	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 var scanCmdExamples = fmt.Sprintf(`
@@ -268,33 +267,19 @@ func applyRegistryCredentialsFromEnv(cmd *cobra.Command, scanInfo *cautils.ScanI
 	if scanInfo == nil {
 		return
 	}
-	usernameFlagChanged := registryCredentialFlagChanged(cmd, "registry-username", "username")
-	passwordFlagChanged := registryCredentialFlagChanged(cmd, "registry-password", "password")
-	tokenFlagChanged := registryCredentialFlagChanged(cmd, "registry-token")
+	usernameFlagChanged := shared.RegistryCredentialFlagChanged(cmd, "registry-username", "username")
+	passwordFlagChanged := shared.RegistryCredentialFlagChanged(cmd, "registry-password", "password")
+	tokenFlagChanged := shared.RegistryCredentialFlagChanged(cmd, "registry-token")
 
 	if !tokenFlagChanged && !usernameFlagChanged && scanInfo.RegistryUsername == "" {
-		scanInfo.RegistryUsername = os.Getenv("KUBESCAPE_REGISTRY_USERNAME")
+		scanInfo.RegistryUsername = os.Getenv(shared.RegistryUsernameEnvVar)
 	}
 	if !tokenFlagChanged && !passwordFlagChanged && scanInfo.RegistryPassword == "" {
-		scanInfo.RegistryPassword = os.Getenv("KUBESCAPE_REGISTRY_PASSWORD")
+		scanInfo.RegistryPassword = os.Getenv(shared.RegistryPasswordEnvVar)
 	}
 	if !tokenFlagChanged && !usernameFlagChanged && !passwordFlagChanged && scanInfo.RegistryToken == "" {
-		scanInfo.RegistryToken = os.Getenv("KUBESCAPE_REGISTRY_TOKEN")
+		scanInfo.RegistryToken = os.Getenv(shared.RegistryTokenEnvVar)
 	}
-}
-
-func registryCredentialFlagChanged(cmd *cobra.Command, names ...string) bool {
-	if cmd == nil {
-		return false
-	}
-	for _, name := range names {
-		for _, flags := range []*pflag.FlagSet{cmd.Flags(), cmd.PersistentFlags(), cmd.InheritedFlags()} {
-			if flag := flags.Lookup(name); flag != nil && flag.Changed {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) []cautils.PolicyIdentifier {
