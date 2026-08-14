@@ -16,6 +16,11 @@ deny contains msga if {
 	binds_privileged_namespace(role, rolebinding)
 
 	rule := role.rules[p]
+
+	# RBAC cannot authorize a top-level create through an entry carrying
+	# resourceNames, since the object has no name at authorization time, so such
+	# an entry grants no pod creation at all. Updating an existing pod is no
+	# substitute: spec.serviceAccountName is immutable once the pod exists.
 	not rule.resourceNames
 
 	subject := rolebinding.subjects[k]
@@ -40,8 +45,6 @@ deny contains msga if {
 # writing a pod controller in a privileged namespace reaches the same pod
 # template indirectly, so it grants the same service account assignment
 deny contains msga if {
-	verbs := ["create", "update", "patch", "*"]
-
 	# each API group is paired with the pod controllers it actually owns, so a
 	# rule such as apiGroups:[apps] + resources:[cronjobs] is not matched
 	controller := [
@@ -56,7 +59,7 @@ deny contains msga if {
 	binds_privileged_namespace(role, rolebinding)
 
 	rule := role.rules[p]
-	not rule.resourceNames
+	verbs := controller_write_verbs(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -75,6 +78,21 @@ deny contains msga if {
 			"externalObjects": subjectVector,
 		},
 	}
+}
+
+# Which write verbs on a pod controller are reachable for this rule entry.
+#
+# Narrowing an entry with resourceNames does not protect the named controller:
+# update/patch on it still reach spec.template.spec.serviceAccountName, so the
+# subject can repoint an existing Deployment/DaemonSet/Job at an
+# admin-equivalent SA. Only create drops out, because RBAC cannot authorize a
+# top-level create through an entry carrying resourceNames.
+controller_write_verbs(rule) := ["create", "update", "patch", "*"] if {
+	not rule.resourceNames
+}
+
+controller_write_verbs(rule) := ["update", "patch", "*"] if {
+	rule.resourceNames
 }
 
 # A ClusterRoleBinding grants the role in every namespace, a RoleBinding only in
