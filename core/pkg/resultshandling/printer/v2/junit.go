@@ -288,7 +288,10 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 			continue
 		}
 		testCase.Name = control.GetName()
-		testCase.Classname = classname
+		// JUnit consumers identify a test by (classname, name); several controls
+		// share a display name, so fold the unique control ID into the classname
+		// to keep findings from colliding in CI reporters.
+		testCase.Classname = classname + "/" + cID
 
 		if control.GetStatus().IsFailed() {
 			resources := map[string]any{}

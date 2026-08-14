@@ -669,6 +669,38 @@ func TestAggregateSuiteCounts(t *testing.T) {
 	}
 }
 
+func TestTestCases_UniqueClassnameForDuplicateNames(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+
+	const sharedName = "Minimize the admission of containers wishing to share the host process ID namespace"
+	controls := reportsummary.ControlSummaries{
+		"C-0194": {
+			ControlID:  "C-0194",
+			Name:       sharedName,
+			StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusPassed},
+		},
+		"C-0214": {
+			ControlID:  "C-0214",
+			Name:       sharedName,
+			StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		},
+	}
+
+	cases := testsCases(session, &controls, "AllControls")
+	require.Len(t, cases, 2)
+
+	seen := make(map[string]struct{}, len(cases))
+	for _, tc := range cases {
+		// JUnit consumers key a test by (classname, name); two same-named
+		// controls must not produce the same identity.
+		key := tc.Classname + "\x00" + tc.Name
+		require.NotContains(t, seen, key, "duplicate (classname, name) identity %q / %q", tc.Classname, tc.Name)
+		seen[key] = struct{}{}
+		assert.Equal(t, sharedName, tc.Name, "name must stay untouched")
+		assert.Contains(t, tc.Classname, "/C-", "classname must embed the control ID")
+	}
+}
+
 func TestTestCases_MissingControl(t *testing.T) {
 	session := cautils.NewOPASessionObjMock()
 	session.Report = &reporthandlingv2.PostureReport{
