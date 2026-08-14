@@ -1048,25 +1048,25 @@ func joinStrings(inputStrings ...string) string {
 	return strings.Join(inputStrings, "")
 }
 
-func GetFileString(filepath string) (string, error) {
-	bytes, err := os.ReadFile(filepath)
+func GetFileString(path string) (string, error) {
+	bytes, err := os.ReadFile(filepath.Clean(path))
 
 	if err != nil {
-		return "", fmt.Errorf("error reading file %s", filepath)
+		return "", fmt.Errorf("error reading file %s", path)
 	}
 
 	return string(bytes), nil
 }
 
-func writeFixesToFile(filepath, content string) error {
+func writeFixesToFile(path, content string) error {
 	perm := os.FileMode(0644)
-	if info, err := os.Stat(filepath); err == nil {
+	if info, err := os.Stat(filepath.Clean(path)); err == nil {
 		perm = info.Mode().Perm()
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("error reading file permissions: %w", err)
 	}
 
-	file, err := os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	file, err := os.OpenFile(filepath.Clean(path), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return fmt.Errorf("error writing fixes to file: %w", err)
 	}

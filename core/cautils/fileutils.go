@@ -703,7 +703,7 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 }
 
 func loadFile(filePath string) ([]byte, error) {
-	return os.ReadFile(filePath)
+	return os.ReadFile(filepath.Clean(filePath))
 }
 func ReadFile(fileContent []byte, fileFormat FileFormat) ([]workloadinterface.IMetadata, error) {
 

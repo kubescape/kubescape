@@ -146,6 +146,6 @@ func (yp *YamlPrinter) PrintNextSteps() {
 
 func (yp *YamlPrinter) CloseWriter() {
 	if yp.writer != nil && yp.writer != os.Stdout {
-		yp.writer.Close()
+		yp.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
 	}
 }

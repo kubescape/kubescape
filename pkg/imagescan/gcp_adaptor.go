@@ -110,11 +110,14 @@ func (a *GCPAdaptor) Login(ctx context.Context, registry string, credentials Reg
 		PageSize: 1,
 	}
 	it := a.client.ListOccurrences(ctx, req)
-	if _, err := it.Next(); err != nil && err != iterator.Done {
-		a.owningClient.Close()
-		a.owningClient = nil
-		a.client = nil
-		return fmt.Errorf("failed to authenticate or access gcp project %s: %w", a.projectID, err)
+	if _, err := it.Next(); err != nil { // #nosec G104 -- iterator.Done is the expected end-of-iteration sentinel, not an error
+		if err != iterator.Done {
+			a.owningClient.Close()
+			a.owningClient = nil
+			a.client = nil
+			return fmt.Errorf("failed to authenticate or access gcp project %s: %w", a.projectID, err)
+		}
+		// iterator.Done means authentication succeeded but there are no occurrences yet.
 	}
 
 	return nil

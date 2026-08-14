@@ -262,7 +262,9 @@ func (report *ReportEventReceiver) sendReport(postureReport *reporthandlingv2.Po
 		// in case of error, we need to revert the generated account ID
 		// otherwise the next run will fail using a non existing account ID
 		if report.accountIdGenerated {
-			report.tenantConfig.DeleteCredentials()
+			if err := report.tenantConfig.DeleteCredentials(); err != nil {
+				logger.L().Error("failed to delete generated credentials after report submission failed", helpers.Error(err))
+			}
 		}
 
 		return fmt.Errorf("%w:%s", err, strResponse)

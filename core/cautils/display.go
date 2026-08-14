@@ -121,7 +121,7 @@ func (p *ProgressHandler) Start(allSteps int) {
 }
 
 func (p *ProgressHandler) ProgressJob(step int, message string) {
-	p.pb.Add(step)
+	p.pb.Add(step) // #nosec G104 -- progress bar update; the error is not actionable
 	p.pb.Describe(message)
 }
 

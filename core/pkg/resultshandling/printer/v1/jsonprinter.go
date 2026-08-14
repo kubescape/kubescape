@@ -73,8 +73,9 @@ func (jsonPrinter *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 	return nil
 }
 
-func (p *JsonPrinter) CloseWriter() {
+func (p *JsonPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }
