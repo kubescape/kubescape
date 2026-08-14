@@ -21,7 +21,7 @@ deny contains msga if {
 	# resourceNames, since the object has no name at authorization time, so such
 	# an entry grants no pod creation at all. Updating an existing pod is no
 	# substitute: spec.serviceAccountName is immutable once the pod exists.
-	not rule.resourceNames
+	unrestricted_rule(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -88,11 +88,20 @@ deny contains msga if {
 # admin-equivalent SA. Only create drops out, because RBAC cannot authorize a
 # top-level create through an entry carrying resourceNames.
 controller_write_verbs(rule) := ["create", "update", "patch", "*"] if {
-	not rule.resourceNames
+	unrestricted_rule(rule)
 }
 
 controller_write_verbs(rule) := ["update", "patch", "*"] if {
-	rule.resourceNames
+	not unrestricted_rule(rule)
+}
+
+# Kubernetes draws no distinction between an absent resourceNames and an
+# explicitly empty one: ResourceNameMatches returns true as soon as the list is
+# empty, so both mean the rule is not narrowed to named objects. Testing
+# definedness alone (not rule.resourceNames) would treat resourceNames: [] as
+# scoped and skip a subject that in fact holds unrestricted access.
+unrestricted_rule(rule) if {
+	count(object.get(rule, "resourceNames", [])) == 0
 }
 
 # A ClusterRoleBinding grants the role in every namespace, a RoleBinding only in
