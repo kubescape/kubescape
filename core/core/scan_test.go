@@ -62,6 +62,10 @@ func (m estimateClusterSizeMock) GetCloudProvider() string {
 	return ""
 }
 
+func (m estimateClusterSizeMock) Preflight(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (*resourcehandler.PreflightResult, error) {
+	return nil, nil
+}
+
 func TestEstimateClusterSize(t *testing.T) {
 	// A ScanInfo with no input patterns is treated as a cluster scan.
 	clusterScanInfo := &cautils.ScanInfo{}
@@ -515,6 +519,10 @@ func (m *streamingCancelMock) GetClusterAPIServerInfo(context.Context) *version.
 
 func (m *streamingCancelMock) GetCloudProvider() string {
 	return m.cloudProvider
+}
+
+func (m *streamingCancelMock) Preflight(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (*resourcehandler.PreflightResult, error) {
+	return nil, nil
 }
 
 func TestCollectAndProcessResourcesWithStreaming_InitializesProviderScope(t *testing.T) {

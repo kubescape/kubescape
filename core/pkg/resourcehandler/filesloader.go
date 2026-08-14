@@ -109,6 +109,12 @@ func (fileHandler *FileResourceHandler) GetCloudProvider() string {
 	return ""
 }
 
+// Preflight is not supported for file-based scans: there is no API server to
+// check RBAC access against.
+func (fileHandler *FileResourceHandler) Preflight(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*PreflightResult, error) {
+	return nil, ErrPreflightNotSupported
+}
+
 // EstimateClusterSize always returns 0 for file-based scans since streaming
 // is not needed for local or URL-based resources.
 func (fileHandler *FileResourceHandler) EstimateClusterSize(ctx context.Context, scanInfo *cautils.ScanInfo) (int, error) {

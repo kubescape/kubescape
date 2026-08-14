@@ -162,6 +162,7 @@ type ScanInfo struct {
 	ScanTimeout           time.Duration // Maximum duration for the entire scan (0 = no timeout)
 	ControlTimeout        time.Duration // Maximum duration for evaluating a single control (0 = no timeout)
 	EnableStreaming       bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
+	DryRun                bool          // Check RBAC access for the resources the scan would need, without collecting or evaluating anything
 	ChartPath             string
 	FilePath              string
 	HelmValueFiles        []string // -f / --values: paths to Helm values YAML files (repeatable)
