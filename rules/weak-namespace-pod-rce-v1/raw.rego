@@ -16,7 +16,7 @@ deny contains msga if {
 	binds_unprivileged_namespace(role, rolebinding)
 
 	rule := role.rules[p]
-	not rule.resourceNames
+	unrestricted_rule(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -49,7 +49,7 @@ deny contains msga if {
 	binds_unprivileged_namespace(role, rolebinding)
 
 	rule := role.rules[p]
-	not rule.resourceNames
+	unrestricted_rule(rule)
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -70,10 +70,23 @@ deny contains msga if {
 	}
 }
 
+# Kubernetes draws no distinction between an absent resourceNames and an
+# explicitly empty one: ResourceNameMatches returns true as soon as the list is
+# empty, so both mean the rule is not narrowed to named objects. Testing
+# definedness alone (not rule.resourceNames) would treat resourceNames: [] as
+# scoped and skip a subject that in fact holds unrestricted access.
+unrestricted_rule(rule) if {
+	count(object.get(rule, "resourceNames", [])) == 0
+}
+
 # Only RoleBindings outside the privileged namespaces are in scope here. A
-# ClusterRoleBinding grants the role in every namespace, so it is reported by
-# modify-privileged-pods-v1 instead. Namespaces are listed inline because a
-# package level constant would be evaluated as a rule response.
+# ClusterRoleBinding grants the role in every namespace, and those grants are
+# not yet reported anywhere: modify-privileged-pods-v1 is still an open task in
+# #3097, so until it lands cluster-wide and kube-system pod-write rights raise
+# no alert from this rule or any other. The clusterrolebinding-clusterwide and
+# role-kube-system fixtures assert that gap rather than hide it. Namespaces are
+# listed inline because a package level constant would be evaluated as a rule
+# response.
 binds_unprivileged_namespace(role, rolebinding) if {
 	endswith(role.kind, "Role")
 	endswith(rolebinding.kind, "Binding")
