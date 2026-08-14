@@ -7,9 +7,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/kubescape/kubescape/v3/internal/testutils"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
 )
@@ -73,6 +76,20 @@ func TestGetComplianceScoreColumnDoesNotRoundFractionalScoreToPerfect(t *testing
 	}
 
 	assert.Equal(t, "99%", getComplianceScoreColumn(controlSummary, nil))
+}
+
+func Test_generateTableRow_UTF8(t *testing.T) {
+	name := strings.Repeat("a", 69) + "é" + strings.Repeat("b", 20)
+	ctrl := &reportsummary.ControlSummary{
+		ControlID:      "C-1234",
+		Name:           name,
+		StatusInfo:     apis.StatusInfo{InnerStatus: apis.StatusPassed},
+		StatusCounters: reportsummary.StatusCounters{PassedResources: 1, FailedResources: 1},
+	}
+
+	row := generateTableRow(ctrl, nil)
+
+	assert.True(t, utf8.ValidString(row.name), "truncated control name must be valid UTF-8")
 }
 
 func mockSummaryDetails() (*reportsummary.SummaryDetails, error) {

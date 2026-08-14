@@ -41,6 +41,25 @@ var astEvalBufferPool = sync.Pool{
 
 const ScoreConfigPath = "/resources/config"
 
+// ControlAttributeRequiresWholeClusterInput marks a control whose rules join
+// objects that live in different namespaces. Such a control must be evaluated
+// once against the whole cluster — after per-namespace evaluation has merged
+// every batch — rather than once per namespace, or the join silently
+// disappears and the control passes resources it should flag. The value is a
+// boolean (or the string "true").
+const ControlAttributeRequiresWholeClusterInput = "requiresWholeClusterInput"
+
+// wholeClusterControlIDsFallback lists the shipped controls known to require
+// whole-cluster input until the regolibrary ships the
+// requiresWholeClusterInput attribute on them. Keep it in sync with the
+// regolibrary: remove an ID once its control carries the attribute.
+var wholeClusterControlIDsFallback = map[string]struct{}{
+	"C-0261": {}, // SA token auto-mount bound via RoleBinding/ClusterRoleBinding in another namespace
+	"C-0266": {}, // Exposure to internet via Gateway API or Istio Ingress (Gateway/Service/VirtualService across namespaces)
+	"C-0267": {}, // Workload with cluster takeover roles (RoleBinding -> ServiceAccount in another namespace)
+	"C-0272": {}, // Workload with administrative roles (RoleBinding -> ServiceAccount in another namespace)
+}
+
 type IJobProgressNotificationClient interface {
 	Start(allSteps int)
 	ProgressJob(step int, message string)
@@ -242,10 +261,11 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-
 	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.ExcludedRules, cautils.GetScanningScope(opap.Metadata.ContextMetadata))
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
-	controlIDs := sortedControlIDs(opap.AllPolicies)
+	scopeControlIDs, wholeClusterControlIDs := splitWholeClusterControls(opap.AllPolicies, sortedControlIDs(opap.AllPolicies))
 
-	// Calculate total progress steps: controls × (resident scope + namespace scopes)
-	totalSteps := len(controlIDs) * (1 + expectedNamespaceBatches)
+	// Calculate total progress steps: per-scope controls × (resident scope +
+	// namespace scopes), plus one whole-cluster pass per deferred control.
+	totalSteps := len(scopeControlIDs)*(1+expectedNamespaceBatches) + len(wholeClusterControlIDs)
 	if progressListener != nil {
 		progressListener.Start(totalSteps)
 		defer progressListener.Stop()
@@ -311,9 +331,13 @@ haveResident:
 	// so CEL's namespaceObject binding is populated for this scope's objects.
 	opap.indexNamespacesFrom(residentBatch.AllResources)
 
+	// Index the resident batch once: every namespace scope below is evaluated
+	// together with it and reads the same index.
+	residentGroups := newResidentIndex(residentBatch)
+
 	// Process resident batch first
-	residentScope := evaluationScope{name: residentBatch.Scope, resident: residentBatch}
-	if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, residentScope, progressListener); err != nil {
+	residentScope := newEvaluationScope(residentBatch.Scope, nil, residentGroups)
+	if err := opap.processScope(ctx, opap.AllPolicies, scopeControlIDs, residentScope, progressListener); err != nil {
 		return err
 	}
 
@@ -334,8 +358,8 @@ haveResident:
 			opap.indexNamespacesFrom(batch.AllResources)
 
 			// Process this namespace batch
-			namespaceScope := evaluationScope{name: batch.Scope, batch: batch, resident: residentBatch}
-			if err := opap.processScope(ctx, opap.AllPolicies, controlIDs, namespaceScope, progressListener); err != nil {
+			namespaceScope := newEvaluationScope(batch.Scope, batch, residentGroups)
+			if err := opap.processScope(ctx, opap.AllPolicies, scopeControlIDs, namespaceScope, progressListener); err != nil {
 				return err
 			}
 
@@ -368,6 +392,19 @@ done:
 			return err
 		}
 	default:
+	}
+
+	// Every namespace batch has been merged into the session resource maps, so
+	// the whole-cluster controls can now be evaluated once against the full
+	// input. Doing this after the merge (rather than per namespace) keeps their
+	// cross-namespace joins intact.
+	if len(wholeClusterControlIDs) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := opap.processScope(ctx, opap.AllPolicies, wholeClusterControlIDs, opap.wholeClusterScope(), progressListener); err != nil {
+			return err
+		}
 	}
 
 	// Rebuild scan coverage
@@ -466,10 +503,10 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 	defer opap.loggerDoneScanning()
 
 	scopes := opap.evaluationScopes()
-	controlIDs := sortedControlIDs(policies)
+	scopeControlIDs, wholeClusterControlIDs := splitWholeClusterControls(policies, sortedControlIDs(policies))
 
 	if progressListener != nil {
-		progressListener.Start(len(controlIDs) * len(scopes))
+		progressListener.Start(len(scopeControlIDs)*len(scopes) + len(wholeClusterControlIDs))
 		defer progressListener.Stop()
 	}
 
@@ -481,7 +518,18 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 			processErrs = append(processErrs, err)
 			break
 		}
-		if err := opap.processScope(ctx, policies, controlIDs, scope, progressListener); err != nil {
+		if err := opap.processScope(ctx, policies, scopeControlIDs, scope, progressListener); err != nil {
+			processErrs = append(processErrs, err)
+		}
+	}
+
+	// Whole-cluster controls are evaluated once against the full input, after
+	// the per-scope pass, so a cross-namespace join is never lost to
+	// partitioning.
+	if len(wholeClusterControlIDs) > 0 {
+		if err := ctx.Err(); err != nil {
+			processErrs = append(processErrs, err)
+		} else if err := opap.processScope(ctx, policies, wholeClusterControlIDs, opap.wholeClusterScope(), progressListener); err != nil {
 			processErrs = append(processErrs, err)
 		}
 	}
@@ -493,11 +541,45 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 // the resident batch every scope depends on.
 type evaluationScope struct {
 	name string
-	// batch holds the scope's own resources. It is nil for the resident scope,
-	// which is evaluated on its own so that cluster-scoped resources are still
-	// assessed on clusters with no namespaced resources at all.
-	batch    *cautils.ResourceBatch
-	resident *cautils.ResourceBatch
+	// ownBatch reports whether the scope brings resources of its own. It is
+	// false for the resident scope, which is evaluated on its own so that
+	// cluster-scoped resources are still assessed on clusters with no namespaced
+	// resources at all.
+	ownBatch bool
+	// batchGroups indexes the scope's own batch, zero when ownBatch is false.
+	batchGroups resourceGroupIndex
+	// residentGroups indexes the resident batch, shared by every scope.
+	residentGroups *residentIndex
+}
+
+// residentIndex holds the resident batch indexed for matching. Every scope is
+// evaluated together with the resident batch, so it is built once per scan and
+// shared, rather than re-indexed once per namespace.
+type residentIndex struct {
+	k8s      resourceGroupIndex
+	external resourceGroupIndex
+}
+
+func newResidentIndex(resident *cautils.ResourceBatch) *residentIndex {
+	return &residentIndex{
+		k8s:      newResourceGroupIndex(resident.K8SResources, resident.AllResources),
+		external: newResourceGroupIndex(cautils.K8SResources(resident.ExternalResources), resident.AllResources),
+	}
+}
+
+// newEvaluationScope builds a scope and the index its rule matching reads,
+// keeping that work off the per-rule path (see resourceGroupIndex). batch is nil
+// for the resident scope, which is already indexed in residentGroups.
+func newEvaluationScope(name string, batch *cautils.ResourceBatch, residentGroups *residentIndex) evaluationScope {
+	scope := evaluationScope{
+		name:           name,
+		residentGroups: residentGroups,
+	}
+	if batch != nil {
+		scope.ownBatch = true
+		scope.batchGroups = newResourceGroupIndex(batch.K8SResources, batch.AllResources)
+	}
+	return scope
 }
 
 // matchedObjects returns the rule's input for this scope: the scope's own
@@ -509,14 +591,14 @@ type evaluationScope struct {
 // which the resident scope already did.
 func (scope evaluationScope) matchedObjects(rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
 	var objects []workloadinterface.IMetadata
-	if scope.batch != nil {
-		objects = getKubernetesObjects(scope.batch.K8SResources, scope.batch.AllResources, rule.Match)
+	if scope.ownBatch {
+		objects = getKubernetesObjects(scope.batchGroups, rule.Match)
 		if len(objects) == 0 {
 			return nil
 		}
 	}
-	objects = append(objects, getKubernetesObjects(scope.resident.K8SResources, scope.resident.AllResources, rule.Match)...)
-	objects = append(objects, getKubernetesObjectsFromExternalResources(scope.resident.ExternalResources, scope.resident.AllResources, rule.DynamicMatch)...)
+	objects = append(objects, getKubernetesObjects(scope.residentGroups.k8s, rule.Match)...)
+	objects = append(objects, getKubernetesObjects(scope.residentGroups.external, rule.DynamicMatch)...)
 	return objects
 }
 
@@ -529,10 +611,12 @@ func (scope evaluationScope) matchedObjects(rule *reporthandling.PolicyRule) []w
 func (opap *OPAProcessor) evaluationScopes() []evaluationScope {
 	resident, batches := cautils.PartitionResources(opap.initialResourceCount, opap.K8SResources, opap.ExternalResources, opap.AllResources)
 
+	residentGroups := newResidentIndex(resident)
+
 	scopes := make([]evaluationScope, 0, len(batches)+1)
-	scopes = append(scopes, evaluationScope{name: resident.Scope, resident: resident})
+	scopes = append(scopes, newEvaluationScope(resident.Scope, nil, residentGroups))
 	for _, batch := range batches {
-		scopes = append(scopes, evaluationScope{name: batch.Scope, batch: batch, resident: resident})
+		scopes = append(scopes, newEvaluationScope(batch.Scope, batch, residentGroups))
 	}
 
 	logger.L().Debug("partitioned resources for evaluation",
@@ -540,6 +624,23 @@ func (opap *OPAProcessor) evaluationScopes() []evaluationScope {
 		helpers.Int("residentResources", resident.Len()))
 
 	return scopes
+}
+
+// wholeClusterScope returns a scope whose input is every resource the scan
+// collected, independent of namespace. It is the scope used to evaluate
+// whole-cluster controls once, after per-namespace evaluation has merged every
+// batch, reproducing the single-input behaviour of clusters below the
+// large-cluster threshold. Indexing everything as the resident batch means
+// matchedObjects returns all matching objects, mirroring the small-cluster
+// eager path exactly.
+func (opap *OPAProcessor) wholeClusterScope() evaluationScope {
+	batch := &cautils.ResourceBatch{
+		Scope:             cautils.ClusterScope,
+		K8SResources:      opap.K8SResources,
+		ExternalResources: opap.ExternalResources,
+		AllResources:      opap.AllResources,
+	}
+	return newEvaluationScope(cautils.ClusterScope, nil, newResidentIndex(batch))
 }
 
 type policyControl struct {
@@ -585,6 +686,40 @@ func policyControlSortKey(item policyControl) string {
 		return item.control.ControlID
 	}
 	return item.key
+}
+
+// controlRequiresWholeClusterInput reports whether a control joins objects
+// across namespaces and therefore must see the whole cluster as one input.
+func controlRequiresWholeClusterInput(control *reporthandling.Control) bool {
+	if control == nil {
+		return false
+	}
+	if flag, ok := control.Attributes[ControlAttributeRequiresWholeClusterInput]; ok {
+		switch v := flag.(type) {
+		case bool:
+			return v
+		case string:
+			return strings.EqualFold(v, "true")
+		}
+	}
+	_, ok := wholeClusterControlIDsFallback[control.ControlID]
+	return ok
+}
+
+// splitWholeClusterControls partitions controlIDs into the controls evaluated
+// once per scope and the controls deferred to a single whole-cluster pass. The
+// order within each returned slice follows the input order, so the evaluation
+// order remains deterministic.
+func splitWholeClusterControls(policies *cautils.Policies, controlIDs []string) (scopeControlIDs, wholeClusterControlIDs []string) {
+	for _, id := range controlIDs {
+		control, ok := policies.Controls[id]
+		if ok && controlRequiresWholeClusterInput(&control) {
+			wholeClusterControlIDs = append(wholeClusterControlIDs, id)
+			continue
+		}
+		scopeControlIDs = append(scopeControlIDs, id)
+	}
+	return scopeControlIDs, wholeClusterControlIDs
 }
 
 func (opap *OPAProcessor) loggerStartScanning() {
@@ -1060,9 +1195,17 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 		var messages []string
 		var hints []cel.PathHint
 		var objErrs []error
+		var denyErrs []error
 		for _, res := range eval.Results {
 			if res.Err != nil {
 				objErrs = append(objErrs, res.Err)
+				// Under failurePolicy Fail, a validation whose expression
+				// errored denies the object at admission. Compile errors, budget
+				// exhaustion and cancellation stay unknown verdicts: the cluster
+				// never produces them, so failurePolicy does not apply.
+				if eval.FailOnError && cel.IsExpressionError(res.Err) {
+					denyErrs = append(denyErrs, res.Err)
+				}
 				continue
 			}
 			if !res.Passed {
@@ -1084,6 +1227,11 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 					helpers.String("resource", celResourceID(obj)),
 					helpers.Error(errors.Join(objErrs...)))
 			}
+		case len(denyErrs) > 0:
+			// failurePolicy Fail turned the eval error into a deny, exactly as
+			// admission would. Report it as a failure whose message is the error,
+			// so the finding is visible instead of silently downgraded to a skip.
+			responses = append(responses, celErrorRuleResponse(rule, obj, errors.Join(denyErrs...)))
 		case len(objErrs) > 0:
 			outcome.skipped = append(outcome.skipped, skippedCELResource{obj: obj, err: errors.Join(objErrs...)})
 		}
@@ -1161,6 +1309,23 @@ func celRuleResponse(rule *reporthandling.PolicyRule, obj map[string]any, messag
 		RuleStatus:          reporthandling.StatusFailed,
 		PackageName:         rule.Name,
 		Rulename:            rule.Name,
+		AlertObject: reporthandling.AlertObject{
+			K8SApiObjects: []map[string]any{obj},
+		},
+	}
+}
+
+// celErrorRuleResponse builds the failure a validation's eval error produces
+// under failurePolicy Fail: the object is denied with the error as the message,
+// matching what admission does. There is no remediation to offer — the
+// expression never reached a verdict — so the finding carries no paths and is
+// informational rather than fixable.
+func celErrorRuleResponse(rule *reporthandling.PolicyRule, obj map[string]any, err error) reporthandling.RuleResponse {
+	return reporthandling.RuleResponse{
+		AlertMessage: err.Error(),
+		RuleStatus:   reporthandling.StatusFailed,
+		PackageName:  rule.Name,
+		Rulename:     rule.Name,
 		AlertObject: reporthandling.AlertObject{
 			K8SApiObjects: []map[string]any{obj},
 		},

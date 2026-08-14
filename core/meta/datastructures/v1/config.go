@@ -9,7 +9,9 @@ type SetConfig struct {
 	CloudAPIURL    string
 }
 type ViewConfig struct {
-	Writer io.Writer
+	Writer       io.Writer
+	OutputFormat string
+	IncludeEmpty bool
 }
 type DeleteConfig struct {
 }

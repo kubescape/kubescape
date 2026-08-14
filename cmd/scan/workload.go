@@ -62,15 +62,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if err := validateWorkloadArgs(args, scanInfo); err != nil {
 				return err
 			}
-			if scanInfo.FailThresholdSeverity != "" {
-				if err := shared.ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
-					return err
-				}
-			}
-			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(shared.ScanFormats, ", "))
-			}
-			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ScanFormats); err != nil {
+			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ScanFormats); err != nil {
 				return err
 			}
 			if err := validateThresholdsOnly(scanInfo); err != nil {

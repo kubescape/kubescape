@@ -34,7 +34,8 @@ func NewYamlPrinter() *YamlPrinter {
 	return &YamlPrinter{}
 }
 
-func (yp *YamlPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (yp *YamlPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = yamlOutputFile
@@ -44,7 +45,13 @@ func (yp *YamlPrinter) SetWriter(ctx context.Context, outputFile string) {
 			outputFile = outputFile + printer.YamlOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		yp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	yp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 func (yp *YamlPrinter) Score(score float32) {
@@ -117,18 +124,21 @@ func (yp *YamlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 }
 
 func printConfigurationsScanningYaml(opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData, yp *YamlPrinter) error {
+	// Add combined-scan data to this renderer's finalized report. Mutating the
+	// shared session here would also change the posture payload submitted after
+	// local output has finished.
+	finalizedReport := FinalizeResults(opaSessionObj)
 
 	if imageScanData != nil {
 		imageScanSummary := yp.convertToImageScanSummary(imageScanData)
-		opaSessionObj.Report.SummaryDetails.Vulnerabilities.MapsSeverityToSummary = convertToReportSummary(imageScanSummary.MapsSeverityToSummary)
-		opaSessionObj.Report.SummaryDetails.Vulnerabilities.CVESummary = convertToCVESummary(imageScanSummary.CVEs)
-		opaSessionObj.Report.SummaryDetails.Vulnerabilities.PackageScores = convertToPackageScores(imageScanSummary.PackageScores)
-		opaSessionObj.Report.SummaryDetails.Vulnerabilities.Images = imageScanSummary.Images
+		finalizedReport.SummaryDetails.Vulnerabilities.MapsSeverityToSummary = convertToReportSummary(imageScanSummary.MapsSeverityToSummary)
+		finalizedReport.SummaryDetails.Vulnerabilities.CVESummary = convertToCVESummary(imageScanSummary.CVEs)
+		finalizedReport.SummaryDetails.Vulnerabilities.PackageScores = convertToPackageScores(imageScanSummary.PackageScores)
+		finalizedReport.SummaryDetails.Vulnerabilities.Images = imageScanSummary.Images
 	}
 
 	// Convert to PostureReportWithSeverity to add severity field to controls,
 	// extract specified labels from workloads, and attach scan coverage gaps.
-	finalizedReport := FinalizeResults(opaSessionObj)
 	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverage(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources, &opaSessionObj.ScanCoverage)
 
 	r, err := yaml.Marshal(reportWithSeverity)
@@ -146,6 +156,6 @@ func (yp *YamlPrinter) PrintNextSteps() {
 
 func (yp *YamlPrinter) CloseWriter() {
 	if yp.writer != nil && yp.writer != os.Stdout {
-		yp.writer.Close()
+		yp.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
 	}
 }

@@ -10,6 +10,11 @@ type ControlEvaluation struct {
 	Applicable bool
 	// Results holds one entry per validation, in order, when Applicable.
 	Results []ValidationResult
+	// FailOnError reports whether the policy's failurePolicy is Fail (the
+	// default, and the only value the embedded bundle uses). When true, a
+	// validation whose expression errored denies the object at admission, and
+	// the scanner reports it as failed rather than skipped.
+	FailOnError bool
 }
 
 // EvaluateControl loads the ValidatingAdmissionPolicy for a control from the
@@ -46,5 +51,5 @@ func (e *Evaluator) EvaluateControl(ctx context.Context, controlID string, obj, 
 	if err != nil {
 		return ControlEvaluation{}, err
 	}
-	return ControlEvaluation{Applicable: true, Results: results}, nil
+	return ControlEvaluation{Applicable: true, Results: results, FailOnError: vap.failOnError()}, nil
 }

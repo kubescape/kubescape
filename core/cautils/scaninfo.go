@@ -162,6 +162,7 @@ type ScanInfo struct {
 	ScanTimeout           time.Duration // Maximum duration for the entire scan (0 = no timeout)
 	ControlTimeout        time.Duration // Maximum duration for evaluating a single control (0 = no timeout)
 	EnableStreaming       bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
+	DryRun                bool          // Check RBAC access for the resources the scan would need, without collecting or evaluating anything
 	ChartPath             string
 	FilePath              string
 	HelmValueFiles        []string // -f / --values: paths to Helm values YAML files (repeatable)
@@ -184,6 +185,7 @@ type ScanInfo struct {
 	RegistryPassword      string            // Password for workload image registry authentication
 	RegistryToken         string            // Bearer token for workload image registry authentication
 	ImageScanConcurrency  int               // Number of concurrent workers for image scanning
+	MinSeverity           string            // Only include controls at or above this severity in the output
 }
 
 type Getters struct {
@@ -222,12 +224,17 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) error {
 	if scanInfo.UseArtifactsFrom == "" {
 		return nil
 	}
-	// UseArtifactsFrom must be a path without a filename
-	dir, file := filepath.Split(scanInfo.UseArtifactsFrom)
-	if dir == "" {
-		scanInfo.UseArtifactsFrom = file
-	} else if strings.Contains(file, ".json") {
-		scanInfo.UseArtifactsFrom = dir
+	// UseArtifactsFrom must be a directory. If it points at a single file,
+	// fall back to its parent directory based on the filesystem, not a name
+	// heuristic (a directory named "*.json" is still a directory). A bare
+	// filename with no path separator is left untouched so os.ReadDir below
+	// surfaces the existing clear error instead of silently scanning ".".
+	// An explicit current-directory path like "./<file>" has a separator, so
+	// it falls back to "." as its parent directory.
+	if info, err := os.Stat(scanInfo.UseArtifactsFrom); err == nil && !info.IsDir() {
+		if filepath.Base(scanInfo.UseArtifactsFrom) != scanInfo.UseArtifactsFrom {
+			scanInfo.UseArtifactsFrom = filepath.Dir(scanInfo.UseArtifactsFrom)
+		}
 	}
 	// set frameworks files
 	files, err := os.ReadDir(scanInfo.UseArtifactsFrom)
@@ -237,7 +244,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) error {
 	framework := &reporthandling.Framework{}
 	for _, f := range files {
 		filePath := filepath.Join(scanInfo.UseArtifactsFrom, f.Name())
-		file, err := os.ReadFile(filePath)
+		file, err := os.ReadFile(filepath.Clean(filePath))
 		if err == nil {
 			if err := json.Unmarshal(file, framework); err == nil {
 				scanInfo.UseFrom = append(scanInfo.UseFrom, filepath.Join(scanInfo.UseArtifactsFrom, f.Name()))

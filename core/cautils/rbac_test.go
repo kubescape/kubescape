@@ -161,7 +161,6 @@ func TestRBACObjectsToResources(t *testing.T) {
 						},
 					},
 				},
-				SA2WLIDmap:   make(map[string][]string),
 				SAID2WLIDmap: make(map[string][]string),
 			},
 		},

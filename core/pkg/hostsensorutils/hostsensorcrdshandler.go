@@ -41,9 +41,6 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, _ string) (*HostSe
 		return nil, fmt.Errorf("failed to get k8s config")
 	}
 	config = rest.CopyConfig(config)
-	// force GRPC
-	config.AcceptContentTypes = "application/vnd.kubernetes.protobuf"
-	config.ContentType = "application/vnd.kubernetes.protobuf"
 
 	// Create dynamic client for CRD access
 	dynamicClient, err := dynamic.NewForConfig(config)
@@ -65,7 +62,7 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, _ string) (*HostSe
 		if err == nil {
 			err = fmt.Errorf("no nodes to scan")
 		}
-		return hsh, fmt.Errorf("in NewHostSensorHandler, failed to get nodes list: %w", err)
+		return nil, fmt.Errorf("in NewHostSensorHandler, failed to get nodes list: %w", err)
 	}
 
 	return hsh, nil

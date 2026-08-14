@@ -225,46 +225,14 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 }
 
 func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurationScanSpec, newSpec v1beta1.WorkloadConfigurationScanSpec) v1beta1.WorkloadConfigurationScanSpec {
-	if existingSpec.Controls == nil {
-		existingSpec.Controls = make(map[string]v1beta1.ScannedControl)
-	}
-	for ctrlID := range newSpec.Controls {
-		newCtrl := newSpec.Controls[ctrlID]
-		_, found := existingSpec.Controls[ctrlID]
-		if !found {
-			existingSpec.Controls[ctrlID] = newCtrl
-			continue
-		}
-
-		// TODOs:
-		// 1. Decide what to do with existing controls (compare statuses, what is the merge strategy)
-		// 2. Do we need to merge the rules?
-		// 3. Do we need to remove non-existing controls?
-		existingSpec.Controls[ctrlID] = newCtrl
-	}
+	existingSpec.Controls = newSpec.Controls
 
 	existingSpec.RelatedObjects = newSpec.RelatedObjects
 	return existingSpec
 }
 
 func mergeWorkloadConfigurationScanSummarySpec(existingSpec v1beta1.WorkloadConfigurationScanSummarySpec, newSpec v1beta1.WorkloadConfigurationScanSummarySpec) v1beta1.WorkloadConfigurationScanSummarySpec {
-	if existingSpec.Controls == nil {
-		existingSpec.Controls = make(map[string]v1beta1.ScannedControlSummary)
-	}
-	for ctrlID := range newSpec.Controls {
-		newCtrl := newSpec.Controls[ctrlID]
-		_, found := existingSpec.Controls[ctrlID]
-		if !found {
-			existingSpec.Controls[ctrlID] = newCtrl
-			continue
-		}
-
-		// TODOs:
-		// 1. Decide what to do with existing controls (compare statuses, what is the merge strategy)
-		// 2. Do we need to merge the rules?
-		// 3. Do we need to remove non-existing controls?
-		existingSpec.Controls[ctrlID] = newCtrl
-	}
+	existingSpec.Controls = newSpec.Controls
 
 	existingSpec.Severities = calculateSeveritiesSummaryFromControls(existingSpec.Controls)
 	return existingSpec
@@ -553,8 +521,15 @@ func parseWorkloadScanRelatedObjectList(relatedObjects []workloadinterface.IMeta
 	return r
 }
 
-// mergeMaps merges new into existing, overwriting existing keys with new values
+// mergeMaps merges new into existing, overwriting existing keys with new values.
+// Both parameters are safe to pass as nil.
 func mergeMaps(existing, new map[string]string) map[string]string {
+	if new == nil {
+		if existing == nil {
+			return make(map[string]string)
+		}
+		return existing
+	}
 	if existing == nil {
 		existing = make(map[string]string)
 	}

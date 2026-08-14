@@ -1,0 +1,20 @@
+{
+  "name": "escalate-roles-clusterroles-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Privilege Escalation::Escalate roles/clusterroles",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": ["rbac.authorization.k8s.io"],
+      "apiVersions": ["v1"],
+      "resources": ["RoleBinding", "ClusterRoleBinding", "Role", "ClusterRole"]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects hold the escalate verb on roles or clusterroles, which bypasses Kubernetes' built-in protection against granting more rights than a subject already has",
+  "remediation": "Avoid granting the escalate verb outside of cluster-admin equivalent identities. Review any role/clusterrole granting escalate and confirm it is required.",
+  "ruleQuery": "armo_builtins"
+}

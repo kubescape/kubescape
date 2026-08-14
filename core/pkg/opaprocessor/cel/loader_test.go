@@ -71,6 +71,44 @@ func TestLoadVAPUnknownControl(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), "C-9999"))
 }
 
+// TestVAPFailurePolicy pins how spec.failurePolicy is resolved: omitted defaults
+// to Fail (the apiserver's default), an explicit Fail stays Fail, and only
+// Ignore flips failOnError to false.
+func TestVAPFailurePolicy(t *testing.T) {
+	doc := func(failurePolicy string) string {
+		return `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: pol
+  labels:
+    controlId: C-1000
+spec:
+` + failurePolicy + `  validations:
+  - expression: "true"
+`
+	}
+
+	tests := []struct {
+		name          string
+		failurePolicy string
+		wantFail      bool
+	}{
+		{name: "omitted defaults to Fail", failurePolicy: "", wantFail: true},
+		{name: "explicit Fail", failurePolicy: "  failurePolicy: Fail\n", wantFail: true},
+		{name: "explicit Ignore", failurePolicy: "  failurePolicy: Ignore\n", wantFail: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			catalog, err := parseVAPBundle([]byte(doc(tt.failurePolicy)))
+			require.NoError(t, err)
+			vap, ok := catalog.byControl["C-1000"]
+			require.True(t, ok)
+			assert.Equal(t, tt.wantFail, vap.failOnError())
+		})
+	}
+}
+
 // vapDoc renders a minimal VAP document for the in-memory bundle tests.
 func vapDoc(name, controlID string) string {
 	labels := ""

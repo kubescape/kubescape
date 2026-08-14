@@ -160,15 +160,17 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		if sessionObj.Metadata.ScanMetadata.HostScanner {
 			logger.L().Info("Requesting Host scanner data")
 			cautils.StartSpinner()
-			infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
-				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
-			} else if k8sHandler.hostSensorHandler == nil {
+			if k8sHandler.hostSensorHandler == nil {
 				// using hostSensor mock
 				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
 			} else {
-				maps.Copy(sessionObj.InfoMap, infoMap)
+				infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
+					cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
+				} else {
+					maps.Copy(sessionObj.InfoMap, infoMap)
+				}
 			}
 			cautils.StopSpinner()
 			logger.L().Success("Requested Host scanner data")
@@ -407,18 +409,18 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	if len(hostResources) > 0 {
 		if sessionObj.Metadata.ScanMetadata.HostScanner {
 			logger.L().Info("Requesting Host scanner data")
-			infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
-				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
-			} else if k8sHandler.hostSensorHandler == nil {
-				// using hostSensor mock
+			if k8sHandler.hostSensorHandler == nil {
 				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
 			} else {
-				for k, v := range infoMap {
-					sessionObj.InfoMap[k] = v
+				infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
+					cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
+				} else {
+					maps.Copy(sessionObj.InfoMap, infoMap)
 				}
 			}
+			logger.L().Success("Requested Host scanner data")
 		} else {
 			cautils.SetInfoMapForResources("This control is scanned exclusively by the Kubescape operator, not the Kubescape CLI. Install the Kubescape operator:\n     https://kubescape.io/docs/install-operator/.", hostResources, sessionObj.InfoMap)
 		}
@@ -446,7 +448,7 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		}
 	}
 
-	if scanInfo.GetScanningContext() == cautils.ContextCluster {
+	if scanInfo.GetScanningContext() == cautils.ContextCluster && k8sHandler.k8s != nil {
 		policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
@@ -473,13 +475,15 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	// resident batch into the processor (sessionObj) after receiving it, so the
 	// maps still land on the session by the time downstream stages run.
 
-	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
-	if err != nil {
-		logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
-	} else {
-		sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
-		metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
-		metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
+	if k8sHandler.k8s != nil {
+		numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
+		if err != nil {
+			logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
+		} else {
+			sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
+			metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
+			metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
+		}
 	}
 
 	// Stream resident batch first.
@@ -541,6 +545,21 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 		return nil, fmt.Errorf("resource not found in Kubernetes discovery: %s", getReadableID(resource))
 	}
 	apiGroup, apiVersion, resourceName := k8sinterface.StringToResourceGroup(resolved[0].groupVersionResourceTriplet)
+	if apiGroup == "" && resourceName == "secrets" {
+		// Defense in depth: a Secret is not a useful single-resource scan
+		// target, so reject it here instead of fetching it and discarding it
+		// later. Rejecting before pullSingleResource avoids an unnecessary
+		// Kubernetes API call (and the RBAC it requires) and guarantees Secret
+		// objects are never retrieved from the cluster in single-resource scan
+		// mode, rather than relying solely on downstream sanitization
+		// (removeData()/removeSecretData(), which redacts "data" and
+		// "stringData" to "XXXXXX").
+		//
+		// The GVR is resolved from cluster discovery, not from the
+		// client-supplied kind string, so this check cannot be sidestepped with
+		// casing or aliasing tricks.
+		return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s", getReadableID(resource))
+	}
 	gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resourceName}
 
 	fieldSelectors := getNameFieldSelectorString(resource.GetName(), FieldSelectorsEqualsOperator)
@@ -1056,8 +1075,8 @@ var namespacedResourcesToEstimate = []schema.GroupVersionResource{
 }
 
 // EstimateClusterSize estimates the number of namespaced resources in the
-// cluster by issuing metadata-only LIST requests (limit=1) to the API server
-// and summing the remainingItemCount from each response. A per-GVR failure
+// cluster by issuing LIST requests (limit=1) to the API server and summing the
+// returned items and remainingItemCount from each response. A per-GVR failure
 // (type unavailable, or the service account lacking read access) is tolerated,
 // but if no representative type can be listed at all the estimate is useless —
 // returning (0, nil) would be indistinguishable from a genuinely small cluster

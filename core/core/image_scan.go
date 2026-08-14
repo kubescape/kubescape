@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -52,7 +53,7 @@ type VulnerabilitiesIgnorePolicy struct {
 // Loads exception policies from exceptions json object.
 func GetImageExceptionsFromFile(filePath string) ([]VulnerabilitiesIgnorePolicy, error) {
 	// Read the JSON file
-	jsonFile, err := os.ReadFile(filePath)
+	jsonFile, err := os.ReadFile(filepath.Clean(filePath))
 	if err != nil {
 		return nil, fmt.Errorf("error reading exceptions file: %w", err)
 	}
@@ -365,9 +366,8 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 type ScanErrorCategory string
 
 const (
-	ErrCategoryDNSTimeout ScanErrorCategory = "Registry DNSTimeout/Unreachable"
-	//nolint:gosec // G101: this is a descriptive category label, not a hardcoded credential
-	ErrCategoryCredentials ScanErrorCategory = "Registry Credentials/Authentication"
+	ErrCategoryDNSTimeout  ScanErrorCategory = "Registry DNSTimeout/Unreachable"
+	ErrCategoryCredentials ScanErrorCategory = "Registry Credentials/Authentication" // #nosec G101 -- descriptive error category label, not a hardcoded credential
 	ErrCategoryParser      ScanErrorCategory = "Image Manifest/Parser Issue"
 	ErrCategoryGeneral     ScanErrorCategory = "General Error"
 )
@@ -540,9 +540,13 @@ func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScan
 			for job := range jobChan {
 				select {
 				case <-ctx.Done():
+					cancelErr := fmt.Errorf("scan canceled: %w", ctx.Err())
+					if o.errorAggregator != nil {
+						o.errorAggregator.Add(job.Image, cancelErr)
+					}
 					resultChan <- ImageScanResult{
 						Image: job.Image,
-						Error: fmt.Errorf("scan canceled: %w", ctx.Err()),
+						Error: cancelErr,
 					}
 					continue
 				default:

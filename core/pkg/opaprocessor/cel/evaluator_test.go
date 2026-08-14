@@ -2,6 +2,7 @@ package cel
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -227,6 +228,44 @@ func TestEvaluateOnObjectValidationEvalErrorSetsErr(t *testing.T) {
 
 	assert.Error(t, results[0].Err)
 	assert.False(t, results[0].Passed)
+}
+
+// TestIsExpressionError pins the classification behind failurePolicy: an error
+// the expression itself produced is governed by failurePolicy, while an
+// offline-only failure (compile error, budget, cancellation) is not.
+func TestIsExpressionError(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	t.Run("runtime eval error", func(t *testing.T) {
+		results, err := e.EvaluateOnObject(context.Background(), hostNetworkPod(), nil, nil, nil,
+			[]Validation{{Expression: "object.spec.thisKeyDoesNotExist.value == 1"}})
+		require.NoError(t, err)
+		require.Error(t, results[0].Err)
+		assert.True(t, IsExpressionError(results[0].Err))
+	})
+
+	t.Run("non-bool result", func(t *testing.T) {
+		results, err := e.EvaluateOnObject(context.Background(), hostNetworkPod(), nil, nil, nil,
+			[]Validation{{Expression: "object.metadata.name"}})
+		require.NoError(t, err)
+		require.Error(t, results[0].Err)
+		assert.True(t, IsExpressionError(results[0].Err))
+	})
+
+	t.Run("compile error", func(t *testing.T) {
+		results, err := e.EvaluateOnObject(context.Background(), hostNetworkPod(), nil, nil, nil,
+			[]Validation{{Expression: "this is not valid cel {{{"}})
+		require.NoError(t, err)
+		require.Error(t, results[0].Err)
+		assert.False(t, IsExpressionError(results[0].Err),
+			"a compile error is an offline-only failure, never a verdict")
+	})
+
+	t.Run("plain error", func(t *testing.T) {
+		assert.False(t, IsExpressionError(errors.New("something else")))
+		assert.False(t, IsExpressionError(nil))
+	})
 }
 
 // TestEvaluateOnObjectUnreferencedBrokenVariableIsIgnored is a parity guard:
