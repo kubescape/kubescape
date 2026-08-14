@@ -61,6 +61,7 @@ var pluralOverrides = map[string]string{
 	"match_expressions":     "matchExpressions",
 	"volume_claim_template": "volumeClaimTemplates",
 	"http_header":           "httpHeaders",
+	"sysctl":                "sysctls",
 }
 
 // repeatableBlocks lists HCL block labels that always encode as a JSON array,
@@ -71,6 +72,7 @@ var repeatableBlocks = map[string]bool{
 	"env": true, "env_from": true, "port": true, "toleration": true,
 	"host_alias": true, "rule": true, "subject": true, "image_pull_secrets": true,
 	"match_expressions": true, "volume_claim_template": true, "http_header": true,
+	"sysctl": true,
 }
 
 // resourceMetaAttributes are Terraform meta-argument attributes valid on any
