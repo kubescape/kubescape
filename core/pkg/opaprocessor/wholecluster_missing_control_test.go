@@ -18,6 +18,8 @@ import (
 // any RoleBinding in the input, regardless of which namespace that RoleBinding
 // itself lives in. A RoleBinding legally binds a ServiceAccount subject from a
 // different namespace than its own metadata.namespace.
+//
+//nolint:gosec // G101: this is a Rego rule fixture, not a hardcoded credential
 const saTokenBindingRule = `package armo_builtins
 
 deny[msga] {
