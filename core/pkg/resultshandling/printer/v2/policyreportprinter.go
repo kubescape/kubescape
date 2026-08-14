@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -154,7 +155,14 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 	byNamespace := map[string][]policyReportResult{}
 	summaries := map[string]policyReportSummary{}
 
-	for resourceID, result := range opaSessionObj.ResourcesResult {
+	resourceIDs := make([]string, 0, len(opaSessionObj.ResourcesResult))
+	for resourceID := range opaSessionObj.ResourcesResult {
+		resourceIDs = append(resourceIDs, resourceID)
+	}
+	sort.Strings(resourceIDs)
+
+	for _, resourceID := range resourceIDs {
+		result := opaSessionObj.ResourcesResult[resourceID]
 		resourceData, ok := opaSessionObj.AllResources[resourceID]
 		if !ok {
 			continue
@@ -220,8 +228,15 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 
 	clusterName := scanContextName(opaSessionObj)
 
+	namespaces := make([]string, 0, len(byNamespace))
+	for namespace := range byNamespace {
+		namespaces = append(namespaces, namespace)
+	}
+	sort.Strings(namespaces)
+
 	reports := make([]policyReport, 0, len(byNamespace))
-	for namespace, results := range byNamespace {
+	for _, namespace := range namespaces {
+		results := byNamespace[namespace]
 		if namespace == "" {
 			reports = append(reports, policyReport{
 				APIVersion: policyReportAPIVersion,
@@ -254,6 +269,9 @@ func buildPolicyReports(opaSessionObj *cautils.OPASessionObj) []policyReport {
 
 func policyReportName(clusterName, namespace string) string {
 	base := "kubescape"
+	if clusterName != "" {
+		base = base + "-" + clusterName
+	}
 	if namespace != "" {
 		base = base + "-" + namespace
 	}
