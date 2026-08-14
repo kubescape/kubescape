@@ -36,6 +36,24 @@ import (
 
 const ScoreConfigPath = "/resources/config"
 
+// SubStatusIncompleteCoverage marks a Passed verdict reached while at least
+// one resource type the control depends on (per ResourceToControlsMap)
+// failed to collect for the current scan (e.g. an RBAC 403 on a correlated
+// ServiceAccount/RoleBinding). The rule genuinely found no violation in the
+// data it had, but that data was incomplete, so the pass could not be fully
+// verified against live cluster state. This is deliberately additive: Status
+// stays Passed (existing pass/fail counts and CI/CD gates are unaffected),
+// and only SubStatus carries the caveat, mirroring how SubStatusException
+// annotates a Passed verdict without changing Status itself.
+//
+// This does not attempt per-object precision (distinguishing "the resource
+// this evaluation is about" from "a resource kind the rule cross-references
+// internally") — ResourceToControlsMap only tracks a control's declared
+// match resources as one flat set, so a failure in any of a control's match
+// kinds anywhere in the scope trips this for every Passed resource under
+// that control in that scope. See https://github.com/kubescape/kubescape/issues/3069.
+const SubStatusIncompleteCoverage apis.ScanningSubStatus = "incompleteCoverage"
+
 // ControlAttributeRequiresWholeClusterInput marks a control whose rules join
 // objects that live in different namespaces. Such a control must be evaluated
 // once against the whole cluster — after per-namespace evaluation has merged
@@ -901,6 +919,12 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 	// Record CEL resources with unknown verdicts as skipped before pass-inference.
 	opap.seedCELSkips(resources, rule, ruleRegoDependenciesData, celOut.skipped)
 
+	// incompleteCoverage is computed once per rule-scope call (not per
+	// resource, it's the same answer for all of them) so a Passed verdict
+	// below can be tagged with SubStatusIncompleteCoverage when at least one
+	// of this control's dependency GVRs failed to collect in this scope.
+	incompleteCoverage := opap.hasUnreachableDependency(controlID)
+
 	// Build the set of failed IDs so we can correctly mark the remainder as passed.
 	// Resources are only written to the result map after a successful OPA evaluation,
 	// preventing stale StatusPassed entries when evaluation fails.
@@ -937,11 +961,15 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		if existing, ok := resources[id]; ok && (existing.Status == apis.StatusFailed || existing.Status == apis.StatusSkipped) {
 			continue
 		}
-		resources[id] = &resourcesresults.ResourceAssociatedRule{
+		passResult := &resourcesresults.ResourceAssociatedRule{
 			Name:                  rule.Name,
 			ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
 			Status:                apis.StatusPassed,
 		}
+		if incompleteCoverage {
+			passResult.SubStatus = SubStatusIncompleteCoverage
+		}
+		resources[id] = passResult
 	}
 
 	// ruleResponse to ruleResult
@@ -981,6 +1009,30 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		}
 	}
 	return resources, nil
+}
+
+// hasUnreachableDependency reports whether controlID depends (per
+// ResourceToControlsMap, built from the control's declared rule.Match/
+// DynamicMatch resources) on at least one GVR that failed to collect this
+// scan. opap.InfoMap is mixed-purpose (whole-GVR pull failures keyed by GVR
+// string, plus per-resource eval skips keyed by resource ID); checking that
+// the key is also present in ResourceToControlsMap, the same guard
+// cautils.BuildScanCoverage uses, is what keeps this from matching a
+// per-resource skip as if it were a GVR pull failure.
+//
+// This runs once per rule-scope evaluation (not once per resource), so its
+// O(len(ResourceToControlsMap)) cost is paid a small, bounded number of times
+// per scan rather than once per resource.
+func (opap *OPAProcessor) hasUnreachableDependency(controlID string) bool {
+	for gvr, controlIDs := range opap.ResourceToControlsMap {
+		if !slices.Contains(controlIDs, controlID) {
+			continue
+		}
+		if info, ok := opap.InfoMap[gvr]; ok && info.InnerStatus == apis.StatusSkipped {
+			return true
+		}
+	}
+	return false
 }
 
 // markResourcesSkipped seeds the result map with StatusSkipped entries for every
