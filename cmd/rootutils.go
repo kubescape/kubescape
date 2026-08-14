@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -36,7 +37,7 @@ func initLogger() {
 	logger.InitLogger(rootInfo.LoggerName)
 }
 
-func initLoggerLevel(cmd *cobra.Command) {
+func initLoggerLevel(cmd *cobra.Command) error {
 	loggerExplicit := false
 	if cmd != nil {
 		// Persistent flags are parsed on the root while traversing to the subcommand.
@@ -56,8 +57,9 @@ func initLoggerLevel(cmd *cobra.Command) {
 	}
 
 	if err := logger.L().SetLevel(rootInfo.Logger); err != nil {
-		logger.L().Fatal(fmt.Sprintf("supported levels: %s", strings.Join(helpers.SupportedLevels(), "/")), helpers.Error(err))
+		return fmt.Errorf("supported levels: %s: %w", strings.Join(helpers.SupportedLevels(), "/"), err)
 	}
+	return nil
 }
 
 func initCacheDir(cmd *cobra.Command) {
@@ -83,17 +85,16 @@ func initCacheDir(cmd *cobra.Command) {
 		logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
 	}
 }
-func initEnvironment() {
+func initEnvironment(ctx context.Context) error {
 	if rootInfo.DiscoveryServerURL == "" {
-		return
+		return nil
 	}
 
 	logger.L().Debug("fetching URLs from service discovery server", helpers.String("server", rootInfo.DiscoveryServerURL))
 
 	client, err := sdClientV2.NewServiceDiscoveryClientV2(rootInfo.DiscoveryServerURL)
 	if err != nil {
-		logger.L().Fatal("failed to create service discovery client", helpers.Error(err), helpers.String("server", rootInfo.DiscoveryServerURL))
-		return
+		return fmt.Errorf("failed to create service discovery client for %q: %w", rootInfo.DiscoveryServerURL, err)
 	}
 
 	services, err := servicediscovery.GetServices(
@@ -101,13 +102,12 @@ func initEnvironment() {
 	)
 
 	if err != nil {
-		logger.L().Fatal("failed to get services from server", helpers.Error(err), helpers.String("server", rootInfo.DiscoveryServerURL))
-		return
+		return fmt.Errorf("failed to get services from server %q: %w", rootInfo.DiscoveryServerURL, err)
 	}
 
 	logger.L().Debug("configuring service discovery URLs", helpers.String("cloudAPIURL", services.GetApiServerUrl()), helpers.String("cloudReportURL", services.GetReportReceiverHttpUrl()))
 
-	tenant := cautils.GetTenantConfig("", "", "", "", nil)
+	tenant := cautils.GetTenantConfig(ctx, "", "", "", "", nil)
 	if services.GetApiServerUrl() != "" {
 		tenant.GetConfigObj().CloudAPIURL = services.GetApiServerUrl()
 	}
@@ -126,9 +126,9 @@ func initEnvironment() {
 		"",
 	)
 	if err != nil {
-		logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to create KS Cloud client: %w", err)
 	}
 
 	getter.SetKSCloudAPIConnector(ksCloud)
+	return nil
 }

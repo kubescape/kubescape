@@ -2,7 +2,7 @@ package core
 
 import (
 	"context"
-	"os"
+	"errors"
 
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
@@ -16,6 +16,7 @@ import (
 	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
 	reporterv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter/v2"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/rbac-utils/rbacscanner"
 	"go.opentelemetry.io/otel"
 	corev1 "k8s.io/api/core/v1"
@@ -52,38 +53,45 @@ func getExceptionsK8sClient(ctx context.Context) client.Client {
 	return k8sClient
 }
 
-func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) getter.IExceptionsGetter {
+func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) (getter.IExceptionsGetter, error) {
 	var primary getter.IExceptionsGetter
 
 	if useExceptions != "" {
 		// load exceptions from file
 		primary = getter.NewLoadPolicy([]string{useExceptions})
-		return primary
+		k8sClient := getExceptionsK8sClient(ctx)
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
 	}
 	if airGapped {
 		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
 		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
 	}
 	if accountID != "" {
+		if downloadReleasedPolicy != nil && downloadReleasedPolicy.IsVersionPinned() {
+			logger.L().Ctx(ctx).Warning("--controls-version is ignored for exceptions when an account ID is set; exceptions are downloaded from the Kubescape Cloud backend")
+		}
 		// download exceptions from Kubescape Cloud backend
-		primary = getter.GetKSCloudAPIConnector()
+		primary = getter.GetKSCloudAPIAdapter()
 		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
 	}
 	// download exceptions from GitHub
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
-	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull attack tracks, fallback to cache
-		logger.L().Ctx(ctx).Warning("failed to get exceptions from github release, loading attack tracks from cache", helpers.Error(err))
+	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
+		// pinned version: hard error, do not silently serve cached exceptions
+		return nil, err
+	} else if fallback { // if failed to pull exceptions, fallback to cache
+		logger.L().Ctx(ctx).Warning("failed to get exceptions from github release, loading exceptions from cache")
 		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
 		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
 	}
 	primary = downloadReleasedPolicy
 	k8sClient := getExceptionsK8sClient(ctx)
-	return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
+	return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
 
 }
 
@@ -132,7 +140,7 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 	if !isAirGappedMode(scanInfo) {
 		_ = getter.GetKSCloudAPIConnector()
 	}
-	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
+	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit.GetBool())
 	return resourcehandler.NewK8sResourceHandler(ctx, k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
 }
 
@@ -144,20 +152,31 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 	hostSensorVal := scanInfo.HostSensorEnabled.Get()
 
 	switch {
-	case !k8sinterface.IsConnectedToCluster() || k8s == nil: // TODO(fred): fix race condition on global KSConfig there
+	case k8s == nil:
+		// k8s is nil exactly when this scan never connected to a cluster (a
+		// non-cluster scan, or a cluster scan that failed to connect, which
+		// getInterfaces returns ErrClusterConnection for before reaching this
+		// point). Re-checking
+		// k8sinterface.IsConnectedToCluster() here as well used to read the
+		// same global connection state a second time, at a later point than
+		// when k8s was obtained, with no synchronization between the two
+		// reads - a caller could observe k8s and IsConnectedToCluster()
+		// disagree. k8s == nil is already a complete, single-read proxy for
+		// "no cluster connection", so the second read added nothing but risk.
 		return hostsensorutils.NewHostSensorHandlerMock()
 
 	case hostSensorVal != nil && *hostSensorVal:
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, scanInfo.HostSensorYamlPath)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("failed to create host scanner", helpers.Error(err))
+			scanInfo.HostSensorEnabled.SetBool(false)
 			return hostsensorutils.NewHostSensorHandlerMock()
 		}
 
 		return hostSensorHandler
 
 	case hostSensorVal == nil && wantsHostSensorControls:
-		// Auto-detect: if node-agent CRDs are available, use them without requiring --enable-host-scanner.
+		// Auto-detect: if node-agent CRDs are available, use them instead of deploying the host-sensor daemonset.
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, "")
 		if err != nil {
 			logger.L().Ctx(ctx).Debug("node-agent not available, host sensor disabled", helpers.Error(err))
@@ -191,6 +210,10 @@ func policyIdentifierIdentities(pi []cautils.PolicyIdentifier) string {
 func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig) {
 
 	/*
+		If the caller explicitly opted out of submission (--submit=false, KS_SUBMIT=false,
+		or the httphandler request body's submit:false) - Do not send report, and do not
+		let the auto-detection below override that choice.
+
 		If keep-local OR scan type which is not submittable - Do not send report
 
 		If CloudReportURL not set - Do not send report
@@ -205,20 +228,25 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 
 	*/
 
+	// respect an explicit opt-out - never auto-submit against the caller's wishes
+	if explicit := scanInfo.Submit.Get(); explicit != nil && !*explicit {
+		return
+	}
+
 	// do not submit control/workload scanning
 	if !isScanTypeForSubmission(scanInfo.ScanType) || scanInfo.Local {
-		scanInfo.Submit = false
+		scanInfo.Submit.SetBool(false)
 		return
 	}
 
 	if tenantConfig.GetCloudReportURL() == "" {
-		scanInfo.Submit = false
+		scanInfo.Submit.SetBool(false)
 		return
 	}
 
 	// a new account will be created if a report URL is set and there is no account ID
 	if tenantConfig.GetAccountID() == "" {
-		scanInfo.Submit = true
+		scanInfo.Submit.SetBool(true)
 		return
 	}
 
@@ -228,7 +256,7 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 	}
 
 	// submit if account is valid
-	scanInfo.Submit = err == nil
+	scanInfo.Submit.SetBool(err == nil)
 }
 
 func isScanTypeForSubmission(scanType cautils.ScanTypes) bool {
@@ -239,16 +267,19 @@ func isScanTypeForSubmission(scanType cautils.ScanTypes) bool {
 }
 
 // setPolicyGetter set the policy getter - local file/github release/Kubescape Cloud API
-func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, accountID string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) getter.IPolicyGetter {
+func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, accountID string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) (getter.IPolicyGetter, error) {
 	if len(loadPoliciesFromFile) > 0 {
-		return getter.NewLoadPolicy(loadPoliciesFromFile)
+		return getter.NewLoadPolicy(loadPoliciesFromFile), nil
 	}
 	if airGapped {
-		return getter.NewLoadPolicy(getDefaultFrameworksPaths())
+		return getter.NewLoadPolicy(getDefaultFrameworksPaths()), nil
 	}
 	if accountID != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() != "" && frameworkScope {
+		if downloadReleasedPolicy != nil && downloadReleasedPolicy.IsVersionPinned() {
+			logger.L().Ctx(ctx).Warning("--controls-version is ignored when an account ID is set; policies are downloaded from the Kubescape Cloud backend")
+		}
 		g := getter.GetKSCloudAPIConnector() // download policy from Kubescape Cloud backend
-		return g
+		return g, nil
 	} else if accountID != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() == "" && frameworkScope {
 		logger.L().Ctx(ctx).Warning("Kubescape Cloud API URL is not set, loading policies from cache")
 	}
@@ -265,24 +296,33 @@ func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, account
 //  2. Kubescape Cloud API (if accountID configured)
 //  3. ControlInput CRD in-cluster (if connected to cluster and CRD exists)
 //  4. Defaults from regolibrary GitHub releases
-func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool, airGapped bool) getter.IControlsInputsGetter {
+//
+// getConfigInputsGetter returns the control inputs getter and a bool reporting
+// whether the inputs are served from the local cache fallback (GitHub download
+// failed) rather than fetched fresh, so the caller can record a PolicyDegradation.
+func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool, airGapped bool) (getter.IControlsInputsGetter, bool, error) {
 	if len(ControlsInputs) > 0 {
-		return getter.NewLoadPolicy([]string{ControlsInputs})
+		return getter.NewLoadPolicy([]string{ControlsInputs}), false, nil
 	}
 	if airGapped {
-		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalControlInputsFilename)})
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalControlInputsFilename)}), false, nil
 	}
 	if accountID != "" {
-		g := getter.GetKSCloudAPIConnector() // download config from Kubescape Cloud backend
-		return g
+		if downloadReleasedPolicy != nil && downloadReleasedPolicy.IsVersionPinned() {
+			logger.L().Ctx(ctx).Warning("--controls-version is ignored for control config when an account ID is set; control config is downloaded from the Kubescape Cloud backend")
+		}
+		g := getter.GetKSCloudAPIAdapter() // download config from Kubescape Cloud backend
+		return g, false, nil
 	}
 
 	// Try to read control inputs from the ControlInput CRD in-cluster (live cluster scans only)
 	if useCRD {
 		if crdInputs, err := getter.NewCRDControlInputs(); err == nil {
-			if _, crdErr := crdInputs.GetControlsInputs(""); crdErr == nil {
+			if _, crdErr := crdInputs.GetControlsInputs(ctx, ""); crdErr == nil {
 				logger.L().Ctx(ctx).Info("using ControlInput CRD for control configuration")
-				return crdInputs
+				return crdInputs, false, nil
+			} else if isContextErr(crdErr) {
+				return nil, false, crdErr
 			}
 			logger.L().Ctx(ctx).Debug("ControlInput CRD found but default resource not available, falling back")
 		}
@@ -291,19 +331,25 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
-	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull config inputs, fallback to BE
-		logger.L().Ctx(ctx).Warning("failed to get config inputs from github release, this may affect the scanning results", helpers.Error(err))
+	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
+		// pinned version: hard error, surface it instead of silently degrading
+		return nil, false, err
+	} else if fallback { // if failed to pull config inputs, fallback to cache
+		logger.L().Ctx(ctx).Warning("failed to get config inputs from github release, loading config inputs from cache")
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalControlInputsFilename)}), true, nil
 	}
-	return downloadReleasedPolicy
+	return downloadReleasedPolicy, false, nil
 }
 
-func getDownloadReleasedPolicy(ctx context.Context, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
-	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull policy, fallback to cache
-		logger.L().Ctx(ctx).Warning("failed to get policies from github release, loading policies from cache", helpers.Error(err))
-		return getter.NewLoadPolicy(getDefaultFrameworksPaths())
-	} else {
-		return downloadReleasedPolicy
+func getDownloadReleasedPolicy(ctx context.Context, downloadReleasedPolicy *getter.DownloadReleasedPolicy) (getter.IPolicyGetter, error) {
+	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
+		// pinned version: hard error, do not silently serve cached policies
+		return nil, err
+	} else if fallback { // if failed to pull policy, fallback to cache
+		logger.L().Ctx(ctx).Warning("failed to get policies from github release, loading policies from cache")
+		return getter.NewLoadPolicy(getDefaultFrameworksPaths()), nil
 	}
+	return downloadReleasedPolicy, nil
 }
 
 func getDefaultFrameworksPaths() []string {
@@ -312,6 +358,24 @@ func getDefaultFrameworksPaths() []string {
 		fwPaths = append(fwPaths, getter.GetDefaultPath(getter.NativeFrameworks[i]+".json")) // GetDefaultPath expects a filename, not just the framework name
 	}
 	return fwPaths
+}
+
+// resolveDefaultScanAllPolicies expands a ScanAll framework list before ScanInfo.Init runs.
+// Init's setUseFrom resolves a local cache path per identifier, so the ScanAll expansion that
+// happens later - once the policy getter exists - would add frameworks that carry no cached
+// path, leaving an offline scan with a downloader it cannot reach. --use-default makes the
+// local store the policy source, so the expansion is answered from the default framework set
+// instead of the getter, the same set getDefaultFrameworksPaths serves in air-gapped mode.
+//
+// Only framework scans are expanded. `scan control` with no arguments also sets ScanAll, but
+// it is not a framework scan, and injecting KindFramework identifiers there would populate
+// UseFrom and silently turn the scan air-gapped - dropping the downloader that control inputs,
+// exceptions and attack tracks still fall back to.
+func resolveDefaultScanAllPolicies(scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) []cautils.PolicyIdentifier {
+	if !scanInfo.ScanAll || !scanInfo.UseDefault || !scanInfo.FrameworkScan {
+		return policyIdentifiers
+	}
+	return cautils.AppendPolicyIdentifiers(policyIdentifiers, getter.NativeFrameworks, apisv1.KindFramework)
 }
 
 func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
@@ -324,43 +388,49 @@ func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
 	return getter.NativeFrameworks
 }
 
-func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) getter.IAttackTracksGetter {
+func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) (getter.IAttackTracksGetter, error) {
 	if len(attackTracks) > 0 {
-		return getter.NewLoadPolicy([]string{attackTracks})
+		return getter.NewLoadPolicy([]string{attackTracks}), nil
 	}
 	if airGapped {
-		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)})
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)}), nil
 	}
 	if accountID != "" {
+		if downloadReleasedPolicy != nil && downloadReleasedPolicy.IsVersionPinned() {
+			logger.L().Ctx(ctx).Warning("--controls-version is ignored for attack tracks when an account ID is set; attack tracks are downloaded from the Kubescape Cloud backend")
+		}
 		g := getter.GetKSCloudAPIConnector() // download attack tracks from Kubescape Cloud backend
-		return g
+		return g, nil
 	}
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
 
-	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull attack tracks, fallback to cache
-		logger.L().Ctx(ctx).Warning("failed to get attack tracks from github release, loading attack tracks from cache", helpers.Error(err))
-		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)})
+	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
+		// pinned version: hard error, do not silently serve cached attack tracks
+		return nil, err
+	} else if fallback { // if failed to pull attack tracks, fallback to cache
+		logger.L().Ctx(ctx).Warning("failed to get attack tracks from github release, loading attack tracks from cache")
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)}), nil
 	}
-	return downloadReleasedPolicy
+	return downloadReleasedPolicy, nil
 }
 
 // GetUIPrinter returns a printer that will be used to print to the program’s UI (terminal)
 func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName string) printer.IPrinter {
-	var p printer.IPrinter
-	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
-		p = &printerv2.SilentPrinter{}
-	} else {
-		p = printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName)
-
-		// Since the UI of the program is a CLI (Stdout), it means that it should always print to Stdout
-		if scanInfo.Format != "" && scanInfo.Output == "" {
-			p.SetWriter(ctx, os.DevNull)
-		} else {
-			p.SetWriter(ctx, os.Stdout.Name())
-		}
+	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel || (scanInfo.Format != "" && scanInfo.Output == "") {
+		return &printerv2.SilentPrinter{}
 	}
 
+	p := printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName)
+	if err := p.SetWriter(ctx, ""); err != nil {
+		logger.L().Ctx(ctx).Warning("failed to configure terminal output", helpers.Error(err))
+		return &printerv2.SilentPrinter{}
+	}
 	return p
+}
+
+// isContextErr reports whether err was caused by context cancellation or a deadline.
+func isContextErr(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

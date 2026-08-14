@@ -8,7 +8,7 @@ import (
 )
 
 func TestCurrentDir(t *testing.T) {
-	p := filepath.Join("kubescape", "internal", "testutils")
+	p := filepath.Join("internal", "testutils")
 	currDir := CurrentDir()
 	assert.NotNil(t, currDir)
 	assert.Contains(t, currDir, p)

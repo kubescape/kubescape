@@ -56,7 +56,7 @@ func TestGojayUnmarshalScanResultReport(t *testing.T) {
 				WLID:                     "wlid://cluster-test/namespace-default/deployment-app",
 				ContainerName:            "nginx",
 				Timestamp:                42,
-				ListOfDangerousArtifcats: []string{"/bin/sh", "/usr/bin/curl"},
+				ListOfDangerousArtifacts: []string{"/bin/sh", "/usr/bin/curl"},
 			},
 			wantLayerSize: 1,
 		},
@@ -73,7 +73,7 @@ func TestGojayUnmarshalScanResultReport(t *testing.T) {
 				CustomerGUID:             "customer-2",
 				ImgTag:                   "busybox",
 				Timestamp:                1,
-				ListOfDangerousArtifcats: nil,
+				ListOfDangerousArtifacts: nil,
 			},
 			wantLayerSize: 0,
 		},
@@ -102,7 +102,7 @@ func TestGojayUnmarshalScanResultReport(t *testing.T) {
 			assert.Equal(t, tt.want.WLID, got.WLID)
 			assert.Equal(t, tt.want.ContainerName, got.ContainerName)
 			assert.Equal(t, tt.want.Timestamp, got.Timestamp)
-			assert.Equal(t, tt.want.ListOfDangerousArtifcats, got.ListOfDangerousArtifcats)
+			assert.Equal(t, tt.want.ListOfDangerousArtifacts, got.ListOfDangerousArtifacts)
 			assert.Len(t, got.Layers, tt.wantLayerSize)
 		})
 	}
@@ -157,7 +157,7 @@ func TestGojayUnmarshalRawNginxScanJSON(t *testing.T) {
 	assert.EqualValues(t, 1628091365, got.Timestamp)
 	require.NotEmpty(t, got.Layers)
 	assert.NotEmpty(t, got.Layers[0].Vulnerabilities)
-	assert.Equal(t, []string{"bin/dash", "bin/bash", "usr/bin/curl"}, got.ListOfDangerousArtifcats)
+	assert.Equal(t, []string{"bin/dash", "bin/bash", "usr/bin/curl"}, got.ListOfDangerousArtifacts)
 }
 
 func TestGojayUnmarshalInvalidTypesKeepZeroValues(t *testing.T) {
@@ -190,7 +190,7 @@ func TestGojayUnmarshalInvalidTypesKeepZeroValues(t *testing.T) {
 			name:  "numeric dangerous artifact decodes to empty string",
 			input: `{"listOfDangerousArtifcats":["ok",5]}`,
 			assert: func(t *testing.T, got ScanResultReport) {
-				assert.Equal(t, []string{"ok", ""}, got.ListOfDangerousArtifcats)
+				assert.Equal(t, []string{"ok", ""}, got.ListOfDangerousArtifacts)
 			},
 		},
 	}

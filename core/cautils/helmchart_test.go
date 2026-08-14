@@ -6,14 +6,76 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
+	helmregistry "helm.sh/helm/v3/pkg/registry"
 )
+
+// registryClientField reads an unexported field off a *helmregistry.Client,
+// since the registry package exposes no public getters for plainHTTP,
+// username, or password.
+func registryClientField(t *testing.T, client *helmregistry.Client, name string) reflect.Value {
+	t.Helper()
+	v := reflect.ValueOf(client).Elem().FieldByName(name)
+	require.True(t, v.IsValid(), "helmregistry.Client has no %s field - update this test to match the library", name)
+	return v
+}
+
+func registryClientPlainHTTP(t *testing.T, client *helmregistry.Client) bool {
+	t.Helper()
+	return registryClientField(t, client, "plainHTTP").Bool()
+}
+
+// TestNewRegistryClient_PlainHTTPGatedOnPlainHTTPArg guards against a
+// regression where the plainHTTP client option was gated on the
+// insecureSkipTLS argument instead of the plainHTTP argument. Those mean
+// different things (skip certificate verification vs. disable TLS
+// entirely), so the old code silently disabled encryption for any caller
+// that only asked to skip certificate verification.
+func TestNewRegistryClient_PlainHTTPGatedOnPlainHTTPArg(t *testing.T) {
+	t.Run("plainHTTP=true enables plain HTTP", func(t *testing.T) {
+		client, err := newRegistryClient(true, "", "")
+		require.NoError(t, err)
+		assert.True(t, registryClientPlainHTTP(t, client))
+	})
+
+	t.Run("plainHTTP=false leaves plain HTTP disabled", func(t *testing.T) {
+		client, err := newRegistryClient(false, "", "")
+		require.NoError(t, err)
+		assert.False(t, registryClientPlainHTTP(t, client))
+	})
+}
+
+// TestNewRegistryClient_BasicAuthCredentialsAccepted guards against a
+// regression where the username/password arguments were accepted but never
+// passed to helmregistry.ClientOptBasicAuth, silently dropping credentials
+// for authenticated OCI registries. Asserting only that NewClient succeeds
+// isn't enough - that holds whether or not the credentials are actually
+// applied - so this reads them back off the unexported fields.
+func TestNewRegistryClient_BasicAuthCredentialsAccepted(t *testing.T) {
+	t.Run("username and password both set are applied", func(t *testing.T) {
+		client, err := newRegistryClient(false, "someuser", "somepass")
+		require.NoError(t, err)
+		require.NotNil(t, client)
+		assert.Equal(t, "someuser", registryClientField(t, client, "username").String())
+		assert.Equal(t, "somepass", registryClientField(t, client, "password").String())
+	})
+
+	t.Run("password empty leaves credentials unset", func(t *testing.T) {
+		client, err := newRegistryClient(false, "someuser", "")
+		require.NoError(t, err)
+		require.NotNil(t, client)
+		assert.Empty(t, registryClientField(t, client, "username").String())
+		assert.Empty(t, registryClientField(t, client, "password").String())
+	})
+}
 
 type HelmChartTestSuite struct {
 	suite.Suite
@@ -169,7 +231,7 @@ func TestLoadResourcesFromHelmCharts_WithOverrides(t *testing.T) {
 	opts := HelmValueOptions{
 		Values: []string{"image.pullPolicy=Never"},
 	}
-	sourceToWorkloads, _, err := LoadResourcesFromHelmCharts(context.Background(), chartPath, opts)
+	sourceToWorkloads, _, _, err := LoadResourcesFromHelmCharts(context.Background(), chartPath, opts)
 	assert.NoError(t, err)
 
 	cronjobPath := filepath.Join(chartPath, "templates", "cronjob.yaml")
@@ -191,7 +253,7 @@ func TestLoadResourcesFromHelmCharts_BadOverrideFailsFast(t *testing.T) {
 	opts := HelmValueOptions{
 		ValueFiles: []string{"/nonexistent/values.yaml"},
 	}
-	_, _, err := LoadResourcesFromHelmCharts(context.Background(), chartPath, opts)
+	_, _, _, err := LoadResourcesFromHelmCharts(context.Background(), chartPath, opts)
 	assert.Error(t, err, "expected fail-fast on missing -f file")
 	assert.Contains(t, err.Error(), "Helm value overrides")
 }
@@ -204,7 +266,7 @@ func TestLoadResourcesFromHelmCharts_AttachesProvenance(t *testing.T) {
 	o, _ := os.Getwd()
 	chartPath := filepath.Join(filepath.Dir(o), "..", "examples", "helm_chart")
 
-	_, sourceToChart, err := LoadResourcesFromHelmCharts(context.TODO(), chartPath, HelmValueOptions{})
+	_, sourceToChart, _, err := LoadResourcesFromHelmCharts(context.TODO(), chartPath, HelmValueOptions{})
 	assert.NoError(t, err)
 
 	cronjobPath := filepath.Join(chartPath, "templates", "cronjob.yaml")

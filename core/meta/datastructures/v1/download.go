@@ -8,3 +8,7 @@ type DownloadInfo struct {
 	AccountID  string
 	AccessKey  string
 }
+
+type DownloadResult struct {
+	Files []string // paths of the downloaded artifacts that were saved
+}

@@ -71,11 +71,7 @@ func GenerateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo [
 	}
 
 	row[summaryColumnSeverity] = GetSeverityColumn(controlSummary)
-	if len(controlSummary.GetName()) > 50 {
-		row[summaryColumnName] = controlSummary.GetName()[:50] + "..." //nolint:gosec // Safe: row has length _summaryRowLen (5), accessing index 1
-	} else {
-		row[summaryColumnName] = controlSummary.GetName() //nolint:gosec // Safe: row has length _summaryRowLen (5), accessing index 1
-	}
+	row[summaryColumnName] = utils.TruncateName(controlSummary.GetName(), utils.MaxControlNameLen)
 	row[summaryColumnCounterFailed] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
 	row[summaryColumnCounterAll] = fmt.Sprintf("%d", controlSummary.NumberOfResources().All())
 	row[summaryColumnComplianceScore] = GetComplianceScoreColumn(controlSummary, infoToPrintInfo)
@@ -87,7 +83,11 @@ func GetComplianceScoreColumn(controlSummary reportsummary.IControlSummary, info
 	if controlSummary.GetStatus().IsSkipped() {
 		return fmt.Sprintf("%s %s", "Action Required", GetInfoColumn(controlSummary, infoToPrintInfo))
 	}
-	return fmt.Sprintf("%d", cautils.Float32ToInt(controlSummary.GetComplianceScore())) + "%"
+	score := cautils.ComplianceScoreToInt(controlSummary.GetComplianceScore())
+	if score < 0 {
+		return "N/A"
+	}
+	return fmt.Sprintf("%d%%", score)
 }
 
 func GetInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) string {
@@ -103,7 +103,7 @@ func GenerateFooter(summaryDetails *reportsummary.SummaryDetails, short bool) ta
 	var row table.Row
 	if short {
 		row = make(table.Row, 1)
-		row[0] = fmt.Sprintf("Resource Summary"+strings.Repeat(" ", 0)+"\n\nFailed Resources"+strings.Repeat(" ", 1)+": %d\nAll Resources"+strings.Repeat(" ", 4)+": %d\n%% Compliance-Score"+strings.Repeat(" ", 4)+": %.2f%%", summaryDetails.NumberOfResources().Failed(), summaryDetails.NumberOfResources().All(), summaryDetails.ComplianceScore)
+		row[0] = fmt.Sprintf("Resource Summary"+strings.Repeat(" ", 0)+"\n\nFailed Resources"+strings.Repeat(" ", 1)+": %d\nAll Resources"+strings.Repeat(" ", 4)+": %d\n%% Compliance-Score"+strings.Repeat(" ", 4)+": %s%%", summaryDetails.NumberOfResources().Failed(), summaryDetails.NumberOfResources().All(), cautils.ComplianceScoreToString(summaryDetails.ComplianceScore, 2))
 	} else {
 		// Severity | Control name | failed resources | all resources | % success
 		row = make(table.Row, _summaryRowLen)
@@ -111,7 +111,7 @@ func GenerateFooter(summaryDetails *reportsummary.SummaryDetails, short bool) ta
 		row[summaryColumnCounterFailed] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed())
 		row[summaryColumnCounterAll] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().All())
 		row[summaryColumnSeverity] = " "
-		row[summaryColumnComplianceScore] = fmt.Sprintf("%.2f%s", summaryDetails.ComplianceScore, "%")
+		row[summaryColumnComplianceScore] = cautils.ComplianceScoreToString(summaryDetails.ComplianceScore, 2) + "%"
 	}
 
 	return row

@@ -73,10 +73,8 @@ func (tcm *TenantConfigMock) GetAccessKey() string {
 }
 
 func TestDisplayMessage(t *testing.T) {
-	t.Parallel()
 
 	t.Run("should display an empty message", func(t *testing.T) {
-		t.Parallel()
 
 		reporter := NewReportEventReceiver(
 			&TenantConfigMock{
@@ -101,7 +99,6 @@ func TestDisplayMessage(t *testing.T) {
 	})
 
 	t.Run("should display a non-empty message", func(t *testing.T) {
-		t.Parallel()
 
 		reporter := NewReportEventReceiver(
 			&TenantConfigMock{
@@ -131,7 +128,6 @@ func TestDisplayMessage(t *testing.T) {
 }
 
 func TestPrepareReport(t *testing.T) {
-	t.Parallel()
 
 	t.Run("should keep the original scanning target it received and not mutate it", func(t *testing.T) {
 		testCases := []struct {
@@ -166,7 +162,7 @@ func TestPrepareReport(t *testing.T) {
 					},
 				}
 
-				reporter.prepareReport(opaSessionObj)
+				reporter.prepareReport(context.Background(), opaSessionObj)
 
 				got := opaSessionObj.Metadata.ScanMetadata.ScanningTarget
 				require.Equalf(t, want, got,
@@ -209,6 +205,33 @@ func TestSubmit(t *testing.T) {
 		require.NoError(t,
 			reporter.Submit(ctx, opaSession),
 		)
+	})
+
+	t.Run("should abort on context cancellation", func(t *testing.T) {
+		ksCloud, err := v1.NewKSCloudAPI(
+			srv.Root(),
+			srv.Root(),
+			account,
+			accessKey,
+			v1.WithHTTPClient(hijackedClient(t, srv)))
+		require.NoError(t, err)
+
+		reporter := NewReportEventReceiver(
+			&TenantConfigMock{
+				clusterName: "test",
+				accountID:   account,
+				accessKey:   accessKey,
+			},
+			"cbabd56f-bac6-416a-836b-b815ef347647",
+			SubmitContextScan,
+			ksCloud,
+		)
+
+		opaSession := mockOPASessionObj(t)
+		cancelCtx, cancel := context.WithCancel(ctx)
+		cancel() // cancel immediately
+		err = reporter.Submit(cancelCtx, opaSession)
+		require.ErrorContains(t, err, "scan canceled")
 	})
 
 	t.Run("should generate new account if account is empty", func(t *testing.T) {
@@ -300,7 +323,6 @@ func TestSubmit(t *testing.T) {
 }
 
 func TestSetters(t *testing.T) {
-	t.Parallel()
 
 	pickString := func() string {
 		return strconv.Itoa(rand.Intn(10000)) //nolint:gosec

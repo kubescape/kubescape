@@ -71,6 +71,44 @@ func TestLoadVAPUnknownControl(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), "C-9999"))
 }
 
+// TestVAPFailurePolicy pins how spec.failurePolicy is resolved: omitted defaults
+// to Fail (the apiserver's default), an explicit Fail stays Fail, and only
+// Ignore flips failOnError to false.
+func TestVAPFailurePolicy(t *testing.T) {
+	doc := func(failurePolicy string) string {
+		return `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: pol
+  labels:
+    controlId: C-1000
+spec:
+` + failurePolicy + `  validations:
+  - expression: "true"
+`
+	}
+
+	tests := []struct {
+		name          string
+		failurePolicy string
+		wantFail      bool
+	}{
+		{name: "omitted defaults to Fail", failurePolicy: "", wantFail: true},
+		{name: "explicit Fail", failurePolicy: "  failurePolicy: Fail\n", wantFail: true},
+		{name: "explicit Ignore", failurePolicy: "  failurePolicy: Ignore\n", wantFail: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			catalog, err := parseVAPBundle([]byte(doc(tt.failurePolicy)))
+			require.NoError(t, err)
+			vap, ok := catalog.byControl["C-1000"]
+			require.True(t, ok)
+			assert.Equal(t, tt.wantFail, vap.failOnError())
+		})
+	}
+}
+
 // vapDoc renders a minimal VAP document for the in-memory bundle tests.
 func vapDoc(name, controlID string) string {
 	labels := ""
@@ -100,22 +138,23 @@ metadata:
 spec:
   policyName: kubescape-c-1000
 `
-	index, _, err := parseVAPBundle([]byte(bundle))
+	catalog, err := parseVAPBundle([]byte(bundle))
 	require.NoError(t, err)
-	assert.Len(t, index, 1)
-	assert.Contains(t, index, "C-1000")
+	assert.Len(t, catalog.byControl, 1)
+	assert.Contains(t, catalog.byControl, "C-1000")
 }
 
 // TestParseVAPBundleSkipsNoControlID proves policies without a controlId label
-// (cluster-scoped helpers) are dropped from the index rather than indexed under
-// an empty key.
+// (cluster-scoped helpers) stay out of the control index (no empty key) while
+// remaining reachable by name, since name-keyed callers still need them.
 func TestParseVAPBundleSkipsNoControlID(t *testing.T) {
 	bundle := vapDoc("cluster-policy-helper", "") + "---\n" + vapDoc("kubescape-c-1000", "C-1000")
-	index, _, err := parseVAPBundle([]byte(bundle))
+	catalog, err := parseVAPBundle([]byte(bundle))
 	require.NoError(t, err)
-	assert.Len(t, index, 1)
-	assert.Contains(t, index, "C-1000")
-	assert.NotContains(t, index, "")
+	assert.Len(t, catalog.byControl, 1)
+	assert.Contains(t, catalog.byControl, "C-1000")
+	assert.NotContains(t, catalog.byControl, "")
+	assert.Contains(t, catalog.byName, "cluster-policy-helper")
 }
 
 // TestParseVAPBundleDuplicateControl proves a duplicated control poisons only
@@ -126,12 +165,28 @@ func TestParseVAPBundleDuplicateControl(t *testing.T) {
 	bundle := vapDoc("kubescape-c-1000-a", "C-1000") +
 		"---\n" + vapDoc("kubescape-c-1000-b", "C-1000") +
 		"---\n" + vapDoc("kubescape-c-2000", "C-2000")
-	index, duplicates, err := parseVAPBundle([]byte(bundle))
+	catalog, err := parseVAPBundle([]byte(bundle))
 	require.NoError(t, err)
 
-	assert.NotContains(t, index, "C-1000", "a duplicated control must not silently win")
-	assert.Contains(t, duplicates, "C-1000")
-	assert.Contains(t, index, "C-2000", "an unrelated control must still index")
+	assert.NotContains(t, catalog.byControl, "C-1000", "a duplicated control must not silently win")
+	assert.Contains(t, catalog.dupControls, "C-1000")
+	assert.Contains(t, catalog.byControl, "C-2000", "an unrelated control must still index")
+}
+
+// TestParseVAPBundleDuplicateName proves the same poisoning applies to the name
+// index: two policies sharing a metadata.name is a bundle bug (the bundle could
+// not even be kubectl-applied), so neither wins and name lookups refuse it,
+// while other names still index.
+func TestParseVAPBundleDuplicateName(t *testing.T) {
+	bundle := vapDoc("kubescape-c-1000", "C-1000") +
+		"---\n" + vapDoc("kubescape-c-1000", "C-1001") +
+		"---\n" + vapDoc("kubescape-c-2000", "C-2000")
+	catalog, err := parseVAPBundle([]byte(bundle))
+	require.NoError(t, err)
+
+	assert.NotContains(t, catalog.byName, "kubescape-c-1000", "a duplicated name must not silently win")
+	assert.Contains(t, catalog.dupNames, "kubescape-c-1000")
+	assert.Contains(t, catalog.byName, "kubescape-c-2000", "an unrelated name must still index")
 }
 
 // TestLoadVAPRefusesMatchConditions proves a policy with a matchConditions gate is
@@ -152,14 +207,92 @@ spec:
   validations:
   - expression: "false"
 `
-	index, _, err := parseVAPBundle([]byte(bundle))
+	catalog, err := parseVAPBundle([]byte(bundle))
 	require.NoError(t, err)
 
-	vap := index["C-1001"]
+	vap := catalog.byControl["C-1001"]
 	require.NotNil(t, vap)
 	require.NotEmpty(t, vap.matchConditions, "matchConditions must be captured, not dropped")
 
 	err = vap.requireSupported()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "matchConditions")
+}
+
+// TestLoadVAPRefusesNarrowingSelectors pins which selector is refused and which
+// is not. namespaceSelector reads the NAMESPACE's labels, which the scan only
+// has when some control's match happened to collect Namespaces, so a policy
+// narrowing with it is refused (a loud skip) rather than evaluated against an
+// input that may be absent (a silent parity break). objectSelector reads the
+// scanned object's own labels, which the scan always has, so it is evaluated in
+// appliesTo instead of refused — see TestVAPAppliesToObjectSelector. An empty
+// selector matches everything (it is what the apiserver defaults an omitted one
+// to), so it must not trip the refusal either.
+func TestLoadVAPRefusesNarrowingSelectors(t *testing.T) {
+	policy := func(selectorYAML string) string {
+		return `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kubescape-c-1002
+  labels:
+    controlId: C-1002
+spec:
+  matchConstraints:
+` + selectorYAML + `    resourceRules:
+    - apiGroups: [""]
+      apiVersions: ["v1"]
+      operations: ["CREATE"]
+      resources: ["pods"]
+  validations:
+  - expression: "false"
+`
+	}
+
+	cases := []struct {
+		name         string
+		selectorYAML string
+		refusedFor   string // empty: must be supported
+	}{
+		{
+			name: "namespaceSelector with labels is refused",
+			selectorYAML: `    namespaceSelector:
+      matchLabels:
+        env: prod
+`,
+			refusedFor: "namespaceSelector",
+		},
+		{
+			name: "objectSelector with expressions is supported, not refused",
+			selectorYAML: `    objectSelector:
+      matchExpressions:
+      - key: app
+        operator: Exists
+`,
+			refusedFor: "",
+		},
+		{
+			name: "empty selectors match everything and are supported",
+			selectorYAML: `    namespaceSelector: {}
+    objectSelector: {}
+`,
+			refusedFor: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			catalog, err := parseVAPBundle([]byte(policy(tc.selectorYAML)))
+			require.NoError(t, err)
+			vap := catalog.byControl["C-1002"]
+			require.NotNil(t, vap)
+
+			err = vap.requireSupported()
+			if tc.refusedFor == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.refusedFor)
+		})
+	}
 }

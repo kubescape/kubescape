@@ -1,102 +1,12 @@
 package shared
 
 import (
-	"context"
-	"os"
-	"reflect"
 	"testing"
-	"time"
 
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 )
-
-type spyLogMessage struct {
-	Message string
-	Details map[string]string
-}
-
-type spyLogger struct {
-	setItems []spyLogMessage
-}
-
-var _ helpers.ILogger = &spyLogger{}
-
-func (l *spyLogger) Error(msg string, details ...helpers.IDetails)                    {}
-func (l *spyLogger) Success(msg string, details ...helpers.IDetails)                  {}
-func (l *spyLogger) Warning(msg string, details ...helpers.IDetails)                  {}
-func (l *spyLogger) Info(msg string, details ...helpers.IDetails)                     {}
-func (l *spyLogger) Debug(msg string, details ...helpers.IDetails)                    {}
-func (l *spyLogger) SetLevel(level string) error                                      { return nil }
-func (l *spyLogger) GetLevel() string                                                 { return "" }
-func (l *spyLogger) SetWriter(w *os.File)                                             {}
-func (l *spyLogger) GetWriter() *os.File                                              { return &os.File{} }
-func (l *spyLogger) LoggerName() string                                               { return "" }
-func (l *spyLogger) Ctx(_ context.Context) helpers.ILogger                            { return l }
-func (l *spyLogger) Start(msg string, details ...helpers.IDetails)                    {}
-func (l *spyLogger) StopSuccess(msg string, details ...helpers.IDetails)              {}
-func (l *spyLogger) StopError(msg string, details ...helpers.IDetails)                {}
-func (l *spyLogger) TimedWrapper(funcName string, timeout time.Duration, task func()) {}
-
-func (l *spyLogger) Fatal(msg string, details ...helpers.IDetails) {
-	firstDetail := details[0]
-	detailsMap := map[string]string{firstDetail.Key(): firstDetail.Value().(string)}
-
-	newMsg := spyLogMessage{msg, detailsMap}
-	l.setItems = append(l.setItems, newMsg)
-}
-
-func (l *spyLogger) GetSpiedItems() []spyLogMessage {
-	return l.setItems
-}
-
-func TestTerminateOnExceedingSeverity(t *testing.T) {
-	expectedMessage := "result exceeds severity threshold"
-	expectedKey := "Set severity threshold"
-
-	testCases := []struct {
-		Description     string
-		ExpectedMessage string
-		ExpectedKey     string
-		ExpectedValue   string
-		Logger          *spyLogger
-	}{
-		{
-			"Should log the Critical threshold that was set in scan info",
-			expectedMessage,
-			expectedKey,
-			apis.SeverityCriticalString,
-			&spyLogger{},
-		},
-		{
-			"Should log the High threshold that was set in scan info",
-			expectedMessage,
-			expectedKey,
-			apis.SeverityHighString,
-			&spyLogger{},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(
-			tc.Description,
-			func(t *testing.T) {
-				want := []spyLogMessage{
-					{tc.ExpectedMessage, map[string]string{tc.ExpectedKey: tc.ExpectedValue}},
-				}
-				scanInfo := &cautils.ScanInfo{FailThresholdSeverity: tc.ExpectedValue}
-
-				TerminateOnExceedingSeverity(scanInfo, tc.Logger)
-
-				got := tc.Logger.GetSpiedItems()
-				if !reflect.DeepEqual(got, want) {
-					t.Errorf("got: %v, want: %v", got, want)
-				}
-			},
-		)
-	}
-}
 
 func TestValidateScanFormat(t *testing.T) {
 	testCases := []struct {
@@ -114,8 +24,10 @@ func TestValidateScanFormat(t *testing.T) {
 		{"whitespace-and-separator-only input is rejected", " , ", ScanFormats, true},
 		{"invalid format", "xml", ScanFormats, true},
 		{"mixed valid and invalid formats", "json,xml", ScanFormats, true},
-		{"valid image format", "sarif", ImageScanFormats, false},
-		{"format unsupported for image scanning", "junit", ImageScanFormats, true},
+		{"valid image format", "sarif", ScanFormats, false},
+		{"junit format is now supported for image scanning", "junit", ScanFormats, false},
+		{"junit is supported for image scanning", "junit", ImageScanFormats, false},
+		{"csv is not supported for image scanning", "csv", ImageScanFormats, true},
 	}
 
 	for _, testCase := range testCases {
@@ -156,6 +68,80 @@ func TestValidateSeverity(t *testing.T) {
 
 			if got != want {
 				t.Errorf("got: %v, want: %v", got, want)
+			}
+		})
+	}
+}
+
+func TestValidateCommonScanFlags(t *testing.T) {
+	tests := []struct {
+		name          string
+		severity      string
+		minSeverity   string
+		format        string
+		formatChanged bool
+		expectedErr   string
+	}{
+		{
+			name:          "Valid setup",
+			severity:      "High",
+			minSeverity:   "Medium",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
+		{
+			name:          "Invalid severity",
+			severity:      "Extreme",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "unknown severity",
+		},
+		{
+			name:          "Invalid minimum severity",
+			severity:      "High",
+			minSeverity:   "Extreme",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "unknown severity",
+		},
+		{
+			name:          "Empty format flag explicitly passed",
+			severity:      "High",
+			format:        "",
+			formatChanged: true,
+			expectedErr:   "format cannot be empty, supported formats",
+		},
+		{
+			name:          "Invalid format",
+			severity:      "High",
+			format:        "fake-format",
+			formatChanged: true,
+			expectedErr:   "invalid format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				FailThresholdSeverity: tt.severity,
+				MinSeverity:           tt.minSeverity,
+				Format:                tt.format,
+			}
+
+			cmd := &cobra.Command{}
+			cmd.Flags().String("format", "", "")
+			if tt.formatChanged {
+				cmd.Flags().Set("format", tt.format)
+			}
+
+			err := ValidateCommonScanFlags(cmd, scanInfo, ScanFormats)
+
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
 			}
 		})
 	}

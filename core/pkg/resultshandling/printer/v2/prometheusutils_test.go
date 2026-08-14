@@ -1,10 +1,15 @@
 package printer
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestComplianceScore_MetricsLabelsAndPrefix(t *testing.T) {
@@ -56,6 +61,80 @@ func TestComplianceScore_MetricsLabelsAndPrefix(t *testing.T) {
 	}
 }
 
+func TestMetricsString_EscapesDynamicLabelValues(t *testing.T) {
+	value := "quote\" slash\\ newline\nnext"
+	parse := func(t *testing.T, exposition string) func(string) map[string]string {
+		t.Helper()
+		parser := expfmt.NewTextParser(model.LegacyValidation)
+		families, err := parser.TextToMetricFamilies(strings.NewReader(exposition))
+		require.NoErrorf(t, err, "invalid Prometheus exposition:\n%s", exposition)
+
+		return func(familyName string) map[string]string {
+			t.Helper()
+			family, ok := families[familyName]
+			require.Truef(t, ok, "metric family %q is missing", familyName)
+			require.Len(t, family.Metric, 1)
+			labels := map[string]string{}
+			for _, label := range family.Metric[0].Label {
+				labels[label.GetName()] = label.GetValue()
+			}
+			return labels
+		}
+	}
+
+	t.Run("posture scan", func(t *testing.T) {
+		// Custom policies loaded with --use-from can define framework and
+		// control names containing any JSON string. Drive the same
+		// SummaryDetails -> Metrics path as the Prometheus printer.
+		controlScore := float32(50)
+		summary := &reportsummary.SummaryDetails{
+			Frameworks: []reportsummary.FrameworkSummary{{Name: value, ComplianceScore: 50}},
+			Controls: reportsummary.ControlSummaries{
+				"C-ESCAPE": {
+					ControlID:       "C-ESCAPE",
+					Name:            value,
+					ComplianceScore: &controlScore,
+				},
+			},
+		}
+		metricsOutput := &Metrics{}
+		metricsOutput.setComplianceScores(summary)
+		metricsOutput.listResources = []mResources{{
+			apiVersion: value,
+			kind:       value,
+			namespace:  value,
+			name:       value,
+		}}
+
+		labelsFor := parse(t, metricsOutput.String())
+		assert.Equal(t, value, labelsFor("kubescape_framework_complianceScore")["name"])
+		assert.Equal(t, value, labelsFor("kubescape_control_complianceScore")["name"])
+		assert.Equal(t, map[string]string{
+			"apiVersion": value,
+			"kind":       value,
+			"namespace":  value,
+			"name":       value,
+		}, labelsFor("kubescape_resource_count_controls_failed"))
+	})
+
+	t.Run("image scan", func(t *testing.T) {
+		metricsOutput := &Metrics{
+			isImageScan: true,
+			listImages: []mImageVulnerability{{
+				image:    value,
+				severity: value,
+				cveCount: 1,
+			}},
+		}
+
+		labelsFor := parse(t, metricsOutput.String())
+		assert.Equal(t, map[string]string{
+			"image":    value,
+			"severity": value,
+		}, labelsFor("kubescape_image_count_cve"))
+	})
+}
+
 func TestControlComplianceScore_MetricsLabelsAndPrefix(t *testing.T) {
 	tests := []struct {
 		name            string
@@ -100,6 +179,18 @@ func TestControlComplianceScore_MetricsLabelsAndPrefix(t *testing.T) {
 			},
 			expectedMetrics: []string{"kubescape_control_complianceScore{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 37", "kubescape_control_count_resources_failed{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 17", "kubescape_control_count_resources_skipped{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 27", "kubescape_control_count_resources_passed{name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"} 7"},
 			expectedLabels:  "name=\"Test Control\",severity=\"high\",link=\"https://test-link.com\"",
+		},
+		{
+			name: "Unset compliance score omits only the score metric",
+			mcrs: mControlComplianceScore{
+				controlName:           "Unset Control",
+				resourcesCountPassed:  7,
+				resourcesCountFailed:  17,
+				resourcesCountSkipped: 27,
+				complianceScore:       -1,
+			},
+			expectedMetrics: []string{"kubescape_control_count_resources_failed{name=\"Unset Control\",severity=\"\",link=\"\"} 17", "kubescape_control_count_resources_skipped{name=\"Unset Control\",severity=\"\",link=\"\"} 27", "kubescape_control_count_resources_passed{name=\"Unset Control\",severity=\"\",link=\"\"} 7"},
+			expectedLabels:  "name=\"Unset Control\",severity=\"\",link=\"\"",
 		},
 	}
 
@@ -370,4 +461,129 @@ func TestMetrics_String_MultiItem_NoDuplicateHeaders(t *testing.T) {
 	// verify both resource series are present
 	assert.Contains(t, output, "kubescape_resource_count_controls_failed{apiVersion=\"v1\",kind=\"Pod\",namespace=\"ns1\",name=\"Resource A\"} 2")
 	assert.Contains(t, output, "kubescape_resource_count_controls_failed{apiVersion=\"v1\",kind=\"Pod\",namespace=\"ns2\",name=\"Resource B\"} 4")
+}
+
+func TestMetrics_String_MultiItem_SamplesGroupedPerFamily(t *testing.T) {
+	// The exposition format requires a family's samples to be contiguous. Each item
+	// contributes a line to several families, so collecting them item by item and
+	// writing them in that order splits every family once there is a second item.
+	m := Metrics{
+		listFrameworks: []mFrameworkComplianceScore{
+			{frameworkName: "Framework A", complianceScore: 80, resourcesCountFailed: 5},
+			{frameworkName: "Framework B", complianceScore: 60, resourcesCountFailed: 10},
+		},
+		listControls: []mControlComplianceScore{
+			{controlName: "Control A", severity: "high", link: "https://link-a.com", complianceScore: 50},
+			{controlName: "Control B", severity: "low", link: "https://link-b.com", complianceScore: 90},
+		},
+		listResources: []mResources{
+			{name: "Resource A", namespace: "ns1", apiVersion: "v1", kind: "Pod", controlsCountFailed: 2},
+			{name: "Resource B", namespace: "ns2", apiVersion: "v1", kind: "Pod", controlsCountFailed: 4},
+		},
+		listImages: []mImageVulnerability{
+			{image: "nginx:latest", severity: "High", cveCount: 3, fixableCVECount: 1},
+			{image: "nginx:latest", severity: "Low", cveCount: 7, fixableCVECount: 2},
+		},
+	}
+
+	// closed records a family that a later sample would reopen: a family is closed
+	// once a line belonging to a different family follows it.
+	seen := map[string]bool{}
+	closed := map[string]bool{}
+	current := ""
+	for _, line := range strings.Split(m.String(), "\n") {
+		if line == "" || strings.HasPrefix(line, "# ") {
+			continue
+		}
+		name, _, ok := strings.Cut(line, "{")
+		assert.True(t, ok, "sample %q has no labels", line)
+
+		assert.False(t, closed[name], "family %q is split: sample %q comes after another family", name, line)
+		if current != "" && current != name {
+			closed[current] = true
+		}
+		seen[name] = true
+		current = name
+	}
+
+	// the families the fixture populates, so a silently empty output fails too
+	for _, name := range []string{
+		"kubescape_framework_complianceScore",
+		"kubescape_control_complianceScore",
+		"kubescape_resource_count_controls_failed",
+		"kubescape_image_count_cve",
+		"kubescape_image_count_cve_fixable",
+	} {
+		assert.True(t, seen[name], "family %q is missing from the output", name)
+	}
+}
+
+func TestSetComplianceScores_ClusterMetricUsesComplianceScore(t *testing.T) {
+	// The cluster gauge is named complianceScore, so it must not be fed the risk score.
+	summaryDetails := &reportsummary.SummaryDetails{
+		Score:           42,
+		ComplianceScore: 77,
+	}
+
+	m := &Metrics{}
+	m.setComplianceScores(summaryDetails)
+
+	assert.Equal(t, 77, m.rs.complianceScore)
+	assert.Contains(t, m.String(), "kubescape_cluster_complianceScore{} 77")
+}
+
+func TestSetComplianceScores_ControlMetricsUseComplianceScore(t *testing.T) {
+	complianceScore := float32(65)
+	summaryDetails := &reportsummary.SummaryDetails{
+		Controls: reportsummary.ControlSummaries{
+			"C-SET": {
+				ControlID:       "C-SET",
+				Name:            "Set Control",
+				Score:           10,
+				ComplianceScore: &complianceScore,
+			},
+			"C-UNSET": {
+				ControlID: "C-UNSET",
+				Name:      "Unset Control",
+				Score:     20,
+			},
+		},
+	}
+
+	m := &Metrics{}
+	m.setComplianceScores(summaryDetails)
+	output := m.String()
+
+	assert.Regexp(t, regexp.MustCompile(`(?m)^kubescape_control_complianceScore\{name="Set Control".*\} 65$`), output)
+	assert.NotContains(t, output, "kubescape_control_complianceScore{name=\"Unset Control\"")
+	assert.Contains(t, output, "kubescape_control_count_resources_failed{name=\"Unset Control\"")
+}
+
+func TestSetComplianceScoresDoNotRoundFractionalScoresToPerfect(t *testing.T) {
+	controlScore := float32(99.5)
+	summaryDetails := &reportsummary.SummaryDetails{
+		ComplianceScore: 99.5,
+		Frameworks: []reportsummary.FrameworkSummary{
+			{
+				Name:            "Almost Perfect",
+				ComplianceScore: 99.5,
+			},
+		},
+		Controls: reportsummary.ControlSummaries{
+			"C-ALMOST": {
+				ControlID:       "C-ALMOST",
+				Name:            "Almost Perfect Control",
+				ComplianceScore: &controlScore,
+			},
+		},
+	}
+
+	m := &Metrics{}
+	m.setComplianceScores(summaryDetails)
+	output := m.String()
+
+	assert.Contains(t, output, "kubescape_cluster_complianceScore{} 99")
+	assert.Contains(t, output, "kubescape_framework_complianceScore{name=\"Almost Perfect\"} 99")
+	assert.Regexp(t, regexp.MustCompile(`(?m)^kubescape_control_complianceScore\{name="Almost Perfect Control".*\} 99$`), output)
+	assert.NotContains(t, output, "complianceScore{} 100")
 }

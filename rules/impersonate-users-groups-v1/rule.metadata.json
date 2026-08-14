@@ -1,0 +1,20 @@
+{
+  "name": "impersonate-users-groups-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Privilege Escalation::Impersonate identity",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": ["rbac.authorization.k8s.io"],
+      "apiVersions": ["v1"],
+      "resources": ["RoleBinding", "ClusterRoleBinding", "Role", "ClusterRole"]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can impersonate other users, groups or service accounts via the impersonate verb, allowing them to act with the RBAC rights of the impersonated identity",
+  "remediation": "Restrict the impersonate verb to a small, trusted set of subjects (e.g. auth proxies). Avoid granting impersonate on '*' or on privileged identities such as system:masters members.",
+  "ruleQuery": "armo_builtins"
+}

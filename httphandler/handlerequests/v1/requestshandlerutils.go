@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +25,8 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/core"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/httphandler/config"
 	"github.com/kubescape/kubescape/v3/httphandler/storage"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -34,8 +38,23 @@ import (
 )
 
 var scanImpl = scan // Override for testing
+
+// runKubescapeScan is the scanner construction seam used by lifecycle tests.
+var runKubescapeScan = func(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return core.NewKubescape(ctx).Scan(scanInfo, policyIdentifiers)
+}
+
+// canonicalResultPersistenceKey marks scans submitted through /v1/scan. The
+// metrics endpoint shares scan(), but owns the extensionless output path for
+// its Prometheus response and must not have that file replaced with JSON.
+type canonicalResultPersistenceKey struct{}
+
+func withCanonicalResultPersistence(ctx context.Context) context.Context {
+	return context.WithValue(ctx, canonicalResultPersistenceKey{}, true)
+}
+
 func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
-	response := &utilsmetav1.Response{}
+	response := &utilsmetav1.Response{ID: scanReq.scanID}
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -46,6 +65,7 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 				logger.L().Ctx(scanReq.ctx).Error("failed to persist panic error to file", helpers.String("ID", scanReq.scanID), helpers.Error(persistErr))
 				responseMsg = persistErr.Error()
 			}
+			handler.state.releaseCancel(scanReq.scanID)
 			handler.state.setNotBusy(scanReq.scanID)
 			if scanReq.scanQueryParams.ReturnResults {
 				response.Type = utilsapisv1.ErrorScanResponseType
@@ -59,21 +79,34 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	}()
 
 	logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
-	_, err := scanImpl(scanReq.ctx, scanReq.scanInfo, scanReq.scanID, scanReq.scanQueryParams.SkipPersistence)
+	scanCtx := scanReq.ctx
+	if scanReq.isUserScan {
+		scanCtx = withCanonicalResultPersistence(scanCtx)
+	}
+	_, err := scanImpl(scanCtx, scanReq.scanInfo, scanReq.policyIdentifiers, scanReq.scanID, scanReq.scanQueryParams.SkipPersistence)
 	if err != nil {
-		logger.L().Ctx(scanReq.ctx).Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
-		if scanReq.scanQueryParams.ReturnResults {
-			response.Type = utilsapisv1.ErrorScanResponseType
-			response.Response = err.Error()
+		if errors.Is(scanReq.ctx.Err(), context.Canceled) {
+			logger.L().Ctx(scanReq.ctx).Info("scan cancelled", helpers.String("ID", scanReq.scanID))
+			removeResultsFile(scanReq.scanID)
+			if scanReq.scanQueryParams.ReturnResults {
+				response.Type = utilsapisv1.ErrorScanResponseType
+				response.Response = fmt.Sprintf("scan '%s' was cancelled", scanReq.scanID)
+			}
+		} else {
+			logger.L().Ctx(scanReq.ctx).Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
+			if scanReq.scanQueryParams.ReturnResults {
+				response.Type = utilsapisv1.ErrorScanResponseType
+				response.Response = err.Error()
+			}
 		}
 	} else {
 		logger.L().Ctx(scanReq.ctx).Success("done scanning", helpers.String("ID", scanReq.scanID))
 		if scanReq.scanQueryParams.ReturnResults {
-			//TODO(ttimonen) should we actually pass the PostureReport here somehow?
 			response.Type = utilsapisv1.ResultsV1ScanResponseType
 		}
 	}
 
+	handler.state.releaseCancel(scanReq.scanID)
 	handler.state.setNotBusy(scanReq.scanID)
 
 	// return results, if someone's waiting for them; never block.
@@ -114,11 +147,9 @@ func (handler *HTTPHandler) watchForScan(ctx context.Context) {
 		}
 	}
 }
-func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {
+func scan(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier, scanID string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {
 	ctx, spanScan := otel.Tracer("").Start(ctx, "kubescape.scan")
 	defer spanScan.End()
-
-	ks := core.NewKubescape(ctx)
 
 	spanScan.AddEvent("scanning metadata",
 		trace.WithAttributes(attribute.String("version", versioncheck.BuildNumber)),
@@ -131,12 +162,20 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 		trace.WithAttributes(attribute.String("hostSensorYamlPath", scanInfo.HostSensorYamlPath)),
 	)
 
-	result, err := ks.Scan(scanInfo)
+	result, err := runKubescapeScan(ctx, scanInfo, policyIdentifiers)
 	if err != nil {
 		return nil, writeScanErrorToFile(err, scanID)
 	}
 	if err := result.HandleResults(ctx, scanInfo); err != nil {
 		return nil, writeScanErrorToFile(err, scanID)
+	}
+	// Non-JSON printers write format-specific sidecars (for example .yaml or
+	// .pdf), while /v1/results reads JSON. Keep the requested sidecars and add
+	// the extensionless canonical JSON that the results API reads first.
+	if shouldPersistCanonicalResult(ctx, scanInfo) {
+		if err := persistCanonicalResult(result, scanID); err != nil {
+			return nil, writeScanErrorToFile(err, scanID)
+		}
 	}
 
 	if !skipPersistence {
@@ -163,6 +202,34 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 	return nil, nil
 }
 
+func shouldPersistCanonicalResult(ctx context.Context, scanInfo *cautils.ScanInfo) bool {
+	persist, _ := ctx.Value(canonicalResultPersistenceKey{}).(bool)
+	if !persist {
+		return false
+	}
+	for _, format := range scanInfo.Formats() {
+		if format == printer.JsonFormat {
+			return false
+		}
+	}
+	return true
+}
+
+func persistCanonicalResult(result *resultshandling.ResultsHandler, scanID string) error {
+	parsedUUID, err := uuid.Parse(scanID)
+	if err != nil {
+		return fmt.Errorf("failed to persist canonical scan results: invalid scan ID: %w", err)
+	}
+	data, err := result.ToJson()
+	if err != nil {
+		return fmt.Errorf("failed to marshal canonical scan results: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(OutputDir, parsedUUID.String()), data, 0o600); err != nil {
+		return fmt.Errorf("failed to persist canonical scan results: %w", err)
+	}
+	return nil
+}
+
 // ScanFailedError carries the plaintext error written by writeScanErrorToFile.
 // readResultsFile returns this when the only artifact for a scan ID is under
 // FailedOutputDir, so the Results handler can surface the real scan failure
@@ -175,7 +242,7 @@ func (e *ScanFailedError) Error() string {
 	return e.Message
 }
 
-func readResultsFile(fileID string) (*reporthandlingv2.PostureReport, error) {
+func readResultsFile(fileID string) (json.RawMessage, error) {
 	parsedUUID, err := uuid.Parse(fileID)
 	if err != nil {
 		logger.L().Warning("invalid scan ID requested", helpers.String("ID", fileID), helpers.Error(err))
@@ -201,9 +268,13 @@ func readResultsFile(fileID string) (*reporthandlingv2.PostureReport, error) {
 		path := filepath.Join(OutputDir, cleanID+ext)
 		f, err := os.ReadFile(path)
 		if err == nil {
-			postureReport := &reporthandlingv2.PostureReport{}
-			err = json.Unmarshal(f, postureReport)
-			return postureReport, err
+			// Retain the existing structural validation against PostureReport,
+			// then return the original JSON so additive output fields survive.
+			var postureReport reporthandlingv2.PostureReport
+			if err := json.Unmarshal(f, &postureReport); err != nil {
+				return nil, err
+			}
+			return json.RawMessage(f), nil
 		}
 	}
 
@@ -228,7 +299,21 @@ func removeResultsFile(fileID string) error {
 	cleanID := parsedUUID.String()
 
 	dirs := []string{OutputDir, FailedOutputDir}
-	extensions := []string{"", ".json"}
+	// Exact suffixes that printers can append to the extensionless HTTP output
+	// base. Do not glob cleanID+".*": UUID-adjacent files may be unrelated.
+	extensions := []string{
+		"",
+		printer.JsonOutputExt,
+		printer.JunitOutputExt,
+		printer.SARIFOutputExt,
+		printer.HtmlOutputExt,
+		printer.PdfOutputExt,
+		printer.PrometheusOutputExt,
+		printer.YamlOutputExt,
+		printer.CsvOutputExt,
+		printer.CycloneDXOutputExt,
+		printer.SPDXOutputExt,
+	}
 
 	for _, dir := range dirs {
 		for _, ext := range extensions {
@@ -242,9 +327,9 @@ func removeResultsFile(fileID string) error {
 	return nil
 }
 
-func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *cautils.ScanInfo {
+func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) (*cautils.ScanInfo, []cautils.PolicyIdentifier) {
 
-	scanInfo := ToScanInfo(scanRequest)
+	scanInfo, policyIdentifiers := ToScanInfo(scanRequest)
 	scanInfo.ScanID = scanID
 
 	// *** start ***
@@ -260,7 +345,7 @@ func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *ca
 	scanInfo.Output = filepath.Join(OutputDir, scanID)
 	// *** end ***
 
-	return scanInfo
+	return scanInfo, policyIdentifiers
 }
 
 func defaultScanInfo() *cautils.ScanInfo {
@@ -274,9 +359,19 @@ func defaultScanInfo() *cautils.ScanInfo {
 	scanInfo.HostSensorYamlPath = envToString("KS_HOST_SCAN_YAML", "")       // path to host scan YAML
 	scanInfo.FormatVersion = envToString("KS_FORMAT_VERSION", "v2")          // output format version
 	scanInfo.Format = envToString("KS_FORMAT", "json")                       // default output should be json
-	scanInfo.Submit = envToBool("KS_SUBMIT", false)                          // publish results to Kubescape SaaS
-	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)                       // do not publish results to Kubescape SaaS
-	scanInfo.EnableRegoPrint = envToBool("KS_REGO_PRINT", false)             // print rego rules
+	// KS_SUBMIT is presence-checked (not just envToBool'd): its mere presence
+	// marks Submit as explicitly requested, so an unparsable value (including
+	// "", which Helm commonly renders for an unset value) must not silently
+	// become a permanent, unoverridable opt-out - warn and leave it unset instead.
+	if raw, ok := os.LookupEnv("KS_SUBMIT"); ok {
+		if v, err := strconv.ParseBool(strings.TrimSpace(raw)); err == nil {
+			scanInfo.Submit.SetBool(v)
+		} else {
+			logger.L().Warning("ignoring unparsable KS_SUBMIT value", helpers.String("value", raw))
+		}
+	}
+	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)           // do not publish results to Kubescape SaaS
+	scanInfo.EnableRegoPrint = envToBool("KS_REGO_PRINT", false) // print rego rules
 	// Only set HostSensorEnabled when explicitly configured; leaving it nil allows
 	// auto-detection of node-agent CRDs in getHostSensorHandler.
 	if val, ok := os.LookupEnv("KS_ENABLE_HOST_SCANNER"); ok {
@@ -304,7 +399,7 @@ func envToString(env string, defaultValue string) string {
 }
 
 func writeScanErrorToFile(err error, scanID string) (e error) {
-	if e = os.MkdirAll(FailedOutputDir, os.ModePerm); e != nil {
+	if e = os.MkdirAll(FailedOutputDir, outputDirPerm); e != nil {
 		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to create directory. reason: %s", err.Error(), e.Error())
 	}
 	var f *os.File
@@ -321,7 +416,7 @@ func writeScanErrorToFile(err error, scanID string) (e error) {
 	if _, e = f.Write([]byte(err.Error())); e != nil {
 		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to write. reason: %s", err.Error(), e.Error())
 	}
-	return fmt.Errorf("failed to scan. reason: '%s'", err.Error())
+	return fmt.Errorf("failed to scan. reason: %w", err)
 }
 
 // responseToBytes convert response object to bytes

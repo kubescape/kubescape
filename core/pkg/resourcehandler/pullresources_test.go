@@ -7,13 +7,17 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
+	discoveryfake "k8s.io/client-go/discovery/fake"
 	k8stesting "k8s.io/client-go/testing"
 
 	"k8s.io/client-go/dynamic/fake"
@@ -24,7 +28,7 @@ type staticFieldSelector struct {
 	selectors []string
 }
 
-func (s *staticFieldSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
+func (s *staticFieldSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource, namespaced *bool) []string {
 	return s.selectors
 }
 func (s *staticFieldSelector) GetClusterScope(resource *schema.GroupVersionResource) bool {
@@ -68,9 +72,10 @@ func TestPullSingleResource_FieldSelectorDoesNotLeakAcrossIterations(t *testing.
 	_, selectorErrs := handler.pullSingleResource(
 		context.Background(),
 		resource,
-		nil,
+		"",
 		"",
 		fieldSelector,
+		nil,
 	)
 
 	require.Empty(t, selectorErrs)
@@ -129,7 +134,7 @@ func TestPullResources_NonForbiddenErrorRecorded(t *testing.T) {
 		},
 	}
 
-	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
+	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{}, "")
 
 	require.Len(t, failedQueries, 1, "expected one failed query entry")
 	for _, f := range failedQueries {
@@ -138,11 +143,32 @@ func TestPullResources_NonForbiddenErrorRecorded(t *testing.T) {
 	}
 }
 
-// TestPullResources_NotFoundErrorIgnored verifies that a "server could not find
-// the requested resource" error (CRD not installed) is silently ignored and does
-// NOT appear in failedQueries — this is expected behaviour when a control
+// TestPullResources_NotFoundErrorIgnored verifies that a canonical NotFound
+// API status error (CRD not installed) is silently ignored and does NOT
+// appear in failedQueries — this is expected behaviour when a control
 // references an optional CRD that isn't present on the cluster.
 func TestPullResources_NotFoundErrorIgnored(t *testing.T) {
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "example.com", Resource: "somecrds"}, "")
+	})
+
+	qrs := QueryableResources{
+		"/v1/somecrd": QueryableResource{
+			GroupVersionResourceTriplet: "/v1/somecrd",
+		},
+	}
+
+	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{}, "")
+
+	assert.Empty(t, failedQueries, "404-style errors should not be recorded as failures")
+}
+
+// TestPullResources_SimilarMessageButNotTypedNotFoundIsRecorded verifies that
+// an untyped transport/proxy error whose message happens to resemble the
+// classic "resource not found" sentence is still recorded as a failure.
+// Message-based matching would have silently swallowed this; typed
+// apierrors.IsNotFound classification does not.
+func TestPullResources_SimilarMessageButNotTypedNotFoundIsRecorded(t *testing.T) {
 	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, fmt.Errorf("the server could not find the requested resource")
 	})
@@ -153,9 +179,9 @@ func TestPullResources_NotFoundErrorIgnored(t *testing.T) {
 		},
 	}
 
-	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
+	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{}, "")
 
-	assert.Empty(t, failedQueries, "404-style errors should not be recorded as failures")
+	require.Len(t, failedQueries, 1, "an untyped error must not be classified as NotFound just because its message resembles one")
 }
 
 // TestPullResources_PartialFailure verifies that when one GVR succeeds and
@@ -203,7 +229,7 @@ func TestPullResources_PartialFailure(t *testing.T) {
 		},
 	}
 
-	k8sResources, allResources, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
+	k8sResources, allResources, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{}, "")
 
 	// failed query is recorded
 	assert.Len(t, failedQueries, 1)
@@ -235,7 +261,7 @@ func TestPullResources_TotalFailure(t *testing.T) {
 		},
 	}
 
-	_, allResources, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
+	_, allResources, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{}, "")
 
 	assert.Empty(t, allResources, "no resources should be collected when all queries fail")
 	assert.Len(t, failedQueries, 2, "both failed GVRs should be recorded")
@@ -350,7 +376,7 @@ func TestRecordFailedQueryStatuses_PartialFailureSessionField(t *testing.T) {
 	framework.Controls = append(framework.Controls, control)
 
 	scanInfo := &cautils.ScanInfo{}
-	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
 	sessionObj.Policies = append(sessionObj.Policies, *framework)
 
 	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
@@ -366,4 +392,42 @@ func TestRecordFailedQueryStatuses_PartialFailureSessionField(t *testing.T) {
 	require.NotEmpty(t, sessionObj.PartialGVRFailures,
 		"the failed selector must be recorded in PartialGVRFailures, not silently dropped")
 	assert.Contains(t, sessionObj.PartialGVRFailures[0].Error, "RBAC denied for secret2")
+}
+
+func TestGetResources_DiscoveryFailureReachesScanCoverage(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+	handler := getResourceHandlerMock()
+	fakeDiscovery, ok := handler.k8s.DiscoveryClient.(*discoveryfake.FakeDiscovery)
+	require.True(t, ok)
+	fakeDiscovery.PrependReactor("get", "resource", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, &discovery.ErrGroupDiscoveryFailed{Groups: map[schema.GroupVersion]error{
+			{Group: "custom.metrics.k8s.io", Version: "v1beta2"}: fmt.Errorf("provider unavailable"),
+		}}
+	})
+
+	handler.k8s.DynamicClient = &mockDynamicClient{
+		listFunc: func(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			return &unstructured.UnstructuredList{Items: []unstructured.Unstructured{{Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Namespace",
+				"metadata":   map[string]any{"name": "default"},
+			}}}}, nil
+		},
+	}
+
+	rule := mockRule("discovery-coverage", []reporthandling.RuleMatchObjects{mockMatch(6)}, "")
+	control := mockControl("discovery-coverage", []reporthandling.PolicyRule{rule})
+	framework := mockFramework("discovery-coverage", []reporthandling.Control{control})
+	scanInfo := &cautils.ScanInfo{}
+	sessionObj := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{*framework}, nil, scanInfo, nil)
+
+	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
+	require.NoError(t, err)
+	require.Len(t, sessionObj.PartialGVRFailures, 1)
+	assert.Equal(t, "discovery:custom.metrics.k8s.io/v1beta2", sessionObj.PartialGVRFailures[0].GVR)
+	assert.Equal(t, "discovery", sessionObj.PartialGVRFailures[0].Selector)
+	assert.Contains(t, sessionObj.PartialGVRFailures[0].Error, "provider unavailable")
+
+	coverage := cautils.BuildScanCoverage(sessionObj.InfoMap, sessionObj.ResourceToControlsMap, nil, sessionObj.PartialGVRFailures, nil)
+	assert.Len(t, coverage.PartialGVRPulls, 1)
 }

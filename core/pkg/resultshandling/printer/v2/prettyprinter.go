@@ -100,16 +100,17 @@ func (pp *PrettyPrinter) convertToImageScanSummary(imageScanData []cautils.Image
 	return &imageScanSummary, nil
 }
 
-func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) {
+func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) error {
 	imageScanSummary, err := pp.convertToImageScanSummary(imageScanData)
 	if err != nil {
 		logger.L().Error("failed to convert to image scan summary", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to convert to image scan summary: %w", err)
 	}
 	pp.mainPrinter.PrintImageScanning(imageScanSummary)
+	return nil
 }
 
-func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if opaSessionObj != nil {
 		// TODO line is currently printed on framework scan only
 		if isPrintSeparatorType(pp.scanType) {
@@ -146,8 +147,11 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 	}
 
 	if len(imageScanData) > 0 {
-		pp.PrintImageScan(imageScanData)
+		if err := pp.PrintImageScan(imageScanData); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (pp *PrettyPrinter) printOverview(opaSessionObj *cautils.OPASessionObj, printExtraLine bool) {
@@ -188,25 +192,36 @@ func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 
 }
 
-func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	if outputFile == os.Stdout.Name() {
 		pp.writer = printer.GetWriter(ctx, "")
 		pp.SetMainPrinter()
-		return
+		return nil
 	}
 
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		outputFile = strings.TrimSpace(outputFile)
 		if outputFile == "" {
 			outputFile = prettyOutputFile
 		}
-		if filepath.Ext(outputFile) != printer.PrettyOutputExt {
+		// os.DevNull is used to silence the UI printer, appending an extension would turn it into a regular file
+		if outputFile != os.DevNull && filepath.Ext(outputFile) != printer.PrettyOutputExt {
 			outputFile = outputFile + printer.PrettyOutputExt
 		}
 	}
 
-	pp.writer = printer.GetWriter(ctx, outputFile)
+	if explicitOutput {
+		writer, err := printer.GetWriterNoFallback(outputFile)
+		if err != nil {
+			return err
+		}
+		pp.writer = writer
+	} else {
+		pp.writer = printer.GetWriter(ctx, outputFile)
+	}
 	pp.SetMainPrinter()
+	return nil
 }
 
 func (pp *PrettyPrinter) Score(_ float32) {
@@ -297,7 +312,7 @@ func (pp *PrettyPrinter) printGroupedResource(indent string, title string, rsc [
 
 	resources := []string{}
 	for r := range rsc {
-		relatedObjectsStr := generateRelatedObjectsStr(rsc[r]) // TODO -
+		relatedObjectsStr := generateRelatedObjectsStr(rsc[r])
 		resources = append(resources, fmt.Sprintf("%s%s - %s %s", indent, rsc[r].resource.GetKind(), rsc[r].resource.GetName(), relatedObjectsStr))
 	}
 
@@ -399,6 +414,6 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 
 func (p *PrettyPrinter) CloseWriter() {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
 	}
 }
