@@ -29,6 +29,10 @@ import (
 var (
 	YAML_PREFIX = []string{"yaml", "yml"}
 	JSON_PREFIX = []string{"json"}
+
+	// ErrNoManifestFiles lets resource orchestrators defer this specific error
+	// while another supported loader examines the same input.
+	ErrNoManifestFiles = errors.New("no YAML or JSON manifest files found")
 )
 
 type FileFormat string
@@ -626,7 +630,7 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, rendere
 		logger.L().Ctx(ctx).Warning("Continuing with manifest files found before a discovery error", helpers.Error(discoveryErr))
 	}
 	if len(files) == 0 {
-		return nil, nil, fmt.Errorf("no YAML or JSON manifest files found for input %q", input)
+		return nil, nil, fmt.Errorf("%w for input %q", ErrNoManifestFiles, input)
 	}
 
 	// skip the plain-YAML glob for the templates of charts the helm render already covered; a chart

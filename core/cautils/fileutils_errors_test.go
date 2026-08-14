@@ -38,6 +38,7 @@ func TestLoadResourcesFromFilesReturnsErrorForMissingInput(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, workloads)
+	assert.ErrorIs(t, err, ErrNoManifestFiles)
 	assert.Contains(t, err.Error(), "no YAML or JSON manifest files")
 	// The error formats the input with %q, which escapes the separators in a
 	// Windows path, so the raw path is not a substring of it.
@@ -51,7 +52,22 @@ func TestLoadResourcesFromFilesReturnsErrorForEmptyDirectory(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, workloads)
+	assert.ErrorIs(t, err, ErrNoManifestFiles)
+	assert.Equal(t, "no YAML or JSON manifest files found for input "+strconv.Quote(dir), err.Error())
 	assert.Contains(t, err.Error(), "no YAML or JSON manifest files")
+}
+
+func TestLoadResourcesFromFilesTerraformOnlyDirectoryKeepsPlainLoaderContract(t *testing.T) {
+	dir := t.TempDir()
+	writeManifestFixture(t, dir, "main.tf", `resource "null_resource" "example" {}`)
+
+	workloads, skips, err := LoadResourcesFromFiles(context.Background(), dir, dir, nil)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNoManifestFiles)
+	assert.Nil(t, workloads)
+	assert.Empty(t, skips)
+	assert.Equal(t, "no YAML or JSON manifest files found for input "+strconv.Quote(dir), err.Error())
 }
 
 func TestLoadResourcesFromFilesReturnsJSONParseErrorWithPath(t *testing.T) {

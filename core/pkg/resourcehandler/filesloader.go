@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -345,12 +346,22 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	coveredChartDirectories := append(append([]string{}, renderedCharts...), kustomizeResult.OwnedHelmChartDirectories...)
 	sourceToWorkloads, fileSkips, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, coveredChartDirectories)
 	allSkips = append(allSkips, fileSkips...)
-	if err != nil {
+	filesErr := err
+	if err != nil && !errors.Is(err, cautils.ErrNoManifestFiles) {
 		return nil, nil, allSkips, err
 	}
 	terraformSourceToWorkloads, err := cautils.LoadResourcesFromTerraform(ctx, path)
 	if err != nil {
 		return nil, nil, allSkips, err
+	}
+	if filesErr != nil {
+		terraformWorkloads := 0
+		for _, ws := range terraformSourceToWorkloads {
+			terraformWorkloads += len(ws)
+		}
+		if terraformWorkloads == 0 {
+			return nil, nil, allSkips, filesErr
+		}
 	}
 
 	// merge Terraform-derived workloads, same pattern as the Kustomize block below
