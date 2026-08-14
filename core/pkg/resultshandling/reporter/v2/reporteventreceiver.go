@@ -173,7 +173,7 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 			continue
 		}
 
-		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Results) > 0 {
+		if *counter+len(r) >= MAX_REPORT_SIZE && (len(reportObj.Results) > 0 || len(reportObj.Resources) > 0) {
 
 			// send report
 			if err := report.sendReport(reportObj, *reportCounter, false); err != nil {
