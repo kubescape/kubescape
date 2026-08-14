@@ -268,6 +268,12 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 			logger.L().Ctx(ctx).Warning("Failed to get resource from CRD",
 				helpers.String("resource", k8sInfo.Resource.String()),
 				helpers.Error(err))
+		} else if len(kcData) == 0 && hsh.nodeCount > 0 {
+			err = fmt.Errorf("node-agent didn't report any %s for %d nodes", k8sInfo.Resource.String(), hsh.nodeCount)
+			addInfoToMap(k8sInfo.Resource, infoMap, err)
+			logger.L().Ctx(ctx).Warning("Zero CRD items found",
+				helpers.String("resource", k8sInfo.Resource.String()),
+				helpers.Error(err))
 		}
 
 		if len(kcData) > 0 {

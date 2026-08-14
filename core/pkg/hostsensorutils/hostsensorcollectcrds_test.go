@@ -193,6 +193,20 @@ func TestCollectResources_RecordsQueryErrors(t *testing.T) {
 	assert.Len(t, infoMap, 2)
 }
 
+func TestCollectResources_RecordsZeroItemsErrors(t *testing.T) {
+	client := newCRDDynamicClient(t)
+	// Empty client with no CRD items created, but simulate 1 node existing
+	hsh := &HostSensorHandler{dynamicClient: client, nodeCount: 1}
+
+	res, infoMap, err := hsh.CollectResources(context.Background())
+
+	require.NoError(t, err)
+	assert.Empty(t, res)
+	// It should record an error for every collected resource type since nodeCount is 1 but lists are empty.
+	// K8sInfo slices have 9-10 elements.
+	assert.Greater(t, len(infoMap), 0, "should record errors for missing CRD items when nodes exist")
+}
+
 func hasKind(envelopes []hostsensor.HostSensorDataEnvelope, kind k8shostsensor.HostSensorResource) bool {
 	for _, e := range envelopes {
 		if e.GetKind() == kind.String() {
