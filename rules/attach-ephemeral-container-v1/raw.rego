@@ -19,6 +19,9 @@ deny contains msga if {
 
 	rule := role.rules[p]
 
+	# a rule restricted to named pods cannot be pointed at an arbitrary pod's ephemeral containers
+	not rule.resourceNames
+
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
 

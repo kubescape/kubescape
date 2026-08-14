@@ -15,6 +15,10 @@ deny contains msga if {
 	rolebinding.roleRef.name == role.metadata.name
 	is_same_namespace(role, rolebinding)
 	rule := role.rules[p]
+
+	# a rule restricted to named identities cannot be used to impersonate an arbitrary identity
+	not rule.resourceNames
+
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
 	rule_path := sprintf("relatedObjects[%d].rules[%d]", [i, p])
@@ -57,6 +61,10 @@ deny contains msga if {
 	rolebinding.roleRef.name == role.metadata.name
 	is_same_namespace(role, rolebinding)
 	rule := role.rules[p]
+
+	# a rule restricted to named identities cannot be used to impersonate an arbitrary identity
+	not rule.resourceNames
+
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
 	rule_path := sprintf("relatedObjects[%d].rules[%d]", [i, p])
