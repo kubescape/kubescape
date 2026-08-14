@@ -18,8 +18,10 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
 const (
@@ -85,6 +87,7 @@ type gitLabVulnerability struct {
 	Scanner     gitLabScannerRef   `json:"scanner"`
 	Location    gitLabLocation     `json:"location"`
 	Identifiers []gitLabIdentifier `json:"identifiers"`
+	Solution    string             `json:"solution,omitempty"`
 }
 
 type gitLabScannerRef struct {
@@ -333,7 +336,8 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 			}
 
 			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
-			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, resource.resourceID, resource.relPath, location))
+			res, _ := opaSessionObj.AllResources[resource.resourceID]
+			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, &ac, res, resource.resourceID, resource.relPath, location))
 		}
 	}
 
@@ -378,10 +382,17 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 }
 
 // toGitLabVulnerability maps a failed control on a resource to a GitLab SAST vulnerability.
-func toGitLabVulnerability(ctl reportsummary.IControlSummary, resourceID, filePath string, location locationresolver.Location) gitLabVulnerability {
+// ac and resource are used to populate the Solution field with fix paths and current field values,
+// matching what the pretty-printer and HTML printer already emit.
+func toGitLabVulnerability(ctl reportsummary.IControlSummary, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, resourceID, filePath string, location locationresolver.Location) gitLabVulnerability {
 	controlID := ctl.GetID()
 	// Kubescape severities (Critical/High/Medium/Low/Unknown) are all valid GitLab severities
 	severity := apis.ControlSeverityToString(ctl.GetScoreFactor())
+
+	var solution string
+	if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
+		solution = strings.Join(paths, "\n")
+	}
 
 	return gitLabVulnerability{
 		ID:       gitLabVulnerabilityID(controlID, resourceID, filePath),
@@ -404,6 +415,7 @@ func toGitLabVulnerability(ctl reportsummary.IControlSummary, resourceID, filePa
 				URL:   cautils.GetControlLink(controlID),
 			},
 		},
+		Solution: solution,
 	}
 }
 
