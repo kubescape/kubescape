@@ -802,7 +802,7 @@ func TestMergeWorkloadConfigurationScanSpec(t *testing.T) {
 			},
 		},
 		{
-			name: "existing failed wins over new passed",
+			name: "existing failed wins over new passed, rules replaced by new scan",
 			existing: v1beta1.WorkloadConfigurationScanSpec{
 				Controls: map[string]v1beta1.ScannedControl{
 					"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "old"}, Rules: []v1beta1.ScannedControlRule{{Name: "rule-1"}}},
@@ -814,7 +814,7 @@ func TestMergeWorkloadConfigurationScanSpec(t *testing.T) {
 				},
 			},
 			expected: map[string]v1beta1.ScannedControl{
-				"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "old"}, Rules: []v1beta1.ScannedControlRule{{Name: "rule-1"}, {Name: "rule-2"}}},
+				"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "old"}, Rules: []v1beta1.ScannedControlRule{{Name: "rule-2"}}},
 			},
 		},
 		{
@@ -857,6 +857,26 @@ func TestMergeWorkloadConfigurationScanSpec(t *testing.T) {
 			assert.Equal(t, tt.expected, got.Controls)
 		})
 	}
+
+	// Regression guard: repeated merges (simulating continuous-scan cycles) must not
+	// duplicate rule entries. See reviewer feedback on unbounded Rules growth.
+	t.Run("repeated merges do not duplicate rules", func(t *testing.T) {
+		newScan := v1beta1.WorkloadConfigurationScanSpec{
+			Controls: map[string]v1beta1.ScannedControl{
+				"C-001": {
+					ControlID: "C-001",
+					Name:      "Control 1",
+					Status:    v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed)},
+					Rules:     []v1beta1.ScannedControlRule{{Name: "rule-1"}},
+				},
+			},
+		}
+		spec := v1beta1.WorkloadConfigurationScanSpec{}
+		for i := 0; i < 10; i++ {
+			spec = mergeWorkloadConfigurationScanSpec(spec, newScan)
+		}
+		assert.Len(t, spec.Controls["C-001"].Rules, 1)
+	})
 }
 
 func TestMergeWorkloadConfigurationScanSummarySpec(t *testing.T) {

@@ -273,7 +273,7 @@ func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurati
 				SubStatus: string(mergedSubStatus),
 				Info:      info,
 			},
-			Rules: append(existingCtrl.Rules, newCtrl.Rules...),
+			Rules: newCtrl.Rules,
 		}
 	}
 
