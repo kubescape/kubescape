@@ -3,6 +3,8 @@ package reporter
 import (
 	"context"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strconv"
 	"sync"
@@ -208,15 +210,20 @@ func TestSubmit(t *testing.T) {
 	})
 
 	t.Run("should delete credentials only on first chunk failure", func(t *testing.T) {
+		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "mock server error", http.StatusInternalServerError)
+		}))
+		defer mockServer.Close()
+
 		// Test 1: First chunk fails (counter == 0)
 		tenantMock1 := &TenantConfigMock{
 			clusterName: "test",
-			accountID:   account, 
+			accountID:   account,
 		}
-		
+
 		ksCloud1, err := v1.NewKSCloudAPI(
-			"https://invalid.local",
-			"https://invalid.local",
+			mockServer.URL,
+			mockServer.URL,
 			account,
 			accessKey)
 		require.NoError(t, err)
@@ -241,8 +248,8 @@ func TestSubmit(t *testing.T) {
 		}
 
 		ksCloud2, err := v1.NewKSCloudAPI(
-			"https://invalid.local",
-			"https://invalid.local",
+			mockServer.URL,
+			mockServer.URL,
 			account,
 			accessKey)
 		require.NoError(t, err)
