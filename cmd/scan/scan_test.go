@@ -700,10 +700,19 @@ func TestApplyRegistryCredentialsFromEnv_KeepsExplicitAuthMode(t *testing.T) {
 }
 
 // coverageWouldFail mirrors the gate logic in enforceCoverageThreshold so we
-// can test it without triggering os.Exit.
+// can test it without triggering os.Exit. It MUST stay byte-identical with the
+// gate: when this and the gate disagree, every other test in this file lies
+// about scan behavior. In particular, a zero-controls scan is a coverage
+// failure (nothing was evaluated) rather than a free pass — see
+// core/cautils/scancoverage.go ComputeCoverageScore for the matching rule.
 func coverageWouldFail(notEvaluated, totalControls int, threshold float32) bool {
-	if threshold <= 0 || totalControls == 0 {
+	if threshold <= 0 {
 		return false
+	}
+	if totalControls == 0 {
+		// Scan loaded no controls: coverage is 0%, which is below any positive
+		// threshold — mirror enforceCoverageThreshold's explicit error branch.
+		return true
 	}
 	pct := float32(totalControls-notEvaluated) / float32(totalControls) * 100
 	return pct < threshold
@@ -721,7 +730,14 @@ func Test_enforceCoverageThreshold(t *testing.T) {
 		{"all controls evaluated passes", 0, 10, 80, false},
 		{"coverage exactly at threshold passes", 2, 10, 80, false},
 		{"coverage below threshold fails", 5, 10, 80, true},
-		{"zero total controls never fails", 0, 0, 50, false},
+		// Zero loaded controls is a coverage failure regardless of how low the
+		// user-set threshold is (a 0% coverage never satisfies any threshold > 0),
+		// mirroring the production gate's behavior.
+		{"zero total controls fails at positive threshold", 0, 0, 50, true},
+		{"zero total controls still fails when only a 1% threshold is set", 0, 0, 1, true},
+		// A non-positive threshold is the only way to opt the zero-controls case out,
+		// matching the production `if scanInfo.FailCoverageThreshold <= 0 { return nil }` guard.
+		{"zero total controls with threshold disabled passes", 0, 0, 0, false},
 	}
 
 	for _, tt := range tests {
@@ -729,6 +745,131 @@ func Test_enforceCoverageThreshold(t *testing.T) {
 			assert.Equal(t, tt.wantFail, coverageWouldFail(tt.notEvaluated, tt.totalControls, tt.threshold))
 		})
 	}
+}
+
+// Test_enforceCoverageThreshold_Direct exercises the production gate itself
+// (not the mirror) so the zero-controls fix is regression-tested against the
+// real function: any future change to enforceCoverageThreshold that re-opens
+// the silent-pass will be caught here even if someone "simplifies" the test
+// mirror back to the old behavior.
+func Test_enforceCoverageThreshold_Direct(t *testing.T) {
+	tests := []struct {
+		name          string
+		coverage      cautils.ScanCoverage
+		totalControls int
+		threshold     float32
+		wantErr       bool
+		wantSubstring string
+	}{
+		{
+			name:          "zero controls with positive threshold returns error (was silent-pass before fix)",
+			coverage:      cautils.ScanCoverage{},
+			totalControls: 0,
+			threshold:     50,
+			wantErr:       true,
+			wantSubstring: "scan loaded no controls",
+		},
+		{
+			name:          "zero controls with threshold disabled returns nil (opt-out preserved)",
+			coverage:      cautils.ScanCoverage{},
+			totalControls: 0,
+			threshold:     0,
+			wantErr:       false,
+		},
+		{
+			name:          "full coverage passes",
+			coverage:      cautils.ScanCoverage{CoverageScore: 100},
+			totalControls: 10,
+			threshold:     80,
+			wantErr:       false,
+		},
+		{
+			name:          "below threshold returns error",
+			coverage:      cautils.ScanCoverage{CoverageScore: 50},
+			totalControls: 10,
+			threshold:     80,
+			wantErr:       true,
+			wantSubstring: "scan coverage is below permitted threshold",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{FailCoverageThreshold: tt.threshold}
+			err := enforceCoverageThreshold(tt.coverage, tt.totalControls, scanInfo)
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.wantSubstring != "" {
+					assert.Contains(t, err.Error(), tt.wantSubstring)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestCoverageWouldFail_MatchesGate is an invariant: the test mirror and the
+// real gate must agree on every input in the sweep. A divergence here means
+// the mirror has drifted from production and Test_enforceCoverageThreshold no
+// longer tests what enforceCoverageThreshold actually does.
+func TestCoverageWouldFail_MatchesGate(t *testing.T) {
+	thresholds := []float32{0, 1, 25, 50, 80, 99, 100}
+	totals := []int{0, 1, 2, 10, 50, 100}
+	notEvals := []int{0, 1, 5, 49}
+
+	for _, threshold := range thresholds {
+		for _, total := range totals {
+			for _, ne := range notEvals {
+				if ne > total {
+					continue
+				}
+				mirrored := coverageWouldFail(ne, total, threshold)
+
+				// Mirror production: build the same ScanCoverage + ScanInfo the
+				// gate receives and ask it directly.
+				coverage := cautils.ScanCoverage{}
+				if total > 0 {
+					coverage.ComputeCoverageScore(total)
+					// Force EvaluatedControls/TotalControls to mirror what the
+					// mirror function sees (the mirror does not run penalties;
+					// it computes pct from the raw ratio).
+					if ne > 0 {
+						coverage.NotEvaluatedControls = make([]cautils.NotEvaluatedControl, ne)
+					}
+					coverage.ComputeCoverageScore(total)
+				}
+				scanInfo := &cautils.ScanInfo{FailCoverageThreshold: threshold}
+				err := enforceCoverageThreshold(coverage, total, scanInfo)
+				gateFails := err != nil
+
+				if mirrored != gateFails {
+					t.Errorf("mirror/gate divergence threshold=%.0f total=%d notEvaluated=%d: mirror=%v gate=%v err=%v", threshold, total, ne, mirrored, gateFails, err)
+				}
+			}
+		}
+	}
+}
+
+// TestZeroControlsCoverage_EndToEnd pins the user-visible behavior: a scan
+// that loaded no controls must (1) report coverageScore=0 and Degraded=true
+// in the report, and (2) make enforceCoverageThreshold return a non-nil error
+// when FailCoverageThreshold > 0. Together these prove the bug is gone from
+// both the score and the gate. It would fail under the buggy code on (1) the
+// score (expected 0, would get 100) and (2) the gate (expected error, would
+// get nil).
+func TestZeroControlsCoverage_EndToEnd(t *testing.T) {
+	coverage := cautils.ScanCoverage{}
+	coverage.ComputeCoverageScore(0)
+
+	assert.Equal(t, float32(0), coverage.CoverageScore, "score must be 0, not the misleading 100")
+	assert.Equal(t, 0, coverage.EvaluatedControls)
+	assert.True(t, coverage.Degraded, "Degraded must be true so downstream consumers (MCP server, JSON) flag the scan")
+
+	scanInfo := &cautils.ScanInfo{FailCoverageThreshold: 1}
+	err := enforceCoverageThreshold(coverage, 0, scanInfo)
+	require.Error(t, err, "zero-controls scan must not silently pass the coverage gate")
+	assert.Contains(t, err.Error(), "scan loaded no controls")
 }
 
 type mockVulnerabilityProvider struct {
