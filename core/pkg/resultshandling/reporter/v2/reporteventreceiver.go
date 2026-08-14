@@ -75,7 +75,7 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 		return nil
 	}
 
-	if err := report.prepareReport(opaSessionObj); err != nil {
+	if err := report.prepareReport(ctx, opaSessionObj); err != nil {
 		return fmt.Errorf("failed to submit scan results. reason: %w", err)
 	}
 
@@ -96,7 +96,7 @@ func (report *ReportEventReceiver) GetClusterName() string {
 	return cautils.AdoptClusterName(report.tenantConfig.GetContextName()) // clean cluster name
 }
 
-func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessionObj) error {
+func (report *ReportEventReceiver) prepareReport(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
 	// The backend for Kubescape expects scanning targets to be either
 	// Clusters or Files, not other types we support (GitLocal, Directory
 	// etc). So, to submit a compatible report to the backend, we have to
@@ -114,7 +114,7 @@ func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessi
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
 
-	return report.sendResources(opaSessionObj)
+	return report.sendResources(ctx, opaSessionObj)
 }
 
 func (report *ReportEventReceiver) getReportUrl() string {
@@ -125,24 +125,24 @@ func (report *ReportEventReceiver) getReportUrl() string {
 	return url.String()
 }
 
-func (report *ReportEventReceiver) sendResources(opaSessionObj *cautils.OPASessionObj) error {
+func (report *ReportEventReceiver) sendResources(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
 	splittedPostureReport := report.setSubReport(opaSessionObj)
 
 	counter := 0
 	reportCounter := 0
 
-	if err := report.setResources(splittedPostureReport, opaSessionObj.AllResources, opaSessionObj.ResourceSource, opaSessionObj.ResourcesResult, &counter, &reportCounter); err != nil {
+	if err := report.setResources(ctx, splittedPostureReport, opaSessionObj.AllResources, opaSessionObj.ResourceSource, opaSessionObj.ResourcesResult, &counter, &reportCounter); err != nil {
 		return err
 	}
 
-	if err := report.setResults(splittedPostureReport, opaSessionObj.ResourcesResult, opaSessionObj.AllResources, opaSessionObj.ResourceSource, opaSessionObj.ResourcesPrioritized, &counter, &reportCounter); err != nil {
+	if err := report.setResults(ctx, splittedPostureReport, opaSessionObj.ResourcesResult, opaSessionObj.AllResources, opaSessionObj.ResourceSource, opaSessionObj.ResourcesPrioritized, &counter, &reportCounter); err != nil {
 		return err
 	}
 
-	return report.sendReport(splittedPostureReport, reportCounter, true)
+	return report.sendReport(ctx, splittedPostureReport, reportCounter, true)
 }
 
-func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, prioritizedResources map[string]prioritization.PrioritizedResource, counter, reportCounter *int) error {
+func (report *ReportEventReceiver) setResults(ctx context.Context, reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, prioritizedResources map[string]prioritization.PrioritizedResource, counter, reportCounter *int) error {
 	for _, v := range results {
 		// set result.RawResource
 		resourceID := v.GetResourceID()
@@ -176,7 +176,7 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Results) > 0 {
 
 			// send report
-			if err := report.sendReport(reportObj, *reportCounter, false); err != nil {
+			if err := report.sendReport(ctx, reportObj, *reportCounter, false); err != nil {
 				return err
 			}
 			*reportCounter++
@@ -195,7 +195,7 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 	return nil
 }
 
-func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, results map[string]resourcesresults.Result, counter, reportCounter *int) error {
+func (report *ReportEventReceiver) setResources(ctx context.Context, reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, results map[string]resourcesresults.Result, counter, reportCounter *int) error {
 	for resourceID, v := range allResources {
 		/*
 
@@ -226,7 +226,7 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Resources) > 0 {
 
 			// send report
-			if err := report.sendReport(reportObj, *reportCounter, false); err != nil {
+			if err := report.sendReport(ctx, reportObj, *reportCounter, false); err != nil {
 				return err
 			}
 			*reportCounter++
@@ -245,7 +245,11 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 	return nil
 }
 
-func (report *ReportEventReceiver) sendReport(postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
+func (report *ReportEventReceiver) sendReport(ctx context.Context, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("scan canceled: %w", err)
+	}
+
 	postureReport.PaginationInfo = apis.PaginationMarks{
 		ReportNumber: counter,
 		IsLastReport: isLastReport,
