@@ -364,6 +364,7 @@ func removeConfigMapData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 	overrideSensitiveData(workload)
+	overrideMapField(workload, "binaryData")
 }
 
 func overrideSensitiveData(workload workloadinterface.IWorkload) {
