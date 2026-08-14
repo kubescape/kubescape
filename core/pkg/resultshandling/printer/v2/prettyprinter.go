@@ -13,13 +13,10 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/jwalton/gchalk"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -76,37 +73,8 @@ func (pp *PrettyPrinter) PrintNextSteps() {
 	pp.mainPrinter.PrintNextSteps()
 }
 
-// convertToImageScanSummary takes a list of image scan data and converts it to a single image scan summary
-func (pp *PrettyPrinter) convertToImageScanSummary(imageScanData []cautils.ImageScanData) (*imageprinter.ImageScanSummary, error) {
-	imageScanSummary := imageprinter.ImageScanSummary{
-		CVEs:                  []imageprinter.CVE{},
-		PackageScores:         map[string]*imageprinter.PackageScore{},
-		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
-	}
-
-	for i := range imageScanData {
-		if !slices.Contains(imageScanSummary.Images, imageScanData[i].Image) {
-			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
-		}
-
-		CVEs := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
-		imageScanSummary.CVEs = append(imageScanSummary.CVEs, CVEs...)
-
-		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
-
-		setSeverityToSummaryMap(CVEs, imageScanSummary.MapsSeverityToSummary)
-	}
-
-	return &imageScanSummary, nil
-}
-
 func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) error {
-	imageScanSummary, err := pp.convertToImageScanSummary(imageScanData)
-	if err != nil {
-		logger.L().Error("failed to convert to image scan summary", helpers.Error(err))
-		return fmt.Errorf("failed to convert to image scan summary: %w", err)
-	}
-	pp.mainPrinter.PrintImageScanning(imageScanSummary)
+	pp.mainPrinter.PrintImageScanning(buildImageScanSummary(imageScanData))
 	return nil
 }
 
