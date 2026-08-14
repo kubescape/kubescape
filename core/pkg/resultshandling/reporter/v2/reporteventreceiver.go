@@ -261,7 +261,7 @@ func (report *ReportEventReceiver) sendReport(postureReport *reporthandlingv2.Po
 	if err != nil {
 		// in case of error, we need to revert the generated account ID
 		// otherwise the next run will fail using a non existing account ID
-		if report.accountIdGenerated {
+		if report.accountIdGenerated && counter == 0 {
 			report.tenantConfig.DeleteCredentials()
 		}
 

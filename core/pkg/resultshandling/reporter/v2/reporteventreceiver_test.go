@@ -211,6 +211,59 @@ func TestSubmit(t *testing.T) {
 		)
 	})
 
+	t.Run("should delete credentials only on first chunk failure", func(t *testing.T) {
+		// Test 1: First chunk fails (counter == 0)
+		tenantMock1 := &TenantConfigMock{
+			clusterName: "test",
+			accountID:   account, 
+		}
+		
+		ksCloud1, err := v1.NewKSCloudAPI(
+			"https://invalid.local",
+			"https://invalid.local",
+			account,
+			accessKey)
+		require.NoError(t, err)
+
+		reporter1 := NewReportEventReceiver(
+			tenantMock1,
+			"cbabd56f-bac6-416a-836b-b815ef347647",
+			SubmitContextScan,
+			ksCloud1,
+		)
+		reporter1.accountIdGenerated = true // Simulate account generation
+
+		// Fail on chunk 0
+		err = reporter1.sendReport(&reporthandlingv2.PostureReport{}, 0, false)
+		require.Error(t, err) // Mock will fail since it's empty / unsupported format in this test setup
+		assert.Equal(t, 0, len(tenantMock1.GetAccountID()), "Account ID should be deleted on first chunk failure")
+
+		// Test 2: Second chunk fails (counter == 1)
+		tenantMock2 := &TenantConfigMock{
+			clusterName: "test",
+			accountID:   account,
+		}
+
+		ksCloud2, err := v1.NewKSCloudAPI(
+			"https://invalid.local",
+			"https://invalid.local",
+			account,
+			accessKey)
+		require.NoError(t, err)
+
+		reporter2 := NewReportEventReceiver(
+			tenantMock2,
+			"cbabd56f-bac6-416a-836b-b815ef347647",
+			SubmitContextScan,
+			ksCloud2,
+		)
+		reporter2.accountIdGenerated = true
+
+		err = reporter2.sendReport(&reporthandlingv2.PostureReport{}, 1, false)
+		require.Error(t, err)
+		assert.Equal(t, account, tenantMock2.GetAccountID(), "Account ID should NOT be deleted on subsequent chunk failures")
+	})
+
 	t.Run("should generate new account if account is empty", func(t *testing.T) {
 		ksCloud, err := v1.NewKSCloudAPI(
 			srv.Root(),
