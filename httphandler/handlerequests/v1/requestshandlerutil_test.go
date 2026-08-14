@@ -215,7 +215,7 @@ func TestWatchForScan_ProcessesRequestThenExits(t *testing.T) {
 	// Override scanImpl so executeScan returns immediately.
 	oldScanImpl := scanImpl
 	defer func() { scanImpl = oldScanImpl }()
-	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
 		return nil, nil
 	}
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/google/uuid"
@@ -39,22 +40,17 @@ type ScanResponse struct {
 }
 
 type HTTPHandler struct {
-	offline         bool
-	state           *serverState
-	scanRequestChan chan *scanRequestParams
-	cancelWatch     context.CancelFunc
+	offline             bool
+	state               *serverState
+	scanRequestChan     chan *scanRequestParams
+	cancelWatch         context.CancelFunc
+	maxRequestBodyBytes int64
 }
 
 func NewHTTPHandler(offline bool) *HTTPHandler {
-	ctx, cancel := context.WithCancel(context.Background())
-	handler := &HTTPHandler{
-		offline:         offline,
-		state:           newServerState(),
-		scanRequestChan: make(chan *scanRequestParams),
-		cancelWatch:     cancel,
-	}
-	go handler.watchForScan(ctx)
-	return handler
+	queueCapacity := configuredPositiveInt(scanQueueCapacityEnv, defaultScanQueueCapacity)
+	maxRequestBody := configuredPositiveInt64(scanRequestMaxBytesEnv, defaultMaxScanRequestBodyBytes)
+	return newHTTPHandler(offline, queueCapacity, maxRequestBody)
 }
 
 // Shutdown stops the background scan watcher goroutine. It should be called
@@ -63,6 +59,37 @@ func (handler *HTTPHandler) Shutdown() {
 	if handler.cancelWatch != nil {
 		handler.cancelWatch()
 	}
+}
+
+func newHTTPHandler(offline bool, queueCapacity int, maxRequestBodyBytes int64) *HTTPHandler {
+	ctx, cancel := context.WithCancel(context.Background())
+	handler := &HTTPHandler{
+		offline:             offline,
+		state:               newServerState(),
+		scanRequestChan:     make(chan *scanRequestParams, queueCapacity),
+		cancelWatch:         cancel,
+		maxRequestBodyBytes: maxRequestBodyBytes,
+	}
+	go handler.watchForScan(ctx)
+	return handler
+}
+
+func configuredPositiveInt(name string, defaultValue int) int {
+	if raw, ok := os.LookupEnv(name); ok {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			return v
+		}
+	}
+	return defaultValue
+}
+
+func configuredPositiveInt64(name string, defaultValue int64) int64 {
+	if raw, ok := os.LookupEnv(name); ok {
+		if v, err := strconv.ParseInt(raw, 10, 64); err == nil && v > 0 {
+			return v
+		}
+	}
+	return defaultValue
 }
 
 // ============================================== STATUS ========================================================

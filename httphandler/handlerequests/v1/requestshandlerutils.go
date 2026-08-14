@@ -141,6 +141,9 @@ func (handler *HTTPHandler) watchForScan(ctx context.Context) {
 		select {
 		case scanReq := <-handler.scanRequestChan:
 			logger.L().Info("triggering scan", helpers.String("scanID", scanReq.scanID))
+			if scanReq.isUserScan {
+				handler.state.setRunningUserScanID(scanReq.scanID)
+			}
 			handler.executeScan(scanReq)
 		case <-ctx.Done():
 			return
