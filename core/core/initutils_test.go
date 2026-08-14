@@ -747,8 +747,6 @@ func TestGetDownloadReleasedPolicy(t *testing.T) {
 	ctx := context.Background()
 	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy()
 
-	require.NoError(t, downloadReleasedPolicy.SetRegoObjects())
-
 	result, err := getDownloadReleasedPolicy(ctx, downloadReleasedPolicy)
 
 	require.NoError(t, err)
