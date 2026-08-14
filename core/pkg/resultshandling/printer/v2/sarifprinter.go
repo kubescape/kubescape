@@ -484,13 +484,18 @@ func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, 
 	// wrong segment for any path containing more than one colon (e.g. a
 	// Windows path like "C:\repo\deploy.yaml:0"), producing a non-numeric
 	// value that Atoi rejects and this function reporting "no doc index"
-	// even though one exists. This matches how fixhandler.getFilePathAndIndex
-	// parses the same convention.
+	// even though one exists. We also explicitly ignore the volume name
+	// to prevent treating a drive letter colon as the document index separator.
+	// This matches how fixhandler.getFilePathAndIndex parses the same convention.
 	path := localworkload.GetPath()
-	lastColon := strings.LastIndex(path, ":")
+	volume := filepath.VolumeName(path)
+	pathWithoutVolume := path[len(volume):]
+
+	lastColon := strings.LastIndex(pathWithoutVolume, ":")
 	if lastColon == -1 {
 		return 0, false
 	}
+	lastColon += len(volume)
 
 	docIndex, err := strconv.Atoi(path[lastColon+1:])
 	if err != nil {

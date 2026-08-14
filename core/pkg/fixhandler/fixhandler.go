@@ -755,10 +755,14 @@ func sanitizeForLog(s string) string {
 }
 
 func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath string, documentIndex int, err error) {
-	lastColon := strings.LastIndex(filePathWithIndex, ":")
+	volume := filepath.VolumeName(filePathWithIndex)
+	pathWithoutVolume := filePathWithIndex[len(volume):]
+
+	lastColon := strings.LastIndex(pathWithoutVolume, ":")
 	if lastColon == -1 {
 		return "", 0, fmt.Errorf("expected to find ':' in file path")
 	}
+	lastColon += len(volume)
 
 	filePath = filePathWithIndex[:lastColon]
 	indexStr := filePathWithIndex[lastColon+1:]
