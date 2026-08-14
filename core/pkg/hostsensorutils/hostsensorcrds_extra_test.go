@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 )
@@ -131,6 +132,19 @@ func TestListCRDResources(t *testing.T) {
 }
 
 func TestHostSensorHandlerLifecycleEdges(t *testing.T) {
+	sharedConfig := &rest.Config{
+		Host: "https://cluster.example.test",
+		ContentConfig: rest.ContentConfig{
+			AcceptContentTypes: "application/json",
+			ContentType:        "application/json",
+		},
+	}
+	originalConfig := k8sinterface.K8SConfig
+	k8sinterface.K8SConfig = sharedConfig
+	t.Cleanup(func() {
+		k8sinterface.K8SConfig = originalConfig
+	})
+
 	handler := &HostSensorHandler{}
 
 	assert.NoError(t, handler.TearDown())
