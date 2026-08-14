@@ -5,10 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/anchore/grype/grype/match"
+	grypepkg "github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
@@ -29,6 +34,36 @@ func (dr *DummyReporter) Submit(_ context.Context, _ *cautils.OPASessionObj) err
 func (dr *DummyReporter) SetTenantConfig(_ cautils.ITenantConfig) {}
 func (dr *DummyReporter) DisplayMessage()                         {}
 func (dr *DummyReporter) GetURL() string                          { return "" }
+
+type capturingReporter struct {
+	cves   []reportsummary.CVESummary
+	images []string
+}
+
+func (r *capturingReporter) Submit(_ context.Context, data *cautils.OPASessionObj) error {
+	r.cves = append([]reportsummary.CVESummary(nil), data.Report.SummaryDetails.Vulnerabilities.CVESummary...)
+	r.images = append([]string(nil), data.Report.SummaryDetails.Vulnerabilities.Images...)
+	return nil
+}
+func (r *capturingReporter) SetTenantConfig(_ cautils.ITenantConfig) {}
+func (r *capturingReporter) DisplayMessage()                         {}
+func (r *capturingReporter) GetURL() string                          { return "" }
+
+type combinedScanVulnerabilityProvider struct{}
+
+func (combinedScanVulnerabilityProvider) PackageSearchNames(grypepkg.Package) []string {
+	return nil
+}
+func (combinedScanVulnerabilityProvider) FindVulnerabilities(...vulnerability.Criteria) ([]vulnerability.Vulnerability, error) {
+	return nil, nil
+}
+func (combinedScanVulnerabilityProvider) VulnerabilityMetadata(ref vulnerability.Reference) (*vulnerability.Metadata, error) {
+	if ref.ID != "CVE-COMBINED" {
+		return nil, errors.New("metadata not found")
+	}
+	return &vulnerability.Metadata{ID: ref.ID, Severity: "High"}, nil
+}
+func (combinedScanVulnerabilityProvider) Close() error { return nil }
 
 type SpyPrinter struct {
 	ActionPrintCalls int
@@ -128,6 +163,63 @@ func TestResultsHandlerHandleResultsPrintsBeforeReturningScanError(t *testing.T)
 	require.ErrorIs(t, err, scanErr)
 	assert.Equal(t, 1, uiPrinter.ActionPrintCalls)
 	assert.Equal(t, 1, outputPrinter.ActionPrintCalls)
+}
+
+func TestCombinedJSONAndYAMLOutputDoesNotMutateSubmittedSession(t *testing.T) {
+	imageMatch := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-COMBINED", Namespace: "nvd"},
+			Metadata:  &vulnerability.Metadata{ID: "CVE-COMBINED", Severity: "High"},
+		},
+		Package: grypepkg.Package{
+			ID:      grypepkg.ID("pkg-combined"),
+			Name:    "pkg-combined",
+			Version: "1.0.0",
+		},
+	}
+	imageData := []cautils.ImageScanData{{
+		Image:                 "combined:latest",
+		Matches:               match.NewMatches(imageMatch),
+		VulnerabilityProvider: combinedScanVulnerabilityProvider{},
+	}}
+
+	tests := []struct {
+		name      string
+		extension string
+		printer   func() printer.IPrinter
+	}{
+		{name: "json", extension: ".json", printer: func() printer.IPrinter { return printerv2.NewJsonPrinter("") }},
+		{name: "yaml", extension: ".yaml", printer: func() printer.IPrinter { return printerv2.NewYamlPrinter() }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanData := &cautils.OPASessionObj{
+				Report:   &reporthandlingv2.PostureReport{},
+				Metadata: &reporthandlingv2.Metadata{},
+			}
+			reporter := &capturingReporter{}
+			outputPrinter := tt.printer()
+			outputPath := filepath.Join(t.TempDir(), "combined"+tt.extension)
+			outputPrinter.SetWriter(context.Background(), outputPath)
+
+			handler := NewResultsHandler(reporter, []printer.IPrinter{outputPrinter}, &SpyPrinter{})
+			handler.SetData(scanData)
+			handler.ImageScanData = imageData
+			scanInfo := &cautils.ScanInfo{}
+			scanInfo.Submit.SetBool(true)
+
+			require.NoError(t, handler.HandleResults(context.Background(), scanInfo))
+
+			output, err := os.ReadFile(outputPath)
+			require.NoError(t, err)
+			assert.Contains(t, string(output), "CVE-COMBINED", "combined local output lost image findings")
+			assert.Empty(t, reporter.cves, "local output changed the submitted posture summary")
+			assert.Empty(t, reporter.images, "local output changed the submitted posture summary")
+			assert.Empty(t, handler.GetData().Report.SummaryDetails.Vulnerabilities.CVESummary)
+			assert.Empty(t, handler.GetData().Report.SummaryDetails.Vulnerabilities.Images)
+		})
+	}
 }
 
 func TestValidatePrinter(t *testing.T) {
