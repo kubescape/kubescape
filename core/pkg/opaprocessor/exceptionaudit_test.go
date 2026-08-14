@@ -112,9 +112,45 @@ func TestBuildExceptionAuditTreatsRegexControlAsValid(t *testing.T) {
 	assert.Equal(t, exceptionAuditStatusUnused, audit.Items[0].Status)
 }
 
+func TestBuildExceptionAuditDoesNotCollapseDuplicateNamesWithDifferentGUIDs(t *testing.T) {
+	firstException := auditExceptionWithGUID("guid-1", "dup-name", "C-0001", nil)
+	secondException := auditExceptionWithGUID("guid-2", "dup-name", "C-0002", nil)
+
+	audit := buildExceptionAudit(
+		[]armotypes.PostureExceptionPolicy{firstException, secondException},
+		[]armotypes.PostureExceptionPolicy{firstException, secondException},
+		nil,
+		nil,
+		&cautils.Policies{
+			Controls: map[string]reporthandling.Control{
+				"C-0001": {ControlID: "C-0001"},
+				"C-0002": {ControlID: "C-0002"},
+			},
+		},
+		exceptions.NewProcessor(),
+	)
+
+	require.NotNil(t, audit)
+	require.Len(t, audit.Items, 2)
+	assert.Equal(t, 2, audit.Summary.Total)
+	assert.Equal(t, 2, audit.Summary.Active)
+
+	var gotControlIDs []string
+	for _, item := range audit.Items {
+		assert.Equal(t, "dup-name", item.Name)
+		require.Len(t, item.ControlIDs, 1)
+		gotControlIDs = append(gotControlIDs, item.ControlIDs[0])
+	}
+	assert.ElementsMatch(t, []string{"C-0001", "C-0002"}, gotControlIDs)
+}
+
 func auditException(name, controlID string, expirationDate *time.Time) armotypes.PostureExceptionPolicy {
+	return auditExceptionWithGUID("", name, controlID, expirationDate)
+}
+
+func auditExceptionWithGUID(guid, name, controlID string, expirationDate *time.Time) armotypes.PostureExceptionPolicy {
 	return armotypes.PostureExceptionPolicy{
-		PortalBase: armotypes.PortalBase{Name: name},
+		PortalBase: armotypes.PortalBase{GUID: guid, Name: name},
 		PosturePolicies: []armotypes.PosturePolicy{
 			{ControlID: controlID},
 		},

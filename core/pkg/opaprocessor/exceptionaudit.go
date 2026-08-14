@@ -106,7 +106,7 @@ func buildExceptionAudit(
 
 func exceptionAuditItem(exception armotypes.PostureExceptionPolicy, policies *cautils.Policies, processor *exceptions.Processor) cautils.ExceptionAuditItem {
 	item := cautils.ExceptionAuditItem{
-		Name:       exceptionAuditKey(exception),
+		Name:       exceptionAuditName(exception),
 		Expired:    exceptionIsExpired(exception),
 		ControlIDs: exceptionControlIDs(exception),
 	}
@@ -115,6 +115,13 @@ func exceptionAuditItem(exception armotypes.PostureExceptionPolicy, policies *ca
 }
 
 func exceptionAuditKey(exception armotypes.PostureExceptionPolicy) string {
+	if exception.GUID != "" {
+		return exception.GUID
+	}
+	return exceptionAuditName(exception)
+}
+
+func exceptionAuditName(exception armotypes.PostureExceptionPolicy) string {
 	if exception.Name != "" {
 		return exception.Name
 	}
