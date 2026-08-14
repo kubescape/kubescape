@@ -814,7 +814,39 @@ func TestMergeWorkloadConfigurationScanSpec(t *testing.T) {
 				},
 			},
 			expected: map[string]v1beta1.ScannedControl{
-				"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "old"}, Rules: []v1beta1.ScannedControlRule{{Name: "rule-2"}}},
+				"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "new"}, Rules: []v1beta1.ScannedControlRule{{Name: "rule-2"}}},
+			},
+		},
+		{
+			name: "tied status takes latest non-empty info",
+			existing: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "old"}},
+				},
+			},
+			new: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "new"}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControl{
+				"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "new"}},
+			},
+		},
+		{
+			name: "tied status falls back to existing info when new is empty",
+			existing: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "old"}},
+				},
+			},
+			new: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControl{
+				"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "old"}},
 			},
 		},
 		{
@@ -911,7 +943,39 @@ func TestMergeWorkloadConfigurationScanSummarySpec(t *testing.T) {
 				},
 			},
 			expected: map[string]v1beta1.ScannedControlSummary{
-				"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "old"}},
+				"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "new"}},
+			},
+		},
+		{
+			name: "tied status takes latest non-empty info",
+			existing: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "old"}},
+				},
+			},
+			new: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "new"}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControlSummary{
+				"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "new"}},
+			},
+		},
+		{
+			name: "tied status falls back to existing info when new is empty",
+			existing: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "old"}},
+				},
+			},
+			new: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControlSummary{
+				"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "old"}},
 			},
 		},
 		{

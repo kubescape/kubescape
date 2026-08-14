@@ -242,11 +242,8 @@ func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurati
 		mergedStatus, mergedSubStatus := apis.CompareStatusAndSubStatus(existingStatus, newStatus, existingSubStatus, newSubStatus)
 
 		info := newCtrl.Status.Info
-		if mergedStatus == existingStatus {
-			info = existingCtrl.Status.Info
-		}
 		if info == "" {
-			info = newCtrl.Status.Info
+			info = existingCtrl.Status.Info
 		}
 
 		severity := newCtrl.Severity
@@ -305,11 +302,8 @@ func mergeWorkloadConfigurationScanSummarySpec(existingSpec v1beta1.WorkloadConf
 		mergedStatus, mergedSubStatus := apis.CompareStatusAndSubStatus(existingStatus, newStatus, existingSubStatus, newSubStatus)
 
 		info := newCtrl.Status.Info
-		if mergedStatus == existingStatus {
-			info = existingCtrl.Status.Info
-		}
 		if info == "" {
-			info = newCtrl.Status.Info
+			info = existingCtrl.Status.Info
 		}
 
 		severity := newCtrl.Severity
