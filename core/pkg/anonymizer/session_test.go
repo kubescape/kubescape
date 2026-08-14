@@ -1232,3 +1232,56 @@ func TestTransformSourcePath_EncryptionTransformer(t *testing.T) {
 		decryptedPath,
 	)
 }
+
+func TestTransformSourcePath_WindowsDriveLetterNoLineSuffix(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	transformer := NewEncryptionTransformer(dek)
+
+	// A bare Windows path has no trailing ":<index>" suffix, so its only
+	// colon is the drive letter's. That colon must not be mistaken for a
+	// line-number separator, or everything past "C" leaks in cleartext.
+	transformed, err := transformSourcePath(
+		`C:\Users\alice\manifests\payment.yaml`,
+		transformer,
+	)
+	require.NoError(t, err)
+
+	assert.NotContains(t, transformed, `Users\alice`)
+	assert.Contains(t, transformed, "ENC[AES256_GCM,")
+
+	decryptedPath, err := reportcrypto.DecryptString(transformed, dek)
+	require.NoError(t, err)
+
+	assert.Equal(t, `C:\Users\alice\manifests\payment.yaml`, decryptedPath)
+}
+
+func TestTransformSourcePath_WindowsDriveLetterWithLineSuffix(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	transformer := NewEncryptionTransformer(dek)
+
+	transformed, err := transformSourcePath(
+		`C:\Users\alice\manifests\payment.yaml:7`,
+		transformer,
+	)
+	require.NoError(t, err)
+
+	assert.NotContains(t, transformed, `Users\alice`)
+
+	lastColon := strings.LastIndex(transformed, ":")
+	require.NotEqual(t, -1, lastColon)
+
+	encryptedPath := transformed[:lastColon]
+	linePart := transformed[lastColon:]
+
+	assert.Contains(t, encryptedPath, "ENC[AES256_GCM,")
+	assert.Equal(t, ":7", linePart)
+
+	decryptedPath, err := reportcrypto.DecryptString(encryptedPath, dek)
+	require.NoError(t, err)
+
+	assert.Equal(t, `C:\Users\alice\manifests\payment.yaml`, decryptedPath)
+}
