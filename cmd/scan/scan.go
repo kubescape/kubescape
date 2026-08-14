@@ -63,6 +63,15 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Example: scanCmdExamples,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// runs for the bare scan command and all subcommands (framework, control, workload, image)
+			if scanInfo.FormatVersion != "v1" && scanInfo.FormatVersion != "v2" {
+				return fmt.Errorf("invalid --format-version %q: supported versions are v1 and v2", scanInfo.FormatVersion)
+			}
+			if scanInfo.ScanTimeout < 0 {
+				return fmt.Errorf("invalid --scan-timeout %s: must be zero or positive", scanInfo.ScanTimeout)
+			}
+			if scanInfo.ControlTimeout < 0 {
+				return fmt.Errorf("invalid --control-timeout %s: must be zero or positive", scanInfo.ControlTimeout)
+			}
 			if strings.Contains(scanInfo.ControlsVersion, "/") {
 				return fmt.Errorf(
 					"invalid --controls-version %q: must be a regolibrary release tag and cannot contain '/'",

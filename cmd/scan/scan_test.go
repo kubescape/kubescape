@@ -418,6 +418,49 @@ func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	assert.EqualError(t, err, errMessage)
 }
 
+type scanCallCounter struct {
+	mocks.MockIKubescape
+	calls int
+}
+
+func (m *scanCallCounter) Scan(_ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
+	m.calls++
+	return nil, errors.New("scan reached")
+}
+
+func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		wantCalls int
+		wantError string
+	}{
+		{name: "rejects unsupported format version", args: []string{"--format-version=v3"}, wantError: "invalid --format-version"},
+		{name: "format version is case sensitive", args: []string{"--format-version=V2"}, wantError: "invalid --format-version"},
+		{name: "rejects empty format version", args: []string{"--format-version="}, wantError: "invalid --format-version"},
+		{name: "rejects negative scan timeout", args: []string{"--scan-timeout=-1s"}, wantError: "invalid --scan-timeout"},
+		{name: "rejects negative control timeout", args: []string{"--control-timeout=-1s"}, wantError: "invalid --control-timeout"},
+		{name: "accepts defaults", wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts format version v1", args: []string{"--format-version=v1"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts format version v2", args: []string{"--format-version=v2"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts zero timeouts", args: []string{"--scan-timeout=0", "--control-timeout=0"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts positive timeouts", args: []string{"--scan-timeout=2s", "--control-timeout=1s"}, wantCalls: 1, wantError: "scan reached"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &scanCallCounter{}
+			cmd := GetScanCommand(ks)
+			cmd.SilenceUsage = true
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			require.ErrorContains(t, err, tt.wantError)
+			assert.Equal(t, tt.wantCalls, ks.calls)
+		})
+	}
+}
+
 func TestGetScanCommand_ScanTimeoutFlagRegistered(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	cmd := GetScanCommand(mockKubescape)
