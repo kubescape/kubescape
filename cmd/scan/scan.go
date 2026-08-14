@@ -362,14 +362,18 @@ func enforceImageSeverityThresholds(imageScanData []cautils.ImageScanData, scanI
 	}
 
 	for _, data := range imageScanData {
-		if data.VulnerabilityProvider == nil {
-			continue
-		}
 		for m := range data.Matches.Enumerate() {
-			//nolint:staticcheck // deprecated but replacing it requires refactoring
-			metadata, err := data.VulnerabilityProvider.VulnerabilityMetadata(m.Vulnerability.Reference)
-			if err != nil {
-				continue
+			metadata := m.Vulnerability.Metadata
+			if metadata == nil || imagescan.ParseSeverity(metadata.Severity) == vulnerability.UnknownSeverity {
+				if data.VulnerabilityProvider == nil {
+					continue
+				}
+				var err error
+				//nolint:staticcheck // fallback for matches without a known embedded severity
+				metadata, err = data.VulnerabilityProvider.VulnerabilityMetadata(m.Vulnerability.Reference)
+				if err != nil {
+					continue
+				}
 			}
 
 			if imagescan.ParseSeverity(metadata.Severity) >= thresholdSeverity &&
