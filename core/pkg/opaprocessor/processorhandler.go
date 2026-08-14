@@ -48,6 +48,7 @@ const ControlAttributeRequiresWholeClusterInput = "requiresWholeClusterInput"
 // requiresWholeClusterInput attribute on them. Keep it in sync with the
 // regolibrary: remove an ID once its control carries the attribute.
 var wholeClusterControlIDsFallback = map[string]struct{}{
+	"C-0261": {}, // SA token auto-mount bound via RoleBinding/ClusterRoleBinding in another namespace
 	"C-0266": {}, // Exposure to internet via Gateway API or Istio Ingress (Gateway/Service/VirtualService across namespaces)
 	"C-0267": {}, // Workload with cluster takeover roles (RoleBinding -> ServiceAccount in another namespace)
 	"C-0272": {}, // Workload with administrative roles (RoleBinding -> ServiceAccount in another namespace)
