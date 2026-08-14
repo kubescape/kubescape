@@ -189,6 +189,9 @@ func TestReadmeReferencesExistingWorkflows(t *testing.T) {
 // fails here instead of quietly making the README wrong again.
 func TestWorkflowPrefixConventionHolds(t *testing.T) {
 	numericPrefix := regexp.MustCompile(`^[0-9]`)
+	// Asserted positively rather than as "not numeric", so a name starting with
+	// punctuation or an underscore fails too instead of passing by default.
+	alphabeticPrefix := regexp.MustCompile(`^[A-Za-z]`)
 
 	for name, content := range workflowFiles(t) {
 		t.Run(name, func(t *testing.T) {
@@ -197,7 +200,7 @@ func TestWorkflowPrefixConventionHolds(t *testing.T) {
 
 			switch {
 			case isReusable:
-				assert.Falsef(t, numericPrefix.MatchString(name),
+				assert.Truef(t, alphabeticPrefix.MatchString(name),
 					"%s is reusable (on.workflow_call) so it should carry an alphabetic prefix", name)
 			case isCaller:
 				assert.Truef(t, numericPrefix.MatchString(name),

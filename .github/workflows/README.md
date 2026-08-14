@@ -8,11 +8,11 @@ Kubescape's default branch is `master`; open every PR against `master`.
 
 ### Opening a PR
 
-Opening a PR triggers `00-pr-scanner.yaml`, which calls the reusable `a-pr-scanner.yaml` workflow. That runs the unit tests (`go test -race ./...`, plus a separate race-enabled run over `./core/cautils/...` and the `httphandler` module), a cross-platform GoReleaser snapshot build, the `smoke_testing/init.py` smoke test against the built binary, and `golangci-lint` in `only-new-issues` mode.
+Opening a PR triggers `00-pr-scanner.yaml`, which calls the reusable `a-pr-scanner.yaml` workflow. That runs, in order: `go test -race ./...`; a second race-enabled run over `./core/cautils/...` with `CGO_ENABLED=1`; the `httphandler` module tests, which run without the race detector; a cross-platform GoReleaser snapshot build; the `smoke_testing/init.py` smoke test against the built binary; and `golangci-lint` in `only-new-issues` mode.
 
 Two GitHub Apps report alongside it: the DCO check, which requires a `Signed-off-by:` trailer on every commit, and GitGuardian secret scanning.
 
-Documentation-only PRs do not run the build: `00-pr-scanner.yaml` filters out Markdown, YAML, shell, `docs/`, `build/` and `examples/` changes via `paths-ignore`.
+`00-pr-scanner.yaml` carries a `paths-ignore` filter, so a PR that touches nothing else can skip the build entirely. It ignores `**.md`, `**.yaml`, `**.yml` and `**.sh` at any depth, plus files sitting directly in `website/`, `examples/`, `docs/`, `build/` and `.github/`. Those last five are single-level patterns: a nested file such as `docs/guide/diagram.svg` does not match and will still start the workflow. The build is skipped only when *every* changed file in the PR matches one of the patterns.
 
 ### Reviewing a PR
 
@@ -55,7 +55,7 @@ The workflow can also be started manually via `workflow_dispatch`, which exposes
 
 ## Additional Information
 
-Reusable workflows — the ones invoked by another workflow through `on: workflow_call` — carry an alphabetic prefix (`a-pr-scanner.yaml`). The event-triggered entrypoints that invoke them carry a numeric prefix (`00-pr-scanner.yaml`, `02-release.yaml`). Standalone workflows that are neither, such as `scorecard.yml` and `comments.yaml`, sit outside the convention.
+Reusable workflows — the ones invoked by another workflow through `on: workflow_call` — carry an alphabetic prefix (`a-pr-scanner.yaml`). A workflow that invokes one carries a numeric prefix (`00-pr-scanner.yaml`). `02-release.yaml` also carries a numeric prefix, but it invokes nothing: it is an event-triggered entrypoint that does its work inline. Workflows that are neither reusable nor callers, such as `scorecard.yml` and `comments.yaml`, sit outside the convention.
 
 ## Screenshot
 
