@@ -109,8 +109,17 @@ grants(role, verb) if {
 grants_unrestricted(role, verb) if {
 	rule := role.rules[_]
 	targets_secrets(rule)
-	not rule.resourceNames
+	unrestricted_rule(rule)
 	rule.verbs[_] in {verb, "*"}
+}
+
+# Kubernetes draws no distinction between an absent resourceNames and an
+# explicitly empty one: ResourceNameMatches returns true as soon as the list is
+# empty, so both mean the rule is not narrowed to named objects. Testing
+# definedness alone (not rule.resourceNames) would treat resourceNames: [] as
+# scoped and skip a subject that in fact holds unrestricted access.
+unrestricted_rule(rule) if {
+	count(object.get(rule, "resourceNames", [])) == 0
 }
 
 targets_secrets(rule) if {
