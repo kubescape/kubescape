@@ -48,6 +48,7 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 	fixCmd.PersistentFlags().BoolVar(&fixInfo.DryRun, "dry-run", false, "No changes will be applied (default false)")
 	fixCmd.PersistentFlags().BoolVar(&fixInfo.SkipUserValues, "skip-user-values", true, "Changes which involve user-defined values will be skipped")
 	fixCmd.PersistentFlags().StringVar(&fixInfo.BasePath, "base-path", "", "Restrict fixes to this directory: the report's own recorded scan location must resolve inside it. Use this when the report file comes from a source you don't fully trust (e.g. a shared CI artifact); without it, the report's recorded location is trusted as-is")
+	fixCmd.PersistentFlags().StringVar(&fixInfo.ContainerProfilePath, "container-profile", "", "Path to a JSON file containing a ContainerProfile to use for drift detection")
 
 	return fixCmd
 }

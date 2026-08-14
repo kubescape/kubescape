@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -133,6 +134,66 @@ func buildDependencies(chartPath string) error {
 
 func (hc *HelmChart) GetName() string {
 	return hc.chart.Name()
+}
+
+// ownsUnpackedDependency reports whether candidate is a chart directory loaded
+// through hc's on-disk charts/ dependency tree. It follows the loaded chart graph
+// instead of relying on the path alone: a directory excluded by .helmignore is not
+// owned by the parent and remains eligible for a standalone fallback render.
+func (hc *HelmChart) ownsUnpackedDependency(candidate string) bool {
+	rel, err := filepath.Rel(hc.path, candidate)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(filepath.Clean(rel), string(filepath.Separator))
+	current := hc.chart
+	for len(parts) > 0 {
+		if len(parts) < 2 || parts[0] != "charts" {
+			return false
+		}
+
+		current = loadedUnpackedDependency(current, parts[1])
+		if current == nil {
+			return false
+		}
+		parts = parts[2:]
+	}
+	return true
+}
+
+// loadedUnpackedDependency matches a direct charts/<directory> tree from the
+// parent's raw, post-.helmignore file set to the dependency object Helm loaded
+// from those same files. Comparing the complete file set avoids assuming that
+// the directory name equals Chart.yaml's name or that chart names are unique.
+func loadedUnpackedDependency(parent *helmchart.Chart, directory string) *helmchart.Chart {
+	prefix := filepath.ToSlash(filepath.Join("charts", directory)) + "/"
+	files := make(map[string][]byte)
+	for _, file := range parent.Raw {
+		if strings.HasPrefix(file.Name, prefix) {
+			files[strings.TrimPrefix(file.Name, prefix)] = file.Data
+		}
+	}
+	if len(files) == 0 {
+		return nil
+	}
+
+	for _, dependency := range parent.Dependencies() {
+		if len(dependency.Raw) != len(files) {
+			continue
+		}
+		matches := true
+		for _, file := range dependency.Raw {
+			data, ok := files[file.Name]
+			if !ok || !bytes.Equal(data, file.Data) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return dependency
+		}
+	}
+	return nil
 }
 
 func (hc *HelmChart) GetDefaultValues() map[string]any {

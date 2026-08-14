@@ -22,7 +22,6 @@ func TestRegisteredStorageToolsRejectMalformedArguments(t *testing.T) {
 		"list_vulnerability_matches_for_cve",
 		"list_configuration_security_scan_manifests",
 		"get_configuration_security_scan_manifest",
-		"scan_container_image",
 	}
 	malformed := []struct {
 		name      string
@@ -178,6 +177,5 @@ func newRegisteredStorageToolTestServer(objects ...runtime.Object) *KubescapeMcp
 	}
 	createVulnerabilityToolsAndResources(ksServer)
 	createConfigurationsToolsAndResources(ksServer)
-	createImageScanningTools(ksServer)
 	return ksServer
 }

@@ -17,6 +17,9 @@ type mockECRClient struct {
 }
 
 func (m *mockECRClient) DescribeImageScanFindings(ctx context.Context, params *ecr.DescribeImageScanFindingsInput, optFns ...func(*ecr.Options)) (*ecr.DescribeImageScanFindingsOutput, error) {
+	if params.ImageId != nil && params.ImageId.ImageDigest == nil && params.ImageId.ImageTag == nil {
+		panic("InvalidParameterException: imageId must contain either imageDigest or imageTag")
+	}
 	return m.describeFindingsOut, m.describeFindingsErr
 }
 
@@ -43,11 +46,35 @@ func TestAWSECRAdaptor_GetImagesScanStatus(t *testing.T) {
 			expectedScan: true,
 		},
 		{
+			name: "enhanced continuous scan active with findings",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				ImageScanStatus: &types.ImageScanStatus{
+					Status: types.ScanStatusActive,
+				},
+				ImageScanFindings: &types.ImageScanFindings{
+					ImageScanCompletedAt: &now,
+					EnhancedFindings: []types.EnhancedImageScanFinding{
+						{
+							Severity: aws.String("HIGH"),
+						},
+					},
+				},
+			},
+			expectedScan: true,
+		},
+		{
 			name: "scan in progress",
 			mockOut: &ecr.DescribeImageScanFindingsOutput{
 				ImageScanStatus: &types.ImageScanStatus{
 					Status: types.ScanStatusInProgress,
 				},
+			},
+			expectedScan: false,
+		},
+		{
+			name:    "empty hash and tag should not panic",
+			mockOut: &ecr.DescribeImageScanFindingsOutput{
+				// the mock client will panic if it reaches DescribeImageScanFindings
 			},
 			expectedScan: false,
 		},
@@ -63,6 +90,10 @@ func TestAWSECRAdaptor_GetImagesScanStatus(t *testing.T) {
 
 			images := []ContainerImageIdentifier{
 				{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "test-repo", Tag: "latest"},
+			}
+
+			if tt.name == "empty hash and tag should not panic" {
+				images[0].Tag = ""
 			}
 
 			statuses, err := adaptor.GetImagesScanStatus(context.Background(), images)
@@ -113,4 +144,91 @@ func TestAWSECRAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	assert.Equal(t, "High", vuln.Severity)
 	assert.Equal(t, "Test vulnerability", vuln.Description)
 	assert.Equal(t, []string{"https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2023-1234"}, vuln.Links)
+}
+
+func TestAWSECRAdaptor_GetImagesVulnerabilities_EnhancedFindings(t *testing.T) {
+	mockOut := &ecr.DescribeImageScanFindingsOutput{
+		ImageScanFindings: &types.ImageScanFindings{
+			EnhancedFindings: []types.EnhancedImageScanFinding{
+				{
+					Description: aws.String("xmlXIncludeAddNode in libxml2 has a use-after-free"),
+					Severity:    aws.String("HIGH"),
+					PackageVulnerabilityDetails: &types.PackageVulnerabilityDetails{
+						VulnerabilityId: aws.String("CVE-2022-49043"),
+						ReferenceUrls: []string{
+							"https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1094238",
+							"https://security-tracker.debian.org/tracker/CVE-2022-49043",
+						},
+						SourceUrl: aws.String("https://security-tracker.debian.org/tracker/CVE-2022-49043"),
+					},
+				},
+			},
+		},
+	}
+
+	adaptor := NewAWSECRAdaptor()
+	adaptor.client = &mockECRClient{
+		describeFindingsOut: mockOut,
+	}
+
+	images := []ContainerImageIdentifier{
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "test-repo", Tag: "latest"},
+	}
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
+	assert.NoError(t, err)
+	assert.Len(t, reports, 1)
+	assert.Len(t, reports[0].Vulnerabilities, 1)
+
+	vuln := reports[0].Vulnerabilities[0]
+	assert.Equal(t, "CVE-2022-49043", vuln.ID)
+	assert.Equal(t, "High", vuln.Severity)
+	assert.Equal(t, "xmlXIncludeAddNode in libxml2 has a use-after-free", vuln.Description)
+	assert.Equal(t, []string{
+		"https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1094238",
+		"https://security-tracker.debian.org/tracker/CVE-2022-49043",
+	}, vuln.Links)
+}
+
+func TestAWSECRAdaptor_GetImagesVulnerabilities_EnhancedFindingsFallsBackToTitle(t *testing.T) {
+	mockOut := &ecr.DescribeImageScanFindingsOutput{
+		ImageScanFindings: &types.ImageScanFindings{
+			EnhancedFindings: []types.EnhancedImageScanFinding{
+				{
+					Title: aws.String("CVE-2026-1234"),
+				},
+				{
+					Title:                       aws.String("CVE-2026-5678"),
+					PackageVulnerabilityDetails: &types.PackageVulnerabilityDetails{},
+				},
+			},
+		},
+	}
+
+	adaptor := NewAWSECRAdaptor()
+	adaptor.client = &mockECRClient{describeFindingsOut: mockOut}
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "test-repo", Tag: "latest"},
+	})
+
+	assert.NoError(t, err)
+	assert.Len(t, reports, 1)
+	assert.Len(t, reports[0].Vulnerabilities, 2)
+	assert.Equal(t, "CVE-2026-1234", reports[0].Vulnerabilities[0].ID)
+	assert.Equal(t, "CVE-2026-5678", reports[0].Vulnerabilities[1].ID)
+}
+
+func TestAWSECRAdaptor_GetImagesVulnerabilities_EmptyHashAndTagShouldNotPanic(t *testing.T) {
+	adaptor := NewAWSECRAdaptor()
+	adaptor.client = &mockECRClient{}
+
+	images := []ContainerImageIdentifier{
+		{Registry: "123456789012.dkr.ecr.us-east-1.amazonaws.com", Repository: "test-repo"},
+	}
+
+	reports, err := adaptor.GetImagesVulnerabilities(context.Background(), images)
+	assert.NoError(t, err)
+	assert.Len(t, reports, 1)
+	assert.Empty(t, reports[0].Vulnerabilities)
 }

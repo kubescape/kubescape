@@ -200,3 +200,14 @@ func TestValidateWorkloadImageCredentialsRequiresAuthority(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateRegistryCredentials_EnvVarBug(t *testing.T) {
+	username := "my-username"
+	password := ""
+	token := "my-token"
+
+	err := ValidateRegistryCredentials(username, password, token, "")
+
+	// Should return conflict error because both token and username are present
+	assert.Equal(t, ErrRegistryAuthConflict, err)
+}

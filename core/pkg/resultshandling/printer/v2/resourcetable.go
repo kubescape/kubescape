@@ -84,7 +84,7 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		}
 
 		row[resourceColumnURL] = cautils.GetControlLink(controls[i].GetID())
-		paths := AssistedRemediationPathsToString(&controls[i])
+		paths := AssistedRemediationPathsWithCurrentValues(&controls[i], resource)
 		addContainerNameToAssistedRemediation(resource, &paths)
 		row[resourceColumnPath] = strings.Join(paths, "\n")
 		row[resourceColumnName] = controls[i].GetName()

@@ -715,6 +715,7 @@ func TestMakeRegoDeps_InputIsolation(t *testing.T) {
 	_, runtimeExists := opap.regoDependenciesData.PostureControlInputs["runtime"]
 
 	assert.False(t, runtimeExists)
+	assert.Equal(t, "aws", deps.DataControlInputs["cloudProvider"])
 }
 
 func TestRunOPAOnSingleRuleDispatch(t *testing.T) {
@@ -967,13 +968,28 @@ func TestRunCELOnK8s(t *testing.T) {
 	t.Run("a broken object does not erase a sibling violation", func(t *testing.T) {
 		responses, outcome, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{violatingPod, brokenPod}, nil, "C-0017")
 		require.NoError(t, err, "an eval error on one object must not fail the whole rule")
-		require.Len(t, responses, 1, "the confirmed violation must survive")
-		assert.Equal(t, "mutable", responses[0].GetFailedResources()[0]["metadata"].(map[string]any)["name"])
+		require.Len(t, responses, 2, "the confirmed violation must survive alongside the eval-error deny")
+		assert.Empty(t, outcome.skipped, "an eval error under failurePolicy Fail is a deny, not a skip")
 
-		require.Len(t, outcome.skipped, 1, "the broken object must be reported as an unknown-verdict skip")
-		skippedMeta := objectsenvelopes.NewObject(outcome.skipped[0].obj)
-		require.NotNil(t, skippedMeta)
-		assert.Equal(t, "broken", skippedMeta.GetName())
+		byName := map[string]reporthandling.RuleResponse{}
+		for _, r := range responses {
+			byName[r.GetFailedResources()[0]["metadata"].(map[string]any)["name"].(string)] = r
+		}
+		require.Contains(t, byName, "mutable", "the confirmed violation must survive")
+		assert.Contains(t, byName, "broken", "the eval-error object must be denied, matching admission")
+	})
+
+	// An eval error alone is a deny under failurePolicy Fail, not a skip.
+	t.Run("an eval error is denied under failurePolicy Fail", func(t *testing.T) {
+		responses, outcome, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{brokenPod}, nil, "C-0017")
+		require.NoError(t, err)
+		require.Len(t, responses, 1)
+		assert.Empty(t, outcome.skipped)
+
+		failed := responses[0].GetFailedResources()
+		require.Len(t, failed, 1)
+		assert.Equal(t, "broken", failed[0]["metadata"].(map[string]any)["name"])
+		assert.NotEmpty(t, responses[0].AlertMessage)
 	})
 
 	// Blocker 2: an out-of-scope object must be excluded, not left to be
@@ -1063,6 +1079,19 @@ func TestCELNamespaceObjectFor(t *testing.T) {
 
 	t.Run("cluster-scoped resource resolves to nil", func(t *testing.T) {
 		assert.Nil(t, opap.celNamespaceObjectFor(podIn("")))
+	})
+
+	t.Run("enveloped resource resolves through object metadata accessors", func(t *testing.T) {
+		enveloped := objectsenvelopes.NewRegoResponseVectorObject(map[string]any{
+			"apiVersion":     "v1",
+			"kind":           "Pod",
+			"name":           "p",
+			"namespace":      "prod",
+			"relatedObjects": []map[string]any{},
+		})
+		got := opap.celNamespaceObjectFor(enveloped.GetObject())
+		require.NotNil(t, got)
+		assert.Equal(t, "prod", got["metadata"].(map[string]any)["name"])
 	})
 
 	t.Run("no session resolves to nil without panicking", func(t *testing.T) {

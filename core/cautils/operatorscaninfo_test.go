@@ -71,8 +71,8 @@ func TestConfigScanInfo_ValidatePayload(t *testing.T) {
 }
 
 func TestConfigScanInfo_GetRequestPayload(t *testing.T) {
-	t.Run("default frameworks when none specified", func(t *testing.T) {
-		info := &ConfigScanInfo{}
+	t.Run("passes through explicitly set frameworks", func(t *testing.T) {
+		info := &ConfigScanInfo{Frameworks: []string{"all"}}
 		payload := info.GetRequestPayload()
 		request := requireConfigScanRequest(t, payload)
 
@@ -82,6 +82,12 @@ func TestConfigScanInfo_GetRequestPayload(t *testing.T) {
 		assert.Empty(t, request.ExcludedNamespaces)
 		require.NotNil(t, request.HostScanner)
 		assert.False(t, *request.HostScanner)
+	})
+
+	t.Run("does not mutate the receiver", func(t *testing.T) {
+		info := &ConfigScanInfo{}
+		info.GetRequestPayload()
+		assert.Empty(t, info.Frameworks)
 	})
 
 	t.Run("uses provided frameworks", func(t *testing.T) {

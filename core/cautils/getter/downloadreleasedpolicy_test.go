@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -107,7 +108,7 @@ func TestReleasedPolicy(t *testing.T) {
 		t.Run("with GetControlsInput", func(t *testing.T) {
 			t.Parallel()
 
-			controlInputs, err := p.GetControlsInputs("") // NOTE: cluster name currently unused
+			controlInputs, err := p.GetControlsInputs(context.TODO(), "") // NOTE: cluster name currently unused
 			require.NoError(t, err)
 			require.NotEmpty(t, controlInputs)
 		})
@@ -123,7 +124,7 @@ func TestReleasedPolicy(t *testing.T) {
 		t.Run("with GetExceptions", func(t *testing.T) {
 			t.Parallel()
 
-			exceptions, err := p.GetExceptions("") // NOTE: cluster name currently unused
+			exceptions, err := p.GetExceptions(context.TODO(), "") // NOTE: cluster name currently unused
 			require.NoError(t, err)
 			require.NotEmpty(t, exceptions)
 		})

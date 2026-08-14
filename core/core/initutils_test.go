@@ -12,8 +12,11 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	fakeclientset "k8s.io/client-go/kubernetes/fake"
+	restclient "k8s.io/client-go/rest"
 )
 
 type TenantConfigMock struct {
@@ -157,6 +160,100 @@ func TestGettersAirGappedUseCache(t *testing.T) {
 			assert.Equal(t, "*getter.MergedExceptionsGetter", reflect.TypeOf(exceptionsGetter).String())
 		})
 	}
+}
+
+func TestResolveDefaultScanAllPolicies(t *testing.T) {
+	nativeIdentifiers := func() []cautils.PolicyIdentifier {
+		return cautils.BuildPolicyIdentifiers(getter.NativeFrameworks, apisv1.KindFramework)
+	}
+
+	tests := []struct {
+		name              string
+		scanInfo          *cautils.ScanInfo
+		policyIdentifiers []cautils.PolicyIdentifier
+		want              []cautils.PolicyIdentifier
+	}{
+		{
+			name:     "ScanAll with UseDefault expands an empty list to the default frameworks",
+			scanInfo: &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: true},
+			want:     nativeIdentifiers(),
+		},
+		{
+			name:              "ScanAll with UseDefault keeps the requested frameworks first",
+			scanInfo:          &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: true},
+			policyIdentifiers: cautils.BuildPolicyIdentifiers([]string{"cis-v1.23-t1.0.1"}, apisv1.KindFramework),
+			want: append(
+				cautils.BuildPolicyIdentifiers([]string{"cis-v1.23-t1.0.1"}, apisv1.KindFramework),
+				nativeIdentifiers()...,
+			),
+		},
+		{
+			name:              "ScanAll with UseDefault does not re-add differently cased frameworks",
+			scanInfo:          &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: true},
+			policyIdentifiers: cautils.BuildPolicyIdentifiers([]string{"NSA", "MITRE"}, apisv1.KindFramework),
+			want: append(
+				cautils.BuildPolicyIdentifiers([]string{"NSA", "MITRE"}, apisv1.KindFramework),
+				cautils.PolicyIdentifier{Identifier: "allcontrols", Kind: apisv1.KindFramework},
+			),
+		},
+		{
+			name:     "ScanAll without UseDefault is left to the policy getter",
+			scanInfo: &cautils.ScanInfo{ScanAll: true},
+			want:     nil,
+		},
+		{
+			name:              "UseDefault without ScanAll leaves the list untouched",
+			scanInfo:          &cautils.ScanInfo{UseDefault: true},
+			policyIdentifiers: cautils.BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework),
+			want:              cautils.BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework),
+		},
+		{
+			// `scan control` with no arguments sets ScanAll but is not a framework scan;
+			// expanding it would populate UseFrom and turn the scan air-gapped.
+			name:     "control scan is not expanded even with ScanAll and UseDefault",
+			scanInfo: &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: false},
+			want:     nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, resolveDefaultScanAllPolicies(tt.scanInfo, tt.policyIdentifiers))
+		})
+	}
+}
+
+// TestScanAllWithUseDefaultResolvesCachePaths is the regression test for the ordering bug:
+// a ScanAll scan combined with --use-default must reach getPolicyGetter with every framework
+// already resolved to a cache path, so the scan loads locally instead of reaching the network.
+func TestScanAllWithUseDefaultResolvesCachePaths(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: true}
+
+	policyIdentifiers := resolveDefaultScanAllPolicies(scanInfo, nil)
+	require.NoError(t, scanInfo.Init(context.Background(), policyIdentifiers))
+
+	wantPaths := getDefaultFrameworksPaths()
+	assert.ElementsMatch(t, wantPaths, scanInfo.UseFrom)
+	assert.True(t, isAirGappedMode(scanInfo), "cached paths must put the scan in air-gapped mode")
+
+	policyGetter, err := getPolicyGetter(context.Background(), scanInfo.UseFrom, "123456789012", scanInfo.FrameworkScan, nil, isAirGappedMode(scanInfo))
+	require.NoError(t, err)
+	assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(policyGetter).String())
+}
+
+// TestScanAllControlScanWithUseDefaultStaysOnline guards the FrameworkScan gate: `scan control`
+// with no arguments sets ScanAll, and expanding it would resolve cache paths into UseFrom and
+// flip the scan air-gapped, cutting off the download fallback for control inputs, exceptions
+// and attack tracks on a cold cache.
+func TestScanAllControlScanWithUseDefaultStaysOnline(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{ScanAll: true, UseDefault: true, FrameworkScan: false}
+
+	policyIdentifiers := resolveDefaultScanAllPolicies(scanInfo, nil)
+	require.NoError(t, scanInfo.Init(context.Background(), policyIdentifiers))
+
+	assert.Empty(t, policyIdentifiers, "a control scan must not gain framework identifiers")
+	assert.Empty(t, scanInfo.UseFrom)
+	assert.False(t, isAirGappedMode(scanInfo), "control scans must keep the download fallback")
 }
 
 func TestPolicyIdentifierIdentities(t *testing.T) {
@@ -368,6 +465,31 @@ func TestGetSensorHandler(t *testing.T) {
 
 		_, isMock := sensor.(*hostsensorutils.HostSensorHandlerMock)
 		require.True(t, isMock)
+	})
+
+	t.Run("should disable HostSensorEnabled if explicitly enabled but construction fails", func(t *testing.T) {
+		originalK8SConfig := k8sinterface.K8SConfig
+		t.Cleanup(func() { k8sinterface.K8SConfig = originalK8SConfig })
+		k8sinterface.K8SConfig = &restclient.Config{}
+
+		trueFlag := cautils.NewBoolPtr(nil)
+		trueFlag.SetBool(true)
+		scanInfo := &cautils.ScanInfo{
+			HostSensorEnabled: trueFlag,
+		}
+		// A client with no nodes makes NewHostSensorHandler fail its liveness check.
+		k8s := &k8sinterface.KubernetesApi{
+			KubernetesClient: fakeclientset.NewClientset(),
+			Context:          ctx,
+		}
+
+		sensor := getHostSensorHandler(ctx, scanInfo, k8s)
+		require.NotNil(t, sensor)
+
+		_, isMock := sensor.(*hostsensorutils.HostSensorHandlerMock)
+		require.True(t, isMock)
+		assert.False(t, scanInfo.HostSensorEnabled.GetBool(),
+			"a failed explicit host-scan request must not leave HostSensorEnabled true, or the collector will treat the mock's empty result as a clean scan")
 	})
 
 	// TODO(fredbi): need to share the k8s client mock to test a happy path / deployment failure path
@@ -624,8 +746,6 @@ func TestGetDefaultFrameworksPaths(t *testing.T) {
 func TestGetDownloadReleasedPolicy(t *testing.T) {
 	ctx := context.Background()
 	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy()
-
-	require.NoError(t, downloadReleasedPolicy.SetRegoObjects())
 
 	result, err := getDownloadReleasedPolicy(ctx, downloadReleasedPolicy)
 

@@ -44,10 +44,11 @@ kubescape scan [target] [flags]
 | `--encrypt` | Encrypt sensitive report metadata using the master key provided through the `KUBESCAPE_MASTER_KEY` environment variable. Requires `--format json` for reports that will later be decrypted with `kubescape decrypt`. If both `--encrypt` and `--hide` are specified, `--encrypt` takes precedence. | `false` |
 | `--exceptions <path>` | Path to exceptions file | - |
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
-| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `sarif`, `html`, `pdf`, `prometheus` | `pretty-printer` |
+| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `csv` | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
 | `--host-scan` | Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use `--host-scan=false` to disable host data collection. See the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for a managed alternative. | auto-detect |
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
+| `--label-selector <selector>` | Filter collected resources by Kubernetes label selector. Accepts any expression `kubectl -l` supports, e.g. `app=nginx,env!=dev` or `env in (prod,staging)`. Syntax is validated before scanning begins; filtering is applied during live cluster collection and ignored when scanning local files. | - |
 | `--keep-local` | Don't report results to backend | `false` |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
@@ -110,6 +111,15 @@ kubescape scan --view resource --compliance-threshold 80
 
 # Exclude namespaces
 kubescape scan --exclude-namespaces kube-system,kube-public
+
+# Scan only resources matching a label selector
+kubescape scan --label-selector "app=nginx"
+
+# Combine a label selector with a specific framework
+kubescape scan framework nsa --label-selector "env=prod,team=backend"
+
+# Set-based label selector using the 'in' operator
+kubescape scan framework mitre --label-selector "env in (prod,staging)"
 ```
 ### Score thresholds
 
@@ -169,6 +179,7 @@ kubescape scan framework <framework-name> [target] [flags]
 kubescape scan framework nsa
 kubescape scan framework mitre --include-namespaces production
 kubescape scan framework cis-v1.23-t1.0.1 /path/to/manifests
+cat ./manifests/deployment.yaml | kubescape scan framework nsa -
 ```
 
 ---
@@ -191,6 +202,9 @@ kubescape scan control C-0057 -v
 
 # Scan specific files for a control
 kubescape scan control C-0013 /path/to/deployment.yaml
+
+# Scan a manifest from stdin
+cat ./manifests/deployment.yaml | kubescape scan control C-0013 -
 ```
 
 ---
@@ -202,7 +216,7 @@ Scan a specific workload.
 ### Synopsis
 
 ```bash
-kubescape scan workload <kind>[.<version>[.<group>]]/<name> [flags]
+kubescape scan workload <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]
 ```
 
 Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this command requires a **Kind** (e.g. `Deployment.v1.apps`, not `deployments.v1.apps`).
@@ -212,6 +226,8 @@ Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this co
 | Flag | Description |
 |------|-------------|
 | `--namespace <ns>` | Namespace of the workload |
+| `--file-path <path>` | Path to a manifest that contains the workload |
+| `--chart-path <path>` | Path to the Helm chart the workload is part of. Must be used with `--file-path` |
 
 ### Examples
 
@@ -219,6 +235,10 @@ Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this co
 kubescape scan workload Deployment/nginx --namespace default
 kubescape scan workload Deployment.v1.apps/nginx
 kubescape scan workload DaemonSet/fluentd --namespace logging
+kubescape scan workload Deployment/nginx ./manifests
+cat ./manifests/deployment.yaml | kubescape scan workload Deployment/nginx -
+kubescape scan workload Deployment/nginx --file-path ./manifests/deployment.yaml
+kubescape scan workload Deployment/nginx --chart-path ./chart --file-path ./chart/templates/deployment.yaml
 ```
 
 ---
@@ -315,7 +335,7 @@ kubescape patch [flags]
 |------|-------------|---------|
 | `-i, --image <image>` | Image to patch (required) | - |
 | `-t, --tag <tag>` | Output image tag | `<image>-patched` |
-| `-a, --addr <addr>` | BuildKit daemon address | `unix:///run/buildkit/buildkitd.sock` |
+| `-a, --address <address>` | BuildKit daemon address | none (auto-detects local docker daemon, falling back to `unix:///run/buildkit/buildkitd.sock`) |
 | `--timeout <duration>` | Patching timeout | `5m` |
 | `--ignore-errors` | Continue on errors | `false` |
 | `--push` | Push the patched image to the source registry | `false` |
@@ -505,14 +525,16 @@ kubescape list <type> [flags]
 |------|-------------|---------|
 | `--account <id>` | Account ID for custom frameworks | - |
 | `--access-key <key>` | Access key | - |
-| `--format <format>` | Output format: `pretty-print`, `json` | `pretty-print` |
+| `--format <format>` | Output format: `pretty-print`, `json`, `yaml`, `csv` | `pretty-print` |
 
 ### Examples
 
 ```bash
 kubescape list frameworks
+kubescape list frameworks --format csv
 kubescape list controls
 kubescape list controls --format json
+kubescape list controls --format csv
 ```
 
 ---
@@ -575,6 +597,12 @@ Manage Kubescape configuration.
 ```bash
 # View configuration
 kubescape config view
+
+# View configuration as JSON
+kubescape config view -o json
+
+# View configuration as YAML
+kubescape config view -o yaml
 
 # Set account ID
 kubescape config set accountID <account-id>
@@ -711,7 +739,24 @@ Display version information.
 ### Synopsis
 
 ```bash
+kubescape version [--format text|json]
+```
+
+### Flags
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--format` | `-f` | `text` | Output format. Supported: `text`, `json` |
+
+### Examples
+
+```bash
+# Default human-readable output
 kubescape version
+
+# Machine-readable JSON output (safe to pipe to jq)
+kubescape version --format json
+# {"version":"v3.x.x","commit":"abc123","date":"2024-01-15"}
 ```
 
 ---

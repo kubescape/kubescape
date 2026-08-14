@@ -714,3 +714,60 @@ func TestDecryptResourceLabels_Plaintext(t *testing.T) {
 
 	assert.Equal(t, "backend", resource.GetLabels()["team"])
 }
+
+func TestDecryptIfEncrypted_PreservesPlaintextWhitespace(t *testing.T) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	// Values that were never encrypted must survive decryption byte for byte.
+	// Trailing newlines in particular are meaningful: kubectl writes the
+	// last-applied-configuration annotation with one.
+	plaintexts := []string{
+		"{\"apiVersion\":\"v1\"}\n",
+		"  indented value",
+		"trailing spaces   ",
+		"multi\nline\nvalue\n",
+		"\ttabbed\t",
+	}
+
+	for _, plaintext := range plaintexts {
+		got, err := decryptIfEncrypted(plaintext, dek)
+		require.NoError(t, err)
+		assert.Equal(t, plaintext, got, "plaintext must not be rewritten")
+	}
+}
+
+func TestDecryptIfEncrypted_TolerantOfEnvelopeWhitespace(t *testing.T) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	ciphertext, err := EncryptString("secret-value", dek)
+	require.NoError(t, err)
+
+	// An envelope padded by whitespace still decrypts to the exact plaintext.
+	got, err := decryptIfEncrypted("  "+ciphertext+"\n", dek)
+	require.NoError(t, err)
+	assert.Equal(t, "secret-value", got)
+}
+
+func TestDecryptResourceAnnotations_PreservesPlaintextValue(t *testing.T) {
+	const lastApplied = "{\"apiVersion\":\"v1\",\"kind\":\"Pod\"}\n"
+
+	resource := workloadinterface.NewWorkloadObj(
+		map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"annotations": map[string]any{
+					"kubectl.kubernetes.io/last-applied-configuration": lastApplied,
+				},
+			},
+		},
+	)
+
+	require.NoError(t, DecryptResourceAnnotations(resource, make([]byte, 32)))
+
+	metadata := resource.GetObject()["metadata"].(map[string]any)
+	annotations := metadata["annotations"].(map[string]any)
+	assert.Equal(t, lastApplied, annotations["kubectl.kubernetes.io/last-applied-configuration"])
+}

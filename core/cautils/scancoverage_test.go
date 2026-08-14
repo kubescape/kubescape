@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildScanCoverage_EmptyInfoMap(t *testing.T) {
@@ -20,6 +21,57 @@ func TestBuildScanCoverage_NoFailedGVRs(t *testing.T) {
 	coverage := BuildScanCoverage(infoMap, map[string][]string{"networking.k8s.io/v1/networkpolicies": {"C-0001"}}, nil, nil, nil)
 	assert.Empty(t, coverage.FailedGVRPulls)
 	assert.Empty(t, coverage.NotEvaluatedControls)
+}
+
+func TestBuildScanCoverage_MappedDiscoveryFailureIsNotEvaluated(t *testing.T) {
+	const discoveryKey = "discovery:example.com/v1"
+	coverage := BuildScanCoverage(
+		nil,
+		map[string][]string{discoveryKey: {"C-WIDGET"}},
+		nil,
+		[]PartialGVRPull{{GVR: discoveryKey, Selector: "discovery", Error: "forbidden"}},
+		nil,
+	)
+	coverage.ComputeCoverageScore(1)
+
+	assert.Empty(t, coverage.FailedGVRPulls, "the discovery error is already present in PartialGVRPulls")
+	require.Len(t, coverage.PartialGVRPulls, 1)
+	require.Len(t, coverage.NotEvaluatedControls, 1)
+	assert.Equal(t, "C-WIDGET", coverage.NotEvaluatedControls[0].ControlID)
+	assert.Equal(t, []string{discoveryKey}, coverage.NotEvaluatedControls[0].MissingGVRs)
+	assert.Equal(t, 0, coverage.EvaluatedControls)
+	assert.Zero(t, coverage.CoverageScore)
+	assert.True(t, coverage.Degraded)
+}
+
+func TestBuildScanCoverage_DiscoveryFailureWithSuccessfulDependencyRemainsEvaluated(t *testing.T) {
+	const discoveryKey = "discovery:example.com/v1"
+	coverage := BuildScanCoverage(
+		nil,
+		map[string][]string{
+			discoveryKey:           {"C-MIXED"},
+			"other.com/v1/gadgets": {"C-MIXED"},
+		},
+		nil,
+		[]PartialGVRPull{{GVR: discoveryKey, Selector: "discovery", Error: "forbidden"}},
+		nil,
+	)
+
+	assert.Empty(t, coverage.NotEvaluatedControls)
+	assert.Empty(t, coverage.FailedGVRPulls)
+}
+
+func TestBuildScanCoverage_UnmappedDiscoveryFailureDoesNotInventControlDependency(t *testing.T) {
+	coverage := BuildScanCoverage(
+		nil,
+		map[string][]string{"other.com/v1/gadgets": {"C-GADGET"}},
+		nil,
+		[]PartialGVRPull{{GVR: "discovery:example.com/v1", Selector: "discovery", Error: "forbidden"}},
+		nil,
+	)
+
+	assert.Empty(t, coverage.NotEvaluatedControls)
+	assert.Empty(t, coverage.FailedGVRPulls)
 }
 
 func TestBuildScanCoverage_FailedGVRPopulated(t *testing.T) {
@@ -293,6 +345,26 @@ func TestBuildScanCoverage_PartialGVRPullsPassedThrough(t *testing.T) {
 	assert.Contains(t, coverage.PartialGVRPulls[0].Error, "RBAC denied")
 	assert.Empty(t, coverage.FailedGVRPulls)
 	assert.Empty(t, coverage.NotEvaluatedControls)
+}
+
+func TestBuildScanCoverage_SortsPartialGVRPullsWithoutMutatingInput(t *testing.T) {
+	partials := []PartialGVRPull{
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==b", Error: "z error"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==b", Error: "a error"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==a", Error: "forbidden"},
+		{GVR: "/v1/pods", Selector: "metadata.namespace==z", Error: "denied"},
+	}
+	original := append([]PartialGVRPull(nil), partials...)
+
+	coverage := BuildScanCoverage(nil, nil, nil, partials, nil)
+
+	assert.Equal(t, []PartialGVRPull{
+		{GVR: "/v1/pods", Selector: "metadata.namespace==z", Error: "denied"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==a", Error: "forbidden"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==b", Error: "a error"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==b", Error: "z error"},
+	}, coverage.PartialGVRPulls)
+	assert.Equal(t, original, partials)
 }
 
 func TestComputeCoverageScore_Float32PrecisionLoss(t *testing.T) {

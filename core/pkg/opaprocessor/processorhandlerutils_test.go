@@ -38,7 +38,7 @@ func TestGetKubernetesObjectsDeduplicatesResourceAliases(t *testing.T) {
 		Resources:   []string{"Sandbox", "sandboxes"},
 	}}
 
-	objects := getKubernetesObjects(resources, allResources, match)
+	objects := getKubernetesObjects(newResourceGroupIndex(resources, allResources), match)
 	assert.Equal(t, 1, len(objects))
 }
 
@@ -62,7 +62,7 @@ func TestGetKubernetesObjectsMatchesFutureAPIVersionWithWildcards(t *testing.T) 
 		Resources:   []string{"HorizontalPodAutoscaler"},
 	}}
 
-	objects := getKubernetesObjects(resources, allResources, match)
+	objects := getKubernetesObjects(newResourceGroupIndex(resources, allResources), match)
 	require.Len(t, objects, 1)
 	assert.Same(t, workload, objects[0])
 }

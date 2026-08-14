@@ -2,8 +2,9 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -32,6 +33,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// ErrClusterConnection is returned when a cluster scan cannot reach the
+// Kubernetes API server. Callers embedding Kubescape.Scan can test for it with
+// errors.Is to distinguish an unreachable cluster from other scan failures.
+var ErrClusterConnection = errors.New("failed connecting to Kubernetes cluster")
+
 type componentInterfaces struct {
 	tenantConfig      cautils.ITenantConfig
 	resourceHandler   resourcehandler.IResourceHandler
@@ -39,9 +45,10 @@ type componentInterfaces struct {
 	uiPrinter         printer.IPrinter
 	hostSensorHandler hostsensorutils.IHostSensor
 	outputPrinters    []printer.IPrinter
+	k8s               *k8sinterface.KubernetesApi
 }
 
-func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentInterfaces, error) {
+func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (componentInterfaces, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "setup interfaces")
 	defer span.End()
 
@@ -51,14 +58,16 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentIn
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
 		k8s = getKubernetesApi()
 		if k8s == nil {
-			logger.L().Ctx(ctx).Fatal("failed connecting to Kubernetes cluster")
-		} else {
-			k8sClient = k8s.KubernetesClient
+			// Return rather than terminate: Scan already propagates this to the
+			// caller, and the command layer still exits non-zero on it.
+			span.RecordError(ErrClusterConnection)
+			return componentInterfaces{}, ErrClusterConnection
 		}
+		k8sClient = k8s.KubernetesClient
 	}
 
 	// ================== setup tenant object ======================================
-	tenantConfig := cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, k8sinterface.GetContextName(), scanInfo.CustomClusterName, getKubernetesApi())
+	tenantConfig := cautils.GetTenantConfig(ctx, scanInfo.AccountID, scanInfo.AccessKey, scanInfo.GetClusterContextName(), scanInfo.CustomClusterName, getKubernetesApi())
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
@@ -74,7 +83,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentIn
 	// Skip version check in air-gapped mode (when keep-local flag is set)
 	if !scanInfo.Local {
 		v := versioncheck.NewIVersionCheckHandler(ctx)
-		_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", string(scanInfo.GetScanningContext()), k8sClient))
+		_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(policyIdentifiers), "", string(scanInfo.GetScanningContext()), k8sClient))
 	}
 
 	// ================== setup host scanner object ======================================
@@ -113,6 +122,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) (componentIn
 		outputPrinters:    outputPrinters,
 		uiPrinter:         uiPrinter,
 		hostSensorHandler: hostSensorHandler,
+		k8s:               k8s,
 	}, nil
 }
 
@@ -156,50 +166,44 @@ func resolvedOutputPath(format, outputFile string) string {
 		return ""
 	}
 	ext := fileExtForFormat(format)
-	fileExt := filepath.Ext(trimmed)
 
-	if ext == printer.YamlOutputExt && fileExt == ".yml" {
+	if ext == printer.YamlOutputExt && strings.HasSuffix(trimmed, ".yml") {
 		return trimmed
 	}
 
-	if ext != "" && fileExt != ext {
+	if ext != "" && !strings.HasSuffix(trimmed, ext) {
 		return trimmed + ext
 	}
 	return trimmed
 }
 
+// fileExtForFormat returns the extension the format's printer appends to
+// --output. An unknown format falls back to the pretty extension because
+// NewPrinter falls back to the pretty printer for it.
 func fileExtForFormat(format string) string {
-	switch format {
-	case printer.JsonFormat:
-		return printer.JsonOutputExt
-	case printer.YamlFormat:
-		return printer.YamlOutputExt
-	case printer.JunitResultFormat:
-		return printer.JunitOutputExt
-	case printer.SARIFFormat:
-		return printer.SARIFOutputExt
-	case printer.GitLabSASTFormat:
-		return printer.JsonOutputExt
-	case printer.HtmlFormat:
-		return printer.HtmlOutputExt
-	case printer.PdfFormat:
-		return printer.PdfOutputExt
-	case printer.PrometheusFormat:
-		return printer.PrometheusOutputExt
-	default:
-		return printer.PrettyOutputExt
+	if ext, ok := printer.FormatOutputExt[format]; ok {
+		return ext
 	}
+	return printer.PrettyOutputExt
 }
 
-func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
+func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ks.Context(), "initialization")
 	logger.L().Start("Kubescape scanner initializing...")
 
 	// ===================== Initialization =====================
-	scanInfo.Init(ctxInit) // initialize scan info
+	policyIdentifiers = resolveDefaultScanAllPolicies(scanInfo, policyIdentifiers) // resolve the ScanAll expansion while Init can still cache its paths
+	if err := scanInfo.Init(ctxInit, policyIdentifiers); err != nil {              // initialize scan info
+		spanInit.End()
+		return nil, err
+	}
 	defer scanInfo.Cleanup()
+	if err := resolveClusterContext(scanInfo); err != nil {
+		spanInit.End()
+		return nil, err
+	}
 
-	interfaces, err := getInterfaces(ctxInit, scanInfo)
+	interfaces, err := getInterfaces(ctxInit, scanInfo, policyIdentifiers)
 	if err != nil {
 		spanInit.End()
 		return nil, err
@@ -226,23 +230,24 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	}
 
 	// set policy getter only after setting the customerGUID
-	scanInfo.PolicyGetter, err = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy, airGapped)
+	var getters cautils.Getters
+	getters.PolicyGetter, err = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy, airGapped)
 	if err != nil {
 		spanInit.End()
 		return nil, err
 	}
 	var controlInputsFromCache bool
-	scanInfo.ControlsInputsGetter, controlInputsFromCache, err = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped)
+	getters.ControlsInputsGetter, controlInputsFromCache, err = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped)
 	if err != nil {
 		spanInit.End()
 		return nil, err
 	}
-	scanInfo.ExceptionsGetter, err = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	getters.ExceptionsGetter, err = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
 	if err != nil {
 		spanInit.End()
 		return nil, err
 	}
-	scanInfo.AttackTracksGetter, err = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	getters.AttackTracksGetter, err = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
 	if err != nil {
 		spanInit.End()
 		return nil, err
@@ -250,7 +255,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {
-		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.PolicyGetter), apisv1.KindFramework)
+		policyIdentifiers = cautils.AppendPolicyIdentifiers(policyIdentifiers, listFrameworksNames(getters.PolicyGetter), apisv1.KindFramework)
 	}
 
 	logger.L().StopSuccess("Initialized scanner")
@@ -260,7 +265,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// ===================== policies =====================
 	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies")
 	policyHandler := policyhandler.NewPolicyHandler(interfaces.tenantConfig.GetContextName())
-	scanData, err := policyHandler.CollectPolicies(ctxPolicies, scanInfo.PolicyIdentifier, scanInfo)
+	scanData, err := policyHandler.CollectPolicies(ctxPolicies, policyIdentifiers, scanInfo, &getters)
 	if err != nil {
 		spanInit.End()
 		return resultsHandling, err
@@ -269,6 +274,20 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 		scanData.PolicyDegradations = append(scanData.PolicyDegradations, cautils.PolicyDegradation{Component: "controlInputs", Reason: "failed to fetch from GitHub, loaded from local cache"})
 	}
 	spanPolicies.End()
+
+	if scanInfo.DryRun {
+		spanInit.End()
+		resultsHandling.SetData(scanData)
+		result, err := interfaces.resourceHandler.Preflight(ctxInit, scanData, scanInfo)
+		if err != nil {
+			return resultsHandling, err
+		}
+		printPreflightResult(result)
+		if denied := result.Denied(); len(denied) > 0 {
+			return resultsHandling, fmt.Errorf("dry-run: %d required resource type(s) cannot be listed with the current credentials", len(denied))
+		}
+		return resultsHandling, nil
+	}
 
 	// ===================== resources =====================
 	ctxResources, spanResources := otel.Tracer("").Start(ctxInit, "resources")
@@ -308,7 +327,10 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 		}
 
 		deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
-		var exceptionRecorder = newSecurityExceptionEventRecorder()
+		exceptionRecorder, shutdownRecorder := newSecurityExceptionEventRecorder()
+		if shutdownRecorder != nil {
+			defer shutdownRecorder()
+		}
 		reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, exceptionRecorder)
 		reportResults.ControlTimeout = scanInfo.ControlTimeout
 		if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
@@ -327,7 +349,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// ======================== prioritization ===================
 	if scanInfo.PrintAttackTree || isPrioritizationScanType(scanInfo.ScanType) {
 		_, spanPrioritization := otel.Tracer("").Start(ctxOpa, "prioritization")
-		if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, scanInfo.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
+		if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
 			logger.L().Ctx(ks.Context()).Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
 		} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 			return resultsHandling, fmt.Errorf("%w", err)
@@ -339,7 +361,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	}
 
 	if scanInfo.ScanImages {
-		scanImages(scanInfo.ScanType, scanData, ks.Context(), resultsHandling, scanInfo)
+		resultsHandling.SetScanError(scanImages(scanInfo.ScanType, scanData, ks.Context(), resultsHandling, scanInfo, interfaces.k8s))
 	}
 	// ========================= results handling =====================
 	resultsHandling.SetData(scanData)
@@ -358,7 +380,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 			}
 
 			return nil, fmt.Errorf(
-				"failed to generate encryption key",
+				"failed to generate encryption key: %w", err,
 			)
 		}
 
@@ -395,51 +417,146 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	return resultsHandling, nil
 }
 
-func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, resultsHandling *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) {
-	imagesToScan := mapset.NewSet[string]()
+func resolveClusterContext(scanInfo *cautils.ScanInfo) error {
+	if scanInfo.GetScanningContext() != cautils.ContextCluster {
+		return nil
+	}
+	if err := scanInfo.ResolveClusterContextName(); err != nil {
+		return fmt.Errorf("failed to resolve Kubernetes context: %w", err)
+	}
+	return nil
+}
 
-	if scanType == cautils.ScanTypeWorkload {
-		containers, err := workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject()).GetContainers()
-		if err != nil {
-			logger.L().Error("failed to get containers", helpers.Error(err))
-			return
-		}
-		for _, container := range containers {
-			imagesToScan.Add(container.Image)
-		}
-	} else {
-		for _, workload := range scanData.AllResources {
-			containers, err := workloadinterface.NewWorkloadObj(workload.GetObject()).GetContainers()
-			if err != nil {
-				logger.L().Error(fmt.Sprintf("failed to get containers for kind: %s, name: %s, namespace: %s", workload.GetKind(), workload.GetName(), workload.GetNamespace()), helpers.Error(err))
-				continue
-			}
-			for _, container := range containers {
-				imagesToScan.Add(container.Image)
-			}
-		}
+func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, resultsHandling *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo, k8sApi *k8sinterface.KubernetesApi) error {
+	var scanningContext cautils.ScanningContext
+	if scanInfo != nil {
+		scanningContext = scanInfo.GetScanningContext()
+	}
+	imagesToScan, imageToCreds, containerErrors := collectImageScanTargets(scanType, scanData, ctx, scanningContext, k8sApi)
+	if imagesToScan.IsEmpty() {
+		return errors.Join(containerErrors...)
 	}
 
 	distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Invalid Grype database URL '%s': %v", scanInfo.ListingURL, err))
-		return
+		return errors.Join(append(containerErrors, fmt.Errorf("invalid Grype database URL %q: %w", scanInfo.ListingURL, err))...)
 	}
 	svc, err := imagescan.NewScanServiceWithMatchers(distCfg, installCfg, scanInfo.UseDefaultMatchers)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to initialize image scanner: %s", err))
-		return
+		return errors.Join(append(containerErrors, fmt.Errorf("failed to initialize image scanner: %w", err))...)
 	}
 	defer svc.Close()
-
+	defaultCreds := registryCredentialsFromScanInfo(scanInfo)
+	var jobs []ImageScanJob
 	for img := range imagesToScan.Iter() {
-		logger.L().Start("Scanning", helpers.String("image", img))
-		if err := scanSingleImage(ctx, img, svc, resultsHandling, scanInfo.RegistryMapping, registryCredentialsFromScanInfo(scanInfo)); err != nil {
-			logger.L().StopError("failed to scan", helpers.String("image", img), helpers.Error(err))
+		credsList := []imagescan.RegistryCredentials{}
+		if resolvedCreds, ok := imageToCreds[img]; ok {
+			sort.Slice(resolvedCreds, func(i, j int) bool {
+				if resolvedCreds[i].Authority != resolvedCreds[j].Authority {
+					return resolvedCreds[i].Authority < resolvedCreds[j].Authority
+				}
+				if resolvedCreds[i].Username != resolvedCreds[j].Username {
+					return resolvedCreds[i].Username < resolvedCreds[j].Username
+				}
+				if resolvedCreds[i].Password != resolvedCreds[j].Password {
+					return resolvedCreds[i].Password < resolvedCreds[j].Password
+				}
+				return resolvedCreds[i].Token < resolvedCreds[j].Token
+			})
+			credsList = append(credsList, resolvedCreds...)
+		}
+
+		if len(credsList) == 0 && (defaultCreds.Token != "" || defaultCreds.Username != "" || defaultCreds.Password != "") {
+			credsList = append(credsList, defaultCreds)
+		}
+
+		jobs = append(jobs, ImageScanJob{
+			Image:               img,
+			RegistryCredentials: credsList,
+			RegistryMapping:     scanInfo.RegistryMapping,
+		})
+	}
+
+	concurrency := scanInfo.ImageScanConcurrency
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+
+	return scanImageJobsWithDiscoveryErrors(ctx, svc, concurrency, jobs, resultsHandling, containerErrors)
+}
+
+func scanImageJobsWithDiscoveryErrors(ctx context.Context, svc imageScanService, concurrency int, jobs []ImageScanJob, resultsHandling *resultshandling.ResultsHandler, discoveryErrors []error) error {
+	errs := append([]error{}, discoveryErrors...)
+	return errors.Join(append(errs, scanImageJobs(ctx, svc, concurrency, jobs, resultsHandling))...)
+}
+
+func scanImageJobs(ctx context.Context, svc imageScanService, concurrency int, jobs []ImageScanJob, resultsHandling *resultshandling.ResultsHandler) error {
+	logger.L().Info(fmt.Sprintf("Scanning %d images concurrently with %d workers...", len(jobs), concurrency))
+	orchestrator := NewImageScanOrchestrator(svc, concurrency)
+	results := orchestrator.ScanImages(ctx, jobs)
+
+	for _, res := range results {
+		if res.Error != nil {
+			logger.L().Error("failed to scan", helpers.String("image", res.Image), helpers.Error(res.Error))
 			continue
 		}
-		logger.L().StopSuccess("Done scanning", helpers.String("image", img))
+		if res.ScanData != nil {
+			resultsHandling.ImageScanData = append(resultsHandling.ImageScanData, *res.ScanData)
+			logger.L().Success("Done scanning", helpers.String("image", res.Image))
+		}
 	}
+	if agg := orchestrator.GetErrorAggregator(); agg != nil && agg.HasErrors() {
+		logger.L().Warning(agg.Error())
+		return agg
+	}
+	return nil
+}
+
+func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, scanningContext cautils.ScanningContext, k8sApi *k8sinterface.KubernetesApi) (mapset.Set[string], map[string][]imagescan.RegistryCredentials, []error) {
+	imagesToScan := mapset.NewSet[string]()
+	imageToCreds := make(map[string][]imagescan.RegistryCredentials)
+	var containerErrors []error
+	if scanningContext != cautils.ContextCluster {
+		// imagePullSecrets belong to a live cluster target. A manifest or repository
+		// may contain the same Secret name as the current kube context, but that must
+		// never grant cluster credentials to an offline image scan.
+		k8sApi = nil
+	}
+
+	collectWorkload := func(wl *workloadinterface.Workload) {
+		images, workloadContainerErrors := getAllWorkloadImages(wl)
+		for _, containerErr := range workloadContainerErrors {
+			logger.L().Error("failed to collect image scan targets", helpers.Error(containerErr))
+			containerErrors = append(containerErrors, containerErr)
+		}
+		for _, image := range images {
+			imagesToScan.Add(image)
+			if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, image); ok {
+				found := false
+				for _, c := range imageToCreds[image] {
+					if c == creds {
+						found = true
+						break
+					}
+				}
+				if !found {
+					imageToCreds[image] = append(imageToCreds[image], creds)
+				}
+			}
+		}
+	}
+
+	if scanType == cautils.ScanTypeWorkload {
+		collectWorkload(workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject()))
+	} else {
+		for _, workload := range scanData.AllResources {
+			collectWorkload(workloadinterface.NewWorkloadObj(workload.GetObject()))
+		}
+	}
+
+	return imagesToScan, imageToCreds, containerErrors
 }
 
 func registryCredentialsFromScanInfo(scanInfo *cautils.ScanInfo) imagescan.RegistryCredentials {
@@ -457,7 +574,7 @@ func registryCredentialsFromScanInfo(scanInfo *cautils.ScanInfo) imagescan.Regis
 func scanSingleImage(ctx context.Context, img string, svc imageScanService, resultsHandling *resultshandling.ResultsHandler, registryMapping map[string]string, creds imagescan.RegistryCredentials) error {
 
 	scanResults, err := scanWithRegistryMapping(
-		ctx, svc, img, creds,
+		ctx, svc, img, []imagescan.RegistryCredentials{creds},
 		registryMapping, nil, nil,
 	)
 	if err != nil {
@@ -506,6 +623,11 @@ func estimateClusterSize(resourceHandler resourcehandler.IResourceHandler, ctx c
 // count because sessionObj.AllResources is populated asynchronously by the
 // producer goroutine.
 func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandler resourcehandler.IResourceHandler, scanData *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, clusterName string, excludedNamespaces string, includeNamespaces string, enableRegoPrint bool, controlTimeout time.Duration, estimatedClusterSize int) error {
+	// The eager collector initializes this metadata before constructing the OPA
+	// processor. Do the same here because the cloud provider is a policy input,
+	// not only report metadata.
+	resourcehandler.CollectClusterMetadata(ctx, resourceHandler, scanData)
+
 	// Construct the processor before starting the producer goroutine. The
 	// producer does not touch scanData's resource maps (it carries them on the
 	// resident batch instead), but constructing first means the constructor's
@@ -513,12 +635,18 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	// producer does later — the invariant is enforced by ordering rather than by
 	// a comment in the resource handler.
 	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), clusterName)
-	var exceptionRecorder = newSecurityExceptionEventRecorder()
+	exceptionRecorder, shutdownRecorder := newSecurityExceptionEventRecorder()
+	if shutdownRecorder != nil {
+		defer shutdownRecorder()
+	}
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, clusterName, excludedNamespaces, includeNamespaces, enableRegoPrint, exceptionRecorder)
 	reportResults.ControlTimeout = controlTimeout
 
 	// Stream resources in batches
-	batchChan, errChan, expectedNamespaceBatches, err := resourceHandler.StreamResourcesBatches(ctx, scanData, scanInfo)
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	batchChan, errChan, expectedNamespaceBatches, err := resourceHandler.StreamResourcesBatches(streamCtx, scanData, scanInfo)
 	if err != nil {
 		return fmt.Errorf("failed to start resource streaming: %w", err)
 	}
@@ -528,9 +656,74 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	reportResults.SetInitialResourceCount(estimatedClusterSize)
 
 	// Process batches with streaming
-	if err := reportResults.ProcessWithStreaming(ctx, batchChan, errChan, cautils.NewProgressHandler(""), expectedNamespaceBatches); err != nil {
+	if err := reportResults.ProcessWithStreaming(streamCtx, batchChan, errChan, cautils.NewProgressHandler(""), expectedNamespaceBatches); err != nil {
 		return fmt.Errorf("failed to process rules with streaming: %w", err)
 	}
 
 	return nil
+}
+
+func getAllWorkloadImages(wl *workloadinterface.Workload) ([]string, []error) {
+	var images []string
+	var containerErrors []error
+	addContainerError := func(containerClass string, err error) {
+		containerErrors = append(containerErrors, fmt.Errorf("failed to get %s for kind: %s, name: %s, namespace: %s: %w", containerClass, wl.GetKind(), wl.GetName(), wl.GetNamespace(), err))
+	}
+
+	if containers, err := wl.GetContainers(); err != nil {
+		addContainerError("containers", err)
+	} else {
+		for _, c := range containers {
+			if c.Image != "" {
+				images = append(images, c.Image)
+			}
+		}
+	}
+	if initContainers, err := wl.GetInitContainers(); err != nil {
+		addContainerError("init containers", err)
+	} else {
+		for _, c := range initContainers {
+			if c.Image != "" {
+				images = append(images, c.Image)
+			}
+		}
+	}
+	if ephemeralContainers, err := wl.GetEphemeralContainers(); err != nil {
+		addContainerError("ephemeral containers", err)
+	} else {
+		for _, c := range ephemeralContainers {
+			if c.Image != "" {
+				images = append(images, c.Image)
+			}
+		}
+	}
+	return images, containerErrors
+}
+
+// printPreflightResult prints the --dry-run RBAC check to stdout.
+func printPreflightResult(result *resourcehandler.PreflightResult) {
+	for _, f := range result.DiscoveryFailures {
+		fmt.Printf("DISCOVERY FAILED  %s: %s\n", f.GVR, f.Error)
+	}
+
+	errored := result.Errored()
+	for _, c := range errored {
+		fmt.Printf("CHECK FAILED  list %s: %s\n", c.GVR, c.Reason)
+	}
+
+	denied := result.Denied()
+	if len(denied) == 0 && len(errored) == 0 {
+		fmt.Printf("All %d required resource type(s) can be listed with the current credentials.\n", len(result.Checks))
+		return
+	}
+
+	for _, c := range denied {
+		fmt.Printf("DENIED  list %s\n", c.GVR)
+		if len(c.AffectedControls) > 0 {
+			fmt.Printf("        -> %s will not evaluate\n", strings.Join(c.AffectedControls, ", "))
+		}
+	}
+
+	allowed := len(result.Checks) - len(denied) - len(errored)
+	fmt.Printf("\n%d/%d required resource type(s) can be listed. %d denied, %d could not be checked.\n", allowed, len(result.Checks), len(denied), len(errored))
 }

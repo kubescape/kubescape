@@ -3,8 +3,10 @@ package printer
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -214,6 +216,116 @@ func TestCalculateMove_MultiByteRunes(t *testing.T) {
 	assert.True(t, success)
 	assert.Equal(t, 2, newLine)
 	assert.Equal(t, 3, newColumn)
+}
+
+// The end line is 1-indexed, so values below 1 are as out of range as values past the end of the file and both return false.
+func TestCalculateMove_EndLineOutOfRange(t *testing.T) {
+	file := []string{"line 1", "line 2", "line 3"}
+
+	tc := []struct {
+		name      string
+		file      []string
+		endLine   int
+		endColumn int
+	}{
+		{"zero end line, as left behind by a failed move", file, 0, 0},
+		{"negative end line", file, -1, 1},
+		{"end line one past the last line", file, 4, 1},
+		{"any end line into an empty file", []string{}, 1, 1},
+	}
+
+	for _, testCase := range tc {
+		t.Run(testCase.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				newLine, newColumn, success := calculateMove("5", testCase.file, testCase.endColumn, testCase.endLine)
+
+				assert.False(t, success)
+				assert.Equal(t, 0, newLine)
+				assert.Equal(t, 0, newColumn)
+			})
+		})
+	}
+}
+
+// A move that claims more characters than the file holds walks past the last line and returns false.
+func TestCalculateMove_WalkPastLastLine(t *testing.T) {
+	file := []string{"line 1", "line 2", "line 3"}
+
+	assert.NotPanics(t, func() {
+		newLine, newColumn, success := calculateMove("50", file, 1, 3)
+
+		assert.False(t, success)
+		assert.Equal(t, 0, newLine)
+		assert.Equal(t, 0, newColumn)
+	})
+}
+
+// A move that fails mid-delta leaves the position untouched, so later fixes keep 1-indexed regions instead of landing on line 0.
+func TestCollectDiffs_FailedMoveKeepsRegionOneIndexed(t *testing.T) {
+	// the equality run claims more content than the file holds, so the first move fails
+	diffs := []diffmatchpatch.Diff{
+		{Type: diffmatchpatch.DiffEqual, Text: strings.Repeat("a", 44)},
+		{Type: diffmatchpatch.DiffInsert, Text: "x"},
+	}
+
+	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+	result := run.CreateResultForRule("0")
+
+	assert.NotPanics(t, func() {
+		collectDiffs(diffmatchpatch.New(), diffs, result, "", "short")
+	})
+
+	require.Len(t, result.Fixes, 1)
+	replacements := result.Fixes[0].ArtifactChanges[0].Replacements
+	require.Len(t, replacements, 1)
+
+	region := replacements[0].DeletedRegion
+	assert.Equal(t, 1, *region.StartLine)
+	assert.Equal(t, 1, *region.StartColumn)
+	assert.Equal(t, 1, *region.EndLine)
+	assert.Equal(t, 1, *region.EndColumn)
+}
+
+// An empty diff set yields a single empty delta segment and collects no fixes.
+func TestCollectDiffs_EmptyDelta(t *testing.T) {
+	dmp := diffmatchpatch.New()
+	diffs := dmp.DiffMain("", "", false)
+	require.Empty(t, diffs)
+
+	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+	result := run.CreateResultForRule("0")
+
+	assert.NotPanics(t, func() {
+		collectDiffs(dmp, diffs, result, "", "")
+	})
+
+	assert.Empty(t, result.Fixes)
+}
+
+// The region lookahead reports the last segment and an equality run as closing, and tolerates an empty neighbor.
+func TestClosesFixRegion(t *testing.T) {
+	tc := []struct {
+		name     string
+		delta    []string
+		index    int
+		expected bool
+	}{
+		{"last segment closes the region", []string{"+abc", "=5"}, 1, true},
+		{"next segment resumes unchanged content", []string{"+abc", "=5"}, 0, true},
+		{"next segment continues the edit", []string{"+abc", "-5"}, 0, false},
+		{"trailing empty segment leaves no operation to resume", []string{"+abc", ""}, 0, true},
+		{"empty segments skipped before an equality run", []string{"+abc", "", "", "=5"}, 0, true},
+		{"empty segments skipped before a further edit", []string{"+abc", "", "-5"}, 0, false},
+		{"index past the end of the delta", []string{"+abc"}, 5, true},
+	}
+
+	for _, testCase := range tc {
+		t.Run(testCase.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				assert.Equal(t, testCase.expected, closesFixRegion(testCase.delta, testCase.index))
+			})
+		})
+	}
 }
 
 // Adds a new fix to the result with the given filepath, start and end positions, and text.
@@ -801,4 +913,55 @@ spec:
 		"SARIF must resolve the privileged field to line %d, got startLines=%v", privilegedLine, startLines)
 	assert.NotEqual(t, []int{1}, startLines,
 		"all findings must not collapse to line 1 for absolute-path file scans")
+}
+
+// TestPrintImageScan_WriterIsNonSeekablePipe is a regression test for image
+// SARIF output hanging when the destination is a pipe (e.g. stdout in a Unix
+// pipeline). printImageScan used to render the report to sp.writer, then
+// reopen sp.writer.Name() to patch the driver name and write it back. For a
+// pipe there is nothing meaningful to reopen by name, so the fix renders and
+// patches the report in memory and writes it to sp.writer exactly once. This
+// test uses a real os.Pipe() as the writer, with a concurrent reader (playing
+// the role of a downstream consumer like `tee` or `jq`), and asserts
+// ActionPrint returns promptly with a correctly patched report.
+func TestPrintImageScan_WriterIsNonSeekablePipe(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+
+	sp := NewSARIFPrinter()
+	sp.writer = w
+
+	imageScanData := buildSeverityExceptionImageScanData()
+
+	printDone := make(chan error, 1)
+	go func() {
+		printDone <- sp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{imageScanData})
+	}()
+
+	readDone := make(chan []byte, 1)
+	go func() {
+		data, _ := io.ReadAll(r)
+		readDone <- data
+	}()
+
+	select {
+	case err := <-printDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("ActionPrint did not return within 5s: image SARIF output is hanging on a pipe writer")
+	}
+
+	require.NoError(t, w.Close())
+
+	var raw []byte
+	select {
+	case raw = <-readDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out reading the piped SARIF output")
+	}
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 1)
+	assert.Equal(t, "Kubescape", report.Runs[0].Tool.Driver.Name, "driver name must still be patched when writing to a pipe")
 }

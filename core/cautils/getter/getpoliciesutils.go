@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,6 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 )
+
+const savedJSONFileMode os.FileMode = 0o644
+
+var renameSavedFile = os.Rename
 
 // GetDefaultPath returns a location under the local dot files for kubescape.
 //
@@ -43,24 +48,69 @@ func SaveInFile(object any, targetFile string) error {
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(targetFile, encodedData, 0644) //nolint:gosec
-	if err != nil {
-		if os.IsNotExist(err) {
-			pathDir := filepath.Dir(targetFile)
-			// pathDir could contain subdirectories
-			if erm := os.MkdirAll(pathDir, 0755); erm != nil {
-				return erm
-			}
-		} else {
-			return err
-
-		}
-		err = os.WriteFile(targetFile, encodedData, 0644) //nolint:gosec
-		if err != nil {
-			return err
-		}
+	if targetFile == "" {
+		return fmt.Errorf("target file is empty")
 	}
+
+	targetDir := filepath.Dir(targetFile)
+	if err := os.MkdirAll(targetDir, 0o750); err != nil {
+		return fmt.Errorf("create target directory: %w", err)
+	}
+
+	mode, err := savedFileMode(targetFile)
+	if err != nil {
+		return err
+	}
+
+	tempFile, err := os.CreateTemp(targetDir, ".kubescape-json-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary JSON file: %w", err)
+	}
+	tempPath := tempFile.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if err := tempFile.Chmod(mode); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("set temporary JSON file permissions: %w", err)
+	}
+	if _, err := tempFile.Write(encodedData); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("write temporary JSON file: %w", err)
+	}
+	if err := tempFile.Sync(); err != nil {
+		_ = tempFile.Close()
+		return fmt.Errorf("sync temporary JSON file: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("close temporary JSON file: %w", err)
+	}
+	if err := renameSavedFile(tempPath, targetFile); err != nil {
+		return fmt.Errorf("replace target JSON file: %w", err)
+	}
+	committed = true
 	return nil
+}
+
+func savedFileMode(targetFile string) (os.FileMode, error) {
+	info, err := os.Lstat(targetFile)
+	if errors.Is(err, os.ErrNotExist) {
+		return savedJSONFileMode, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("inspect target JSON file: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return 0, fmt.Errorf("target JSON file %q is a symbolic link", targetFile)
+	}
+	if !info.Mode().IsRegular() {
+		return 0, fmt.Errorf("target JSON file %q is not a regular file", targetFile)
+	}
+	return info.Mode().Perm(), nil
 }
 
 // HttpDelete provides a low-level capability to send a HTTP DELETE request and serialize the response as a string.

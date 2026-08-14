@@ -3,13 +3,13 @@ package scan
 import (
 	"context"
 	"errors"
-	"os"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/kubescape/go-logger/helpers"
+	"github.com/anchore/grype/grype/match"
+	grypepkg "github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/mocks"
@@ -168,101 +168,10 @@ func Test_enforceSeverityThresholds(t *testing.T) {
 				scanInfo := tc.ScanInfo
 				want := tc.Want
 
-				got := false
-				onExceed := func(*cautils.ScanInfo, helpers.ILogger) {
-					got = true
-				}
+				err := enforceSeverityThresholds(severityCounters, scanInfo)
 
-				enforceSeverityThresholds(severityCounters, scanInfo, onExceed)
-
-				if got != want {
-					t.Errorf("got: %v, want %v", got, want)
-				}
-			},
-		)
-	}
-}
-
-type spyLogMessage struct {
-	Message string
-	Details map[string]string
-}
-
-type spyLogger struct {
-	setItems []spyLogMessage
-}
-
-var _ helpers.ILogger = &spyLogger{}
-
-func (l *spyLogger) Error(msg string, details ...helpers.IDetails)                    {}
-func (l *spyLogger) Success(msg string, details ...helpers.IDetails)                  {}
-func (l *spyLogger) Warning(msg string, details ...helpers.IDetails)                  {}
-func (l *spyLogger) Info(msg string, details ...helpers.IDetails)                     {}
-func (l *spyLogger) Debug(msg string, details ...helpers.IDetails)                    {}
-func (l *spyLogger) SetLevel(level string) error                                      { return nil }
-func (l *spyLogger) GetLevel() string                                                 { return "" }
-func (l *spyLogger) SetWriter(w *os.File)                                             {}
-func (l *spyLogger) GetWriter() *os.File                                              { return &os.File{} }
-func (l *spyLogger) LoggerName() string                                               { return "" }
-func (l *spyLogger) Ctx(_ context.Context) helpers.ILogger                            { return l }
-func (l *spyLogger) Start(msg string, details ...helpers.IDetails)                    {}
-func (l *spyLogger) StopSuccess(msg string, details ...helpers.IDetails)              {}
-func (l *spyLogger) StopError(msg string, details ...helpers.IDetails)                {}
-func (l *spyLogger) TimedWrapper(funcName string, timeout time.Duration, task func()) {}
-
-func (l *spyLogger) Fatal(msg string, details ...helpers.IDetails) {
-	firstDetail := details[0]
-	detailsMap := map[string]string{firstDetail.Key(): firstDetail.Value().(string)}
-
-	newMsg := spyLogMessage{msg, detailsMap}
-	l.setItems = append(l.setItems, newMsg)
-}
-
-func (l *spyLogger) GetSpiedItems() []spyLogMessage {
-	return l.setItems
-}
-
-func Test_terminateOnExceedingSeverity(t *testing.T) {
-	expectedMessage := "compliance result exceeds severity threshold"
-	expectedKey := "set severity threshold"
-
-	testCases := []struct {
-		Description     string
-		ExpectedMessage string
-		ExpectedKey     string
-		ExpectedValue   string
-		Logger          *spyLogger
-	}{
-		{
-			"Should log the Critical threshold that was set in scan info",
-			expectedMessage,
-			expectedKey,
-			apis.SeverityCriticalString,
-			&spyLogger{},
-		},
-		{
-			"Should log the High threshold that was set in scan info",
-			expectedMessage,
-			expectedKey,
-			apis.SeverityHighString,
-			&spyLogger{},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(
-			tc.Description,
-			func(t *testing.T) {
-				want := []spyLogMessage{
-					{tc.ExpectedMessage, map[string]string{tc.ExpectedKey: tc.ExpectedValue}},
-				}
-				scanInfo := &cautils.ScanInfo{FailThresholdSeverity: tc.ExpectedValue}
-
-				terminateOnExceedingSeverity(scanInfo, tc.Logger)
-
-				got := tc.Logger.GetSpiedItems()
-				if !reflect.DeepEqual(got, want) {
-					t.Errorf("got: %v, want: %v", got, want)
+				if (err != nil) != want {
+					t.Errorf("got error: %v, want error: %v", err != nil, want)
 				}
 			},
 		)
@@ -271,9 +180,10 @@ func Test_terminateOnExceedingSeverity(t *testing.T) {
 
 func TestSetSecurityViewScanInfo(t *testing.T) {
 	tests := []struct {
-		name string
-		args []string
-		want *cautils.ScanInfo
+		name         string
+		args         []string
+		want         *cautils.ScanInfo
+		wantPolicies []cautils.PolicyIdentifier
 	}{
 		{
 			name: "no args",
@@ -281,19 +191,19 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 			want: &cautils.ScanInfo{
 				InputPatterns: []string{},
 				ScanType:      cautils.ScanTypeCluster,
-				PolicyIdentifier: []cautils.PolicyIdentifier{
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "clusterscan",
-					},
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "mitre",
-					},
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "nsa",
-					},
+			},
+			wantPolicies: []cautils.PolicyIdentifier{
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "clusterscan",
+				},
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "mitre",
+				},
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "nsa",
 				},
 			},
 		},
@@ -309,15 +219,15 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 					"file.yaml",
 					"file2.yaml",
 				},
-				PolicyIdentifier: []cautils.PolicyIdentifier{
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "workloadscan",
-					},
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "allcontrols",
-					},
+			},
+			wantPolicies: []cautils.PolicyIdentifier{
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "workloadscan",
+				},
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "allcontrols",
 				},
 			},
 		},
@@ -328,7 +238,7 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 			got := &cautils.ScanInfo{
 				View: string(cautils.SecurityViewType),
 			}
-			setSecurityViewScanInfo(tt.args, got)
+			policyIdentifiers := setSecurityViewScanInfo(tt.args, got)
 
 			if len(tt.want.InputPatterns) != len(got.InputPatterns) {
 				t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.InputPatterns, tt.want.InputPatterns)
@@ -351,16 +261,16 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 				}
 			}
 
-			for i := range tt.want.PolicyIdentifier {
+			for i := range tt.wantPolicies {
 				found := false
-				for j := range got.PolicyIdentifier {
-					if tt.want.PolicyIdentifier[i].Kind == got.PolicyIdentifier[j].Kind && tt.want.PolicyIdentifier[i].Identifier == got.PolicyIdentifier[j].Identifier {
+				for j := range policyIdentifiers {
+					if tt.wantPolicies[i].Kind == policyIdentifiers[j].Kind && tt.wantPolicies[i].Identifier == policyIdentifiers[j].Identifier {
 						found = true
 						break
 					}
 				}
 				if !found {
-					t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.PolicyIdentifier, tt.want.PolicyIdentifier)
+					t.Errorf("in test: %s, got: %v, want: %v", tt.name, policyIdentifiers, tt.wantPolicies)
 				}
 			}
 		})
@@ -442,7 +352,6 @@ func TestGetScanCommand_DeprecatedFlagsRemoved(t *testing.T) {
 	require.NotNil(t, cmd)
 
 	for _, removed := range []string{
-		"fail-threshold",
 		"create-account",
 		"enable-host-scan",
 		"host-scan-yaml",
@@ -450,6 +359,26 @@ func TestGetScanCommand_DeprecatedFlagsRemoved(t *testing.T) {
 		assert.Nil(t, cmd.PersistentFlags().Lookup(removed),
 			"deprecated flag %q must no longer be registered", removed)
 	}
+}
+
+func TestGetScanCommand_FailThresholdKeptAsHiddenDeprecatedFlag(t *testing.T) {
+	// --fail-threshold's gating logic was removed, but the flag must stay registered
+	// (hidden + deprecated) so cobra keeps accepting it instead of erroring with
+	// "unknown flag" for existing callers - see https://github.com/kubescape/kubescape/issues/3056
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	require.NotNil(t, cmd)
+
+	f := cmd.PersistentFlags().Lookup("fail-threshold")
+	require.NotNil(t, f, "--fail-threshold must stay registered so it doesn't fail with 'unknown flag'")
+	assert.True(t, f.Hidden, "--fail-threshold must be hidden from help output")
+	assert.Equal(t, "use '--compliance-threshold' flag instead", f.Deprecated)
+
+	require.NoError(t, cmd.ParseFlags([]string{"--fail-threshold", "20"}))
+	assert.Equal(t, "20", f.Value.String())
+
+	require.NoError(t, cmd.ParseFlags([]string{"-t", "20"}))
+	assert.Equal(t, "20", f.Value.String())
 }
 
 func TestGetScanCommand_HostScanFlagTriState(t *testing.T) {
@@ -485,7 +414,8 @@ func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	require.NoError(t, cmd.PersistentFlags().Set("format", "xml"))
 
 	err := cmd.RunE(cmd, []string{"."})
-	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml`)
+	errMessage := "invalid format \"xml\", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml, csv, markdown, cyclonedx-json, spdx-json"
+	assert.EqualError(t, err, errMessage)
 }
 
 func TestGetScanCommand_ScanTimeoutFlagRegistered(t *testing.T) {
@@ -572,7 +502,7 @@ type contextTrackingKubescape struct {
 
 func (m *contextTrackingKubescape) Context() context.Context       { return m.ctx }
 func (m *contextTrackingKubescape) SetContext(ctx context.Context) { m.ctx = ctx }
-func (m *contextTrackingKubescape) Scan(_ *cautils.ScanInfo) (*resultshandlingpkg.ResultsHandler, error) {
+func (m *contextTrackingKubescape) Scan(_ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
 	m.scanCalledWith = m.ctx
 	return nil, errors.New("stub: scan not implemented in test")
 }
@@ -581,7 +511,7 @@ func TestSecurityScan_TimeoutDeadlineActiveForScan(t *testing.T) {
 	ks := &contextTrackingKubescape{ctx: context.Background()}
 	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
 
-	_ = securityScan(scanInfo, ks)
+	_ = securityScan(scanInfo, ks, nil)
 
 	_, hasDeadline := ks.scanCalledWith.Deadline()
 	assert.True(t, hasDeadline, "Scan() must receive a context with a deadline when ScanTimeout > 0")
@@ -592,7 +522,7 @@ func TestSecurityScan_TimeoutContextRestoredAfterReturn(t *testing.T) {
 	ks := &contextTrackingKubescape{ctx: originalCtx}
 	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
 
-	_ = securityScan(scanInfo, ks)
+	_ = securityScan(scanInfo, ks, nil)
 
 	_, hasDeadline := ks.Context().Deadline()
 	assert.False(t, hasDeadline, "original context must be restored on ks after securityScan returns")
@@ -602,7 +532,7 @@ func TestSecurityScan_ZeroTimeoutNoDeadline(t *testing.T) {
 	ks := &contextTrackingKubescape{ctx: context.Background()}
 	scanInfo := cautils.ScanInfo{ScanTimeout: 0}
 
-	_ = securityScan(scanInfo, ks)
+	_ = securityScan(scanInfo, ks, nil)
 
 	_, hasDeadline := ks.scanCalledWith.Deadline()
 	assert.False(t, hasDeadline, "Scan() must not receive a deadline when ScanTimeout is 0")
@@ -754,6 +684,117 @@ func Test_enforceCoverageThreshold(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.wantFail, coverageWouldFail(tt.notEvaluated, tt.totalControls, tt.threshold))
+		})
+	}
+}
+
+type mockVulnerabilityProvider struct {
+	severity string
+}
+
+func (m mockVulnerabilityProvider) VulnerabilityMetadata(ref vulnerability.Reference) (*vulnerability.Metadata, error) {
+	return &vulnerability.Metadata{Severity: m.severity}, nil
+}
+func (m mockVulnerabilityProvider) PackageSearchNames(grypepkg.Package) []string { return nil }
+func (m mockVulnerabilityProvider) FindVulnerabilities(criteria ...vulnerability.Criteria) ([]vulnerability.Vulnerability, error) {
+	return nil, nil
+}
+func (m mockVulnerabilityProvider) Close() error { return nil }
+
+func TestEnforceImageSeverityThresholds(t *testing.T) {
+	tests := []struct {
+		name          string
+		threshold     string
+		matchSeverity string
+		fixState      vulnerability.FixState
+		onlyFixable   bool
+		expectedError bool
+	}{
+		{
+			name:          "no threshold",
+			threshold:     "",
+			matchSeverity: "Critical",
+			expectedError: false,
+		},
+		{
+			name:          "threshold unknown",
+			threshold:     "unknown",
+			matchSeverity: "Critical",
+			expectedError: false,
+		},
+		{
+			name:          "threshold met exactly",
+			threshold:     "high",
+			matchSeverity: "High",
+			expectedError: true,
+		},
+		{
+			name:          "threshold exceeded",
+			threshold:     "high",
+			matchSeverity: "Critical",
+			expectedError: true,
+		},
+		{
+			name:          "below threshold",
+			threshold:     "critical",
+			matchSeverity: "High",
+			expectedError: false,
+		},
+		{
+			name:          "unfixed vulnerability at threshold is ignored when only fixable is enabled",
+			threshold:     "high",
+			matchSeverity: "High",
+			fixState:      vulnerability.FixStateNotFixed,
+			onlyFixable:   true,
+			expectedError: false,
+		},
+		{
+			name:          "fixed vulnerability at threshold fails when only fixable is enabled",
+			threshold:     "high",
+			matchSeverity: "High",
+			fixState:      vulnerability.FixStateFixed,
+			onlyFixable:   true,
+			expectedError: true,
+		},
+		{
+			name:          "unfixed vulnerability at threshold still fails when only fixable is disabled",
+			threshold:     "high",
+			matchSeverity: "High",
+			fixState:      vulnerability.FixStateNotFixed,
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				FailThresholdSeverity: tt.threshold,
+				OnlyFixable:           tt.onlyFixable,
+			}
+
+			matches := match.NewMatches()
+			if tt.matchSeverity != "" {
+				matches.Add(match.Match{
+					Vulnerability: vulnerability.Vulnerability{
+						Reference: vulnerability.Reference{ID: "CVE-TEST"},
+						Fix:       vulnerability.Fix{State: tt.fixState},
+					},
+				})
+			}
+
+			imgData := []cautils.ImageScanData{
+				{
+					Matches:               matches,
+					VulnerabilityProvider: mockVulnerabilityProvider{severity: tt.matchSeverity},
+				},
+			}
+
+			err := enforceImageSeverityThresholds(imgData, scanInfo)
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
 		})
 	}
 }

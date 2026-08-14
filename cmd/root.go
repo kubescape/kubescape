@@ -65,12 +65,17 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 		Use:     "kubescape",
 		Short:   "Kubescape is a tool for testing Kubernetes security posture. Docs: https://kubescape.io/docs/",
 		Example: ksExamples,
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			k8sinterface.SetClusterContextName(rootInfo.KubeContext)
 			initLogger()
-			initLoggerLevel(cmd)
-			initEnvironment(ks.Context())
+			if err := initLoggerLevel(cmd); err != nil {
+				return err
+			}
+			if err := initEnvironment(ks.Context()); err != nil {
+				return err
+			}
 			initCacheDir(cmd)
+			return nil
 		},
 	}
 
@@ -86,13 +91,16 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 
 	rootCmd.PersistentFlags().StringVar(&rootInfo.DiscoveryServerURL, "server", "", "Backend discovery server URL")
 
-	rootCmd.PersistentFlags().MarkDeprecated("environment", "'environment' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
-	rootCmd.PersistentFlags().MarkDeprecated("env", "'env' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
-	rootCmd.PersistentFlags().MarkHidden("environment")
-	rootCmd.PersistentFlags().MarkHidden("env")
+	var dummyEnvironment, dummyEnv string
+	rootCmd.PersistentFlags().StringVar(&dummyEnvironment, "environment", "", "'environment' is no longer supported, Use 'server' instead.")
+	rootCmd.PersistentFlags().StringVar(&dummyEnv, "env", "", "'env' is no longer supported, Use 'server' instead.")
+	_ = rootCmd.PersistentFlags().MarkDeprecated("environment", "'environment' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
+	_ = rootCmd.PersistentFlags().MarkDeprecated("env", "'env' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
+	_ = rootCmd.PersistentFlags().MarkHidden("environment")
+	_ = rootCmd.PersistentFlags().MarkHidden("env")
 
 	rootCmd.PersistentFlags().StringVar(&rootInfo.LoggerName, "logger-name", "", fmt.Sprintf("Logger name. Supported: %s [$KS_LOGGER_NAME]", strings.Join(logger.ListLoggersNames(), "/")))
-	rootCmd.PersistentFlags().MarkHidden("logger-name")
+	_ = rootCmd.PersistentFlags().MarkHidden("logger-name") // #nosec G104 -- flag is defined on this command; MarkHidden only errors for an unknown flag
 
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.Logger, "logger", "l", helpers.InfoLevel.String(), fmt.Sprintf("Logger level. Supported: %s [$KS_LOGGER]", strings.Join(helpers.SupportedLevels(), "/")))
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")

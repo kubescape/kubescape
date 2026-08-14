@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"gopkg.in/op/go-logging.v1"
 )
@@ -277,6 +279,21 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 	h.unfixedControls = h.unfixedControls[:0]
 	h.fixedControlsCount = 0
 
+	var containerProfile *storagev1beta1.ContainerProfile
+	if h.fixInfo != nil && h.fixInfo.ContainerProfilePath != "" {
+		profileData, err := os.ReadFile(h.fixInfo.ContainerProfilePath)
+		if err == nil {
+			var cp storagev1beta1.ContainerProfile
+			if err := json.Unmarshal(profileData, &cp); err == nil {
+				containerProfile = &cp
+			} else {
+				logger.L().Ctx(ctx).Warning("Failed to unmarshal container profile: " + err.Error())
+			}
+		} else {
+			logger.L().Ctx(ctx).Warning("Failed to read container profile: " + err.Error())
+		}
+	}
+
 	for _, result := range h.reportObj.Results {
 		if !result.GetStatus(nil).IsFailed() {
 			continue
@@ -430,6 +447,41 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				continue
 			}
 			h.unfixedControls = append(h.unfixedControls, pu.entry)
+		}
+
+		if containerProfile != nil {
+			var rawManifest []byte
+			if resourceObj != nil && resourceObj.GetObject() != nil {
+				rawManifest, _ = json.Marshal(resourceObj.GetObject())
+			}
+			var workloadKind string
+			var containerName string
+
+			if resourceObj != nil {
+				workloadKind = resourceObj.GetKind()
+			}
+
+			// Verify resourceObj matches containerProfile's workload labels
+			labels := containerProfile.GetLabels()
+			if labels != nil {
+				containerName = labels["kubescape.io/workload-container-name"]
+				profileKind := labels["kubescape.io/workload-kind"]
+				profileName := labels["kubescape.io/workload-name"]
+
+				if resourceObj != nil {
+					if profileKind != "" && !strings.EqualFold(profileKind, resourceObj.GetKind()) {
+						continue // Kind mismatch, skip drift detection for this resource
+					}
+					if profileName != "" && profileName != resourceObj.GetName() {
+						continue // Name mismatch, skip drift detection for this resource
+					}
+				}
+			}
+
+			fixes := DetectProfileDrift(rawManifest, containerProfile, workloadKind, containerName, rfi.DocumentIndex)
+			for _, fix := range fixes {
+				rfi.YamlExpressions[fix.YamlExpression] = armotypes.FixPath{Path: fix.YamlExpression, Value: ""}
+			}
 		}
 
 		if len(rfi.YamlExpressions) > 0 {
@@ -704,10 +756,14 @@ func sanitizeForLog(s string) string {
 }
 
 func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath string, documentIndex int, err error) {
-	lastColon := strings.LastIndex(filePathWithIndex, ":")
+	volume := filepath.VolumeName(filePathWithIndex)
+	pathWithoutVolume := filePathWithIndex[len(volume):]
+
+	lastColon := strings.LastIndex(pathWithoutVolume, ":")
 	if lastColon == -1 {
 		return "", 0, fmt.Errorf("expected to find ':' in file path")
 	}
+	lastColon += len(volume)
 
 	filePath = filePathWithIndex[:lastColon]
 	indexStr := filePathWithIndex[lastColon+1:]
@@ -902,6 +958,12 @@ func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(docu
 			}
 
 			yamlExpression := FixPathToValidYamlExpression(rulePaths.FixPath.Path, rulePaths.FixPath.Value, documentIndex)
+			if yamlExpression == "" {
+				logger.L().Debug("skipping fix path that is not a plain yaml path",
+					helpers.String("fixPath", sanitizeForLog(rulePaths.FixPath.Path)))
+				skippedReasons = append(skippedReasons, "skipped: fix path is not a plain yaml path")
+				continue
+			}
 			rfi.YamlExpressions[yamlExpression] = rulePaths.FixPath
 			added++
 		}
@@ -925,7 +987,36 @@ func reduceYamlExpressions(resource *ResourceFixInfo) string {
 	return strings.Join(expressions, " | ")
 }
 
+// safeFixPath matches the subset of yq's expression grammar that a fix path is
+// allowed to use: dot-separated keys — bare or double-quoted — each optionally
+// followed by list indices. Everything else yq accepts in that position
+// (pipes, parentheses, comparison and assignment operators, function calls
+// such as strenv() or load_str()) is expression syntax, not a path.
+var safeFixPath = regexp.MustCompile(`^(?:[A-Za-z0-9_/-]+|"[^"\\]*")(?:\[(?:\d+|\*)\])*(?:\.(?:[A-Za-z0-9_/-]+|"[^"\\]*")(?:\[(?:\d+|\*)\])*)*$`)
+
+// safeSequenceValue matches a flow sequence of plain scalars, which is the
+// only shape of value that may be spliced into the expression unquoted.
+var safeSequenceValue = regexp.MustCompile(`^\[\s*(?:(?:"[^"\\]*"|-?\d+(?:\.\d+)?|true|false)(?:\s*,\s*(?:"[^"\\]*"|-?\d+(?:\.\d+)?|true|false))*\s*)?\]$`)
+
+// FixPathToValidYamlExpression builds the yq expression that writes value at
+// fixPath in document documentIndexInYaml. It returns an empty string when
+// fixPath is not a plain yaml path, and callers must skip such paths.
+//
+// Both operands come from the report file, which `kubescape fix` treats as
+// untrusted input (hence --base-path), and both are spliced into an expression
+// that yq then evaluates. A path such as
+//
+//	metadata.annotations.leak |= strenv(KUBESCAPE_ACCESS_KEY) | select(di==0).spec.hostNetwork
+//
+// parses as valid yq and makes `fix` copy an environment variable — or, via
+// load_str(), any local file — into the user's manifest, which is then written
+// back to disk. Validating both operands against a path/scalar grammar keeps a
+// crafted report from steering the expression.
 func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int) string {
+	if !safeFixPath.MatchString(fixPath) {
+		return ""
+	}
+
 	isStringValue := true
 	if _, err := strconv.ParseBool(value); err == nil {
 		isStringValue = false
@@ -938,7 +1029,14 @@ func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int
 	// Strings should be quoted. Escape only `"` — yq's expression lexer
 	// (lexer_participle.go stringValue) unescapes \" and nothing else, so any
 	// other Go-style escape would be written to the file literally.
-	if isStringValue {
+	//
+	// Do not quote if the value is meant to be a YAML sequence — but only when
+	// it really is one. Looking at the brackets alone is not enough: yq reads
+	// `[strenv(SECRET)]` as a collect operator around a function call, and
+	// `[] | (...) | [1]` as a pipeline, so both would evaluate rather than land
+	// as a literal sequence. Anything that is not a sequence of plain scalars
+	// is quoted like any other string value.
+	if isStringValue && !safeSequenceValue.MatchString(value) {
 		value = `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 	}
 
@@ -950,25 +1048,25 @@ func joinStrings(inputStrings ...string) string {
 	return strings.Join(inputStrings, "")
 }
 
-func GetFileString(filepath string) (string, error) {
-	bytes, err := os.ReadFile(filepath)
+func GetFileString(path string) (string, error) {
+	bytes, err := os.ReadFile(filepath.Clean(path))
 
 	if err != nil {
-		return "", fmt.Errorf("error reading file %s", filepath)
+		return "", fmt.Errorf("error reading file %s", path)
 	}
 
 	return string(bytes), nil
 }
 
-func writeFixesToFile(filepath, content string) error {
+func writeFixesToFile(path, content string) error {
 	perm := os.FileMode(0644)
-	if info, err := os.Stat(filepath); err == nil {
+	if info, err := os.Stat(filepath.Clean(path)); err == nil {
 		perm = info.Mode().Perm()
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("error reading file permissions: %w", err)
 	}
 
-	file, err := os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	file, err := os.OpenFile(filepath.Clean(path), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return fmt.Errorf("error writing fixes to file: %w", err)
 	}

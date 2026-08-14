@@ -77,23 +77,34 @@ func (pp *PrometheusPrinter) generatePrometheusFormat(
 	return m
 }
 
-func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
-	if opaSessionObj == nil {
-		logger.L().Ctx(ctx).Error("failed to print results, missing data")
-		return
-	}
+// generateImagePrometheusFormat builds CVE-count metrics, grouped by image and severity, for an image scan (#2782)
+func (pp *PrometheusPrinter) generateImagePrometheusFormat(imageScanData []cautils.ImageScanData) *Metrics {
+	m := &Metrics{isImageScan: true}
+	m.setImageVulnerabilities(imageScanData)
+	return m
+}
 
-	metrics := pp.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails, opaSessionObj.ScanCoverage)
+func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	var metrics *Metrics
+
+	if opaSessionObj != nil {
+		metrics = pp.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails, opaSessionObj.ScanCoverage)
+	} else if len(imageScanData) > 0 {
+		metrics = pp.generateImagePrometheusFormat(imageScanData)
+	} else {
+		return fmt.Errorf("failed to print results, missing data")
+	}
 
 	if _, err := pp.writer.Write([]byte(metrics.String())); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to write results: %w", err)
 	}
 	printer.LogOutputFile(pp.writer.Name())
+	return nil
 }
 
 func (p *PrometheusPrinter) CloseWriter() {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
 	}
 }

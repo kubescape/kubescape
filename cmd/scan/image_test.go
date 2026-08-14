@@ -1,6 +1,9 @@
 package scan
 
 import (
+	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/cmd/shared"
@@ -79,7 +82,7 @@ func TestGetImageCmd_RunE_FormatFlagEmpty(t *testing.T) {
 	assert.NoError(t, parent.PersistentFlags().Set("format", ""))
 
 	err := cmd.RunE(cmd, []string{"nginx"})
-	assert.Equal(t, "format cannot be empty, supported formats: pretty-printer, json, sarif", err.Error())
+	assert.Equal(t, fmt.Sprintf("format cannot be empty, supported formats: %s", strings.Join(shared.ImageScanFormats, ", ")), err.Error())
 }
 
 func TestGetImageCmd_RunE_FormatFlagInvalid(t *testing.T) {
@@ -93,7 +96,7 @@ func TestGetImageCmd_RunE_FormatFlagInvalid(t *testing.T) {
 	assert.NoError(t, parent.PersistentFlags().Set("format", "xml"))
 
 	err := cmd.RunE(cmd, []string{"nginx"})
-	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, sarif, yaml`)
+	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml, cyclonedx-json, spdx-json`)
 }
 
 func TestGetImageCmd_RunE_Success(t *testing.T) {
@@ -241,4 +244,24 @@ func TestGetScanCommand_ImageRegistryTokenAndAuthorityReachImageScan(t *testing.
 	assert.Equal(t, "registry.example.com", mockKubescape.imgScanInfo.Authority)
 	assert.Equal(t, "token", mockKubescape.imgScanInfo.Token)
 	assert.Equal(t, "registry.example.com/app:tag", mockKubescape.imgScanInfo.Image)
+}
+
+func TestGetImageCmd_RunE_ForwardsLocalTarball(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.AddCommand(cmd)
+
+	// Create a dummy tarball file
+	tmpFile, err := os.CreateTemp("", "dummy-*.tar")
+	assert.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	err = cmd.RunE(cmd, []string{tmpFile.Name()})
+	assert.NoError(t, err)
+	assert.Equal(t, "docker-archive:"+tmpFile.Name(), mockKubescape.imgScanInfo.Image)
 }

@@ -159,7 +159,7 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
 	resultsHandler.ImageScanData = []cautils.ImageScanData{*scanResultsPatched}
 
-	return svc.ExceedsSeverityThreshold(imagescan.ParseSeverity(scanInfo.FailThresholdSeverity), scanResultsPatched.Matches), resultsHandler.HandleResults(ks.Context(), scanInfo)
+	return svc.ExceedsSeverityThreshold(imagescan.ParseSeverity(scanInfo.FailThresholdSeverity), scanResultsPatched.Matches, scanInfo.OnlyFixable), resultsHandler.HandleResults(ks.Context(), scanInfo)
 }
 
 // buildPatchedImageName returns the canonical "<name>:<tag>" used as the buildkit
@@ -220,6 +220,15 @@ func copaPatch(ctx context.Context, timeout time.Duration, buildkitAddr, image, 
 	}
 }
 
+// resolveBuildkitOpts fills Addr from the --address flag unless a caller
+// already set it directly; empty means let buildkit.NewClient auto-detect.
+func resolveBuildkitOpts(buildkitAddr string, bkOpts buildkit.Opts) buildkit.Opts {
+	if bkOpts.Addr == "" {
+		bkOpts.Addr = buildkitAddr
+	}
+	return bkOpts
+}
+
 func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, ignoreError bool, outputMode, outputPath string, bkOpts buildkit.Opts) error {
 	// Ensure working folder exists for call to InstallUpdates
 	if workingFolder == "" {
@@ -229,11 +238,11 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 			return err
 		}
 		defer os.RemoveAll(workingFolder)
-		if err := os.Chmod(workingFolder, 0o744); err != nil {
+		if err := os.Chmod(workingFolder, 0o700); err != nil { // #nosec G302 -- working directory needs owner-execute (0o700) for a private area
 			return err
 		}
 	} else {
-		if isNew, err := utils.EnsurePath(workingFolder, 0o744); err != nil {
+		if isNew, err := utils.EnsurePath(workingFolder, 0o700); err != nil {
 			log.Errorf("failed to create workingFolder %s", workingFolder)
 			return err
 		} else if isNew {
@@ -247,6 +256,8 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 	if err != nil {
 		return err
 	}
+
+	bkOpts = resolveBuildkitOpts(buildkitAddr, bkOpts)
 
 	bkClient, err := buildkit.NewClient(ctx, bkOpts)
 	if err != nil {
@@ -422,11 +433,11 @@ func buildPatchExport(outputMode, outputPath, patchedImageName string) (client.E
 			},
 			Output: func(_ map[string]string) (io.WriteCloser, error) {
 				if dir := filepath.Dir(outputPath); dir != "." {
-					if err := os.MkdirAll(dir, 0o755); err != nil {
+					if err := os.MkdirAll(dir, 0o750); err != nil {
 						return nil, fmt.Errorf("failed to create parent directory for output-path %q: %w", outputPath, err)
 					}
 				}
-				return os.Create(outputPath)
+				return os.Create(filepath.Clean(outputPath))
 			},
 		}, nil, nil
 	case "local":

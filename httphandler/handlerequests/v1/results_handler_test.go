@@ -10,6 +10,8 @@ import (
 
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -160,6 +162,97 @@ func TestResults_GetWhileBusy_ReturnsBusyResponse(t *testing.T) {
 	}
 }
 
+func TestResults_GetPreservesEnrichedReportFields(t *testing.T) {
+	const id = "123e4567-e89b-12d3-a456-426614174001"
+	const resourceID = "/v1/tenant-a/Pod/app"
+	out := withTempOutputDirs(t)
+	report := `{
+  "summaryDetails": {
+    "controls": {
+      "C-ENRICHED": {
+        "controlID": "C-ENRICHED",
+        "scoreFactor": 7,
+        "severity": "High"
+      }
+    }
+  },
+  "results": [{
+    "resourceID": "` + resourceID + `",
+    "controls": [{"controlID": "C-ENRICHED", "severity": "High"}]
+  }],
+  "resourceLabels": {
+    "` + resourceID + `": {"team": "platform"}
+  },
+  "scanCoverage": {
+    "partialGVRPulls": [{
+      "gvr": "/v1/pods",
+      "selector": "metadata.namespace=tenant-b",
+      "error": "forbidden"
+    }],
+    "coverageScore": 98,
+    "degraded": true
+  }
+}`
+	if err := os.WriteFile(filepath.Join(out, id), []byte(report), 0o644); err != nil {
+		t.Fatalf("setup: write enriched result: %v", err)
+	}
+
+	h := newResultsHandler(false)
+	rq := httptest.NewRequest(http.MethodGet, "/results?id="+id+"&keep=true", nil)
+	w := httptest.NewRecorder()
+	h.GetResults(w, rq)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("GET enriched result = HTTP %d; want %d (body=%q)", w.Result().StatusCode, http.StatusOK, w.Body.String())
+	}
+	response := decodeResultsResponse(t, w)
+	payload, ok := response.Response.(map[string]any)
+	require.Truef(t, ok, "response payload type = %T; want JSON object", response.Response)
+	summary, ok := payload["summaryDetails"].(map[string]any)
+	require.True(t, ok)
+	controls, ok := summary["controls"].(map[string]any)
+	require.True(t, ok)
+	control, ok := controls["C-ENRICHED"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "High", control["severity"])
+	results, ok := payload["results"].([]any)
+	require.True(t, ok)
+	require.Len(t, results, 1)
+	result, ok := results[0].(map[string]any)
+	require.True(t, ok)
+	resultControls, ok := result["controls"].([]any)
+	require.True(t, ok)
+	require.Len(t, resultControls, 1)
+	resultControl, ok := resultControls[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "High", resultControl["severity"])
+	labels, ok := payload["resourceLabels"].(map[string]any)
+	require.True(t, ok)
+	resourceLabels, ok := labels[resourceID].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "platform", resourceLabels["team"])
+	coverage, ok := payload["scanCoverage"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, true, coverage["degraded"])
+	partial, ok := coverage["partialGVRPulls"].([]any)
+	require.True(t, ok)
+	assert.Len(t, partial, 1)
+}
+
+func TestReadResultsFileRetainsPostureReportValidation(t *testing.T) {
+	const id = "123e4567-e89b-12d3-a456-426614174002"
+	out := withTempOutputDirs(t)
+	// This is syntactically valid JSON but is not structurally compatible with
+	// the posture report contract. The old typed unmarshal rejected it, and
+	// preserving unknown fields must not weaken that validation.
+	if err := os.WriteFile(filepath.Join(out, id), []byte(`{"summaryDetails":[]}`), 0o644); err != nil {
+		t.Fatalf("setup: write invalid result: %v", err)
+	}
+
+	_, err := readResultsFile(id)
+	require.ErrorContains(t, err, "cannot unmarshal array")
+}
+
 // ---------------------------------------------------------------------------
 // 3. GET /results with empty ID, server NOT in offline mode.
 //
@@ -258,8 +351,12 @@ func TestResults_GetEmptyID_OfflineFallback_TableDriven(t *testing.T) {
 			h := newResultsHandler(true) // offline = true
 
 			if c.seedLatest {
+				// Seed a completed *user* scan, the way Scan() does: the
+				// offline fallback resolves via latestUserScanID, which
+				// survives setNotBusy so results stay reachable afterwards.
 				h.state.setBusy(validUUID, func() {})
-				h.state.setNotBusy(validUUID) // latestID survives, scan finished
+				h.state.setLatestUserScanID(validUUID)
+				h.state.setNotBusy(validUUID) // scan finished
 			}
 			resultFile := filepath.Join(out, validUUID)
 			if c.writeFile {
@@ -300,6 +397,47 @@ func TestResults_GetEmptyID_OfflineFallback_TableDriven(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestResults_GetEmptyID_OfflineFallback_IgnoresMetricsScan is the /v1/results
+// half of the hijack. A Prometheus scrape that lands after the user's scan
+// finished overwrites latestID, so resolving the offline fallback through it
+// would serve the metrics run's (absent) output instead of the user's report.
+func TestResults_GetEmptyID_OfflineFallback_IgnoresMetricsScan(t *testing.T) {
+	const userScanID = "11111111-2222-3333-4444-555555555555"
+	const metricsScanID = "99999999-8888-7777-6666-555555555555"
+
+	out := withTempOutputDirs(t)
+	h := newResultsHandler(true) // offline = true
+
+	// A user scan runs to completion and leaves its report on disk.
+	h.state.setBusy(userScanID, func() {})
+	h.state.setLatestUserScanID(userScanID)
+	h.state.setNotBusy(userScanID)
+	if err := os.WriteFile(filepath.Join(out, userScanID), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("setup: write result file: %v", err)
+	}
+
+	// Then a metrics scrape runs. It writes no report and must not become the
+	// scan that an ID-less /v1/results resolves to.
+	h.state.setBusy(metricsScanID, func() {})
+	h.state.setNotBusy(metricsScanID)
+
+	rq := httptest.NewRequest(http.MethodGet, "/results", nil)
+	w := httptest.NewRecorder()
+	h.GetResults(w, rq)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; want %d: fallback must resolve to the user scan, not the metrics scrape (body=%q)",
+			w.Result().StatusCode, http.StatusOK, w.Body.String())
+	}
+	resp := decodeResultsResponse(t, w)
+	if resp.ID != userScanID {
+		t.Errorf("response.ID = %q; want %q: a /v1/metrics scrape must not hijack the latest-results fallback", resp.ID, userScanID)
+	}
+	if resp.Type != utilsapisv1.ResultsV1ScanResponseType {
+		t.Errorf("response.Type = %q; want %q", resp.Type, utilsapisv1.ResultsV1ScanResponseType)
 	}
 }
 

@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
@@ -124,10 +125,11 @@ type NotEvaluatedControl struct {
 // ResourceToControlsMap, timedOutControls, and any partial GVR pull failures
 // on the session.
 //
-// A control is considered NotEvaluated when every GVR listed in
-// ResourceToControlsMap for that control appears in InfoMap as a pull failure,
-// or when it appears in timedOutControls because its evaluation was aborted
-// (e.g. by exceeding --control-timeout).
+// A control is considered NotEvaluated when every dependency listed in
+// ResourceToControlsMap for that control either appears in InfoMap as a pull
+// failure or is a mapped discovery failure in partialPulls, or when it appears
+// in timedOutControls because its evaluation was aborted (e.g. by exceeding
+// --control-timeout).
 // Controls with at least one successfully fetched GVR are not included.
 //
 // InfoMap is mixed-purpose: it holds whole-GVR pull failures (keyed by GVR
@@ -136,18 +138,43 @@ type NotEvaluatedControl struct {
 // entries whose key is also a key in ResourceToControlsMap are considered.
 //
 // partialPulls carries per-selector LIST failures for GVRs that were partially
-// collected; they are included as-is in ScanCoverage.PartialGVRPulls.
+// collected; they are included in canonical order in
+// ScanCoverage.PartialGVRPulls. A
+// discovery-stage failure that has a synthetic ResourceToControlsMap edge also
+// participates in the all-dependencies-failed check without being duplicated
+// in FailedGVRPulls.
 //
 // policyDegradations carries policy inputs (control configurations,
 // exceptions) that were served from a fallback; they are included as-is in
 // ScanCoverage.PolicyDegradations.
 func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap map[string][]string, timedOutControls map[string]string, partialPulls []PartialGVRPull, policyDegradations []PolicyDegradation) ScanCoverage {
+	sortedPartialPulls := append([]PartialGVRPull(nil), partialPulls...)
+	sort.Slice(sortedPartialPulls, func(i, j int) bool {
+		if sortedPartialPulls[i].GVR != sortedPartialPulls[j].GVR {
+			return sortedPartialPulls[i].GVR < sortedPartialPulls[j].GVR
+		}
+		if sortedPartialPulls[i].Selector != sortedPartialPulls[j].Selector {
+			return sortedPartialPulls[i].Selector < sortedPartialPulls[j].Selector
+		}
+		return sortedPartialPulls[i].Error < sortedPartialPulls[j].Error
+	})
 	coverage := ScanCoverage{
-		PartialGVRPulls:    partialPulls,
+		PartialGVRPulls:    sortedPartialPulls,
 		PolicyDegradations: policyDegradations,
 	}
 
 	notEvaluated := make(map[string]NotEvaluatedControl, len(timedOutControls))
+	discoveryFailureKeys := make(map[string]struct{})
+	failedDependencyKeys := make(map[string]struct{})
+	for _, partialPull := range partialPulls {
+		if partialPull.Selector != "discovery" || !strings.HasPrefix(partialPull.GVR, "discovery:") {
+			continue
+		}
+		discoveryFailureKeys[partialPull.GVR] = struct{}{}
+		if _, mappedToControl := resourceToControlsMap[partialPull.GVR]; mappedToControl {
+			failedDependencyKeys[partialPull.GVR] = struct{}{}
+		}
+	}
 
 	for controlID, reason := range timedOutControls {
 		notEvaluated[controlID] = NotEvaluatedControl{
@@ -156,7 +183,7 @@ func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap
 		}
 	}
 
-	if len(infoMap) == 0 {
+	if len(infoMap) == 0 && len(failedDependencyKeys) == 0 {
 		for _, ne := range notEvaluated {
 			coverage.NotEvaluatedControls = append(coverage.NotEvaluatedControls, ne)
 		}
@@ -168,12 +195,18 @@ func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap
 
 	if len(resourceToControlsMap) > 0 {
 		// collect failed GVR pulls from InfoMap, filtering out resource-level
-		// eval skips by requiring the key to be a known GVR
+		// eval skips by requiring the key to be a known dependency. Discovery
+		// failures are already reported in PartialGVRPulls, so keep them in the
+		// dependency set without duplicating them in FailedGVRPulls.
 		for gvr, statusInfo := range infoMap {
 			if statusInfo.InnerStatus != apis.StatusSkipped {
 				continue
 			}
 			if _, isGVR := resourceToControlsMap[gvr]; !isGVR {
+				continue
+			}
+			failedDependencyKeys[gvr] = struct{}{}
+			if _, isDiscoveryFailure := discoveryFailureKeys[gvr]; isDiscoveryFailure {
 				continue
 			}
 			coverage.FailedGVRPulls = append(coverage.FailedGVRPulls, FailedGVRPull{
@@ -182,13 +215,7 @@ func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap
 			})
 		}
 
-		if len(coverage.FailedGVRPulls) > 0 {
-			// build a set of failed GVRs for fast lookup
-			failedGVRs := make(map[string]struct{}, len(coverage.FailedGVRPulls))
-			for _, f := range coverage.FailedGVRPulls {
-				failedGVRs[f.GVR] = struct{}{}
-			}
-
+		if len(failedDependencyKeys) > 0 {
 			// invert ResourceToControlsMap: controlID -> set of GVRs it depends on
 			controlToGVRs := make(map[string]map[string]struct{})
 			for gvr, controlIDs := range resourceToControlsMap {
@@ -208,7 +235,7 @@ func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap
 				missingGVRs := make([]string, 0, len(gvrSet))
 				allFailed := true
 				for gvr := range gvrSet {
-					if _, failed := failedGVRs[gvr]; failed {
+					if _, failed := failedDependencyKeys[gvr]; failed {
 						missingGVRs = append(missingGVRs, gvr)
 					} else {
 						allFailed = false

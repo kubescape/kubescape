@@ -2,11 +2,25 @@ package containerscan
 
 import (
 	"bytes"
-	"math/rand"
+	"crypto/rand"
+	"math/big"
 	"time"
 
 	"github.com/francoispqt/gojay"
 )
+
+// randIntn returns a uniform random value in [0, n) using a cryptographically
+// secure source. Falls back to 0 only if the source is unavailable.
+func randIntn(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	v, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
+	if err != nil {
+		return 0
+	}
+	return int(v.Int64())
+}
 
 // GenerateContainerScanReportMock - generate a scan result
 func GenerateContainerScanReportMock() ScanResultReport {
@@ -48,7 +62,7 @@ var nums = []rune("0123456789")
 func randSeq(n int, bank []rune) string {
 	b := make([]rune, n)
 	for i := range b {
-		b[i] = bank[rand.Intn(len(bank))] //nolint:gosec
+		b[i] = bank[randIntn(len(bank))]
 	}
 	return string(b)
 }
@@ -58,11 +72,11 @@ func GenerateContainerScanLayer(layer *ScanResultLayer) {
 	layer.LayerHash = randSeq(32, hash)
 	layer.Vulnerabilities = make(VulnerabilitiesList, 0)
 	layer.Packages = make(LinuxPkgs, 0)
-	vuls := rand.Intn(10) + 1 //nolint:gosec
+	vuls := randIntn(10) + 1
 
 	for range vuls {
 		v := Vulnerability{}
-		GenerateVulnerability(&v)
+		_ = GenerateVulnerability(&v) // #nosec G104 -- mock generator; the error is irrelevant for synthetic data
 		layer.Vulnerabilities = append(layer.Vulnerabilities, v)
 	}
 

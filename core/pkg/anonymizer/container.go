@@ -21,6 +21,12 @@ func transformContainerMetadata(resource workloadinterface.IMetadata, transforme
 		return nil
 	}
 
+	if wl, ok := resource.(workloadinterface.IWorkload); ok {
+		if err := transformTypedWorkloadContainers(wl, transformer); err != nil {
+			return err
+		}
+	}
+
 	obj := resource.GetObject()
 	if obj == nil {
 		return nil
@@ -31,6 +37,94 @@ func transformContainerMetadata(resource workloadinterface.IMetadata, transforme
 	}
 
 	resource.SetObject(obj)
+
+	return nil
+}
+
+func transformTypedWorkloadContainers(wl workloadinterface.IWorkload, transformer Transformer) error {
+	kind := wl.GetKind()
+	scope := workloadinterface.PodSpec(kind)
+
+	if containers, err := wl.GetContainers(); err == nil && len(containers) > 0 {
+		if err := transformTypedContainerList(containers, transformer); err != nil {
+			return err
+		}
+		workloadinterface.SetInMap(wl.GetObject(), scope, "containers", containers)
+	}
+
+	if initContainers, err := wl.GetInitContainers(); err == nil && len(initContainers) > 0 {
+		if err := transformTypedContainerList(initContainers, transformer); err != nil {
+			return err
+		}
+		workloadinterface.SetInMap(wl.GetObject(), scope, "initContainers", initContainers)
+	}
+
+	if ephemeralContainers, err := wl.GetEphemeralContainers(); err == nil && len(ephemeralContainers) > 0 {
+		if err := transformTypedEphemeralContainerList(ephemeralContainers, transformer); err != nil {
+			return err
+		}
+		workloadinterface.SetInMap(wl.GetObject(), scope, "ephemeralContainers", ephemeralContainers)
+	}
+
+	return nil
+}
+
+func transformTypedContainerList(containers []corev1.Container, transformer Transformer) error {
+	var err error
+
+	for i := range containers {
+		if containers[i].Name != "" {
+			containers[i].Name, err = transformValue(transformer, "ctr", containers[i].Name)
+			if err != nil {
+				return err
+			}
+		}
+
+		if containers[i].Image != "" {
+			containers[i].Image, err = transformValue(transformer, "img", containers[i].Image)
+			if err != nil {
+				return err
+			}
+		}
+
+		if err := transformTypedEnv(containers[i].Env, transformer); err != nil {
+			return err
+		}
+
+		if err := transformTypedEnvFrom(containers[i].EnvFrom, transformer); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func transformTypedEphemeralContainerList(containers []corev1.EphemeralContainer, transformer Transformer) error {
+	var err error
+
+	for i := range containers {
+		if containers[i].Name != "" {
+			containers[i].Name, err = transformValue(transformer, "ctr", containers[i].Name)
+			if err != nil {
+				return err
+			}
+		}
+
+		if containers[i].Image != "" {
+			containers[i].Image, err = transformValue(transformer, "img", containers[i].Image)
+			if err != nil {
+				return err
+			}
+		}
+
+		if err := transformTypedEnv(containers[i].Env, transformer); err != nil {
+			return err
+		}
+
+		if err := transformTypedEnvFrom(containers[i].EnvFrom, transformer); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
@@ -164,38 +258,6 @@ func transformContainerList(obj map[string]any, key string, transformer Transfor
 		return nil
 	}
 
-	var err error
-
-	if containers, ok := rawContainers.([]corev1.Container); ok {
-		for i := range containers {
-
-			if containers[i].Name != "" {
-				containers[i].Name, err = transformValue(transformer, "ctr", containers[i].Name)
-				if err != nil {
-					return err
-				}
-			}
-
-			if containers[i].Image != "" {
-				containers[i].Image, err = transformValue(transformer, "img", containers[i].Image)
-				if err != nil {
-					return err
-				}
-			}
-
-			if err := transformTypedEnv(containers[i].Env, transformer); err != nil {
-				return err
-			}
-
-			if err := transformTypedEnvFrom(containers[i].EnvFrom, transformer); err != nil {
-				return err
-			}
-		}
-
-		obj[key] = containers
-		return nil
-	}
-
 	if containers, ok := rawContainers.([]any); ok {
 		for _, item := range containers {
 			container, ok := item.(map[string]any)
@@ -225,38 +287,6 @@ func transformEphemeralContainerList(obj map[string]any, key string, transformer
 
 	rawContainers, ok := obj[key]
 	if !ok || rawContainers == nil {
-		return nil
-	}
-
-	var err error
-
-	if containers, ok := rawContainers.([]corev1.EphemeralContainer); ok {
-		for i := range containers {
-
-			if containers[i].Name != "" {
-				containers[i].Name, err = transformValue(transformer, "ctr", containers[i].Name)
-				if err != nil {
-					return err
-				}
-			}
-
-			if containers[i].Image != "" {
-				containers[i].Image, err = transformValue(transformer, "img", containers[i].Image)
-				if err != nil {
-					return err
-				}
-			}
-
-			if err := transformTypedEnv(containers[i].Env, transformer); err != nil {
-				return err
-			}
-
-			if err := transformTypedEnvFrom(containers[i].EnvFrom, transformer); err != nil {
-				return err
-			}
-		}
-
-		obj[key] = containers
 		return nil
 	}
 

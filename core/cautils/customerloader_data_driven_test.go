@@ -3,8 +3,10 @@ package cautils
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"testing"
 
 	"github.com/google/uuid"
@@ -13,10 +15,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	restclient "k8s.io/client-go/rest"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func useTemporaryConfigStore(t *testing.T) {
@@ -59,7 +63,11 @@ func TestTenantConfigCacheLifecycleDataDriven(t *testing.T) {
 			require.NoError(t, config.UpdateCachedConfig())
 			info, err := os.Stat(ConfigFileFullPath())
 			require.NoError(t, err)
-			assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+			// Windows has no Unix permission bits: os.Chmod only toggles the
+			// read-only attribute, so a file created 0600 reports 0666.
+			if goruntime.GOOS != "windows" {
+				assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+			}
 
 			var persisted ConfigObj
 			contents, err := os.ReadFile(ConfigFileFullPath())
@@ -182,6 +190,80 @@ func TestClusterConfigLoadsKubernetesSourcesDataDriven(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, config.updateConfigEmptyFieldsFromCredentialsSecret(context.Background()))
 			assert.Equal(t, test.wantConfig, *config.configObj)
+		})
+	}
+}
+
+func TestClusterConfigMapOnlyFillsMissingValues(t *testing.T) {
+	k8s := k8sinterface.NewKubernetesApiMock()
+	k8s.KubernetesClient = fake.NewClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cloud",
+			Namespace: "security",
+			Labels:    map[string]string{"kubescape.io/infra": "config"},
+		},
+		Data: map[string]string{
+			"clusterData": `{
+				"accountID":"configmap-account",
+				"clusterName":"configmap-cluster",
+				"cloudAPIURL":"https://configmap-api.example.com",
+				"cloudReportURL":"https://configmap-report.example.com"
+			}`,
+		},
+	})
+
+	config := &ClusterConfig{
+		k8s: k8s,
+		configObj: &ConfigObj{
+			AccountID:   "cached-account",
+			CloudAPIURL: "https://service-discovery-api.example.com",
+		},
+		configMapNamespace: "security",
+	}
+
+	require.NoError(t, config.updateConfigEmptyFieldsFromKubescapeConfigMap(context.Background()))
+	assert.Equal(t, "cached-account", config.GetAccountID(), "cached tenant identity must not be replaced by fallback data")
+	assert.Equal(t, "https://service-discovery-api.example.com", config.GetCloudAPIURL(), "service discovery must keep precedence")
+	assert.Equal(t, "configmap-cluster", config.GetContextName(), "a missing cluster name should be filled")
+	assert.Equal(t, "https://configmap-report.example.com", config.GetCloudReportURL(), "a missing report URL should be filled")
+}
+
+func TestUpdateConfigEmptyFieldsFromKubescapeConfigMap_LegacyGetErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		reactErr  error
+		wantError string
+	}{
+		{
+			name:     "not found is treated as absent config and ignored",
+			reactErr: apierrors.NewNotFound(corev1.Resource("configmaps"), kubescapeConfigMapName),
+		},
+		{
+			name:      "forbidden must not be silently discarded",
+			reactErr:  apierrors.NewForbidden(corev1.Resource("configmaps"), kubescapeConfigMapName, errors.New("user cannot get resource")),
+			wantError: "forbidden",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			k8s := k8sinterface.NewKubernetesApiMock()
+			clientset := fake.NewClientset()
+			// No labelled ConfigMaps exist, so updateConfigEmptyFieldsFromKubescapeConfigMap
+			// falls back to the legacy get-by-name lookup, which is the call this reactor fails.
+			clientset.PrependReactor("get", "configmaps", func(action k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, test.reactErr
+			})
+			k8s.KubernetesClient = clientset
+			config := &ClusterConfig{k8s: k8s, configObj: &ConfigObj{}, configMapNamespace: "security"}
+
+			err := config.updateConfigEmptyFieldsFromKubescapeConfigMap(context.Background())
+			if test.wantError != "" {
+				require.ErrorContains(t, err, test.wantError)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, ConfigObj{}, *config.configObj)
 		})
 	}
 }

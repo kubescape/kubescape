@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/anchore/grype/grype/match"
+	grypepkg "github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
@@ -40,6 +43,12 @@ func TestSetWriter(t *testing.T) {
 	base := filepath.Join(t.TempDir(), "test-prom")
 	promPrinter = &PrometheusPrinter{}
 	promPrinter.SetWriter(context.Background(), base)
+	// SetWriter leaves the report file open. Windows refuses to delete a file
+	// that still has an open handle, so t.TempDir's cleanup fails the test
+	// unless the writer is closed too. Captured in a local because promPrinter
+	// is reassigned below.
+	baseWriter := promPrinter.writer
+	defer baseWriter.Close()
 	expectedPath := base + printer.PrometheusOutputExt
 	f, err := os.Open(expectedPath)
 	assert.NoError(t, err)
@@ -49,6 +58,7 @@ func TestSetWriter(t *testing.T) {
 	withExt := filepath.Join(t.TempDir(), "test-prom"+printer.PrometheusOutputExt)
 	promPrinter = &PrometheusPrinter{}
 	promPrinter.SetWriter(context.Background(), withExt)
+	defer promPrinter.writer.Close()
 	f2, err := os.Open(withExt)
 	assert.NoError(t, err)
 	defer f2.Close()
@@ -191,4 +201,54 @@ func TestCoverageScoreMetricEmitted(t *testing.T) {
 		degraded,
 	)
 	assert.Contains(t, metrics.String(), "kubescape_cluster_coverage_score{} 90")
+}
+
+func TestImagePrometheusFormat_OmitsPostureMetrics(t *testing.T) {
+	// Regression test for #2782: an image scan must not emit posture-scan
+	// metric families (compliance score, coverage) at zero — those fields
+	// are never populated for image scans, so emitting them previously
+	// pushed out a misleading all-zero compliance score alongside the
+	// real CVE metrics.
+	imageData := []cautils.ImageScanData{
+		{
+			Image: "test-image:latest",
+			Matches: match.NewMatches(match.Match{
+				Package: grypepkg.Package{ID: "pkg-1", Name: "openssl", Version: "3.0.0"},
+				Vulnerability: vulnerability.Vulnerability{
+					Metadata: &vulnerability.Metadata{ID: "CVE-2026-0001", Severity: "High"},
+					Fix:      vulnerability.Fix{Versions: []string{"3.0.1"}, State: "Fixed"},
+				},
+			}),
+		},
+	}
+
+	pp := NewPrometheusPrinter(false)
+	metrics := pp.generateImagePrometheusFormat(imageData)
+	output := metrics.String()
+
+	// Image metrics must be present.
+	assert.Contains(t, output, "kubescape_image_count_cve")
+	assert.Contains(t, output, `image="test-image:latest"`)
+
+	// Posture metric families must be completely absent, not just zeroed.
+	assert.NotContains(t, output, "kubescape_cluster_complianceScore")
+	assert.NotContains(t, output, "kubescape_cluster_count_resources")
+	assert.NotContains(t, output, "kubescape_cluster_count_control")
+	assert.NotContains(t, output, "kubescape_cluster_coverage_score")
+}
+
+func TestPostureScanFormat_StillEmitsPostureMetrics(t *testing.T) {
+	// Sanity check the flag doesn't accidentally suppress posture metrics
+	// for real posture scans.
+	pp := NewPrometheusPrinter(false)
+	metrics := pp.generatePrometheusFormat(
+		map[string]workloadinterface.IMetadata{},
+		map[string]resourcesresults.Result{},
+		&reportsummary.SummaryDetails{},
+		cautils.ScanCoverage{},
+	)
+	output := metrics.String()
+
+	assert.Contains(t, output, "kubescape_cluster_complianceScore")
+	assert.Contains(t, output, "kubescape_cluster_coverage_score")
 }

@@ -184,7 +184,7 @@ func TestNewOPASessionObj(t *testing.T) {
 		OmitRawResources: true,
 		TriggeredByCLI:   true,
 	}
-	sessionObj := NewOPASessionObj(ctx, frameworks, k8sResources, scanInfo)
+	sessionObj := NewOPASessionObj(ctx, frameworks, k8sResources, scanInfo, nil)
 	assert.NotNil(t, sessionObj)
 	assert.Equal(t, "test-scan-id", sessionObj.SessionID)
 	assert.Equal(t, true, sessionObj.OmitRawResources)

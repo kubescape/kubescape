@@ -46,17 +46,24 @@ func unstructuredResource(apiVersion, kind, namespace, name string) *unstructure
 func TestFindScanObjectResourceDataDriven(t *testing.T) {
 	k8sinterface.InitializeMapResourcesMock()
 	deploymentGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
 	listKinds := map[schema.GroupVersionResource]string{
 		deploymentGVR: "DeploymentList",
+		// Secrets are registered so the fake client is genuinely able to serve
+		// them. Without this the client cannot list secrets at all and the
+		// "no API calls were issued" assertion below would hold even for an
+		// implementation that fetches the Secret before rejecting it.
+		secretGVR: "SecretList",
 	}
 
 	tests := []struct {
-		name      string
-		request   *objectsenvelopes.ScanObject
-		objects   []runtime.Object
-		wantName  string
-		wantError string
-		wantNil   bool
+		name             string
+		request          *objectsenvelopes.ScanObject
+		objects          []runtime.Object
+		wantName         string
+		wantError        string
+		wantNil          bool
+		wantNoAPIActions bool
 	}{
 		{name: "nil request is not a single-resource scan", request: nil, wantNil: true},
 		{
@@ -89,6 +96,26 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 			request:   scanObject("", "UnknownKind", "shop", "object"),
 			wantError: "apiVersion is required to resolve non-built-in resource",
 		},
+		{
+			// Defense in depth: a Secret is not a useful single-resource scan
+			// target, so it must be rejected before retrieval rather than
+			// fetched and then sanitized downstream. Rejecting early also
+			// avoids an unnecessary Kubernetes API call. The Secret exists in
+			// the fake client here, so the rejection is proven to be a policy
+			// decision and not a lookup miss.
+			name:             "secret is rejected even when it exists",
+			request:          scanObject("v1", "Secret", "shop", "db-creds"),
+			objects:          []runtime.Object{unstructuredResource("v1", "Secret", "shop", "db-creds")},
+			wantError:        "scanning Secret resources via single resource scan is not supported",
+			wantNoAPIActions: true,
+		},
+		{
+			name:             "secret is rejected via the legacy no-apiVersion path",
+			request:          scanObject("", "Secret", "shop", "db-creds"),
+			objects:          []runtime.Object{unstructuredResource("v1", "Secret", "shop", "db-creds")},
+			wantError:        "scanning Secret resources via single resource scan is not supported",
+			wantNoAPIActions: true,
+		},
 	}
 
 	for _, test := range tests {
@@ -99,6 +126,14 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 			require.Empty(t, discoveryFailures)
 
 			workload, err := handler.findScanObjectResource(context.Background(), test.request, &EmptySelector{}, resolver)
+			if test.wantNoAPIActions {
+				// Defense in depth: the rejection must happen before the live
+				// API pull, so no Kubernetes API/RBAC operation is issued for a
+				// Secret at all. Fetching first and refusing afterwards would
+				// still pass the error assertion below, so the absence of
+				// client actions is what actually pins the ordering.
+				assert.Empty(t, dynamicClient.Actions(), "expected the request to be rejected before any API call")
+			}
 			if test.wantError != "" {
 				require.ErrorContains(t, err, test.wantError)
 				assert.Nil(t, workload)

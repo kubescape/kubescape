@@ -158,3 +158,74 @@ func TestScanResultReportValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestVulnerabilityIsRCE(t *testing.T) {
+	tests := []struct {
+		name        string
+		description string
+		expected    bool
+	}{
+		{
+			name:        "uppercase acronym",
+			description: "a flaw allows an attacker to achieve RCE",
+			expected:    true,
+		},
+		{
+			name:        "lowercase acronym",
+			description: "a flaw allows an attacker to achieve rce",
+			expected:    true,
+		},
+		{
+			name:        "mixed-case acronym",
+			description: "a flaw allows an attacker to achieve Rce",
+			expected:    true,
+		},
+		{
+			name:        "acronym adjacent to punctuation",
+			description: "this is an RCE-vulnerability affecting the product",
+			expected:    true,
+		},
+		{
+			name:        "expanded phrase is still detected",
+			description: "allows arbitrary code execution in the context of the host",
+			expected:    true,
+		},
+		{
+			name:        "command injection phrase is still detected",
+			description: "allows command injection via crafted arguments",
+			expected:    true,
+		},
+		{
+			name:        "source substring is not a false positive",
+			description: "the source code of the affected component is available",
+			expected:    false,
+		},
+		{
+			name:        "resource substring is not a false positive",
+			description: "an unauthenticated user may access the affected resource",
+			expected:    false,
+		},
+		{
+			name:        "force substring is not a false positive",
+			description: "the update may force a restart of the service",
+			expected:    false,
+		},
+		{
+			name:        "commerce substring is not a false positive",
+			description: "information disclosure in the commerce component",
+			expected:    false,
+		},
+		{
+			name:        "no RCE keywords",
+			description: "a denial of service vulnerability exists in the parser",
+			expected:    false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			vul := Vulnerability{Description: test.description}
+			assert.Equal(t, test.expected, vul.IsRCE())
+		})
+	}
+}

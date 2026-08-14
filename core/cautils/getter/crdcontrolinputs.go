@@ -50,14 +50,14 @@ func NewCRDControlInputs() (*CRDControlInputs, error) {
 
 // GetControlsInputs retrieves control inputs from the ControlInput CRD.
 // It looks for a ControlInput resource named "default" in the cluster scope.
-func (c *CRDControlInputs) GetControlsInputs(clusterName string) (map[string][]string, error) {
+func (c *CRDControlInputs) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
 	gvr := schema.GroupVersionResource{
 		Group:    controlInputGroup,
 		Version:  controlInputVersion,
 		Resource: controlInputResource,
 	}
 
-	obj, err := c.client.Resource(gvr).Get(context.Background(), "default", metav1.GetOptions{})
+	obj, err := c.client.Resource(gvr).Get(ctx, "default", metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ControlInput CRD 'default': %w", err)
 	}

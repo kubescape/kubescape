@@ -58,3 +58,12 @@ func TestGetFrameworkCmdWithNonExistentFramework(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }
+
+func TestGetFrameworkCmd_RunERejectsStdinMixedWithOtherInputs(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getFrameworkCmd(&mocks.MockIKubescape{}, &scanInfo)
+
+	err := cmd.RunE(cmd, []string{"nsa", "-", "manifests/app.yaml"})
+
+	assert.EqualError(t, err, "usage: stdin input '-' cannot be combined with other input paths")
+}
