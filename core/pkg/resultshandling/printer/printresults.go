@@ -80,7 +80,7 @@ var FormatOutputExt = map[string]string{
 type IPrinter interface {
 	PrintNextSteps()
 	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error
-	SetWriter(ctx context.Context, outputFile string)
+	SetWriter(ctx context.Context, outputFile string) error
 	Score(score float32)
 }
 
@@ -105,6 +105,20 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 	}
 	return os.Stdout
 
+}
+
+// GetWriterNoFallback opens an explicitly requested output path. Unlike the
+// legacy helpers, it never redirects an error to stdout or a temporary file:
+// callers can return the setup failure before a scan starts.
+func GetWriterNoFallback(outputFile string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(outputFile), outputDirPerm); err != nil {
+		return nil, fmt.Errorf("create output directory for %q: %w", outputFile, err)
+	}
+	f, err := os.Create(outputFile)
+	if err != nil {
+		return nil, fmt.Errorf("open output file %q: %w", outputFile, err)
+	}
+	return f, nil
 }
 
 // GetWriterNoStdoutFallback opens outputFile for writing for formats whose

@@ -34,7 +34,8 @@ func NewYamlPrinter() *YamlPrinter {
 	return &YamlPrinter{}
 }
 
-func (yp *YamlPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (yp *YamlPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = yamlOutputFile
@@ -44,7 +45,13 @@ func (yp *YamlPrinter) SetWriter(ctx context.Context, outputFile string) {
 			outputFile = outputFile + printer.YamlOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		yp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	yp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 func (yp *YamlPrinter) Score(score float32) {

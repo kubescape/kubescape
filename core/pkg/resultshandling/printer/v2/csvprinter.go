@@ -31,7 +31,8 @@ func NewCsvPrinter() *CsvPrinter {
 	return &CsvPrinter{}
 }
 
-func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = csvOutputFile
@@ -41,7 +42,13 @@ func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) {
 			outputFile = outputFile + printer.CsvOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		cp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	cp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 func (cp *CsvPrinter) Score(score float32) {

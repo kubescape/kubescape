@@ -32,7 +32,8 @@ func NewMarkdownPrinter() *MarkdownPrinter {
 	return &MarkdownPrinter{}
 }
 
-func (mp *MarkdownPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (mp *MarkdownPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	outputFile = strings.TrimSpace(outputFile)
 	if outputFile == "" {
 		outputFile = markdownOutputFile + printer.MarkdownOutputExt
@@ -41,7 +42,13 @@ func (mp *MarkdownPrinter) SetWriter(ctx context.Context, outputFile string) {
 	} else if filepath.Ext(outputFile) != printer.MarkdownOutputExt {
 		outputFile = outputFile + printer.MarkdownOutputExt
 	}
+	if explicitOutput {
+		var err error
+		mp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	mp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, markdownTempPattern)
+	return nil
 }
 
 func (mp *MarkdownPrinter) Score(score float32) {

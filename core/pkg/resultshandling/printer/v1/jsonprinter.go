@@ -27,7 +27,8 @@ func NewJsonPrinter() *JsonPrinter {
 	return &JsonPrinter{}
 }
 
-func (jsonPrinter *JsonPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (jsonPrinter *JsonPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = jsonOutputFile
@@ -36,7 +37,13 @@ func (jsonPrinter *JsonPrinter) SetWriter(ctx context.Context, outputFile string
 			outputFile = outputFile + jsonOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		jsonPrinter.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	jsonPrinter.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 func (jsonPrinter *JsonPrinter) Score(score float32) {
