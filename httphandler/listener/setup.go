@@ -81,6 +81,8 @@ func SetupHTTPListener() error {
 
 	servePprof()
 
+	defer httpHandler.Shutdown()
+
 	if keyPair != nil {
 		return server.ListenAndServeTLS("", "")
 	}

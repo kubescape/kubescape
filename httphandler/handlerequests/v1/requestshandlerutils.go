@@ -103,11 +103,15 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 }
 
 // executeScan execute the scan request passed in the channel
-func (handler *HTTPHandler) watchForScan() {
+func (handler *HTTPHandler) watchForScan(ctx context.Context) {
 	for {
-		scanReq := <-handler.scanRequestChan
-		logger.L().Info("triggering scan", helpers.String("scanID", scanReq.scanID))
-		handler.executeScan(scanReq)
+		select {
+		case scanReq := <-handler.scanRequestChan:
+			logger.L().Info("triggering scan", helpers.String("scanID", scanReq.scanID))
+			handler.executeScan(scanReq)
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {

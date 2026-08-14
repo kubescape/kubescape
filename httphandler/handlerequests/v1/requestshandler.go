@@ -31,16 +31,27 @@ type HTTPHandler struct {
 	offline         bool
 	state           *serverState
 	scanRequestChan chan *scanRequestParams
+	cancelWatch     context.CancelFunc
 }
 
 func NewHTTPHandler(offline bool) *HTTPHandler {
+	ctx, cancel := context.WithCancel(context.Background())
 	handler := &HTTPHandler{
 		offline:         offline,
 		state:           newServerState(),
 		scanRequestChan: make(chan *scanRequestParams),
+		cancelWatch:     cancel,
 	}
-	go handler.watchForScan()
+	go handler.watchForScan(ctx)
 	return handler
+}
+
+// Shutdown stops the background scan watcher goroutine. It should be called
+// when the HTTP handler is no longer needed (e.g. on server shutdown).
+func (handler *HTTPHandler) Shutdown() {
+	if handler.cancelWatch != nil {
+		handler.cancelWatch()
+	}
 }
 
 // ============================================== STATUS ========================================================

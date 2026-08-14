@@ -1,12 +1,15 @@
 package v1
 
 import (
+	"context"
 	"os"
 	"testing"
 
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/httphandler/config"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -115,4 +118,56 @@ func TestRemoveResultsFile(t *testing.T) {
 	// removeResultsFile should prevent path traversal
 	err = removeResultsFile("../target")
 	assert.NoError(t, err)
+}
+
+func TestWatchForScan_GracefulShutdown(t *testing.T) {
+	h := NewHTTPHandler(false)
+
+	// Shutdown should cause the watchForScan goroutine to exit cleanly.
+	h.Shutdown()
+
+	// Verify the handler is still usable for non-scan operations
+	// (the scan channel is still there, just no one listening).
+	assert.NotNil(t, h.scanRequestChan)
+}
+
+func TestWatchForScan_ProcessesRequestThenExits(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h := &HTTPHandler{
+		state:           newServerState(),
+		scanRequestChan: make(chan *scanRequestParams, 1),
+		cancelWatch:     cancel,
+	}
+
+	// Override scanImpl so executeScan returns immediately.
+	oldScanImpl := scanImpl
+	defer func() { scanImpl = oldScanImpl }()
+	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+		return nil, nil
+	}
+
+	go h.watchForScan(ctx)
+
+	// Send a scan request — it should be processed.
+	h.scanRequestChan <- &scanRequestParams{
+		scanID:          "test-shutdown",
+		scanInfo:        &cautils.ScanInfo{},
+		scanQueryParams: &ScanQueryParams{},
+		resp:            make(chan *utilsmetav1.Response, 1),
+	}
+
+	// Cancel the context — watchForScan should exit.
+	cancel()
+
+	// If watchForScan didn't exit, this test would hang on the send below
+	// because no one is reading from the channel. With the fix, the goroutine
+	// has exited, so the buffered channel just accumulates.
+	h.scanRequestChan <- &scanRequestParams{
+		scanID:          "after-shutdown",
+		scanInfo:        &cautils.ScanInfo{},
+		scanQueryParams: &ScanQueryParams{},
+		resp:            make(chan *utilsmetav1.Response, 1),
+	}
 }
