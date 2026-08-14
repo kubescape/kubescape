@@ -80,6 +80,19 @@ func DecryptRepoContextMetadata(
 		}
 	}()
 
+	return decryptRepoContextMetadata(metadata, dek)
+}
+
+// decryptRepoContextMetadata performs the repository metadata portion
+// of report decryption with an already unwrapped data-encryption key. Keeping
+// this internal avoids unwrapping the same key twice during whole-report
+// decryption while the exported helper retains its existing master-key API.
+func decryptRepoContextMetadata(metadata *reporthandlingv2.Metadata, dek []byte) error {
+	if metadata == nil {
+		return fmt.Errorf("metadata is nil")
+	}
+	var err error
+
 	repoMetadata :=
 		metadata.ContextMetadata.RepoContextMetadata
 

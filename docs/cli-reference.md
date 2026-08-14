@@ -470,10 +470,13 @@ kubescape decrypt <report-file>
 
 ### Description
 
-Decrypts report metadata that was protected with
-`kubescape scan --encrypt`.
+Decrypts a JSON report that was protected with `kubescape scan --encrypt`.
+The command restores encrypted repository metadata, Kubernetes resource
+metadata, source paths, container fields, copied resource labels, raw resource
+copies in results, and every resource ID reference that Kubescape rewrote
+during encryption.
 
-Only metadata encrypted by `kubescape scan --encrypt` is restored.
+Only fields encrypted by `kubescape scan --encrypt` are restored.
 Metadata pseudonymized with `--hide` cannot be recovered by `kubescape decrypt`.
 
 ### Flags
@@ -497,7 +500,7 @@ kubescape decrypt encrypted-report.json
 kubescape decrypt encrypted-report.json > decrypted-report.json
 ```
 
-> `kubescape decrypt` restores metadata encrypted by
+> `kubescape decrypt` restores report fields encrypted by
 > `kubescape scan --encrypt`. It does not reverse
 > deterministic pseudonymization produced by `--hide`.
 

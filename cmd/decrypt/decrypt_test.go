@@ -3,6 +3,7 @@ package decrypt
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 
@@ -10,6 +11,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type failingWriter struct {
+	err error
+}
+
+func (w failingWriter) Write(_ []byte) (int, error) {
+	return 0, w.err
+}
 
 func TestDecryptCommand(t *testing.T) {
 	tests := []struct {
@@ -155,7 +164,9 @@ func TestDecryptCommand(t *testing.T) {
 
 			report := map[string]any{
 				"resourceLabels": map[string]any{
-					"team": "platform",
+					"resource-1": map[string]any{
+						"team": encryptedLabel,
+					},
 				},
 				"scanCoverage": map[string]any{
 					"all": true,
@@ -237,6 +248,17 @@ func TestDecryptCommand(t *testing.T) {
 				"results": []map[string]any{
 					{
 						"resourceID": "resource-1",
+						"rawResource": map[string]any{
+							"resourceID": "resource-1",
+							"object": map[string]any{
+								"apiVersion": "apps/v1",
+								"kind":       "Deployment",
+								"metadata": map[string]any{
+									"name":      encryptedName,
+									"namespace": encryptedNamespace,
+								},
+							},
+						},
 						"prioritizedResource": map[string]any{
 							"resourceID": "resource-1",
 						},
@@ -291,35 +313,15 @@ func TestDecryptCommand(t *testing.T) {
 				string(masterKey),
 			)
 
-			oldStdout := os.Stdout
-
-			r, w, err := os.Pipe()
-			require.NoError(t, err)
-
-			os.Stdout = w
-
-			defer func() {
-				os.Stdout = oldStdout
-			}()
-
-			defer func() {
-				_ = w.Close()
-			}()
-
 			cmd := GetDecryptCommand()
+			var buf bytes.Buffer
+			cmd.SetOut(&buf)
 
 			err = cmd.RunE(
 				cmd,
 				[]string{tmp.Name()},
 			)
 
-			require.NoError(t, err)
-
-			require.NoError(t, w.Close())
-
-			var buf bytes.Buffer
-
-			_, err = buf.ReadFrom(r)
 			require.NoError(t, err)
 
 			var output map[string]any
@@ -370,6 +372,14 @@ func TestDecryptCommand(t *testing.T) {
 			result, ok := results[0].(map[string]any)
 			require.True(t, ok, "result should be an object")
 			assert.Equal(t, resourceID, result["resourceID"])
+
+			rawResource, ok := result["rawResource"].(map[string]any)
+			require.True(t, ok, "rawResource should be an object")
+			assert.Equal(t, resourceID, rawResource["resourceID"])
+			rawObject := rawResource["object"].(map[string]any)
+			rawMetadata := rawObject["metadata"].(map[string]any)
+			assert.Equal(t, "nginx-deployment", rawMetadata["name"])
+			assert.Equal(t, "production", rawMetadata["namespace"])
 
 			prioritized, ok := result["prioritizedResource"].(map[string]any)
 			require.True(t, ok, "prioritizedResource should be an object")
@@ -487,6 +497,55 @@ func TestDecryptCommand(t *testing.T) {
 
 			require.Len(t, related, 1)
 			assert.Equal(t, resourceID, related[0])
+
+			resourceLabels := output["resourceLabels"].(map[string]any)
+			restoredLabels, ok := resourceLabels[resourceID].(map[string]any)
+			require.True(t, ok, "resourceLabels should use the restored resource ID")
+			assert.Equal(t, "backend", restoredLabels["team"])
 		})
 	}
+}
+
+func TestDecryptCommandReturnsReadError(t *testing.T) {
+	cmd := GetDecryptCommand()
+	err := cmd.RunE(cmd, []string{"/path/that/does/not/exist/report.json"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read report")
+	assert.Contains(t, err.Error(), "report.json")
+}
+
+func TestDecryptCommandReturnsWriteError(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+	masterKey := []byte("12345678901234567890123456789012")
+	wrappedDEK, err := reportcrypto.WrapDEK(dek, masterKey)
+	require.NoError(t, err)
+
+	report := map[string]any{
+		"metadata": map[string]any{
+			"encryptionMetadata": map[string]any{
+				"encryptedDEK": wrappedDEK,
+			},
+		},
+	}
+	data, err := json.Marshal(report)
+	require.NoError(t, err)
+
+	tmp, err := os.CreateTemp("", "encrypted-write-error-*.json")
+	require.NoError(t, err)
+	defer os.Remove(tmp.Name())
+	_, err = tmp.Write(data)
+	require.NoError(t, err)
+	require.NoError(t, tmp.Close())
+
+	t.Setenv("KUBESCAPE_MASTER_KEY", string(masterKey))
+	wantErr := errors.New("output unavailable")
+	cmd := GetDecryptCommand()
+	cmd.SetOut(failingWriter{err: wantErr})
+
+	err = cmd.RunE(cmd, []string{tmp.Name()})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, wantErr)
+	assert.Contains(t, err.Error(), "failed to write decrypted report")
 }
