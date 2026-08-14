@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/httphandler/config"
@@ -207,7 +208,7 @@ func TestWatchForScan_ProcessesRequestThenExits(t *testing.T) {
 
 	h := &HTTPHandler{
 		state:           newServerState(),
-		scanRequestChan: make(chan *scanRequestParams, 1),
+		scanRequestChan: make(chan *scanRequestParams, 2),
 		cancelWatch:     cancel,
 	}
 
@@ -218,7 +219,13 @@ func TestWatchForScan_ProcessesRequestThenExits(t *testing.T) {
 		return nil, nil
 	}
 
-	go h.watchForScan(ctx)
+	// done signals that watchForScan has exited.
+	done := make(chan struct{})
+
+	go func() {
+		h.watchForScan(ctx)
+		close(done)
+	}()
 
 	// Send a scan request — it should be processed.
 	h.scanRequestChan <- &scanRequestParams{
@@ -231,9 +238,15 @@ func TestWatchForScan_ProcessesRequestThenExits(t *testing.T) {
 	// Cancel the context — watchForScan should exit.
 	cancel()
 
-	// If watchForScan didn't exit, this test would hang on the send below
-	// because no one is reading from the channel. With the fix, the goroutine
-	// has exited, so the buffered channel just accumulates.
+	// Wait for the goroutine to exit (with timeout).
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("watchForScan did not exit after context cancellation")
+	}
+
+	// After shutdown, sending to the buffered channel should not block
+	// because no one is reading from it and the buffer has capacity.
 	h.scanRequestChan <- &scanRequestParams{
 		scanID:          "after-shutdown",
 		scanInfo:        &cautils.ScanInfo{},
