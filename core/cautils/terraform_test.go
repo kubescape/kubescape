@@ -2,12 +2,52 @@ package cautils
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestTerraformDirectory_GetWorkloads_MapsSysctls(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.tf")
+	require.NoError(t, os.WriteFile(path, []byte(`
+resource "kubernetes_pod_v1" "example" {
+  metadata {
+    name      = "sysctl-test"
+    namespace = "default"
+  }
+  spec {
+    security_context {
+      sysctl {
+        name  = "net.ipv4.ip_local_port_range"
+        value = "1024 65535"
+      }
+    }
+    container {
+      name  = "pause"
+      image = "registry.k8s.io/pause:3.9"
+    }
+  }
+}
+`), 0o600))
+
+	workloads, errs := NewTerraformDirectory(dir).GetWorkloads(dir)
+	require.Empty(t, errs)
+	require.Len(t, workloads[path], 1)
+
+	obj := workloads[path][0].GetObject()
+	spec := obj["spec"].(map[string]interface{})
+	securityContext := spec["securityContext"].(map[string]interface{})
+	assert.NotContains(t, securityContext, "sysctl")
+	sysctls, ok := securityContext["sysctls"].([]interface{})
+	require.True(t, ok, "securityContext.sysctls must be an array")
+	require.Len(t, sysctls, 1)
+	assert.Equal(t, "net.ipv4.ip_local_port_range", sysctls[0].(map[string]interface{})["name"])
+}
 
 func TestTerraformDirectory_GetWorkloads(t *testing.T) {
 	td := NewTerraformDirectory("testdata/terraform")
