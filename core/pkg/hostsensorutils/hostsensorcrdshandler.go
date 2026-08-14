@@ -62,7 +62,7 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, _ string) (*HostSe
 		if err == nil {
 			err = fmt.Errorf("no nodes to scan")
 		}
-		return hsh, fmt.Errorf("in NewHostSensorHandler, failed to get nodes list: %w", err)
+		return nil, fmt.Errorf("in NewHostSensorHandler, failed to get nodes list: %w", err)
 	}
 
 	return hsh, nil
