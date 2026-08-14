@@ -699,12 +699,17 @@ func TestApplyRegistryCredentialsFromEnv_KeepsExplicitAuthMode(t *testing.T) {
 	})
 }
 
-// coverageWouldFail mirrors the gate logic in enforceCoverageThreshold so we
-// can test it without triggering os.Exit. It MUST stay byte-identical with the
-// gate: when this and the gate disagree, every other test in this file lies
-// about scan behavior. In particular, a zero-controls scan is a coverage
-// failure (nothing was evaluated) rather than a free pass — see
-// core/cautils/scancoverage.go ComputeCoverageScore for the matching rule.
+// coverageWouldFail is a ratio-only mirror of enforceCoverageThreshold used
+// by the table-driven Test_enforceCoverageThreshold below. It models two of
+// the gate's branches: the threshold opt-out (threshold <= 0) and the
+// zero-controls failure (totalControls == 0 with a positive threshold).
+//
+// It does NOT model the gate's penalty-aware coverageScore comparison, so
+// any test that exercises silent failed GVR pulls, partial GVR pulls, or
+// policy degradations must call enforceCoverageThreshold directly. The
+// invariant that this mirror and the real gate agree on every ratio-only
+// input is enforced by TestCoverageWouldFail_MatchesGate, and the
+// penalty-aware path is pinned by Test_enforceCoverageThreshold_Direct.
 func coverageWouldFail(notEvaluated, totalControls int, threshold float32) bool {
 	if threshold <= 0 {
 		return false
