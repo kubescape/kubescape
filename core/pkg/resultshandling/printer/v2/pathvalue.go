@@ -2,6 +2,7 @@ package printer
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -174,13 +175,71 @@ func reviewPathsWithCurrentValues(control *resourcesresults.ResourceAssociatedCo
 // redactedValue is substituted for sensitive field values when --show-secrets is not set.
 const redactedValue = "[redacted]"
 
+// fixPathsToStringFiltered emits fix paths as "path=value", redacting the value to
+// [redacted] for Secret.data and Secret.stringData paths when showSecrets is false.
+// This prevents FixPath.Value leaking secret material through the evidence column.
+func fixPathsToStringFiltered(control *resourcesresults.ResourceAssociatedControl, kind string, showSecrets bool) []string {
+	var paths []string
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			p := control.ResourceAssociatedRules[j].Paths[k].FixPath.Path
+			if p == "" {
+				continue
+			}
+			v := control.ResourceAssociatedRules[j].Paths[k].FixPath.Value
+			if !showSecrets && isSensitivePath(kind, p) {
+				v = redactedValue
+			}
+			paths = append(paths, fmt.Sprintf("%s=%s", p, v))
+		}
+	}
+	return paths
+}
+
 // AssistedRemediationPathsWithCurrentValuesFiltered is like AssistedRemediationPathsWithCurrentValues
 // but redacts sensitive field values (Secret.data, Secret.stringData) unless showSecrets is true.
-func AssistedRemediationPathsWithCurrentValuesFiltered(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
-	if showSecrets {
-		return AssistedRemediationPathsWithCurrentValues(control, resource)
+// enrichedPathsForFieldUnredacted is like enrichedPathsForField but never suppresses values
+// for sensitive paths — used when --show-secrets is set and the operator explicitly wants
+// Secret.data / Secret.stringData values surfaced.
+func enrichedPathsForFieldUnredacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
+	var paths []string
+	obj := resource.GetObject()
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			p := getPath(control.ResourceAssociatedRules[j].Paths[k])
+			if p == "" {
+				continue
+			}
+			if val, ok := extractValueAtPath(obj, p); ok {
+				paths = append(paths, p+" (current: "+val+")")
+				continue
+			}
+			paths = append(paths, p)
+		}
 	}
-	fixPaths := fixPathsToString(control, false)
+	return paths
+}
+
+func failedPathsWithCurrentValuesUnredacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
+	return enrichedPathsForFieldUnredacted(control, resource, func(p armotypes.PosturePaths) string { return p.FailedPath })
+}
+
+func reviewPathsWithCurrentValuesUnredacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
+	return enrichedPathsForFieldUnredacted(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
+}
+
+func AssistedRemediationPathsWithCurrentValuesFiltered(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
+	kind := resource.GetKind()
+	if showSecrets {
+		// extract values for all paths including sensitive ones — caller explicitly opted in
+		fixPaths := fixPathsToStringFiltered(control, kind, true)
+		deletePaths := deletePathsToString(control)
+		enrichedReview := reviewPathsWithCurrentValuesUnredacted(control, resource)
+		enrichedFailed := failedPathsWithCurrentValuesUnredacted(control, resource)
+		paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
+		return appendFailedPathsIfNotInPaths(paths, enrichedFailed)
+	}
+	fixPaths := fixPathsToStringFiltered(control, kind, false)
 	deletePaths := deletePathsToString(control)
 	enrichedReview := reviewPathsWithCurrentValuesRedacted(control, resource)
 	enrichedFailed := failedPathsWithCurrentValuesRedacted(control, resource)

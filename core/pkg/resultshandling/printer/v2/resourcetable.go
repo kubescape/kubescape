@@ -91,7 +91,7 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		if showEvidence {
 			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&controls[i], resource, showSecrets)
 			addContainerNameToAssistedRemediation(resource, &paths)
-			if sourcePath != "" && len(paths) > 0 {
+			if sourcePath != "" {
 				paths = append([]string{"@ " + sourcePath}, paths...)
 			}
 			row[resourceColumnPath] = strings.Join(paths, "\n")
