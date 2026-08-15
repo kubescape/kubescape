@@ -61,6 +61,7 @@ type PostureReportWithSeverity struct {
 	ClusterCloudProvider string                            `json:"clusterCloudProvider"`
 	CustomerGUID         string                            `json:"customerGUID"`
 	ClusterName          string                            `json:"clusterName"`
+	ReportID             string                            `json:"reportGUID"`
 	SummaryDetails       SummaryDetailsWithSeverity        `json:"summaryDetails"`
 	Resources            []reporthandling.Resource         `json:"resources,omitempty"`
 	Attributes           []reportsummary.PostureAttributes `json:"attributes"`
@@ -188,6 +189,7 @@ func ConvertToPostureReportWithSeverityLabelsAndCoverage(report *reporthandlingv
 		ClusterCloudProvider: report.ClusterCloudProvider,
 		CustomerGUID:         report.CustomerGUID,
 		ClusterName:          report.ClusterName,
+		ReportID:             report.ReportID,
 		SummaryDetails: SummaryDetailsWithSeverity{
 			Controls:                  enrichedControls,
 			Status:                    report.SummaryDetails.Status,
@@ -265,6 +267,9 @@ func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureRepor
 	if data.Report.ClusterName == "" {
 		data.Report.ClusterName = cautils.AdoptClusterName(scanContextName(data))
 	}
+	if data.Report.ReportID == "" {
+		data.Report.ReportID = data.SessionID
+	}
 	report := reporthandlingv2.PostureReport{
 		SummaryDetails:       data.Report.SummaryDetails,
 		Metadata:             *data.Metadata,
@@ -273,6 +278,7 @@ func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureRepor
 		Attributes:           data.Report.Attributes,
 		ClusterName:          data.Report.ClusterName,
 		CustomerGUID:         data.Report.CustomerGUID,
+		ReportID:             data.Report.ReportID,
 		ClusterCloudProvider: data.Report.ClusterCloudProvider,
 	}
 

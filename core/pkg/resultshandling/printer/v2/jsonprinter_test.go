@@ -143,6 +143,15 @@ func TestActionPrintOmitsExceptionAuditWhenNil(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestActionPrintIncludesSessionIDAsReportGUID(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.SessionID = "scan-6f012842"
+
+	got := jsonPrinterOutput(t, session)
+
+	assert.Equal(t, "scan-6f012842", got["reportGUID"])
+}
+
 func jsonPrinterOutput(t *testing.T, session *cautils.OPASessionObj) map[string]any {
 	t.Helper()
 
