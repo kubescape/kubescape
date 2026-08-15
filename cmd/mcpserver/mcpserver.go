@@ -40,6 +40,9 @@ var setConnectedToCluster = k8sinterface.SetConnectedToCluster
 
 var newK8sClient = k8sinterface.NewKubernetesApi
 
+// jsonMarshal is a package-level var so tests can inject marshal failures.
+var jsonMarshal = json.Marshal
+
 type scanCtxState struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -1081,14 +1084,20 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to get workload manifest: %v", err)), nil
 		}
-		rawManifest, _ = json.Marshal(workloadObj)
+		rawManifest, err = jsonMarshal(workloadObj)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal workload manifest: %v", err)), nil
+		}
 
 		containerName := ""
 		if profile.GetLabels() != nil {
 			containerName = profile.GetLabels()["kubescape.io/workload-container-name"]
 		}
 		fixes := fixhandler.DetectProfileDrift(rawManifest, profile, workloadKindStr, containerName, 0)
-		fixesJson, _ := json.MarshalIndent(fixes, "", "  ")
+		fixesJson, err := json.MarshalIndent(fixes, "", "  ")
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal drift result: %v", err)), nil
+		}
 
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
