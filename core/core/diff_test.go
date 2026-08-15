@@ -31,7 +31,7 @@ func writeReport(t *testing.T, json string) string {
 	return f.Name()
 }
 
-// TestDiff_ReturnsNewFailureCount verifies that Diff returns the number of new failures at or above the severity threshold.
+// TestDiff_ReturnsNewFailureCount verifies that Diff returns the number of new or incomparable failures at or above the severity threshold.
 func TestDiff_ReturnsNewFailureCount(t *testing.T) {
 	base := writeReport(t, `{"results":[],"summaryDetails":{"controls":{}}}`)
 	head := writeReport(t, `{
@@ -86,6 +86,33 @@ func TestDiff_ReturnsNewFailureCount(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, 0, count)
+	})
+
+	t.Run("scope mismatch counts incomparable failures", func(t *testing.T) {
+		baseScoped := writeReport(t, `{
+			"results":[{"resourceID":"res1","controls":[
+				{"controlID":"C-HIGH","name":"High","status":{"status":"failed"}}
+			]}],
+			"summaryDetails":{"controls":{"C-HIGH":{"scoreFactor":7.0}}},
+			"metadata":{"scanMetadata":{"excludedNamespaces":["kube-system"]}}
+		}`)
+		headScoped := writeReport(t, `{
+			"results":[{"resourceID":"res1","controls":[
+				{"controlID":"C-HIGH","name":"High","status":{"status":"failed"}}
+			]}],
+			"summaryDetails":{"controls":{"C-HIGH":{"scoreFactor":7.0}}},
+			"metadata":{"scanMetadata":{"excludedNamespaces":["kube-system","monitoring"]}}
+		}`)
+
+		count, err := ks.Diff(&metav1.DiffInfo{
+			BaseFile:          baseScoped,
+			HeadFile:          headScoped,
+			Format:            "json",
+			SeverityThreshold: "high",
+			Output:            filepath.Join(outDir, "scope.json"),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, 1, count)
 	})
 }
 
