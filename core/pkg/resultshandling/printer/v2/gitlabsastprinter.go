@@ -442,9 +442,10 @@ func kubescapeVersion() string {
 	return versioncheck.BuildNumber
 }
 
-// CloseWriter closes the output file, unless it is stdout, satisfying the optional printerCloser interface
-func (gp *GitLabSASTPrinter) CloseWriter() {
+// CloseWriter closes the GitLab SAST output writer, returning any error from flushing or closing.
+func (gp *GitLabSASTPrinter) CloseWriter() error {
 	if gp.writer != nil && gp.writer != os.Stdout {
-		gp.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
+		return gp.writer.Close()
 	}
+	return nil
 }

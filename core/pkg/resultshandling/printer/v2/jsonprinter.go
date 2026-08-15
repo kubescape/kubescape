@@ -192,8 +192,10 @@ func (jp *JsonPrinter) PrintNextSteps() {
 
 }
 
-func (p *JsonPrinter) CloseWriter() {
+// CloseWriter closes the JSON output writer, returning any error from flushing or closing.
+func (p *JsonPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
+		return p.writer.Close()
 	}
+	return nil
 }

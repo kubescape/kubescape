@@ -559,8 +559,10 @@ func hashArtifactChange(artifactChange *sarif.ArtifactChange) [32]byte {
 	return sha256.Sum256(acJson)
 }
 
-func (p *SARIFPrinter) CloseWriter() {
+// CloseWriter closes the SARIF output writer, returning any error from flushing or closing.
+func (p *SARIFPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
+		return p.writer.Close()
 	}
+	return nil
 }

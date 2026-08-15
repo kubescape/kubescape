@@ -391,8 +391,10 @@ func properties(complianceScore float32) []JUnitProperty {
 	}
 }
 
-func (p *JunitPrinter) CloseWriter() {
+// CloseWriter closes the JUnit output writer, returning any error from flushing or closing.
+func (p *JunitPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
+		return p.writer.Close()
 	}
+	return nil
 }

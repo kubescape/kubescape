@@ -154,8 +154,10 @@ func (yp *YamlPrinter) PrintNextSteps() {
 
 }
 
-func (yp *YamlPrinter) CloseWriter() {
+// CloseWriter closes the YAML output writer, returning any error from flushing or closing.
+func (yp *YamlPrinter) CloseWriter() error {
 	if yp.writer != nil && yp.writer != os.Stdout {
-		yp.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
+		return yp.writer.Close()
 	}
+	return nil
 }
