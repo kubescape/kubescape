@@ -92,7 +92,7 @@ func NewPolicyReportPrinter() *PolicyReportPrinter {
 	return &PolicyReportPrinter{}
 }
 
-func (pp *PolicyReportPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (pp *PolicyReportPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = policyReportOutputFile
@@ -103,6 +103,10 @@ func (pp *PolicyReportPrinter) SetWriter(ctx context.Context, outputFile string)
 		}
 	}
 	pp.writer = printer.GetWriter(ctx, outputFile)
+	if pp.writer == nil {
+		return fmt.Errorf("failed to open writer for PolicyReport output %q", outputFile)
+	}
+	return nil
 }
 
 func (pp *PolicyReportPrinter) Score(score float32) {
