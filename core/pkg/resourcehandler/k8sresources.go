@@ -307,6 +307,22 @@ func streamingResourceScope(obj workloadinterface.IMetadata, namespaced *bool) s
 	return cautils.ClusterScope
 }
 
+// streamingKubernetesResourceCount returns the number of unique Kubernetes
+// resources retained across the resident and namespace batches. A single
+// resource scan may add an object to resident that was already collected in a
+// namespace batch, so resident IDs are excluded from the namespace count.
+func streamingKubernetesResourceCount(resident *cautils.ResourceBatch, namespaceBatches map[string]*cautils.ResourceBatch) int {
+	count := len(resident.AllResources)
+	for _, batch := range namespaceBatches {
+		for id := range batch.AllResources {
+			if _, alreadyCounted := resident.AllResources[id]; !alreadyCounted {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 // collectAndStreamBatches pulls every queryable GVR exactly once, partitions
 // the results into a single resident batch (cluster-scoped and external
 // resources) and one batch per namespace, then streams the resident batch
@@ -406,6 +422,21 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		addSingleResourceToResourceMaps(resident.K8SResources, allResources, sessionObj.SingleResourceScan, resolver)
 	}
 
+	// Match the eager collector's metric timing: report the complete Kubernetes
+	// resource snapshot before adding host, RBAC, or cloud resources. Resource
+	// telemetry is independent of the worker-node LIST and must survive a node
+	// permission or transport failure.
+	metrics.UpdateKubernetesResourcesCount(ctx, int64(streamingKubernetesResourceCount(resident, namespaceBatches)))
+	if k8sHandler.k8s != nil {
+		numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
+		if err != nil {
+			logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
+		} else {
+			sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
+			metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
+		}
+	}
+
 	hostResources := cautils.MapHostResources(ksResourceMap)
 	// check that controls use host sensor resources
 	if len(hostResources) > 0 {
@@ -475,17 +506,6 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	// concurrent write against that read. ProcessWithStreaming copies the
 	// resident batch into the processor (sessionObj) after receiving it, so the
 	// maps still land on the session by the time downstream stages run.
-
-	if k8sHandler.k8s != nil {
-		numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
-		if err != nil {
-			logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
-		} else {
-			sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
-			metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
-			metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
-		}
-	}
 
 	// Stream resident batch first.
 	select {

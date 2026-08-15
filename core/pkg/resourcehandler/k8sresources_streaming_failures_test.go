@@ -6,13 +6,18 @@ import (
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/metrics"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -273,6 +278,74 @@ func TestCollectAndStreamBatches_CountsNamespacedResourcesAcrossBatches(t *testi
 	require.NoError(t, err)
 	require.NotNil(t, session.Metadata.ContextMetadata.ClusterContextMetadata)
 	assert.Equal(t, map[string]int{"ns-a": 2}, session.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources)
+}
+
+func TestCollectAndStreamBatches_ReportsAllKubernetesResourcesWhenNodeCountFails(t *testing.T) {
+	previousProvider := otel.GetMeterProvider()
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(provider)
+	metrics.Init()
+	t.Cleanup(func() {
+		otel.SetMeterProvider(previousProvider)
+		require.NoError(t, provider.Shutdown(context.Background()))
+	})
+
+	ctx := context.Background()
+	twoPods := &unstructured.UnstructuredList{
+		Object: map[string]any{"apiVersion": "v1", "kind": "PodList"},
+		Items: []unstructured.Unstructured{
+			{Object: map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "a", "namespace": "ns-a"}}},
+			{Object: map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "b", "namespace": "ns-b"}}},
+		},
+	}
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, twoPods, nil
+	})
+	client, ok := handler.k8s.KubernetesClient.(*fakeclientset.Clientset)
+	require.True(t, ok)
+	client.PrependReactor("list", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("forbidden: cannot list nodes")
+	})
+
+	scanInfo, session := streamingTestSession(ctx)
+	namespaced := true
+	const podsGVR = "/v1/pods"
+	queryable := QueryableResources{
+		podsGVR: {
+			GroupVersionResourceTriplet: podsGVR,
+			Namespaced:                  &namespaced,
+		},
+	}
+	batches := make(chan *cautils.ResourceBatch, 3)
+
+	err := handler.collectAndStreamBatches(
+		ctx,
+		queryable,
+		&EmptySelector{},
+		session,
+		scanInfo,
+		cautils.ExternalResources{},
+		batches,
+		nil,
+	)
+
+	require.NoError(t, err)
+	var resourceMetrics metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(ctx, &resourceMetrics))
+	for _, scopeMetrics := range resourceMetrics.ScopeMetrics {
+		for _, metric := range scopeMetrics.Metrics {
+			if metric.Name != "kubescape_kubernetes_resources_count" {
+				continue
+			}
+			sum, ok := metric.Data.(metricdata.Sum[int64])
+			require.True(t, ok)
+			require.Len(t, sum.DataPoints, 1)
+			assert.Equal(t, int64(2), sum.DataPoints[0].Value)
+			return
+		}
+	}
+	t.Fatal("kubescape_kubernetes_resources_count was not recorded")
 }
 
 func TestCollectAndStreamBatches_RecordsPartialSelectorFailure(t *testing.T) {
