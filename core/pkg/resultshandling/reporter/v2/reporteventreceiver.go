@@ -42,6 +42,7 @@ type ReportEventReceiver struct {
 	reportID           string
 	submitContext      SubmitContext
 	accountIdGenerated bool
+	firstChunkSent     bool
 }
 
 func NewReportEventReceiver(tenantConfig cautils.ITenantConfig, reportID string, submitContext SubmitContext, client *client.KSCloudAPI) *ReportEventReceiver {
@@ -69,6 +70,16 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 		getter.SetKSCloudAPIConnector(report.client)
 		logger.L().Debug("generated account ID", helpers.String("account ID", accountID))
 	}
+
+	defer func() {
+		// Clean up generated credentials if no chunks were successfully sent
+		// This handles early returns (e.g., missing cluster name, context cancellation)
+		if report.accountIdGenerated && !report.firstChunkSent {
+			if err := report.tenantConfig.DeleteCredentials(); err != nil {
+				logger.L().Error("failed to delete generated credentials after report submission failed or returned early", helpers.Error(err))
+			}
+		}
+	}()
 
 	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.GetClusterName() == "" {
 		logger.L().Ctx(ctx).Error("failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS")
@@ -263,16 +274,9 @@ func (report *ReportEventReceiver) sendReport(ctx context.Context, postureReport
 
 	strResponse, err := report.client.SubmitReport(postureReport)
 	if err != nil {
-		// in case of error, we need to revert the generated account ID
-		// otherwise the next run will fail using a non existing account ID
-		if report.accountIdGenerated {
-			if err := report.tenantConfig.DeleteCredentials(); err != nil {
-				logger.L().Error("failed to delete generated credentials after report submission failed", helpers.Error(err))
-			}
-		}
-
 		return fmt.Errorf("%w:%s", err, strResponse)
 	}
+	report.firstChunkSent = true
 
 	// message is taken only from last report
 	if strResponse != "" && isLastReport {
