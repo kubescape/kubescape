@@ -1,0 +1,29 @@
+{
+  "name": "steal-privileged-pods-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Credential Access::Steal pods from privileged namespaces",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        "rbac.authorization.k8s.io"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "RoleBinding",
+        "ClusterRoleBinding",
+        "Role",
+        "ClusterRole"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can both remove pods from privileged namespaces such as kube-system and make other nodes unschedulable, letting them force powerful pods to reschedule onto a node they already control and read the service account tokens of those pods",
+  "remediation": "Split pod removal and node maintenance rights between separate subjects so that no single subject holds both. Where node maintenance is required, avoid granting update/patch on nodes and nodes/status alongside delete on pods, create on pods/eviction, or update/patch on pods in kube-system and other privileged namespaces.",
+  "ruleQuery": "armo_builtins"
+}
