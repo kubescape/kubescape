@@ -430,8 +430,8 @@ func withConfigInputsGetter(t *testing.T, g getter.IControlsInputsGetter, err er
 func withExceptionsGetter(t *testing.T, g getter.IExceptionsGetter, err error) {
 	t.Helper()
 	orig := exceptionsGetterFunc
-	exceptionsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IExceptionsGetter, error) {
-		return g, err
+	exceptionsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IExceptionsGetter, bool, error) {
+		return g, false, err
 	}
 	t.Cleanup(func() { exceptionsGetterFunc = orig })
 }

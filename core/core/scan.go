@@ -258,7 +258,8 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 		spanInit.End()
 		return nil, err
 	}
-	getters.ExceptionsGetter, err = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	var exceptionsFromCache bool
+	getters.ExceptionsGetter, exceptionsFromCache, err = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
 	if err != nil {
 		spanInit.End()
 		return nil, err
@@ -288,6 +289,9 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 	}
 	if controlInputsFromCache {
 		scanData.PolicyDegradations = append(scanData.PolicyDegradations, cautils.PolicyDegradation{Component: "controlInputs", Reason: "failed to fetch from GitHub, loaded from local cache"})
+	}
+	if exceptionsFromCache {
+		scanData.PolicyDegradations = append(scanData.PolicyDegradations, cautils.PolicyDegradation{Component: "exceptions", Reason: "failed to fetch from GitHub, loaded from local cache"})
 	}
 	spanPolicies.End()
 
