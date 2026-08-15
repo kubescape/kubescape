@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	restclient "k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -32,11 +33,16 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 	return k8sinterface.NewKubernetesApi()
 }
 
-func getExceptionsK8sClient(ctx context.Context) client.Client {
-	if !k8sinterface.IsConnectedToCluster() {
-		return nil
+func getExceptionsK8sClient(ctx context.Context, target *k8sinterface.KubernetesApi) client.Client {
+	var config *restclient.Config
+	if target != nil {
+		config = target.K8SConfig
+	} else {
+		if !k8sinterface.IsConnectedToCluster() {
+			return nil
+		}
+		config = k8sinterface.GetK8sConfig()
 	}
-	config := k8sinterface.GetK8sConfig()
 	if config == nil {
 		return nil
 	}
@@ -58,22 +64,32 @@ type releasedExceptionsGetter interface {
 	SetRegoObjectsWithFallback() (bool, error)
 }
 
+func newCRDExceptionsGetter(ctx context.Context, target *k8sinterface.KubernetesApi) *getter.CRDExceptionsGetter {
+	k8sClient := getExceptionsK8sClient(ctx, target)
+	if target != nil {
+		return getter.NewCRDExceptionsGetterWithClients(target.DynamicClient, k8sClient)
+	}
+	return getter.NewCRDExceptionsGetter(k8sClient)
+}
+
 // getExceptionsGetter returns the selected getter and whether an online
 // GitHub source degraded to the bundled cache. Explicit local/air-gapped
 // sources are intentional selections and therefore do not count as fallback.
 func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) (getter.IExceptionsGetter, bool, error) {
+	return getExceptionsGetterForTarget(ctx, useExceptions, accountID, downloadReleasedPolicy, airGapped, nil)
+}
+
+func getExceptionsGetterForTarget(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool, target *k8sinterface.KubernetesApi) (getter.IExceptionsGetter, bool, error) {
 	var primary getter.IExceptionsGetter
 
 	if useExceptions != "" {
 		// load exceptions from file
 		primary = getter.NewLoadPolicy([]string{useExceptions})
-		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), false, nil
+		return getter.NewMergedExceptionsGetter(primary, newCRDExceptionsGetter(ctx, target)), false, nil
 	}
 	if airGapped {
 		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
-		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), false, nil
+		return getter.NewMergedExceptionsGetter(primary, newCRDExceptionsGetter(ctx, target)), false, nil
 	}
 	if accountID != "" {
 		if downloadReleasedPolicy != nil && downloadReleasedPolicy.IsVersionPinned() {
@@ -81,20 +97,23 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 		}
 		// download exceptions from Kubescape Cloud backend
 		primary = getter.GetKSCloudAPIAdapter()
-		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), false, nil
+		return getter.NewMergedExceptionsGetter(primary, newCRDExceptionsGetter(ctx, target)), false, nil
 	}
 	// download exceptions from GitHub
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
-	return getReleasedExceptionsGetter(ctx, downloadReleasedPolicy)
+	return getReleasedExceptionsGetterForTarget(ctx, downloadReleasedPolicy, target)
 }
 
 // getReleasedExceptionsGetter reports whether the GitHub release could not be
 // fetched and the bundled local cache is being used instead. The caller must
 // preserve that signal because cached exceptions can change scan findings.
 func getReleasedExceptionsGetter(ctx context.Context, downloadReleasedPolicy releasedExceptionsGetter) (getter.IExceptionsGetter, bool, error) {
+	return getReleasedExceptionsGetterForTarget(ctx, downloadReleasedPolicy, nil)
+}
+
+func getReleasedExceptionsGetterForTarget(ctx context.Context, downloadReleasedPolicy releasedExceptionsGetter, target *k8sinterface.KubernetesApi) (getter.IExceptionsGetter, bool, error) {
 	var primary getter.IExceptionsGetter = downloadReleasedPolicy
 	fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback()
 	if err != nil {
@@ -105,9 +124,7 @@ func getReleasedExceptionsGetter(ctx context.Context, downloadReleasedPolicy rel
 		logger.L().Ctx(ctx).Warning("failed to get exceptions from github release, loading exceptions from cache")
 		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
 	}
-	k8sClient := getExceptionsK8sClient(ctx)
-	return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), fallback, nil
-
+	return getter.NewMergedExceptionsGetter(primary, newCRDExceptionsGetter(ctx, target)), fallback, nil
 }
 
 func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, submit bool) *cautils.RBACObjects {
@@ -316,6 +333,10 @@ func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, account
 // whether the inputs are served from the local cache fallback (GitHub download
 // failed) rather than fetched fresh, so the caller can record a PolicyDegradation.
 func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool, airGapped bool) (getter.IControlsInputsGetter, bool, error) {
+	return getConfigInputsGetterForTarget(ctx, ControlsInputs, accountID, downloadReleasedPolicy, useCRD, airGapped, nil)
+}
+
+func getConfigInputsGetterForTarget(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool, airGapped bool, target *k8sinterface.KubernetesApi) (getter.IControlsInputsGetter, bool, error) {
 	if len(ControlsInputs) > 0 {
 		return getter.NewLoadPolicy([]string{ControlsInputs}), false, nil
 	}
@@ -332,7 +353,14 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 
 	// Try to read control inputs from the ControlInput CRD in-cluster (live cluster scans only)
 	if useCRD {
-		if crdInputs, err := getter.NewCRDControlInputs(); err == nil {
+		var crdInputs *getter.CRDControlInputs
+		var err error
+		if target != nil {
+			crdInputs, err = getter.NewCRDControlInputsWithClient(target.DynamicClient)
+		} else {
+			crdInputs, err = getter.NewCRDControlInputs()
+		}
+		if err == nil {
 			if _, crdErr := crdInputs.GetControlsInputs(ctx, ""); crdErr == nil {
 				logger.L().Ctx(ctx).Info("using ControlInput CRD for control configuration")
 				return crdInputs, false, nil

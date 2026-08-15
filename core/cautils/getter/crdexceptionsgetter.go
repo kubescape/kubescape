@@ -67,6 +67,17 @@ func NewCRDExceptionsGetter(k8sClient client.Client) *CRDExceptionsGetter {
 	return getter
 }
 
+// NewCRDExceptionsGetterWithClients creates a CRD-backed exceptions getter from
+// clients that belong to the same scan target. Callers that already resolved a
+// Kubernetes target should use this constructor instead of consulting the
+// process-global Kubernetes configuration again.
+func NewCRDExceptionsGetterWithClients(dynamicClient dynamic.Interface, k8sClient client.Client) *CRDExceptionsGetter {
+	return &CRDExceptionsGetter{
+		client:    dynamicClient,
+		k8sClient: k8sClient,
+	}
+}
+
 func (g *CRDExceptionsGetter) GetExceptions(ctx context.Context, _ string) ([]armotypes.PostureExceptionPolicy, error) {
 	if g == nil || g.client == nil {
 		return []armotypes.PostureExceptionPolicy{}, nil
