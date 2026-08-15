@@ -422,14 +422,19 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 
 	// allResources is resident.AllResources, which only ever holds
 	// cluster-scoped resources (see the partition loop above); namespaced
-	// resources live in namespaceBatches. Aggregate both before counting, and
-	// do it here, before namespaceBatches are drained into batchChan below.
-	countable := make(map[string]workloadinterface.IMetadata, len(allResources))
-	maps.Copy(countable, allResources)
+	// resources live in namespaceBatches. Count across both before the batches
+	// are drained below, without building a second whole-cluster map just for
+	// this report metadata. Count namespace batches first, then skip a resident
+	// entry when the same ID is already present in its namespace batch. This
+	// preserves the old merged-map deduplication for resources injected into the
+	// resident batch (for example SingleResourceScan and RBAC resources) without
+	// allocating a whole-cluster seen-ID set.
+	mapNamespaceToNumberOfResources := make(map[string]int)
 	for _, batch := range namespaceBatches {
-		maps.Copy(countable, batch.AllResources)
+		addNamespaceResourceCounts(ctx, batch.AllResources, mapNamespaceToNumberOfResources, nil)
 	}
-	setMapNamespaceToNumOfResources(ctx, countable, sessionObj)
+	addNamespaceResourceCounts(ctx, allResources, mapNamespaceToNumberOfResources, namespaceBatches)
+	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 	if len(cloudResources) > 0 {
 		if err := k8sHandler.collectCloudResources(ctx, sessionObj, allResources, ksResourceMap, cloudResources); err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
@@ -672,9 +677,26 @@ func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo(ctx context.Contex
 
 // set  namespaceToNumOfResources map in report
 func setMapNamespaceToNumOfResources(ctx context.Context, allResources map[string]workloadinterface.IMetadata, sessionObj *cautils.OPASessionObj) {
-
 	mapNamespaceToNumberOfResources := make(map[string]int)
-	for _, resource := range allResources {
+	addNamespaceResourceCounts(ctx, allResources, mapNamespaceToNumberOfResources, nil)
+	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
+}
+
+// addNamespaceResourceCounts accumulates reportable top-level resources into
+// an existing namespace-count map. Keeping accumulation separate lets the
+// streaming collector count resident and namespace batches in place instead
+// of copying every resource into a temporary whole-cluster map. When
+// alreadyCounted is non-nil, a resource already present in its namespace batch
+// is skipped; callers with one already-unique map can pass nil.
+func addNamespaceResourceCounts(ctx context.Context, allResources map[string]workloadinterface.IMetadata, mapNamespaceToNumberOfResources map[string]int, alreadyCounted map[string]*cautils.ResourceBatch) {
+	for resourceID, resource := range allResources {
+		if alreadyCounted != nil {
+			if batch := alreadyCounted[resource.GetNamespace()]; batch != nil {
+				if _, counted := batch.AllResources[resourceID]; counted {
+					continue
+				}
+			}
+		}
 		if obj := workloadinterface.NewWorkloadObj(resource.GetObject()); obj != nil {
 			ownerReferences, err := obj.GetOwnerReferences()
 			if err == nil {
@@ -691,7 +713,6 @@ func setMapNamespaceToNumOfResources(ctx context.Context, allResources map[strin
 			}
 		}
 	}
-	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 }
 
 // queryFailure records a failed pull at query granularity (GVR + field selectors).
