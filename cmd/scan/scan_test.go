@@ -749,6 +749,7 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 		name          string
 		threshold     string
 		matchSeverity string
+		metadata      *vulnerability.Metadata
 		fixState      vulnerability.FixState
 		onlyFixable   bool
 		expectedError bool
@@ -775,6 +776,27 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 			name:          "threshold exceeded",
 			threshold:     "high",
 			matchSeverity: "Critical",
+			expectedError: true,
+		},
+		{
+			name:          "empty embedded severity falls back to provider metadata",
+			threshold:     "high",
+			matchSeverity: "Critical",
+			metadata:      &vulnerability.Metadata{},
+			expectedError: true,
+		},
+		{
+			name:          "unrecognized embedded severity falls back to provider metadata",
+			threshold:     "high",
+			matchSeverity: "Critical",
+			metadata:      &vulnerability.Metadata{Severity: "important"},
+			expectedError: true,
+		},
+		{
+			name:          "explicit unknown embedded severity falls back to provider metadata",
+			threshold:     "high",
+			matchSeverity: "Critical",
+			metadata:      &vulnerability.Metadata{Severity: vulnerability.UnknownSeverity.String()},
 			expectedError: true,
 		},
 		{
@@ -820,6 +842,7 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 				matches.Add(match.Match{
 					Vulnerability: vulnerability.Vulnerability{
 						Reference: vulnerability.Reference{ID: "CVE-TEST"},
+						Metadata:  tt.metadata,
 						Fix:       vulnerability.Fix{State: tt.fixState},
 					},
 				})
@@ -840,4 +863,20 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEnforceImageSeverityThresholdsUsesEmbeddedMetadataWithoutProvider(t *testing.T) {
+	matches := match.NewMatches(match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-TEST"},
+			Metadata:  &vulnerability.Metadata{Severity: vulnerability.CriticalSeverity.String()},
+		},
+	})
+
+	err := enforceImageSeverityThresholds(
+		[]cautils.ImageScanData{{Matches: matches}},
+		&cautils.ScanInfo{FailThresholdSeverity: "high"},
+	)
+
+	assert.EqualError(t, err, "image scan result exceeds severity threshold: high")
 }

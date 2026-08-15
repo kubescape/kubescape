@@ -135,6 +135,7 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScan
 	// Convert to PostureReportWithSeverity to add severity field to controls,
 	// extract specified labels from workloads, and attach scan coverage gaps.
 	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverage(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources, &opaSessionObj.ScanCoverage)
+	reportWithSeverity.ExceptionAudit = opaSessionObj.ExceptionAudit
 	FilterBySeverity(reportWithSeverity, jp.minSeverity)
 
 	r, err := json.Marshal(reportWithSeverity)
