@@ -61,10 +61,10 @@ func TestParamKindForPolicy(t *testing.T) {
 }
 
 // TestCatalogBypassesRequireSupported proves the metadata helpers answer for a
-// matchConditions-gated policy loadVAP refuses: deploying/binding such a policy
-// is valid (live admission evaluates the gate), so metadata questions about it
-// must not be blocked. Exercised via parseVAPBundle + lookup on an in-memory
-// bundle, since the vendored bundle ships no gated policies today.
+// policy loadVAP refuses: deploying/binding a namespaceSelector-narrowed policy
+// is valid (live admission has the namespace labels the scan lacks), so metadata
+// questions about it must not be blocked. Exercised via parseVAPBundle + lookup
+// on an in-memory bundle, since the vendored bundle ships no such policy today.
 func TestCatalogBypassesRequireSupported(t *testing.T) {
 	bundle := `apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -73,9 +73,15 @@ metadata:
   labels:
     controlId: C-1001
 spec:
-  matchConditions:
-  - name: only-kube-system
-    expression: "object.metadata.namespace == 'kube-system'"
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        env: prod
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: ["v1"]
+      operations: ["CREATE"]
+      resources: ["pods"]
   validations:
   - expression: "false"
 `
@@ -84,7 +90,7 @@ spec:
 
 	vap := catalog.byControl["C-1001"]
 	require.NotNil(t, vap)
-	require.Error(t, vap.requireSupported(), "the offline eval path refuses the gated policy")
+	require.Error(t, vap.requireSupported(), "the offline eval path refuses the narrowed policy")
 
 	// The name index still carries it, so name-keyed metadata stays answerable.
 	named := catalog.byName["kubescape-c-1001-gated"]
