@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -735,6 +736,11 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool) ([]string, []e
 		paths = append(paths, pattern)
 		return paths, errs
 	}
+	// A concrete path is an exact scan target. Do not reinterpret a missing
+	// file as a recursive basename pattern and silently scan a nested namesake.
+	if !isDir(pattern) && !hasGlobMeta(pattern) {
+		return paths, errs
+	}
 
 	root, shouldMatch := filepath.Split(pattern)
 
@@ -753,6 +759,15 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool) ([]string, []e
 	}
 
 	return paths, errs
+}
+
+// hasGlobMeta mirrors the set of magic characters recognized by filepath.Match.
+func hasGlobMeta(path string) bool {
+	magicChars := `*?[`
+	if runtime.GOOS != "windows" {
+		magicChars = `*?[\`
+	}
+	return strings.ContainsAny(path, magicChars)
 }
 
 func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err error) {
