@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"testing"
@@ -11,8 +12,10 @@ import (
 	v1 "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/prettylogger"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -171,6 +174,53 @@ func TestPrepareReport(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestReportChunksUseStableResourceOrder(t *testing.T) {
+	resources := []workloadinterface.IMetadata{
+		workloadinterface.NewWorkloadObj(map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "zeta"}}),
+		workloadinterface.NewWorkloadObj(map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "alpha"}}),
+		workloadinterface.NewWorkloadObj(map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "kappa"}}),
+		workloadinterface.NewWorkloadObj(map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "beta"}}),
+		workloadinterface.NewWorkloadObj(map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "theta"}}),
+		workloadinterface.NewWorkloadObj(map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "delta"}}),
+		workloadinterface.NewWorkloadObj(map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "eta"}}),
+		workloadinterface.NewWorkloadObj(map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": "gamma"}}),
+	}
+
+	allResources := make(map[string]workloadinterface.IMetadata, len(resources))
+	results := make(map[string]resourcesresults.Result, len(resources))
+	expectedResourceIDs := make([]string, 0, len(resources))
+	for _, resource := range resources {
+		resourceID := resource.GetID()
+		allResources[resourceID] = resource
+		results[resourceID] = resourcesresults.Result{ResourceID: resourceID}
+		expectedResourceIDs = append(expectedResourceIDs, resourceID)
+	}
+	sort.Strings(expectedResourceIDs)
+
+	receiver := &ReportEventReceiver{}
+	// Repeat to guard against a randomized map iteration coincidentally matching
+	// the canonical order once.
+	for i := 0; i < 64; i++ {
+		reportObj := &reporthandlingv2.PostureReport{}
+		counter, reportCounter := 0, 0
+
+		require.NoError(t, receiver.setResources(context.Background(), reportObj, allResources, nil, results, &counter, &reportCounter))
+		require.NoError(t, receiver.setResults(context.Background(), reportObj, results, allResources, nil, nil, &counter, &reportCounter))
+
+		gotResources := make([]string, 0, len(reportObj.Resources))
+		for _, resource := range reportObj.Resources {
+			gotResources = append(gotResources, resource.ResourceID)
+		}
+		gotResults := make([]string, 0, len(reportObj.Results))
+		for _, result := range reportObj.Results {
+			gotResults = append(gotResults, result.ResourceID)
+		}
+
+		require.Equalf(t, expectedResourceIDs, gotResources, "resources iteration %d", i)
+		require.Equalf(t, expectedResourceIDs, gotResults, "results iteration %d", i)
+	}
 }
 
 func TestSubmit(t *testing.T) {
