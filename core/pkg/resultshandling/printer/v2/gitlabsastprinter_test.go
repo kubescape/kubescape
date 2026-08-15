@@ -513,3 +513,33 @@ func TestGitLabImageScan_NoData(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, info.Size())
 }
+
+// TestGitLabSASTPrintConfigurationScan_SolutionFieldPopulated verifies that the Solution field
+// is populated with fix paths when the resource is present in AllResources
+func TestGitLabSASTPrintConfigurationScan_SolutionFieldPopulated(t *testing.T) {
+	report := gitLabReportFor(t, gitLabSessionFixture(t, "C-0057", 8.0))
+
+	require.Len(t, report.Vulnerabilities, 1)
+	vuln := report.Vulnerabilities[0]
+	// the fixture has a FixPath for spec.template.spec.containers[0].securityContext.privileged=false
+	assert.NotEmpty(t, vuln.Solution, "Solution field must be populated when fix paths exist")
+	assert.Contains(t, vuln.Solution, "spec.template.spec.containers[0].securityContext.privileged")
+}
+
+// TestGitLabSASTPrintConfigurationScan_NilResourceDoesNotPanic verifies that a resourceID
+// present in ResourcesResult but absent from AllResources degrades gracefully (empty solution)
+// rather than panicking via a nil interface dereference in enrichedPathsForField
+func TestGitLabSASTPrintConfigurationScan_NilResourceDoesNotPanic(t *testing.T) {
+	const controlID = "C-0057"
+	session := gitLabSessionFixture(t, controlID, 8.0)
+
+	// remove the resource from AllResources to simulate the missing-key scenario
+	for k := range session.AllResources {
+		delete(session.AllResources, k)
+	}
+
+	// must not panic — solution should be empty, vulnerability still emitted
+	report := gitLabReportFor(t, session)
+	require.Len(t, report.Vulnerabilities, 1)
+	assert.Empty(t, report.Vulnerabilities[0].Solution, "Solution must be empty when resource is absent from AllResources")
+}
