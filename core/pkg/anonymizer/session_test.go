@@ -117,7 +117,7 @@ func TestResolveMappedIDReturnsFallbackTransformationError(t *testing.T) {
 func TestTransformSession_NilSession(t *testing.T) {
 	require.NoError(
 		t,
-		transformSession(nil, NewMappingTransformer()),
+		transformSession(nil, NewMapping(), NewMappingTransformer()),
 	)
 }
 
@@ -141,7 +141,7 @@ func TestTransformSession_NamesAndNamespacesReplaced(t *testing.T) {
 		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
 	}
 
-	err := transformSession(session, NewMappingTransformer())
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
 	require.NoError(t, err)
 
 	for _, resource := range session.AllResources {
@@ -230,7 +230,7 @@ func TestTransformSession_IDConsistencyAcrossMaps(t *testing.T) {
 		},
 	}
 
-	err := transformSession(session, NewMappingTransformer())
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
 	require.NoError(t, err)
 
 	var newID string
@@ -404,7 +404,7 @@ func TestTransformSession_LabelHandling(t *testing.T) {
 				LabelsToCopy:         test.labelsToCopy,
 			}
 
-			err := transformSession(session, NewMappingTransformer())
+			err := transformSession(session, NewMapping(), NewMappingTransformer())
 			require.NoError(t, err)
 
 			for _, resource := range session.AllResources {
@@ -588,7 +588,7 @@ func TestTransformSession_Annotations(t *testing.T) {
 			}
 
 			assert.NotPanics(t, func() {
-				err := transformSession(session, NewMappingTransformer())
+				err := transformSession(session, NewMapping(), NewMappingTransformer())
 				require.NoError(t, err)
 			})
 
@@ -656,7 +656,7 @@ func TestTransformSession_RepoContextMetadata(t *testing.T) {
 		},
 	}
 
-	err := transformSession(session, NewMappingTransformer())
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
 	require.NoError(t, err)
 
 	for _, repo := range []*reporthandlingv2.RepoContextMetadata{
@@ -989,6 +989,7 @@ func TestTransformSession_ResourceSourceEncryption(
 
 	err = transformSession(
 		session,
+		NewMapping(),
 		NewEncryptionTransformer(dek),
 	)
 	require.NoError(t, err)

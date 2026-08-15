@@ -17,7 +17,7 @@ import (
 // transformSession applies the supplied Transformer to sensitive resource
 // identifiers and metadata while preserving referential integrity across
 // the full OPA session.
-func transformSession(session *cautils.OPASessionObj, transformer Transformer) error {
+func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Transformer) error {
 	if session == nil {
 		return nil
 	}
