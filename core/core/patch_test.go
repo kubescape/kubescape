@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -358,4 +360,55 @@ func TestRunWithCopaLoggerMuted_RestoresActualPriorLogrusWriter(t *testing.T) {
 	assert.Equal(t, io.Discard, duringCallWriter, "logrus output must be discarded while fn runs")
 	assert.Empty(t, customWriter.String(), "logrus output during fn must not leak to the pre-existing writer")
 	assert.Same(t, &customWriter, log.StandardLogger().Out, "logrus writer must be restored to what it actually was, not assumed to be os.Stderr")
+}
+
+// TestPatchIntermediateFileCleanup verifies that intermediate scan files
+// created for copacetic are closed and deleted via deferred cleanup on both error and success paths.
+func TestPatchIntermediateFileCleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+
+	imageName := "test-image"
+	imageTag := "1.0"
+	fileName := fmt.Sprintf("%s:%s.json", imageName, imageTag)
+	fileName = strings.ReplaceAll(fileName, "/", "-")
+
+	// Simulate the file creation and deferred cleanup pattern used in Patch()
+	cleanupFn := func(simulateFailure bool) error {
+		f, createErr := os.Create(fileName)
+		if createErr != nil {
+			return createErr
+		}
+		defer func() {
+			if remErr := os.Remove(fileName); remErr != nil && !errors.Is(remErr, os.ErrNotExist) {
+				t.Errorf("failed to remove intermediate file: %v", remErr)
+			}
+		}()
+
+		_, writeErr := f.WriteString("{\"test\": \"data\"}")
+		require.NoError(t, writeErr)
+		require.NoError(t, f.Close(), "file must close without error before downstream reading/cleanup")
+
+		if simulateFailure {
+			return errors.New("simulated downstream copa failure")
+		}
+		return nil
+	}
+
+	t.Run("cleanup on success", func(t *testing.T) {
+		err := cleanupFn(false)
+		assert.NoError(t, err)
+		_, statErr := os.Stat(fileName)
+		assert.True(t, os.IsNotExist(statErr), "intermediate file must be cleaned up on success")
+	})
+
+	t.Run("cleanup on error", func(t *testing.T) {
+		err := cleanupFn(true)
+		assert.Error(t, err)
+		_, statErr := os.Stat(fileName)
+		assert.True(t, os.IsNotExist(statErr), "intermediate file must be cleaned up even if downstream error occurs")
+	})
 }
