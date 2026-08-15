@@ -126,6 +126,10 @@ func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDat
 }
 
 func saveToCache(clusterName, resourceName string, envelopes []hostsensor.HostSensorDataEnvelope) error {
+	return saveToCacheWithRename(clusterName, resourceName, envelopes, os.Rename)
+}
+
+func saveToCacheWithRename(clusterName, resourceName string, envelopes []hostsensor.HostSensorDataEnvelope, rename func(string, string) error) error {
 	if getHostSensorCacheTtl() <= 0 || clusterIdentity() == "unknown" {
 		// An unresolved API server host is a shared cache key across every
 		// caller in that state; loadFromCache always refuses to read it back,
@@ -143,11 +147,11 @@ func saveToCache(clusterName, resourceName string, envelopes []hostsensor.HostSe
 		return err
 	}
 
-	tmpPath := path + ".tmp"
-	f, err := os.OpenFile(filepath.Clean(tmpPath), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	f, err := os.CreateTemp(dir, ".hostsensor-cache-*.tmp")
 	if err != nil {
 		return err
 	}
+	tmpPath := f.Name()
 
 	cleanup := true
 	defer func() {
@@ -178,7 +182,7 @@ func saveToCache(clusterName, resourceName string, envelopes []hostsensor.HostSe
 		return err
 	}
 
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := rename(tmpPath, path); err != nil {
 		return err
 	}
 	cleanup = false
