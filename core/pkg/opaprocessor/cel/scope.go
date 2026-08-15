@@ -9,6 +9,20 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+// ResourcePluralAnnotation is an optional annotation that callers can set on a
+// scanned object to declare its exact plural resource name. When present,
+// objectGVR uses this value instead of UnsafeGuessKindToResource, which
+// lower-cases and pluralizes the Kind — a convention that holds for all core
+// K8s types but silently breaks for CRDs whose spec.names.plural deviates
+// from it (e.g. a CRD that registers "worker-pools" instead of "workerpools").
+//
+// The cluster collector sets this automatically from the API server's discovery
+// response. Manifest-scan callers that know the real plural (e.g. integration
+// tests for agent-runtime CRD policies) can set it by hand:
+//
+//	obj.metadata.annotations["kubescape.io/resource"] = "actortemplates"
+const ResourcePluralAnnotation = "kubescape.io/resource"
+
 // appliesTo reports whether an object of the given kind falls within the
 // policy's spec.matchConstraints. At live admission a non-matching object is
 // never handed to the policy, so the offline scan must not evaluate it either:
@@ -86,10 +100,20 @@ func objectSelectorMatches(selector *metav1.LabelSelector, obj map[string]any) b
 	return sel.Matches(labels.Set(objLabels))
 }
 
-// objectGVR guesses an object's GroupVersionResource from its apiVersion and
-// kind. Offline there is no discovery or RESTMapper, so we use apimachinery's
-// standard kind->resource guess (lower-case and pluralize), which is correct
-// for every kind the bundle's policies constrain.
+// objectGVR derives an object's GroupVersionResource from its apiVersion and
+// kind. Offline there is no discovery or RESTMapper, so the function first
+// checks for a ResourcePluralAnnotation set by the cluster collector or by the
+// caller; if the annotation is absent it falls back to apimachinery's
+// UnsafeGuessKindToResource, which lower-cases and pluralizes the Kind.
+//
+// The guess is correct for every core and built-in K8s kind the current
+// bundle's policies constrain, but silently wrong for CRDs whose
+// spec.names.plural deviates from the convention. In that case the resource
+// field of the returned GVR will not match the policy's matchConstraints entry
+// and resourceRuleMatches will return false — the policy evaluates against
+// nothing, which is indistinguishable from "all resources pass". The annotation
+// exists precisely to let callers that know the real plural bypass the guess
+// (see ResourcePluralAnnotation).
 func objectGVR(obj map[string]any) (schema.GroupVersionResource, bool) {
 	apiVersion, _ := obj["apiVersion"].(string)
 	kind, _ := obj["kind"].(string)
@@ -99,6 +123,12 @@ func objectGVR(obj map[string]any) (schema.GroupVersionResource, bool) {
 	gv, err := schema.ParseGroupVersion(apiVersion)
 	if err != nil {
 		return schema.GroupVersionResource{}, false
+	}
+	// Prefer the explicit annotation over the guess. UnsafeGuessKindToResource
+	// pluralizes and lower-cases, which is correct for core types but silently
+	// wrong for CRDs with non-standard spec.names.plural values.
+	if hint, _, _ := unstructured.NestedString(obj, "metadata", "annotations", ResourcePluralAnnotation); hint != "" {
+		return gv.WithResource(hint), true
 	}
 	gvr, _ := meta.UnsafeGuessKindToResource(gv.WithKind(kind))
 	return gvr, true

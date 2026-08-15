@@ -7,7 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func rule(groups, versions, resources []string) admissionregistrationv1.NamedRuleWithOperations {
@@ -28,6 +30,18 @@ func vapWithConstraints(rules ...admissionregistrationv1.NamedRuleWithOperations
 
 func obj(apiVersion, kind string) map[string]any {
 	return map[string]any{"apiVersion": apiVersion, "kind": kind, "metadata": map[string]any{"name": "x"}}
+}
+
+// objWithHint builds a test object that carries ResourcePluralAnnotation so
+// objectGVR uses the given plural name instead of UnsafeGuessKindToResource.
+// Use this for CRD kinds whose real spec.names.plural is not the lowercase-
+// pluralized form of the Kind (e.g. "worker-pools" vs "workerpools").
+func objWithHint(apiVersion, kind, resourcePlural string) map[string]any {
+	o := obj(apiVersion, kind)
+	o["metadata"].(map[string]any)["annotations"] = map[string]any{
+		ResourcePluralAnnotation: resourcePlural,
+	}
+	return o
 }
 
 func TestVAPAppliesTo(t *testing.T) {
@@ -71,6 +85,80 @@ func TestVAPAppliesToNoConstraintsEvaluates(t *testing.T) {
 	assert.True(t, v.appliesTo(obj("v1", "Pod")))
 }
 
+// TestObjectGVRResourceHint verifies that the ResourcePluralAnnotation
+// annotation is honoured over UnsafeGuessKindToResource. This is the escape
+// hatch for CRDs with non-standard plural names: the cluster collector sets the
+// annotation from the API server's discovery response, and callers writing
+// manifest-scan tests for agent-runtime CRD policies can set it by hand.
+func TestObjectGVRResourceHint(t *testing.T) {
+	cases := []struct {
+		name           string
+		apiVersion     string
+		kind           string
+		resourcePlural string
+		wantGroup      string
+		wantResource   string
+	}{
+		{
+			name:           "non-standard plural overrides the guess",
+			apiVersion:     "agentsubstrate.google.com/v1",
+			kind:           "WorkerPool",
+			resourcePlural: "worker-pools",
+			wantGroup:      "agentsubstrate.google.com",
+			wantResource:   "worker-pools",
+		},
+		{
+			name:           "standard plural via hint is also honoured",
+			apiVersion:     "agentsubstrate.google.com/v1",
+			kind:           "ActorTemplate",
+			resourcePlural: "actortemplates",
+			wantGroup:      "agentsubstrate.google.com",
+			wantResource:   "actortemplates",
+		},
+		{
+			name:           "core type with hint overrides guess too",
+			apiVersion:     "v1",
+			kind:           "Pod",
+			resourcePlural: "pods",
+			wantGroup:      "",
+			wantResource:   "pods",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o := objWithHint(tc.apiVersion, tc.kind, tc.resourcePlural)
+			gvr, ok := objectGVR(o)
+			require.True(t, ok)
+			assert.Equal(t, tc.wantGroup, gvr.Group)
+			assert.Equal(t, tc.wantResource, gvr.Resource)
+		})
+	}
+}
+
+// TestObjectGVRNonStandardPluralIsUnsafe documents the known failure mode of
+// objectGVR when the ResourcePluralAnnotation is absent and the CRD's
+// spec.names.plural deviates from the lowercase-pluralize convention that
+// UnsafeGuessKindToResource applies.
+//
+// This test is intentionally a documentation test: it asserts that the guess
+// is WRONG for a non-standard plural, so readers understand why the annotation
+// hint exists. When a VAP policy targets such a CRD, the policy author must
+// ensure either the cluster collector sets the annotation, or the manifest
+// carries it, otherwise appliesTo silently returns false and the policy
+// evaluates against nothing.
+func TestObjectGVRNonStandardPluralIsUnsafe(t *testing.T) {
+	// Simulate a CRD that registers plural "worker-pools" (with a hyphen)
+	// while UnsafeGuessKindToResource would produce "workerpools".
+	o := obj("agentsubstrate.google.com/v1", "WorkerPool")
+	gvr, ok := objectGVR(o)
+	require.True(t, ok, "objectGVR must return true even when the guess may be wrong")
+	// The guess lowercases and pluralizes: WorkerPool -> workerpools.
+	// If the CRD actually registers "worker-pools", this will not match the
+	// policy's matchConstraints and appliesTo will silently return false.
+	assert.Equal(t, "workerpools", gvr.Resource,
+		"UnsafeGuessKindToResource produced an unexpected plural; if the CRD registers a different name, use ResourcePluralAnnotation to override")
+}
+
 // canonicalKinds maps a matchConstraints resource to the Kind the scanner feeds
 // for it. The one silent-failure mode of appliesTo is UnsafeGuessKindToResource
 // mis-guessing a plural (irregular kind or a CRD), which would quietly drop a
@@ -96,6 +184,12 @@ var canonicalKinds = map[string]string{
 // stands for. It is driven by the bundle, so a `make sync-vap` that introduces a
 // policy for a new kind fails here (unknown resource -> add it to canonicalKinds)
 // rather than silently dropping that kind at scan time once the guess is wrong.
+//
+// The test also asserts the round-trip: UnsafeGuessKindToResource applied to the
+// canonical Kind must reproduce the resource name from the bundle. If it does not,
+// objectGVR will mis-map live objects of that kind and the policy will evaluate
+// against nothing. Add that kind to canonicalKinds AND attach a ResourcePluralAnnotation
+// when writing manifests or collecting from the cluster.
 func TestVAPAppliesToCoversEveryBundleKind(t *testing.T) {
 	catalog, err := getVAPCatalog()
 	require.NoError(t, err)
@@ -130,6 +224,15 @@ func TestVAPAppliesToCoversEveryBundleKind(t *testing.T) {
 						require.Truef(t, ok, "policy %q constrains resource %q with no canonical Kind in the test; add it to canonicalKinds and confirm UnsafeGuessKindToResource maps that Kind back to %q", name, res, res)
 						assert.Truef(t, vap.appliesTo(obj(apiVersion, kind)),
 							"policy %q constrains %q but appliesTo rejects a %s %s; UnsafeGuessKindToResource likely mis-guessed the plural", name, res, apiVersion, kind)
+						// Round-trip check: the guess must reproduce the resource name
+						// from the bundle. A mismatch means live objects of this kind
+						// will be silently skipped even if appliesTo evaluates true here
+						// (appliesTo uses the Kind, the live scan uses the real GVR).
+						gv, _ := schema.ParseGroupVersion(apiVersion)
+						guessed, _ := meta.UnsafeGuessKindToResource(gv.WithKind(kind))
+						assert.Equalf(t, res, guessed.Resource,
+							"policy %q: UnsafeGuessKindToResource(%q) = %q, want %q; if the CRD registers a different plural, add ResourcePluralAnnotation to manifests and collector output",
+							name, kind, guessed.Resource, res)
 					}
 				}
 			}
