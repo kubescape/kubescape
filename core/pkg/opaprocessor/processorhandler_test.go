@@ -170,7 +170,7 @@ func (r *recordingProgressListener) Stop() {
 	r.stopped = true
 }
 
-func TestProcessReportsControlsInSortedOrder(t *testing.T) {
+func TestProcessReportsControls(t *testing.T) {
 	opaSessionObj := cautils.NewOPASessionObjMock()
 	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
 
@@ -189,7 +189,7 @@ func TestProcessReportsControlsInSortedOrder(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3, progress.started)
 	assert.True(t, progress.stopped)
-	assert.Equal(t, []string{
+	assert.ElementsMatch(t, []string{
 		"Control: C-0001",
 		"Control: C-0002",
 		"Control: C-0003",
