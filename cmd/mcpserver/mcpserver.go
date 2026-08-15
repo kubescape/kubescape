@@ -22,7 +22,6 @@ import (
 
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
-	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/sync/singleflight"
 )
@@ -993,7 +992,6 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 
 		var rawManifest []byte
 		var workloadObj any
-		k8sClient := ksServer.getK8sClient()
 		k8sClient, k8sErr := ksServer.getK8sClient()
 		if k8sErr != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to connect to Kubernetes cluster: %v", k8sErr)), nil
@@ -1016,7 +1014,6 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		rawManifest, _ = json.Marshal(workloadObj)
 
-		fixes := fixhandler.DetectProfileDrift(rawManifest, profile)
 		containerName := ""
 		if profile.GetLabels() != nil {
 			containerName = profile.GetLabels()["kubescape.io/workload-container-name"]

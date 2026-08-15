@@ -454,7 +454,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			if resourceObj != nil && resourceObj.GetObject() != nil {
 				rawManifest, _ = json.Marshal(resourceObj.GetObject())
 			}
-			fixes := DetectProfileDrift(rawManifest, containerProfile)
+
 			var workloadKind string
 			var containerName string
 
