@@ -280,6 +280,20 @@ func TestCollectAndStreamBatches_CountsNamespacedResourcesAcrossBatches(t *testi
 	assert.Equal(t, map[string]int{"ns-a": 2}, session.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources)
 }
 
+func TestStreamingKubernetesResourceCount_DeduplicatesResidentOverlap(t *testing.T) {
+	resident := cautils.NewResourceBatch(cautils.ClusterScope)
+	resident.AllResources["resident-only"] = nil
+	resident.AllResources["shared"] = nil
+
+	namespaced := cautils.NewResourceBatch("team-a")
+	namespaced.AllResources["namespaced-only"] = nil
+	namespaced.AllResources["shared"] = nil
+
+	assert.Equal(t, 3, streamingKubernetesResourceCount(resident, map[string]*cautils.ResourceBatch{
+		"team-a": namespaced,
+	}))
+}
+
 func TestCollectAndStreamBatches_ReportsAllKubernetesResourcesWhenNodeCountFails(t *testing.T) {
 	previousProvider := otel.GetMeterProvider()
 	reader := sdkmetric.NewManualReader()
