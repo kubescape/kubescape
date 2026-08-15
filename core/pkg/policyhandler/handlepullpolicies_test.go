@@ -39,6 +39,10 @@ func (mock *nonPersistentPolicyGetterMock) ShouldPersistPolicyArtifacts() bool {
 	return false
 }
 
+func (mock *nonPersistentPolicyGetterMock) GetControl(name string) (*reporthandling.Control, error) {
+	return &reporthandling.Control{ControlID: name}, nil
+}
+
 func (mock *ExceptionsGetterMock) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	return CachedExceptions, nil
 }
@@ -355,6 +359,25 @@ func TestDownloadScanPolicies_NonPersistentSourcePreservesSharedFallback(t *test
 	require.NoError(t, err)
 	require.Equal(t, rollingFallback, after,
 		"a source without cache provenance must not replace the shared rolling fallback")
+
+	const controlID = "control-from-non-persistent-source"
+	controlCachePath, err := getter.PolicyCachePath(controlID)
+	require.NoError(t, err)
+	rollingControlFallback := []byte(`{"controlID":"rolling-control"}`)
+	require.NoError(t, os.WriteFile(controlCachePath, rollingControlFallback, 0o600))
+
+	controlIdentifiers := []cautils.PolicyIdentifier{{Identifier: controlID, Kind: "Control"}}
+	controlFrameworks, err := policyHandler.downloadScanPolicies(context.Background(), controlIdentifiers, getters)
+	require.NoError(t, err)
+	require.Len(t, controlFrameworks, 1)
+	require.Len(t, controlFrameworks[0].Controls, 1)
+	require.Equal(t, controlID, controlFrameworks[0].Controls[0].ControlID,
+		"the requested control must still be returned to the current scan")
+
+	controlAfter, err := os.ReadFile(controlCachePath)
+	require.NoError(t, err)
+	require.Equal(t, rollingControlFallback, controlAfter,
+		"a non-persistent control source must not replace the shared rolling fallback")
 }
 
 type ControlsInputsGetterEmptyMock struct{}
