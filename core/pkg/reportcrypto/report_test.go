@@ -268,13 +268,34 @@ func TestDecryptReportRejectsIrreversibleResourceIDPseudonyms(t *testing.T) {
 
 func TestDecryptReportRejectsLeftoverCiphertext(t *testing.T) {
 	fixture := newEncryptedReportFixture(t, true, true)
-	report := decodeTestObject(t, fixture.data)
-	report["futureEncryptedField"] = fixture.encryptedLabel
+	tests := []struct {
+		name  string
+		field string
+		value any
+	}{
+		{
+			name:  "unknown field",
+			field: "futureEncryptedField",
+			value: fixture.encryptedLabel,
+		},
+		{
+			name:  "dotted key cannot forge wrapped DEK path",
+			field: "metadata.encryptionMetadata.encryptedDEK",
+			value: map[string]any{"ciphertext": fixture.encryptedLabel},
+		},
+	}
 
-	_, err := DecryptReport(mustMarshalTestJSON(t, report), []byte(testMasterKey))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "encrypted value remains")
-	assert.Contains(t, err.Error(), "futureEncryptedField")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			report := decodeTestObject(t, fixture.data)
+			report[tt.field] = tt.value
+
+			_, err := DecryptReport(mustMarshalTestJSON(t, report), []byte(testMasterKey))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "encrypted value remains")
+			assert.Contains(t, err.Error(), tt.field)
+		})
+	}
 }
 
 func TestDecryptReportAllowsWrappedDEKToRemain(t *testing.T) {

@@ -676,7 +676,7 @@ func (d *reportDecryptor) validateNoEncryptedValues() error {
 	if err := json.Unmarshal(data, &report); err != nil {
 		return fmt.Errorf("failed to validate decrypted report: %w", err)
 	}
-	if path, found := findEncryptedValue(report, "report"); found {
+	if path, found := findEncryptedValue(report, nil); found {
 		return fmt.Errorf("encrypted value remains at %s", path)
 	}
 	return nil
@@ -684,32 +684,64 @@ func (d *reportDecryptor) validateNoEncryptedValues() error {
 
 // findEncryptedValue recursively returns the path of the first ciphertext
 // envelope while exempting the wrapped DEK required by report metadata.
-func findEncryptedValue(value any, path string) (string, bool) {
-	if path == "report.metadata.encryptionMetadata.encryptedDEK" {
+func findEncryptedValue(value any, path []any) (string, bool) {
+	if isWrappedDEKPath(path) {
 		return "", false
 	}
 
 	switch current := value.(type) {
 	case map[string]any:
 		for key, child := range current {
-			if encryptedPath, found := findEncryptedValue(child, path+"."+key); found {
+			childPath := append(append([]any(nil), path...), key)
+			if encryptedPath, found := findEncryptedValue(child, childPath); found {
 				return encryptedPath, true
 			}
 		}
 	case []any:
 		for i, child := range current {
-			childPath := fmt.Sprintf("%s[%d]", path, i)
+			childPath := append(append([]any(nil), path...), i)
 			if encryptedPath, found := findEncryptedValue(child, childPath); found {
 				return encryptedPath, true
 			}
 		}
 	case string:
 		if strings.Contains(current, prefix) {
-			return path, true
+			return formatReportPath(path), true
 		}
 	}
 
 	return "", false
+}
+
+// isWrappedDEKPath matches the one allowed ciphertext location by structural
+// JSON segments so dotted object keys cannot forge the exemption.
+func isWrappedDEKPath(path []any) bool {
+	if len(path) != 3 {
+		return false
+	}
+	metadata, metadataOK := path[0].(string)
+	encryptionMetadata, encryptionMetadataOK := path[1].(string)
+	encryptedDEK, encryptedDEKOK := path[2].(string)
+	return metadataOK && encryptionMetadataOK && encryptedDEKOK &&
+		metadata == "metadata" &&
+		encryptionMetadata == "encryptionMetadata" &&
+		encryptedDEK == "encryptedDEK"
+}
+
+// formatReportPath renders structural path segments without treating dots in
+// JSON keys as nesting separators.
+func formatReportPath(path []any) string {
+	var formatted strings.Builder
+	formatted.WriteString("report")
+	for _, segment := range path {
+		switch segment := segment.(type) {
+		case string:
+			fmt.Fprintf(&formatted, "[%q]", segment)
+		case int:
+			fmt.Fprintf(&formatted, "[%d]", segment)
+		}
+	}
+	return formatted.String()
 }
 
 // optionalString decodes a nullable optional string field with path context.
