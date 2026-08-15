@@ -421,3 +421,33 @@ func extractCVEs(matches match.Matches, image string) []imageprinter.CVE {
 	}
 	return CVEs
 }
+
+// buildImageScanSummary aggregates per-image scan data into the summary every
+// output format consumes. The image list is deduplicated with a set so this is
+// O(N) in the number of images; the printer-local copies this replaces used
+// slices.Contains and were O(N^2) on large image sets.
+func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.ImageScanSummary {
+	imageScanSummary := &imageprinter.ImageScanSummary{
+		CVEs:                  []imageprinter.CVE{},
+		PackageScores:         map[string]*imageprinter.PackageScore{},
+		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
+	}
+
+	seenImages := make(map[string]struct{}, len(imageScanData))
+	for i := range imageScanData {
+		image := imageScanData[i].Image
+		if _, seen := seenImages[image]; !seen {
+			seenImages[image] = struct{}{}
+			imageScanSummary.Images = append(imageScanSummary.Images, image)
+		}
+
+		cves := extractCVEs(imageScanData[i].Matches, image)
+		imageScanSummary.CVEs = append(imageScanSummary.CVEs, cves...)
+
+		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
+
+		setSeverityToSummaryMap(cves, imageScanSummary.MapsSeverityToSummary)
+	}
+
+	return imageScanSummary
+}
