@@ -527,8 +527,9 @@ func TestGitLabSASTPrintConfigurationScan_SolutionFieldPopulated(t *testing.T) {
 }
 
 // TestGitLabSASTPrintConfigurationScan_NilResourceDoesNotPanic verifies that a resourceID
-// present in ResourcesResult but absent from AllResources degrades gracefully (empty solution)
-// rather than panicking via a nil interface dereference in enrichedPathsForField
+// present in ResourcesResult but absent from AllResources degrades gracefully.
+// The vulnerability must still be emitted and the solution key must be absent
+// from the serialized JSON entirely (omitempty), not just an empty string.
 func TestGitLabSASTPrintConfigurationScan_NilResourceDoesNotPanic(t *testing.T) {
 	const controlID = "C-0057"
 	session := gitLabSessionFixture(t, controlID, 8.0)
@@ -538,8 +539,27 @@ func TestGitLabSASTPrintConfigurationScan_NilResourceDoesNotPanic(t *testing.T) 
 		delete(session.AllResources, k)
 	}
 
-	// must not panic — solution should be empty, vulnerability still emitted
-	report := gitLabReportFor(t, session)
+	tmp, err := os.CreateTemp("", "gitlab-sast-nil-*.json")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	})
+
+	gp := NewGitLabSASTPrinter()
+	gp.writer = tmp
+	require.NotPanics(t, func() {
+		_ = gp.printConfigurationScan(context.Background(), session)
+	})
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var report gitLabSASTReport
+	require.NoError(t, json.Unmarshal(raw, &report))
 	require.Len(t, report.Vulnerabilities, 1)
-	assert.Empty(t, report.Vulnerabilities[0].Solution, "Solution must be empty when resource is absent from AllResources")
+
+	// solution key must be absent from JSON entirely when resource is missing
+	assert.NotContains(t, string(raw), `"solution"`,
+		"solution key must be omitted from JSON when resource is absent from AllResources")
 }
