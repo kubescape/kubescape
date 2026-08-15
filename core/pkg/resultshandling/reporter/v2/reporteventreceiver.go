@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/armosec/armoapi-go/apis"
@@ -154,7 +155,15 @@ func (report *ReportEventReceiver) sendResources(ctx context.Context, opaSession
 }
 
 func (report *ReportEventReceiver) setResults(ctx context.Context, reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, prioritizedResources map[string]prioritization.PrioritizedResource, counter, reportCounter *int) error {
-	for _, v := range results {
+	// Chunk boundaries depend on iteration order, so keep the input order stable.
+	resourceIDs := make([]string, 0, len(results))
+	for resourceID := range results {
+		resourceIDs = append(resourceIDs, resourceID)
+	}
+	sort.Strings(resourceIDs)
+
+	for _, resultID := range resourceIDs {
+		v := results[resultID]
 		// set result.RawResource
 		resourceID := v.GetResourceID()
 		if _, ok := allResources[resourceID]; !ok {
@@ -207,7 +216,15 @@ func (report *ReportEventReceiver) setResults(ctx context.Context, reportObj *re
 }
 
 func (report *ReportEventReceiver) setResources(ctx context.Context, reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, results map[string]resourcesresults.Result, counter, reportCounter *int) error {
-	for resourceID, v := range allResources {
+	// Chunk boundaries depend on iteration order, so keep the input order stable.
+	resourceIDs := make([]string, 0, len(allResources))
+	for resourceID := range allResources {
+		resourceIDs = append(resourceIDs, resourceID)
+	}
+	sort.Strings(resourceIDs)
+
+	for _, resourceID := range resourceIDs {
+		v := allResources[resourceID]
 		/*
 
 			// process only resources which have no result because these resources will be sent on the result object
