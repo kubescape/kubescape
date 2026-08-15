@@ -17,7 +17,7 @@ import (
 // transformSession applies the supplied Transformer to sensitive resource
 // identifiers and metadata while preserving referential integrity across
 // the full OPA session.
-func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transformer Transformer) error {
+func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Transformer) error {
 	if session == nil {
 		return nil
 	}
@@ -65,7 +65,10 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 
 	newResourcesResult := make(map[string]resourcesresults.Result, len(session.ResourcesResult))
 	for oldID, result := range session.ResourcesResult {
-		newID := resolveMappedID(mapping, idMapping, oldID, "ref")
+		newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
+		if err != nil {
+			return err
+		}
 		result.ResourceID = newID
 
 		if result.PrioritizedResource != nil {
@@ -77,21 +80,29 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 				rule := &result.AssociatedControls[controlIndex].ResourceAssociatedRules[ruleIndex]
 
 				for pathIndex := range rule.Paths {
-					rule.Paths[pathIndex].ResourceID = resolveMappedID(
-						mapping,
+					mappedID, err := resolveMappedID(
+						transformer,
 						idMapping,
 						rule.Paths[pathIndex].ResourceID,
 						"ref",
 					)
+					if err != nil {
+						return err
+					}
+					rule.Paths[pathIndex].ResourceID = mappedID
 				}
 
 				for relatedIndex := range rule.RelatedResourcesIDs {
-					rule.RelatedResourcesIDs[relatedIndex] = resolveMappedID(
-						mapping,
+					mappedID, err := resolveMappedID(
+						transformer,
 						idMapping,
 						rule.RelatedResourcesIDs[relatedIndex],
 						"ref",
 					)
+					if err != nil {
+						return err
+					}
+					rule.RelatedResourcesIDs[relatedIndex] = mappedID
 				}
 			}
 		}
@@ -103,7 +114,10 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 	newResourceSource := make(map[string]reporthandling.Source, len(session.ResourceSource))
 
 	for oldID, source := range session.ResourceSource {
-		newID := resolveMappedID(mapping, idMapping, oldID, "ref")
+		newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
+		if err != nil {
+			return err
+		}
 
 		if err := transformResourceSource(
 			&source,
@@ -118,7 +132,10 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 
 	newResourcesPrioritized := make(map[string]prioritization.PrioritizedResource, len(session.ResourcesPrioritized))
 	for oldID, prioritized := range session.ResourcesPrioritized {
-		newID := resolveMappedID(mapping, idMapping, oldID, "ref")
+		newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
+		if err != nil {
+			return err
+		}
 		prioritized.ResourceID = newID
 		newResourcesPrioritized[newID] = prioritized
 	}
@@ -126,7 +143,10 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 
 	newResourceAttackTracks := make(map[string]v1alpha1.IAttackTrack, len(session.ResourceAttackTracks))
 	for oldID, attackTrack := range session.ResourceAttackTracks {
-		newID := resolveMappedID(mapping, idMapping, oldID, "ref")
+		newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
+		if err != nil {
+			return err
+		}
 		newResourceAttackTracks[newID] = attackTrack
 	}
 	session.ResourceAttackTracks = newResourceAttackTracks
@@ -156,12 +176,15 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 			remappedResourceIDs.Clear()
 
 			for oldID, status := range originalResourceIDs {
-				newID := resolveMappedID(
-					mapping,
+				newID, err := resolveMappedID(
+					transformer,
 					idMapping,
 					oldID,
 					"ref",
 				)
+				if err != nil {
+					return err
+				}
 
 				remappedResourceIDs.Append(
 					status,
@@ -178,15 +201,24 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 
 // resolveMappedID preserves referential integrity when IDs are rewritten during
 // anonymization, ensuring cross-references remain valid.
-func resolveMappedID(mapping *Mapping, idMapping map[string]string, originalID, prefix string) string {
+func resolveMappedID(transformer Transformer, idMapping map[string]string, originalID, prefix string) (string, error) {
 
 	// Exact match (most common case)
 	if mappedID, ok := idMapping[originalID]; ok {
-		return mappedID
+		return mappedID, nil
 	}
 
-	// Fallback for IDs that are not backed by a resource object.
-	return mapping.GetOrCreate(prefix, originalID)
+	// IDs that are not backed by a resource object still need the active
+	// transformation. In encrypted reports this keeps the fallback reversible;
+	// in hidden reports the mapping transformer retains deterministic aliases.
+	// Cache the fallback so every reference to the same missing resource uses
+	// one value even when the transformer uses randomized encryption.
+	mappedID, err := transformer.Transform(prefix, originalID)
+	if err != nil {
+		return "", err
+	}
+	idMapping[originalID] = mappedID
+	return mappedID, nil
 }
 
 // transformResourceLabels applies the supplied Transformer to labels

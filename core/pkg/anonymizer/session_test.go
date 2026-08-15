@@ -76,19 +76,48 @@ func TestResolveMappedID(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			mapping := NewMapping()
-			result := resolveMappedID(mapping, test.idMapping, test.original, "ref")
+			result, err := resolveMappedID(NewMappingTransformer(), test.idMapping, test.original, "ref")
+			require.NoError(t, err)
 			test.validate(t, result)
 		})
 	}
 }
 
-func TestTransformSession_NilSession(t *testing.T) {
-	mapping := NewMapping()
+func TestResolveMappedIDEncryptionFallbackIsReversible(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
 
+	original := "apps/v1/production/Deployment/payments-api"
+	idMapping := map[string]string{}
+	transformed, err := resolveMappedID(
+		NewEncryptionTransformer(dek),
+		idMapping,
+		original,
+		"ref",
+	)
+	require.NoError(t, err)
+	assert.Contains(t, transformed, "ENC[AES256_GCM,")
+	assert.NotContains(t, transformed, "ref-")
+
+	restored, err := reportcrypto.DecryptString(transformed, dek)
+	require.NoError(t, err)
+	assert.Equal(t, original, restored)
+
+	repeated, err := resolveMappedID(NewEncryptionTransformer(dek), idMapping, original, "ref")
+	require.NoError(t, err)
+	assert.Equal(t, transformed, repeated)
+}
+
+func TestResolveMappedIDReturnsFallbackTransformationError(t *testing.T) {
+	_, err := resolveMappedID(&failingTransformer{}, map[string]string{}, "unknown-id", "ref")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "transform failed")
+}
+
+func TestTransformSession_NilSession(t *testing.T) {
 	require.NoError(
 		t,
-		transformSession(nil, mapping, NewMappingTransformer()),
+		transformSession(nil, NewMapping(), NewMappingTransformer()),
 	)
 }
 
@@ -112,9 +141,7 @@ func TestTransformSession_NamesAndNamespacesReplaced(t *testing.T) {
 		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
 	}
 
-	mapping := NewMapping()
-
-	err := transformSession(session, mapping, NewMappingTransformer())
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
 	require.NoError(t, err)
 
 	for _, resource := range session.AllResources {
@@ -258,8 +285,7 @@ func TestTransformSession_IDConsistencyAcrossMaps(t *testing.T) {
 		},
 	}
 
-	mapping := NewMapping()
-	err := transformSession(session, mapping, NewMappingTransformer())
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
 	require.NoError(t, err)
 
 	var newID string
@@ -433,8 +459,7 @@ func TestTransformSession_LabelHandling(t *testing.T) {
 				LabelsToCopy:         test.labelsToCopy,
 			}
 
-			mapping := NewMapping()
-			err := transformSession(session, mapping, NewMappingTransformer())
+			err := transformSession(session, NewMapping(), NewMappingTransformer())
 			require.NoError(t, err)
 
 			for _, resource := range session.AllResources {
@@ -617,10 +642,8 @@ func TestTransformSession_Annotations(t *testing.T) {
 				ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
 			}
 
-			mapping := NewMapping()
-
 			assert.NotPanics(t, func() {
-				err := transformSession(session, mapping, NewMappingTransformer())
+				err := transformSession(session, NewMapping(), NewMappingTransformer())
 				require.NoError(t, err)
 			})
 
@@ -688,8 +711,7 @@ func TestTransformSession_RepoContextMetadata(t *testing.T) {
 		},
 	}
 
-	mapping := NewMapping()
-	err := transformSession(session, mapping, NewMappingTransformer())
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
 	require.NoError(t, err)
 
 	for _, repo := range []*reporthandlingv2.RepoContextMetadata{

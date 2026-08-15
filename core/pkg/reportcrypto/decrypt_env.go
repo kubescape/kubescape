@@ -27,10 +27,7 @@ func DecryptMetadataFromEnv(
 		return nil, err
 	}
 
-	if err := DecryptRepoContextMetadata(
-		metadata,
-		masterKey,
-	); err != nil {
+	if err := decryptRepoContextMetadata(metadata, dek); err != nil {
 		for i := range dek {
 			dek[i] = 0
 		}
