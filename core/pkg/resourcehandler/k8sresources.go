@@ -158,15 +158,17 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		if sessionObj.Metadata.ScanMetadata.HostScanner {
 			logger.L().Info("Requesting Host scanner data")
 			cautils.StartSpinner()
-			infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
-				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
-			} else if k8sHandler.hostSensorHandler == nil {
+			if k8sHandler.hostSensorHandler == nil {
 				// using hostSensor mock
 				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
 			} else {
-				maps.Copy(sessionObj.InfoMap, infoMap)
+				infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
+					cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
+				} else {
+					maps.Copy(sessionObj.InfoMap, infoMap)
+				}
 			}
 			cautils.StopSpinner()
 			logger.L().Success("Requested Host scanner data")
@@ -192,16 +194,30 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	}
 
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
-		policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
-		} else {
-			sessionObj.VAPPolicies = policies
-			sessionObj.VAPBindings = bindings
-		}
+		k8sHandler.collectVAPResources(ctx, sessionObj)
 	}
 
 	return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, nil
+}
+
+// collectVAPResources records the cluster's admission enforcement state on the
+// session. Clusters that do not serve the VAP API are skipped without a warning,
+// since having no policies to reconcile is not a scan failure.
+func (k8sHandler *K8sResourceHandler) collectVAPResources(ctx context.Context, sessionObj *cautils.OPASessionObj) {
+	if k8sHandler.k8s == nil {
+		return
+	}
+
+	policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
+	switch {
+	case errors.Is(err, vapreconcile.ErrUnsupported):
+		logger.L().Debug("skipping VAP reconciliation, cluster does not serve the API")
+	case err != nil:
+		logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
+	default:
+		sessionObj.VAPPolicies = policies
+		sessionObj.VAPBindings = bindings
+	}
 }
 
 func (k8sHandler *K8sResourceHandler) GetCloudProvider() string {
@@ -395,18 +411,18 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	if len(hostResources) > 0 {
 		if sessionObj.Metadata.ScanMetadata.HostScanner {
 			logger.L().Info("Requesting Host scanner data")
-			infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
-				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
-			} else if k8sHandler.hostSensorHandler == nil {
-				// using hostSensor mock
+			if k8sHandler.hostSensorHandler == nil {
 				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
 			} else {
-				for k, v := range infoMap {
-					sessionObj.InfoMap[k] = v
+				infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
+					cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
+				} else {
+					maps.Copy(sessionObj.InfoMap, infoMap)
 				}
 			}
+			logger.L().Success("Requested Host scanner data")
 		} else {
 			cautils.SetInfoMapForResources("This control is scanned exclusively by the Kubescape operator, not the Kubescape CLI. Install the Kubescape operator:\n     https://kubescape.io/docs/install-operator/.", hostResources, sessionObj.InfoMap)
 		}
@@ -420,14 +436,19 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 
 	// allResources is resident.AllResources, which only ever holds
 	// cluster-scoped resources (see the partition loop above); namespaced
-	// resources live in namespaceBatches. Aggregate both before counting, and
-	// do it here, before namespaceBatches are drained into batchChan below.
-	countable := make(map[string]workloadinterface.IMetadata, len(allResources))
-	maps.Copy(countable, allResources)
+	// resources live in namespaceBatches. Count across both before the batches
+	// are drained below, without building a second whole-cluster map just for
+	// this report metadata. Count namespace batches first, then skip a resident
+	// entry when the same ID is already present in its namespace batch. This
+	// preserves the old merged-map deduplication for resources injected into the
+	// resident batch (for example SingleResourceScan and RBAC resources) without
+	// allocating a whole-cluster seen-ID set.
+	mapNamespaceToNumberOfResources := make(map[string]int)
 	for _, batch := range namespaceBatches {
-		maps.Copy(countable, batch.AllResources)
+		addNamespaceResourceCounts(ctx, batch.AllResources, mapNamespaceToNumberOfResources, nil)
 	}
-	setMapNamespaceToNumOfResources(ctx, countable, sessionObj)
+	addNamespaceResourceCounts(ctx, allResources, mapNamespaceToNumberOfResources, namespaceBatches)
+	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 	if len(cloudResources) > 0 {
 		if err := k8sHandler.collectCloudResources(ctx, sessionObj, allResources, ksResourceMap, cloudResources); err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
@@ -435,13 +456,7 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	}
 
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
-		policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
-		} else {
-			sessionObj.VAPPolicies = policies
-			sessionObj.VAPBindings = bindings
-		}
+		k8sHandler.collectVAPResources(ctx, sessionObj)
 	}
 
 	for groupResource, ids := range ksResourceMap {
@@ -461,13 +476,15 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	// resident batch into the processor (sessionObj) after receiving it, so the
 	// maps still land on the session by the time downstream stages run.
 
-	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
-	if err != nil {
-		logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
-	} else {
-		sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
-		metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
-		metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
+	if k8sHandler.k8s != nil {
+		numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
+		if err != nil {
+			logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
+		} else {
+			sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
+			metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
+			metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
+		}
 	}
 
 	// Stream resident batch first.
@@ -529,6 +546,21 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 		return nil, fmt.Errorf("resource not found in Kubernetes discovery: %s", getReadableID(resource))
 	}
 	apiGroup, apiVersion, resourceName := k8sinterface.StringToResourceGroup(resolved[0].groupVersionResourceTriplet)
+	if apiGroup == "" && resourceName == "secrets" {
+		// Defense in depth: a Secret is not a useful single-resource scan
+		// target, so reject it here instead of fetching it and discarding it
+		// later. Rejecting before pullSingleResource avoids an unnecessary
+		// Kubernetes API call (and the RBAC it requires) and guarantees Secret
+		// objects are never retrieved from the cluster in single-resource scan
+		// mode, rather than relying solely on downstream sanitization
+		// (removeData()/removeSecretData(), which redacts "data" and
+		// "stringData" to "XXXXXX").
+		//
+		// The GVR is resolved from cluster discovery, not from the
+		// client-supplied kind string, so this check cannot be sidestepped with
+		// casing or aliasing tricks.
+		return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s", getReadableID(resource))
+	}
 	gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resourceName}
 
 	fieldSelectors := getNameFieldSelectorString(resource.GetName(), FieldSelectorsEqualsOperator)
@@ -653,9 +685,26 @@ func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo(ctx context.Contex
 
 // set  namespaceToNumOfResources map in report
 func setMapNamespaceToNumOfResources(ctx context.Context, allResources map[string]workloadinterface.IMetadata, sessionObj *cautils.OPASessionObj) {
-
 	mapNamespaceToNumberOfResources := make(map[string]int)
-	for _, resource := range allResources {
+	addNamespaceResourceCounts(ctx, allResources, mapNamespaceToNumberOfResources, nil)
+	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
+}
+
+// addNamespaceResourceCounts accumulates reportable top-level resources into
+// an existing namespace-count map. Keeping accumulation separate lets the
+// streaming collector count resident and namespace batches in place instead
+// of copying every resource into a temporary whole-cluster map. When
+// alreadyCounted is non-nil, a resource already present in its namespace batch
+// is skipped; callers with one already-unique map can pass nil.
+func addNamespaceResourceCounts(ctx context.Context, allResources map[string]workloadinterface.IMetadata, mapNamespaceToNumberOfResources map[string]int, alreadyCounted map[string]*cautils.ResourceBatch) {
+	for resourceID, resource := range allResources {
+		if alreadyCounted != nil {
+			if batch := alreadyCounted[resource.GetNamespace()]; batch != nil {
+				if _, counted := batch.AllResources[resourceID]; counted {
+					continue
+				}
+			}
+		}
 		if obj := workloadinterface.NewWorkloadObj(resource.GetObject()); obj != nil {
 			ownerReferences, err := obj.GetOwnerReferences()
 			if err == nil {
@@ -672,7 +721,6 @@ func setMapNamespaceToNumOfResources(ctx context.Context, allResources map[strin
 			}
 		}
 	}
-	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 }
 
 // queryFailure records a failed pull at query granularity (GVR + field selectors).
@@ -1032,8 +1080,8 @@ var namespacedResourcesToEstimate = []schema.GroupVersionResource{
 }
 
 // EstimateClusterSize estimates the number of namespaced resources in the
-// cluster by issuing metadata-only LIST requests (limit=1) to the API server
-// and summing the remainingItemCount from each response. A per-GVR failure
+// cluster by issuing LIST requests (limit=1) to the API server and summing the
+// returned items and remainingItemCount from each response. A per-GVR failure
 // (type unavailable, or the service account lacking read access) is tolerated,
 // but if no representative type can be listed at all the estimate is useless —
 // returning (0, nil) would be indistinguishable from a genuinely small cluster

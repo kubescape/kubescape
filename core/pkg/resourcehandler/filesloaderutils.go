@@ -15,7 +15,7 @@ import (
 // providerRank ranks discovery providers so rendered output wins over raw file input.
 func providerRank(fileType string) int {
 	switch fileType {
-	case reporthandling.SourceTypeKustomizeDirectory, reporthandling.SourceTypeHelmChart:
+	case reporthandling.SourceTypeKustomizeDirectory, reporthandling.SourceTypeHelmChart, "Terraform":
 		return 2
 	case reporthandling.SourceTypeYaml, reporthandling.SourceTypeJson:
 		return 1

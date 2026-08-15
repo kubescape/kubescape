@@ -3,15 +3,12 @@ package imagescan
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
-
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 )
 
 // HarborAPI defines the interface for Harbor HTTP interactions to enable mocking
@@ -28,8 +25,8 @@ type harborAPIWrapper struct {
 }
 
 func (w *harborAPIWrapper) DoRequest(ctx context.Context, method, path string) ([]byte, error) {
-	url := fmt.Sprintf("%s%s", w.baseURL, path)
-	req, err := http.NewRequestWithContext(ctx, method, url, nil)
+	reqUrl := fmt.Sprintf("%s%s", w.baseURL, path)
+	req, err := http.NewRequestWithContext(ctx, method, reqUrl, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -125,10 +122,7 @@ func (a *HarborAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 		return nil, fmt.Errorf("harbor client not initialized, call login first")
 	}
 
-	var statuses []ContainerImageScanStatus
-	var aggErr error
-
-	for _, imageID := range imageIDs {
+	return ProcessImages(imageIDs, func(imageID ContainerImageIdentifier) (ContainerImageScanStatus, error) {
 		status := ContainerImageScanStatus{
 			ImageID:         imageID,
 			IsScanAvailable: false,
@@ -140,30 +134,22 @@ func (a *HarborAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 			ref = imageID.Tag
 		}
 		if ref == "" {
-			statuses = append(statuses, status)
-			continue
+			return status, nil
 		}
 
 		project, repo, err := extractProjectAndRepo(imageID.Repository)
 		if err != nil {
-			fetchErr := fmt.Errorf("failed to extract project from repository %s: %w", imageID.Repository, err)
-			logger.L().Warning("skipping image scan status due to format error", helpers.Error(fetchErr))
-			aggErr = errors.Join(aggErr, fetchErr)
-			statuses = append(statuses, status)
-			continue
+			return status, fmt.Errorf("failed to extract project from repository %s: %w", imageID.Repository, err)
 		}
 
-		// URL encode the repository name to handle nested repositories (e.g., myrepo/backend -> myrepo%2Fbackend)
-		encodedRepo := strings.ReplaceAll(repo, "/", "%2F")
-		path := fmt.Sprintf("/api/v2.0/projects/%s/repositories/%s/artifacts/%s?with_scan_overview=true", project, encodedRepo, ref)
+		path := fmt.Sprintf("/api/v2.0/projects/%s/repositories/%s/artifacts/%s?with_scan_overview=true",
+			url.PathEscape(project),
+			url.PathEscape(repo),
+			url.PathEscape(ref))
 
 		data, err := a.client.DoRequest(ctx, http.MethodGet, path)
 		if err != nil {
-			fetchErr := fmt.Errorf("failed to query scan status for repository %s: %w", repo, err)
-			logger.L().Warning("skipping image scan status due to api error", helpers.Error(fetchErr))
-			aggErr = errors.Join(aggErr, fetchErr)
-			statuses = append(statuses, status)
-			continue
+			return status, fmt.Errorf("failed to query scan status for repository %s: %w", repo, err)
 		}
 
 		var artifact struct {
@@ -174,11 +160,7 @@ func (a *HarborAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 		}
 
 		if err := json.Unmarshal(data, &artifact); err != nil {
-			fetchErr := fmt.Errorf("failed to parse scan status payload for repository %s: %w", repo, err)
-			logger.L().Warning("skipping image scan status due to payload error", helpers.Error(fetchErr))
-			aggErr = errors.Join(aggErr, fetchErr)
-			statuses = append(statuses, status)
-			continue
+			return status, fmt.Errorf("failed to parse scan status payload for repository %s: %w", repo, err)
 		}
 
 		if artifact.ScanOverview != nil {
@@ -193,28 +175,8 @@ func (a *HarborAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 			}
 		}
 
-		statuses = append(statuses, status)
-	}
-
-	return statuses, aggErr
-}
-
-// normalizeHarborSeverity maps Harbor severity to Kubescape severity strings
-func normalizeHarborSeverity(severity string) string {
-	switch strings.ToLower(severity) {
-	case "critical":
-		return "Critical"
-	case "high":
-		return "High"
-	case "medium":
-		return "Medium"
-	case "low":
-		return "Low"
-	case "negligible", "none":
-		return "Negligible"
-	default:
-		return "Unknown"
-	}
+		return status, nil
+	})
 }
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
@@ -223,10 +185,7 @@ func (a *HarborAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 		return nil, fmt.Errorf("harbor client not initialized, call login first")
 	}
 
-	var reports []ContainerImageVulnerabilityReport
-	var aggErr error
-
-	for _, imageID := range imageIDs {
+	return ProcessImages(imageIDs, func(imageID ContainerImageIdentifier) (ContainerImageVulnerabilityReport, error) {
 		report := ContainerImageVulnerabilityReport{
 			ImageID:         imageID,
 			Vulnerabilities: []Vulnerability{},
@@ -237,29 +196,22 @@ func (a *HarborAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			ref = imageID.Tag
 		}
 		if ref == "" {
-			reports = append(reports, report)
-			continue
+			return report, nil
 		}
 
 		project, repo, err := extractProjectAndRepo(imageID.Repository)
 		if err != nil {
-			fetchErr := fmt.Errorf("failed to extract project from repository %s: %w", imageID.Repository, err)
-			logger.L().Warning("skipping image vulnerabilities due to format error", helpers.Error(fetchErr))
-			aggErr = errors.Join(aggErr, fetchErr)
-			reports = append(reports, report)
-			continue
+			return report, fmt.Errorf("failed to extract project from repository %s: %w", imageID.Repository, err)
 		}
 
-		encodedRepo := strings.ReplaceAll(repo, "/", "%2F")
-		path := fmt.Sprintf("/api/v2.0/projects/%s/repositories/%s/artifacts/%s/additions/vulnerabilities", project, encodedRepo, ref)
+		path := fmt.Sprintf("/api/v2.0/projects/%s/repositories/%s/artifacts/%s/additions/vulnerabilities",
+			url.PathEscape(project),
+			url.PathEscape(repo),
+			url.PathEscape(ref))
 
 		data, err := a.client.DoRequest(ctx, http.MethodGet, path)
 		if err != nil {
-			fetchErr := fmt.Errorf("failed to query vulnerabilities for repository %s: %w", repo, err)
-			logger.L().Warning("skipping image vulnerabilities due to api error", helpers.Error(fetchErr))
-			aggErr = errors.Join(aggErr, fetchErr)
-			reports = append(reports, report)
-			continue
+			return report, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", repo, err)
 		}
 
 		var harborVulnPayload map[string]struct {
@@ -272,18 +224,14 @@ func (a *HarborAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 		}
 
 		if err := json.Unmarshal(data, &harborVulnPayload); err != nil {
-			fetchErr := fmt.Errorf("failed to parse vulnerability payload for repository %s: %w", repo, err)
-			logger.L().Warning("failed to parse vulnerability payload", helpers.Error(fetchErr))
-			aggErr = errors.Join(aggErr, fetchErr)
-			reports = append(reports, report)
-			continue
+			return report, fmt.Errorf("failed to parse vulnerability payload for repository %s: %w", repo, err)
 		}
 
 		for _, mimeTypeData := range harborVulnPayload {
 			for _, v := range mimeTypeData.Vulnerabilities {
 				vuln := Vulnerability{
 					ID:          v.ID,
-					Severity:    normalizeHarborSeverity(v.Severity),
+					Severity:    NormalizeSeverity(v.Severity),
 					Description: v.Description,
 					Links:       v.Links,
 				}
@@ -291,10 +239,8 @@ func (a *HarborAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			}
 		}
 
-		reports = append(reports, report)
-	}
-
-	return reports, aggErr
+		return report, nil
+	})
 }
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
@@ -303,17 +249,7 @@ func (a *HarborAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Con
 		return nil, fmt.Errorf("harbor client not initialized, call login first")
 	}
 
-	var infos []ContainerImageInformation
-
-	for _, imageID := range imageIDs {
-		info := ContainerImageInformation{
-			ImageID: imageID,
-			Bom:     []string{},
-		}
-		infos = append(infos, info)
-	}
-
-	return infos, nil
+	return FetchImagesInformation(imageIDs)
 }
 
 // Destroy cleans up any persistent resources used by the adaptor.

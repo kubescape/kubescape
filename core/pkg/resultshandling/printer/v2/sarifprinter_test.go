@@ -3,6 +3,7 @@ package printer
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -912,4 +913,55 @@ spec:
 		"SARIF must resolve the privileged field to line %d, got startLines=%v", privilegedLine, startLines)
 	assert.NotEqual(t, []int{1}, startLines,
 		"all findings must not collapse to line 1 for absolute-path file scans")
+}
+
+// TestPrintImageScan_WriterIsNonSeekablePipe is a regression test for image
+// SARIF output hanging when the destination is a pipe (e.g. stdout in a Unix
+// pipeline). printImageScan used to render the report to sp.writer, then
+// reopen sp.writer.Name() to patch the driver name and write it back. For a
+// pipe there is nothing meaningful to reopen by name, so the fix renders and
+// patches the report in memory and writes it to sp.writer exactly once. This
+// test uses a real os.Pipe() as the writer, with a concurrent reader (playing
+// the role of a downstream consumer like `tee` or `jq`), and asserts
+// ActionPrint returns promptly with a correctly patched report.
+func TestPrintImageScan_WriterIsNonSeekablePipe(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+
+	sp := NewSARIFPrinter()
+	sp.writer = w
+
+	imageScanData := buildSeverityExceptionImageScanData()
+
+	printDone := make(chan error, 1)
+	go func() {
+		printDone <- sp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{imageScanData})
+	}()
+
+	readDone := make(chan []byte, 1)
+	go func() {
+		data, _ := io.ReadAll(r)
+		readDone <- data
+	}()
+
+	select {
+	case err := <-printDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("ActionPrint did not return within 5s: image SARIF output is hanging on a pipe writer")
+	}
+
+	require.NoError(t, w.Close())
+
+	var raw []byte
+	select {
+	case raw = <-readDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out reading the piped SARIF output")
+	}
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 1)
+	assert.Equal(t, "Kubescape", report.Runs[0].Tool.Driver.Name, "driver name must still be patched when writing to a pipe")
 }

@@ -292,7 +292,7 @@ func transformResourceObjectSourcePath(resource workloadinterface.IMetadata, tra
 // src-xxxx:12).
 func transformSourcePath(sourcePath string, transformer Transformer) (string, error) {
 
-	lastColon := strings.LastIndex(sourcePath, ":")
+	lastColon := lastSourcePathColon(sourcePath)
 	if lastColon == -1 {
 		return transformValue(transformer, "src", sourcePath)
 	}
@@ -310,6 +310,30 @@ func transformSourcePath(sourcePath string, transformer Transformer) (string, er
 	}
 
 	return transformedPath + linePart, nil
+}
+
+// lastSourcePathColon returns the index of the colon separating a
+// sourcePath's file path from its trailing document-index suffix (for
+// example the ":12" in "src-xxxx:12"), or -1 if there is none. A leading
+// Windows drive letter (for example "C:\...") is skipped so it is never
+// mistaken for that separator, which would otherwise leave everything past
+// the drive letter untransformed.
+func lastSourcePathColon(sourcePath string) int {
+	searchFrom := 0
+	if len(sourcePath) >= 2 && sourcePath[1] == ':' && isASCIILetter(sourcePath[0]) {
+		searchFrom = 2
+	}
+
+	idx := strings.LastIndex(sourcePath[searchFrom:], ":")
+	if idx == -1 {
+		return -1
+	}
+
+	return idx + searchFrom
+}
+
+func isASCIILetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 // transformAnnotationNodes recursively traverses unstructured resource

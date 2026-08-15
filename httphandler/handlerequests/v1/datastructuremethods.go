@@ -21,12 +21,13 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) (*cautils.ScanInfo, []
 
 	policyIdentifiers := setTargetInScanInfo(scanRequest, scanInfo)
 
-	if scanRequest.Account != "" {
-		scanInfo.AccountID = scanRequest.Account
-	}
-	if scanRequest.AccessKey != "" {
-		scanInfo.AccessKey = scanRequest.AccessKey
-	}
+	// scanRequest.Account/AccessKey are intentionally ignored: this endpoint has
+	// no authentication, so honoring client-supplied values would let any caller
+	// redirect scan results (which can include cluster secrets/RBAC data, see
+	// Submit below) to an attacker-controlled Kubescape Cloud account. The
+	// account/access key are only ever taken from this server's own trusted
+	// config, set in defaultScanInfo from KS_ACCOUNT_ID/KS_ACCESS_KEY or the
+	// credentials fetched at startup - never from the request body.
 	if len(scanRequest.ExcludedNamespaces) > 0 {
 		scanInfo.ExcludedNamespaces = strings.Join(scanRequest.ExcludedNamespaces, ",")
 	}

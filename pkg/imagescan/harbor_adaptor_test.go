@@ -218,24 +218,25 @@ func TestHarborAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	assert.Len(t, reports[1].Vulnerabilities, 0) // Malformed should return empty
 }
 
-func TestNormalizeHarborSeverity(t *testing.T) {
+func TestNormalizeSeverity(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
 	}{
+		{"CRITICAL", "Critical"},
 		{"critical", "Critical"},
 		{"HIGH", "High"},
-		{"Medium", "Medium"},
-		{"low", "Low"},
-		{"Negligible", "Negligible"},
-		{"None", "Negligible"},
+		{"MEDIUM", "Medium"},
+		{"LOW", "Low"},
+		{"negligible", "Negligible"},
+		{"none", "Negligible"},
 		{"unknown", "Unknown"},
 		{"invalid", "Unknown"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			assert.Equal(t, tt.expected, normalizeHarborSeverity(tt.input))
+			assert.Equal(t, tt.expected, NormalizeSeverity(tt.input))
 		})
 	}
 }

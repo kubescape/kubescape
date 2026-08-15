@@ -69,15 +69,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer applyTimeout(scanInfo, ks)()
 
-			if scanInfo.FailThresholdSeverity != "" {
-				if err := shared.ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
-					return err
-				}
-			}
-			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(shared.ScanFormats, ", "))
-			}
-			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ScanFormats); err != nil {
+			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ScanFormats); err != nil {
 				return err
 			}
 			if err := validateFrameworkScanInfo(scanInfo); err != nil {
@@ -196,7 +188,7 @@ func enforceCoverageThreshold(coverage cautils.ScanCoverage, totalControls int, 
 		return nil
 	}
 	if totalControls == 0 {
-		return nil
+		return fmt.Errorf("scan loaded no controls: coverage is 0%% (fail-coverage-below: %.2f%%)", scanInfo.FailCoverageThreshold)
 	}
 	if coverage.CoverageScore < scanInfo.FailCoverageThreshold {
 		return fmt.Errorf("scan coverage is below permitted threshold: %.2f%% (fail-coverage-below: %.2f%%)", coverage.CoverageScore, scanInfo.FailCoverageThreshold)

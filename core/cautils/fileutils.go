@@ -22,11 +22,17 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/scheme"
 )
 
 var (
 	YAML_PREFIX = []string{"yaml", "yml"}
 	JSON_PREFIX = []string{"json"}
+
+	// ErrNoManifestFiles lets resource orchestrators defer this specific error
+	// while another supported loader examines the same input.
+	ErrNoManifestFiles = errors.New("no YAML or JSON manifest files found")
 )
 
 type FileFormat string
@@ -70,10 +76,10 @@ func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(err))
 	}
 	if len(excludedChartDirectories) > 0 {
-		normalizedExcludedDirectories := normalizePaths(excludedChartDirectories)
+		excludedDirectories := newDirSet(normalizePaths(excludedChartDirectories))
 		remaining := make([]string, 0, len(helmDirectories))
 		for _, directory := range helmDirectories {
-			if !isUnderAnyNormalizedDir(normalizePath(directory), normalizedExcludedDirectories) {
+			if !excludedDirectories.contains(normalizePath(directory)) {
 				remaining = append(remaining, directory)
 			}
 		}
@@ -230,13 +236,32 @@ func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
 	for _, helmDir := range renderedCharts {
 		templateDirs = append(templateDirs, filepath.Join(helmDir, "templates"))
 	}
-	templateDirs = pathAliasesForPaths(templateDirs)
+	templates := newDirSet(pathAliasesForPaths(templateDirs))
 
 	remaining := make([]string, 0, len(files))
 	for _, file := range files {
-		if !IsAnyPathAliasUnderAnyDir(file, templateDirs) {
+		if !templates.containsAnyAlias(file) {
 			remaining = append(remaining, file)
 		}
+	}
+	return remaining
+}
+
+// excludeHelmChartMetadataFiles removes the fixed Helm chart-metadata files
+// (Chart.yaml, Chart.lock) from a plain-manifest glob. Chart.yaml always
+// declares a top-level apiVersion per Helm's own schema but is not a
+// Kubernetes manifest, so without this exclusion it would be flagged as a
+// skipped manifest on every directory scan that contains a chart. The files
+// are identified by their well-known name, the same way templates/ is
+// excluded by location.
+func excludeHelmChartMetadataFiles(files []string) []string {
+	remaining := make([]string, 0, len(files))
+	for _, file := range files {
+		switch filepath.Base(file) {
+		case "Chart.yaml", "Chart.lock":
+			continue
+		}
+		remaining = append(remaining, file)
 	}
 	return remaining
 }
@@ -244,21 +269,62 @@ func excludeHelmTemplateFiles(files, renderedCharts []string) []string {
 // IsUnderAnyDir reports whether path is inside one of dirs after normalizing
 // relative paths and resolving symlinks where the path already exists.
 func IsUnderAnyDir(path string, dirs []string) bool {
-	return isUnderAnyNormalizedDir(normalizePath(path), normalizePaths(dirs))
+	return newDirSet(pathAliasesForPaths(dirs)).containsAnyAlias(path)
 }
 
-func isUnderAnyNormalizedDir(path string, dirs []string) bool {
-	for _, dir := range dirs {
-		rel, err := filepath.Rel(dir, path)
-		if err != nil {
-			continue
+// dirSet decides containment by walking a path's ancestors, so a lookup costs
+// path depth instead of one filepath.Rel per directory. Callers scanning many
+// paths against the same directories must build it once and reuse it.
+// Members must already be normalized, as must the paths passed to contains.
+type dirSet map[string]struct{}
+
+// newDirSet indexes dirs for lookup. Members are cleaned because the ancestor
+// walk compares exact strings, where the filepath.Rel comparison it replaces
+// cleaned its arguments itself: without this a trailing separator or a "."
+// segment would stop a directory matching the paths below it.
+func newDirSet(normalizedDirs []string) dirSet {
+	set := make(dirSet, len(normalizedDirs))
+	for _, dir := range normalizedDirs {
+		set[filepath.Clean(dir)] = struct{}{}
+	}
+	return set
+}
+
+// contains reports whether path is the set's member directory or lives below
+// it. A sibling merely sharing a prefix ("templates-docs" next to "templates")
+// is not an ancestor, so it stays outside.
+func (s dirSet) contains(path string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for dir := path; ; {
+		if _, ok := s[dir]; ok {
+			return true
 		}
-		// a sibling merely sharing a prefix (e.g. "templates-docs" next to "templates") escapes with ".."
-		if rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
+}
+
+// containsAny reports whether any of the already-normalized paths is contained.
+func (s dirSet) containsAny(paths []string) bool {
+	for _, path := range paths {
+		if s.contains(path) {
 			return true
 		}
 	}
 	return false
+}
+
+// containsAnyAlias resolves path's aliases and reports whether any is contained.
+func (s dirSet) containsAnyAlias(path string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	return s.containsAny(pathAliases(path))
 }
 
 func normalizePaths(paths []string) []string {
@@ -275,20 +341,6 @@ func pathAliasesForPaths(paths []string) []string {
 		aliases = append(aliases, pathAliases(path)...)
 	}
 	return aliases
-}
-
-// IsAnyPathAliasUnderAnyDir reports whether any alias of path (its absolute
-// lexical form and, when different, its symlink-resolved physical form) is
-// inside one of dirs. dirs must already be normalized. Keeping the lexical
-// alias matters for a symlinked file whose link target lives elsewhere: it is
-// still owned by the directory that lexically contains it.
-func IsAnyPathAliasUnderAnyDir(path string, dirs []string) bool {
-	for _, alias := range pathAliases(path) {
-		if isUnderAnyNormalizedDir(alias, dirs) {
-			return true
-		}
-	}
-	return false
 }
 
 // pathAliases returns both the absolute lexical path and, when different, its
@@ -312,6 +364,9 @@ func pathAliases(path string) []string {
 func normalizePath(path string) string {
 	normalized, err := canonicalPath(path)
 	if err != nil {
+		if absPath, absErr := filepath.Abs(path); absErr == nil {
+			return filepath.Clean(absPath)
+		}
 		return filepath.Clean(path)
 	}
 	return normalized
@@ -388,20 +443,126 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 	return sourceToWorkloads, kustomizeDirectoryName, nil
 }
 
-// LoadResourcesFromNestedKustomizeDirectories discovers and renders Kustomize configurations
-// found below basePath, for the case where basePath itself is a broader directory (e.g. a
-// repository root) rather than a Kustomize directory or file — that direct-input case is already
-// handled by LoadResourcesFromKustomizeDirectory. Every discovered directory carries its own
-// Kustomization file, so each is rendered independently; a directory whose render fails is
-// skipped with a warning rather than aborting the scan, leaving its files to the plain-manifest
-// loader as a fallback. Directory discovery errors (e.g. an unreadable subdirectory hit during the
-// tree walk) are likewise logged as warnings rather than aborting the scan, matching
-// loadResourcesFromHelmCharts: a permission error on one subtree should not cost the whole scan
-// the Kustomize directories that were discovered successfully. The returned directories are
-// exactly those that rendered successfully, for the caller to exclude from the plain-manifest pass.
+// KustomizeRenderResult records the successful Kustomize renders and the input
+// paths they own. Ownership is claimed only after a build succeeds, so a broken
+// nested configuration remains available to the plain-manifest fallback.
+type KustomizeRenderResult struct {
+	SourceToWorkloads         map[string][]workloadinterface.IMetadata
+	OwnedSourcePaths          []string
+	OwnedHelmChartDirectories []string
+	OwnedHelmCRDDirectories   []string
+	ownedSourcePathSet        dirSet
+	ownedHelmChartSet         dirSet
+	ownedHelmCRDSet           dirSet
+}
+
+// OwnsPlainFile reports whether a successfully rendered Kustomize input already
+// covers path. Chart trees are handled specially: templates are removed by the
+// Helm-template exclusion, while raw CRDs are removed here only when the owning
+// helmCharts entry requested includeCRDs.
+func (result KustomizeRenderResult) OwnsPlainFile(path string) bool {
+	// Resolve once: every alias resolution walks the path's symlinks.
+	aliases := pathAliases(path)
+	if result.ownedHelmChartSet.containsAny(aliases) {
+		return result.ownedHelmCRDSet.containsAny(aliases) ||
+			result.ownedSourcePathSet.containsAny(aliases)
+	}
+	return result.ownedSourcePathSet.containsAny(aliases)
+}
+
+// LoadResourcesFromKustomizeDirectories renders the Kustomize configuration at
+// basePath, or discovers and renders Kustomize configurations below basePath when
+// the input itself is not one. A broad scan treats invalid nested configurations
+// as best-effort misses; an explicitly selected Kustomize input remains a hard
+// error, preserving its existing behavior.
+func LoadResourcesFromKustomizeDirectories(ctx context.Context, basePath string) (KustomizeRenderResult, error) {
+	kustomizeInputs, discoveryErrs := listKustomizeInputs(basePath)
+	explicitKustomizeInput := IsKustomizeFile(basePath) || isKustomizeDirectory(basePath)
+	for _, err := range discoveryErrs {
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Kustomize configurations", helpers.Error(err))
+	}
+
+	result := KustomizeRenderResult{SourceToWorkloads: map[string][]workloadinterface.IMetadata{}}
+	seenOwnedSourcePaths := map[string]struct{}{}
+	seenOwnedCharts := map[string]struct{}{}
+	seenOwnedCRDs := map[string]struct{}{}
+	for _, input := range kustomizeInputs {
+		directory := input
+		if IsKustomizeFile(input) {
+			directory = filepath.Dir(input)
+		}
+
+		workloads, _, err := LoadResourcesFromKustomizeDirectory(ctx, input)
+		if err != nil {
+			if explicitKustomizeInput {
+				return KustomizeRenderResult{}, err
+			}
+			logger.L().Ctx(ctx).Warning("Skipping nested Kustomize configuration that failed to render", helpers.String("path", directory), helpers.Error(err))
+			continue
+		}
+
+		// Inspect ownership after the build so a remotely pulled chart and its
+		// nested chart tree are present before generic Helm discovery begins.
+		ownership, err := KustomizeInputOwnershipForPath(ctx, input)
+		if err != nil {
+			if explicitKustomizeInput {
+				return KustomizeRenderResult{}, err
+			}
+			logger.L().Ctx(ctx).Warning("Skipping nested Kustomize configuration with unresolved inputs", helpers.String("path", directory), helpers.Error(err))
+			continue
+		}
+
+		maps.Copy(result.SourceToWorkloads, workloads)
+		appendUniquePaths(&result.OwnedSourcePaths, seenOwnedSourcePaths, ownership.SourcePaths...)
+		appendUniquePaths(&result.OwnedHelmChartDirectories, seenOwnedCharts, ownership.HelmChartDirectories...)
+		appendUniquePaths(&result.OwnedHelmCRDDirectories, seenOwnedCRDs, ownership.HelmCRDDirectories...)
+	}
+	result.ownedSourcePathSet = newDirSet(pathAliasesForPaths(result.OwnedSourcePaths))
+	result.ownedHelmChartSet = newDirSet(pathAliasesForPaths(result.OwnedHelmChartDirectories))
+	result.ownedHelmCRDSet = newDirSet(pathAliasesForPaths(result.OwnedHelmCRDDirectories))
+
+	return result, nil
+}
+
+func appendUniquePaths(destination *[]string, seen map[string]struct{}, paths ...string) {
+	for _, path := range paths {
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		*destination = append(*destination, path)
+	}
+}
+
+// listKustomizeInputs preserves exact selection for a Kustomize file or
+// directory. For a broader input it discovers child configurations recursively,
+// matching repository-wide Helm and manifest discovery.
+func listKustomizeInputs(basePath string) ([]string, []error) {
+	if IsKustomizeFile(basePath) || isKustomizeDirectory(basePath) {
+		return []string{basePath}, nil
+	}
+	// A concrete non-Kustomize file is an exact scan target. listDirs interprets
+	// a file path as a parent-directory pattern, which could otherwise discover
+	// an unrelated Kustomize directory sharing the file's basename.
+	if isFile(basePath) {
+		return nil, nil
+	}
+
+	directories, errs := listDirs(basePath)
+	kustomizeDirectories := make([]string, 0)
+	for _, directory := range directories {
+		if isKustomizeDirectory(directory) {
+			kustomizeDirectories = append(kustomizeDirectories, directory)
+		}
+	}
+	return kustomizeDirectories, errs
+}
+
+// LoadResourcesFromNestedKustomizeDirectories preserves the existing nested-rendering API.
+// New callers that also need precise source and Helm ownership should use
+// LoadResourcesFromKustomizeDirectories.
 func LoadResourcesFromNestedKustomizeDirectories(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, []string) {
 	if isKustomizeDirectory(basePath) || IsKustomizeFile(basePath) {
-		// The direct-input case is handled by LoadResourcesFromKustomizeDirectory.
 		return nil, nil
 	}
 
@@ -426,32 +587,53 @@ func LoadResourcesFromNestedKustomizeDirectories(ctx context.Context, basePath s
 	return sourceToWorkloads, renderedDirs
 }
 
+func LoadResourcesFromTerraform(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, error) {
+	if !isTerraformDirectory(basePath) && !IsTerraformFile(basePath) {
+		return nil, nil
+	}
+	dir := basePath
+	if IsTerraformFile(basePath) {
+		dir = filepath.Dir(basePath)
+	}
+	td := NewTerraformDirectory(dir)
+	wls, errs := td.GetWorkloads(dir)
+	if len(errs) > 0 {
+		return wls, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
+	}
+	return wls, nil
+}
+
 // LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts
 // are the chart directories LoadResourcesFromHelmCharts already rendered; their templates are left
 // to that render and skipped here. Pass nil to scan everything (e.g. when no charts were rendered).
-func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, renderedCharts []string) (map[string][]workloadinterface.IMetadata, error) {
+func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, renderedCharts []string) (map[string][]workloadinterface.IMetadata, []SkippedManifest, error) {
 	// skip the plain-YAML glob for a kustomize directory; the kustomize render handles it
 	if isKustomizeDirectory(input) {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	files, errs := listFiles(input)
 	if len(errs) > 0 {
 		discoveryErr := fmt.Errorf("failed to discover all manifest files for %q: %w", input, errors.Join(errs...))
 		if len(files) == 0 {
-			return nil, discoveryErr
+			return nil, nil, discoveryErr
 		}
 		logger.L().Ctx(ctx).Warning("Continuing with manifest files found before a discovery error", helpers.Error(discoveryErr))
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("no YAML or JSON manifest files found for input %q", input)
+		return nil, nil, fmt.Errorf("%w for input %q", ErrNoManifestFiles, input)
 	}
 
 	// skip the plain-YAML glob for the templates of charts the helm render already covered; a chart
 	// whose render failed is absent from renderedCharts, so its templates stay plainly scanned.
 	files = excludeHelmTemplateFiles(files, renderedCharts)
 
-	workloads, errs := loadFiles(rootPath, files)
+	// chart metadata files (Chart.yaml, Chart.lock) are not manifests and carry
+	// a top-level apiVersion per Helm's own schema; drop them so they are never
+	// flagged as skipped manifests.
+	files = excludeHelmChartMetadataFiles(files)
+
+	workloads, skips, errs := loadFiles(rootPath, files)
 	if len(errs) > 0 {
 		loadErr := fmt.Errorf("failed to load one or more manifests from %q: %w", input, errors.Join(errs...))
 		// Directory and glob scans have historically been best effort. Keep the
@@ -460,21 +642,23 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, rendere
 		// remains a hard failure because returning success would scan nothing or
 		// conceal corruption in the exact file the user requested.
 		if isFile(input) || len(workloads) == 0 {
-			return workloads, loadErr
+			return workloads, skips, loadErr
 		}
 		logger.L().Ctx(ctx).Warning("Skipping invalid manifest files", helpers.Error(loadErr))
 	}
 
-	return workloads, nil
+	return workloads, skips, nil
 }
 
-func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterface.IMetadata, []error) {
+func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterface.IMetadata, []SkippedManifest, []error) {
 	workloads := make(map[string][]workloadinterface.IMetadata, 0)
 	errs := []error{}
+	skips := []SkippedManifest{}
 	for i := range filePaths {
 		f, err := loadFile(filePaths[i])
 		if err != nil {
 			errs = append(errs, err)
+			skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "read error: " + err.Error()})
 			continue
 		}
 		if len(f) == 0 {
@@ -489,6 +673,7 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 			// standalone manifests.
 			if !bytes.Contains(f, []byte("{{")) {
 				errs = append(errs, fmt.Errorf("failed to parse %q: %w", filePaths[i], e))
+				skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "parse error: " + e.Error()})
 			}
 		}
 		if len(w) != 0 {
@@ -509,11 +694,11 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 			workloads[path] = wSlice
 		}
 	}
-	return workloads, errs
+	return workloads, skips, errs
 }
 
 func loadFile(filePath string) ([]byte, error) {
-	return os.ReadFile(filePath)
+	return os.ReadFile(filepath.Clean(filePath))
 }
 func ReadFile(fileContent []byte, fileFormat FileFormat) ([]workloadinterface.IMetadata, error) {
 
@@ -590,6 +775,9 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 			continue
 		}
 		if obj, ok := j.(map[string]any); ok {
+			if validationErr := validateManifestAgainstScheme(obj); validationErr != nil {
+				parseErrs = append(parseErrs, fmt.Errorf("document %d: %w", i+1, validationErr))
+			}
 			objects, objectErr := manifestObjectToWorkloads(obj)
 			yamlObjs = append(yamlObjs, objects...)
 			if objectErr != nil {
@@ -650,7 +838,9 @@ func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err
 	}()
 
 	var jsonObj any
-	if err := json.Unmarshal(jsonFile, &jsonObj); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(jsonFile))
+	decoder.UseNumber()
+	if err := decoder.Decode(&jsonObj); err != nil {
 		return workloads, err
 	}
 
@@ -694,6 +884,16 @@ func manifestObjectToWorkloads(obj map[string]any) ([]workloadinterface.IMetadat
 
 	if o := objectsenvelopes.NewObject(obj); o != nil {
 		return []workloadinterface.IMetadata{o}, nil
+	}
+
+	// Only surface as skipped when the document looks like an attempted
+	// Kubernetes manifest (has apiVersion). Files without apiVersion —
+	// values.yaml, CI configs, docker-compose.yaml — are silently ignored
+	// as before. The known Helm chart-metadata files (Chart.yaml,
+	// Chart.lock) are removed earlier by filename in LoadResourcesFromFiles,
+	// so they are never flagged here.
+	if _, hasAPIVersion := obj["apiVersion"]; hasAPIVersion {
+		return nil, fmt.Errorf("not a valid Kubernetes object")
 	}
 	return nil, nil
 }
@@ -815,6 +1015,102 @@ func convertYamlToJson(i any) any {
 		}
 	}
 	return i
+}
+
+// removedButRealKinds are built-in Kubernetes kinds the bundled client-go scheme
+// no longer registers because the API itself was removed — not renamed, not
+// mistyped. A manifest still carrying one of these is legitimate historical
+// input (PodSecurityPolicy YAMLs are still common in older Helm charts), so it
+// must not be reported as a typo.
+var removedButRealKinds = map[schema.GroupKind]struct{}{
+	{Group: "policy", Kind: "PodSecurityPolicy"}:               {}, // removed in Kubernetes 1.25
+	{Group: "policy", Kind: "PodSecurityPolicyList"}:           {},
+	{Group: "auditregistration.k8s.io", Kind: "AuditSink"}:     {}, // removed in Kubernetes 1.19
+	{Group: "auditregistration.k8s.io", Kind: "AuditSinkList"}: {},
+}
+
+// validateManifestAgainstScheme checks a parsed YAML document against the
+// Kubernetes type scheme bundled with client-go. It is intentionally narrow:
+//
+//   - Documents without an apiVersion (values.yaml, Chart.yaml, CI configs)
+//     are ignored, matching the existing non-manifest handling.
+//   - Documents whose group is not registered in the client-go scheme are
+//     custom resources (CRDs) and are ignored — a CRD is not a typo.
+//   - A kind that no version of a built-in group registers is reported:
+//     Kubernetes forbids CRDs in built-in groups, so such a kind is reliably
+//     a typo (e.g. apps/v1 kind Deplyment) — unless the kind is a known
+//     removal (see removedButRealKinds), which is left alone.
+//   - A known kind in an unknown version (e.g. a future apiVersion) is left
+//     alone, since kubescape deliberately scans resources newer than the
+//     bundled scheme.
+//   - A registered kind that fails to decode (for example a string where a
+//     number is expected) is reported as structurally invalid.
+//
+// List envelopes are recursed into so a bad built-in resource nested inside a
+// List or typed list is surfaced too. The document is still loaded and scanned
+// by the caller; this only surfaces the missing diagnostic through the existing
+// error path.
+func validateManifestAgainstScheme(obj map[string]any) error {
+	var errs []error
+	if err := validateSingleManifest(obj); err != nil {
+		errs = append(errs, err)
+	}
+	if items, ok := obj["items"].([]any); ok {
+		for i, item := range items {
+			if itemObj, ok := item.(map[string]any); ok {
+				if err := validateManifestAgainstScheme(itemObj); err != nil {
+					errs = append(errs, fmt.Errorf("item %d: %w", i, err))
+				}
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// validateSingleManifest validates one document's own type metadata and
+// structure, without descending into a list envelope.
+func validateSingleManifest(obj map[string]any) error {
+	apiVersion, _ := obj["apiVersion"].(string)
+	kind, _ := obj["kind"].(string)
+	if apiVersion == "" || kind == "" {
+		// Not a Kubernetes manifest (or missing type metadata); nothing to
+		// validate against the scheme.
+		return nil
+	}
+
+	gvk := schema.FromAPIVersionAndKind(apiVersion, kind)
+
+	if !scheme.Scheme.IsGroupRegistered(gvk.Group) {
+		// Unregistered group: a custom resource that is not part of the
+		// client-go scheme by design. Skip silently to avoid false positives.
+		return nil
+	}
+
+	if len(scheme.Scheme.VersionsForGroupKind(gvk.GroupKind())) == 0 {
+		if _, removed := removedButRealKinds[gvk.GroupKind()]; removed {
+			// A real kind dropped from the bundled scheme, not a typo.
+			return nil
+		}
+		// The group is built-in but no version of it registers this kind, so
+		// the kind itself is a typo rather than a future apiVersion.
+		return fmt.Errorf("%s %q is not a valid Kubernetes kind", apiVersion, kind)
+	}
+
+	if !scheme.Scheme.Recognizes(gvk) {
+		// A known kind in a version the bundled scheme does not register yet
+		// (e.g. autoscaling/v99): there is no concrete type to decode into, so
+		// structural validation is not possible. This is not a typo.
+		return nil
+	}
+
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return fmt.Errorf("failed to re-encode %s %q for validation: %w", apiVersion, kind, err)
+	}
+	if _, _, err := scheme.Codecs.UniversalDeserializer().Decode(data, nil, nil); err != nil {
+		return fmt.Errorf("%s %q is structurally invalid: %w", apiVersion, kind, err)
+	}
+	return nil
 }
 
 func IsYaml(filePath string) bool {

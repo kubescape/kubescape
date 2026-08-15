@@ -125,6 +125,61 @@ func TestTransformSession_NamesAndNamespacesReplaced(t *testing.T) {
 	}
 }
 
+// TestTransformSession_CollidingNamesKeepDistinctResources covers what a
+// pseudonym collision costs at session level, which is more than a confusing
+// report: transformSession rebuilds AllResources and ResourcesResult keyed by
+// the *transformed* ID, so two resources whose names hash to the same
+// pseudonym overwrite each other and one disappears from the output
+// entirely - a scanned, failing workload that the report never mentions.
+//
+// collidingNameA and collidingNameB (mapping_test.go) collide in the first 32
+// bits of their SHA-256 digests, so this test fails whenever the pseudonym
+// suffix is truncated that short.
+func TestTransformSession_CollidingNamesKeepDistinctResources(t *testing.T) {
+	newPod := func(name string) workloadinterface.IMetadata {
+		return workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"name":      name,
+				"namespace": "default",
+			},
+		})
+	}
+
+	podA := newPod(collidingNameA)
+	podB := newPod(collidingNameB)
+
+	session := &cautils.OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{
+			podA.GetID(): podA,
+			podB.GetID(): podB,
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			podA.GetID(): {ResourceID: podA.GetID()},
+			podB.GetID(): {ResourceID: podB.GetID()},
+		},
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+	}
+
+	require.NoError(t, transformSession(session, NewMapping(), NewMappingTransformer()))
+
+	assert.Len(t, session.AllResources, 2,
+		"both pods were scanned, so both must still be present after anonymization")
+	assert.Len(t, session.ResourcesResult, 2,
+		"each pod must keep its own result entry after anonymization")
+
+	names := make(map[string]struct{}, len(session.AllResources))
+	for _, resource := range session.AllResources {
+		assert.NotContains(t, resource.GetName(), "payments-api",
+			"the real name must not survive anonymization")
+		names[resource.GetName()] = struct{}{}
+	}
+	assert.Len(t, names, 2, "the two pods must carry distinct pseudonyms")
+}
+
 func TestTransformSession_IDConsistencyAcrossMaps(t *testing.T) {
 	pod := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
@@ -1231,4 +1286,57 @@ func TestTransformSourcePath_EncryptionTransformer(t *testing.T) {
 		"/workspace/manifests/payment.yaml",
 		decryptedPath,
 	)
+}
+
+func TestTransformSourcePath_WindowsDriveLetterNoLineSuffix(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	transformer := NewEncryptionTransformer(dek)
+
+	// A bare Windows path has no trailing ":<index>" suffix, so its only
+	// colon is the drive letter's. That colon must not be mistaken for a
+	// line-number separator, or everything past "C" leaks in cleartext.
+	transformed, err := transformSourcePath(
+		`C:\Users\alice\manifests\payment.yaml`,
+		transformer,
+	)
+	require.NoError(t, err)
+
+	assert.NotContains(t, transformed, `Users\alice`)
+	assert.Contains(t, transformed, "ENC[AES256_GCM,")
+
+	decryptedPath, err := reportcrypto.DecryptString(transformed, dek)
+	require.NoError(t, err)
+
+	assert.Equal(t, `C:\Users\alice\manifests\payment.yaml`, decryptedPath)
+}
+
+func TestTransformSourcePath_WindowsDriveLetterWithLineSuffix(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	transformer := NewEncryptionTransformer(dek)
+
+	transformed, err := transformSourcePath(
+		`C:\Users\alice\manifests\payment.yaml:7`,
+		transformer,
+	)
+	require.NoError(t, err)
+
+	assert.NotContains(t, transformed, `Users\alice`)
+
+	lastColon := strings.LastIndex(transformed, ":")
+	require.NotEqual(t, -1, lastColon)
+
+	encryptedPath := transformed[:lastColon]
+	linePart := transformed[lastColon:]
+
+	assert.Contains(t, encryptedPath, "ENC[AES256_GCM,")
+	assert.Equal(t, ":7", linePart)
+
+	decryptedPath, err := reportcrypto.DecryptString(encryptedPath, dek)
+	require.NoError(t, err)
+
+	assert.Equal(t, `C:\Users\alice\manifests\payment.yaml`, decryptedPath)
 }

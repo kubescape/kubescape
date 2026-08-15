@@ -27,11 +27,6 @@ var (
 )
 
 // KSCloudAPIAdapter adapts v1.KSCloudAPI to the context-aware getter interfaces.
-//
-// NOTE: the supplied context is intentionally discarded. The upstream client in
-// github.com/kubescape/backend/pkg/client/v1 does not yet expose context-aware
-// methods, so cancellation and deadlines do not reach these HTTP calls. Remove
-// this adapter once the backend client accepts a context.
 type KSCloudAPIAdapter struct {
 	*v1.KSCloudAPI
 }
@@ -43,12 +38,12 @@ func GetKSCloudAPIAdapter() *KSCloudAPIAdapter {
 	}
 }
 
-func (a *KSCloudAPIAdapter) GetExceptions(_ context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
-	return a.KSCloudAPI.GetExceptions(clusterName)
+func (a *KSCloudAPIAdapter) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+	return a.GetExceptionsWithContext(ctx, clusterName)
 }
 
-func (a *KSCloudAPIAdapter) GetControlsInputs(_ context.Context, clusterName string) (map[string][]string, error) {
-	return a.KSCloudAPI.GetControlsInputs(clusterName)
+func (a *KSCloudAPIAdapter) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
+	return a.GetControlsInputsWithContext(ctx, clusterName)
 }
 
 // SetKSCloudAPIConnector registers a global instance of the KS Cloud client.
@@ -109,8 +104,12 @@ func HTTPPost(client *http.Client, fullURL string, body []byte, headers map[stri
 		}
 
 		// Fully drain the rest of the response body to ensure the TCP connection can be reused.
-		_, _ = io.Copy(io.Discard, body)
-		resp.Body.Close()
+		if _, err := io.Copy(io.Discard, body); err != nil {
+			logger.L().Debug("failed to drain error response body", helpers.Error(err))
+		}
+		if err := resp.Body.Close(); err != nil {
+			logger.L().Debug("failed to close error response body", helpers.Error(err))
+		}
 
 		// Restore the body for utils.ErrAPI so it can format the error message
 		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))

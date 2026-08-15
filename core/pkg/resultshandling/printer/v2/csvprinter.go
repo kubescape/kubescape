@@ -31,7 +31,8 @@ func NewCsvPrinter() *CsvPrinter {
 	return &CsvPrinter{}
 }
 
-func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = csvOutputFile
@@ -41,7 +42,13 @@ func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) {
 			outputFile = outputFile + printer.CsvOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		cp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	cp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 func (cp *CsvPrinter) Score(score float32) {
@@ -169,10 +176,12 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 func (cp *CsvPrinter) PrintNextSteps() {
 }
 
-func (cp *CsvPrinter) CloseWriter() {
+// CloseWriter closes the CSV output writer, returning any error from flushing or closing.
+func (cp *CsvPrinter) CloseWriter() error {
 	if cp.writer != nil && cp.writer != os.Stdout {
-		_ = cp.writer.Close()
+		return cp.writer.Close()
 	}
+	return nil
 }
 
 // csvControlPaths returns the semicolon-separated failed paths and fix paths

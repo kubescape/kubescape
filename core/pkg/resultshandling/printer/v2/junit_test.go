@@ -13,6 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anchore/grype/grype/match"
+	grypepkg "github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
@@ -119,6 +122,75 @@ func TestTestSuites(t *testing.T) {
 	assert.Equal(t, listTestsSuite(results), junitTestSuites.Suites)
 	assert.Equal(t, results.Report.SummaryDetails.NumberOfControls().All(), junitTestSuites.Tests)
 	assert.Equal(t, "Kubescape Scanning", junitTestSuites.Name)
+}
+
+func TestJunitActionPrintCombinedScanIncludesPostureAndImages(t *testing.T) {
+	postureControlID := "C-COMBINED"
+	postureSession := cautils.NewOPASessionObjMock()
+	postureSession.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				postureControlID: {
+					ControlID:  postureControlID,
+					Name:       "Combined posture control",
+					Status:     apis.StatusFailed,
+					StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				},
+			},
+		},
+	}
+
+	imageMatch := func(id, severity string) match.Match {
+		return match.Match{
+			Vulnerability: vulnerability.Vulnerability{
+				Reference: vulnerability.Reference{ID: id, Namespace: "nvd"},
+				Metadata:  &vulnerability.Metadata{ID: id, Severity: severity},
+			},
+			Package: grypepkg.Package{
+				ID:      grypepkg.ID("pkg-" + id),
+				Name:    "pkg-" + id,
+				Version: "1.0.0",
+			},
+		}
+	}
+	imageScanData := []cautils.ImageScanData{
+		{
+			Image:   "combined:first",
+			Matches: match.NewMatches(imageMatch("CVE-COMBINED", "High")),
+		},
+		{
+			Image:   "combined:second",
+			Matches: match.NewMatches(imageMatch("CVE-COMBINED-SECOND", "Critical")),
+		},
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "combined.xml")
+	jp := NewJunitPrinter(false)
+	require.NoError(t, jp.SetWriter(context.Background(), outputPath))
+	require.NoError(t, jp.ActionPrint(context.Background(), postureSession, imageScanData))
+	require.NoError(t, jp.writer.Close())
+
+	raw, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+
+	var got JUnitTestSuites
+	require.NoError(t, xml.Unmarshal(raw, &got))
+	require.Len(t, got.Suites, 3)
+	assert.Equal(t, "Kubescape Scanning", got.Name)
+	assert.Equal(t, []string{"kubescape", "combined:first", "combined:second"}, []string{
+		got.Suites[0].Name,
+		got.Suites[1].Name,
+		got.Suites[2].Name,
+	})
+	assert.Equal(t, []int{0, 1, 2}, []int{got.Suites[0].ID, got.Suites[1].ID, got.Suites[2].ID})
+	assert.Equal(t, 1, got.Suites[0].Tests)
+	assert.Equal(t, 1, got.Suites[0].Failures)
+	assert.Equal(t, 3, got.Tests)
+	assert.Equal(t, 3, got.Failures)
+	assert.Zero(t, got.Errors)
+	assert.Contains(t, string(raw), "Combined posture control")
+	assert.Contains(t, string(raw), "CVE-COMBINED")
+	assert.Contains(t, string(raw), "CVE-COMBINED-SECOND")
 }
 
 func TestListTestSuites(t *testing.T) {
@@ -666,6 +738,38 @@ func TestAggregateSuiteCounts(t *testing.T) {
 			assert.Equal(t, tc.wantFailures, gotFailures, "failures")
 			assert.Equal(t, tc.wantErrors, gotErrors, "errors")
 		})
+	}
+}
+
+func TestTestCases_UniqueClassnameForDuplicateNames(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+
+	const sharedName = "Minimize the admission of containers wishing to share the host process ID namespace"
+	controls := reportsummary.ControlSummaries{
+		"C-0194": {
+			ControlID:  "C-0194",
+			Name:       sharedName,
+			StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusPassed},
+		},
+		"C-0214": {
+			ControlID:  "C-0214",
+			Name:       sharedName,
+			StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		},
+	}
+
+	cases := testsCases(session, &controls, "AllControls")
+	require.Len(t, cases, 2)
+
+	seen := make(map[string]struct{}, len(cases))
+	for _, tc := range cases {
+		// JUnit consumers key a test by (classname, name); two same-named
+		// controls must not produce the same identity.
+		key := tc.Classname + "\x00" + tc.Name
+		require.NotContains(t, seen, key, "duplicate (classname, name) identity %q / %q", tc.Classname, tc.Name)
+		seen[key] = struct{}{}
+		assert.Equal(t, sharedName, tc.Name, "name must stay untouched")
+		assert.Contains(t, tc.Classname, "/C-", "classname must embed the control ID")
 	}
 }
 

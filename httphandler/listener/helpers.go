@@ -12,9 +12,10 @@ import (
 // RecoverFunc recover function for http requests
 func RecoverFunc(w http.ResponseWriter) {
 	if err := recover(); err != nil {
-		logger.L().Error("", helpers.Error(fmt.Errorf("%v", err)))
+		errMsg := fmt.Sprintf("%v", err)
+		logger.L().Error("", helpers.Error(fmt.Errorf("%s", errMsg)))
 		w.WriteHeader(http.StatusInternalServerError)
-		bErr, _ := json.Marshal(err)
+		bErr, _ := json.Marshal(errMsg)
 		w.Write(bErr)
 	}
 }

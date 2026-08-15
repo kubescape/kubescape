@@ -53,7 +53,7 @@ func SaveInFile(object any, targetFile string) error {
 	}
 
 	targetDir := filepath.Dir(targetFile)
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+	if err := os.MkdirAll(targetDir, 0o750); err != nil {
 		return fmt.Errorf("create target directory: %w", err)
 	}
 

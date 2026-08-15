@@ -140,7 +140,7 @@ func (handler *HTTPHandler) watchForScan() {
 	for {
 		scanReq := <-handler.scanRequestChan
 		if scanReq.isUserScan {
-			handler.state.setLatestUserScanID(scanReq.scanID)
+			handler.state.setRunningUserScanID(scanReq.scanID)
 		}
 		if handler.state.isCancelled(scanReq.scanID) {
 			logger.L().Info("skipping cancelled scan", helpers.String("scanID", scanReq.scanID))
@@ -450,7 +450,11 @@ func writeScanErrorToFile(err error, scanID string) (e error) {
 
 // responseToBytes convert response object to bytes
 func responseToBytes(res *utilsmetav1.Response) []byte {
-	b, _ := json.Marshal(res)
+	b, err := json.Marshal(res)
+	if err != nil {
+		logger.L().Error("failed to marshal response", helpers.Error(err))
+		return []byte(`{"response":"internal error: failed to marshal response","type":"error"}`)
+	}
 	return b
 }
 

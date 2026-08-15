@@ -14,6 +14,8 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -1093,6 +1095,32 @@ func TestFinalizeResults_PreservesExistingGenerationTime(t *testing.T) {
 	assert.Equal(t, preset, session.Report.ReportGenerationTime)
 }
 
+func TestFinalizeResults_SetsReportIDFromSession(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.SessionID = "scan-6f012842"
+	require.Empty(t, session.Report.ReportID,
+		"precondition: the report has not been assigned an ID")
+
+	report := FinalizeResults(session)
+
+	require.NotNil(t, report)
+	assert.Equal(t, "scan-6f012842", report.ReportID)
+	assert.Equal(t, "scan-6f012842", session.Report.ReportID,
+		"FinalizeResults must write the ID back so every downstream consumer observes the same identity")
+}
+
+func TestFinalizeResults_PreservesExistingReportID(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.SessionID = "scan-new"
+	session.Report.ReportID = "report-preset"
+
+	report := FinalizeResults(session)
+
+	require.NotNil(t, report)
+	assert.Equal(t, "report-preset", report.ReportID)
+	assert.Equal(t, "report-preset", session.Report.ReportID)
+}
+
 // TestFinalizeResults_SetsClusterNameWhenEmpty is the regression test for
 // kubescape/kubescape#2856: JSON reports always had an empty clusterName
 // because nothing on the scan path ever assigned OPASessionObj.Report.ClusterName,
@@ -1172,4 +1200,82 @@ func TestFinalizeResults_SortsResultsAndResourcesByResourceID(t *testing.T) {
 		}
 		require.Equalf(t, expectedResourceIDs, resourceIDs, "resources iteration %d", i)
 	}
+}
+
+func Test_mapInfoToPrintInfo_stableMarkers(t *testing.T) {
+	skipReasons := map[string]string{
+		"C-0001": "no cluster connection",
+		"C-0002": "host scanner is not deployed",
+		"C-0003": "control configuration is missing",
+		"C-0004": "resource kind was not scanned",
+	}
+
+	controls := reportsummary.ControlSummaries{}
+	for controlID, info := range skipReasons {
+		controls[controlID] = reportsummary.ControlSummary{
+			ControlID:  controlID,
+			StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusSkipped, InnerInfo: info},
+		}
+	}
+
+	want := []infoStars{
+		{stars: "†", info: skipReasons["C-0001"]},
+		{stars: "††", info: skipReasons["C-0002"]},
+		{stars: "†††", info: skipReasons["C-0003"]},
+		{stars: "††††", info: skipReasons["C-0004"]},
+	}
+
+	// The PDF printer reads the markers for the table and the legend from
+	// separate calls, so every call must return the same assignment.
+	for i := 0; i < 64; i++ {
+		require.Equalf(t, want, mapInfoToPrintInfo(controls), "iteration %d", i)
+	}
+}
+
+func TestFilterBySeverity(t *testing.T) {
+	report := &PostureReportWithSeverity{
+		SummaryDetails: SummaryDetailsWithSeverity{
+			Controls: map[string]ControlSummaryWithSeverity{
+				"C-0001": {Severity: "Critical"},
+				"C-0002": {Severity: "High"},
+				"C-0003": {Severity: "Medium"},
+				"C-0004": {Severity: "Low"},
+			},
+		},
+		Results: []ResultWithSeverity{
+			{
+				ResourceID: "res-1",
+				AssociatedControls: []ResourceAssociatedControlWithSeverity{
+					{Severity: "Critical"},
+					{Severity: "High"},
+					{Severity: "Medium"},
+					{Severity: "Low"},
+				},
+			},
+		},
+	}
+
+	FilterBySeverity(report, "high")
+
+	assert.Len(t, report.SummaryDetails.Controls, 2)
+	assert.Contains(t, report.SummaryDetails.Controls, "C-0001")
+	assert.Contains(t, report.SummaryDetails.Controls, "C-0002")
+	assert.NotContains(t, report.SummaryDetails.Controls, "C-0003")
+
+	assert.Len(t, report.Results[0].AssociatedControls, 2)
+	for _, c := range report.Results[0].AssociatedControls {
+		assert.Contains(t, []string{"Critical", "High"}, c.Severity)
+	}
+}
+
+func TestFilterBySeverity_EmptyMinSeverityNoOp(t *testing.T) {
+	report := &PostureReportWithSeverity{
+		SummaryDetails: SummaryDetailsWithSeverity{
+			Controls: map[string]ControlSummaryWithSeverity{
+				"C-0001": {Severity: "Low"},
+			},
+		},
+	}
+	FilterBySeverity(report, "")
+	assert.Len(t, report.SummaryDetails.Controls, 1)
 }

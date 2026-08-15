@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: named-deployment-writer
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  resourceNames: ["coredns"]
+  verbs: ["update", "patch"]

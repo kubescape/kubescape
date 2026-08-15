@@ -43,6 +43,12 @@ func TestSetWriter(t *testing.T) {
 	base := filepath.Join(t.TempDir(), "test-prom")
 	promPrinter = &PrometheusPrinter{}
 	promPrinter.SetWriter(context.Background(), base)
+	// SetWriter leaves the report file open. Windows refuses to delete a file
+	// that still has an open handle, so t.TempDir's cleanup fails the test
+	// unless the writer is closed too. Captured in a local because promPrinter
+	// is reassigned below.
+	baseWriter := promPrinter.writer
+	defer baseWriter.Close()
 	expectedPath := base + printer.PrometheusOutputExt
 	f, err := os.Open(expectedPath)
 	assert.NoError(t, err)
@@ -52,6 +58,7 @@ func TestSetWriter(t *testing.T) {
 	withExt := filepath.Join(t.TempDir(), "test-prom"+printer.PrometheusOutputExt)
 	promPrinter = &PrometheusPrinter{}
 	promPrinter.SetWriter(context.Background(), withExt)
+	defer promPrinter.writer.Close()
 	f2, err := os.Open(withExt)
 	assert.NoError(t, err)
 	defer f2.Close()

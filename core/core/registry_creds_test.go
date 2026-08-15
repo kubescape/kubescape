@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -157,6 +158,135 @@ func TestResolveRegistryCredentialsSkipsUnusableSecrets(t *testing.T) {
 
 			assert.Equal(t, tt.expectedToBeFound, found)
 			assert.Equal(t, tt.expected, creds)
+		})
+	}
+}
+
+func TestCollectImageScanTargetsScopesPullSecretsToLiveCluster(t *testing.T) {
+	const (
+		namespace  = "default"
+		secretName = "registry-auth"
+		image      = "registry.example.com/team/app:tag"
+	)
+
+	tests := []struct {
+		name              string
+		scanType          cautils.ScanTypes
+		scanningContext   cautils.ScanningContext
+		singleResource    bool
+		expectSecretRead  bool
+		expectCredentials bool
+	}{
+		{
+			name:            "single file repository scan",
+			scanType:        cautils.ScanTypeRepo,
+			scanningContext: cautils.ContextFile,
+		},
+		{
+			name:            "directory repository scan",
+			scanType:        cautils.ScanTypeRepo,
+			scanningContext: cautils.ContextDir,
+		},
+		{
+			name:            "local Git repository scan",
+			scanType:        cautils.ScanTypeRepo,
+			scanningContext: cautils.ContextGitLocal,
+		},
+		{
+			name:            "remote Git repository scan",
+			scanType:        cautils.ScanTypeRepo,
+			scanningContext: cautils.ContextGitRemote,
+		},
+		{
+			name:            "file workload scan",
+			scanType:        cautils.ScanTypeWorkload,
+			scanningContext: cautils.ContextFile,
+			singleResource:  true,
+		},
+		{
+			name:            "directory workload scan",
+			scanType:        cautils.ScanTypeWorkload,
+			scanningContext: cautils.ContextDir,
+			singleResource:  true,
+		},
+		{
+			name:              "live cluster scan",
+			scanType:          cautils.ScanTypeCluster,
+			scanningContext:   cautils.ContextCluster,
+			expectSecretRead:  true,
+			expectCredentials: true,
+		},
+		{
+			name:              "live cluster workload scan",
+			scanType:          cautils.ScanTypeWorkload,
+			scanningContext:   cautils.ContextCluster,
+			singleResource:    true,
+			expectSecretRead:  true,
+			expectCredentials: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewClientset(&corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: namespace},
+				Type:       corev1.SecretTypeDockerConfigJson,
+				Data: map[string][]byte{
+					corev1.DockerConfigJsonKey: []byte(`{"auths":{"registry.example.com":{"username":"user","password":"password"}}}`),
+				},
+			})
+			k8sAPI := &k8sinterface.KubernetesApi{KubernetesClient: client}
+			workload := workloadinterface.NewWorkloadObj(map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]interface{}{
+					"name":      "app",
+					"namespace": namespace,
+				},
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{"name": "app", "image": image},
+					},
+					"imagePullSecrets": []interface{}{
+						map[string]interface{}{"name": secretName},
+					},
+				},
+			})
+			scanData := cautils.NewOPASessionObjMock()
+			if tt.singleResource {
+				scanData.SingleResourceScan = workload
+			} else {
+				scanData.AllResources[workload.GetID()] = workload
+			}
+
+			images, credentials, containerErrors := collectImageScanTargets(
+				tt.scanType,
+				scanData,
+				context.Background(),
+				tt.scanningContext,
+				k8sAPI,
+			)
+
+			assert.Empty(t, containerErrors)
+			assert.True(t, images.Contains(image))
+			if tt.expectSecretRead {
+				require.Len(t, client.Actions(), 1)
+				assert.Equal(t, "get", client.Actions()[0].GetVerb())
+				assert.Equal(t, "secrets", client.Actions()[0].GetResource().Resource)
+			} else {
+				assert.Empty(t, client.Actions(), "offline image scans must not read imagePullSecrets from the current cluster")
+			}
+
+			if tt.expectCredentials {
+				require.Len(t, credentials[image], 1)
+				assert.Equal(t, imagescan.RegistryCredentials{
+					Authority: "registry.example.com",
+					Username:  "user",
+					Password:  "password",
+				}, credentials[image][0])
+			} else {
+				assert.NotContains(t, credentials, image)
+			}
 		})
 	}
 }

@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	grypesarif "github.com/anchore/grype/grype/presenter/sarif"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/locationresolver"
@@ -76,7 +78,8 @@ func NewSARIFPrinter() *SARIFPrinter {
 func (sp *SARIFPrinter) Score(score float32) {
 }
 
-func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = sarifOutputFile
@@ -85,7 +88,13 @@ func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) {
 			outputFile = outputFile + printer.SARIFOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		sp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	sp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 // addRule adds a rule description to the scan run based on the given control summary
@@ -109,9 +118,15 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 }
 
 // addResult adds a result of checking a rule to the scan run based on the given control summary
-func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location) *sarif.Result {
+func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) *sarif.Result {
+	msg := ctl.GetDescription()
+	if resource != nil {
+		if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
+			msg += "\n\nAffected fields:\n" + strings.Join(paths, "\n")
+		}
+	}
 	return scanRun.CreateResultForRule(ctl.GetID()).
-		WithMessage(sarif.NewTextMessage(ctl.GetDescription())).
+		WithMessage(sarif.NewTextMessage(msg)).
 		WithLocations([]*sarif.Location{
 			sarif.NewLocationWithPhysicalLocation(
 				sarif.NewPhysicalLocation().
@@ -124,43 +139,45 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 		})
 }
 
-func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults cautils.ImageScanData) error {
+func (sp *SARIFPrinter) printImageScan(scanResults cautils.ImageScanData) error {
 	model, err := models.NewDocument(clio.Identification{}, scanResults.Packages, scanResults.Context,
 		scanResults.Matches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
 	if err != nil {
 		return fmt.Errorf("failed to create document: %w", err)
 	}
 
+	// Render into an in-memory buffer rather than sp.writer directly: when no
+	// --output file is given, sp.writer is os.Stdout, and reopening it by
+	// name below to patch the driver name would deadlock if stdout is a pipe
+	// (this process still holds the write end open, so a second reader on
+	// the same pipe never sees EOF). Rendering and patching in memory, then
+	// writing to sp.writer exactly once, avoids that entirely.
+	var rendered bytes.Buffer
 	pres := grypesarif.NewPresenter(models.PresenterConfig{Document: model, SBOM: scanResults.SBOM})
-	if err := pres.Present(sp.writer); err != nil {
+	if err := pres.Present(&rendered); err != nil {
 		return err
-	}
-
-	// Change driver name to Kubescape
-
-	jsonReport, err := os.ReadFile(sp.writer.Name())
-	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to read json file - results will not be patched", helpers.Error(err))
-		return nil
 	}
 
 	var sarifReport sarif.Report
-	if err := json.Unmarshal(jsonReport, &sarifReport); err != nil {
+	if err := json.Unmarshal(rendered.Bytes(), &sarifReport); err != nil {
 		return err
 	}
 
-	// Patch driver name
+	// Patch driver name to Kubescape
 	for i := range sarifReport.Runs {
 		sarifReport.Runs[i].Tool.Driver.Name = "Kubescape"
 	}
 
-	// Write back to file
 	updatedSarifReport, err := json.MarshalIndent(sarifReport, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(sp.writer.Name(), updatedSarifReport, 0644) //nolint:gosec // Read-only report output, acceptable permissions
+	if _, err := sp.writer.Write(updatedSarifReport); err != nil {
+		return fmt.Errorf("failed to write SARIF report: %w", err)
+	}
+
+	return nil
 }
 
 func (sp *SARIFPrinter) PrintNextSteps() {
@@ -174,7 +191,7 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 		}
 
 		// image scan
-		if err := sp.printImageScan(ctx, imageScanData[0]); err != nil {
+		if err := sp.printImageScan(imageScanData[0]); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
 			return fmt.Errorf("failed to write results in sarif format: %w", err)
 		}
@@ -243,7 +260,8 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 				}
 				location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
 				sp.addRule(run, ctl)
-				r := sp.addResult(run, ctl, resource.relPath, location)
+				rsrc := opaSessionObj.AllResources[resource.resourceID]
+				r := sp.addResult(run, ctl, resource.relPath, location, &ac, rsrc)
 				collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath)
 			}
 		}
@@ -455,7 +473,12 @@ func collectFixes(ctx context.Context, cache *fixReportCache, result *sarif.Resu
 				continue
 			}
 
+			// Empty means the path is not a plain yaml path and must not be
+			// evaluated as a yq expression.
 			yamlExpression := fixhandler.FixPathToValidYamlExpression(fixPath, rulePaths.FixPath.Value, documentIndex)
+			if yamlExpression == "" {
+				continue
+			}
 			addFixRegions(result, filepath, cache.fixRegions(ctx, rsrcAbsPath, yamlExpression))
 		}
 	}
@@ -473,13 +496,18 @@ func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, 
 	// wrong segment for any path containing more than one colon (e.g. a
 	// Windows path like "C:\repo\deploy.yaml:0"), producing a non-numeric
 	// value that Atoi rejects and this function reporting "no doc index"
-	// even though one exists. This matches how fixhandler.getFilePathAndIndex
-	// parses the same convention.
+	// even though one exists. We also explicitly ignore the volume name
+	// to prevent treating a drive letter colon as the document index separator.
+	// This matches how fixhandler.getFilePathAndIndex parses the same convention.
 	path := localworkload.GetPath()
-	lastColon := strings.LastIndex(path, ":")
+	volume := filepath.VolumeName(path)
+	pathWithoutVolume := path[len(volume):]
+
+	lastColon := strings.LastIndex(pathWithoutVolume, ":")
 	if lastColon == -1 {
 		return 0, false
 	}
+	lastColon += len(volume)
 
 	docIndex, err := strconv.Atoi(path[lastColon+1:])
 	if err != nil {
@@ -531,8 +559,10 @@ func hashArtifactChange(artifactChange *sarif.ArtifactChange) [32]byte {
 	return sha256.Sum256(acJson)
 }
 
-func (p *SARIFPrinter) CloseWriter() {
+// CloseWriter closes the SARIF output writer, returning any error from flushing or closing.
+func (p *SARIFPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }

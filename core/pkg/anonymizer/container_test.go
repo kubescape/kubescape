@@ -17,6 +17,8 @@ func TestTransformContainerMetadata(t *testing.T) {
 		{
 			name: "typed containers should be anonymized",
 			object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
 				"spec": map[string]any{
 					"containers": []corev1.Container{
 						{
@@ -76,6 +78,8 @@ func TestTransformContainerMetadata(t *testing.T) {
 		{
 			name: "typed init containers should be anonymized",
 			object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
 				"spec": map[string]any{
 					"initContainers": []corev1.Container{
 						{
@@ -103,6 +107,8 @@ func TestTransformContainerMetadata(t *testing.T) {
 		{
 			name: "typed ephemeral containers should be anonymized",
 			object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
 				"spec": map[string]any{
 					"ephemeralContainers": []corev1.EphemeralContainer{
 						{
@@ -164,6 +170,8 @@ func TestTransformContainerMetadata(t *testing.T) {
 		{
 			name: "typed container env references should be anonymized",
 			object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
 				"spec": map[string]any{
 					"containers": []corev1.Container{
 						{
@@ -302,6 +310,8 @@ func TestTransformContainerMetadata(t *testing.T) {
 		{
 			name: "typed container envFrom references should be anonymized",
 			object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
 				"spec": map[string]any{
 					"containers": []corev1.Container{
 						{
@@ -415,6 +425,8 @@ func TestTransformContainerMetadata(t *testing.T) {
 		{
 			name: "typed container literal env values should be anonymized",
 			object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
 				"spec": map[string]any{
 					"containers": []corev1.Container{
 						{
