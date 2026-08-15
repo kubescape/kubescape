@@ -355,6 +355,9 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 		reportResults.ControlTimeout = scanInfo.ControlTimeout
 		if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
 			logger.L().Ctx(ctxOpa).Error("failed to process rules", helpers.Error(err))
+			// The eager listener finalizes its accumulated results before returning
+			// an error. Streaming errors can return before that invariant holds.
+			resultsHandling.SetData(scanData)
 			return resultsHandling, fmt.Errorf("%w", err)
 		}
 	}
