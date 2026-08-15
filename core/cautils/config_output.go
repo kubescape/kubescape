@@ -73,6 +73,30 @@ func configOutputFields(cfg *ConfigObj) []configOutputField {
 		{name: "clusterName", value: cfg.ClusterName},
 		{name: "cloudReportURL", value: cfg.CloudReportURL},
 		{name: "cloudAPIURL", value: cfg.CloudAPIURL},
-		{name: "accessKey", value: cfg.AccessKey},
+		{name: "accessKey", value: maskAccessKey(cfg.AccessKey)},
 	}
+}
+
+// accessKeyMask replaces the secret part of the access key when it is rendered.
+const accessKeyMask = "****"
+
+// maskAccessKey hides the cached access key. The key is a Kubescape Cloud
+// credential - it is persisted with 0600 permissions and elsewhere only ever
+// logged by length - while this output is written straight to stdout,
+// including in the CI logs and shared terminals the command is documented
+// for. Only the last four characters are kept, so an operator can still tell
+// which key is cached, and the mask has a fixed width so the length of the key
+// is not disclosed either.
+// The key itself remains readable in the config file for anyone who needs it.
+func maskAccessKey(accessKey string) string {
+	if accessKey == "" {
+		return ""
+	}
+	// Keeping the tail of a short key would give away most of it, so such a
+	// key is masked in full.
+	key := []rune(accessKey)
+	if len(key) <= 8 {
+		return accessKeyMask
+	}
+	return accessKeyMask + string(key[len(key)-4:])
 }
