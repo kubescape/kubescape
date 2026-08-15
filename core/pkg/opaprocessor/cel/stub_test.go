@@ -122,6 +122,15 @@ func TestStubRequestResourcePlural(t *testing.T) {
 			want: "actortemplates",
 		},
 		{
+			name: "resource-plural annotation overrides the guess",
+			obj: map[string]any{
+				"apiVersion": "agentsubstrate.google.com/v1",
+				"kind":       "WorkerPool",
+				"metadata":   map[string]any{"annotations": map[string]any{"kubescape.io/resource-plural": "worker-pools"}},
+			},
+			want: "worker-pools",
+		},
+		{
 			name: "undeterminable kind stays empty",
 			obj:  map[string]any{"apiVersion": "v1"},
 			want: "",
