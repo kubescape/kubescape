@@ -194,16 +194,30 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	}
 
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
-		policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
-		} else {
-			sessionObj.VAPPolicies = policies
-			sessionObj.VAPBindings = bindings
-		}
+		k8sHandler.collectVAPResources(ctx, sessionObj)
 	}
 
 	return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, nil
+}
+
+// collectVAPResources records the cluster's admission enforcement state on the
+// session. Clusters that do not serve the VAP API are skipped without a warning,
+// since having no policies to reconcile is not a scan failure.
+func (k8sHandler *K8sResourceHandler) collectVAPResources(ctx context.Context, sessionObj *cautils.OPASessionObj) {
+	if k8sHandler.k8s == nil {
+		return
+	}
+
+	policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
+	switch {
+	case errors.Is(err, vapreconcile.ErrUnsupported):
+		logger.L().Debug("skipping VAP reconciliation, cluster does not serve the API")
+	case err != nil:
+		logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
+	default:
+		sessionObj.VAPPolicies = policies
+		sessionObj.VAPBindings = bindings
+	}
 }
 
 func (k8sHandler *K8sResourceHandler) GetCloudProvider() string {
@@ -441,14 +455,8 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		}
 	}
 
-	if scanInfo.GetScanningContext() == cautils.ContextCluster && k8sHandler.k8s != nil {
-		policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
-		} else {
-			sessionObj.VAPPolicies = policies
-			sessionObj.VAPBindings = bindings
-		}
+	if scanInfo.GetScanningContext() == cautils.ContextCluster {
+		k8sHandler.collectVAPResources(ctx, sessionObj)
 	}
 
 	for groupResource, ids := range ksResourceMap {
