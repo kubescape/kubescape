@@ -120,20 +120,74 @@ func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 	return anyToString(cur)
 }
 
-// isSensitivePath reports whether a path targets a field whose value must
-// not be surfaced in scan output. Secret data and stringData contain
-// credentials that are base64-encoded (or plaintext) and must never be
-// printed regardless of what the existing redaction in updateResults has done.
-func isSensitivePath(kind, path string) bool {
-	if kind != "Secret" {
-		return false
-	}
+// secretFieldPatterns lists normalized field-name substrings that mark a
+// path's value as secret-shaped regardless of resource kind. This mirrors
+// anonymizer.isSensitiveEnvName's pattern list in core/pkg/anonymizer -
+// intentionally not imported from there, since anonymizer imports
+// resultshandling, which imports this package, and importing anonymizer
+// here would create an import cycle.
+var secretFieldPatterns = []string{
+	"password", "passwd", "pwd",
+	"secret",
+	"token",
+	"apikey",
+	"accesskey",
+	"privatekey",
+	"credential",
+	"databaseurl", "dburl",
+	"redisurl",
+	"mongouri", "mongodburi",
+	"dsn",
+	"connectionstring",
+}
+
+// hasSecretShapedFieldName reports whether path's final segment looks like
+// a credential field name (e.g. "apiKey", "db_password", "clientSecret"),
+// independent of resource kind. Separators are stripped before matching so
+// API_KEY, api-key, and apiKey are all treated the same way. This only
+// looks at the field name in the path itself - it does not correlate a
+// generic field (e.g. a container env var's "value") with a sibling field
+// that names it (e.g. that same env var's "name"), which is a separate,
+// harder problem left out of scope here.
+func hasSecretShapedFieldName(path string) bool {
 	if i := strings.Index(path, "="); i >= 0 {
 		path = path[:i]
 	}
-	path = strings.TrimLeft(path, ".")
-	return path == "data" || strings.HasPrefix(path, "data.") ||
-		path == "stringData" || strings.HasPrefix(path, "stringData.")
+	segments := splitPath(path)
+	if len(segments) == 0 {
+		return false
+	}
+	name := strings.ToLower(segments[len(segments)-1].key)
+	for _, sep := range []string{"_", "-", ".", " "} {
+		name = strings.ReplaceAll(name, sep, "")
+	}
+	for _, pattern := range secretFieldPatterns {
+		if strings.Contains(name, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// isSensitivePath reports whether a path targets a field whose value must
+// not be surfaced in scan output. Secret data and stringData contain
+// credentials that are base64-encoded (or plaintext) and must never be
+// printed regardless of what the existing redaction in updateResults has
+// done. Beyond that Secret-specific case, any path whose final field name
+// looks like a credential is masked regardless of kind, since a hardcoded
+// secret can live in a plain field on any resource - a ConfigMap entry
+// named apiKey, a CRD's spec.auth.token, and so on.
+func isSensitivePath(kind, path string) bool {
+	trimmed := path
+	if i := strings.Index(trimmed, "="); i >= 0 {
+		trimmed = trimmed[:i]
+	}
+	trimmed = strings.TrimLeft(trimmed, ".")
+	if kind == "Secret" && (trimmed == "data" || strings.HasPrefix(trimmed, "data.") ||
+		trimmed == "stringData" || strings.HasPrefix(trimmed, "stringData.")) {
+		return true
+	}
+	return hasSecretShapedFieldName(path)
 }
 
 // enrichedPathsForField iterates a control's rule paths, extracts the string

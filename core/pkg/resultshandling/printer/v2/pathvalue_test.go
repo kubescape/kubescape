@@ -300,6 +300,14 @@ func TestIsSensitivePath(t *testing.T) {
 		{name: "Deployment data field", kind: "Deployment", path: "data.key", want: false},
 		{name: "ConfigMap data field", kind: "ConfigMap", path: "data.config", want: false},
 		{name: "empty kind", kind: "", path: "data.key", want: false},
+		{name: "ConfigMap field literally named apiKey is caught", kind: "ConfigMap", path: "data.apiKey", want: true},
+		{name: "Deployment field named password is caught regardless of kind", kind: "Deployment", path: "spec.auth.password", want: true},
+		{name: "custom resource token field is caught", kind: "MyCustomResource", path: "spec.auth.token", want: true},
+		{name: "snake_case db_password is caught after separator normalization", kind: "Deployment", path: "spec.env.db_password", want: true},
+		{name: "uppercase API_KEY is caught case-insensitively", kind: "Deployment", path: "spec.API_KEY", want: true},
+		{name: "clientSecret is caught", kind: "OAuthClient", path: "spec.clientSecret", want: true},
+		{name: "ordinary field name is unaffected", kind: "Deployment", path: "spec.replicas", want: false},
+		{name: "keyword is not a false positive for key/apikey", kind: "Deployment", path: "spec.keyword", want: false},
 	}
 
 	for _, tc := range cases {
