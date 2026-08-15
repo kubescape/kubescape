@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	celconfig "k8s.io/apiserver/pkg/apis/cel"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -76,6 +77,59 @@ func TestMatchConditionsHold(t *testing.T) {
 			assert.Equal(t, tc.matched, matched)
 		})
 	}
+}
+
+// TestMatchConditionsHoldFalseOutranksError pins the apiserver's precedence: a
+// condition evaluating to false skips the policy whatever order it appears in
+// relative to a condition that errored, and only a gate of trues and errors
+// reaches failurePolicy. Returning on the first error instead would deny an
+// object under Fail that admission simply skips.
+func TestMatchConditionsHoldFalseOutranksError(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	isFalse := cond("is-kube-system", "object.metadata.namespace == 'kube-system'")
+	// Selects a field the object does not carry, so it errors at eval time.
+	evalErrors := cond("absent-field", "object.spec.nodeName == 'node-1'")
+	// authorizer is not declared on the env, so this cannot compile.
+	wontCompile := cond("uncompilable", "authorizer.group('').resource('pods').check('list').allowed()")
+
+	cases := []struct {
+		name       string
+		conditions []MatchCondition
+	}{
+		{
+			name:       "an eval error before a false one is discarded",
+			conditions: []MatchCondition{evalErrors, isFalse},
+		},
+		{
+			name:       "a compile error before a false one is discarded",
+			conditions: []MatchCondition{wontCompile, isFalse},
+		},
+		{
+			name:       "the false one still wins from further down the gate",
+			conditions: []MatchCondition{cond("is-pod", "object.kind == 'Pod'"), evalErrors, isFalse},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			matched, err := e.matchConditionsHold(context.Background(), tc.conditions, gatedPod(), nil, nil, nil)
+			require.NoError(t, err, "a false condition outranks an error, so the gate is a clean not-matched")
+			assert.False(t, matched)
+		})
+	}
+
+	t.Run("trues and errors with no false still surface the error", func(t *testing.T) {
+		matched, err := e.matchConditionsHold(context.Background(), []MatchCondition{
+			cond("is-pod", "object.kind == 'Pod'"),
+			evalErrors,
+		}, gatedPod(), nil, nil, nil)
+		require.Error(t, err, "with no false condition the error is what failurePolicy acts on")
+		assert.False(t, matched)
+		assert.True(t, IsExpressionError(err))
+		assert.Contains(t, err.Error(), evalErrors.Name)
+	})
 }
 
 // TestMatchConditionsHoldReadsPolicyInputs proves the gate evaluates against the
@@ -171,8 +225,12 @@ func TestMatchConditionsHoldOwnBudget(t *testing.T) {
 	e, err := NewEvaluator(WithCostBudget(1))
 	require.NoError(t, err)
 
+	// A false condition after the exhausted one must NOT rescue the gate: once
+	// the budget is gone nothing later can be trusted to have really evaluated,
+	// so an exhausted budget is terminal where an expression error is not.
 	_, err = e.matchConditionsHold(context.Background(), []MatchCondition{
 		cond("is-prod", "object.metadata.namespace == 'prod'"),
+		cond("is-kube-system", "object.metadata.namespace == 'kube-system'"),
 	}, gatedPod(), nil, nil, nil)
 	require.Error(t, err, "the gate must exhaust this budget for the test to mean anything")
 	assert.False(t, IsExpressionError(err))
@@ -184,6 +242,22 @@ func TestMatchConditionsHoldOwnBudget(t *testing.T) {
 	require.Len(t, results, 1)
 	assert.NoError(t, results[0].Err, "the gate must not have spent the validations' budget")
 	assert.True(t, results[0].Passed)
+}
+
+// TestMatchConditionsBudgetLimit pins the gate to the budget the apiserver bills
+// matchConditions against, which is a quarter of the validations' ceiling.
+// Metering the gate against the larger one would let a gate run offline that
+// admission cuts off.
+func TestMatchConditionsBudgetLimit(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(celconfig.RuntimeCELCostBudgetMatchConditions), e.matchConditionsBudgetLimit())
+	assert.Less(t, e.matchConditionsBudgetLimit(), e.budgetLimit(), "the gate gets the smaller ceiling")
+
+	overridden, err := NewEvaluator(WithCostBudget(7))
+	require.NoError(t, err)
+	assert.Equal(t, int64(7), overridden.matchConditionsBudgetLimit(), "an explicit override still wins")
 }
 
 // TestMatchConditionsGate maps a gate that reached no verdict onto the outcome
