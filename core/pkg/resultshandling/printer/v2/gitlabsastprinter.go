@@ -336,7 +336,7 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 			}
 
 			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
-			res, _ := opaSessionObj.AllResources[resource.resourceID]
+			res := opaSessionObj.AllResources[resource.resourceID]
 			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, &ac, res, resource.resourceID, resource.relPath, location))
 		}
 	}
@@ -390,8 +390,10 @@ func toGitLabVulnerability(ctl reportsummary.IControlSummary, ac *resourcesresul
 	severity := apis.ControlSeverityToString(ctl.GetScoreFactor())
 
 	var solution string
-	if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
-		solution = strings.Join(paths, "\n")
+	if resource != nil {
+		if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
+			solution = strings.Join(paths, "\n")
+		}
 	}
 
 	return gitLabVulnerability{
