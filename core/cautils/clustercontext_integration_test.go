@@ -39,10 +39,14 @@ func groundTruthKubeSystemUID(t *testing.T, contextName string) string {
 // discovery snapshot, or connection state left over from the first.
 //
 // Opt-in and skipped by default: needs `kind create cluster --name fleet-test-a` and
-// `--name fleet-test-b` already running (KUBESCAPE_INTEGRATION_KIND=1 to enable).
+// `--name fleet-test-b` already running, each with a distinct CRD applied (`foos.example.io`
+// on cluster A, `bars.example.io` on cluster B, both group example.io) so the discovery half
+// of the fix (#159/#160) is exercised as well as the client-config half (#158/#161) - the
+// typed CoreV1().Namespaces().Get call alone never touches the process-global resource map
+// InitializeMapResources builds. KUBESCAPE_INTEGRATION_KIND=1 to enable.
 func TestEnterClusterContext_TwoRealClusters(t *testing.T) {
 	if os.Getenv("KUBESCAPE_INTEGRATION_KIND") == "" {
-		t.Skip("set KUBESCAPE_INTEGRATION_KIND=1 with kind clusters fleet-test-a and fleet-test-b running to enable")
+		t.Skip("set KUBESCAPE_INTEGRATION_KIND=1 with kind clusters fleet-test-a and fleet-test-b running, each with its own CRD, to enable")
 	}
 
 	const contextA = "kind-fleet-test-a"
@@ -72,6 +76,8 @@ func TestEnterClusterContext_TwoRealClusters(t *testing.T) {
 	leaveA := EnterClusterContext(contextA)
 	gotUIDA := fetchKubeSystemUID(t)
 	require.Equal(t, wantUIDA, gotUIDA, "scan of context A did not observe cluster A")
+	requireResourceDiscoverable(t, "foos", true, "cluster A's own CRD must be discoverable")
+	requireResourceDiscoverable(t, "bars", false, "cluster B's CRD must not leak into cluster A's discovery mapping")
 	leaveA()
 
 	leaveB := EnterClusterContext(contextB)
@@ -79,7 +85,20 @@ func TestEnterClusterContext_TwoRealClusters(t *testing.T) {
 	require.Equal(t, wantUIDB, gotUIDB,
 		"scan of context B observed cluster A's data (uid=%s) instead of cluster B's (uid=%s) - "+
 			"this is the cross-cluster state leak the isolation fix exists to close", gotUIDA, wantUIDB)
+	requireResourceDiscoverable(t, "bars", true, "cluster B's own CRD must be discoverable")
+	requireResourceDiscoverable(t, "foos", false,
+		"cluster A's CRD is still in the discovery mapping after switching to cluster B - "+
+			"the resource-map half of the isolation fix (#159/#160) did not take effect")
 	leaveB()
+}
+
+// requireResourceDiscoverable asserts whether resource is present in k8sinterface's
+// process-global resource-group mapping, which InitializeMapResources rebuilds from the
+// active cluster's live discovery client each time k8sinterface.NewKubernetesApi runs.
+func requireResourceDiscoverable(t *testing.T, resource string, want bool, msgAndArgs ...interface{}) {
+	t.Helper()
+	_, ok := k8sinterface.GetSingleResourceFromGroupMapping(resource)
+	require.Equal(t, want, ok, msgAndArgs...)
 }
 
 // fetchKubeSystemUID reads kube-system's UID through the same k8sinterface.NewKubernetesApi

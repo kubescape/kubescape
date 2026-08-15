@@ -2,11 +2,54 @@ package cautils
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/stretchr/testify/require"
 )
+
+// writeThreeContextKubeconfig extends writeScanInfoMultiContextKubeconfig's two contexts
+// with a third, distinct one, so a test can exercise a genuine intervening context change
+// (switching to a context that differs from both the original and the entered one) rather
+// than a no-op switch back to a context that's already active.
+func writeThreeContextKubeconfig(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config")
+	contents := `apiVersion: v1
+kind: Config
+current-context: context-current
+clusters:
+- name: cluster-current
+  cluster:
+    server: https://current.example
+- name: cluster-selected
+  cluster:
+    server: https://selected.example
+- name: cluster-third
+  cluster:
+    server: https://third.example
+contexts:
+- name: context-current
+  context:
+    cluster: cluster-current
+    user: user
+- name: context-selected
+  context:
+    cluster: cluster-selected
+    user: user
+- name: context-third
+  context:
+    cluster: cluster-third
+    user: user
+users:
+- name: user
+  user:
+    token: test
+`
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o600))
+	return path
+}
 
 // resetClusterContextState clears the k8sinterface globals EnterClusterContext relies on,
 // so this test is independent of whatever ran before/after it in the same package.
@@ -61,18 +104,29 @@ func TestEnterClusterContext_LeaveAfterInterveningContextChange(t *testing.T) {
 	resetClusterContextState(t)
 	t.Cleanup(func() { resetClusterContextState(t) })
 
-	path := writeScanInfoMultiContextKubeconfig(t)
+	path := writeThreeContextKubeconfig(t)
+	oldKubeconfig, hadKubeconfig := os.LookupEnv("KUBECONFIG")
 	require.NoError(t, os.Setenv("KUBECONFIG", path))
-	t.Cleanup(func() { _ = os.Unsetenv("KUBECONFIG") })
+	t.Cleanup(func() {
+		if hadKubeconfig {
+			_ = os.Setenv("KUBECONFIG", oldKubeconfig)
+		} else {
+			_ = os.Unsetenv("KUBECONFIG")
+		}
+	})
 
 	k8sinterface.SetClusterContextName("context-current")
 	leave := EnterClusterContext("context-selected")
 
 	// leave captured "context-current" as the context to restore at the moment
-	// EnterClusterContext was called, regardless of what happens to the active
-	// context afterward.
-	k8sinterface.SetClusterContextName("context-selected")
+	// EnterClusterContext was called. Switch to a third, previously-untouched context
+	// before calling leave, so restoration is checked against a genuine intervening
+	// change rather than a no-op switch back to the context that was already active.
+	k8sinterface.SetClusterContextName("context-third")
+	require.Equal(t, "https://third.example", k8sinterface.GetK8sConfig().Host)
 
 	leave()
 	require.Equal(t, "context-current", k8sinterface.GetContextName())
+	require.Equal(t, "https://current.example", k8sinterface.GetK8sConfig().Host,
+		"leave() restored the context name but not the config that goes with it")
 }
