@@ -278,9 +278,21 @@ func TestComputeCoverageScore_CombinedDiscountsClampedToZero(t *testing.T) {
 func TestComputeCoverageScore_ZeroControls(t *testing.T) {
 	c := ScanCoverage{}
 	c.ComputeCoverageScore(0)
-	assert.Equal(t, float32(100), c.CoverageScore)
+	assert.Equal(t, float32(0), c.CoverageScore)
 	assert.Equal(t, 0, c.EvaluatedControls)
-	assert.False(t, c.Degraded)
+	assert.True(t, c.Degraded)
+}
+
+func TestComputeCoverageScore_ZeroControlsWithPenalties(t *testing.T) {
+	c := ScanCoverage{
+		PolicyDegradations: []PolicyDegradation{
+			{Component: "controlInputs", Reason: "network error"},
+		},
+	}
+	c.ComputeCoverageScore(0)
+	// 0 controls → base score 0, penalties cannot push it below 0
+	assert.Equal(t, float32(0), c.CoverageScore)
+	assert.True(t, c.Degraded)
 }
 
 func TestComputeCoverageScore_SilentFailedGVRReducesScore(t *testing.T) {

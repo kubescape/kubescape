@@ -1,0 +1,26 @@
+[
+    {
+        "alertMessage": "ServiceAccount: s3-reader is assigned the AWS IAM role arn:aws:iam::123456789012:role/s3-reader",
+        "failedPaths": [
+            "metadata.annotations[eks.amazonaws.com/role-arn]"
+        ],
+        "reviewPaths": [
+            "metadata.annotations[eks.amazonaws.com/role-arn]"
+        ],
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 3,
+        "alertObject": {
+            "k8sApiObjects": [
+                {
+                    "apiVersion": "v1",
+                    "kind": "ServiceAccount",
+                    "metadata": {
+                        "name": "s3-reader"
+                    }
+                }
+            ]
+        }
+    }
+]

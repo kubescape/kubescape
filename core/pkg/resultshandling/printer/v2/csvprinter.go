@@ -31,7 +31,8 @@ func NewCsvPrinter() *CsvPrinter {
 	return &CsvPrinter{}
 }
 
-func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = csvOutputFile
@@ -41,7 +42,13 @@ func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) {
 			outputFile = outputFile + printer.CsvOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		cp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	cp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 func (cp *CsvPrinter) Score(score float32) {
@@ -54,7 +61,7 @@ func (cp *CsvPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.ComplianceScoreToInt(score))
 }
 
-func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) (err error) {
 	if opaSessionObj == nil {
 		return fmt.Errorf("no data provided for CSV output")
 	}
@@ -65,6 +72,18 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 	summaryControls := finalizedReport.SummaryDetails.Controls
 
 	csvWriter := csv.NewWriter(cp.writer)
+	defer func() {
+		csvWriter.Flush()
+		if flushErr := csvWriter.Error(); flushErr != nil {
+			logger.L().Ctx(ctx).Error("failed to flush CSV writer", helpers.Error(flushErr))
+			if err == nil {
+				err = fmt.Errorf("failed to flush CSV writer: %w", flushErr)
+			}
+		}
+		if err == nil {
+			printer.LogOutputFile(cp.writer.Name())
+		}
+	}()
 
 	header := []string{
 		"Control Name",
@@ -151,23 +170,18 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 		}
 	}
 
-	csvWriter.Flush()
-	if err := csvWriter.Error(); err != nil {
-		logger.L().Ctx(ctx).Error("failed to flush CSV writer", helpers.Error(err))
-		return fmt.Errorf("failed to flush CSV writer: %w", err)
-	}
-
-	printer.LogOutputFile(cp.writer.Name())
 	return nil
 }
 
 func (cp *CsvPrinter) PrintNextSteps() {
 }
 
-func (cp *CsvPrinter) CloseWriter() {
+// CloseWriter closes the CSV output writer, returning any error from flushing or closing.
+func (cp *CsvPrinter) CloseWriter() error {
 	if cp.writer != nil && cp.writer != os.Stdout {
-		_ = cp.writer.Close()
+		return cp.writer.Close()
 	}
+	return nil
 }
 
 // csvControlPaths returns the semicolon-separated failed paths and fix paths

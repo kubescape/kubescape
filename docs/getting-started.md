@@ -231,6 +231,9 @@ kubescape scan /path/to/kustomize/directory
 > **Note**  
 > Kubescape will generate Kubernetes YAML objects using the 
 > `kustomization.yaml` file and scan them for security.
+> A broader directory scan also builds nested Kustomizations. Kustomize may
+> follow references outside the scan root, and a nested `helmCharts.repo` may
+> fetch remote chart content, so scan only source you trust to build.
 > If a directory contains both `Chart.yaml` and 
 > `kustomization.yaml`, Kubescape will treat it as a Helm chart.
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -127,7 +128,8 @@ func (gp *GitLabSASTPrinter) Score(score float32) {
 }
 
 // SetWriter opens outputFile for writing, defaulting the name and forcing a .json extension
-func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = gitLabSASTOutputFile
@@ -136,7 +138,13 @@ func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) {
 			outputFile = outputFile + printer.JsonOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		gp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	gp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 // PrintNextSteps is a no-op: machine-readable output carries no human-facing guidance
@@ -287,6 +295,7 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 	basePath := getBasePathFromMetadata(*opaSessionObj)
 
 	var withoutFilePath, outsideRepository int
+	failed := make([]scannedResource, 0, len(opaSessionObj.ResourcesResult))
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if !result.GetStatus(nil).IsFailed() {
 			continue
@@ -307,13 +316,18 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 			continue
 		}
 
-		rsrcAbsPath := filepath.Join(effectiveBasePath(resourceSource, basePath), relPath)
-		locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
-		if err != nil {
-			logger.L().Warning("failed to create location resolver, GitLab SAST locations will default to line 1", helpers.Error(err))
-		}
+		failed = append(failed, scannedResource{
+			resourceID: resourceID,
+			relPath:    relPath,
+			absPath:    filepath.Join(effectiveBasePath(resourceSource, basePath), relPath),
+		})
+	}
 
-		for _, toPin := range result.AssociatedControls {
+	var caches manifestCache
+	for _, resource := range groupByManifest(failed) {
+		locationResolver := caches.get(resource.absPath).locationResolver(resource.absPath, "GitLab SAST")
+
+		for _, toPin := range opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls {
 			ac := toPin
 			if !ac.GetStatus(nil).IsFailed() {
 				continue
@@ -325,8 +339,8 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 				continue
 			}
 
-			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
-			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, resourceID, relPath, location))
+			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
+			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, resource.resourceID, resource.relPath, location))
 		}
 	}
 
@@ -400,12 +414,18 @@ func toGitLabVulnerability(ctl reportsummary.IControlSummary, resourceID, filePa
 	}
 }
 
-// isRepositoryRelative reports whether path is a repository-relative file path, i.e. not empty, absolute, or escaping the repository root via ".."
-func isRepositoryRelative(path string) bool {
-	if path == "" || filepath.IsAbs(path) {
+// isRepositoryRelative reports whether p is a repository-relative file path, i.e. not empty, absolute, or escaping the repository root via ".."
+func isRepositoryRelative(p string) bool {
+	// GitLab resolves these paths against a repository tree using POSIX
+	// semantics, so what counts as absolute must not depend on the host that
+	// produced the report. filepath.IsAbs alone is host-dependent: on Windows
+	// it reports false for "/etc/x", because it wants a drive letter or a UNC
+	// prefix, and such a path would then be emitted as if it were relative.
+	slashed := filepath.ToSlash(p)
+	if p == "" || filepath.IsAbs(p) || path.IsAbs(slashed) {
 		return false
 	}
-	cleaned := filepath.ToSlash(filepath.Clean(path))
+	cleaned := path.Clean(slashed)
 	return cleaned != ".." && !strings.HasPrefix(cleaned, "../")
 }
 
@@ -422,9 +442,10 @@ func kubescapeVersion() string {
 	return versioncheck.BuildNumber
 }
 
-// CloseWriter closes the output file, unless it is stdout, satisfying the optional printerCloser interface
-func (gp *GitLabSASTPrinter) CloseWriter() {
+// CloseWriter closes the GitLab SAST output writer, returning any error from flushing or closing.
+func (gp *GitLabSASTPrinter) CloseWriter() error {
 	if gp.writer != nil && gp.writer != os.Stdout {
-		gp.writer.Close()
+		return gp.writer.Close()
 	}
+	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -13,6 +14,10 @@ import (
 	"gopkg.in/op/go-logging.v1"
 	"gopkg.in/yaml.v3"
 )
+
+// lastPathSegment matches an expression's trailing ".<segment>", stripped to walk
+// back up a path that does not exist. Compiled once rather than per step.
+var lastPathSegment = regexp.MustCompile(`(.*)(\.[^.]*)`)
 
 type FixPathLocationResolver struct {
 	yqlibEvaluator yqlib.Evaluator
@@ -26,7 +31,7 @@ type Location struct {
 }
 
 func NewFixPathLocationResolver(yamlPath string) (*FixPathLocationResolver, error) {
-	file, err := os.Open(yamlPath)
+	file, err := os.Open(filepath.Clean(yamlPath))
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +85,7 @@ func (l *FixPathLocationResolver) ResolveLocation(fixPath string, nodeIndex int)
 		}
 
 		// for non-existent yaml expressions, remove the last part of the expression and try again
-		yamlExpression = regexp.MustCompile(`(.*)(\.[^.]*)`).ReplaceAllString(yamlExpression, `${1}`)
+		yamlExpression = lastPathSegment.ReplaceAllString(yamlExpression, `${1}`)
 	}
 	return Location{}, nil
 

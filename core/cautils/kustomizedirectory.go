@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -17,7 +18,8 @@ import (
 )
 
 type KustomizeDirectory struct {
-	path string
+	path        string
+	helmCommand string
 }
 
 // Used for checking if there is "Kustomization" file in the given Directory
@@ -42,7 +44,7 @@ func isKustomizeDirectory(path string) bool {
 	case 1:
 		return true
 	default:
-		logger.L().Info("Multiple kustomize files found while checking the Kustomize Directory")
+		logger.L().Debug("Multiple kustomize files found while checking the Kustomize Directory")
 		return false
 	}
 }
@@ -66,6 +68,10 @@ func NewKustomizeDirectory(path string) *KustomizeDirectory {
 	}
 }
 
+func (kd *KustomizeDirectory) SetHelmCommand(cmd string) {
+	kd.helmCommand = cmd
+}
+
 func getKustomizeDirectoryName(path string) string {
 	if ok := isKustomizeDirectory(path); !ok {
 		return ""
@@ -74,36 +80,63 @@ func getKustomizeDirectoryName(path string) string {
 	return path
 }
 
+// KustomizeInputOwnership describes the local inputs selected by a Kustomize
+// build. HelmCRDDirectories contains only crds/ directories whose chart is
+// rendered with includeCRDs, so callers can retain raw CRDs when Kustomize omits
+// them. SourcePaths contains exact local build inputs rather than the whole
+// Kustomization directory, preserving unrelated manifests beside a build.
+type KustomizeInputOwnership struct {
+	SourcePaths          []string
+	HelmChartDirectories []string
+	HelmCRDDirectories   []string
+}
+
 // KustomizeHelmChartDirectories returns the local chart directories owned by the
 // Kustomize configuration selected by path. Returning only explicitly referenced
 // charts keeps unrelated charts under the same tree available to the generic Helm
 // loader. Nested chart directories are owned by the referenced parent chart too.
 func KustomizeHelmChartDirectories(ctx context.Context, path string) ([]string, error) {
+	ownership, err := KustomizeInputOwnershipForPath(ctx, path)
+	return ownership.HelmChartDirectories, err
+}
+
+// KustomizeInputOwnershipForPath returns the local source and chart inputs owned
+// by the selected Kustomize build.
+func KustomizeInputOwnershipForPath(ctx context.Context, path string) (KustomizeInputOwnership, error) {
 	kustomizationPath := selectedKustomizationFile(path)
 	if kustomizationPath == "" {
-		return nil, nil
+		return KustomizeInputOwnership{}, nil
 	}
-	var chartDirectories []string
+	ownership := KustomizeInputOwnership{}
 	seenKustomizations := map[string]struct{}{}
+	seenSourcePaths := map[string]struct{}{}
 	seenChartDirectories := map[string]struct{}{}
-	if err := collectKustomizeHelmChartDirectories(
+	seenCRDDirectories := map[string]struct{}{}
+	chartTrees := map[string][]string{}
+	if err := collectKustomizeInputOwnership(
 		ctx,
 		kustomizationPath,
 		seenKustomizations,
+		seenSourcePaths,
 		seenChartDirectories,
-		&chartDirectories,
+		seenCRDDirectories,
+		chartTrees,
+		&ownership,
 	); err != nil {
-		return nil, err
+		return KustomizeInputOwnership{}, err
 	}
-	return chartDirectories, nil
+	return ownership, nil
 }
 
-func collectKustomizeHelmChartDirectories(
+func collectKustomizeInputOwnership(
 	ctx context.Context,
 	kustomizationPath string,
 	seenKustomizations map[string]struct{},
+	seenSourcePaths map[string]struct{},
 	seenChartDirectories map[string]struct{},
-	chartDirectories *[]string,
+	seenCRDDirectories map[string]struct{},
+	chartTrees map[string][]string,
+	ownership *KustomizeInputOwnership,
 ) error {
 	absKustomizationPath, err := canonicalPath(kustomizationPath)
 	if err != nil {
@@ -113,8 +146,9 @@ func collectKustomizeHelmChartDirectories(
 		return nil
 	}
 	seenKustomizations[absKustomizationPath] = struct{}{}
+	appendUniquePath(absKustomizationPath, seenSourcePaths, &ownership.SourcePaths)
 
-	contents, err := os.ReadFile(absKustomizationPath)
+	contents, err := os.ReadFile(filepath.Clean(absKustomizationPath))
 	if err != nil {
 		return fmt.Errorf("failed to read Kustomization %q: %w", absKustomizationPath, err)
 	}
@@ -144,7 +178,42 @@ func collectKustomizeHelmChartDirectories(
 			chartRoot = filepath.Join(chartRoot, fmt.Sprintf("%s-%s", chart.Name, chart.Version))
 		}
 		directory := filepath.Clean(filepath.Join(chartRoot, chart.Name))
-		appendOwnedHelmChartTree(ctx, directory, seenChartDirectories, chartDirectories)
+		chartKey := normalizePath(directory)
+		chartTree, ok := chartTrees[chartKey]
+		if !ok {
+			chartTree = make([]string, 0, 1)
+			appendOwnedHelmChartTree(ctx, directory, map[string]struct{}{}, &chartTree)
+			chartTrees[chartKey] = chartTree
+		}
+		for _, chartDirectory := range chartTree {
+			if _, ok := seenChartDirectories[chartDirectory]; !ok {
+				seenChartDirectories[chartDirectory] = struct{}{}
+				ownership.HelmChartDirectories = append(ownership.HelmChartDirectories, chartDirectory)
+			}
+			if !chart.IncludeCRDs {
+				continue
+			}
+			crdDirectory := normalizePath(filepath.Join(chartDirectory, "crds"))
+			if _, ok := seenCRDDirectories[crdDirectory]; ok {
+				continue
+			}
+			seenCRDDirectories[crdDirectory] = struct{}{}
+			ownership.HelmCRDDirectories = append(ownership.HelmCRDDirectories, crdDirectory)
+		}
+
+		valuesFiles := append([]string{}, chart.AdditionalValuesFiles...)
+		if chart.ValuesFile != "" {
+			valuesFiles = append(valuesFiles, chart.ValuesFile)
+		} else {
+			valuesFiles = append(valuesFiles, filepath.Join(directory, "values.yaml"))
+		}
+		for _, valuesFile := range valuesFiles {
+			candidate, ok := localKustomizeReference(filepath.Dir(absKustomizationPath), valuesFile)
+			if !ok {
+				continue
+			}
+			appendUniquePath(normalizePath(candidate), seenSourcePaths, &ownership.SourcePaths)
+		}
 	}
 
 	// A selected Kustomize build can compose local bases and components that carry
@@ -154,28 +223,109 @@ func collectKustomizeHelmChartDirectories(
 	references = append(references, kustomization.Resources...)
 	references = append(references, kustomization.Components...)
 	for _, reference := range references {
-		candidate := reference
-		if !filepath.IsAbs(candidate) {
-			candidate = filepath.Join(filepath.Dir(absKustomizationPath), candidate)
-		}
-		if _, err := os.Stat(candidate); err != nil {
+		candidate, ok := localKustomizeReference(filepath.Dir(absKustomizationPath), reference)
+		if !ok {
 			continue
 		}
 		childKustomization := selectedKustomizationFile(candidate)
 		if childKustomization == "" {
+			appendUniquePath(normalizePath(candidate), seenSourcePaths, &ownership.SourcePaths)
 			continue
 		}
-		if err := collectKustomizeHelmChartDirectories(
+		if err := collectKustomizeInputOwnership(
 			ctx,
 			childKustomization,
 			seenKustomizations,
+			seenSourcePaths,
 			seenChartDirectories,
-			chartDirectories,
+			seenCRDDirectories,
+			chartTrees,
+			ownership,
 		); err != nil {
 			return err
 		}
 	}
+
+	inputReferences := make([]string, 0,
+		len(kustomization.Crds)+len(kustomization.Configurations)+len(kustomization.Generators)+
+			len(kustomization.Transformers)+len(kustomization.Validators)+
+			len(kustomization.Patches)+len(kustomization.Replacements),
+	)
+	inputReferences = append(inputReferences, kustomization.Crds...)
+	inputReferences = append(inputReferences, kustomization.Configurations...)
+	inputReferences = append(inputReferences, kustomization.Generators...)
+	inputReferences = append(inputReferences, kustomization.Transformers...)
+	inputReferences = append(inputReferences, kustomization.Validators...)
+	for _, patch := range kustomization.Patches {
+		inputReferences = append(inputReferences, patch.Path)
+	}
+	// FixKustomization intentionally leaves the deprecated patch fields intact;
+	// only FixKustomizationPreMarshalling migrates them, and that requires a
+	// Kustomize filesystem. Track their local files here so legacy builds get the
+	// same ownership behavior as the normalized Patches field.
+	for _, patch := range kustomization.PatchesJson6902 { //nolint:staticcheck // Required for legacy Kustomization input ownership.
+		inputReferences = append(inputReferences, patch.Path)
+	}
+	for _, patch := range kustomization.PatchesStrategicMerge { //nolint:staticcheck // Required for legacy Kustomization input ownership.
+		inputReferences = append(inputReferences, string(patch))
+	}
+	for _, replacement := range kustomization.Replacements {
+		inputReferences = append(inputReferences, replacement.Path)
+	}
+	if openAPIPath := kustomization.OpenAPI["path"]; openAPIPath != "" {
+		inputReferences = append(inputReferences, openAPIPath)
+	}
+	for _, generator := range kustomization.ConfigMapGenerator {
+		inputReferences = append(inputReferences, generatorInputPaths(generator.FileSources, generator.EnvSources, generator.EnvSource)...)
+	}
+	for _, generator := range kustomization.SecretGenerator {
+		inputReferences = append(inputReferences, generatorInputPaths(generator.FileSources, generator.EnvSources, generator.EnvSource)...)
+	}
+	for _, reference := range inputReferences {
+		candidate, ok := localKustomizeReference(filepath.Dir(absKustomizationPath), reference)
+		if !ok {
+			continue
+		}
+		appendUniquePath(normalizePath(candidate), seenSourcePaths, &ownership.SourcePaths)
+	}
 	return nil
+}
+
+func localKustomizeReference(baseDirectory, reference string) (string, bool) {
+	if reference == "" {
+		return "", false
+	}
+	candidate := reference
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(baseDirectory, candidate)
+	}
+	if _, err := os.Stat(candidate); err != nil {
+		return "", false
+	}
+	return candidate, true
+}
+
+func generatorInputPaths(files, envs []string, env string) []string {
+	paths := make([]string, 0, len(files)+len(envs)+1)
+	for _, file := range files {
+		if _, value, ok := strings.Cut(file, "="); ok {
+			file = value
+		}
+		paths = append(paths, file)
+	}
+	paths = append(paths, envs...)
+	if env != "" {
+		paths = append(paths, env)
+	}
+	return paths
+}
+
+func appendUniquePath(path string, seen map[string]struct{}, paths *[]string) {
+	if _, ok := seen[path]; ok {
+		return
+	}
+	seen[path] = struct{}{}
+	*paths = append(*paths, path)
 }
 
 type helmChartDirectoryLister func(string) ([]string, []error)
@@ -225,7 +375,7 @@ func appendOwnedHelmChartTreeWithLister(ctx context.Context, directory string, s
 }
 
 func selectedKustomizationFile(path string) string {
-	if IsKustomizeFile(path) {
+	if IsKustomizeFile(path) && isFile(path) {
 		return path
 	}
 	if !isKustomizeDirectory(path) {
@@ -233,7 +383,7 @@ func selectedKustomizationFile(path string) string {
 	}
 	for _, matcher := range kustomizationFileMatchers {
 		candidate := filepath.Join(path, matcher)
-		if _, err := os.Stat(candidate); err == nil {
+		if isFile(candidate) {
 			return candidate
 		}
 	}
@@ -250,7 +400,11 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	opts := krusty.MakeDefaultOptions()
 	opts.LoadRestrictions = types.LoadRestrictionsNone
 	opts.PluginConfig = types.EnabledPluginConfig(types.BploUseStaticallyLinked)
-	opts.PluginConfig.HelmConfig.Command = "helm"
+	helmCommand := "helm"
+	if kd.helmCommand != "" {
+		helmCommand = kd.helmCommand
+	}
+	opts.PluginConfig.HelmConfig.Command = helmCommand
 	kustomizer := krusty.MakeKustomizer(opts)
 	resmap, err := kustomizer.Run(fSys, kustomizeDirectoryPath)
 

@@ -5,6 +5,22 @@ import (
 	"encoding/hex"
 )
 
+// pseudoIDHashLength is the number of hex characters of the SHA-256 digest
+// kept in a pseudo-ID suffix. 32 hex characters carry 128 bits, which puts a
+// collision beyond reach for any realistic report.
+//
+// This is deliberately not a short digest: the suffix is the only thing that
+// distinguishes one pseudonym from another, and transformSession (session.go)
+// re-keys AllResources, ResourcesResult and the rest of the session maps by
+// the transformed ID. Two distinct values sharing a suffix therefore do not
+// merely look alike in the report - they collapse into a single map entry,
+// silently dropping a resource. A 32-bit suffix reached that point at a
+// birthday bound of only ~2^16 distinct values, well inside the range a
+// single large cluster produces once names, namespaces, labels, annotations
+// and source paths are counted together - all of which share one suffix
+// space, because the hash is taken over the value alone (see GetOrCreate).
+const pseudoIDHashLength = 32
+
 type Mapping struct {
 	data map[string]string
 }
@@ -67,7 +83,7 @@ func (m *Mapping) GetOrCreate(prefix, value string) string {
 	// this function exists to preserve. That combined trade-off needs an
 	// explicit decision, not a change made incidentally here.
 	hash := sha256.Sum256([]byte(value))
-	pseudo := prefix + "-" + hex.EncodeToString(hash[:])[:8]
+	pseudo := prefix + "-" + hex.EncodeToString(hash[:])[:pseudoIDHashLength]
 
 	m.data[key] = pseudo
 
