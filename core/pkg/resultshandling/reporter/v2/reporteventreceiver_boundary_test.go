@@ -2,6 +2,7 @@ package reporter
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,7 @@ func TestSubmitSplitsBeforeFirstResultExceedsReportLimit(t *testing.T) {
 	var (
 		mu        sync.Mutex
 		bodySizes []int
+		reports   []reporthandlingv2.PostureReport
 	)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -30,9 +32,15 @@ func TestSubmitSplitsBeforeFirstResultExceedsReportLimit(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+		var capturedReport reporthandlingv2.PostureReport
+		if err := json.Unmarshal(body, &capturedReport); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 
 		mu.Lock()
 		bodySizes = append(bodySizes, len(body))
+		reports = append(reports, capturedReport)
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{}`))
@@ -97,6 +105,11 @@ func TestSubmitSplitsBeforeFirstResultExceedsReportLimit(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	require.Len(t, bodySizes, 2, "resources must be flushed before the first result is appended")
+	require.Len(t, reports, 2)
+	require.Len(t, reports[0].Resources, 2)
+	require.Empty(t, reports[0].Results)
+	require.Empty(t, reports[1].Resources)
+	require.Len(t, reports[1].Results, 1)
 	for _, size := range bodySizes {
 		require.Less(t, size, MAX_REPORT_SIZE, "submitted request exceeded the report-size limit")
 	}
