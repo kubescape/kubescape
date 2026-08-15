@@ -412,8 +412,10 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 	}
 }
 
-func (p *PrettyPrinter) CloseWriter() {
+// CloseWriter closes the pretty-printer output writer, returning any error from flushing or closing.
+func (p *PrettyPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
+		return p.writer.Close()
 	}
+	return nil
 }

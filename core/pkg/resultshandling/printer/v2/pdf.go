@@ -199,8 +199,10 @@ func getSeverityColor(severity string) *props.Color {
 	return &props.BlackColor
 }
 
-func (p *PdfPrinter) CloseWriter() {
+// CloseWriter closes the PDF output writer, returning any error from flushing or closing.
+func (p *PdfPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
+		return p.writer.Close()
 	}
+	return nil
 }

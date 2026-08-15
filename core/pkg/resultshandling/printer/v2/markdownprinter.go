@@ -85,10 +85,12 @@ func (mp *MarkdownPrinter) ActionPrint(ctx context.Context, opaSessionObj *cauti
 
 func (mp *MarkdownPrinter) PrintNextSteps() {}
 
-func (mp *MarkdownPrinter) CloseWriter() {
+// CloseWriter closes the Markdown output writer, returning any error from flushing or closing.
+func (mp *MarkdownPrinter) CloseWriter() error {
 	if mp.writer != nil && mp.writer != os.Stdout {
-		_ = mp.writer.Close()
+		return mp.writer.Close()
 	}
+	return nil
 }
 
 // mdErrWriter wraps an io.Writer and records the first write error so callers
