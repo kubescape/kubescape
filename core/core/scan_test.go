@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,12 +16,75 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/pkg/imagescan"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/version"
 )
+
+func TestScan_ReturnsFinalizedPartialDataOnOPAError(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "pod.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name: partial-result-probe
+  namespace: default
+`), 0o600))
+
+	rule := reporthandling.PolicyRule{
+		Rule:         "package armo_builtins\nthis is not valid rego at all {{{",
+		RuleLanguage: reporthandling.RegoLanguage,
+		Match: []reporthandling.RuleMatchObjects{{
+			APIGroups:   []string{""},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"Pod"},
+		}},
+	}
+	rule.Name = "broken-rule"
+	control := reporthandling.Control{ControlID: "C-BROKEN", BaseScore: 5, Rules: []reporthandling.PolicyRule{rule}}
+	control.Name = "broken-control"
+	framework := reporthandling.Framework{Controls: []reporthandling.Control{control}}
+	framework.Name = "broken-framework"
+	frameworkBytes, err := json.Marshal(framework)
+	require.NoError(t, err)
+	frameworkPath := filepath.Join(dir, "framework.json")
+	require.NoError(t, os.WriteFile(frameworkPath, frameworkBytes, 0o600))
+	controlsInputsPath := filepath.Join(dir, "controls-inputs.json")
+	require.NoError(t, os.WriteFile(controlsInputsPath, []byte(`{"probe":["value"]}`), 0o600))
+	exceptionsPath := filepath.Join(dir, "exceptions.json")
+	require.NoError(t, os.WriteFile(exceptionsPath, []byte(`[]`), 0o600))
+	attackTracksPath := filepath.Join(dir, "attack-tracks.json")
+	require.NoError(t, os.WriteFile(attackTracksPath, []byte(`[]`), 0o600))
+
+	scanInfo := &cautils.ScanInfo{
+		UseFrom:          []string{frameworkPath},
+		ControlsInputs:   controlsInputsPath,
+		UseExceptions:    exceptionsPath,
+		AttackTracks:     attackTracksPath,
+		InputPatterns:    []string{manifestPath},
+		Local:            true,
+		FrameworkScan:    true,
+		ScanType:         cautils.ScanTypeFramework,
+		OmitRawResources: true,
+	}
+	scanInfo.Submit.SetBool(false)
+
+	results, err := NewKubescape(context.Background()).Scan(scanInfo, []cautils.PolicyIdentifier{{
+		Identifier: framework.Name,
+		Kind:       apisv1.KindFramework,
+	}})
+
+	require.ErrorContains(t, err, "broken-rule")
+	require.NotNil(t, results)
+	require.NotNil(t, results.GetData(), "the finalized partial session must remain available alongside the scan error")
+	require.Len(t, results.GetData().ResourcesResult, 1)
+	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
+	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+}
 
 type recordingImageScanService struct {
 	image              string
