@@ -195,3 +195,55 @@ func TestCollect_GracefulSkip(t *testing.T) {
 	assert.Nil(t, vaps)
 	assert.Nil(t, vapbs)
 }
+
+func TestCollect_GracefulSkip_Incomplete(t *testing.T) {
+	discovery := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	discovery.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "admissionregistration.k8s.io/v1beta1",
+			APIResources: []metav1.APIResource{
+				{Name: "validatingadmissionpolicies"},
+				// missing validatingadmissionpolicybindings
+			},
+		},
+	}
+
+	k8s := &k8sinterface.KubernetesApi{
+		DiscoveryClient: discovery,
+	}
+
+	vaps, vapbs, err := Collect(context.Background(), k8s)
+
+	assert.NoError(t, err)
+	assert.Nil(t, vaps)
+	assert.Nil(t, vapbs)
+}
+
+func TestCollect_GracefulSkip_Fallback_Unavailable(t *testing.T) {
+	discovery := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	// Both missing
+	discovery.Resources = []*metav1.APIResourceList{
+		{
+			GroupVersion: "admissionregistration.k8s.io/v1beta1",
+			APIResources: []metav1.APIResource{
+				{Name: "other"},
+			},
+		},
+		{
+			GroupVersion: "admissionregistration.k8s.io/v1",
+			APIResources: []metav1.APIResource{
+				{Name: "other"},
+			},
+		},
+	}
+
+	k8s := &k8sinterface.KubernetesApi{
+		DiscoveryClient: discovery,
+	}
+
+	vaps, vapbs, err := Collect(context.Background(), k8s)
+
+	assert.NoError(t, err)
+	assert.Nil(t, vaps)
+	assert.Nil(t, vapbs)
+}
