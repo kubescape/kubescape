@@ -188,7 +188,7 @@ func enforceCoverageThreshold(coverage cautils.ScanCoverage, totalControls int, 
 		return nil
 	}
 	if totalControls == 0 {
-		return nil
+		return fmt.Errorf("scan loaded no controls: coverage is 0%% (fail-coverage-below: %.2f%%)", scanInfo.FailCoverageThreshold)
 	}
 	if coverage.CoverageScore < scanInfo.FailCoverageThreshold {
 		return fmt.Errorf("scan coverage is below permitted threshold: %.2f%% (fail-coverage-below: %.2f%%)", coverage.CoverageScore, scanInfo.FailCoverageThreshold)
