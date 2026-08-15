@@ -177,3 +177,9 @@ func (hsh *HostSensorHandler) listCRDResources(ctx context.Context, resourceName
 
 	return nil
 }
+
+func (hsh *HostSensorHandler) StreamTelemetry(ctx context.Context) (<-chan SyscallEvent, error) {
+	events := make(chan SyscallEvent)
+	close(events)
+	return events, nil
+}
