@@ -113,8 +113,12 @@ func TestAnyToString(t *testing.T) {
 		{name: "uint64", input: uint64(65535), want: "65535", wantOK: true},
 		{name: "json.Number integer", input: json.Number("3"), want: "3", wantOK: true},
 		{name: "json.Number float", input: json.Number("1.5"), want: "1.5", wantOK: true},
-		{name: "map (complex)", input: map[string]any{"k": "v"}, want: "", wantOK: false},
-		{name: "slice (complex)", input: []any{"a"}, want: "", wantOK: false},
+		{name: "map renders as compact JSON", input: map[string]any{"k": "v"}, want: `{"k":"v"}`, wantOK: true},
+		{name: "map with multiple keys is sorted", input: map[string]any{"b": 1, "a": 2}, want: `{"a":2,"b":1}`, wantOK: true},
+		{name: "empty map renders as {}", input: map[string]any{}, want: "{}", wantOK: true},
+		{name: "slice renders as compact JSON", input: []any{"a"}, want: `["a"]`, wantOK: true},
+		{name: "slice of maps", input: []any{map[string]any{"name": "x"}}, want: `[{"name":"x"}]`, wantOK: true},
+		{name: "empty slice renders as []", input: []any{}, want: "[]", wantOK: true},
 	}
 
 	for _, tc := range cases {
@@ -151,6 +155,10 @@ func TestExtractValueAtPath(t *testing.T) {
 							"memory": "128Mi",
 							"cpu":    float64(500),
 						},
+					},
+					"ports": []any{
+						map[string]any{"containerPort": float64(8080)},
+						map[string]any{"containerPort": float64(9090)},
 					},
 				},
 				map[string]any{
@@ -249,10 +257,22 @@ func TestExtractValueAtPath(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			name:   "map value returns false",
+			name:   "map value renders as compact JSON",
 			path:   "spec.securityContext",
-			want:   "",
-			wantOK: false,
+			want:   `{"runAsNonRoot":true}`,
+			wantOK: true,
+		},
+		{
+			name:   "nested map value renders as compact JSON",
+			path:   "spec.containers[0].securityContext",
+			want:   `{"allowPrivilegeEscalation":false,"privileged":true}`,
+			wantOK: true,
+		},
+		{
+			name:   "slice value renders as compact JSON",
+			path:   "spec.containers[0].ports",
+			want:   `[{"containerPort":8080},{"containerPort":9090}]`,
+			wantOK: true,
 		},
 		{
 			name:   "empty path",
@@ -450,6 +470,29 @@ func TestFailedPathsWithCurrentValues(t *testing.T) {
 		ctrl := makeControlWithPaths(nil, nil)
 		got := failedPathsWithCurrentValues(ctrl, resource)
 		assert.Nil(t, got)
+	})
+
+	t.Run("object-valued path is rendered as JSON instead of falling back to bare path", func(t *testing.T) {
+		objResource := &mockResource{
+			obj: map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"securityContext": map[string]any{
+								"privileged": true,
+								"capabilities": map[string]any{
+									"add": []any{"SYS_ADMIN"},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		ctrl := makeControlWithPaths([]string{"spec.containers[0].securityContext"}, nil)
+		got := failedPathsWithCurrentValues(ctrl, objResource)
+		require.Len(t, got, 1)
+		assert.Equal(t, `spec.containers[0].securityContext (current: {"capabilities":{"add":["SYS_ADMIN"]},"privileged":true})`, got[0])
 	})
 }
 
