@@ -85,8 +85,10 @@ func (sp *SPDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 
 func (sp *SPDXPrinter) PrintNextSteps() {}
 
-func (sp *SPDXPrinter) CloseWriter() {
+// CloseWriter closes the SPDX output writer, returning any error from flushing or closing.
+func (sp *SPDXPrinter) CloseWriter() error {
 	if sp.writer != nil && sp.writer != os.Stdout {
-		sp.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
+		return sp.writer.Close()
 	}
+	return nil
 }

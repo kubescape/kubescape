@@ -53,11 +53,9 @@ type VAP struct {
 
 	// matchConditions gates whether a policy runs at all: at admission a policy
 	// whose matchConditions evaluate to false is skipped and none of its
-	// validations run. The offline engine does not evaluate them yet, so we keep
-	// them here only so loadVAP can refuse such a policy (see requireSupported)
-	// rather than run its validations unconditionally and emit violations live
-	// admission would never raise.
-	matchConditions []admissionregistrationv1.MatchCondition
+	// validations run. The evaluator honors the gate offline the same way (see
+	// matchConditionsHold), so a gated policy is scanned rather than refused.
+	matchConditions []MatchCondition
 
 	// paramKind mirrors spec.paramKind; nil when the policy declares no params.
 	paramKind *admissionregistrationv1.ParamKind
@@ -83,12 +81,11 @@ func (v *VAP) failOnError() bool {
 }
 
 // requireSupported reports whether the offline engine can honor this policy with
-// scan/admission parity. matchConditions is an admission-time gate we do not
-// evaluate yet; running a gated policy's validations unconditionally would emit
-// violations live admission never would, so we refuse the control instead. The
-// error maps to the same errored/skipped status a Rego eval error takes, never a
-// silent pass or a false violation. Removing a guard here is the seam for when
-// the evaluator learns to evaluate that gate.
+// scan/admission parity. A refusal maps to the same errored/skipped status a
+// Rego eval error takes, never a silent pass or a false violation. Removing a
+// guard here is the seam for when the evaluator learns to honor that input —
+// matchConditions came off this list once the evaluator could evaluate the gate
+// (see matchConditionsHold).
 //
 // A namespaceSelector is refused for a subtler reason. Its input is the
 // NAMESPACE's labels, and the scan only has those when some control's match
@@ -106,9 +103,6 @@ func (v *VAP) failOnError() bool {
 // objectSelector (the object's own labels) and a resource rule's operations
 // and resourceNames (the object's own name).
 func (v *VAP) requireSupported() error {
-	if len(v.matchConditions) > 0 {
-		return fmt.Errorf("control %q uses spec.matchConditions, which the offline engine does not evaluate yet; refusing it to preserve scan/admission parity", v.ControlID)
-	}
 	if v.matchConstraints != nil && selectorNarrows(v.matchConstraints.NamespaceSelector) {
 		return fmt.Errorf("control %q scopes matchConstraints with a namespaceSelector, whose input (namespace labels) the scan cannot guarantee to have; refusing it to preserve scan/admission parity", v.ControlID)
 	}
@@ -269,8 +263,8 @@ func indexUnique(index map[string]*VAP, duplicates map[string]struct{}, key stri
 
 // newVAP flattens a parsed policy into the evaluator's structs. The message and
 // messageExpression travel with each validation so the evaluator can resolve the
-// violation message the same way the apiserver does. matchConditions is carried
-// so loadVAP can refuse a gated policy (see requireSupported).
+// violation message the same way the apiserver does. matchConditions are carried
+// so the evaluator can honor the gate before running any validation.
 //
 // spec.matchConstraints is kept so the scan can scope evaluation to the kinds
 // the policy actually applies to (see appliesTo); without it a non-matching
@@ -287,10 +281,12 @@ func newVAP(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *VAP {
 	vap := &VAP{
 		ControlID:        policy.Labels[controlIDLabel],
 		PolicyName:       policy.Name,
-		matchConditions:  policy.Spec.MatchConditions,
 		paramKind:        policy.Spec.ParamKind,
 		matchConstraints: policy.Spec.MatchConstraints,
 		failurePolicy:    failurePolicy,
+	}
+	for _, c := range policy.Spec.MatchConditions {
+		vap.matchConditions = append(vap.matchConditions, MatchCondition{Name: c.Name, Expression: c.Expression})
 	}
 	for _, v := range policy.Spec.Variables {
 		vap.Variables = append(vap.Variables, Variable{Name: v.Name, Expression: v.Expression})

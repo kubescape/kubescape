@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -85,7 +86,7 @@ type OPAProcessor struct {
 	printEnabled           bool
 	compiledModules        map[string]compiledRule
 	compiledMu             sync.RWMutex
-	preparedQueriesMu      sync.RWMutex
+	mu                     sync.Mutex
 	// ControlTimeout, when non-zero, bounds the evaluation time of a single
 	// control. If exceeded, the control is recorded as not evaluated instead
 	// of stalling or aborting the whole scan.
@@ -431,53 +432,84 @@ done:
 // accumulated results even if a later scope exceeds the budget.
 func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Policies, controlIDs []string, scope evaluationScope, progressListener IJobProgressNotificationClient) error {
 	var processErrs []error
+	var processErrsMu sync.Mutex
 
-	for _, controlID := range controlIDs {
-		if err := ctx.Err(); err != nil {
-			processErrs = append(processErrs, err)
-			break
-		}
-		if progressListener != nil {
-			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", controlID))
-		}
-		if _, timedOut := opap.TimedOutControls[controlID]; timedOut {
-			continue
-		}
-
-		control := policies.Controls[controlID]
-
-		var resourcesAssociatedControl map[string]resourcesresults.ResourceAssociatedControl
-		var err error
-
-		if opap.ControlTimeout > 0 {
-			cctx, cancel := context.WithTimeout(ctx, opap.ControlTimeout)
-			resourcesAssociatedControl, err = opap.processControl(cctx, &control, scope)
-			if cctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
-				opap.markControlTimedOut(&control, opap.ControlTimeout)
-				// Keep results accumulated from earlier scopes; only discard
-				// the current scope's verdicts since the control did not finish.
-				err = nil
-				resourcesAssociatedControl = nil
-			}
-			cancel()
-		} else {
-			resourcesAssociatedControl, err = opap.processControl(ctx, &control, scope)
-		}
-
-		if err != nil {
-			processErrs = append(processErrs, fmt.Errorf("control %q: %w", control.ControlID, err))
-		}
-
-		// Update resources with latest results
-		for resourceID, controlResult := range resourcesAssociatedControl {
-			t, ok := opap.ResourcesResult[resourceID]
-			if !ok {
-				t = resourcesresults.Result{ResourceID: resourceID}
-			}
-			t.AssociatedControls = mergeAssociatedControls(t.AssociatedControls, controlResult, opap.AllPolicies)
-			opap.ResourcesResult[resourceID] = t
-		}
+	numWorkers := runtime.GOMAXPROCS(0)
+	controlChan := make(chan string, len(controlIDs))
+	for _, id := range controlIDs {
+		controlChan <- id
 	}
+	close(controlChan)
+
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for controlID := range controlChan {
+				if err := ctx.Err(); err != nil {
+					processErrsMu.Lock()
+					processErrs = append(processErrs, err)
+					processErrsMu.Unlock()
+					return // exit worker early on context cancellation
+				}
+
+				if progressListener != nil {
+					opap.mu.Lock()
+					progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", controlID))
+					opap.mu.Unlock()
+				}
+
+				opap.mu.Lock()
+				_, timedOut := opap.TimedOutControls[controlID]
+				opap.mu.Unlock()
+				if timedOut {
+					continue
+				}
+
+				control := policies.Controls[controlID]
+
+				var resourcesAssociatedControl map[string]resourcesresults.ResourceAssociatedControl
+				var err error
+
+				if opap.ControlTimeout > 0 {
+					cctx, cancel := context.WithTimeout(ctx, opap.ControlTimeout)
+					resourcesAssociatedControl, err = opap.processControl(cctx, &control, scope)
+					if cctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+						opap.markControlTimedOut(&control, opap.ControlTimeout)
+						// Keep results accumulated from earlier scopes; only discard
+						// the current scope's verdicts since the control did not finish.
+						err = nil
+						resourcesAssociatedControl = nil
+					}
+					cancel()
+				} else {
+					resourcesAssociatedControl, err = opap.processControl(ctx, &control, scope)
+				}
+
+				if err != nil {
+					processErrsMu.Lock()
+					processErrs = append(processErrs, fmt.Errorf("control %q: %w", control.ControlID, err))
+					processErrsMu.Unlock()
+				}
+
+				// Update resources with latest results
+				if len(resourcesAssociatedControl) > 0 {
+					opap.mu.Lock()
+					for resourceID, controlResult := range resourcesAssociatedControl {
+						t, ok := opap.ResourcesResult[resourceID]
+						if !ok {
+							t = resourcesresults.Result{ResourceID: resourceID}
+						}
+						t.AssociatedControls = mergeAssociatedControls(t.AssociatedControls, controlResult, opap.AllPolicies)
+						opap.ResourcesResult[resourceID] = t
+					}
+					opap.mu.Unlock()
+				}
+			}
+		}()
+	}
+	wg.Wait()
 
 	return errors.Join(processErrs...)
 }
@@ -859,15 +891,24 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 
 	inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
 
+	var addedResources []workloadinterface.IMetadata
 	for _, inputResource := range inputResources {
 		if opap.skipNamespace(inputResource.GetNamespace()) {
 			continue
 		}
-		// AllResources is also the partitioning input (evaluationScopes →
-		// PartitionResources), so this aggregator write-back grows the map
-		// mid-scan. Bucketing must keep using the frozen initialResourceCount,
-		// not the live length, or later rules could see per-namespace scopes.
-		opap.AllResources[inputResource.GetID()] = inputResource
+		addedResources = append(addedResources, inputResource)
+	}
+
+	if len(addedResources) > 0 {
+		opap.mu.Lock()
+		for _, inputResource := range addedResources {
+			// AllResources is also the partitioning input (evaluationScopes →
+			// PartitionResources), so this aggregator write-back grows the map
+			// mid-scan. Bucketing must keep using the frozen initialResourceCount,
+			// not the live length, or later rules could see per-namespace scopes.
+			opap.AllResources[inputResource.GetID()] = inputResource
+		}
+		opap.mu.Unlock()
 	}
 
 	ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData, controlID)
@@ -987,7 +1028,9 @@ func (opap *OPAProcessor) markResourcesSkipped(out map[string]*resourcesresults.
 			SubStatus:             apis.SubStatusUnknown,
 		}
 		if opap.InfoMap != nil {
+			opap.mu.Lock()
 			opap.InfoMap[id] = statusInfo
+			opap.mu.Unlock()
 		}
 	}
 }
@@ -1077,6 +1120,8 @@ func (opap *OPAProcessor) reweightComplianceScores() {
 // evaluation was aborted after exceeding ControlTimeout, so it surfaces as a
 // not-evaluated control instead of silently stalling the scan.
 func (opap *OPAProcessor) markControlTimedOut(control *reporthandling.Control, timeout time.Duration) {
+	opap.mu.Lock()
+	defer opap.mu.Unlock()
 	if opap.TimedOutControls == nil {
 		opap.TimedOutControls = make(map[string]string)
 	}
@@ -1264,11 +1309,13 @@ func (opap *OPAProcessor) seedCELSkips(out map[string]*resourcesresults.Resource
 			SubStatus:             apis.SubStatusUnknown,
 		}
 		if opap.InfoMap != nil {
+			opap.mu.Lock()
 			opap.InfoMap[id] = apis.StatusInfo{
 				InnerInfo:   s.err.Error(),
 				InnerStatus: apis.StatusSkipped,
 				SubStatus:   apis.SubStatusUnknown,
 			}
+			opap.mu.Unlock()
 		}
 	}
 }

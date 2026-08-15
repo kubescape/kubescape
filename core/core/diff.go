@@ -1,8 +1,9 @@
 package core
 
 import (
-	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
@@ -11,15 +12,21 @@ import (
 )
 
 // Diff writes the diff between the two scan reports and returns the number of new failures at or above the severity threshold; the caller decides whether to exit 1.
-func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (int, error) {
+func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error) {
 	cs, err := diff.Compute(diffInfo.BaseFile, diffInfo.HeadFile)
 	if err != nil {
 		return 0, err
 	}
 
-	w := printer.GetWriter(context.Background(), diffInfo.Output)
-	if w != os.Stdout {
-		defer w.Close()
+	w := os.Stdout
+	if diffInfo.Output != "" {
+		w, err = printer.GetWriterNoFallback(diffInfo.Output)
+		if err != nil {
+			return 0, fmt.Errorf("opening diff output: %w", err)
+		}
+		defer func() {
+			err = closeDiffOutput(w, err)
+		}()
 	}
 
 	switch diffInfo.Format {
@@ -32,8 +39,17 @@ func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (int, error) {
 			return 0, fmt.Errorf("writing YAML diff: %w", err)
 		}
 	default:
-		diff.PrintPretty(w, cs)
+		if err := diff.PrintPretty(w, cs); err != nil {
+			return 0, fmt.Errorf("writing pretty diff: %w", err)
+		}
 	}
 
 	return len(diff.FilterBySeverity(cs.New, diffInfo.SeverityThreshold)), nil
+}
+
+func closeDiffOutput(closer io.Closer, err error) error {
+	if closeErr := closer.Close(); closeErr != nil {
+		return errors.Join(err, fmt.Errorf("closing diff output: %w", closeErr))
+	}
+	return err
 }

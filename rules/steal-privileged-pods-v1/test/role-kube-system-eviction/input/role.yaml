@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kube-system-evictor
+  namespace: kube-system
+rules:
+- apiGroups: [""]
+  resources: ["pods/eviction"]
+  verbs: ["create"]

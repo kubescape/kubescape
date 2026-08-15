@@ -97,7 +97,7 @@ func stubRequest(obj map[string]any) map[string]any {
 }
 
 // resourcePlural is the plural resource name for request.resource, taken from
-// the same objectGVR guess appliesTo scopes with. Sharing the guess is the
+// the same objectGVR resolution appliesTo scopes with. Sharing it is the
 // point: a policy that narrows by resource can do it through matchConstraints
 // or by reading request.resource.resource, and the two must agree.
 //

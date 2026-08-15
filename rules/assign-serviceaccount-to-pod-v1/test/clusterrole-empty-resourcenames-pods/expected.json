@@ -1,0 +1,72 @@
+[
+    {
+        "alertMessage": "Subject: ServiceAccount-empty-rn-pod-sa can create pods in privileged namespaces and assign them any service account",
+        "failedPaths": [
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "reviewPaths": [
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 9,
+        "alertObject": {
+            "externalObjects": {
+                "kind": "ServiceAccount",
+                "name": "empty-rn-pod-sa",
+                "namespace": "ci",
+                "relatedObjects": [
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRoleBinding",
+                        "metadata": {
+                            "name": "empty-resourcenames-pod-creator-crb"
+                        },
+                        "roleRef": {
+                            "apiGroup": "rbac.authorization.k8s.io",
+                            "kind": "ClusterRole",
+                            "name": "empty-resourcenames-pod-creator"
+                        },
+                        "subjects": [
+                            {
+                                "kind": "ServiceAccount",
+                                "name": "empty-rn-pod-sa",
+                                "namespace": "ci"
+                            }
+                        ]
+                    },
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRole",
+                        "metadata": {
+                            "name": "empty-resourcenames-pod-creator"
+                        },
+                        "rules": [
+                            {
+                                "apiGroups": [
+                                    ""
+                                ],
+                                "resourceNames": [],
+                                "resources": [
+                                    "pods"
+                                ],
+                                "verbs": [
+                                    "create"
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+]

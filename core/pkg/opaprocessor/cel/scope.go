@@ -1,6 +1,8 @@
 package cel
 
 import (
+	"strings"
+
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -86,10 +88,14 @@ func objectSelectorMatches(selector *metav1.LabelSelector, obj map[string]any) b
 	return sel.Matches(labels.Set(objLabels))
 }
 
-// objectGVR guesses an object's GroupVersionResource from its apiVersion and
-// kind. Offline there is no discovery or RESTMapper, so we use apimachinery's
-// standard kind->resource guess (lower-case and pluralize), which is correct
-// for every kind the bundle's policies constrain.
+// resourcePluralAnnotation lets an object declare the plural its CRD actually
+// registers, for a plural the kind->resource guess cannot reach.
+const resourcePluralAnnotation = "kubescape.io/resource-plural"
+
+// objectGVR resolves an object's GroupVersionResource from its apiVersion and
+// kind. Offline there is no discovery or RESTMapper, so the plural comes from
+// the resource-plural annotation when the object carries one, and otherwise
+// from apimachinery's kind->resource guess (lower-case and pluralize).
 func objectGVR(obj map[string]any) (schema.GroupVersionResource, bool) {
 	apiVersion, _ := obj["apiVersion"].(string)
 	kind, _ := obj["kind"].(string)
@@ -100,8 +106,22 @@ func objectGVR(obj map[string]any) (schema.GroupVersionResource, bool) {
 	if err != nil {
 		return schema.GroupVersionResource{}, false
 	}
+	if plural, ok := annotatedPlural(obj); ok {
+		return gv.WithResource(plural), true
+	}
 	gvr, _ := meta.UnsafeGuessKindToResource(gv.WithKind(kind))
 	return gvr, true
+}
+
+// annotatedPlural reads the resource-plural hint off the object. A missing,
+// blank or non-string-map annotation set leaves the guess in charge.
+func annotatedPlural(obj map[string]any) (string, bool) {
+	annotations, found, err := unstructured.NestedStringMap(obj, "metadata", "annotations")
+	if err != nil || !found {
+		return "", false
+	}
+	plural := strings.TrimSpace(annotations[resourcePluralAnnotation])
+	return plural, plural != ""
 }
 
 func resourceRuleMatches(rule *admissionregistrationv1.NamedRuleWithOperations, gvr schema.GroupVersionResource, name string) bool {
@@ -164,11 +184,34 @@ func matchesValue(allowed []string, want string) bool {
 // matchesResource is matchesValue for resources, also accepting the "*/*"
 // subresource wildcard. A "resource/subresource" entry never matches a bare
 // resource, which is correct: the scan does not evaluate subresources.
+//
+// A rule resource differing from the object's only in separators still matches:
+// a CRD may register "worker-pools" for kind WorkerPool, which the guess renders
+// "workerpools". Dropping that object would be silent — the policy evaluates
+// against nothing and the control reads as clean. A plural further from the
+// guess than that still needs the resource-plural annotation.
 func matchesResource(allowed []string, want string) bool {
 	for _, a := range allowed {
 		if a == "*" || a == "*/*" || a == want {
 			return true
 		}
 	}
+	if want == "" {
+		return false
+	}
+	normalized := normalizePlural(want)
+	for _, a := range allowed {
+		if normalizePlural(a) == normalized {
+			return true
+		}
+	}
 	return false
+}
+
+// pluralSeparators strips the separators a CRD plural may carry, so
+// "worker-pools" and the guessed "workerpools" compare equal.
+var pluralSeparators = strings.NewReplacer("-", "", "_", "")
+
+func normalizePlural(resource string) string {
+	return pluralSeparators.Replace(strings.ToLower(resource))
 }

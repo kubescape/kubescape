@@ -176,10 +176,12 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 func (cp *CsvPrinter) PrintNextSteps() {
 }
 
-func (cp *CsvPrinter) CloseWriter() {
+// CloseWriter closes the CSV output writer, returning any error from flushing or closing.
+func (cp *CsvPrinter) CloseWriter() error {
 	if cp.writer != nil && cp.writer != os.Stdout {
-		_ = cp.writer.Close()
+		return cp.writer.Close()
 	}
+	return nil
 }
 
 // csvControlPaths returns the semicolon-separated failed paths and fix paths

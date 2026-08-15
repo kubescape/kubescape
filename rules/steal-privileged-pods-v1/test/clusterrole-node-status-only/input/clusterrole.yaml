@@ -1,0 +1,8 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-status-writer
+rules:
+- apiGroups: [""]
+  resources: ["nodes/status"]
+  verbs: ["update"]

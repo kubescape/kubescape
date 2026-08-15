@@ -269,7 +269,7 @@ func excludeHelmChartMetadataFiles(files []string) []string {
 // IsUnderAnyDir reports whether path is inside one of dirs after normalizing
 // relative paths and resolving symlinks where the path already exists.
 func IsUnderAnyDir(path string, dirs []string) bool {
-	return newDirSet(normalizePaths(dirs)).contains(normalizePath(path))
+	return newDirSet(pathAliasesForPaths(dirs)).containsAnyAlias(path)
 }
 
 // dirSet decides containment by walking a path's ancestors, so a lookup costs
@@ -341,15 +341,6 @@ func pathAliasesForPaths(paths []string) []string {
 		aliases = append(aliases, pathAliases(path)...)
 	}
 	return aliases
-}
-
-// IsAnyPathAliasUnderAnyDir reports whether any alias of path (its absolute
-// lexical form and, when different, its symlink-resolved physical form) is
-// inside one of dirs. dirs must already be normalized. Keeping the lexical
-// alias matters for a symlinked file whose link target lives elsewhere: it is
-// still owned by the directory that lexically contains it.
-func IsAnyPathAliasUnderAnyDir(path string, dirs []string) bool {
-	return newDirSet(dirs).containsAnyAlias(path)
 }
 
 // pathAliases returns both the absolute lexical path and, when different, its

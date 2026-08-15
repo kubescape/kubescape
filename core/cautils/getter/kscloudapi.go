@@ -27,11 +27,6 @@ var (
 )
 
 // KSCloudAPIAdapter adapts v1.KSCloudAPI to the context-aware getter interfaces.
-//
-// NOTE: the supplied context is intentionally discarded. The upstream client in
-// github.com/kubescape/backend/pkg/client/v1 does not yet expose context-aware
-// methods, so cancellation and deadlines do not reach these HTTP calls. Remove
-// this adapter once the backend client accepts a context.
 type KSCloudAPIAdapter struct {
 	*v1.KSCloudAPI
 }
@@ -43,12 +38,12 @@ func GetKSCloudAPIAdapter() *KSCloudAPIAdapter {
 	}
 }
 
-func (a *KSCloudAPIAdapter) GetExceptions(_ context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
-	return a.KSCloudAPI.GetExceptions(clusterName)
+func (a *KSCloudAPIAdapter) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+	return a.GetExceptionsWithContext(ctx, clusterName)
 }
 
-func (a *KSCloudAPIAdapter) GetControlsInputs(_ context.Context, clusterName string) (map[string][]string, error) {
-	return a.KSCloudAPI.GetControlsInputs(clusterName)
+func (a *KSCloudAPIAdapter) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
+	return a.GetControlsInputsWithContext(ctx, clusterName)
 }
 
 // SetKSCloudAPIConnector registers a global instance of the KS Cloud client.

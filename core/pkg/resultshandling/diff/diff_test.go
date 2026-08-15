@@ -3,6 +3,7 @@ package diff
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type failingWriter struct {
+	err error
+}
+
+func (w failingWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
 
 func writeTempReport(t *testing.T, r scanReport) string {
 	t.Helper()
@@ -369,6 +378,30 @@ func TestPrintYAML(t *testing.T) {
 	assert.Contains(t, yamlStr, "resourceID: path-123/api/v1/Pod/demo")
 	assert.Contains(t, yamlStr, "controlID: C-0057")
 	assert.Contains(t, yamlStr, "controlName: Privileged container")
+}
+
+func TestPrintPretty_ReturnsWriteError(t *testing.T) {
+	wantErr := errors.New("write failed")
+	err := PrintPretty(failingWriter{err: wantErr}, &ChangeSet{
+		New: []ControlChange{{ControlID: "C-001"}},
+	})
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestPrintPretty_WritesExpectedOutput(t *testing.T) {
+	cs := &ChangeSet{
+		New: []ControlChange{{
+			ResourceID:  "resource",
+			ControlID:   "C-001",
+			ControlName: "Control",
+			Severity:    "High",
+		}},
+	}
+
+	var buf bytes.Buffer
+	require.NoError(t, PrintPretty(&buf, cs))
+	assert.Contains(t, buf.String(), "New failures")
+	assert.Contains(t, buf.String(), "Summary: 1 new, 0 resolved, 0 unchanged")
 }
 
 func TestCompute_OutputOrderIsDeterministic(t *testing.T) {

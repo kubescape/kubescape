@@ -116,9 +116,9 @@ func TestNoEvalErrorOnMinimalWorkloads(t *testing.T) {
 		for _, id := range bundleControlIDs {
 			ev, err := e.EvaluateControl(context.Background(), id, obj, nil)
 			if err != nil {
-				// The engine refuses policies it cannot honor offline (e.g.
-				// matchConditions); the scanner skips the whole rule, which is a
-				// separate, already-intentional path.
+				// The engine refuses policies it cannot honor offline (e.g. ones
+				// narrowed by a namespaceSelector); the scanner skips the whole
+				// rule, which is a separate, already-intentional path.
 				continue
 			}
 			if !ev.Applicable {

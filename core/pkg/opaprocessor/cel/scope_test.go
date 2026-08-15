@@ -57,6 +57,60 @@ func TestVAPAppliesTo(t *testing.T) {
 	}
 }
 
+// annotated returns obj carrying the resource-plural hint.
+func annotated(o map[string]any, plural string) map[string]any {
+	o["metadata"].(map[string]any)["annotations"] = map[string]any{resourcePluralAnnotation: plural}
+	return o
+}
+
+// TestVAPAppliesToCRDPlural covers the plurals the kind->resource guess does not
+// produce. A CRD registers spec.names.plural itself, so a policy constraining
+// "worker-pools" would be silently dropped by an exact compare against the
+// guessed "workerpools": the control evaluates against nothing and reads clean.
+func TestVAPAppliesToCRDPlural(t *testing.T) {
+	const apiVersion = "agentsubstrate.google.com/v1"
+	workerPool := func() map[string]any { return obj(apiVersion, "WorkerPool") }
+
+	cases := []struct {
+		name      string
+		resources []string
+		obj       map[string]any
+		want      bool
+	}{
+		{"hyphenated plural matches the guess", []string{"worker-pools"}, workerPool(), true},
+		{"underscored plural matches the guess", []string{"worker_pools"}, workerPool(), true},
+		{"guessed plural still matches exactly", []string{"workerpools"}, workerPool(), true},
+		{"annotation resolves a plural the guess cannot reach", []string{"wpools"}, annotated(workerPool(), "wpools"), true},
+		{"annotated plural matches a separated rule", []string{"worker-pools"}, annotated(workerPool(), "workerpools"), true},
+		{"unreachable plural without the annotation is out of scope", []string{"wpools"}, workerPool(), false},
+		{"blank annotation falls back to the guess", []string{"workerpools"}, annotated(workerPool(), "  "), true},
+		{"an unrelated resource is still out of scope", []string{"actortemplates"}, workerPool(), false},
+		{"a subresource rule never matches the bare resource", []string{"worker-pools/status"}, workerPool(), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := vapWithConstraints(rule([]string{"agentsubstrate.google.com"}, []string{"v1"}, tc.resources))
+			assert.Equal(t, tc.want, v.appliesTo(tc.obj))
+		})
+	}
+
+	t.Run("exclusion honors the same plural resolution", func(t *testing.T) {
+		v := &VAP{matchConstraints: &admissionregistrationv1.MatchResources{
+			ResourceRules:        []admissionregistrationv1.NamedRuleWithOperations{rule([]string{"*"}, []string{"*"}, []string{"*"})},
+			ExcludeResourceRules: []admissionregistrationv1.NamedRuleWithOperations{rule([]string{"agentsubstrate.google.com"}, []string{"v1"}, []string{"worker-pools"})},
+		}}
+		assert.False(t, v.appliesTo(workerPool()))
+		assert.True(t, v.appliesTo(obj(apiVersion, "ActorTemplate")))
+	})
+
+	t.Run("annotations that are not a string map fall back to the guess", func(t *testing.T) {
+		o := workerPool()
+		o["metadata"].(map[string]any)["annotations"] = map[string]any{resourcePluralAnnotation: 42}
+		v := vapWithConstraints(rule([]string{"agentsubstrate.google.com"}, []string{"v1"}, []string{"workerpools"}))
+		assert.True(t, v.appliesTo(o))
+	})
+}
+
 func TestVAPAppliesToWildcards(t *testing.T) {
 	any := vapWithConstraints(rule([]string{"*"}, []string{"*"}, []string{"*"}))
 	assert.True(t, any.appliesTo(obj("v1", "Pod")))
@@ -129,7 +183,7 @@ func TestVAPAppliesToCoversEveryBundleKind(t *testing.T) {
 						kind, ok := canonicalKinds[res]
 						require.Truef(t, ok, "policy %q constrains resource %q with no canonical Kind in the test; add it to canonicalKinds and confirm UnsafeGuessKindToResource maps that Kind back to %q", name, res, res)
 						assert.Truef(t, vap.appliesTo(obj(apiVersion, kind)),
-							"policy %q constrains %q but appliesTo rejects a %s %s; UnsafeGuessKindToResource likely mis-guessed the plural", name, res, apiVersion, kind)
+							"policy %q constrains %q but appliesTo rejects a %s %s; annotate scanned %s objects with %s=%q if the guess cannot reach that plural", name, res, apiVersion, kind, kind, resourcePluralAnnotation, res)
 					}
 				}
 			}

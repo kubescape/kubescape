@@ -131,18 +131,24 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 	containPrettyPrinter := false
 	outputPrinters := make([]printer.IPrinter, 0)
 	resolvedPaths := make(map[string]string)
-	closeConfiguredPrinters := func() {
+	// closeConfiguredPrinters closes already configured output printers upon setup failure.
+	closeConfiguredPrinters := func() error {
+		var closeErr error
 		for _, configuredPrinter := range outputPrinters {
-			if closer, ok := configuredPrinter.(interface{ CloseWriter() }); ok {
+			if closer, ok := configuredPrinter.(interface{ CloseWriter() error }); ok {
+				if err := closer.CloseWriter(); err != nil {
+					closeErr = errors.Join(closeErr, err)
+				}
+			} else if closer, ok := configuredPrinter.(interface{ CloseWriter() }); ok {
 				closer.CloseWriter()
 			}
 		}
+		return closeErr
 	}
 	for _, format := range formats {
 		usesPrettyPrinter, err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format)
 		if err != nil {
-			closeConfiguredPrinters()
-			return nil, err
+			return nil, errors.Join(err, closeConfiguredPrinters())
 		}
 
 		if usesPrettyPrinter && containPrettyPrinter {
@@ -151,16 +157,14 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 
 		if path := resolvedOutputPath(format, scanInfo.Output); path != "" {
 			if existing, collision := resolvedPaths[path]; collision {
-				closeConfiguredPrinters()
-				return nil, fmt.Errorf("output path collision: formats %q and %q both resolve to %q; specify distinct output paths or use format-specific file extensions", existing, format, path)
+				return nil, errors.Join(fmt.Errorf("output path collision: formats %q and %q both resolve to %q; specify distinct output paths or use format-specific file extensions", existing, format, path), closeConfiguredPrinters())
 			}
 			resolvedPaths[path] = format
 		}
 
 		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo, clusterName)
 		if err := printerHandler.SetWriter(ctx, scanInfo.Output); err != nil {
-			closeConfiguredPrinters()
-			return nil, fmt.Errorf("configure %q output: %w", format, err)
+			return nil, errors.Join(fmt.Errorf("configure %q output: %w", format, err), closeConfiguredPrinters())
 		}
 		outputPrinters = append(outputPrinters, printerHandler)
 
@@ -197,6 +201,14 @@ func fileExtForFormat(format string) string {
 		return ext
 	}
 	return printer.PrettyOutputExt
+}
+
+// collectPolicies pins the shared handler for exactly as long as its caches are
+// in use, so an idle registry sweep cannot close them during collection.
+func collectPolicies(ctx context.Context, clusterName string, policyIdentifiers []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (*cautils.OPASessionObj, error) {
+	policyHandler, release := policyhandler.NewPolicyHandlerWithRelease(clusterName)
+	defer release()
+	return policyHandler.CollectPolicies(ctx, policyIdentifiers, scanInfo, getters)
 }
 
 func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
@@ -254,7 +266,8 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 		spanInit.End()
 		return nil, err
 	}
-	getters.ExceptionsGetter, err = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	var exceptionsFromCache bool
+	getters.ExceptionsGetter, exceptionsFromCache, err = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
 	if err != nil {
 		spanInit.End()
 		return nil, err
@@ -276,14 +289,16 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 
 	// ===================== policies =====================
 	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies")
-	policyHandler := policyhandler.NewPolicyHandler(interfaces.tenantConfig.GetContextName())
-	scanData, err := policyHandler.CollectPolicies(ctxPolicies, policyIdentifiers, scanInfo, &getters)
+	scanData, err := collectPolicies(ctxPolicies, interfaces.tenantConfig.GetContextName(), policyIdentifiers, scanInfo, &getters)
 	if err != nil {
 		spanInit.End()
 		return resultsHandling, err
 	}
 	if controlInputsFromCache {
 		scanData.PolicyDegradations = append(scanData.PolicyDegradations, cautils.PolicyDegradation{Component: "controlInputs", Reason: "failed to fetch from GitHub, loaded from local cache"})
+	}
+	if exceptionsFromCache {
+		scanData.PolicyDegradations = append(scanData.PolicyDegradations, cautils.PolicyDegradation{Component: "exceptions", Reason: "failed to fetch from GitHub, loaded from local cache"})
 	}
 	spanPolicies.End()
 
@@ -347,6 +362,9 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 		reportResults.ControlTimeout = scanInfo.ControlTimeout
 		if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
 			logger.L().Ctx(ctxOpa).Error("failed to process rules", helpers.Error(err))
+			// The eager listener finalizes its accumulated results before returning
+			// an error. Streaming errors can return before that invariant holds.
+			resultsHandling.SetData(scanData)
 			return resultsHandling, fmt.Errorf("%w", err)
 		}
 	}
