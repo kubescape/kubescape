@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -842,6 +843,18 @@ func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err
 	decoder.UseNumber()
 	if err := decoder.Decode(&jsonObj); err != nil {
 		return workloads, err
+	}
+
+	// A manifest file must contain exactly one top-level JSON value. Decoder.Decode
+	// intentionally stops after the first value, so without this EOF check a file
+	// containing a valid manifest followed by another value or malformed trailing
+	// data is accepted and the unscanned suffix is silently ignored.
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return workloads, errors.New("multiple top-level JSON values are not supported; use a JSON array or Kubernetes List")
+		}
+		return workloads, fmt.Errorf("invalid trailing JSON data: %w", err)
 	}
 
 	if convertErr := convertJsonToWorkload(jsonObj, &workloads); convertErr != nil {

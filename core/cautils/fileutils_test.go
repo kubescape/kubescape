@@ -49,6 +49,21 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 	}
 }
 
+func TestLoadResourcesFromFiles_RejectsTrailingJSONInExplicitFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifests.json")
+	data := []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"first"}}
+{"apiVersion":"v1","kind":"Service","metadata":{"name":"second"}}`)
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+
+	workloads, skipped, err := LoadResourcesFromFiles(context.Background(), path, filepath.Dir(path), nil)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "multiple top-level JSON values")
+	assert.Empty(t, workloads)
+	require.Len(t, skipped, 1)
+	assert.Equal(t, path, skipped[0].Path)
+}
+
 func TestLoadResourcesFromFiles_SupportsMixedCaseExtensions(t *testing.T) {
 	o, _ := os.Getwd()
 	testDir := filepath.Join(o, "testdata", "mixed_extensions")
@@ -1031,6 +1046,25 @@ func TestReadJsonFile(t *testing.T) {
 			content:   `{not valid json`,
 			wantCount: 0,
 			wantErr:   true,
+		},
+		{
+			name: "concatenated JSON objects are rejected instead of scanning only the first",
+			content: `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"first"}}
+				{"apiVersion":"v1","kind":"Service","metadata":{"name":"ignored-before-fix"}}`,
+			wantCount: 0,
+			wantErr:   true,
+		},
+		{
+			name:      "valid manifest followed by malformed data is rejected",
+			content:   `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"first"}} trailing`,
+			wantCount: 0,
+			wantErr:   true,
+		},
+		{
+			name: "trailing whitespace remains valid",
+			content: `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"whitespace"}}
+				   `,
+			wantCount: 1,
 		},
 		{
 			name:      "empty JSON object (no kind) returns no workloads",
