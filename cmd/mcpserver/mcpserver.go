@@ -336,7 +336,7 @@ func createRuntimeToolsAndResources(ksServer *KubescapeMcpserver) {
 		),
 		mcp.WithString("workload_kind",
 			mcp.Required(),
-			mcp.Description("Kind of the workload (e.g., Pod, Deployment, DaemonSet, StatefulSet)."),
+			mcp.Description("Kind of the workload (e.g., Pod, Deployment, DaemonSet, StatefulSet, ReplicaSet, Job, CronJob)."),
 		),
 	)
 
@@ -1077,6 +1077,12 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			workloadObj, err = k8sClient.KubernetesClient.AppsV1().DaemonSets(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
 		case "statefulset":
 			workloadObj, err = k8sClient.KubernetesClient.AppsV1().StatefulSets(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
+		case "replicaset":
+			workloadObj, err = k8sClient.KubernetesClient.AppsV1().ReplicaSets(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
+		case "job":
+			workloadObj, err = k8sClient.KubernetesClient.BatchV1().Jobs(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
+		case "cronjob":
+			workloadObj, err = k8sClient.KubernetesClient.BatchV1().CronJobs(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
 		default:
 			return mcp.NewToolResultError(fmt.Sprintf("unsupported workload kind: %s", workloadKindStr)), nil
 		}
