@@ -141,21 +141,56 @@ func TestExceedsSeverity(t *testing.T) {
 
 func Test_enforceSeverityThresholds(t *testing.T) {
 	testCases := []struct {
-		Description      string
-		SeverityCounters *reportsummary.SeverityCounters
-		ScanInfo         *cautils.ScanInfo
-		Want             bool
+		Description    string
+		SummaryDetails *reportsummary.SummaryDetails
+		ScanInfo       *cautils.ScanInfo
+		Want           bool
 	}{
 		{
 			"Exceeding Critical severity counter should call the terminating function",
-			&reportsummary.SeverityCounters{CriticalSeverityCounter: 1},
+			&reportsummary.SummaryDetails{ResourcesSeverityCounters: reportsummary.SeverityCounters{CriticalSeverityCounter: 1}},
 			&cautils.ScanInfo{FailThresholdSeverity: apis.SeverityCriticalString},
 			true,
 		},
 		{
 			"Non-exceeding severity counter should call not the terminating function",
-			&reportsummary.SeverityCounters{},
+			&reportsummary.SummaryDetails{ResourcesSeverityCounters: reportsummary.SeverityCounters{}},
 			&cautils.ScanInfo{FailThresholdSeverity: apis.SeverityCriticalString},
+			false,
+		},
+		{
+			// Regression: SeverityCounters.Increase silently drops Unknown
+			// severity, so a failing control with a zero score factor never
+			// reaches the counters and used to pass every threshold.
+			"Failed resources on a control with unknown severity trip the lowest threshold",
+			&reportsummary.SummaryDetails{Controls: map[string]reportsummary.ControlSummary{
+				"C-0001": {ScoreFactor: 0, StatusCounters: reportsummary.StatusCounters{FailedResources: 2}},
+			}},
+			&cautils.ScanInfo{FailThresholdSeverity: apis.SeverityLowString},
+			true,
+		},
+		{
+			"Failed resources on a control with unknown severity trip the highest threshold",
+			&reportsummary.SummaryDetails{Controls: map[string]reportsummary.ControlSummary{
+				"C-0001": {ScoreFactor: 0, StatusCounters: reportsummary.StatusCounters{FailedResources: 1}},
+			}},
+			&cautils.ScanInfo{FailThresholdSeverity: apis.SeverityCriticalString},
+			true,
+		},
+		{
+			"Passed resources on a control with unknown severity do not trip the threshold",
+			&reportsummary.SummaryDetails{Controls: map[string]reportsummary.ControlSummary{
+				"C-0001": {ScoreFactor: 0, StatusCounters: reportsummary.StatusCounters{PassedResources: 3}},
+			}},
+			&cautils.ScanInfo{FailThresholdSeverity: apis.SeverityLowString},
+			false,
+		},
+		{
+			"Failed resources on bucketed severities are not counted as unknown",
+			&reportsummary.SummaryDetails{Controls: map[string]reportsummary.ControlSummary{
+				"C-0002": {ScoreFactor: 5, StatusCounters: reportsummary.StatusCounters{FailedResources: 4}},
+			}},
+			&cautils.ScanInfo{FailThresholdSeverity: apis.SeverityHighString},
 			false,
 		},
 	}
@@ -164,17 +199,32 @@ func Test_enforceSeverityThresholds(t *testing.T) {
 		t.Run(
 			tc.Description,
 			func(t *testing.T) {
-				severityCounters := tc.SeverityCounters
+				summaryDetails := tc.SummaryDetails
 				scanInfo := tc.ScanInfo
 				want := tc.Want
 
-				err := enforceSeverityThresholds(severityCounters, scanInfo)
+				err := enforceSeverityThresholds(summaryDetails, scanInfo)
 
 				if (err != nil) != want {
-					t.Errorf("got error: %v, want error: %v", err != nil, want)
+					t.Errorf("got error: %v, want error: %v", err, want)
 				}
 			},
 		)
+	}
+}
+
+func Test_countFailedResourcesWithUnbucketedSeverity(t *testing.T) {
+	summaryDetails := &reportsummary.SummaryDetails{Controls: map[string]reportsummary.ControlSummary{
+		"C-0001": {ScoreFactor: 9.5, StatusCounters: reportsummary.StatusCounters{FailedResources: 3}}, // Critical
+		"C-0002": {ScoreFactor: 0, StatusCounters: reportsummary.StatusCounters{FailedResources: 2}},   // Unknown
+		"C-0003": {ScoreFactor: 2, StatusCounters: reportsummary.StatusCounters{FailedResources: 1}},   // Low
+		"C-0004": {ScoreFactor: 0, StatusCounters: reportsummary.StatusCounters{PassedResources: 7}},   // Unknown, passed only
+	}}
+
+	got := countFailedResourcesWithUnbucketedSeverity(summaryDetails)
+	want := 2
+	if got != want {
+		t.Errorf("got: %d, want: %d", got, want)
 	}
 }
 
