@@ -38,7 +38,7 @@ func DetectProfileDrift(manifest []byte, profile *storagev1beta1.ContainerProfil
 		logger.L().Debug("error unmarshaling manifest", helpers.Error(err))
 		return fixes
 	}
-	logger.L().Debug(fmt.Sprintf("DETECT: manifest len=%d, profile_caps=%v", len(manifest), profile.Spec.Capabilities))
+	logger.L().Debug("evaluating profile capabilities", helpers.Interface("profile_caps", profile.Spec.Capabilities))
 
 	var containersPath string
 	var containersList []interface{}

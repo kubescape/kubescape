@@ -11,6 +11,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -171,8 +172,8 @@ func TestFixReportCache_FixRegionsCachedPerExpression(t *testing.T) {
 	ctx := context.Background()
 
 	cache := newFixReportCache()
-	doc0 := cache.fixRegions(ctx, path, `select(di==0).`+privilegedFixPath+` |= false`)
-	doc1 := cache.fixRegions(ctx, path, `select(di==1).`+privilegedFixPath+` |= false`)
+	doc0 := cache.fixRegions(ctx, path, fixhandler.DocumentFix{DocumentIndex: 0, Fix: armotypes.FixPath{Path: privilegedFixPath, Value: "false"}})
+	doc1 := cache.fixRegions(ctx, path, fixhandler.DocumentFix{DocumentIndex: 1, Fix: armotypes.FixPath{Path: privilegedFixPath, Value: "false"}})
 
 	require.NotEmpty(t, doc0)
 	require.NotEmpty(t, doc1)
@@ -180,7 +181,7 @@ func TestFixReportCache_FixRegionsCachedPerExpression(t *testing.T) {
 
 	// removing the file proves the repeat came from the cache rather than disk
 	require.NoError(t, os.Remove(path))
-	assert.Equal(t, doc0, cache.fixRegions(ctx, path, `select(di==0).`+privilegedFixPath+` |= false`))
+	assert.Equal(t, doc0, cache.fixRegions(ctx, path, fixhandler.DocumentFix{DocumentIndex: 0, Fix: armotypes.FixPath{Path: privilegedFixPath, Value: "false"}}))
 	assert.Len(t, cache.regions, 2)
 }
 
@@ -189,7 +190,7 @@ func TestFixReportCache_FixRegionsCachesUnappliableExpression(t *testing.T) {
 	ctx := context.Background()
 
 	cache := newFixReportCache()
-	assert.Empty(t, cache.fixRegions(ctx, path, "this is not a yq expression"))
+	assert.Empty(t, cache.fixRegions(ctx, path, fixhandler.DocumentFix{Fix: armotypes.FixPath{Path: "this is not a yq expression", Value: ""}}))
 	assert.Len(t, cache.regions, 1, "an expression that cannot be applied is diagnosed once, not once per control")
 }
 

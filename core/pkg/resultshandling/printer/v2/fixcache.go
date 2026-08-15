@@ -26,7 +26,9 @@ type fixRegion struct {
 // matter: regions differ per file and per expression.
 type fixCacheKey struct {
 	path       string
-	expression string
+	docIndex   int
+	fixPath    string
+	fixValue   string
 }
 
 // readResult keeps a read with its error, so a failed read is answered from the
@@ -132,26 +134,26 @@ func (c *fixReportCache) locationResolver(path, format string) *locationresolver
 // fixRegions returns the regions applying one fix expression to one manifest
 // produces, computing them on first use. An expression that cannot be applied
 // caches an empty set, so it is diagnosed once rather than per control.
-func (c *fixReportCache) fixRegions(ctx context.Context, path, expression string) []fixRegion {
-	key := fixCacheKey{path: path, expression: expression}
+func (c *fixReportCache) fixRegions(ctx context.Context, path string, fix fixhandler.DocumentFix) []fixRegion {
+	key := fixCacheKey{path: path, docIndex: fix.DocumentIndex, fixPath: fix.Fix.Path, fixValue: fix.Fix.Value}
 	if regions, ok := c.regions[key]; ok {
 		return regions
 	}
 
-	regions := c.computeFixRegions(ctx, path, expression)
+	regions := c.computeFixRegions(ctx, path, fix)
 	c.regions[key] = regions
 	return regions
 }
 
-func (c *fixReportCache) computeFixRegions(ctx context.Context, path, expression string) []fixRegion {
+func (c *fixReportCache) computeFixRegions(ctx context.Context, path string, fix fixhandler.DocumentFix) []fixRegion {
 	fileAsString, err := c.fileString(path)
 	if err != nil {
 		return nil
 	}
 
-	fixedYamlString, err := fixhandler.ApplyFixToContent(ctx, fileAsString, expression)
+	fixedYamlString, err := fixhandler.NewYAMLTreeEditor().ApplyFixes(fileAsString, []fixhandler.DocumentFix{fix})
 	if err != nil {
-		logger.L().Debug("failed to fix "+path+" with "+expression, helpers.Error(err))
+		logger.L().Debug("failed to fix "+path, helpers.Error(err))
 		return nil
 	}
 

@@ -36,9 +36,11 @@ func TestPrepareResourcesToFix_ProfileDrift(t *testing.T) {
 			Capabilities: []string{"NET_ADMIN", "SYS_TIME"},
 		},
 	}
-	profileData, _ := json.Marshal(profile)
+	profileData, err := json.Marshal(profile)
+	require.NoError(t, err)
 
-	tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
+	tmpDir, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	profilePath := filepath.Join(tmpDir, "profile.json")
 	require.NoError(t, os.WriteFile(profilePath, profileData, 0644))
 

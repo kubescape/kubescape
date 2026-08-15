@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
-	"strconv"
-	"strings"
+
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -313,7 +311,14 @@ func TestApplyFixToContent_CraftedFixPathLeaksNothing(t *testing.T) {
 		assert.Contains(t, skipped[0], "not a plain yaml path")
 	}
 
-	got, err := ApplyFixToContent(context.Background(), yamlContent, reduceYamlExpressions(rfi))
+	var fixes []DocumentFix
+	for _, fix := range rfi.YamlExpressions {
+		fixes = append(fixes, DocumentFix{
+			DocumentIndex: 0,
+			Fix:           fix,
+		})
+	}
+	got, err := NewYAMLTreeEditor().ApplyFixes(yamlContent, fixes)
 	require.NoError(t, err)
 	assert.NotContains(t, got, "super-secret-token")
 }
@@ -1186,32 +1191,4 @@ func singleResourceReport(t *testing.T, sourcePath, relPath string) *reporthandl
 			}},
 		}},
 	}
-}
-
-func parseMockExpression(expr string) []DocumentFix {
-	var fixes []DocumentFix
-	for _, part := range strings.Split(expr, "|") {
-		part = strings.TrimSpace(part)
-		if part == "" || strings.HasPrefix(part, "del(") {
-			continue // Skip deletions in this mock
-		}
-		
-		re := regexp.MustCompile(`select\(di==(\d+)\)\.(.*?)\s*\|=\s*(.*)`)
-		matches := re.FindStringSubmatch(part)
-		if len(matches) == 4 {
-			di, _ := strconv.Atoi(matches[1])
-			val := matches[3]
-			if strings.HasPrefix(val, "\"") {
-				val = val[1:len(val)-1]
-			}
-			fixes = append(fixes, DocumentFix{
-				DocumentIndex: di,
-				Fix: armotypes.FixPath{
-					Path: matches[2],
-					Value: val,
-				},
-			})
-		}
-	}
-	return fixes
 }

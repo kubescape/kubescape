@@ -1,7 +1,9 @@
 package fixhandler
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -52,7 +54,7 @@ func (e *YAMLTreeEditor) ApplyFixes(yamlAsString string, fixes []DocumentFix) (s
 
 		edit, err := e.calculateEdit(docNode.Content[0], fix.Fix)
 		if err != nil {
-			return "", err
+			continue // Skip if path not applicable
 		}
 		if edit != nil {
 			currentYaml = e.applyEdits(currentYaml, []YAMLEdit{*edit})
@@ -108,7 +110,11 @@ func (e *YAMLTreeEditor) applyEdits(yaml string, edits []YAMLEdit) string {
 		if lineEdits, ok := editsByLine[lineNum]; ok {
 			for _, edit := range lineEdits {
 				if edit.Insert {
-					result = append(result, edit.Text)
+					if strings.Contains(edit.Text, "\n") {
+						result = append(result, strings.Split(edit.Text, "\n")...)
+					} else {
+						result = append(result, edit.Text)
+					}
 				}
 			}
 		}
@@ -119,7 +125,11 @@ func (e *YAMLTreeEditor) applyEdits(yaml string, edits []YAMLEdit) string {
 		if ln > maxLine {
 			for _, edit := range lineEdits {
 				if edit.Insert {
-					result = append(result, edit.Text)
+					if strings.Contains(edit.Text, "\n") {
+						result = append(result, strings.Split(edit.Text, "\n")...)
+					} else {
+						result = append(result, edit.Text)
+					}
 				}
 			}
 		}
@@ -180,11 +190,15 @@ func (e *YAMLTreeEditor) traverse(node *yaml.Node, tokens []string, value string
 
 		if isLast {
 			valNode := node.Content[idx]
+			removeLen := len(valNode.Value)
+			if valNode.Style == yaml.DoubleQuotedStyle || valNode.Style == yaml.SingleQuotedStyle {
+				removeLen += 2
+			}
 			return &YAMLEdit{
 				Line:   valNode.Line,
 				Column: valNode.Column,
 				Text:   value,
-				Remove: len(valNode.Value),
+				Remove: removeLen,
 			}, nil
 		} else {
 			return e.traverse(node.Content[idx], tokens[1:], value, node.Column)
@@ -203,11 +217,15 @@ func (e *YAMLTreeEditor) traverse(node *yaml.Node, tokens []string, value string
 			if keyNode.Value == cleanToken {
 				if isLast {
 					if valNode.Kind == yaml.ScalarNode {
+						removeLen := len(valNode.Value)
+						if valNode.Style == yaml.DoubleQuotedStyle || valNode.Style == yaml.SingleQuotedStyle {
+							removeLen += 2
+						}
 						return &YAMLEdit{
 							Line:   valNode.Line,
 							Column: valNode.Column,
 							Text:   value,
-							Remove: len(valNode.Value),
+							Remove: removeLen,
 						}, nil
 					}
 					return nil, fmt.Errorf("cannot replace non-scalar node yet")
@@ -293,7 +311,7 @@ func decodeDocumentRoots(yamlAsString string) ([]*yaml.Node, error) {
 		var doc yaml.Node
 		err := decoder.Decode(&doc)
 		if err != nil {
-			if err.Error() == "EOF" {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return nil, err

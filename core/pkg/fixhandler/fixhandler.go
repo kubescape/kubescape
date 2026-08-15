@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -932,7 +932,6 @@ func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(docu
 				continue
 			}
 
-			rfi.YamlExpressions[rulePaths.FixPath.Path] = rulePaths.FixPath
 			yamlExpression := FixPathToValidYamlExpression(rulePaths.FixPath.Path, rulePaths.FixPath.Value, documentIndex)
 			if yamlExpression == "" {
 				logger.L().Debug("skipping fix path that is not a plain yaml path",
@@ -940,7 +939,7 @@ func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(docu
 				skippedReasons = append(skippedReasons, "skipped: fix path is not a plain yaml path")
 				continue
 			}
-			rfi.YamlExpressions[yamlExpression] = rulePaths.FixPath
+			rfi.YamlExpressions[rulePaths.FixPath.Path] = rulePaths.FixPath
 			added++
 		}
 
@@ -953,18 +952,8 @@ func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(docu
 	return added, skippedReasons
 }
 
-// FixPathToValidYamlExpression is deprecated.
-func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int) string {
-	return ""
-// reduceYamlExpressions reduces the number of yaml expressions to a single one
-func reduceYamlExpressions(resource *ResourceFixInfo) string {
-	expressions := make([]string, 0, len(resource.YamlExpressions))
-	for expr := range resource.YamlExpressions {
-		expressions = append(expressions, expr)
-	}
-	sort.Strings(expressions)
-	return strings.Join(expressions, " | ")
-}
+
+
 
 // safeFixPath matches the subset of yq's expression grammar that a fix path is
 // allowed to use: dot-separated keys — bare or double-quoted — each optionally
