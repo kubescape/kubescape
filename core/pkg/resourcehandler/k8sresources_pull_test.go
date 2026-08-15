@@ -221,6 +221,12 @@ func (s *stubHostSensor) CollectResources(_ context.Context) ([]hostsensor.HostS
 	return nil, s.infoMap, nil
 }
 
+func (s *stubHostSensor) StreamTelemetry(_ context.Context) (<-chan hostsensorutils.SyscallEvent, error) {
+	events := make(chan hostsensorutils.SyscallEvent)
+	close(events)
+	return events, nil
+}
+
 // TestGetResources_HostSensorInfoMapMerged is a regression test for the bug
 // where the host-sensor infoMap replaced sessionObj.InfoMap wholesale instead
 // of being merged into it, silently discarding GVR pull-failure entries that
