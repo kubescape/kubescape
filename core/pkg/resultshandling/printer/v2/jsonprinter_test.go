@@ -5,11 +5,14 @@ import (
 	"os"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewJsonPrinter(t *testing.T) {
@@ -330,7 +333,7 @@ func TestEnrichResultsWithSeverity(t *testing.T) {
 	}
 
 	// Enrich results with severity
-	enrichedResults := enrichResultsWithSeverity(results, controlSummaries)
+	enrichedResults := enrichResultsWithSeverity(results, controlSummaries, nil)
 
 	// Verify results structure
 	assert.Equal(t, 2, len(enrichedResults))
@@ -349,4 +352,76 @@ func TestEnrichResultsWithSeverity(t *testing.T) {
 	// Verify unknown control gets "Unknown" severity
 	assert.Equal(t, "Unknown", enrichedResults[1].AssociatedControls[1].Severity)
 	assert.Equal(t, "C-0003", enrichedResults[1].AssociatedControls[1].ControlID)
+}
+
+func TestEnrichResultsWithSeverity_PopulatesEvidenceFromResources(t *testing.T) {
+	controlSummaries := reportsummary.ControlSummaries{
+		"C-0001": reportsummary.ControlSummary{ControlID: "C-0001", ScoreFactor: 8.0},
+	}
+	results := []resourcesresults.Result{
+		{
+			ResourceID: "test-resource-1",
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0001",
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{
+							Paths: []armotypes.PosturePaths{
+								{FailedPath: "spec.hostPID"},
+								{FailedPath: "spec.doesNotExist"},
+								{FailedPath: "data.password"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	allResources := map[string]workloadinterface.IMetadata{
+		"test-resource-1": &mockResource{
+			kind: "Secret",
+			obj: map[string]any{
+				"spec": map[string]any{"hostPID": true},
+				"data": map[string]any{"password": "hunter2"},
+			},
+		},
+		// unrelated entry to confirm lookup is keyed correctly
+		"test-resource-2": &mockResource{obj: map[string]any{}},
+	}
+
+	enrichedResults := enrichResultsWithSeverity(results, controlSummaries, allResources)
+
+	require.Len(t, enrichedResults, 1)
+	evidence := enrichedResults[0].AssociatedControls[0].Evidence
+	// spec.doesNotExist is unresolvable (omitted) and data.password is
+	// redacted (Secret kind) - only spec.hostPID should surface.
+	require.Len(t, evidence, 1)
+	assert.Equal(t, PathValue{Path: "spec.hostPID", Value: "true"}, evidence[0])
+
+	// The original FailedPath strings on the embedded control are untouched.
+	rawPaths := enrichedResults[0].AssociatedControls[0].ResourceAssociatedRules[0].Paths
+	require.Len(t, rawPaths, 3)
+	assert.Equal(t, "spec.hostPID", rawPaths[0].FailedPath)
+}
+
+func TestEnrichResultsWithSeverity_NoResourceMatchLeavesEvidenceNil(t *testing.T) {
+	controlSummaries := reportsummary.ControlSummaries{}
+	results := []resourcesresults.Result{
+		{
+			ResourceID: "missing-resource",
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0001",
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{Paths: []armotypes.PosturePaths{{FailedPath: "spec.hostPID"}}},
+					},
+				},
+			},
+		},
+	}
+
+	enrichedResults := enrichResultsWithSeverity(results, controlSummaries, nil)
+
+	require.Len(t, enrichedResults, 1)
+	assert.Nil(t, enrichedResults[0].AssociatedControls[0].Evidence)
 }
