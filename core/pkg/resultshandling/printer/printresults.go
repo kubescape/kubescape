@@ -64,19 +64,20 @@ const (
 // than re-deriving it, so a format can never resolve to a path its printer
 // does not write. Every entry in AllFormats is covered.
 var FormatOutputExt = map[string]string{
-	PrettyFormat:      PrettyOutputExt,
-	JsonFormat:        JsonOutputExt,
-	JunitResultFormat: JunitOutputExt,
-	PrometheusFormat:  PrometheusOutputExt,
-	PdfFormat:         PdfOutputExt,
-	HtmlFormat:        HtmlOutputExt,
-	SARIFFormat:       SARIFOutputExt,
-	GitLabSASTFormat:  JsonOutputExt,
-	YamlFormat:        YamlOutputExt,
-	CsvFormat:         CsvOutputExt,
-	MarkdownFormat:    MarkdownOutputExt,
-	CycloneDXFormat:   CycloneDXOutputExt,
-	SPDXFormat:        SPDXOutputExt,
+	PrettyFormat:       PrettyOutputExt,
+	JsonFormat:         JsonOutputExt,
+	JunitResultFormat:  JunitOutputExt,
+	PrometheusFormat:   PrometheusOutputExt,
+	PdfFormat:          PdfOutputExt,
+	HtmlFormat:         HtmlOutputExt,
+	SARIFFormat:        SARIFOutputExt,
+	GitLabSASTFormat:   JsonOutputExt,
+	YamlFormat:         YamlOutputExt,
+	CsvFormat:          CsvOutputExt,
+	MarkdownFormat:     MarkdownOutputExt,
+	CycloneDXFormat:    CycloneDXOutputExt,
+	SPDXFormat:         SPDXOutputExt,
+	PolicyReportFormat: PolicyReportOutputExt,
 }
 
 type IPrinter interface {
