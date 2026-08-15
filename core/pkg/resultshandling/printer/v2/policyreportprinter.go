@@ -101,11 +101,11 @@ func (pp *PolicyReportPrinter) SetWriter(ctx context.Context, outputFile string)
 		if ext != printer.YamlOutputExt && ext != ".yml" {
 			outputFile = outputFile + printer.YamlOutputExt
 		}
+		var err error
+		pp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
 	}
 	pp.writer = printer.GetWriter(ctx, outputFile)
-	if pp.writer == nil {
-		return fmt.Errorf("failed to open writer for PolicyReport output %q", outputFile)
-	}
 	return nil
 }
 
