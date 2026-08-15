@@ -35,7 +35,8 @@ func NewPdfPrinter() *PdfPrinter {
 	return &PdfPrinter{}
 }
 
-func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	outputFile = strings.TrimSpace(outputFile)
 	if outputFile == "" {
 		// Binary PDF must never fall back to stdout: it corrupts TTYs and
@@ -46,10 +47,15 @@ func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) {
 	} else if filepath.Ext(outputFile) != printer.PdfOutputExt {
 		outputFile = outputFile + printer.PdfOutputExt
 	}
-	// PDF must never fall back to stdout on file-create errors either
-	// (e.g. read-only cwd) — use the no-stdout-fallback helper, which
-	// falls back to a temp file rather than corrupting the TTY.
+	if explicitOutput {
+		var err error
+		pp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
+	// The implicit PDF destination must never fall back to stdout. Preserve
+	// the existing temp-file fallback if the default path cannot be opened.
 	pp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+printer.PdfOutputExt)
+	return nil
 }
 
 func (pp *PdfPrinter) Score(score float32) {
@@ -68,7 +74,7 @@ func (pp *PdfPrinter) PrintNextSteps() {
 }
 
 // ActionPrint is responsible for generating a report in pdf format
-func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	var outBuff []byte
 	var err error
 
@@ -77,20 +83,20 @@ func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 	} else if len(imageScanData) > 0 {
 		outBuff, err = pp.generateImagePdf(imageScanData)
 	} else {
-		logger.L().Ctx(ctx).Error("failed to print results, missing data")
-		return
+		return fmt.Errorf("failed to print results, missing data")
 	}
 
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to generate pdf format", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to generate pdf format: %w", err)
 	}
 
 	if _, err := pp.writer.Write(outBuff); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to write results: %w", err)
 	}
 	printer.LogOutputFile(pp.writer.Name())
+	return nil
 }
 
 // generateImagePdf builds a CVE-table PDF report for an image scan (#2782)
@@ -146,7 +152,7 @@ func (pp *PdfPrinter) generatePdf(summaryDetails *reportsummary.SummaryDetails) 
 
 	template := pdf.NewReportTemplate()
 	template.GenerateHeader(utils.FrameworksScoresToString(summaryDetails.ListFrameworks()), time.Now().Format(time.DateTime))
-	err := template.GenerateTable(pp.getTableObjects(summaryDetails, sortedControlIDs),
+	err := template.GenerateTable(pp.getTableObjects(summaryDetails, sortedControlIDs, infoToPrintInfo),
 		summaryDetails.NumberOfResources().Failed(), summaryDetails.NumberOfResources().All(), summaryDetails.ComplianceScore)
 
 	if err != nil {
@@ -166,9 +172,9 @@ func (pp *PdfPrinter) getFormattedInformation(infoMap []infoStars) []string {
 	return rows
 }
 
-// getTableData is responsible for getting the table data in a standardized format
-func (pp *PdfPrinter) getTableObjects(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) *[]pdf.TableObject {
-	infoToPrintInfoMap := mapInfoToPrintInfo(summaryDetails.Controls)
+// getTableData is responsible for getting the table data in a standardized format.
+// The markers are taken from the caller so the table and the legend share one list.
+func (pp *PdfPrinter) getTableObjects(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, infoToPrintInfoMap []infoStars) *[]pdf.TableObject {
 	var controls []pdf.TableObject
 	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
 		for _, c := range sortedControlID {
@@ -193,8 +199,10 @@ func getSeverityColor(severity string) *props.Color {
 	return &props.BlackColor
 }
 
-func (p *PdfPrinter) CloseWriter() {
+// CloseWriter closes the PDF output writer, returning any error from flushing or closing.
+func (p *PdfPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }

@@ -43,6 +43,10 @@ func (m collectResourcesMock) EstimateClusterSize(ctx context.Context, scanInfo 
 	return 0, nil
 }
 
+func (m collectResourcesMock) Preflight(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (*PreflightResult, error) {
+	return nil, nil
+}
+
 func TestCollectResources(t *testing.T) {
 	tests := []struct {
 		name       string

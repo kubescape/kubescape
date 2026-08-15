@@ -18,12 +18,7 @@ import (
 func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
 	ctx, span := otel.Tracer("").Start(ctx, "resourcehandler.CollectResources")
 	defer span.End()
-	opaSessionObj.Report.ClusterAPIServerInfo = rsrcHandler.GetClusterAPIServerInfo(ctx)
-
-	// set cloud metadata only when scanning a cluster
-	if rsrcHandler.GetCloudProvider() != "" {
-		setCloudMetadata(opaSessionObj, rsrcHandler.GetCloudProvider())
-	}
+	CollectClusterMetadata(ctx, rsrcHandler, opaSessionObj)
 
 	resourcesMap, allResources, externalResources, excludedRulesMap, getErr := rsrcHandler.GetResources(ctx, opaSessionObj, scanInfo)
 
@@ -46,6 +41,18 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, opaSess
 	}
 
 	return nil
+}
+
+// CollectClusterMetadata initializes the report metadata that is also used as
+// policy input. Resource collection modes must call it before policy
+// evaluation so eager and streaming scans evaluate with the same cluster
+// context.
+func CollectClusterMetadata(ctx context.Context, rsrcHandler IResourceHandler, opaSessionObj *cautils.OPASessionObj) {
+	opaSessionObj.Report.ClusterAPIServerInfo = rsrcHandler.GetClusterAPIServerInfo(ctx)
+
+	if provider := rsrcHandler.GetCloudProvider(); provider != "" {
+		setCloudMetadata(opaSessionObj, provider)
+	}
 }
 
 func setCloudMetadata(opaSessionObj *cautils.OPASessionObj, provider string) {

@@ -43,6 +43,7 @@ kubescape scan [target] [flags]
 | `-e, --exclude-namespaces <ns>` | Namespaces to exclude (comma-separated) | - |
 | `--encrypt` | Encrypt sensitive report metadata using the master key provided through the `KUBESCAPE_MASTER_KEY` environment variable. Requires `--format json` for reports that will later be decrypted with `kubescape decrypt`. If both `--encrypt` and `--hide` are specified, `--encrypt` takes precedence. | `false` |
 | `--exceptions <path>` | Path to exceptions file | - |
+| `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `csv` | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
@@ -59,6 +60,19 @@ kubescape scan [target] [flags]
 | `--use-from <path>` | Load specific policy from path | - |
 | `-v, --verbose` | Display all resources, not just failed ones | `false` |
 | `--view <type>` | View type: `security`, `control`, `resource` | `security` |
+
+### Exception Audit
+
+Use `--audit-exceptions --format json` to include an `exceptionAudit` object in scan output. The audit contains:
+
+| Field | Description |
+|-------|-------------|
+| `summary` | Counts for total, active, expired, matched, unused, and invalid-control exceptions |
+| `items` | One entry per loaded exception, including name, status, match count, control IDs, invalid controls, and matched resources when present |
+| `generated` | Indicates that the audit was requested and generated |
+
+Item `status` values are `matched`, `unused`, `expired`, and `invalid-control`.
+
 ### Examples
 
 ```bash
@@ -179,6 +193,7 @@ kubescape scan framework <framework-name> [target] [flags]
 kubescape scan framework nsa
 kubescape scan framework mitre --include-namespaces production
 kubescape scan framework cis-v1.23-t1.0.1 /path/to/manifests
+cat ./manifests/deployment.yaml | kubescape scan framework nsa -
 ```
 
 ---
@@ -201,6 +216,9 @@ kubescape scan control C-0057 -v
 
 # Scan specific files for a control
 kubescape scan control C-0013 /path/to/deployment.yaml
+
+# Scan a manifest from stdin
+cat ./manifests/deployment.yaml | kubescape scan control C-0013 -
 ```
 
 ---
@@ -232,6 +250,7 @@ kubescape scan workload Deployment/nginx --namespace default
 kubescape scan workload Deployment.v1.apps/nginx
 kubescape scan workload DaemonSet/fluentd --namespace logging
 kubescape scan workload Deployment/nginx ./manifests
+cat ./manifests/deployment.yaml | kubescape scan workload Deployment/nginx -
 kubescape scan workload Deployment/nginx --file-path ./manifests/deployment.yaml
 kubescape scan workload Deployment/nginx --chart-path ./chart --file-path ./chart/templates/deployment.yaml
 ```
@@ -465,11 +484,18 @@ kubescape decrypt <report-file>
 
 ### Description
 
-Decrypts report metadata that was protected with
-`kubescape scan --encrypt`.
+Decrypts a JSON report that was protected with `kubescape scan --encrypt`.
+The command restores encrypted repository metadata, Kubernetes resource
+metadata, source paths, container fields, copied resource labels, raw resource
+copies in results, and recoverable resource ID references. If ciphertext or an
+irreversible legacy resource ID remains, decryption fails instead of returning
+a partially restored report.
 
-Only metadata encrypted by `kubescape scan --encrypt` is restored.
+Only fields encrypted by `kubescape scan --encrypt` are restored.
 Metadata pseudonymized with `--hide` cannot be recovered by `kubescape decrypt`.
+Older encrypted reports may contain `ref-<hash>` resource IDs that were written
+with a one-way mapping. Those IDs cannot be recovered, so the command reports
+an error rather than silently treating the report as fully decrypted.
 
 ### Flags
 
@@ -492,7 +518,7 @@ kubescape decrypt encrypted-report.json
 kubescape decrypt encrypted-report.json > decrypted-report.json
 ```
 
-> `kubescape decrypt` restores metadata encrypted by
+> `kubescape decrypt` restores report fields encrypted by
 > `kubescape scan --encrypt`. It does not reverse
 > deterministic pseudonymization produced by `--hide`.
 
@@ -520,14 +546,16 @@ kubescape list <type> [flags]
 |------|-------------|---------|
 | `--account <id>` | Account ID for custom frameworks | - |
 | `--access-key <key>` | Access key | - |
-| `--format <format>` | Output format: `pretty-print`, `json` | `pretty-print` |
+| `--format <format>` | Output format: `pretty-print`, `json`, `yaml`, `csv` | `pretty-print` |
 
 ### Examples
 
 ```bash
 kubescape list frameworks
+kubescape list frameworks --format csv
 kubescape list controls
 kubescape list controls --format json
+kubescape list controls --format csv
 ```
 
 ---
@@ -590,6 +618,12 @@ Manage Kubescape configuration.
 ```bash
 # View configuration
 kubescape config view
+
+# View configuration as JSON
+kubescape config view -o json
+
+# View configuration as YAML
+kubescape config view -o yaml
 
 # Set account ID
 kubescape config set accountID <account-id>

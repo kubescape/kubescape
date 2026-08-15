@@ -3,15 +3,16 @@ package printer
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"html/template"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
@@ -45,7 +46,8 @@ func NewHtmlPrinter() *HtmlPrinter {
 	return &HtmlPrinter{}
 }
 
-func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	outputFile = strings.TrimSpace(outputFile)
 	if outputFile == "" {
 		// Raw HTML markup must never fall back to stdout on a TTY.
@@ -55,19 +57,23 @@ func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
 	} else if filepath.Ext(outputFile) != printer.HtmlOutputExt {
 		outputFile = outputFile + printer.HtmlOutputExt
 	}
-	// HTML must never fall back to stdout on file-create errors either
-	// (e.g. read-only cwd) — use the no-stdout-fallback helper.
+	if explicitOutput {
+		var err error
+		hp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
+	// Preserve the temp-file fallback for the implicit HTML destination.
 	hp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+printer.HtmlOutputExt)
+	return nil
 }
 
 func (hp *HtmlPrinter) PrintNextSteps() {
 
 }
 
-func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if opaSessionObj == nil && len(imageScanData) == 0 {
-		logger.L().Ctx(ctx).Error("failed to print results, missing data")
-		return
+		return fmt.Errorf("failed to print results, missing data")
 	}
 
 	tplFuncMap := template.FuncMap{
@@ -135,10 +141,11 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 	err := tpl.Execute(hp.writer, reportingCtx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to render template", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to render template: %w", err)
 	}
 	printer.LogOutputFile(hp.writer.Name())
 
+	return nil
 }
 
 func (hp *HtmlPrinter) Score(score float32) {
@@ -154,7 +161,7 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableV
 					helpers.String("resourceID", resourceID))
 				continue
 			}
-			ctlResults := buildResourceControlResultTable(result.AssociatedControls, &opaSessionObj.Report.SummaryDetails)
+			ctlResults := buildResourceControlResultTable(result.AssociatedControls, &opaSessionObj.Report.SummaryDetails, resource)
 			resourceTableView = append(resourceTableView, ResourceResult{resource, ctlResults})
 		}
 	}
@@ -162,40 +169,17 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableV
 	return resourceTableView
 }
 
-// buildImageScanSummary aggregates CVE, package-score, and severity data for an image scan report (#2782)
-func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.ImageScanSummary {
-	imageScanSummary := &imageprinter.ImageScanSummary{
-		CVEs:                  []imageprinter.CVE{},
-		PackageScores:         map[string]*imageprinter.PackageScore{},
-		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
-	}
-
-	for i := range imageScanData {
-		if !slices.Contains(imageScanSummary.Images, imageScanData[i].Image) {
-			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
-		}
-
-		cves := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
-		imageScanSummary.CVEs = append(imageScanSummary.CVEs, cves...)
-
-		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
-		setSeverityToSummaryMap(cves, imageScanSummary.MapsSeverityToSummary)
-	}
-
-	return imageScanSummary
-}
-
-func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary) ResourceControlResult {
+func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary, resource workloadinterface.IMetadata) ResourceControlResult {
 	ctlSeverity := apis.ControlSeverityToString(control.GetScoreFactor())
 	ctlName := resourceControl.GetName()
 	ctlID := resourceControl.GetID()
 	ctlURL := cautils.GetControlLink(resourceControl.GetID())
-	failedPaths := AssistedRemediationPathsToString(&resourceControl)
+	failedPaths := AssistedRemediationPathsWithCurrentValues(&resourceControl, resource)
 
 	return ResourceControlResult{ctlSeverity, ctlName, ctlID, ctlURL, failedPaths}
 }
 
-func buildResourceControlResultTable(resourceControls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails) []ResourceControlResult {
+func buildResourceControlResultTable(resourceControls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata) []ResourceControlResult {
 	var ctlResults []ResourceControlResult
 	for _, resourceControl := range resourceControls {
 		if resourceControl.GetStatus(nil).IsFailed() {
@@ -203,7 +187,7 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 			if control == nil {
 				continue
 			}
-			ctlResult := buildResourceControlResult(resourceControl, control)
+			ctlResult := buildResourceControlResult(resourceControl, control, resource)
 
 			ctlResults = append(ctlResults, ctlResult)
 		}
@@ -212,8 +196,10 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 	return ctlResults
 }
 
-func (p *HtmlPrinter) CloseWriter() {
+// CloseWriter closes the HTML output writer, returning any error from flushing or closing.
+func (p *HtmlPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }

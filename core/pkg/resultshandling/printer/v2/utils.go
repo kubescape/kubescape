@@ -2,6 +2,7 @@ package printer
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
@@ -60,6 +61,7 @@ type PostureReportWithSeverity struct {
 	ClusterCloudProvider string                            `json:"clusterCloudProvider"`
 	CustomerGUID         string                            `json:"customerGUID"`
 	ClusterName          string                            `json:"clusterName"`
+	ReportID             string                            `json:"reportGUID"`
 	SummaryDetails       SummaryDetailsWithSeverity        `json:"summaryDetails"`
 	Resources            []reporthandling.Resource         `json:"resources,omitempty"`
 	Attributes           []reportsummary.PostureAttributes `json:"attributes"`
@@ -67,6 +69,7 @@ type PostureReportWithSeverity struct {
 	Metadata             reporthandlingv2.Metadata         `json:"metadata"`
 	ResourceLabels       map[string]map[string]string      `json:"resourceLabels,omitempty"` // map[resourceID]map[labelKey]labelValue - extracted labels from workloads
 	ScanCoverage         *cautils.ScanCoverage             `json:"scanCoverage,omitempty"`
+	ExceptionAudit       *cautils.ExceptionAudit           `json:"exceptionAudit,omitempty"`
 }
 
 // enrichControlsWithSeverity adds severity field to controls based on scoreFactor
@@ -107,6 +110,47 @@ func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummari
 	return enrichedResults
 }
 
+// severityRank returns a comparable rank for a severity string; unknown values rank lowest.
+func severityRank(severity string) int {
+	switch strings.ToLower(severity) {
+	case "critical":
+		return 4
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// FilterBySeverity drops controls (and matching associated controls in results)
+// that are below minSeverity. Pass an empty minSeverity to disable filtering.
+func FilterBySeverity(report *PostureReportWithSeverity, minSeverity string) {
+	if minSeverity == "" || report == nil {
+		return
+	}
+	threshold := severityRank(minSeverity)
+
+	for id, control := range report.SummaryDetails.Controls {
+		if severityRank(control.Severity) < threshold {
+			delete(report.SummaryDetails.Controls, id)
+		}
+	}
+
+	for i, result := range report.Results {
+		filtered := result.AssociatedControls[:0]
+		for _, control := range result.AssociatedControls {
+			if severityRank(control.Severity) >= threshold {
+				filtered = append(filtered, control)
+			}
+		}
+		report.Results[i].AssociatedControls = filtered
+	}
+}
+
 // ConvertToPostureReportWithSeverity converts PostureReport to PostureReportWithSeverity
 func ConvertToPostureReportWithSeverity(report *reporthandlingv2.PostureReport) *PostureReportWithSeverity {
 	return ConvertToPostureReportWithSeverityAndLabels(report, nil, nil)
@@ -145,6 +189,7 @@ func ConvertToPostureReportWithSeverityLabelsAndCoverage(report *reporthandlingv
 		ClusterCloudProvider: report.ClusterCloudProvider,
 		CustomerGUID:         report.CustomerGUID,
 		ClusterName:          report.ClusterName,
+		ReportID:             report.ReportID,
 		SummaryDetails: SummaryDetailsWithSeverity{
 			Controls:                  enrichedControls,
 			Status:                    report.SummaryDetails.Status,
@@ -197,13 +242,33 @@ func extractResourceLabels(allResources map[string]workloadinterface.IMetadata, 
 	return resourceLabels
 }
 
+// scanContextName returns the kube context this scan actually ran against.
+//
+// ScanInfo.GetClusterContextName() resolves the context from the kubeconfig the
+// scan selected, and that value is recorded on the session metadata. Reading the
+// process-global k8sinterface.GetContextName() instead would label the report
+// with the ambient context, which differs whenever --kubeconfig or
+// --kube-context points somewhere else. The global remains the fallback for
+// sessions that carry no cluster context metadata.
+func scanContextName(data *cautils.OPASessionObj) string {
+	if data.Metadata != nil {
+		if cluster := data.Metadata.ContextMetadata.ClusterContextMetadata; cluster != nil && cluster.ContextName != "" {
+			return cluster.ContextName
+		}
+	}
+	return k8sinterface.GetContextName()
+}
+
 // FinalizeResults finalize the results objects by copying data from map to lists
 func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	if data.Report.ReportGenerationTime.IsZero() {
 		data.Report.ReportGenerationTime = time.Now().UTC()
 	}
 	if data.Report.ClusterName == "" {
-		data.Report.ClusterName = cautils.AdoptClusterName(k8sinterface.GetContextName())
+		data.Report.ClusterName = cautils.AdoptClusterName(scanContextName(data))
+	}
+	if data.Report.ReportID == "" {
+		data.Report.ReportID = data.SessionID
 	}
 	report := reporthandlingv2.PostureReport{
 		SummaryDetails:       data.Report.SummaryDetails,
@@ -213,6 +278,7 @@ func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureRepor
 		Attributes:           data.Report.Attributes,
 		ClusterName:          data.Report.ClusterName,
 		CustomerGUID:         data.Report.CustomerGUID,
+		ReportID:             data.Report.ReportID,
 		ClusterCloudProvider: data.Report.ClusterCloudProvider,
 	}
 
@@ -247,11 +313,22 @@ type infoStars struct {
 	info  string
 }
 
+// mapInfoToPrintInfo assigns a footnote marker to every distinct skip reason.
+// Controls are walked in ID order: marker assignment follows iteration order, so
+// ranging over the map directly gives a different marker per run and lets two
+// calls over the same controls disagree.
 func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) []infoStars {
+	controlIDs := make([]string, 0, len(controls))
+	for controlID := range controls {
+		controlIDs = append(controlIDs, controlID)
+	}
+	sort.Strings(controlIDs)
+
 	infoToPrintInfo := []infoStars{}
 	infoToPrintInfoMap := map[string]any{}
 	starCount := indicator
-	for _, control := range controls {
+	for _, controlID := range controlIDs {
+		control := controls[controlID]
 		if control.GetStatus().IsSkipped() && control.GetStatus().Info() != "" {
 			if _, ok := infoToPrintInfoMap[control.GetStatus().Info()]; !ok {
 				infoToPrintInfo = append(infoToPrintInfo, infoStars{
@@ -294,10 +371,27 @@ func setSeverityToSummaryMap(cves []imageprinter.CVE, mapSeverityToSummary map[s
 	}
 }
 
+// pkgScoreKey builds a collision-free map key from a package name and
+// version. A plain "name@version" join is not enough on its own: Name and
+// Version are free-form strings from Grype, and real-world values can
+// contain "@" (e.g. npm scoped package names like "@angular/core"), so two
+// different (name, version) pairs could still join to the same string -
+// e.g. name="foo@bar", version="baz" and name="foo", version="bar@baz"
+// both become "foo@bar@baz". Escaping "@" (and the escape character
+// itself) in each part before joining ensures the delimiter "@" can always
+// be told apart from an escaped literal one, so distinct pairs never
+// collide.
+func pkgScoreKey(name, version string) string {
+	escape := func(s string) string {
+		s = strings.ReplaceAll(s, `\`, `\\`)
+		return strings.ReplaceAll(s, "@", `\@`)
+	}
+	return escape(name) + "@" + escape(version)
+}
+
 func setPkgNameToScoreMap(matches match.Matches, pkgScores map[string]*imageprinter.PackageScore) {
 	for _, m := range matches.Sorted() {
-		// key is pkg name + version to avoid version conflicts
-		key := m.Package.Name + m.Package.Version
+		key := pkgScoreKey(m.Package.Name, m.Package.Version)
 
 		if _, ok := pkgScores[key]; !ok {
 			pkgScores[key] = &imageprinter.PackageScore{
@@ -332,4 +426,34 @@ func extractCVEs(matches match.Matches, image string) []imageprinter.CVE {
 		CVEs = append(CVEs, cve)
 	}
 	return CVEs
+}
+
+// buildImageScanSummary aggregates per-image scan data into the summary every
+// output format consumes. The image list is deduplicated with a set so this is
+// O(N) in the number of images; the printer-local copies this replaces used
+// slices.Contains and were O(N^2) on large image sets.
+func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.ImageScanSummary {
+	imageScanSummary := &imageprinter.ImageScanSummary{
+		CVEs:                  []imageprinter.CVE{},
+		PackageScores:         map[string]*imageprinter.PackageScore{},
+		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
+	}
+
+	seenImages := make(map[string]struct{}, len(imageScanData))
+	for i := range imageScanData {
+		image := imageScanData[i].Image
+		if _, seen := seenImages[image]; !seen {
+			seenImages[image] = struct{}{}
+			imageScanSummary.Images = append(imageScanSummary.Images, image)
+		}
+
+		cves := extractCVEs(imageScanData[i].Matches, image)
+		imageScanSummary.CVEs = append(imageScanSummary.CVEs, cves...)
+
+		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
+
+		setSeverityToSummaryMap(cves, imageScanSummary.MapsSeverityToSummary)
+	}
+
+	return imageScanSummary
 }

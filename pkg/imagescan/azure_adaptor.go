@@ -35,15 +35,31 @@ func (a *azureAPIWrapper) Resources(ctx context.Context, query armresourcegraph.
 	return a.client.Resources(ctx, query, options)
 }
 
+type azureCredentialProvider func(options *azidentity.DefaultAzureCredentialOptions) (azcore.TokenCredential, error)
+type azureClientFactory func(cred azcore.TokenCredential, options *arm.ClientOptions) (AzureAPI, error)
+
 // AzureAdaptor implements IContainerImageVulnerabilityAdaptor for Azure Container Registry (ACR).
 type AzureAdaptor struct {
-	client       AzureAPI
-	registryHost string
+	client        AzureAPI
+	registryHost  string
+	credProvider  azureCredentialProvider
+	clientFactory azureClientFactory
 }
 
 // NewAzureAdaptor creates a new Azure adaptor instance.
 func NewAzureAdaptor() *AzureAdaptor {
-	return &AzureAdaptor{}
+	return &AzureAdaptor{
+		credProvider: func(options *azidentity.DefaultAzureCredentialOptions) (azcore.TokenCredential, error) {
+			return azidentity.NewDefaultAzureCredential(options)
+		},
+		clientFactory: func(cred azcore.TokenCredential, options *arm.ClientOptions) (AzureAPI, error) {
+			c, err := armresourcegraph.NewClient(cred, options)
+			if err != nil {
+				return nil, err
+			}
+			return &azureAPIWrapper{client: c}, nil
+		},
+	}
 }
 
 func resolveAzureCloudConfig(registryHost string) (cloud.Configuration, error) {
@@ -62,7 +78,7 @@ func resolveAzureCloudConfig(registryHost string) (cloud.Configuration, error) {
 // Explicit credentials passed via RegistryCredentials are intentionally unsupported
 // as Azure SDK relies heavily on Managed Identities and Azure CLI credentials.
 func (a *AzureAdaptor) Login(ctx context.Context, registry string, credentials RegistryCredentials) error {
-	if credentials.Username != "" || credentials.Password != "" {
+	if credentials.Username != "" || credentials.Password != "" || credentials.Token != "" {
 		return fmt.Errorf("explicit credentials are intentionally unsupported for Azure; use DefaultAzureCredential")
 	}
 
@@ -74,20 +90,20 @@ func (a *AzureAdaptor) Login(ctx context.Context, registry string, credentials R
 
 	clientOpts := azcore.ClientOptions{Cloud: cloudConfig}
 
-	cred, err := azidentity.NewDefaultAzureCredential(&azidentity.DefaultAzureCredentialOptions{
+	cred, err := a.credProvider(&azidentity.DefaultAzureCredentialOptions{
 		ClientOptions: clientOpts,
 	})
 	if err != nil {
 		return fmt.Errorf("unable to load azure credentials: %w", err)
 	}
 
-	c, err := armresourcegraph.NewClient(cred, &arm.ClientOptions{
+	c, err := a.clientFactory(cred, &arm.ClientOptions{
 		ClientOptions: clientOpts,
 	})
 	if err != nil {
 		return fmt.Errorf("unable to load azure resource graph client: %w", err)
 	}
-	a.client = &azureAPIWrapper{client: c}
+	a.client = c
 
 	// Cheap probe query so Login fails fast on bad/missing identity
 	probeReq := armresourcegraph.QueryRequest{
@@ -121,30 +137,28 @@ func (a *AzureAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Conta
 		return nil, fmt.Errorf("azure client not initialized, call Login first")
 	}
 
-	var statuses []ContainerImageScanStatus
 	parts := strings.Split(a.registryHost, ".")
 	registryName := parts[0]
 
-	for _, imageID := range imageIDs {
-		status := ContainerImageScanStatus{
-			ImageID:         imageID,
-			IsScanAvailable: false,
-			IsBomAvailable:  false,
-		}
+	return ProcessImages(imageIDs,
+		func(imageID ContainerImageIdentifier) (ContainerImageScanStatus, error) {
+			status := ContainerImageScanStatus{
+				ImageID:         imageID,
+				IsScanAvailable: false,
+				IsBomAvailable:  false,
+			}
 
-		if imageID.Hash == "" {
-			statuses = append(statuses, status)
-			continue
-		}
+			if imageID.Hash == "" {
+				return status, nil
+			}
 
-		if err := a.validateImageID(imageID); err != nil {
-			logger.L().Warning("skipping image", helpers.String("repository", imageID.Repository), helpers.Error(err))
-			statuses = append(statuses, status)
-			continue
-		}
+			if err := a.validateImageID(imageID); err != nil {
+				logger.L().Warning("skipping image", helpers.String("repository", imageID.Repository), helpers.Error(err))
+				return status, nil
+			}
 
-		// Query ARG for parent assessment to determine scan availability
-		queryStr := fmt.Sprintf(`
+			// Query ARG for parent assessment to determine scan availability
+			queryStr := fmt.Sprintf(`
 			securityresources
 			| where type == "microsoft.security/assessments"
 			| extend registryName = extract(@"(?i)/registries/([^/]+)/", 1, id)
@@ -154,55 +168,36 @@ func (a *AzureAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Conta
 			| limit 1
 		`, registryName, imageID.Hash)
 
-		req := armresourcegraph.QueryRequest{
-			Query: to.Ptr(queryStr),
-			Options: &armresourcegraph.QueryRequestOptions{
-				ResultFormat: to.Ptr(armresourcegraph.ResultFormatObjectArray),
-			},
-		}
+			req := armresourcegraph.QueryRequest{
+				Query: to.Ptr(queryStr),
+				Options: &armresourcegraph.QueryRequestOptions{
+					ResultFormat: to.Ptr(armresourcegraph.ResultFormatObjectArray),
+				},
+			}
 
-		res, err := a.client.Resources(ctx, req, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
-		}
+			res, err := a.client.Resources(ctx, req, nil)
+			if err != nil {
+				return status, fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
+			}
 
-		if res.TotalRecords != nil && *res.TotalRecords > 0 {
-			status.IsScanAvailable = true
-			if res.Data != nil {
-				if dataList, ok := res.Data.([]interface{}); ok && len(dataList) > 0 {
-					if row, ok := dataList[0].(map[string]interface{}); ok {
-						if tg := getStringSafe(row, "timeGenerated"); tg != "" {
-							if parsedTime, err := time.Parse(time.RFC3339Nano, tg); err == nil {
-								status.LastScanDate = parsedTime
+			if res.TotalRecords != nil && *res.TotalRecords > 0 {
+				status.IsScanAvailable = true
+				if res.Data != nil {
+					if dataList, ok := res.Data.([]interface{}); ok && len(dataList) > 0 {
+						if row, ok := dataList[0].(map[string]interface{}); ok {
+							if tg := getStringSafe(row, "timeGenerated"); tg != "" {
+								if parsedTime, err := time.Parse(time.RFC3339Nano, tg); err == nil {
+									status.LastScanDate = parsedTime
+								}
 							}
 						}
 					}
 				}
 			}
-		}
 
-		statuses = append(statuses, status)
-	}
-
-	return statuses, nil
-}
-
-// Helper to normalize Azure severity to Kubescape expected severity
-func normalizeAzureSeverity(azureSeverity string) string {
-	switch strings.ToLower(azureSeverity) {
-	case "critical":
-		return "Critical"
-	case "high":
-		return "High"
-	case "medium":
-		return "Medium"
-	case "low":
-		return "Low"
-	case "unassigned", "informational":
-		return "Negligible"
-	default:
-		return "Unknown"
-	}
+			return status, nil
+		},
+	)
 }
 
 // GetImagesVulnerabilities retrieves the vulnerability reports for a list of image identifiers.
@@ -211,28 +206,26 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 		return nil, fmt.Errorf("azure client not initialized, call Login first")
 	}
 
-	var reports []ContainerImageVulnerabilityReport
 	parts := strings.Split(a.registryHost, ".")
 	registryName := parts[0]
 
-	for _, imageID := range imageIDs {
-		report := ContainerImageVulnerabilityReport{
-			ImageID:         imageID,
-			Vulnerabilities: []Vulnerability{},
-		}
+	return ProcessImages(imageIDs,
+		func(imageID ContainerImageIdentifier) (ContainerImageVulnerabilityReport, error) {
+			report := ContainerImageVulnerabilityReport{
+				ImageID:         imageID,
+				Vulnerabilities: []Vulnerability{},
+			}
 
-		if imageID.Hash == "" {
-			reports = append(reports, report)
-			continue
-		}
+			if imageID.Hash == "" {
+				return report, nil
+			}
 
-		if err := a.validateImageID(imageID); err != nil {
-			logger.L().Warning("skipping image", helpers.String("repository", imageID.Repository), helpers.Error(err))
-			reports = append(reports, report)
-			continue
-		}
+			if err := a.validateImageID(imageID); err != nil {
+				logger.L().Warning("skipping image", helpers.String("repository", imageID.Repository), helpers.Error(err))
+				return report, nil
+			}
 
-		queryStr := fmt.Sprintf(`
+			queryStr := fmt.Sprintf(`
 			securityresources
 			| where type == "microsoft.security/assessments/subassessments"
 			| extend registryName = extract(@"(?i)/registries/([^/]+)/", 1, id)
@@ -247,78 +240,93 @@ func (a *AzureAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs []
 				cve = properties.additionalData.cve
 		`, registryName, imageID.Repository, imageID.Hash)
 
-		var skipToken *string
-		count := 0
-		const maxVulns = 1000
-		const maxPages = 50
+			var skipToken *string
+			count := 0
+			const maxVulns = 1000
+			const maxPages = 50
+			truncatedByPageLimit := false
 
-		for page := 0; page < maxPages; page++ {
-			req := armresourcegraph.QueryRequest{
-				Query: to.Ptr(queryStr),
-				Options: &armresourcegraph.QueryRequestOptions{
-					ResultFormat: to.Ptr(armresourcegraph.ResultFormatObjectArray),
-					SkipToken:    skipToken,
-					Top:          to.Ptr[int32](1000),
-				},
-			}
-
-			res, err := a.client.Resources(ctx, req, nil)
-			if err != nil {
-				return nil, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, err)
-			}
-
-			if res.Data != nil {
-				dataList, ok := res.Data.([]interface{})
-				if !ok {
-					return nil, fmt.Errorf("failed to decode ARG response data format")
+			for page := 0; page < maxPages; page++ {
+				req := armresourcegraph.QueryRequest{
+					Query: to.Ptr(queryStr),
+					Options: &armresourcegraph.QueryRequestOptions{
+						ResultFormat: to.Ptr(armresourcegraph.ResultFormatObjectArray),
+						SkipToken:    skipToken,
+						Top:          to.Ptr[int32](1000),
+					},
 				}
-				for _, item := range dataList {
-					if count >= maxVulns {
-						// Log truncation rather than failing hard
-						logger.L().Warning("truncated vulnerabilities", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxVulns))
-						break
-					}
 
-					row, ok := item.(map[string]interface{})
+				res, err := a.client.Resources(ctx, req, nil)
+				if err != nil {
+					return report, fmt.Errorf("failed to query vulnerabilities for repository %s: %w", imageID.Repository, err)
+				}
+
+				if res.Data != nil {
+					dataList, ok := res.Data.([]interface{})
 					if !ok {
-						return nil, fmt.Errorf("malformed vulnerability row: expected map[string]interface{}, got %T", item)
+						return report, fmt.Errorf("failed to decode ARG response data format for repository %s", imageID.Repository)
 					}
+					malformed := false
+					for _, item := range dataList {
+						if count >= maxVulns {
+							// Log truncation rather than failing hard
+							logger.L().Warning("truncated vulnerabilities", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxVulns))
+							break
+						}
 
-					vuln := Vulnerability{
-						ID:          getStringSafe(row, "id"),
-						Severity:    normalizeAzureSeverity(getStringSafe(row, "severity")),
-						Description: getStringSafe(row, "description"),
-						Links:       []string{},
-					}
+						row, ok := item.(map[string]interface{})
+						if !ok {
+							malformed = true
+							break
+						}
 
-					// Try to get primary CVE if it exists
-					if cves := getMultipleNestedStringSafe(row, "cve", "title"); len(cves) > 0 {
-						for _, cve := range cves {
-							if count >= maxVulns {
-								break
+						vuln := Vulnerability{
+							ID:          getStringSafe(row, "id"),
+							Severity:    NormalizeSeverity(getStringSafe(row, "severity")),
+							Description: getStringSafe(row, "description"),
+							Links:       []string{},
+						}
+
+						// Try to get primary CVE if it exists
+						if cves := getMultipleNestedStringSafe(row, "cve", "title"); len(cves) > 0 {
+							for _, cve := range cves {
+								if count >= maxVulns {
+									break
+								}
+								newVuln := vuln
+								newVuln.ID = cve
+								report.Vulnerabilities = append(report.Vulnerabilities, newVuln)
+								count++
 							}
-							newVuln := vuln
-							newVuln.ID = cve
-							report.Vulnerabilities = append(report.Vulnerabilities, newVuln)
+						} else {
+							report.Vulnerabilities = append(report.Vulnerabilities, vuln)
 							count++
 						}
-					} else {
-						report.Vulnerabilities = append(report.Vulnerabilities, vuln)
-						count++
 					}
+					if malformed {
+						return report, fmt.Errorf("malformed vulnerability row for repository %s", imageID.Repository)
+					}
+				}
+
+				if count >= maxVulns || res.SkipToken == nil || *res.SkipToken == "" {
+					break
+				}
+				skipToken = res.SkipToken
+
+				if page == maxPages-1 {
+					// About to exit the loop solely because maxPages was reached,
+					// while the server still has more pages (SkipToken is set).
+					truncatedByPageLimit = true
 				}
 			}
 
-			if count >= maxVulns || res.SkipToken == nil || *res.SkipToken == "" {
-				break
+			if truncatedByPageLimit {
+				return report, fmt.Errorf("exceeded max pages (%d) fetching vulnerabilities for repository %s", maxPages, imageID.Repository)
 			}
-			skipToken = res.SkipToken
-		}
 
-		reports = append(reports, report)
-	}
-
-	return reports, nil
+			return report, nil
+		},
+	)
 }
 
 // GetImagesInformation retrieves the BOM and manifest information for a list of image identifiers.
@@ -326,18 +334,7 @@ func (a *AzureAdaptor) GetImagesInformation(ctx context.Context, imageIDs []Cont
 	if a.client == nil {
 		return nil, fmt.Errorf("azure client not initialized, call Login first")
 	}
-
-	var infos []ContainerImageInformation
-
-	for _, imageID := range imageIDs {
-		info := ContainerImageInformation{
-			ImageID: imageID,
-			Bom:     []string{},
-		}
-		infos = append(infos, info)
-	}
-
-	return infos, nil
+	return FetchImagesInformation(imageIDs)
 }
 
 // Destroy cleans up any persistent resources used by the adaptor.

@@ -13,13 +13,10 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/jwalton/gchalk"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -76,40 +73,12 @@ func (pp *PrettyPrinter) PrintNextSteps() {
 	pp.mainPrinter.PrintNextSteps()
 }
 
-// convertToImageScanSummary takes a list of image scan data and converts it to a single image scan summary
-func (pp *PrettyPrinter) convertToImageScanSummary(imageScanData []cautils.ImageScanData) (*imageprinter.ImageScanSummary, error) {
-	imageScanSummary := imageprinter.ImageScanSummary{
-		CVEs:                  []imageprinter.CVE{},
-		PackageScores:         map[string]*imageprinter.PackageScore{},
-		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
-	}
-
-	for i := range imageScanData {
-		if !slices.Contains(imageScanSummary.Images, imageScanData[i].Image) {
-			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
-		}
-
-		CVEs := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
-		imageScanSummary.CVEs = append(imageScanSummary.CVEs, CVEs...)
-
-		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
-
-		setSeverityToSummaryMap(CVEs, imageScanSummary.MapsSeverityToSummary)
-	}
-
-	return &imageScanSummary, nil
+func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) error {
+	pp.mainPrinter.PrintImageScanning(buildImageScanSummary(imageScanData))
+	return nil
 }
 
-func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) {
-	imageScanSummary, err := pp.convertToImageScanSummary(imageScanData)
-	if err != nil {
-		logger.L().Error("failed to convert to image scan summary", helpers.Error(err))
-		return
-	}
-	pp.mainPrinter.PrintImageScanning(imageScanSummary)
-}
-
-func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	if opaSessionObj != nil {
 		// TODO line is currently printed on framework scan only
 		if isPrintSeparatorType(pp.scanType) {
@@ -146,8 +115,11 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 	}
 
 	if len(imageScanData) > 0 {
-		pp.PrintImageScan(imageScanData)
+		if err := pp.PrintImageScan(imageScanData); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (pp *PrettyPrinter) printOverview(opaSessionObj *cautils.OPASessionObj, printExtraLine bool) {
@@ -188,13 +160,14 @@ func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 
 }
 
-func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	if outputFile == os.Stdout.Name() {
 		pp.writer = printer.GetWriter(ctx, "")
 		pp.SetMainPrinter()
-		return
+		return nil
 	}
 
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		outputFile = strings.TrimSpace(outputFile)
 		if outputFile == "" {
@@ -206,8 +179,17 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
 		}
 	}
 
-	pp.writer = printer.GetWriter(ctx, outputFile)
+	if explicitOutput {
+		writer, err := printer.GetWriterNoFallback(outputFile)
+		if err != nil {
+			return err
+		}
+		pp.writer = writer
+	} else {
+		pp.writer = printer.GetWriter(ctx, outputFile)
+	}
 	pp.SetMainPrinter()
+	return nil
 }
 
 func (pp *PrettyPrinter) Score(_ float32) {
@@ -398,8 +380,10 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 	}
 }
 
-func (p *PrettyPrinter) CloseWriter() {
+// CloseWriter closes the pretty-printer output writer, returning any error from flushing or closing.
+func (p *PrettyPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }

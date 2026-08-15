@@ -25,6 +25,8 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/core"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/httphandler/config"
 	"github.com/kubescape/kubescape/v3/httphandler/storage"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -36,8 +38,23 @@ import (
 )
 
 var scanImpl = scan // Override for testing
+
+// runKubescapeScan is the scanner construction seam used by lifecycle tests.
+var runKubescapeScan = func(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return core.NewKubescape(ctx).Scan(scanInfo, policyIdentifiers)
+}
+
+// canonicalResultPersistenceKey marks scans submitted through /v1/scan. The
+// metrics endpoint shares scan(), but owns the extensionless output path for
+// its Prometheus response and must not have that file replaced with JSON.
+type canonicalResultPersistenceKey struct{}
+
+func withCanonicalResultPersistence(ctx context.Context) context.Context {
+	return context.WithValue(ctx, canonicalResultPersistenceKey{}, true)
+}
+
 func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
-	response := &utilsmetav1.Response{}
+	response := &utilsmetav1.Response{ID: scanReq.scanID}
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -62,7 +79,11 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	}()
 
 	logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
-	_, err := scanImpl(scanReq.ctx, scanReq.scanInfo, scanReq.policyIdentifiers, scanReq.scanID, scanReq.scanQueryParams.SkipPersistence)
+	scanCtx := scanReq.ctx
+	if scanReq.isUserScan {
+		scanCtx = withCanonicalResultPersistence(scanCtx)
+	}
+	_, err := scanImpl(scanCtx, scanReq.scanInfo, scanReq.policyIdentifiers, scanReq.scanID, scanReq.scanQueryParams.SkipPersistence)
 	if err != nil {
 		if errors.Is(scanReq.ctx.Err(), context.Canceled) {
 			logger.L().Ctx(scanReq.ctx).Info("scan cancelled", helpers.String("ID", scanReq.scanID))
@@ -114,52 +135,55 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	}
 }
 
-// executeScan execute the scan request passed in the channel
-func (handler *HTTPHandler) watchForScan() {
+// watchForScan dequeues scan requests and executes them, honoring
+// cancellation that happened while a request was still queued.
+func (handler *HTTPHandler) watchForScan(ctx context.Context) {
 	for {
-		scanReq := <-handler.scanRequestChan
-		if scanReq.isUserScan {
-			handler.state.setLatestUserScanID(scanReq.scanID)
-		}
-		if handler.state.isCancelled(scanReq.scanID) {
-			logger.L().Info("skipping cancelled scan", helpers.String("scanID", scanReq.scanID))
-			if scanReq.resp != nil {
-				select {
-				case scanReq.resp <- &utilsmetav1.Response{
-					ID:       scanReq.scanID,
-					Type:     utilsapisv1.ErrorScanResponseType,
-					Response: fmt.Sprintf("scan '%s' was cancelled", scanReq.scanID),
-				}:
-				default:
-				}
+		select {
+		case scanReq := <-handler.scanRequestChan:
+			logger.L().Info("triggering scan", helpers.String("scanID", scanReq.scanID))
+			if scanReq.isUserScan {
+				handler.state.setRunningUserScanID(scanReq.scanID)
 			}
-			if scanReq.callbackURL != "" {
-				payload := scanCallbackPayload{ID: scanReq.scanID, Status: callbackStatusFailed, Error: "scan cancelled"}
-				cbCtx := context.WithoutCancel(scanReq.ctx)
-				go func() {
-					defer func() {
-						if r := recover(); r != nil {
-							logger.L().Ctx(cbCtx).Error("scan completion callback panicked", helpers.String("ID", scanReq.scanID), helpers.Error(fmt.Errorf("%v", r)))
+			if handler.state.isCancelled(scanReq.scanID) {
+				logger.L().Info("skipping cancelled scan", helpers.String("scanID", scanReq.scanID))
+				if scanReq.resp != nil {
+					select {
+					case scanReq.resp <- &utilsmetav1.Response{
+						ID:       scanReq.scanID,
+						Type:     utilsapisv1.ErrorScanResponseType,
+						Response: fmt.Sprintf("scan '%s' was cancelled", scanReq.scanID),
+					}:
+					default:
+					}
+				}
+				if scanReq.callbackURL != "" {
+					payload := scanCallbackPayload{ID: scanReq.scanID, Status: callbackStatusFailed, Error: "scan cancelled"}
+					cbCtx := context.WithoutCancel(scanReq.ctx)
+					go func() {
+						defer func() {
+							if r := recover(); r != nil {
+								logger.L().Ctx(cbCtx).Error("scan completion callback panicked", helpers.String("ID", scanReq.scanID), helpers.Error(fmt.Errorf("%v", r)))
+							}
+						}()
+						if cbErr := postScanCallback(cbCtx, scanReq.callbackURL, payload); cbErr != nil {
+							logger.L().Ctx(cbCtx).Error("failed to deliver scan completion callback", helpers.String("ID", scanReq.scanID), helpers.Error(cbErr))
 						}
 					}()
-					if cbErr := postScanCallback(cbCtx, scanReq.callbackURL, payload); cbErr != nil {
-						logger.L().Ctx(cbCtx).Error("failed to deliver scan completion callback", helpers.String("ID", scanReq.scanID), helpers.Error(cbErr))
-					}
-				}()
+				}
+				handler.state.releaseCancel(scanReq.scanID)
+				handler.state.setNotBusy(scanReq.scanID)
+				continue
 			}
-			handler.state.releaseCancel(scanReq.scanID)
-			handler.state.setNotBusy(scanReq.scanID)
-			continue
+			handler.executeScan(scanReq)
+		case <-ctx.Done():
+			return
 		}
-		logger.L().Info("triggering scan", helpers.String("scanID", scanReq.scanID))
-		handler.executeScan(scanReq)
 	}
 }
 func scan(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier, scanID string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {
 	ctx, spanScan := otel.Tracer("").Start(ctx, "kubescape.scan")
 	defer spanScan.End()
-
-	ks := core.NewKubescape(ctx)
 
 	spanScan.AddEvent("scanning metadata",
 		trace.WithAttributes(attribute.String("version", versioncheck.BuildNumber)),
@@ -172,12 +196,20 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []c
 		trace.WithAttributes(attribute.String("hostSensorYamlPath", scanInfo.HostSensorYamlPath)),
 	)
 
-	result, err := ks.Scan(scanInfo, policyIdentifiers)
+	result, err := runKubescapeScan(ctx, scanInfo, policyIdentifiers)
 	if err != nil {
 		return nil, writeScanErrorToFile(err, scanID)
 	}
 	if err := result.HandleResults(ctx, scanInfo); err != nil {
 		return nil, writeScanErrorToFile(err, scanID)
+	}
+	// Non-JSON printers write format-specific sidecars (for example .yaml or
+	// .pdf), while /v1/results reads JSON. Keep the requested sidecars and add
+	// the extensionless canonical JSON that the results API reads first.
+	if shouldPersistCanonicalResult(ctx, scanInfo) {
+		if err := persistCanonicalResult(result, scanID); err != nil {
+			return nil, writeScanErrorToFile(err, scanID)
+		}
 	}
 
 	if !skipPersistence {
@@ -202,6 +234,34 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []c
 	}
 
 	return nil, nil
+}
+
+func shouldPersistCanonicalResult(ctx context.Context, scanInfo *cautils.ScanInfo) bool {
+	persist, _ := ctx.Value(canonicalResultPersistenceKey{}).(bool)
+	if !persist {
+		return false
+	}
+	for _, format := range scanInfo.Formats() {
+		if format == printer.JsonFormat {
+			return false
+		}
+	}
+	return true
+}
+
+func persistCanonicalResult(result *resultshandling.ResultsHandler, scanID string) error {
+	parsedUUID, err := uuid.Parse(scanID)
+	if err != nil {
+		return fmt.Errorf("failed to persist canonical scan results: invalid scan ID: %w", err)
+	}
+	data, err := result.ToJson()
+	if err != nil {
+		return fmt.Errorf("failed to marshal canonical scan results: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(OutputDir, parsedUUID.String()), data, 0o600); err != nil {
+		return fmt.Errorf("failed to persist canonical scan results: %w", err)
+	}
+	return nil
 }
 
 // ScanFailedError carries the plaintext error written by writeScanErrorToFile.
@@ -273,7 +333,21 @@ func removeResultsFile(fileID string) error {
 	cleanID := parsedUUID.String()
 
 	dirs := []string{OutputDir, FailedOutputDir}
-	extensions := []string{"", ".json"}
+	// Exact suffixes that printers can append to the extensionless HTTP output
+	// base. Do not glob cleanID+".*": UUID-adjacent files may be unrelated.
+	extensions := []string{
+		"",
+		printer.JsonOutputExt,
+		printer.JunitOutputExt,
+		printer.SARIFOutputExt,
+		printer.HtmlOutputExt,
+		printer.PdfOutputExt,
+		printer.PrometheusOutputExt,
+		printer.YamlOutputExt,
+		printer.CsvOutputExt,
+		printer.CycloneDXOutputExt,
+		printer.SPDXOutputExt,
+	}
 
 	for _, dir := range dirs {
 		for _, ext := range extensions {
@@ -381,7 +455,11 @@ func writeScanErrorToFile(err error, scanID string) (e error) {
 
 // responseToBytes convert response object to bytes
 func responseToBytes(res *utilsmetav1.Response) []byte {
-	b, _ := json.Marshal(res)
+	b, err := json.Marshal(res)
+	if err != nil {
+		logger.L().Error("failed to marshal response", helpers.Error(err))
+		return []byte(`{"response":"internal error: failed to marshal response","type":"error"}`)
+	}
 	return b
 }
 

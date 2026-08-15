@@ -2,6 +2,7 @@ package vapreconcile
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kubescape/go-logger"
@@ -11,6 +12,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 )
 
 // Collect lists ValidatingAdmissionPolicy and ValidatingAdmissionPolicyBinding
@@ -49,16 +52,100 @@ func Collect(ctx context.Context, k8s *k8sinterface.KubernetesApi) ([]unstructur
 	}
 
 	vapList, err := k8s.DynamicClient.Resource(vapGVR).List(ctx, metav1.ListOptions{})
+const (
+	vapGroup           = "admissionregistration.k8s.io"
+	vapResource        = "validatingadmissionpolicies"
+	vapBindingResource = "validatingadmissionpolicybindings"
+)
+
+// vapVersions lists the served versions of the VAP API in preference order:
+// v1 since Kubernetes 1.30, v1beta1 since 1.28, v1alpha1 since 1.26.
+var vapVersions = []string{"v1", "v1beta1", "v1alpha1"}
+
+// ErrUnsupported reports a cluster that serves no version of the VAP API, so
+// there is no enforcement state to reconcile.
+var ErrUnsupported = errors.New("cluster does not serve ValidatingAdmissionPolicy resources")
+
+// Collect lists ValidatingAdmissionPolicy and ValidatingAdmissionPolicyBinding
+// resources from the live cluster, using whichever version of the API the
+// cluster serves. Both resource types are cluster-scoped so no namespace
+// selector is needed. Clusters without the API return ErrUnsupported.
+func Collect(ctx context.Context, k8s *k8sinterface.KubernetesApi) ([]unstructured.Unstructured, []unstructured.Unstructured, error) {
+	version, err := resolveVersion(k8s.DiscoveryClient)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to list ValidatingAdmissionPolicies: %w", err)
+		return nil, nil, err
 	}
 
-	vapbList, err := k8s.DynamicClient.Resource(vapbGVR).List(ctx, metav1.ListOptions{})
+	policies, err := list(ctx, k8s.DynamicClient, version, vapResource)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to list ValidatingAdmissionPolicyBindings: %w", err)
+		return nil, nil, err
+	}
+	bindings, err := list(ctx, k8s.DynamicClient, version, vapBindingResource)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	return vapList.Items, vapbList.Items, nil
+	return policies, bindings, nil
+}
+
+// resolveVersion returns the first VAP version the cluster both advertises and
+// serves both resources for. Without a discovery client the newest version is
+// assumed, which is what the API server routing did before discovery existed.
+func resolveVersion(client discovery.DiscoveryInterface) (string, error) {
+	if client == nil {
+		return vapVersions[0], nil
+	}
+
+	for _, version := range vapVersions {
+		gv := schema.GroupVersion{Group: vapGroup, Version: version}
+		resources, err := client.ServerResourcesForGroupVersion(gv.String())
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return "", fmt.Errorf("failed to discover %s: %w", gv.String(), err)
+		}
+		if serves(resources, vapResource, vapBindingResource) {
+			return version, nil
+		}
+	}
+
+	return "", ErrUnsupported
+}
+
+// serves reports whether the API resource list carries every named resource.
+func serves(resources *metav1.APIResourceList, names ...string) bool {
+	if resources == nil {
+		return false
+	}
+
+	served := make(map[string]struct{}, len(resources.APIResources))
+	for _, resource := range resources.APIResources {
+		served[resource.Name] = struct{}{}
+	}
+	for _, name := range names {
+		if _, ok := served[name]; !ok {
+			return false
+		}
+	}
+
+	return true
+}
+
+// list pulls every object of one cluster-scoped VAP resource. A resource that
+// discovery advertised but the API server does not route is reported as
+// unsupported rather than as a scan failure.
+func list(ctx context.Context, client dynamic.Interface, version, resource string) ([]unstructured.Unstructured, error) {
+	gvr := schema.GroupVersionResource{Group: vapGroup, Version: version, Resource: resource}
+	listed, err := client.Resource(gvr).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, ErrUnsupported
+		}
+		return nil, fmt.Errorf("failed to list %s: %w", gvr.String(), err)
+	}
+
+	return listed.Items, nil
 }
 
 func hasVAPResources(resources *metav1.APIResourceList) bool {

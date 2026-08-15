@@ -3,8 +3,6 @@ package scan
 import (
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"slices"
 	"strings"
 
@@ -71,15 +69,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 		RunE: func(cmd *cobra.Command, args []string) error {
 			defer applyTimeout(scanInfo, ks)()
 
-			if scanInfo.FailThresholdSeverity != "" {
-				if err := shared.ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
-					return err
-				}
-			}
-			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(shared.ScanFormats, ", "))
-			}
-			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ScanFormats); err != nil {
+			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ScanFormats); err != nil {
 				return err
 			}
 			if err := validateFrameworkScanInfo(scanInfo); err != nil {
@@ -102,26 +92,16 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 					frameworks = getter.NativeFrameworks
 
 				}
-				if len(args) > 1 {
-					if args[1] != "-" {
-						scanInfo.InputPatterns = args[1:]
-						logger.L().Debug("List of input files", helpers.Interface("patterns", scanInfo.InputPatterns))
-					} else { // store stdin to file - do NOT move to separate function !!
-						tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
-						if err != nil {
-							return err
-						}
-						defer os.Remove(tempFile.Name())
-
-						if _, err := io.Copy(tempFile, os.Stdin); err != nil {
-							_ = tempFile.Close()
-							return err
-						}
-						if err := tempFile.Close(); err != nil {
-							return err
-						}
-						scanInfo.InputPatterns = []string{tempFile.Name()}
-					}
+				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, scanInfo, scanLocalInputOptions{
+					FirstInputArg:    1,
+					RejectMixedStdin: true,
+				})
+				if err != nil {
+					return err
+				}
+				defer cleanup()
+				if len(scanInfo.InputPatterns) > 0 {
+					logger.L().Debug("List of input files", helpers.Interface("patterns", scanInfo.InputPatterns))
 				}
 			}
 			scanInfo.SetScanType(cautils.ScanTypeFramework)
@@ -143,6 +123,11 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 
 			if err := enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo); err != nil {
 				return err
+			}
+			if scanInfo.ScanImages {
+				if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+					return err
+				}
 			}
 			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
 				return err
@@ -203,7 +188,7 @@ func enforceCoverageThreshold(coverage cautils.ScanCoverage, totalControls int, 
 		return nil
 	}
 	if totalControls == 0 {
-		return nil
+		return fmt.Errorf("scan loaded no controls: coverage is 0%% (fail-coverage-below: %.2f%%)", scanInfo.FailCoverageThreshold)
 	}
 	if coverage.CoverageScore < scanInfo.FailCoverageThreshold {
 		return fmt.Errorf("scan coverage is below permitted threshold: %.2f%% (fail-coverage-below: %.2f%%)", coverage.CoverageScore, scanInfo.FailCoverageThreshold)

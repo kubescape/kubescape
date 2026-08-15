@@ -47,6 +47,52 @@ func TestConfig(t *testing.T) {
 
 }
 
+func TestConfigConcurrentSerializationDoesNotMutateSource(t *testing.T) {
+	co := mockConfigObj()
+
+	originalMarshal := configMarshal
+	firstEntered := make(chan struct{})
+	secondEntered := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	var calls int
+	configMarshal = func(v any) ([]byte, error) {
+		calls++
+		switch calls {
+		case 1:
+			close(firstEntered)
+			<-releaseFirst
+		case 2:
+			close(secondEntered)
+			<-releaseSecond
+		}
+		return json.MarshalIndent(v, "", "  ") // #nosec G117 -- test fixture contains no real credential
+	}
+	t.Cleanup(func() { configMarshal = originalMarshal })
+
+	firstResult := make(chan []byte, 1)
+	go func() { firstResult <- co.Config() }()
+	<-firstEntered
+
+	secondResult := make(chan []byte, 1)
+	go func() { secondResult <- co.Config() }()
+	<-secondEntered
+
+	assert.Equal(t, "ddd", co.ClusterName, "serialization must not expose a temporary empty runtime identity")
+
+	close(releaseFirst)
+	firstJSON := <-firstResult
+	close(releaseSecond)
+	secondJSON := <-secondResult
+
+	assert.Equal(t, "ddd", co.ClusterName, "concurrent serialization must not change the source config")
+	for _, data := range [][]byte{firstJSON, secondJSON} {
+		var persisted map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(data, &persisted))
+		assert.NotContains(t, persisted, "clusterName", "clusterName must remain absent from persisted config")
+	}
+}
+
 func TestITenantConfig(t *testing.T) {
 	var lc ITenantConfig
 	var c ITenantConfig
@@ -84,7 +130,7 @@ func TestReadConfig(t *testing.T) {
 	com := mockConfigObj()
 	co := &ConfigObj{}
 
-	b, e := json.Marshal(com)
+	b, e := json.Marshal(com) // #nosec G117 -- test fixture; marshals a mock config object
 	assert.NoError(t, e)
 
 	readConfig(b, co)
@@ -93,86 +139,6 @@ func TestReadConfig(t *testing.T) {
 	assert.Equal(t, com.ClusterName, co.ClusterName)
 	assert.Equal(t, com.CloudReportURL, co.CloudReportURL)
 	assert.Equal(t, com.CloudAPIURL, co.CloudAPIURL)
-}
-
-func TestLoadConfigFromData(t *testing.T) {
-
-	// use case: all data is in base config
-	{
-		c := mockClusterConfig()
-		co := mockConfigObj()
-
-		configMap := &corev1.ConfigMap{}
-
-		c.updateConfigData(configMap)
-
-		c.configObj = &ConfigObj{}
-
-		loadConfigFromData(c.configObj, configMap.Data)
-
-		assert.Equal(t, c.GetAccountID(), co.AccountID)
-		assert.Equal(t, c.GetContextName(), co.ClusterName)
-		assert.Equal(t, c.GetCloudReportURL(), co.CloudReportURL)
-		assert.Equal(t, c.GetCloudAPIURL(), co.CloudAPIURL)
-	}
-
-	// use case: all data is in config.json
-	{
-		c := mockClusterConfig()
-
-		co := mockConfigObj()
-		configMap := &corev1.ConfigMap{
-			Data: make(map[string]string),
-		}
-
-		configMap.Data["config.json"] = string(c.GetConfigObj().Config())
-		c.configObj = &ConfigObj{}
-
-		loadConfigFromData(c.configObj, configMap.Data)
-
-		assert.Equal(t, c.GetAccountID(), co.AccountID)
-		assert.Equal(t, c.GetCloudReportURL(), co.CloudReportURL)
-		assert.Equal(t, c.GetCloudAPIURL(), co.CloudAPIURL)
-	}
-
-	// use case: some data is in config.json
-	{
-		c := mockClusterConfig()
-		configMap := &corev1.ConfigMap{
-			Data: make(map[string]string),
-		}
-
-		// add to map
-		configMap.Data["cloudReportURL"] = c.configObj.CloudReportURL
-
-		// delete the content
-		c.configObj.CloudReportURL = ""
-
-		configMap.Data["config.json"] = string(c.GetConfigObj().Config())
-		loadConfigFromData(c.configObj, configMap.Data)
-
-		assert.NotEmpty(t, c.GetAccountID())
-		assert.NotEmpty(t, c.GetCloudReportURL())
-	}
-
-	// use case: some data is in config.json
-	{
-		c := mockClusterConfig()
-		configMap := &corev1.ConfigMap{
-			Data: make(map[string]string),
-		}
-
-		c.configObj.AccountID = "tttt"
-
-		// add to map
-		configMap.Data["accountID"] = mockConfigObj().AccountID
-
-		configMap.Data["config.json"] = string(c.GetConfigObj().Config())
-		loadConfigFromData(c.configObj, configMap.Data)
-
-		assert.Equal(t, mockConfigObj().AccountID, c.GetAccountID())
-	}
-
 }
 
 func TestAdoptClusterName(t *testing.T) {

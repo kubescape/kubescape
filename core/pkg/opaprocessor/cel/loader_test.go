@@ -71,6 +71,44 @@ func TestLoadVAPUnknownControl(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), "C-9999"))
 }
 
+// TestVAPFailurePolicy pins how spec.failurePolicy is resolved: omitted defaults
+// to Fail (the apiserver's default), an explicit Fail stays Fail, and only
+// Ignore flips failOnError to false.
+func TestVAPFailurePolicy(t *testing.T) {
+	doc := func(failurePolicy string) string {
+		return `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: pol
+  labels:
+    controlId: C-1000
+spec:
+` + failurePolicy + `  validations:
+  - expression: "true"
+`
+	}
+
+	tests := []struct {
+		name          string
+		failurePolicy string
+		wantFail      bool
+	}{
+		{name: "omitted defaults to Fail", failurePolicy: "", wantFail: true},
+		{name: "explicit Fail", failurePolicy: "  failurePolicy: Fail\n", wantFail: true},
+		{name: "explicit Ignore", failurePolicy: "  failurePolicy: Ignore\n", wantFail: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			catalog, err := parseVAPBundle([]byte(doc(tt.failurePolicy)))
+			require.NoError(t, err)
+			vap, ok := catalog.byControl["C-1000"]
+			require.True(t, ok)
+			assert.Equal(t, tt.wantFail, vap.failOnError())
+		})
+	}
+}
+
 // vapDoc renders a minimal VAP document for the in-memory bundle tests.
 func vapDoc(name, controlID string) string {
 	labels := ""
@@ -151,11 +189,11 @@ func TestParseVAPBundleDuplicateName(t *testing.T) {
 	assert.Contains(t, catalog.byName, "kubescape-c-2000", "an unrelated name must still index")
 }
 
-// TestLoadVAPRefusesMatchConditions proves a policy with a matchConditions gate is
-// captured but refused, rather than having its validations run unconditionally.
-// Today's bundle ships none, but a future sync could, and running one offline
-// would emit violations live admission (which honors the gate) never would.
-func TestLoadVAPRefusesMatchConditions(t *testing.T) {
+// TestLoadVAPAcceptsMatchConditions proves a policy with a matchConditions gate
+// loads with its conditions captured, rather than being refused. The evaluator
+// honors the gate per object (see TestMatchConditions*), so refusing the control
+// outright would drop it from the scan for no reason.
+func TestLoadVAPAcceptsMatchConditions(t *testing.T) {
 	bundle := `apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -174,11 +212,11 @@ spec:
 
 	vap := catalog.byControl["C-1001"]
 	require.NotNil(t, vap)
-	require.NotEmpty(t, vap.matchConditions, "matchConditions must be captured, not dropped")
+	require.Len(t, vap.matchConditions, 1, "matchConditions must be captured, not dropped")
+	assert.Equal(t, "only-kube-system", vap.matchConditions[0].Name)
+	assert.Equal(t, "object.metadata.namespace == 'kube-system'", vap.matchConditions[0].Expression)
 
-	err = vap.requireSupported()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "matchConditions")
+	assert.NoError(t, vap.requireSupported(), "a gated policy is evaluated, not refused")
 }
 
 // TestLoadVAPRefusesNarrowingSelectors pins which selector is refused and which

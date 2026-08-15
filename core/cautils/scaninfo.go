@@ -115,6 +115,7 @@ type PolicyIdentifier struct {
 
 type ScanInfo struct {
 	UseExceptions         string   // Load file with exceptions configuration
+	AuditExceptions       bool     // Include exception usage audit in supported scan outputs
 	ControlsInputs        string   // Load file with inputs for controls
 	AttackTracks          string   // Load file with attack tracks
 	UseFrom               []string // Load framework from local file (instead of download). Use when running offline
@@ -138,6 +139,7 @@ type ScanInfo struct {
 	FailThreshold         float32                      // DEPRECATED - Failure score threshold
 	ComplianceThreshold   float32                      // Compliance score threshold
 	FailThresholdSeverity string                       // Severity at and above which the command should fail
+	OnlyFixable           bool                         // Gate the severity threshold to only count CVEs that have an available fix
 	FailCoverageThreshold float32                      // Coverage threshold below which the command fails (0 = disabled)
 	FailOnDegradedConfig  bool                         // Fail the scan if control inputs or exceptions could not be loaded and a fallback was used
 	Submit                BoolPtrFlag                  // Submit results to Kubescape Cloud BE. Get() is nil unless explicitly set by the caller (flag/env/request field)
@@ -161,6 +163,7 @@ type ScanInfo struct {
 	ScanTimeout           time.Duration // Maximum duration for the entire scan (0 = no timeout)
 	ControlTimeout        time.Duration // Maximum duration for evaluating a single control (0 = no timeout)
 	EnableStreaming       bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
+	DryRun                bool          // Check RBAC access for the resources the scan would need, without collecting or evaluating anything
 	ChartPath             string
 	FilePath              string
 	HelmValueFiles        []string // -f / --values: paths to Helm values YAML files (repeatable)
@@ -183,6 +186,7 @@ type ScanInfo struct {
 	RegistryPassword      string            // Password for workload image registry authentication
 	RegistryToken         string            // Bearer token for workload image registry authentication
 	ImageScanConcurrency  int               // Number of concurrent workers for image scanning
+	MinSeverity           string            // Only include controls at or above this severity in the output
 }
 
 type Getters struct {
@@ -192,9 +196,11 @@ type Getters struct {
 	AttackTracksGetter   getter.IAttackTracksGetter
 }
 
-func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyIdentifier) {
+func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyIdentifier) error {
 	scanInfo.setUseFrom(policyIdentifiers)
-	scanInfo.setUseArtifactsFrom(ctx)
+	if err := scanInfo.setUseArtifactsFrom(ctx); err != nil {
+		return err
+	}
 	// setUseFrom and setUseArtifactsFrom can resolve to the same file - --use-default and
 	// --use-artifacts-from both point at the local store on the offline HTTP handler path -
 	// and a repeated path costs an extra read and unmarshal per policy load.
@@ -202,6 +208,7 @@ func (scanInfo *ScanInfo) Init(ctx context.Context, policyIdentifiers []PolicyId
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
 	}
+	return nil
 }
 
 func (scanInfo *ScanInfo) Cleanup() {
@@ -214,26 +221,31 @@ func (scanInfo *ScanInfo) AddCleanup(cleanup func()) {
 	scanInfo.cleanups = append(scanInfo.cleanups, cleanup)
 }
 
-func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
+func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) error {
 	if scanInfo.UseArtifactsFrom == "" {
-		return
+		return nil
 	}
-	// UseArtifactsFrom must be a path without a filename
-	dir, file := filepath.Split(scanInfo.UseArtifactsFrom)
-	if dir == "" {
-		scanInfo.UseArtifactsFrom = file
-	} else if strings.Contains(file, ".json") {
-		scanInfo.UseArtifactsFrom = dir
+	// UseArtifactsFrom must be a directory. If it points at a single file,
+	// fall back to its parent directory based on the filesystem, not a name
+	// heuristic (a directory named "*.json" is still a directory). A bare
+	// filename with no path separator is left untouched so os.ReadDir below
+	// surfaces the existing clear error instead of silently scanning ".".
+	// An explicit current-directory path like "./<file>" has a separator, so
+	// it falls back to "." as its parent directory.
+	if info, err := os.Stat(scanInfo.UseArtifactsFrom); err == nil && !info.IsDir() {
+		if filepath.Base(scanInfo.UseArtifactsFrom) != scanInfo.UseArtifactsFrom {
+			scanInfo.UseArtifactsFrom = filepath.Dir(scanInfo.UseArtifactsFrom)
+		}
 	}
 	// set frameworks files
 	files, err := os.ReadDir(scanInfo.UseArtifactsFrom)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("failed to read files from directory", helpers.String("dir", scanInfo.UseArtifactsFrom), helpers.Error(err))
+		return fmt.Errorf("failed to read files from directory %q: %w", scanInfo.UseArtifactsFrom, err)
 	}
 	framework := &reporthandling.Framework{}
 	for _, f := range files {
 		filePath := filepath.Join(scanInfo.UseArtifactsFrom, f.Name())
-		file, err := os.ReadFile(filePath)
+		file, err := os.ReadFile(filepath.Clean(filePath))
 		if err == nil {
 			if err := json.Unmarshal(file, framework); err == nil {
 				scanInfo.UseFrom = append(scanInfo.UseFrom, filepath.Join(scanInfo.UseArtifactsFrom, f.Name()))
@@ -253,6 +265,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 	if scanInfo.AttackTracks == "" {
 		scanInfo.AttackTracks = filepath.Join(scanInfo.UseArtifactsFrom, LocalAttackTracksFilename)
 	}
+	return nil
 }
 
 func (scanInfo *ScanInfo) setUseFrom(policyIdentifiers []PolicyIdentifier) {
@@ -359,7 +372,7 @@ func splitNamespaceList(s string) []string {
 func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
-	metadata.ScanMetadata.Formats = []string{scanInfo.Format}
+	metadata.ScanMetadata.Formats = scanInfo.Formats()
 	metadata.ScanMetadata.FormatVersion = scanInfo.FormatVersion
 	metadata.ScanMetadata.Submit = scanInfo.Submit.GetBool()
 
@@ -420,7 +433,11 @@ func (scanInfo *ScanInfo) GetInputFiles() string {
 
 func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
 	if scanInfo.scanningContext == nil {
-		scanningContext := scanInfo.getScanningContext(scanInfo.GetInputFiles())
+		input := scanInfo.GetInputFiles()
+		scanningContext := scanInfo.getScanningContext(input)
+		if input != "" {
+			scanInfo.cloneAdditionalRemoteInputs(input)
+		}
 		scanInfo.scanningContext = &scanningContext
 	}
 	return *scanInfo.scanningContext
@@ -505,7 +522,6 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 						logger.L().Warning("failed to clean up cloned repository", helpers.String("url", originalInput), helpers.Error(err))
 					}
 				})
-				scanInfo.cloneAdditionalRemoteInputs(originalInput)
 				return ContextGitRemote
 			}
 			if err := ReleaseClonedRepo(originalInput); err != nil {

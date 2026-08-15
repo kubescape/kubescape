@@ -34,7 +34,7 @@ func TestInitLoggerLevel_KSLoggerPrecedence(t *testing.T) {
 		rootInfo.LoggerName = zaplogger.LoggerName
 
 		initLogger()
-		initLoggerLevel(cmd)
+		assert.NoError(t, initLoggerLevel(cmd))
 
 		assert.Equal(t, "debug", rootInfo.Logger)
 	})
@@ -53,7 +53,7 @@ func TestInitLoggerLevel_KSLoggerPrecedence(t *testing.T) {
 		rootInfo.LoggerName = zaplogger.LoggerName
 
 		initLogger()
-		initLoggerLevel(cmd)
+		assert.NoError(t, initLoggerLevel(cmd))
 
 		assert.Equal(t, helpers.WarningLevel.String(), rootInfo.Logger)
 	})
@@ -72,7 +72,7 @@ func TestInitLoggerLevel_KSLoggerPrecedence(t *testing.T) {
 		rootInfo.LoggerName = zaplogger.LoggerName
 
 		initLogger()
-		initLoggerLevel(cmd)
+		assert.NoError(t, initLoggerLevel(cmd))
 
 		assert.Equal(t, helpers.InfoLevel.String(), rootInfo.Logger)
 	})
@@ -96,7 +96,7 @@ func TestInitLoggerLevel_KSLoggerPrecedence(t *testing.T) {
 
 		rootInfo.LoggerName = zaplogger.LoggerName
 		initLogger()
-		initLoggerLevel(versionCmd)
+		assert.NoError(t, initLoggerLevel(versionCmd))
 
 		assert.Equal(t, helpers.InfoLevel.String(), rootInfo.Logger)
 	})

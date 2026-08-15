@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/google/uuid"
@@ -42,38 +43,53 @@ type HTTPHandler struct {
 	offline             bool
 	state               *serverState
 	scanRequestChan     chan *scanRequestParams
+	cancelWatch         context.CancelFunc
 	maxRequestBodyBytes int64
 }
 
 func NewHTTPHandler(offline bool) *HTTPHandler {
-	return newHTTPHandler(offline, configuredPositiveInt(scanQueueCapacityEnv, defaultScanQueueCapacity), int64(configuredPositiveInt(scanRequestMaxBytesEnv, int(defaultMaxScanRequestBodyBytes))))
+	queueCapacity := configuredPositiveInt(scanQueueCapacityEnv, defaultScanQueueCapacity)
+	maxRequestBody := configuredPositiveInt64(scanRequestMaxBytesEnv, defaultMaxScanRequestBodyBytes)
+	return newHTTPHandler(offline, queueCapacity, maxRequestBody)
+}
+
+// Shutdown stops the background scan watcher goroutine. It should be called
+// when the HTTP handler is no longer needed (e.g. on server shutdown).
+func (handler *HTTPHandler) Shutdown() {
+	if handler.cancelWatch != nil {
+		handler.cancelWatch()
+	}
 }
 
 func newHTTPHandler(offline bool, queueCapacity int, maxRequestBodyBytes int64) *HTTPHandler {
+	ctx, cancel := context.WithCancel(context.Background())
 	handler := &HTTPHandler{
 		offline:             offline,
 		state:               newServerState(),
 		scanRequestChan:     make(chan *scanRequestParams, queueCapacity),
+		cancelWatch:         cancel,
 		maxRequestBodyBytes: maxRequestBodyBytes,
 	}
-	go handler.watchForScan()
+	go handler.watchForScan(ctx)
 	return handler
 }
 
-func configuredPositiveInt(name string, fallback int) int {
-	raw := envToString(name, "")
-	if raw == "" {
-		return fallback
+func configuredPositiveInt(name string, defaultValue int) int {
+	if raw, ok := os.LookupEnv(name); ok {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			return v
+		}
 	}
-	value, err := strconv.Atoi(raw)
-	if err != nil || value <= 0 {
-		logger.L().Warning("invalid positive integer configuration; using default",
-			helpers.String("environmentVariable", name),
-			helpers.String("value", raw),
-			helpers.Int("default", fallback))
-		return fallback
+	return defaultValue
+}
+
+func configuredPositiveInt64(name string, defaultValue int64) int64 {
+	if raw, ok := os.LookupEnv(name); ok {
+		if v, err := strconv.ParseInt(raw, 10, 64); err == nil && v > 0 {
+			return v
+		}
 	}
-	return value
+	return defaultValue
 }
 
 // ============================================== STATUS ========================================================
@@ -96,23 +112,28 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 	}
 	logger.L().Info("requesting status", helpers.String("scanID", statusQueryParams.ScanID), helpers.String("api", "v1/status"))
 
+	scanID := statusQueryParams.ScanID
+	if scanID == "" {
+		// Resolve the implicit "latest" before consulting isBusy: isBusy("")
+		// falls back to latestID, which /v1/metrics scrapes overwrite just as
+		// much as user scans do, so an empty ID would otherwise report on a
+		// metrics scrape. An empty result here means no user scan has run.
+		scanID = handler.state.getLatestUserScanID()
+	}
+
 	w.WriteHeader(http.StatusOK)
-	if !handler.state.isBusy(statusQueryParams.ScanID) {
+	if scanID == "" || !handler.state.isBusy(scanID) {
 		response.Type = utilsapisv1.NotBusyScanResponseType
-		logger.L().Debug("status: not busy", helpers.String("ID", statusQueryParams.ScanID))
+		logger.L().Debug("status: not busy", helpers.String("ID", scanID))
 		w.Write(responseToBytes(&response))
 		return
 	}
 
-	if statusQueryParams.ScanID == "" {
-		statusQueryParams.ScanID = handler.state.getLatestID()
-	}
-
-	response.Response = statusQueryParams.ScanID
-	response.ID = statusQueryParams.ScanID
+	response.Response = scanID
+	response.ID = scanID
 	response.Type = utilsapisv1.BusyScanResponseType
 
-	logger.L().Debug("status: busy", helpers.String("ID", statusQueryParams.ScanID))
+	logger.L().Debug("status: busy", helpers.String("ID", scanID))
 	w.Write(responseToBytes(&response))
 }
 
@@ -150,19 +171,27 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		scanRequestParams.scanInfo.UseArtifactsFrom = getter.DefaultLocalStore
 	}
 
-	handler.state.setBusy(scanID, cancel)
-
-	select {
-	case handler.scanRequestChan <- scanRequestParams:
-		logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
-	default:
-		handler.state.setNotBusy(scanID)
+	// Mark busy, enqueue, and record the accepted user scan as one atomic
+	// admission step. Status and the offline Results fallback resolve "latest"
+	// through latestUserScanID, so it has to be written in the same critical
+	// section that decides acceptance -- otherwise two concurrent requests can
+	// be accepted in one order and recorded in the other.
+	admitted := handler.state.admitUserScan(scanID, cancel, func() bool {
+		select {
+		case handler.scanRequestChan <- scanRequestParams:
+			return true
+		default:
+			return false
+		}
+	})
+	if !admitted {
 		w.Header().Set("Retry-After", "1")
 		handler.writeErrorWithStatus(w,
 			fmt.Errorf("scan queue is full; retry the request later"),
 			"", http.StatusTooManyRequests)
 		return
 	}
+	logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
 
 	response := &utilsmetav1.Response{
 		ID:       scanID,
@@ -217,7 +246,7 @@ func (handler *HTTPHandler) CancelScan(w http.ResponseWriter, r *http.Request) {
 
 	scanID := cancelQueryParams.ScanID
 	if scanID == "" {
-		scanID = handler.state.getLatestUserScanID()
+		scanID = handler.state.getRunningUserScanID()
 	}
 
 	logger.L().Info("requesting scan cancellation", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
@@ -260,7 +289,10 @@ func (handler *HTTPHandler) validateScanID(w http.ResponseWriter, resultsQueryPa
 	isLatestFallback := false
 	if resultsQueryParams.ScanID == "" {
 		if handler.offline {
-			resultsQueryParams.ScanID = handler.state.getLatestID()
+			// Latest *user* scan: latestID is also written by /v1/metrics
+			// scrapes, which would make this fallback serve a metrics run's
+			// output as if it were the caller's scan.
+			resultsQueryParams.ScanID = handler.state.getLatestUserScanID()
 			isLatestFallback = true
 		} else {
 			logger.L().Info("empty scan ID")

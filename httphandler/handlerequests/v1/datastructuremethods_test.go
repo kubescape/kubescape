@@ -37,7 +37,7 @@ func TestToScanInfo(t *testing.T) {
 	{
 		req := &utilsmetav1.PostScanRequest{
 			TargetType:         apisv1.KindFramework,
-			Account:            "abc",
+			Account:            "abc", // must NOT reach s.AccountID - see TestToScanInfo_IgnoresClientSuppliedIdentity
 			Logger:             "info",
 			Format:             "pdf",
 			FailThreshold:      50,
@@ -45,7 +45,6 @@ func TestToScanInfo(t *testing.T) {
 			TargetNames:        []string{"nsa", "mitre"},
 		}
 		s, policyIdentifiers := ToScanInfo(req)
-		assert.Equal(t, "abc", s.AccountID)
 		assert.Equal(t, "v2", s.FormatVersion)
 		assert.Equal(t, "pdf", s.Format)
 		assert.Equal(t, 2, len(policyIdentifiers))
@@ -101,6 +100,28 @@ func TestToScanInfo(t *testing.T) {
 		assert.Equal(t, "nginx", s.ScanObject.GetName())
 		assert.Equal(t, "ns1", s.ScanObject.GetNamespace())
 	}
+}
+
+// TestToScanInfo_IgnoresClientSuppliedIdentity is a regression test for a
+// critical vuln: an unauthenticated caller of POST /v1/scan could set
+// account/accessKey in the request body and redirect the cluster scan report
+// (RBAC, workload details, etc.) to an attacker-controlled Kubescape Cloud
+// account. AccountID/AccessKey must always come from this server's own
+// trusted config (env vars / credentials fetched at startup), never from the
+// request body.
+func TestToScanInfo_IgnoresClientSuppliedIdentity(t *testing.T) {
+	t.Setenv("KS_ACCOUNT_ID", "trusted-account")
+	t.Setenv("KS_ACCESS_KEY", "trusted-access-key")
+
+	req := &utilsmetav1.PostScanRequest{
+		TargetType: apisv1.KindFramework,
+		Account:    "attacker-account",
+		AccessKey:  "attacker-access-key",
+	}
+	s, _ := ToScanInfo(req)
+
+	assert.Equal(t, "trusted-account", s.AccountID, "client-supplied Account must not override the server's configured identity")
+	assert.Equal(t, "trusted-access-key", s.AccessKey, "client-supplied AccessKey must not override the server's configured identity")
 }
 
 func TestToScanInfoExceptionsCleanup(t *testing.T) {

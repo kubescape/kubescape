@@ -9,8 +9,10 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -76,7 +78,7 @@ func TestCollectAndStreamBatches_FailsWhenAllQueriesFail(t *testing.T) {
 func TestCollectAndStreamBatches_IgnoresMissingOptionalResource(t *testing.T) {
 	ctx := context.Background()
 	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, fmt.Errorf("the server could not find the requested resource")
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "example.com", Resource: "somecrds"}, "")
 	})
 	scanInfo, session := streamingTestSession(ctx)
 	namespaced := true
@@ -199,6 +201,35 @@ func TestCollectAndStreamBatches_HostScannerDisabled_MarksControlsSkipped(t *tes
 	require.True(t, ok, "host-sensor resources must be recorded as skipped when the host scanner is disabled")
 	assert.Equal(t, apis.StatusSkipped, info.InnerStatus)
 	assert.Contains(t, info.InnerInfo, "Install the Kubescape operator")
+}
+
+func TestCollectAndStreamBatches_HostScannerEnabled_NilHandler_NoPanic(t *testing.T) {
+	ctx := context.Background()
+	handler := &K8sResourceHandler{
+		hostSensorHandler: nil, // Nil handler must NOT cause a nil pointer panic when HostScanner is true
+	}
+	scanInfo, session := streamingTestSession(ctx)
+	session.Metadata.ScanMetadata.HostScanner = true
+	batches := make(chan *cautils.ResourceBatch, 1)
+
+	assert.NotPanics(t, func() {
+		err := handler.collectAndStreamBatches(
+			ctx,
+			QueryableResources{},
+			&EmptySelector{},
+			session,
+			scanInfo,
+			cautils.ExternalResources{"KubeletConfiguration": nil},
+			batches,
+			nil,
+		)
+		require.NoError(t, err)
+	})
+
+	info, ok := session.InfoMap["KubeletConfiguration"]
+	require.True(t, ok)
+	assert.Equal(t, apis.StatusSkipped, info.InnerStatus)
+	assert.Equal(t, "failed to init host scanner", info.InnerInfo)
 }
 
 // TestCollectAndStreamBatches_CountsNamespacedResourcesAcrossBatches guards

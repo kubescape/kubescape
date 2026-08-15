@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"errors"
-	"os"
 
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
@@ -54,19 +53,27 @@ func getExceptionsK8sClient(ctx context.Context) client.Client {
 	return k8sClient
 }
 
-func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) (getter.IExceptionsGetter, error) {
+type releasedExceptionsGetter interface {
+	getter.IExceptionsGetter
+	SetRegoObjectsWithFallback() (bool, error)
+}
+
+// getExceptionsGetter returns the selected getter and whether an online
+// GitHub source degraded to the bundled cache. Explicit local/air-gapped
+// sources are intentional selections and therefore do not count as fallback.
+func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, airGapped bool) (getter.IExceptionsGetter, bool, error) {
 	var primary getter.IExceptionsGetter
 
 	if useExceptions != "" {
 		// load exceptions from file
 		primary = getter.NewLoadPolicy([]string{useExceptions})
 		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), false, nil
 	}
 	if airGapped {
 		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
 		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), false, nil
 	}
 	if accountID != "" {
 		if downloadReleasedPolicy != nil && downloadReleasedPolicy.IsVersionPinned() {
@@ -75,24 +82,31 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 		// download exceptions from Kubescape Cloud backend
 		primary = getter.GetKSCloudAPIAdapter()
 		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), false, nil
 	}
 	// download exceptions from GitHub
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
-	if fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback(); err != nil {
+	return getReleasedExceptionsGetter(ctx, downloadReleasedPolicy)
+}
+
+// getReleasedExceptionsGetter reports whether the GitHub release could not be
+// fetched and the bundled local cache is being used instead. The caller must
+// preserve that signal because cached exceptions can change scan findings.
+func getReleasedExceptionsGetter(ctx context.Context, downloadReleasedPolicy releasedExceptionsGetter) (getter.IExceptionsGetter, bool, error) {
+	var primary getter.IExceptionsGetter = downloadReleasedPolicy
+	fallback, err := downloadReleasedPolicy.SetRegoObjectsWithFallback()
+	if err != nil {
 		// pinned version: hard error, do not silently serve cached exceptions
-		return nil, err
-	} else if fallback { // if failed to pull exceptions, fallback to cache
+		return nil, false, err
+	}
+	if fallback { // if failed to pull exceptions, fallback to cache
 		logger.L().Ctx(ctx).Warning("failed to get exceptions from github release, loading exceptions from cache")
 		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
-		k8sClient := getExceptionsK8sClient(ctx)
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
 	}
-	primary = downloadReleasedPolicy
 	k8sClient := getExceptionsK8sClient(ctx)
-	return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), nil
+	return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient)), fallback, nil
 
 }
 
@@ -419,20 +433,15 @@ func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, 
 
 // GetUIPrinter returns a printer that will be used to print to the program’s UI (terminal)
 func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName string) printer.IPrinter {
-	var p printer.IPrinter
-	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
-		p = &printerv2.SilentPrinter{}
-	} else {
-		p = printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName)
-
-		// Since the UI of the program is a CLI (Stdout), it means that it should always print to Stdout
-		if scanInfo.Format != "" && scanInfo.Output == "" {
-			p.SetWriter(ctx, os.DevNull)
-		} else {
-			p.SetWriter(ctx, os.Stdout.Name())
-		}
+	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel || (scanInfo.Format != "" && scanInfo.Output == "") {
+		return &printerv2.SilentPrinter{}
 	}
 
+	p := printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName)
+	if err := p.SetWriter(ctx, ""); err != nil {
+		logger.L().Ctx(ctx).Warning("failed to configure terminal output", helpers.Error(err))
+		return &printerv2.SilentPrinter{}
+	}
 	return p
 }
 

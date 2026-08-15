@@ -3,6 +3,7 @@ package resultshandling
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -25,6 +26,7 @@ type ResultsHandler struct {
 	ScanData      *cautils.OPASessionObj
 	PrinterObjs   []printer.IPrinter
 	ImageScanData []cautils.ImageScanData
+	scanError     error
 }
 
 func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrinter, uiPrinter printer.IPrinter) *ResultsHandler {
@@ -56,6 +58,13 @@ func (rh *ResultsHandler) GetData() *cautils.OPASessionObj {
 // SetData sets the scan/action related data
 func (rh *ResultsHandler) SetData(data *cautils.OPASessionObj) {
 	rh.ScanData = data
+}
+
+// SetScanError records a scan error that must be returned after any partial
+// results have been printed. This lets callers preserve useful scan output
+// without reporting a successful exit status for incomplete results.
+func (rh *ResultsHandler) SetScanError(err error) {
+	rh.scanError = err
 }
 
 // GetPrinters returns all printers
@@ -133,18 +142,32 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 
 	// Display scan results in the UI first to give immediate value.
 
-	rh.UiPrinter.ActionPrint(ctx, rh.ScanData, rh.ImageScanData)
+	var printErr error
+
+	if err := rh.UiPrinter.ActionPrint(ctx, rh.ScanData, rh.ImageScanData); err != nil {
+		printErr = errors.Join(printErr, fmt.Errorf("ui printer: %w", err))
+	}
 
 	rh.UiPrinter.PrintNextSteps()
-	closePrinter(rh.UiPrinter)
+	if err := closePrinter(rh.UiPrinter); err != nil {
+		printErr = errors.Join(printErr, fmt.Errorf("ui printer close: %w", err))
+	}
 
 	// Then print to output files
 	for _, p := range rh.PrinterObjs {
-		p.ActionPrint(ctx, rh.ScanData, rh.ImageScanData)
+		if err := p.ActionPrint(ctx, rh.ScanData, rh.ImageScanData); err != nil {
+			printErr = errors.Join(printErr, fmt.Errorf("output printer %T: %w", p, err))
+		}
 		if rh.ScanData != nil {
 			p.Score(rh.GetComplianceScore())
 		}
-		closePrinter(p)
+		if err := closePrinter(p); err != nil {
+			printErr = errors.Join(printErr, fmt.Errorf("output printer %T close: %w", p, err))
+		}
+	}
+
+	if err := errors.Join(printErr, rh.scanError); err != nil {
+		return err
 	}
 
 	// We should submit only after printing results, so a user can see
@@ -169,7 +192,7 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 			logger.L().Ctx(ctx).Warning("Deprecated format version", helpers.String("run", "--format-version=v2"))
 			return printerv1.NewJsonPrinter()
 		default:
-			return printerv2.NewJsonPrinter()
+			return printerv2.NewJsonPrinter(scanInfo.MinSeverity)
 		}
 	case printer.YamlFormat:
 		if scanInfo.FormatVersion == "v1" {
@@ -178,6 +201,8 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		return printerv2.NewYamlPrinter()
 	case printer.CsvFormat:
 		return printerv2.NewCsvPrinter()
+	case printer.MarkdownFormat:
+		return printerv2.NewMarkdownPrinter()
 	case printer.JunitResultFormat:
 		return printerv2.NewJunitPrinter(scanInfo.VerboseMode)
 	case printer.PrometheusFormat:
@@ -190,6 +215,12 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		return printerv2.NewSARIFPrinter()
 	case printer.GitLabSASTFormat:
 		return printerv2.NewGitLabSASTPrinter()
+	case printer.CycloneDXFormat:
+		return printerv2.NewCycloneDXPrinter()
+	case printer.SPDXFormat:
+		return printerv2.NewSPDXPrinter()
+	case printer.PolicyReportFormat:
+		return printerv2.NewPolicyReportPrinter()
 	default:
 		if printFormat != printer.PrettyFormat {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
@@ -217,22 +248,34 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 			return false, fmt.Errorf("format \"%s\" is only supported when scanning local files", printFormat)
 		}
 	}
+	if printFormat == printer.CycloneDXFormat || printFormat == printer.SPDXFormat {
+		return false, fmt.Errorf("format \"%s\" is only supported for image scanning", printFormat)
+	}
 
 	switch printFormat {
-	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat:
+	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat, printer.MarkdownFormat, printer.PolicyReportFormat:
 		return false, nil
 	default:
 		return true, nil
 	}
 }
 
-// closePrinter closes p's output writer if p implements the optional
-// printerCloser interface. This avoids widening the public IPrinter interface.
-func closePrinter(p printer.IPrinter) {
-	type printerCloser interface {
+// closePrinter closes p's output writer if p implements an optional close
+// contract, returning any error so callers can surface incomplete writes.
+// Printers migrated to return an error from CloseWriter are preferred; the
+// legacy void contract is still supported for backwards compatibility.
+func closePrinter(p printer.IPrinter) error {
+	type errorCloser interface {
+		CloseWriter() error
+	}
+	if c, ok := p.(errorCloser); ok {
+		return c.CloseWriter()
+	}
+	type voidCloser interface {
 		CloseWriter()
 	}
-	if c, ok := p.(printerCloser); ok {
+	if c, ok := p.(voidCloser); ok {
 		c.CloseWriter()
 	}
+	return nil
 }

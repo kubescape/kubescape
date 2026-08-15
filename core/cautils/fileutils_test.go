@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -34,7 +35,7 @@ func TestListFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
-	workloads, err := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "", nil)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "", nil)
 	require.NoError(t, err)
 	assert.Equal(t, 12, len(workloads))
 
@@ -51,7 +52,7 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 func TestLoadResourcesFromFiles_SupportsMixedCaseExtensions(t *testing.T) {
 	o, _ := os.Getwd()
 	testDir := filepath.Join(o, "testdata", "mixed_extensions")
-	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, "", nil)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), testDir, "", nil)
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(workloads))
 
@@ -80,7 +81,7 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplates(t *testing.T) {
 		filepath.Join(testDir, "mychart"),
 		filepath.Join(testDir, "mychart", "charts", "mysubchart"),
 	}
-	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
 	require.NoError(t, err)
 
 	expectedFiles := []string{
@@ -99,7 +100,7 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplates(t *testing.T) {
 func TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart(t *testing.T) {
 	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
 	renderedCharts := []string{testDir, filepath.Join(testDir, "charts", "mysubchart")}
-	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
 	require.NoError(t, err)
 
 	expectedFile := filepath.Join(testDir, "crds", "widget.yaml")
@@ -114,7 +115,7 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart(t *testing.T) {
 func TestLoadResourcesFromFiles_ScansTemplatesOfUnrenderedChart(t *testing.T) {
 	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
 	// no charts rendered successfully, so nothing may be excluded
-	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, nil)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, nil)
 	require.NoError(t, err)
 
 	staticTemplate := filepath.Join(testDir, "templates", "serviceaccount.yaml")
@@ -193,6 +194,171 @@ func TestExcludeHelmTemplateFiles_NoCharts(t *testing.T) {
 	assert.Equal(t, files, excludeHelmTemplateFiles(files, nil))
 }
 
+// TestExcludeHelmChartMetadataFiles asserts that the fixed Helm chart-metadata
+// files are dropped by name while all other files survive, regardless of depth.
+func TestExcludeHelmChartMetadataFiles(t *testing.T) {
+	files := []string{
+		filepath.Join("repo", "chart", "Chart.yaml"),
+		filepath.Join("repo", "chart", "Chart.lock"),
+		filepath.Join("repo", "chart", "values.yaml"),
+		filepath.Join("repo", "chart", "templates", "deployment.yaml"),
+		filepath.Join("repo", "chart-docs", "Chart.yaml.example"),
+		filepath.Join("repo", "pod.yaml"),
+	}
+	remaining := excludeHelmChartMetadataFiles(files)
+	assert.Equal(t, []string{
+		filepath.Join("repo", "chart", "values.yaml"),
+		filepath.Join("repo", "chart", "templates", "deployment.yaml"),
+		filepath.Join("repo", "chart-docs", "Chart.yaml.example"),
+		filepath.Join("repo", "pod.yaml"),
+	}, remaining)
+}
+
+// TestIsUnderAnyDir asserts that containment is decided by canonical relative
+// paths, not by string prefix equality: siblings that merely share a directory
+// prefix must not be reported as contained, and a directory named "." must stay
+// confined to its location (#2889).
+func TestIsUnderAnyDir(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		dirs      []string
+		contained bool
+	}{
+		{
+			name:      "file directly inside directory",
+			path:      "/repo/app/deployment.yaml",
+			dirs:      []string{"/repo/app"},
+			contained: true,
+		},
+		{
+			name:      "file nested below directory",
+			path:      "/repo/app/config/base/pod.yaml",
+			dirs:      []string{"/repo/app"},
+			contained: true,
+		},
+		{
+			name:      "sibling sharing a prefix is outside",
+			path:      "/repo/app-docs/deployment.yaml",
+			dirs:      []string{"/repo/app"},
+			contained: false,
+		},
+		{
+			name:      "unrelated path is outside",
+			path:      "/repo/other/pod.yaml",
+			dirs:      []string{"/repo/app"},
+			contained: false,
+		},
+		{
+			name:      "every path is under the root directory",
+			path:      "/repo/app/deployment.yaml",
+			dirs:      []string{string(filepath.Separator)},
+			contained: true,
+		},
+		{
+			name:      "parent directory does not claim a sibling",
+			path:      "/repo/app/deployment.yaml",
+			dirs:      []string{"/repo"},
+			contained: true,
+		},
+		{
+			name:      "relative path is resolved against the working directory",
+			path:      "app/deployment.yaml",
+			dirs:      []string{"app"},
+			contained: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.contained, IsUnderAnyDir(tt.path, tt.dirs))
+		})
+	}
+}
+
+// TestDirSetContains asserts that the ancestor walk decides containment exactly
+// as the per-directory relative-path comparison it replaces, including for a
+// sibling sharing a name prefix and for a directory absent from the set.
+func TestDirSetContains(t *testing.T) {
+	set := newDirSet([]string{"/repo/app", "/repo/charts/web/templates"})
+
+	tests := []struct {
+		name      string
+		path      string
+		contained bool
+	}{
+		{name: "the directory itself", path: "/repo/app", contained: true},
+		{name: "file directly inside", path: "/repo/app/deployment.yaml", contained: true},
+		{name: "file nested below", path: "/repo/app/config/base/pod.yaml", contained: true},
+		{name: "second member of the set", path: "/repo/charts/web/templates/svc.yaml", contained: true},
+		{name: "sibling sharing a prefix", path: "/repo/app-docs/deployment.yaml", contained: false},
+		{name: "parent of a member", path: "/repo/charts/web/Chart.yaml", contained: false},
+		{name: "unrelated path", path: "/other/pod.yaml", contained: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.contained, set.contains(tt.path))
+		})
+	}
+
+	assert.False(t, newDirSet(nil).contains("/repo/app/deployment.yaml"), "an empty set contains nothing")
+	assert.True(t, newDirSet([]string{string(filepath.Separator)}).contains("/repo/app/deployment.yaml"),
+		"every absolute path is under the filesystem root")
+}
+
+// TestDirSetContains_UncleanDirs asserts that a member that is not lexically
+// clean still claims the paths below it, matching the filepath.Rel comparison
+// this lookup replaced, which cleaned its arguments itself.
+func TestDirSetContains_UncleanDirs(t *testing.T) {
+	for _, dir := range []string{"/repo/app/", "/repo/./app", "/repo//app", "/repo/other/../app"} {
+		t.Run(dir, func(t *testing.T) {
+			set := newDirSet([]string{dir})
+			assert.True(t, set.contains("/repo/app/deployment.yaml"), "an unclean member must still claim files below it")
+			assert.False(t, set.contains("/repo/app-docs/deployment.yaml"), "a prefix sibling stays outside")
+		})
+	}
+}
+
+// BenchmarkExcludeHelmTemplateFiles covers the repository-scan shape the lookup
+// is built for: many files checked against many rendered chart directories.
+func BenchmarkExcludeHelmTemplateFiles(b *testing.B) {
+	root := b.TempDir()
+
+	charts := make([]string, 0, 200)
+	for i := range 200 {
+		charts = append(charts, filepath.Join(root, "charts", strconv.Itoa(i)))
+	}
+	files := make([]string, 0, 2000)
+	for i := range 2000 {
+		files = append(files, filepath.Join(root, "manifests", strconv.Itoa(i), "deployment.yaml"))
+	}
+
+	b.ResetTimer()
+	for range b.N {
+		excludeHelmTemplateFiles(files, charts)
+	}
+}
+
+// TestIsUnderAnyDir_CanonicalizesSymlinks asserts that a path reached through a
+// symlinked parent is still reported contained when only the physical layout
+// matches one of dirs.
+func TestIsUnderAnyDir_CanonicalizesSymlinks(t *testing.T) {
+	realParent := resolvedTempDir(t)
+	dir := filepath.Join(realParent, "app")
+	require.NoError(t, os.MkdirAll(dir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "deployment.yaml"), []byte("apiVersion: v1\n"), 0o600))
+
+	linkedParent := filepath.Join(resolvedTempDir(t), "linked-parent")
+	if err := os.Symlink(realParent, linkedParent); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	assert.True(t, IsUnderAnyDir(
+		filepath.Join(linkedParent, "app", "deployment.yaml"), []string{dir},
+	), "a symlinked copy of the directory must still be treated as contained")
+}
+
 func TestLoadResourcesFromHelmCharts(t *testing.T) {
 	sourceToWorkloads, sourceToChartName, _, err := LoadResourcesFromHelmCharts(context.Background(), helmChartPath(), HelmValueOptions{})
 	assert.NoError(t, err)
@@ -235,7 +401,7 @@ func writeHelmChartFixture(t *testing.T, directory, name string) {
 }
 
 func TestLoadResourcesFromHelmChartsExcludingKustomizeOwnedDirectories(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	chartHome := filepath.Join(root, "charts")
 	base := filepath.Join(root, "base")
 	ownedChart := filepath.Join(base, "charts", "app")
@@ -299,7 +465,7 @@ helmCharts:
 }
 
 func TestLoadResourcesFromHelmChartsExcludingDirectories_CanonicalizesSymlinkedScanPath(t *testing.T) {
-	realParent := t.TempDir()
+	realParent := resolvedTempDir(t)
 	root := filepath.Join(realParent, "project")
 	ownedChart := filepath.Join(root, "charts", "app")
 	standaloneChart := filepath.Join(root, "charts", "standalone")
@@ -312,7 +478,7 @@ helmCharts:
     releaseName: app
 `)
 
-	linkedParent := filepath.Join(t.TempDir(), "linked-parent")
+	linkedParent := filepath.Join(resolvedTempDir(t), "linked-parent")
 	if err := os.Symlink(realParent, linkedParent); err != nil {
 		t.Skipf("symlinks are unavailable: %v", err)
 	}
@@ -334,11 +500,11 @@ helmCharts:
 }
 
 func TestExcludeHelmTemplateFiles_PreservesLexicalOwnershipOfSymlinkedTemplate(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	templateDir := filepath.Join(root, "chart", "templates")
 	require.NoError(t, os.MkdirAll(templateDir, 0o750))
 
-	externalTemplate := filepath.Join(t.TempDir(), "configmap.yaml")
+	externalTemplate := filepath.Join(resolvedTempDir(t), "configmap.yaml")
 	require.NoError(t, os.WriteFile(externalTemplate, []byte("apiVersion: v1\nkind: ConfigMap\n"), 0o600))
 	linkedTemplate := filepath.Join(templateDir, "configmap.yaml")
 	if err := os.Symlink(externalTemplate, linkedTemplate); err != nil {
@@ -353,7 +519,7 @@ func TestExcludeHelmTemplateFiles_PreservesLexicalOwnershipOfSymlinkedTemplate(t
 
 func TestLoadFiles(t *testing.T) {
 	files, _ := listFiles(onlineBoutiquePath())
-	_, errs := loadFiles("", files)
+	_, _, errs := loadFiles("", files)
 	assert.Len(t, errs, 1)
 	assert.Contains(t, errs[0].Error(), "invalid.yaml")
 }
@@ -590,7 +756,7 @@ func TestGetFileFormat(t *testing.T) {
 }
 
 func TestIsFileAndIsDir(t *testing.T) {
-	tempDir := t.TempDir()
+	tempDir := resolvedTempDir(t)
 	tempFile := filepath.Join(tempDir, "test_file.txt")
 	err := os.WriteFile(tempFile, []byte("test"), 0o600)
 	require.NoError(t, err)
@@ -683,6 +849,151 @@ metadata:
 			got, err := readYamlFile([]byte(tt.content))
 			if tt.wantErr {
 				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantCount, len(got))
+		})
+	}
+}
+
+func TestReadYamlFileValidatesAgainstScheme(t *testing.T) {
+	tests := []struct {
+		name          string
+		content       string
+		wantCount     int
+		wantErrSubstr string
+	}{
+		{
+			name: "valid Pod is accepted",
+			content: `apiVersion: v1
+kind: Pod
+metadata:
+  name: valid-pod
+  namespace: default`,
+			wantCount: 1,
+		},
+		{
+			name: "valid custom resource is ignored",
+			content: `apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tls-cert
+spec:
+  secretName: tls-cert`,
+			wantCount: 1,
+		},
+		{
+			name: "wrong field type is surfaced",
+			content: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bad-deployment
+spec:
+  replicas: "not-a-number"`,
+			wantCount:     1,
+			wantErrSubstr: "structurally invalid",
+		},
+		{
+			name: "typo'd kind in a built-in group is surfaced",
+			content: `apiVersion: apps/v1
+kind: Deplyment
+metadata:
+  name: typo-deployment`,
+			wantCount:     1,
+			wantErrSubstr: "is not a valid Kubernetes kind",
+		},
+		{
+			name: "typo'd kind in the core group is surfaced",
+			content: `apiVersion: v1
+kind: Pods
+metadata:
+  name: typo-pod`,
+			wantCount:     1,
+			wantErrSubstr: "is not a valid Kubernetes kind",
+		},
+		{
+			name: "known kind in a future apiVersion is ignored",
+			content: `apiVersion: autoscaling/v99
+kind: HorizontalPodAutoscaler
+metadata:
+  name: future-hpa
+  namespace: default`,
+			wantCount: 1,
+		},
+		{
+			name: "removed-but-real kind is not flagged as a typo",
+			content: `apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: legacy-psp
+spec:
+  privileged: false`,
+			wantCount: 1,
+		},
+		{
+			name: "invalid built-in kind inside a List is surfaced",
+			content: `apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: good-pod
+      namespace: default
+  - apiVersion: apps/v1
+    kind: Deplyment
+    metadata:
+      name: typo-deployment`,
+			wantCount:     2,
+			wantErrSubstr: "is not a valid Kubernetes kind",
+		},
+		{
+			name: "valid List is accepted without errors",
+			content: `apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: good-pod
+      namespace: default
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: good-svc
+      namespace: default`,
+			wantCount: 2,
+		},
+		{
+			name: "non-manifest YAML without apiVersion is ignored",
+			content: `foo: bar
+baz: qux`,
+			wantCount: 0,
+		},
+		{
+			name: "multi-document manifest keeps valid docs and surfaces invalid ones",
+			content: `apiVersion: v1
+kind: Pod
+metadata:
+  name: good-pod
+  namespace: default
+---
+apiVersion: apps/v1
+kind: Deplyment
+metadata:
+  name: typo-deployment`,
+			wantCount:     2,
+			wantErrSubstr: "is not a valid Kubernetes kind",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := readYamlFile([]byte(tt.content))
+			if tt.wantErrSubstr != "" {
+				require.Error(t, err)
+				assert.ErrorContains(t, err, tt.wantErrSubstr)
 			} else {
 				assert.NoError(t, err)
 			}

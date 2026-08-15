@@ -278,9 +278,21 @@ func TestComputeCoverageScore_CombinedDiscountsClampedToZero(t *testing.T) {
 func TestComputeCoverageScore_ZeroControls(t *testing.T) {
 	c := ScanCoverage{}
 	c.ComputeCoverageScore(0)
-	assert.Equal(t, float32(100), c.CoverageScore)
+	assert.Equal(t, float32(0), c.CoverageScore)
 	assert.Equal(t, 0, c.EvaluatedControls)
-	assert.False(t, c.Degraded)
+	assert.True(t, c.Degraded)
+}
+
+func TestComputeCoverageScore_ZeroControlsWithPenalties(t *testing.T) {
+	c := ScanCoverage{
+		PolicyDegradations: []PolicyDegradation{
+			{Component: "controlInputs", Reason: "network error"},
+		},
+	}
+	c.ComputeCoverageScore(0)
+	// 0 controls → base score 0, penalties cannot push it below 0
+	assert.Equal(t, float32(0), c.CoverageScore)
+	assert.True(t, c.Degraded)
 }
 
 func TestComputeCoverageScore_SilentFailedGVRReducesScore(t *testing.T) {
@@ -345,6 +357,26 @@ func TestBuildScanCoverage_PartialGVRPullsPassedThrough(t *testing.T) {
 	assert.Contains(t, coverage.PartialGVRPulls[0].Error, "RBAC denied")
 	assert.Empty(t, coverage.FailedGVRPulls)
 	assert.Empty(t, coverage.NotEvaluatedControls)
+}
+
+func TestBuildScanCoverage_SortsPartialGVRPullsWithoutMutatingInput(t *testing.T) {
+	partials := []PartialGVRPull{
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==b", Error: "z error"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==b", Error: "a error"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==a", Error: "forbidden"},
+		{GVR: "/v1/pods", Selector: "metadata.namespace==z", Error: "denied"},
+	}
+	original := append([]PartialGVRPull(nil), partials...)
+
+	coverage := BuildScanCoverage(nil, nil, nil, partials, nil)
+
+	assert.Equal(t, []PartialGVRPull{
+		{GVR: "/v1/pods", Selector: "metadata.namespace==z", Error: "denied"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==a", Error: "forbidden"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==b", Error: "a error"},
+		{GVR: "apps/v1/deployments", Selector: "metadata.namespace==b", Error: "z error"},
+	}, coverage.PartialGVRPulls)
+	assert.Equal(t, original, partials)
 }
 
 func TestComputeCoverageScore_Float32PrecisionLoss(t *testing.T) {

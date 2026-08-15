@@ -22,10 +22,11 @@ import (
 type noOpWorkloadPrinter struct{}
 
 func (noOpWorkloadPrinter) PrintNextSteps() {}
-func (noOpWorkloadPrinter) ActionPrint(context.Context, *cautils.OPASessionObj, []cautils.ImageScanData) {
+func (noOpWorkloadPrinter) ActionPrint(context.Context, *cautils.OPASessionObj, []cautils.ImageScanData) error {
+	return nil
 }
-func (noOpWorkloadPrinter) SetWriter(context.Context, string) {}
-func (noOpWorkloadPrinter) Score(float32)                     {}
+func (noOpWorkloadPrinter) SetWriter(context.Context, string) error { return nil }
+func (noOpWorkloadPrinter) Score(float32)                           {}
 
 type workloadScanCaptureKubescape struct {
 	mocks.MockIKubescape
@@ -277,6 +278,32 @@ func TestGetWorkloadCmd_ChartPathAndFilePathEmpty(t *testing.T) {
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }
 
+func TestGetWorkloadCmd_FilePathWithoutChartPath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getWorkloadCmd(mockKubescape, &scanInfo)
+	scanInfo.ChartPath = ""
+	scanInfo.FilePath = "manifests/app.yaml"
+
+	// Should not return an error when FilePath is set without ChartPath
+	err := cmd.Args(cmd, []string{"Deployment/nginx"})
+	assert.NoError(t, err)
+}
+
+func TestGetWorkloadCmd_RejectsFilePathWithPositionalInputPath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getWorkloadCmd(mockKubescape, &scanInfo)
+	require.NoError(t, cmd.PersistentFlags().Set("chart-path", "./chart"))
+	require.NoError(t, cmd.PersistentFlags().Set("file-path", "./chart/templates/deployment.yaml"))
+
+	err := cmd.Args(&cobra.Command{}, []string{"Deployment/nginx", "./manifests"})
+
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
+}
+
 func TestGetWorkloadCmd_ArgsAcceptsPositionalLocalInputs(t *testing.T) {
 	scanInfo := cautils.ScanInfo{}
 	cmd := getWorkloadCmd(&mocks.MockIKubescape{}, &scanInfo)
@@ -296,7 +323,7 @@ func TestGetWorkloadCmd_ArgsRejectsAmbiguousFilePathAndPositionalInputs(t *testi
 	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
 }
 
-func TestGetWorkloadCmd_ArgsAllowsChartPathWithScanRoot(t *testing.T) {
+func TestGetWorkloadCmd_ArgsRejectsChartPathFilePathAndPositionalInputs(t *testing.T) {
 	scanInfo := cautils.ScanInfo{}
 	cmd := getWorkloadCmd(&mocks.MockIKubescape{}, &scanInfo)
 	scanInfo.ChartPath = "charts/app"
@@ -304,7 +331,7 @@ func TestGetWorkloadCmd_ArgsAllowsChartPathWithScanRoot(t *testing.T) {
 
 	err := cmd.Args(cmd, []string{"Deployment/nginx", "."})
 
-	assert.NoError(t, err)
+	assert.EqualError(t, err, "usage: use either --file-path or positional input paths, not both")
 }
 
 func TestGetWorkloadCmd_ArgsRejectsStdinMixedWithOtherInputs(t *testing.T) {
@@ -519,10 +546,11 @@ func Test_parseWorkloadIdentifierString_Values(t *testing.T) {
 type fakePrinter struct{}
 
 func (p *fakePrinter) PrintNextSteps() {}
-func (p *fakePrinter) ActionPrint(ctx context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) {
+func (p *fakePrinter) ActionPrint(ctx context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
+	return nil
 }
-func (p *fakePrinter) SetWriter(ctx context.Context, _ string) {}
-func (p *fakePrinter) Score(_ float32)                         {}
+func (p *fakePrinter) SetWriter(ctx context.Context, _ string) error { return nil }
+func (p *fakePrinter) Score(_ float32)                               {}
 
 type recordingKubescape struct {
 	mocks.MockIKubescape

@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 )
 
 const (
@@ -28,6 +29,7 @@ const (
 type HostSensorHandler struct {
 	k8sObj        *k8sinterface.KubernetesApi
 	dynamicClient dynamic.Interface
+	nodeCount     int
 }
 
 // NewHostSensorHandler builds a new CRD-based host sensor handler.
@@ -39,9 +41,7 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, _ string) (*HostSe
 	if config == nil {
 		return nil, fmt.Errorf("failed to get k8s config")
 	}
-	// force GRPC
-	config.AcceptContentTypes = "application/vnd.kubernetes.protobuf"
-	config.ContentType = "application/vnd.kubernetes.protobuf"
+	config = rest.CopyConfig(config)
 
 	// Create dynamic client for CRD access
 	dynamicClient, err := dynamic.NewForConfig(config)
@@ -59,12 +59,14 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, _ string) (*HostSe
 	}
 
 	// Verify we can access nodes (basic sanity check)
-	if nodeList, err := k8sObj.KubernetesClient.CoreV1().Nodes().List(k8sObj.Context, metav1.ListOptions{}); err != nil || len(nodeList.Items) == 0 {
+	nodeList, err := k8sObj.KubernetesClient.CoreV1().Nodes().List(k8sObj.Context, metav1.ListOptions{})
+	if err != nil || len(nodeList.Items) == 0 {
 		if err == nil {
 			err = fmt.Errorf("no nodes to scan")
 		}
-		return hsh, fmt.Errorf("in NewHostSensorHandler, failed to get nodes list: %w", err)
+		return nil, fmt.Errorf("in NewHostSensorHandler, failed to get nodes list: %w", err)
 	}
+	hsh.nodeCount = len(nodeList.Items)
 
 	return hsh, nil
 }
@@ -174,4 +176,10 @@ func (hsh *HostSensorHandler) listCRDResources(ctx context.Context, resourceName
 		helpers.Int("count", totalCount))
 
 	return nil
+}
+
+func (hsh *HostSensorHandler) StreamTelemetry(ctx context.Context) (<-chan SyscallEvent, error) {
+	events := make(chan SyscallEvent)
+	close(events)
+	return events, nil
 }

@@ -47,7 +47,7 @@ func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo *cautils.Operator
 
 	configCmd.PersistentFlags().StringSliceVar(&configScanInfo.IncludedNamespaces, "include-namespaces", nil, "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
 	configCmd.PersistentFlags().StringSliceVar(&configScanInfo.ExcludedNamespaces, "exclude-namespaces", nil, "Namespaces to exclude from scanning. e.g: --exclude-namespaces ns-a,ns-b. Notice, when running with `exclude-namespace` kubescape does not scan cluster-scoped objects.")
-	configCmd.PersistentFlags().StringSliceVar(&configScanInfo.Frameworks, "frameworks", nil, "Load frameworks for configuration scanning")
+	configCmd.PersistentFlags().StringSliceVar(&configScanInfo.Frameworks, "frameworks", []string{"all"}, "Load frameworks for configuration scanning (default: all)")
 	configCmd.PersistentFlags().BoolVarP(&configScanInfo.HostScanner, "enable-host-scan", "", false, "Deploy Kubescape host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valuable data from cluster nodes for certain controls. Yaml file: https://github.com/kubescape/kubescape/blob/master/core/pkg/hostsensorutils/hostsensor.yaml")
 
 	return configCmd
