@@ -239,6 +239,7 @@ func TestGetOutputPrintersClosesV1JSONWriterAfterLaterSetupFailure(t *testing.T)
 		Format:        printer.JsonFormat + "," + printer.GitLabSASTFormat,
 		FormatVersion: "v1",
 		Output:        output,
+		InputPatterns: []string{"manifest.yaml"},
 	}
 
 	outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
