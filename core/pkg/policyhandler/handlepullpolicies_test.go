@@ -2,6 +2,7 @@ package policyhandler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -280,6 +281,49 @@ func TestDownloadScanPolicies_LocalCacheBypass(t *testing.T) {
 	files, err := os.ReadDir(cacheDir)
 	assert.NoError(t, err)
 	assert.Empty(t, files)
+}
+
+func TestGetScanPolicies_LocalSourceBypassesSharedCache(t *testing.T) {
+	t.Setenv(PoliciesCacheTtlEnvVar, "1h")
+	policyHandler := NewRequestScopedPolicyHandler("local-source-cluster")
+	defer policyHandler.Close()
+
+	policyIdent := []cautils.PolicyIdentifier{{Identifier: FrameworkName, Kind: "Framework"}}
+	remoteGetters := &cautils.Getters{PolicyGetter: &PolicyGetterMock{}}
+
+	remotePolicies, err := policyHandler.getScanPolicies(context.Background(), policyIdent, remoteGetters)
+	require.NoError(t, err)
+	require.NotEmpty(t, remotePolicies)
+
+	localFramework := reporthandling.Framework{
+		PortalBase: armotypes.PortalBase{Name: FrameworkName},
+		Controls: []reporthandling.Control{
+			{
+				PortalBase: armotypes.PortalBase{Name: "local override"},
+				ControlID:  "local-control",
+			},
+		},
+	}
+	localBytes, err := json.Marshal(localFramework)
+	require.NoError(t, err)
+	localPath := filepath.Join(t.TempDir(), "framework.json")
+	require.NoError(t, os.WriteFile(localPath, localBytes, 0o600))
+
+	localGetters := &cautils.Getters{PolicyGetter: getter.NewLoadPolicy([]string{localPath})}
+	localPolicies, err := policyHandler.getScanPolicies(context.Background(), policyIdent, localGetters)
+	require.NoError(t, err)
+	require.Len(t, localPolicies, 1)
+	require.Len(t, localPolicies[0].Controls, 1)
+	assert.Equal(t, "local-control", localPolicies[0].Controls[0].ControlID,
+		"an explicit local source must not be shadowed by a warm shared cache entry")
+
+	remotePoliciesAgain, err := policyHandler.getScanPolicies(context.Background(), policyIdent, remoteGetters)
+	require.NoError(t, err)
+	require.Len(t, remotePoliciesAgain, len(remotePolicies))
+	require.NotEmpty(t, remotePoliciesAgain[0].Controls)
+	assert.Equal(t, remotePolicies[0].Controls[0].ControlID, remotePoliciesAgain[0].Controls[0].ControlID,
+		"a local request must not replace the shared remote-policy cache")
+	assert.NotEqual(t, "local-control", remotePoliciesAgain[0].Controls[0].ControlID)
 }
 
 type ControlsInputsGetterEmptyMock struct{}
