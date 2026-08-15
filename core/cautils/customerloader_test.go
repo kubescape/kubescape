@@ -84,7 +84,7 @@ func TestReadConfig(t *testing.T) {
 	com := mockConfigObj()
 	co := &ConfigObj{}
 
-	b, e := json.Marshal(com)
+	b, e := json.Marshal(com) // #nosec G117 -- test fixture; marshals a mock config object
 	assert.NoError(t, e)
 
 	readConfig(b, co)
@@ -94,7 +94,6 @@ func TestReadConfig(t *testing.T) {
 	assert.Equal(t, com.CloudReportURL, co.CloudReportURL)
 	assert.Equal(t, com.CloudAPIURL, co.CloudAPIURL)
 }
-
 
 func TestAdoptClusterName(t *testing.T) {
 	tests := []struct {

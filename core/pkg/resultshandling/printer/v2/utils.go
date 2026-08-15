@@ -68,6 +68,7 @@ type PostureReportWithSeverity struct {
 	Metadata             reporthandlingv2.Metadata         `json:"metadata"`
 	ResourceLabels       map[string]map[string]string      `json:"resourceLabels,omitempty"` // map[resourceID]map[labelKey]labelValue - extracted labels from workloads
 	ScanCoverage         *cautils.ScanCoverage             `json:"scanCoverage,omitempty"`
+	ExceptionAudit       *cautils.ExceptionAudit           `json:"exceptionAudit,omitempty"`
 }
 
 // enrichControlsWithSeverity adds severity field to controls based on scoreFactor
@@ -106,6 +107,47 @@ func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummari
 		}
 	}
 	return enrichedResults
+}
+
+// severityRank returns a comparable rank for a severity string; unknown values rank lowest.
+func severityRank(severity string) int {
+	switch strings.ToLower(severity) {
+	case "critical":
+		return 4
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// FilterBySeverity drops controls (and matching associated controls in results)
+// that are below minSeverity. Pass an empty minSeverity to disable filtering.
+func FilterBySeverity(report *PostureReportWithSeverity, minSeverity string) {
+	if minSeverity == "" || report == nil {
+		return
+	}
+	threshold := severityRank(minSeverity)
+
+	for id, control := range report.SummaryDetails.Controls {
+		if severityRank(control.Severity) < threshold {
+			delete(report.SummaryDetails.Controls, id)
+		}
+	}
+
+	for i, result := range report.Results {
+		filtered := result.AssociatedControls[:0]
+		for _, control := range result.AssociatedControls {
+			if severityRank(control.Severity) >= threshold {
+				filtered = append(filtered, control)
+			}
+		}
+		report.Results[i].AssociatedControls = filtered
+	}
 }
 
 // ConvertToPostureReportWithSeverity converts PostureReport to PostureReportWithSeverity
@@ -265,11 +307,22 @@ type infoStars struct {
 	info  string
 }
 
+// mapInfoToPrintInfo assigns a footnote marker to every distinct skip reason.
+// Controls are walked in ID order: marker assignment follows iteration order, so
+// ranging over the map directly gives a different marker per run and lets two
+// calls over the same controls disagree.
 func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) []infoStars {
+	controlIDs := make([]string, 0, len(controls))
+	for controlID := range controls {
+		controlIDs = append(controlIDs, controlID)
+	}
+	sort.Strings(controlIDs)
+
 	infoToPrintInfo := []infoStars{}
 	infoToPrintInfoMap := map[string]any{}
 	starCount := indicator
-	for _, control := range controls {
+	for _, controlID := range controlIDs {
+		control := controls[controlID]
 		if control.GetStatus().IsSkipped() && control.GetStatus().Info() != "" {
 			if _, ok := infoToPrintInfoMap[control.GetStatus().Info()]; !ok {
 				infoToPrintInfo = append(infoToPrintInfo, infoStars{

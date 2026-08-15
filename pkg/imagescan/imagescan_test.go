@@ -68,6 +68,12 @@ func makeThresholdTestMatchWithFixState(id string, state vulnerability.FixState)
 	return m
 }
 
+func makeThresholdTestMatchWithMetadata(id, severity string) match.Match {
+	m := makeThresholdTestMatch(id)
+	m.Vulnerability.Metadata = &vulnerability.Metadata{Severity: severity}
+	return m
+}
+
 type stubVulnerabilityProvider struct {
 	metadataByID map[string]*vulnerability.Metadata
 	errByID      map[string]error
@@ -128,6 +134,14 @@ func TestParseSeverity(t *testing.T) {
 	}{
 		{
 			name: "",
+			want: vulnerability.UnknownSeverity,
+		},
+		{
+			name: "unknown",
+			want: vulnerability.UnknownSeverity,
+		},
+		{
+			name: "important",
 			want: vulnerability.UnknownSeverity,
 		},
 		{
@@ -320,6 +334,42 @@ func TestExceedsSeverityThreshold(t *testing.T) {
 			want:        false,
 		},
 		{
+			name:      "embedded metadata gates when provider lookup fails",
+			threshold: vulnerability.HighSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatchWithMetadata("CVE-error", vulnerability.CriticalSeverity.String()),
+			),
+			onlyFixable: false,
+			want:        true,
+		},
+		{
+			name:      "empty embedded severity falls back to provider metadata",
+			threshold: vulnerability.HighSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatchWithMetadata("CVE-high", ""),
+			),
+			onlyFixable: false,
+			want:        true,
+		},
+		{
+			name:      "unrecognized embedded severity falls back to provider metadata",
+			threshold: vulnerability.HighSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatchWithMetadata("CVE-high", "important"),
+			),
+			onlyFixable: false,
+			want:        true,
+		},
+		{
+			name:      "explicit unknown embedded severity falls back to provider metadata",
+			threshold: vulnerability.HighSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatchWithMetadata("CVE-high", vulnerability.UnknownSeverity.String()),
+			),
+			onlyFixable: false,
+			want:        true,
+		},
+		{
 			name:      "onlyFixable ignores an unfixable CVE at or above threshold",
 			threshold: vulnerability.HighSeverity,
 			matches: match.NewMatches(
@@ -444,7 +494,7 @@ func TestNewDefaultDBConfig(t *testing.T) {
 
 func TestDefaultMatcherConfig(t *testing.T) {
 	cfg := defaultMatcherConfig()
-	assert.Equal(t, "https://search.maven.org/solrsearch/select", cfg.Java.ExternalSearchConfig.MavenBaseURL)
+	assert.Equal(t, "https://search.maven.org/solrsearch/select", cfg.Java.MavenBaseURL)
 	assert.False(t, cfg.Java.UseCPEs)
 	assert.False(t, cfg.Ruby.UseCPEs)
 	assert.False(t, cfg.Python.UseCPEs)

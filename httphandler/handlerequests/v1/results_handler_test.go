@@ -351,8 +351,12 @@ func TestResults_GetEmptyID_OfflineFallback_TableDriven(t *testing.T) {
 			h := newResultsHandler(true) // offline = true
 
 			if c.seedLatest {
+				// Seed a completed *user* scan, the way Scan() does: the
+				// offline fallback resolves via latestUserScanID, which
+				// survives setNotBusy so results stay reachable afterwards.
 				h.state.setBusy(validUUID, func() {})
-				h.state.setNotBusy(validUUID) // latestID survives, scan finished
+				h.state.setLatestUserScanID(validUUID)
+				h.state.setNotBusy(validUUID) // scan finished
 			}
 			resultFile := filepath.Join(out, validUUID)
 			if c.writeFile {
@@ -393,6 +397,47 @@ func TestResults_GetEmptyID_OfflineFallback_TableDriven(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestResults_GetEmptyID_OfflineFallback_IgnoresMetricsScan is the /v1/results
+// half of the hijack. A Prometheus scrape that lands after the user's scan
+// finished overwrites latestID, so resolving the offline fallback through it
+// would serve the metrics run's (absent) output instead of the user's report.
+func TestResults_GetEmptyID_OfflineFallback_IgnoresMetricsScan(t *testing.T) {
+	const userScanID = "11111111-2222-3333-4444-555555555555"
+	const metricsScanID = "99999999-8888-7777-6666-555555555555"
+
+	out := withTempOutputDirs(t)
+	h := newResultsHandler(true) // offline = true
+
+	// A user scan runs to completion and leaves its report on disk.
+	h.state.setBusy(userScanID, func() {})
+	h.state.setLatestUserScanID(userScanID)
+	h.state.setNotBusy(userScanID)
+	if err := os.WriteFile(filepath.Join(out, userScanID), []byte("{}"), 0o644); err != nil {
+		t.Fatalf("setup: write result file: %v", err)
+	}
+
+	// Then a metrics scrape runs. It writes no report and must not become the
+	// scan that an ID-less /v1/results resolves to.
+	h.state.setBusy(metricsScanID, func() {})
+	h.state.setNotBusy(metricsScanID)
+
+	rq := httptest.NewRequest(http.MethodGet, "/results", nil)
+	w := httptest.NewRecorder()
+	h.GetResults(w, rq)
+
+	if w.Result().StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; want %d: fallback must resolve to the user scan, not the metrics scrape (body=%q)",
+			w.Result().StatusCode, http.StatusOK, w.Body.String())
+	}
+	resp := decodeResultsResponse(t, w)
+	if resp.ID != userScanID {
+		t.Errorf("response.ID = %q; want %q: a /v1/metrics scrape must not hijack the latest-results fallback", resp.ID, userScanID)
+	}
+	if resp.Type != utilsapisv1.ResultsV1ScanResponseType {
+		t.Errorf("response.Type = %q; want %q", resp.Type, utilsapisv1.ResultsV1ScanResponseType)
 	}
 }
 

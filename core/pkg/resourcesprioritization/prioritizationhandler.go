@@ -243,7 +243,7 @@ func hasPodTemplateSpec(object map[string]any) bool {
 func (handler *ResourcesPrioritizationHandler) copyAttackTrack(attackTrack v1alpha1.IAttackTrack, lookup v1alpha1.IAttackTrackControlsLookup) v1alpha1.IAttackTrack {
 	copyBytes, _ := json.Marshal(attackTrack)
 	var copyObj v1alpha1.AttackTrack
-	json.Unmarshal(copyBytes, &copyObj)
+	json.Unmarshal(copyBytes, &copyObj) // #nosec G104 -- copyBytes is the output of json.Marshal on the same object, so the round-trip cannot fail
 
 	iter := copyObj.Iterator()
 	for iter.HasNext() {

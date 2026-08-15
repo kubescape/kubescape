@@ -43,6 +43,7 @@ kubescape scan [target] [flags]
 | `-e, --exclude-namespaces <ns>` | Namespaces to exclude (comma-separated) | - |
 | `--encrypt` | Encrypt sensitive report metadata using the master key provided through the `KUBESCAPE_MASTER_KEY` environment variable. Requires `--format json` for reports that will later be decrypted with `kubescape decrypt`. If both `--encrypt` and `--hide` are specified, `--encrypt` takes precedence. | `false` |
 | `--exceptions <path>` | Path to exceptions file | - |
+| `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `csv` | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
@@ -59,6 +60,19 @@ kubescape scan [target] [flags]
 | `--use-from <path>` | Load specific policy from path | - |
 | `-v, --verbose` | Display all resources, not just failed ones | `false` |
 | `--view <type>` | View type: `security`, `control`, `resource` | `security` |
+
+### Exception Audit
+
+Use `--audit-exceptions --format json` to include an `exceptionAudit` object in scan output. The audit contains:
+
+| Field | Description |
+|-------|-------------|
+| `summary` | Counts for total, active, expired, matched, unused, and invalid-control exceptions |
+| `items` | One entry per loaded exception, including name, status, match count, control IDs, invalid controls, and matched resources when present |
+| `generated` | Indicates that the audit was requested and generated |
+
+Item `status` values are `matched`, `unused`, `expired`, and `invalid-control`.
+
 ### Examples
 
 ```bash
@@ -525,14 +539,16 @@ kubescape list <type> [flags]
 |------|-------------|---------|
 | `--account <id>` | Account ID for custom frameworks | - |
 | `--access-key <key>` | Access key | - |
-| `--format <format>` | Output format: `pretty-print`, `json` | `pretty-print` |
+| `--format <format>` | Output format: `pretty-print`, `json`, `yaml`, `csv` | `pretty-print` |
 
 ### Examples
 
 ```bash
 kubescape list frameworks
+kubescape list frameworks --format csv
 kubescape list controls
 kubescape list controls --format json
+kubescape list controls --format csv
 ```
 
 ---
@@ -595,6 +611,12 @@ Manage Kubescape configuration.
 ```bash
 # View configuration
 kubescape config view
+
+# View configuration as JSON
+kubescape config view -o json
+
+# View configuration as YAML
+kubescape config view -o yaml
 
 # Set account ID
 kubescape config set accountID <account-id>

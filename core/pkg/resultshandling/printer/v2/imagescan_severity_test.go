@@ -1,17 +1,22 @@
 package printer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"testing"
+	"time"
 
 	"github.com/anchore/grype/grype/match"
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/owenrumney/go-sarif/v2/sarif"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -103,7 +108,7 @@ func TestJsonPrinter_ImageScan_HonorsSeverityExceptions(t *testing.T) {
 		assert.NoError(t, os.Remove(tmp.Name()))
 	}()
 
-	jp := NewJsonPrinter()
+	jp := NewJsonPrinter("")
 	jp.writer = tmp
 
 	jp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{imageScanData})
@@ -145,7 +150,7 @@ func TestSARIFPrinter_ImageScan_HonorsSeverityExceptions(t *testing.T) {
 	sp := NewSARIFPrinter()
 	sp.writer = tmp
 
-	require.NoError(t, sp.printImageScan(context.Background(), imageScanData))
+	require.NoError(t, sp.printImageScan(imageScanData))
 
 	raw, err := os.ReadFile(tmp.Name())
 	require.NoError(t, err)
@@ -153,4 +158,47 @@ func TestSARIFPrinter_ImageScan_HonorsSeverityExceptions(t *testing.T) {
 	content := string(raw)
 	assert.Contains(t, content, "CVE-KEPT")
 	assert.NotContains(t, content, "CVE-EXCEPTED", "severity-excepted CVE must not appear in SARIF report output")
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.NotEmpty(t, report.Runs)
+	assert.Equal(t, "Kubescape", report.Runs[0].Tool.Driver.Name)
+}
+
+const imageSARIFStdoutHelperEnv = "KUBESCAPE_TEST_IMAGE_SARIF_STDOUT_HELPER"
+
+// TestSARIFPrinter_ImageScan_StdoutPipeCompletes runs the image SARIF printer
+// in a subprocess whose stdout is an actual OS pipe. Reopening /dev/stdout to
+// patch the report deadlocks because the process itself still owns the pipe's
+// write end; the printer must instead render and patch in memory before its
+// single write to stdout.
+func TestSARIFPrinter_ImageScan_StdoutPipeCompletes(t *testing.T) {
+	if os.Getenv(imageSARIFStdoutHelperEnv) == "1" {
+		sp := NewSARIFPrinter()
+		sp.SetWriter(context.Background(), "")
+		if err := sp.printImageScan(buildSeverityExceptionImageScanData()); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSARIFPrinter_ImageScan_StdoutPipeCompletes$") //nolint:gosec // G204: test subprocess re-executes test binary.
+	cmd.Env = append(os.Environ(), imageSARIFStdoutHelperEnv+"=1")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	raw, err := cmd.Output()
+	if ctx.Err() == context.DeadlineExceeded {
+		t.Fatal("image SARIF output did not complete while stdout was a pipe")
+	}
+	require.NoError(t, err, stderr.String())
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.NotEmpty(t, report.Runs)
+	assert.Equal(t, "Kubescape", report.Runs[0].Tool.Driver.Name)
 }

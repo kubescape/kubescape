@@ -192,13 +192,14 @@ func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 
 }
 
-func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	if outputFile == os.Stdout.Name() {
 		pp.writer = printer.GetWriter(ctx, "")
 		pp.SetMainPrinter()
-		return
+		return nil
 	}
 
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		outputFile = strings.TrimSpace(outputFile)
 		if outputFile == "" {
@@ -210,8 +211,17 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
 		}
 	}
 
-	pp.writer = printer.GetWriter(ctx, outputFile)
+	if explicitOutput {
+		writer, err := printer.GetWriterNoFallback(outputFile)
+		if err != nil {
+			return err
+		}
+		pp.writer = writer
+	} else {
+		pp.writer = printer.GetWriter(ctx, outputFile)
+	}
 	pp.SetMainPrinter()
+	return nil
 }
 
 func (pp *PrettyPrinter) Score(_ float32) {
@@ -404,6 +414,6 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 
 func (p *PrettyPrinter) CloseWriter() {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
 	}
 }

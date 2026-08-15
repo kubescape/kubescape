@@ -162,7 +162,7 @@ func TestPrepareReport(t *testing.T) {
 					},
 				}
 
-				reporter.prepareReport(opaSessionObj)
+				reporter.prepareReport(context.Background(), opaSessionObj)
 
 				got := opaSessionObj.Metadata.ScanMetadata.ScanningTarget
 				require.Equalf(t, want, got,
@@ -205,6 +205,99 @@ func TestSubmit(t *testing.T) {
 		require.NoError(t,
 			reporter.Submit(ctx, opaSession),
 		)
+	})
+
+	t.Run("should abort on context cancellation", func(t *testing.T) {
+		ksCloud, err := v1.NewKSCloudAPI(
+			srv.Root(),
+			srv.Root(),
+			account,
+			accessKey,
+			v1.WithHTTPClient(hijackedClient(t, srv)))
+		require.NoError(t, err)
+
+		reporter := NewReportEventReceiver(
+			&TenantConfigMock{
+				clusterName: "test",
+				accountID:   account,
+				accessKey:   accessKey,
+			},
+			"cbabd56f-bac6-416a-836b-b815ef347647",
+			SubmitContextScan,
+			ksCloud,
+		)
+
+		opaSession := mockOPASessionObj(t)
+		cancelCtx, cancel := context.WithCancel(ctx)
+		cancel() // cancel immediately
+		err = reporter.Submit(cancelCtx, opaSession)
+		require.ErrorContains(t, err, "scan canceled")
+	})
+
+	t.Run("should clean up generated credentials on early cancellation", func(t *testing.T) {
+		ksCloud, err := v1.NewKSCloudAPI(
+			srv.Root(),
+			srv.Root(),
+			"",
+			"",
+			v1.WithHTTPClient(hijackedClient(t, srv)))
+		require.NoError(t, err)
+
+		tenantMock := &TenantConfigMock{
+			clusterName: "test",
+			accountID:   "", // Empty to force generation
+			accessKey:   accessKey,
+		}
+
+		reporter := NewReportEventReceiver(
+			tenantMock,
+			"cbabd56f-bac6-416a-836b-b815ef347647",
+			SubmitContextScan,
+			ksCloud,
+		)
+
+		opaSession := mockOPASessionObj(t)
+
+		// Create a context that is already canceled
+		canceledCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err = reporter.Submit(canceledCtx, opaSession)
+		require.ErrorContains(t, err, "scan canceled")
+
+		// Since it was cancelled before sending any chunks, it should have deleted the credentials
+		assert.Empty(t, tenantMock.GetAccountID())
+	})
+
+	t.Run("should clean up generated credentials on missing cluster name", func(t *testing.T) {
+		ksCloud, err := v1.NewKSCloudAPI(
+			srv.Root(),
+			srv.Root(),
+			"",
+			"",
+			v1.WithHTTPClient(hijackedClient(t, srv)))
+		require.NoError(t, err)
+
+		tenantMock := &TenantConfigMock{
+			clusterName: "", // Missing to trigger early return
+			accountID:   "", // Empty to force generation
+			accessKey:   accessKey,
+		}
+
+		reporter := NewReportEventReceiver(
+			tenantMock,
+			"cbabd56f-bac6-416a-836b-b815ef347647",
+			SubmitContextScan,
+			ksCloud,
+		)
+
+		opaSession := mockOPASessionObj(t)
+
+		err = reporter.Submit(context.Background(), opaSession)
+		require.NoError(t, err) // It returns nil on missing cluster name
+
+		// Should have deleted the generated credentials
+		assert.Empty(t, tenantMock.GetAccountID())
 	})
 
 	t.Run("should generate new account if account is empty", func(t *testing.T) {

@@ -109,8 +109,12 @@ func HTTPPost(client *http.Client, fullURL string, body []byte, headers map[stri
 		}
 
 		// Fully drain the rest of the response body to ensure the TCP connection can be reused.
-		_, _ = io.Copy(io.Discard, body)
-		resp.Body.Close()
+		if _, err := io.Copy(io.Discard, body); err != nil {
+			logger.L().Debug("failed to drain error response body", helpers.Error(err))
+		}
+		if err := resp.Body.Close(); err != nil {
+			logger.L().Debug("failed to close error response body", helpers.Error(err))
+		}
 
 		// Restore the body for utils.ErrAPI so it can format the error message
 		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))

@@ -25,8 +25,8 @@ func (noOpWorkloadPrinter) PrintNextSteps() {}
 func (noOpWorkloadPrinter) ActionPrint(context.Context, *cautils.OPASessionObj, []cautils.ImageScanData) error {
 	return nil
 }
-func (noOpWorkloadPrinter) SetWriter(context.Context, string) {}
-func (noOpWorkloadPrinter) Score(float32)                     {}
+func (noOpWorkloadPrinter) SetWriter(context.Context, string) error { return nil }
+func (noOpWorkloadPrinter) Score(float32)                           {}
 
 type workloadScanCaptureKubescape struct {
 	mocks.MockIKubescape
@@ -276,6 +276,19 @@ func TestGetWorkloadCmd_ChartPathAndFilePathEmpty(t *testing.T) {
 	err = cmd.Args(&cobra.Command{}, []string{"nginx"})
 	expectedErrorMessage = "usage: --chart-path <chart path> --file-path <file path>"
 	assert.Equal(t, expectedErrorMessage, err.Error())
+}
+
+func TestGetWorkloadCmd_FilePathWithoutChartPath(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getWorkloadCmd(mockKubescape, &scanInfo)
+	scanInfo.ChartPath = ""
+	scanInfo.FilePath = "manifests/app.yaml"
+
+	// Should not return an error when FilePath is set without ChartPath
+	err := cmd.Args(cmd, []string{"Deployment/nginx"})
+	assert.NoError(t, err)
 }
 
 func TestGetWorkloadCmd_RejectsFilePathWithPositionalInputPath(t *testing.T) {
@@ -536,8 +549,8 @@ func (p *fakePrinter) PrintNextSteps() {}
 func (p *fakePrinter) ActionPrint(ctx context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
 	return nil
 }
-func (p *fakePrinter) SetWriter(ctx context.Context, _ string) {}
-func (p *fakePrinter) Score(_ float32)                         {}
+func (p *fakePrinter) SetWriter(ctx context.Context, _ string) error { return nil }
+func (p *fakePrinter) Score(_ float32)                               {}
 
 type recordingKubescape struct {
 	mocks.MockIKubescape

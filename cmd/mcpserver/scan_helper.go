@@ -64,6 +64,9 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 			timeout = 60 * time.Second
 		}
 	}
+	if namespace == "*" {
+		namespace = ""
+	}
 
 	getters := cautils.Getters{
 		PolicyGetter:         ksServer.policyGetter,

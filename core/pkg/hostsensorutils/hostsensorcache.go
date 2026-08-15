@@ -95,11 +95,11 @@ func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDat
 		return nil, err
 	}
 	if time.Since(stat.ModTime()) > ttl {
-		os.Remove(path)
+		os.Remove(path) // #nosec G104 -- best-effort removal of an expired cache file
 		return nil, fmt.Errorf("cache expired")
 	}
 
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, err
 	}
@@ -126,6 +126,10 @@ func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDat
 }
 
 func saveToCache(clusterName, resourceName string, envelopes []hostsensor.HostSensorDataEnvelope) error {
+	return saveToCacheWithRename(clusterName, resourceName, envelopes, os.Rename)
+}
+
+func saveToCacheWithRename(clusterName, resourceName string, envelopes []hostsensor.HostSensorDataEnvelope, rename func(string, string) error) error {
 	if getHostSensorCacheTtl() <= 0 || clusterIdentity() == "unknown" {
 		// An unresolved API server host is a shared cache key across every
 		// caller in that state; loadFromCache always refuses to read it back,
@@ -143,17 +147,17 @@ func saveToCache(clusterName, resourceName string, envelopes []hostsensor.HostSe
 		return err
 	}
 
-	tmpPath := path + ".tmp"
-	f, err := os.OpenFile(tmpPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	f, err := os.CreateTemp(dir, ".hostsensor-cache-*.tmp")
 	if err != nil {
 		return err
 	}
+	tmpPath := f.Name()
 
 	cleanup := true
 	defer func() {
-		f.Close()
+		f.Close() // #nosec G104 -- best-effort close in defer cleanup
 		if cleanup {
-			os.Remove(tmpPath)
+			os.Remove(tmpPath) // #nosec G104 -- best-effort removal of a temp cache file
 		}
 	}()
 
@@ -161,12 +165,12 @@ func saveToCache(clusterName, resourceName string, envelopes []hostsensor.HostSe
 
 	data, err := json.Marshal(envelopes)
 	if err != nil {
-		gw.Close()
+		gw.Close() // #nosec G104 -- best-effort close on the error path
 		return err
 	}
 
 	if _, err := gw.Write(data); err != nil {
-		gw.Close()
+		gw.Close() // #nosec G104 -- best-effort close on the error path
 		return err
 	}
 
@@ -178,7 +182,7 @@ func saveToCache(clusterName, resourceName string, envelopes []hostsensor.HostSe
 		return err
 	}
 
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := rename(tmpPath, path); err != nil {
 		return err
 	}
 	cleanup = false

@@ -3,6 +3,7 @@ package printer
 import (
 	"context"
 	"encoding/csv"
+	"fmt"
 	"io"
 	"os"
 	"testing"
@@ -131,6 +132,82 @@ func csvSessionFixtureWithPaths() *cautils.OPASessionObj {
 	}
 
 	return session
+}
+
+// csvSessionFixtureManyRows builds a session with n associated controls on a
+// single resource, producing enough CSV row data to overflow the csv.Writer's
+// internal buffer mid-loop rather than only at the final Flush.
+func csvSessionFixtureManyRows(n int) *cautils.OPASessionObj {
+	obj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "demo",
+			"namespace": "default",
+		},
+		"spec": map[string]interface{}{},
+	}
+	lw := localworkload.NewLocalWorkload(obj)
+
+	controls := make([]resourcesresults.ResourceAssociatedControl, 0, n)
+	for i := 0; i < n; i++ {
+		controls = append(controls, resourcesresults.ResourceAssociatedControl{
+			ControlID: fmt.Sprintf("C-%04d", i),
+			Name:      fmt.Sprintf("control-%d", i),
+			Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		})
+	}
+
+	session := cautils.NewOPASessionObjMock()
+	session.ResourcesResult[testResourceID1] = resourcesresults.Result{
+		ResourceID:         testResourceID1,
+		AssociatedControls: controls,
+	}
+	session.AllResources[testResourceID1] = lw
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{},
+		},
+	}
+
+	return session
+}
+
+// openDevFull opens /dev/full, a device whose Write always fails with
+// ENOSPC, to deterministically simulate an underlying I/O write failure.
+// Tests using it are skipped on platforms where the device doesn't exist.
+func openDevFull(t *testing.T) *os.File {
+	t.Helper()
+	if _, err := os.Stat("/dev/full"); err != nil {
+		t.Skip("/dev/full not available on this platform")
+	}
+	f, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = f.Close() })
+	return f
+}
+
+func TestActionPrint_Csv_WriteFailureIsReported(t *testing.T) {
+	// A small fixture whose rows all fit comfortably inside the csv.Writer's
+	// internal buffer: no row write ever touches the underlying file, so the
+	// only write attempt happens on the final Flush.
+	cp := NewCsvPrinter()
+	cp.writer = openDevFull(t)
+
+	err := cp.ActionPrint(context.TODO(), csvSessionFixture(), nil)
+	require.Error(t, err, "ActionPrint must surface a failed flush instead of silently returning nil")
+}
+
+func TestActionPrint_Csv_MidLoopWriteFailureIsReported(t *testing.T) {
+	// Enough rows to overflow the csv.Writer's internal 4KB buffer mid-loop,
+	// forcing a real write to the underlying file (and a resulting error)
+	// before the loop even finishes, exercising the early-return path that
+	// used to skip the final Flush() entirely.
+	cp := NewCsvPrinter()
+	cp.writer = openDevFull(t)
+
+	err := cp.ActionPrint(context.TODO(), csvSessionFixtureManyRows(200), nil)
+	require.Error(t, err, "ActionPrint must surface a mid-loop write failure instead of silently returning nil")
 }
 
 func TestNewCsvPrinter(t *testing.T) {

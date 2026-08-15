@@ -99,7 +99,8 @@ func NewJunitPrinter(verbose bool) *JunitPrinter {
 	}
 }
 
-func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = junitOutputFile
@@ -108,7 +109,13 @@ func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) {
 			outputFile = outputFile + printer.JunitOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		jp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	jp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 func (jp *JunitPrinter) Score(score float32) {
@@ -131,6 +138,15 @@ func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 
 	if opaSessionObj != nil {
 		junitResult = testsSuites(opaSessionObj)
+		if len(imageScanData) > 0 {
+			imageResult := imageTestsSuites(imageScanData)
+			suiteIDOffset := len(junitResult.Suites)
+			for i := range imageResult.Suites {
+				imageResult.Suites[i].ID += suiteIDOffset
+			}
+			junitResult.Suites = append(junitResult.Suites, imageResult.Suites...)
+			junitResult.Tests, junitResult.Failures, junitResult.Errors = aggregateSuiteCounts(junitResult.Suites)
+		}
 	} else if len(imageScanData) > 0 {
 		junitResult = imageTestsSuites(imageScanData)
 	} else {
@@ -288,7 +304,10 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 			continue
 		}
 		testCase.Name = control.GetName()
-		testCase.Classname = classname
+		// JUnit consumers identify a test by (classname, name); several controls
+		// share a display name, so fold the unique control ID into the classname
+		// to keep findings from colliding in CI reporters.
+		testCase.Classname = classname + "/" + cID
 
 		if control.GetStatus().IsFailed() {
 			resources := map[string]any{}
@@ -374,6 +393,6 @@ func properties(complianceScore float32) []JUnitProperty {
 
 func (p *JunitPrinter) CloseWriter() {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
 	}
 }

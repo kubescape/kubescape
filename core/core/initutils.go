@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"errors"
-	"os"
 
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
@@ -419,20 +418,15 @@ func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, 
 
 // GetUIPrinter returns a printer that will be used to print to the program’s UI (terminal)
 func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName string) printer.IPrinter {
-	var p printer.IPrinter
-	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
-		p = &printerv2.SilentPrinter{}
-	} else {
-		p = printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName)
-
-		// Since the UI of the program is a CLI (Stdout), it means that it should always print to Stdout
-		if scanInfo.Format != "" && scanInfo.Output == "" {
-			p.SetWriter(ctx, os.DevNull)
-		} else {
-			p.SetWriter(ctx, os.Stdout.Name())
-		}
+	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel || (scanInfo.Format != "" && scanInfo.Output == "") {
+		return &printerv2.SilentPrinter{}
 	}
 
+	p := printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName)
+	if err := p.SetWriter(ctx, ""); err != nil {
+		logger.L().Ctx(ctx).Warning("failed to configure terminal output", helpers.Error(err))
+		return &printerv2.SilentPrinter{}
+	}
 	return p
 }
 

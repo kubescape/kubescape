@@ -27,14 +27,16 @@ const (
 var _ printer.IPrinter = &JsonPrinter{}
 
 type JsonPrinter struct {
-	writer *os.File
+	writer      *os.File
+	minSeverity string
 }
 
-func NewJsonPrinter() *JsonPrinter {
-	return &JsonPrinter{}
+func NewJsonPrinter(minSeverity string) *JsonPrinter {
+	return &JsonPrinter{minSeverity: minSeverity}
 }
 
-func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = jsonOutputFile
@@ -43,7 +45,13 @@ func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) {
 			outputFile = outputFile + printer.JsonOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		jp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	jp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 func (jp *JsonPrinter) Score(score float32) {
@@ -106,6 +114,11 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 }
 
 func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData, jp *JsonPrinter) error {
+	// Finalize into the report owned by this renderer before adding image data.
+	// The same OPASessionObj is submitted after local output is written, so
+	// enriching opaSessionObj.Report here would make --format change the backend
+	// payload as a side effect.
+	finalizedReport := FinalizeResults(opaSessionObj)
 
 	if imageScanData != nil {
 		imageScanSummary, err := jp.convertToImageScanSummary(imageScanData)
@@ -113,16 +126,17 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScan
 			logger.L().Error("failed to convert to image scan summary", helpers.Error(err))
 			return err
 		}
-		opaSessionObj.Report.SummaryDetails.Vulnerabilities.MapsSeverityToSummary = convertToReportSummary(imageScanSummary.MapsSeverityToSummary)
-		opaSessionObj.Report.SummaryDetails.Vulnerabilities.CVESummary = convertToCVESummary(imageScanSummary.CVEs)
-		opaSessionObj.Report.SummaryDetails.Vulnerabilities.PackageScores = convertToPackageScores(imageScanSummary.PackageScores)
-		opaSessionObj.Report.SummaryDetails.Vulnerabilities.Images = imageScanSummary.Images
+		finalizedReport.SummaryDetails.Vulnerabilities.MapsSeverityToSummary = convertToReportSummary(imageScanSummary.MapsSeverityToSummary)
+		finalizedReport.SummaryDetails.Vulnerabilities.CVESummary = convertToCVESummary(imageScanSummary.CVEs)
+		finalizedReport.SummaryDetails.Vulnerabilities.PackageScores = convertToPackageScores(imageScanSummary.PackageScores)
+		finalizedReport.SummaryDetails.Vulnerabilities.Images = imageScanSummary.Images
 	}
 
 	// Convert to PostureReportWithSeverity to add severity field to controls,
 	// extract specified labels from workloads, and attach scan coverage gaps.
-	finalizedReport := FinalizeResults(opaSessionObj)
 	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverage(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources, &opaSessionObj.ScanCoverage)
+	reportWithSeverity.ExceptionAudit = opaSessionObj.ExceptionAudit
+	FilterBySeverity(reportWithSeverity, jp.minSeverity)
 
 	r, err := json.Marshal(reportWithSeverity)
 	if err != nil {
@@ -180,6 +194,6 @@ func (jp *JsonPrinter) PrintNextSteps() {
 
 func (p *JsonPrinter) CloseWriter() {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
 	}
 }

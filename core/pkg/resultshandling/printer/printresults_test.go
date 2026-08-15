@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -19,6 +20,11 @@ func captureLog(t *testing.T, fn func()) string {
 	t.Helper()
 	buf, err := os.CreateTemp(t.TempDir(), "log-*")
 	require.NoError(t, err)
+	// Registered before the writer restore so it runs after it (cleanups are
+	// LIFO), and after t.TempDir's own removal was registered so it runs
+	// before that. Windows refuses to delete a file that is still open, so
+	// leaving the handle around fails the test in TempDir cleanup.
+	t.Cleanup(func() { _ = buf.Close() })
 	prev := logger.L().GetWriter()
 	logger.L().SetWriter(buf)
 	t.Cleanup(func() { logger.L().SetWriter(prev) })
@@ -102,6 +108,13 @@ func TestGetWriter_ValidFileName(t *testing.T) {
 // this repo also ships Windows builds.
 func assertDirNotMorePermissiveThan0750(t *testing.T, dir string) {
 	t.Helper()
+	// Windows does not model POSIX permission bits at all: os.Stat reports
+	// 0777 for every directory, so the check below can only fail there, never
+	// catch anything. Return rather than t.Skip so the assertions the caller
+	// already made still count.
+	if runtime.GOOS == "windows" {
+		return
+	}
 	info, err := os.Stat(dir)
 	require.NoError(t, err)
 	mode := info.Mode().Perm()
@@ -128,6 +141,20 @@ func TestGetWriter_CreateFailsFallsBackToStdout(t *testing.T) {
 
 	f := GetWriter(context.Background(), target)
 	assert.Same(t, os.Stdout, f)
+}
+
+func TestGetWriterNoFallback_ReturnsExplicitSetupError(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-directory")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
+	target := filepath.Join(blocker, "report.json")
+
+	f, err := GetWriterNoFallback(target)
+
+	require.Error(t, err)
+	assert.Nil(t, f)
+	assert.ErrorContains(t, err, "create output directory")
+	assert.NoFileExists(t, target)
 }
 
 func TestGetWriterNoStdoutFallback_ValidFileName(t *testing.T) {
@@ -174,5 +201,13 @@ func TestLogOutputFile(t *testing.T) {
 	for _, sink := range []string{os.Stdout.Name(), os.Stderr.Name(), os.DevNull} {
 		out := captureLog(t, func() { LogOutputFile(sink) })
 		assert.Empty(t, strings.TrimSpace(out), "expected no log for %s", sink)
+	}
+}
+
+func TestFormatOutputExtCoversAllFormats(t *testing.T) {
+	for _, format := range AllFormats {
+		ext, ok := FormatOutputExt[format]
+		assert.True(t, ok, "format %q has no entry in FormatOutputExt", format)
+		assert.NotEmpty(t, ext, "format %q maps to an empty extension", format)
 	}
 }

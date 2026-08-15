@@ -13,6 +13,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
@@ -46,7 +47,8 @@ func NewHtmlPrinter() *HtmlPrinter {
 	return &HtmlPrinter{}
 }
 
-func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	outputFile = strings.TrimSpace(outputFile)
 	if outputFile == "" {
 		// Raw HTML markup must never fall back to stdout on a TTY.
@@ -56,9 +58,14 @@ func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
 	} else if filepath.Ext(outputFile) != printer.HtmlOutputExt {
 		outputFile = outputFile + printer.HtmlOutputExt
 	}
-	// HTML must never fall back to stdout on file-create errors either
-	// (e.g. read-only cwd) — use the no-stdout-fallback helper.
+	if explicitOutput {
+		var err error
+		hp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
+	// Preserve the temp-file fallback for the implicit HTML destination.
 	hp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+printer.HtmlOutputExt)
+	return nil
 }
 
 func (hp *HtmlPrinter) PrintNextSteps() {
@@ -155,7 +162,7 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableV
 					helpers.String("resourceID", resourceID))
 				continue
 			}
-			ctlResults := buildResourceControlResultTable(result.AssociatedControls, &opaSessionObj.Report.SummaryDetails)
+			ctlResults := buildResourceControlResultTable(result.AssociatedControls, &opaSessionObj.Report.SummaryDetails, resource)
 			resourceTableView = append(resourceTableView, ResourceResult{resource, ctlResults})
 		}
 	}
@@ -186,17 +193,17 @@ func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.
 	return imageScanSummary
 }
 
-func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary) ResourceControlResult {
+func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary, resource workloadinterface.IMetadata) ResourceControlResult {
 	ctlSeverity := apis.ControlSeverityToString(control.GetScoreFactor())
 	ctlName := resourceControl.GetName()
 	ctlID := resourceControl.GetID()
 	ctlURL := cautils.GetControlLink(resourceControl.GetID())
-	failedPaths := AssistedRemediationPathsToString(&resourceControl)
+	failedPaths := AssistedRemediationPathsWithCurrentValues(&resourceControl, resource)
 
 	return ResourceControlResult{ctlSeverity, ctlName, ctlID, ctlURL, failedPaths}
 }
 
-func buildResourceControlResultTable(resourceControls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails) []ResourceControlResult {
+func buildResourceControlResultTable(resourceControls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata) []ResourceControlResult {
 	var ctlResults []ResourceControlResult
 	for _, resourceControl := range resourceControls {
 		if resourceControl.GetStatus(nil).IsFailed() {
@@ -204,7 +211,7 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 			if control == nil {
 				continue
 			}
-			ctlResult := buildResourceControlResult(resourceControl, control)
+			ctlResult := buildResourceControlResult(resourceControl, control, resource)
 
 			ctlResults = append(ctlResults, ctlResult)
 		}
@@ -215,6 +222,6 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 
 func (p *HtmlPrinter) CloseWriter() {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
 	}
 }

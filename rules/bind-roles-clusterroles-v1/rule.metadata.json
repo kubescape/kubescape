@@ -1,0 +1,20 @@
+{
+  "name": "bind-roles-clusterroles-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Privilege Escalation::Bind roles/clusterroles",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": ["rbac.authorization.k8s.io"],
+      "apiVersions": ["v1"],
+      "resources": ["RoleBinding", "ClusterRoleBinding", "Role", "ClusterRole"]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects hold the bind verb on roles or clusterroles, letting them create bindings that grant themselves rights from any role/clusterrole they can bind to, bypassing the normal escalation check",
+  "remediation": "Avoid granting the bind verb outside of cluster-admin equivalent identities. Restrict which roles/clusterroles a subject with bind rights can reference.",
+  "ruleQuery": "armo_builtins"
+}

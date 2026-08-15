@@ -25,12 +25,13 @@ const (
 	GitLabSASTFormat  string = "gitlab-sast"
 	YamlFormat        string = "yaml"
 	CsvFormat         string = "csv"
+	MarkdownFormat    string = "markdown"
 	CycloneDXFormat   string = "cyclonedx-json"
 	SPDXFormat        string = "spdx-json"
 )
 
 // AllFormats lists every output format kubescape can emit.
-var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CsvFormat, CycloneDXFormat, SPDXFormat}
+var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat}
 
 // ImageFormats lists formats whose printers support image-scan data. CSV is
 // deliberately excluded: CsvPrinter.ActionPrint requires opaSessionObj and
@@ -51,14 +52,35 @@ const (
 	PrettyOutputExt     = ".txt"
 	YamlOutputExt       = ".yaml"
 	CsvOutputExt        = ".csv"
+	MarkdownOutputExt   = ".md"
 	CycloneDXOutputExt  = ".cdx.json"
 	SPDXOutputExt       = ".spdx.json"
 )
 
+// FormatOutputExt maps a format to the extension its printer enforces in
+// SetWriter. Callers resolving an --output path must read it from here rather
+// than re-deriving it, so a format can never resolve to a path its printer
+// does not write. Every entry in AllFormats is covered.
+var FormatOutputExt = map[string]string{
+	PrettyFormat:      PrettyOutputExt,
+	JsonFormat:        JsonOutputExt,
+	JunitResultFormat: JunitOutputExt,
+	PrometheusFormat:  PrometheusOutputExt,
+	PdfFormat:         PdfOutputExt,
+	HtmlFormat:        HtmlOutputExt,
+	SARIFFormat:       SARIFOutputExt,
+	GitLabSASTFormat:  JsonOutputExt,
+	YamlFormat:        YamlOutputExt,
+	CsvFormat:         CsvOutputExt,
+	MarkdownFormat:    MarkdownOutputExt,
+	CycloneDXFormat:   CycloneDXOutputExt,
+	SPDXFormat:        SPDXOutputExt,
+}
+
 type IPrinter interface {
 	PrintNextSteps()
 	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error
-	SetWriter(ctx context.Context, outputFile string)
+	SetWriter(ctx context.Context, outputFile string) error
 	Score(score float32)
 }
 
@@ -74,7 +96,7 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to create directory, reason: %s", err.Error()))
 			return os.Stdout
 		}
-		f, err := os.Create(outputFile)
+		f, err := os.Create(filepath.Clean(outputFile))
 		if err != nil {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
 			return os.Stdout
@@ -83,6 +105,20 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 	}
 	return os.Stdout
 
+}
+
+// GetWriterNoFallback opens an explicitly requested output path. Unlike the
+// legacy helpers, it never redirects an error to stdout or a temporary file:
+// callers can return the setup failure before a scan starts.
+func GetWriterNoFallback(outputFile string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(outputFile), outputDirPerm); err != nil {
+		return nil, fmt.Errorf("create output directory for %q: %w", outputFile, err)
+	}
+	f, err := os.Create(outputFile)
+	if err != nil {
+		return nil, fmt.Errorf("open output file %q: %w", outputFile, err)
+	}
+	return f, nil
 }
 
 // GetWriterNoStdoutFallback opens outputFile for writing for formats whose
@@ -94,7 +130,7 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 func GetWriterNoStdoutFallback(ctx context.Context, outputFile, tempPattern string) *os.File {
 	if outputFile != "" {
 		if err := os.MkdirAll(filepath.Dir(outputFile), outputDirPerm); err == nil {
-			if f, err := os.Create(outputFile); err == nil {
+			if f, err := os.Create(filepath.Clean(outputFile)); err == nil {
 				return f
 			} else {
 				logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))

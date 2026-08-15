@@ -37,7 +37,8 @@ func (pp *PrometheusPrinter) PrintNextSteps() {
 
 }
 
-func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		outputFile = strings.TrimSpace(outputFile)
 		if outputFile == "" {
@@ -47,7 +48,13 @@ func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) {
 			outputFile = outputFile + printer.PrometheusOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		pp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	pp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 func (pp *PrometheusPrinter) Score(score float32) {
@@ -105,6 +112,6 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 
 func (p *PrometheusPrinter) CloseWriter() {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
 	}
 }

@@ -352,7 +352,6 @@ func TestGetScanCommand_DeprecatedFlagsRemoved(t *testing.T) {
 	require.NotNil(t, cmd)
 
 	for _, removed := range []string{
-		"fail-threshold",
 		"create-account",
 		"enable-host-scan",
 		"host-scan-yaml",
@@ -360,6 +359,26 @@ func TestGetScanCommand_DeprecatedFlagsRemoved(t *testing.T) {
 		assert.Nil(t, cmd.PersistentFlags().Lookup(removed),
 			"deprecated flag %q must no longer be registered", removed)
 	}
+}
+
+func TestGetScanCommand_FailThresholdKeptAsHiddenDeprecatedFlag(t *testing.T) {
+	// --fail-threshold's gating logic was removed, but the flag must stay registered
+	// (hidden + deprecated) so cobra keeps accepting it instead of erroring with
+	// "unknown flag" for existing callers - see https://github.com/kubescape/kubescape/issues/3056
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	require.NotNil(t, cmd)
+
+	f := cmd.PersistentFlags().Lookup("fail-threshold")
+	require.NotNil(t, f, "--fail-threshold must stay registered so it doesn't fail with 'unknown flag'")
+	assert.True(t, f.Hidden, "--fail-threshold must be hidden from help output")
+	assert.Equal(t, "use '--compliance-threshold' flag instead", f.Deprecated)
+
+	require.NoError(t, cmd.ParseFlags([]string{"--fail-threshold", "20"}))
+	assert.Equal(t, "20", f.Value.String())
+
+	require.NoError(t, cmd.ParseFlags([]string{"-t", "20"}))
+	assert.Equal(t, "20", f.Value.String())
 }
 
 func TestGetScanCommand_HostScanFlagTriState(t *testing.T) {
@@ -395,8 +414,51 @@ func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	require.NoError(t, cmd.PersistentFlags().Set("format", "xml"))
 
 	err := cmd.RunE(cmd, []string{"."})
-	errMessage := "invalid format \"xml\", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml, csv, cyclonedx-json, spdx-json"
+	errMessage := "invalid format \"xml\", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml, csv, markdown, cyclonedx-json, spdx-json"
 	assert.EqualError(t, err, errMessage)
+}
+
+type scanCallCounter struct {
+	mocks.MockIKubescape
+	calls int
+}
+
+func (m *scanCallCounter) Scan(_ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
+	m.calls++
+	return nil, errors.New("scan reached")
+}
+
+func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		wantCalls int
+		wantError string
+	}{
+		{name: "rejects unsupported format version", args: []string{"--format-version=v3"}, wantError: "invalid --format-version"},
+		{name: "format version is case sensitive", args: []string{"--format-version=V2"}, wantError: "invalid --format-version"},
+		{name: "rejects empty format version", args: []string{"--format-version="}, wantError: "invalid --format-version"},
+		{name: "rejects negative scan timeout", args: []string{"--scan-timeout=-1s"}, wantError: "invalid --scan-timeout"},
+		{name: "rejects negative control timeout", args: []string{"--control-timeout=-1s"}, wantError: "invalid --control-timeout"},
+		{name: "accepts defaults", wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts format version v1", args: []string{"--format-version=v1"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts format version v2", args: []string{"--format-version=v2"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts zero timeouts", args: []string{"--scan-timeout=0", "--control-timeout=0"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts positive timeouts", args: []string{"--scan-timeout=2s", "--control-timeout=1s"}, wantCalls: 1, wantError: "scan reached"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &scanCallCounter{}
+			cmd := GetScanCommand(ks)
+			cmd.SilenceUsage = true
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			require.ErrorContains(t, err, tt.wantError)
+			assert.Equal(t, tt.wantCalls, ks.calls)
+		})
+	}
 }
 
 func TestGetScanCommand_ScanTimeoutFlagRegistered(t *testing.T) {
@@ -687,6 +749,7 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 		name          string
 		threshold     string
 		matchSeverity string
+		metadata      *vulnerability.Metadata
 		fixState      vulnerability.FixState
 		onlyFixable   bool
 		expectedError bool
@@ -713,6 +776,27 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 			name:          "threshold exceeded",
 			threshold:     "high",
 			matchSeverity: "Critical",
+			expectedError: true,
+		},
+		{
+			name:          "empty embedded severity falls back to provider metadata",
+			threshold:     "high",
+			matchSeverity: "Critical",
+			metadata:      &vulnerability.Metadata{},
+			expectedError: true,
+		},
+		{
+			name:          "unrecognized embedded severity falls back to provider metadata",
+			threshold:     "high",
+			matchSeverity: "Critical",
+			metadata:      &vulnerability.Metadata{Severity: "important"},
+			expectedError: true,
+		},
+		{
+			name:          "explicit unknown embedded severity falls back to provider metadata",
+			threshold:     "high",
+			matchSeverity: "Critical",
+			metadata:      &vulnerability.Metadata{Severity: vulnerability.UnknownSeverity.String()},
 			expectedError: true,
 		},
 		{
@@ -758,6 +842,7 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 				matches.Add(match.Match{
 					Vulnerability: vulnerability.Vulnerability{
 						Reference: vulnerability.Reference{ID: "CVE-TEST"},
+						Metadata:  tt.metadata,
 						Fix:       vulnerability.Fix{State: tt.fixState},
 					},
 				})
@@ -778,4 +863,20 @@ func TestEnforceImageSeverityThresholds(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEnforceImageSeverityThresholdsUsesEmbeddedMetadataWithoutProvider(t *testing.T) {
+	matches := match.NewMatches(match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-TEST"},
+			Metadata:  &vulnerability.Metadata{Severity: vulnerability.CriticalSeverity.String()},
+		},
+	})
+
+	err := enforceImageSeverityThresholds(
+		[]cautils.ImageScanData{{Matches: matches}},
+		&cautils.ScanInfo{FailThresholdSeverity: "high"},
+	)
+
+	assert.EqualError(t, err, "image scan result exceeds severity threshold: high")
 }
