@@ -161,6 +161,7 @@ func TestScanClosesOutputPrinterWhenPolicyLoadingFails(t *testing.T) {
 
 			results, err := NewKubescape(context.Background()).Scan(scanInfo, cautils.BuildPolicyIdentifiers([]string{missingPolicy}, apisv1.KindFramework))
 			require.Error(t, err)
+			require.ErrorContains(t, err, missingPolicy)
 			require.NotNil(t, results, "policy loading must fail after the configured printer is attached to a result handler")
 			assertNoOpenFileDescriptor(t, output)
 			// Keep the returned handler (and its printer) reachable while inspecting
@@ -225,6 +226,26 @@ func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "output path collision")
+}
+
+func TestGetOutputPrintersClosesV1JSONWriterAfterLaterSetupFailure(t *testing.T) {
+	if _, err := os.Stat("/proc/self/fd"); err != nil {
+		t.Skip("requires /proc/self/fd")
+	}
+
+	output := filepath.Join(t.TempDir(), "report")
+	scanInfo := &cautils.ScanInfo{
+		ScanType:      cautils.ScanTypeControl,
+		Format:        printer.JsonFormat + "," + printer.GitLabSASTFormat,
+		FormatVersion: "v1",
+		Output:        output,
+	}
+
+	outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+
+	require.ErrorContains(t, err, "output path collision")
+	assert.Nil(t, outputPrinters)
+	assertNoOpenFileDescriptor(t, output+printer.JsonOutputExt)
 }
 
 func TestResolvedOutputPath(t *testing.T) {

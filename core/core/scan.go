@@ -49,8 +49,14 @@ type componentInterfaces struct {
 }
 
 func (interfaces componentInterfaces) closePrinters() error {
-	var closeErr error
 	printers := append([]printer.IPrinter{interfaces.uiPrinter}, interfaces.outputPrinters...)
+	return closePrinters(printers...)
+}
+
+// closePrinters supports both printer close contracts while the migration to
+// error-returning CloseWriter methods is in progress.
+func closePrinters(printers ...printer.IPrinter) error {
+	var closeErr error
 	for _, configuredPrinter := range printers {
 		if configuredPrinter == nil {
 			continue
@@ -149,18 +155,15 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 	containPrettyPrinter := false
 	outputPrinters := make([]printer.IPrinter, 0)
 	resolvedPaths := make(map[string]string)
-	closeConfiguredPrinters := func() {
-		for _, configuredPrinter := range outputPrinters {
-			if closer, ok := configuredPrinter.(interface{ CloseWriter() }); ok {
-				closer.CloseWriter()
-			}
-		}
+	closeConfiguredPrinters := func(setupErr error, additional ...printer.IPrinter) error {
+		printersToClose := append([]printer.IPrinter(nil), outputPrinters...)
+		printersToClose = append(printersToClose, additional...)
+		return errors.Join(setupErr, closePrinters(printersToClose...))
 	}
 	for _, format := range formats {
 		usesPrettyPrinter, err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format)
 		if err != nil {
-			closeConfiguredPrinters()
-			return nil, err
+			return nil, closeConfiguredPrinters(err)
 		}
 
 		if usesPrettyPrinter && containPrettyPrinter {
@@ -169,16 +172,16 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 
 		if path := resolvedOutputPath(format, scanInfo.Output); path != "" {
 			if existing, collision := resolvedPaths[path]; collision {
-				closeConfiguredPrinters()
-				return nil, fmt.Errorf("output path collision: formats %q and %q both resolve to %q; specify distinct output paths or use format-specific file extensions", existing, format, path)
+				setupErr := fmt.Errorf("output path collision: formats %q and %q both resolve to %q; specify distinct output paths or use format-specific file extensions", existing, format, path)
+				return nil, closeConfiguredPrinters(setupErr)
 			}
 			resolvedPaths[path] = format
 		}
 
 		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo, clusterName)
 		if err := printerHandler.SetWriter(ctx, scanInfo.Output); err != nil {
-			closeConfiguredPrinters()
-			return nil, fmt.Errorf("configure %q output: %w", format, err)
+			setupErr := fmt.Errorf("configure %q output: %w", format, err)
+			return nil, closeConfiguredPrinters(setupErr, printerHandler)
 		}
 		outputPrinters = append(outputPrinters, printerHandler)
 
