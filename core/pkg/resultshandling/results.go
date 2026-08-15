@@ -114,6 +114,7 @@ func (rh *ResultsHandler) ToJson() ([]byte, error) {
 		Results        []resultWithEnrichment       `json:"results,omitempty"`
 		ResourceLabels map[string]map[string]string `json:"resourceLabels,omitempty"`
 		ScanCoverage   *cautils.ScanCoverage        `json:"scanCoverage,omitempty"`
+		ExceptionAudit *cautils.ExceptionAudit      `json:"exceptionAudit,omitempty"`
 	}{
 		PostureReport: finalizedReport,
 		SummaryDetails: summaryWithEnrichment{
@@ -123,6 +124,7 @@ func (rh *ResultsHandler) ToJson() ([]byte, error) {
 		Results:        results,
 		ResourceLabels: enrichedReport.ResourceLabels,
 		ScanCoverage:   enrichedReport.ScanCoverage,
+		ExceptionAudit: rh.ScanData.ExceptionAudit,
 	}
 
 	return json.Marshal(&output)
