@@ -31,7 +31,7 @@ func NormalizeSeverity(severity string) string {
 		return "Medium"
 	case "low":
 		return "Low"
-	case "minimal", "informational", "untriaged", "unassigned":
+	case "minimal", "informational", "untriaged", "unassigned", "negligible", "none":
 		return "Negligible"
 	default:
 		return "Unknown"
