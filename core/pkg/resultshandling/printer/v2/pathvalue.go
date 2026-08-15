@@ -171,6 +171,55 @@ func reviewPathsWithCurrentValues(control *resourcesresults.ResourceAssociatedCo
 	return enrichedPathsForField(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
 }
 
+// redactedValue is substituted for sensitive field values when --show-secrets is not set.
+const redactedValue = "[redacted]"
+
+// AssistedRemediationPathsWithCurrentValuesFiltered is like AssistedRemediationPathsWithCurrentValues
+// but redacts sensitive field values (Secret.data, Secret.stringData) unless showSecrets is true.
+func AssistedRemediationPathsWithCurrentValuesFiltered(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
+	if showSecrets {
+		return AssistedRemediationPathsWithCurrentValues(control, resource)
+	}
+	fixPaths := fixPathsToString(control, false)
+	deletePaths := deletePathsToString(control)
+	enrichedReview := reviewPathsWithCurrentValuesRedacted(control, resource)
+	enrichedFailed := failedPathsWithCurrentValuesRedacted(control, resource)
+	paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
+	return appendFailedPathsIfNotInPaths(paths, enrichedFailed)
+}
+
+func enrichedPathsForFieldRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
+	var paths []string
+	obj := resource.GetObject()
+	kind := resource.GetKind()
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			p := getPath(control.ResourceAssociatedRules[j].Paths[k])
+			if p == "" {
+				continue
+			}
+			if isSensitivePath(kind, p) {
+				paths = append(paths, p+" (current: "+redactedValue+")")
+				continue
+			}
+			if val, ok := extractValueAtPath(obj, p); ok {
+				paths = append(paths, p+" (current: "+val+")")
+				continue
+			}
+			paths = append(paths, p)
+		}
+	}
+	return paths
+}
+
+func failedPathsWithCurrentValuesRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
+	return enrichedPathsForFieldRedacted(control, resource, func(p armotypes.PosturePaths) string { return p.FailedPath })
+}
+
+func reviewPathsWithCurrentValuesRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
+	return enrichedPathsForFieldRedacted(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
+}
+
 func AssistedRemediationPathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
 	fixPaths := fixPathsToString(control, false)
 	deletePaths := deletePathsToString(control)

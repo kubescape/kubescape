@@ -501,3 +501,65 @@ func TestAssistedRemediationPathsWithCurrentValues(t *testing.T) {
 		assert.Len(t, got, 2)
 	})
 }
+
+func TestAssistedRemediationPathsWithCurrentValuesFiltered(t *testing.T) {
+	secretObj := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"data": map[string]any{
+			"password": "test-value-for-testing",
+		},
+	}
+	normalObj := map[string]any{
+		"spec": map[string]any{
+			"hostPID": true,
+			"containers": []any{
+				map[string]any{
+					"securityContext": map[string]any{
+						"privileged": true,
+					},
+				},
+			},
+		},
+	}
+
+	t.Run("non-secret path with showSecrets=false shows value", func(t *testing.T) {
+		resource := &mockResource{obj: normalObj, kind: "Pod"}
+		ctrl := makeControlWithPaths([]string{"spec.hostPID"}, nil)
+		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, false)
+		require.Len(t, got, 1)
+		assert.Equal(t, "spec.hostPID (current: true)", got[0])
+	})
+
+	t.Run("secret path with showSecrets=false is redacted", func(t *testing.T) {
+		resource := &mockResource{obj: secretObj, kind: "Secret"}
+		ctrl := makeControlWithPaths([]string{"data.password"}, nil)
+		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, false)
+		require.Len(t, got, 1)
+		assert.Equal(t, "data.password (current: "+redactedValue+")", got[0])
+		assert.NotContains(t, got[0], "test-value-for-testing")
+	})
+
+	t.Run("secret path with showSecrets=true shows actual value", func(t *testing.T) {
+		resource := &mockResource{obj: secretObj, kind: "Secret"}
+		ctrl := makeControlWithPaths([]string{"data.password"}, nil)
+		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, true)
+		require.Len(t, got, 1)
+		assert.Equal(t, "data.password (current: test-value-for-testing)", got[0])
+	})
+
+	t.Run("showSecrets=true delegates to AssistedRemediationPathsWithCurrentValues", func(t *testing.T) {
+		resource := &mockResource{obj: normalObj, kind: "Pod"}
+		ctrl := makeControlWithPaths([]string{"spec.containers[0].securityContext.privileged"}, nil)
+		filtered := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, true)
+		unfiltered := AssistedRemediationPathsWithCurrentValues(ctrl, resource)
+		assert.Equal(t, unfiltered, filtered)
+	})
+
+	t.Run("empty paths returns nil", func(t *testing.T) {
+		resource := &mockResource{obj: normalObj, kind: "Pod"}
+		ctrl := makeControlWithPaths(nil, nil)
+		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, false)
+		assert.Nil(t, got)
+	})
+}
