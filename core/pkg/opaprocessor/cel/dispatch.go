@@ -48,7 +48,10 @@ func (e *Evaluator) EvaluateControl(ctx context.Context, controlID string, obj, 
 	if err != nil {
 		return ControlEvaluation{}, err
 	}
-	matched, err := e.matchConditionsHold(ctx, vap.matchConditions, obj, namespaceObject, params, vap.Variables)
+	// namespaceObject is not threaded into the gate: admission evaluates
+	// matchConditions with it bound to null and only resolves the real Namespace
+	// for the validations below (see matchConditionsHold).
+	matched, err := e.matchConditionsHold(ctx, vap.matchConditions, obj, params, vap.Variables)
 	if err != nil {
 		return matchConditionsGate(vap, err), nil
 	}

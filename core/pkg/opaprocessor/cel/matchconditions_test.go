@@ -72,7 +72,7 @@ func TestMatchConditionsHold(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			matched, err := e.matchConditionsHold(context.Background(), tc.conditions, gatedPod(), nil, nil, nil)
+			matched, err := e.matchConditionsHold(context.Background(), tc.conditions, gatedPod(), nil, nil)
 			require.NoError(t, err)
 			assert.Equal(t, tc.matched, matched)
 		})
@@ -114,7 +114,7 @@ func TestMatchConditionsHoldFalseOutranksError(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			matched, err := e.matchConditionsHold(context.Background(), tc.conditions, gatedPod(), nil, nil, nil)
+			matched, err := e.matchConditionsHold(context.Background(), tc.conditions, gatedPod(), nil, nil)
 			require.NoError(t, err, "a false condition outranks an error, so the gate is a clean not-matched")
 			assert.False(t, matched)
 		})
@@ -124,7 +124,7 @@ func TestMatchConditionsHoldFalseOutranksError(t *testing.T) {
 		matched, err := e.matchConditionsHold(context.Background(), []MatchCondition{
 			cond("is-pod", "object.kind == 'Pod'"),
 			evalErrors,
-		}, gatedPod(), nil, nil, nil)
+		}, gatedPod(), nil, nil)
 		require.Error(t, err, "with no false condition the error is what failurePolicy acts on")
 		assert.False(t, matched)
 		assert.True(t, IsExpressionError(err))
@@ -133,16 +133,13 @@ func TestMatchConditionsHoldFalseOutranksError(t *testing.T) {
 }
 
 // TestMatchConditionsHoldReadsPolicyInputs proves the gate evaluates against the
-// same bindings a validation gets, so a condition can narrow on any of them.
+// bindings admission gives a matchCondition, so a condition can narrow on any of
+// them. namespaceObject is not among them - see
+// TestMatchConditionsHoldBindsNamespaceObjectNull.
 func TestMatchConditionsHoldReadsPolicyInputs(t *testing.T) {
 	e, err := NewEvaluator()
 	require.NoError(t, err)
 
-	namespaceObject := map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Namespace",
-		"metadata":   map[string]any{"name": "prod", "labels": map[string]any{"tier": "critical"}},
-	}
 	params := map[string]any{"settings": map[string]any{"gate": true}}
 	variables := []Variable{{Name: "isProd", Expression: "object.metadata.namespace == 'prod'"}}
 
@@ -150,12 +147,35 @@ func TestMatchConditionsHoldReadsPolicyInputs(t *testing.T) {
 		cond("via-variable", "variables.isProd"),
 		cond("via-params", "params.settings.gate"),
 		cond("via-request", "request.operation == 'CREATE'"),
-		cond("via-namespace", "namespaceObject.metadata.labels.tier == 'critical'"),
 	}
 
-	matched, err := e.matchConditionsHold(context.Background(), conditions, gatedPod(), namespaceObject, params, variables)
+	matched, err := e.matchConditionsHold(context.Background(), conditions, gatedPod(), params, variables)
 	require.NoError(t, err)
 	assert.True(t, matched)
+}
+
+// TestMatchConditionsHoldBindsNamespaceObjectNull pins the one binding the gate
+// deliberately withholds. The apiserver's matcher evaluates matchConditions with
+// a hardcoded nil namespace even when the VAP dispatcher has already resolved
+// the real one for spec.validations, so at admission a condition reading
+// namespaceObject.* always errors into failurePolicy. Answering it offline from
+// the scan's real Namespace would pass a policy admission rejects, so the gate
+// must reproduce the error - and it must stay an expression error, since that is
+// the verdict failurePolicy governs.
+func TestMatchConditionsHoldBindsNamespaceObjectNull(t *testing.T) {
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	// matchConditionsHold takes no namespaceObject at all, so a caller holding a
+	// real Namespace (EvaluateControl does, for the validations) has no way to
+	// reach the gate with it. The condition below therefore runs against null.
+	conditions := []MatchCondition{cond("via-namespace", "namespaceObject.metadata.labels.tier == 'critical'")}
+
+	matched, err := e.matchConditionsHold(context.Background(), conditions, gatedPod(), nil, nil)
+	require.Error(t, err, "namespaceObject is null at admission, so the condition errors rather than answering")
+	assert.False(t, matched)
+	assert.True(t, IsExpressionError(err), "the error is one failurePolicy governs, as at admission")
+	assert.Contains(t, err.Error(), "via-namespace")
 }
 
 // TestMatchConditionsHoldErrors separates the errors failurePolicy governs from
@@ -192,7 +212,7 @@ func TestMatchConditionsHoldErrors(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			matched, err := e.matchConditionsHold(context.Background(), []MatchCondition{tc.condition}, gatedPod(), nil, nil, nil)
+			matched, err := e.matchConditionsHold(context.Background(), []MatchCondition{tc.condition}, gatedPod(), nil, nil)
 			require.Error(t, err)
 			assert.False(t, matched)
 			assert.Contains(t, err.Error(), tc.condition.Name, "the error must name the condition")
@@ -211,7 +231,7 @@ func TestMatchConditionsHoldCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	matched, err := e.matchConditionsHold(ctx, []MatchCondition{cond("is-pod", "object.kind == 'Pod'")}, gatedPod(), nil, nil, nil)
+	matched, err := e.matchConditionsHold(ctx, []MatchCondition{cond("is-pod", "object.kind == 'Pod'")}, gatedPod(), nil, nil)
 	require.Error(t, err)
 	assert.False(t, matched)
 	assert.False(t, IsExpressionError(err), "a cancelled scan is not a verdict failurePolicy governs")
@@ -231,7 +251,7 @@ func TestMatchConditionsHoldOwnBudget(t *testing.T) {
 	_, err = e.matchConditionsHold(context.Background(), []MatchCondition{
 		cond("is-prod", "object.metadata.namespace == 'prod'"),
 		cond("is-kube-system", "object.metadata.namespace == 'kube-system'"),
-	}, gatedPod(), nil, nil, nil)
+	}, gatedPod(), nil, nil)
 	require.Error(t, err, "the gate must exhaust this budget for the test to mean anything")
 	assert.False(t, IsExpressionError(err))
 

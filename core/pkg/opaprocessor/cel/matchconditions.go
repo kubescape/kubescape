@@ -50,13 +50,24 @@ type MatchCondition struct {
 // where admission is fine. Its own activation because variables memoize per
 // activation: sharing one would hand the validations variables the gate already
 // paid for, making the policy cheaper offline than at admission.
-func (e *Evaluator) matchConditionsHold(ctx context.Context, conditions []MatchCondition, obj, namespaceObject map[string]any, params any, variables []Variable) (bool, error) {
+//
+// namespaceObject is deliberately absent from the signature: the gate binds it
+// to null, never to the object's real Namespace, even when the scan captured
+// one. The apiserver's matcher passes a hardcoded nil namespace to ForInput
+// (webhook/matchconditions matcher.go), while the validations that follow get
+// the resolved Namespace, so at admission a matchCondition touching
+// namespaceObject always evaluates against null and errors into failurePolicy.
+// Binding the real namespace here would answer that condition offline instead
+// of reproducing the error, which is the scan/admission divergence this package
+// exists to avoid. params and variables ARE available to matchConditions at
+// admission (the shared CompositedCompiler), so those stay bound.
+func (e *Evaluator) matchConditionsHold(ctx context.Context, conditions []MatchCondition, obj map[string]any, params any, variables []Variable) (bool, error) {
 	if len(conditions) == 0 {
 		return true, nil
 	}
 
 	budget := newCostBudget(e.matchConditionsBudgetLimit())
-	activation := e.activationFor(ctx, obj, namespaceObject, params, variables, budget)
+	activation := e.activationFor(ctx, obj, nil, params, variables, budget)
 
 	// The first error we can still recover from, held until a false outranks it
 	// or the gate runs out of conditions.
