@@ -199,6 +199,14 @@ func fileExtForFormat(format string) string {
 	return printer.PrettyOutputExt
 }
 
+// collectPolicies pins the shared handler for exactly as long as its caches are
+// in use, so an idle registry sweep cannot close them during collection.
+func collectPolicies(ctx context.Context, clusterName string, policyIdentifiers []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (*cautils.OPASessionObj, error) {
+	policyHandler, release := policyhandler.NewPolicyHandlerWithRelease(clusterName)
+	defer release()
+	return policyHandler.CollectPolicies(ctx, policyIdentifiers, scanInfo, getters)
+}
+
 func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ks.Context(), "initialization")
 	logger.L().Start("Kubescape scanner initializing...")
@@ -276,8 +284,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 
 	// ===================== policies =====================
 	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies")
-	policyHandler := policyhandler.NewPolicyHandler(interfaces.tenantConfig.GetContextName())
-	scanData, err := policyHandler.CollectPolicies(ctxPolicies, policyIdentifiers, scanInfo, &getters)
+	scanData, err := collectPolicies(ctxPolicies, interfaces.tenantConfig.GetContextName(), policyIdentifiers, scanInfo, &getters)
 	if err != nil {
 		spanInit.End()
 		return resultsHandling, err
