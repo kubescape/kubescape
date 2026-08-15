@@ -322,6 +322,100 @@ func TestCallTool_RunFrameworkScan(t *testing.T) {
 	}
 }
 
+func TestCallTool_NamespaceStarMapsToClusterWide(t *testing.T) {
+	origRBAC, origNetwork, origFramework := rbacScanFn, networkScanFn, frameworkScanFn
+	t.Cleanup(func() {
+		rbacScanFn = origRBAC
+		networkScanFn = origNetwork
+		frameworkScanFn = origFramework
+	})
+
+	type scanCall struct {
+		tool      string
+		namespace string
+	}
+	var calls []scanCall
+	rbacScanFn = func(_ *KubescapeMcpserver, _ context.Context, namespace string) ([]byte, error) {
+		calls = append(calls, scanCall{tool: "rbac", namespace: namespace})
+		return []byte(`{"ok":true}`), nil
+	}
+	networkScanFn = func(_ *KubescapeMcpserver, _ context.Context, namespace string) ([]byte, error) {
+		calls = append(calls, scanCall{tool: "network", namespace: namespace})
+		return []byte(`{"ok":true}`), nil
+	}
+	frameworkScanFn = func(_ *KubescapeMcpserver, _ context.Context, namespace, _ string) ([]byte, error) {
+		calls = append(calls, scanCall{tool: "framework", namespace: namespace})
+		return []byte(`{"ok":true}`), nil
+	}
+
+	ksServer := &KubescapeMcpserver{}
+	tests := []struct {
+		name      string
+		tool      string
+		arguments map[string]any
+		wantTool  string
+		wantNS    string
+	}{
+		{
+			name:      "rbac star is cluster-wide",
+			tool:      "run_rbac_security_scan",
+			arguments: map[string]any{"namespace": "*"},
+			wantTool:  "rbac",
+			wantNS:    "",
+		},
+		{
+			name:      "network star is cluster-wide",
+			tool:      "run_network_security_scan",
+			arguments: map[string]any{"namespace": "*"},
+			wantTool:  "network",
+			wantNS:    "",
+		},
+		{
+			name:      "framework star is cluster-wide",
+			tool:      "run_framework_security_scan",
+			arguments: map[string]any{"namespace": "*", "framework_name": "nsa"},
+			wantTool:  "framework",
+			wantNS:    "",
+		},
+		{
+			name:      "named namespace is preserved",
+			tool:      "run_rbac_security_scan",
+			arguments: map[string]any{"namespace": "kube-system"},
+			wantTool:  "rbac",
+			wantNS:    "kube-system",
+		},
+		{
+			name:      "omitted namespace is cluster-wide",
+			tool:      "run_network_security_scan",
+			arguments: map[string]any{},
+			wantTool:  "network",
+			wantNS:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls = nil
+			res, err := ksServer.CallTool(context.Background(), tt.tool, tt.arguments)
+			if err != nil {
+				t.Fatalf("unexpected error from CallTool itself: %v", err)
+			}
+			if res.IsError {
+				t.Fatalf("unexpected tool error: %s", res.Content[0].(mcp.TextContent).Text)
+			}
+			if len(calls) != 1 {
+				t.Fatalf("expected 1 scan call, got %d: %+v", len(calls), calls)
+			}
+			if calls[0].tool != tt.wantTool {
+				t.Errorf("scan tool = %q, want %q", calls[0].tool, tt.wantTool)
+			}
+			if calls[0].namespace != tt.wantNS {
+				t.Errorf("scan namespace = %q, want %q (empty means cluster-wide)", calls[0].namespace, tt.wantNS)
+			}
+		})
+	}
+}
+
 func TestGetKsClient_RetriesAfterTransientFailure(t *testing.T) {
 	sentinelErr := fmt.Errorf("transient init failure")
 	calls := 0

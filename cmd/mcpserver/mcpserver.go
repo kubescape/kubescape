@@ -40,6 +40,37 @@ var setConnectedToCluster = k8sinterface.SetConnectedToCluster
 
 var newK8sClient = k8sinterface.NewKubernetesApi
 
+// Scan implementations are package-level vars so CallTool tests can observe
+// namespace mapping without running a cluster scan.
+var rbacScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace string) ([]byte, error) {
+	return s.RunRBACScan(ctx, namespace)
+}
+
+var networkScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace string) ([]byte, error) {
+	return s.RunNetworkScan(ctx, namespace)
+}
+
+var frameworkScanFn = func(s *KubescapeMcpserver, ctx context.Context, namespace, frameworkName string) ([]byte, error) {
+	return s.RunFrameworkScan(ctx, namespace, frameworkName)
+}
+
+// mcpScanNamespace reads the optional CallTool namespace argument. "*" means
+// cluster-wide, the same as omitting the argument.
+func mcpScanNamespace(arguments map[string]any) (string, error) {
+	namespace := ""
+	if ns, ok := arguments["namespace"]; ok {
+		nsStr, ok := ns.(string)
+		if !ok {
+			return "", fmt.Errorf("namespace argument must be a string")
+		}
+		namespace = nsStr
+	}
+	if namespace == "*" {
+		namespace = ""
+	}
+	return namespace, nil
+}
+
 type scanCtxState struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -516,24 +547,13 @@ func (ksServer *KubescapeMcpserver) ReadContainerProfileResource(ctx context.Con
 func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, arguments map[string]any) (*mcp.CallToolResult, error) {
 	switch name {
 	case "run_rbac_security_scan":
-		namespace := ""
-		if ns, ok := arguments["namespace"]; ok {
-			nsStr, ok := ns.(string)
-			if !ok {
-				return mcp.NewToolResultError("namespace argument must be a string"), nil
-			}
-			namespace = nsStr
-		}
-		if namespace == "*" {
-			namespace = ""
-		}
-
-		if namespace == "*" {
-			namespace = ""
+		namespace, err := mcpScanNamespace(arguments)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		key := fmt.Sprintf("rbac_scan:%s", namespace)
 		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
-			return ksServer.RunRBACScan(scanCtx, namespace)
+			return rbacScanFn(ksServer, scanCtx, namespace)
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run RBAC scan: %v", err)), nil
@@ -571,24 +591,13 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		responseBytes := v.([]byte)
 		return mcp.NewToolResultText(string(responseBytes)), nil
 	case "run_network_security_scan":
-		namespace := ""
-		if ns, ok := arguments["namespace"]; ok {
-			nsStr, ok := ns.(string)
-			if !ok {
-				return mcp.NewToolResultError("namespace argument must be a string"), nil
-			}
-			namespace = nsStr
-		}
-		if namespace == "*" {
-			namespace = ""
-		}
-
-		if namespace == "*" {
-			namespace = ""
+		namespace, err := mcpScanNamespace(arguments)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		key := fmt.Sprintf("network_scan:%s", namespace)
 		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
-			return ksServer.RunNetworkScan(scanCtx, namespace)
+			return networkScanFn(ksServer, scanCtx, namespace)
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run Network scan: %v", err)), nil
@@ -1030,13 +1039,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			},
 		}, nil
 	case "run_framework_security_scan":
-		namespace := ""
-		if ns, ok := arguments["namespace"]; ok {
-			nsStr, ok := ns.(string)
-			if !ok {
-				return mcp.NewToolResultError("namespace argument must be a string"), nil
-			}
-			namespace = nsStr
+		namespace, err := mcpScanNamespace(arguments)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
 		frameworkName, ok := arguments["framework_name"]
 		if !ok {
@@ -1050,16 +1055,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if frameworkNameStr == "" {
 			return mcp.NewToolResultError("framework_name argument must not be empty"), nil
 		}
-		if namespace == "*" {
-			namespace = ""
-		}
-
-		if namespace == "*" {
-			namespace = ""
-		}
 		key := fmt.Sprintf("framework_scan:%s:%s", namespace, url.QueryEscape(frameworkNameStr))
 		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
-			return ksServer.RunFrameworkScan(scanCtx, namespace, frameworkNameStr)
+			return frameworkScanFn(ksServer, scanCtx, namespace, frameworkNameStr)
 		})
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run framework scan: %v", err)), nil
