@@ -124,7 +124,13 @@ func TestEncryptedReportProducerConsumerRoundTrip(t *testing.T) {
 	encryptedJSON, err := handler.ToJson()
 	require.NoError(t, err)
 	assert.Contains(t, string(encryptedJSON), "ENC[AES256_GCM,")
-	assert.NotContains(t, string(encryptedJSON), `"name":"checkout"`)
+	var encryptedReport map[string]any
+	require.NoError(t, json.Unmarshal(encryptedJSON, &encryptedReport))
+	encryptedResources := encryptedReport["resources"].([]any)
+	encryptedObject := encryptedResources[0].(map[string]any)["object"].(map[string]any)
+	encryptedName := encryptedObject["metadata"].(map[string]any)["name"].(string)
+	assert.NotEqual(t, "checkout", encryptedName)
+	assert.Contains(t, encryptedName, "ENC[AES256_GCM,")
 
 	decryptedJSON, err := reportcrypto.DecryptReport(encryptedJSON, []byte(masterKey))
 	require.NoError(t, err)
@@ -162,4 +168,98 @@ func TestEncryptedReportProducerConsumerRoundTrip(t *testing.T) {
 	repository := target["gitRepoContextMetadata"].(map[string]any)
 	assert.Equal(t, "kubescape", repository["repo"])
 	assert.Equal(t, "https://github.com/kubescape/kubescape.git", repository["remoteURL"])
+}
+
+func TestEncryptedReportRoundTripWithoutRawResources(t *testing.T) {
+	const masterKey = "01234567890123456789012345678901"
+
+	workload, err := workloadinterface.NewWorkload([]byte(`{
+		"apiVersion": "apps/v1",
+		"kind": "Deployment",
+		"metadata": {
+			"name": "checkout",
+			"namespace": "production",
+			"labels": {"team": "payments"}
+		},
+		"spec": {
+			"template": {
+				"spec": {
+					"containers": [{"name": "api", "image": "checkout:v2"}]
+				}
+			}
+		}
+	}`))
+	require.NoError(t, err)
+	originalID := workload.GetID()
+	relatedID := "apps/v1/production/Deployment/payments-worker"
+
+	result := resourcesresults.Result{
+		ResourceID: originalID,
+		PrioritizedResource: &prioritization.PrioritizedResource{
+			ResourceID: originalID,
+		},
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: "C-0010",
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Name:                "Related workload",
+						RelatedResourcesIDs: []string{relatedID},
+					},
+				},
+			},
+		},
+	}
+
+	session := &cautils.OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{
+			originalID: workload,
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			originalID: result,
+		},
+		ResourcesPrioritized: map[string]prioritization.PrioritizedResource{
+			originalID: *result.PrioritizedResource,
+		},
+		ResourceSource:   map[string]reporthandling.Source{},
+		Metadata:         &reporthandlingv2.Metadata{},
+		Report:           &reporthandlingv2.PostureReport{},
+		LabelsToCopy:     []string{"team"},
+		OmitRawResources: true,
+	}
+
+	handler := &resultshandling.ResultsHandler{ScanData: session}
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+	require.NoError(t, anonymizer.ApplyEncrypted(handler, dek, []byte(masterKey)))
+
+	encryptedJSON, err := handler.ToJson()
+	require.NoError(t, err)
+	var encryptedReport map[string]any
+	require.NoError(t, json.Unmarshal(encryptedJSON, &encryptedReport))
+	assert.NotContains(t, encryptedReport, "resources")
+	encryptedResult := encryptedReport["results"].([]any)[0].(map[string]any)
+	encryptedID := encryptedResult["resourceID"].(string)
+	assert.Contains(t, encryptedID, "ENC[AES256_GCM,")
+	controls := encryptedResult["controls"].([]any)
+	rules := controls[0].(map[string]any)["rules"].([]any)
+	encryptedRelatedID := rules[0].(map[string]any)["relatedResourcesIDs"].([]any)[0].(string)
+	assert.Contains(t, encryptedRelatedID, "ENC[AES256_GCM,")
+	assert.NotContains(t, encryptedRelatedID, "ref-")
+
+	decryptedJSON, err := reportcrypto.DecryptReport(encryptedJSON, []byte(masterKey))
+	require.NoError(t, err)
+	var report map[string]any
+	require.NoError(t, json.Unmarshal(decryptedJSON, &report))
+	assert.NotContains(t, report, "resources")
+	decryptedResult := report["results"].([]any)[0].(map[string]any)
+	assert.Equal(t, originalID, decryptedResult["resourceID"])
+	prioritized := decryptedResult["prioritizedResource"].(map[string]any)
+	assert.Equal(t, originalID, prioritized["resourceID"])
+	controls = decryptedResult["controls"].([]any)
+	rules = controls[0].(map[string]any)["rules"].([]any)
+	related := rules[0].(map[string]any)["relatedResourcesIDs"].([]any)
+	assert.Equal(t, relatedID, related[0])
+	labels := report["resourceLabels"].(map[string]any)
+	assert.Equal(t, "payments", labels[originalID].(map[string]any)["team"])
 }

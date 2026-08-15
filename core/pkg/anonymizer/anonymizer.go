@@ -22,11 +22,8 @@ func applyWithTransformer(
 		return nil
 	}
 
-	mapping := NewMapping()
-
 	if err := transformSession(
 		resultsHandler.ScanData,
-		mapping,
 		transformer,
 	); err != nil {
 		return err

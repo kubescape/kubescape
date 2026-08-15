@@ -204,6 +204,114 @@ func TestDecryptReportHandlesMissingOptionalSections(t *testing.T) {
 	assert.Equal(t, "kubescape", repository["repo"])
 }
 
+func TestDecryptReportRestoresIDsWithoutResourceObjects(t *testing.T) {
+	fixture := newEncryptedReportFixture(t, false, false)
+
+	decrypted, err := DecryptReport(fixture.data, []byte(testMasterKey))
+	require.NoError(t, err)
+
+	report := decodeTestObject(t, decrypted)
+	result := requireTestArray(t, report, "results")[0].(map[string]any)
+	assert.Equal(t, fixture.decryptedID, result["resourceID"])
+	prioritized := requireTestObject(t, result, "prioritizedResource")
+	assert.Equal(t, fixture.decryptedID, prioritized["resourceID"])
+	labels := requireTestObject(t, report, "resourceLabels")
+	assert.Contains(t, labels, fixture.decryptedID)
+	assert.NotContains(t, labels, fixture.encryptedID)
+}
+
+func TestDecryptReportRemapsObjectlessResourceAfterRawResource(t *testing.T) {
+	fixture := newEncryptedReportFixture(t, true, true)
+	report := decodeTestObject(t, fixture.data)
+	resource := requireTestArray(t, report, "resources")[0].(map[string]any)
+	delete(resource, "object")
+
+	decrypted, err := DecryptReport(mustMarshalTestJSON(t, report), []byte(testMasterKey))
+	require.NoError(t, err)
+
+	output := decodeTestObject(t, decrypted)
+	resource = requireTestArray(t, output, "resources")[0].(map[string]any)
+	assert.Equal(t, fixture.decryptedID, resource["resourceID"])
+	assert.NotContains(t, resource, "object")
+}
+
+func TestDecryptReportDoesNotClobberIDForMalformedObject(t *testing.T) {
+	fixture := newEncryptedReportFixture(t, true, false)
+	report := decodeTestObject(t, fixture.data)
+	resource := requireTestArray(t, report, "resources")[0].(map[string]any)
+	resource["resourceID"] = "apps/v1/prod/Deployment/checkout"
+	resource["object"] = map[string]any{"foo": "bar"}
+	delete(report, "results")
+	delete(report, "resourceLabels")
+
+	decrypted, err := DecryptReport(mustMarshalTestJSON(t, report), []byte(testMasterKey))
+	require.NoError(t, err)
+
+	output := decodeTestObject(t, decrypted)
+	resource = requireTestArray(t, output, "resources")[0].(map[string]any)
+	assert.Equal(t, "apps/v1/prod/Deployment/checkout", resource["resourceID"])
+	assert.NotEqual(t, "////", resource["resourceID"])
+}
+
+func TestDecryptReportRejectsIrreversibleResourceIDPseudonyms(t *testing.T) {
+	fixture := newEncryptedReportFixture(t, false, false)
+	report := decodeTestObject(t, fixture.data)
+	result := requireTestArray(t, report, "results")[0].(map[string]any)
+	result["resourceID"] = "ref-0123abcd"
+	delete(report, "resourceLabels")
+
+	_, err := DecryptReport(mustMarshalTestJSON(t, report), []byte(testMasterKey))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "irreversible resource ID pseudonym")
+	assert.Contains(t, err.Error(), "results[0].resourceID")
+}
+
+func TestDecryptReportRejectsLeftoverCiphertext(t *testing.T) {
+	fixture := newEncryptedReportFixture(t, true, true)
+	report := decodeTestObject(t, fixture.data)
+	report["futureEncryptedField"] = fixture.encryptedLabel
+
+	_, err := DecryptReport(mustMarshalTestJSON(t, report), []byte(testMasterKey))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "encrypted value remains")
+	assert.Contains(t, err.Error(), "futureEncryptedField")
+}
+
+func TestDecryptReportAllowsWrappedDEKToRemain(t *testing.T) {
+	fixture := newEncryptedReportFixture(t, true, true)
+
+	decrypted, err := DecryptReport(fixture.data, []byte(testMasterKey))
+	require.NoError(t, err)
+
+	report := decodeTestObject(t, decrypted)
+	metadata := requireTestObject(t, report, "metadata")
+	encryptionMetadata := requireTestObject(t, metadata, "encryptionMetadata")
+	assert.Contains(t, encryptionMetadata["encryptedDEK"], "ENC[AES256_GCM,")
+}
+
+func TestDecryptEmbeddedCiphertextsHandlesSlashesInsideEnvelopes(t *testing.T) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	var encryptedNamespace string
+	for i := 0; i < 256; i++ {
+		encryptedNamespace, err = EncryptString("production", dek)
+		require.NoError(t, err)
+		if strings.Contains(encryptedNamespace, "/") {
+			break
+		}
+	}
+	require.Contains(t, encryptedNamespace, "/", "test requires base64 ciphertext containing a slash")
+
+	encryptedName, err := EncryptString("checkout", dek)
+	require.NoError(t, err)
+	encryptedID := "apps/v1/" + encryptedNamespace + "/Deployment/" + encryptedName
+
+	restored, err := decryptEmbeddedCiphertexts(encryptedID, dek)
+	require.NoError(t, err)
+	assert.Equal(t, "apps/v1/production/Deployment/checkout", restored)
+}
+
 func TestDecryptReportRejectsIncorrectMasterKey(t *testing.T) {
 	fixture := newEncryptedReportFixture(t, true, true)
 
@@ -218,7 +326,14 @@ func TestDecryptReportRejectsTamperedCiphertext(t *testing.T) {
 	resources := requireTestArray(t, report, "resources")
 	object := requireTestObject(t, resources[0].(map[string]any), "object")
 	metadata := requireTestObject(t, object, "metadata")
-	metadata["name"] = fixture.encryptedName[:len(fixture.encryptedName)-2] + "AA"
+	tampered := []byte(fixture.encryptedName)
+	last := len(tampered) - 1
+	if tampered[last] == 'A' {
+		tampered[last] = 'B'
+	} else {
+		tampered[last] = 'A'
+	}
+	metadata["name"] = string(tampered)
 
 	_, err := DecryptReport(mustMarshalTestJSON(t, report), []byte(testMasterKey))
 	require.Error(t, err)
@@ -278,13 +393,13 @@ func TestDecryptReportValidationErrorsIncludeFieldContext(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		mutate      func(map[string]any)
+		mutate      func(*testing.T, map[string]any)
 		wantError   string
 		wantContext string
 	}{
 		{
 			name: "empty report",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				for key := range report {
 					delete(report, key)
 				}
@@ -293,35 +408,35 @@ func TestDecryptReportValidationErrorsIncludeFieldContext(t *testing.T) {
 		},
 		{
 			name: "null metadata",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				report["metadata"] = nil
 			},
 			wantError: "metadata not found",
 		},
 		{
 			name: "metadata array",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				report["metadata"] = []any{}
 			},
 			wantError: "failed to parse metadata",
 		},
 		{
 			name: "resources object",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				report["resources"] = map[string]any{}
 			},
 			wantError: "failed to parse resources",
 		},
 		{
 			name: "resource scalar",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				report["resources"] = []any{"not-an-object"}
 			},
 			wantError: "failed to parse resources",
 		},
 		{
 			name: "resource ID number",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				resources := requireTestArray(t, report, "resources")
 				resources[0].(map[string]any)["resourceID"] = 42
 			},
@@ -330,7 +445,7 @@ func TestDecryptReportValidationErrorsIncludeFieldContext(t *testing.T) {
 		},
 		{
 			name: "resource object scalar",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				resources := requireTestArray(t, report, "resources")
 				resources[0].(map[string]any)["object"] = "not-a-workload"
 			},
@@ -339,7 +454,7 @@ func TestDecryptReportValidationErrorsIncludeFieldContext(t *testing.T) {
 		},
 		{
 			name: "resource source scalar",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				resources := requireTestArray(t, report, "resources")
 				resources[0].(map[string]any)["source"] = "not-a-source"
 			},
@@ -348,14 +463,14 @@ func TestDecryptReportValidationErrorsIncludeFieldContext(t *testing.T) {
 		},
 		{
 			name: "results object",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				report["results"] = map[string]any{}
 			},
 			wantError: "failed to parse results",
 		},
 		{
 			name: "result ID number",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				results := requireTestArray(t, report, "results")
 				results[0].(map[string]any)["resourceID"] = 42
 			},
@@ -364,7 +479,7 @@ func TestDecryptReportValidationErrorsIncludeFieldContext(t *testing.T) {
 		},
 		{
 			name: "raw resource array",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				results := requireTestArray(t, report, "results")
 				results[0].(map[string]any)["rawResource"] = []any{}
 			},
@@ -373,7 +488,7 @@ func TestDecryptReportValidationErrorsIncludeFieldContext(t *testing.T) {
 		},
 		{
 			name: "prioritized resource array",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				results := requireTestArray(t, report, "results")
 				results[0].(map[string]any)["prioritizedResource"] = []any{}
 			},
@@ -382,7 +497,7 @@ func TestDecryptReportValidationErrorsIncludeFieldContext(t *testing.T) {
 		},
 		{
 			name: "controls object",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				results := requireTestArray(t, report, "results")
 				results[0].(map[string]any)["controls"] = map[string]any{}
 			},
@@ -391,7 +506,7 @@ func TestDecryptReportValidationErrorsIncludeFieldContext(t *testing.T) {
 		},
 		{
 			name: "rules scalar",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				result := requireTestArray(t, report, "results")[0].(map[string]any)
 				control := requireTestArray(t, result, "controls")[0].(map[string]any)
 				control["rules"] = "not-rules"
@@ -401,7 +516,7 @@ func TestDecryptReportValidationErrorsIncludeFieldContext(t *testing.T) {
 		},
 		{
 			name: "paths object",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				result := requireTestArray(t, report, "results")[0].(map[string]any)
 				control := requireTestArray(t, result, "controls")[0].(map[string]any)
 				rule := requireTestArray(t, control, "rules")[0].(map[string]any)
@@ -412,7 +527,7 @@ func TestDecryptReportValidationErrorsIncludeFieldContext(t *testing.T) {
 		},
 		{
 			name: "related resource IDs contain number",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				result := requireTestArray(t, report, "results")[0].(map[string]any)
 				control := requireTestArray(t, result, "controls")[0].(map[string]any)
 				rule := requireTestArray(t, control, "rules")[0].(map[string]any)
@@ -423,14 +538,14 @@ func TestDecryptReportValidationErrorsIncludeFieldContext(t *testing.T) {
 		},
 		{
 			name: "resource labels array",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				report["resourceLabels"] = []any{}
 			},
 			wantError: "failed to parse resourceLabels",
 		},
 		{
 			name: "resource label set scalar",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				labels := requireTestObject(t, report, "resourceLabels")
 				labels[fixture.encryptedID] = "not-labels"
 			},
@@ -439,7 +554,7 @@ func TestDecryptReportValidationErrorsIncludeFieldContext(t *testing.T) {
 		},
 		{
 			name: "resource label value number",
-			mutate: func(report map[string]any) {
+			mutate: func(t *testing.T, report map[string]any) {
 				labels := requireTestObject(t, report, "resourceLabels")
 				labels[fixture.encryptedID].(map[string]any)["team"] = 42
 			},
@@ -451,7 +566,7 @@ func TestDecryptReportValidationErrorsIncludeFieldContext(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			report := decodeTestObject(t, fixture.data)
-			tt.mutate(report)
+			tt.mutate(t, report)
 
 			_, err := DecryptReport(mustMarshalTestJSON(t, report), []byte(testMasterKey))
 			require.Error(t, err)

@@ -20,6 +20,10 @@ func (w failingWriter) Write(_ []byte) (int, error) {
 	return 0, w.err
 }
 
+func TestDecryptCommandSilencesUsageForRuntimeErrors(t *testing.T) {
+	assert.True(t, GetDecryptCommand().SilenceUsage)
+}
+
 func TestDecryptCommand(t *testing.T) {
 	tests := []struct {
 		name string

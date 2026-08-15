@@ -23,8 +23,9 @@ var decryptCmdExamples = `
 
 func GetDecryptCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "decrypt <report.json>",
-		Short: "Decrypt a report produced by kubescape scan --encrypt",
+		Use:          "decrypt <report.json>",
+		Short:        "Decrypt a report produced by kubescape scan --encrypt",
+		SilenceUsage: true,
 		Long: `Decrypt all encrypted report fields using KUBESCAPE_MASTER_KEY.
 
 The command restores metadata, resources, result raw resources, resource
