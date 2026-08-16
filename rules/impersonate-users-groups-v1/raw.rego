@@ -17,7 +17,8 @@ deny contains msga if {
 	rule := role.rules[p]
 
 	# a rule restricted to named identities cannot be used to impersonate an arbitrary identity
-	not rule.resourceNames
+	# (an omitted or explicitly empty resourceNames list is unrestricted)
+	count(object.get(rule, "resourceNames", [])) == 0
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
@@ -63,7 +64,8 @@ deny contains msga if {
 	rule := role.rules[p]
 
 	# a rule restricted to named identities cannot be used to impersonate an arbitrary identity
-	not rule.resourceNames
+	# (an omitted or explicitly empty resourceNames list is unrestricted)
+	count(object.get(rule, "resourceNames", [])) == 0
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)

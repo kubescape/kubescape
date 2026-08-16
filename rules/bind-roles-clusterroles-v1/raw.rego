@@ -17,7 +17,8 @@ deny contains msga if {
 	rule := role.rules[p]
 
 	# a rule restricted to named roles/clusterroles cannot be used to bind an arbitrary role/clusterrole
-	not rule.resourceNames
+	# (an omitted or explicitly empty resourceNames list is unrestricted)
+	count(object.get(rule, "resourceNames", [])) == 0
 
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
