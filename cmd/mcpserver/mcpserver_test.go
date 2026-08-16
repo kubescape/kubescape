@@ -509,3 +509,97 @@ func TestGetK8sClient_RetriesAfterTransientLoadFailure(t *testing.T) {
 		t.Fatal("expected the connectivity latch to be cleared to true on successful retry")
 	}
 }
+
+func TestCallTool_ScanControls(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+
+	tests := []struct {
+		name          string
+		arguments     map[string]any
+		wantErrString string
+	}{
+		{
+			name:          "missing control_ids",
+			arguments:     map[string]any{},
+			wantErrString: "control_ids argument is required",
+		},
+		{
+			name:          "control_ids wrong type",
+			arguments:     map[string]any{"control_ids": 42},
+			wantErrString: "control_ids must be a comma-separated string or array",
+		},
+		{
+			name:          "control_ids empty string",
+			arguments:     map[string]any{"control_ids": "  ,  "},
+			wantErrString: "control_ids must contain at least one control ID",
+		},
+		{
+			name:          "control_ids empty array",
+			arguments:     map[string]any{"control_ids": []interface{}{}},
+			wantErrString: "control_ids must contain at least one control ID",
+		},
+		{
+			name:          "namespace not a string",
+			arguments:     map[string]any{"control_ids": "C-0012", "namespace": 99},
+			wantErrString: "namespace argument must be a string",
+		},
+		{
+			name:          "control_ids mixed array rejects non-string element",
+			arguments:     map[string]any{"control_ids": []interface{}{"C-0012", 42}},
+			wantErrString: "control_ids array elements must be strings",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ksServer.CallTool(t.Context(), "scan_controls", tt.arguments)
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatalf("expected tool error for %q, got success", tt.name)
+			}
+			text := result.Content[0].(mcp.TextContent).Text
+			if tt.wantErrString != "" && !containsSubstring(text, tt.wantErrString) {
+				t.Errorf("error %q does not contain %q", text, tt.wantErrString)
+			}
+		})
+	}
+}
+
+func TestCallTool_ScanControls_ArrayInput(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+	result, err := ksServer.CallTool(t.Context(), "scan_controls", map[string]any{
+		"control_ids": []interface{}{"C-0012", "C-0017"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if result.IsError {
+		text := result.Content[0].(mcp.TextContent).Text
+		if containsSubstring(text, "control_ids") {
+			t.Errorf("array input should pass argument validation but got control_ids error: %s", text)
+		}
+	}
+}
+
+func TestCallTool_ListingTools_UnknownToolFallthrough(t *testing.T) {
+
+	ksServer := &KubescapeMcpserver{}
+	_, err := ksServer.CallTool(t.Context(), "not_a_real_tool", map[string]any{})
+	if err == nil {
+		t.Fatal("expected Go error for unknown tool name")
+	}
+}
+
+func containsSubstring(s, sub string) bool {
+	if len(sub) == 0 {
+		return true
+	}
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

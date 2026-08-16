@@ -1,0 +1,29 @@
+{
+  "name": "issue-token-secrets-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Credential Access::Issue service account token secrets",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        "rbac.authorization.k8s.io"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "RoleBinding",
+        "ClusterRoleBinding",
+        "Role",
+        "ClusterRole"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can create, update or patch secrets in privileged namespaces such as kube-system, letting them mint a service account token secret for an admin-equivalent service account and escalate to cluster admin",
+  "remediation": "Restrict create/update/patch on secrets in kube-system and other privileged namespaces to a small, trusted set of subjects. Where a subject only needs to manage specific secrets, scope the rule with resourceNames, and prefer namespace-scoped Roles in unprivileged namespaces over ClusterRoles.",
+  "ruleQuery": "armo_builtins"
+}

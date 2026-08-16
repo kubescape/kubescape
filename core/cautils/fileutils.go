@@ -29,6 +29,10 @@ import (
 var (
 	YAML_PREFIX = []string{"yaml", "yml"}
 	JSON_PREFIX = []string{"json"}
+
+	// ErrNoManifestFiles lets resource orchestrators defer this specific error
+	// while another supported loader examines the same input.
+	ErrNoManifestFiles = errors.New("no YAML or JSON manifest files found")
 )
 
 type FileFormat string
@@ -265,7 +269,7 @@ func excludeHelmChartMetadataFiles(files []string) []string {
 // IsUnderAnyDir reports whether path is inside one of dirs after normalizing
 // relative paths and resolving symlinks where the path already exists.
 func IsUnderAnyDir(path string, dirs []string) bool {
-	return newDirSet(normalizePaths(dirs)).contains(normalizePath(path))
+	return newDirSet(pathAliasesForPaths(dirs)).containsAnyAlias(path)
 }
 
 // dirSet decides containment by walking a path's ancestors, so a lookup costs
@@ -337,15 +341,6 @@ func pathAliasesForPaths(paths []string) []string {
 		aliases = append(aliases, pathAliases(path)...)
 	}
 	return aliases
-}
-
-// IsAnyPathAliasUnderAnyDir reports whether any alias of path (its absolute
-// lexical form and, when different, its symlink-resolved physical form) is
-// inside one of dirs. dirs must already be normalized. Keeping the lexical
-// alias matters for a symlinked file whose link target lives elsewhere: it is
-// still owned by the directory that lexically contains it.
-func IsAnyPathAliasUnderAnyDir(path string, dirs []string) bool {
-	return newDirSet(dirs).containsAnyAlias(path)
 }
 
 // pathAliases returns both the absolute lexical path and, when different, its
@@ -626,7 +621,7 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, rendere
 		logger.L().Ctx(ctx).Warning("Continuing with manifest files found before a discovery error", helpers.Error(discoveryErr))
 	}
 	if len(files) == 0 {
-		return nil, nil, fmt.Errorf("no YAML or JSON manifest files found for input %q", input)
+		return nil, nil, fmt.Errorf("%w for input %q", ErrNoManifestFiles, input)
 	}
 
 	// skip the plain-YAML glob for the templates of charts the helm render already covered; a chart

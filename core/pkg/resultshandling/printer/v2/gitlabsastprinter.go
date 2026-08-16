@@ -14,12 +14,14 @@ import (
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
 const (
@@ -85,6 +87,7 @@ type gitLabVulnerability struct {
 	Scanner     gitLabScannerRef   `json:"scanner"`
 	Location    gitLabLocation     `json:"location"`
 	Identifiers []gitLabIdentifier `json:"identifiers"`
+	Solution    string             `json:"solution,omitempty"`
 }
 
 type gitLabScannerRef struct {
@@ -128,7 +131,8 @@ func (gp *GitLabSASTPrinter) Score(score float32) {
 }
 
 // SetWriter opens outputFile for writing, defaulting the name and forcing a .json extension
-func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = gitLabSASTOutputFile
@@ -137,7 +141,13 @@ func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) {
 			outputFile = outputFile + printer.JsonOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		gp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	gp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 // PrintNextSteps is a no-op: machine-readable output carries no human-facing guidance
@@ -333,7 +343,8 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 			}
 
 			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
-			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, resource.resourceID, resource.relPath, location))
+			res := opaSessionObj.AllResources[resource.resourceID]
+			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, &ac, res, resource.resourceID, resource.relPath, location))
 		}
 	}
 
@@ -378,10 +389,19 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 }
 
 // toGitLabVulnerability maps a failed control on a resource to a GitLab SAST vulnerability.
-func toGitLabVulnerability(ctl reportsummary.IControlSummary, resourceID, filePath string, location locationresolver.Location) gitLabVulnerability {
+// ac and resource are used to populate the Solution field with fix paths and current field values,
+// matching what the pretty-printer and HTML printer already emit.
+func toGitLabVulnerability(ctl reportsummary.IControlSummary, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, resourceID, filePath string, location locationresolver.Location) gitLabVulnerability {
 	controlID := ctl.GetID()
 	// Kubescape severities (Critical/High/Medium/Low/Unknown) are all valid GitLab severities
 	severity := apis.ControlSeverityToString(ctl.GetScoreFactor())
+
+	var solution string
+	if resource != nil {
+		if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
+			solution = strings.Join(paths, "\n")
+		}
+	}
 
 	return gitLabVulnerability{
 		ID:       gitLabVulnerabilityID(controlID, resourceID, filePath),
@@ -404,6 +424,7 @@ func toGitLabVulnerability(ctl reportsummary.IControlSummary, resourceID, filePa
 				URL:   cautils.GetControlLink(controlID),
 			},
 		},
+		Solution: solution,
 	}
 }
 
@@ -435,9 +456,10 @@ func kubescapeVersion() string {
 	return versioncheck.BuildNumber
 }
 
-// CloseWriter closes the output file, unless it is stdout, satisfying the optional printerCloser interface
-func (gp *GitLabSASTPrinter) CloseWriter() {
+// CloseWriter closes the GitLab SAST output writer, returning any error from flushing or closing.
+func (gp *GitLabSASTPrinter) CloseWriter() error {
 	if gp.writer != nil && gp.writer != os.Stdout {
-		gp.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
+		return gp.writer.Close()
 	}
+	return nil
 }

@@ -850,6 +850,105 @@ func TestGetResourcesFromPathRejectsDirectoryWithoutKubernetesResources(t *testi
 	assert.Contains(t, err.Error(), "no scannable Kubernetes resources")
 }
 
+const terraformPodFixture = `
+resource "kubernetes_pod_v1" "example" {
+  metadata {
+    name      = "terraform-pod"
+    namespace = "default"
+  }
+  spec {
+    container {
+      name  = "pause"
+      image = "registry.k8s.io/pause:3.9"
+    }
+  }
+}
+`
+
+func writeTerraformFixture(t *testing.T, dir, contents string) string {
+	t.Helper()
+	path := filepath.Join(dir, "main.tf")
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o600))
+	return path
+}
+
+func TestGetResourcesFromPathLoadsTerraformOnlyDirectory(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTerraformFixture(t, dir, terraformPodFixture)
+
+	sources, workloads, skips, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
+
+	require.NoError(t, err)
+	assert.Empty(t, skips)
+	require.Len(t, workloads, 1)
+	assert.Equal(t, "Pod", workloads[0].GetKind())
+	assert.Equal(t, "terraform-pod", workloads[0].GetName())
+	source := sources[workloads[0].GetID()]
+	assert.Equal(t, "Terraform", source.FileType)
+	assert.Equal(t, filepath.Base(path), source.RelativePath)
+}
+
+func TestGetResourcesFromPathLoadsExplicitTerraformFile(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTerraformFixture(t, dir, terraformPodFixture)
+
+	_, workloads, _, err := getResourcesFromPath(context.Background(), path, cautils.HelmValueOptions{})
+
+	require.NoError(t, err)
+	require.Len(t, workloads, 1)
+	assert.Equal(t, "terraform-pod", workloads[0].GetName())
+}
+
+func TestGetResourcesFromPathReturnsTerraformErrorForMalformedTerraformOnlyDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeTerraformFixture(t, dir, `resource "kubernetes_pod_v1" "broken" {`)
+
+	sources, workloads, skips, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
+
+	require.Error(t, err)
+	assert.Nil(t, sources)
+	assert.Nil(t, workloads)
+	assert.Empty(t, skips)
+	assert.Contains(t, err.Error(), "failed to render Terraform resources")
+	assert.NotContains(t, err.Error(), "no YAML or JSON manifest files")
+}
+
+func TestGetResourcesFromPathKeepsNoManifestErrorForUnsupportedTerraformOnlyDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeTerraformFixture(t, dir, `resource "null_resource" "example" {}`)
+
+	sources, workloads, skips, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, cautils.ErrNoManifestFiles)
+	assert.Nil(t, sources)
+	assert.Nil(t, workloads)
+	assert.Empty(t, skips)
+}
+
+func TestGetResourcesFromPathLoadsMixedYamlAndTerraformDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeTerraformFixture(t, dir, terraformPodFixture)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(`
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yaml-config
+`), 0o600))
+
+	_, workloads, _, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
+
+	require.NoError(t, err)
+	resources := map[string]bool{}
+	for _, workload := range workloads {
+		resources[workload.GetKind()+"/"+workload.GetName()] = true
+	}
+	assert.Equal(t, map[string]bool{
+		"ConfigMap/yaml-config": true,
+		"Pod/terraform-pod":     true,
+	}, resources)
+}
+
 func TestGetResourcesFromPathPropagatesKustomizeFailure(t *testing.T) {
 	dir := t.TempDir()
 	kustomization := `apiVersion: kustomize.config.k8s.io/v1beta1
@@ -956,7 +1055,8 @@ metadata:
 // files, survive. The containment check is directory-aware, so a root located
 // just above the scan tree must not swallow unrelated inputs.
 func TestExcludeFilesUnderDirectories(t *testing.T) {
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	appDir := filepath.Join(root, "app")
 	nestedDir := filepath.Join(appDir, "config", "base")
 	require.NoError(t, os.MkdirAll(nestedDir, 0o750))

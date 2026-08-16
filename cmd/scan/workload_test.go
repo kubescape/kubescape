@@ -25,8 +25,8 @@ func (noOpWorkloadPrinter) PrintNextSteps() {}
 func (noOpWorkloadPrinter) ActionPrint(context.Context, *cautils.OPASessionObj, []cautils.ImageScanData) error {
 	return nil
 }
-func (noOpWorkloadPrinter) SetWriter(context.Context, string) {}
-func (noOpWorkloadPrinter) Score(float32)                     {}
+func (noOpWorkloadPrinter) SetWriter(context.Context, string) error { return nil }
+func (noOpWorkloadPrinter) Score(float32)                           {}
 
 type workloadScanCaptureKubescape struct {
 	mocks.MockIKubescape
@@ -549,8 +549,8 @@ func (p *fakePrinter) PrintNextSteps() {}
 func (p *fakePrinter) ActionPrint(ctx context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
 	return nil
 }
-func (p *fakePrinter) SetWriter(ctx context.Context, _ string) {}
-func (p *fakePrinter) Score(_ float32)                         {}
+func (p *fakePrinter) SetWriter(ctx context.Context, _ string) error { return nil }
+func (p *fakePrinter) Score(_ float32)                               {}
 
 type recordingKubescape struct {
 	mocks.MockIKubescape

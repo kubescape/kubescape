@@ -5,10 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/anchore/grype/grype/match"
+	grypepkg "github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
@@ -30,14 +35,44 @@ func (dr *DummyReporter) SetTenantConfig(_ cautils.ITenantConfig) {}
 func (dr *DummyReporter) DisplayMessage()                         {}
 func (dr *DummyReporter) GetURL() string                          { return "" }
 
+type capturingReporter struct {
+	cves   []reportsummary.CVESummary
+	images []string
+}
+
+func (r *capturingReporter) Submit(_ context.Context, data *cautils.OPASessionObj) error {
+	r.cves = append([]reportsummary.CVESummary(nil), data.Report.SummaryDetails.Vulnerabilities.CVESummary...)
+	r.images = append([]string(nil), data.Report.SummaryDetails.Vulnerabilities.Images...)
+	return nil
+}
+func (r *capturingReporter) SetTenantConfig(_ cautils.ITenantConfig) {}
+func (r *capturingReporter) DisplayMessage()                         {}
+func (r *capturingReporter) GetURL() string                          { return "" }
+
+type combinedScanVulnerabilityProvider struct{}
+
+func (combinedScanVulnerabilityProvider) PackageSearchNames(grypepkg.Package) []string {
+	return nil
+}
+func (combinedScanVulnerabilityProvider) FindVulnerabilities(...vulnerability.Criteria) ([]vulnerability.Vulnerability, error) {
+	return nil, nil
+}
+func (combinedScanVulnerabilityProvider) VulnerabilityMetadata(ref vulnerability.Reference) (*vulnerability.Metadata, error) {
+	if ref.ID != "CVE-COMBINED" {
+		return nil, errors.New("metadata not found")
+	}
+	return &vulnerability.Metadata{ID: ref.ID, Severity: "High"}, nil
+}
+func (combinedScanVulnerabilityProvider) Close() error { return nil }
+
 type SpyPrinter struct {
 	ActionPrintCalls int
 	ScoreCalls       int
 	ActionPrintErr   error
 }
 
-func (sp *SpyPrinter) SetWriter(_ context.Context, _ string) {}
-func (sp *SpyPrinter) PrintNextSteps()                       {}
+func (sp *SpyPrinter) SetWriter(_ context.Context, _ string) error { return nil }
+func (sp *SpyPrinter) PrintNextSteps()                             {}
 func (sp *SpyPrinter) ActionPrint(_ context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
 	sp.ActionPrintCalls += 1
 	return sp.ActionPrintErr
@@ -128,6 +163,63 @@ func TestResultsHandlerHandleResultsPrintsBeforeReturningScanError(t *testing.T)
 	require.ErrorIs(t, err, scanErr)
 	assert.Equal(t, 1, uiPrinter.ActionPrintCalls)
 	assert.Equal(t, 1, outputPrinter.ActionPrintCalls)
+}
+
+func TestCombinedJSONAndYAMLOutputDoesNotMutateSubmittedSession(t *testing.T) {
+	imageMatch := match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-COMBINED", Namespace: "nvd"},
+			Metadata:  &vulnerability.Metadata{ID: "CVE-COMBINED", Severity: "High"},
+		},
+		Package: grypepkg.Package{
+			ID:      grypepkg.ID("pkg-combined"),
+			Name:    "pkg-combined",
+			Version: "1.0.0",
+		},
+	}
+	imageData := []cautils.ImageScanData{{
+		Image:                 "combined:latest",
+		Matches:               match.NewMatches(imageMatch),
+		VulnerabilityProvider: combinedScanVulnerabilityProvider{},
+	}}
+
+	tests := []struct {
+		name      string
+		extension string
+		printer   func() printer.IPrinter
+	}{
+		{name: "json", extension: ".json", printer: func() printer.IPrinter { return printerv2.NewJsonPrinter("") }},
+		{name: "yaml", extension: ".yaml", printer: func() printer.IPrinter { return printerv2.NewYamlPrinter() }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanData := &cautils.OPASessionObj{
+				Report:   &reporthandlingv2.PostureReport{},
+				Metadata: &reporthandlingv2.Metadata{},
+			}
+			reporter := &capturingReporter{}
+			outputPrinter := tt.printer()
+			outputPath := filepath.Join(t.TempDir(), "combined"+tt.extension)
+			outputPrinter.SetWriter(context.Background(), outputPath)
+
+			handler := NewResultsHandler(reporter, []printer.IPrinter{outputPrinter}, &SpyPrinter{})
+			handler.SetData(scanData)
+			handler.ImageScanData = imageData
+			scanInfo := &cautils.ScanInfo{}
+			scanInfo.Submit.SetBool(true)
+
+			require.NoError(t, handler.HandleResults(context.Background(), scanInfo))
+
+			output, err := os.ReadFile(outputPath)
+			require.NoError(t, err)
+			assert.Contains(t, string(output), "CVE-COMBINED", "combined local output lost image findings")
+			assert.Empty(t, reporter.cves, "local output changed the submitted posture summary")
+			assert.Empty(t, reporter.images, "local output changed the submitted posture summary")
+			assert.Empty(t, handler.GetData().Report.SummaryDetails.Vulnerabilities.CVESummary)
+			assert.Empty(t, handler.GetData().Report.SummaryDetails.Vulnerabilities.Images)
+		})
+	}
 }
 
 func TestValidatePrinter(t *testing.T) {
@@ -679,4 +771,98 @@ func TestValidatePrinter_ImageFormatsInvariant(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
+}
+
+// TestClosePrinter_AllV2PrintersImplementErrorCloser tests that all v2 report printers implement
+// the CloseWriter() error interface and properly surface errors on already-closed writers.
+func TestClosePrinter_AllV2PrintersImplementErrorCloser(t *testing.T) {
+	printers := []struct {
+		name    string
+		printer printer.IPrinter
+	}{
+		{"json", printerv2.NewJsonPrinter("")},
+		{"sarif", printerv2.NewSARIFPrinter()},
+		{"html", printerv2.NewHtmlPrinter()},
+		{"yaml", printerv2.NewYamlPrinter()},
+		{"junit", printerv2.NewJunitPrinter(false)},
+		{"markdown", printerv2.NewMarkdownPrinter()},
+		{"pdf", printerv2.NewPdfPrinter()},
+		{"prometheus", printerv2.NewPrometheusPrinter(false)},
+		{"spdx", printerv2.NewSPDXPrinter()},
+		{"cyclonedx", printerv2.NewCycloneDXPrinter()},
+		{"gitlabsast", printerv2.NewGitLabSASTPrinter()},
+		{"csv", printerv2.NewCsvPrinter()},
+		{"pretty", printerv2.NewPrettyPrinter(false, "1.0", false, cautils.ControlViewType, cautils.ScanTypeCluster, nil, "")},
+		{"silent", &printerv2.SilentPrinter{}},
+	}
+
+	type errorCloser interface {
+		CloseWriter() error
+	}
+
+	for _, tt := range printers {
+		t.Run(tt.name, func(t *testing.T) {
+			closer, ok := tt.printer.(errorCloser)
+			require.True(t, ok, "printer %T must implement CloseWriter() error", tt.printer)
+
+			// When writer is nil/stdout, CloseWriter() must succeed
+			err := closer.CloseWriter()
+			assert.NoError(t, err)
+
+			if tt.name == "silent" {
+				return
+			}
+
+			// When writer points to an explicit file, SetWriter and CloseWriter must work cleanly
+			tmp, tmpErr := os.CreateTemp(t.TempDir(), "close_test*")
+			require.NoError(t, tmpErr)
+			targetName := tmp.Name()
+			_ = tmp.Close()
+
+			setErr := tt.printer.SetWriter(context.Background(), targetName)
+			require.NoError(t, setErr)
+
+			// 1. Initial close on active writer must succeed
+			closeErr := closePrinter(tt.printer)
+			assert.NoError(t, closeErr)
+
+			// 2. Subsequent close on already-closed writer must surface the underlying error
+			secondCloseErr := closePrinter(tt.printer)
+			assert.Error(t, secondCloseErr, "closePrinter must surface error on already-closed writer for %s", tt.name)
+		})
+	}
+}
+
+// mockFailingClosePrinter is a mock IPrinter implementation whose CloseWriter method returns a simulated error.
+type mockFailingClosePrinter struct {
+	printer.IPrinter
+}
+
+// CloseWriter returns a simulated error during writer closure.
+func (m *mockFailingClosePrinter) CloseWriter() error {
+	return errors.New("simulated close flush failure")
+}
+
+// ActionPrint is a no-op implementation of IPrinter.ActionPrint for testing.
+func (m *mockFailingClosePrinter) ActionPrint(_ context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
+	return nil
+}
+
+// Score is a no-op implementation of IPrinter.Score for testing.
+func (m *mockFailingClosePrinter) Score(_ float32) {}
+
+// PrintNextSteps is a no-op implementation of IPrinter.PrintNextSteps for testing.
+func (m *mockFailingClosePrinter) PrintNextSteps() {}
+
+// TestHandleResults_PropagatesPrinterCloseErrors verifies that ResultsHandler.HandleResults
+// joins and propagates close errors returned by UI and output printers.
+func TestHandleResults_PropagatesPrinterCloseErrors(t *testing.T) {
+	rh := &ResultsHandler{
+		UiPrinter:   &mockFailingClosePrinter{},
+		PrinterObjs: []printer.IPrinter{&mockFailingClosePrinter{}},
+	}
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ui printer close: simulated close flush failure")
+	assert.Contains(t, err.Error(), "output printer *resultshandling.mockFailingClosePrinter close: simulated close flush failure")
 }

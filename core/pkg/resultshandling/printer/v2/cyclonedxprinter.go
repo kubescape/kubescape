@@ -28,7 +28,8 @@ func NewCycloneDXPrinter() *CycloneDXPrinter {
 	return &CycloneDXPrinter{}
 }
 
-func (cp *CycloneDXPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (cp *CycloneDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = cyclonedxOutputFile
@@ -37,7 +38,13 @@ func (cp *CycloneDXPrinter) SetWriter(ctx context.Context, outputFile string) {
 			outputFile = outputFile + printer.CycloneDXOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		cp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	cp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 // Score is a no-op: HandleResults only calls Score when opaSessionObj != nil
@@ -78,6 +85,7 @@ func (cp *CycloneDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *caut
 
 func (cp *CycloneDXPrinter) PrintNextSteps() {}
 
+// CloseWriter closes the CycloneDX output writer, returning any error from flushing or closing.
 func (cp *CycloneDXPrinter) CloseWriter() error {
 	if cp.writer != nil && cp.writer != os.Stdout {
 		return cp.writer.Close()

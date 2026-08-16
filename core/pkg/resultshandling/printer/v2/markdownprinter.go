@@ -32,7 +32,8 @@ func NewMarkdownPrinter() *MarkdownPrinter {
 	return &MarkdownPrinter{}
 }
 
-func (mp *MarkdownPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (mp *MarkdownPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	outputFile = strings.TrimSpace(outputFile)
 	if outputFile == "" {
 		outputFile = markdownOutputFile + printer.MarkdownOutputExt
@@ -41,7 +42,13 @@ func (mp *MarkdownPrinter) SetWriter(ctx context.Context, outputFile string) {
 	} else if filepath.Ext(outputFile) != printer.MarkdownOutputExt {
 		outputFile = outputFile + printer.MarkdownOutputExt
 	}
+	if explicitOutput {
+		var err error
+		mp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	mp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, markdownTempPattern)
+	return nil
 }
 
 func (mp *MarkdownPrinter) Score(score float32) {
@@ -78,10 +85,12 @@ func (mp *MarkdownPrinter) ActionPrint(ctx context.Context, opaSessionObj *cauti
 
 func (mp *MarkdownPrinter) PrintNextSteps() {}
 
-func (mp *MarkdownPrinter) CloseWriter() {
+// CloseWriter closes the Markdown output writer, returning any error from flushing or closing.
+func (mp *MarkdownPrinter) CloseWriter() error {
 	if mp.writer != nil && mp.writer != os.Stdout {
-		_ = mp.writer.Close()
+		return mp.writer.Close()
 	}
+	return nil
 }
 
 // mdErrWriter wraps an io.Writer and records the first write error so callers

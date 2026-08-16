@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type failingCloser struct {
+	err error
+}
+
+func (c failingCloser) Close() error {
+	return c.err
+}
 
 // writeReport writes raw scan-report JSON to a temp file and returns its path.
 func writeReport(t *testing.T, json string) string {
@@ -102,4 +111,53 @@ func TestDiff_PrettyFormatWritesOutput(t *testing.T) {
 	data, err := os.ReadFile(out)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "New failures")
+}
+
+func TestDiff_ExplicitOutputSetupFailureIsReturned(t *testing.T) {
+	base := writeReport(t, `{"results":[],"summaryDetails":{"controls":{}}}`)
+	head := writeReport(t, `{"results":[],"summaryDetails":{"controls":{}}}`)
+
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	require.NoError(t, os.WriteFile(blocker, []byte("not a directory"), 0o600))
+
+	ks := NewKubescape(context.Background())
+	_, err := ks.Diff(&metav1.DiffInfo{
+		BaseFile: base,
+		HeadFile: head,
+		Format:   "pretty-printer",
+		Output:   filepath.Join(blocker, "diff.out"),
+	})
+	require.ErrorContains(t, err, "opening diff output")
+}
+
+func TestDiff_PrettyWriteFailureIsReturned(t *testing.T) {
+	if _, err := os.Stat("/dev/full"); err != nil {
+		t.Skip("requires /dev/full")
+	}
+
+	base := writeReport(t, `{"results":[],"summaryDetails":{"controls":{}}}`)
+	head := writeReport(t, `{
+		"results":[{"resourceID":"res1","controls":[
+			{"controlID":"C-HIGH","name":"High","status":{"status":"failed"}}
+		]}],
+		"summaryDetails":{"controls":{"C-HIGH":{"scoreFactor":7.0}}}
+	}`)
+
+	ks := NewKubescape(context.Background())
+	_, err := ks.Diff(&metav1.DiffInfo{
+		BaseFile: base,
+		HeadFile: head,
+		Format:   "pretty-printer",
+		Output:   "/dev/full",
+	})
+	require.ErrorContains(t, err, "writing pretty diff")
+}
+
+func TestCloseDiffOutput_JoinsCloseError(t *testing.T) {
+	writeErr := errors.New("write failed")
+	closeErr := errors.New("close failed")
+
+	err := closeDiffOutput(failingCloser{err: closeErr}, writeErr)
+	require.ErrorIs(t, err, writeErr)
+	require.ErrorIs(t, err, closeErr)
 }

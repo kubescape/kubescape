@@ -143,6 +143,20 @@ func TestGetWriter_CreateFailsFallsBackToStdout(t *testing.T) {
 	assert.Same(t, os.Stdout, f)
 }
 
+func TestGetWriterNoFallback_ReturnsExplicitSetupError(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-directory")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
+	target := filepath.Join(blocker, "report.json")
+
+	f, err := GetWriterNoFallback(target)
+
+	require.Error(t, err)
+	assert.Nil(t, f)
+	assert.ErrorContains(t, err, "create output directory")
+	assert.NoFileExists(t, target)
+}
+
 func TestGetWriterNoStdoutFallback_ValidFileName(t *testing.T) {
 	ctx := context.Background()
 	target := filepath.Join(t.TempDir(), "nested", "report.pdf")

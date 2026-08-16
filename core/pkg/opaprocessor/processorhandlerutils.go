@@ -42,6 +42,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	}
 
 	processor := exceptions.NewProcessor()
+	loadedExceptions := append([]armotypes.PostureExceptionPolicy(nil), opap.Exceptions...)
 
 	// filter expired exceptions before applying them
 	opap.Exceptions = filterExpiredExceptions(opap.Exceptions)
@@ -76,6 +77,10 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	// map control to error
 	controlToInfoMap := mapControlToInfo(opap.ResourceToControlsMap, opap.InfoMap, opap.Report.SummaryDetails.Controls)
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
+
+	if opap.AuditExceptions {
+		opap.ExceptionAudit = buildExceptionAudit(loadedExceptions, opap.Exceptions, opap.ResourcesResult, opap.AllResources, opap.AllPolicies, processor)
+	}
 }
 
 // applyExceptionsToManualControls marks manual controls as passed+w/exceptions when
@@ -364,6 +369,7 @@ func removeConfigMapData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 	overrideSensitiveData(workload)
+	overrideMapField(workload, "binaryData")
 }
 
 func overrideSensitiveData(workload workloadinterface.IWorkload) {

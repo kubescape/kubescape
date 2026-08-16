@@ -15,23 +15,24 @@ import (
 var INDENT = "   "
 
 const (
-	PrettyFormat      string = "pretty-printer"
-	JsonFormat        string = "json"
-	JunitResultFormat string = "junit"
-	PrometheusFormat  string = "prometheus"
-	PdfFormat         string = "pdf"
-	HtmlFormat        string = "html"
-	SARIFFormat       string = "sarif"
-	GitLabSASTFormat  string = "gitlab-sast"
-	YamlFormat        string = "yaml"
-	CsvFormat         string = "csv"
-	MarkdownFormat    string = "markdown"
-	CycloneDXFormat   string = "cyclonedx-json"
-	SPDXFormat        string = "spdx-json"
+	PrettyFormat       string = "pretty-printer"
+	JsonFormat         string = "json"
+	JunitResultFormat  string = "junit"
+	PrometheusFormat   string = "prometheus"
+	PdfFormat          string = "pdf"
+	HtmlFormat         string = "html"
+	SARIFFormat        string = "sarif"
+	GitLabSASTFormat   string = "gitlab-sast"
+	YamlFormat         string = "yaml"
+	CsvFormat          string = "csv"
+	MarkdownFormat     string = "markdown"
+	CycloneDXFormat    string = "cyclonedx-json"
+	SPDXFormat         string = "spdx-json"
+	PolicyReportFormat string = "policyreport"
 )
 
 // AllFormats lists every output format kubescape can emit.
-var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat}
+var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat, PolicyReportFormat}
 
 // ImageFormats lists formats whose printers support image-scan data. CSV is
 // deliberately excluded: CsvPrinter.ActionPrint requires opaSessionObj and
@@ -43,18 +44,19 @@ var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, Prometheu
 var ImageFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CycloneDXFormat, SPDXFormat}
 
 const (
-	JsonOutputExt       = ".json"
-	JunitOutputExt      = ".xml"
-	SARIFOutputExt      = ".sarif"
-	HtmlOutputExt       = ".html"
-	PdfOutputExt        = ".pdf"
-	PrometheusOutputExt = ".txt"
-	PrettyOutputExt     = ".txt"
-	YamlOutputExt       = ".yaml"
-	CsvOutputExt        = ".csv"
-	MarkdownOutputExt   = ".md"
-	CycloneDXOutputExt  = ".cdx.json"
-	SPDXOutputExt       = ".spdx.json"
+	JsonOutputExt         = ".json"
+	JunitOutputExt        = ".xml"
+	SARIFOutputExt        = ".sarif"
+	HtmlOutputExt         = ".html"
+	PdfOutputExt          = ".pdf"
+	PrometheusOutputExt   = ".txt"
+	PrettyOutputExt       = ".txt"
+	YamlOutputExt         = ".yaml"
+	CsvOutputExt          = ".csv"
+	MarkdownOutputExt     = ".md"
+	CycloneDXOutputExt    = ".cdx.json"
+	SPDXOutputExt         = ".spdx.json"
+	PolicyReportOutputExt = ".yaml"
 )
 
 // FormatOutputExt maps a format to the extension its printer enforces in
@@ -62,25 +64,26 @@ const (
 // than re-deriving it, so a format can never resolve to a path its printer
 // does not write. Every entry in AllFormats is covered.
 var FormatOutputExt = map[string]string{
-	PrettyFormat:      PrettyOutputExt,
-	JsonFormat:        JsonOutputExt,
-	JunitResultFormat: JunitOutputExt,
-	PrometheusFormat:  PrometheusOutputExt,
-	PdfFormat:         PdfOutputExt,
-	HtmlFormat:        HtmlOutputExt,
-	SARIFFormat:       SARIFOutputExt,
-	GitLabSASTFormat:  JsonOutputExt,
-	YamlFormat:        YamlOutputExt,
-	CsvFormat:         CsvOutputExt,
-	MarkdownFormat:    MarkdownOutputExt,
-	CycloneDXFormat:   CycloneDXOutputExt,
-	SPDXFormat:        SPDXOutputExt,
+	PrettyFormat:       PrettyOutputExt,
+	JsonFormat:         JsonOutputExt,
+	JunitResultFormat:  JunitOutputExt,
+	PrometheusFormat:   PrometheusOutputExt,
+	PdfFormat:          PdfOutputExt,
+	HtmlFormat:         HtmlOutputExt,
+	SARIFFormat:        SARIFOutputExt,
+	GitLabSASTFormat:   JsonOutputExt,
+	YamlFormat:         YamlOutputExt,
+	CsvFormat:          CsvOutputExt,
+	MarkdownFormat:     MarkdownOutputExt,
+	CycloneDXFormat:    CycloneDXOutputExt,
+	SPDXFormat:         SPDXOutputExt,
+	PolicyReportFormat: PolicyReportOutputExt,
 }
 
 type IPrinter interface {
 	PrintNextSteps()
 	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error
-	SetWriter(ctx context.Context, outputFile string)
+	SetWriter(ctx context.Context, outputFile string) error
 	Score(score float32)
 }
 
@@ -105,6 +108,20 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 	}
 	return os.Stdout
 
+}
+
+// GetWriterNoFallback opens an explicitly requested output path. Unlike the
+// legacy helpers, it never redirects an error to stdout or a temporary file:
+// callers can return the setup failure before a scan starts.
+func GetWriterNoFallback(outputFile string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(outputFile), outputDirPerm); err != nil {
+		return nil, fmt.Errorf("create output directory for %q: %w", outputFile, err)
+	}
+	f, err := os.Create(outputFile)
+	if err != nil {
+		return nil, fmt.Errorf("open output file %q: %w", outputFile, err)
+	}
+	return f, nil
 }
 
 // GetWriterNoStdoutFallback opens outputFile for writing for formats whose

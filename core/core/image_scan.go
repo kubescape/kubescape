@@ -64,8 +64,38 @@ func GetImageExceptionsFromFile(filePath string) ([]VulnerabilitiesIgnorePolicy,
 	if err != nil {
 		return nil, fmt.Errorf("error unmarshaling exceptions file: %w", err)
 	}
+	if err := validateImageExceptionTargetRegexes(policies); err != nil {
+		return nil, fmt.Errorf("error validating exceptions file: %w", err)
+	}
 
 	return policies, nil
+}
+
+func validateImageExceptionTargetRegexes(policies []VulnerabilitiesIgnorePolicy) error {
+	for policyIndex := range policies {
+		policyName := policies[policyIndex].Metadata.Name
+		if policyName == "" {
+			policyName = fmt.Sprintf("#%d", policyIndex)
+		}
+		for targetIndex := range policies[policyIndex].Targets {
+			attributes := policies[policyIndex].Targets[targetIndex].Attributes
+			fields := []struct {
+				name  string
+				value string
+			}{
+				{name: "registry", value: attributes.Registry},
+				{name: "organization", value: attributes.Organization},
+				{name: "imageName", value: attributes.ImageName},
+				{name: "imageTag", value: attributes.ImageTag},
+			}
+			for _, field := range fields {
+				if _, err := regexp.Compile(field.value); err != nil {
+					return fmt.Errorf("image exception policy %q target %d field %s contains an invalid regular expression: %w", policyName, targetIndex, field.name, err)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // This function will identify the registry, organization and image tag from the image name

@@ -61,6 +61,7 @@ type PostureReportWithSeverity struct {
 	ClusterCloudProvider string                            `json:"clusterCloudProvider"`
 	CustomerGUID         string                            `json:"customerGUID"`
 	ClusterName          string                            `json:"clusterName"`
+	ReportID             string                            `json:"reportGUID"`
 	SummaryDetails       SummaryDetailsWithSeverity        `json:"summaryDetails"`
 	Resources            []reporthandling.Resource         `json:"resources,omitempty"`
 	Attributes           []reportsummary.PostureAttributes `json:"attributes"`
@@ -68,6 +69,7 @@ type PostureReportWithSeverity struct {
 	Metadata             reporthandlingv2.Metadata         `json:"metadata"`
 	ResourceLabels       map[string]map[string]string      `json:"resourceLabels,omitempty"` // map[resourceID]map[labelKey]labelValue - extracted labels from workloads
 	ScanCoverage         *cautils.ScanCoverage             `json:"scanCoverage,omitempty"`
+	ExceptionAudit       *cautils.ExceptionAudit           `json:"exceptionAudit,omitempty"`
 }
 
 // enrichControlsWithSeverity adds severity field to controls based on scoreFactor
@@ -187,6 +189,7 @@ func ConvertToPostureReportWithSeverityLabelsAndCoverage(report *reporthandlingv
 		ClusterCloudProvider: report.ClusterCloudProvider,
 		CustomerGUID:         report.CustomerGUID,
 		ClusterName:          report.ClusterName,
+		ReportID:             report.ReportID,
 		SummaryDetails: SummaryDetailsWithSeverity{
 			Controls:                  enrichedControls,
 			Status:                    report.SummaryDetails.Status,
@@ -264,6 +267,9 @@ func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureRepor
 	if data.Report.ClusterName == "" {
 		data.Report.ClusterName = cautils.AdoptClusterName(scanContextName(data))
 	}
+	if data.Report.ReportID == "" {
+		data.Report.ReportID = data.SessionID
+	}
 	report := reporthandlingv2.PostureReport{
 		SummaryDetails:       data.Report.SummaryDetails,
 		Metadata:             *data.Metadata,
@@ -272,6 +278,7 @@ func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureRepor
 		Attributes:           data.Report.Attributes,
 		ClusterName:          data.Report.ClusterName,
 		CustomerGUID:         data.Report.CustomerGUID,
+		ReportID:             data.Report.ReportID,
 		ClusterCloudProvider: data.Report.ClusterCloudProvider,
 	}
 
@@ -419,4 +426,34 @@ func extractCVEs(matches match.Matches, image string) []imageprinter.CVE {
 		CVEs = append(CVEs, cve)
 	}
 	return CVEs
+}
+
+// buildImageScanSummary aggregates per-image scan data into the summary every
+// output format consumes. The image list is deduplicated with a set so this is
+// O(N) in the number of images; the printer-local copies this replaces used
+// slices.Contains and were O(N^2) on large image sets.
+func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.ImageScanSummary {
+	imageScanSummary := &imageprinter.ImageScanSummary{
+		CVEs:                  []imageprinter.CVE{},
+		PackageScores:         map[string]*imageprinter.PackageScore{},
+		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
+	}
+
+	seenImages := make(map[string]struct{}, len(imageScanData))
+	for i := range imageScanData {
+		image := imageScanData[i].Image
+		if _, seen := seenImages[image]; !seen {
+			seenImages[image] = struct{}{}
+			imageScanSummary.Images = append(imageScanSummary.Images, image)
+		}
+
+		cves := extractCVEs(imageScanData[i].Matches, image)
+		imageScanSummary.CVEs = append(imageScanSummary.CVEs, cves...)
+
+		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
+
+		setSeverityToSummaryMap(cves, imageScanSummary.MapsSeverityToSummary)
+	}
+
+	return imageScanSummary
 }

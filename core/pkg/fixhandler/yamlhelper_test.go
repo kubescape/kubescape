@@ -262,6 +262,20 @@ func TestAssignLastLine(t *testing.T) {
 	}
 }
 
+func TestGetLastLineOfResource_EmptyFile(t *testing.T) {
+	linesSlice := []string{
+		"# comment",
+		"",
+		" ",
+	}
+
+	_, err := getLastLineOfResource(&linesSlice, 1)
+
+	if err == nil {
+		t.Errorf("Expected an error for empty resource, but got none")
+	}
+}
+
 // returns the line number of the node at the given tracker position
 func TestGetNodeLine_ReturnsLineNumberOfNodeAtGivenTrackerPosition(t *testing.T) {
 	nodeList := []nodeInfo{

@@ -63,6 +63,15 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Example: scanCmdExamples,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// runs for the bare scan command and all subcommands (framework, control, workload, image)
+			if scanInfo.FormatVersion != "v1" && scanInfo.FormatVersion != "v2" {
+				return fmt.Errorf("invalid --format-version %q: supported versions are v1 and v2", scanInfo.FormatVersion)
+			}
+			if scanInfo.ScanTimeout < 0 {
+				return fmt.Errorf("invalid --scan-timeout %s: must be zero or positive", scanInfo.ScanTimeout)
+			}
+			if scanInfo.ControlTimeout < 0 {
+				return fmt.Errorf("invalid --control-timeout %s: must be zero or positive", scanInfo.ControlTimeout)
+			}
 			if strings.Contains(scanInfo.ControlsVersion, "/") {
 				return fmt.Errorf(
 					"invalid --controls-version %q: must be a regolibrary release tag and cannot contain '/'",
@@ -169,6 +178,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsInputs, "controls-config", "", "Path to an controls-config obj. If not set will download controls-config from ARMO management portal")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to an exceptions obj. If not set will download exceptions from ARMO management portal")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.AuditExceptions, "audit-exceptions", false, "Include an exception usage audit in supported scan outputs")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseArtifactsFrom, "use-artifacts-from", "", "Load artifacts from local directory. If not used will download them")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. e.g: --exclude-namespaces ns-a,ns-b. Notice, when running with `exclude-namespace` kubescape does not scan cluster-scoped objects.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "Only include controls at or above this severity (low, medium, high, critical) in the output. Currently applies to JSON output only.")
@@ -353,14 +363,18 @@ func enforceImageSeverityThresholds(imageScanData []cautils.ImageScanData, scanI
 	}
 
 	for _, data := range imageScanData {
-		if data.VulnerabilityProvider == nil {
-			continue
-		}
 		for m := range data.Matches.Enumerate() {
-			//nolint:staticcheck // deprecated but replacing it requires refactoring
-			metadata, err := data.VulnerabilityProvider.VulnerabilityMetadata(m.Vulnerability.Reference)
-			if err != nil {
-				continue
+			metadata := m.Vulnerability.Metadata
+			if metadata == nil || imagescan.ParseSeverity(metadata.Severity) == vulnerability.UnknownSeverity {
+				if data.VulnerabilityProvider == nil {
+					continue
+				}
+				var err error
+				//nolint:staticcheck // fallback for matches without a known embedded severity
+				metadata, err = data.VulnerabilityProvider.VulnerabilityMetadata(m.Vulnerability.Reference)
+				if err != nil {
+					continue
+				}
 			}
 
 			if imagescan.ParseSeverity(metadata.Severity) >= thresholdSeverity &&

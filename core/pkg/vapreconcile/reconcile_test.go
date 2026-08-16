@@ -1,11 +1,20 @@
 package vapreconcile
 
 import (
+	"context"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	discoveryfake "k8s.io/client-go/discovery/fake"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func makeVAP(name, controlID string) unstructured.Unstructured {
@@ -36,6 +45,125 @@ func toInterfaceSlice(ss []string) []any {
 		out[i] = s
 	}
 	return out
+}
+
+// discoveryServing returns a discovery client advertising the VAP API on every
+// given version, plus the webhook resources every supported cluster serves.
+func discoveryServing(versions ...string) *discoveryfake.FakeDiscovery {
+	client := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	for _, version := range versions {
+		client.Resources = append(client.Resources, &metav1.APIResourceList{
+			GroupVersion: vapGroup + "/" + version,
+			APIResources: []metav1.APIResource{
+				{Name: "validatingwebhookconfigurations", Kind: "ValidatingWebhookConfiguration"},
+				{Name: vapResource, Kind: "ValidatingAdmissionPolicy"},
+				{Name: vapBindingResource, Kind: "ValidatingAdmissionPolicyBinding"},
+			},
+		})
+	}
+	return client
+}
+
+// dynamicServing returns a dynamic client holding the given objects under the
+// VAP resources of one version.
+func dynamicServing(version string, objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
+	listKinds := map[schema.GroupVersionResource]string{
+		{Group: vapGroup, Version: version, Resource: vapResource}:        "ValidatingAdmissionPolicyList",
+		{Group: vapGroup, Version: version, Resource: vapBindingResource}: "ValidatingAdmissionPolicyBindingList",
+	}
+	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, objects...)
+}
+
+func servedVAP(version, name, controlID string) *unstructured.Unstructured {
+	vap := makeVAP(name, controlID)
+	vap.SetAPIVersion(vapGroup + "/" + version)
+	vap.SetKind("ValidatingAdmissionPolicy")
+	return &vap
+}
+
+func TestResolveVersion_PrefersNewestServedVersion(t *testing.T) {
+	version, err := resolveVersion(discoveryServing("v1", "v1beta1", "v1alpha1"))
+
+	require.NoError(t, err)
+	assert.Equal(t, "v1", version)
+}
+
+func TestResolveVersion_FallsBackToOlderVersions(t *testing.T) {
+	for _, served := range []string{"v1beta1", "v1alpha1"} {
+		t.Run(served, func(t *testing.T) {
+			version, err := resolveVersion(discoveryServing(served))
+
+			require.NoError(t, err)
+			assert.Equal(t, served, version)
+		})
+	}
+}
+
+func TestResolveVersion_GroupWithoutPolicyResources(t *testing.T) {
+	// pre-1.26 clusters serve the group for webhook configurations only
+	client := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	client.Resources = []*metav1.APIResourceList{{
+		GroupVersion: vapGroup + "/v1",
+		APIResources: []metav1.APIResource{
+			{Name: "validatingwebhookconfigurations", Kind: "ValidatingWebhookConfiguration"},
+		},
+	}}
+
+	_, err := resolveVersion(client)
+
+	assert.ErrorIs(t, err, ErrUnsupported)
+}
+
+func TestResolveVersion_BindingsNotServed(t *testing.T) {
+	client := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	client.Resources = []*metav1.APIResourceList{{
+		GroupVersion: vapGroup + "/v1",
+		APIResources: []metav1.APIResource{{Name: vapResource, Kind: "ValidatingAdmissionPolicy"}},
+	}}
+
+	_, err := resolveVersion(client)
+
+	assert.ErrorIs(t, err, ErrUnsupported)
+}
+
+func TestResolveVersion_NoGroupAtAll(t *testing.T) {
+	_, err := resolveVersion(&discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}})
+
+	assert.ErrorIs(t, err, ErrUnsupported)
+}
+
+func TestResolveVersion_WithoutDiscoveryClient(t *testing.T) {
+	version, err := resolveVersion(nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "v1", version)
+}
+
+func TestCollect_ReadsFromServedVersion(t *testing.T) {
+	k8s := &k8sinterface.KubernetesApi{
+		DiscoveryClient: discoveryServing("v1beta1"),
+		DynamicClient:   dynamicServing("v1beta1", servedVAP("v1beta1", "kubescape-c-0041", "C-0041")),
+	}
+
+	policies, bindings, err := Collect(context.Background(), k8s)
+
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	assert.Equal(t, "kubescape-c-0041", policies[0].GetName())
+	assert.Empty(t, bindings)
+}
+
+func TestCollect_UnsupportedClusterIsNotAFailure(t *testing.T) {
+	k8s := &k8sinterface.KubernetesApi{
+		DiscoveryClient: &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}},
+		DynamicClient:   dynamicServing("v1"),
+	}
+
+	policies, bindings, err := Collect(context.Background(), k8s)
+
+	assert.ErrorIs(t, err, ErrUnsupported)
+	assert.Nil(t, policies)
+	assert.Nil(t, bindings)
 }
 
 func TestBuildIndex_BoundDeny(t *testing.T) {
