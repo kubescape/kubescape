@@ -52,6 +52,7 @@ type K8sResourceHandler struct {
 	k8s               *k8sinterface.KubernetesApi
 	hostSensorHandler hostsensorutils.IHostSensor
 	rbacObjectsAPI    *cautils.RBACObjects
+	apiLimiter        *rate.Limiter
 }
 
 func NewK8sResourceHandler(ctx context.Context, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, clusterName string) *K8sResourceHandler {
@@ -60,6 +61,7 @@ func NewK8sResourceHandler(ctx context.Context, k8s *k8sinterface.KubernetesApi,
 		k8s:               k8s,
 		hostSensorHandler: hostSensorHandler,
 		rbacObjectsAPI:    rbacObjects,
+		apiLimiter:        rate.NewLimiter(rate.Limit(50), 100), // 50 requests/sec, burst of 100
 	}
 	if err := k8sHandler.setCloudProvider(ctx); err != nil {
 		logger.L().Warning("failed to set cloud provider", helpers.Error(err))
@@ -780,7 +782,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 
 	// Bounded worker pool with token-bucket rate limiting against the k8s API
 	sem := make(chan struct{}, maxParallelResourcePulls)
-	apiLimiter := rate.NewLimiter(rate.Limit(50), 100) // 50 requests/sec, burst of 100
+	apiLimiter := k8sHandler.apiLimiter
 
 	for key := range queryableResources {
 		qr := queryableResources[key]

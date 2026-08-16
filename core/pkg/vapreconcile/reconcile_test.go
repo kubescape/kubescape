@@ -10,8 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	discoveryfake "k8s.io/client-go/discovery/fake"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	discoveryfake "k8s.io/client-go/discovery/fake"

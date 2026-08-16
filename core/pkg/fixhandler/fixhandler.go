@@ -449,74 +449,56 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			h.unfixedControls = append(h.unfixedControls, pu.entry)
 		}
 
-			if containerProfile != nil {
-				var rawManifest []byte
-				if resourceObj != nil && resourceObj.GetObject() != nil {
-					rawManifest, _ = json.Marshal(resourceObj.GetObject())
-				}
-				var workloadKind string
-				var containerName string
 		if containerProfile != nil {
 			var rawManifest []byte
 			if resourceObj != nil && resourceObj.GetObject() != nil {
 				rawManifest, _ = json.Marshal(resourceObj.GetObject())
 			}
-
+			
 			var workloadKind string
 			var containerName string
-
+			
 			if resourceObj != nil {
 				workloadKind = resourceObj.GetKind()
 			}
-
+			
 			// Verify resourceObj matches containerProfile's workload labels
 			labels := containerProfile.GetLabels()
+			profileMatches := true
 			if labels != nil {
 				containerName = labels["kubescape.io/workload-container-name"]
 				profileKind := labels["kubescape.io/workload-kind"]
 				profileName := labels["kubescape.io/workload-name"]
+				profileNamespace := labels["kubescape.io/workload-namespace"]
 
 				if resourceObj != nil {
-					workloadKind = resourceObj.GetKind()
-				}
-
-				// Verify resourceObj matches containerProfile's workload labels
-				labels := containerProfile.GetLabels()
-				profileMatches := true
-				if labels != nil {
-					containerName = labels["kubescape.io/workload-container-name"]
-					profileKind := labels["kubescape.io/workload-kind"]
-					profileName := labels["kubescape.io/workload-name"]
-					profileNamespace := labels["kubescape.io/workload-namespace"]
-
-					if resourceObj != nil {
-						if profileKind != "" && !strings.EqualFold(profileKind, resourceObj.GetKind()) {
-							profileMatches = false // Kind mismatch, skip drift detection for this resource
-						}
-						if profileName != "" && profileName != resourceObj.GetName() {
-							profileMatches = false // Name mismatch, skip drift detection for this resource
-						}
-						if profileNamespace != "" && profileNamespace != resourceObj.GetNamespace() {
-							profileMatches = false // Namespace mismatch, skip drift detection for this resource
-						}
+					if profileKind != "" && !strings.EqualFold(profileKind, resourceObj.GetKind()) {
+						profileMatches = false // Kind mismatch, skip drift detection for this resource
 					}
-				}
-
-				if profileMatches {
-					fixes := DetectProfileDrift(rawManifest, containerProfile, workloadKind, containerName, rfi.DocumentIndex)
-					for _, fix := range fixes {
-						rfi.YamlExpressions[fix.YamlExpression] = armotypes.FixPath{Path: fix.YamlExpression, Value: ""}
+					if profileName != "" && profileName != resourceObj.GetName() {
+						profileMatches = false // Name mismatch, skip drift detection for this resource
+					}
+					if profileNamespace != "" && profileNamespace != resourceObj.GetNamespace() {
+						profileMatches = false // Namespace mismatch, skip drift detection for this resource
 					}
 				}
 			}
 
-			if len(rfi.YamlExpressions) > 0 {
-				resourcesToFix = append(resourcesToFix, rfi)
+			if profileMatches {
+				fixes := DetectProfileDrift(rawManifest, containerProfile, workloadKind, containerName, rfi.DocumentIndex)
+				for _, fix := range fixes {
+					rfi.YamlExpressions[fix.YamlExpression] = armotypes.FixPath{Path: fix.YamlExpression, Value: ""}
+				}
 			}
 		}
 
-		return resourcesToFix
+		if len(rfi.YamlExpressions) > 0 {
+			resourcesToFix = append(resourcesToFix, rfi)
+		}
 	}
+
+	return resourcesToFix
+}
 
 // PrepareHelmSuggestions collects fix guidance for resources whose Source is a
 // Helm chart. We never auto-edit template files for these: the fix paths are
