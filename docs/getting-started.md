@@ -513,7 +513,7 @@ kubescape vap create-policy-binding \
 | `-p, --policy` | Policy/control to bind | Yes |
 | `--namespace` | Namespace selector (can be repeated) | No |
 | `--label` | Label selector in `key=value` format | No |
-| `-a, --action` | Action on failure: `Deny`, `Audit`, `Warn` | No (default: `Deny`) |
+| `-a, --action` | Action on failure: `Deny`, `Audit`, `Warn` (can be repeated; `Deny` and `Warn` cannot be combined) | No (default: `Deny`) |
 | `-r, --parameter-reference` | Parameter reference object name | No |
 
 ### Example
@@ -525,6 +525,13 @@ kubescape vap create-policy-binding \
   --policy c-0057 \
   --namespace production \
   --action Deny | kubectl apply -f -
+
+# Report on non-compliant resources first, then switch the binding to Deny
+kubescape vap create-policy-binding \
+  --name audit-privileged-containers \
+  --policy c-0057 \
+  --namespace production \
+  --action Audit --action Warn | kubectl apply -f -
 ```
 
 ## MCP Server (AI Integration)

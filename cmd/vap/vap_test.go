@@ -314,7 +314,7 @@ func TestDeployLibraryFromRelease(t *testing.T) {
 
 func TestCreatePolicyBinding(t *testing.T) {
 	t.Run("minimal binding with name and policy", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Deny", "", nil, nil)
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -331,7 +331,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("with namespaces", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Audit", "", []string{"ns1", "ns2"}, nil)
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Audit}, "", []string{"ns1", "ns2"}, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -345,7 +345,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("with labels", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Warn", "", nil, []string{"app=nginx", "env=prod"})
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Warn}, "", nil, []string{"app=nginx", "env=prod"})
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -357,7 +357,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("labels with whitespace are trimmed", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Deny", "", nil, []string{"app = nginx"})
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, []string{"app = nginx"})
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -368,7 +368,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("with parameter reference", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Deny", "my-params", nil, nil)
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "my-params", nil, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -381,7 +381,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("all fields combined", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Deny", "my-params", []string{"ns1"}, []string{"app=nginx"})
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "my-params", []string{"ns1"}, []string{"app=nginx"})
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -395,7 +395,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("empty namespace slice does not add selector", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Deny", "", []string{}, nil)
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", []string{}, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -405,7 +405,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("empty label slice does not add selector", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Deny", "", nil, []string{})
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, []string{})
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -601,7 +601,7 @@ func TestGetCreatePolicyBindingCmd(t *testing.T) {
 
 	actionFlag := cmd.Flags().Lookup("action")
 	require.NotNil(t, actionFlag)
-	assert.Equal(t, "Deny", actionFlag.DefValue)
+	assert.Equal(t, "[Deny]", actionFlag.DefValue)
 
 	paramRefFlag := cmd.Flags().Lookup("parameter-reference")
 	require.NotNil(t, paramRefFlag)
@@ -715,7 +715,7 @@ func TestLabelSelectorRegexEdgeCases(t *testing.T) {
 
 func TestCreatePolicyBindingCmdAllActions(t *testing.T) {
 	validActions := []string{"Deny", "Audit", "Warn"}
-	invalidActions := []string{"Allow", "deny", "audit", "warn", "", "Log", "Reject"}
+	invalidActions := []string{"Allow", "deny", "audit", "warn", "Log", "Reject"}
 
 	for _, action := range validActions {
 		t.Run("valid action "+action, func(t *testing.T) {
@@ -735,6 +735,133 @@ func TestCreatePolicyBindingCmdAllActions(t *testing.T) {
 			assert.Contains(t, err.Error(), "invalid action")
 		})
 	}
+
+	// An empty value clears the slice rather than adding a blank action, so it
+	// reports the missing action instead of an invalid one.
+	t.Run("empty action clears the default", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--action", ""})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "at least one --action is required")
+	})
+}
+
+func TestParseValidationActions(t *testing.T) {
+	tests := []struct {
+		name    string
+		values  []string
+		want    []admissionv1.ValidationAction
+		wantErr string
+	}{
+		{
+			name:   "single action",
+			values: []string{"Deny"},
+			want:   []admissionv1.ValidationAction{admissionv1.Deny},
+		},
+		{
+			name:   "audit and warn roll out together",
+			values: []string{"Audit", "Warn"},
+			want:   []admissionv1.ValidationAction{admissionv1.Audit, admissionv1.Warn},
+		},
+		{
+			name:   "deny and audit are a valid pair",
+			values: []string{"Deny", "Audit"},
+			want:   []admissionv1.ValidationAction{admissionv1.Deny, admissionv1.Audit},
+		},
+		{
+			name:   "order is preserved",
+			values: []string{"Warn", "Audit"},
+			want:   []admissionv1.ValidationAction{admissionv1.Warn, admissionv1.Audit},
+		},
+		{
+			name:   "surrounding whitespace is trimmed",
+			values: []string{" Audit ", "Warn"},
+			want:   []admissionv1.ValidationAction{admissionv1.Audit, admissionv1.Warn},
+		},
+		{
+			name:    "no action at all",
+			values:  nil,
+			wantErr: "at least one --action is required",
+		},
+		{
+			name:    "unknown action",
+			values:  []string{"Allow"},
+			wantErr: "invalid action: Allow",
+		},
+		{
+			name:    "lowercase is not the API spelling",
+			values:  []string{"deny"},
+			wantErr: "invalid action: deny",
+		},
+		{
+			name:    "repeated action",
+			values:  []string{"Audit", "Audit"},
+			wantErr: "duplicate action: Audit",
+		},
+		{
+			name:    "deny with warn is refused by the API",
+			values:  []string{"Deny", "Warn"},
+			wantErr: "actions Deny and Warn cannot be combined",
+		},
+		{
+			name:    "deny with warn in either order",
+			values:  []string{"Warn", "Deny"},
+			wantErr: "actions Deny and Warn cannot be combined",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseValidationActions(tt.values)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestCreatePolicyBindingMultipleActions(t *testing.T) {
+	out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Audit, admissionv1.Warn}, "", nil, nil)
+	require.NoError(t, err)
+
+	var binding admissionv1.ValidatingAdmissionPolicyBinding
+	require.NoError(t, yaml.Unmarshal([]byte(out), &binding))
+	assert.Equal(t, []admissionv1.ValidationAction{admissionv1.Audit, admissionv1.Warn}, binding.Spec.ValidationActions)
+}
+
+func TestCreatePolicyBindingCmdMultipleActions(t *testing.T) {
+	t.Run("repeated flag", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--action", "Audit", "--action", "Warn"})
+		assert.NoError(t, cmd.Execute())
+	})
+
+	t.Run("comma separated", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--action", "Audit,Warn"})
+		assert.NoError(t, cmd.Execute())
+	})
+
+	t.Run("deny with warn is rejected", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--action", "Deny,Warn"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot be combined")
+	})
+
+	t.Run("duplicate is rejected", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--action", "Warn,Warn"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate action")
+	})
 }
 
 func TestCreatePolicyBindingCmdRequiredFlags(t *testing.T) {
