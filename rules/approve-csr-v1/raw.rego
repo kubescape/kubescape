@@ -116,6 +116,13 @@ can_approve_signers(role) if {
 	certificates_api_group(rule)
 	targets(rule, "signers")
 	verb_or_wildcard(rule.verbs, "approve")
+
+	# resourceNames must be omitted, kubernetes.io/kube-apiserver-client, or kubernetes.io/*
+	# to allow approving dangerous signers
+	(resourceNames := rule.resourceNames; resourceNames = []) or
+	(resourceNames := rule.resourceNames; length(resourceNames) = 1 and
+		(resourceNames[0] = "kubernetes.io/kube-apiserver-client" or
+		 startswith(resourceNames[0], "kubernetes.io/")))
 }
 
 # An entry contributes to the reported paths when it participates in any leg of
