@@ -519,19 +519,19 @@ kubescape vap create-policy-binding \
 ### Example
 
 ```bash
-# Create a policy that denies non-compliant resources in production
+# Report on non-compliant resources in production first
 kubescape vap create-policy-binding \
-  --name deny-privileged-containers \
-  --policy c-0057 \
-  --namespace production \
-  --action Deny | kubectl apply -f -
-
-# Report on non-compliant resources first, then switch the binding to Deny
-kubescape vap create-policy-binding \
-  --name audit-privileged-containers \
+  --name privileged-containers \
   --policy c-0057 \
   --namespace production \
   --action Audit --action Warn | kubectl apply -f -
+
+# Once the findings look right, switch the same binding to Deny
+kubescape vap create-policy-binding \
+  --name privileged-containers \
+  --policy c-0057 \
+  --namespace production \
+  --action Deny | kubectl apply -f -
 ```
 
 ## MCP Server (AI Integration)
