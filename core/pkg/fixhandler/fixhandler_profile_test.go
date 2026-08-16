@@ -40,7 +40,7 @@ func TestPrepareResourcesToFix_ProfileDrift(t *testing.T) {
 
 	tmpDir, _ := filepath.EvalSymlinks(t.TempDir())
 	profilePath := filepath.Join(tmpDir, "profile.json")
-	require.NoError(t, os.WriteFile(profilePath, profileData, 0644))
+	require.NoError(t, os.WriteFile(profilePath, profileData, 0600))
 
 	yamlPath := filepath.Join(tmpDir, "myapp.yaml")
 	yamlContent := `apiVersion: apps/v1
@@ -54,7 +54,7 @@ spec:
       containers:
       - name: app
         image: nginx`
-	require.NoError(t, os.WriteFile(yamlPath, []byte(yamlContent), 0644))
+	require.NoError(t, os.WriteFile(yamlPath, []byte(yamlContent), 0600))
 
 	fixInfo := &metav1.FixInfo{
 		BasePath:             tmpDir,
@@ -121,7 +121,7 @@ spec:
 			FileType:     reporthandling.SourceTypeYaml,
 		},
 	}
-	
+
 	report2 := &reporthandlingv2.PostureReport{
 		Resources: []reporthandling.Resource{*resourceObj2},
 		Results: []resourcesresults.Result{

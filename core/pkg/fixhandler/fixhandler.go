@@ -454,14 +454,14 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			if resourceObj != nil && resourceObj.GetObject() != nil {
 				rawManifest, _ = json.Marshal(resourceObj.GetObject())
 			}
-			
+
 			var workloadKind string
 			var containerName string
-			
+
 			if resourceObj != nil {
 				workloadKind = resourceObj.GetKind()
 			}
-			
+
 			// Verify resourceObj matches containerProfile's workload labels
 			labels := containerProfile.GetLabels()
 			profileMatches := true
