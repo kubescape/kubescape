@@ -15,7 +15,6 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-
 const (
 	vapGroup           = "admissionregistration.k8s.io"
 	vapResource        = "validatingadmissionpolicies"
@@ -110,23 +109,6 @@ func list(ctx context.Context, client dynamic.Interface, version, resource strin
 	}
 
 	return listed.Items, nil
-}
-
-func hasVAPResources(resources *metav1.APIResourceList) bool {
-	if resources == nil {
-		return false
-	}
-	hasVAP := false
-	hasVAPB := false
-	for i := range resources.APIResources {
-		if resources.APIResources[i].Name == "validatingadmissionpolicies" {
-			hasVAP = true
-		}
-		if resources.APIResources[i].Name == "validatingadmissionpolicybindings" {
-			hasVAPB = true
-		}
-	}
-	return hasVAP && hasVAPB
 }
 
 // BuildIndex builds a map of controlId -> VAPEnforcementStatus by reading the
