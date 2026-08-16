@@ -37,7 +37,6 @@ func DetectProfileDrift(manifest []byte, profile *storagev1beta1.ContainerProfil
 		return fixes
 	}
 
-
 	var containersPath string
 	var containersList []interface{}
 

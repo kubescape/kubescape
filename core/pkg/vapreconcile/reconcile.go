@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -16,42 +15,7 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-// Collect lists ValidatingAdmissionPolicy and ValidatingAdmissionPolicyBinding
-// resources from the live cluster. Both resource types are cluster-scoped so no
-// namespace selector is needed.
-func Collect(ctx context.Context, k8s *k8sinterface.KubernetesApi) ([]unstructured.Unstructured, []unstructured.Unstructured, error) {
-	groupVersion := "admissionregistration.k8s.io/v1"
-	version := "v1"
 
-	resources, err := k8s.DiscoveryClient.ServerResourcesForGroupVersion(groupVersion)
-	if err != nil && !apierrors.IsNotFound(err) {
-		return nil, nil, err
-	}
-	if err != nil || !hasVAPResources(resources) {
-		groupVersion = "admissionregistration.k8s.io/v1beta1"
-		resources, err = k8s.DiscoveryClient.ServerResourcesForGroupVersion(groupVersion)
-		if err != nil && !apierrors.IsNotFound(err) {
-			return nil, nil, err
-		}
-		if err != nil || !hasVAPResources(resources) {
-			logger.L().Ctx(ctx).Warning("ValidatingAdmissionPolicies are not supported on this cluster, skipping VAP reconciliation")
-			return nil, nil, nil
-		}
-		version = "v1beta1"
-	}
-
-	vapGVR := schema.GroupVersionResource{
-		Group:    "admissionregistration.k8s.io",
-		Version:  version,
-		Resource: "validatingadmissionpolicies",
-	}
-	vapbGVR := schema.GroupVersionResource{
-		Group:    "admissionregistration.k8s.io",
-		Version:  version,
-		Resource: "validatingadmissionpolicybindings",
-	}
-
-	vapList, err := k8s.DynamicClient.Resource(vapGVR).List(ctx, metav1.ListOptions{})
 const (
 	vapGroup           = "admissionregistration.k8s.io"
 	vapResource        = "validatingadmissionpolicies"

@@ -7,9 +7,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	discoveryfake "k8s.io/client-go/discovery/fake"
+
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -305,71 +303,4 @@ func TestEnrichSummary_NoMatchingControl(t *testing.T) {
 		EnrichSummary(controls, index)
 	})
 	assert.Nil(t, controls["C-0041"].VAPEnforcement)
-}
-
-func TestCollect_GracefulSkip(t *testing.T) {
-	discovery := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
-	discovery.Resources = []*metav1.APIResourceList{} // No resources
-
-	k8s := &k8sinterface.KubernetesApi{
-		DiscoveryClient: discovery,
-	}
-
-	vaps, vapbs, err := Collect(context.Background(), k8s)
-
-	assert.NoError(t, err)
-	assert.Nil(t, vaps)
-	assert.Nil(t, vapbs)
-}
-
-func TestCollect_GracefulSkip_Incomplete(t *testing.T) {
-	discovery := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
-	discovery.Resources = []*metav1.APIResourceList{
-		{
-			GroupVersion: "admissionregistration.k8s.io/v1beta1",
-			APIResources: []metav1.APIResource{
-				{Name: "validatingadmissionpolicies"},
-				// missing validatingadmissionpolicybindings
-			},
-		},
-	}
-
-	k8s := &k8sinterface.KubernetesApi{
-		DiscoveryClient: discovery,
-	}
-
-	vaps, vapbs, err := Collect(context.Background(), k8s)
-
-	assert.NoError(t, err)
-	assert.Nil(t, vaps)
-	assert.Nil(t, vapbs)
-}
-
-func TestCollect_GracefulSkip_Fallback_Unavailable(t *testing.T) {
-	discovery := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
-	// Both missing
-	discovery.Resources = []*metav1.APIResourceList{
-		{
-			GroupVersion: "admissionregistration.k8s.io/v1beta1",
-			APIResources: []metav1.APIResource{
-				{Name: "other"},
-			},
-		},
-		{
-			GroupVersion: "admissionregistration.k8s.io/v1",
-			APIResources: []metav1.APIResource{
-				{Name: "other"},
-			},
-		},
-	}
-
-	k8s := &k8sinterface.KubernetesApi{
-		DiscoveryClient: discovery,
-	}
-
-	vaps, vapbs, err := Collect(context.Background(), k8s)
-
-	assert.NoError(t, err)
-	assert.Nil(t, vaps)
-	assert.Nil(t, vapbs)
 }
