@@ -2,13 +2,13 @@ package fixhandler
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"sort"
 	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"gopkg.in/yaml.v3"
 )
 
 func isValidCapability(s string) bool {
