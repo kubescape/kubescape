@@ -20,7 +20,7 @@ import (
 //
 // Matching covers everything on matchConstraints whose input the scanned
 // object itself carries: the resource rules (apiGroups/apiVersions/resources,
-// each rule's operations and resourceNames, honoring "*" and
+// each rule's operations, scope and resourceNames, honoring "*" and
 // excludeResourceRules) and the objectSelector, which matches the object's own
 // labels. The scan models every resource as a fresh CREATE (see stub.go), so a
 // rule that fires only on other operations does not match here either. The one
@@ -39,10 +39,11 @@ func (v *VAP) appliesTo(obj map[string]any) bool {
 		return true // kind undeterminable; let evaluation proceed (it will error and skip)
 	}
 	name, _, _ := unstructured.NestedString(obj, "metadata", "name")
+	target := scopedObject{gvr: gvr, name: name, namespaced: isNamespaced(obj)}
 
 	included := false
 	for i := range v.matchConstraints.ResourceRules {
-		if resourceRuleMatches(&v.matchConstraints.ResourceRules[i], gvr, name) {
+		if resourceRuleMatches(&v.matchConstraints.ResourceRules[i], target) {
 			included = true
 			break
 		}
@@ -51,7 +52,7 @@ func (v *VAP) appliesTo(obj map[string]any) bool {
 		return false
 	}
 	for i := range v.matchConstraints.ExcludeResourceRules {
-		if resourceRuleMatches(&v.matchConstraints.ExcludeResourceRules[i], gvr, name) {
+		if resourceRuleMatches(&v.matchConstraints.ExcludeResourceRules[i], target) {
 			return false
 		}
 	}
@@ -124,12 +125,39 @@ func annotatedPlural(obj map[string]any) (string, bool) {
 	return plural, plural != ""
 }
 
-func resourceRuleMatches(rule *admissionregistrationv1.NamedRuleWithOperations, gvr schema.GroupVersionResource, name string) bool {
+// scopedObject is what appliesTo reads off the scanned object once and matches
+// every resource rule against, so adding a rule field to honor costs one field
+// here rather than another parameter on every call.
+type scopedObject struct {
+	gvr        schema.GroupVersionResource
+	name       string
+	namespaced bool
+}
+
+func resourceRuleMatches(rule *admissionregistrationv1.NamedRuleWithOperations, target scopedObject) bool {
 	return matchesOperation(rule.Operations) &&
-		matchesValue(rule.APIGroups, gvr.Group) &&
-		matchesValue(rule.APIVersions, gvr.Version) &&
-		matchesResource(rule.Resources, gvr.Resource) &&
-		matchesName(rule.ResourceNames, name)
+		matchesScope(rule.Scope, target.namespaced) &&
+		matchesValue(rule.APIGroups, target.gvr.Group) &&
+		matchesValue(rule.APIVersions, target.gvr.Version) &&
+		matchesResource(rule.Resources, target.gvr.Resource) &&
+		matchesName(rule.ResourceNames, target.name)
+}
+
+// matchesScope reports whether the rule's scope admits the object. nil and "*"
+// are the API default and admit everything.
+//
+// Only a Cluster rule narrows anything offline: an object carrying a namespace
+// is proven namespaced, and admission would not hand it to that rule. The
+// reverse is not provable — the apiserver defaults metadata.namespace before
+// admission, so an absent one does not make the object cluster-scoped — which
+// is why a Namespaced rule matches regardless, the same widening appliesTo
+// applies to an undeterminable kind. Exclude rules get this symmetrically: a
+// Cluster-scoped exclusion does not exempt an object we know is namespaced.
+func matchesScope(scope *admissionregistrationv1.ScopeType, namespaced bool) bool {
+	if scope == nil || *scope != admissionregistrationv1.ClusterScope {
+		return true
+	}
+	return !namespaced
 }
 
 // matchesName reports whether the rule's resourceNames admit the object's
