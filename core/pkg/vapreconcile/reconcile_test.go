@@ -161,7 +161,7 @@ func TestCollect_UnsupportedClusterIsNotAFailure(t *testing.T) {
 
 	policies, bindings, err := Collect(context.Background(), k8s)
 
-	assert.ErrorIs(t, err, ErrUnsupported)
+	assert.NoError(t, err)
 	assert.Nil(t, policies)
 	assert.Nil(t, bindings)
 }

@@ -803,14 +803,16 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 			}
 			defer func() { <-sem }()
 
-			if err := apiLimiter.Wait(ctx); err != nil {
-				mu.Lock()
-				failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
-					gvr: qr.GroupVersionResourceTriplet,
-					err: err,
+			if apiLimiter != nil {
+				if err := apiLimiter.Wait(ctx); err != nil {
+					mu.Lock()
+					failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
+						gvr: qr.GroupVersionResourceTriplet,
+						err: err,
+					}
+					mu.Unlock()
+					return
 				}
-				mu.Unlock()
-				return
 			}
 
 			apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
