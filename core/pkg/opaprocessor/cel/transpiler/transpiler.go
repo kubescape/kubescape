@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-policy-agent/opa/ast"
+	"github.com/open-policy-agent/opa/v1/ast"
 )
 
 // Transpile converts a Rego AST body to a CEL AST string.
@@ -14,7 +14,7 @@ func Transpile(body *ast.Body) (string, error) {
 	}
 
 	celExpression := ""
-	
+
 	for _, expr := range *body {
 		exprStr := expr.String()
 		if strings.Contains(exprStr, "every") {

@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"errors"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -33,10 +31,7 @@ func isDiscoveryMissingError(err error) bool {
 		return true
 	}
 	var noMatchErr *meta.NoResourceMatchError
-	if errors.As(err, &noMatchErr) {
-		return true
-	}
-	return false
+	return errors.As(err, &noMatchErr)
 }
 
 // vapVersions lists the served versions of the VAP API in preference order:
@@ -129,22 +124,6 @@ func list(ctx context.Context, client dynamic.Interface, version, resource strin
 	return listed.Items, nil
 }
 
-func hasVAPResources(resources *metav1.APIResourceList) bool {
-	if resources == nil {
-		return false
-	}
-	hasVAP := false
-	hasVAPB := false
-	for i := range resources.APIResources {
-		if resources.APIResources[i].Name == "validatingadmissionpolicies" {
-			hasVAP = true
-		}
-		if resources.APIResources[i].Name == "validatingadmissionpolicybindings" {
-			hasVAPB = true
-		}
-	}
-	return hasVAP && hasVAPB
-}
 
 // BuildIndex builds a map of controlId -> VAPEnforcementStatus by reading the
 // controlId label that cel-admission-library stamps on every VAP, then joining
@@ -248,7 +227,7 @@ func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[str
 			},
 		},
 	}
-	if paramSchema != nil && len(paramSchema) > 0 {
+	if len(paramSchema) > 0 {
 		spec["paramKind"] = map[string]interface{}{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",

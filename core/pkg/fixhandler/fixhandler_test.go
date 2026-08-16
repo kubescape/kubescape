@@ -23,12 +23,6 @@ import (
 	"gopkg.in/op/go-logging.v1"
 )
 
-type indentationTestCase struct {
-	inputFile      string
-	yamlExpression string
-	expectedFile   string
-}
-
 func NewFixHandlerMock() (*FixHandler, error) {
 	backendLoggerLeveled := logging.AddModuleLevel(logging.NewLogBackend(logger.L().GetWriter(), "", 0))
 	backendLoggerLeveled.SetLevel(logging.ERROR, "")
@@ -41,154 +35,6 @@ func NewFixHandlerMock() (*FixHandler, error) {
 	}, nil
 }
 
-func getTestCases() []indentationTestCase {
-	indentationTestCases := []indentationTestCase{
-		// Insertion Scenarios
-		{
-			"inserts/tc-01-00-input-mapping-insert-mapping.yaml",
-			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-			"inserts/tc-01-01-expected.yaml",
-		},
-		{
-			"inserts/tc-02-00-input-mapping-insert-mapping-with-list.yaml",
-			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
-			"inserts/tc-02-01-expected.yaml",
-		},
-		{
-			"inserts/tc-03-00-input-list-append-scalar.yaml",
-			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]",
-			"inserts/tc-03-01-expected.yaml",
-		},
-		{
-			"inserts/tc-04-00-input-multiple-inserts.yaml",
-
-			`select(di==0).spec.template.spec.securityContext.allowPrivilegeEscalation |= false |
-			 select(di==0).spec.template.spec.containers[0].securityContext.capabilities.drop += ["NET_RAW"] |
-			 select(di==0).spec.template.spec.containers[0].securityContext.seccompProfile.type |= "RuntimeDefault" |
-			 select(di==0).spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation |= false |
-			 select(di==0).spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem |= true`,
-
-			"inserts/tc-04-01-expected.yaml",
-		},
-		{
-			"inserts/tc-05-00-input-comment-blank-line-single-insert.yaml",
-			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-			"inserts/tc-05-01-expected.yaml",
-		},
-		{
-			"inserts/tc-06-00-input-list-append-scalar-oneline.yaml",
-			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]",
-			"inserts/tc-06-01-expected.yaml",
-		},
-		{
-			"inserts/tc-07-00-input-multiple-documents.yaml",
-
-			`select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false |
-			 select(di==1).spec.containers[0].securityContext.allowPrivilegeEscalation |= false`,
-
-			"inserts/tc-07-01-expected.yaml",
-		},
-		{
-			"inserts/tc-08-00-input-mapping-insert-mapping-indented.yaml",
-			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
-			"inserts/tc-08-01-expected.yaml",
-		},
-		{
-			"inserts/tc-09-00-input-list-insert-new-mapping-indented.yaml",
-			`select(di==0).spec.containers += {"name": "redis", "image": "redis"}`,
-			"inserts/tc-09-01-expected.yaml",
-		},
-		{
-			"inserts/tc-10-00-input-list-insert-new-mapping.yaml",
-			`select(di==0).spec.containers += {"name": "redis", "image": "redis"}`,
-			"inserts/tc-10-01-expected.yaml",
-		},
-		{
-			"inserts/tc-11-00-input-list-insert-new-mapping-crlf-newlines.yaml",
-			`select(di==0).spec.containers += {"name": "redis", "image": "redis"}`,
-			"inserts/tc-11-01-expected.yaml",
-		},
-
-		// Starts with ---
-		{
-			"inserts/tc-12-00-begin-with-document-separator.yaml",
-			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-			"inserts/tc-12-01-expected.yaml",
-		},
-
-		// Removal Scenarios
-		{
-			"removals/tc-01-00-input.yaml",
-			"del(select(di==0).spec.containers[0].securityContext)",
-			"removals/tc-01-01-expected.yaml",
-		},
-		{
-			"removals/tc-02-00-input.yaml",
-			"del(select(di==0).spec.containers[1])",
-			"removals/tc-02-01-expected.yaml",
-		},
-		{
-			"removals/tc-03-00-input.yaml",
-			"del(select(di==0).spec.containers[0].securityContext.capabilities.drop[1])",
-			"removals/tc-03-01-expected.yaml",
-		},
-		{
-			"removals/tc-04-00-input.yaml",
-			`del(select(di==0).spec.containers[0].securityContext) |
-			 del(select(di==1).spec.containers[1])`,
-			"removals/tc-04-01-expected.yaml",
-		},
-
-		// Replace Scenarios
-		{
-			"replaces/tc-01-00-input.yaml",
-			"select(di==0).spec.containers[0].securityContext.runAsRoot |= false",
-			"replaces/tc-01-01-expected.yaml",
-		},
-		{
-			"replaces/tc-02-00-input.yaml",
-			`select(di==0).spec.containers[0].securityContext.capabilities.drop[0] |= "SYS_ADM" |
-			 select(di==0).spec.containers[0].securityContext.capabilities.add[0] |= "NET_RAW"`,
-			"replaces/tc-02-01-expected.yaml",
-		},
-
-		// Hybrid Scenarios
-		{
-			"hybrids/tc-01-00-input.yaml",
-			`del(select(di==0).spec.containers[0].securityContext) |
-			 select(di==0).spec.securityContext.runAsRoot |= false`,
-			"hybrids/tc-01-01-expected.yaml",
-		},
-		{
-			"hybrids/tc-02-00-input-indented-list.yaml",
-			`del(select(di==0).spec.containers[0].securityContext) |
-			 select(di==0).spec.securityContext.runAsRoot |= false`,
-			"hybrids/tc-02-01-expected.yaml",
-		},
-		{
-			"hybrids/tc-03-00-input-comments.yaml",
-			`del(select(di==0).spec.containers[0].securityContext) |
-			 select(di==0).spec.securityContext.runAsRoot |= false`,
-			"hybrids/tc-03-01-expected.yaml",
-		},
-		{
-			"hybrids/tc-04-00-input-separated-keys.yaml",
-			`del(select(di==0).spec.containers[0].securityContext) |
-			 select(di==0).spec.securityContext.runAsRoot |= false`,
-			"hybrids/tc-04-01-expected.yaml",
-		},
-		{
-			"hybrids/tc-05-00-input-leading-doc-separator.yaml",
-			`del(select(di==0).spec.containers[0].securityContext) |
-			 select(di==0).spec.securityContext.runAsRoot |= false`,
-			"hybrids/tc-05-01-expected.yaml",
-		},
-	}
-
-	return indentationTestCases
-}
-
-
 // TestApplyFixToContent_EmptyLeadingDocument guards the regression from issue
 // #2495: a file whose first document is empty (a comment followed by "---") is
 // decoded inconsistently by go-yaml and yqlib, which used to make the fix
@@ -200,7 +46,6 @@ func getTestCases() []indentationTestCase {
 // line to replace picked the document node that shares that line and rendered it against
 // its nil parent, panicking out of `kubescape fix` before anything was written. A nested
 // flow sequence never hit this because the document node sits on an earlier line.
-
 
 // TestFixPathToValidYamlExpression_RejectsExpressionSyntax covers fix paths that
 // are yq expressions rather than paths. Both halves of a FixPath come out of the
@@ -594,7 +439,6 @@ func TestSanitizeYaml_RoundTrip(t *testing.T) {
 	assert.Equal(t, "# ---\napiVersion: v1\nkind: Pod\n", sanitized)
 	assert.Equal(t, original, revertSanitizeYaml(sanitized))
 }
-
 
 func TestGetLocalPath(t *testing.T) {
 	type args struct {

@@ -1,8 +1,8 @@
 package fixhandler
 
 import (
-	"gopkg.in/yaml.v3"
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"sort"
 	"strings"
 

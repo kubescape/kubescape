@@ -49,7 +49,7 @@ func (e *YAMLTreeEditor) ApplyFixes(yamlAsString string, fixes []DocumentFix) (s
 		docNode := docs[fix.DocumentIndex]
 
 		if len(docNode.Content) == 0 {
-			continue 
+			continue
 		}
 
 		edit, err := e.calculateEdit(docNode.Content[0], fix.Fix)
@@ -94,7 +94,7 @@ func (e *YAMLTreeEditor) applyEdits(yaml string, edits []YAMLEdit) string {
 					if colIndex > len(lineText) {
 						colIndex = len(lineText)
 					}
-					
+
 					removeEnd := colIndex + edit.Remove
 					if removeEnd > len(lineText) {
 						removeEnd = len(lineText)
@@ -104,7 +104,7 @@ func (e *YAMLTreeEditor) applyEdits(yaml string, edits []YAMLEdit) string {
 				}
 			}
 		}
-		
+
 		result = append(result, lineText)
 
 		if lineEdits, ok := editsByLine[lineNum]; ok {
@@ -237,11 +237,11 @@ func (e *YAMLTreeEditor) traverse(node *yaml.Node, tokens []string, value string
 
 		indent := parentIndent + 2
 		if len(node.Content) > 0 {
-			indent = node.Content[0].Column - 1 
+			indent = node.Content[0].Column - 1
 		}
 
 		indentStr := strings.Repeat(" ", indent)
-		
+
 		lastLine := node.Line
 		if len(node.Content) > 0 {
 			lastNode := node.Content[len(node.Content)-1]
@@ -278,20 +278,20 @@ func (e *YAMLTreeEditor) buildNestedInsertion(tokens []string, value string, lin
 	for i, token := range tokens {
 		indentStr := strings.Repeat(" ", currentIndent)
 		cleanToken := strings.Trim(token, `"'`)
-		
+
 		isLast := i == len(tokens)-1
-		
+
 		if strings.HasPrefix(token, "[") {
-			sb.WriteString(fmt.Sprintf("\n%s- ", indentStr))
+			fmt.Fprintf(&sb, "\n%s- ", indentStr)
 			currentIndent += 2
 		} else {
 			if i > 0 {
 				sb.WriteString("\n")
 			}
 			if isLast {
-				sb.WriteString(fmt.Sprintf("%s%s: %s", indentStr, cleanToken, value))
+				fmt.Fprintf(&sb, "%s%s: %s", indentStr, cleanToken, value)
 			} else {
-				sb.WriteString(fmt.Sprintf("%s%s:", indentStr, cleanToken))
+				fmt.Fprintf(&sb, "%s%s:", indentStr, cleanToken)
 				currentIndent += 2
 			}
 		}

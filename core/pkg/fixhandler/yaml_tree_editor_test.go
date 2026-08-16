@@ -160,7 +160,7 @@ spec:
 `,
 		},
 		{
-			name: "CRLF input with preserved newline style",
+			name:       "CRLF input with preserved newline style",
 			yamlString: "apiVersion: v1\r\nkind: Pod\r\nmetadata:\r\n  name: test\r\nspec:\r\n  containers:\r\n  - name: test-container\r\n",
 			fixes: []DocumentFix{
 				{

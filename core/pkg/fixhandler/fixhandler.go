@@ -784,8 +784,6 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 	return filePath, documentIndex, nil
 }
 
-
-
 func (h *FixHandler) getFileFixes(resourcesToFix []ResourceFixInfo) map[string][]DocumentFix {
 	fileFixes := make(map[string][]DocumentFix)
 	for _, resourceToFix := range resourcesToFix {
@@ -952,9 +950,6 @@ func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(docu
 	}
 	return added, skippedReasons
 }
-
-
-
 
 // safeFixPath matches the subset of yq's expression grammar that a fix path is
 // allowed to use: dot-separated keys — bare or double-quoted — each optionally
