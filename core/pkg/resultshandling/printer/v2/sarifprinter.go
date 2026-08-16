@@ -122,6 +122,7 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 	msg := ctl.GetDescription()
 	if resource != nil {
 		if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
+			addContainerNameToAssistedRemediation(resource, &paths)
 			msg += "\n\nAffected fields:\n" + strings.Join(paths, "\n")
 		}
 	}

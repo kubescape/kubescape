@@ -12,6 +12,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -381,6 +382,29 @@ func TestAddRule_SetsSecuritySeverity(t *testing.T) {
 	require.NotNil(t, rule.Properties, "rule properties must be set")
 	assert.Equal(t, "8.5", rule.Properties["security-severity"],
 		"security-severity must mirror the control score factor")
+}
+
+func TestAddResult_AnnotatesInitAndEphemeralContainerNames(t *testing.T) {
+	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+	control := &reportsummary.ControlSummary{
+		ControlID:   "C-0057",
+		Name:        "Privileged container",
+		Description: "Privileged containers should be avoided",
+		ScoreFactor: 8.0,
+	}
+
+	sp := NewSARIFPrinter()
+	sp.addRule(run, control)
+
+	ac := makeControlWithPaths(privilegedInitAndEphemeralPaths(), nil)
+	ac.ControlID = "C-0057"
+
+	result := sp.addResult(run, control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, privilegedInitAndEphemeralPod())
+	require.NotNil(t, result.Message)
+	require.NotNil(t, result.Message.Text)
+	for _, path := range privilegedInitAndEphemeralNamedPaths() {
+		assert.Contains(t, *result.Message.Text, path)
+	}
 }
 
 func TestPrintConfigurationScan_MissingControl(t *testing.T) {

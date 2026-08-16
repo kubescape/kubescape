@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewHtmlPrinter(t *testing.T) {
@@ -74,6 +75,20 @@ func TestSetWriter_Html(t *testing.T) {
 				"HTML printer must never write to stdout")
 		})
 	}
+}
+
+func TestBuildResourceControlResult_AnnotatesInitAndEphemeralContainerNames(t *testing.T) {
+	control := &reportsummary.ControlSummary{
+		ControlID:   "C-0057",
+		Name:        "Privileged container",
+		ScoreFactor: 8.0,
+	}
+	ac := makeControlWithPaths(privilegedInitAndEphemeralPaths(), nil)
+	ac.ControlID = "C-0057"
+	ac.Name = "Privileged container"
+
+	got := buildResourceControlResult(*ac, control, privilegedInitAndEphemeralPod())
+	require.Equal(t, privilegedInitAndEphemeralNamedPaths(), got.FailedPaths)
 }
 
 func TestBuildResourceControlResultTable_MissingControl(t *testing.T) {
