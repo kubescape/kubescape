@@ -36,23 +36,7 @@ import (
 
 const ScoreConfigPath = "/resources/config"
 
-// SubStatusIncompleteCoverage marks a Passed verdict reached while at least
-// one resource type the control depends on (per ResourceToControlsMap)
-// failed to collect for the current scan (e.g. an RBAC 403 on a correlated
-// ServiceAccount/RoleBinding). The rule genuinely found no violation in the
-// data it had, but that data was incomplete, so the pass could not be fully
-// verified against live cluster state. This is deliberately additive: Status
-// stays Passed (existing pass/fail counts and CI/CD gates are unaffected),
-// and only SubStatus carries the caveat, mirroring how SubStatusException
-// annotates a Passed verdict without changing Status itself.
-//
-// This does not attempt per-object precision (distinguishing "the resource
-// this evaluation is about" from "a resource kind the rule cross-references
-// internally") — ResourceToControlsMap only tracks a control's declared
-// match resources as one flat set, so a failure in any of a control's match
-// kinds anywhere in the scope trips this for every Passed resource under
-// that control in that scope. See https://github.com/kubescape/kubescape/issues/3069.
-const SubStatusIncompleteCoverage apis.ScanningSubStatus = "incompleteCoverage"
+
 
 // ControlAttributeRequiresWholeClusterInput marks a control whose rules join
 // objects that live in different namespaces. Such a control must be evaluated
@@ -921,7 +905,7 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 
 	// incompleteCoverage is computed once per rule-scope call (not per
 	// resource, it's the same answer for all of them) so a Passed verdict
-	// below can be tagged with SubStatusIncompleteCoverage when at least one
+	// below can be tagged with apis.SubStatusIncompleteCoverage when at least one
 	// of this control's dependency GVRs failed to collect in this scope.
 	incompleteCoverage := opap.hasUnreachableDependency(controlID)
 
@@ -967,7 +951,7 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 			Status:                apis.StatusPassed,
 		}
 		if incompleteCoverage {
-			passResult.SubStatus = SubStatusIncompleteCoverage
+			passResult.SubStatus = apis.SubStatusIncompleteCoverage
 		}
 		resources[id] = passResult
 	}
