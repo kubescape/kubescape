@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	v1 "k8s.io/api/core/v1"
@@ -23,6 +24,7 @@ type portForward struct {
 	*portforward.PortForwarder
 	localPort string
 	stopChan  chan struct{}
+	stopOnce  sync.Once
 	readyChan chan struct{}
 	errChan   chan error
 	out       *bytes.Buffer
@@ -111,11 +113,11 @@ func (p *portForward) GetPortForwardLocalhost() string {
 	return "localhost:" + p.localPort
 }
 
+// StopPortForwarder safely terminates the port forwarder by closing the stop channel idempotently.
 func (p *portForward) StopPortForwarder() {
-	select {
-	case p.stopChan <- struct{}{}:
-	default:
-	}
+	p.stopOnce.Do(func() {
+		close(p.stopChan)
+	})
 }
 
 func (p *portForward) StartPortForwarder() error {

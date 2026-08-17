@@ -41,7 +41,7 @@ require (
 	github.com/johnfercher/maroto/v2 v2.2.2
 	github.com/json-iterator/go v1.1.12
 	github.com/jwalton/gchalk v1.3.0
-	github.com/kubescape/backend v0.0.40
+	github.com/kubescape/backend v0.0.46
 	github.com/kubescape/go-git-url v0.0.31
 	github.com/kubescape/go-logger v0.0.28
 	github.com/kubescape/k8s-interface v0.0.209
@@ -58,8 +58,8 @@ require (
 	github.com/moby/buildkit v0.29.0
 	github.com/open-policy-agent/opa v1.14.1
 	github.com/owenrumney/go-sarif/v2 v2.2.0
-	github.com/prometheus/common v0.67.5
 	github.com/project-copacetic/copacetic v0.10.0
+	github.com/prometheus/common v0.67.5
 	github.com/quay/claircore v1.5.35
 	github.com/schollz/progressbar/v3 v3.13.0
 	github.com/sergi/go-diff v1.4.0
@@ -95,11 +95,13 @@ require (
 require (
 	cel.dev/expr v0.25.1 // indirect
 	cloud.google.com/go v0.123.0 // indirect
+	cloud.google.com/go/artifactregistry v1.20.0 // indirect
 	cloud.google.com/go/auth v0.20.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	cloud.google.com/go/container v1.46.0 // indirect
 	cloud.google.com/go/iam v1.11.0 // indirect
+	cloud.google.com/go/longrunning v1.0.0 // indirect
 	cloud.google.com/go/monitoring v1.25.0 // indirect
 	cloud.google.com/go/storage v1.62.2 // indirect
 	cyphar.com/go-pathrs v0.2.1 // indirect
@@ -111,6 +113,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization v1.0.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2 v2.1.1 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerregistry/armcontainerregistry v1.2.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v2 v2.4.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Azure/go-autorest v14.2.0+incompatible // indirect
@@ -623,3 +626,5 @@ replace github.com/anchore/stereoscope => github.com/matthyx/stereoscope v0.0.0-
 replace github.com/google/go-containerregistry => github.com/matthyx/go-containerregistry v0.0.0-20250916162850-293c5b36a9f8
 
 replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.0-20260322054632-16583c73e9b8
+
+replace github.com/kubescape/k8s-interface => github.com/doraem-on/k8s-interface v0.0.218-0.20260815050130-fa6fe1e9bc98

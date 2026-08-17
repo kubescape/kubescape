@@ -7,7 +7,6 @@ import (
 	"html/template"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 
@@ -170,29 +169,6 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableV
 	return resourceTableView
 }
 
-// buildImageScanSummary aggregates CVE, package-score, and severity data for an image scan report (#2782)
-func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.ImageScanSummary {
-	imageScanSummary := &imageprinter.ImageScanSummary{
-		CVEs:                  []imageprinter.CVE{},
-		PackageScores:         map[string]*imageprinter.PackageScore{},
-		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
-	}
-
-	for i := range imageScanData {
-		if !slices.Contains(imageScanSummary.Images, imageScanData[i].Image) {
-			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
-		}
-
-		cves := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
-		imageScanSummary.CVEs = append(imageScanSummary.CVEs, cves...)
-
-		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
-		setSeverityToSummaryMap(cves, imageScanSummary.MapsSeverityToSummary)
-	}
-
-	return imageScanSummary
-}
-
 func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary, resource workloadinterface.IMetadata) ResourceControlResult {
 	ctlSeverity := apis.ControlSeverityToString(control.GetScoreFactor())
 	ctlName := resourceControl.GetName()
@@ -220,8 +196,10 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 	return ctlResults
 }
 
-func (p *HtmlPrinter) CloseWriter() {
+// CloseWriter closes the HTML output writer, returning any error from flushing or closing.
+func (p *HtmlPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
+		return p.writer.Close()
 	}
+	return nil
 }

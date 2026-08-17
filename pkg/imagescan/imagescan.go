@@ -265,10 +265,17 @@ func (s *Service) ExceedsSeverityThreshold(severity vulnerability.Severity, matc
 		return false
 	}
 	for m := range matches.Enumerate() {
-		//nolint:staticcheck // deprecated but replacing it requires refactoring
-		metadata, err := s.vp.VulnerabilityMetadata(m.Vulnerability.Reference)
-		if err != nil {
-			continue
+		metadata := m.Vulnerability.Metadata
+		if metadata == nil || vulnerability.ParseSeverity(metadata.Severity) == vulnerability.UnknownSeverity {
+			if s.vp == nil {
+				continue
+			}
+			var err error
+			//nolint:staticcheck // fallback for matches without a known embedded severity
+			metadata, err = s.vp.VulnerabilityMetadata(m.Vulnerability.Reference)
+			if err != nil {
+				continue
+			}
 		}
 
 		if vulnerability.ParseSeverity(metadata.Severity) < severity {

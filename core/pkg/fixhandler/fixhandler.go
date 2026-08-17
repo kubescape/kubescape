@@ -287,10 +287,10 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			if err := json.Unmarshal(profileData, &cp); err == nil {
 				containerProfile = &cp
 			} else {
-				logger.L().Ctx(ctx).Warning("Failed to unmarshal container profile: " + err.Error())
+				logger.L().Ctx(ctx).Warning("Failed to unmarshal container profile: " + sanitizeForLog(err.Error()))
 			}
 		} else {
-			logger.L().Ctx(ctx).Warning("Failed to read container profile: " + err.Error())
+			logger.L().Ctx(ctx).Warning("Failed to read container profile: " + sanitizeForLog(err.Error()))
 		}
 	}
 
@@ -454,6 +454,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			if resourceObj != nil && resourceObj.GetObject() != nil {
 				rawManifest, _ = json.Marshal(resourceObj.GetObject())
 			}
+
 			var workloadKind string
 			var containerName string
 
@@ -463,24 +464,31 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 			// Verify resourceObj matches containerProfile's workload labels
 			labels := containerProfile.GetLabels()
+			profileMatches := true
 			if labels != nil {
 				containerName = labels["kubescape.io/workload-container-name"]
 				profileKind := labels["kubescape.io/workload-kind"]
 				profileName := labels["kubescape.io/workload-name"]
+				profileNamespace := labels["kubescape.io/workload-namespace"]
 
 				if resourceObj != nil {
 					if profileKind != "" && !strings.EqualFold(profileKind, resourceObj.GetKind()) {
-						continue // Kind mismatch, skip drift detection for this resource
+						profileMatches = false // Kind mismatch, skip drift detection for this resource
 					}
 					if profileName != "" && profileName != resourceObj.GetName() {
-						continue // Name mismatch, skip drift detection for this resource
+						profileMatches = false // Name mismatch, skip drift detection for this resource
+					}
+					if profileNamespace != "" && profileNamespace != resourceObj.GetNamespace() {
+						profileMatches = false // Namespace mismatch, skip drift detection for this resource
 					}
 				}
 			}
 
-			fixes := DetectProfileDrift(rawManifest, containerProfile, workloadKind, containerName, rfi.DocumentIndex)
-			for _, fix := range fixes {
-				rfi.YamlExpressions[fix.YamlExpression] = armotypes.FixPath{Path: fix.YamlExpression, Value: ""}
+			if profileMatches {
+				fixes := DetectProfileDrift(rawManifest, containerProfile, workloadKind, containerName, rfi.DocumentIndex)
+				for _, fix := range fixes {
+					rfi.YamlExpressions[fix.YamlExpression] = armotypes.FixPath{Path: fix.YamlExpression, Value: ""}
+				}
 			}
 		}
 

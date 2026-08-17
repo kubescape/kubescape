@@ -3,6 +3,7 @@ package hostsensorutils
 import (
 	"os"
 	"testing"
+	"time"
 
 	restclient "k8s.io/client-go/rest"
 
@@ -90,6 +91,57 @@ func TestHostSensorCache_OptInRoundTrip(t *testing.T) {
 	withK8sHost(t, "https://cluster-b.example.com")
 	_, err = loadFromCache("kubernetes-admin@kubernetes", "KubeletInfo")
 	assert.Error(t, err, "cluster B must not read cluster A's cached host data")
+}
+
+func TestSaveToCache_ConcurrentWritersUseDistinctTemporaryFiles(t *testing.T) {
+	withTempCacheDir(t)
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+	withK8sHost(t, "https://cluster-a.example.com")
+
+	ready := make(chan struct{}, 2)
+	release := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+	renameAtBarrier := func(oldPath, newPath string) error {
+		ready <- struct{}{}
+		<-release
+		return os.Rename(oldPath, newPath)
+	}
+
+	errCh := make(chan error, 2)
+	for _, name := range []string{"node-a", "node-b"} {
+		env := hostsensor.HostSensorDataEnvelope{}
+		env.SetName(name)
+		go func() {
+			errCh <- saveToCacheWithRename("ctx", "KubeletInfo", []hostsensor.HostSensorDataEnvelope{env}, renameAtBarrier)
+		}()
+	}
+
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for range 2 {
+		select {
+		case <-ready:
+		case err := <-errCh:
+			require.NoError(t, err, "writer exited before reaching rename")
+			t.Fatal("writer exited before reaching rename")
+		case <-timer.C:
+			t.Fatal("writers did not reach rename barrier")
+		}
+	}
+	close(release)
+	released = true
+	require.NoError(t, <-errCh)
+	require.NoError(t, <-errCh)
+
+	got, err := loadFromCache("ctx", "KubeletInfo")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Contains(t, []string{"node-a", "node-b"}, got[0].GetName())
 }
 
 // TestLoadFromCache_UnresolvedClusterIdentityIsRejected guards against the

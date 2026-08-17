@@ -114,6 +114,7 @@ func (rh *ResultsHandler) ToJson() ([]byte, error) {
 		Results        []resultWithEnrichment       `json:"results,omitempty"`
 		ResourceLabels map[string]map[string]string `json:"resourceLabels,omitempty"`
 		ScanCoverage   *cautils.ScanCoverage        `json:"scanCoverage,omitempty"`
+		ExceptionAudit *cautils.ExceptionAudit      `json:"exceptionAudit,omitempty"`
 	}{
 		PostureReport: finalizedReport,
 		SummaryDetails: summaryWithEnrichment{
@@ -123,6 +124,7 @@ func (rh *ResultsHandler) ToJson() ([]byte, error) {
 		Results:        results,
 		ResourceLabels: enrichedReport.ResourceLabels,
 		ScanCoverage:   enrichedReport.ScanCoverage,
+		ExceptionAudit: rh.ScanData.ExceptionAudit,
 	}
 
 	return json.Marshal(&output)
@@ -219,11 +221,13 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		return printerv2.NewCycloneDXPrinter()
 	case printer.SPDXFormat:
 		return printerv2.NewSPDXPrinter()
+	case printer.PolicyReportFormat:
+		return printerv2.NewPolicyReportPrinter()
 	default:
 		if printFormat != printer.PrettyFormat {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
 		}
-		return printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName)
+		return printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName, scanInfo.ShowEvidence, scanInfo.ShowSecrets)
 	}
 }
 
@@ -251,7 +255,7 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 	}
 
 	switch printFormat {
-	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat, printer.MarkdownFormat:
+	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat, printer.MarkdownFormat, printer.PolicyReportFormat:
 		return false, nil
 	default:
 		return true, nil

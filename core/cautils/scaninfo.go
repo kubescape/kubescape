@@ -115,6 +115,7 @@ type PolicyIdentifier struct {
 
 type ScanInfo struct {
 	UseExceptions         string   // Load file with exceptions configuration
+	AuditExceptions       bool     // Include exception usage audit in supported scan outputs
 	ControlsInputs        string   // Load file with inputs for controls
 	AttackTracks          string   // Load file with attack tracks
 	UseFrom               []string // Load framework from local file (instead of download). Use when running offline
@@ -151,6 +152,8 @@ type ScanInfo struct {
 	FrameworkScan         bool                         // false if scanning control
 	ScanAll               bool                         // true if scan all frameworks
 	OmitRawResources      bool                         // true if omit raw resources from the output
+	ShowEvidence          bool                         // Show evidence paths with current field values in pretty-printer output (-E / --show-evidence)
+	ShowSecrets           bool                         // Show secret field values in evidence output; redacted by default (--show-secrets)
 	PrintAttackTree       bool                         // true if print attack tree
 	EnableRegoPrint       bool                         // true if print rego
 	ScanObject            *objectsenvelopes.ScanObject // identifies a single resource (k8s object) to be scanned

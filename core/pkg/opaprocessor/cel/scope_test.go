@@ -57,6 +57,60 @@ func TestVAPAppliesTo(t *testing.T) {
 	}
 }
 
+// annotated returns obj carrying the resource-plural hint.
+func annotated(o map[string]any, plural string) map[string]any {
+	o["metadata"].(map[string]any)["annotations"] = map[string]any{resourcePluralAnnotation: plural}
+	return o
+}
+
+// TestVAPAppliesToCRDPlural covers the plurals the kind->resource guess does not
+// produce. A CRD registers spec.names.plural itself, so a policy constraining
+// "worker-pools" would be silently dropped by an exact compare against the
+// guessed "workerpools": the control evaluates against nothing and reads clean.
+func TestVAPAppliesToCRDPlural(t *testing.T) {
+	const apiVersion = "agentsubstrate.google.com/v1"
+	workerPool := func() map[string]any { return obj(apiVersion, "WorkerPool") }
+
+	cases := []struct {
+		name      string
+		resources []string
+		obj       map[string]any
+		want      bool
+	}{
+		{"hyphenated plural matches the guess", []string{"worker-pools"}, workerPool(), true},
+		{"underscored plural matches the guess", []string{"worker_pools"}, workerPool(), true},
+		{"guessed plural still matches exactly", []string{"workerpools"}, workerPool(), true},
+		{"annotation resolves a plural the guess cannot reach", []string{"wpools"}, annotated(workerPool(), "wpools"), true},
+		{"annotated plural matches a separated rule", []string{"worker-pools"}, annotated(workerPool(), "workerpools"), true},
+		{"unreachable plural without the annotation is out of scope", []string{"wpools"}, workerPool(), false},
+		{"blank annotation falls back to the guess", []string{"workerpools"}, annotated(workerPool(), "  "), true},
+		{"an unrelated resource is still out of scope", []string{"actortemplates"}, workerPool(), false},
+		{"a subresource rule never matches the bare resource", []string{"worker-pools/status"}, workerPool(), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := vapWithConstraints(rule([]string{"agentsubstrate.google.com"}, []string{"v1"}, tc.resources))
+			assert.Equal(t, tc.want, v.appliesTo(tc.obj))
+		})
+	}
+
+	t.Run("exclusion honors the same plural resolution", func(t *testing.T) {
+		v := &VAP{matchConstraints: &admissionregistrationv1.MatchResources{
+			ResourceRules:        []admissionregistrationv1.NamedRuleWithOperations{rule([]string{"*"}, []string{"*"}, []string{"*"})},
+			ExcludeResourceRules: []admissionregistrationv1.NamedRuleWithOperations{rule([]string{"agentsubstrate.google.com"}, []string{"v1"}, []string{"worker-pools"})},
+		}}
+		assert.False(t, v.appliesTo(workerPool()))
+		assert.True(t, v.appliesTo(obj(apiVersion, "ActorTemplate")))
+	})
+
+	t.Run("annotations that are not a string map fall back to the guess", func(t *testing.T) {
+		o := workerPool()
+		o["metadata"].(map[string]any)["annotations"] = map[string]any{resourcePluralAnnotation: 42}
+		v := vapWithConstraints(rule([]string{"agentsubstrate.google.com"}, []string{"v1"}, []string{"workerpools"}))
+		assert.True(t, v.appliesTo(o))
+	})
+}
+
 func TestVAPAppliesToWildcards(t *testing.T) {
 	any := vapWithConstraints(rule([]string{"*"}, []string{"*"}, []string{"*"}))
 	assert.True(t, any.appliesTo(obj("v1", "Pod")))
@@ -129,7 +183,7 @@ func TestVAPAppliesToCoversEveryBundleKind(t *testing.T) {
 						kind, ok := canonicalKinds[res]
 						require.Truef(t, ok, "policy %q constrains resource %q with no canonical Kind in the test; add it to canonicalKinds and confirm UnsafeGuessKindToResource maps that Kind back to %q", name, res, res)
 						assert.Truef(t, vap.appliesTo(obj(apiVersion, kind)),
-							"policy %q constrains %q but appliesTo rejects a %s %s; UnsafeGuessKindToResource likely mis-guessed the plural", name, res, apiVersion, kind)
+							"policy %q constrains %q but appliesTo rejects a %s %s; annotate scanned %s objects with %s=%q if the guess cannot reach that plural", name, res, apiVersion, kind, kind, resourcePluralAnnotation, res)
 					}
 				}
 			}
@@ -196,6 +250,76 @@ func TestVAPAppliesToOperations(t *testing.T) {
 	})
 }
 
+// withScope returns a copy of the rule constrained to the given scope.
+func withScope(r admissionregistrationv1.NamedRuleWithOperations, scope admissionregistrationv1.ScopeType) admissionregistrationv1.NamedRuleWithOperations {
+	r.Scope = &scope
+	return r
+}
+
+// inNamespace returns a copy of the object placed in a namespace, which is what
+// proves it namespaced offline.
+func inNamespace(o map[string]any, namespace string) map[string]any {
+	meta, _ := o["metadata"].(map[string]any)
+	placed := make(map[string]any, len(meta))
+	for k, v := range meta {
+		placed[k] = v
+	}
+	placed["namespace"] = namespace
+
+	out := make(map[string]any, len(o))
+	for k, v := range o {
+		out[k] = v
+	}
+	out["metadata"] = placed
+	return out
+}
+
+// TestVAPAppliesToScope pins the scope side of rule matching. A Cluster rule is
+// the only one that narrows offline: an object carrying a namespace is proven
+// namespaced, so admission would never hand it to that rule. An absent
+// namespace proves nothing (the apiserver defaults it before admission), so
+// every other combination stays matched.
+func TestVAPAppliesToScope(t *testing.T) {
+	pods := rule([]string{""}, []string{"v1"}, []string{"pods"})
+
+	cases := []struct {
+		name      string
+		scope     *admissionregistrationv1.ScopeType
+		namespace string
+		want      bool
+	}{
+		{"unset scope matches a namespaced object", nil, "prod", true},
+		{"unset scope matches an object with no namespace", nil, "", true},
+		{"wildcard scope matches a namespaced object", scopePtr(admissionregistrationv1.AllScopes), "prod", true},
+		{"Namespaced scope matches a namespaced object", scopePtr(admissionregistrationv1.NamespacedScope), "prod", true},
+		{"Namespaced scope still matches when the namespace is absent", scopePtr(admissionregistrationv1.NamespacedScope), "", true},
+		{"Cluster scope does not match a namespaced object", scopePtr(admissionregistrationv1.ClusterScope), "prod", false},
+		{"Cluster scope matches when the namespace is absent", scopePtr(admissionregistrationv1.ClusterScope), "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := pods
+			r.Scope = tc.scope
+			o := obj("v1", "Pod")
+			if tc.namespace != "" {
+				o = inNamespace(o, tc.namespace)
+			}
+			assert.Equal(t, tc.want, vapWithConstraints(r).appliesTo(o))
+		})
+	}
+
+	t.Run("a Cluster-scoped exclusion does not exempt a namespaced object", func(t *testing.T) {
+		v := &VAP{matchConstraints: &admissionregistrationv1.MatchResources{
+			ResourceRules:        []admissionregistrationv1.NamedRuleWithOperations{pods},
+			ExcludeResourceRules: []admissionregistrationv1.NamedRuleWithOperations{withScope(pods, admissionregistrationv1.ClusterScope)},
+		}}
+		assert.True(t, v.appliesTo(inNamespace(obj("v1", "Pod"), "prod")),
+			"the exclusion only covers cluster-scoped objects, so a namespaced one is still matched")
+	})
+}
+
+func scopePtr(s admissionregistrationv1.ScopeType) *admissionregistrationv1.ScopeType { return &s }
+
 // TestBundleControlRulesAllMatchModeledCreate is the safety case for honoring
 // operations, and it is the assertion the kind sweep cannot make: that sweep
 // skips subresources, which is exactly where the bundle's non-CREATE rules
@@ -241,6 +365,8 @@ func TestBundleUsesNoUnevaluatedScoping(t *testing.T) {
 		for _, rr := range rules {
 			assert.Emptyf(t, rr.ResourceNames,
 				"policy %q now uses resourceNames: appliesTo matches it against metadata.name, so confirm the scanned manifests carry the names it expects", name)
+			assert.Truef(t, rr.Scope == nil || *rr.Scope == admissionregistrationv1.AllScopes,
+				"policy %q now scopes a rule to %v: appliesTo narrows a Cluster rule by the object's namespace, so confirm that matches the policy's intent", name, rr.Scope)
 		}
 	}
 }

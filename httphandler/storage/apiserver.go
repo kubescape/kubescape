@@ -225,14 +225,113 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 }
 
 func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurationScanSpec, newSpec v1beta1.WorkloadConfigurationScanSpec) v1beta1.WorkloadConfigurationScanSpec {
-	existingSpec.Controls = newSpec.Controls
+	if existingSpec.Controls == nil {
+		existingSpec.Controls = make(map[string]v1beta1.ScannedControl)
+	}
+	for ctrlID, newCtrl := range newSpec.Controls {
+		existingCtrl, found := existingSpec.Controls[ctrlID]
+		if !found {
+			existingSpec.Controls[ctrlID] = newCtrl
+			continue
+		}
+
+		existingStatus := apis.ScanningStatus(existingCtrl.Status.Status)
+		existingSubStatus := apis.ScanningSubStatus(existingCtrl.Status.SubStatus)
+		newStatus := apis.ScanningStatus(newCtrl.Status.Status)
+		newSubStatus := apis.ScanningSubStatus(newCtrl.Status.SubStatus)
+		mergedStatus, mergedSubStatus := apis.CompareStatusAndSubStatus(existingStatus, newStatus, existingSubStatus, newSubStatus)
+
+		info := newCtrl.Status.Info
+		if info == "" {
+			info = existingCtrl.Status.Info
+		}
+
+		severity := newCtrl.Severity
+		if severity.Severity == "" {
+			severity = existingCtrl.Severity
+		}
+
+		name := newCtrl.Name
+		if name == "" {
+			name = existingCtrl.Name
+		}
+
+		controlID := existingCtrl.ControlID
+		if controlID == "" {
+			controlID = newCtrl.ControlID
+		}
+
+		existingSpec.Controls[ctrlID] = v1beta1.ScannedControl{
+			ControlID: controlID,
+			Name:      name,
+			Severity:  severity,
+			Status: v1beta1.ScannedControlStatus{
+				Status:    string(mergedStatus),
+				SubStatus: string(mergedSubStatus),
+				Info:      info,
+			},
+			Rules: newCtrl.Rules,
+		}
+	}
+
+	for ctrlID := range existingSpec.Controls {
+		if _, ok := newSpec.Controls[ctrlID]; !ok {
+			delete(existingSpec.Controls, ctrlID)
+		}
+	}
 
 	existingSpec.RelatedObjects = newSpec.RelatedObjects
 	return existingSpec
 }
 
 func mergeWorkloadConfigurationScanSummarySpec(existingSpec v1beta1.WorkloadConfigurationScanSummarySpec, newSpec v1beta1.WorkloadConfigurationScanSummarySpec) v1beta1.WorkloadConfigurationScanSummarySpec {
-	existingSpec.Controls = newSpec.Controls
+	if existingSpec.Controls == nil {
+		existingSpec.Controls = make(map[string]v1beta1.ScannedControlSummary)
+	}
+	for ctrlID, newCtrl := range newSpec.Controls {
+		existingCtrl, found := existingSpec.Controls[ctrlID]
+		if !found {
+			existingSpec.Controls[ctrlID] = newCtrl
+			continue
+		}
+
+		existingStatus := apis.ScanningStatus(existingCtrl.Status.Status)
+		existingSubStatus := apis.ScanningSubStatus(existingCtrl.Status.SubStatus)
+		newStatus := apis.ScanningStatus(newCtrl.Status.Status)
+		newSubStatus := apis.ScanningSubStatus(newCtrl.Status.SubStatus)
+		mergedStatus, mergedSubStatus := apis.CompareStatusAndSubStatus(existingStatus, newStatus, existingSubStatus, newSubStatus)
+
+		info := newCtrl.Status.Info
+		if info == "" {
+			info = existingCtrl.Status.Info
+		}
+
+		severity := newCtrl.Severity
+		if severity.Severity == "" {
+			severity = existingCtrl.Severity
+		}
+
+		controlID := existingCtrl.ControlID
+		if controlID == "" {
+			controlID = newCtrl.ControlID
+		}
+
+		existingSpec.Controls[ctrlID] = v1beta1.ScannedControlSummary{
+			ControlID: controlID,
+			Severity:  severity,
+			Status: v1beta1.ScannedControlStatus{
+				Status:    string(mergedStatus),
+				SubStatus: string(mergedSubStatus),
+				Info:      info,
+			},
+		}
+	}
+
+	for ctrlID := range existingSpec.Controls {
+		if _, ok := newSpec.Controls[ctrlID]; !ok {
+			delete(existingSpec.Controls, ctrlID)
+		}
+	}
 
 	existingSpec.Severities = calculateSeveritiesSummaryFromControls(existingSpec.Controls)
 	return existingSpec

@@ -6,14 +6,17 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	storagefake "github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 )
 
@@ -225,6 +228,72 @@ func TestReadResourceWithFakeClient(t *testing.T) {
 				ids = append(ids, resource["id"].(string))
 			}
 			require.ElementsMatch(t, test.wantIDs, ids)
+		})
+	}
+}
+
+func TestGetConfigurationDrift_MarshalErrorIsToolError(t *testing.T) {
+	orig := jsonMarshal
+	t.Cleanup(func() { jsonMarshal = orig })
+	jsonMarshal = func(any) ([]byte, error) {
+		return nil, fmt.Errorf("marshal boom")
+	}
+
+	profile := &storagev1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "nginx-profile", Namespace: "default"},
+	}
+	ksClient := storagefake.NewClientset(profile)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "nginx", Namespace: "default"},
+	}
+	ksServer := &KubescapeMcpserver{
+		ksClient: ksClient.SpdxV1beta1(),
+		k8sClient: &k8sinterface.KubernetesApi{
+			KubernetesClient: fake.NewClientset(pod),
+		},
+	}
+
+	result, err := ksServer.CallTool(context.Background(), "get_configuration_drift", map[string]any{
+		"profile_name":  "nginx-profile",
+		"workload_name": "nginx",
+		"workload_kind": "pod",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.IsError)
+	text := toolResultText(t, result)
+	assert.Contains(t, text, "failed to marshal workload manifest")
+	assert.Contains(t, text, "marshal boom")
+}
+
+func TestGetConfigurationDrift_SupportsAllWorkloadKinds(t *testing.T) {
+	profile := &storagev1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-profile", Namespace: "default"},
+	}
+	ksClient := storagefake.NewClientset(profile)
+
+	// The fake k8s client returns "not found" for all workloads, but that's fine:
+	// we only need to verify the tool doesn't reject the kind as "unsupported".
+	ksServer := &KubescapeMcpserver{
+		ksClient: ksClient.SpdxV1beta1(),
+		k8sClient: &k8sinterface.KubernetesApi{
+			KubernetesClient: fake.NewClientset(),
+		},
+	}
+
+	for _, kind := range []string{"pod", "deployment", "daemonset", "statefulset", "replicaset", "job", "cronjob"} {
+		t.Run(kind, func(t *testing.T) {
+			result, err := ksServer.CallTool(context.Background(), "get_configuration_drift", map[string]any{
+				"profile_name":  "test-profile",
+				"workload_name": "test-workload",
+				"workload_kind": kind,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			text := toolResultText(t, result)
+			// The error should be "not found" (workload doesn't exist in the fake client),
+			// NOT "unsupported workload kind" which would mean the kind was rejected.
+			assert.NotContains(t, text, "unsupported workload kind")
 		})
 	}
 }

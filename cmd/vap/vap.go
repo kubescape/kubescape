@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -35,6 +36,8 @@ var vapHelperCmdExamples = fmt.Sprintf(`
   %[1]s vap create-policy-binding --name my-policy-binding --control C-0016 --namespace=my-namespace | kubectl apply -f -
   # Create a policy binding by ValidatingAdmissionPolicy name
   %[1]s vap create-policy-binding --name my-policy-binding --policy kubescape-c-0016-allow-privilege-escalation --namespace=my-namespace | kubectl apply -f -
+  # Roll a control out in report-only mode before switching it to Deny
+  %[1]s vap create-policy-binding --name my-policy-binding --control C-0016 --action Audit --action Warn | kubectl apply -f -
 `, cautils.ExecName())
 
 func GetVapHelperCmd() *cobra.Command {
@@ -88,7 +91,7 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 	var controlID string
 	var namespaceArr []string
 	var labelArr []string
-	var action string
+	var actionArr []string
 	var parameterReference string
 	var outputFile string
 
@@ -150,8 +153,9 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 					}
 				}
 			}
-			if action != "Deny" && action != "Audit" && action != "Warn" {
-				return fmt.Errorf("invalid action: %s", action)
+			actions, err := parseValidationActions(actionArr)
+			if err != nil {
+				return err
 			}
 			if parameterReference != "" {
 				if err := isValidK8sObjectName(parameterReference); err != nil {
@@ -159,7 +163,7 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 				}
 			}
 
-			content, err := createPolicyBinding(policyBindingName, resolvedPolicyName, action, parameterReference, namespaceArr, labelArr)
+			content, err := createPolicyBinding(policyBindingName, resolvedPolicyName, actions, parameterReference, namespaceArr, labelArr)
 			if err != nil {
 				return err
 			}
@@ -173,7 +177,7 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 	createPolicyBindingCmd.Flags().StringVarP(&controlID, "control", "c", "", "Kubescape control ID to bind resources to")
 	createPolicyBindingCmd.Flags().StringSliceVar(&namespaceArr, "namespace", []string{}, "Resource namespace selector")
 	createPolicyBindingCmd.Flags().StringSliceVar(&labelArr, "label", []string{}, "Resource label selector")
-	createPolicyBindingCmd.Flags().StringVarP(&action, "action", "a", "Deny", "Action to take when policy fails")
+	createPolicyBindingCmd.Flags().StringSliceVarP(&actionArr, "action", "a", []string{string(admissionv1.Deny)}, "Action to take when policy fails, repeatable (Deny, Warn, Audit). Deny and Warn cannot be combined")
 	createPolicyBindingCmd.Flags().StringVarP(&parameterReference, "parameter-reference", "r", "", "Parameter reference object name")
 	createPolicyBindingCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file instead of stdout")
 
@@ -231,11 +235,39 @@ var libraryReleaseFiles = []string{
 	"kubescape-validating-admission-policies.yaml",
 }
 
+// releaseTagPattern is the shape a cel-admission-library release tag may take.
+// It is deliberately an allowlist: the tag is interpolated into the release
+// URL, so any character that carries meaning in a URL path has to stay out.
+// Requiring an alphanumeric first character also rules out "." and ".." on its
+// own. Real tags ("v0.11") and the usual semver decorations ("v1.2.3-rc1",
+// "v1.2.3+build.5") all satisfy it.
+var releaseTagPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
+
+// validateReleaseTag rejects a tag that would change the shape of the release
+// URL rather than just name a release within it. Without this the tag can walk
+// out of the kubescape release path entirely ("../../../../owner/repo/..."):
+// Go's HTTP client forwards the "../" segments verbatim and GitHub resolves
+// them server-side, so the library is served from an unrelated repository while
+// the log line still names the requested kubescape release. A "?" or "#" is the
+// same class of bug without an attacker - it truncates the URL, so every file
+// in libraryReleaseFiles resolves to the same object and the concatenated
+// output is silently wrong.
+func validateReleaseTag(tag string) error {
+	if !releaseTagPattern.MatchString(tag) {
+		return fmt.Errorf("invalid release tag %q: expected a release tag such as v0.11", tag)
+	}
+	return nil
+}
+
 // downloadLibrary fetches the library files from one pinned release tag and
 // concatenates them into a single multi-document YAML stream. The tag is
 // always explicit — downloading whatever "latest" points at would reintroduce
 // the skew deployLibrary's embedded default exists to prevent.
 func downloadLibrary(tag string, timeout time.Duration) (string, error) {
+	if err := validateReleaseTag(tag); err != nil {
+		return "", err
+	}
+
 	logger.L().Info(fmt.Sprintf("Downloading the Kubescape CEL admission policy library release %s", tag))
 
 	parts := make([]string, 0, len(libraryReleaseFiles))
@@ -303,8 +335,59 @@ func isValidNamespace(name string) error {
 	return nil
 }
 
+// supportedValidationActions are the enforcement actions the admission API
+// accepts on a binding, matched case-sensitively as the API spells them.
+var supportedValidationActions = []admissionv1.ValidationAction{
+	admissionv1.Deny,
+	admissionv1.Warn,
+	admissionv1.Audit,
+}
+
+// parseValidationActions turns the --action values into the binding's
+// validationActions set. The field is a set on the API, so a binding can carry
+// more than one action — the usual rollout is Audit plus Warn first and Deny
+// once the findings are clean, which a single-valued flag could not express.
+//
+// The two combinations the apiserver rejects are refused here rather than at
+// apply time: a repeated action (the field is a listType=set) and Deny with
+// Warn, which the API forbids because it would report the same failure twice.
+// Order is preserved so the emitted YAML reads back the way it was asked for.
+func parseValidationActions(values []string) ([]admissionv1.ValidationAction, error) {
+	if len(values) == 0 {
+		return nil, fmt.Errorf("at least one --action is required")
+	}
+	actions := make([]admissionv1.ValidationAction, 0, len(values))
+	seen := make(map[admissionv1.ValidationAction]struct{}, len(values))
+	for _, value := range values {
+		action := admissionv1.ValidationAction(strings.TrimSpace(value))
+		if !isSupportedValidationAction(action) {
+			return nil, fmt.Errorf("invalid action: %s", value)
+		}
+		if _, dup := seen[action]; dup {
+			return nil, fmt.Errorf("duplicate action: %s", action)
+		}
+		seen[action] = struct{}{}
+		actions = append(actions, action)
+	}
+	if _, deny := seen[admissionv1.Deny]; deny {
+		if _, warn := seen[admissionv1.Warn]; warn {
+			return nil, fmt.Errorf("actions Deny and Warn cannot be combined")
+		}
+	}
+	return actions, nil
+}
+
+func isSupportedValidationAction(action admissionv1.ValidationAction) bool {
+	for _, supported := range supportedValidationActions {
+		if action == supported {
+			return true
+		}
+	}
+	return false
+}
+
 // Create a policy binding
-func createPolicyBinding(bindingName string, policyName string, action string, paramRefName string, namespaceArr []string, labelMatch []string) (string, error) {
+func createPolicyBinding(bindingName string, policyName string, actions []admissionv1.ValidationAction, paramRefName string, namespaceArr []string, labelMatch []string) (string, error) {
 	// Create a policy binding struct
 	policyBinding := &admissionv1.ValidatingAdmissionPolicyBinding{}
 	policyBinding.APIVersion = "admissionregistration.k8s.io/v1"
@@ -341,7 +424,7 @@ func createPolicyBinding(bindingName string, policyName string, action string, p
 		}
 	}
 
-	policyBinding.Spec.ValidationActions = []admissionv1.ValidationAction{admissionv1.ValidationAction(action)}
+	policyBinding.Spec.ValidationActions = actions
 	paramAction := admissionv1.DenyAction
 	if paramRefName != "" {
 		policyBinding.Spec.ParamRef = &admissionv1.ParamRef{

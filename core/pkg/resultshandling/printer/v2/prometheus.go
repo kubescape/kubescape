@@ -110,8 +110,10 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 	return nil
 }
 
-func (p *PrometheusPrinter) CloseWriter() {
+// CloseWriter closes the Prometheus output writer, returning any error from flushing or closing.
+func (p *PrometheusPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
+		return p.writer.Close()
 	}
+	return nil
 }

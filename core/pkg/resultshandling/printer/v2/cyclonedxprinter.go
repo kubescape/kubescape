@@ -85,6 +85,7 @@ func (cp *CycloneDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *caut
 
 func (cp *CycloneDXPrinter) PrintNextSteps() {}
 
+// CloseWriter closes the CycloneDX output writer, returning any error from flushing or closing.
 func (cp *CycloneDXPrinter) CloseWriter() error {
 	if cp.writer != nil && cp.writer != os.Stdout {
 		return cp.writer.Close()

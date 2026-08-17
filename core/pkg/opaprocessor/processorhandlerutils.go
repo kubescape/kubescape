@@ -42,6 +42,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	}
 
 	processor := exceptions.NewProcessor()
+	loadedExceptions := append([]armotypes.PostureExceptionPolicy(nil), opap.Exceptions...)
 
 	// filter expired exceptions before applying them
 	opap.Exceptions = filterExpiredExceptions(opap.Exceptions)
@@ -76,6 +77,10 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	// map control to error
 	controlToInfoMap := mapControlToInfo(opap.ResourceToControlsMap, opap.InfoMap, opap.Report.SummaryDetails.Controls)
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
+
+	if opap.AuditExceptions {
+		opap.ExceptionAudit = buildExceptionAudit(loadedExceptions, opap.Exceptions, opap.ResourcesResult, opap.AllResources, opap.AllPolicies, processor)
+	}
 }
 
 // applyExceptionsToManualControls marks manual controls as passed+w/exceptions when
@@ -298,9 +303,10 @@ func getKubernetesObjects(index resourceGroupIndex, match []reporthandling.RuleM
 	var emitted []bool
 
 	for m := range match {
-		for _, groups := range match[m].APIGroups {
-			for _, version := range match[m].APIVersions {
-				for _, resource := range match[m].Resources {
+		mt := &match[m]
+		for _, groups := range mt.APIGroups {
+			for _, version := range mt.APIVersions {
+				for _, resource := range mt.Resources {
 					for g := range index.groups {
 						group := &index.groups[g]
 						if !matchesKubernetesObjectValue(groups, group.group) || !matchesKubernetesObjectValue(version, group.version) {

@@ -85,6 +85,54 @@ func TestMapping_GetOrCreate_DeterministicAcrossInstances(t *testing.T) {
 		NewMapping().GetOrCreate("res", "same-value"))
 }
 
+// collidingNameA and collidingNameB are two distinct values whose SHA-256
+// digests share their first 8 hex characters (822ee169) and differ from the
+// 9th onwards. They were found by hashing sequential "payments-api-<n>" names
+// and stopping at the first repeated 8-character prefix - reachable after
+// ~90k names, which is the birthday bound for a 32-bit suffix and well inside
+// the number of distinct values one large cluster contributes.
+//
+// The pair is a fixed input, so these tests are deterministic: they do not
+// search for a collision at run time.
+const (
+	collidingNameA = "payments-api-55939"
+	collidingNameB = "payments-api-89940"
+)
+
+// TestMapping_GetOrCreate_TruncatedHashDoesNotCollide covers the case the
+// "different inputs should return different outputs" table entry above
+// asserts but cannot detect: that entry uses two arbitrary values, which
+// pass for any suffix width. This one uses a value pair chosen to collide in
+// the first 32 bits of the digest, so it fails whenever the suffix is
+// truncated that short, and passes only because the retained digest is wide
+// enough to separate them.
+func TestMapping_GetOrCreate_TruncatedHashDoesNotCollide(t *testing.T) {
+	mapping := NewMapping()
+
+	first := mapping.GetOrCreate("res", collidingNameA)
+	second := mapping.GetOrCreate("res", collidingNameB)
+
+	require.Equal(t,
+		pseudoIDSuffix(t, first, "res")[:8],
+		pseudoIDSuffix(t, second, "res")[:8],
+		"test fixture is stale: %q and %q must still collide in the first 32 bits, otherwise this test proves nothing", collidingNameA, collidingNameB)
+
+	assert.NotEqual(t, first, second,
+		"two distinct values must not share a pseudonym: the report cannot tell them apart, and session maps keyed by the pseudonym silently lose one of them")
+}
+
+// TestMapping_GetOrCreate_SuffixRetainsEnoughDigest pins the suffix width
+// itself. Without it, a future change could shorten the digest again and only
+// TestMapping_GetOrCreate_TruncatedHashDoesNotCollide would notice - and only
+// for the one collision the fixture happens to encode.
+func TestMapping_GetOrCreate_SuffixRetainsEnoughDigest(t *testing.T) {
+	suffix := pseudoIDSuffix(t, NewMapping().GetOrCreate("res", "any-value"), "res")
+
+	assert.Len(t, suffix, pseudoIDHashLength)
+	assert.GreaterOrEqual(t, len(suffix), 32,
+		"a suffix shorter than 128 bits brings collisions back within reach of a single large report")
+}
+
 func TestMapping_GetOrCreate_PrefixIsolationAcrossMultiplePrefixes(t *testing.T) {
 	mapping := NewMapping()
 

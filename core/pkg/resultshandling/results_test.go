@@ -608,6 +608,35 @@ func TestToJson(t *testing.T) {
 	// verify it is valid JSON
 	var out map[string]any
 	assert.NoError(t, json.Unmarshal(data, &out))
+	assert.NotContains(t, out, "exceptionAudit")
+}
+
+func TestToJsonIncludesExceptionAuditWhenSet(t *testing.T) {
+	rh := makeResultsHandler(75.0, 50.0)
+	rh.ScanData.ExceptionAudit = &cautils.ExceptionAudit{
+		Generated: true,
+		Summary: cautils.ExceptionAuditSummary{
+			Total:   1,
+			Active:  1,
+			Matched: 1,
+		},
+		Items: []cautils.ExceptionAuditItem{{
+			Name:       "matched-exception",
+			Status:     "matched",
+			MatchCount: 1,
+			ControlIDs: []string{"C-0001"},
+		}},
+	}
+
+	data, err := rh.ToJson()
+	require.NoError(t, err)
+
+	var out struct {
+		ExceptionAudit *cautils.ExceptionAudit `json:"exceptionAudit"`
+	}
+	require.NoError(t, json.Unmarshal(data, &out))
+	require.NotNil(t, out.ExceptionAudit)
+	assert.Equal(t, rh.ScanData.ExceptionAudit, out.ExceptionAudit)
 }
 
 // requireJSONSubset verifies that every value in the legacy JSON remains at
@@ -771,4 +800,98 @@ func TestValidatePrinter_ImageFormatsInvariant(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
+}
+
+// TestClosePrinter_AllV2PrintersImplementErrorCloser tests that all v2 report printers implement
+// the CloseWriter() error interface and properly surface errors on already-closed writers.
+func TestClosePrinter_AllV2PrintersImplementErrorCloser(t *testing.T) {
+	printers := []struct {
+		name    string
+		printer printer.IPrinter
+	}{
+		{"json", printerv2.NewJsonPrinter("")},
+		{"sarif", printerv2.NewSARIFPrinter()},
+		{"html", printerv2.NewHtmlPrinter()},
+		{"yaml", printerv2.NewYamlPrinter()},
+		{"junit", printerv2.NewJunitPrinter(false)},
+		{"markdown", printerv2.NewMarkdownPrinter()},
+		{"pdf", printerv2.NewPdfPrinter()},
+		{"prometheus", printerv2.NewPrometheusPrinter(false)},
+		{"spdx", printerv2.NewSPDXPrinter()},
+		{"cyclonedx", printerv2.NewCycloneDXPrinter()},
+		{"gitlabsast", printerv2.NewGitLabSASTPrinter()},
+		{"csv", printerv2.NewCsvPrinter()},
+		{"pretty", printerv2.NewPrettyPrinter(false, "1.0", false, cautils.ControlViewType, cautils.ScanTypeCluster, nil, "", false, false)},
+		{"silent", &printerv2.SilentPrinter{}},
+	}
+
+	type errorCloser interface {
+		CloseWriter() error
+	}
+
+	for _, tt := range printers {
+		t.Run(tt.name, func(t *testing.T) {
+			closer, ok := tt.printer.(errorCloser)
+			require.True(t, ok, "printer %T must implement CloseWriter() error", tt.printer)
+
+			// When writer is nil/stdout, CloseWriter() must succeed
+			err := closer.CloseWriter()
+			assert.NoError(t, err)
+
+			if tt.name == "silent" {
+				return
+			}
+
+			// When writer points to an explicit file, SetWriter and CloseWriter must work cleanly
+			tmp, tmpErr := os.CreateTemp(t.TempDir(), "close_test*")
+			require.NoError(t, tmpErr)
+			targetName := tmp.Name()
+			_ = tmp.Close()
+
+			setErr := tt.printer.SetWriter(context.Background(), targetName)
+			require.NoError(t, setErr)
+
+			// 1. Initial close on active writer must succeed
+			closeErr := closePrinter(tt.printer)
+			assert.NoError(t, closeErr)
+
+			// 2. Subsequent close on already-closed writer must surface the underlying error
+			secondCloseErr := closePrinter(tt.printer)
+			assert.Error(t, secondCloseErr, "closePrinter must surface error on already-closed writer for %s", tt.name)
+		})
+	}
+}
+
+// mockFailingClosePrinter is a mock IPrinter implementation whose CloseWriter method returns a simulated error.
+type mockFailingClosePrinter struct {
+	printer.IPrinter
+}
+
+// CloseWriter returns a simulated error during writer closure.
+func (m *mockFailingClosePrinter) CloseWriter() error {
+	return errors.New("simulated close flush failure")
+}
+
+// ActionPrint is a no-op implementation of IPrinter.ActionPrint for testing.
+func (m *mockFailingClosePrinter) ActionPrint(_ context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
+	return nil
+}
+
+// Score is a no-op implementation of IPrinter.Score for testing.
+func (m *mockFailingClosePrinter) Score(_ float32) {}
+
+// PrintNextSteps is a no-op implementation of IPrinter.PrintNextSteps for testing.
+func (m *mockFailingClosePrinter) PrintNextSteps() {}
+
+// TestHandleResults_PropagatesPrinterCloseErrors verifies that ResultsHandler.HandleResults
+// joins and propagates close errors returned by UI and output printers.
+func TestHandleResults_PropagatesPrinterCloseErrors(t *testing.T) {
+	rh := &ResultsHandler{
+		UiPrinter:   &mockFailingClosePrinter{},
+		PrinterObjs: []printer.IPrinter{&mockFailingClosePrinter{}},
+	}
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ui printer close: simulated close flush failure")
+	assert.Contains(t, err.Error(), "output printer *resultshandling.mockFailingClosePrinter close: simulated close flush failure")
 }

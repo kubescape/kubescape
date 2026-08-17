@@ -25,6 +25,10 @@ type cachedPoliciesEntry struct {
 	frameworks  []reporthandling.Framework
 }
 
+type policyArtifactPersistence interface {
+	ShouldPersistPolicyArtifacts() bool
+}
+
 // PolicyHandler
 type PolicyHandler struct {
 	clusterName         string
@@ -152,20 +156,25 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 // getScanPolicies - get policies from cache or downloads them. The function returns an error if the policies could not be downloaded.
 func (policyHandler *PolicyHandler) getScanPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, getters *cautils.Getters) ([]reporthandling.Framework, error) {
 	policyIdentifiersSlice := policyIdentifierToSlice(policyIdentifier)
-	// check if policies are cached atomically
-	if entry, exist := policyHandler.cachedPolicies.Get(); exist {
-		// check if the cached policies match the requested policy identifiers
-		if cautils.StringSlicesAreEqual(entry.identifiers, policyIdentifiersSlice) {
-			logger.L().Info("Using cached policies")
-			return deepCopyPolicies(entry.frameworks)
-		}
+	_, isLocalPolicy := getters.PolicyGetter.(*getter.LoadPolicy)
+	// Explicit local policy sources are request-scoped inputs. They must not be
+	// shadowed by, or replace, a shared cache entry for the same identifiers.
+	if !isLocalPolicy {
+		// check if policies are cached atomically
+		if entry, exist := policyHandler.cachedPolicies.Get(); exist {
+			// check if the cached policies match the requested policy identifiers
+			if cautils.StringSlicesAreEqual(entry.identifiers, policyIdentifiersSlice) {
+				logger.L().Info("Using cached policies")
+				return deepCopyPolicies(entry.frameworks)
+			}
 
-		logger.L().Debug("Cached policies are not the same as the requested policies")
-		policyHandler.cachedPolicies.Invalidate()
+			logger.L().Debug("Cached policies are not the same as the requested policies")
+			policyHandler.cachedPolicies.Invalidate()
+		}
 	}
 
 	policies, err := policyHandler.downloadScanPolicies(ctx, policyIdentifier, getters)
-	if err == nil {
+	if err == nil && !isLocalPolicy {
 		policyHandler.cachedPolicies.Set(cachedPoliciesEntry{
 			identifiers: policyIdentifiersSlice,
 			frameworks:  policies,
@@ -191,7 +200,10 @@ func deepCopyPolicies(src []reporthandling.Framework) ([]reporthandling.Framewor
 
 func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, getters *cautils.Getters) ([]reporthandling.Framework, error) {
 	frameworks := []reporthandling.Framework{}
-	_, isLocalPolicy := getters.PolicyGetter.(*getter.LoadPolicy)
+	persistPolicyArtifacts := true
+	if persistence, ok := getters.PolicyGetter.(policyArtifactPersistence); ok {
+		persistPolicyArtifacts = persistence.ShouldPersistPolicyArtifacts()
+	}
 
 	switch getScanKind(policyIdentifier) {
 	case apisv1.KindFramework: // Download frameworks
@@ -206,8 +218,8 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 			}
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
-				if isLocalPolicy {
-					continue // skip caching for local files
+				if !persistPolicyArtifacts {
+					continue
 				}
 				cache, err := getter.PolicyCachePath(rule.Identifier)
 				if err != nil {
@@ -231,8 +243,8 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 			}
 			if receivedControl != nil {
 				f.Controls = append(f.Controls, *receivedControl)
-				if isLocalPolicy {
-					continue // skip caching for local files
+				if !persistPolicyArtifacts {
+					continue
 				}
 				cache, err := getter.PolicyCachePath(policy.Identifier)
 				if err != nil {
