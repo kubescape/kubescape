@@ -265,3 +265,35 @@ func TestGetConfigurationDrift_MarshalErrorIsToolError(t *testing.T) {
 	assert.Contains(t, text, "failed to marshal workload manifest")
 	assert.Contains(t, text, "marshal boom")
 }
+
+func TestGetConfigurationDrift_SupportsAllWorkloadKinds(t *testing.T) {
+	profile := &storagev1beta1.ContainerProfile{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-profile", Namespace: "default"},
+	}
+	ksClient := storagefake.NewClientset(profile)
+
+	// The fake k8s client returns "not found" for all workloads, but that's fine:
+	// we only need to verify the tool doesn't reject the kind as "unsupported".
+	ksServer := &KubescapeMcpserver{
+		ksClient: ksClient.SpdxV1beta1(),
+		k8sClient: &k8sinterface.KubernetesApi{
+			KubernetesClient: fake.NewClientset(),
+		},
+	}
+
+	for _, kind := range []string{"pod", "deployment", "daemonset", "statefulset", "replicaset", "job", "cronjob"} {
+		t.Run(kind, func(t *testing.T) {
+			result, err := ksServer.CallTool(context.Background(), "get_configuration_drift", map[string]any{
+				"profile_name":  "test-profile",
+				"workload_name": "test-workload",
+				"workload_kind": kind,
+			})
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			text := toolResultText(t, result)
+			// The error should be "not found" (workload doesn't exist in the fake client),
+			// NOT "unsupported workload kind" which would mean the kind was rejected.
+			assert.NotContains(t, text, "unsupported workload kind")
+		})
+	}
+}
