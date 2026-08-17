@@ -390,3 +390,25 @@ func TestGitlabAdaptor_Destroy(t *testing.T) {
 	adaptor := NewGitlabAdaptor()
 	assert.NoError(t, adaptor.Destroy())
 }
+
+func TestImageMatches(t *testing.T) {
+	t.Run("matches by digest with registry path prefix", func(t *testing.T) {
+		id := ContainerImageIdentifier{Repository: "group/app", Hash: "sha256:abc"}
+		assert.True(t, imageMatches("registry.gitlab.com/group/app@sha256:abc", id))
+	})
+
+	t.Run("matches by tag with no prefix", func(t *testing.T) {
+		id := ContainerImageIdentifier{Repository: "app", Tag: "latest"}
+		assert.True(t, imageMatches("app:latest", id))
+	})
+
+	t.Run("does not match a different repo that happens to share a suffix", func(t *testing.T) {
+		id := ContainerImageIdentifier{Repository: "app", Tag: "latest"}
+		assert.False(t, imageMatches("registry.gitlab.com/group/webapp:latest", id))
+	})
+
+	t.Run("does not match a different repo sharing a suffix, by digest", func(t *testing.T) {
+		id := ContainerImageIdentifier{Repository: "app", Hash: "sha256:abc"}
+		assert.False(t, imageMatches("registry.gitlab.com/group/myapp@sha256:abc", id))
+	})
+}
