@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -667,11 +669,15 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 
 		w, e := ReadFile(f, getFileFormat(filePaths[i]))
 		if e != nil {
-			// Raw Helm templates are a best-effort fallback when chart rendering
-			// fails. Go-template actions are not valid YAML, so keep scanning any
-			// static templates without treating templated siblings as corrupt
-			// standalone manifests.
-			if !bytes.Contains(f, []byte("{{")) {
+			// Only chart-owned templates/ files reach this loader unrendered —
+			// excludeHelmTemplateFiles drops the templates of every chart whose
+			// render succeeded — and their Go-template actions are not valid
+			// YAML, so record the drop without treating it as manifest
+			// corruption. Any other parse failure is always reported: "{{" in a
+			// comment, label value or string is not evidence of a template.
+			if isUnrenderedHelmTemplate(filePaths[i]) {
+				skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "unrendered Helm template: " + e.Error()})
+			} else {
 				errs = append(errs, fmt.Errorf("failed to parse %q: %w", filePaths[i], e))
 				skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "parse error: " + e.Error()})
 			}
@@ -695,6 +701,28 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 		}
 	}
 	return workloads, skips, errs
+}
+
+// isUnrenderedHelmTemplate reports whether path lives below the templates/
+// directory of a Helm chart, detected with the same chart-directory check
+// chart discovery uses. excludeHelmTemplateFiles removes the templates of
+// every chart whose render succeeded, so a chart-owned file parsed here
+// belongs to a chart whose render failed; its Go-template actions are
+// expected to be unparseable as plain YAML.
+func isUnrenderedHelmTemplate(path string) bool {
+	dir := filepath.Dir(path)
+	for {
+		if filepath.Base(dir) == "templates" {
+			if isChart, err := IsHelmDirectory(filepath.Dir(dir)); err == nil && isChart {
+				return true
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
 }
 
 func loadFile(filePath string) ([]byte, error) {
@@ -735,6 +763,11 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool) ([]string, []e
 		paths = append(paths, pattern)
 		return paths, errs
 	}
+	// A concrete path is an exact scan target. Do not reinterpret a missing
+	// file as a recursive basename pattern and silently scan a nested namesake.
+	if !isDir(pattern) && !hasGlobMeta(pattern) {
+		return paths, errs
+	}
 
 	root, shouldMatch := filepath.Split(pattern)
 
@@ -753,6 +786,15 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool) ([]string, []e
 	}
 
 	return paths, errs
+}
+
+// hasGlobMeta mirrors the set of magic characters recognized by filepath.Match.
+func hasGlobMeta(path string) bool {
+	magicChars := `*?[`
+	if runtime.GOOS != "windows" {
+		magicChars = `*?[\`
+	}
+	return strings.ContainsAny(path, magicChars)
 }
 
 func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err error) {
@@ -842,6 +884,18 @@ func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err
 	decoder.UseNumber()
 	if err := decoder.Decode(&jsonObj); err != nil {
 		return workloads, err
+	}
+
+	// A manifest file must contain exactly one top-level JSON value. Decoder.Decode
+	// intentionally stops after the first value, so without this EOF check a file
+	// containing a valid manifest followed by another value or malformed trailing
+	// data is accepted and the unscanned suffix is silently ignored.
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return workloads, errors.New("multiple top-level JSON values are not supported; use a JSON array or Kubernetes List")
+		}
+		return workloads, fmt.Errorf("invalid trailing JSON data: %w", err)
 	}
 
 	if convertErr := convertJsonToWorkload(jsonObj, &workloads); convertErr != nil {

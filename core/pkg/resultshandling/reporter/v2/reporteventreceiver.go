@@ -193,7 +193,7 @@ func (report *ReportEventReceiver) setResults(ctx context.Context, reportObj *re
 			continue
 		}
 
-		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Results) > 0 {
+		if *counter+len(r) >= MAX_REPORT_SIZE && (len(reportObj.Results) > 0 || len(reportObj.Resources) > 0) {
 
 			// send report
 			if err := report.sendReport(ctx, reportObj, *reportCounter, false); err != nil {

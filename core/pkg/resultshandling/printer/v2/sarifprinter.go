@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -117,8 +118,11 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 		})
 }
 
-// addResult adds a result of checking a rule to the scan run based on the given control summary
-func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) *sarif.Result {
+// addResult adds a result of checking a rule to the scan run based on the given control summary.
+// failedPathLocations, when non-empty, adds one relatedLocation per resolved FailedPath so each
+// field that actually caused the failure gets its own precise location in the manifest, distinct
+// from the single primary location (which points at the fix, not necessarily at every failed field).
+func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, failedPathLocations map[string]locationresolver.Location) *sarif.Result {
 	msg := ctl.GetDescription()
 	if resource != nil {
 		if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
@@ -126,7 +130,7 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 			msg += "\n\nAffected fields:\n" + strings.Join(paths, "\n")
 		}
 	}
-	return scanRun.CreateResultForRule(ctl.GetID()).
+	result := scanRun.CreateResultForRule(ctl.GetID()).
 		WithMessage(sarif.NewTextMessage(msg)).
 		WithLocations([]*sarif.Location{
 			sarif.NewLocationWithPhysicalLocation(
@@ -138,6 +142,69 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 				),
 			),
 		})
+
+	// Sort for deterministic output - map iteration order is randomized and this feeds
+	// directly into the written SARIF file.
+	paths := make([]string, 0, len(failedPathLocations))
+	for p := range failedPathLocations {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	for _, p := range paths {
+		loc := failedPathLocations[p]
+		result.AddRelatedLocation(
+			sarif.NewLocation().
+				WithMessage(sarif.NewTextMessage(p)).
+				WithPhysicalLocation(
+					sarif.NewPhysicalLocation().
+						WithArtifactLocation(
+							sarif.NewSimpleArtifactLocation(filepath),
+						).WithRegion(
+						sarif.NewRegion().WithStartLine(loc.Line).WithStartColumn(loc.Column),
+					),
+				),
+		)
+	}
+
+	return result
+}
+
+// resolveFailedPathLocations resolves each of ac's FailedPaths to its location in the source
+// manifest, using the same locationResolver already built for the fix location. Unlike
+// resolveFixLocation, which returns one location for the highest-priority remediation path, this
+// resolves every FailedPath independently so each field that actually caused the failure can get
+// its own precise location instead of all sharing the fix location. A path that doesn't resolve
+// (unknown docIndex, or ResolveLocation finding nothing) is omitted rather than defaulted to line
+// 1 - a relatedLocation with a fabricated line number would be worse than no relatedLocation at all.
+func resolveFailedPathLocations(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) map[string]locationresolver.Location {
+	if locationResolver == nil {
+		return nil
+	}
+	docIndex, ok := getDocIndex(opaSessionObj, resourceID)
+	if !ok {
+		return nil
+	}
+
+	var locations map[string]locationresolver.Location
+	for i := range ac.ResourceAssociatedRules {
+		for _, p := range ac.ResourceAssociatedRules[i].Paths {
+			if p.FailedPath == "" {
+				continue
+			}
+			if _, seen := locations[p.FailedPath]; seen {
+				continue
+			}
+			location, err := locationResolver.ResolveLocation(p.FailedPath, docIndex)
+			if err != nil || location.Line == 0 {
+				continue
+			}
+			if locations == nil {
+				locations = make(map[string]locationresolver.Location)
+			}
+			locations[p.FailedPath] = location
+		}
+	}
+	return locations
 }
 
 func (sp *SARIFPrinter) printImageScan(scanResults cautils.ImageScanData) error {
@@ -260,9 +327,10 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 					continue
 				}
 				location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
+				failedPathLocations := resolveFailedPathLocations(opaSessionObj, locationResolver, &ac, resource.resourceID)
 				sp.addRule(run, ctl)
 				rsrc := opaSessionObj.AllResources[resource.resourceID]
-				r := sp.addResult(run, ctl, resource.relPath, location, &ac, rsrc)
+				r := sp.addResult(run, ctl, resource.relPath, location, &ac, rsrc, failedPathLocations)
 				collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath)
 			}
 		}

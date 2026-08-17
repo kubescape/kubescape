@@ -183,6 +183,24 @@ func TestNewDownloadReleasedPolicyWithVersion(t *testing.T) {
 	})
 }
 
+func TestDownloadReleasedPolicyArtifactPersistence(t *testing.T) {
+	t.Parallel()
+
+	t.Run("rolling release may refresh the shared fallback", func(t *testing.T) {
+		t.Parallel()
+
+		p := NewDownloadReleasedPolicy()
+		require.True(t, p.ShouldPersistPolicyArtifacts())
+	})
+
+	t.Run("pinned release must not replace the unversioned fallback", func(t *testing.T) {
+		t.Parallel()
+
+		p := NewDownloadReleasedPolicyWithVersion("v2.0.301")
+		require.False(t, p.ShouldPersistPolicyArtifacts())
+	})
+}
+
 func TestSetRegoObjectsWithFallback(t *testing.T) {
 	t.Parallel()
 

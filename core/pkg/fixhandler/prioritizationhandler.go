@@ -1,10 +1,11 @@
 package fixhandler
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 )
@@ -32,7 +33,7 @@ func DetectProfileDrift(manifest []byte, profile *storagev1beta1.ContainerProfil
 	}
 
 	var obj map[string]interface{}
-	if err := json.Unmarshal(manifest, &obj); err != nil {
+	if err := yaml.Unmarshal(manifest, &obj); err != nil {
 		return fixes
 	}
 

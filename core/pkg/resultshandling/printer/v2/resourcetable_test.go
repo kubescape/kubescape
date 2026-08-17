@@ -517,7 +517,7 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rows := generateResourceRows(tt.controls, &tt.summaryDetails, tt.resource)
+			rows := generateResourceRows(tt.controls, &tt.summaryDetails, tt.resource, true, false, "")
 			assert.Equal(t, tt.expectedLen, len(rows))
 			//remediation is the last column of the first row
 			if len(rows) != 0 {
@@ -601,6 +601,46 @@ func TestAddContainerNameToAssistedRemediation_OutOfBounds(t *testing.T) {
 			resource:      privilegedInitAndEphemeralPod(),
 			paths:         privilegedInitAndEphemeralPaths(),
 			expectedPaths: privilegedInitAndEphemeralNamedPaths(),
+		},
+		{
+			name: "init and ephemeral container indices append names",
+			resource: workloadinterface.NewWorkloadObj(map[string]any{
+				"kind": "Pod",
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":  "nginx",
+							"image": "nginx:latest",
+						},
+					},
+					"initContainers": []any{
+						map[string]any{
+							"name":  "init-db",
+							"image": "busybox:latest",
+						},
+					},
+					"ephemeralContainers": []any{
+						map[string]any{
+							"name":  "debugger",
+							"image": "busybox:latest",
+						},
+					},
+				},
+			}),
+			paths: []string{
+				"spec.initContainers[0].securityContext.privileged",
+				"spec.ephemeralContainers[0].securityContext.privileged",
+				"spec.template.spec.initContainers[0].securityContext.privileged",
+				"spec.initContainers[5].securityContext.privileged",
+				"spec.ephemeralContainers[3].securityContext.privileged",
+			},
+			expectedPaths: []string{
+				"spec.initContainers[0].securityContext.privileged (init-db)",
+				"spec.ephemeralContainers[0].securityContext.privileged (debugger)",
+				"spec.template.spec.initContainers[0].securityContext.privileged (init-db)",
+				"spec.initContainers[5].securityContext.privileged",
+				"spec.ephemeralContainers[3].securityContext.privileged",
+			},
 		},
 		{
 			name: "path without container index is unchanged",

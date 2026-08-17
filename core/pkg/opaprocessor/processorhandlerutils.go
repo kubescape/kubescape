@@ -303,9 +303,10 @@ func getKubernetesObjects(index resourceGroupIndex, match []reporthandling.RuleM
 	var emitted []bool
 
 	for m := range match {
-		for _, groups := range match[m].APIGroups {
-			for _, version := range match[m].APIVersions {
-				for _, resource := range match[m].Resources {
+		mt := &match[m]
+		for _, groups := range mt.APIGroups {
+			for _, version := range mt.APIVersions {
+				for _, resource := range mt.Resources {
 					for g := range index.groups {
 						group := &index.groups[g]
 						if !matchesKubernetesObjectValue(groups, group.group) || !matchesKubernetesObjectValue(version, group.version) {

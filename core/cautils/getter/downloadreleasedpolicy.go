@@ -52,6 +52,15 @@ func (drp *DownloadReleasedPolicy) IsVersionPinned() bool {
 	return drp.version != ""
 }
 
+// ShouldPersistPolicyArtifacts reports whether policies fetched by this getter
+// may be published to Kubescape's shared, unversioned disk fallback. A pinned
+// release must not replace that fallback because the flat cache path does not
+// record release provenance; doing so would let a later unpinned fallback
+// silently evaluate the pinned release.
+func (drp *DownloadReleasedPolicy) ShouldPersistPolicyArtifacts() bool {
+	return !drp.IsVersionPinned()
+}
+
 // SetRegoObjectsWithFallback downloads the policy objects and reports whether
 // the caller should fall back to the bundled cache on failure.
 //

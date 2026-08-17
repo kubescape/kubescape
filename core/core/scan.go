@@ -261,13 +261,13 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 		return nil, err
 	}
 	var controlInputsFromCache bool
-	getters.ControlsInputsGetter, controlInputsFromCache, err = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped)
+	getters.ControlsInputsGetter, controlInputsFromCache, err = getConfigInputsGetterForTarget(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped, interfaces.k8s)
 	if err != nil {
 		spanInit.End()
 		return nil, err
 	}
 	var exceptionsFromCache bool
-	getters.ExceptionsGetter, exceptionsFromCache, err = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	getters.ExceptionsGetter, exceptionsFromCache, err = getExceptionsGetterForTarget(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped, interfaces.k8s)
 	if err != nil {
 		spanInit.End()
 		return nil, err

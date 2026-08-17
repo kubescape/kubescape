@@ -608,6 +608,35 @@ func TestToJson(t *testing.T) {
 	// verify it is valid JSON
 	var out map[string]any
 	assert.NoError(t, json.Unmarshal(data, &out))
+	assert.NotContains(t, out, "exceptionAudit")
+}
+
+func TestToJsonIncludesExceptionAuditWhenSet(t *testing.T) {
+	rh := makeResultsHandler(75.0, 50.0)
+	rh.ScanData.ExceptionAudit = &cautils.ExceptionAudit{
+		Generated: true,
+		Summary: cautils.ExceptionAuditSummary{
+			Total:   1,
+			Active:  1,
+			Matched: 1,
+		},
+		Items: []cautils.ExceptionAuditItem{{
+			Name:       "matched-exception",
+			Status:     "matched",
+			MatchCount: 1,
+			ControlIDs: []string{"C-0001"},
+		}},
+	}
+
+	data, err := rh.ToJson()
+	require.NoError(t, err)
+
+	var out struct {
+		ExceptionAudit *cautils.ExceptionAudit `json:"exceptionAudit"`
+	}
+	require.NoError(t, json.Unmarshal(data, &out))
+	require.NotNil(t, out.ExceptionAudit)
+	assert.Equal(t, rh.ScanData.ExceptionAudit, out.ExceptionAudit)
 }
 
 // requireJSONSubset verifies that every value in the legacy JSON remains at
@@ -792,7 +821,7 @@ func TestClosePrinter_AllV2PrintersImplementErrorCloser(t *testing.T) {
 		{"cyclonedx", printerv2.NewCycloneDXPrinter()},
 		{"gitlabsast", printerv2.NewGitLabSASTPrinter()},
 		{"csv", printerv2.NewCsvPrinter()},
-		{"pretty", printerv2.NewPrettyPrinter(false, "1.0", false, cautils.ControlViewType, cautils.ScanTypeCluster, nil, "")},
+		{"pretty", printerv2.NewPrettyPrinter(false, "1.0", false, cautils.ControlViewType, cautils.ScanTypeCluster, nil, "", false, false)},
 		{"silent", &printerv2.SilentPrinter{}},
 	}
 

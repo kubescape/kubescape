@@ -3,6 +3,7 @@ package scan
 import (
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -121,7 +122,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
 			}
 
-			if err := enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo); err != nil {
+			if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
 				return err
 			}
 			if scanInfo.ScanImages {
@@ -209,19 +210,48 @@ func enforcePolicyDegradation(coverage cautils.ScanCoverage, scanInfo *cautils.S
 	return fmt.Errorf("scan policy inputs were degraded (fail-on-degraded-config is true)")
 }
 
+// countFailedResourcesWithUnbucketedSeverity returns the number of failed
+// resources on controls whose severity SeverityCounters.Increase silently
+// drops: Unknown, Negligible, and any other severity it has no bucket for.
+// The severity is derived from the control's score factor the same way
+// SummaryDetails.AppendResourceResult derives it when feeding the counters.
+func countFailedResourcesWithUnbucketedSeverity(summaryDetails *reportsummary.SummaryDetails) int {
+	count := 0
+	for _, controlSummary := range summaryDetails.Controls {
+		switch reporthandlingapis.ControlSeverityToString(controlSummary.GetScoreFactor()) {
+		case reporthandlingapis.SeverityCriticalString,
+			reporthandlingapis.SeverityHighString,
+			reporthandlingapis.SeverityMediumString,
+			reporthandlingapis.SeverityLowString:
+		default:
+			count += controlSummary.StatusCounters.Failed()
+		}
+	}
+	return count
+}
+
 // enforceSeverityThresholds ensures that the scan results are below the defined severity threshold
 //
 // The function returns an error if at least one failed control has a severity at or above the set severity threshold
-func enforceSeverityThresholds(severityCounters reportsummary.ISeverityCounters, scanInfo *cautils.ScanInfo) error {
+func enforceSeverityThresholds(summaryDetails *reportsummary.SummaryDetails, scanInfo *cautils.ScanInfo) error {
 	// If a severity threshold is not set, we don’t need to enforce it
 	if scanInfo.FailThresholdSeverity == "" {
 		return nil
 	}
 
-	if val, err := countersExceedSeverityThreshold(severityCounters, scanInfo); val && err == nil {
+	if val, err := countersExceedSeverityThreshold(summaryDetails.GetResourcesSeverityCounters(), scanInfo); val && err == nil {
 		return fmt.Errorf("compliance result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
 	} else if err != nil {
 		return err
+	}
+
+	// Failed controls with a zero or missing baseScore never reach the
+	// counters above, so a threshold could pass on findings whose severity
+	// cannot be determined. Fail closed: treat them as at or above any
+	// threshold the user set.
+	if unbucketed := countFailedResourcesWithUnbucketedSeverity(summaryDetails); unbucketed > 0 {
+		logger.L().Warning("failed resources with unknown severity counted toward the severity threshold", helpers.Int("failedResources", unbucketed))
+		return fmt.Errorf("compliance result exceeds severity threshold: %s (%d failed resource(s) with unknown severity)", scanInfo.FailThresholdSeverity, unbucketed)
 	}
 	return nil
 }
@@ -235,10 +265,7 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if scanInfo.Submit.GetBool() && scanInfo.Local {
 		return ErrKeepLocalOrSubmit
 	}
-	if 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
-		return ErrBadThreshold
-	}
-	if 100 < scanInfo.FailCoverageThreshold || 0 > scanInfo.FailCoverageThreshold {
+	if postureThresholdsOutOfRange(scanInfo) {
 		return ErrBadThreshold
 	}
 	if scanInfo.Submit.GetBool() && scanInfo.OmitRawResources {
@@ -277,11 +304,15 @@ func validateControlTimeout(scanInfo *cautils.ScanInfo) error {
 // Unlike validateFrameworkScanInfo, this function does not mutate scanInfo
 // or enforce unrelated constraints.
 func validateThresholdsOnly(scanInfo *cautils.ScanInfo) error {
-	if 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
-		return ErrBadThreshold
-	}
-	if 100 < scanInfo.FailCoverageThreshold || 0 > scanInfo.FailCoverageThreshold {
+	if postureThresholdsOutOfRange(scanInfo) {
 		return ErrBadThreshold
 	}
 	return validateControlTimeout(scanInfo)
+}
+
+func postureThresholdsOutOfRange(scanInfo *cautils.ScanInfo) bool {
+	return math.IsNaN(float64(scanInfo.ComplianceThreshold)) ||
+		math.IsNaN(float64(scanInfo.FailCoverageThreshold)) ||
+		scanInfo.ComplianceThreshold < 0 || scanInfo.ComplianceThreshold > 100 ||
+		scanInfo.FailCoverageThreshold < 0 || scanInfo.FailCoverageThreshold > 100
 }

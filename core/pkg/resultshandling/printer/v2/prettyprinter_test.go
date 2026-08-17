@@ -169,7 +169,7 @@ func TestSetWriter_Pretty(t *testing.T) {
 				tt.outputFile = filepath.Join(tmpDir, tt.outputFile)
 				tt.expected = filepath.Join(tmpDir, tt.expected)
 			}
-			pp := NewPrettyPrinter(false, "v2", false, cautils.ViewTypes("control"), cautils.ScanTypes("cluster"), []string{}, "")
+			pp := NewPrettyPrinter(false, "v2", false, cautils.ViewTypes("control"), cautils.ScanTypes("cluster"), []string{}, "", false, false)
 
 			pp.SetWriter(ctx, tt.outputFile)
 			if tt.outputFile != "" && tt.outputFile != os.DevNull {

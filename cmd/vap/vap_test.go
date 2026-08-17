@@ -312,9 +312,131 @@ func TestDeployLibraryFromRelease(t *testing.T) {
 	})
 }
 
+// A release tag is pasted straight into the release URL, so anything that can
+// change the URL's shape has to be rejected before the request is built. Go's
+// HTTP client forwards "../" segments verbatim and GitHub resolves them
+// server-side, so a tag carrying them silently serves the admission policy
+// library out of an unrelated repository - which deploy-library's own examples
+// then pipe into "kubectl apply -f -".
+func TestDeployLibraryRejectsTagsThatEscapeTheReleaseURL(t *testing.T) {
+	malicious := []struct {
+		name string
+		tag  string
+	}{
+		{name: "parent directory traversal", tag: "../../../../attacker/evil-repo/releases/download/v1"},
+		{name: "traversal after a real tag", tag: "v0.11/../../../../attacker/evil-repo/releases/download/v1"},
+		{name: "plain path separator", tag: "attacker/evil-repo"},
+		{name: "backslash separator", tag: `..\..\attacker`},
+		{name: "query string truncates the path", tag: "v0.11?ref="},
+		{name: "fragment truncates the path", tag: "v0.11#"},
+		{name: "absolute url", tag: "https://attacker.example.com/x"},
+	}
+	// An empty tag is not in this table on purpose: it is how deployLibrary
+	// selects the embedded bundle, so it never reaches the download path.
+
+	const wantPrefix = "/kubescape/cel-admission-library/releases/download/"
+
+	for _, tc := range malicious {
+		t.Run(tc.name, func(t *testing.T) {
+			var paths []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths = append(paths, r.URL.Path)
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, "attacker-controlled-content")
+			}))
+			defer server.Close()
+
+			origTransport := http.DefaultTransport
+			http.DefaultTransport = &redirectTransport{
+				baseURL:           strings.TrimPrefix(server.URL, "http://"),
+				originalTransport: server.Client().Transport,
+			}
+			defer func() { http.DefaultTransport = origTransport }()
+
+			_, err := deployLibrary(tc.tag, 0)
+
+			// The request must never be built at all: rejecting the tag up front
+			// is what keeps the download pinned to the kubescape release.
+			for _, path := range paths {
+				assert.True(t, strings.HasPrefix(path, wantPrefix),
+					"request escaped the pinned release URL: %q", path)
+			}
+			assert.Empty(t, paths, "an invalid release tag must not reach the network")
+			require.Error(t, err, "an invalid release tag must be rejected")
+			assert.Contains(t, err.Error(), "invalid release tag")
+		})
+	}
+}
+
+func TestValidateReleaseTag(t *testing.T) {
+	valid := []string{"v0.11", "v0.0.1", "1.2.3", "v1.2.3-rc1", "v1.2.3+build.5", "release_2024", "v10"}
+	for _, tag := range valid {
+		t.Run("valid/"+tag, func(t *testing.T) {
+			assert.NoError(t, validateReleaseTag(tag))
+		})
+	}
+
+	invalid := []struct {
+		name string
+		tag  string
+	}{
+		{name: "empty", tag: ""},
+		{name: "dot", tag: "."},
+		{name: "dot dot", tag: ".."},
+		{name: "leading dot", tag: ".v0.11"},
+		{name: "leading hyphen", tag: "-v0.11"},
+		{name: "forward slash", tag: "v0.11/x"},
+		{name: "backslash", tag: `v0.11\x`},
+		{name: "question mark", tag: "v0.11?x"},
+		{name: "hash", tag: "v0.11#x"},
+		{name: "percent encoded slash", tag: "v0.11%2F.."},
+		{name: "space", tag: "v0.11 x"},
+		{name: "at sign", tag: "v0.11@host"},
+		{name: "colon", tag: "https:"},
+		{name: "newline", tag: "v0.11\nx"},
+	}
+	for _, tc := range invalid {
+		t.Run("invalid/"+tc.name, func(t *testing.T) {
+			err := validateReleaseTag(tc.tag)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid release tag")
+		})
+	}
+}
+
+func TestDeployLibraryAcceptsRealReleaseTags(t *testing.T) {
+	// Tags the cel-admission-library actually publishes, plus the shapes
+	// semver releases commonly take, must keep working.
+	for _, tag := range []string{"v0.11", "v0.0.1", "1.2.3", "v1.2.3-rc1", "v1.2.3+build.5", "release_2024"} {
+		t.Run(tag, func(t *testing.T) {
+			var paths []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths = append(paths, r.URL.Path)
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, "content")
+			}))
+			defer server.Close()
+
+			origTransport := http.DefaultTransport
+			http.DefaultTransport = &redirectTransport{
+				baseURL:           strings.TrimPrefix(server.URL, "http://"),
+				originalTransport: server.Client().Transport,
+			}
+			defer func() { http.DefaultTransport = origTransport }()
+
+			_, err := deployLibrary(tag, 0)
+			require.NoError(t, err)
+			require.Len(t, paths, len(libraryReleaseFiles))
+			for _, path := range paths {
+				assert.Equal(t, "/kubescape/cel-admission-library/releases/download/"+tag+"/", path[:strings.LastIndex(path, "/")+1])
+			}
+		})
+	}
+}
+
 func TestCreatePolicyBinding(t *testing.T) {
 	t.Run("minimal binding with name and policy", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Deny", "", nil, nil)
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -331,7 +453,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("with namespaces", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Audit", "", []string{"ns1", "ns2"}, nil)
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Audit}, "", []string{"ns1", "ns2"}, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -345,7 +467,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("with labels", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Warn", "", nil, []string{"app=nginx", "env=prod"})
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Warn}, "", nil, []string{"app=nginx", "env=prod"})
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -357,7 +479,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("labels with whitespace are trimmed", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Deny", "", nil, []string{"app = nginx"})
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, []string{"app = nginx"})
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -368,7 +490,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("with parameter reference", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Deny", "my-params", nil, nil)
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "my-params", nil, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -381,7 +503,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("all fields combined", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Deny", "my-params", []string{"ns1"}, []string{"app=nginx"})
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "my-params", []string{"ns1"}, []string{"app=nginx"})
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -395,7 +517,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("empty namespace slice does not add selector", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Deny", "", []string{}, nil)
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", []string{}, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -405,7 +527,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("empty label slice does not add selector", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", "Deny", "", nil, []string{})
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, []string{})
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -601,7 +723,7 @@ func TestGetCreatePolicyBindingCmd(t *testing.T) {
 
 	actionFlag := cmd.Flags().Lookup("action")
 	require.NotNil(t, actionFlag)
-	assert.Equal(t, "Deny", actionFlag.DefValue)
+	assert.Equal(t, "[Deny]", actionFlag.DefValue)
 
 	paramRefFlag := cmd.Flags().Lookup("parameter-reference")
 	require.NotNil(t, paramRefFlag)
@@ -715,7 +837,7 @@ func TestLabelSelectorRegexEdgeCases(t *testing.T) {
 
 func TestCreatePolicyBindingCmdAllActions(t *testing.T) {
 	validActions := []string{"Deny", "Audit", "Warn"}
-	invalidActions := []string{"Allow", "deny", "audit", "warn", "", "Log", "Reject"}
+	invalidActions := []string{"Allow", "deny", "audit", "warn", "Log", "Reject"}
 
 	for _, action := range validActions {
 		t.Run("valid action "+action, func(t *testing.T) {
@@ -735,6 +857,133 @@ func TestCreatePolicyBindingCmdAllActions(t *testing.T) {
 			assert.Contains(t, err.Error(), "invalid action")
 		})
 	}
+
+	// An empty value clears the slice rather than adding a blank action, so it
+	// reports the missing action instead of an invalid one.
+	t.Run("empty action clears the default", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--action", ""})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "at least one --action is required")
+	})
+}
+
+func TestParseValidationActions(t *testing.T) {
+	tests := []struct {
+		name    string
+		values  []string
+		want    []admissionv1.ValidationAction
+		wantErr string
+	}{
+		{
+			name:   "single action",
+			values: []string{"Deny"},
+			want:   []admissionv1.ValidationAction{admissionv1.Deny},
+		},
+		{
+			name:   "audit and warn roll out together",
+			values: []string{"Audit", "Warn"},
+			want:   []admissionv1.ValidationAction{admissionv1.Audit, admissionv1.Warn},
+		},
+		{
+			name:   "deny and audit are a valid pair",
+			values: []string{"Deny", "Audit"},
+			want:   []admissionv1.ValidationAction{admissionv1.Deny, admissionv1.Audit},
+		},
+		{
+			name:   "order is preserved",
+			values: []string{"Warn", "Audit"},
+			want:   []admissionv1.ValidationAction{admissionv1.Warn, admissionv1.Audit},
+		},
+		{
+			name:   "surrounding whitespace is trimmed",
+			values: []string{" Audit ", "Warn"},
+			want:   []admissionv1.ValidationAction{admissionv1.Audit, admissionv1.Warn},
+		},
+		{
+			name:    "no action at all",
+			values:  nil,
+			wantErr: "at least one --action is required",
+		},
+		{
+			name:    "unknown action",
+			values:  []string{"Allow"},
+			wantErr: "invalid action: Allow",
+		},
+		{
+			name:    "lowercase is not the API spelling",
+			values:  []string{"deny"},
+			wantErr: "invalid action: deny",
+		},
+		{
+			name:    "repeated action",
+			values:  []string{"Audit", "Audit"},
+			wantErr: "duplicate action: Audit",
+		},
+		{
+			name:    "deny with warn is refused by the API",
+			values:  []string{"Deny", "Warn"},
+			wantErr: "actions Deny and Warn cannot be combined",
+		},
+		{
+			name:    "deny with warn in either order",
+			values:  []string{"Warn", "Deny"},
+			wantErr: "actions Deny and Warn cannot be combined",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseValidationActions(tt.values)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestCreatePolicyBindingMultipleActions(t *testing.T) {
+	out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Audit, admissionv1.Warn}, "", nil, nil)
+	require.NoError(t, err)
+
+	var binding admissionv1.ValidatingAdmissionPolicyBinding
+	require.NoError(t, yaml.Unmarshal([]byte(out), &binding))
+	assert.Equal(t, []admissionv1.ValidationAction{admissionv1.Audit, admissionv1.Warn}, binding.Spec.ValidationActions)
+}
+
+func TestCreatePolicyBindingCmdMultipleActions(t *testing.T) {
+	t.Run("repeated flag", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--action", "Audit", "--action", "Warn"})
+		assert.NoError(t, cmd.Execute())
+	})
+
+	t.Run("comma separated", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--action", "Audit,Warn"})
+		assert.NoError(t, cmd.Execute())
+	})
+
+	t.Run("deny with warn is rejected", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--action", "Deny,Warn"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot be combined")
+	})
+
+	t.Run("duplicate is rejected", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--action", "Warn,Warn"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate action")
+	})
 }
 
 func TestCreatePolicyBindingCmdRequiredFlags(t *testing.T) {

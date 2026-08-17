@@ -336,7 +336,7 @@ func createRuntimeToolsAndResources(ksServer *KubescapeMcpserver) {
 		),
 		mcp.WithString("workload_kind",
 			mcp.Required(),
-			mcp.Description("Kind of the workload (e.g., Pod, Deployment, DaemonSet, StatefulSet)."),
+			mcp.Description("Kind of the workload (e.g., Pod, Deployment, DaemonSet, StatefulSet, ReplicaSet, Job, CronJob)."),
 		),
 	)
 
@@ -1077,6 +1077,12 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			workloadObj, err = k8sClient.KubernetesClient.AppsV1().DaemonSets(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
 		case "statefulset":
 			workloadObj, err = k8sClient.KubernetesClient.AppsV1().StatefulSets(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
+		case "replicaset":
+			workloadObj, err = k8sClient.KubernetesClient.AppsV1().ReplicaSets(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
+		case "job":
+			workloadObj, err = k8sClient.KubernetesClient.BatchV1().Jobs(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
+		case "cronjob":
+			workloadObj, err = k8sClient.KubernetesClient.BatchV1().CronJobs(namespaceStr).Get(ctx, workloadNameStr, metav1.GetOptions{})
 		default:
 			return mcp.NewToolResultError(fmt.Sprintf("unsupported workload kind: %s", workloadKindStr)), nil
 		}
@@ -1092,6 +1098,15 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		containerName := ""
 		if profile.GetLabels() != nil {
 			containerName = profile.GetLabels()["kubescape.io/workload-container-name"]
+			profileKind := profile.GetLabels()["kubescape.io/workload-kind"]
+			profileName := profile.GetLabels()["kubescape.io/workload-name"]
+
+			if profileKind != "" && !strings.EqualFold(profileKind, workloadKindStr) {
+				return mcp.NewToolResultError(fmt.Sprintf("profile workload kind mismatch: expected %s, got %s", workloadKindStr, profileKind)), nil
+			}
+			if profileName != "" && profileName != workloadNameStr {
+				return mcp.NewToolResultError(fmt.Sprintf("profile workload name mismatch: expected %s, got %s", workloadNameStr, profileName)), nil
+			}
 		}
 		fixes := fixhandler.DetectProfileDrift(rawManifest, profile, workloadKindStr, containerName, 0)
 		fixesJson, err := json.MarshalIndent(fixes, "", "  ")

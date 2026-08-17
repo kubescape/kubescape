@@ -113,8 +113,12 @@ func TestAnyToString(t *testing.T) {
 		{name: "uint64", input: uint64(65535), want: "65535", wantOK: true},
 		{name: "json.Number integer", input: json.Number("3"), want: "3", wantOK: true},
 		{name: "json.Number float", input: json.Number("1.5"), want: "1.5", wantOK: true},
-		{name: "map (complex)", input: map[string]any{"k": "v"}, want: "", wantOK: false},
-		{name: "slice (complex)", input: []any{"a"}, want: "", wantOK: false},
+		{name: "map renders as compact JSON", input: map[string]any{"k": "v"}, want: `{"k":"v"}`, wantOK: true},
+		{name: "map with multiple keys is sorted", input: map[string]any{"b": 1, "a": 2}, want: `{"a":2,"b":1}`, wantOK: true},
+		{name: "empty map renders as {}", input: map[string]any{}, want: "{}", wantOK: true},
+		{name: "slice renders as compact JSON", input: []any{"a"}, want: `["a"]`, wantOK: true},
+		{name: "slice of maps", input: []any{map[string]any{"name": "x"}}, want: `[{"name":"x"}]`, wantOK: true},
+		{name: "empty slice renders as []", input: []any{}, want: "[]", wantOK: true},
 	}
 
 	for _, tc := range cases {
@@ -151,6 +155,10 @@ func TestExtractValueAtPath(t *testing.T) {
 							"memory": "128Mi",
 							"cpu":    float64(500),
 						},
+					},
+					"ports": []any{
+						map[string]any{"containerPort": float64(8080)},
+						map[string]any{"containerPort": float64(9090)},
 					},
 				},
 				map[string]any{
@@ -249,10 +257,22 @@ func TestExtractValueAtPath(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			name:   "map value returns false",
+			name:   "map value renders as compact JSON",
 			path:   "spec.securityContext",
-			want:   "",
-			wantOK: false,
+			want:   `{"runAsNonRoot":true}`,
+			wantOK: true,
+		},
+		{
+			name:   "nested map value renders as compact JSON",
+			path:   "spec.containers[0].securityContext",
+			want:   `{"allowPrivilegeEscalation":false,"privileged":true}`,
+			wantOK: true,
+		},
+		{
+			name:   "slice value renders as compact JSON",
+			path:   "spec.containers[0].ports",
+			want:   `[{"containerPort":8080},{"containerPort":9090}]`,
+			wantOK: true,
 		},
 		{
 			name:   "empty path",
@@ -451,6 +471,29 @@ func TestFailedPathsWithCurrentValues(t *testing.T) {
 		got := failedPathsWithCurrentValues(ctrl, resource)
 		assert.Nil(t, got)
 	})
+
+	t.Run("object-valued path is rendered as JSON instead of falling back to bare path", func(t *testing.T) {
+		objResource := &mockResource{
+			obj: map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"securityContext": map[string]any{
+								"privileged": true,
+								"capabilities": map[string]any{
+									"add": []any{"SYS_ADMIN"},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		ctrl := makeControlWithPaths([]string{"spec.containers[0].securityContext"}, nil)
+		got := failedPathsWithCurrentValues(ctrl, objResource)
+		require.Len(t, got, 1)
+		assert.Equal(t, `spec.containers[0].securityContext (current: {"capabilities":{"add":["SYS_ADMIN"]},"privileged":true})`, got[0])
+	})
 }
 
 func TestReviewPathsWithCurrentValues(t *testing.T) {
@@ -499,5 +542,69 @@ func TestAssistedRemediationPathsWithCurrentValues(t *testing.T) {
 		assert.Contains(t, got, "spec.hostPID=false")
 		assert.Contains(t, got, "spec.hostPID (current: true)")
 		assert.Len(t, got, 2)
+	})
+}
+
+func TestAssistedRemediationPathsWithCurrentValuesFiltered(t *testing.T) {
+	secretObj := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"data": map[string]any{
+			"password": "test-value-for-testing",
+		},
+	}
+	normalObj := map[string]any{
+		"spec": map[string]any{
+			"hostPID": true,
+			"containers": []any{
+				map[string]any{
+					"securityContext": map[string]any{
+						"privileged": true,
+					},
+				},
+			},
+		},
+	}
+
+	t.Run("non-secret path with showSecrets=false shows value", func(t *testing.T) {
+		resource := &mockResource{obj: normalObj, kind: "Pod"}
+		ctrl := makeControlWithPaths([]string{"spec.hostPID"}, nil)
+		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, false)
+		require.Len(t, got, 1)
+		assert.Equal(t, "spec.hostPID (current: true)", got[0])
+	})
+
+	t.Run("secret path with showSecrets=false is redacted", func(t *testing.T) {
+		resource := &mockResource{obj: secretObj, kind: "Secret"}
+		ctrl := makeControlWithPaths([]string{"data.password"}, nil)
+		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, false)
+		require.Len(t, got, 1)
+		assert.Equal(t, "data.password (current: "+redactedValue+")", got[0])
+		assert.NotContains(t, got[0], "test-value-for-testing")
+	})
+
+	t.Run("secret path with showSecrets=true shows actual value", func(t *testing.T) {
+		resource := &mockResource{obj: secretObj, kind: "Secret"}
+		ctrl := makeControlWithPaths([]string{"data.password"}, nil)
+		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, true)
+		require.Len(t, got, 1)
+		assert.Equal(t, "data.password (current: test-value-for-testing)", got[0])
+	})
+
+	t.Run("showSecrets=true extracts non-secret values same as unfiltered", func(t *testing.T) {
+		// for non-secret paths, showSecrets=true and the unfiltered variant
+		// both extract the current value — result must be identical
+		resource := &mockResource{obj: normalObj, kind: "Pod"}
+		ctrl := makeControlWithPaths([]string{"spec.containers[0].securityContext.privileged"}, nil)
+		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, true)
+		require.Len(t, got, 1)
+		assert.Equal(t, "spec.containers[0].securityContext.privileged (current: true)", got[0])
+	})
+
+	t.Run("empty paths returns nil", func(t *testing.T) {
+		resource := &mockResource{obj: normalObj, kind: "Pod"}
+		ctrl := makeControlWithPaths(nil, nil)
+		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, false)
+		assert.Nil(t, got)
 	})
 }

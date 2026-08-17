@@ -57,6 +57,12 @@ func NewLoadPolicy(filePaths []string) *LoadPolicy {
 	}
 }
 
+// ShouldPersistPolicyArtifacts prevents explicit local inputs from being
+// republished into Kubescape's shared disk fallback.
+func (lp *LoadPolicy) ShouldPersistPolicyArtifacts() bool {
+	return false
+}
+
 // GetControl returns a control from the policy file.
 func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, error) {
 	if controlID == "" {

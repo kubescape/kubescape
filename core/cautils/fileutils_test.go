@@ -34,6 +34,28 @@ func TestListFiles(t *testing.T) {
 	assert.Equal(t, 13, len(files))
 }
 
+func TestLoadResourcesFromFilesDoesNotSubstituteNestedBasenameForMissingExactPath(t *testing.T) {
+	root := t.TempDir()
+	nestedDir := filepath.Join(root, "nested")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(nestedDir, "manifest.yaml"), []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name: nested
+`), 0o600))
+
+	requestedPath := filepath.Join(root, "manifest.yaml")
+	workloads, skipped, err := LoadResourcesFromFiles(context.Background(), requestedPath, root, nil)
+
+	require.ErrorIs(t, err, ErrNoManifestFiles)
+	assert.Empty(t, workloads)
+	assert.Empty(t, skipped)
+
+	workloads, _, err = LoadResourcesFromFiles(context.Background(), filepath.Join(root, "*.yaml"), root, nil)
+	require.NoError(t, err)
+	assert.Contains(t, workloads, filepath.Join(nestedDir, "manifest.yaml"), "explicit glob behavior must remain recursive")
+}
+
 func TestLoadResourcesFromFiles(t *testing.T) {
 	workloads, _, err := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "", nil)
 	require.NoError(t, err)
@@ -47,6 +69,21 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 			assert.Equal(t, "/v1//Service/adservice", getRelativePath(w[1].GetID()))
 		}
 	}
+}
+
+func TestLoadResourcesFromFiles_RejectsTrailingJSONInExplicitFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifests.json")
+	data := []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"first"}}
+{"apiVersion":"v1","kind":"Service","metadata":{"name":"second"}}`)
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+
+	workloads, skipped, err := LoadResourcesFromFiles(context.Background(), path, filepath.Dir(path), nil)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "multiple top-level JSON values")
+	assert.Empty(t, workloads)
+	require.Len(t, skipped, 1)
+	assert.Equal(t, path, skipped[0].Path)
 }
 
 func TestLoadResourcesFromFiles_SupportsMixedCaseExtensions(t *testing.T) {
@@ -1031,6 +1068,25 @@ func TestReadJsonFile(t *testing.T) {
 			content:   `{not valid json`,
 			wantCount: 0,
 			wantErr:   true,
+		},
+		{
+			name: "concatenated JSON objects are rejected instead of scanning only the first",
+			content: `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"first"}}
+				{"apiVersion":"v1","kind":"Service","metadata":{"name":"ignored-before-fix"}}`,
+			wantCount: 0,
+			wantErr:   true,
+		},
+		{
+			name:      "valid manifest followed by malformed data is rejected",
+			content:   `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"first"}} trailing`,
+			wantCount: 0,
+			wantErr:   true,
+		},
+		{
+			name: "trailing whitespace remains valid",
+			content: `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"whitespace"}}
+				   `,
+			wantCount: 1,
 		},
 		{
 			name:      "empty JSON object (no kind) returns no workloads",
