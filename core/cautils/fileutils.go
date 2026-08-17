@@ -669,11 +669,15 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 
 		w, e := ReadFile(f, getFileFormat(filePaths[i]))
 		if e != nil {
-			// Raw Helm templates are a best-effort fallback when chart rendering
-			// fails. Go-template actions are not valid YAML, so keep scanning any
-			// static templates without treating templated siblings as corrupt
-			// standalone manifests.
-			if !bytes.Contains(f, []byte("{{")) {
+			// Only chart-owned templates/ files reach this loader unrendered —
+			// excludeHelmTemplateFiles drops the templates of every chart whose
+			// render succeeded — and their Go-template actions are not valid
+			// YAML, so record the drop without treating it as manifest
+			// corruption. Any other parse failure is always reported: "{{" in a
+			// comment, label value or string is not evidence of a template.
+			if isUnrenderedHelmTemplate(filePaths[i]) {
+				skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "unrendered Helm template: " + e.Error()})
+			} else {
 				errs = append(errs, fmt.Errorf("failed to parse %q: %w", filePaths[i], e))
 				skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "parse error: " + e.Error()})
 			}
@@ -697,6 +701,28 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 		}
 	}
 	return workloads, skips, errs
+}
+
+// isUnrenderedHelmTemplate reports whether path lives below the templates/
+// directory of a Helm chart, detected with the same chart-directory check
+// chart discovery uses. excludeHelmTemplateFiles removes the templates of
+// every chart whose render succeeded, so a chart-owned file parsed here
+// belongs to a chart whose render failed; its Go-template actions are
+// expected to be unparseable as plain YAML.
+func isUnrenderedHelmTemplate(path string) bool {
+	dir := filepath.Dir(path)
+	for {
+		if filepath.Base(dir) == "templates" {
+			if isChart, err := IsHelmDirectory(filepath.Dir(dir)); err == nil && isChart {
+				return true
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
 }
 
 func loadFile(filePath string) ([]byte, error) {
