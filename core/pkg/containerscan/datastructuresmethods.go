@@ -81,7 +81,7 @@ func (scanresult *ScanResultReport) Validate() bool {
 func (v *Vulnerability) IsRCE() bool {
 	desc := strings.ToLower(v.Description)
 
-	isRCE := strings.Contains(desc, "rce")
+	isRCE := rceAcronymRe.MatchString(v.Description)
 
 	return isRCE || strings.Contains(desc, "remote code execution") || strings.Contains(desc, "remote command execution") || strings.Contains(desc, "arbitrary code") || strings.Contains(desc, "code execution") || strings.Contains(desc, "code injection") || strings.Contains(desc, "command injection") || strings.Contains(desc, "inject arbitrary commands")
 }
