@@ -30,11 +30,7 @@ func Test_validateControlScanInfo(t *testing.T) {
 			&cautils.ScanInfo{FailThresholdSeverity: "Unknown"},
 			shared.ErrUnknownSeverity,
 		},
-		{
-			"Submit with omit-raw-resources should be invalid",
-			&cautils.ScanInfo{Submit: cautils.NewBoolPtr(new(true)), OmitRawResources: true},
-			ErrOmitRawResourcesOrSubmit,
-		},
+
 		{
 			"Compliance threshold below 0 should be invalid",
 			&cautils.ScanInfo{ComplianceThreshold: -1},
@@ -97,16 +93,7 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 			&cautils.ScanInfo{AccountID: validAccountID},
 			nil,
 		},
-		{
-			"Submit with keep-local should be invalid",
-			&cautils.ScanInfo{Submit: cautils.NewBoolPtr(new(true)), Local: true, AccountID: validAccountID},
-			ErrKeepLocalOrSubmit,
-		},
-		{
-			"Submit with omit-raw-resources should be invalid",
-			&cautils.ScanInfo{Submit: cautils.NewBoolPtr(new(true)), OmitRawResources: true, AccountID: validAccountID},
-			ErrOmitRawResourcesOrSubmit,
-		},
+
 		{
 			"Compliance threshold below 0 should be invalid",
 			&cautils.ScanInfo{ComplianceThreshold: -1, AccountID: validAccountID},

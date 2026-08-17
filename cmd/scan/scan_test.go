@@ -1076,3 +1076,14 @@ func TestEnforceImageSeverityThresholdsUsesEmbeddedMetadataWithoutProvider(t *te
 
 	assert.EqualError(t, err, "image scan result exceeds severity threshold: high")
 }
+
+func TestGetScanCommand_RunE_SubmitExclusivity(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	require.NoError(t, cmd.PersistentFlags().Set("submit", "true"))
+	require.NoError(t, cmd.PersistentFlags().Set("keep-local", "true"))
+
+	err := cmd.RunE(cmd, []string{""})
+	assert.EqualError(t, err, "you can use `keep-local` or `submit`, but not both")
+}

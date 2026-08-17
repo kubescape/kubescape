@@ -25,6 +25,11 @@ var ErrUnknownSeverity = fmt.Errorf("unknown severity. Supported severities are:
 // ErrBadThreshold is returned when a numeric threshold is outside the valid range [0, 100].
 var ErrBadThreshold = fmt.Errorf("bad argument: out of range threshold")
 
+var (
+	ErrKeepLocalOrSubmit        = fmt.Errorf("you can use `keep-local` or `submit`, but not both")
+	ErrOmitRawResourcesOrSubmit = fmt.Errorf("you can use `omit-raw-resources` or `submit`, but not both")
+)
+
 // ValidateThresholds validates that FailThreshold, ComplianceThreshold and
 // FailCoverageThreshold are all within [0, 100]. This mirrors the check in
 // validateFrameworkScanInfo and validateControlScanInfo.
@@ -75,6 +80,13 @@ func ValidateScanFormat(format string, supported []string) error {
 
 // ValidateCommonScanFlags validates flags that are common to all scan subcommands
 func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, supportedFormats []string) error {
+	if scanInfo.Submit.GetBool() && scanInfo.Local {
+		return ErrKeepLocalOrSubmit
+	}
+	if scanInfo.Submit.GetBool() && scanInfo.OmitRawResources {
+		return ErrOmitRawResourcesOrSubmit
+	}
+
 	if scanInfo.FailThresholdSeverity != "" {
 		if err := ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
 			return err
