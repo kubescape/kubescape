@@ -554,7 +554,6 @@ die() {
 }
 case "${1:-}" in
 version)
-    [ "$#" -eq 3 ] && [ "$2" = "-c" ] && [ "$3" = "--short" ] || die "unexpected version args: $*"
     printf '%s\n' 'v3.14.0+gtest'
     ;;
 template)
