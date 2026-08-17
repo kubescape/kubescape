@@ -1,0 +1,76 @@
+[
+    {
+        "alertMessage": "Subject: ServiceAccount-pod-labeler can modify pods/status and so relabel a pod to match a service's selector, intercepting connections to services in the pod's namespace",
+        "failedPaths": [
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[1]",
+            "relatedObjects[1].rules[0].verbs[2]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "reviewPaths": [
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[1]",
+            "relatedObjects[1].rules[0].verbs[2]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 3,
+        "alertObject": {
+            "externalObjects": {
+                "kind": "ServiceAccount",
+                "name": "pod-labeler",
+                "namespace": "platform",
+                "relatedObjects": [
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRoleBinding",
+                        "metadata": {
+                            "name": "pod-status-writer-crb"
+                        },
+                        "roleRef": {
+                            "apiGroup": "rbac.authorization.k8s.io",
+                            "kind": "ClusterRole",
+                            "name": "pod-status-writer"
+                        },
+                        "subjects": [
+                            {
+                                "kind": "ServiceAccount",
+                                "name": "pod-labeler",
+                                "namespace": "platform"
+                            }
+                        ]
+                    },
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRole",
+                        "metadata": {
+                            "name": "pod-status-writer"
+                        },
+                        "rules": [
+                            {
+                                "apiGroups": [
+                                    ""
+                                ],
+                                "resources": [
+                                    "pods/status"
+                                ],
+                                "verbs": [
+                                    "get",
+                                    "update",
+                                    "patch"
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+]

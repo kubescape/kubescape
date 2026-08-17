@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: metrics-pod-status-writer
+  namespace: monitoring
+rules:
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods/status"]
+  verbs: ["update", "patch"]
