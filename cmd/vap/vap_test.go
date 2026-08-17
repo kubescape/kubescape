@@ -312,6 +312,128 @@ func TestDeployLibraryFromRelease(t *testing.T) {
 	})
 }
 
+// A release tag is pasted straight into the release URL, so anything that can
+// change the URL's shape has to be rejected before the request is built. Go's
+// HTTP client forwards "../" segments verbatim and GitHub resolves them
+// server-side, so a tag carrying them silently serves the admission policy
+// library out of an unrelated repository - which deploy-library's own examples
+// then pipe into "kubectl apply -f -".
+func TestDeployLibraryRejectsTagsThatEscapeTheReleaseURL(t *testing.T) {
+	malicious := []struct {
+		name string
+		tag  string
+	}{
+		{name: "parent directory traversal", tag: "../../../../attacker/evil-repo/releases/download/v1"},
+		{name: "traversal after a real tag", tag: "v0.11/../../../../attacker/evil-repo/releases/download/v1"},
+		{name: "plain path separator", tag: "attacker/evil-repo"},
+		{name: "backslash separator", tag: `..\..\attacker`},
+		{name: "query string truncates the path", tag: "v0.11?ref="},
+		{name: "fragment truncates the path", tag: "v0.11#"},
+		{name: "absolute url", tag: "https://attacker.example.com/x"},
+	}
+	// An empty tag is not in this table on purpose: it is how deployLibrary
+	// selects the embedded bundle, so it never reaches the download path.
+
+	const wantPrefix = "/kubescape/cel-admission-library/releases/download/"
+
+	for _, tc := range malicious {
+		t.Run(tc.name, func(t *testing.T) {
+			var paths []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths = append(paths, r.URL.Path)
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, "attacker-controlled-content")
+			}))
+			defer server.Close()
+
+			origTransport := http.DefaultTransport
+			http.DefaultTransport = &redirectTransport{
+				baseURL:           strings.TrimPrefix(server.URL, "http://"),
+				originalTransport: server.Client().Transport,
+			}
+			defer func() { http.DefaultTransport = origTransport }()
+
+			_, err := deployLibrary(tc.tag, 0)
+
+			// The request must never be built at all: rejecting the tag up front
+			// is what keeps the download pinned to the kubescape release.
+			for _, path := range paths {
+				assert.True(t, strings.HasPrefix(path, wantPrefix),
+					"request escaped the pinned release URL: %q", path)
+			}
+			assert.Empty(t, paths, "an invalid release tag must not reach the network")
+			require.Error(t, err, "an invalid release tag must be rejected")
+			assert.Contains(t, err.Error(), "invalid release tag")
+		})
+	}
+}
+
+func TestValidateReleaseTag(t *testing.T) {
+	valid := []string{"v0.11", "v0.0.1", "1.2.3", "v1.2.3-rc1", "v1.2.3+build.5", "release_2024", "v10"}
+	for _, tag := range valid {
+		t.Run("valid/"+tag, func(t *testing.T) {
+			assert.NoError(t, validateReleaseTag(tag))
+		})
+	}
+
+	invalid := []struct {
+		name string
+		tag  string
+	}{
+		{name: "empty", tag: ""},
+		{name: "dot", tag: "."},
+		{name: "dot dot", tag: ".."},
+		{name: "leading dot", tag: ".v0.11"},
+		{name: "leading hyphen", tag: "-v0.11"},
+		{name: "forward slash", tag: "v0.11/x"},
+		{name: "backslash", tag: `v0.11\x`},
+		{name: "question mark", tag: "v0.11?x"},
+		{name: "hash", tag: "v0.11#x"},
+		{name: "percent encoded slash", tag: "v0.11%2F.."},
+		{name: "space", tag: "v0.11 x"},
+		{name: "at sign", tag: "v0.11@host"},
+		{name: "colon", tag: "https:"},
+		{name: "newline", tag: "v0.11\nx"},
+	}
+	for _, tc := range invalid {
+		t.Run("invalid/"+tc.name, func(t *testing.T) {
+			err := validateReleaseTag(tc.tag)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid release tag")
+		})
+	}
+}
+
+func TestDeployLibraryAcceptsRealReleaseTags(t *testing.T) {
+	// Tags the cel-admission-library actually publishes, plus the shapes
+	// semver releases commonly take, must keep working.
+	for _, tag := range []string{"v0.11", "v0.0.1", "1.2.3", "v1.2.3-rc1", "v1.2.3+build.5", "release_2024"} {
+		t.Run(tag, func(t *testing.T) {
+			var paths []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths = append(paths, r.URL.Path)
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, "content")
+			}))
+			defer server.Close()
+
+			origTransport := http.DefaultTransport
+			http.DefaultTransport = &redirectTransport{
+				baseURL:           strings.TrimPrefix(server.URL, "http://"),
+				originalTransport: server.Client().Transport,
+			}
+			defer func() { http.DefaultTransport = origTransport }()
+
+			_, err := deployLibrary(tag, 0)
+			require.NoError(t, err)
+			require.Len(t, paths, len(libraryReleaseFiles))
+			for _, path := range paths {
+				assert.Equal(t, "/kubescape/cel-admission-library/releases/download/"+tag+"/", path[:strings.LastIndex(path, "/")+1])
+			}
+		})
+	}
+}
+
 func TestCreatePolicyBinding(t *testing.T) {
 	t.Run("minimal binding with name and policy", func(t *testing.T) {
 		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, nil)

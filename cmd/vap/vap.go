@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -234,11 +235,39 @@ var libraryReleaseFiles = []string{
 	"kubescape-validating-admission-policies.yaml",
 }
 
+// releaseTagPattern is the shape a cel-admission-library release tag may take.
+// It is deliberately an allowlist: the tag is interpolated into the release
+// URL, so any character that carries meaning in a URL path has to stay out.
+// Requiring an alphanumeric first character also rules out "." and ".." on its
+// own. Real tags ("v0.11") and the usual semver decorations ("v1.2.3-rc1",
+// "v1.2.3+build.5") all satisfy it.
+var releaseTagPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
+
+// validateReleaseTag rejects a tag that would change the shape of the release
+// URL rather than just name a release within it. Without this the tag can walk
+// out of the kubescape release path entirely ("../../../../owner/repo/..."):
+// Go's HTTP client forwards the "../" segments verbatim and GitHub resolves
+// them server-side, so the library is served from an unrelated repository while
+// the log line still names the requested kubescape release. A "?" or "#" is the
+// same class of bug without an attacker - it truncates the URL, so every file
+// in libraryReleaseFiles resolves to the same object and the concatenated
+// output is silently wrong.
+func validateReleaseTag(tag string) error {
+	if !releaseTagPattern.MatchString(tag) {
+		return fmt.Errorf("invalid release tag %q: expected a release tag such as v0.11", tag)
+	}
+	return nil
+}
+
 // downloadLibrary fetches the library files from one pinned release tag and
 // concatenates them into a single multi-document YAML stream. The tag is
 // always explicit — downloading whatever "latest" points at would reintroduce
 // the skew deployLibrary's embedded default exists to prevent.
 func downloadLibrary(tag string, timeout time.Duration) (string, error) {
+	if err := validateReleaseTag(tag); err != nil {
+		return "", err
+	}
+
 	logger.L().Info(fmt.Sprintf("Downloading the Kubescape CEL admission policy library release %s", tag))
 
 	parts := make([]string, 0, len(libraryReleaseFiles))
