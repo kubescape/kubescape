@@ -11,6 +11,11 @@ import (
 
 // PrintPretty writes a human-readable diff summary to w.
 func PrintPretty(w io.Writer, cs *ChangeSet) error {
+	for _, warning := range cs.Warnings {
+		if _, err := fmt.Fprintf(w, "WARNING: %s\n", warning); err != nil {
+			return err
+		}
+	}
 	if err := printSection(w, "New failures", cs.New, "+"); err != nil {
 		return err
 	}
@@ -22,9 +27,14 @@ func PrintPretty(w io.Writer, cs *ChangeSet) error {
 			return err
 		}
 	}
+	if len(cs.Incomparable) > 0 {
+		if err := printSection(w, "Incomparable", cs.Incomparable, "?"); err != nil {
+			return err
+		}
+	}
 
-	_, err := fmt.Fprintf(w, "\nSummary: %d new, %d resolved, %d unchanged\n",
-		len(cs.New), len(cs.Resolved), len(cs.Unchanged))
+	_, err := fmt.Fprintf(w, "\nSummary: %d new, %d resolved, %d unchanged, %d incomparable\n",
+		len(cs.New), len(cs.Resolved), len(cs.Unchanged), len(cs.Incomparable))
 	return err
 }
 
@@ -39,6 +49,34 @@ func printSection(w io.Writer, title string, changes []ControlChange, prefix str
 		if _, err := fmt.Fprintf(w, "%s [%s] %s (%s)\n    Resource: %s\n",
 			prefix, c.Severity, c.ControlName, c.ControlID, c.ResourceID); err != nil {
 			return err
+		}
+		if c.RuleName != "" {
+			if _, err := fmt.Fprintf(w, "    Rule: %s\n", c.RuleName); err != nil {
+				return err
+			}
+		}
+		if c.EvidenceType != "" && c.EvidenceType != evidenceTypeControl {
+			if _, err := fmt.Fprintf(w, "    Evidence: %s", c.EvidenceType); err != nil {
+				return err
+			}
+			if c.Path != "" {
+				if _, err := fmt.Fprintf(w, " %s", c.Path); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprintln(w); err != nil {
+				return err
+			}
+		}
+		if c.EvidenceResourceID != "" && c.EvidenceResourceID != c.ResourceID {
+			if _, err := fmt.Fprintf(w, "    Evidence resource: %s\n", c.EvidenceResourceID); err != nil {
+				return err
+			}
+		}
+		if c.Reason != "" {
+			if _, err := fmt.Fprintf(w, "    Reason: %s\n", c.Reason); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
