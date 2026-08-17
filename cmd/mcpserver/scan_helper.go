@@ -11,7 +11,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
 	"github.com/kubescape/kubescape/v3/core/pkg/policyhandler"
 	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
@@ -56,18 +55,12 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 
 	scanInfo := buildScanInfo(namespace, wantComplianceScore, inputPatterns)
 
-	getters := cautils.Getters{}
-	if ksServer.policyGetter != nil {
-		getters.PolicyGetter = ksServer.policyGetter
-		getters.ExceptionsGetter = ksServer.policyGetter
-		getters.ControlsInputsGetter = ksServer.policyGetter
-		getters.AttackTracksGetter = ksServer.policyGetter
-	} else {
-		defaultGetter := getter.NewDownloadReleasedPolicy()
-		getters.PolicyGetter = defaultGetter
-		getters.ExceptionsGetter = defaultGetter
-		getters.ControlsInputsGetter = defaultGetter
-		getters.AttackTracksGetter = defaultGetter
+	policyGetter := ksServer.getPolicyGetter()
+	getters := cautils.Getters{
+		PolicyGetter:         policyGetter,
+		ExceptionsGetter:     policyGetter,
+		ControlsInputsGetter: policyGetter,
+		AttackTracksGetter:   policyGetter,
 	}
 	if customGetters != nil {
 		getters = *customGetters
