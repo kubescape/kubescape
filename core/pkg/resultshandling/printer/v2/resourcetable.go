@@ -16,7 +16,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
-var specContainerRegex = regexp.MustCompile(`spec\.containers\[(\d+)]`)
+var specContainerRegex = regexp.MustCompile(`spec\.(containers|initContainers|ephemeralContainers)\[(\d+)]`)
 
 const (
 	resourceColumnSeverity = iota
@@ -101,25 +101,51 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 
 func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata, paths *[]string) {
 	wl := workloadinterface.NewWorkloadObj(resource.GetObject())
-	containers, err := wl.GetContainers()
-	if err != nil {
-		return
-	}
+	namesByKind := containerNamesByKind(wl)
 
 	for i := range *paths {
 		match := specContainerRegex.FindStringSubmatch((*paths)[i])
-		if len(match) != 2 {
+		if len(match) != 3 {
 			continue
 		}
-		index, err := strconv.Atoi(match[1])
+		index, err := strconv.Atoi(match[2])
 		if err != nil {
 			continue
 		}
-		if index >= len(containers) {
+		names := namesByKind[match[1]]
+		if index >= len(names) {
 			continue
 		}
-		(*paths)[i] += " (" + containers[index].Name + ")"
+		(*paths)[i] += " (" + names[index] + ")"
 	}
+}
+
+func containerNamesByKind(wl *workloadinterface.Workload) map[string][]string {
+	namesByKind := make(map[string][]string, 3)
+
+	if cs, err := wl.GetContainers(); err == nil {
+		names := make([]string, len(cs))
+		for i := range cs {
+			names[i] = cs[i].Name
+		}
+		namesByKind["containers"] = names
+	}
+	if cs, err := wl.GetInitContainers(); err == nil {
+		names := make([]string, len(cs))
+		for i := range cs {
+			names[i] = cs[i].Name
+		}
+		namesByKind["initContainers"] = names
+	}
+	if cs, err := wl.GetEphemeralContainers(); err == nil {
+		names := make([]string, len(cs))
+		for i := range cs {
+			names[i] = cs[i].Name
+		}
+		namesByKind["ephemeralContainers"] = names
+	}
+
+	return namesByKind
 }
 
 func generateResourceHeader(short bool) table.Row {
