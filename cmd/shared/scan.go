@@ -48,13 +48,41 @@ func ValidateThresholds(scanInfo *cautils.ScanInfo) error {
 
 // ValidateSeverity returns an error if a given severity is not known, nil otherwise
 func ValidateSeverity(severity string) error {
+	trimmed := strings.TrimSpace(severity)
 	for _, val := range reporthandlingapis.GetSupportedSeverities() {
-		if strings.EqualFold(severity, val) {
+		if strings.EqualFold(trimmed, val) {
 			return nil
 		}
 	}
 	return ErrUnknownSeverity
+}
 
+// ValidateSeverityRange returns an error when min is greater than max, which
+// would produce empty output rather than an obvious error. Both values must
+// already have been validated by ValidateSeverity before this is called.
+func ValidateSeverityRange(min, max string) error {
+	if severityOrdinal(min) > severityOrdinal(max) {
+		return fmt.Errorf("min severity cannot be greater than max severity (%s > %s)", min, max)
+	}
+	return nil
+}
+
+// severityOrdinal maps a severity string to the same integer ordinal used by
+// reporthandlingapis.ControlSeverityToInt so that CLI-layer comparisons stay
+// in sync with the core library. Unknown values map to SeverityUnknown (0).
+func severityOrdinal(severity string) int {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case strings.ToLower(reporthandlingapis.SeverityCriticalString):
+		return reporthandlingapis.SeverityCritical
+	case strings.ToLower(reporthandlingapis.SeverityHighString):
+		return reporthandlingapis.SeverityHigh
+	case strings.ToLower(reporthandlingapis.SeverityMediumString):
+		return reporthandlingapis.SeverityMedium
+	case strings.ToLower(reporthandlingapis.SeverityLowString):
+		return reporthandlingapis.SeverityLow
+	default:
+		return reporthandlingapis.SeverityUnknown
+	}
 }
 
 // ValidateScanFormat returns an error if any comma-separated entry in format is not a supported format.
@@ -94,6 +122,16 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	}
 	if scanInfo.MinSeverity != "" {
 		if err := ValidateSeverity(scanInfo.MinSeverity); err != nil {
+			return err
+		}
+	}
+	if scanInfo.MaxSeverity != "" {
+		if err := ValidateSeverity(scanInfo.MaxSeverity); err != nil {
+			return err
+		}
+	}
+	if scanInfo.MinSeverity != "" && scanInfo.MaxSeverity != "" {
+		if err := ValidateSeverityRange(scanInfo.MinSeverity, scanInfo.MaxSeverity); err != nil {
 			return err
 		}
 	}
