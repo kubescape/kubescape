@@ -278,9 +278,20 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 		return nil, err
 	}
 
-	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {
+		// Add all frameworks
 		policyIdentifiers = cautils.AppendPolicyIdentifiers(policyIdentifiers, listFrameworksNames(getters.PolicyGetter), apisv1.KindFramework)
+
+		// Add all controls
+		if controls, err := getters.PolicyGetter.ListControls(); err == nil {
+			controlIDs := make([]string, 0, len(controls))
+			for _, control := range controls {
+				controlIDs = append(controlIDs, parseControlEntry(control).ID)
+			}
+			policyIdentifiers = cautils.AppendPolicyIdentifiers(policyIdentifiers, controlIDs, apisv1.KindControl)
+		} else {
+			logger.L().Ctx(ctxInit).Warning("failed to list controls for ScanAll", helpers.Error(err))
+		}
 	}
 
 	logger.L().StopSuccess("Initialized scanner")
