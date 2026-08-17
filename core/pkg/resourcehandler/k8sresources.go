@@ -840,7 +840,96 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 	}
 
 	wg.Wait()
+	dedupeServedVersionAliases(k8sResources, allResources)
 	return k8sResources, allResources, failedQueries
+}
+
+// dedupeServedVersionAliases collapses objects the API server returned under
+// more than one served version of the same resource. A CRD served at both
+// v1alpha1 and v1beta1 answers each LIST with the same objects converted to the
+// requested version, so a control matching both versions collects, counts and
+// reports one custom resource twice.
+//
+// metadata.uid is the join key: Kubernetes keeps it stable across versions and
+// unique across the cluster, so equal uids are the same object and no two
+// distinct objects can be merged by mistake. Objects without one (offline and
+// synthetic resources) are left alone.
+//
+// Every GVR keeps pointing at the surviving object, so a rule declaring either
+// version still matches it.
+func dedupeServedVersionAliases(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata) {
+	byUID := make(map[string][]string, len(allResources))
+	for _, id := range slices.Sorted(maps.Keys(allResources)) {
+		if uid := resourceUID(allResources[id]); uid != "" {
+			byUID[uid] = append(byUID[uid], id)
+		}
+	}
+
+	alias := map[string]string{} // dropped resource ID -> surviving one
+	for _, ids := range byUID {
+		if len(ids) < 2 {
+			continue
+		}
+		survivor := ids[0]
+		for _, id := range ids[1:] {
+			if preferServedVersion(allResources[id], allResources[survivor]) {
+				survivor = id
+			}
+		}
+		for _, id := range ids {
+			if id != survivor {
+				alias[id] = survivor
+			}
+		}
+	}
+	if len(alias) == 0 {
+		return
+	}
+
+	for dropped := range alias {
+		delete(allResources, dropped)
+	}
+	for gvr, resourceIDs := range k8sResources {
+		seen := make(map[string]struct{}, len(resourceIDs))
+		deduped := make([]string, 0, len(resourceIDs))
+		for _, id := range resourceIDs {
+			if survivor, dropped := alias[id]; dropped {
+				id = survivor
+			}
+			if _, duplicate := seen[id]; duplicate {
+				continue
+			}
+			seen[id] = struct{}{}
+			deduped = append(deduped, id)
+		}
+		k8sResources[gvr] = deduped
+	}
+}
+
+// resourceUID reads metadata.uid off a collected object.
+func resourceUID(resource workloadinterface.IMetadata) string {
+	if resource == nil {
+		return ""
+	}
+	uid, _, err := unstructured.NestedString(resource.GetObject(), "metadata", "uid")
+	if err != nil {
+		return ""
+	}
+	return uid
+}
+
+// preferServedVersion reports whether candidate is the better copy to keep of
+// two aliases of one object. It follows the API server's own version ranking
+// (GA over beta over alpha, newest first), so a scan reports the version a
+// client would get by default. The ID comparison keeps the choice stable when
+// the ranking cannot separate them, since the pulls complete in any order.
+func preferServedVersion(candidate, current workloadinterface.IMetadata) bool {
+	_, candidateVersion := k8sinterface.SplitApiVersion(candidate.GetApiVersion())
+	_, currentVersion := k8sinterface.SplitApiVersion(current.GetApiVersion())
+	if ranking := version.CompareKubeAwareVersionStrings(candidateVersion, currentVersion); ranking != 0 {
+		return ranking > 0
+	}
+	return candidate.GetID() < current.GetID()
 }
 
 func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResources cautils.K8SResources, infoMap map[string]apis.StatusInfo) []cautils.PartialGVRPull {
