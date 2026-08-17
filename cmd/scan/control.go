@@ -100,7 +100,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
 				return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
 			}
-			if err := enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo); err != nil {
+			if err := enforceSeverityThresholds(&results.GetResults().SummaryDetails, scanInfo); err != nil {
 				return err
 			}
 			if scanInfo.ScanImages {
