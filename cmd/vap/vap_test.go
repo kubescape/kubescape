@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -436,7 +438,7 @@ func TestDeployLibraryAcceptsRealReleaseTags(t *testing.T) {
 
 func TestCreatePolicyBinding(t *testing.T) {
 	t.Run("minimal binding with name and policy", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, nil)
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, nil, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -453,7 +455,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("with namespaces", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Audit}, "", []string{"ns1", "ns2"}, nil)
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Audit}, "", []string{"ns1", "ns2"}, nil, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -467,7 +469,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("with labels", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Warn}, "", nil, []string{"app=nginx", "env=prod"})
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Warn}, "", nil, []string{"app=nginx", "env=prod"}, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -479,7 +481,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("labels with whitespace are trimmed", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, []string{"app = nginx"})
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, []string{"app = nginx"}, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -490,7 +492,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("with parameter reference", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "my-params", nil, nil)
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "my-params", nil, nil, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -503,7 +505,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("all fields combined", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "my-params", []string{"ns1"}, []string{"app=nginx"})
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "my-params", []string{"ns1"}, []string{"app=nginx"}, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -517,7 +519,7 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("empty namespace slice does not add selector", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", []string{}, nil)
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", []string{}, nil, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
@@ -527,13 +529,118 @@ func TestCreatePolicyBinding(t *testing.T) {
 	})
 
 	t.Run("empty label slice does not add selector", func(t *testing.T) {
-		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, []string{})
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, []string{}, nil)
 		require.NoError(t, err)
 
 		var binding admissionv1.ValidatingAdmissionPolicyBinding
 		err = yaml.Unmarshal([]byte(out), &binding)
 		require.NoError(t, err)
 		assert.Nil(t, binding.Spec.MatchResources.ObjectSelector)
+	})
+
+	// No rules means the binding covers everything the policy matches, which is
+	// what the apiserver does with an empty resourceRules.
+	t.Run("empty resource rule slice does not add rules", func(t *testing.T) {
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, nil, []string{})
+		require.NoError(t, err)
+
+		var binding admissionv1.ValidatingAdmissionPolicyBinding
+		err = yaml.Unmarshal([]byte(out), &binding)
+		require.NoError(t, err)
+		assert.Empty(t, binding.Spec.MatchResources.ResourceRules)
+	})
+
+	t.Run("with resource rules", func(t *testing.T) {
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, nil, []string{"apps/v1/deployments", "/v1/pods"})
+		require.NoError(t, err)
+
+		var binding admissionv1.ValidatingAdmissionPolicyBinding
+		err = yaml.Unmarshal([]byte(out), &binding)
+		require.NoError(t, err)
+		require.Len(t, binding.Spec.MatchResources.ResourceRules, 2)
+
+		apps := binding.Spec.MatchResources.ResourceRules[0]
+		assert.Equal(t, []string{"apps"}, apps.APIGroups)
+		assert.Equal(t, []string{"v1"}, apps.APIVersions)
+		assert.Equal(t, []string{"deployments"}, apps.Resources)
+		assert.Equal(t, []admissionv1.OperationType{admissionv1.OperationAll}, apps.Operations)
+
+		core := binding.Spec.MatchResources.ResourceRules[1]
+		assert.Equal(t, []string{""}, core.APIGroups)
+		assert.Equal(t, []string{"pods"}, core.Resources)
+	})
+
+	t.Run("with custom resource rule", func(t *testing.T) {
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, nil, []string{"agentsubstrate.google.com/v1/actortemplates"})
+		require.NoError(t, err)
+
+		var binding admissionv1.ValidatingAdmissionPolicyBinding
+		err = yaml.Unmarshal([]byte(out), &binding)
+		require.NoError(t, err)
+		require.Len(t, binding.Spec.MatchResources.ResourceRules, 1)
+		assert.Equal(t, []string{"agentsubstrate.google.com"}, binding.Spec.MatchResources.ResourceRules[0].APIGroups)
+		assert.Equal(t, []string{"actortemplates"}, binding.Spec.MatchResources.ResourceRules[0].Resources)
+	})
+
+	t.Run("invalid resource rule is rejected", func(t *testing.T) {
+		_, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, nil, []string{"deployments"})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expected group/version/resource")
+	})
+}
+
+func TestParseResourceRule(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			input    string
+			group    string
+			version  string
+			resource string
+		}{
+			{name: "grouped resource", input: "apps/v1/deployments", group: "apps", version: "v1", resource: "deployments"},
+			{name: "core group", input: "/v1/pods", group: "", version: "v1", resource: "pods"},
+			{name: "custom resource", input: "agentsubstrate.google.com/v1beta1/workerpools", group: "agentsubstrate.google.com", version: "v1beta1", resource: "workerpools"},
+			{name: "subresource", input: "apps/v1/deployments/scale", group: "apps", version: "v1", resource: "deployments/scale"},
+			{name: "wildcards", input: "*/*/*", group: "*", version: "*", resource: "*"},
+			{name: "wildcard resource", input: "apps/v1/*", group: "apps", version: "v1", resource: "*"},
+			{name: "surrounding whitespace", input: " apps / v1 / deployments ", group: "apps", version: "v1", resource: "deployments"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				rule, err := parseResourceRule(tt.input)
+				require.NoError(t, err)
+				assert.Equal(t, []string{tt.group}, rule.APIGroups)
+				assert.Equal(t, []string{tt.version}, rule.APIVersions)
+				assert.Equal(t, []string{tt.resource}, rule.Resources)
+				assert.Equal(t, []admissionv1.OperationType{admissionv1.OperationAll}, rule.Operations)
+			})
+		}
+	})
+
+	t.Run("invalid", func(t *testing.T) {
+		tests := []struct {
+			name   string
+			input  string
+			errMsg string
+		}{
+			{name: "empty", input: "", errMsg: "expected group/version/resource"},
+			{name: "resource only", input: "deployments", errMsg: "expected group/version/resource"},
+			{name: "group and version only", input: "apps/v1", errMsg: "expected group/version/resource"},
+			{name: "missing version", input: "apps//deployments", errMsg: "version and resource are required"},
+			{name: "missing resource", input: "apps/v1/", errMsg: "version and resource are required"},
+			{name: "bad group", input: "App$/v1/deployments", errMsg: "invalid api group"},
+			{name: "bad version", input: "apps/V1/deployments", errMsg: "invalid api version"},
+			{name: "bad resource", input: "apps/v1/Deployments", errMsg: "invalid resource"},
+			{name: "bad subresource", input: "apps/v1/deployments/Scale", errMsg: "invalid resource"},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				_, err := parseResourceRule(tt.input)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errMsg)
+			})
+		}
 	})
 }
 
@@ -565,6 +672,30 @@ func TestCreatePolicyBindingCmdValidation(t *testing.T) {
 		err := cmd.Execute()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unsupported control ID")
+	})
+
+	t.Run("resource rule is written to the binding", func(t *testing.T) {
+		outputFile := filepath.Join(t.TempDir(), "binding.yaml")
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--resource-rule", "apps/v1/deployments", "--output", outputFile})
+		require.NoError(t, cmd.Execute())
+
+		content, err := os.ReadFile(outputFile)
+		require.NoError(t, err)
+
+		var binding admissionv1.ValidatingAdmissionPolicyBinding
+		require.NoError(t, yaml.Unmarshal(content, &binding))
+		require.Len(t, binding.Spec.MatchResources.ResourceRules, 1)
+		assert.Equal(t, []string{"apps"}, binding.Spec.MatchResources.ResourceRules[0].APIGroups)
+		assert.Equal(t, []string{"deployments"}, binding.Spec.MatchResources.ResourceRules[0].Resources)
+	})
+
+	t.Run("invalid resource rule fails the command", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--resource-rule", "deployments"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "expected group/version/resource")
 	})
 
 	t.Run("policy and control are mutually exclusive", func(t *testing.T) {
@@ -720,6 +851,9 @@ func TestGetCreatePolicyBindingCmd(t *testing.T) {
 
 	labelFlag := cmd.Flags().Lookup("label")
 	require.NotNil(t, labelFlag)
+
+	resourceRuleFlag := cmd.Flags().Lookup("resource-rule")
+	require.NotNil(t, resourceRuleFlag)
 
 	actionFlag := cmd.Flags().Lookup("action")
 	require.NotNil(t, actionFlag)
@@ -948,7 +1082,7 @@ func TestParseValidationActions(t *testing.T) {
 }
 
 func TestCreatePolicyBindingMultipleActions(t *testing.T) {
-	out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Audit, admissionv1.Warn}, "", nil, nil)
+	out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Audit, admissionv1.Warn}, "", nil, nil, nil)
 	require.NoError(t, err)
 
 	var binding admissionv1.ValidatingAdmissionPolicyBinding
