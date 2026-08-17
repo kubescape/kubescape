@@ -2,6 +2,8 @@ package opaprocessor
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -19,10 +21,6 @@ import (
 	"go.opentelemetry.io/otel"
 	corev1 "k8s.io/api/core/v1"
 )
-
-const clusterScope = "clusterScope"
-
-var largeClusterSize int = -1
 
 // updateResults updates the results objects and report objects. This is a critical function - DO NOT CHANGE
 //
@@ -44,6 +42,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	}
 
 	processor := exceptions.NewProcessor()
+	loadedExceptions := append([]armotypes.PostureExceptionPolicy(nil), opap.Exceptions...)
 
 	// filter expired exceptions before applying them
 	opap.Exceptions = filterExpiredExceptions(opap.Exceptions)
@@ -67,9 +66,6 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 		// summarize the resources
 		opap.Report.AppendResourceResultToSummary(&t)
 
-		// Add score
-		// TODO
-
 		// save changes
 		opap.ResourcesResult[i] = t
 	}
@@ -81,6 +77,10 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	// map control to error
 	controlToInfoMap := mapControlToInfo(opap.ResourceToControlsMap, opap.InfoMap, opap.Report.SummaryDetails.Controls)
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
+
+	if opap.AuditExceptions {
+		opap.ExceptionAudit = buildExceptionAudit(loadedExceptions, opap.Exceptions, opap.ResourcesResult, opap.AllResources, opap.AllPolicies, processor)
+	}
 }
 
 // applyExceptionsToManualControls marks manual controls as passed+w/exceptions when
@@ -206,33 +206,127 @@ func isEmptyResources(counters reportsummary.ICounters) bool {
 	return counters.Failed() == 0 && counters.Skipped() == 0 && counters.Passed() == 0
 }
 
-func getAllSupportedObjects(k8sResources cautils.K8SResources, externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) map[string][]workloadinterface.IMetadata {
-	k8sObjects := getKubernetesObjects(k8sResources, allResources, rule.Match)
-	externalObjs := getKubernetesObjectsFromExternalResources(externalResources, allResources, rule.DynamicMatch)
-	if len(externalObjs) > 0 {
-		l, ok := k8sObjects[clusterScope]
-		if !ok {
-			l = []workloadinterface.IMetadata{}
-		}
-		l = append(l, externalObjs...)
-		k8sObjects[clusterScope] = l
-	}
-	return k8sObjects
+// indexedObject is one resolved object in a resourceGroupIndex. kind is cached
+// so matching does not re-read it, and ordinal is the object's slot in the
+// index's de-duplicated ID space.
+type indexedObject struct {
+	object  workloadinterface.IMetadata
+	kind    string
+	ordinal int
 }
 
-func getKubernetesObjectsFromExternalResources(externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+// resourceGroup is one collected GVR key, parsed, with the objects under it.
+type resourceGroup struct {
+	group    string
+	version  string
+	resource string
+	objects  []indexedObject
+}
+
+// resourceGroupIndex holds a scope's resources ready for matching: GVR keys
+// parsed and sorted, IDs resolved to objects, ordinals assigned.
+//
+// Matching runs once per rule per scope, but none of that work depends on the
+// rule, and a scope's resources do not change during a scan. Doing it per call
+// made it the scan's dominant source of allocations on large clusters, so it is
+// done once per scope instead (see newEvaluationScope).
+type resourceGroupIndex struct {
+	groups []resourceGroup
+	// objectCount is the number of distinct objects, sizing the emitted bitset.
+	objectCount int
+}
+
+// newResourceGroupIndex parses and sorts a scope's GVR keys and resolves the IDs
+// under them. Keys are sorted raw, the order the match loop used to establish,
+// so a rule's input array keeps the same resource ordering. An ID that
+// allResources does not hold is dropped, as the per-match lookup used to.
+func newResourceGroupIndex(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata) resourceGroupIndex {
+	keys := make([]string, 0, len(k8sResources))
+	for key := range k8sResources {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	index := resourceGroupIndex{groups: make([]resourceGroup, 0, len(keys))}
+	// One ID can be collected under several GVR keys, so ordinals are assigned
+	// per ID rather than per slot, keeping the dedup in getKubernetesObjects.
+	ordinals := make(map[string]int)
+
+	for _, key := range keys {
+		// Match the collected GVR keys directly. Re-resolving policy matches
+		// through k8s-interface here would make file scans depend on its
+		// discovery snapshot again and would lose manifest versions that the
+		// snapshot does not contain.
+		group, version, resource := k8sinterface.StringToResourceGroup(key)
+		ids := k8sResources[key]
+
+		objects := make([]indexedObject, 0, len(ids))
+		for _, id := range ids {
+			object, ok := allResources[id]
+			if !ok || object == nil {
+				continue
+			}
+			ordinal, seen := ordinals[id]
+			if !seen {
+				ordinal = index.objectCount
+				ordinals[id] = ordinal
+				index.objectCount++
+			}
+			objects = append(objects, indexedObject{
+				object:  object,
+				kind:    object.GetKind(),
+				ordinal: ordinal,
+			})
+		}
+
+		index.groups = append(index.groups, resourceGroup{
+			group:    group,
+			version:  version,
+			resource: resource,
+			objects:  objects,
+		})
+	}
+
+	return index
+}
+
+// getKubernetesObjects returns the objects of a single scope that the rule
+// matches, in match-declaration order. Callers evaluate one scope at a time,
+// so no per-namespace bucketing happens here: the caller's batch already is
+// the bucket (see cautils.PartitionResources).
+func getKubernetesObjects(index resourceGroupIndex, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
+	// A match block often names the same object under several combinations, so
+	// emitted objects are tracked by ordinal to keep the input free of
+	// duplicates. Allocated on first emission: most rules match nothing in a
+	// given scope, and those must not pay for a buffer sized to the index.
+	var emitted []bool
 
 	for m := range match {
-		for _, groups := range match[m].APIGroups {
-			for _, version := range match[m].APIVersions {
-				for _, resource := range match[m].Resources {
-					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
-					for _, groupResource := range groupResources {
-						if k8sObj, ok := externalResources[groupResource]; ok {
-							for i := range k8sObj {
-								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
+		mt := &match[m]
+		for _, groups := range mt.APIGroups {
+			for _, version := range mt.APIVersions {
+				for _, resource := range mt.Resources {
+					for g := range index.groups {
+						group := &index.groups[g]
+						if !matchesKubernetesObjectValue(groups, group.group) || !matchesKubernetesObjectValue(version, group.version) {
+							continue
+						}
+
+						directResourceMatch := resource == "*" || strings.EqualFold(resource, group.resource)
+						for i := range group.objects {
+							object := &group.objects[i]
+							if len(emitted) != 0 && emitted[object.ordinal] {
+								continue
 							}
+							if !directResourceMatch && !strings.EqualFold(resource, object.kind) {
+								continue
+							}
+							if emitted == nil {
+								emitted = make([]bool, index.objectCount)
+							}
+							k8sObjects = append(k8sObjects, object.object)
+							emitted[object.ordinal] = true
 						}
 					}
 				}
@@ -243,37 +337,11 @@ func getKubernetesObjectsFromExternalResources(externalResources cautils.Externa
 	return k8sObjects
 }
 
-func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) map[string][]workloadinterface.IMetadata {
-	k8sObjects := map[string][]workloadinterface.IMetadata{}
-
-	for m := range match {
-		for _, groups := range match[m].APIGroups {
-			for _, version := range match[m].APIVersions {
-				for _, resource := range match[m].Resources {
-					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
-					for _, groupResource := range groupResources {
-						if k8sObj, ok := k8sResources[groupResource]; ok {
-							for i := range k8sObj {
-
-								obj := allResources[k8sObj[i]]
-								ns := getNamespaceName(obj, len(allResources))
-
-								l, ok := k8sObjects[ns]
-								if !ok {
-									l = []workloadinterface.IMetadata{}
-								}
-								l = append(l, obj)
-								k8sObjects[ns] = l
-							}
-						}
-					}
-				}
-			}
-		}
+func matchesKubernetesObjectValue(policyValue, objectValue string) bool {
+	if policyValue == "*" || policyValue == objectValue {
+		return true
 	}
-
-	return k8sObjects
-	// return filterOutChildResources(k8sObjects, match)
+	return policyValue == "core" && objectValue == ""
 }
 func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 	modules := resources.LoadRegoModules()
@@ -302,17 +370,28 @@ func removeConfigMapData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 	overrideSensitiveData(workload)
+	overrideMapField(workload, "binaryData")
 }
 
 func overrideSensitiveData(workload workloadinterface.IWorkload) {
-	dataInterface, ok := workloadinterface.InspectMap(workload.GetObject(), "data")
-	if ok {
-		data, ok := dataInterface.(map[string]any)
-		if ok {
-			for key := range data {
-				workloadinterface.SetInMap(workload.GetObject(), []string{"data"}, key, "XXXXXX")
-			}
-		}
+	overrideMapField(workload, "data")
+}
+
+func overrideStringData(workload workloadinterface.IWorkload) {
+	overrideMapField(workload, "stringData")
+}
+
+func overrideMapField(workload workloadinterface.IWorkload, field string) {
+	dataInterface, ok := workloadinterface.InspectMap(workload.GetObject(), field)
+	if !ok {
+		return
+	}
+	data, ok := dataInterface.(map[string]any)
+	if !ok {
+		return
+	}
+	for key := range data {
+		workloadinterface.SetInMap(workload.GetObject(), []string{field}, key, "XXXXXX")
 	}
 }
 
@@ -320,7 +399,9 @@ func removeSecretData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 	overrideSensitiveData(workload)
+	overrideStringData(workload)
 }
+
 func removePodData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
@@ -373,31 +454,4 @@ func ruleData(rule *reporthandling.PolicyRule) string {
 
 func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
 	return rule.ResourceEnumerator
-}
-
-func getNamespaceName(obj workloadinterface.IMetadata, clusterSize int) string {
-
-	if !isLargeCluster(clusterSize) {
-		return clusterScope
-	}
-
-	// if the resource is in namespace scope, get the namespace
-	if k8sinterface.IsResourceInNamespaceScope(obj.GetKind()) {
-		return obj.GetNamespace()
-	}
-	if obj.GetKind() == "Namespace" {
-		return obj.GetName()
-	}
-
-	return clusterScope
-}
-
-// isLargeCluster returns true if the cluster size is larger than the largeClusterSize
-// This code is a workaround for large clusters. The final solution will be to scan resources individually
-func isLargeCluster(clusterSize int) bool {
-	if largeClusterSize < 0 {
-		// initialize large cluster size
-		largeClusterSize, _ = cautils.ParseIntEnvVar("LARGE_CLUSTER_SIZE", 2500)
-	}
-	return clusterSize > largeClusterSize
 }

@@ -48,8 +48,16 @@ func validateFramework(framework *reporthandling.Framework) error {
 	return nil
 }
 
-// getPoliciesCacheTtl - get policies cache TTL from environment variable or return 0 if not set
+// getPoliciesCacheTtl returns the policy cache TTL from the POLICIES_CACHE_TTL
+// environment variable. It first tries to parse the value as a Go duration
+// string (e.g. "5m", "90s", "1h30m"). If that fails it falls back to treating
+// the value as an integer number of minutes for backwards compatibility with
+// callers that set POLICIES_CACHE_TTL=5 (meaning 5 minutes).
 func getPoliciesCacheTtl() time.Duration {
+	if d, err := cautils.ParseDurationEnvVar(PoliciesCacheTtlEnvVar, 0); err == nil {
+		return d
+	}
+
 	if val, err := cautils.ParseIntEnvVar(PoliciesCacheTtlEnvVar, 0); err == nil {
 		return time.Duration(val) * time.Minute
 	}

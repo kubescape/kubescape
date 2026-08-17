@@ -1,19 +1,23 @@
 package printer
 
 import (
+	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"testing"
 
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewJsonPrinter(t *testing.T) {
-	pp := NewJsonPrinter()
+	pp := NewJsonPrinter("")
 	assert.NotNil(t, pp)
 	assert.Empty(t, pp)
 }
@@ -28,6 +32,11 @@ func TestScore_Json(t *testing.T) {
 			name:  "Score not an integer",
 			score: 20.7,
 			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 21\n",
+		},
+		{
+			name:  "Fractional score below perfect",
+			score: 99.5,
+			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 99\n",
 		},
 		{
 			name:  "Score less than 0",
@@ -56,7 +65,7 @@ func TestScore_Json(t *testing.T) {
 		},
 	}
 
-	jp := NewJsonPrinter()
+	jp := NewJsonPrinter("")
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -87,6 +96,84 @@ func TestScore_Json(t *testing.T) {
 		})
 	}
 }
+
+func TestActionPrintIncludesExceptionAuditWhenSet(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.ExceptionAudit = &cautils.ExceptionAudit{
+		Generated: true,
+		Summary: cautils.ExceptionAuditSummary{
+			Total:   1,
+			Active:  1,
+			Matched: 1,
+		},
+		Items: []cautils.ExceptionAuditItem{
+			{
+				Name:       "matched-exception",
+				Status:     "matched",
+				MatchCount: 1,
+				ControlIDs: []string{"C-0001"},
+			},
+		},
+	}
+
+	got := jsonPrinterOutput(t, session)
+
+	exceptionAudit, ok := got["exceptionAudit"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, true, exceptionAudit["generated"])
+
+	summary, ok := exceptionAudit["summary"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, float64(1), summary["total"])
+	assert.Equal(t, float64(1), summary["active"])
+	assert.Equal(t, float64(1), summary["matched"])
+
+	items, ok := exceptionAudit["items"].([]any)
+	require.True(t, ok)
+	require.Len(t, items, 1)
+	item, ok := items[0].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "matched-exception", item["name"])
+}
+
+func TestActionPrintOmitsExceptionAuditWhenNil(t *testing.T) {
+	got := jsonPrinterOutput(t, cautils.NewOPASessionObjMock())
+
+	_, ok := got["exceptionAudit"]
+	assert.False(t, ok)
+}
+
+func TestActionPrintIncludesSessionIDAsReportGUID(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.SessionID = "scan-6f012842"
+
+	got := jsonPrinterOutput(t, session)
+
+	assert.Equal(t, "scan-6f012842", got["reportGUID"])
+}
+
+func jsonPrinterOutput(t *testing.T, session *cautils.OPASessionObj) map[string]any {
+	t.Helper()
+
+	tmpJson, err := os.CreateTemp("", "json-exception-audit-*.json")
+	require.NoError(t, err)
+	defer func() {
+		_ = os.Remove(tmpJson.Name())
+	}()
+
+	jp := NewJsonPrinter("")
+	jp.writer = tmpJson
+	require.NoError(t, jp.ActionPrint(context.Background(), session, nil))
+	require.NoError(t, tmpJson.Close())
+
+	rawJson, err := os.ReadFile(tmpJson.Name())
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(rawJson, &got))
+	return got
+}
+
 func TestConvertToCVESummary(t *testing.T) {
 	cves := []imageprinter.CVE{
 		{

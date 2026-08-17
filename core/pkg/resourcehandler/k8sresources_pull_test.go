@@ -8,6 +8,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -84,7 +85,7 @@ func TestPullResources_PartialFailureSurface(t *testing.T) {
 		},
 	}
 
-	k8sResourcesMap, allResources, failedQueries := handler.pullResources(context.Background(), queryableResources, &EmptySelector{})
+	k8sResourcesMap, allResources, failedQueries := handler.pullResources(context.Background(), queryableResources, &EmptySelector{}, "")
 
 	// Verify that the successful selector populated the shared raw-GVR bucket.
 	assert.Len(t, allResources, 1)
@@ -129,7 +130,7 @@ func TestGetResources_SurfacesMissingGVRFailuresInInfoMap(t *testing.T) {
 	framework.Controls = append(framework.Controls, control)
 
 	scanInfo := &cautils.ScanInfo{}
-	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
 	sessionObj.Policies = append(sessionObj.Policies, *framework)
 
 	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
@@ -158,7 +159,7 @@ func TestGetResources_FailsWhenAllQueriesFail(t *testing.T) {
 	framework.Controls = append(framework.Controls, control)
 
 	scanInfo := &cautils.ScanInfo{}
-	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
 	sessionObj.Policies = append(sessionObj.Policies, *framework)
 
 	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
@@ -196,7 +197,7 @@ func TestGetResources_ScanAbortedOnContextCancellation(t *testing.T) {
 	framework.Controls = append(framework.Controls, control)
 
 	scanInfo := &cautils.ScanInfo{}
-	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
 	sessionObj.Policies = append(sessionObj.Policies, *framework)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -219,6 +220,12 @@ func (s *stubHostSensor) Init(_ context.Context) error { return nil }
 func (s *stubHostSensor) TearDown() error              { return nil }
 func (s *stubHostSensor) CollectResources(_ context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
 	return nil, s.infoMap, nil
+}
+
+func (s *stubHostSensor) StreamTelemetry(_ context.Context) (<-chan hostsensorutils.SyscallEvent, error) {
+	events := make(chan hostsensorutils.SyscallEvent)
+	close(events)
+	return events, nil
 }
 
 // TestGetResources_HostSensorInfoMapMerged is a regression test for the bug
@@ -252,7 +259,7 @@ func TestGetResources_HostSensorInfoMapMerged(t *testing.T) {
 
 	scanInfo := &cautils.ScanInfo{}
 	scanInfo.HostSensorEnabled.SetBool(true)
-	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
 	sessionObj.Policies = append(sessionObj.Policies, *framework)
 
 	const preSeededGVR = "/v1/networkpolicies"

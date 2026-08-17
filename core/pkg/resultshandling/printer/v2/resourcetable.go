@@ -16,7 +16,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
-var specContainerRegex = regexp.MustCompile(`spec\.containers\[(\d+)]`)
+var specContainerRegex = regexp.MustCompile(`spec\.(containers|initContainers|ephemeralContainers)\[(\d+)]`)
 
 const (
 	resourceColumnSeverity = iota
@@ -58,7 +58,11 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		summaryTable.Style().Format.Header = text.FormatDefault
 		summaryTable.Style().Box = table.StyleBoxRounded
 
-		resourceRows := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource)
+		var sourcePath string
+		if src, ok := opaSessionObj.ResourceSource[resourceID]; ok {
+			sourcePath = src.RelativePath
+		}
+		resourceRows := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource, prettyPrinter.showEvidence, prettyPrinter.showSecrets, sourcePath)
 
 		short := utils.CheckShortTerminalWidth(resourceRows, generateResourceHeader(false))
 		if short {
@@ -73,7 +77,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 
 }
 
-func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata) []table.Row {
+func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, showEvidence bool, showSecrets bool, sourcePath string) []table.Row {
 	var rows []table.Row
 
 	for i := range controls {
@@ -84,9 +88,14 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		}
 
 		row[resourceColumnURL] = cautils.GetControlLink(controls[i].GetID())
-		paths := AssistedRemediationPathsToString(&controls[i])
-		addContainerNameToAssistedRemediation(resource, &paths)
-		row[resourceColumnPath] = strings.Join(paths, "\n")
+		if showEvidence {
+			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&controls[i], resource, showSecrets)
+			addContainerNameToAssistedRemediation(resource, &paths)
+			if sourcePath != "" {
+				paths = append([]string{"@ " + sourcePath}, paths...)
+			}
+			row[resourceColumnPath] = strings.Join(paths, "\n")
+		}
 		row[resourceColumnName] = controls[i].GetName()
 
 		if c := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, controls[i].GetID()); c != nil {
@@ -100,22 +109,52 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 }
 
 func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata, paths *[]string) {
+	wl := workloadinterface.NewWorkloadObj(resource.GetObject())
+	namesByKind := containerNamesByKind(wl)
+
 	for i := range *paths {
 		match := specContainerRegex.FindStringSubmatch((*paths)[i])
-		if len(match) == 2 {
-			index, err := strconv.Atoi(match[1])
-			if err != nil {
-				continue
-			}
-			wl := workloadinterface.NewWorkloadObj(resource.GetObject())
-			containers, _ := wl.GetContainers()
-			if index >= len(containers) {
-				continue
-			}
-			containerName := containers[index].Name
-			(*paths)[i] = (*paths)[i] + " (" + containerName + ")"
+		if len(match) != 3 {
+			continue
 		}
+		index, err := strconv.Atoi(match[2])
+		if err != nil {
+			continue
+		}
+		names := namesByKind[match[1]]
+		if index >= len(names) {
+			continue
+		}
+		(*paths)[i] += " (" + names[index] + ")"
 	}
+}
+
+func containerNamesByKind(wl *workloadinterface.Workload) map[string][]string {
+	namesByKind := make(map[string][]string, 3)
+
+	if cs, err := wl.GetContainers(); err == nil {
+		names := make([]string, len(cs))
+		for i := range cs {
+			names[i] = cs[i].Name
+		}
+		namesByKind["containers"] = names
+	}
+	if cs, err := wl.GetInitContainers(); err == nil {
+		names := make([]string, len(cs))
+		for i := range cs {
+			names[i] = cs[i].Name
+		}
+		namesByKind["initContainers"] = names
+	}
+	if cs, err := wl.GetEphemeralContainers(); err == nil {
+		names := make([]string, len(cs))
+		for i := range cs {
+			names[i] = cs[i].Name
+		}
+		namesByKind["ephemeralContainers"] = names
+	}
+
+	return namesByKind
 }
 
 func generateResourceHeader(short bool) table.Row {

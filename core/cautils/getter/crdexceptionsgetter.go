@@ -67,20 +67,34 @@ func NewCRDExceptionsGetter(k8sClient client.Client) *CRDExceptionsGetter {
 	return getter
 }
 
-func (g *CRDExceptionsGetter) GetExceptions(_ string) ([]armotypes.PostureExceptionPolicy, error) {
+// NewCRDExceptionsGetterWithClients creates a CRD-backed exceptions getter from
+// clients that belong to the same scan target. Callers that already resolved a
+// Kubernetes target should use this constructor instead of consulting the
+// process-global Kubernetes configuration again.
+func NewCRDExceptionsGetterWithClients(dynamicClient dynamic.Interface, k8sClient client.Client) *CRDExceptionsGetter {
+	return &CRDExceptionsGetter{
+		client:    dynamicClient,
+		k8sClient: k8sClient,
+	}
+}
+
+func (g *CRDExceptionsGetter) GetExceptions(ctx context.Context, _ string) ([]armotypes.PostureExceptionPolicy, error) {
 	if g == nil || g.client == nil {
 		return []armotypes.PostureExceptionPolicy{}, nil
 	}
 
 	var out []armotypes.PostureExceptionPolicy
 
-	seList, err := g.client.Resource(securityExceptionGVR).List(context.Background(), metav1.ListOptions{})
+	seList, err := g.client.Resource(securityExceptionGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
 	for i := range seList.Items {
-		policies, convErr := convertCRDObjectToPosturePolicies(&seList.Items[i], "SecurityException", g.k8sClient)
+		policies, convErr := convertCRDObjectToPosturePolicies(ctx, &seList.Items[i], "SecurityException", g.k8sClient)
 		if convErr != nil {
+			if isContextErr(convErr) {
+				return nil, convErr
+			}
 			// Partial application: skip this one CRD but keep the rest, and make the
 			// drop observable instead of silently swallowing it.
 			logger.L().Warning("skipping SecurityException that failed to convert to posture exceptions",
@@ -92,13 +106,16 @@ func (g *CRDExceptionsGetter) GetExceptions(_ string) ([]armotypes.PostureExcept
 		out = append(out, policies...)
 	}
 
-	cseList, err := g.client.Resource(clusterSecurityExceptionGVR).List(context.Background(), metav1.ListOptions{})
+	cseList, err := g.client.Resource(clusterSecurityExceptionGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
 	for i := range cseList.Items {
-		policies, convErr := convertCRDObjectToPosturePolicies(&cseList.Items[i], "ClusterSecurityException", g.k8sClient)
+		policies, convErr := convertCRDObjectToPosturePolicies(ctx, &cseList.Items[i], "ClusterSecurityException", g.k8sClient)
 		if convErr != nil {
+			if isContextErr(convErr) {
+				return nil, convErr
+			}
 			// Partial application: skip this one CRD but keep the rest, and make the
 			// drop observable instead of silently swallowing it.
 			logger.L().Warning("skipping ClusterSecurityException that failed to convert to posture exceptions",
@@ -113,6 +130,7 @@ func (g *CRDExceptionsGetter) GetExceptions(_ string) ([]armotypes.PostureExcept
 }
 
 func convertCRDObjectToPosturePolicies(
+	ctx context.Context,
 	obj *unstructured.Unstructured,
 	kind string,
 	k8sClient client.Client,
@@ -146,7 +164,7 @@ func convertCRDObjectToPosturePolicies(
 	if !postureFound {
 		postureItems = nil
 	}
-	resources, err := buildResourceDesignators(obj, kind, k8sClient)
+	resources, err := buildResourceDesignators(ctx, obj, kind, k8sClient)
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +214,7 @@ func convertCRDObjectToPosturePolicies(
 }
 
 func buildResourceDesignators(
+	ctx context.Context,
 	obj *unstructured.Unstructured,
 	kind string,
 	k8sClient client.Client,
@@ -233,7 +252,7 @@ func buildResourceDesignators(
 			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(selectorMap, &labelSelector); err != nil {
 				return nil, fmt.Errorf("decode namespaceSelector: %w", err)
 			}
-			names, err := resolveNamespaceSelector(labelSelector, k8sClient)
+			names, err := resolveNamespaceSelector(ctx, labelSelector, k8sClient)
 			if err != nil {
 				return nil, err
 			}
@@ -351,7 +370,7 @@ func toArmoLabelSelector(sel metav1.LabelSelector) *armotypes.LabelSelector {
 }
 
 // resolveNamespaceSelector returns namespace names matching a label selector.
-func resolveNamespaceSelector(selector metav1.LabelSelector, k8sClient client.Client) ([]string, error) {
+func resolveNamespaceSelector(ctx context.Context, selector metav1.LabelSelector, k8sClient client.Client) ([]string, error) {
 	if k8sClient == nil {
 		return nil, fmt.Errorf("kubernetes client is nil")
 	}
@@ -366,7 +385,7 @@ func resolveNamespaceSelector(selector metav1.LabelSelector, k8sClient client.Cl
 	}
 
 	var namespaces corev1.NamespaceList
-	if err := k8sClient.List(context.Background(), &namespaces, client.MatchingLabelsSelector{Selector: parsedSelector}); err != nil {
+	if err := k8sClient.List(ctx, &namespaces, client.MatchingLabelsSelector{Selector: parsedSelector}); err != nil {
 		return nil, fmt.Errorf("list namespaces: %w", err)
 	}
 

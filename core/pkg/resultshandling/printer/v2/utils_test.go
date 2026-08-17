@@ -2,6 +2,7 @@ package printer
 
 import (
 	"encoding/json"
+	"sort"
 	"testing"
 	"time"
 
@@ -9,9 +10,13 @@ import (
 	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -219,7 +224,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				},
 			}...),
 			want: map[string]*imageprinter.PackageScore{
-				"foo1.2.3": {
+				"foo@1.2.3": {
 					Name:    "foo",
 					Score:   4,
 					Version: "1.2.3",
@@ -270,7 +275,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				},
 			}...),
 			want: map[string]*imageprinter.PackageScore{
-				"pkg1version1": {
+				"pkg1@version1": {
 					Name:    "pkg1",
 					Score:   5,
 					Version: "version1",
@@ -278,7 +283,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"Critical": 1,
 					},
 				},
-				"pkg21.2": {
+				"pkg2@1.2": {
 					Name:    "pkg2",
 					Score:   2,
 					Version: "1.2",
@@ -286,7 +291,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"Low": 1,
 					},
 				},
-				"pkg31.2.3": {
+				"pkg3@1.2.3": {
 					Name:    "pkg3",
 					Score:   4,
 					Version: "1.2.3",
@@ -373,7 +378,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				},
 			}...),
 			want: map[string]*imageprinter.PackageScore{
-				"pkg1version1": {
+				"pkg1@version1": {
 					Name:    "pkg1",
 					Score:   8,
 					Version: "version1",
@@ -381,7 +386,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"High": 2,
 					},
 				},
-				"pkg1version2": {
+				"pkg1@version2": {
 					Name:    "pkg1",
 					Score:   5,
 					Version: "version2",
@@ -389,7 +394,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"Critical": 1,
 					},
 				},
-				"pkg31.2": {
+				"pkg3@1.2": {
 					Name:    "pkg3",
 					Score:   5,
 					Version: "1.2",
@@ -398,7 +403,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"Low":    1,
 					},
 				},
-				"pkg41.2.3": {
+				"pkg4@1.2.3": {
 					Name:    "pkg4",
 					Score:   4,
 					Version: "1.2.3",
@@ -454,7 +459,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				},
 			}...),
 			originalMap: map[string]*imageprinter.PackageScore{
-				"pkg41.2.3": {
+				"pkg4@1.2.3": {
 					Name:    "pkg4",
 					Score:   4,
 					Version: "1.2.3",
@@ -464,7 +469,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				},
 			},
 			want: map[string]*imageprinter.PackageScore{
-				"pkg41.2.3": {
+				"pkg4@1.2.3": {
 					Name:    "pkg4",
 					Score:   4,
 					Version: "1.2.3",
@@ -472,7 +477,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"High": 1,
 					},
 				},
-				"pkg1version1": {
+				"pkg1@version1": {
 					Name:    "pkg1",
 					Score:   8,
 					Version: "version1",
@@ -480,7 +485,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"High": 2,
 					},
 				},
-				"pkg1version2": {
+				"pkg1@version2": {
 					Name:    "pkg1",
 					Score:   5,
 					Version: "version2",
@@ -531,7 +536,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				},
 			}...),
 			originalMap: map[string]*imageprinter.PackageScore{
-				"pkg1version1": {
+				"pkg1@version1": {
 					Name:    "pkg1",
 					Score:   4,
 					Version: "version1",
@@ -541,7 +546,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				},
 			},
 			want: map[string]*imageprinter.PackageScore{
-				"pkg1version1": {
+				"pkg1@version1": {
 					Name:    "pkg1",
 					Score:   12,
 					Version: "version1",
@@ -549,7 +554,7 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 						"High": 3,
 					},
 				},
-				"pkg1version2": {
+				"pkg1@version2": {
 					Name:    "pkg1",
 					Score:   5,
 					Version: "version2",
@@ -596,6 +601,128 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestSetPkgNameToScoreMap_NoCollisionWithoutSeparator verifies that two
+// distinct (name, version) pairs whose concatenation would be identical if no
+// separator were used between them - e.g. name="foo1"+version="2.3" and
+// name="foo"+version="12.3", both "foo12.3" - are kept as separate entries
+// instead of one silently overwriting the other's CVE data.
+func TestSetPkgNameToScoreMap_NoCollisionWithoutSeparator(t *testing.T) {
+	matches := match.NewMatches([]match.Match{
+		{
+			Package: pkg.Package{
+				ID:      "1",
+				Name:    "foo1",
+				Version: "2.3",
+			},
+			Vulnerability: vulnerability.Vulnerability{
+				Metadata: &vulnerability.Metadata{
+					Severity: "High",
+				},
+			},
+		},
+		{
+			Package: pkg.Package{
+				ID:      "2",
+				Name:    "foo",
+				Version: "12.3",
+			},
+			Vulnerability: vulnerability.Vulnerability{
+				Metadata: &vulnerability.Metadata{
+					Severity: "Critical",
+				},
+			},
+		},
+	}...)
+
+	pkgScores := make(map[string]*imageprinter.PackageScore)
+	setPkgNameToScoreMap(matches, pkgScores)
+
+	require.Len(t, pkgScores, 2, "both packages must have their own entry, not collide into one")
+
+	names := make(map[string]string)
+	for _, score := range pkgScores {
+		names[score.Name+"/"+score.Version] = score.Name
+	}
+	assert.Contains(t, names, "foo1/2.3")
+	assert.Contains(t, names, "foo/12.3")
+}
+
+// TestSetPkgNameToScoreMap_NoCollisionWithAtInNameOrVersion verifies that
+// the "@" delimiter itself does not reintroduce the collision class it was
+// meant to fix. Package names can legitimately contain "@" (e.g. npm scoped
+// packages such as "@angular/core"), so without escaping, name="foo@bar"
+// + version="baz" and name="foo" + version="bar@baz" would both join to the
+// same raw string "foo@bar@baz" and collide.
+func TestSetPkgNameToScoreMap_NoCollisionWithAtInNameOrVersion(t *testing.T) {
+	matches := match.NewMatches([]match.Match{
+		{
+			Package: pkg.Package{
+				ID:      "1",
+				Name:    "foo@bar",
+				Version: "baz",
+			},
+			Vulnerability: vulnerability.Vulnerability{
+				Metadata: &vulnerability.Metadata{
+					Severity: "High",
+				},
+			},
+		},
+		{
+			Package: pkg.Package{
+				ID:      "2",
+				Name:    "foo",
+				Version: "bar@baz",
+			},
+			Vulnerability: vulnerability.Vulnerability{
+				Metadata: &vulnerability.Metadata{
+					Severity: "Critical",
+				},
+			},
+		},
+	}...)
+
+	pkgScores := make(map[string]*imageprinter.PackageScore)
+	setPkgNameToScoreMap(matches, pkgScores)
+
+	require.Len(t, pkgScores, 2, "both packages must have their own entry, not collide into one")
+
+	names := make(map[string]string)
+	for _, score := range pkgScores {
+		names[score.Name+"/"+score.Version] = score.Name
+	}
+	assert.Contains(t, names, "foo@bar/baz")
+	assert.Contains(t, names, "foo/bar@baz")
+}
+
+// TestPkgScoreKeyIsCollisionFree exercises pkgScoreKey directly against a
+// broader set of adversarial (name, version) pairs - including values
+// containing the delimiter and the escape character itself - and asserts
+// every pair maps to a distinct key.
+func TestPkgScoreKeyIsCollisionFree(t *testing.T) {
+	type nameVersion struct{ name, version string }
+	pairs := []nameVersion{
+		{"foo1", "2.3"},
+		{"foo", "12.3"},
+		{"foo@bar", "baz"},
+		{"foo", "bar@baz"},
+		{"@angular/core", "12.3"},
+		{"@angular/core@12", "3"},
+		{`foo\`, "bar"},
+		{"foo", `\bar`},
+		{`foo\@`, "bar"},
+		{"foo", `\@bar`},
+	}
+
+	seen := make(map[string]nameVersion)
+	for _, p := range pairs {
+		key := pkgScoreKey(p.name, p.version)
+		if prev, ok := seen[key]; ok {
+			t.Fatalf("key collision: (%q,%q) and (%q,%q) both produced key %q", prev.name, prev.version, p.name, p.version, key)
+		}
+		seen[key] = p
 	}
 }
 
@@ -966,4 +1093,189 @@ func TestFinalizeResults_PreservesExistingGenerationTime(t *testing.T) {
 	require.NotNil(t, report)
 	assert.Equal(t, preset, report.ReportGenerationTime)
 	assert.Equal(t, preset, session.Report.ReportGenerationTime)
+}
+
+func TestFinalizeResults_SetsReportIDFromSession(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.SessionID = "scan-6f012842"
+	require.Empty(t, session.Report.ReportID,
+		"precondition: the report has not been assigned an ID")
+
+	report := FinalizeResults(session)
+
+	require.NotNil(t, report)
+	assert.Equal(t, "scan-6f012842", report.ReportID)
+	assert.Equal(t, "scan-6f012842", session.Report.ReportID,
+		"FinalizeResults must write the ID back so every downstream consumer observes the same identity")
+}
+
+func TestFinalizeResults_PreservesExistingReportID(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.SessionID = "scan-new"
+	session.Report.ReportID = "report-preset"
+
+	report := FinalizeResults(session)
+
+	require.NotNil(t, report)
+	assert.Equal(t, "report-preset", report.ReportID)
+	assert.Equal(t, "report-preset", session.Report.ReportID)
+}
+
+// TestFinalizeResults_SetsClusterNameWhenEmpty is the regression test for
+// kubescape/kubescape#2856: JSON reports always had an empty clusterName
+// because nothing on the scan path ever assigned OPASessionObj.Report.ClusterName,
+// even though the context name is known via k8sinterface at scan time.
+func TestFinalizeResults_SetsClusterNameWhenEmpty(t *testing.T) {
+	k8sinterface.SetClusterContextName("test-cluster")
+	defer k8sinterface.SetClusterContextName("")
+
+	session := cautils.NewOPASessionObjMock()
+	require.Empty(t, session.Report.ClusterName,
+		"precondition: mock starts with the empty ClusterName that #2856 reported")
+
+	report := FinalizeResults(session)
+
+	require.NotNil(t, report)
+	assert.Equal(t, "test-cluster", report.ClusterName)
+	assert.Equal(t, "test-cluster", session.Report.ClusterName,
+		"FinalizeResults must also write back to the session so downstream consumers see it")
+}
+
+// TestFinalizeResults_PreservesExistingClusterName ensures we don't clobber a
+// cluster name the caller has already set.
+func TestFinalizeResults_PreservesExistingClusterName(t *testing.T) {
+	k8sinterface.SetClusterContextName("other-cluster")
+	defer k8sinterface.SetClusterContextName("")
+
+	session := cautils.NewOPASessionObjMock()
+	session.Report.ClusterName = "preset-cluster"
+
+	report := FinalizeResults(session)
+
+	require.NotNil(t, report)
+	assert.Equal(t, "preset-cluster", report.ClusterName)
+	assert.Equal(t, "preset-cluster", session.Report.ClusterName)
+}
+
+func TestFinalizeResults_SortsResultsAndResourcesByResourceID(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+
+	resources := []workloadinterface.IMetadata{
+		createWorkloadWithLabels("zeta", "default", nil),
+		createWorkloadWithLabels("alpha", "default", nil),
+		createWorkloadWithLabels("kappa", "default", nil),
+		createWorkloadWithLabels("beta", "default", nil),
+		createWorkloadWithLabels("theta", "default", nil),
+		createWorkloadWithLabels("delta", "default", nil),
+		createWorkloadWithLabels("eta", "default", nil),
+		createWorkloadWithLabels("gamma", "default", nil),
+	}
+	expectedResourceIDs := make([]string, 0, len(resources))
+
+	// Insert resources in a deliberately non-canonical order. FinalizeResults
+	// must define its own stable order instead of exposing Go map iteration.
+	for _, resource := range resources {
+		resourceID := resource.GetID()
+		expectedResourceIDs = append(expectedResourceIDs, resourceID)
+		session.ResourcesResult[resourceID] = resourcesresults.Result{ResourceID: resourceID}
+		session.AllResources[resourceID] = resource
+	}
+	sort.Strings(expectedResourceIDs)
+
+	for i := 0; i < 64; i++ {
+		report := FinalizeResults(session)
+		require.NotNil(t, report)
+		require.Len(t, report.Results, len(expectedResourceIDs))
+		require.Len(t, report.Resources, len(expectedResourceIDs))
+
+		resultResourceIDs := make([]string, 0, len(report.Results))
+		for _, result := range report.Results {
+			resultResourceIDs = append(resultResourceIDs, result.ResourceID)
+		}
+		require.Equalf(t, expectedResourceIDs, resultResourceIDs, "results iteration %d", i)
+
+		resourceIDs := make([]string, 0, len(report.Resources))
+		for _, resource := range report.Resources {
+			resourceIDs = append(resourceIDs, resource.ResourceID)
+		}
+		require.Equalf(t, expectedResourceIDs, resourceIDs, "resources iteration %d", i)
+	}
+}
+
+func Test_mapInfoToPrintInfo_stableMarkers(t *testing.T) {
+	skipReasons := map[string]string{
+		"C-0001": "no cluster connection",
+		"C-0002": "host scanner is not deployed",
+		"C-0003": "control configuration is missing",
+		"C-0004": "resource kind was not scanned",
+	}
+
+	controls := reportsummary.ControlSummaries{}
+	for controlID, info := range skipReasons {
+		controls[controlID] = reportsummary.ControlSummary{
+			ControlID:  controlID,
+			StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusSkipped, InnerInfo: info},
+		}
+	}
+
+	want := []infoStars{
+		{stars: "†", info: skipReasons["C-0001"]},
+		{stars: "††", info: skipReasons["C-0002"]},
+		{stars: "†††", info: skipReasons["C-0003"]},
+		{stars: "††††", info: skipReasons["C-0004"]},
+	}
+
+	// The PDF printer reads the markers for the table and the legend from
+	// separate calls, so every call must return the same assignment.
+	for i := 0; i < 64; i++ {
+		require.Equalf(t, want, mapInfoToPrintInfo(controls), "iteration %d", i)
+	}
+}
+
+func TestFilterBySeverity(t *testing.T) {
+	report := &PostureReportWithSeverity{
+		SummaryDetails: SummaryDetailsWithSeverity{
+			Controls: map[string]ControlSummaryWithSeverity{
+				"C-0001": {Severity: "Critical"},
+				"C-0002": {Severity: "High"},
+				"C-0003": {Severity: "Medium"},
+				"C-0004": {Severity: "Low"},
+			},
+		},
+		Results: []ResultWithSeverity{
+			{
+				ResourceID: "res-1",
+				AssociatedControls: []ResourceAssociatedControlWithSeverity{
+					{Severity: "Critical"},
+					{Severity: "High"},
+					{Severity: "Medium"},
+					{Severity: "Low"},
+				},
+			},
+		},
+	}
+
+	FilterBySeverity(report, "high")
+
+	assert.Len(t, report.SummaryDetails.Controls, 2)
+	assert.Contains(t, report.SummaryDetails.Controls, "C-0001")
+	assert.Contains(t, report.SummaryDetails.Controls, "C-0002")
+	assert.NotContains(t, report.SummaryDetails.Controls, "C-0003")
+
+	assert.Len(t, report.Results[0].AssociatedControls, 2)
+	for _, c := range report.Results[0].AssociatedControls {
+		assert.Contains(t, []string{"Critical", "High"}, c.Severity)
+	}
+}
+
+func TestFilterBySeverity_EmptyMinSeverityNoOp(t *testing.T) {
+	report := &PostureReportWithSeverity{
+		SummaryDetails: SummaryDetailsWithSeverity{
+			Controls: map[string]ControlSummaryWithSeverity{
+				"C-0001": {Severity: "Low"},
+			},
+		},
+	}
+	FilterBySeverity(report, "")
+	assert.Len(t, report.SummaryDetails.Controls, 1)
 }

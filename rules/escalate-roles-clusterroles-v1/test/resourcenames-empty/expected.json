@@ -1,0 +1,54 @@
+[
+    {
+        "alertMessage": "Subject: ServiceAccount-escalator-empty-resourcenames-sa can escalate roles/clusterroles beyond their own permissions",
+        "reviewPaths": [
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "failedPaths": [
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 9,
+        "alertObject": {
+            "externalObjects": {
+                "kind": "ServiceAccount",
+                "name": "escalator-empty-resourcenames-sa",
+                "namespace": "kube-system",
+                "relatedObjects": [
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRoleBinding",
+                        "metadata": { "name": "escalate-roles-empty-resourcenames-crb" },
+                        "roleRef": {
+                            "apiGroup": "rbac.authorization.k8s.io",
+                            "kind": "ClusterRole",
+                            "name": "escalate-roles-empty-resourcenames"
+                        },
+                        "subjects": [
+                            { "kind": "ServiceAccount", "name": "escalator-empty-resourcenames-sa", "namespace": "kube-system" }
+                        ]
+                    },
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRole",
+                        "metadata": { "name": "escalate-roles-empty-resourcenames" },
+                        "rules": [
+                            { "apiGroups": ["rbac.authorization.k8s.io"], "resources": ["clusterroles"], "verbs": ["escalate"], "resourceNames": [] }
+                        ]
+                    }
+                ]
+            },
+            "k8sApiObjects": []
+        }
+    }
+]

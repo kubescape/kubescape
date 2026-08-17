@@ -44,13 +44,13 @@ The patch command can be run in 2 ways:
 | Flag           | Description                                            | Required | Default                             |
 | -------------- | ------------------------------------------------------ | -------- | ----------------------------------- |
 | -i, --image    | Image name to be patched (should be in canonical form) | Yes      |                                     |
-| -a, --addr     | Address of the buildkitd service                       | No       | unix:///run/buildkit/buildkitd.sock |
+| -a, --address  | Address of the buildkitd service                       | No       | none (auto-detects local docker daemon, falling back to unix:///run/buildkit/buildkitd.sock) |
 | -t, --tag      | Tag of the resultant patched image                     | No       | image_name-patched                  |
 | --timeout      | Timeout for the patching process                       | No       | 5m                                  |
 | --ignore-errors| Ignore errors during patching                          | No       | false                               |
 | --push         | Push the patched image to the source registry          | No       | false                               |
-| -u, --username | Username for the image registry login                  | No       |                                     |
-| -p, --password | Password for the image registry login                  | No       |                                     |
+| -u, --username | Username for the image registry login (falls back to `$KUBESCAPE_REGISTRY_USERNAME`) | No       |                                     |
+| -p, --password | Password for the image registry login (falls back to `$KUBESCAPE_REGISTRY_PASSWORD`) | No       |                                     |
 | -f, --format   | Output file format.                                    | No       |                                     |
 | -o, --output   | Output file. Print output to file and not stdout       | No       |                                     |
 | -v, --verbose  | Display full report. Default to false                  | No       |                                     |
@@ -145,6 +145,18 @@ Pass `--push` to push the patched image to the source registry instead. Credenti
 ```bash
 kubescape patch -i myregistry.example.com/team/app:1.2.3 --push
 ```
+
+### Registry credentials from the environment
+
+A password passed as `--password` is visible to every other user on the host via `ps` and `/proc/<pid>/cmdline`, and is recorded in your shell history. To keep it off the command line, set `KUBESCAPE_REGISTRY_USERNAME` / `KUBESCAPE_REGISTRY_PASSWORD` instead — `kubescape patch` uses them whenever the matching flag is omitted (the same variables `kubescape scan image` already honours):
+
+```bash
+export KUBESCAPE_REGISTRY_USERNAME=<registry-username>
+export KUBESCAPE_REGISTRY_PASSWORD=<registry-password>
+kubescape patch -i myregistry.example.com/team/app:1.2.3 --push
+```
+
+A flag given on the command line always takes precedence over the environment, so existing `--username` / `--password` invocations are unaffected.
 
 > **Note:** when used with `--push`, BuildKit uploads the patched image directly to the registry; the image is not necessarily added to your local Docker image store in that mode. Pass `--push` only if you have push access to the source registry — otherwise you will see an `insufficient_scope: authorization failed` error.
 

@@ -41,20 +41,37 @@ kubescape scan [target] [flags]
 | `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, and `--view resource\|control` — see [score thresholds](#score-thresholds). | `0` |
 | `--controls-config <path>` | Path to controls configuration file | - |
 | `-e, --exclude-namespaces <ns>` | Namespaces to exclude (comma-separated) | - |
+| `--encrypt` | Encrypt sensitive report metadata using the master key provided through the `KUBESCAPE_MASTER_KEY` environment variable. Requires `--format json` for reports that will later be decrypted with `kubescape decrypt`. If both `--encrypt` and `--hide` are specified, `--encrypt` takes precedence. | `false` |
 | `--exceptions <path>` | Path to exceptions file | - |
+| `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
-| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `sarif`, `html`, `pdf`, `prometheus` | `pretty-printer` |
+| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `csv` | `pretty-printer` |
+| `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
+| `--host-scan` | Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use `--host-scan=false` to disable host data collection. See the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for a managed alternative. | auto-detect |
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
+| `--label-selector <selector>` | Filter collected resources by Kubernetes label selector. Accepts any expression `kubectl -l` supports, e.g. `app=nginx,env!=dev` or `env in (prod,staging)`. Syntax is validated before scanning begins; filtering is applied during live cluster collection and ignored when scanning local files. | - |
 | `--keep-local` | Don't report results to backend | `false` |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
 | `--scan-images` | Also scan container images for vulnerabilities | `false` |
-| `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical` | - |
+| `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical`. Failed controls with unknown severity (missing base score) are treated as exceeding any threshold | - |
 | `--submit` | Submit results to Kubescape SaaS | `false` |
 | `--use-artifacts-from <path>` | Load artifacts from local directory (offline mode) | - |
 | `--use-from <path>` | Load specific policy from path | - |
 | `-v, --verbose` | Display all resources, not just failed ones | `false` |
 | `--view <type>` | View type: `security`, `control`, `resource` | `security` |
+
+### Exception Audit
+
+Use `--audit-exceptions --format json` to include an `exceptionAudit` object in scan output. The audit contains:
+
+| Field | Description |
+|-------|-------------|
+| `summary` | Counts for total, active, expired, matched, unused, and invalid-control exceptions |
+| `items` | One entry per loaded exception, including name, status, match count, control IDs, invalid controls, and matched resources when present |
+| `generated` | Indicates that the audit was requested and generated |
+
+Item `status` values are `matched`, `unused`, `expired`, and `invalid-control`.
 
 ### Examples
 
@@ -76,6 +93,28 @@ kubescape scan /path/to/manifests/
 # Scan Git repository
 kubescape scan https://github.com/org/repo
 
+# Anonymize sensitive report metadata
+kubescape scan --hide
+
+# Generate an anonymized JSON report
+kubescape scan --hide --format json --output report.json
+
+# The key is used as raw bytes and must be exactly 32 characters long.
+# Note: `openssl rand -base64 32` (44 chars) and `openssl rand -hex 32` (64 chars)
+# are NOT valid — they exceed 32 bytes once passed through as raw text.
+export KUBESCAPE_MASTER_KEY=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)
+
+# Generate an encrypted JSON report
+kubescape scan --encrypt --format json --output encrypted-report.json
+
+# The key is used as raw bytes and must be exactly 32 characters long.
+# Note: `openssl rand -base64 32` (44 chars) and `openssl rand -hex 32` (64 chars)
+# are NOT valid — they exceed 32 bytes once passed through as raw text.
+export KUBESCAPE_MASTER_KEY=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)
+
+# Decrypt an encrypted report
+kubescape decrypt encrypted-report.json > decrypted-report.json
+
 # Output to JSON file
 kubescape scan --format json --output results.json
 
@@ -86,12 +125,20 @@ kubescape scan --view resource --compliance-threshold 80
 
 # Exclude namespaces
 kubescape scan --exclude-namespaces kube-system,kube-public
-```
 
+# Scan only resources matching a label selector
+kubescape scan --label-selector "app=nginx"
+
+# Combine a label selector with a specific framework
+kubescape scan framework nsa --label-selector "env=prod,team=backend"
+
+# Set-based label selector using the 'in' operator
+kubescape scan framework mitre --label-selector "env in (prod,staging)"
+```
 ### Score thresholds
 
-`--compliance-threshold` (compliance score) and the deprecated
-`--fail-threshold` (risk score) apply to the following invocations:
+`--compliance-threshold` (compliance score) applies to the following
+invocations:
 
 - `kubescape scan framework <name> ...`
 - `kubescape scan control <id> ...`
@@ -99,7 +146,7 @@ kubescape scan --exclude-namespaces kube-system,kube-public
 
 The default `kubescape scan [path]` uses `--view security`, which does
 not evaluate against a score threshold. To gate a pipeline on the
-compliance or risk score, use one of the forms above.
+compliance score, use one of the forms above.
 `--severity-threshold` and `--fail-coverage-below` apply in every view.
 
 `--fail-coverage-below` gates on the **scan coverage score**, not the raw
@@ -146,6 +193,7 @@ kubescape scan framework <framework-name> [target] [flags]
 kubescape scan framework nsa
 kubescape scan framework mitre --include-namespaces production
 kubescape scan framework cis-v1.23-t1.0.1 /path/to/manifests
+cat ./manifests/deployment.yaml | kubescape scan framework nsa -
 ```
 
 ---
@@ -168,6 +216,9 @@ kubescape scan control C-0057 -v
 
 # Scan specific files for a control
 kubescape scan control C-0013 /path/to/deployment.yaml
+
+# Scan a manifest from stdin
+cat ./manifests/deployment.yaml | kubescape scan control C-0013 -
 ```
 
 ---
@@ -179,20 +230,29 @@ Scan a specific workload.
 ### Synopsis
 
 ```bash
-kubescape scan workload <kind>/<name> [flags]
+kubescape scan workload <kind>[.<version>[.<group>]]/<name> [`<glob pattern>`/`-`] [flags]
 ```
+
+Unlike `kubectl`'s `TYPE.VERSION.GROUP` (which takes a plural resource), this command requires a **Kind** (e.g. `Deployment.v1.apps`, not `deployments.v1.apps`).
 
 ### Flags
 
 | Flag | Description |
 |------|-------------|
 | `--namespace <ns>` | Namespace of the workload |
+| `--file-path <path>` | Path to a manifest that contains the workload |
+| `--chart-path <path>` | Path to the Helm chart the workload is part of. Must be used with `--file-path` |
 
 ### Examples
 
 ```bash
 kubescape scan workload Deployment/nginx --namespace default
+kubescape scan workload Deployment.v1.apps/nginx
 kubescape scan workload DaemonSet/fluentd --namespace logging
+kubescape scan workload Deployment/nginx ./manifests
+cat ./manifests/deployment.yaml | kubescape scan workload Deployment/nginx -
+kubescape scan workload Deployment/nginx --file-path ./manifests/deployment.yaml
+kubescape scan workload Deployment/nginx --chart-path ./chart --file-path ./chart/templates/deployment.yaml
 ```
 
 ---
@@ -265,6 +325,12 @@ kubescape fix results.json --dry-run
 kubescape fix results.json --no-confirm
 ```
 
+> **Note:** The confirmation prompt requires a real interactive terminal. If
+> stdin isn't a TTY — `kubescape fix results.json < /dev/null`, a piped
+> answer like `echo y | kubescape fix results.json`, or any CI/script
+> context — the prompt is skipped and no changes are applied. Use
+> `--no-confirm` to apply fixes in non-interactive contexts.
+
 ---
 
 ## kubescape patch
@@ -283,7 +349,7 @@ kubescape patch [flags]
 |------|-------------|---------|
 | `-i, --image <image>` | Image to patch (required) | - |
 | `-t, --tag <tag>` | Output image tag | `<image>-patched` |
-| `-a, --addr <addr>` | BuildKit daemon address | `unix:///run/buildkit/buildkitd.sock` |
+| `-a, --address <address>` | BuildKit daemon address | none (auto-detects local docker daemon, falling back to `unix:///run/buildkit/buildkitd.sock`) |
 | `--timeout <duration>` | Patching timeout | `5m` |
 | `--ignore-errors` | Continue on errors | `false` |
 | `--push` | Push the patched image to the source registry | `false` |
@@ -316,6 +382,147 @@ sudo kubescape patch --image myregistry.example.com/team/app:1.2.3 --push
 
 ---
 
+## Hiding sensitive metadata
+
+Generate a report with anonymized sensitive report metadata.
+
+### Synopsis
+
+```bash
+kubescape scan [target] --hide [flags]
+```
+
+### Description
+
+Replaces sensitive report metadata with deterministic pseudonyms.
+
+This reduces incidental exposure but is not a confidentiality guarantee.
+Values drawn from small or predictable sets (such as common namespace names)
+may be recovered by comparing candidate hashes.
+
+Use `--encrypt` when sensitive metadata requires confidentiality.
+
+### Examples
+
+```bash
+# Scan the current cluster and generate an anonymized report
+kubescape scan --hide --format json --output report.json
+
+# Scan local manifests and save an anonymized report
+kubescape scan /path/to/manifests \
+  --hide \
+  --format json \
+  --output report.json
+```
+> `--hide` replaces sensitive values with deterministic pseudonyms derived from an
+> unsalted hash of the original value. Values drawn from a small or guessable set —
+> such as common namespace names — can be recovered by hashing candidate values and
+> matching the result, and identical values produce identical pseudonyms across
+> reports. Use `--hide` to reduce incidental exposure, not as a confidentiality
+> guarantee. To share a report whose metadata is genuinely protected, use
+> `--encrypt` and withhold the master key.
+
+---
+
+## Encrypting sensitive metadata
+
+Generate a report with encrypted sensitive report metadata.
+
+### Synopsis
+
+```bash
+kubescape scan [target] --encrypt [flags]
+```
+
+### Description
+
+Encrypts sensitive report metadata using the master key supplied through the
+`KUBESCAPE_MASTER_KEY` environment variable.
+
+The master key is used as raw bytes and must be exactly 32 characters long.
+
+Use `--format json` to produce a report that can later be decrypted with
+`kubescape decrypt`.
+
+If both `--encrypt` and `--hide` are specified, `--encrypt` takes precedence.
+
+### Examples
+
+```bash
+# The key is used as raw bytes and must be exactly 32 characters long.
+# Note: `openssl rand -base64 32` (44 chars) and `openssl rand -hex 32` (64 chars)
+# are NOT valid — they exceed 32 bytes once passed through as raw text.
+export KUBESCAPE_MASTER_KEY=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)
+
+# Scan the current cluster and generate an encrypted report
+kubescape scan \
+  --encrypt \
+  --format json \
+  --output encrypted-report.json
+
+# Scan local manifests and generate an encrypted report
+kubescape scan /path/to/manifests \
+  --encrypt \
+  --format json \
+  --output encrypted-report.json
+```
+> `--encrypt` requires the `KUBESCAPE_MASTER_KEY` environment variable.
+> The key must be exactly 32 characters long and the same key must be supplied
+> later when running `kubescape decrypt`.
+
+---
+
+## kubescape decrypt
+
+Decrypt an encrypted Kubescape report.
+
+### Synopsis
+
+```bash
+kubescape decrypt <report-file>
+```
+
+### Description
+
+Decrypts a JSON report that was protected with `kubescape scan --encrypt`.
+The command restores encrypted repository metadata, Kubernetes resource
+metadata, source paths, container fields, copied resource labels, raw resource
+copies in results, and recoverable resource ID references. If ciphertext or an
+irreversible legacy resource ID remains, decryption fails instead of returning
+a partially restored report.
+
+Only fields encrypted by `kubescape scan --encrypt` are restored.
+Metadata pseudonymized with `--hide` cannot be recovered by `kubescape decrypt`.
+Older encrypted reports may contain `ref-<hash>` resource IDs that were written
+with a one-way mapping. Those IDs cannot be recovered, so the command reports
+an error rather than silently treating the report as fully decrypted.
+
+### Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-h, --help` | Help for decrypt | - |
+
+### Examples
+
+```bash
+# The key is used as raw bytes and must be exactly 32 characters long.
+# Note: `openssl rand -base64 32` (44 chars) and `openssl rand -hex 32` (64 chars)
+# are NOT valid — they exceed 32 bytes once passed through as raw text.
+export KUBESCAPE_MASTER_KEY=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)
+
+# Decrypt an encrypted report
+kubescape decrypt encrypted-report.json
+
+# Save the decrypted report to a file
+kubescape decrypt encrypted-report.json > decrypted-report.json
+```
+
+> `kubescape decrypt` restores report fields encrypted by
+> `kubescape scan --encrypt`. It does not reverse
+> deterministic pseudonymization produced by `--hide`.
+
+---
 ## kubescape list
 
 List available frameworks and controls.
@@ -339,14 +546,16 @@ kubescape list <type> [flags]
 |------|-------------|---------|
 | `--account <id>` | Account ID for custom frameworks | - |
 | `--access-key <key>` | Access key | - |
-| `--format <format>` | Output format: `pretty-print`, `json` | `pretty-print` |
+| `--format <format>` | Output format: `pretty-print`, `json`, `yaml`, `csv` | `pretty-print` |
 
 ### Examples
 
 ```bash
 kubescape list frameworks
+kubescape list frameworks --format csv
 kubescape list controls
 kubescape list controls --format json
+kubescape list controls --format csv
 ```
 
 ---
@@ -409,6 +618,12 @@ Manage Kubescape configuration.
 ```bash
 # View configuration
 kubescape config view
+
+# View configuration as JSON
+kubescape config view -o json
+
+# View configuration as YAML
+kubescape config view -o yaml
 
 # Set account ID
 kubescape config set accountID <account-id>
@@ -545,7 +760,24 @@ Display version information.
 ### Synopsis
 
 ```bash
+kubescape version [--format text|json]
+```
+
+### Flags
+
+| Flag | Short | Default | Description |
+|---|---|---|---|
+| `--format` | `-f` | `text` | Output format. Supported: `text`, `json` |
+
+### Examples
+
+```bash
+# Default human-readable output
 kubescape version
+
+# Machine-readable JSON output (safe to pipe to jq)
+kubescape version --format json
+# {"version":"v3.x.x","commit":"abc123","date":"2024-01-15"}
 ```
 
 ---
@@ -596,6 +828,7 @@ Kubescape respects the following environment variables:
 | `KS_LOGGER` | Log level |
 | `KS_LOGGER_NAME` | Logger name |
 | `KUBECONFIG` | Path to kubeconfig file |
+| `KUBESCAPE_MASTER_KEY` | 32-character master key used to encrypt and decrypt report metadata |
 | `HTTPS_PROXY` | HTTPS proxy URL |
 | `HTTP_PROXY` | HTTP proxy URL |
 | `NO_PROXY` | Hosts to exclude from proxy |

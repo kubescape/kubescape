@@ -991,7 +991,8 @@
                 "skippedResources": 89,
                 "excludedResources": 0
             },
-            "score": 19.654322
+            "score": 19.654322,
+            "complianceScore": 73.24568
         }
     ],
     "resourcesSeverityCounters": {
@@ -1012,5 +1013,6 @@
         "skippedResources": 89,
         "excludedResources": 0
     },
-    "score": 19.654322
+    "score": 19.654322,
+    "complianceScore": 73.24568
 }

@@ -1,16 +1,42 @@
 package v1
 
 import (
+	"context"
 	"os"
 	"testing"
+	"time"
 
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/httphandler/config"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
+// unsetEnvForTest ensures name is absent from the process environment for the
+// duration of the test, restoring whatever value (or absence) it had before.
+// Needed because t.Setenv can only set a value, not guarantee absence, and
+// defaultScanInfo's KS_SUBMIT handling is presence-sensitive.
+func unsetEnvForTest(t *testing.T, name string) {
+	t.Helper()
+	orig, ok := os.LookupEnv(name)
+	require.NoError(t, os.Unsetenv(name))
+	t.Cleanup(func() {
+		if ok {
+			os.Setenv(name, orig)
+		} else {
+			os.Unsetenv(name)
+		}
+	})
+}
+
 func TestDefaultScanInfo(t *testing.T) {
+	// KS_SUBMIT must not leak from the ambient environment (dev machine or CI
+	// runner) into this default-value assertion.
+	unsetEnvForTest(t, "KS_SUBMIT")
+
 	s := defaultScanInfo()
 
 	assert.Equal(t, "", s.AccountID)
@@ -19,14 +45,61 @@ func TestDefaultScanInfo(t *testing.T) {
 	assert.Equal(t, "", s.AccessKey)
 	assert.False(t, s.HostSensorEnabled.GetBool())
 	assert.False(t, s.Local)
-	assert.False(t, s.Submit)
+	assert.False(t, s.Submit.GetBool())
+	assert.Nil(t, s.Submit.Get(), "Submit must not be marked explicitly set by default")
+}
+
+func TestDefaultScanInfo_SubmitExplicitlySetFromEnv(t *testing.T) {
+	t.Setenv("KS_SUBMIT", "false")
+
+	s := defaultScanInfo()
+
+	assert.False(t, s.Submit.GetBool())
+	require.NotNil(t, s.Submit.Get())
+}
+
+func TestDefaultScanInfo_KS_SUBMIT_UnparsableValueIgnored(t *testing.T) {
+	// Regression test: KS_SUBMIT="" (a common Helm rendering for an unset
+	// value) or any other unparsable value must NOT be treated as an
+	// explicit opt-out - see https://github.com/kubescape/kubescape/issues/2555.
+	for _, v := range []string{"", "yes", "enabled", "no"} {
+		t.Run("value="+v, func(t *testing.T) {
+			t.Setenv("KS_SUBMIT", v)
+			s := defaultScanInfo()
+			assert.Nil(t, s.Submit.Get(), "unparsable KS_SUBMIT=%q must not mark Submit as explicitly set", v)
+		})
+	}
+}
+
+func TestDefaultScanInfo_KS_SUBMIT_ParsedValues(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want bool
+	}{
+		{"true", true},
+		{"1", true},
+		{"TRUE ", true}, // tolerated: case and surrounding whitespace
+		{"false", false},
+		{"0", false},
+		{" False", false},
+	}
+	for _, tt := range tests {
+		t.Run("value="+tt.raw, func(t *testing.T) {
+			t.Setenv("KS_SUBMIT", tt.raw)
+			s := defaultScanInfo()
+			require.NotNil(t, s.Submit.Get())
+			assert.Equal(t, tt.want, s.Submit.GetBool())
+		})
+	}
 }
 
 func TestGetScanCommand(t *testing.T) {
+	unsetEnvForTest(t, "KS_SUBMIT")
+
 	req := utilsmetav1.PostScanRequest{
 		TargetType: apisv1.KindFramework,
 	}
-	s := getScanCommand(&req, "abc")
+	s, _ := getScanCommand(&req, "abc")
 	assert.Equal(t, "", s.AccountID)
 	assert.Equal(t, "abc", s.ScanID)
 	assert.Equal(t, "v2", s.FormatVersion)
@@ -34,16 +107,17 @@ func TestGetScanCommand(t *testing.T) {
 	assert.Equal(t, "", s.AccessKey)
 	assert.False(t, s.HostSensorEnabled.GetBool())
 	assert.False(t, s.Local)
-	assert.False(t, s.Submit)
+	assert.False(t, s.Submit.GetBool())
 }
 
 func TestGetScanCommandWithAccessKey(t *testing.T) {
+	unsetEnvForTest(t, "KS_SUBMIT")
 	config.SetAccessKey("test-123")
 
 	req := utilsmetav1.PostScanRequest{
 		TargetType: apisv1.KindFramework,
 	}
-	s := getScanCommand(&req, "abc")
+	s, _ := getScanCommand(&req, "abc")
 	assert.Equal(t, "", s.AccountID)
 	assert.Equal(t, "abc", s.ScanID)
 	assert.Equal(t, "v2", s.FormatVersion)
@@ -51,7 +125,7 @@ func TestGetScanCommandWithAccessKey(t *testing.T) {
 	assert.Equal(t, "test-123", s.AccessKey)
 	assert.False(t, s.HostSensorEnabled.GetBool())
 	assert.False(t, s.Local)
-	assert.False(t, s.Submit)
+	assert.False(t, s.Submit.GetBool())
 }
 
 func TestReadResultsFile(t *testing.T) {
@@ -115,4 +189,68 @@ func TestRemoveResultsFile(t *testing.T) {
 	// removeResultsFile should prevent path traversal
 	err = removeResultsFile("../target")
 	assert.NoError(t, err)
+}
+
+func TestWatchForScan_GracefulShutdown(t *testing.T) {
+	h := NewHTTPHandler(false)
+
+	// Shutdown should cause the watchForScan goroutine to exit cleanly.
+	h.Shutdown()
+
+	// Verify the handler is still usable for non-scan operations
+	// (the scan channel is still there, just no one listening).
+	assert.NotNil(t, h.scanRequestChan)
+}
+
+func TestWatchForScan_ProcessesRequestThenExits(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	h := &HTTPHandler{
+		state:           newServerState(),
+		scanRequestChan: make(chan *scanRequestParams, 2),
+		cancelWatch:     cancel,
+	}
+
+	// Override scanImpl so executeScan returns immediately.
+	oldScanImpl := scanImpl
+	defer func() { scanImpl = oldScanImpl }()
+	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+		return nil, nil
+	}
+
+	// done signals that watchForScan has exited.
+	done := make(chan struct{})
+
+	go func() {
+		h.watchForScan(ctx)
+		close(done)
+	}()
+
+	// Send a scan request — it should be processed.
+	h.scanRequestChan <- &scanRequestParams{
+		scanID:          "test-shutdown",
+		scanInfo:        &cautils.ScanInfo{},
+		scanQueryParams: &ScanQueryParams{},
+		resp:            make(chan *utilsmetav1.Response, 1),
+	}
+
+	// Cancel the context — watchForScan should exit.
+	cancel()
+
+	// Wait for the goroutine to exit (with timeout).
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("watchForScan did not exit after context cancellation")
+	}
+
+	// After shutdown, sending to the buffered channel should not block
+	// because no one is reading from it and the buffer has capacity.
+	h.scanRequestChan <- &scanRequestParams{
+		scanID:          "after-shutdown",
+		scanInfo:        &cautils.ScanInfo{},
+		scanQueryParams: &ScanQueryParams{},
+		resp:            make(chan *utilsmetav1.Response, 1),
+	}
 }

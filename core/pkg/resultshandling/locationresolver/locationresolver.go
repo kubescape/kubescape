@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -13,6 +14,10 @@ import (
 	"gopkg.in/op/go-logging.v1"
 	"gopkg.in/yaml.v3"
 )
+
+// lastPathSegment matches an expression's trailing ".<segment>", stripped to walk
+// back up a path that does not exist. Compiled once rather than per step.
+var lastPathSegment = regexp.MustCompile(`(.*)(\.[^.]*)`)
 
 type FixPathLocationResolver struct {
 	yqlibEvaluator yqlib.Evaluator
@@ -26,7 +31,7 @@ type Location struct {
 }
 
 func NewFixPathLocationResolver(yamlPath string) (*FixPathLocationResolver, error) {
-	file, err := os.Open(yamlPath)
+	file, err := os.Open(filepath.Clean(yamlPath))
 	if err != nil {
 		return nil, err
 	}
@@ -68,26 +73,37 @@ func (l *FixPathLocationResolver) ResolveLocation(fixPath string, nodeIndex int)
 	for strings.HasPrefix(yamlExpression, ".") && len(yamlExpression) > 1 {
 		candidateNodes, err := l.yqlibEvaluator.EvaluateNodes(yamlExpression, l.yamlNodes[nodeIndex])
 		if err != nil {
-			return Location{}, err
+			return Location{}, fmt.Errorf("failed to evaluate yaml expression %q: %w", yamlExpression, err)
 		}
 
-		candidateNode := candidateNodes.Back().Value.(*yqlib.CandidateNode).Node
+		if backElement := candidateNodes.Back(); backElement != nil {
+			candidateNode := backElement.Value.(*yqlib.CandidateNode).Node
 
-		if candidateNode.Line != 0 || len(yamlExpression) <= 1 {
-			return Location{Line: candidateNode.Line, Column: candidateNode.Column}, nil
+			if candidateNode.Line != 0 || len(yamlExpression) <= 1 {
+				return Location{Line: candidateNode.Line, Column: candidateNode.Column}, nil
+			}
 		}
 
 		// for non-existent yaml expressions, remove the last part of the expression and try again
-		yamlExpression = regexp.MustCompile(`(.*)(\.[^.]*)`).ReplaceAllString(yamlExpression, `${1}`)
+		yamlExpression = lastPathSegment.ReplaceAllString(yamlExpression, `${1}`)
 	}
 	return Location{}, nil
+
 }
 
 func FixPathToValidYamlExpression(fixPath string) string {
-	// remove everything after the first =
-	yamlExpression := regexp.MustCompile(`(.*)=.*`).ReplaceAllString(fixPath, `${1}`)
+	// Remove everything after the first "=": assisted-remediation strings are built
+	// as "<path>=<value>" by fixPathsToString in printer/v2/resourcetable.go, and
+	// only the path half is a valid yaml expression.
+	//
+	// This must split on the *first* separator. Fix values routinely contain "="
+	// themselves — the CIS control-plane rules emit values such as
+	// "--anonymous-auth=false" and "--authorization-mode=RBAC" — so a greedy match
+	// keeps part of the value in the path and produces an unusable expression.
+	if i := strings.Index(fixPath, "="); i >= 0 {
+		fixPath = fixPath[:i]
+	}
 
 	// add a dot for the root node
-	yamlExpression = "." + yamlExpression
-	return yamlExpression
+	return "." + fixPath
 }

@@ -3,7 +3,7 @@ package cautils
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func (s *LocalGitRepositoryTestSuite) TestGetLastCommit() {
@@ -50,9 +50,10 @@ func (s *LocalGitRepositoryTestSuite) TestGetFileLastCommit() {
 
 func BenchmarkBuildCommitMap(b *testing.B) {
 	localRepo, err := NewLocalGitRepository("testdata/temp/localrepo")
-	assert.NoError(b, err)
+	// require, not assert: NewLocalGitRepository returns a nil repository on error, so continuing would panic on the nil dereference below and bury the real setup failure.
+	require.NoError(b, err)
 	for b.Loop() {
-		localRepo.buildCommitMap()
+		localRepo.gitRepository.buildCommitMap()
 	}
 	b.ReportAllocs()
 }

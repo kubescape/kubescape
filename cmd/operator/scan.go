@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/core"
 	"github.com/kubescape/kubescape/v3/core/meta"
 	"github.com/spf13/cobra"
 )
@@ -14,12 +15,28 @@ const (
 	configurationsSubCommand  string = "configurations"
 )
 
-func getOperatorScanCmd(ks meta.IKubescape, operatorInfo cautils.OperatorInfo) *cobra.Command {
+var operatorScanExamples = fmt.Sprintf(`
+
+  # Trigger a configuration scan
+  %[1]s operator scan configurations
+
+  # Trigger a vulnerabilities scan
+  %[1]s operator scan vulnerabilities
+
+`, cautils.ExecName())
+
+// newOperatorAdapter is a seam over core.NewOperatorAdapter: the "configurations"
+// and "vulnerabilities" child commands call it to reach the cluster. Tests
+// substitute it to assert on the (scanInfo, namespace) a child actually sends
+// without connecting to a real cluster.
+var newOperatorAdapter = core.NewOperatorAdapter
+
+func getOperatorScanCmd(ks meta.IKubescape, operatorInfo *cautils.OperatorInfo) *cobra.Command {
 	operatorCmd := &cobra.Command{
 		Use:     "scan",
 		Short:   "Scan your cluster using the Kubescape-operator within the cluster components",
 		Long:    ``,
-		Example: operatorExamples,
+		Example: operatorScanExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
 			operatorInfo.Subcommands = append(operatorInfo.Subcommands, "scan")
 			if len(args) < 1 {

@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"math"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/cmd/shared"
@@ -31,8 +32,18 @@ func Test_validateControlScanInfo(t *testing.T) {
 		},
 		{
 			"Submit with omit-raw-resources should be invalid",
-			&cautils.ScanInfo{Submit: true, OmitRawResources: true},
+			&cautils.ScanInfo{Submit: cautils.NewBoolPtr(new(true)), OmitRawResources: true},
 			ErrOmitRawResourcesOrSubmit,
+		},
+		{
+			"Compliance threshold below 0 should be invalid",
+			&cautils.ScanInfo{ComplianceThreshold: -1},
+			ErrBadThreshold,
+		},
+		{
+			"Coverage threshold above 100 should be invalid",
+			&cautils.ScanInfo{FailCoverageThreshold: 150},
+			ErrBadThreshold,
 		},
 	}
 
@@ -88,18 +99,13 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 		},
 		{
 			"Submit with keep-local should be invalid",
-			&cautils.ScanInfo{Submit: true, Local: true, AccountID: validAccountID},
+			&cautils.ScanInfo{Submit: cautils.NewBoolPtr(new(true)), Local: true, AccountID: validAccountID},
 			ErrKeepLocalOrSubmit,
 		},
 		{
 			"Submit with omit-raw-resources should be invalid",
-			&cautils.ScanInfo{Submit: true, OmitRawResources: true, AccountID: validAccountID},
+			&cautils.ScanInfo{Submit: cautils.NewBoolPtr(new(true)), OmitRawResources: true, AccountID: validAccountID},
 			ErrOmitRawResourcesOrSubmit,
-		},
-		{
-			"Fail threshold above 100 should be invalid",
-			&cautils.ScanInfo{FailThreshold: 101, AccountID: validAccountID},
-			ErrBadThreshold,
 		},
 		{
 			"Compliance threshold below 0 should be invalid",
@@ -109,6 +115,16 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 		{
 			"Coverage threshold above 100 should be invalid",
 			&cautils.ScanInfo{FailCoverageThreshold: 150, AccountID: validAccountID},
+			ErrBadThreshold,
+		},
+		{
+			"NaN compliance threshold should be invalid",
+			&cautils.ScanInfo{ComplianceThreshold: float32(math.NaN()), AccountID: validAccountID},
+			ErrBadThreshold,
+		},
+		{
+			"NaN coverage threshold should be invalid",
+			&cautils.ScanInfo{FailCoverageThreshold: float32(math.NaN()), AccountID: validAccountID},
 			ErrBadThreshold,
 		},
 		{
@@ -169,6 +185,7 @@ func Test_validateCoverageThreshold(t *testing.T) {
 		{"100 is a valid threshold", &cautils.ScanInfo{FailCoverageThreshold: 100}, nil},
 		{"101 is out of range", &cautils.ScanInfo{FailCoverageThreshold: 101}, ErrBadThreshold},
 		{"negative value is out of range", &cautils.ScanInfo{FailCoverageThreshold: -1}, ErrBadThreshold},
+		{"NaN is out of range", &cautils.ScanInfo{FailCoverageThreshold: float32(math.NaN())}, ErrBadThreshold},
 	}
 
 	for _, tc := range testCases {
@@ -181,7 +198,7 @@ func Test_validateCoverageThreshold(t *testing.T) {
 	}
 }
 
-func Test_validateThresholdsOnly_ComplianceAndFail(t *testing.T) {
+func Test_validateThresholdsOnly_Compliance(t *testing.T) {
 	testCases := []struct {
 		Description string
 		ScanInfo    *cautils.ScanInfo
@@ -191,10 +208,7 @@ func Test_validateThresholdsOnly_ComplianceAndFail(t *testing.T) {
 		{"Compliance threshold below 0 is out of range", &cautils.ScanInfo{ComplianceThreshold: -1}, ErrBadThreshold},
 		{"Compliance threshold at 0 is valid", &cautils.ScanInfo{ComplianceThreshold: 0}, nil},
 		{"Compliance threshold at 100 is valid", &cautils.ScanInfo{ComplianceThreshold: 100}, nil},
-		{"Fail threshold above 100 is out of range", &cautils.ScanInfo{FailThreshold: 101}, ErrBadThreshold},
-		{"Fail threshold below 0 is out of range", &cautils.ScanInfo{FailThreshold: -1}, ErrBadThreshold},
-		{"Fail threshold at 0 is valid", &cautils.ScanInfo{FailThreshold: 0}, nil},
-		{"Fail threshold at 100 is valid", &cautils.ScanInfo{FailThreshold: 100}, nil},
+		{"NaN compliance threshold is out of range", &cautils.ScanInfo{ComplianceThreshold: float32(math.NaN())}, ErrBadThreshold},
 	}
 
 	for _, tc := range testCases {
@@ -227,6 +241,91 @@ func Test_validateWorkloadIdentifier(t *testing.T) {
 
 			if got != want {
 				t.Errorf("got: %v, want: %v", got, want)
+			}
+		})
+	}
+}
+
+func Test_validateFrameworkScanInfo_LabelSelector(t *testing.T) {
+	const validAccountID = "22019933-feac-4012-a8eb-e81461ba6655"
+
+	tests := []struct {
+		name          string
+		labelSelector string
+		wantErr       bool
+	}{
+		{
+			name:          "empty selector is valid",
+			labelSelector: "",
+			wantErr:       false,
+		},
+		{
+			name:          "simple equality",
+			labelSelector: "app=nginx",
+			wantErr:       false,
+		},
+		{
+			name:          "double-equals equality",
+			labelSelector: "app==nginx",
+			wantErr:       false,
+		},
+		{
+			name:          "inequality requirement",
+			labelSelector: "env!=dev",
+			wantErr:       false,
+		},
+		{
+			name:          "multiple requirements comma separated",
+			labelSelector: "app=nginx,env!=dev",
+			wantErr:       false,
+		},
+		{
+			name:          "set-based in requirement",
+			labelSelector: "env in (prod,staging)",
+			wantErr:       false,
+		},
+		{
+			name:          "set-based notin requirement",
+			labelSelector: "env notin (dev,test)",
+			wantErr:       false,
+		},
+		{
+			name:          "existence check",
+			labelSelector: "app",
+			wantErr:       false,
+		},
+		{
+			name:          "negated existence check",
+			labelSelector: "!app",
+			wantErr:       false,
+		},
+		{
+			name:          "malformed selector with unclosed bracket",
+			labelSelector: "env in (prod",
+			wantErr:       true,
+		},
+		{
+			name:          "selector starting with operator is invalid",
+			labelSelector: "=invalid",
+			wantErr:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			si := &cautils.ScanInfo{
+				AccountID:     validAccountID,
+				LabelSelector: tt.labelSelector,
+			}
+			err := validateFrameworkScanInfo(si)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error for label selector %q, got nil", tt.labelSelector)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for label selector %q: %v", tt.labelSelector, err)
+				}
 			}
 		})
 	}

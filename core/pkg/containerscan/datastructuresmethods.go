@@ -1,10 +1,17 @@
 package containerscan
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/armosec/armoapi-go/identifiers"
 )
+
+// rceAcronymRe matches the standalone "RCE" acronym case-insensitively. The
+// word boundaries are what keep it from matching the substring inside unrelated
+// words such as "source", "force" or "resource", which would otherwise flood
+// the RCE tally with false positives on almost every vulnerability description.
+var rceAcronymRe = regexp.MustCompile(`(?i)\brce\b`)
 
 // GetPackagesNames retrieves the names of all the packages stored in the Packages field of the ScanResultLayer object and returns them as a slice of strings.
 func (layer *ScanResultLayer) GetPackagesNames() []string {
@@ -30,7 +37,42 @@ func (scanresult *ScanResultReport) Validate() bool {
 		return false
 	}
 
-	//TODO validate layers & vuls
+	if scanresult.Layers == nil {
+		return false
+	}
+
+	type vulnerabilityKey struct {
+		Name               string
+		RelatedPackageName string
+		PackageVersion     string
+	}
+	layerHashes := make(map[string]bool)
+
+	for _, layer := range scanresult.Layers {
+		if layer.LayerHash != "" {
+			if layerHashes[layer.LayerHash] {
+				return false
+			}
+			layerHashes[layer.LayerHash] = true
+		}
+
+		vulnKeys := make(map[vulnerabilityKey]bool)
+
+		for _, vul := range layer.Vulnerabilities {
+			if vul.Name == "" {
+				return false
+			}
+			key := vulnerabilityKey{
+				Name:               vul.Name,
+				RelatedPackageName: vul.RelatedPackageName,
+				PackageVersion:     vul.PackageVersion,
+			}
+			if vulnKeys[key] {
+				return false
+			}
+			vulnKeys[key] = true
+		}
+	}
 
 	return true
 }

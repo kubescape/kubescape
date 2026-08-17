@@ -3,6 +3,7 @@ package printer
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"html/template"
 	"os"
 	"path/filepath"
@@ -11,8 +12,10 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -30,6 +33,9 @@ var _ printer.IPrinter = &HtmlPrinter{}
 type HTMLReportingCtx struct {
 	OPASessionObj     *cautils.OPASessionObj
 	ResourceTableView ResourceTableView
+	// ImageScanSummary is set instead of the two fields above when this report
+	// is for an image scan rather than a posture scan (#2782).
+	ImageScanSummary *imageprinter.ImageScanSummary
 }
 
 type HtmlPrinter struct {
@@ -40,7 +46,8 @@ func NewHtmlPrinter() *HtmlPrinter {
 	return &HtmlPrinter{}
 }
 
-func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	outputFile = strings.TrimSpace(outputFile)
 	if outputFile == "" {
 		// Raw HTML markup must never fall back to stdout on a TTY.
@@ -50,19 +57,23 @@ func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
 	} else if filepath.Ext(outputFile) != printer.HtmlOutputExt {
 		outputFile = outputFile + printer.HtmlOutputExt
 	}
-	// HTML must never fall back to stdout on file-create errors either
-	// (e.g. read-only cwd) — use the no-stdout-fallback helper.
+	if explicitOutput {
+		var err error
+		hp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
+	// Preserve the temp-file fallback for the implicit HTML destination.
 	hp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+printer.HtmlOutputExt)
+	return nil
 }
 
 func (hp *HtmlPrinter) PrintNextSteps() {
 
 }
 
-func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
-	if opaSessionObj == nil {
-		logger.L().Ctx(ctx).Error("failed to print results, missing data")
-		return
+func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
+	if opaSessionObj == nil && len(imageScanData) == 0 {
+		return fmt.Errorf("failed to print results, missing data")
 	}
 
 	tplFuncMap := template.FuncMap{
@@ -73,8 +84,8 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 			}
 			return total
 		},
-		"float32ToInt": cautils.Float32ToInt,
-		"lower":        strings.ToLower,
+		"riskScoreToInt": cautils.RiskScoreToInt,
+		"lower":          strings.ToLower,
 		"sortByNamespace": func(resourceTableView ResourceTableView) ResourceTableView {
 			sortedResourceTableView := make(ResourceTableView, len(resourceTableView))
 			copy(sortedResourceTableView, resourceTableView)
@@ -118,15 +129,23 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		template.New("htmlReport").Funcs(tplFuncMap).Parse(reportTemplate),
 	)
 
-	resourceTableView := buildResourceTableView(opaSessionObj)
-	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView}
+	var resourceTableView ResourceTableView
+	var imageScanSummary *imageprinter.ImageScanSummary
+	if opaSessionObj != nil {
+		resourceTableView = buildResourceTableView(opaSessionObj)
+	} else {
+		imageScanSummary = buildImageScanSummary(imageScanData)
+	}
+
+	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView, imageScanSummary}
 	err := tpl.Execute(hp.writer, reportingCtx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to render template", helpers.Error(err))
-		return
+		return fmt.Errorf("failed to render template: %w", err)
 	}
 	printer.LogOutputFile(hp.writer.Name())
 
+	return nil
 }
 
 func (hp *HtmlPrinter) Score(score float32) {
@@ -136,8 +155,13 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableV
 	resourceTableView := make(ResourceTableView, 0)
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if result.GetStatus(nil).IsFailed() {
-			resource := opaSessionObj.AllResources[resourceID]
-			ctlResults := buildResourceControlResultTable(result.AssociatedControls, &opaSessionObj.Report.SummaryDetails)
+			resource, ok := opaSessionObj.AllResources[resourceID]
+			if !ok {
+				logger.L().Debug("resource missing from AllResources, skipping",
+					helpers.String("resourceID", resourceID))
+				continue
+			}
+			ctlResults := buildResourceControlResultTable(result.AssociatedControls, &opaSessionObj.Report.SummaryDetails, resource)
 			resourceTableView = append(resourceTableView, ResourceResult{resource, ctlResults})
 		}
 	}
@@ -145,17 +169,17 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableV
 	return resourceTableView
 }
 
-func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary) ResourceControlResult {
+func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary, resource workloadinterface.IMetadata) ResourceControlResult {
 	ctlSeverity := apis.ControlSeverityToString(control.GetScoreFactor())
 	ctlName := resourceControl.GetName()
 	ctlID := resourceControl.GetID()
 	ctlURL := cautils.GetControlLink(resourceControl.GetID())
-	failedPaths := AssistedRemediationPathsToString(&resourceControl)
+	failedPaths := AssistedRemediationPathsWithCurrentValues(&resourceControl, resource)
 
 	return ResourceControlResult{ctlSeverity, ctlName, ctlID, ctlURL, failedPaths}
 }
 
-func buildResourceControlResultTable(resourceControls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails) []ResourceControlResult {
+func buildResourceControlResultTable(resourceControls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata) []ResourceControlResult {
 	var ctlResults []ResourceControlResult
 	for _, resourceControl := range resourceControls {
 		if resourceControl.GetStatus(nil).IsFailed() {
@@ -163,7 +187,7 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 			if control == nil {
 				continue
 			}
-			ctlResult := buildResourceControlResult(resourceControl, control)
+			ctlResult := buildResourceControlResult(resourceControl, control, resource)
 
 			ctlResults = append(ctlResults, ctlResult)
 		}
@@ -172,8 +196,10 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 	return ctlResults
 }
 
-func (p *HtmlPrinter) CloseWriter() {
+// CloseWriter closes the HTML output writer, returning any error from flushing or closing.
+func (p *HtmlPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }

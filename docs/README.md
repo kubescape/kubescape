@@ -21,6 +21,7 @@ Welcome to the Kubescape documentation. This directory contains detailed guides 
 |----------|-------------|
 | [CLI Reference](cli-reference.md) | Complete command-line reference for all Kubescape commands |
 | [Architecture](architecture.md) | Technical architecture of Kubescape CLI and Operator |
+| [CEL Rule Engine](cel-engine.md) | Evaluating ValidatingAdmissionPolicy rules offline, and how scan and admission stay equivalent |
 
 ### Features
 
@@ -82,6 +83,8 @@ We welcome contributions to improve our documentation! Please see the [Contribut
 | [troubleshooting.md](troubleshooting.md) | ✅ Current | Common issues and solutions |
 | [providers.md](providers.md) | ✅ Current | Backend service providers |
 | [environment-dependencies-policy.md](environment-dependencies-policy.md) | ✅ Current | Dependency policies |
+| [ics-ot-workloads.md](ics-ot-workloads.md) | ✅ Current | Scanning ICS/OT workloads on Kubernetes |
+| [cel-engine.md](cel-engine.md) | ✅ Current | CEL rule engine: offline VAP evaluation and scan/admission equivalence |
 
 ---
 

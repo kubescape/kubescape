@@ -13,8 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anchore/grype/grype/match"
+	grypepkg "github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -45,6 +49,11 @@ func TestScore_Junit(t *testing.T) {
 			name:  "Score not an integer",
 			score: 20.7,
 			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 21\n",
+		},
+		{
+			name:  "Fractional score below perfect",
+			score: 99.5,
+			want:  "\nOverall compliance-score (100- Excellent, 0- All failed): 99\n",
 		},
 		{
 			name:  "Score less than 0",
@@ -113,6 +122,75 @@ func TestTestSuites(t *testing.T) {
 	assert.Equal(t, listTestsSuite(results), junitTestSuites.Suites)
 	assert.Equal(t, results.Report.SummaryDetails.NumberOfControls().All(), junitTestSuites.Tests)
 	assert.Equal(t, "Kubescape Scanning", junitTestSuites.Name)
+}
+
+func TestJunitActionPrintCombinedScanIncludesPostureAndImages(t *testing.T) {
+	postureControlID := "C-COMBINED"
+	postureSession := cautils.NewOPASessionObjMock()
+	postureSession.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				postureControlID: {
+					ControlID:  postureControlID,
+					Name:       "Combined posture control",
+					Status:     apis.StatusFailed,
+					StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				},
+			},
+		},
+	}
+
+	imageMatch := func(id, severity string) match.Match {
+		return match.Match{
+			Vulnerability: vulnerability.Vulnerability{
+				Reference: vulnerability.Reference{ID: id, Namespace: "nvd"},
+				Metadata:  &vulnerability.Metadata{ID: id, Severity: severity},
+			},
+			Package: grypepkg.Package{
+				ID:      grypepkg.ID("pkg-" + id),
+				Name:    "pkg-" + id,
+				Version: "1.0.0",
+			},
+		}
+	}
+	imageScanData := []cautils.ImageScanData{
+		{
+			Image:   "combined:first",
+			Matches: match.NewMatches(imageMatch("CVE-COMBINED", "High")),
+		},
+		{
+			Image:   "combined:second",
+			Matches: match.NewMatches(imageMatch("CVE-COMBINED-SECOND", "Critical")),
+		},
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "combined.xml")
+	jp := NewJunitPrinter(false)
+	require.NoError(t, jp.SetWriter(context.Background(), outputPath))
+	require.NoError(t, jp.ActionPrint(context.Background(), postureSession, imageScanData))
+	require.NoError(t, jp.writer.Close())
+
+	raw, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+
+	var got JUnitTestSuites
+	require.NoError(t, xml.Unmarshal(raw, &got))
+	require.Len(t, got.Suites, 3)
+	assert.Equal(t, "Kubescape Scanning", got.Name)
+	assert.Equal(t, []string{"kubescape", "combined:first", "combined:second"}, []string{
+		got.Suites[0].Name,
+		got.Suites[1].Name,
+		got.Suites[2].Name,
+	})
+	assert.Equal(t, []int{0, 1, 2}, []int{got.Suites[0].ID, got.Suites[1].ID, got.Suites[2].ID})
+	assert.Equal(t, 1, got.Suites[0].Tests)
+	assert.Equal(t, 1, got.Suites[0].Failures)
+	assert.Equal(t, 3, got.Tests)
+	assert.Equal(t, 3, got.Failures)
+	assert.Zero(t, got.Errors)
+	assert.Contains(t, string(raw), "Combined posture control")
+	assert.Contains(t, string(raw), "CVE-COMBINED")
+	assert.Contains(t, string(raw), "CVE-COMBINED-SECOND")
 }
 
 func TestListTestSuites(t *testing.T) {
@@ -213,6 +291,16 @@ func TestProperties(t *testing.T) {
 				{
 					Name:  "complianceScore",
 					Value: fmt.Sprintf("%.2f", 100.0),
+				},
+			},
+		},
+		{
+			name:  "Score near 100 does not round to 100.00",
+			score: 99.996,
+			expectedProperty: []JUnitProperty{
+				{
+					Name:  "complianceScore",
+					Value: "99.99",
 				},
 			},
 		},
@@ -497,7 +585,8 @@ func TestJunitGoldenFile(t *testing.T) {
 
 	goldenPath := filepath.Join("testdata", "junit_golden.xml")
 	if *updateGolden {
-		require.NoError(t, os.WriteFile(goldenPath, got, 0o644))
+		//nolint:gosec // this is a test file writing a golden file
+		require.NoError(t, os.WriteFile(goldenPath, got, 0o600))
 	}
 
 	want, err := os.ReadFile(goldenPath)
@@ -652,6 +741,38 @@ func TestAggregateSuiteCounts(t *testing.T) {
 	}
 }
 
+func TestTestCases_UniqueClassnameForDuplicateNames(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+
+	const sharedName = "Minimize the admission of containers wishing to share the host process ID namespace"
+	controls := reportsummary.ControlSummaries{
+		"C-0194": {
+			ControlID:  "C-0194",
+			Name:       sharedName,
+			StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusPassed},
+		},
+		"C-0214": {
+			ControlID:  "C-0214",
+			Name:       sharedName,
+			StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		},
+	}
+
+	cases := testsCases(session, &controls, "AllControls")
+	require.Len(t, cases, 2)
+
+	seen := make(map[string]struct{}, len(cases))
+	for _, tc := range cases {
+		// JUnit consumers key a test by (classname, name); two same-named
+		// controls must not produce the same identity.
+		key := tc.Classname + "\x00" + tc.Name
+		require.NotContains(t, seen, key, "duplicate (classname, name) identity %q / %q", tc.Classname, tc.Name)
+		seen[key] = struct{}{}
+		assert.Equal(t, sharedName, tc.Name, "name must stay untouched")
+		assert.Contains(t, tc.Classname, "/C-", "classname must embed the control ID")
+	}
+}
+
 func TestTestCases_MissingControl(t *testing.T) {
 	session := cautils.NewOPASessionObjMock()
 	session.Report = &reporthandlingv2.PostureReport{
@@ -675,4 +796,104 @@ func TestTestCases_MissingControl(t *testing.T) {
 			assert.Nil(t, cases[0].Failure)
 		}
 	})
+}
+
+// TestJunitActionPrintComplianceScore is an integration-level regression test
+// for issue #2540. Unlike the unit-level TestListTestsSuiteUsesComplianceScores
+// in junit_compliance_score_test.go, this test exercises the full ActionPrint
+// path and decodes the real marshalled XML to verify the complianceScore
+// property is correct end-to-end.
+func TestJunitActionPrintComplianceScore(t *testing.T) {
+	tests := []struct {
+		name       string
+		frameworks []reportsummary.FrameworkSummary
+		want       string
+	}{
+		{
+			name:       "no frameworks uses summary compliance score",
+			frameworks: []reportsummary.FrameworkSummary{},
+			want:       "87.75",
+		},
+		{
+			name: "frameworks use per-framework compliance score",
+			frameworks: []reportsummary.FrameworkSummary{
+				{Name: "NSA", Score: 10, ComplianceScore: 90},
+			},
+			want: "90.00",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session := cautils.NewOPASessionObjMock()
+			session.Report = &reporthandlingv2.PostureReport{
+				SummaryDetails: reportsummary.SummaryDetails{
+					Score:           12.25,
+					ComplianceScore: 87.75,
+					Frameworks:      tt.frameworks,
+				},
+			}
+
+			tmp, err := os.CreateTemp("", "junit-integration-*.xml")
+			require.NoError(t, err)
+			defer os.Remove(tmp.Name())
+
+			jp := NewJunitPrinter(false)
+			jp.writer = tmp
+			jp.ActionPrint(context.Background(), session, nil)
+			require.NoError(t, tmp.Close())
+
+			raw, err := os.ReadFile(tmp.Name())
+			require.NoError(t, err)
+
+			var got JUnitXML
+			dec := xml.NewDecoder(bytes.NewReader(raw))
+			require.NoError(t, dec.Decode(&got.TestSuites))
+			require.Len(t, got.TestSuites.Suites, 1)
+			require.GreaterOrEqual(t, len(got.TestSuites.Suites[0].Properties), 1)
+
+			prop := got.TestSuites.Suites[0].Properties[0]
+			assert.Equal(t, "complianceScore", prop.Name)
+			assert.Equal(t, tt.want, prop.Value,
+				"complianceScore must come from ComplianceScore (%s), not Score", tt.want)
+		})
+	}
+}
+
+func TestJunitActionPrintMissingResourceNoPanic(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+
+	resourceIDs := helpersv1.AllLists{}
+	resourceIDs.Append(apis.StatusFailed, "r-1")
+
+	control := reportsummary.ControlSummary{
+		ControlID: "C-0001",
+		Name:      "Test Control",
+		Status:    apis.StatusFailed,
+		StatusInfo: apis.StatusInfo{
+			InnerStatus: apis.StatusFailed,
+		},
+		ResourceIDs: resourceIDs,
+	}
+
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				"C-0001": control,
+			},
+		},
+	}
+
+	tmp, err := os.CreateTemp("", "junit-test-*.xml")
+	require.NoError(t, err)
+	defer os.Remove(tmp.Name())
+
+	jp := NewJunitPrinter(false)
+	jp.writer = tmp
+
+	assert.NotPanics(t, func() {
+		jp.ActionPrint(context.Background(), session, nil)
+	})
+
+	require.NoError(t, tmp.Close())
 }

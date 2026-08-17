@@ -243,11 +243,10 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 
 func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary) {
 	if len(summary.Images) > 3 {
-		cautils.SimpleDisplay(writer, "Receive full report by running: kubescape scan image <image>\n")
+		cautils.SimpleDisplay(writer, "Receive a full report by running: kubescape scan image <image>\n")
 	} else {
 		for _, img := range summary.Images {
-			imgWithoutTag, _, _ := strings.Cut(img, ":")
-			cautils.SimpleDisplay(writer, fmt.Sprintf("Receive a full report for %s by running: %s\n", imgWithoutTag, getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img))))
+			cautils.SimpleDisplay(writer, fmt.Sprintf("Receive a full report by running: %s\n", getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img))))
 		}
 	}
 
@@ -272,7 +271,7 @@ func printComplianceScore(writer *os.File, frameworks []reportsummary.IFramework
 	cautils.SimpleDisplay(writer, "The compliance score is calculated by multiplying control failures by the number of failures against supported compliance frameworks. Remediate controls, or configure your cluster baseline with exceptions, to improve this score.\n\n")
 
 	for _, fw := range frameworks {
-		cautils.StarDisplay(writer, "%s: %s", fw.GetName(), gchalk.WithBrightYellow().Bold(fmt.Sprintf("%.2f%%\n", fw.GetComplianceScore())))
+		cautils.StarDisplay(writer, "%s: %s", fw.GetName(), gchalk.WithBrightYellow().Bold(fmt.Sprintf("%s%%\n", cautils.ComplianceScoreToString(fw.GetComplianceScore(), 2))))
 	}
 
 	cautils.SimpleDisplay(writer, fmt.Sprintf("\nView a full compliance report by running %s or %s\n", getCallToActionString("'$ kubescape scan framework nsa'"), getCallToActionString("'$ kubescape scan framework mitre'")))
