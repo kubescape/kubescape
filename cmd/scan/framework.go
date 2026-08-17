@@ -43,8 +43,6 @@ var (
 	ErrSecurityViewNotSupported = errors.New("security view is not supported for framework scan")
 	ErrBadThreshold             = errors.New("bad argument: out of range threshold")
 	ErrControlTimeoutTooHigh    = errors.New("--control-timeout must be lower than --scan-timeout")
-	ErrKeepLocalOrSubmit        = errors.New("you can use `keep-local` or `submit`, but not both")
-	ErrOmitRawResourcesOrSubmit = errors.New("you can use `omit-raw-resources` or `submit`, but not both")
 )
 
 func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
@@ -261,15 +259,8 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if scanInfo.View == string(cautils.SecurityViewType) {
 		scanInfo.View = string(cautils.ResourceViewType)
 	}
-
-	if scanInfo.Submit.GetBool() && scanInfo.Local {
-		return ErrKeepLocalOrSubmit
-	}
 	if postureThresholdsOutOfRange(scanInfo) {
 		return ErrBadThreshold
-	}
-	if scanInfo.Submit.GetBool() && scanInfo.OmitRawResources {
-		return ErrOmitRawResourcesOrSubmit
 	}
 	if err := validateControlTimeout(scanInfo); err != nil {
 		return err

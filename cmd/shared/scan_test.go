@@ -80,6 +80,9 @@ func TestValidateCommonScanFlags(t *testing.T) {
 		minSeverity   string
 		format        string
 		formatChanged bool
+		submit        bool
+		local         bool
+		omitRaw       bool
 		expectedErr   string
 	}{
 		{
@@ -119,6 +122,22 @@ func TestValidateCommonScanFlags(t *testing.T) {
 			formatChanged: true,
 			expectedErr:   "invalid format",
 		},
+		{
+			name:          "Submit with keep-local",
+			submit:        true,
+			local:         true,
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "you can use `keep-local` or `submit`, but not both",
+		},
+		{
+			name:          "Submit with omit-raw-resources",
+			submit:        true,
+			omitRaw:       true,
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "you can use `omit-raw-resources` or `submit`, but not both",
+		},
 	}
 
 	for _, tt := range tests {
@@ -127,6 +146,9 @@ func TestValidateCommonScanFlags(t *testing.T) {
 				FailThresholdSeverity: tt.severity,
 				MinSeverity:           tt.minSeverity,
 				Format:                tt.format,
+				Local:                 tt.local,
+				OmitRawResources:      tt.omitRaw,
+				Submit:                cautils.NewBoolPtr(&tt.submit),
 			}
 
 			cmd := &cobra.Command{}

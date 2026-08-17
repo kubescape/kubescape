@@ -124,10 +124,6 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 	severity := scanInfo.FailThresholdSeverity
 
-	if scanInfo.Submit.GetBool() && scanInfo.OmitRawResources {
-		return ErrOmitRawResourcesOrSubmit
-	}
-
 	if err := validateControlTimeout(scanInfo); err != nil {
 		return err
 	}
