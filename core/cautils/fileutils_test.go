@@ -34,6 +34,28 @@ func TestListFiles(t *testing.T) {
 	assert.Equal(t, 13, len(files))
 }
 
+func TestLoadResourcesFromFilesDoesNotSubstituteNestedBasenameForMissingExactPath(t *testing.T) {
+	root := t.TempDir()
+	nestedDir := filepath.Join(root, "nested")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(nestedDir, "manifest.yaml"), []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name: nested
+`), 0o600))
+
+	requestedPath := filepath.Join(root, "manifest.yaml")
+	workloads, skipped, err := LoadResourcesFromFiles(context.Background(), requestedPath, root, nil)
+
+	require.ErrorIs(t, err, ErrNoManifestFiles)
+	assert.Empty(t, workloads)
+	assert.Empty(t, skipped)
+
+	workloads, _, err = LoadResourcesFromFiles(context.Background(), filepath.Join(root, "*.yaml"), root, nil)
+	require.NoError(t, err)
+	assert.Contains(t, workloads, filepath.Join(nestedDir, "manifest.yaml"), "explicit glob behavior must remain recursive")
+}
+
 func TestLoadResourcesFromFiles(t *testing.T) {
 	workloads, _, err := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "", nil)
 	require.NoError(t, err)
