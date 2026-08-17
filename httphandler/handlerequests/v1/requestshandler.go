@@ -449,5 +449,4 @@ func (handler *HTTPHandler) writeErrorWithStatus(w http.ResponseWriter, err erro
 	response.Response = err.Error()
 	response.Type = utilsapisv1.ErrorScanResponseType
 	w.Write(responseToBytes(&response))
-	handler.state.setNotBusy(scanID)
 }
