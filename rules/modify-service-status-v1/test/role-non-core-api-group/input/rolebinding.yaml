@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gateway-status-writer-rb
+  namespace: mesh
+subjects:
+- kind: ServiceAccount
+  name: gateway-controller
+  namespace: mesh
+roleRef:
+  kind: Role
+  name: gateway-status-writer
+  apiGroup: rbac.authorization.k8s.io

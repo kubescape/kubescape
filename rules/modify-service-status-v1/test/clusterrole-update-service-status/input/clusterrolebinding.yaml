@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: service-status-writer-crb
+subjects:
+- kind: ServiceAccount
+  name: lb-controller
+  namespace: platform
+roleRef:
+  kind: ClusterRole
+  name: service-status-writer
+  apiGroup: rbac.authorization.k8s.io
