@@ -43,10 +43,13 @@ func splitPath(path string) []pathSegment {
 	return segments
 }
 
-// anyToString converts a scalar value to its string representation.
+// anyToString converts a value to its string representation.
 // It handles all numeric types that may appear in JSON-decoded or
-// programmatically-constructed Kubernetes objects.
-// Maps and slices return ("", false).
+// programmatically-constructed Kubernetes objects. Maps and slices are
+// rendered as compact JSON rather than dropped, so a failing path whose
+// value is an object or array (e.g. a container's full securityContext, an
+// env var list) still surfaces something instead of falling back to the
+// bare path with no value at all.
 func anyToString(v any) (string, bool) {
 	switch val := v.(type) {
 	case nil:
@@ -77,6 +80,12 @@ func anyToString(v any) (string, bool) {
 		return strconv.FormatUint(val, 10), true
 	case json.Number:
 		return val.String(), true
+	case map[string]any, []any:
+		b, err := json.Marshal(val)
+		if err != nil {
+			return "", false
+		}
+		return string(b), true
 	default:
 		return "", false
 	}
