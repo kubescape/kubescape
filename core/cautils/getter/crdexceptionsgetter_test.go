@@ -548,6 +548,7 @@ func TestBuildResourceDesignators_NamespaceSelector(t *testing.T) {
 		selector  map[string]any
 		resources []map[string]any
 		want      []map[string]string
+		wantErr   bool
 	}{
 		{
 			name: "namespaceSelector matches one namespace",
@@ -602,7 +603,7 @@ func TestBuildResourceDesignators_NamespaceSelector(t *testing.T) {
 			selector: map[string]any{
 				"matchLabels": map[string]any{"env": "dev"},
 			},
-			want: []map[string]string{},
+			wantErr: true,
 		},
 		{
 			name: "namespaceSelector matches no namespaces with resources",
@@ -617,7 +618,7 @@ func TestBuildResourceDesignators_NamespaceSelector(t *testing.T) {
 					"apiGroup": "apps",
 				},
 			},
-			want: []map[string]string{},
+			wantErr: true,
 		},
 		{
 			name:     "empty namespaceSelector matches all namespaces",
@@ -674,6 +675,10 @@ func TestBuildResourceDesignators_NamespaceSelector(t *testing.T) {
 			}}
 
 			got, err := buildResourceDesignators(context.TODO(), obj, tc.kind, k8sClient)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
 			require.NoError(t, err)
 			assert.ElementsMatch(t, tc.want, got)
 		})

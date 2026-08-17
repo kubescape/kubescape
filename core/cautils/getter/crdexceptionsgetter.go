@@ -256,6 +256,13 @@ func buildResourceDesignators(
 			if err != nil {
 				return nil, err
 			}
+			if len(names) == 0 {
+				// A selector matching no namespace must not fall through to the
+				// scopeless-exception fallback below: an empty designator list
+				// means "matches every cluster" downstream, which would turn a
+				// deliberately narrow exception into a cluster-wide one.
+				return nil, fmt.Errorf("namespaceSelector matched no namespaces")
+			}
 			namespaceNames = names
 		}
 	}
