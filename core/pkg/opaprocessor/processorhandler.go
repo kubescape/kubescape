@@ -1,3 +1,8 @@
+// Package opaprocessor evaluates Open Policy Agent (OPA) Rego rules and
+// dispatches CEL rules against scanned Kubernetes resources. CEL evaluation is
+// not yet implemented. It is the engine that consumes the rules defined in the
+// kubescape/regolibrary repository and produces Kubescape's misconfiguration
+// results.
 package opaprocessor
 
 import (
