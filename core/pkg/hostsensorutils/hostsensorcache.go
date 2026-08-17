@@ -121,6 +121,13 @@ func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDat
 		return nil, err
 	}
 
+	if len(envelopes) == 0 {
+		// An empty entry carries no node data, only the absence of it. Serving it
+		// keeps a node-agent outage reported as "didn't report any <resource>"
+		// until the TTL runs out, long after the agent is back.
+		return nil, os.ErrNotExist
+	}
+
 	logger.L().Debug("Loaded host sensor envelopes from cache", helpers.String("resource", resourceName), helpers.Int("count", len(envelopes)))
 	return envelopes, nil
 }
@@ -134,6 +141,13 @@ func saveToCacheWithRename(clusterName, resourceName string, envelopes []hostsen
 		// An unresolved API server host is a shared cache key across every
 		// caller in that state; loadFromCache always refuses to read it back,
 		// so writing it is dead I/O and unnecessary disk data at rest.
+		return nil
+	}
+
+	if len(envelopes) == 0 {
+		// Nothing collected means the node-agent had nothing to report yet, not
+		// that the cluster has no node data. Persisting it would pin that outage
+		// for the whole TTL, and loadFromCache refuses to serve it back anyway.
 		return nil
 	}
 

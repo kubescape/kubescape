@@ -138,6 +138,30 @@ func TestCRDResourceGetters(t *testing.T) {
 	}
 }
 
+// Covers the scan sequence a node-agent restart produces: one scan collects
+// nothing, the next one collects normally. With the cache enabled, the second
+// scan must query the cluster instead of being served the empty first result.
+func TestGetCRDResources_RecoversAfterEmptyCollection(t *testing.T) {
+	withTempCacheDir(t)
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+	withK8sHost(t, "https://cluster-a.example.com")
+
+	hsh := &HostSensorHandler{dynamicClient: newCRDDynamicClient(t)}
+	got, rawCount, err := hsh.getKubeletInfo(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.Zero(t, rawCount)
+
+	item := newCRDItem("KubeletInfo", "node-1", map[string]any{"KubeletInfo": map[string]any{"version": "v1.30.0"}})
+	hsh.dynamicClient = newCRDDynamicClient(t, item)
+
+	got, rawCount, err = hsh.getKubeletInfo(context.Background())
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, 1, rawCount)
+	assert.Equal(t, "node-1", got[0].GetName())
+}
+
 func TestCollectResources_SkipsControlPlaneInfoWhenCloudProviderPresent(t *testing.T) {
 	items := []*unstructured.Unstructured{
 		newCRDItem("CloudProviderInfo", "node-1", map[string]any{"providerMetaDataAPIAccess": true}),
