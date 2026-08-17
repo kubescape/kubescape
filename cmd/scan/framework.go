@@ -3,6 +3,7 @@ package scan
 import (
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -235,10 +236,7 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if scanInfo.Submit.GetBool() && scanInfo.Local {
 		return ErrKeepLocalOrSubmit
 	}
-	if 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
-		return ErrBadThreshold
-	}
-	if 100 < scanInfo.FailCoverageThreshold || 0 > scanInfo.FailCoverageThreshold {
+	if postureThresholdsOutOfRange(scanInfo) {
 		return ErrBadThreshold
 	}
 	if scanInfo.Submit.GetBool() && scanInfo.OmitRawResources {
@@ -277,11 +275,15 @@ func validateControlTimeout(scanInfo *cautils.ScanInfo) error {
 // Unlike validateFrameworkScanInfo, this function does not mutate scanInfo
 // or enforce unrelated constraints.
 func validateThresholdsOnly(scanInfo *cautils.ScanInfo) error {
-	if 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
-		return ErrBadThreshold
-	}
-	if 100 < scanInfo.FailCoverageThreshold || 0 > scanInfo.FailCoverageThreshold {
+	if postureThresholdsOutOfRange(scanInfo) {
 		return ErrBadThreshold
 	}
 	return validateControlTimeout(scanInfo)
+}
+
+func postureThresholdsOutOfRange(scanInfo *cautils.ScanInfo) bool {
+	return math.IsNaN(float64(scanInfo.ComplianceThreshold)) ||
+		math.IsNaN(float64(scanInfo.FailCoverageThreshold)) ||
+		scanInfo.ComplianceThreshold < 0 || scanInfo.ComplianceThreshold > 100 ||
+		scanInfo.FailCoverageThreshold < 0 || scanInfo.FailCoverageThreshold > 100
 }
