@@ -32,8 +32,11 @@ graph TD
     N --> O[ParseRegoResult]
     K -->|CEL| P[runCELOnK8s stub]
     O --> Q[build failed & passed ResourceAssociatedRule maps]
-    Q --> R[updateResults]
-    R --> S[exceptions, score, summary]
+    D --> R[BuildScanCoverage/ComputeCoverageScore]
+    R --> S[updateResults]
+    S --> T[markTimedOutControlsSkipped]
+    T --> U[scorewrapper.Calculate]
+    U --> V[reweightComplianceScores]
 ```
 
 ## Call-chain details
@@ -49,8 +52,11 @@ The public entry point in `processorhandler.go`:
 1. Converts frameworks to `cautils.Policies` via `convertFrameworksToPolicies`.
 2. Seeds report summary objects via `ConvertFrameworksToSummaryDetails`.
 3. Calls `Process` to run the controls.
-4. Builds scan coverage and reweights compliance scores after `Process` returns.
-5. Calls `updateResults` to apply exceptions and finalize summaries.
+4. Calls `BuildScanCoverage` and `ComputeCoverageScore` after `Process` returns.
+5. Calls `updateResults` to apply exceptions and update summaries.
+6. Calls `markTimedOutControlsSkipped` to mark controls that timed out.
+7. Calls `scorewrapper.Calculate` to compute the posture score.
+8. Calls `reweightComplianceScores` to reweight compliance scores.
 
 ### `Process`
 
@@ -106,8 +112,8 @@ This is where per-rule, per-namespace work happens:
 ### Kubernetes object → Rego `input`
 
 1. `workloadinterface.IMetadata` objects are collected into `[]workloadinterface.IMetadata` per namespace.
-2. `RegoResourcesAggregator` converts them to a list of `map[string]any` objects.
-3. `workloadinterface.ListMetaToMap` produces the raw `[]map[string]any` slice.
+2. `RegoResourcesAggregator` optionally aggregates/filters the `[]workloadinterface.IMetadata` list (e.g. subject/role aggregation for RBAC rules) while keeping it as `[]workloadinterface.IMetadata`.
+3. `workloadinterface.ListMetaToMap` converts the `[]workloadinterface.IMetadata` into the raw `[]map[string]any` slice.
 4. `regoEval` passes this slice to OPA as `rego.Input(inputObj)`.
 
 ### OPA result → Kubescape result
