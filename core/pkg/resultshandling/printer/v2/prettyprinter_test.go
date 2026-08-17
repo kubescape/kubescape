@@ -2,11 +2,13 @@ package printer
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -180,4 +182,38 @@ func TestSetWriter_Pretty(t *testing.T) {
 	}
 
 	assert.NoFileExists(t, sourceTreeArtifact)
+}
+
+// TestPrintGroupedResource_ResourceNameWithPercentVerbs guards against a
+// regression where a resource-derived line was passed as the format argument
+// to cautils.SimpleDisplay instead of as a %s value: a workload name
+// containing %-verbs (reachable from an untrusted scanned manifest) was
+// silently corrupted by fmt's format-string interpretation instead of being
+// printed literally.
+func TestPrintGroupedResource_ResourceNameWithPercentVerbs(t *testing.T) {
+	f, err := os.CreateTemp("", "print-grouped-resource")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	name := "my-deployment-%s-%d-leaked"
+	resource := workloadinterface.NewBaseObject(map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name": name,
+		},
+	})
+
+	pp := &PrettyPrinter{writer: f}
+	pp.printGroupedResource("", "", []WorkloadSummary{{resource: resource}})
+
+	f.Seek(0, 0)
+	got, err := io.ReadAll(f)
+	if err != nil {
+		panic(err)
+	}
+
+	assert.Contains(t, string(got), name, "resource name must be printed literally, not interpreted as a format string")
 }

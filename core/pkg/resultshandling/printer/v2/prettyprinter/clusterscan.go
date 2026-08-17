@@ -73,8 +73,8 @@ func (cp *ClusterPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling
 		ns := wl.GetNamespace()
 		name := wl.GetName()
 		kind := wl.GetKind()
-		cautils.SimpleDisplay(cp.writer, fmt.Sprintf("%d. namespace: %s, name: %s, kind: %s\n", i+1, ns, name, kind))
-		cautils.SimpleDisplay(cp.writer, fmt.Sprintf("   '%s'\n", getCallToActionString(cp.getWorkloadScanCommand(ns, kind, name))))
+		cautils.SimpleDisplay(cp.writer, "%d. namespace: %s, name: %s, kind: %s\n", i+1, ns, name, kind)
+		cautils.SimpleDisplay(cp.writer, "   '%s'\n", getCallToActionString(cp.getWorkloadScanCommand(ns, kind, name)))
 	}
 
 	cautils.SimpleDisplay(cp.writer, "\n")
