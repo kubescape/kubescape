@@ -387,6 +387,15 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		}
 	}
 
+	// A resource served at several API versions is scoped identically under
+	// every version (same metadata.namespace), so its aliases always land in
+	// the same batch and can be deduplicated per batch. See
+	// dedupeServedVersionAliases.
+	dedupeServedVersionAliases(resident.K8SResources, resident.AllResources)
+	for _, batch := range namespaceBatches {
+		dedupeServedVersionAliases(batch.K8SResources, batch.AllResources)
+	}
+
 	// Preserve the eager collector's failure contract. Whole-GVR failures feed
 	// InfoMap, while selector failures for a GVR that returned some resources
 	// remain non-fatal and are surfaced as partial coverage.
