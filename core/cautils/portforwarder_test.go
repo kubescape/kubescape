@@ -303,6 +303,7 @@ func Test_GetPortForwardLocalhost(t *testing.T) {
 		})
 	}
 }
+
 // TestStopPortForwarder_Idempotent verifies that repeated or concurrent calls to StopPortForwarder
 // safely close the stop channel and never panic or block.
 func TestStopPortForwarder_Idempotent(t *testing.T) {
