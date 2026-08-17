@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"html/template"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -54,7 +53,7 @@ func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) error {
 		outputFile = htmlOutputFile + printer.HtmlOutputExt
 		logger.L().Info("no --output specified for html format; writing to default file",
 			helpers.String("filename", outputFile))
-	} else if filepath.Ext(outputFile) != printer.HtmlOutputExt {
+	} else if !printer.HasOutputExt(outputFile, printer.HtmlOutputExt) {
 		outputFile = outputFile + printer.HtmlOutputExt
 	}
 	if explicitOutput {

@@ -85,7 +85,7 @@ func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) error 
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = sarifOutputFile
 		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != printer.SARIFOutputExt {
+		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.SARIFOutputExt) {
 			outputFile = outputFile + printer.SARIFOutputExt
 		}
 	}

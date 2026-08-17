@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/anchore/clio"
@@ -40,7 +39,7 @@ func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) error {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = jsonOutputFile
 		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != printer.JsonOutputExt {
+		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.JsonOutputExt) {
 			outputFile = outputFile + printer.JsonOutputExt
 		}
 	}
