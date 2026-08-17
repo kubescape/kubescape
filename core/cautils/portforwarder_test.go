@@ -303,9 +303,11 @@ func Test_GetPortForwardLocalhost(t *testing.T) {
 		})
 	}
 }
+// TestStopPortForwarder_Idempotent verifies that repeated or concurrent calls to StopPortForwarder
+// safely close the stop channel and never panic or block.
 func TestStopPortForwarder_Idempotent(t *testing.T) {
 	p := &portForward{
-		stopChan: make(chan struct{}, 1),
+		stopChan: make(chan struct{}),
 	}
 
 	done := make(chan struct{})
@@ -321,4 +323,18 @@ func TestStopPortForwarder_Idempotent(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("StopPortForwarder blocked on repeated stop")
 	}
+
+	// Verify the channel was closed so all readers receive the stop broadcast
+	select {
+	case _, ok := <-p.stopChan:
+		assert.False(t, ok, "stopChan must be closed")
+	default:
+		t.Fatal("stopChan was not closed by StopPortForwarder")
+	}
+
+	// Assert repeated calls do not panic
+	assert.NotPanics(t, func() {
+		p.StopPortForwarder()
+		p.StopPortForwarder()
+	})
 }
