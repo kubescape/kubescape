@@ -58,7 +58,11 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		summaryTable.Style().Format.Header = text.FormatDefault
 		summaryTable.Style().Box = table.StyleBoxRounded
 
-		resourceRows := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource)
+		var sourcePath string
+		if src, ok := opaSessionObj.ResourceSource[resourceID]; ok {
+			sourcePath = src.RelativePath
+		}
+		resourceRows := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource, prettyPrinter.showEvidence, prettyPrinter.showSecrets, sourcePath)
 
 		short := utils.CheckShortTerminalWidth(resourceRows, generateResourceHeader(false))
 		if short {
@@ -73,7 +77,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 
 }
 
-func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata) []table.Row {
+func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, showEvidence bool, showSecrets bool, sourcePath string) []table.Row {
 	var rows []table.Row
 
 	for i := range controls {
@@ -84,9 +88,14 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		}
 
 		row[resourceColumnURL] = cautils.GetControlLink(controls[i].GetID())
-		paths := AssistedRemediationPathsWithCurrentValues(&controls[i], resource)
-		addContainerNameToAssistedRemediation(resource, &paths)
-		row[resourceColumnPath] = strings.Join(paths, "\n")
+		if showEvidence {
+			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&controls[i], resource, showSecrets)
+			addContainerNameToAssistedRemediation(resource, &paths)
+			if sourcePath != "" {
+				paths = append([]string{"@ " + sourcePath}, paths...)
+			}
+			row[resourceColumnPath] = strings.Join(paths, "\n")
+		}
 		row[resourceColumnName] = controls[i].GetName()
 
 		if c := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, controls[i].GetID()); c != nil {

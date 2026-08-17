@@ -792,7 +792,7 @@ func TestClosePrinter_AllV2PrintersImplementErrorCloser(t *testing.T) {
 		{"cyclonedx", printerv2.NewCycloneDXPrinter()},
 		{"gitlabsast", printerv2.NewGitLabSASTPrinter()},
 		{"csv", printerv2.NewCsvPrinter()},
-		{"pretty", printerv2.NewPrettyPrinter(false, "1.0", false, cautils.ControlViewType, cautils.ScanTypeCluster, nil, "")},
+		{"pretty", printerv2.NewPrettyPrinter(false, "1.0", false, cautils.ControlViewType, cautils.ScanTypeCluster, nil, "", false, false)},
 		{"silent", &printerv2.SilentPrinter{}},
 	}
 

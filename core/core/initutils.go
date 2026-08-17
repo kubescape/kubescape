@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"os"
 
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
@@ -433,14 +434,15 @@ func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, 
 
 // GetUIPrinter returns a printer that will be used to print to the program’s UI (terminal)
 func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName string) printer.IPrinter {
+	var p printer.IPrinter
 	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel || (scanInfo.Format != "" && scanInfo.Output == "") {
-		return &printerv2.SilentPrinter{}
-	}
-
-	p := printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName)
-	if err := p.SetWriter(ctx, ""); err != nil {
-		logger.L().Ctx(ctx).Warning("failed to configure terminal output", helpers.Error(err))
-		return &printerv2.SilentPrinter{}
+		p = &printerv2.SilentPrinter{}
+	} else {
+		p = printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName, scanInfo.ShowEvidence, scanInfo.ShowSecrets)
+		if err := p.SetWriter(ctx, os.Stdout.Name()); err != nil {
+			logger.L().Ctx(ctx).Warning("failed to configure terminal output", helpers.Error(err))
+			return &printerv2.SilentPrinter{}
+		}
 	}
 	return p
 }
