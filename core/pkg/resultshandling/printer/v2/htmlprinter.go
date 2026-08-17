@@ -3,6 +3,7 @@ package printer
 import (
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"os"
@@ -28,6 +29,13 @@ const (
 //go:embed html/report.gohtml
 var reportTemplate string
 
+// kubescapeLogoPNG is embedded (rather than fetched from a live GitHub URL at
+// render time) so generated reports render their logo offline and are not
+// tied to the content of a moving branch reference (#3328).
+//
+//go:embed pdf/logo.png
+var kubescapeLogoPNG []byte
+
 var _ printer.IPrinter = &HtmlPrinter{}
 
 type HTMLReportingCtx struct {
@@ -36,6 +44,9 @@ type HTMLReportingCtx struct {
 	// ImageScanSummary is set instead of the two fields above when this report
 	// is for an image scan rather than a posture scan (#2782).
 	ImageScanSummary *imageprinter.ImageScanSummary
+	// LogoDataURI embeds the Kubescape logo as a data URI so the report
+	// renders offline instead of fetching it from GitHub (#3328).
+	LogoDataURI template.URL
 }
 
 type HtmlPrinter struct {
@@ -137,7 +148,8 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		imageScanSummary = buildImageScanSummary(imageScanData)
 	}
 
-	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView, imageScanSummary}
+	logoDataURI := template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(kubescapeLogoPNG)) // #nosec G203 -- built entirely from an embedded, compile-time-fixed asset, not user input
+	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView, imageScanSummary, logoDataURI}
 	err := tpl.Execute(hp.writer, reportingCtx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to render template", helpers.Error(err))

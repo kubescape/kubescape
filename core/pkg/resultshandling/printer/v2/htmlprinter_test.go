@@ -145,3 +145,26 @@ func TestHtmlPrinter_ActionPrint_RiskScoreRounding(t *testing.T) {
 	assert.Contains(t, htmlContent, `<td class="controlRiskCell numericCell">1</td>`)
 	assert.NotContains(t, htmlContent, `<td class="controlRiskCell numericCell">0</td>`)
 }
+
+func TestHtmlPrinter_ActionPrint_LogoEmbeddedNotFetched(t *testing.T) {
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "report.html")
+
+	hp := NewHtmlPrinter()
+	hp.SetWriter(ctx, out)
+
+	session := cautils.NewOPASessionObjMock()
+
+	hp.ActionPrint(ctx, session, nil)
+	hp.CloseWriter()
+
+	content, err := os.ReadFile(out)
+	assert.NoError(t, err)
+	htmlContent := string(content)
+
+	// Report must never depend on a live, branch-tracking GitHub URL to render its logo.
+	assert.NotContains(t, htmlContent, "raw.githubusercontent.com",
+		"HTML report must not fetch its logo from a live GitHub URL")
+	assert.Contains(t, htmlContent, `<img class="logo" src="data:image/png;base64,`,
+		"HTML report must embed its logo as a data URI")
+}
