@@ -122,6 +122,30 @@ func TestStubRequestResourcePlural(t *testing.T) {
 			want: "actortemplates",
 		},
 		{
+			name: "sibilant kind pluralizes to es",
+			obj: map[string]any{
+				"apiVersion": "agents.x-k8s.io/v1alpha1",
+				"kind":       "Sandbox",
+			},
+			want: "sandboxes",
+		},
+		{
+			name: "vowel before a final y pluralizes to s",
+			obj: map[string]any{
+				"apiVersion": "gateway.networking.k8s.io/v1",
+				"kind":       "Gateway",
+			},
+			want: "gateways",
+		},
+		{
+			name: "an already plural kind is left alone",
+			obj: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Endpoints",
+			},
+			want: "endpoints",
+		},
+		{
 			name: "resource-plural annotation overrides the guess",
 			obj: map[string]any{
 				"apiVersion": "agentsubstrate.google.com/v1",
@@ -156,7 +180,7 @@ func TestStubRequestResourcePlural(t *testing.T) {
 // policy be scoped in and then self-guard itself back out.
 func TestStubRequestResourceMatchesScoping(t *testing.T) {
 	for _, obj := range []map[string]any{namespacedPod(), clusterScopedRole()} {
-		gvr, ok := objectGVR(obj)
+		gvr, _, ok := objectGVR(obj)
 		require.True(t, ok)
 
 		req := stubRequest(obj)
