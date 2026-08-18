@@ -39,7 +39,7 @@ func TestSetWriter_Json_CaseInsensitiveExtension(t *testing.T) {
 			tmpDir := t.TempDir()
 			target := tmpDir + string(os.PathSeparator) + tt.outputFile
 
-			jp := NewJsonPrinter("")
+			jp := NewJsonPrinter()
 			require.NoError(t, jp.SetWriter(context.TODO(), target))
 			require.NotNil(t, jp.writer)
 			defer jp.writer.Close()
