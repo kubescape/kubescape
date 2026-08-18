@@ -41,10 +41,17 @@ type ImageScanData struct {
 // selected, while multi-architecture scans remain distinguishable everywhere
 // the image name is used as a label or grouping key.
 func (d ImageScanData) Target() string {
-	if d.Platform == "" {
-		return d.Image
+	return ImageScanTarget(d.Image, d.Platform)
+}
+
+// ImageScanTarget formats an image variant for human-facing output and logs.
+// Machine-readable identifiers should keep image and platform in separate
+// fields so adding platform awareness does not change existing fingerprints.
+func ImageScanTarget(image, platform string) string {
+	if platform == "" {
+		return image
 	}
-	return d.Image + " [" + d.Platform + "]"
+	return image + " [" + platform + "]"
 }
 
 // SkippedManifest records a manifest file that was discovered but could not

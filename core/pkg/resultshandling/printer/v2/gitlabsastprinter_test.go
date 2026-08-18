@@ -402,7 +402,15 @@ func TestGitLabImageScan_LocationHasFile(t *testing.T) {
 	assert.Equal(t, "dependency_scanning", report.Scan.Type)
 	assert.NotEmpty(t, report.Vulnerabilities[0].Location.File,
 		"location.file is required by the dependency_scanning schema")
-	assert.Equal(t, "nginx:1.25 [linux/arm64]", report.Vulnerabilities[0].Location.File)
+	assert.Equal(t, "nginx:1.25", report.Vulnerabilities[0].Location.File)
+	assert.Contains(t, report.Vulnerabilities[0].Description, "Scanned platform: linux/arm64.")
+
+	withoutPlatform := imageScanData
+	withoutPlatform[0].Platform = ""
+	legacyReport := gitLabImageReportFor(t, withoutPlatform)
+	require.Len(t, legacyReport.Vulnerabilities, 1)
+	assert.Equal(t, legacyReport.Vulnerabilities[0].ID, report.Vulnerabilities[0].ID,
+		"adding platform metadata must not change GitLab's vulnerability fingerprint")
 }
 
 // TestGitLabImageScan_VersionKeyAlwaysPresent guards against #2782's schema violation:

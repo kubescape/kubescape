@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	stereoscopeimage "github.com/anchore/stereoscope/pkg/image"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
@@ -231,6 +232,62 @@ func TestImageScanOrchestratorIncludesPlatformInErrors(t *testing.T) {
 	assert.Contains(t, orchestrator.GetErrorAggregator().Error(), "example/app:latest [linux/arm64]")
 }
 
+func TestImageScanOrchestratorSkipsUnavailableBestEffortPlatform(t *testing.T) {
+	mockSvc := newMockImageScanService(0)
+	mockSvc.errByImage["example/app:latest"] = &stereoscopeimage.ErrPlatformMismatch{
+		ExpectedPlatform: "linux/arm64",
+		Err:              errors.New("image only contains linux/amd64"),
+	}
+	orchestrator := NewImageScanOrchestrator(mockSvc, 1)
+
+	results := orchestrator.ScanImages(context.Background(), []ImageScanJob{{
+		Image: "example/app:latest", Platform: "linux/arm64", SkipUnavailablePlatform: true,
+	}})
+
+	require.Len(t, results, 1)
+	assert.NoError(t, results[0].Error)
+	assert.Error(t, results[0].SkipReason)
+	assert.False(t, orchestrator.GetErrorAggregator().HasErrors())
+}
+
+func TestImageScanOrchestratorFailsUnavailableRequiredPlatform(t *testing.T) {
+	mockSvc := newMockImageScanService(0)
+	mockSvc.errByImage["example/app:latest"] = errors.New(
+		"no child with platform linux/arm64 in index registry.example/app:latest",
+	)
+	orchestrator := NewImageScanOrchestrator(mockSvc, 1)
+
+	results := orchestrator.ScanImages(context.Background(), []ImageScanJob{{
+		Image: "example/app:latest", Platform: "linux/arm64",
+	}})
+
+	require.Len(t, results, 1)
+	assert.Error(t, results[0].Error)
+	assert.NoError(t, results[0].SkipReason)
+	assert.True(t, orchestrator.GetErrorAggregator().HasErrors())
+}
+
+func TestUnavailablePlatformErrorClassificationIsConservative(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "typed mismatch", err: &stereoscopeimage.ErrPlatformMismatch{ExpectedPlatform: "linux/arm64", Err: errors.New("mismatch")}, want: true},
+		{name: "registry index child missing", err: errors.New("no child with platform linux/arm64 in index app"), want: true},
+		{name: "containerd manifest missing", err: errors.New("no manifest found in manifest list for platform linux/arm64"), want: true},
+		{name: "authentication", err: errors.New("unauthorized: authentication required")},
+		{name: "network", err: &net.DNSError{Err: "no such host", Name: "registry.example"}},
+		{name: "generic manifest", err: errors.New("manifest unknown")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isUnavailablePlatformError(tt.err))
+		})
+	}
+}
+
 type legacyImageScanService struct {
 	calls int
 }
@@ -358,6 +415,25 @@ func TestScanImageJobsScansEachVariantExactlyOnce(t *testing.T) {
 		[]string{"linux/amd64", "linux/arm64", "windows/amd64"},
 		mockSvc.platforms["registry.example.com/app:v2"],
 	)
+}
+
+func TestScanImageJobsKeepsAvailableResultWhenInferredVariantIsMissing(t *testing.T) {
+	mockSvc := newMockImageScanService(0)
+	mockSvc.dataByImage["example/available:latest"] = &cautils.ImageScanData{Image: "example/available:latest"}
+	mockSvc.errByImage["example/missing:latest"] = &stereoscopeimage.ErrPlatformMismatch{
+		ExpectedPlatform: "linux/arm64",
+		Err:              errors.New("image only contains linux/amd64"),
+	}
+	results := &resultshandling.ResultsHandler{}
+
+	err := scanImageJobs(context.Background(), mockSvc, 2, []ImageScanJob{
+		{Image: "example/available:latest", Platform: "linux/amd64", SkipUnavailablePlatform: true},
+		{Image: "example/missing:latest", Platform: "linux/arm64", SkipUnavailablePlatform: true},
+	}, results)
+
+	require.NoError(t, err)
+	require.Len(t, results.ImageScanData, 1)
+	assert.Equal(t, "example/available:latest", results.ImageScanData[0].Image)
 }
 
 func TestImageScanTargetDoesNotChangeRegistryReference(t *testing.T) {

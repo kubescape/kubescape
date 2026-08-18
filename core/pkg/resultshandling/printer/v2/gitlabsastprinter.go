@@ -187,10 +187,9 @@ func (gp *GitLabSASTPrinter) printImageScan(imageScanData []cautils.ImageScanDat
 	}
 
 	for _, data := range imageScanData {
-		target := data.Target()
-		cves := extractCVEs(data.Matches, target)
+		cves := extractCVEs(data.Matches, data.Image)
 		for _, cve := range cves {
-			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabImageVulnerability(target, cve))
+			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabImageVulnerability(data.Image, data.Platform, cve))
 		}
 	}
 
@@ -243,10 +242,13 @@ func mapGitLabSeverity(severity string) string {
 }
 
 // toGitLabImageVulnerability maps a CVE found in an image to a GitLab Dependency Scanning vulnerability
-func toGitLabImageVulnerability(image string, cve imageprinter.CVE) gitLabVulnerability {
+func toGitLabImageVulnerability(image, platform string, cve imageprinter.CVE) gitLabVulnerability {
 	message := fmt.Sprintf("%s in %s %s", cve.ID, cve.Package, cve.Version)
 
 	description := fmt.Sprintf("Package %s version %s is affected by %s (severity: %s).", cve.Package, cve.Version, cve.ID, cve.Severity)
+	if platform != "" {
+		description += fmt.Sprintf(" Scanned platform: %s.", platform)
+	}
 	if len(cve.FixVersions) > 0 {
 		description += fmt.Sprintf(" Fix available in version(s): %s.", strings.Join(cve.FixVersions, ", "))
 	} else {

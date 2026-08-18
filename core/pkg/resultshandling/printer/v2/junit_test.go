@@ -178,11 +178,17 @@ func TestJunitActionPrintCombinedScanIncludesPostureAndImages(t *testing.T) {
 	require.NoError(t, xml.Unmarshal(raw, &got))
 	require.Len(t, got.Suites, 3)
 	assert.Equal(t, "Kubescape Scanning", got.Name)
-	assert.Equal(t, []string{"kubescape", "combined:first", "combined:second [linux/arm64]"}, []string{
+	assert.Equal(t, []string{"kubescape", "combined:first", "combined:second"}, []string{
 		got.Suites[0].Name,
 		got.Suites[1].Name,
 		got.Suites[2].Name,
 	})
+	require.Len(t, got.Suites[2].Properties, 1)
+	assert.Equal(t, JUnitProperty{Name: "platform", Value: "linux/arm64"}, got.Suites[2].Properties[0])
+	require.Len(t, got.Suites[2].TestCases, 1)
+	assert.Equal(t, "combined:second", got.Suites[2].TestCases[0].Classname)
+	require.NotNil(t, got.Suites[2].TestCases[0].Failure)
+	assert.Contains(t, got.Suites[2].TestCases[0].Failure.Contents, "Platform: linux/arm64")
 	assert.Equal(t, []int{0, 1, 2}, []int{got.Suites[0].ID, got.Suites[1].ID, got.Suites[2].ID})
 	assert.Equal(t, 1, got.Suites[0].Tests)
 	assert.Equal(t, 1, got.Suites[0].Failures)

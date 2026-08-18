@@ -205,8 +205,8 @@ func (mrc *mResources) prefix() string {
 func (miv *mImageVulnerability) metrics() []string {
 	/*
 		#### Image vulnerability metrics (image scan only, #2782)
-		kubescape_image_count_cve{image="<image>",severity="<severity>"} <counter>
-		kubescape_image_count_cve_fixable{image="<image>",severity="<severity>"} <counter>
+		kubescape_image_count_cve{image="<image>",platform="<optional-platform>",severity="<severity>"} <counter>
+		kubescape_image_count_cve_fixable{image="<image>",platform="<optional-platform>",severity="<severity>"} <counter>
 	*/
 
 	m := []string{}
@@ -217,6 +217,9 @@ func (miv *mImageVulnerability) metrics() []string {
 
 func (miv *mImageVulnerability) labels() string {
 	r := fmt.Sprintf("image=\"%s\"", escapePrometheusLabelValue(miv.image)) + ","
+	if miv.platform != "" {
+		r += fmt.Sprintf("platform=\"%s\"", escapePrometheusLabelValue(miv.platform)) + ","
+	}
 	r += fmt.Sprintf("severity=\"%s\"", escapePrometheusLabelValue(miv.severity))
 	return r
 }
@@ -357,6 +360,7 @@ type mResources struct {
 }
 type mImageVulnerability struct {
 	image           string
+	platform        string
 	severity        string
 	cveCount        int
 	fixableCVECount int
@@ -483,7 +487,8 @@ func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData)
 
 		for severity, summary := range severityToSummary {
 			m.listImages = append(m.listImages, mImageVulnerability{
-				image:           target,
+				image:           imageScanData[i].Image,
+				platform:        imageScanData[i].Platform,
 				severity:        severity,
 				cveCount:        summary.NumberOfCVEs,
 				fixableCVECount: summary.NumberOfFixableCVEs,

@@ -229,13 +229,19 @@ func TestImagePrometheusFormat_OmitsPostureMetrics(t *testing.T) {
 
 	// Image metrics must be present.
 	assert.Contains(t, output, "kubescape_image_count_cve")
-	assert.Contains(t, output, `image="test-image:latest [linux/arm64]"`)
+	assert.Contains(t, output, `image="test-image:latest",platform="linux/arm64",severity="High"`)
+	assert.NotContains(t, output, `image="test-image:latest [linux/arm64]"`)
 
 	// Posture metric families must be completely absent, not just zeroed.
 	assert.NotContains(t, output, "kubescape_cluster_complianceScore")
 	assert.NotContains(t, output, "kubescape_cluster_count_resources")
 	assert.NotContains(t, output, "kubescape_cluster_count_control")
 	assert.NotContains(t, output, "kubescape_cluster_coverage_score")
+
+	imageData[0].Platform = ""
+	legacyOutput := pp.generateImagePrometheusFormat(imageData).String()
+	assert.Contains(t, legacyOutput, `image="test-image:latest",severity="High"`)
+	assert.NotContains(t, legacyOutput, `platform=`)
 }
 
 func TestPostureScanFormat_StillEmitsPostureMetrics(t *testing.T) {

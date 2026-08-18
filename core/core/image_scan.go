@@ -13,6 +13,7 @@ import (
 	"sync"
 	"syscall"
 
+	stereoscopeimage "github.com/anchore/stereoscope/pkg/image"
 	"github.com/distribution/reference"
 
 	"github.com/kubescape/go-logger"
@@ -536,6 +537,7 @@ func (a *ScanErrorAggregator) Error() string {
 type ImageScanJob struct {
 	Image                   string
 	Platform                string
+	SkipUnavailablePlatform bool
 	RegistryCredentials     []imagescan.RegistryCredentials
 	VulnerabilityExceptions []string
 	SeverityExceptions      []string
@@ -544,17 +546,15 @@ type ImageScanJob struct {
 
 // ImageScanResult conveys the scan output and categorized errors from a worker.
 type ImageScanResult struct {
-	Image    string
-	Platform string
-	ScanData *cautils.ImageScanData
-	Error    error
+	Image      string
+	Platform   string
+	ScanData   *cautils.ImageScanData
+	Error      error
+	SkipReason error
 }
 
 func imageScanTarget(image, platform string) string {
-	if platform == "" {
-		return image
-	}
-	return image + " [" + platform + "]"
+	return cautils.ImageScanTarget(image, platform)
 }
 
 // ImageScanOrchestrator coordinates concurrent image scan execution across a worker pool.
@@ -624,6 +624,12 @@ func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScan
 				if scanData != nil && scanData.Platform == "" {
 					scanData.Platform = job.Platform
 				}
+				if err != nil && job.SkipUnavailablePlatform && isUnavailablePlatformError(err) {
+					resultChan <- ImageScanResult{
+						Image: job.Image, Platform: job.Platform, SkipReason: err,
+					}
+					continue
+				}
 				if err != nil {
 					if o.errorAggregator != nil {
 						o.errorAggregator.Add(target, err)
@@ -647,6 +653,20 @@ func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScan
 		results = append(results, res)
 	}
 	return results
+}
+
+func isUnavailablePlatformError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var platformMismatch *stereoscopeimage.ErrPlatformMismatch
+	if errors.As(err, &platformMismatch) {
+		return true
+	}
+
+	message := strings.ToLower(err.Error())
+	return (strings.Contains(message, "no child with platform ") && strings.Contains(message, " in index ")) ||
+		strings.Contains(message, "no manifest found in manifest list for platform ")
 }
 
 // GetErrorAggregator returns the orchestrator's scan error aggregator.

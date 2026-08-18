@@ -50,6 +50,11 @@ func TestNormalizePlatform(t *testing.T) {
 			want:  "linux/arm/v7",
 		},
 		{
+			name:  "architecture and variant shorthand is retained",
+			value: "arm/v7",
+			want:  "linux/arm/v7",
+		},
+		{
 			name:  "default ARM64 variant is normalized away",
 			value: "linux/arm64/v8",
 			want:  "linux/arm64",
@@ -78,6 +83,21 @@ func TestNormalizePlatform(t *testing.T) {
 			name:    "unknown operating system is rejected",
 			value:   "toaster/amd64",
 			wantErr: "invalid image platform",
+		},
+		{
+			name:    "unknown OS cannot be reinterpreted as Linux with ARM variant",
+			value:   "win/arm/v7",
+			wantErr: "unknown operating system",
+		},
+		{
+			name:    "unknown OS cannot be reinterpreted as Linux with amd64 variant",
+			value:   "notanos/amd64/x",
+			wantErr: "unknown operating system",
+		},
+		{
+			name:    "three-component architecture shorthand requires an OS",
+			value:   "arm/amd64/v7",
+			wantErr: "operating system is required",
 		},
 		{
 			name:    "wildcard is rejected",

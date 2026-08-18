@@ -25,9 +25,21 @@ func NormalizePlatform(value string) (string, error) {
 		return "", nil
 	}
 
+	parts := strings.Split(value, "/")
 	platform, err := image.NewPlatform(value)
 	if err != nil {
 		return "", fmt.Errorf("invalid image platform %q: %w", value, err)
+	}
+	if len(parts) >= 2 {
+		firstComponent, firstErr := image.NewPlatform(parts[0])
+		switch {
+		case firstErr != nil:
+			return "", fmt.Errorf("invalid image platform %q: unknown operating system %q", value, parts[0])
+		case len(parts) >= 3 && firstComponent.Architecture != "":
+			return "", fmt.Errorf("invalid image platform %q: an operating system is required before architecture and variant", value)
+		case firstComponent.OS != "" && !strings.EqualFold(firstComponent.OS, platform.OS):
+			return "", fmt.Errorf("invalid image platform %q: operating system %q was not preserved by the platform parser", value, parts[0])
+		}
 	}
 	if platform.OS == "" || platform.Architecture == "" {
 		return "", fmt.Errorf("invalid image platform %q: both operating system and architecture are required", value)

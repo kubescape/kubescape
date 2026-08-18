@@ -244,16 +244,20 @@ func imageTestsSuites(imageScanData []cautils.ImageScanData) *JUnitTestSuites {
 
 	suites := make([]JUnitTestSuite, 0, len(imageScanData))
 	for i := range imageScanData {
-		target := imageScanData[i].Target()
-		cves := extractCVEs(imageScanData[i].Matches, target)
-		suites = append(suites, JUnitTestSuite{
+		image := imageScanData[i].Image
+		cves := extractCVEs(imageScanData[i].Matches, image)
+		suite := JUnitTestSuite{
 			ID:        i,
-			Name:      target,
+			Name:      image,
 			Tests:     len(cves),
 			Failures:  len(cves),
 			Timestamp: timestamp,
-			TestCases: imageTestCases(cves),
-		})
+			TestCases: imageTestCases(cves, imageScanData[i].Platform),
+		}
+		if imageScanData[i].Platform != "" {
+			suite.Properties = []JUnitProperty{{Name: "platform", Value: imageScanData[i].Platform}}
+		}
+		suites = append(suites, suite)
 	}
 
 	tests, failures, errs := aggregateSuiteCounts(suites)
@@ -267,7 +271,7 @@ func imageTestsSuites(imageScanData []cautils.ImageScanData) *JUnitTestSuites {
 }
 
 // imageTestCases converts a set of CVEs into failed JUnit test cases, one per CVE.
-func imageTestCases(cves []imageprinter.CVE) []JUnitTestCase {
+func imageTestCases(cves []imageprinter.CVE, platform string) []JUnitTestCase {
 	testCases := make([]JUnitTestCase, 0, len(cves))
 	for _, cve := range cves {
 		fixMsg := "no fix available"
@@ -275,14 +279,18 @@ func imageTestCases(cves []imageprinter.CVE) []JUnitTestCase {
 			fixMsg = fmt.Sprintf("fixed in: %s", strings.Join(cve.FixVersions, ", "))
 		}
 
+		contents := fmt.Sprintf("CVE: %s\nPackage: %s\nVersion: %s\nSeverity: %s\n%s",
+			cve.ID, cve.Package, cve.Version, cve.Severity, fixMsg)
+		if platform != "" {
+			contents += "\nPlatform: " + platform
+		}
 		testCases = append(testCases, JUnitTestCase{
 			Classname: cve.Image,
 			Name:      fmt.Sprintf("%s (%s)", cve.ID, cve.Package),
 			Failure: &JUnitFailure{
-				Type:    "Vulnerability",
-				Message: fmt.Sprintf("%s severity vulnerability found in package %s", cve.Severity, cve.Package),
-				Contents: fmt.Sprintf("CVE: %s\nPackage: %s\nVersion: %s\nSeverity: %s\n%s",
-					cve.ID, cve.Package, cve.Version, cve.Severity, fixMsg),
+				Type:     "Vulnerability",
+				Message:  fmt.Sprintf("%s severity vulnerability found in package %s", cve.Severity, cve.Package),
+				Contents: contents,
 			},
 		})
 	}

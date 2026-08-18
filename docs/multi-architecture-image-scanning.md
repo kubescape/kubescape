@@ -46,9 +46,10 @@ When `--scan-images` is used with a Kubernetes scan, Kubescape tries to identify
 
 1. If a Pod has `spec.nodeName` and that Node was collected, Kubescape uses the Node's `kubernetes.io/os` and `kubernetes.io/arch` labels.
 2. Otherwise, it evaluates exact OS and architecture values in `spec.nodeSelector`.
-3. It also evaluates `In` expressions in `requiredDuringSchedulingIgnoredDuringExecution` node affinity.
-4. If a workload can run on multiple platform variants in a heterogeneous cluster, each observed variant is scanned once.
-5. If no safe platform can be inferred, Kubescape preserves the image provider's existing default behavior.
+3. It also evaluates platform expressions in `requiredDuringSchedulingIgnoredDuringExecution` node affinity.
+4. Partial and negative constraints such as `NotIn` filter the platforms observed on collected Nodes.
+5. If a workload can run on multiple platform variants in a heterogeneous cluster, each allowed observed variant is scanned once.
+6. If no platform constraint is present and no Node platform is available, Kubescape preserves the image provider's existing default behavior.
 
 Preferred node affinity is not treated as a platform guarantee. The Kubernetes scheduler may ignore a preference, so narrowing a scan from preferred affinity could omit the image that actually runs.
 
@@ -95,7 +96,9 @@ registry.example.com/team/api:v2 [linux/arm64]
 
 The image and platform pair is the deduplication key. If ten Pods use the same tag on ARM64, that variant is scanned once. If the same tag is also used on amd64, the amd64 variant is scanned separately.
 
-Platform-qualified target names are carried into the pretty printer, HTML, PDF, JUnit, Prometheus, GitLab dependency scanning, JSON, and YAML summaries. This keeps findings from different variants distinguishable even when the registry reference is identical.
+Platform-qualified target names are used in human-facing output such as the pretty, HTML, and PDF reports. Machine formats preserve the existing image identity for compatibility. Where the format supports separate metadata, Prometheus adds an optional `platform` label, JUnit adds a `platform` suite property, and GitLab includes the platform in the description without changing its finding fingerprint or `location.file`.
+
+When this automatic fan-out includes a platform that the image index does not publish, Kubescape logs and skips only that unavailable inferred variant. Authentication, network, parsing, and other registry failures still fail the scan. Explicit `--platform` and `--image-platform` selections also remain strict.
 
 ## Node selector examples
 
@@ -135,7 +138,7 @@ spec:
           image: registry.example.com/team/api:v2
 ```
 
-Both variants are scanned. OR branches that do not fully constrain OS and architecture are treated as ambiguous. When Node platforms are available, Kubescape scans every observed platform rather than trusting a partial answer.
+Both variants are scanned. OR branches that do not fully constrain OS and architecture are evaluated against the observed Node platforms. Kubescape scans only observed platforms that satisfy the platform expressions in at least one required branch.
 
 ## CI recommendations
 
@@ -176,8 +179,9 @@ The following table summarizes which source wins when more than one source of pl
 | `--scan-images` | Scheduled Pod and collected Node | The Node platform |
 | `--scan-images` | Exact OS and architecture node selector | The selected platform |
 | `--scan-images` | Complete required node affinity | Every platform allowed by the hard constraint |
-| `--scan-images` | Ambiguous constraint and collected Nodes | Every distinct platform observed in the cluster |
-| `--scan-images` | Offline, ambiguous, no Node inventory | The image provider default |
+| `--scan-images` | Partial or negative constraint and collected Nodes | Every observed platform allowed by the constraint |
+| `--scan-images` | Offline, platform constraint, no Node inventory | No guessed platform; use `--image-platform` |
+| `--scan-images` | Offline, no platform constraint or Node inventory | The image provider default |
 
 The scheduled Node takes precedence over selectors because it records the scheduler's completed decision. An explicit CLI override takes precedence over everything because it is a direct operator instruction.
 
@@ -197,7 +201,7 @@ beta.kubernetes.io/os
 beta.kubernetes.io/arch
 ```
 
-For required node affinity, `operator: In` provides an enumerable set of possible values. Operators such as `NotIn`, `Exists`, `DoesNotExist`, `Gt`, and `Lt` cannot safely enumerate a complete platform set on their own. Kubescape treats those branches as ambiguous and uses the observed Node platforms when available.
+For required node affinity, `operator: In` provides an enumerable set of possible values. `NotIn` is evaluated against platforms observed on collected Nodes, so excluded architectures are not scanned. `Exists`, `DoesNotExist`, `Gt`, and `Lt` do not enumerate an OCI operating system or architecture and therefore do not narrow the observed platform set.
 
 ### Reading multi-platform results
 
@@ -211,7 +215,7 @@ Kubescape still pulls `registry.example.com/team/api:v2` and passes `linux/arm64
 
 Threshold evaluation is performed over every selected variant. If any variant contains a vulnerability at or above `--severity-threshold`, the scan fails. This prevents a clean ARM64 result from hiding a vulnerable amd64 image that the same workload can run.
 
-If two variants contain the same CVE, both findings remain associated with their platform-qualified target. Summary totals therefore describe all scanned artifacts, not a deduplicated list of CVE identifiers across architectures.
+If two variants contain the same CVE, both scans contribute to summary totals. Human-facing reports show their platform-qualified targets, while machine formats keep the historical image identifier and expose separate platform metadata where their schema supports it.
 
 ## Limitations
 

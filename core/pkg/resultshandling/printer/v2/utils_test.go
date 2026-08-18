@@ -1279,3 +1279,19 @@ func TestFilterBySeverity_EmptyMinSeverityNoOp(t *testing.T) {
 	FilterBySeverity(report, "")
 	assert.Len(t, report.SummaryDetails.Controls, 1)
 }
+
+func TestBuildMachineImageScanSummaryKeepsStableImageIdentity(t *testing.T) {
+	data := []cautils.ImageScanData{
+		{Image: "example/app:latest", Platform: "linux/amd64"},
+		{Image: "example/app:latest", Platform: "linux/arm64"},
+	}
+
+	machine := buildMachineImageScanSummary(data)
+	display := buildImageScanSummary(data)
+
+	assert.Equal(t, []string{"example/app:latest"}, machine.Images)
+	assert.Equal(t, []string{
+		"example/app:latest [linux/amd64]",
+		"example/app:latest [linux/arm64]",
+	}, display.Images)
+}

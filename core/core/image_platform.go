@@ -23,6 +23,9 @@ const (
 type ImageScanTarget struct {
 	Image    string
 	Platform string
+	// SkipUnavailable is set only for automatically inferred fan-out targets.
+	// Explicit and uniquely required platforms remain fail-closed.
+	SkipUnavailable bool
 }
 
 func (t ImageScanTarget) String() string {
@@ -85,34 +88,168 @@ func canonicalInferredPlatform(osName, architecture string) string {
 
 // inferWorkloadPlatforms returns every concrete platform allowed by the
 // workload's hard scheduling constraints. It deliberately ignores preferred
-// affinity, because the scheduler may choose a different platform. If any
-// required affinity branch remains ambiguous, no platform is inferred and the
-// scanner falls back to its documented default unless the user supplied an
-// override.
+// affinity because the scheduler may choose a different platform. Partial and
+// negative constraints are evaluated against the collected Node inventory.
 func inferWorkloadPlatforms(workload *workloadinterface.Workload, nodePlatforms map[string]string) []string {
+	return selectWorkloadPlatforms(workload, nodePlatforms).platforms
+}
+
+type workloadPlatformSelection struct {
+	platforms       []string
+	constrained     bool
+	skipUnavailable bool
+}
+
+func selectWorkloadPlatforms(workload *workloadinterface.Workload, nodePlatforms map[string]string) workloadPlatformSelection {
 	if workload == nil {
-		return nil
+		return workloadPlatformSelection{}
 	}
 	podSpec, err := workload.GetPodSpec()
 	if err != nil || podSpec == nil {
-		return nil
+		return workloadPlatformSelection{}
 	}
 
 	if podSpec.NodeName != "" {
 		if platform := nodePlatforms[podSpec.NodeName]; platform != "" {
-			return []string{platform}
+			return workloadPlatformSelection{platforms: []string{platform}, constrained: true}
 		}
 	}
 
 	platforms := platformsFromSchedulingConstraints(podSpec)
 	if len(platforms) > 0 {
-		return platforms
+		return workloadPlatformSelection{
+			platforms: platforms, constrained: true, skipUnavailable: len(platforms) > 1,
+		}
 	}
 
-	// An unconstrained or only partially constrained workload can land on any
-	// node in a heterogeneous cluster. Scanning all observed node platforms is
-	// slower than choosing the caller's CPU, but it is the only complete answer.
-	return uniqueNodePlatforms(nodePlatforms)
+	observed := uniqueNodePlatforms(nodePlatforms)
+	filtered, constrained := filterObservedPlatforms(podSpec, observed)
+	if constrained {
+		return workloadPlatformSelection{
+			platforms:       filtered,
+			constrained:     true,
+			skipUnavailable: len(filtered) > 1,
+		}
+	}
+
+	// An unconstrained workload can land on any node in a heterogeneous
+	// cluster. These variants are best-effort because a registry index can omit
+	// an architecture that is present in the cluster.
+	return workloadPlatformSelection{
+		platforms:       observed,
+		skipUnavailable: len(observed) > 1,
+	}
+}
+
+func filterObservedPlatforms(podSpec *corev1.PodSpec, observed []string) ([]string, bool) {
+	if podSpec == nil {
+		return observed, false
+	}
+
+	hasConstraint := false
+	for key := range podSpec.NodeSelector {
+		if isPlatformLabel(key) {
+			hasConstraint = true
+		}
+	}
+	if required := getRequiredNodeAffinity(podSpec); required != nil {
+		for _, term := range required.NodeSelectorTerms {
+			for _, expression := range term.MatchExpressions {
+				if isFilterablePlatformExpression(expression) {
+					hasConstraint = true
+				}
+			}
+		}
+	}
+	if !hasConstraint {
+		return observed, false
+	}
+
+	filtered := make([]string, 0, len(observed))
+	for _, platform := range observed {
+		parts := strings.Split(platform, "/")
+		if len(parts) < 2 {
+			continue
+		}
+		labels := map[string]string{
+			stableOSLabel: parts[0], betaOSLabel: parts[0],
+			stableArchLabel: parts[1], betaArchLabel: parts[1],
+		}
+		if platformMatchesSchedulingConstraints(podSpec, labels) {
+			filtered = append(filtered, platform)
+		}
+	}
+	return filtered, true
+}
+
+func platformMatchesSchedulingConstraints(podSpec *corev1.PodSpec, labels map[string]string) bool {
+	for key, expected := range podSpec.NodeSelector {
+		if isPlatformLabel(key) && labels[key] != expected {
+			return false
+		}
+	}
+
+	required := getRequiredNodeAffinity(podSpec)
+	if required == nil {
+		return true
+	}
+	for _, term := range required.NodeSelectorTerms {
+		matches := true
+		for _, expression := range term.MatchExpressions {
+			if isFilterablePlatformExpression(expression) && !platformExpressionMatches(expression, labels) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
+}
+
+func isFilterablePlatformExpression(expression corev1.NodeSelectorRequirement) bool {
+	if !isPlatformLabel(expression.Key) {
+		return false
+	}
+	return expression.Operator == corev1.NodeSelectorOpIn || expression.Operator == corev1.NodeSelectorOpNotIn
+}
+
+func getRequiredNodeAffinity(podSpec *corev1.PodSpec) *corev1.NodeSelector {
+	if podSpec == nil || podSpec.Affinity == nil || podSpec.Affinity.NodeAffinity == nil {
+		return nil
+	}
+	return podSpec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+}
+
+func isPlatformLabel(key string) bool {
+	switch key {
+	case stableOSLabel, betaOSLabel, stableArchLabel, betaArchLabel:
+		return true
+	default:
+		return false
+	}
+}
+
+func platformExpressionMatches(expression corev1.NodeSelectorRequirement, labels map[string]string) bool {
+	value, exists := labels[expression.Key]
+	contains := func() bool {
+		for _, candidate := range expression.Values {
+			if value == candidate {
+				return true
+			}
+		}
+		return false
+	}
+
+	switch expression.Operator {
+	case corev1.NodeSelectorOpIn:
+		return exists && contains()
+	case corev1.NodeSelectorOpNotIn:
+		return exists && !contains()
+	default:
+		return false
+	}
 }
 
 func uniqueNodePlatforms(nodePlatforms map[string]string) []string {

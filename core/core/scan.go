@@ -519,10 +519,11 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		}
 
 		jobs = append(jobs, ImageScanJob{
-			Image:               img,
-			Platform:            target.Platform,
-			RegistryCredentials: credsList,
-			RegistryMapping:     scanInfo.RegistryMapping,
+			Image:                   img,
+			Platform:                target.Platform,
+			SkipUnavailablePlatform: target.SkipUnavailable,
+			RegistryCredentials:     credsList,
+			RegistryMapping:         scanInfo.RegistryMapping,
 		})
 	}
 	sort.Slice(jobs, func(i, j int) bool {
@@ -558,6 +559,11 @@ func scanImageJobs(ctx context.Context, svc imageScanService, concurrency int, j
 
 	for _, res := range results {
 		target := imageScanTarget(res.Image, res.Platform)
+		if res.SkipReason != nil {
+			logger.L().Warning("Skipping unavailable inferred image platform",
+				helpers.String("image", target), helpers.Error(res.SkipReason))
+			continue
+		}
 		if res.Error != nil {
 			logger.L().Error("failed to scan", helpers.String("image", target), helpers.Error(res.Error))
 			continue
@@ -588,20 +594,34 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 
 	collectWorkload := func(wl *workloadinterface.Workload) {
 		images, workloadContainerErrors := getAllWorkloadImages(wl)
-		platforms := []string{platformOverride}
-		if platformOverride == "" {
-			platforms = inferWorkloadPlatforms(wl, nodePlatforms)
-			if len(platforms) == 0 {
-				platforms = []string{""}
-			}
-		}
 		for _, containerErr := range workloadContainerErrors {
 			logger.L().Error("failed to collect image scan targets", helpers.Error(containerErr))
 			containerErrors = append(containerErrors, containerErr)
 		}
+		platforms := []string{platformOverride}
+		skipUnavailable := false
+		if platformOverride == "" {
+			selection := selectWorkloadPlatforms(wl, nodePlatforms)
+			platforms = selection.platforms
+			skipUnavailable = selection.skipUnavailable
+			if len(platforms) == 0 {
+				if selection.constrained {
+					containerErrors = append(containerErrors, fmt.Errorf(
+						"no observed image platform satisfies the scheduling constraints for %s", wl.GetID()))
+					return
+				}
+				platforms = []string{""}
+			}
+		}
 		for _, image := range images {
+			if skipUnavailable {
+				logger.L().Info("Scanning image across inferred platform variants",
+					helpers.String("image", image), helpers.Int("platforms", len(platforms)))
+			}
 			for _, platform := range platforms {
-				imagesToScan.Add(ImageScanTarget{Image: image, Platform: platform})
+				addImageScanTarget(imagesToScan, ImageScanTarget{
+					Image: image, Platform: platform, SkipUnavailable: skipUnavailable,
+				})
 			}
 			if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, image); ok {
 				found := false
@@ -627,6 +647,20 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 	}
 
 	return imagesToScan, imageToCreds, containerErrors
+}
+
+func addImageScanTarget(targets mapset.Set[ImageScanTarget], target ImageScanTarget) {
+	for _, existing := range targets.ToSlice() {
+		if existing.Image != target.Image || existing.Platform != target.Platform {
+			continue
+		}
+		if !existing.SkipUnavailable || target.SkipUnavailable {
+			return
+		}
+		targets.Remove(existing)
+		break
+	}
+	targets.Add(target)
 }
 
 func registryCredentialsFromScanInfo(scanInfo *cautils.ScanInfo) imagescan.RegistryCredentials {

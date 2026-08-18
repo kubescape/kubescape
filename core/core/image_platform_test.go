@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/stretchr/testify/assert"
@@ -387,11 +388,28 @@ func TestInferWorkloadPlatforms(t *testing.T) {
 			want: []string{"linux/amd64", "linux/arm64"},
 		},
 		{
-			name: "partial selector covers every observed Node platform",
+			name: "partial selector filters observed Node platforms",
 			spec: map[string]any{
 				"nodeSelector": map[string]any{stableArchLabel: "arm64"},
 			},
-			want: []string{"linux/amd64", "linux/arm64"},
+			want: []string{"linux/arm64"},
+		},
+		{
+			name: "NotIn excludes observed Node platforms",
+			spec: map[string]any{
+				"affinity": map[string]any{
+					"nodeAffinity": map[string]any{
+						"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{
+							"nodeSelectorTerms": []any{
+								map[string]any{"matchExpressions": []any{
+									map[string]any{"key": stableArchLabel, "operator": "NotIn", "values": []any{"amd64"}},
+								}},
+							},
+						},
+					},
+				},
+			},
+			want: []string{"linux/arm64"},
 		},
 	}
 
@@ -480,9 +498,58 @@ func TestCollectImageScanTargetsCoversHeterogeneousCluster(t *testing.T) {
 
 	require.Empty(t, errs)
 	assert.Equal(t, targetSet(
-		ImageScanTarget{Image: "example/app:latest", Platform: "linux/amd64"},
-		ImageScanTarget{Image: "example/app:latest", Platform: "linux/arm64"},
+		ImageScanTarget{Image: "example/app:latest", Platform: "linux/amd64", SkipUnavailable: true},
+		ImageScanTarget{Image: "example/app:latest", Platform: "linux/arm64", SkipUnavailable: true},
 	), collectedTargetSet(targets))
+}
+
+func TestCollectImageScanTargetsDoesNotScanExcludedPlatform(t *testing.T) {
+	amd := platformTestNode("amd-worker", map[string]string{
+		stableOSLabel: "linux", stableArchLabel: "amd64",
+	}, "", "")
+	arm := platformTestNode("arm-worker", map[string]string{
+		stableOSLabel: "linux", stableArchLabel: "arm64",
+	}, "", "")
+	pod := platformTestPod("app", "example/app:latest", map[string]any{
+		"affinity": map[string]any{
+			"nodeAffinity": map[string]any{
+				"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{
+					"nodeSelectorTerms": []any{
+						map[string]any{"matchExpressions": []any{
+							map[string]any{"key": stableArchLabel, "operator": "NotIn", "values": []any{"amd64"}},
+						}},
+					},
+				},
+			},
+		},
+	})
+	scanData := cautils.NewOPASessionObjMock()
+	scanData.AllResources[amd.GetID()] = amd
+	scanData.AllResources[arm.GetID()] = arm
+	scanData.AllResources[pod.GetID()] = pod
+
+	targets, _, errs := collectImageScanTargets(
+		cautils.ScanTypeCluster, scanData, context.Background(), cautils.ContextCluster, nil, "",
+	)
+
+	require.Empty(t, errs)
+	assert.Equal(t, targetSet(ImageScanTarget{
+		Image: "example/app:latest", Platform: "linux/arm64",
+	}), collectedTargetSet(targets))
+}
+
+func TestAddImageScanTargetRequiredVariantWins(t *testing.T) {
+	targets := mapset.NewSet[ImageScanTarget]()
+	addImageScanTarget(targets, ImageScanTarget{
+		Image: "example/app:latest", Platform: "linux/arm64", SkipUnavailable: true,
+	})
+	addImageScanTarget(targets, ImageScanTarget{
+		Image: "example/app:latest", Platform: "linux/arm64",
+	})
+
+	assert.Equal(t, targetSet(ImageScanTarget{
+		Image: "example/app:latest", Platform: "linux/arm64",
+	}), collectedTargetSet(targets))
 }
 
 func TestCollectImageScanTargetsPreservesProviderDefaultWithoutEvidence(t *testing.T) {
