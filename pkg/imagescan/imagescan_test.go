@@ -14,7 +14,7 @@ import (
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/stereoscope/pkg/image"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
