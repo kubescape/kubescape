@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 )
 
 func (ksServer *KubescapeMcpserver) ListFrameworks(ctx context.Context) ([]byte, error) {

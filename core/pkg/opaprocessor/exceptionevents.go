@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/pkg/securityexception"
+	"github.com/kubescape/kubescape/v4/core/pkg/securityexception"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	corev1 "k8s.io/api/core/v1"
 )

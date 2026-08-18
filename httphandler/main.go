@@ -17,12 +17,12 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-	"github.com/kubescape/kubescape/v3/httphandler/config"
-	_ "github.com/kubescape/kubescape/v3/httphandler/docs"
-	"github.com/kubescape/kubescape/v3/httphandler/listener"
-	"github.com/kubescape/kubescape/v3/httphandler/storage"
-	"github.com/kubescape/kubescape/v3/pkg/ksinit"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/httphandler/config"
+	_ "github.com/kubescape/kubescape/v4/httphandler/docs"
+	"github.com/kubescape/kubescape/v4/httphandler/listener"
+	"github.com/kubescape/kubescape/v4/httphandler/storage"
+	"github.com/kubescape/kubescape/v4/pkg/ksinit"
 )
 
 // GoReleaser will fill these at build time

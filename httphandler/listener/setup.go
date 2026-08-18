@@ -14,9 +14,9 @@ import (
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/metrics"
-	"github.com/kubescape/kubescape/v3/httphandler/docs"
-	handlerequestsv1 "github.com/kubescape/kubescape/v3/httphandler/handlerequests/v1"
+	"github.com/kubescape/kubescape/v4/core/metrics"
+	"github.com/kubescape/kubescape/v4/httphandler/docs"
+	handlerequestsv1 "github.com/kubescape/kubescape/v4/httphandler/handlerequests/v1"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
 )
 

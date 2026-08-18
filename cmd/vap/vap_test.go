@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor/cel"
+	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
