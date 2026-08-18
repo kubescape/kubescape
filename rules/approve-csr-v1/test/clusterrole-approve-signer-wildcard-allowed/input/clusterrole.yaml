@@ -12,4 +12,4 @@ rules:
 - apiGroups: ["certificates.k8s.io"]
   resources: ["signers"]
   verbs: ["approve"]
-  resourceNames: ["kubernetes.io/"]
+  resourceNames: ["kubernetes.io/*"]
