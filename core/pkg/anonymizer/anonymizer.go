@@ -65,7 +65,7 @@ func ApplyEncrypted(
 	encryptionMetadata := &reporthandlingv2.EncryptionMetadata{
 		Version:      "v1",
 		DEKAlgorithm: "AES256_GCM",
-		KEKAlgorithm: "AES256_GCM",
+		KEKAlgorithm: reportcrypto.KEKAlgorithm,
 		EncryptedDEK: wrappedDEK,
 	}
 

@@ -39,10 +39,12 @@ var scanCmdExamples = fmt.Sprintf(`
   # Generate an anonymized report
   %[1]s scan --hide --format json -o report.json
 
-  # The key is used as raw bytes and must be exactly 32 characters long.
-  # Note: openssl rand -base64 32 (44 chars) and openssl rand -hex 32 (64 chars)
-  # are NOT valid — they exceed 32 bytes once passed through as raw text.
-  export KUBESCAPE_MASTER_KEY="01234567890123456789012345678901"
+  # The key is a passphrase of at least 16 characters. It is stretched into an
+  # AES-256 key with Argon2id under a per-report salt, so length is what buys
+  # you security here — prefer a long passphrase or generated key material.
+  export KUBESCAPE_MASTER_KEY="$(openssl rand -base64 32)"
+  # Hex-encoded key material works too, via a separate variable:
+  # export KUBESCAPE_MASTER_KEY_HEX="$(openssl rand -hex 32)"
   %[1]s scan --encrypt --format json -o encrypted-report.json
 
   # Decrypt an encrypted report
