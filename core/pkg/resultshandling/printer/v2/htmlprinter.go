@@ -3,6 +3,7 @@ package printer
 import (
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"os"
@@ -28,6 +29,25 @@ const (
 //go:embed html/report.gohtml
 var reportTemplate string
 
+// The HTML report previously loaded this logo from raw.githubusercontent.com
+// at view time, so the report only rendered correctly with network access
+// and leaked the viewer's IP/UA to GitHub every time an offline scan report
+// was opened. Embed the same logo the PDF printer already ships
+// (pdf/logo.png) and inline it as a data URI instead.
+//
+//go:embed pdf/logo.png
+var htmlLogoPNG []byte
+
+// logoDataURI returns the embedded Kubescape logo as a data: URI. It is
+// returned as template.URL, not a plain string, so html/template's URL
+// sanitizer (which rejects the data: scheme by default) doesn't replace it
+// with "#ZgotmplZ" when used as an <img src>.
+func logoDataURI() template.URL {
+	// #nosec G203 -- the input is our own go:embed'd logo.png, not
+	// attacker-controlled data, so bypassing the URL sanitizer here is safe.
+	return template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(htmlLogoPNG))
+}
+
 var _ printer.IPrinter = &HtmlPrinter{}
 
 type HTMLReportingCtx struct {
@@ -36,6 +56,9 @@ type HTMLReportingCtx struct {
 	// ImageScanSummary is set instead of the two fields above when this report
 	// is for an image scan rather than a posture scan (#2782).
 	ImageScanSummary *imageprinter.ImageScanSummary
+	// LogoDataURI is the embedded Kubescape logo, inlined so the report
+	// renders correctly without network access.
+	LogoDataURI template.URL
 }
 
 type HtmlPrinter struct {
@@ -137,7 +160,7 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		imageScanSummary = buildImageScanSummary(imageScanData)
 	}
 
-	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView, imageScanSummary}
+	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView, imageScanSummary, logoDataURI()}
 	err := tpl.Execute(hp.writer, reportingCtx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to render template", helpers.Error(err))
