@@ -40,11 +40,9 @@ builds:
       - -X github.com/kubescape/backend/pkg/versioncheck.Client={{.Env.CLIENT}}
     hooks:
       post:
-        - cmd: >
-            {{ if eq .Arch "amd64" }}
-            /bin/sh -lc 'sh build/goreleaser-post-e2e.sh'
-            {{ end }}
-  - id: downloader
+        - env:
+            - GOARCH={{ .Arch }}
+          sh: .github/scripts/goreleaser-post-e2e.sh
     dir: downloader
     binary: downloader
     env:
