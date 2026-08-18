@@ -199,7 +199,7 @@ func printTopComponents(writer *os.File, summary imageprinter.ImageScanSummary) 
 
 		output = output[:len(output)-1]
 
-		cautils.StarDisplay(writer, output+"\n")
+		cautils.StarDisplay(writer, "%s\n", output)
 	}
 
 	cautils.SimpleDisplay(writer, "\n")

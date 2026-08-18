@@ -290,7 +290,7 @@ func (pp *PrettyPrinter) printGroupedResource(indent string, title string, rsc [
 
 	sort.Strings(resources)
 	for i := range resources {
-		cautils.SimpleDisplay(pp.writer, resources[i]+"\n")
+		cautils.SimpleDisplay(pp.writer, "%s\n", resources[i])
 	}
 }
 
