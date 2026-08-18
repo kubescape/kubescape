@@ -1,9 +1,13 @@
 package printer
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"html"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -165,6 +169,15 @@ func TestHtmlPrinter_ActionPrint_LogoEmbeddedNotFetched(t *testing.T) {
 	// Report must never depend on a live, branch-tracking GitHub URL to render its logo.
 	assert.NotContains(t, htmlContent, "raw.githubusercontent.com",
 		"HTML report must not fetch its logo from a live GitHub URL")
-	assert.Contains(t, htmlContent, `<img class="logo" src="data:image/png;base64,`,
-		"HTML report must embed its logo as a data URI")
+
+	// html/template HTML-entity-escapes some base64 characters (e.g. '+') in
+	// attribute values, so the raw payload never appears verbatim in the rendered
+	// HTML; unescape it back before decoding and comparing against the logo bytes.
+	match := regexp.MustCompile(`<img class="logo" src="data:image/png;base64,([^"]+)">`).FindStringSubmatch(htmlContent)
+	if assert.Len(t, match, 2, "HTML report must embed its logo as a data URI") {
+		payload, err := base64.StdEncoding.DecodeString(html.UnescapeString(match[1]))
+		assert.NoError(t, err, "embedded logo payload must be valid base64")
+		assert.True(t, bytes.HasPrefix(payload, []byte("\x89PNG\r\n\x1a\n")), "embedded logo payload must be a valid PNG")
+		assert.Equal(t, kubescapeLogoPNG, payload, "embedded logo payload must match the embedded kubescape logo")
+	}
 }
