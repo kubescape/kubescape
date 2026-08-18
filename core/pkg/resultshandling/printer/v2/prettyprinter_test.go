@@ -8,8 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -216,4 +221,97 @@ func TestPrintGroupedResource_ResourceNameWithPercentVerbs(t *testing.T) {
 	}
 
 	assert.Contains(t, string(got), name, "resource name must be printed literally, not interpreted as a format string")
+}
+
+const controlViewEnvVarPath = "spec.template.spec.containers[0].env[1].name"
+
+func controlViewAssistedRemediationSession() *cautils.OPASessionObj {
+	resource := workloadinterface.NewBaseObject(map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "checkout-api",
+			"namespace": "prod",
+		},
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name": "api",
+							"env": []interface{}{
+								map[string]interface{}{"name": "LOG_LEVEL", "value": "debug"},
+								map[string]interface{}{"name": "DB_PASSWORD", "value": "s3cret"},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	resourceID := resource.GetID()
+
+	ctrl := &reportsummary.ControlSummary{
+		ControlID:   "C-0012",
+		Name:        "Applications credentials in configuration files",
+		Description: "Secrets should not be in env vars",
+		StatusInfo:  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+	}
+	ctrl.Append(&apis.StatusInfo{InnerStatus: apis.StatusFailed}, resourceID)
+
+	session := cautils.NewOPASessionObjMock()
+	session.AllResources[resourceID] = resource
+	session.ResourcesResult[resourceID] = resourcesresults.Result{
+		ResourceID: resourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: "C-0012",
+				Name:      "Applications credentials in configuration files",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{Paths: []armotypes.PosturePaths{{FailedPath: controlViewEnvVarPath}}},
+				},
+			},
+		},
+	}
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				"C-0012": *ctrl,
+			},
+		},
+	}
+	return session
+}
+
+func newControlViewPrettyPrinter(t *testing.T, verbose bool) (*PrettyPrinter, func() string) {
+	t.Helper()
+	pp, read := newTestPrettyPrinterFile(t)
+	pp.viewType = cautils.ControlViewType
+	pp.verboseMode = verbose
+	pp.mainPrinter = &recordingMainPrinter{}
+	return pp, read
+}
+
+// TestActionPrint_ControlViewVerboseIncludesAssistedRemediationPaths is the
+// #1737 control-view gap: --view=control -v listed Kind/Name only, so an
+// auditor could not tell which env var C-0012 matched.
+func TestActionPrint_ControlViewVerboseIncludesAssistedRemediationPaths(t *testing.T) {
+	pp, read := newControlViewPrettyPrinter(t, true)
+	require.NoError(t, pp.ActionPrint(context.Background(), controlViewAssistedRemediationSession(), nil))
+
+	out := read()
+	assert.Contains(t, out, "checkout-api")
+	assert.Contains(t, out, controlViewEnvVarPath+" (current: DB_PASSWORD)")
+}
+
+// TestActionPrint_ControlViewNonVerboseOmitsAssistedRemediationPaths keeps
+// default control-view output as Kind/Name only. Paths are -v, not a new -E.
+func TestActionPrint_ControlViewNonVerboseOmitsAssistedRemediationPaths(t *testing.T) {
+	pp, read := newControlViewPrettyPrinter(t, false)
+	require.NoError(t, pp.ActionPrint(context.Background(), controlViewAssistedRemediationSession(), nil))
+
+	out := read()
+	assert.Contains(t, out, "checkout-api")
+	assert.NotContains(t, out, controlViewEnvVarPath)
 }
