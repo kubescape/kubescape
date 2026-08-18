@@ -255,18 +255,30 @@ func AssistedRemediationPathsToString(control *resourcesresults.ResourceAssociat
 }
 
 func appendFailedPathsIfNotInPaths(paths []string, failedPaths []string) []string {
-	// Create a set to efficiently check if a failed path already exists in the paths slice
+	// Create a set to efficiently check if a failed path already exists in the paths slice.
+	// Keys are deduplicated on the bare path so a plain delete/fix/review path still matches
+	// its enriched " (current: <value>)" counterpart in failedPaths.
 	pathSet := make(map[string]struct{})
 	for _, path := range paths {
-		pathSet[path] = struct{}{}
+		pathSet[dedupPathKey(path)] = struct{}{}
 	}
 
 	// Append failed paths if they are not already present
 	for _, failedPath := range failedPaths {
-		if _, ok := pathSet[failedPath]; !ok {
+		if _, ok := pathSet[dedupPathKey(failedPath)]; !ok {
 			paths = append(paths, failedPath)
 		}
 	}
 
 	return paths
+}
+
+// dedupPathKey strips the " (current: <value>)" suffix appended by evidence enrichment so a
+// bare path (as emitted by fix/delete/review paths) and its enriched failed-path counterpart
+// are recognized as referring to the same field.
+func dedupPathKey(path string) string {
+	if idx := strings.Index(path, " (current: "); idx >= 0 {
+		return path[:idx]
+	}
+	return path
 }
