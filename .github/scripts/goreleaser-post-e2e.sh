@@ -58,9 +58,9 @@ log "E2E_FAIL_ON_ERROR=${E2E_FAIL_ON_ERROR}"
 
 # Only run on linux/amd64 to avoid running multiple times (once per build)
 # and to ensure we can run the binary on the current host (assuming host is amd64).
-# Use GOARCH environment variable
-if [ "${GOARCH:-}" != "amd64" ]; then
-  log "Skipping smoke tests for non-amd64 build (GOARCH=${GOARCH:-})."
+# Use GOOS and GOARCH environment variables set by GoReleaser hook.
+if [ "${GOOS:-}" != "linux" ] || [ "${GOARCH:-}" != "amd64" ]; then
+  log "Skipping smoke tests for non-linux/amd64 build (GOOS=${GOOS:-}, GOARCH=${GOARCH:-})."
   exit 0
 fi
 

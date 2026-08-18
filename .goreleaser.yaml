@@ -40,9 +40,11 @@ builds:
       - -X github.com/kubescape/backend/pkg/versioncheck.Client={{.Env.CLIENT}}
     hooks:
       post:
-        - env:
+        - cmd: sh .github/scripts/goreleaser-post-e2e.sh
+          env:
+            - GOOS={{ .Os }}
             - GOARCH={{ .Arch }}
-          sh: .github/scripts/goreleaser-post-e2e.sh
+  - id: downloader
     dir: downloader
     binary: downloader
     env:
@@ -62,7 +64,6 @@ builds:
     goarch:
       - amd64
       - arm64
-
 nfpms:
   - id: cli
     package_name: kubescape
