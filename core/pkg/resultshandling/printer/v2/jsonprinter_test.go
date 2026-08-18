@@ -22,6 +22,34 @@ func TestNewJsonPrinter(t *testing.T) {
 	assert.Empty(t, pp)
 }
 
+// TestSetWriter_Json_CaseInsensitiveExtension guards against the extension
+// check regressing to a case-sensitive comparison: an outputFile whose
+// extension already matches --output's target extension in a different case
+// (e.g. "Report.JSON") must not have the extension appended a second time.
+func TestSetWriter_Json_CaseInsensitiveExtension(t *testing.T) {
+	tests := []struct {
+		name       string
+		outputFile string
+	}{
+		{"lowercase extension", "report.json"},
+		{"uppercase extension", "Report.JSON"},
+		{"mixed case extension", "Report.Json"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			target := tmpDir + string(os.PathSeparator) + tt.outputFile
+
+			jp := NewJsonPrinter("")
+			require.NoError(t, jp.SetWriter(context.TODO(), target))
+			require.NotNil(t, jp.writer)
+			defer jp.writer.Close()
+
+			assert.Equal(t, target, jp.writer.Name(), "extension should not be appended a second time")
+		})
+	}
+}
+
 func TestScore_Json(t *testing.T) {
 	tests := []struct {
 		name  string

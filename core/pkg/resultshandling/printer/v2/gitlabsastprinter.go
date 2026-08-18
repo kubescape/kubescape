@@ -137,7 +137,7 @@ func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) e
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = gitLabSASTOutputFile
 		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != printer.JsonOutputExt {
+		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.JsonOutputExt) {
 			outputFile = outputFile + printer.JsonOutputExt
 		}
 	}
