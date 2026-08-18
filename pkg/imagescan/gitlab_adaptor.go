@@ -306,14 +306,14 @@ type vulnCacheEntry struct {
 func imageMatches(locationImage string, imageID ContainerImageIdentifier) bool {
 	if imageID.Hash != "" {
 		expectedSuffix := imageID.Repository + "@" + imageID.Hash
-		if strings.HasSuffix(locationImage, expectedSuffix) || strings.HasSuffix(locationImage, "/"+expectedSuffix) {
+		if locationImage == expectedSuffix || strings.HasSuffix(locationImage, "/"+expectedSuffix) {
 			return true
 		}
 	}
 
 	if imageID.Tag != "" {
 		expectedSuffix := imageID.Repository + ":" + imageID.Tag
-		if strings.HasSuffix(locationImage, expectedSuffix) || strings.HasSuffix(locationImage, "/"+expectedSuffix) {
+		if locationImage == expectedSuffix || strings.HasSuffix(locationImage, "/"+expectedSuffix) {
 			return true
 		}
 	}
