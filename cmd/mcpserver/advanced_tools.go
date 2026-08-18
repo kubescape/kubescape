@@ -36,7 +36,7 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			return mcp.NewToolResultError("resource_kind is required"), nil
 		}
 		namespace, _ := args["namespace"].(string)
-		
+
 		limit := int64(10)
 		if l, ok := args["limit"].(float64); ok {
 			limit = int64(l)
@@ -82,7 +82,7 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		}
 
 		nextContinueToken := list.GetContinue()
-		
+
 		// strip out noisy fields to save tokens
 		var simplifiedItems []map[string]any
 		for _, item := range list.Items {
@@ -216,9 +216,9 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		}
 
 		dynClient := k8sClient.DynamicClient
-		
+
 		patchType := types.StrategicMergePatchType
-		
+
 		var patchedObj *unstructured.Unstructured
 		patchOptions := metav1.PatchOptions{
 			DryRun: []string{metav1.DryRunAll}, // Dry-Run barrier
