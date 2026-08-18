@@ -133,9 +133,9 @@ func TestApplyDBFreshness(t *testing.T) {
 	builtAt := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
 
 	tests := []struct {
-		name     string
-		status   *vulnerability.ProviderStatus
-		wantSet  bool
+		name    string
+		status  *vulnerability.ProviderStatus
+		wantSet bool
 	}{
 		{
 			name:    "nil status leaves field unset",
