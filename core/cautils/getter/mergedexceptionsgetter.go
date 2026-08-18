@@ -2,6 +2,9 @@ package getter
 
 import (
 	"context"
+	"regexp"
+	"slices"
+	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
@@ -69,23 +72,14 @@ func deduplicateExceptions(
 		return []armotypes.PostureExceptionPolicy{}
 	}
 
-	covered := make(map[string]struct{}, len(cloudExceptions))
-	for _, cloud := range cloudExceptions {
-		for _, policy := range cloud.PosturePolicies {
-			if policy.ControlID == "" {
-				continue
-			}
-			for _, resource := range cloud.Resources {
-				covered[exceptionDedupKey(policy.ControlID, resource)] = struct{}{}
-			}
-		}
-	}
-
 	merged := make([]armotypes.PostureExceptionPolicy, 0, len(cloudExceptions)+len(crdExceptions))
 	merged = append(merged, cloudExceptions...)
 	if len(crdExceptions) == 0 {
 		return merged
 	}
+
+	covered := coveredPostureScopes(cloudExceptions)
+	matcher := newScopeMatcher()
 
 	for _, crd := range crdExceptions {
 		// Exceptions without resolvable control+workload keys can't be deduped; keep them.
@@ -97,11 +91,7 @@ func deduplicateExceptions(
 		for _, policy := range crd.PosturePolicies {
 			filteredResources := make([]identifiers.PortalDesignator, 0, len(crd.Resources))
 			for _, resource := range crd.Resources {
-				if policy.ControlID == "" {
-					filteredResources = append(filteredResources, resource)
-					continue
-				}
-				if _, found := covered[exceptionDedupKey(policy.ControlID, resource)]; !found {
+				if !matcher.coveredBy(covered[designatorDedupKey(resource)], policy) {
 					filteredResources = append(filteredResources, resource)
 				}
 			}
@@ -118,14 +108,84 @@ func deduplicateExceptions(
 	return merged
 }
 
-func exceptionDedupKey(controlID string, designator identifiers.PortalDesignator) string {
+// coveredPostureScopes indexes the primary posture-policy scopes by workload
+// designator. A policy without a control ID carries nothing to measure a CRD policy
+// against, so it never suppresses one.
+func coveredPostureScopes(exceptions []armotypes.PostureExceptionPolicy) map[string][]armotypes.PosturePolicy {
+	covered := make(map[string][]armotypes.PosturePolicy, len(exceptions))
+	for _, exception := range exceptions {
+		for _, policy := range exception.PosturePolicies {
+			if policy.ControlID == "" {
+				continue
+			}
+			for _, resource := range exception.Resources {
+				key := designatorDedupKey(resource)
+				if !slices.Contains(covered[key], policy) {
+					covered[key] = append(covered[key], policy)
+				}
+			}
+		}
+	}
+	return covered
+}
+
+// scopeMatcher compares posture-policy scopes the way the exception processor does
+// at evaluation time: a case-insensitive literal or anchored case-insensitive
+// pattern. Compiled patterns are reused across the whole merge.
+type scopeMatcher struct {
+	patterns map[string]*regexp.Regexp
+}
+
+func newScopeMatcher() *scopeMatcher {
+	return &scopeMatcher{patterns: make(map[string]*regexp.Regexp)}
+}
+
+// coveredBy reports whether any primary scope already applies everywhere policy does.
+// A primary exception that does not reach the CRD policy's framework or rule cannot
+// take precedence over it.
+func (m *scopeMatcher) coveredBy(primaries []armotypes.PosturePolicy, policy armotypes.PosturePolicy) bool {
+	for _, primary := range primaries {
+		if m.covers(primary.FrameworkName, policy.FrameworkName) &&
+			m.covers(primary.ControlID, policy.ControlID) &&
+			m.covers(primary.RuleName, policy.RuleName) {
+			return true
+		}
+	}
+	return false
+}
+
+// covers reports whether a primary scope field applies wherever the CRD one does. An
+// empty primary field is unscoped and covers any value; a named one cannot cover an
+// empty CRD field, which is broader.
+func (m *scopeMatcher) covers(primary, crd string) bool {
+	if primary == "" {
+		return true
+	}
+	if crd == "" {
+		return false
+	}
+	if strings.EqualFold(primary, crd) {
+		return true
+	}
+	pattern, compiled := m.patterns[primary]
+	if !compiled {
+		// A pattern that does not compile is cached as nil and read as a
+		// non-match, which is how the exception processor treats it.
+		pattern, _ = regexp.Compile("(?i)^" + primary + "$")
+		m.patterns[primary] = pattern
+	}
+	return pattern != nil && pattern.MatchString(crd)
+}
+
+func designatorDedupKey(designator identifiers.PortalDesignator) string {
 	apiGroup := ""
 	if designator.Attributes != nil {
 		apiGroup = designator.Attributes[identifiers.AttributeApiGroup]
 	}
-	return controlID + exceptionKeySeparator +
-		designator.GetNamespace() + exceptionKeySeparator +
-		designator.GetName() + exceptionKeySeparator +
-		designator.GetKind() + exceptionKeySeparator +
-		apiGroup
+	return strings.Join([]string{
+		designator.GetNamespace(),
+		designator.GetName(),
+		designator.GetKind(),
+		apiGroup,
+	}, exceptionKeySeparator)
 }
