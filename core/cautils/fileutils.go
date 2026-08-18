@@ -220,6 +220,21 @@ func listKustomizeDirs(basePath string) ([]string, []error) {
 	return kustomizeDirectories, errs
 }
 
+// listTerraformDirs scans a given path (recursively) and returns the directories holding
+// Terraform (.tf) files. A module nested below basePath (e.g. modules/<name>/) is found on
+// its own the same way an overlay nested below a Kustomize root is, even when basePath itself
+// has no .tf files directly in it.
+func listTerraformDirs(basePath string) ([]string, []error) {
+	directories, errs := listDirs(basePath)
+	terraformDirectories := make([]string, 0)
+	for _, dir := range directories {
+		if isTerraformDirectory(dir) {
+			terraformDirectories = append(terraformDirectories, dir)
+		}
+	}
+	return terraformDirectories, errs
+}
+
 // excludeHelmTemplateFiles drops the files living under the templates/ directory of a helm chart.
 // LoadResourcesFromHelmCharts renders those templates, so passing them to the plain-YAML loader
 // as well duplicates the workloads it already renders, and warns on every raw template whose
@@ -589,20 +604,42 @@ func LoadResourcesFromNestedKustomizeDirectories(ctx context.Context, basePath s
 	return sourceToWorkloads, renderedDirs
 }
 
+// LoadResourcesFromTerraform loads Kubernetes resources embedded in Terraform files under
+// basePath. Unlike the Helm and Kustomize loaders, an explicit .tf file is scanned on its own
+// (Terraform files are not self-contained the way a chart or kustomization is), but a directory
+// input is discovered recursively: every directory under basePath that contains .tf files is
+// scanned, so a module nested below the scan root (e.g. modules/<name>/) is not silently skipped.
 func LoadResourcesFromTerraform(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, error) {
-	if !isTerraformDirectory(basePath) && !IsTerraformFile(basePath) {
+	if IsTerraformFile(basePath) {
+		dir := filepath.Dir(basePath)
+		td := NewTerraformDirectory(dir)
+		wls, errs := td.GetWorkloads(dir)
+		if len(errs) > 0 {
+			return wls, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
+		}
+		return wls, nil
+	}
+
+	dirs, discoveryErrs := listTerraformDirs(basePath)
+	for _, err := range discoveryErrs {
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Terraform directories", helpers.Error(err))
+	}
+	if len(dirs) == 0 {
 		return nil, nil
 	}
-	dir := basePath
-	if IsTerraformFile(basePath) {
-		dir = filepath.Dir(basePath)
+
+	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
+	var errs []error
+	for _, dir := range dirs {
+		td := NewTerraformDirectory(dir)
+		wls, dirErrs := td.GetWorkloads(dir)
+		errs = append(errs, dirErrs...)
+		maps.Copy(sourceToWorkloads, wls)
 	}
-	td := NewTerraformDirectory(dir)
-	wls, errs := td.GetWorkloads(dir)
 	if len(errs) > 0 {
-		return wls, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
+		return sourceToWorkloads, fmt.Errorf("failed to render Terraform resources from %q: %w", basePath, errors.Join(errs...))
 	}
-	return wls, nil
+	return sourceToWorkloads, nil
 }
 
 // LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts
