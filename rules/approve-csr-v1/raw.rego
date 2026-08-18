@@ -112,18 +112,27 @@ can_update_csr_approval(role) if {
 }
 
 can_approve_signers(role) if {
-	rule := role.rules[_]
-	certificates_api_group(rule)
-	targets(rule, "signers")
-	verb_or_wildcard(rule.verbs, "approve")
+    rule := role.rules[_]
+    certificates_api_group(rule)
+    targets(rule, "signers")
+    verb_or_wildcard(rule.verbs, "approve")
+    dangerous_signer_names(rule)
+}
 
-	# resourceNames must be omitted, "*", "kubernetes.io/*", "kubernetes.io/kube-apiserver-client", or "kubernetes.io/kube-apiserver-client-kubelet"
-	rn := rule.resourceNames
-	object.get(rn, 0, "") = "" or
-	(object.get(rn, 0, "") = "*" or
-	 object.get(rn, 0, "") = "kubernetes.io/kube-apiserver-client" or
-	 startswith(object.get(rn, 0, ""), "kubernetes.io/") or
-	 object.get(rn, 0, "") = "kubernetes.io/kube-apiserver-client-kubelet")
+dangerous_signer_names(rule) if {
+    not rule.resourceNames
+}
+
+dangerous_signer_names(rule) if {
+    count(rule.resourceNames) == 0
+}
+
+dangerous_signer_names(rule) if {
+    signer := rule.resourceNames[_]
+    signer in {
+        "kubernetes.io/kube-apiserver-client",
+        "kubernetes.io/*",
+    }
 }
 # An entry contributes to the reported paths when it participates in any leg of
 # the chain, so the alert points at every grant that made the subject dangerous.
