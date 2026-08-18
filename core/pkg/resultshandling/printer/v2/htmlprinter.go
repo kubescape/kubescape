@@ -175,6 +175,7 @@ func buildResourceControlResult(resourceControl resourcesresults.ResourceAssocia
 	ctlID := resourceControl.GetID()
 	ctlURL := cautils.GetControlLink(resourceControl.GetID())
 	failedPaths := AssistedRemediationPathsWithCurrentValues(&resourceControl, resource)
+	addContainerNameToAssistedRemediation(resource, &failedPaths)
 
 	return ResourceControlResult{ctlSeverity, ctlName, ctlID, ctlURL, failedPaths}
 }
