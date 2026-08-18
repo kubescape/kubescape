@@ -15,9 +15,9 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/mocks"
-	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor/cel"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -215,7 +215,7 @@ func monitorHeapSpace(maxHeap *uint64, quitChan chan bool) {
 
 /*
 goarch: arm64
-pkg: github.com/kubescape/kubescape/v3/core/pkg/opaprocessor
+pkg: github.com/kubescape/kubescape/v4/core/pkg/opaprocessor
 
 BenchmarkProcess/opaprocessor.Process_1-8         	       1	29714096083 ns/op	22309913416 B/op	498183685 allocs/op
 --- BENCH: BenchmarkProcess/opaprocessor.Process_1-8

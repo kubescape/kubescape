@@ -15,9 +15,9 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/zaplogger"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-	"github.com/kubescape/kubescape/v3/httphandler/config"
-	"github.com/kubescape/kubescape/v3/httphandler/storage"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/httphandler/config"
+	"github.com/kubescape/kubescape/v4/httphandler/storage"
 )
 
 // validServicesV3JSON is a minimal well-formed service-discovery v3 payload.

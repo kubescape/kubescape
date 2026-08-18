@@ -453,3 +453,30 @@ func TestVAPAppliesToResourceNames(t *testing.T) {
 		assert.False(t, vapWithConstraints(named("coredns")).appliesTo(o))
 	})
 }
+
+// TestVAPAppliesToKindPluralCandidates covers the kinds whose registered plural
+// the apimachinery guess gets wrong: a sibilant ending takes "es" and a
+// vowel+"y" ending takes "s", so an exact compare against the single guess drops
+// the object and the control reads clean.
+func TestVAPAppliesToKindPluralCandidates(t *testing.T) {
+	cases := []struct {
+		name     string
+		kind     string
+		resource string
+		want     bool
+	}{
+		{"x ending pluralizes with es", "Sandbox", "sandboxes", true},
+		{"sh ending pluralizes with es", "Mesh", "meshes", true},
+		{"ch ending pluralizes with es", "Batch", "batches", true},
+		{"vowel y ending pluralizes with s", "Gateway", "gateways", true},
+		{"consonant y ending still pluralizes with ies", "NetworkPolicy", "networkpolicies", true},
+		{"the apimachinery guess stays accepted", "Sandbox", "sandboxs", true},
+		{"an unrelated plural is out of scope", "Sandbox", "sandboxtemplates", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := vapWithConstraints(rule([]string{"agents.x-k8s.io"}, []string{"v1alpha1"}, []string{tc.resource}))
+			assert.Equal(t, tc.want, v.appliesTo(obj("agents.x-k8s.io/v1alpha1", tc.kind)))
+		})
+	}
+}

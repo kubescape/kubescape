@@ -1,8 +1,8 @@
-module github.com/kubescape/kubescape/v3/httphandler
+module github.com/kubescape/kubescape/v4/httphandler
 
 go 1.26.0
 
-replace github.com/kubescape/kubescape/v3 => ../
+replace github.com/kubescape/kubescape/v4 => ../
 
 replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.0-20260322054632-16583c73e9b8
 
@@ -17,7 +17,7 @@ require (
 	github.com/kubescape/backend v0.0.46
 	github.com/kubescape/go-logger v0.0.33
 	github.com/kubescape/k8s-interface v0.0.217
-	github.com/kubescape/kubescape/v3 v3.0.4
+	github.com/kubescape/kubescape/v4 v4.0.12
 	github.com/kubescape/opa-utils v0.0.307
 	github.com/kubescape/storage v0.0.258
 	github.com/spf13/viper v1.21.0
@@ -367,7 +367,9 @@ require (
 	github.com/knqyf263/go-deb-version v0.0.0-20241115132648-6f4aee6ccd23 // indirect
 	github.com/knqyf263/go-rpm-version v0.0.0-20220614171824-631e686d1075 // indirect
 	github.com/kubescape/go-git-url v0.0.31 // indirect
-	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 // indirect
+	github.com/kubescape/kubescape/v3 v3.0.4 // indirect
+	github.com/kubescape/rbac-utils v0.0.21 // indirect
+	github.com/kubescape/regolibrary v1.0.317-0.20240320124840-1d84ac7186ea // indirect
 	github.com/kubescape/regolibrary/v2 v2.0.1 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect

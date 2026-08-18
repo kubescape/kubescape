@@ -18,10 +18,20 @@ on:
     # blind spot the other workflow's deny-list leaves open.
     # SECURITY-INSIGHTS.yml sits at the repository root and matches the
     # deny-list's "**.yml" the same way, so it is covered here too.
+    #
+    # .goreleaser.yaml and the install scripts sit in the same blind spot and
+    # are worse placed to be in it: they define what a release publishes and
+    # what a user verifies before executing it, and they match "**.yaml" and
+    # "**.sh" respectively, so a PR touching only one of them runs no check at
+    # all. Release signing was absent from .goreleaser.yaml for exactly that
+    # reason - nothing was looking.
     paths:
       - ".github/**"
       - "internal/ghworkflows/**"
       - "SECURITY-INSIGHTS.yml"
+      - ".goreleaser.yaml"
+      - "install.sh"
+      - "install.ps1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

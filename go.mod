@@ -1,4 +1,4 @@
-module github.com/kubescape/kubescape/v3
+module github.com/kubescape/kubescape/v4
 
 go 1.26.0
 
@@ -46,7 +46,7 @@ require (
 	github.com/kubescape/go-logger v0.0.28
 	github.com/kubescape/k8s-interface v0.0.209
 	github.com/kubescape/opa-utils v0.0.307
-	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520
+	github.com/kubescape/rbac-utils v0.0.21
 	github.com/kubescape/regolibrary/v2 v2.0.1
 	github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73
 	github.com/kubescape/storage v0.0.258
@@ -386,6 +386,8 @@ require (
 	github.com/knqyf263/go-apk-version v0.0.0-20200609155635-041fdbb8563f // indirect
 	github.com/knqyf263/go-deb-version v0.0.0-20241115132648-6f4aee6ccd23 // indirect
 	github.com/knqyf263/go-rpm-version v0.0.0-20220614171824-631e686d1075 // indirect
+	github.com/kubescape/kubescape/v3 v3.0.4 // indirect
+	github.com/kubescape/regolibrary v1.0.317-0.20240320124840-1d84ac7186ea // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect
 	github.com/lestrrat-go/dsig v1.2.1 // indirect

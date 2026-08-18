@@ -3,8 +3,8 @@ package shared
 import (
 	"errors"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/pkg/imagescan"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 )
 
 var (

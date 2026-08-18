@@ -74,9 +74,27 @@ sha256_of() {
 #
 # This binds the binary to the manifest, not to the project's signing identity:
 # both are fetched from the same release over the same channel, so it does not
-# defend against a compromised release or GitHub account. Use the cosign
-# signature or build provenance attestation for that. It does close the case
+# defend against a compromised release or GitHub account. It does close the case
 # where only the binary object is substituted or corrupted in transit.
+#
+# Two stronger checks defend against a compromised release, and both are
+# deliberately left manual: each needs a tool that is not present on a stock
+# machine, so running them here would either hard-fail every install or degrade
+# to a check that reports success without having verified anything.
+#
+#   1. Signing identity - cosign signature over the same manifest this function
+#      uses, keyless, so the certificate names the workflow that produced it:
+#
+#        cosign verify-blob checksums.sha256 \
+#          --signature checksums.sha256.sig \
+#          --certificate checksums.sha256.pem \
+#          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#          --certificate-identity-regexp '^https://github\.com/kubescape/kubescape/\.github/workflows/02-release\.yaml@refs/tags/'
+#
+#   2. Build provenance - SLSA attestation over the binary itself, stored in
+#      GitHub's attestation index rather than as a release asset:
+#
+#        gh attestation verify kubescape --repo kubescape/kubescape
 #
 # Fail closed. A missing manifest or a missing entry means something is wrong
 # with the release, not that verification can be skipped.
