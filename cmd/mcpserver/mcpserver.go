@@ -1231,17 +1231,19 @@ func mcpServerEntrypoint(transport string, port int) error {
 	// Start the server
 	if transport == "sse" {
 		sseServer := server.NewSSEServer(s)
-		addr := fmt.Sprintf(":%d", port)
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
 		logger.L().Info("Starting SSE server", helpers.String("addr", addr))
 		if err := sseServer.Start(addr); err != nil {
 			return fmt.Errorf("sse server error: %w", err)
 		}
 		return nil
-	} else {
+	} else if transport == "stdio" {
 		if err := server.ServeStdio(s); err != nil {
 			return fmt.Errorf("server error: %w", err)
 		}
 		return nil
+	} else {
+		return fmt.Errorf("unsupported transport '%s': must be 'sse' or 'stdio'", transport)
 	}
 }
 

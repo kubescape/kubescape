@@ -39,7 +39,13 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 
 		limit := int64(10)
 		if l, ok := args["limit"].(float64); ok {
+			if l <= 0 || l != float64(int64(l)) {
+				return mcp.NewToolResultError("limit must be a positive integer"), nil
+			}
 			limit = int64(l)
+			if limit > 500 {
+				limit = 500
+			}
 		}
 		continueToken, _ := args["continue"].(string)
 
@@ -130,6 +136,10 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			return mcp.NewToolResultError("resource_json is required"), nil
 		}
 
+		if len(resourceJSON) > 1000000 || len(celExpr) > 10000 {
+			return mcp.NewToolResultError("input exceeds size limits"), nil
+		}
+
 		var resourceObj map[string]any
 		if err := json.Unmarshal([]byte(resourceJSON), &resourceObj); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to parse resource_json: %v", err)), nil
@@ -147,7 +157,7 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to compile CEL expression: %v", issues.Err())), nil
 		}
 
-		prg, err := env.Program(ast)
+		prg, err := env.Program(ast, cel.CostLimit(100000))
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to create CEL program: %v", err)), nil
 		}
@@ -187,12 +197,14 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			return mcp.NewToolResultError("resource_kind, resource_name, and patch_json are required"), nil
 		}
 
-		// Security/Privilege Drop checks: deny operations on Roles, ClusterRoles, RoleBindings, ClusterRoleBindings, etc.
-		restrictedKinds := map[string]bool{
-			"role": true, "clusterrole": true, "rolebinding": true, "clusterrolebinding": true,
-			"secret": true, "serviceaccount": true,
+		// Security/Privilege Drop checks: explicitly allow only certain workload kinds.
+		allowedKinds := map[string]bool{
+			"pod": true, "pods": true,
+			"deployment": true, "deployments": true,
+			"daemonset": true, "daemonsets": true,
+			"statefulset": true, "statefulsets": true,
 		}
-		if restrictedKinds[strings.ToLower(kind)] {
+		if !allowedKinds[strings.ToLower(kind)] {
 			return mcp.NewToolResultError(fmt.Sprintf("security barrier: patching kind '%s' is not permitted", kind)), nil
 		}
 
@@ -211,8 +223,6 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"}
 		case "statefulsets", "statefulset":
 			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
-		default:
-			gvr = schema.GroupVersionResource{Group: "", Version: "v1", Resource: strings.ToLower(kind)}
 		}
 
 		dynClient := k8sClient.DynamicClient
