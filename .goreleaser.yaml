@@ -79,6 +79,40 @@ nfpms:
       - rpm
     bindir: /usr/bin
 
+# Cosign signature over the checksum manifest. checksums.sha256 already covers
+# every published asset, so signing that one file transitively binds all of
+# them to this repository's release workflow, at the cost of two extra assets
+# rather than one pair per artifact.
+#
+# Keyless on purpose, unlike docker_signs below. That block signs container
+# images with the COSIGN_PRIVATE_KEY_V1 pair, but the matching public key is
+# published nowhere a user running install.sh can reach it, so a keyed blob
+# signature would be unverifiable by the very people it exists to protect.
+# Keyless binds the signature to the release workflow's OIDC identity and needs
+# no key distribution: 02-release.yaml already grants `id-token: write`, and the
+# certificate is uploaded next to the signature so the signing identity can be
+# checked rather than merely assumed.
+#
+# Verify a downloaded release with:
+#   cosign verify-blob checksums.sha256 \
+#     --signature checksums.sha256.sig \
+#     --certificate checksums.sha256.pem \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     --certificate-identity-regexp '^https://github\.com/kubescape/kubescape/\.github/workflows/02-release\.yaml@refs/tags/'
+signs:
+  - id: checksum
+    cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
 docker_signs:
   - stdin: "{{ .Env.COSIGN_PWD }}"
 
