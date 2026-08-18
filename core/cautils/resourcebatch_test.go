@@ -186,6 +186,31 @@ func TestPartitionResources_SkipsUnknownIDs(t *testing.T) {
 	assert.Equal(t, []string{pod.GetID()}, resident.K8SResources["/v1/pods"])
 }
 
+// TestPartitionResources_ExplicitThresholdOverridesEnv asserts that the
+// threshold passed to PartitionResources takes precedence over the
+// LARGE_CLUSTER_SIZE environment variable.
+func TestPartitionResources_ExplicitThresholdOverridesEnv(t *testing.T) {
+	t.Setenv("LARGE_CLUSTER_SIZE", "2500") // env would keep this small
+
+	podB := mustWorkload(t, `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-b","namespace":"ns-b"}}`)
+	podA := mustWorkload(t, `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"pod-a","namespace":"ns-a"}}`)
+
+	k8sResources := K8SResources{
+		"/v1/pods": {podB.GetID(), podA.GetID()},
+	}
+	allResources := map[string]workloadinterface.IMetadata{
+		podA.GetID(): podA,
+		podB.GetID(): podB,
+	}
+
+	resident, batches := PartitionResources(len(allResources), k8sResources, nil, allResources, 1)
+
+	require.Len(t, batches, 2)
+	assert.Equal(t, "ns-a", batches[0].Scope)
+	assert.Equal(t, "ns-b", batches[1].Scope)
+	assert.Empty(t, resident.K8SResources)
+}
+
 func mustWorkload(t *testing.T, raw string) workloadinterface.IMetadata {
 	t.Helper()
 	workload, err := workloadinterface.NewWorkload([]byte(raw))
