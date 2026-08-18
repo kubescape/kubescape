@@ -399,7 +399,7 @@ func TestAddResult_AnnotatesInitAndEphemeralContainerNames(t *testing.T) {
 	ac := makeControlWithPaths(privilegedInitAndEphemeralPaths(), nil)
 	ac.ControlID = "C-0057"
 
-	result := sp.addResult(run, control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, privilegedInitAndEphemeralPod())
+	result := sp.addResult(run, control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, privilegedInitAndEphemeralPod(), nil)
 	require.NotNil(t, result.Message)
 	require.NotNil(t, result.Message.Text)
 	for _, path := range privilegedInitAndEphemeralNamedPaths() {
