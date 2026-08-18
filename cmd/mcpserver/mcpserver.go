@@ -97,6 +97,13 @@ type KubescapeMcpserver struct {
 	scanCtxs     map[string]*scanCtxState
 }
 
+func (ksServer *KubescapeMcpserver) getPolicyGetter() *getter.DownloadReleasedPolicy {
+	if ksServer.policyGetter == nil {
+		ksServer.policyGetter = getter.NewDownloadReleasedPolicy()
+	}
+	return ksServer.policyGetter
+}
+
 func (ksServer *KubescapeMcpserver) getScanSem() *semaphore.Weighted {
 	ksServer.scanSemMu.Lock()
 	defer ksServer.scanSemMu.Unlock()
