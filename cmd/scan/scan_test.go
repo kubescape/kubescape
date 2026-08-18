@@ -1087,3 +1087,108 @@ func TestGetScanCommand_RunE_SubmitExclusivity(t *testing.T) {
 	err := cmd.RunE(cmd, []string{""})
 	assert.EqualError(t, err, "you can use `keep-local` or `submit`, but not both")
 }
+
+func TestValidateCombinedImageScanFlags(t *testing.T) {
+	tests := []struct {
+		name         string
+		scanInfo     *cautils.ScanInfo
+		wantErr      string
+		wantPlatform string
+	}{
+		{
+			name:     "nil scan info is ignored",
+			scanInfo: nil,
+		},
+		{
+			name: "image flags are ignored when scanning is disabled",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:    false,
+				ImagePlatform: "linux/not-real",
+			},
+			wantPlatform: "linux/not-real",
+		},
+		{
+			name: "empty image options are valid",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages: true,
+			},
+		},
+		{
+			name: "platform is canonicalized",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:    true,
+				ImagePlatform: "x86_64",
+			},
+			wantPlatform: "linux/amd64",
+		},
+		{
+			name: "valid platform and scoped token are accepted",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:        true,
+				ImagePlatform:     "linux/arm64",
+				RegistryAuthority: "registry.example.com",
+				RegistryToken:     "token",
+			},
+			wantPlatform: "linux/arm64",
+		},
+		{
+			name: "invalid platform is rejected",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:    true,
+				ImagePlatform: "linux/toaster",
+			},
+			wantErr: "invalid image platform",
+		},
+		{
+			name: "credentials still require an authority",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:    true,
+				ImagePlatform: "linux/amd64",
+				RegistryToken: "token",
+			},
+			wantErr: shared.ErrRegistryAuthorityMissing.Error(),
+		},
+		{
+			name: "authority still requires credentials",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:        true,
+				RegistryAuthority: "registry.example.com",
+			},
+			wantErr: shared.ErrRegistryAuthorityNoAuth.Error(),
+		},
+		{
+			name: "username and password remain a pair",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:        true,
+				RegistryAuthority: "registry.example.com",
+				RegistryUsername:  "user",
+			},
+			wantErr: shared.ErrRegistryUsernamePassword.Error(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCombinedImageScanFlags(tt.scanInfo)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			if tt.scanInfo != nil {
+				assert.Equal(t, tt.wantPlatform, tt.scanInfo.ImagePlatform)
+			}
+		})
+	}
+}
+
+func TestGetScanCommandRegistersImagePlatformFlag(t *testing.T) {
+	cmd := GetScanCommand(&mocks.MockIKubescape{})
+
+	flag := cmd.PersistentFlags().Lookup("image-platform")
+	require.NotNil(t, flag)
+	assert.Empty(t, flag.DefValue)
+	assert.Contains(t, flag.Usage, "linux/amd64")
+	assert.Contains(t, flag.Usage, "overrides platform inferred")
+}

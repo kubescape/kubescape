@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type imageScanCaptureKubescape struct {
@@ -131,6 +132,79 @@ func TestGetImageCmd_RunE_ForwardsRegistryTokenCredentials(t *testing.T) {
 	assert.Equal(t, "registry.example.com", mockKubescape.imgScanInfo.Authority)
 	assert.Equal(t, "token", mockKubescape.imgScanInfo.Token)
 	assert.Equal(t, "registry.example.com/app:tag", mockKubescape.imgScanInfo.Image)
+}
+
+func TestGetImageCmd_RunE_ForwardsCanonicalPlatform(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{}
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.AddCommand(cmd)
+
+	require.NotNil(t, cmd.PersistentFlags().Lookup("platform"))
+	require.NoError(t, cmd.PersistentFlags().Set("platform", "x86_64"))
+
+	err := cmd.RunE(cmd, []string{"registry.example.com/app:tag"})
+	require.NoError(t, err)
+	require.NotNil(t, mockKubescape.imgScanInfo)
+	assert.Equal(t, "linux/amd64", mockKubescape.imgScanInfo.Platform)
+	assert.Equal(t, "linux/amd64", mockKubescape.scanInfo.ImagePlatform)
+}
+
+func TestGetImageCmd_RunE_ForwardsPlatformVariant(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{}
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.AddCommand(cmd)
+	require.NoError(t, cmd.PersistentFlags().Set("platform", "linux/arm/v7"))
+
+	err := cmd.RunE(cmd, []string{"registry.example.com/app:tag"})
+	require.NoError(t, err)
+	assert.Equal(t, "linux/arm/v7", mockKubescape.imgScanInfo.Platform)
+}
+
+func TestGetImageCmd_RunE_RejectsInvalidPlatformBeforeScanning(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{}
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.AddCommand(cmd)
+	require.NoError(t, cmd.PersistentFlags().Set("platform", "linux/toaster"))
+
+	err := cmd.RunE(cmd, []string{"registry.example.com/app:tag"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid image platform")
+	assert.Nil(t, mockKubescape.imgScanInfo, "scanner must not run with an invalid platform")
+}
+
+func TestGetImageCmd_RunE_RejectsIncompletePlatformBeforeScanning(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{}
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.AddCommand(cmd)
+	require.NoError(t, cmd.PersistentFlags().Set("platform", "linux"))
+
+	err := cmd.RunE(cmd, []string{"registry.example.com/app:tag"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "both operating system and architecture are required")
+	assert.Nil(t, mockKubescape.imgScanInfo)
+}
+
+func TestGetImageCmd_PlatformHelpIsSpecific(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getImageCmd(&mocks.MockIKubescape{}, &scanInfo)
+
+	flag := cmd.PersistentFlags().Lookup("platform")
+	require.NotNil(t, flag)
+	assert.Contains(t, flag.Usage, "linux/amd64")
+	assert.Contains(t, flag.Usage, "linux/arm64/v8")
+	assert.Empty(t, flag.DefValue)
 }
 
 func TestGetImageCmd_RunE_ForwardsInheritedRegistryBasicCredentials(t *testing.T) {

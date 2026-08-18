@@ -159,8 +159,9 @@ func TestJunitActionPrintCombinedScanIncludesPostureAndImages(t *testing.T) {
 			Matches: match.NewMatches(imageMatch("CVE-COMBINED", "High")),
 		},
 		{
-			Image:   "combined:second",
-			Matches: match.NewMatches(imageMatch("CVE-COMBINED-SECOND", "Critical")),
+			Image:    "combined:second",
+			Platform: "linux/arm64",
+			Matches:  match.NewMatches(imageMatch("CVE-COMBINED-SECOND", "Critical")),
 		},
 	}
 
@@ -177,7 +178,7 @@ func TestJunitActionPrintCombinedScanIncludesPostureAndImages(t *testing.T) {
 	require.NoError(t, xml.Unmarshal(raw, &got))
 	require.Len(t, got.Suites, 3)
 	assert.Equal(t, "Kubescape Scanning", got.Name)
-	assert.Equal(t, []string{"kubescape", "combined:first", "combined:second"}, []string{
+	assert.Equal(t, []string{"kubescape", "combined:first", "combined:second [linux/arm64]"}, []string{
 		got.Suites[0].Name,
 		got.Suites[1].Name,
 		got.Suites[2].Name,

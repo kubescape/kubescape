@@ -132,7 +132,7 @@ func validateDBLoad(loadErr error, status *vulnerability.ProviderStatus) error {
 	return nil
 }
 
-func getProviderConfig(creds RegistryCredentials, sources []string) pkg.ProviderConfig {
+func getProviderConfig(creds RegistryCredentials, sources []string, options ScanOptions) pkg.ProviderConfig {
 	var syftCreds []image.RegistryCredentials
 	if creds.hasAuthenticator() {
 		syftCreds = append(syftCreds, image.RegistryCredentials{
@@ -150,6 +150,7 @@ func getProviderConfig(creds RegistryCredentials, sources []string) pkg.Provider
 			RegistryOptions: regOpts,
 			SBOMOptions:     syft.DefaultCreateSBOMConfig(),
 			Sources:         sources,
+			Platform:        options.Platform,
 		},
 		SynthesisConfig: pkg.SynthesisConfig{
 			GenerateMissingCPEs: true,
@@ -231,8 +232,21 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 	return filteredMatches
 }
 
-func (s *Service) Scan(_ context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string) (*cautils.ImageScanData, error) {
-	packages, pkgContext, sbom, err := pkg.Provide(userInput, getProviderConfig(creds, s.sources))
+func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string) (*cautils.ImageScanData, error) {
+	return s.ScanWithOptions(ctx, userInput, creds, vulnerabilityExceptions, severityExceptions, ScanOptions{})
+}
+
+// ScanWithOptions scans an image using explicit source-selection options. In
+// particular, Platform prevents a multi-architecture image index from silently
+// resolving to the architecture of the machine running Kubescape.
+func (s *Service) ScanWithOptions(_ context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string, options ScanOptions) (*cautils.ImageScanData, error) {
+	platform, err := NormalizePlatform(options.Platform)
+	if err != nil {
+		return nil, err
+	}
+	options.Platform = platform
+
+	packages, pkgContext, sbom, err := pkg.Provide(userInput, getProviderConfig(creds, s.sources, options))
 	if err != nil {
 		return nil, err
 	}
@@ -248,6 +262,7 @@ func (s *Service) Scan(_ context.Context, userInput string, creds RegistryCreden
 		Context:               pkgContext,
 		IgnoredMatches:        ignoredMatches,
 		Image:                 userInput,
+		Platform:              platform,
 		Matches:               filteredMatches,
 		Packages:              packages,
 		SBOM:                  sbom,

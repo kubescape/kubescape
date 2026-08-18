@@ -475,14 +475,15 @@ func (m *Metrics) setResourcesCounters(
 // setImageVulnerabilities builds per-image, per-severity CVE counters for an image scan (#2782)
 func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData) {
 	for i := range imageScanData {
-		cves := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
+		target := imageScanData[i].Target()
+		cves := extractCVEs(imageScanData[i].Matches, target)
 
 		severityToSummary := map[string]*imageprinter.SeveritySummary{}
 		setSeverityToSummaryMap(cves, severityToSummary)
 
 		for severity, summary := range severityToSummary {
 			m.listImages = append(m.listImages, mImageVulnerability{
-				image:           imageScanData[i].Image,
+				image:           target,
 				severity:        severity,
 				cveCount:        summary.NumberOfCVEs,
 				fixableCVECount: summary.NumberOfFixableCVEs,

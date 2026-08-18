@@ -211,7 +211,8 @@ func TestImagePrometheusFormat_OmitsPostureMetrics(t *testing.T) {
 	// real CVE metrics.
 	imageData := []cautils.ImageScanData{
 		{
-			Image: "test-image:latest",
+			Image:    "test-image:latest",
+			Platform: "linux/arm64",
 			Matches: match.NewMatches(match.Match{
 				Package: grypepkg.Package{ID: "pkg-1", Name: "openssl", Version: "3.0.0"},
 				Vulnerability: vulnerability.Vulnerability{
@@ -228,7 +229,7 @@ func TestImagePrometheusFormat_OmitsPostureMetrics(t *testing.T) {
 
 	// Image metrics must be present.
 	assert.Contains(t, output, "kubescape_image_count_cve")
-	assert.Contains(t, output, `image="test-image:latest"`)
+	assert.Contains(t, output, `image="test-image:latest [linux/arm64]"`)
 
 	// Posture metric families must be completely absent, not just zeroed.
 	assert.NotContains(t, output, "kubescape_cluster_complianceScore")

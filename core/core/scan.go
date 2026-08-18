@@ -473,7 +473,11 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 	if scanInfo != nil {
 		scanningContext = scanInfo.GetScanningContext()
 	}
-	imagesToScan, imageToCreds, containerErrors := collectImageScanTargets(scanType, scanData, ctx, scanningContext, k8sApi)
+	platformOverride := ""
+	if scanInfo != nil {
+		platformOverride = scanInfo.ImagePlatform
+	}
+	imagesToScan, imageToCreds, containerErrors := collectImageScanTargets(scanType, scanData, ctx, scanningContext, k8sApi, platformOverride)
 	if imagesToScan.IsEmpty() {
 		return errors.Join(containerErrors...)
 	}
@@ -491,7 +495,8 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 	defer svc.Close()
 	defaultCreds := registryCredentialsFromScanInfo(scanInfo)
 	var jobs []ImageScanJob
-	for img := range imagesToScan.Iter() {
+	for target := range imagesToScan.Iter() {
+		img := target.Image
 		credsList := []imagescan.RegistryCredentials{}
 		if resolvedCreds, ok := imageToCreds[img]; ok {
 			sort.Slice(resolvedCreds, func(i, j int) bool {
@@ -515,10 +520,17 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 
 		jobs = append(jobs, ImageScanJob{
 			Image:               img,
+			Platform:            target.Platform,
 			RegistryCredentials: credsList,
 			RegistryMapping:     scanInfo.RegistryMapping,
 		})
 	}
+	sort.Slice(jobs, func(i, j int) bool {
+		if jobs[i].Image != jobs[j].Image {
+			return jobs[i].Image < jobs[j].Image
+		}
+		return jobs[i].Platform < jobs[j].Platform
+	})
 
 	concurrency := scanInfo.ImageScanConcurrency
 	if concurrency <= 0 {
@@ -537,15 +549,22 @@ func scanImageJobs(ctx context.Context, svc imageScanService, concurrency int, j
 	logger.L().Info(fmt.Sprintf("Scanning %d images concurrently with %d workers...", len(jobs), concurrency))
 	orchestrator := NewImageScanOrchestrator(svc, concurrency)
 	results := orchestrator.ScanImages(ctx, jobs)
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Image != results[j].Image {
+			return results[i].Image < results[j].Image
+		}
+		return results[i].Platform < results[j].Platform
+	})
 
 	for _, res := range results {
+		target := imageScanTarget(res.Image, res.Platform)
 		if res.Error != nil {
-			logger.L().Error("failed to scan", helpers.String("image", res.Image), helpers.Error(res.Error))
+			logger.L().Error("failed to scan", helpers.String("image", target), helpers.Error(res.Error))
 			continue
 		}
 		if res.ScanData != nil {
 			resultsHandling.ImageScanData = append(resultsHandling.ImageScanData, *res.ScanData)
-			logger.L().Success("Done scanning", helpers.String("image", res.Image))
+			logger.L().Success("Done scanning", helpers.String("image", target))
 		}
 	}
 	if agg := orchestrator.GetErrorAggregator(); agg != nil && agg.HasErrors() {
@@ -555,10 +574,11 @@ func scanImageJobs(ctx context.Context, svc imageScanService, concurrency int, j
 	return nil
 }
 
-func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, scanningContext cautils.ScanningContext, k8sApi *k8sinterface.KubernetesApi) (mapset.Set[string], map[string][]imagescan.RegistryCredentials, []error) {
-	imagesToScan := mapset.NewSet[string]()
+func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, scanningContext cautils.ScanningContext, k8sApi *k8sinterface.KubernetesApi, platformOverride string) (mapset.Set[ImageScanTarget], map[string][]imagescan.RegistryCredentials, []error) {
+	imagesToScan := mapset.NewSet[ImageScanTarget]()
 	imageToCreds := make(map[string][]imagescan.RegistryCredentials)
 	var containerErrors []error
+	nodePlatforms := buildNodePlatformIndex(scanData.AllResources)
 	if scanningContext != cautils.ContextCluster {
 		// imagePullSecrets belong to a live cluster target. A manifest or repository
 		// may contain the same Secret name as the current kube context, but that must
@@ -568,12 +588,21 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 
 	collectWorkload := func(wl *workloadinterface.Workload) {
 		images, workloadContainerErrors := getAllWorkloadImages(wl)
+		platforms := []string{platformOverride}
+		if platformOverride == "" {
+			platforms = inferWorkloadPlatforms(wl, nodePlatforms)
+			if len(platforms) == 0 {
+				platforms = []string{""}
+			}
+		}
 		for _, containerErr := range workloadContainerErrors {
 			logger.L().Error("failed to collect image scan targets", helpers.Error(containerErr))
 			containerErrors = append(containerErrors, containerErr)
 		}
 		for _, image := range images {
-			imagesToScan.Add(image)
+			for _, platform := range platforms {
+				imagesToScan.Add(ImageScanTarget{Image: image, Platform: platform})
+			}
 			if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, image); ok {
 				found := false
 				for _, c := range imageToCreds[image] {
@@ -616,7 +645,7 @@ func scanSingleImage(ctx context.Context, img string, svc imageScanService, resu
 
 	scanResults, err := scanWithRegistryMapping(
 		ctx, svc, img, []imagescan.RegistryCredentials{creds},
-		registryMapping, nil, nil,
+		registryMapping, nil, nil, "",
 	)
 	if err != nil {
 		return err

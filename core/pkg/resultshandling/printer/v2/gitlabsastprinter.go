@@ -187,9 +187,10 @@ func (gp *GitLabSASTPrinter) printImageScan(imageScanData []cautils.ImageScanDat
 	}
 
 	for _, data := range imageScanData {
-		cves := extractCVEs(data.Matches, data.Image)
+		target := data.Target()
+		cves := extractCVEs(data.Matches, target)
 		for _, cve := range cves {
-			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabImageVulnerability(data.Image, cve))
+			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabImageVulnerability(target, cve))
 		}
 	}
 

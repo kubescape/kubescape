@@ -290,6 +290,29 @@ type imageScanService interface {
 	Scan(context.Context, string, imagescan.RegistryCredentials, []string, []string) (*cautils.ImageScanData, error)
 }
 
+type platformImageScanService interface {
+	ScanWithOptions(context.Context, string, imagescan.RegistryCredentials, []string, []string, imagescan.ScanOptions) (*cautils.ImageScanData, error)
+}
+
+func scanImageForPlatform(
+	ctx context.Context,
+	svc imageScanService,
+	img string,
+	creds imagescan.RegistryCredentials,
+	vulnExceptions, sevExceptions []string,
+	platform string,
+) (*cautils.ImageScanData, error) {
+	if platform == "" {
+		return svc.Scan(ctx, img, creds, vulnExceptions, sevExceptions)
+	}
+
+	platformSvc, ok := svc.(platformImageScanService)
+	if !ok {
+		return nil, fmt.Errorf("image scanner does not support target platform %q", platform)
+	}
+	return platformSvc.ScanWithOptions(ctx, img, creds, vulnExceptions, sevExceptions, imagescan.ScanOptions{Platform: platform})
+}
+
 func scanWithRegistryMapping(
 	ctx context.Context,
 	svc imageScanService,
@@ -297,6 +320,7 @@ func scanWithRegistryMapping(
 	credsList []imagescan.RegistryCredentials,
 	registryMapping map[string]string,
 	vulnExceptions, sevExceptions []string,
+	platform string,
 ) (*cautils.ImageScanData, error) {
 	if len(credsList) == 0 {
 		credsList = []imagescan.RegistryCredentials{{}}
@@ -306,7 +330,7 @@ func scanWithRegistryMapping(
 	var scanData *cautils.ImageScanData
 
 	for _, creds := range credsList {
-		scanData, lastErr = svc.Scan(ctx, img, creds, vulnExceptions, sevExceptions)
+		scanData, lastErr = scanImageForPlatform(ctx, svc, img, creds, vulnExceptions, sevExceptions, platform)
 		if lastErr == nil {
 			return scanData, nil
 		}
@@ -317,7 +341,7 @@ func scanWithRegistryMapping(
 			mappedImage, matched, mapErr := applyRegistryMapping(img, registryMapping)
 			if mapErr == nil && matched {
 				logger.L().Info(fmt.Sprintf("Scanning mapped image %s (original: %s)...", mappedImage, img))
-				scanData, fallbackErr := svc.Scan(ctx, mappedImage, creds, vulnExceptions, sevExceptions)
+				scanData, fallbackErr := scanImageForPlatform(ctx, svc, mappedImage, creds, vulnExceptions, sevExceptions, platform)
 				if fallbackErr == nil {
 					return scanData, nil
 				}
@@ -367,7 +391,7 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 
 	imageScanData, err := scanWithRegistryMapping(
 		ks.Context(), svc, imgScanInfo.Image, []imagescan.RegistryCredentials{creds},
-		scanInfo.RegistryMapping, vulnerabilityExceptions, severityExceptions,
+		scanInfo.RegistryMapping, vulnerabilityExceptions, severityExceptions, imgScanInfo.Platform,
 	)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to scan image %s: %s", imgScanInfo.Image, err))
@@ -511,6 +535,7 @@ func (a *ScanErrorAggregator) Error() string {
 // ImageScanJob represents an item of work for the concurrent scanner.
 type ImageScanJob struct {
 	Image                   string
+	Platform                string
 	RegistryCredentials     []imagescan.RegistryCredentials
 	VulnerabilityExceptions []string
 	SeverityExceptions      []string
@@ -520,8 +545,16 @@ type ImageScanJob struct {
 // ImageScanResult conveys the scan output and categorized errors from a worker.
 type ImageScanResult struct {
 	Image    string
+	Platform string
 	ScanData *cautils.ImageScanData
 	Error    error
+}
+
+func imageScanTarget(image, platform string) string {
+	if platform == "" {
+		return image
+	}
+	return image + " [" + platform + "]"
 }
 
 // ImageScanOrchestrator coordinates concurrent image scan execution across a worker pool.
@@ -568,15 +601,17 @@ func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScan
 		go func() {
 			defer wg.Done()
 			for job := range jobChan {
+				target := imageScanTarget(job.Image, job.Platform)
 				select {
 				case <-ctx.Done():
 					cancelErr := fmt.Errorf("scan canceled: %w", ctx.Err())
 					if o.errorAggregator != nil {
-						o.errorAggregator.Add(job.Image, cancelErr)
+						o.errorAggregator.Add(target, cancelErr)
 					}
 					resultChan <- ImageScanResult{
-						Image: job.Image,
-						Error: cancelErr,
+						Image:    job.Image,
+						Platform: job.Platform,
+						Error:    cancelErr,
 					}
 					continue
 				default:
@@ -584,15 +619,19 @@ func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScan
 
 				scanData, err := scanWithRegistryMapping(
 					ctx, o.svc, job.Image, job.RegistryCredentials,
-					job.RegistryMapping, job.VulnerabilityExceptions, job.SeverityExceptions,
+					job.RegistryMapping, job.VulnerabilityExceptions, job.SeverityExceptions, job.Platform,
 				)
+				if scanData != nil && scanData.Platform == "" {
+					scanData.Platform = job.Platform
+				}
 				if err != nil {
 					if o.errorAggregator != nil {
-						o.errorAggregator.Add(job.Image, err)
+						o.errorAggregator.Add(target, err)
 					}
 				}
 				resultChan <- ImageScanResult{
 					Image:    job.Image,
+					Platform: job.Platform,
 					ScanData: scanData,
 					Error:    err,
 				}

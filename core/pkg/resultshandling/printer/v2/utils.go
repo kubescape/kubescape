@@ -441,7 +441,7 @@ func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.
 
 	seenImages := make(map[string]struct{}, len(imageScanData))
 	for i := range imageScanData {
-		image := imageScanData[i].Image
+		image := imageScanData[i].Target()
 		if _, seen := seenImages[image]; !seen {
 			seenImages[image] = struct{}{}
 			imageScanSummary.Images = append(imageScanSummary.Images, image)

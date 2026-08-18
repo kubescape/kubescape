@@ -244,10 +244,11 @@ func imageTestsSuites(imageScanData []cautils.ImageScanData) *JUnitTestSuites {
 
 	suites := make([]JUnitTestSuite, 0, len(imageScanData))
 	for i := range imageScanData {
-		cves := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
+		target := imageScanData[i].Target()
+		cves := extractCVEs(imageScanData[i].Matches, target)
 		suites = append(suites, JUnitTestSuite{
 			ID:        i,
-			Name:      imageScanData[i].Image,
+			Name:      target,
 			Tests:     len(cves),
 			Failures:  len(cves),
 			Timestamp: timestamp,

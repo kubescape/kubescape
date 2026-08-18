@@ -76,6 +76,31 @@ func TestValidateImageScanInfo(t *testing.T) {
 			nil,
 		},
 		{
+			"Canonical image platform is valid",
+			&cautils.ScanInfo{ImagePlatform: "linux/amd64"},
+			nil,
+		},
+		{
+			"Architecture-only image platform is valid",
+			&cautils.ScanInfo{ImagePlatform: "arm64"},
+			nil,
+		},
+		{
+			"Image platform variant is valid",
+			&cautils.ScanInfo{ImagePlatform: "linux/arm/v7"},
+			nil,
+		},
+		{
+			"Invalid image platform is rejected",
+			&cautils.ScanInfo{ImagePlatform: "linux/toaster"},
+			assert.AnError,
+		},
+		{
+			"Operating system without architecture is rejected",
+			&cautils.ScanInfo{ImagePlatform: "linux"},
+			assert.AnError,
+		},
+		{
 			"NaN fail threshold should be invalid",
 			&cautils.ScanInfo{FailThreshold: float32(math.NaN())},
 			ErrBadThreshold,
@@ -100,10 +125,46 @@ func TestValidateImageScanInfo(t *testing.T) {
 
 				got := ValidateImageScanInfo(tc.ScanInfo)
 
-				assert.Equal(t, want, got)
+				if want == assert.AnError {
+					assert.Error(t, got)
+				} else {
+					assert.Equal(t, want, got)
+				}
 			},
 		)
 	}
+}
+
+func TestValidateImageScanInfoNormalizesPlatform(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", input: "", want: ""},
+		{name: "architecture alias", input: "x86_64", want: "linux/amd64"},
+		{name: "ARM alias", input: "aarch64", want: "linux/arm64"},
+		{name: "surrounding whitespace", input: " linux/arm64 ", want: "linux/arm64"},
+		{name: "ARM variant", input: "linux/arm/v7", want: "linux/arm/v7"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{ImagePlatform: tt.input}
+			assert.NoError(t, ValidateImageScanInfo(scanInfo))
+			assert.Equal(t, tt.want, scanInfo.ImagePlatform)
+		})
+	}
+}
+
+func TestValidateImageScanInfoLeavesInvalidPlatformForDiagnostics(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{ImagePlatform: "linux/not-a-real-architecture"}
+
+	err := ValidateImageScanInfo(scanInfo)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), `invalid image platform "linux/not-a-real-architecture"`)
+	assert.Equal(t, "linux/not-a-real-architecture", scanInfo.ImagePlatform)
 }
 
 func TestValidateImageCredentials(t *testing.T) {

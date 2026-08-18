@@ -29,10 +29,22 @@ type ImageScanData struct {
 	Context               pkg.Context
 	IgnoredMatches        []match.IgnoredMatch
 	Image                 string
+	Platform              string
 	Matches               match.Matches
 	Packages              []pkg.Package
 	SBOM                  *sbom.SBOM
 	VulnerabilityProvider vulnerability.Provider
+}
+
+// Target identifies the exact image variant represented by these results.
+// Existing reports keep their original image spelling when no platform was
+// selected, while multi-architecture scans remain distinguishable everywhere
+// the image name is used as a label or grouping key.
+func (d ImageScanData) Target() string {
+	if d.Platform == "" {
+		return d.Image
+	}
+	return d.Image + " [" + d.Platform + "]"
 }
 
 // SkippedManifest records a manifest file that was discovered but could not

@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 )
 
 var (
@@ -30,6 +31,11 @@ func ValidateImageScanInfo(scanInfo *cautils.ScanInfo) error {
 	if err := ValidateThresholds(scanInfo); err != nil {
 		return err
 	}
+	platform, err := imagescan.NormalizePlatform(scanInfo.ImagePlatform)
+	if err != nil {
+		return err
+	}
+	scanInfo.ImagePlatform = platform
 	return nil
 }
 

@@ -384,7 +384,8 @@ func gitLabImageReportFor(t *testing.T, imageScanData []cautils.ImageScanData) g
 func TestGitLabImageScan_LocationHasFile(t *testing.T) {
 	imageScanData := []cautils.ImageScanData{
 		{
-			Image: "nginx:1.25",
+			Image:    "nginx:1.25",
+			Platform: "linux/arm64",
 			Matches: match.NewMatches(match.Match{
 				Package: grypepkg.Package{ID: "pkg-1", Name: "openssl", Version: "3.0.0"},
 				Vulnerability: vulnerability.Vulnerability{
@@ -401,7 +402,7 @@ func TestGitLabImageScan_LocationHasFile(t *testing.T) {
 	assert.Equal(t, "dependency_scanning", report.Scan.Type)
 	assert.NotEmpty(t, report.Vulnerabilities[0].Location.File,
 		"location.file is required by the dependency_scanning schema")
-	assert.Equal(t, "nginx:1.25", report.Vulnerabilities[0].Location.File)
+	assert.Equal(t, "nginx:1.25 [linux/arm64]", report.Vulnerabilities[0].Location.File)
 }
 
 // TestGitLabImageScan_VersionKeyAlwaysPresent guards against #2782's schema violation:

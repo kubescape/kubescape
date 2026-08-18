@@ -86,6 +86,9 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if err := validateControlScanInfo(scanInfo); err != nil {
 				return err
 			}
+			if err := validateCombinedImageScanFlags(scanInfo); err != nil {
+				return err
+			}
 
 			results, err := ks.Scan(scanInfo, policyIdentifiers)
 			if err != nil {
