@@ -628,16 +628,20 @@ func LoadResourcesFromTerraform(ctx context.Context, basePath string) (map[strin
 		return nil, nil
 	}
 
+	explicitTerraformDir := isTerraformDirectory(basePath)
+
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
-	var errs []error
 	for _, dir := range dirs {
 		td := NewTerraformDirectory(dir)
 		wls, dirErrs := td.GetWorkloads(dir)
-		errs = append(errs, dirErrs...)
+		if len(dirErrs) > 0 {
+			if explicitTerraformDir && dir == basePath {
+				return sourceToWorkloads, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(dirErrs...))
+			}
+			logger.L().Ctx(ctx).Warning("Skipping nested Terraform configuration that failed to render", helpers.String("path", dir), helpers.Error(errors.Join(dirErrs...)))
+			continue
+		}
 		maps.Copy(sourceToWorkloads, wls)
-	}
-	if len(errs) > 0 {
-		return sourceToWorkloads, fmt.Errorf("failed to render Terraform resources from %q: %w", basePath, errors.Join(errs...))
 	}
 	return sourceToWorkloads, nil
 }

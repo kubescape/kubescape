@@ -470,6 +470,29 @@ func TestLoadResourcesFromTerraform_DiscoversNestedModuleDirectories(t *testing.
 	assert.Equal(t, "root-config", sourceToWorkloads[nestedFile][0].GetName())
 }
 
+func TestLoadResourcesFromTerraform_MixedSuccessAndFailure(t *testing.T) {
+	root := resolvedTempDir(t)
+	writeTerraformFixture(t, filepath.Join(root, "modules", "good"), "good-config")
+
+	// Create a malformed module
+	badModuleDir := filepath.Join(root, "modules", "bad")
+	require.NoError(t, os.MkdirAll(badModuleDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(badModuleDir, "main.tf"), []byte("this is not valid HCL"), 0o600))
+
+	sourceToWorkloads, err := LoadResourcesFromTerraform(context.Background(), root)
+	require.NoError(t, err, "a single bad module should not fail the whole scan")
+
+	total := 0
+	for _, wls := range sourceToWorkloads {
+		total += len(wls)
+	}
+	require.Equal(t, 1, total, "the good module should still be discovered and rendered")
+
+	goodFile := filepath.Join(root, "modules", "good", "main.tf")
+	require.Contains(t, sourceToWorkloads, goodFile)
+	assert.Equal(t, "good-config", sourceToWorkloads[goodFile][0].GetName())
+}
+
 // A directory with no .tf files anywhere must keep returning (nil, nil), the
 // same "not a Terraform input" signal LoadResourcesFromTerraform always gave,
 // so callers that branch on a nil map don't see a spurious behavior change.
