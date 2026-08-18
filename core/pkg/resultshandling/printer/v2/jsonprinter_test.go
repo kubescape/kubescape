@@ -17,9 +17,8 @@ import (
 )
 
 func TestNewJsonPrinter(t *testing.T) {
-	pp := NewJsonPrinter("")
+	pp := NewJsonPrinter()
 	assert.NotNil(t, pp)
-	assert.Empty(t, pp)
 }
 
 // TestSetWriter_Json_CaseInsensitiveExtension guards against the extension
@@ -93,7 +92,7 @@ func TestScore_Json(t *testing.T) {
 		},
 	}
 
-	jp := NewJsonPrinter("")
+	jp := NewJsonPrinter()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -189,7 +188,7 @@ func jsonPrinterOutput(t *testing.T, session *cautils.OPASessionObj) map[string]
 		_ = os.Remove(tmpJson.Name())
 	}()
 
-	jp := NewJsonPrinter("")
+	jp := NewJsonPrinter()
 	jp.writer = tmpJson
 	require.NoError(t, jp.ActionPrint(context.Background(), session, nil))
 	require.NoError(t, tmpJson.Close())

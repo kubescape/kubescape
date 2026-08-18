@@ -108,7 +108,7 @@ func TestJsonPrinter_ImageScan_HonorsSeverityExceptions(t *testing.T) {
 		assert.NoError(t, os.Remove(tmp.Name()))
 	}()
 
-	jp := NewJsonPrinter("")
+	jp := NewJsonPrinter()
 	jp.writer = tmp
 
 	jp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{imageScanData})
