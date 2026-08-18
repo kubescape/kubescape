@@ -34,7 +34,7 @@ func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = spdxOutputFile
 		}
-		if !strings.HasSuffix(strings.TrimSpace(outputFile), printer.SPDXOutputExt) {
+		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.SPDXOutputExt) {
 			outputFile = outputFile + printer.SPDXOutputExt
 		}
 	}

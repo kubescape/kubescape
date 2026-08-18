@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/anchore/clio"
@@ -38,8 +37,8 @@ func (yp *YamlPrinter) SetWriter(ctx context.Context, outputFile string) error {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = yamlOutputFile
 		}
-		ext := filepath.Ext(strings.TrimSpace(outputFile))
-		if ext != printer.YamlOutputExt && ext != ".yml" {
+		trimmed := strings.TrimSpace(outputFile)
+		if !printer.HasOutputExt(trimmed, printer.YamlOutputExt) && !printer.HasOutputExt(trimmed, ".yml") {
 			outputFile = outputFile + printer.YamlOutputExt
 		}
 	}

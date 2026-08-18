@@ -898,6 +898,48 @@ func TestGetResourcesFromPathLoadsExplicitTerraformFile(t *testing.T) {
 	assert.Equal(t, "terraform-pod", workloads[0].GetName())
 }
 
+// Regression for issue-3348: the Terraform loader used to only inspect the
+// single directory it was pointed at, unlike the Helm/Kustomize loaders which
+// both discover their configs recursively. A module living below the scan
+// root (the common modules/<name>/*.tf layout) was silently never scanned.
+//
+// This scenario mirrors a real modular Terraform repo: a plain YAML manifest
+// sits at the root alongside a module directory. Pre-fix, the YAML manifest
+// alone was enough for the scan to "succeed" while the module's resource
+// vanished with no error and no warning - the worst kind of false negative.
+func TestGetResourcesFromPathLoadsTerraformModuleInSubdirectory(t *testing.T) {
+	dir := t.TempDir()
+	moduleDir := filepath.Join(dir, "modules", "foo")
+	require.NoError(t, os.MkdirAll(moduleDir, 0o750))
+	writeTerraformFixture(t, moduleDir, terraformPodFixture)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(`
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yaml-config
+`), 0o600))
+
+	sources, workloads, skips, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
+
+	require.NoError(t, err)
+	assert.Empty(t, skips)
+	resources := map[string]bool{}
+	for _, workload := range workloads {
+		resources[workload.GetKind()+"/"+workload.GetName()] = true
+	}
+	assert.Equal(t, map[string]bool{
+		"ConfigMap/yaml-config": true,
+		"Pod/terraform-pod":     true,
+	}, resources, "resource defined only in modules/foo/main.tf must be found when scanning the repo root, not silently dropped")
+
+	for _, workload := range workloads {
+		if workload.GetKind() == "Pod" {
+			source := sources[workload.GetID()]
+			assert.Equal(t, "Terraform", source.FileType)
+		}
+	}
+}
+
 func TestGetResourcesFromPathReturnsTerraformErrorForMalformedTerraformOnlyDirectory(t *testing.T) {
 	dir := t.TempDir()
 	writeTerraformFixture(t, dir, `resource "kubernetes_pod_v1" "broken" {`)

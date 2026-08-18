@@ -201,18 +201,16 @@ func TestHTTPHandlerModuleTracksRoot(t *testing.T) {
 // released. Without it, the test above degrades into a report of damage already
 // shipped; this keeps it a gate.
 func TestReleaseWorkflowChecksModuleMajor(t *testing.T) {
-	content, err := os.ReadFile(filepath.Join(workflowsDir(t), releaseWorkflow))
-	require.NoErrorf(t, err, "cannot read %s", releaseWorkflow)
+	content, err := os.ReadFile(filepath.Join(workflowsDir(t), releaseWorkflowName))
+	require.NoErrorf(t, err, "cannot read %s", releaseWorkflowName)
 
 	assert.Containsf(t, string(content), moduleMajorGuardStep,
 		"%s must keep the %q step: it is the only check that runs before a release is published, "+
 			"and it is what stops a vN tag from shipping against a v(N-1) module path",
-		releaseWorkflow, moduleMajorGuardStep)
+		releaseWorkflowName, moduleMajorGuardStep)
 }
 
 const (
-	// releaseWorkflow publishes a release when a vN.N.N tag is pushed.
-	releaseWorkflow = "02-release.yaml"
 
 	// moduleMajorGuardStep is the name of the step in releaseWorkflow that
 	// rejects a tag whose major version the module path does not carry.

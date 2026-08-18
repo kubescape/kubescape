@@ -190,6 +190,7 @@ type ScanInfo struct {
 	ImageScanConcurrency  int               // Number of concurrent workers for image scanning
 	ImagePlatform         string            // OCI platform used for image scanning (os/architecture[/variant])
 	MinSeverity           string            // Only include controls at or above this severity in the output
+	MaxSeverity           string            // Only include controls at or below this severity in the output
 }
 
 type Getters struct {

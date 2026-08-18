@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -58,6 +59,18 @@ const (
 	SPDXOutputExt         = ".spdx.json"
 	PolicyReportOutputExt = ".yaml"
 )
+
+// HasOutputExt reports whether outputFile already ends with ext, compared
+// case-insensitively. Every v2 printer's SetWriter previously re-implemented
+// this check with a case-sensitive filepath.Ext(...) != ext comparison, so
+// --output Report.JSON (or any differently-cased extension) failed the check
+// in every one of them and silently doubled up: Report.JSON.json.
+func HasOutputExt(outputFile, ext string) bool {
+	if len(outputFile) < len(ext) {
+		return false
+	}
+	return strings.EqualFold(outputFile[len(outputFile)-len(ext):], ext)
+}
 
 // FormatOutputExt maps a format to the extension its printer enforces in
 // SetWriter. Callers resolving an --output path must read it from here rather

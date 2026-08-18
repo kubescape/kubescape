@@ -14,7 +14,7 @@ import (
 // whole evaluation while namespace batches come and go.
 const ClusterScope = "clusterScope"
 
-const defaultLargeClusterSize = 2500
+const DefaultLargeClusterSize = 2500
 
 // IsLargeCluster reports whether a cluster of clusterSize resources is large
 // enough to be evaluated one namespace at a time rather than as a single
@@ -25,7 +25,7 @@ const defaultLargeClusterSize = 2500
 // The threshold is overridable through the LARGE_CLUSTER_SIZE environment
 // variable.
 func IsLargeCluster(clusterSize int) bool {
-	largeClusterSize, _ := ParseIntEnvVar("LARGE_CLUSTER_SIZE", defaultLargeClusterSize)
+	largeClusterSize, _ := ParseIntEnvVar("LARGE_CLUSTER_SIZE", DefaultLargeClusterSize)
 	return clusterSize > largeClusterSize
 }
 
@@ -94,7 +94,7 @@ func (batch *ResourceBatch) Len() int {
 //
 // Resource IDs present in the indexes but missing from allResources are
 // skipped rather than materialised as nil entries.
-func PartitionResources(clusterSize int, k8sResources K8SResources, externalResources ExternalResources, allResources map[string]workloadinterface.IMetadata) (resident *ResourceBatch, batches []*ResourceBatch) {
+func PartitionResources(clusterSize int, k8sResources K8SResources, externalResources ExternalResources, allResources map[string]workloadinterface.IMetadata, threshold ...int) (resident *ResourceBatch, batches []*ResourceBatch) {
 	resident = NewResourceBatch(ClusterScope)
 
 	for groupResource, ids := range externalResources {
@@ -108,7 +108,12 @@ func PartitionResources(clusterSize int, k8sResources K8SResources, externalReso
 		}
 	}
 
-	byNamespace := IsLargeCluster(clusterSize)
+	var byNamespace bool
+	if len(threshold) > 0 && threshold[0] > 0 {
+		byNamespace = clusterSize > threshold[0]
+	} else {
+		byNamespace = IsLargeCluster(clusterSize)
+	}
 	namespaced := make(map[string]*ResourceBatch)
 
 	for groupResource, ids := range k8sResources {
