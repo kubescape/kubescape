@@ -117,14 +117,14 @@ can_approve_signers(role) if {
 	targets(rule, "signers")
 	verb_or_wildcard(rule.verbs, "approve")
 
-	# resourceNames must be omitted, kubernetes.io/kube-apiserver-client, or kubernetes.io/*
-	# to allow approving dangerous signers
-	(resourceNames := rule.resourceNames; resourceNames = []) or
-	(resourceNames := rule.resourceNames; length(resourceNames) = 1 and
-		(resourceNames[0] = "kubernetes.io/kube-apiserver-client" or
-		 startswith(resourceNames[0], "kubernetes.io/")))
+	# resourceNames must be omitted, "*", "kubernetes.io/*", "kubernetes.io/kube-apiserver-client", or "kubernetes.io/kube-apiserver-client-kubelet"
+	rn := rule.resourceNames
+	object.get(rn, 0, "") = "" or
+	(object.get(rn, 0, "") = "*" or
+	 object.get(rn, 0, "") = "kubernetes.io/kube-apiserver-client" or
+	 startswith(object.get(rn, 0, ""), "kubernetes.io/") or
+	 object.get(rn, 0, "") = "kubernetes.io/kube-apiserver-client-kubelet")
 }
-
 # An entry contributes to the reported paths when it participates in any leg of
 # the chain, so the alert points at every grant that made the subject dangerous.
 csr_related(rule) if {
