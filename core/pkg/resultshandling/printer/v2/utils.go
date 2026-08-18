@@ -31,7 +31,47 @@ type ControlSummaryWithSeverity struct {
 // ResourceAssociatedControlWithSeverity wraps ResourceAssociatedControl to add severity field
 type ResourceAssociatedControlWithSeverity struct {
 	resourcesresults.ResourceAssociatedControl
-	Severity string `json:"severity"`
+	Severity string      `json:"severity"`
+	Evidence []PathValue `json:"evidence,omitempty"`
+}
+
+// PathValue pairs a failed path with the current value read from the
+// resource object at that path. It's additive alongside the existing
+// FailedPath/ReviewPath/FixPath strings already present on
+// ResourceAssociatedControl - those are unchanged, so any existing
+// consumer parsing them sees no difference; Evidence is a new, separate
+// field a consumer opts into reading.
+type PathValue struct {
+	Path  string `json:"path"`
+	Value string `json:"value,omitempty"`
+}
+
+// failedPathValues resolves each of control's FailedPaths against
+// resource's captured object, skipping paths whose value is sensitive (see
+// isSensitivePath) or that can't be resolved. An unresolved path is not
+// treated as an error: a rule's FailedPath can legitimately not match this
+// particular resource variant (e.g. a field that's absent rather than
+// present-and-wrong), so it's silently omitted from Evidence rather than
+// reported as a value.
+func failedPathValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []PathValue {
+	if control == nil || resource == nil {
+		return nil
+	}
+	obj := resource.GetObject()
+	kind := resource.GetKind()
+	var out []PathValue
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			p := control.ResourceAssociatedRules[j].Paths[k].FailedPath
+			if p == "" || isSensitivePath(kind, p) {
+				continue
+			}
+			if val, ok := extractValueAtPath(obj, p); ok {
+				out = append(out, PathValue{Path: p, Value: val})
+			}
+		}
+	}
+	return out
 }
 
 // ResultWithSeverity wraps Result to include severity in associated controls
@@ -85,10 +125,13 @@ func enrichControlsWithSeverity(controls reportsummary.ControlSummaries) map[str
 	return enrichedControls
 }
 
-// enrichResultsWithSeverity adds severity field to controls in results
-func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummaries reportsummary.ControlSummaries) []ResultWithSeverity {
+// enrichResultsWithSeverity adds severity field to controls in results, and
+// - when allResources has an entry for the result's ResourceID - resolved
+// evidence values for each control's failed paths.
+func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummaries reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata) []ResultWithSeverity {
 	enrichedResults := make([]ResultWithSeverity, len(results))
 	for i, result := range results {
+		resource := allResources[result.ResourceID]
 		enrichedControls := make([]ResourceAssociatedControlWithSeverity, len(result.AssociatedControls))
 		for j, control := range result.AssociatedControls {
 			// Get the severity from the control summary
@@ -99,6 +142,7 @@ func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummari
 			enrichedControls[j] = ResourceAssociatedControlWithSeverity{
 				ResourceAssociatedControl: control,
 				Severity:                  severity,
+				Evidence:                  failedPathValues(&control, resource),
 			}
 		}
 		enrichedResults[i] = ResultWithSeverity{
@@ -169,7 +213,7 @@ func ConvertToPostureReportWithSeverityLabelsAndCoverage(report *reporthandlingv
 		return nil
 	}
 	enrichedControls := enrichControlsWithSeverity(report.SummaryDetails.Controls)
-	enrichedResults := enrichResultsWithSeverity(report.Results, report.SummaryDetails.Controls)
+	enrichedResults := enrichResultsWithSeverity(report.Results, report.SummaryDetails.Controls, allResources)
 
 	// Extract labels from resources if labelsToCopy is specified
 	var resourceLabels map[string]map[string]string
