@@ -115,7 +115,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				return err
 			}
 
-			return nil
+			return enforceBaselineDrift(ks.Context(), results, scanInfo)
 		},
 	}
 }

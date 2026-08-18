@@ -135,7 +135,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
 				return err
 			}
-			return nil
+			return enforceBaselineDrift(ks.Context(), results, scanInfo)
 		},
 	}
 
