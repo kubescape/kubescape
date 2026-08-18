@@ -1217,8 +1217,8 @@ github.com/kubescape/go-logger v0.0.28 h1:xulKTp9kOg3rD98sopFELQ6yZCHQoQXMDzteoS
 github.com/kubescape/go-logger v0.0.28/go.mod h1:YZHFjwGCDar1hP9OyBLE46oR7a0Y/Z/0FperDo8+9D0=
 github.com/kubescape/opa-utils v0.0.307 h1:YqJ26YGMVSGN1JBu3z95jH/7BxKoTp6nbhTCNoN6ZcY=
 github.com/kubescape/opa-utils v0.0.307/go.mod h1:dWNcjmiTwGYlNmclXvDvgH7UlLdpDvmEc9T7ACTqLo0=
-github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 h1:SqlwF8G+oFazeYmZQKoPczLEflBQpwpHCU8DoLLyfj8=
-github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520/go.mod h1:wuxMUSDzGUyWd25IJfBzEJ/Udmw2Vy7npj+MV3u3GrU=
+github.com/kubescape/rbac-utils v0.0.21 h1:iRaGX8WKBd94dg31vpX10LHWoQZ/QKO5AMLzQf3kEkc=
+github.com/kubescape/rbac-utils v0.0.21/go.mod h1:t57AhSrjuNGQ+mpZWQM/hBzrCOeKBDHegFoVo4tbikQ=
 github.com/kubescape/regolibrary/v2 v2.0.1 h1:7lKj171gslgTbbcmmGVHk34AZNqxForOXZIINoQfdzQ=
 github.com/kubescape/regolibrary/v2 v2.0.1/go.mod h1:s0/Mi9PYw7s91vIf1VJTkuu1Blsl5ZLpYn5UA7yk/vM=
 github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73 h1:XEAryANSWXNEytHoPITzlCTOR2S4bpa30keR39qMNRI=
