@@ -66,7 +66,10 @@ const (
 // --output Report.JSON (or any differently-cased extension) failed the check
 // in every one of them and silently doubled up: Report.JSON.json.
 func HasOutputExt(outputFile, ext string) bool {
-	return strings.EqualFold(filepath.Ext(outputFile), ext)
+	if len(outputFile) < len(ext) {
+		return false
+	}
+	return strings.EqualFold(outputFile[len(outputFile)-len(ext):], ext)
 }
 
 // FormatOutputExt maps a format to the extension its printer enforces in

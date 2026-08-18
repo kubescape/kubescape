@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -97,8 +96,7 @@ func (pp *PolicyReportPrinter) SetWriter(ctx context.Context, outputFile string)
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = policyReportOutputFile
 		}
-		ext := filepath.Ext(strings.TrimSpace(outputFile))
-		if ext != printer.YamlOutputExt && ext != ".yml" {
+		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.YamlOutputExt) && !printer.HasOutputExt(strings.TrimSpace(outputFile), ".yml") {
 			outputFile = outputFile + printer.YamlOutputExt
 		}
 		var err error

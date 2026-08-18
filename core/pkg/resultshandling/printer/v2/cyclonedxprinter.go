@@ -34,7 +34,7 @@ func (cp *CycloneDXPrinter) SetWriter(ctx context.Context, outputFile string) er
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = cyclonedxOutputFile
 		}
-		if !strings.HasSuffix(strings.TrimSpace(outputFile), printer.CycloneDXOutputExt) {
+		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.CycloneDXOutputExt) {
 			outputFile = outputFile + printer.CycloneDXOutputExt
 		}
 	}

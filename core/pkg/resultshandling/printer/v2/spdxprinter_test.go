@@ -33,6 +33,16 @@ func TestSetWriter_SPDX_AppendsExtension(t *testing.T) {
 	assert.Contains(t, sp.writer.Name(), ".spdx.json")
 }
 
+func TestSetWriter_SPDX_CaseInsensitiveExtension(t *testing.T) {
+	sp := NewSPDXPrinter()
+	tmpDir := t.TempDir()
+	sp.SetWriter(context.TODO(), tmpDir+"/Report.SPDX.JSON")
+	defer sp.CloseWriter()
+
+	assert.NotContains(t, sp.writer.Name(), ".spdx.json.spdx.json")
+	assert.Contains(t, sp.writer.Name(), "Report.SPDX.JSON")
+}
+
 func TestActionPrint_SPDX_ImageScan(t *testing.T) {
 	imageScanData := []cautils.ImageScanData{buildSeverityExceptionImageScanData()}
 

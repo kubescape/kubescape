@@ -225,6 +225,10 @@ func TestHasOutputExt(t *testing.T) {
 		{"different extension does not match", "report.yaml", ".json", false},
 		{"no extension does not match", "report", ".json", false},
 		{"empty outputFile does not match", "", ".json", false},
+		{"compound lowercase match", "report.cdx.json", ".cdx.json", true},
+		{"compound uppercase match", "Report.CDX.JSON", ".cdx.json", true},
+		{"compound partial match", "report.cdx.json", ".json", true},
+		{"compound different extension", "report.spdx.json", ".cdx.json", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
