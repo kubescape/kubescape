@@ -182,3 +182,11 @@ func TestPreflightSkipsAccessReviewForUnlistableResource(t *testing.T) {
 	require.Len(t, result.Checks, 1)
 	assert.Equal(t, "agents.x-k8s.io/v1alpha1/sandboxes", result.Checks[0].GVR)
 }
+
+func TestIsExplicitPolicyMatch(t *testing.T) {
+	assert.True(t, isExplicitPolicyMatch("agents.x-k8s.io", "v1alpha1", "Sandbox"))
+	assert.True(t, isExplicitPolicyMatch("", "v1", "Pod"))
+	assert.False(t, isExplicitPolicyMatch("*", "v1alpha1", "Sandbox"))
+	assert.False(t, isExplicitPolicyMatch("agents.x-k8s.io", "*", "Sandbox"))
+	assert.False(t, isExplicitPolicyMatch("agents.x-k8s.io", "v1alpha1", "*"))
+}

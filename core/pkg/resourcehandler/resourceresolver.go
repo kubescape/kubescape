@@ -241,11 +241,20 @@ func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resource
 			// below must not resurrect the GVR it declared unlistable.
 			sort.Strings(skippedUnlistable)
 			logOnce("unlistable:"+k8sinterface.JoinResourceTriplets(group, version, resource), func() {
-				logger.L().Debug("resource does not support list in Kubernetes discovery; skipping live query",
+				details := []helpers.IDetails{
 					helpers.String("apiGroup", group),
 					helpers.String("apiVersion", version),
 					helpers.String("resource", resource),
-					helpers.String("skipped", strings.Join(skippedUnlistable, ",")))
+					helpers.String("skipped", strings.Join(skippedUnlistable, ",")),
+				}
+				// A policy that names the resource outright loses its only
+				// input, which is worth a warning. A wildcard match sweeping
+				// past create-only endpoints is expected, so keep it quiet.
+				if isExplicitPolicyMatch(group, version, resource) {
+					logger.L().Warning("resource does not support list in Kubernetes discovery; skipping live query", details...)
+					return
+				}
+				logger.L().Debug("resource does not support list in Kubernetes discovery; skipping live query", details...)
 			})
 			return nil
 		}
@@ -410,6 +419,12 @@ func collectDiscoveredResources(resourceLists []*metav1.APIResourceList) []disco
 		}
 	}
 	return discovered
+}
+
+// isExplicitPolicyMatch reports whether a rule match names a single resource
+// identity rather than relying on wildcard expansion.
+func isExplicitPolicyMatch(group, version, resource string) bool {
+	return group != "*" && version != "*" && resource != "*"
 }
 
 // discoveryDeclaresList reports whether the API server advertises "list" for a
