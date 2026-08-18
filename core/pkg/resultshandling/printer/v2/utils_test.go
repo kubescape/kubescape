@@ -1279,3 +1279,29 @@ func TestFilterBySeverity_EmptyMinSeverityNoOp(t *testing.T) {
 	FilterBySeverity(report, "")
 	assert.Len(t, report.SummaryDetails.Controls, 1)
 }
+
+func TestBuildImageScanSummary_CarriesVulnDBBuilt(t *testing.T) {
+	builtAt := time.Now().Add(-24 * time.Hour).Truncate(time.Second)
+
+	imageData := []cautils.ImageScanData{
+		{Image: "img:1", VulnDBBuilt: &builtAt},
+		{Image: "img:2"}, // no built time; first non-nil wins
+	}
+
+	summary := buildImageScanSummary(imageData)
+
+	require.NotNil(t, summary)
+	assert.Equal(t, builtAt, *summary.VulnDBBuilt)
+	assert.Equal(t, []string{"img:1", "img:2"}, summary.Images)
+}
+
+func TestBuildImageScanSummary_NilWhenNoBuilt(t *testing.T) {
+	imageData := []cautils.ImageScanData{
+		{Image: "img:1"},
+	}
+
+	summary := buildImageScanSummary(imageData)
+
+	require.NotNil(t, summary)
+	assert.Nil(t, summary.VulnDBBuilt)
+}

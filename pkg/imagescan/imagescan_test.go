@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/adrg/xdg"
 
@@ -13,6 +14,7 @@ import (
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/stereoscope/pkg/image"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -125,6 +127,47 @@ func matchIDs(matches match.Matches) []string {
 		ids = append(ids, m.Vulnerability.ID)
 	}
 	return ids
+}
+
+func TestApplyDBFreshness(t *testing.T) {
+	builtAt := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
+
+	tests := []struct {
+		name     string
+		status   *vulnerability.ProviderStatus
+		wantSet  bool
+	}{
+		{
+			name:    "nil status leaves field unset",
+			status:  nil,
+			wantSet: false,
+		},
+		{
+			name:    "zero Built leaves field unset",
+			status:  &vulnerability.ProviderStatus{},
+			wantSet: false,
+		},
+		{
+			name: "Built is surfaced",
+			status: &vulnerability.ProviderStatus{
+				Built: builtAt,
+			},
+			wantSet: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pb := &cautils.ImageScanData{}
+			applyDBFreshness(pb, tt.status)
+			if tt.wantSet {
+				require.NotNil(t, pb.VulnDBBuilt)
+				assert.Equal(t, builtAt, *pb.VulnDBBuilt)
+			} else {
+				assert.Nil(t, pb.VulnDBBuilt)
+			}
+		})
+	}
 }
 
 func TestParseSeverity(t *testing.T) {

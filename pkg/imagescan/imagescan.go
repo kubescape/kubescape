@@ -167,6 +167,9 @@ type Service struct {
 	// Used by MCP server to restrict scans to remote registry providers.
 	sources []string
 	vp      vulnerability.Provider
+	// dbStatus carries the loaded vulnerability DB status so scan results can
+	// surface DB freshness (ProviderStatus.Built). Nil when the DB failed to load.
+	dbStatus *vulnerability.ProviderStatus
 }
 
 func getIgnoredMatches(vulnerabilityExceptions []string, vp vulnerability.Provider, packages []pkg.Package, pkgContext pkg.Context, useDefaultMatchers bool) (*match.Matches, []match.IgnoredMatch, error) {
@@ -253,7 +256,18 @@ func (s *Service) Scan(_ context.Context, userInput string, creds RegistryCreden
 		SBOM:                  sbom,
 		VulnerabilityProvider: s.vp,
 	}
+
+	applyDBFreshness(&pb, s.dbStatus)
+
 	return &pb, nil
+}
+
+// applyDBFreshness sets VulnDBBuilt on the scan result from the loaded DB
+// status. It is a no-op when the status is nil or the build time is unknown.
+func applyDBFreshness(pb *cautils.ImageScanData, status *vulnerability.ProviderStatus) {
+	if status != nil && !status.Built.IsZero() {
+		pb.VulnDBBuilt = &status.Built
+	}
 }
 
 // ExceedsSeverityThreshold returns true if vulnerabilities in the scan results exceed the severity threshold, false otherwise.
@@ -320,6 +334,7 @@ func NewScanServiceWithMatchersAndSources(distCfg distribution.Config, installCf
 	}
 	return &Service{
 		vp:                 vp,
+		dbStatus:           status,
 		useDefaultMatchers: useDefaultMatchers,
 		sources:            sources,
 	}, nil

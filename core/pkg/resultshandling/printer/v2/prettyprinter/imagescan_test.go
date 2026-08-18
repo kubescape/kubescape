@@ -3,9 +3,13 @@ package prettyprinter
 import (
 	"io"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 )
 
 func TestNewImagePrinter(t *testing.T) {
@@ -92,4 +96,54 @@ func TestPrintNextSteps_ImageScan(t *testing.T) {
 			assert.Equal(t, tt.want, string(got))
 		})
 	}
+}
+
+func TestPrintImageScanningSummary_DBLinePresentWhenBuilt(t *testing.T) {
+	builtAt := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
+	summary := imageprinter.ImageScanSummary{
+		CVEs:                  []imageprinter.CVE{},
+		PackageScores:         map[string]*imageprinter.PackageScore{},
+		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
+		Images:                []string{"img:1"},
+		VulnDBBuilt:           &builtAt,
+	}
+
+	f, err := os.CreateTemp("", "db-line")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	printImageScanningSummary(f, summary, false)
+
+	f.Seek(0, 0)
+	got, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Contains(t, string(got), "Vulnerability DB built: "+builtAt.UTC().Format("2006-01-02"))
+}
+
+func TestPrintImageScanningSummary_NoDBLineWhenNil(t *testing.T) {
+	summary := imageprinter.ImageScanSummary{
+		CVEs:                  []imageprinter.CVE{},
+		PackageScores:         map[string]*imageprinter.PackageScore{},
+		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
+		Images:                []string{"img:1"},
+	}
+
+	f, err := os.CreateTemp("", "db-line")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	printImageScanningSummary(f, summary, false)
+
+	f.Seek(0, 0)
+	got, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.False(t, strings.Contains(string(got), "Vulnerability DB built:"))
 }
