@@ -140,6 +140,15 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan, resolver)
 	}
 
+	// Apply kind filter before external resource collection (host, RBAC, cloud)
+	// so that external control-plane data added below is never discarded.
+	// Pass the single-resource-scan target so the filter can fail fast instead
+	// of silently dropping the explicitly requested workload.
+	if err := applyKindFilter(k8sResourcesMap, allResources, scanInfo, sessionObj.SingleResourceScan); err != nil {
+		cautils.StopSpinner()
+		return nil, nil, nil, nil, err
+	}
+
 	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
 	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
 
@@ -429,6 +438,15 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 
 	if !scanInfo.IsDeletedScanObject && sessionObj.SingleResourceScan != nil {
 		addSingleResourceToResourceMaps(resident.K8SResources, allResources, sessionObj.SingleResourceScan, resolver)
+	}
+
+	if err := applyKindFilter(resident.K8SResources, resident.AllResources, scanInfo, sessionObj.SingleResourceScan); err != nil {
+		return err
+	}
+	for _, batch := range namespaceBatches {
+		if err := applyKindFilter(batch.K8SResources, batch.AllResources, scanInfo, nil); err != nil {
+			return err
+		}
 	}
 
 	// Match the eager collector's metric timing: report the complete Kubernetes

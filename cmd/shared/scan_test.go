@@ -224,3 +224,77 @@ func TestValidateCommonScanFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateKindFilters(t *testing.T) {
+	tests := []struct {
+		name         string
+		includeKinds string
+		excludeKinds string
+		expectedErr  string
+	}{
+		{
+			name:         "both empty is valid",
+			includeKinds: "",
+			excludeKinds: "",
+			expectedErr:  "",
+		},
+		{
+			name:         "valid include-kinds",
+			includeKinds: "Deployment,DaemonSet",
+			excludeKinds: "",
+			expectedErr:  "",
+		},
+		{
+			name:         "valid exclude-kinds",
+			includeKinds: "",
+			excludeKinds: "Job,CronJob",
+			expectedErr:  "",
+		},
+		{
+			name:         "both set is valid",
+			includeKinds: "Deployment",
+			excludeKinds: "DaemonSet",
+			expectedErr:  "",
+		},
+		{
+			name:         "include-kinds whitespace-only tokens are rejected",
+			includeKinds: " , , ",
+			excludeKinds: "",
+			expectedErr:  "contains no valid kind names",
+		},
+		{
+			name:         "exclude-kinds whitespace-only tokens are rejected",
+			includeKinds: "",
+			excludeKinds: "  ,  ",
+			expectedErr:  "contains no valid kind names",
+		},
+		{
+			name:         "single valid kind in include",
+			includeKinds: "Pod",
+			excludeKinds: "",
+			expectedErr:  "",
+		},
+		{
+			name:         "padded valid kind passes",
+			includeKinds: "  Deployment  ",
+			excludeKinds: "",
+			expectedErr:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				IncludeKinds: tt.includeKinds,
+				ExcludeKinds: tt.excludeKinds,
+			}
+			err := ValidateKindFilters(scanInfo)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}

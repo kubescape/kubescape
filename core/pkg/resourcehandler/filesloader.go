@@ -103,6 +103,10 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	// save input resource in resource maps
 	addSingleResourceToResourceMaps(k8sResources, allResources, sessionObj.SingleResourceScan, offlineResolver)
 
+	if err := applyKindFilter(k8sResources, allResources, scanInfo, sessionObj.SingleResourceScan); err != nil {
+		return nil, nil, nil, nil, err
+	}
+
 	return k8sResources, allResources, externalResources, excludedRulesMap, nil
 }
 
