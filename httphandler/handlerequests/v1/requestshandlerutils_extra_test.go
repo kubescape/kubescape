@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
@@ -86,6 +87,9 @@ func TestWriteScanErrorToFile(t *testing.T) {
 // exercise the MkdirAll call - t.TempDir() itself always exists, so this
 // nests one level under it.
 func TestWriteScanErrorToFile_CreatesDirectoryWithRestrictivePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping directory permission test on Windows")
+	}
 	nested := filepath.Join(t.TempDir(), "failed")
 	oldFailedOutputDir := FailedOutputDir
 	FailedOutputDir = nested
