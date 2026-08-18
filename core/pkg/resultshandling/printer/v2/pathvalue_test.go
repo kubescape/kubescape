@@ -172,8 +172,27 @@ func TestExtractValueAtPath(t *testing.T) {
 		},
 	}
 
+	mapSliceObj := map[string]any{
+		"spec": map[string]any{
+			"containers": []map[string]any{
+				{
+					"name":  "main",
+					"image": "nginx:latest",
+					"securityContext": map[string]any{
+						"privileged": true,
+					},
+				},
+				{
+					"name":  "sidecar",
+					"image": "envoy:v1",
+				},
+			},
+		},
+	}
+
 	cases := []struct {
 		name   string
+		obj    map[string]any
 		path   string
 		want   string
 		wantOK bool
@@ -282,7 +301,36 @@ func TestExtractValueAtPath(t *testing.T) {
 		},
 		{
 			name:   "empty object",
+			obj:    map[string]any{},
 			path:   "spec.containers[0].image",
+			want:   "",
+			wantOK: false,
+		},
+		{
+			name:   "indexed path into []map[string]any",
+			obj:    mapSliceObj,
+			path:   "spec.containers[0].image",
+			want:   "nginx:latest",
+			wantOK: true,
+		},
+		{
+			name:   "second index into []map[string]any",
+			obj:    mapSliceObj,
+			path:   "spec.containers[1].image",
+			want:   "envoy:v1",
+			wantOK: true,
+		},
+		{
+			name:   "nested key after indexing []map[string]any",
+			obj:    mapSliceObj,
+			path:   "spec.containers[0].securityContext.privileged",
+			want:   "true",
+			wantOK: true,
+		},
+		{
+			name:   "out-of-range index into []map[string]any",
+			obj:    mapSliceObj,
+			path:   "spec.containers[5].image",
 			want:   "",
 			wantOK: false,
 		},
@@ -291,8 +339,8 @@ func TestExtractValueAtPath(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			obj := deploymentObj
-			if tc.name == "empty object" {
-				obj = map[string]any{}
+			if tc.obj != nil {
+				obj = tc.obj
 			}
 			got, ok := extractValueAtPath(obj, tc.path)
 			assert.Equal(t, tc.wantOK, ok, "ok mismatch")

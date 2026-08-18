@@ -3,6 +3,7 @@ package printer
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -110,24 +111,50 @@ func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 				return "", false
 			}
 			if seg.index >= 0 {
-				arr, ok := next.([]any)
-				if !ok || seg.index >= len(arr) {
+				elem, ok := indexList(next, seg.index)
+				if !ok {
 					return "", false
 				}
-				cur = arr[seg.index]
+				cur = elem
 			} else {
 				cur = next
 			}
-		case []any:
-			if seg.index < 0 || seg.index >= len(v) {
+		default:
+			elem, ok := indexList(v, seg.index)
+			if !ok {
 				return "", false
 			}
-			cur = v[seg.index]
-		default:
-			return "", false
+			cur = elem
 		}
 	}
 	return anyToString(cur)
+}
+
+// indexList returns the element at index i of a slice. JSON-decoded objects
+// use []any; conversions often produce []map[string]any instead, and the
+// previous []any-only assert dropped those lookups. Other slice types are
+// indexed through reflection. Out-of-range indexes fail closed.
+func indexList(v any, i int) (any, bool) {
+	if i < 0 {
+		return nil, false
+	}
+	switch arr := v.(type) {
+	case []any:
+		if i >= len(arr) {
+			return nil, false
+		}
+		return arr[i], true
+	case []map[string]any:
+		if i >= len(arr) {
+			return nil, false
+		}
+		return arr[i], true
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Slice || i >= rv.Len() {
+		return nil, false
+	}
+	return rv.Index(i).Interface(), true
 }
 
 // isSensitivePath reports whether a path targets a field whose value must
