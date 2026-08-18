@@ -137,9 +137,9 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		initialResourceCount = len(sessionObj.AllResources)
 	}
 
-	largeClusterSizeThreshold, _ := cautils.ParseIntEnvVar("LARGE_CLUSTER_SIZE", 2500)
+	largeClusterSizeThreshold, _ := cautils.ParseIntEnvVar("LARGE_CLUSTER_SIZE", cautils.DefaultLargeClusterSize)
 	if largeClusterSizeThreshold <= 0 {
-		largeClusterSizeThreshold = 2500
+		largeClusterSizeThreshold = cautils.DefaultLargeClusterSize
 	}
 
 	return &OPAProcessor{
