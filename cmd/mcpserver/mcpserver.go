@@ -1191,7 +1191,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 	}
 }
 
-func mcpServerEntrypoint() error {
+func mcpServerEntrypoint(transport string, port int) error {
 	logger.L().Info("Starting MCP server...")
 
 	// Create a new MCP server
@@ -1226,12 +1226,23 @@ func mcpServerEntrypoint() error {
 	createIaCControlScanningTool(ksServer)
 	createControlScanningTools(ksServer)
 	createPolicyListingTools(ksServer)
+	createAdvancedTools(ksServer)
 
 	// Start the server
-	if err := server.ServeStdio(s); err != nil {
-		return fmt.Errorf("server error: %w", err)
+	if transport == "sse" {
+		sseServer := server.NewSSEServer(s)
+		addr := fmt.Sprintf(":%d", port)
+		logger.L().Info("Starting SSE server", helpers.String("addr", addr))
+		if err := sseServer.Start(addr); err != nil {
+			return fmt.Errorf("sse server error: %w", err)
+		}
+		return nil
+	} else {
+		if err := server.ServeStdio(s); err != nil {
+			return fmt.Errorf("server error: %w", err)
+		}
+		return nil
 	}
-	return nil
 }
 
 func createRBACScanningTools(ksServer *KubescapeMcpserver) {
@@ -1329,13 +1340,17 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 }
 
 func GetMCPServerCmd() *cobra.Command {
+	var transport string
+	var port int
 	cmd := &cobra.Command{
 		Use:   "mcpserver",
 		Short: "Start the Kubescape MCP server",
 		Long:  `Start the Kubescape MCP server`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return mcpServerEntrypoint()
+			return mcpServerEntrypoint(transport, port)
 		},
 	}
+	cmd.Flags().StringVarP(&transport, "transport", "t", "stdio", "Transport protocol to use (stdio or sse)")
+	cmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to use for SSE transport")
 	return cmd
 }
