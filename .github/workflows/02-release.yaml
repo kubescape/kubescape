@@ -36,6 +36,50 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Go resolves a module by the major version written into its path, so a
+      # vN tag on a module declaring /v(N-1) publishes a release that nobody
+      # can `go get`. That is not hypothetical: v4.0.0 through v4.0.12 shipped
+      # against a `/v3` module path and were all uninstallable as Go modules.
+      #
+      # Tagging touches no file, so no pull-request check can catch this; it
+      # has to be asserted against the tag itself. Kept first in the job so a
+      # mistagged release fails in seconds, before any artifact is built,
+      # signed or pushed. internal/ghworkflows asserts this step still exists.
+      - name: Verify module path matches release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          tag_major="$(printf '%s' "$TAG" | sed -n 's|^v\([0-9][0-9]*\)\..*|\1|p')"
+          if [ -z "$tag_major" ]; then
+            echo "::error::cannot read a major version from tag '$TAG'"
+            exit 1
+          fi
+
+          # Module paths carry the major version as a /vN suffix from v2 on;
+          # v0 and v1 carry none.
+          if [ "$tag_major" -le 1 ]; then
+            want=""
+          else
+            want="/v$tag_major"
+          fi
+
+          rc=0
+          for dir in . httphandler; do
+            path="$(sed -n 's|^module[[:space:]][[:space:]]*||p' "$dir/go.mod" | head -n1)"
+            # The submodule's path is the root module's path plus /httphandler.
+            base="${path%/httphandler}"
+            got="$(printf '%s' "$base" | sed -n 's|.*\(/v[0-9][0-9]*\)$|\1|p')"
+
+            if [ "$got" != "$want" ]; then
+              echo "::error file=$dir/go.mod::module path '$path' does not match release tag $TAG (expected it to end in '${want:-no /vN suffix}'). Releasing this tag would produce a version that cannot be resolved with 'go get' or 'go install'."
+              rc=1
+            fi
+          done
+          exit $rc
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"

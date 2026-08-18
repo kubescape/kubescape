@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
-	"github.com/kubescape/kubescape/v3/core/meta"
+	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/spf13/cobra"
 )
 

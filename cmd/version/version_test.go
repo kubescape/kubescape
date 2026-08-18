@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
-	"github.com/kubescape/kubescape/v3/core/core"
+	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

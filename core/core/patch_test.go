@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/moby/buildkit/client"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"

@@ -1,8 +1,8 @@
 package anonymizer
 
 import (
-	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )

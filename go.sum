@@ -600,6 +600,7 @@ github.com/dimchansky/utfbom v1.1.1 h1:vV6w1AhK4VMnhBno/TPVCoK9U/LP0PkLCS9tbxHdi
 github.com/dimchansky/utfbom v1.1.1/go.mod h1:SxdoEBH5qIqFocHMyGOXVAybYJdr71b1Q/j0mACtrfE=
 github.com/diskfs/go-diskfs v1.7.0 h1:vonWmt5CMowXwUc79jWyGrf2DIMeoOjkLlMnQYGVOs8=
 github.com/diskfs/go-diskfs v1.7.0/go.mod h1:LhQyXqOugWFRahYUSw47NyZJPezFzB9UELwhpszLP/k=
+github.com/distribution/distribution v2.8.3+incompatible h1:RlpEXBLq/WPXYvBYMDAmBX/SnhD67qwtvW/DzKc8pAo=
 github.com/distribution/distribution/v3 v3.0.0 h1:q4R8wemdRQDClzoNNStftB2ZAfqOiN6UX90KJc4HjyM=
 github.com/distribution/distribution/v3 v3.0.0/go.mod h1:tRNuFoZsUdyRVegq8xGNeds4KLjwLCRin/tTo6i1DhU=
 github.com/distribution/reference v0.6.0 h1:0IXCQ5g4/QMHHkarYzh5l+u8T3t73zM5QvfrDyIgxBk=
@@ -1215,10 +1216,14 @@ github.com/kubescape/go-git-url v0.0.31 h1:VZnvtdGLVc42cQaR7llQeGZz0PnOxcs+eDig2
 github.com/kubescape/go-git-url v0.0.31/go.mod h1:3ddc1HEflms1vMhD9owt/3FBES070UaYTUarcjx8jDk=
 github.com/kubescape/go-logger v0.0.28 h1:xulKTp9kOg3rD98sopFELQ6yZCHQoQXMDzteoSHDFKI=
 github.com/kubescape/go-logger v0.0.28/go.mod h1:YZHFjwGCDar1hP9OyBLE46oR7a0Y/Z/0FperDo8+9D0=
+github.com/kubescape/kubescape/v3 v3.0.4 h1:gZ5d8QMxLYZQ6Yz9wRvGcDQlBUIV+v/Y/41g56/YDy8=
+github.com/kubescape/kubescape/v3 v3.0.4/go.mod h1:upPCVTCRT3+LuZ1bawGtjreRmr/Xa+LT0fHtPzlylRU=
 github.com/kubescape/opa-utils v0.0.307 h1:YqJ26YGMVSGN1JBu3z95jH/7BxKoTp6nbhTCNoN6ZcY=
 github.com/kubescape/opa-utils v0.0.307/go.mod h1:dWNcjmiTwGYlNmclXvDvgH7UlLdpDvmEc9T7ACTqLo0=
 github.com/kubescape/rbac-utils v0.0.21 h1:iRaGX8WKBd94dg31vpX10LHWoQZ/QKO5AMLzQf3kEkc=
 github.com/kubescape/rbac-utils v0.0.21/go.mod h1:t57AhSrjuNGQ+mpZWQM/hBzrCOeKBDHegFoVo4tbikQ=
+github.com/kubescape/regolibrary v1.0.317-0.20240320124840-1d84ac7186ea h1:hLUe+1bdhiBD7xM/jliQozVd1NLYn1afQLxl5trQdPk=
+github.com/kubescape/regolibrary v1.0.317-0.20240320124840-1d84ac7186ea/go.mod h1:RK9dHjllKFnISDmVExQlI1B1z93TlQsAu/Kq9c0mt2U=
 github.com/kubescape/regolibrary/v2 v2.0.1 h1:7lKj171gslgTbbcmmGVHk34AZNqxForOXZIINoQfdzQ=
 github.com/kubescape/regolibrary/v2 v2.0.1/go.mod h1:s0/Mi9PYw7s91vIf1VJTkuu1Blsl5ZLpYn5UA7yk/vM=
 github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73 h1:XEAryANSWXNEytHoPITzlCTOR2S4bpa30keR39qMNRI=

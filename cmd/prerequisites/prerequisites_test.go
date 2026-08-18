@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/kubescape/sizing-checker/pkg/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

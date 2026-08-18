@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

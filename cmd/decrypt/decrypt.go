@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
+	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
 	"github.com/spf13/cobra"
 )
 
