@@ -108,9 +108,11 @@ func PartitionResources(clusterSize int, k8sResources K8SResources, externalReso
 		}
 	}
 
-	byNamespace := IsLargeCluster(clusterSize)
+	var byNamespace bool
 	if len(threshold) > 0 && threshold[0] > 0 {
 		byNamespace = clusterSize > threshold[0]
+	} else {
+		byNamespace = IsLargeCluster(clusterSize)
 	}
 	namespaced := make(map[string]*ResourceBatch)
 
