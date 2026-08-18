@@ -631,3 +631,5 @@ replace github.com/google/go-containerregistry => github.com/matthyx/go-containe
 replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.0-20260322054632-16583c73e9b8
 
 replace github.com/kubescape/k8s-interface => github.com/doraem-on/k8s-interface v0.0.218-0.20260815050130-fa6fe1e9bc98
+
+replace github.com/distribution/reference => github.com/distribution/reference v0.5.0
