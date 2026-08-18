@@ -94,7 +94,7 @@ func (batch *ResourceBatch) Len() int {
 //
 // Resource IDs present in the indexes but missing from allResources are
 // skipped rather than materialised as nil entries.
-func PartitionResources(clusterSize int, k8sResources K8SResources, externalResources ExternalResources, allResources map[string]workloadinterface.IMetadata) (resident *ResourceBatch, batches []*ResourceBatch) {
+func PartitionResources(clusterSize int, k8sResources K8SResources, externalResources ExternalResources, allResources map[string]workloadinterface.IMetadata, threshold ...int) (resident *ResourceBatch, batches []*ResourceBatch) {
 	resident = NewResourceBatch(ClusterScope)
 
 	for groupResource, ids := range externalResources {
@@ -109,6 +109,9 @@ func PartitionResources(clusterSize int, k8sResources K8SResources, externalReso
 	}
 
 	byNamespace := IsLargeCluster(clusterSize)
+	if len(threshold) > 0 && threshold[0] > 0 {
+		byNamespace = clusterSize > threshold[0]
+	}
 	namespaced := make(map[string]*ResourceBatch)
 
 	for groupResource, ids := range k8sResources {
