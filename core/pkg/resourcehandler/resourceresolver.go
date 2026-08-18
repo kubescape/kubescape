@@ -171,6 +171,7 @@ type discoveredAPIResource struct {
 	gvr        schema.GroupVersionResource
 	kind       string
 	namespaced bool
+	listable   bool
 }
 
 // newDiscoveryResourceResolver uses the API server's declared Kind, plural
@@ -376,10 +377,21 @@ func collectDiscoveredResources(resourceLists []*metav1.APIResourceList) []disco
 				gvr:        groupVersion.WithResource(apiResource.Name),
 				kind:       apiResource.Kind,
 				namespaced: apiResource.Namespaced,
+				listable:   discoveryDeclaresList(apiResource),
 			})
 		}
 	}
 	return discovered
+}
+
+// discoveryDeclaresList reports whether the API server advertises "list" for a
+// resource. An empty verb set means discovery did not report the verbs, so the
+// resource stays eligible rather than being dropped on missing data.
+func discoveryDeclaresList(apiResource metav1.APIResource) bool {
+	if len(apiResource.Verbs) == 0 {
+		return true
+	}
+	return slices.Contains([]string(apiResource.Verbs), "list")
 }
 
 func matchesDiscoveryValue(policyValue, discoveredValue string) bool {
