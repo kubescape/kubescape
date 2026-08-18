@@ -190,8 +190,17 @@ func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resource
 		discovered = collectDiscoveredResources(resourceLists)
 	}
 
-	warned := map[string]struct{}{}
-	var warnedMu sync.Mutex
+	logged := map[string]struct{}{}
+	var loggedMu sync.Mutex
+	logOnce := func(key string, emit func()) {
+		loggedMu.Lock()
+		defer loggedMu.Unlock()
+		if _, ok := logged[key]; ok {
+			return
+		}
+		logged[key] = struct{}{}
+		emit()
+	}
 
 	return func(group, version, resource string) []resolvedResource {
 		if version == "" || resource == "" {
@@ -199,10 +208,19 @@ func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resource
 		}
 
 		var resolved []resolvedResource
+		var skippedUnlistable []string
 		for _, candidate := range discovered {
 			if !matchesDiscoveryValue(group, candidate.gvr.Group) ||
 				!matchesDiscoveryValue(version, candidate.gvr.Version) ||
 				!matchesDiscoveryResource(resource, candidate) {
+				continue
+			}
+			if !candidate.listable {
+				// Collection is a cluster-wide LIST, so a resource the API
+				// server does not serve "list" for can only fail. Skipping it
+				// keeps create-only endpoints such as tokenreviews out of
+				// wildcard fan-out.
+				skippedUnlistable = append(skippedUnlistable, k8sinterface.GroupVersionResourceToString(&candidate.gvr))
 				continue
 			}
 			namespaced := candidate.namespaced
@@ -218,6 +236,20 @@ func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resource
 			return resolved
 		}
 
+		if len(skippedUnlistable) > 0 {
+			// Discovery answered for this resource, so the built-in fallbacks
+			// below must not resurrect the GVR it declared unlistable.
+			sort.Strings(skippedUnlistable)
+			logOnce("unlistable:"+k8sinterface.JoinResourceTriplets(group, version, resource), func() {
+				logger.L().Debug("resource does not support list in Kubernetes discovery; skipping live query",
+					helpers.String("apiGroup", group),
+					helpers.String("apiVersion", version),
+					helpers.String("resource", resource),
+					helpers.String("skipped", strings.Join(skippedUnlistable, ",")))
+			})
+			return nil
+		}
+
 		if len(mapKSResourceToApiGroup(resource)) > 0 {
 			return defaultResourceResolver(group, version, resource)
 		}
@@ -225,16 +257,12 @@ func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resource
 			return defaultResourceResolver(group, version, resource)
 		}
 
-		key := k8sinterface.JoinResourceTriplets(group, version, resource)
-		warnedMu.Lock()
-		if _, ok := warned[key]; !ok {
+		logOnce("undiscovered:"+k8sinterface.JoinResourceTriplets(group, version, resource), func() {
 			logger.L().Warning("resource was not found in Kubernetes discovery; skipping live query",
 				helpers.String("apiGroup", group),
 				helpers.String("apiVersion", version),
 				helpers.String("resource", resource))
-			warned[key] = struct{}{}
-		}
-		warnedMu.Unlock()
+		})
 		return nil
 	}, discoveryFailures
 }
