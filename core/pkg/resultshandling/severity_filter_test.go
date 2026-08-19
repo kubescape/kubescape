@@ -131,16 +131,16 @@ func TestApplySeverityFilters_ResultsFilteredAlongWithControls(t *testing.T) {
 		"C-high": makeControl("C-high", scoreHigh),
 	}
 	s := makeSessionWithControls(controls)
-	s.Report.Results = []resourcesresults.Result{
-		makeResult("resource-1", "C-low", "C-high"),
-		makeResult("resource-2", "C-low"),
+	s.ResourcesResult = map[string]resourcesresults.Result{
+		"resource-1": makeResult("resource-1", "C-low", "C-high"),
+		"resource-2": makeResult("resource-2", "C-low"),
 	}
 	ApplySeverityFilters(s, "high", "")
 
-	require.Len(t, s.Report.Results, 2)
-	assert.Len(t, s.Report.Results[0].AssociatedControls, 1)
-	assert.Equal(t, "C-high", s.Report.Results[0].AssociatedControls[0].GetID())
-	assert.Len(t, s.Report.Results[1].AssociatedControls, 0)
+	require.Len(t, s.ResourcesResult, 2)
+	assert.Len(t, s.ResourcesResult["resource-1"].AssociatedControls, 1)
+	assert.Equal(t, "C-high", s.ResourcesResult["resource-1"].AssociatedControls[0].GetID())
+	assert.Len(t, s.ResourcesResult["resource-2"].AssociatedControls, 0)
 }
 
 func TestApplySeverityFilters_CaseInsensitive(t *testing.T) {
