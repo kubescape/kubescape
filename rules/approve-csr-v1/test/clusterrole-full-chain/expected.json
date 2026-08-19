@@ -1,0 +1,118 @@
+[
+    {
+        "alertMessage": "Subject: ServiceAccount-csr-approver-sa can create and approve CertificateSigningRequests, and so mint arbitrary client certificates",
+        "failedPaths": [
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[1].resources[0]",
+            "relatedObjects[1].rules[2].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].verbs[1]",
+            "relatedObjects[1].rules[0].verbs[2]",
+            "relatedObjects[1].rules[0].verbs[3]",
+            "relatedObjects[1].rules[1].verbs[0]",
+            "relatedObjects[1].rules[2].verbs[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[1].rules[1].apiGroups[0]",
+            "relatedObjects[1].rules[2].apiGroups[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "reviewPaths": [
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[1].resources[0]",
+            "relatedObjects[1].rules[2].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].verbs[1]",
+            "relatedObjects[1].rules[0].verbs[2]",
+            "relatedObjects[1].rules[0].verbs[3]",
+            "relatedObjects[1].rules[1].verbs[0]",
+            "relatedObjects[1].rules[2].verbs[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[1].rules[1].apiGroups[0]",
+            "relatedObjects[1].rules[2].apiGroups[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 9,
+        "alertObject": {
+            "externalObjects": {
+                "kind": "ServiceAccount",
+                "name": "csr-approver-sa",
+                "namespace": "ci",
+                "relatedObjects": [
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRoleBinding",
+                        "metadata": {
+                            "name": "csr-approver-crb"
+                        },
+                        "roleRef": {
+                            "apiGroup": "rbac.authorization.k8s.io",
+                            "kind": "ClusterRole",
+                            "name": "csr-approver"
+                        },
+                        "subjects": [
+                            {
+                                "kind": "ServiceAccount",
+                                "name": "csr-approver-sa",
+                                "namespace": "ci"
+                            }
+                        ]
+                    },
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRole",
+                        "metadata": {
+                            "name": "csr-approver"
+                        },
+                        "rules": [
+                            {
+                                "apiGroups": [
+                                    "certificates.k8s.io"
+                                ],
+                                "resources": [
+                                    "certificatesigningrequests"
+                                ],
+                                "verbs": [
+                                    "create",
+                                    "get",
+                                    "list",
+                                    "watch"
+                                ]
+                            },
+                            {
+                                "apiGroups": [
+                                    "certificates.k8s.io"
+                                ],
+                                "resources": [
+                                    "certificatesigningrequests/approval"
+                                ],
+                                "verbs": [
+                                    "update"
+                                ]
+                            },
+                            {
+                                "apiGroups": [
+                                    "certificates.k8s.io"
+                                ],
+                                "resourceNames": [
+                                    "*"
+                                ],
+                                "resources": [
+                                    "signers"
+                                ],
+                                "verbs": [
+                                    "approve"
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+]
