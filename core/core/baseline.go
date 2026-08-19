@@ -44,7 +44,7 @@ func EnforceBaseline(ctx context.Context, results *resultshandling.ResultsHandle
 		return 0, fmt.Errorf("comparing against baseline %q: %w", scanInfo.Baseline, err)
 	}
 
-	printBaselineChangeSet(cs)
+	printBaselineChangeSet(cs, scanInfo.Hide)
 
 	failing := append([]diff.ControlChange{}, cs.New...)
 	failing = append(failing, cs.Incomparable...)
@@ -55,27 +55,37 @@ func EnforceBaseline(ctx context.Context, results *resultshandling.ResultsHandle
 // printBaselineChangeSet prints a plain summary of the baseline diff to
 // stderr, so it never interleaves with --format json/junit output written to
 // stdout.
-func printBaselineChangeSet(cs *diff.ChangeSet) {
+func printBaselineChangeSet(cs *diff.ChangeSet, hide bool) {
 	fmt.Fprintf(os.Stderr, "\nBaseline drift summary: %d new, %d resolved, %d unchanged, %d incomparable\n",
 		len(cs.New), len(cs.Resolved), len(cs.Unchanged), len(cs.Incomparable))
 	if len(cs.New) > 0 {
 		fmt.Fprintln(os.Stderr, "\nNew failures:")
 		for _, c := range cs.New {
-			fmt.Fprintf(os.Stderr, "  [%s] %s / %s (%s)\n", c.Severity, c.ResourceID, c.ControlID, c.ControlName)
+			fmt.Fprintf(os.Stderr, "  [%s] %s / %s (%s)\n", c.Severity, redactIfHidden(c.ResourceID, hide), c.ControlID, c.ControlName)
 		}
 	}
 	if len(cs.Incomparable) > 0 {
 		fmt.Fprintln(os.Stderr, "\nIncomparable (scan scope or coverage changed, treated as failing):")
 		for _, c := range cs.Incomparable {
-			fmt.Fprintf(os.Stderr, "  [%s] %s / %s (%s)\n", c.Severity, c.ResourceID, c.ControlID, c.ControlName)
+			fmt.Fprintf(os.Stderr, "  [%s] %s / %s (%s)\n", c.Severity, redactIfHidden(c.ResourceID, hide), c.ControlID, c.ControlName)
 		}
 	}
 	if len(cs.Resolved) > 0 {
 		fmt.Fprintln(os.Stderr, "\nResolved failures:")
 		for _, c := range cs.Resolved {
-			fmt.Fprintf(os.Stderr, "  [%s] %s / %s (%s)\n", c.Severity, c.ResourceID, c.ControlID, c.ControlName)
+			fmt.Fprintf(os.Stderr, "  [%s] %s / %s (%s)\n", c.Severity, redactIfHidden(c.ResourceID, hide), c.ControlID, c.ControlName)
 		}
 	}
+}
+
+// redactIfHidden mirrors the --hide flag's intent for the drift summary: it
+// masks the resource identifier so a scan run with --hide does not leak it
+// through this separate stderr report.
+func redactIfHidden(resourceID string, hide bool) string {
+	if hide {
+		return "[hidden]"
+	}
+	return resourceID
 }
 
 // writeBaselineHeadReport renders the fresh scan results to a private,
@@ -99,6 +109,7 @@ func writeBaselineHeadReport(ctx context.Context, results *resultshandling.Resul
 	jsonPrinter := printerv2.NewJsonPrinter("")
 	jsonPrinter.SetWriter(ctx, tmpPath)
 	if err := jsonPrinter.ActionPrint(ctx, results.GetData(), results.ImageScanData); err != nil {
+		jsonPrinter.CloseWriter()
 		cleanup()
 		return "", func() {}, err
 	}
