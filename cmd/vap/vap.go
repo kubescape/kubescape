@@ -155,8 +155,8 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 				}
 				requirements, _ := parsed.Requirements()
 				for _, r := range requirements {
-					if r.Operator() != selection.Equals {
-						return fmt.Errorf("only '=' equality label selectors are supported: %s", label)
+					if r.Operator() != selection.Equals && r.Operator() != selection.DoubleEquals {
+						return fmt.Errorf("only equality label selectors ('=' or '==') are supported: %s", label)
 					}
 				}
 			}

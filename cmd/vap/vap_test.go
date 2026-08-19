@@ -946,8 +946,12 @@ func TestGetVapHelperCmd(t *testing.T) {
 }
 
 func TestLabelSelectorRegexEdgeCases(t *testing.T) {
-	validLabels := []string{"app=nginx", "env1=prod2", "App=Value", "appName=NginxValue", "app-name=nginx", "app.name=nginx", "app_name=nginx", "app.kubernetes.io/name=nginx", "key=", "app = nginx"}
-	invalidLabels := []string{"key value", "=value", "key=val=extra", "app@=nginx", "app=nginx@", "app!=nginx", "app", "app==nginx"}
+	// Regression for issue-3403: "==" is DoubleEquals, a distinct operator from
+	// "=" (Equals) in k8s.io/apimachinery/pkg/selection, but both spellings mean
+	// the same thing - a plain equality selector - and kubectl treats them
+	// identically. "app==nginx" belongs in validLabels, not invalidLabels.
+	validLabels := []string{"app=nginx", "env1=prod2", "App=Value", "appName=NginxValue", "app-name=nginx", "app.name=nginx", "app_name=nginx", "app.kubernetes.io/name=nginx", "key=", "app = nginx", "app==nginx"}
+	invalidLabels := []string{"key value", "=value", "key=val=extra", "app@=nginx", "app=nginx@", "app!=nginx", "app"}
 
 	for _, label := range validLabels {
 		t.Run("valid label "+label, func(t *testing.T) {
@@ -964,7 +968,7 @@ func TestLabelSelectorRegexEdgeCases(t *testing.T) {
 			cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--label", label})
 			err := cmd.Execute()
 			require.Error(t, err)
-			assert.True(t, strings.Contains(err.Error(), "invalid label selector") || strings.Contains(err.Error(), "only '=' equality"), "unexpected error: %v", err)
+			assert.True(t, strings.Contains(err.Error(), "invalid label selector") || strings.Contains(err.Error(), "only equality label selectors"), "unexpected error: %v", err)
 		})
 	}
 }
