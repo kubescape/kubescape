@@ -13,53 +13,78 @@ import (
 
 // EnforceBaseline compares the just-completed scan against scanInfo.Baseline
 // (a saved JSON report) using the same diff engine as kubescape diff, prints
-// the resulting change set, and returns the count of new failures at or
-// above scanInfo.BaselineSeverityThreshold. It is a no-op when
-// scanInfo.Baseline is empty.
+// the resulting change set, and returns the count of new and incomparable
+// failures at or above scanInfo.BaselineSeverityThreshold. Incomparable
+// failures are counted alongside new ones because the diff engine cannot
+// safely classify them as resolved or unchanged, so treating them as passing
+// would risk a false-green result. It is a no-op when scanInfo.Baseline is
+// empty.
 func EnforceBaseline(ctx context.Context, results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) (newFailures int, err error) {
 	if scanInfo.Baseline == "" {
 		return 0, nil
 	}
+
+	granularity := diff.GranularityEvidence
+	if scanInfo.BaselineGranularity != "" {
+		granularity = diff.Granularity(scanInfo.BaselineGranularity)
+	}
+
 	if results == nil || results.GetData() == nil {
 		return 0, fmt.Errorf("baseline comparison requires scan results")
 	}
 
-	headFile, cleanup, err := writeBaselineHeadReport(ctx, results, scanInfo)
+	headFile, cleanup, err := writeBaselineHeadReport(ctx, results)
 	if err != nil {
 		return 0, fmt.Errorf("preparing scan results for baseline comparison: %w", err)
 	}
 	defer cleanup()
 
-	cs, err := diff.Compute(scanInfo.Baseline, headFile)
+	cs, err := diff.ComputeWithOptions(scanInfo.Baseline, headFile, diff.Options{Granularity: granularity})
 	if err != nil {
 		return 0, fmt.Errorf("comparing against baseline %q: %w", scanInfo.Baseline, err)
 	}
 
 	printBaselineChangeSet(cs)
 
-	return len(diff.FilterBySeverity(cs.New, scanInfo.BaselineSeverityThreshold)), nil
+	failing := append([]diff.ControlChange{}, cs.New...)
+	failing = append(failing, cs.Incomparable...)
+
+	return len(diff.FilterBySeverity(failing, scanInfo.BaselineSeverityThreshold)), nil
 }
 
-// printBaselineChangeSet prints a plain summary of the baseline diff.
+// printBaselineChangeSet prints a plain summary of the baseline diff to
+// stderr, so it never interleaves with --format json/junit output written to
+// stdout.
 func printBaselineChangeSet(cs *diff.ChangeSet) {
-	fmt.Printf("\nBaseline drift summary: %d new, %d resolved, %d unchanged\n", len(cs.New), len(cs.Resolved), len(cs.Unchanged))
+	fmt.Fprintf(os.Stderr, "\nBaseline drift summary: %d new, %d resolved, %d unchanged, %d incomparable\n",
+		len(cs.New), len(cs.Resolved), len(cs.Unchanged), len(cs.Incomparable))
 	if len(cs.New) > 0 {
-		fmt.Println("\nNew failures:")
+		fmt.Fprintln(os.Stderr, "\nNew failures:")
 		for _, c := range cs.New {
-			fmt.Printf("  [%s] %s / %s (%s)\n", c.Severity, c.ResourceID, c.ControlID, c.ControlName)
+			fmt.Fprintf(os.Stderr, "  [%s] %s / %s (%s)\n", c.Severity, c.ResourceID, c.ControlID, c.ControlName)
+		}
+	}
+	if len(cs.Incomparable) > 0 {
+		fmt.Fprintln(os.Stderr, "\nIncomparable (scan scope or coverage changed, treated as failing):")
+		for _, c := range cs.Incomparable {
+			fmt.Fprintf(os.Stderr, "  [%s] %s / %s (%s)\n", c.Severity, c.ResourceID, c.ControlID, c.ControlName)
 		}
 	}
 	if len(cs.Resolved) > 0 {
-		fmt.Println("\nResolved failures:")
+		fmt.Fprintln(os.Stderr, "\nResolved failures:")
 		for _, c := range cs.Resolved {
-			fmt.Printf("  [%s] %s / %s (%s)\n", c.Severity, c.ResourceID, c.ControlID, c.ControlName)
+			fmt.Fprintf(os.Stderr, "  [%s] %s / %s (%s)\n", c.Severity, c.ResourceID, c.ControlID, c.ControlName)
 		}
 	}
 }
 
-// writeBaselineHeadReport renders the fresh scan results to a private temp
-// JSON file so diff.Compute (disk-only) can compare it against the baseline.
-func writeBaselineHeadReport(ctx context.Context, results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) (path string, cleanup func(), err error) {
+// writeBaselineHeadReport renders the fresh scan results to a private,
+// unfiltered temp JSON file so diff.ComputeWithOptions (disk-only) can
+// compare it against the baseline. The report is intentionally rendered
+// without --min-severity filtering: filtering it would make findings below
+// the display threshold vanish from the head report, causing the diff
+// engine to misreport still-failing baseline findings as resolved.
+func writeBaselineHeadReport(ctx context.Context, results *resultshandling.ResultsHandler) (path string, cleanup func(), err error) {
 	tmp, err := os.CreateTemp("", "kubescape-baseline-head-*.json")
 	if err != nil {
 		return "", func() {}, err
@@ -71,7 +96,7 @@ func writeBaselineHeadReport(ctx context.Context, results *resultshandling.Resul
 	}
 	cleanup = func() { _ = os.Remove(tmpPath) }
 
-	jsonPrinter := printerv2.NewJsonPrinter(scanInfo.MinSeverity)
+	jsonPrinter := printerv2.NewJsonPrinter("")
 	jsonPrinter.SetWriter(ctx, tmpPath)
 	if err := jsonPrinter.ActionPrint(ctx, results.GetData(), results.ImageScanData); err != nil {
 		cleanup()

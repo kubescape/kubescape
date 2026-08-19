@@ -115,6 +115,7 @@ type PolicyIdentifier struct {
 
 type ScanInfo struct {
 	UseExceptions             string   // Load file with exceptions configuration
+	AuditExceptions           bool     // Include exception usage audit in supported scan outputs
 	ControlsInputs            string   // Load file with inputs for controls
 	AttackTracks              string   // Load file with attack tracks
 	UseFrom                   []string // Load framework from local file (instead of download). Use when running offline
@@ -151,6 +152,8 @@ type ScanInfo struct {
 	FrameworkScan             bool                         // false if scanning control
 	ScanAll                   bool                         // true if scan all frameworks
 	OmitRawResources          bool                         // true if omit raw resources from the output
+	ShowEvidence              bool                         // Show evidence paths with current field values in pretty-printer output (-E / --show-evidence)
+	ShowSecrets               bool                         // Show secret field values in evidence output; redacted by default (--show-secrets)
 	PrintAttackTree           bool                         // true if print attack tree
 	EnableRegoPrint           bool                         // true if print rego
 	ScanObject                *objectsenvelopes.ScanObject // identifies a single resource (k8s object) to be scanned
@@ -162,6 +165,7 @@ type ScanInfo struct {
 	ScanTimeout               time.Duration // Maximum duration for the entire scan (0 = no timeout)
 	ControlTimeout            time.Duration // Maximum duration for evaluating a single control (0 = no timeout)
 	EnableStreaming           bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
+	DryRun                    bool          // Check RBAC access for the resources the scan would need, without collecting or evaluating anything
 	ChartPath                 string
 	FilePath                  string
 	HelmValueFiles            []string // -f / --values: paths to Helm values YAML files (repeatable)
