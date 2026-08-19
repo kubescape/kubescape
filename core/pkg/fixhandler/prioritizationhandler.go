@@ -10,7 +10,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"gopkg.in/yaml.v3"
 )
 
 func isValidCapability(s string) bool {
