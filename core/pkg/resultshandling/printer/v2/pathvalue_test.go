@@ -591,6 +591,23 @@ func TestAssistedRemediationPathsWithCurrentValues(t *testing.T) {
 		assert.Contains(t, got, "spec.hostPID (current: true)")
 		assert.Len(t, got, 2)
 	})
+
+	t.Run("path shared by delete and failed path is printed once", func(t *testing.T) {
+		// reproduces rules such as C-0012 that assign the same path to both
+		// DeletePath and FailedPath - the enriched failed path must not duplicate
+		// the bare delete path for the same field
+		ctrl := &resourcesresults.ResourceAssociatedControl{
+			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+				{
+					Paths: []armotypes.PosturePaths{
+						{FailedPath: "spec.hostPID", DeletePath: "spec.hostPID"},
+					},
+				},
+			},
+		}
+		got := AssistedRemediationPathsWithCurrentValues(ctrl, resource)
+		assert.Equal(t, []string{"spec.hostPID"}, got)
+	})
 }
 
 func TestAssistedRemediationPathsWithCurrentValuesFiltered(t *testing.T) {
