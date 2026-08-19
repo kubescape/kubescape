@@ -23,6 +23,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
+	"github.com/kubescape/kubescape/v4/core/pkg/scancache"
 	"github.com/kubescape/kubescape/v4/core/pkg/score"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -119,6 +120,9 @@ type OPAProcessor struct {
 	// environment variable once at construction so that the decision does not
 	// race on a package-level global.
 	largeClusterSizeThreshold int
+	// incrementalCache holds cached per-resource-per-control verdicts when
+	// --incremental is enabled. nil when the flag is off.
+	incrementalCache *scancache.Store
 }
 
 // NewOPAProcessor snapshots len(sessionObj.AllResources) at construction for
@@ -212,6 +216,14 @@ func addNamespacesToIndex(index map[string]map[string]any, resources map[string]
 // be 0 and evaluationScopes() would never partition.
 func (opap *OPAProcessor) SetInitialResourceCount(count int) {
 	opap.initialResourceCount = count
+}
+
+// SetIncrementalCache enables incremental-scan caching for this processor.
+// Rules and controls that could be affected by a resource other than the one
+// being verdicted (see ruleCacheEligible/controlCacheEligible) are never
+// served from cache, regardless of this being set.
+func (opap *OPAProcessor) SetIncrementalCache(cache *scancache.Store) {
+	opap.incrementalCache = cache
 }
 
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
@@ -764,6 +776,36 @@ func splitWholeClusterControls(policies *cautils.Policies, controlIDs []string) 
 	return scopeControlIDs, wholeClusterControlIDs
 }
 
+// ruleCacheEligible reports whether a rule's verdict for one resource can be
+// safely cached keyed on that resource's own hash. Ineligible for anything
+// that can join across resources (DynamicMatch, whole-cluster controls) or
+// whose scoping isn't hash-verified yet (CEL/VAP matchConstraints).
+func ruleCacheEligible(control *reporthandling.Control, rule *reporthandling.PolicyRule) bool {
+	if controlRequiresWholeClusterInput(control) {
+		return false
+	}
+	if rule.DynamicMatch != nil {
+		return false
+	}
+	if rule.RuleLanguage == reporthandling.CELLanguage {
+		return false
+	}
+	return true
+}
+
+// controlCacheEligible reports whether every rule in control is safe to cache.
+func controlCacheEligible(control *reporthandling.Control) bool {
+	if controlRequiresWholeClusterInput(control) {
+		return false
+	}
+	for i := range control.Rules {
+		if !ruleCacheEligible(control, &control.Rules[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 func (opap *OPAProcessor) loggerStartScanning() {
 	targetScan := opap.Metadata.ScanMetadata.ScanningTarget
 	if reporthandlingv2.Cluster == targetScan {
@@ -796,7 +838,7 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 			ruleErrs = append(ruleErrs, err)
 			break
 		}
-		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput, scope, control.ControlID)
+		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput, scope, control)
 		if err != nil {
 			ruleErrs = append(ruleErrs, fmt.Errorf("rule %q: %w", control.Rules[i].Name, err))
 		}
@@ -822,6 +864,17 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 		}
 	}
 
+	if opap.incrementalCache != nil && controlCacheEligible(control) {
+		for resourceID, result := range resourcesAssociatedControl {
+			resource, ok := opap.AllResources[resourceID]
+			if !ok {
+				continue
+			}
+			hash := scancache.ResourceHash(resource.GetObject())
+			opap.incrementalCache.Put(control.ControlID, resourceID, hash, result)
+		}
+	}
+
 	return resourcesAssociatedControl, errors.Join(ruleErrs...)
 }
 
@@ -836,16 +889,16 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 //
 // NOTE: processRule no longer mutates the state of the current OPAProcessor instance,
 // and returns a map instead, to be merged by the caller.
-func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string, scope evaluationScope, controlID string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
+func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string, scope evaluationScope, control *reporthandling.Control) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
 	if scope.name != "" {
-		return opap.processRuleOnScope(ctx, rule, fixedControlInputs, scope, controlID)
+		return opap.processRuleOnScope(ctx, rule, fixedControlInputs, scope, control)
 	}
 
 	// No explicit scope — loop over all scopes (parity harness path).
 	merged := make(map[string]*resourcesresults.ResourceAssociatedRule)
 	var evalErrs []error
 	for _, s := range opap.evaluationScopes() {
-		scoped, err := opap.processRuleOnScope(ctx, rule, fixedControlInputs, s, controlID)
+		scoped, err := opap.processRuleOnScope(ctx, rule, fixedControlInputs, s, control)
 		if err != nil {
 			evalErrs = append(evalErrs, err)
 		}
@@ -858,12 +911,37 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 
 // processRuleOnScope evaluates a single policy rule against a single scope,
 // with some extra fixed control inputs.
-func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string, scope evaluationScope, controlID string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
+func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string, scope evaluationScope, control *reporthandling.Control) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
 	resources := make(map[string]*resourcesresults.ResourceAssociatedRule)
+	controlID := control.ControlID
 
 	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ControlConfigInputs, fixedControlInputs)
 
 	resourceToScan := scope.matchedObjects(rule)
+
+	var cacheHitIDs map[string]struct{}
+	if opap.incrementalCache != nil && ruleCacheEligible(control, rule) {
+		var toEvaluate []workloadinterface.IMetadata
+		cacheHitIDs = make(map[string]struct{})
+		for _, r := range resourceToScan {
+			hash := scancache.ResourceHash(r.GetObject())
+			if cached, ok := opap.incrementalCache.Get(controlID, r.GetID(), hash); ok {
+				for _, cr := range cached.ResourceAssociatedRules {
+					if cr.Name == rule.Name {
+						rr := cr
+						resources[r.GetID()] = &rr
+					}
+				}
+				cacheHitIDs[r.GetID()] = struct{}{}
+				continue
+			}
+			toEvaluate = append(toEvaluate, r)
+		}
+		resourceToScan = toEvaluate
+		if len(resourceToScan) == 0 {
+			return resources, nil
+		}
+	}
 	inputResources, err := reporthandling.RegoResourcesAggregator(
 		rule,
 		resourceToScan, // NOTE: this uses the initial snapshot of AllResources

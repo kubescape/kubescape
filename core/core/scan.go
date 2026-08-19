@@ -26,6 +26,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v4/core/pkg/scancache"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/resources"
@@ -371,6 +372,20 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 		}
 		reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, exceptionRecorder)
 		reportResults.ControlTimeout = scanInfo.ControlTimeout
+		if scanInfo.Incremental {
+			cacheDir := getter.DefaultLocalStore
+			cacheStore, cacheErr := scancache.Load(cacheDir, scanInfo.ControlsVersion)
+			if cacheErr != nil {
+				logger.L().Ctx(ctxOpa).Warning("failed to load incremental scan cache, proceeding without it", helpers.Error(cacheErr))
+			} else {
+				reportResults.SetIncrementalCache(cacheStore)
+				defer func() {
+					if flushErr := cacheStore.Flush(); flushErr != nil {
+						logger.L().Ctx(ctxOpa).Warning("failed to persist incremental scan cache", helpers.Error(flushErr))
+					}
+				}()
+			}
+		}
 		if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
 			logger.L().Ctx(ctxOpa).Error("failed to process rules", helpers.Error(err))
 			// The eager listener finalizes its accumulated results before returning
