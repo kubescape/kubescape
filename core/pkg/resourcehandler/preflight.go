@@ -67,12 +67,17 @@ var ErrPreflightNotSupported = errors.New("dry-run RBAC preflight is only suppor
 // against the returned items, not via a namespaced list call), so a
 // cluster-wide "list" access review is the same check the real collection
 // would need to pass, regardless of --include-namespaces/--exclude-namespaces.
+//
+// --include-kinds/--exclude-kinds are honored, unlike the namespace filters:
+// they decide which resource types get listed at all, so reviewing access to an
+// excluded kind would fail the dry-run over a listing that never happens.
 func (k8sHandler *K8sResourceHandler) Preflight(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*PreflightResult, error) {
 	resolver, discoveryFailures := newDiscoveryResourceResolver(k8sHandler.k8s.DiscoveryClient)
 
 	resourceToControl := make(map[string][]string)
 	scanningScope := cautils.GetScanningScope(sessionObj.Metadata.ContextMetadata)
 	queryableResources, _ := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver)
+	filterQueryableResourcesByKind(queryableResources, scanInfo)
 	setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
 
 	result := &PreflightResult{DiscoveryFailures: discoveryFailures}
