@@ -119,3 +119,57 @@ func TestFileResourceHandler_PreflightNotSupported(t *testing.T) {
 	_, err := handler.Preflight(context.Background(), &cautils.OPASessionObj{}, &cautils.ScanInfo{})
 	assert.ErrorIs(t, err, ErrPreflightNotSupported)
 }
+
+// TestPreflight_SkipsExternalResources covers credentials scoped to the API
+// groups a cluster actually serves: Kubescape's own resources must not turn
+// into denials that fail the dry-run.
+func TestPreflight_SkipsExternalResources(t *testing.T) {
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		t.Fatalf("preflight must not list resources: %s", action.GetResource().Resource)
+		return true, nil, nil
+	})
+
+	var reviewed []string
+	fakeClient := handler.k8s.KubernetesClient.(*fakeclientset.Clientset)
+	fakeClient.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ssar := action.(k8stesting.CreateAction).GetObject().(*authorizationv1.SelfSubjectAccessReview)
+		reviewed = append(reviewed, ssar.Spec.ResourceAttributes.Resource)
+		// Stand in for credentials scoped to real API groups: anything outside
+		// the core group is refused.
+		ssar.Status.Allowed = ssar.Spec.ResourceAttributes.Group == ""
+		return true, ssar, nil
+	})
+
+	podRule := mockRule("pod-rule", []reporthandling.RuleMatchObjects{{
+		APIGroups:   []string{""},
+		APIVersions: []string{"v1"},
+		Resources:   []string{"Pod"},
+	}}, "")
+	hostRule := mockRule("host-rule", []reporthandling.RuleMatchObjects{{
+		APIGroups:   []string{"hostdata.kubescape.cloud"},
+		APIVersions: []string{"v1beta0"},
+		Resources:   []string{KubeletConfiguration, CNIInfo},
+	}, {
+		APIGroups:   []string{"armo.vuln.images"},
+		APIVersions: []string{"v1"},
+		Resources:   []string{ImageVulnerabilities},
+	}, {
+		APIGroups:   []string{"eks.amazonaws.com"},
+		APIVersions: []string{"v1"},
+		Resources:   []string{ClusterDescribe},
+	}}, "")
+	control := mockControl("C-0001", []reporthandling.PolicyRule{podRule, hostRule})
+	framework := mockFramework("test-framework", []reporthandling.Control{control})
+
+	scanInfo := &cautils.ScanInfo{}
+	sessionObj := cautils.NewOPASessionObj(context.Background(), []reporthandling.Framework{*framework}, nil, scanInfo, nil)
+
+	result, err := handler.Preflight(context.Background(), sessionObj, scanInfo)
+	require.NoError(t, err)
+
+	assert.Empty(t, result.Denied())
+	assert.Equal(t, []string{"pods"}, reviewed)
+	for _, check := range result.Checks {
+		assert.NotContains(t, check.GVR, "hostdata.kubescape.cloud")
+	}
+}
