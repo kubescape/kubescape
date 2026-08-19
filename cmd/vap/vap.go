@@ -139,6 +139,9 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 			if err := isValidK8sObjectName(resolvedPolicyName); err != nil {
 				return fmt.Errorf("invalid policy name %s: %w", resolvedPolicyName, err)
 			}
+			if err := checkResourceRulesInPolicyScope(resourceRuleArr, normalizedControlID, resolvedPolicyName); err != nil {
+				return err
+			}
 			for _, namespace := range namespaceArr {
 				if err := isValidNamespace(namespace); err != nil {
 					return fmt.Errorf("invalid namespace %s: %w", namespace, err)
@@ -181,7 +184,7 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 	createPolicyBindingCmd.Flags().StringSliceVar(&namespaceArr, "namespace", []string{}, "Resource namespace selector")
 	createPolicyBindingCmd.Flags().StringSliceVar(&labelArr, "label", []string{}, "Resource label selector")
 	createPolicyBindingCmd.Flags().StringSliceVarP(&actionArr, "action", "a", []string{string(admissionv1.Deny)}, "Action to take when policy fails, repeatable (Deny, Warn, Audit). Deny and Warn cannot be combined")
-	createPolicyBindingCmd.Flags().StringSliceVar(&resourceRuleArr, "resource-rule", []string{}, "Restrict the binding to a group/version/resource, repeatable (e.g. apps/v1/deployments, /v1/pods). Omit to bind everything the policy matches")
+	createPolicyBindingCmd.Flags().StringSliceVar(&resourceRuleArr, "resource-rule", []string{}, "Restrict the binding to a group/version/resource the policy already matches, repeatable (e.g. apps/v1/deployments, /v1/pods). Omit to bind everything the policy matches")
 	createPolicyBindingCmd.Flags().StringVarP(&parameterReference, "parameter-reference", "r", "", "Parameter reference object name")
 	createPolicyBindingCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file instead of stdout")
 
@@ -450,6 +453,132 @@ func validateRuleSegment(kind string, value string, validate func(string) []stri
 		return fmt.Errorf("invalid %s %q: %s", kind, value, strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// checkResourceRulesInPolicyScope refuses a --resource-rule the bound policy can
+// never match. The apiserver intersects a binding's matchResources with the
+// policy's matchConstraints, so a rule outside them applies cleanly and enforces
+// nothing.
+//
+// The lookup mirrors the paramKind check: --control reads the constraints off
+// the control's policy, --policy off the named one. A policy we know nothing
+// about — a name outside the embedded bundle, or one declaring no resource
+// rules — is left unchecked rather than blocked.
+func checkResourceRulesInPolicyScope(rules []string, controlID, policyName string) error {
+	if len(rules) == 0 {
+		return nil
+	}
+	constraints, err := policyMatchConstraints(controlID, policyName)
+	if err != nil {
+		return err
+	}
+	if constraints == nil || len(constraints.ResourceRules) == 0 {
+		return nil
+	}
+	for _, rule := range rules {
+		parsed, err := parseResourceRule(rule)
+		if err != nil {
+			return err
+		}
+		if !resourceRuleInScope(parsed, constraints.ResourceRules) {
+			return fmt.Errorf("resource rule %q is outside the matchConstraints of policy %s, so the binding would match nothing; the policy matches %s",
+				strings.TrimSpace(rule), policyName, describeResourceRules(constraints.ResourceRules))
+		}
+	}
+	return nil
+}
+
+// policyMatchConstraints resolves the bound policy's matchConstraints, nil when
+// there are none to check a rule against.
+func policyMatchConstraints(controlID, policyName string) (*admissionv1.MatchResources, error) {
+	if controlID != "" {
+		return cel.MatchConstraintsForControl(controlID)
+	}
+	constraints, found, err := cel.MatchConstraintsForPolicy(policyName)
+	if err != nil || !found {
+		return nil, err
+	}
+	return constraints, nil
+}
+
+// resourceRuleInScope reports whether a binding rule overlaps any of the
+// policy's resource rules. Only an empty overlap is refused, since narrowing the
+// policy is what --resource-rule is for. excludeResourceRules are not consulted:
+// they carve out part of a surface rather than define it.
+//
+// Operations and scope are not compared either. A parsed --resource-rule always
+// carries "*" for both, so comparing them could never refuse anything.
+func resourceRuleInScope(rule admissionv1.NamedRuleWithOperations, constraints []admissionv1.NamedRuleWithOperations) bool {
+	for i := range constraints {
+		constraint := &constraints[i]
+		if valuesOverlap(rule.APIGroups, constraint.APIGroups) &&
+			valuesOverlap(rule.APIVersions, constraint.APIVersions) &&
+			resourcesOverlap(rule.Resources, constraint.Resources) {
+			return true
+		}
+	}
+	return false
+}
+
+func valuesOverlap(a, b []string) bool {
+	for _, want := range a {
+		for _, have := range b {
+			if valueMatches(want, have) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// resourcesOverlap is valuesOverlap for resources, honoring the subresource form
+// the admission API uses: "pods" and "pods/exec" are separate surfaces, "*"
+// covers every resource but no subresource, and "*/*" covers both.
+func resourcesOverlap(a, b []string) bool {
+	for _, want := range a {
+		wantResource, wantSubresource := splitSubresource(want)
+		for _, have := range b {
+			haveResource, haveSubresource := splitSubresource(have)
+			if valueMatches(wantResource, haveResource) && valueMatches(wantSubresource, haveSubresource) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func splitSubresource(resource string) (string, string) {
+	if name, subresource, found := strings.Cut(resource, "/"); found {
+		return name, subresource
+	}
+	return resource, ""
+}
+
+func valueMatches(a, b string) bool {
+	return a == "*" || b == "*" || a == b
+}
+
+// describeResourceRules renders a policy's resource rules in the
+// group/version/resource form --resource-rule takes, so the refusal names what
+// the flag would have to say instead.
+func describeResourceRules(rules []admissionv1.NamedRuleWithOperations) string {
+	seen := make(map[string]struct{})
+	described := make([]string, 0, len(rules))
+	for i := range rules {
+		for _, group := range rules[i].APIGroups {
+			for _, version := range rules[i].APIVersions {
+				for _, resource := range rules[i].Resources {
+					entry := strings.Join([]string{group, version, resource}, "/")
+					if _, duplicate := seen[entry]; duplicate {
+						continue
+					}
+					seen[entry] = struct{}{}
+					described = append(described, entry)
+				}
+			}
+		}
+	}
+	return strings.Join(described, ", ")
 }
 
 // Create a policy binding
