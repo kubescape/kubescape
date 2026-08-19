@@ -293,6 +293,104 @@ func newControlViewPrettyPrinter(t *testing.T, verbose bool) (*PrettyPrinter, fu
 	return pp, read
 }
 
+const (
+	controlViewEnvValuePath = "spec.template.spec.containers[0].env[1].value"
+	controlViewEnvSecret    = "s3cret"
+)
+
+func controlViewEnvValueSession() *cautils.OPASessionObj {
+	session := controlViewAssistedRemediationSession()
+	var resourceID string
+	for id := range session.AllResources {
+		resourceID = id
+	}
+	result := session.ResourcesResult[resourceID]
+	result.AssociatedControls[0].ResourceAssociatedRules[0].Paths = []armotypes.PosturePaths{
+		{FailedPath: controlViewEnvVarPath},
+		{FailedPath: controlViewEnvValuePath},
+	}
+	session.ResourcesResult[resourceID] = result
+	return session
+}
+
+func controlViewWorkload(name string) (workloadinterface.IMetadata, string) {
+	resource := workloadinterface.NewBaseObject(map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      name,
+			"namespace": "prod",
+		},
+		"spec": map[string]interface{}{
+			"hostPID":     true,
+			"hostNetwork": true,
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name": "api",
+							"env": []interface{}{
+								map[string]interface{}{"name": "LOG_LEVEL", "value": "debug"},
+								map[string]interface{}{"name": "DB_PASSWORD", "value": controlViewEnvSecret},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	return resource, resource.GetID()
+}
+
+func controlViewMixedStatusSession() *cautils.OPASessionObj {
+	failedRes, failedID := controlViewWorkload("failed-deploy")
+	passedRes, passedID := controlViewWorkload("passed-deploy")
+	skippedRes, skippedID := controlViewWorkload("skipped-deploy")
+
+	ctrl := &reportsummary.ControlSummary{
+		ControlID:  "C-0012",
+		Name:       "Applications credentials in configuration files",
+		StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusFailed},
+	}
+	ctrl.Append(&apis.StatusInfo{InnerStatus: apis.StatusFailed}, failedID)
+	ctrl.Append(&apis.StatusInfo{InnerStatus: apis.StatusPassed}, passedID)
+	ctrl.Append(&apis.StatusInfo{InnerStatus: apis.StatusSkipped}, skippedID)
+
+	assoc := func(status apis.ScanningStatus, path string) resourcesresults.ResourceAssociatedControl {
+		return resourcesresults.ResourceAssociatedControl{
+			ControlID: "C-0012",
+			Name:      "Applications credentials in configuration files",
+			Status:    apis.StatusInfo{InnerStatus: status},
+			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+				{Paths: []armotypes.PosturePaths{{FailedPath: path}}},
+			},
+		}
+	}
+
+	session := cautils.NewOPASessionObjMock()
+	session.AllResources[failedID] = failedRes
+	session.AllResources[passedID] = passedRes
+	session.AllResources[skippedID] = skippedRes
+	session.ResourcesResult[failedID] = resourcesresults.Result{
+		ResourceID:         failedID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{assoc(apis.StatusFailed, controlViewEnvVarPath)},
+	}
+	session.ResourcesResult[passedID] = resourcesresults.Result{
+		ResourceID:         passedID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{assoc(apis.StatusPassed, "spec.hostPID")},
+	}
+	session.ResourcesResult[skippedID] = resourcesresults.Result{
+		ResourceID:         skippedID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{assoc(apis.StatusSkipped, "spec.hostNetwork")},
+	}
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{"C-0012": *ctrl},
+		},
+	}
+	return session
+}
+
 // TestActionPrint_ControlViewVerboseIncludesAssistedRemediationPaths is the
 // #1737 control-view gap: --view=control -v listed Kind/Name only, so an
 // auditor could not tell which env var C-0012 matched.
@@ -314,4 +412,39 @@ func TestActionPrint_ControlViewNonVerboseOmitsAssistedRemediationPaths(t *testi
 	out := read()
 	assert.Contains(t, out, "checkout-api")
 	assert.NotContains(t, out, controlViewEnvVarPath)
+}
+
+// TestActionPrint_ControlViewVerboseDoesNotLeakEnvValue is the showSecrets
+// blocker: C-0012's env .value path must not print the plaintext credential
+// on --view=control -v unless --show-secrets is set.
+func TestActionPrint_ControlViewVerboseDoesNotLeakEnvValue(t *testing.T) {
+	pp, read := newControlViewPrettyPrinter(t, true)
+	require.NoError(t, pp.ActionPrint(context.Background(), controlViewEnvValueSession(), nil))
+
+	out := read()
+	assert.Contains(t, out, controlViewEnvVarPath+" (current: DB_PASSWORD)")
+	assert.NotContains(t, out, controlViewEnvSecret)
+	assert.Contains(t, out, controlViewEnvValuePath+" (current: "+redactedValue+")")
+}
+
+func TestActionPrint_ControlViewShowSecretsPrintsEnvValue(t *testing.T) {
+	pp, read := newControlViewPrettyPrinter(t, true)
+	pp.showSecrets = true
+	require.NoError(t, pp.ActionPrint(context.Background(), controlViewEnvValueSession(), nil))
+
+	out := read()
+	assert.Contains(t, out, controlViewEnvValuePath+" (current: "+controlViewEnvSecret+")")
+}
+
+func TestActionPrint_ControlViewVerboseOmitsRemediationOnPassedAndSkipped(t *testing.T) {
+	pp, read := newControlViewPrettyPrinter(t, true)
+	require.NoError(t, pp.ActionPrint(context.Background(), controlViewMixedStatusSession(), nil))
+
+	out := read()
+	assert.Contains(t, out, "failed-deploy")
+	assert.Contains(t, out, controlViewEnvVarPath)
+	assert.Contains(t, out, "passed-deploy")
+	assert.Contains(t, out, "skipped-deploy")
+	assert.NotContains(t, out, "spec.hostPID")
+	assert.NotContains(t, out, "spec.hostNetwork")
 }

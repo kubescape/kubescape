@@ -247,7 +247,7 @@ func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSum
 
 	workloadsSummary := listResultSummary(controlSummary, allResources)
 	if pp.verboseMode {
-		attachAssistedRemediation(workloadsSummary, controlSummary.GetID(), resourcesResult)
+		attachAssistedRemediation(workloadsSummary, controlSummary.GetID(), resourcesResult, pp.showSecrets)
 	}
 
 	failedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummaryFailed)
@@ -272,8 +272,11 @@ func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSum
 
 }
 
-func attachAssistedRemediation(workloads []WorkloadSummary, controlID string, resourcesResult map[string]resourcesresults.Result) {
+func attachAssistedRemediation(workloads []WorkloadSummary, controlID string, resourcesResult map[string]resourcesresults.Result, showSecrets bool) {
 	for i := range workloads {
+		if workloads[i].status != apis.StatusFailed {
+			continue
+		}
 		result, ok := resourcesResult[workloads[i].resource.GetID()]
 		if !ok {
 			continue
@@ -282,7 +285,10 @@ func attachAssistedRemediation(workloads []WorkloadSummary, controlID string, re
 			if result.AssociatedControls[j].GetID() != controlID {
 				continue
 			}
-			paths := AssistedRemediationPathsWithCurrentValues(&result.AssociatedControls[j], workloads[i].resource)
+			if !result.AssociatedControls[j].GetStatus(nil).IsFailed() {
+				continue
+			}
+			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&result.AssociatedControls[j], workloads[i].resource, showSecrets)
 			if len(paths) > 0 {
 				workloads[i].assistedRemediation = strings.Join(paths, ", ")
 			}
