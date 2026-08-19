@@ -679,7 +679,8 @@ func TestWrapDBLoadError(t *testing.T) {
 	})
 	t.Run("skip update adds actionable hint", func(t *testing.T) {
 		got := wrapDBLoadError(baseErr, false)
-		assert.ErrorContains(t, got, "no vulnerability database found locally")
+		assert.ErrorIs(t, got, baseErr)
+		assert.ErrorContains(t, got, "local vulnerability database could not be used")
 		assert.ErrorContains(t, got, "--skip-db-update")
 	})
 }

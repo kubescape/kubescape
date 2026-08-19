@@ -356,12 +356,14 @@ func NewScanServiceWithMatchersAndSources(distCfg distribution.Config, installCf
 }
 
 // wrapDBLoadError adds a hint when the database update was skipped and the
-// load failed, so users know the local cache must be populated first.
+// load failed, so users know the local database must be usable first. The
+// wording is neutral because the failure may be a missing, corrupt, or
+// incompatible local database, not only an absent one.
 func wrapDBLoadError(err error, shouldUpdate bool) error {
 	if shouldUpdate {
 		return err
 	}
-	return fmt.Errorf("%w; no vulnerability database found locally — run once without --skip-db-update to download it", err)
+	return fmt.Errorf("%w; the local vulnerability database could not be used (update was skipped) — run once without --skip-db-update to download it", err)
 }
 
 // ParseSeverity returns a Grype severity given a severity string
