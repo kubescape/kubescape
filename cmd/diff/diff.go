@@ -29,6 +29,9 @@ var diffCmdExamples = fmt.Sprintf(`
 	# Compare resource-and-control aggregates while keeping safety checks
 	%[1]s diff base.json head.json --granularity control
 
+  # Output only new and incomparable regressions as SARIF for GitHub Code Scanning
+  %[1]s diff base.json head.json --format sarif --output kubescape-diff
+
   # Output diff as JSON
   %[1]s diff base.json head.json --format json --output diff.json
 `, cautils.ExecName())
@@ -47,7 +50,7 @@ func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
 			diffInfo.HeadFile = args[1]
 
 			// diff honors a single output format, so validate against the exact value rather than scan's comma-separated multi-format set.
-			supportedFormats := []string{printer.PrettyFormat, printer.JsonFormat, printer.YamlFormat}
+			supportedFormats := diffFormats()
 			if !slices.Contains(supportedFormats, diffInfo.Format) {
 				return fmt.Errorf("invalid format %q, supported formats: %s", diffInfo.Format, strings.Join(supportedFormats, ", "))
 			}
@@ -77,7 +80,7 @@ func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
 
 	diffCmd.Flags().BoolVar(&diffInfo.FailOnNew, "fail-on-new", false, "Exit with code 1 when new or incomparable failures are found (combine with --severity-threshold to limit the gate)")
 	diffCmd.Flags().StringVar(&diffInfo.SeverityThreshold, "severity-threshold", "", "Only count new and incomparable failures at or above this severity when using --fail-on-new (low, medium, high, critical)")
-	diffCmd.Flags().StringVarP(&diffInfo.Format, "format", "f", "pretty-printer", `Output format: "pretty-printer", "json", or "yaml"`)
+	diffCmd.Flags().StringVarP(&diffInfo.Format, "format", "f", "pretty-printer", fmt.Sprintf(`Output format: "%s"`, strings.Join(diffFormats(), `", "`)))
 	diffCmd.Flags().StringVarP(&diffInfo.Output, "output", "o", "", "Output file; defaults to stdout")
 	diffCmd.Flags().StringVar(&diffInfo.Granularity, "granularity", string(resultsdiff.GranularityEvidence), `Comparison unit: "evidence" or "control"`)
 
@@ -89,4 +92,16 @@ func severityLabel(s string) string {
 		return "all"
 	}
 	return s
+}
+
+func diffFormats() []string {
+	return []string{
+		printer.PrettyFormat,
+		printer.JsonFormat,
+		printer.YamlFormat,
+		printer.SARIFFormat,
+		printer.JunitResultFormat,
+		printer.GitLabSASTFormat,
+		printer.MarkdownFormat,
+	}
 }

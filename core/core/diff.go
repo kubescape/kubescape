@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/diff"
@@ -22,7 +23,7 @@ func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error
 
 	w := os.Stdout
 	if diffInfo.Output != "" {
-		w, err = printer.GetWriterNoFallback(diffInfo.Output)
+		w, err = printer.GetWriterNoFallback(diffOutputPath(diffInfo.Format, diffInfo.Output))
 		if err != nil {
 			return 0, fmt.Errorf("opening diff output: %w", err)
 		}
@@ -40,6 +41,22 @@ func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error
 		if err := diff.PrintYAML(w, cs); err != nil {
 			return 0, fmt.Errorf("writing YAML diff: %w", err)
 		}
+	case printer.SARIFFormat:
+		if err := diff.PrintSARIF(w, cs, diffInfo.SeverityThreshold); err != nil {
+			return 0, fmt.Errorf("writing SARIF diff: %w", err)
+		}
+	case printer.JunitResultFormat:
+		if err := diff.PrintJUnit(w, cs, diffInfo.SeverityThreshold); err != nil {
+			return 0, fmt.Errorf("writing JUnit diff: %w", err)
+		}
+	case printer.GitLabSASTFormat:
+		if err := diff.PrintGitLabSAST(w, cs, diffInfo.SeverityThreshold); err != nil {
+			return 0, fmt.Errorf("writing GitLab SAST diff: %w", err)
+		}
+	case printer.MarkdownFormat:
+		if err := diff.PrintMarkdown(w, cs, diffInfo.SeverityThreshold); err != nil {
+			return 0, fmt.Errorf("writing Markdown diff: %w", err)
+		}
 	default:
 		if err := diff.PrintPretty(w, cs); err != nil {
 			return 0, fmt.Errorf("writing pretty diff: %w", err)
@@ -54,4 +71,25 @@ func closeDiffOutput(closer io.Closer, err error) error {
 		return errors.Join(err, fmt.Errorf("closing diff output: %w", closeErr))
 	}
 	return err
+}
+
+func diffOutputPath(format, outputFile string) string {
+	outputFile = strings.TrimSpace(outputFile)
+	if outputFile == "" {
+		return ""
+	}
+	if format == printer.PrettyFormat {
+		return outputFile
+	}
+	ext, ok := printer.FormatOutputExt[format]
+	if !ok || ext == "" {
+		return outputFile
+	}
+	if ext == printer.YamlOutputExt && strings.HasSuffix(outputFile, ".yml") {
+		return outputFile
+	}
+	if printer.HasOutputExt(outputFile, ext) {
+		return outputFile
+	}
+	return outputFile + ext
 }

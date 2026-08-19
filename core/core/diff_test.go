@@ -140,6 +140,104 @@ func TestDiff_PrettyFormatWritesOutput(t *testing.T) {
 	assert.Contains(t, string(data), "New failures")
 }
 
+func TestDiff_MachineFormatsWriteExpectedOutputFiles(t *testing.T) {
+	base := writeReport(t, `{"results":[],"summaryDetails":{"controls":{}}}`)
+	head := writeReport(t, `{
+		"results":[{"resourceID":"res1","controls":[
+			{"controlID":"C-HIGH","name":"High","status":{"status":"failed"}}
+		]}],
+		"summaryDetails":{"controls":{"C-HIGH":{"scoreFactor":7.0}}}
+	}`)
+
+	tests := []struct {
+		name       string
+		format     string
+		outputBase string
+		wantFile   string
+		wantText   string
+	}{
+		{
+			name:       "sarif appends extension",
+			format:     "sarif",
+			outputBase: "kubescape-diff",
+			wantFile:   "kubescape-diff.sarif",
+			wantText:   `"version": "2.1.0"`,
+		},
+		{
+			name:       "junit appends extension",
+			format:     "junit",
+			outputBase: "kubescape-diff",
+			wantFile:   "kubescape-diff.xml",
+			wantText:   `<testsuites name="Kubescape Diff" tests="1" failures="1" errors="0">`,
+		},
+		{
+			name:       "gitlab-sast appends json extension",
+			format:     "gitlab-sast",
+			outputBase: "gl-sast-report",
+			wantFile:   "gl-sast-report.json",
+			wantText:   `"version": "15.2.4"`,
+		},
+		{
+			name:       "markdown appends extension",
+			format:     "markdown",
+			outputBase: "kubescape-diff",
+			wantFile:   "kubescape-diff.md",
+			wantText:   "# Kubescape Diff Regressions",
+		},
+		{
+			name:       "yaml accepts yml extension",
+			format:     "yaml",
+			outputBase: "kubescape-diff.yml",
+			wantFile:   "kubescape-diff.yml",
+			wantText:   "new:",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			outDir := t.TempDir()
+			ks := NewKubescape(context.Background())
+			count, err := ks.Diff(&metav1.DiffInfo{
+				BaseFile: base,
+				HeadFile: head,
+				Format:   test.format,
+				Output:   filepath.Join(outDir, test.outputBase),
+			})
+
+			require.NoError(t, err)
+			assert.Equal(t, 1, count)
+
+			data, err := os.ReadFile(filepath.Join(outDir, test.wantFile))
+			require.NoError(t, err)
+			assert.Contains(t, string(data), test.wantText)
+		})
+	}
+}
+
+func TestDiffOutputPath(t *testing.T) {
+	tests := []struct {
+		name       string
+		format     string
+		outputFile string
+		want       string
+	}{
+		{"empty output stays empty", "sarif", "", ""},
+		{"whitespace is trimmed", "sarif", " report ", "report.sarif"},
+		{"known extension is appended", "sarif", "report", "report.sarif"},
+		{"existing extension is preserved", "sarif", "report.sarif", "report.sarif"},
+		{"existing extension comparison is case-insensitive", "sarif", "report.SARIF", "report.SARIF"},
+		{"pretty output path stays exact", "pretty-printer", "pretty.out", "pretty.out"},
+		{"yaml accepts yml", "yaml", "report.yml", "report.yml"},
+		{"unknown format is untouched", "unknown", "report", "report"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, diffOutputPath(test.format, test.outputFile))
+		})
+	}
+}
+
 func TestDiff_ExplicitOutputSetupFailureIsReturned(t *testing.T) {
 	base := writeReport(t, `{"results":[],"summaryDetails":{"controls":{}}}`)
 	head := writeReport(t, `{"results":[],"summaryDetails":{"controls":{}}}`)
