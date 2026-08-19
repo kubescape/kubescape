@@ -72,6 +72,10 @@ const (
 	// addURIAndShaCall identifies the template lines that build an asset URL, in
 	// both the template and its documented copy.
 	addURIAndShaCall = "addURIAndSha"
+
+	// krewPluginAPIVersion picks the documentation's copy of the template out of
+	// the other YAML blocks around it.
+	krewPluginAPIVersion = "apiVersion: krew.googlecontainertools.github.com/v1alpha2"
 )
 
 // krewPlatform is one entry of the plugin manifest's `platforms` list. The
@@ -278,14 +282,46 @@ func TestKrewTemplateRendersValidPluginManifest(t *testing.T) {
 		"%s rendered %d platforms, expected %d",
 		krewTemplateName, len(manifest.Spec.Platforms), len(krewPlatforms))
 
-	for _, platform := range manifest.Spec.Platforms {
-		t.Run(platform.Selector.MatchLabels.OS+"/"+platform.Selector.MatchLabels.Arch, func(t *testing.T) {
-			assert.NotEmpty(t, platform.URI, "platform has no uri, so krew has nothing to download")
-			assert.Equalf(t, krewStubSha, platform.Sha256,
-				"platform has no sha256 at the expected nesting; addURIAndSha pads it by four spaces, "+
-					"so the template call must sit at that indentation")
-			assert.NotEmpty(t, platform.Bin, "platform declares no bin, so krew cannot link the plugin")
+	// Assert the whole mapping, not that the fields are populated. krew picks a
+	// platform by its selector and then runs whatever `bin` that entry names, so
+	// a uri or a bin attached to the wrong selector installs the wrong artifact
+	// while every field is present and every URL resolves.
+	expected := make(map[[2]string]krewPlatform, len(krewPlatforms))
+	for _, platform := range krewPlatforms {
+		expected[[2]string{platform.os, platform.arch}] = platform
+	}
+
+	seen := make(map[[2]string]bool, len(krewPlatforms))
+	for _, rendered := range manifest.Spec.Platforms {
+		selector := [2]string{rendered.Selector.MatchLabels.OS, rendered.Selector.MatchLabels.Arch}
+
+		t.Run(selector[0]+"/"+selector[1], func(t *testing.T) {
+			want, ok := expected[selector]
+			require.Truef(t, ok, "manifest declares %s/%s, which .goreleaser.yaml does not build for the "+
+				"`cli` artifact; krew would offer an install that has no asset", selector[0], selector[1])
+
+			assert.Falsef(t, seen[selector], "%s/%s appears twice; the duplicate shadows whichever entry "+
+				"krew resolves second", selector[0], selector[1])
+			seen[selector] = true
+
+			assert.Equalf(t, want.binary, rendered.Bin,
+				"%s/%s names bin %q; krew runs that path out of the extracted archive, and the Windows "+
+					"archives carry kubescape.exe", selector[0], selector[1], rendered.Bin)
+
+			assert.Equalf(t, expectedKrewURI(krewSampleTag, krewSampleVersion, want), rendered.URI,
+				"%s/%s points at the wrong asset; a uri under the wrong selector installs another "+
+					"platform's binary", selector[0], selector[1])
+
+			assert.Equalf(t, krewStubSha, rendered.Sha256,
+				"%s/%s has no sha256 at the expected nesting; addURIAndSha pads it by four spaces, "+
+					"so the template call must sit at that indentation", selector[0], selector[1])
 		})
+	}
+
+	for _, platform := range krewPlatforms {
+		assert.Truef(t, seen[[2]string{platform.os, platform.arch}],
+			"%s renders no entry for %s/%s, so krew cannot install on it",
+			krewTemplateName, platform.os, platform.arch)
 	}
 }
 
@@ -301,17 +337,64 @@ func TestKrewDocMatchesTemplate(t *testing.T) {
 	docContent, err := os.ReadFile(docPath)
 	require.NoErrorf(t, err, "cannot read %s", krewDocName)
 
-	fromTemplate := addURIAndShaLines(string(templateContent))
+	template := strings.TrimRight(string(templateContent), "\n")
+	embedded := krewTemplateBlock(t, string(docContent))
+
+	// The URL-building lines are what drifted, and comparing them on their own
+	// gives a failure a reader can act on without diffing 70 lines.
+	fromTemplate := addURIAndShaLines(template)
 	require.NotEmptyf(t, fromTemplate, "%s builds no asset URLs at all", krewTemplateName)
 
-	fromDoc := addURIAndShaLines(string(docContent))
-	require.NotEmptyf(t, fromDoc,
-		"%s no longer shows any %s call; it documents the template, so it has to show the real one",
-		krewDocName, addURIAndShaCall)
+	assert.ElementsMatchf(t, fromTemplate, addURIAndShaLines(embedded),
+		"%s documents different %s calls than %s ships; a contributor following the documentation "+
+			"would reintroduce the form that cannot render", krewDocName, addURIAndShaCall, krewTemplateName)
 
-	assert.ElementsMatchf(t, fromTemplate, fromDoc,
-		"%s documents a different template than %s ships; a contributor following the documentation "+
-			"would reintroduce the form that cannot render", krewDocName, krewTemplateName)
+	// Then the block as a whole. Selectors, bin names, the header comment and the
+	// description can all drift while the URL lines still agree.
+	assert.Equalf(t, template, embedded,
+		"the template embedded in %s is not %s. It is a copy, so it goes stale silently - paste the "+
+			"current file into that fenced block", krewDocName, krewTemplateName)
+}
+
+// krewTemplateBlock returns the fenced YAML block in the documentation that
+// holds the copy of .krew.yaml. It is selected by content rather than position,
+// because the document fences other YAML too (the release job's permissions and
+// the GoReleaser krews: block).
+func krewTemplateBlock(t *testing.T, doc string) string {
+	t.Helper()
+
+	const fence = "```"
+
+	var (
+		blocks  []string
+		current []string
+		inBlock bool
+	)
+	for _, line := range strings.Split(doc, "\n") {
+		switch {
+		case !inBlock && strings.HasPrefix(strings.TrimSpace(line), fence+"yaml"):
+			inBlock, current = true, nil
+		case inBlock && strings.TrimSpace(line) == fence:
+			blocks = append(blocks, strings.Join(current, "\n"))
+			inBlock = false
+		case inBlock:
+			current = append(current, line)
+		}
+	}
+	require.Falsef(t, inBlock, "%s has an unterminated ```yaml block", krewDocName)
+
+	var matched []string
+	for _, block := range blocks {
+		if strings.Contains(block, krewPluginAPIVersion) {
+			matched = append(matched, block)
+		}
+	}
+
+	require.Lenf(t, matched, 1,
+		"expected exactly one fenced YAML block in %s carrying %q, found %d; this test cannot tell which "+
+			"one documents the template", krewDocName, krewPluginAPIVersion, len(matched))
+
+	return strings.TrimRight(matched[0], "\n")
 }
 
 // TestGoreleaserArchivesUseDefaultNaming pins the assumption the asset-name test
