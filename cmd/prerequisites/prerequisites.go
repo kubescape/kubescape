@@ -6,7 +6,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/meta"
+	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/sizing-checker/pkg/checks/connectivitycheck"
 	"github.com/kubescape/sizing-checker/pkg/checks/ebpfcheck"
 	"github.com/kubescape/sizing-checker/pkg/checks/pvcheck"

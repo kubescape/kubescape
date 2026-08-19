@@ -1,4 +1,4 @@
-module github.com/kubescape/kubescape/v3
+module github.com/kubescape/kubescape/v4
 
 go 1.26.0
 
@@ -72,6 +72,7 @@ require (
 	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/metric v1.45.0
 	go.opentelemetry.io/otel/sdk/metric v1.45.0
+	golang.org/x/crypto v0.53.0
 	golang.org/x/mod v0.37.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/term v0.45.0
@@ -386,6 +387,8 @@ require (
 	github.com/knqyf263/go-apk-version v0.0.0-20200609155635-041fdbb8563f // indirect
 	github.com/knqyf263/go-deb-version v0.0.0-20241115132648-6f4aee6ccd23 // indirect
 	github.com/knqyf263/go-rpm-version v0.0.0-20220614171824-631e686d1075 // indirect
+	github.com/kubescape/kubescape/v3 v3.0.4 // indirect
+	github.com/kubescape/regolibrary v1.0.317-0.20240320124840-1d84ac7186ea // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect
 	github.com/lestrrat-go/dsig v1.2.1 // indirect
@@ -585,7 +588,6 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
-	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/image v0.44.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
@@ -629,3 +631,5 @@ replace github.com/google/go-containerregistry => github.com/matthyx/go-containe
 replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.0-20260322054632-16583c73e9b8
 
 replace github.com/kubescape/k8s-interface => github.com/doraem-on/k8s-interface v0.0.218-0.20260815050130-fa6fe1e9bc98
+
+replace github.com/distribution/reference => github.com/distribution/reference v0.5.0

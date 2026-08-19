@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

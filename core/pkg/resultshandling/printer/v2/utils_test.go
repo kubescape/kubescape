@@ -12,8 +12,8 @@ import (
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -1278,4 +1278,30 @@ func TestFilterBySeverity_EmptyMinSeverityNoOp(t *testing.T) {
 	}
 	FilterBySeverity(report, "")
 	assert.Len(t, report.SummaryDetails.Controls, 1)
+}
+
+func TestBuildImageScanSummary_CarriesVulnDBBuilt(t *testing.T) {
+	builtAt := time.Now().Add(-24 * time.Hour).Truncate(time.Second)
+
+	imageData := []cautils.ImageScanData{
+		{Image: "img:1", VulnDBBuilt: &builtAt},
+		{Image: "img:2"}, // no built time; first non-nil wins
+	}
+
+	summary := buildImageScanSummary(imageData)
+
+	require.NotNil(t, summary)
+	assert.Equal(t, builtAt, *summary.VulnDBBuilt)
+	assert.Equal(t, []string{"img:1", "img:2"}, summary.Images)
+}
+
+func TestBuildImageScanSummary_NilWhenNoBuilt(t *testing.T) {
+	imageData := []cautils.ImageScanData{
+		{Image: "img:1"},
+	}
+
+	summary := buildImageScanSummary(imageData)
+
+	require.NotNil(t, summary)
+	assert.Nil(t, summary.VulnDBBuilt)
 }

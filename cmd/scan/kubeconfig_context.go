@@ -1,7 +1,7 @@
 package scan
 
 import (
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )

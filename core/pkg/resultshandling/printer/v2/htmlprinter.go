@@ -7,16 +7,15 @@ import (
 	"fmt"
 	"html/template"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -77,7 +76,7 @@ func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) error {
 		outputFile = htmlOutputFile + printer.HtmlOutputExt
 		logger.L().Info("no --output specified for html format; writing to default file",
 			helpers.String("filename", outputFile))
-	} else if filepath.Ext(outputFile) != printer.HtmlOutputExt {
+	} else if !printer.HasOutputExt(outputFile, printer.HtmlOutputExt) {
 		outputFile = outputFile + printer.HtmlOutputExt
 	}
 	if explicitOutput {

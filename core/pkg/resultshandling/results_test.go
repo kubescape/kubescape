@@ -15,9 +15,9 @@ import (
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -188,7 +188,7 @@ func TestCombinedJSONAndYAMLOutputDoesNotMutateSubmittedSession(t *testing.T) {
 		extension string
 		printer   func() printer.IPrinter
 	}{
-		{name: "json", extension: ".json", printer: func() printer.IPrinter { return printerv2.NewJsonPrinter("") }},
+		{name: "json", extension: ".json", printer: func() printer.IPrinter { return printerv2.NewJsonPrinter() }},
 		{name: "yaml", extension: ".yaml", printer: func() printer.IPrinter { return printerv2.NewYamlPrinter() }},
 	}
 
@@ -809,7 +809,7 @@ func TestClosePrinter_AllV2PrintersImplementErrorCloser(t *testing.T) {
 		name    string
 		printer printer.IPrinter
 	}{
-		{"json", printerv2.NewJsonPrinter("")},
+		{"json", printerv2.NewJsonPrinter()},
 		{"sarif", printerv2.NewSARIFPrinter()},
 		{"html", printerv2.NewHtmlPrinter()},
 		{"yaml", printerv2.NewYamlPrinter()},
@@ -894,4 +894,124 @@ func TestHandleResults_PropagatesPrinterCloseErrors(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ui printer close: simulated close flush failure")
 	assert.Contains(t, err.Error(), "output printer *resultshandling.mockFailingClosePrinter close: simulated close flush failure")
+}
+
+// TestHandleResults_RestoresReportAfterSeverityFilter verifies that after
+// HandleResults returns, both SummaryDetails.Controls and every
+// Results[i].AssociatedControls are restored to their unfiltered state.
+// Without this guarantee, httphandler persistence and operator storage that
+// read rh.ScanData after the call would receive an internally inconsistent
+// PostureReport: full summary counts beside severity-filtered per-resource lists.
+func TestHandleResults_RestoresReportAfterSeverityFilter(t *testing.T) {
+	sessionObj := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: map[string]reportsummary.ControlSummary{
+					"C-low":    {ControlID: "C-low", ScoreFactor: 1},
+					"C-high":   {ControlID: "C-high", ScoreFactor: 7},
+					"C-medium": {ControlID: "C-medium", ScoreFactor: 4},
+				},
+			},
+			Results: []resourcesresults.Result{
+				{
+					AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+						{ControlID: "C-low"},
+						{ControlID: "C-high"},
+					},
+				},
+			},
+		},
+	}
+
+	rh := &ResultsHandler{
+		ScanData:  sessionObj,
+		UiPrinter: &SpyPrinter{},
+	}
+
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{
+		MinSeverity: "high",
+	})
+	require.NoError(t, err)
+
+	// Both Controls and AssociatedControls must be fully restored so that
+	// any caller reading rh.ScanData after HandleResults sees a consistent report.
+	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 3, "Controls must be unfiltered after HandleResults")
+	assert.Len(t, rh.ScanData.Report.Results[0].AssociatedControls, 2, "AssociatedControls must be unfiltered after HandleResults")
+}
+
+func makeFilteredSession() *cautils.OPASessionObj {
+	return &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: map[string]reportsummary.ControlSummary{
+					"C-low":  {ControlID: "C-low", ScoreFactor: 1},
+					"C-high": {ControlID: "C-high", ScoreFactor: 7},
+				},
+			},
+			Results: []resourcesresults.Result{
+				{
+					AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+						{ControlID: "C-low"},
+						{ControlID: "C-high"},
+					},
+				},
+			},
+		},
+	}
+}
+
+// TestHandleResults_RestoresReportOnPrinterError verifies that the deferred
+// restoreReport fires even when a printer close fails and HandleResults returns
+// an error, so rh.ScanData.Report is never left permanently filtered.
+func TestHandleResults_RestoresReportOnPrinterError(t *testing.T) {
+	sessionObj := makeFilteredSession()
+
+	rh := &ResultsHandler{
+		ScanData:    sessionObj,
+		UiPrinter:   &mockFailingClosePrinter{},
+		PrinterObjs: []printer.IPrinter{&mockFailingClosePrinter{}},
+	}
+
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{MinSeverity: "high"})
+	require.Error(t, err)
+
+	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 2,
+		"Controls must be restored after printer error")
+	assert.Len(t, rh.ScanData.Report.Results[0].AssociatedControls, 2,
+		"AssociatedControls must be restored after printer error")
+}
+
+type failingReporter struct{}
+
+func (r *failingReporter) Submit(_ context.Context, _ *cautils.OPASessionObj) error {
+	return errors.New("simulated submit failure")
+}
+func (r *failingReporter) SetTenantConfig(_ cautils.ITenantConfig) {}
+func (r *failingReporter) DisplayMessage()                         {}
+func (r *failingReporter) GetURL() string                          { return "" }
+
+// TestHandleResults_RestoresReportOnSubmitError verifies that the deferred
+// restoreReport fires even when ReporterObj.Submit fails and HandleResults
+// returns an error, so rh.ScanData.Report is never left permanently filtered.
+func TestHandleResults_RestoresReportOnSubmitError(t *testing.T) {
+	sessionObj := makeFilteredSession()
+	submit := true
+
+	rh := &ResultsHandler{
+		ScanData:    sessionObj,
+		UiPrinter:   &SpyPrinter{},
+		ReporterObj: &failingReporter{},
+	}
+
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{
+		MinSeverity: "high",
+		Submit:      cautils.NewBoolPtr(&submit),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "simulated submit failure")
+
+	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 2,
+		"Controls must be restored after submit error")
+	assert.Len(t, rh.ScanData.Report.Results[0].AssociatedControls, 2,
+		"AssociatedControls must be restored after submit error")
 }

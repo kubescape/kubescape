@@ -6,9 +6,9 @@ import (
 	"io"
 	"os"
 
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/diff"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/diff"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 )
 
 // Diff writes the diff between the two scan reports and returns the number of new or incomparable failures at or above the severity threshold; the caller decides whether to exit 1.

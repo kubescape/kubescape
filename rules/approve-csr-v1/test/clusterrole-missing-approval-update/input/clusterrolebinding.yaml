@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: csr-missing-approval-update-crb
+subjects:
+- kind: ServiceAccount
+  name: csr-missing-approval-update-sa
+  namespace: ci
+roleRef:
+  kind: ClusterRole
+  name: csr-approver
+  apiGroup: rbac.authorization.k8s.io

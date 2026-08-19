@@ -5,13 +5,12 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	reporthandling "github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -37,8 +36,7 @@ func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) error {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = csvOutputFile
 		}
-		ext := filepath.Ext(strings.TrimSpace(outputFile))
-		if ext != printer.CsvOutputExt {
+		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.CsvOutputExt) {
 			outputFile = outputFile + printer.CsvOutputExt
 		}
 	}

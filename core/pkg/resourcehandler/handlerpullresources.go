@@ -8,7 +8,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	cloudsupportv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"

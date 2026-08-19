@@ -4,14 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
@@ -44,7 +43,7 @@ func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) e
 		if outputFile == "" {
 			outputFile = prometheusOutputFile
 		}
-		if filepath.Ext(outputFile) != printer.PrometheusOutputExt {
+		if !printer.HasOutputExt(outputFile, printer.PrometheusOutputExt) {
 			outputFile = outputFile + printer.PrometheusOutputExt
 		}
 	}

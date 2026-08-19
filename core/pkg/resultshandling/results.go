@@ -9,12 +9,12 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	printerv1 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v1"
-	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
-	"github.com/kubescape/kubescape/v3/core/pkg/vapreconcile"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	printerv1 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v1"
+	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -135,6 +135,51 @@ func (rh *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
 	return printerv2.FinalizeResults(rh.ScanData)
 }
 
+// reportSnapshot holds the parts of ScanData.Report that ApplySeverityFilters
+// mutates in place, so HandleResults can restore them after printers and
+// submission have run.
+type reportSnapshot struct {
+	controls map[string]reportsummary.ControlSummary
+	// Per-result copies of AssociatedControls. The filter uses a [:0] append
+	// which overwrites the backing array, so we must copy the elements before
+	// the filter runs — saving the slice header alone is not enough.
+	associatedControls [][]resourcesresults.ResourceAssociatedControl
+}
+
+func snapshotReport(sessionObj *cautils.OPASessionObj) reportSnapshot {
+	if sessionObj == nil || sessionObj.Report == nil {
+		return reportSnapshot{}
+	}
+
+	src := sessionObj.Report.SummaryDetails.Controls
+	controls := make(map[string]reportsummary.ControlSummary, len(src))
+	for k, v := range src {
+		controls[k] = v
+	}
+
+	results := sessionObj.Report.Results
+	ac := make([][]resourcesresults.ResourceAssociatedControl, len(results))
+	for i, r := range results {
+		copy_ := make([]resourcesresults.ResourceAssociatedControl, len(r.AssociatedControls))
+		copy(copy_, r.AssociatedControls)
+		ac[i] = copy_
+	}
+
+	return reportSnapshot{controls: controls, associatedControls: ac}
+}
+
+func restoreReport(sessionObj *cautils.OPASessionObj, snap reportSnapshot) {
+	if sessionObj == nil || sessionObj.Report == nil {
+		return
+	}
+	sessionObj.Report.SummaryDetails.Controls = snap.controls
+	for i := range sessionObj.Report.Results {
+		if i < len(snap.associatedControls) {
+			sessionObj.Report.Results[i].AssociatedControls = snap.associatedControls[i]
+		}
+	}
+}
+
 // HandleResults handles all necessary actions for the scan results
 func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.ScanInfo) error {
 	if rh.ScanData != nil && len(rh.ScanData.VAPPolicies) > 0 {
@@ -142,8 +187,19 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 		vapreconcile.EnrichSummary(rh.ScanData.Report.SummaryDetails.Controls, index)
 	}
 
-	// Display scan results in the UI first to give immediate value.
+	// Snapshot both Report.SummaryDetails.Controls and every
+	// Results[i].AssociatedControls before applying severity filters.
+	// ApplySeverityFilters mutates both in place; printers and submission see
+	// the narrowed set, but the caller (cmd/scan) evaluates exit thresholds
+	// and coverage counts after HandleResults returns and must see the full
+	// unfiltered report. Other consumers of rh.ScanData (httphandler /v1/results,
+	// StorePostureReportResults) also read the report after this call and
+	// must not receive an internally inconsistent PostureReport.
+	snap := snapshotReport(rh.ScanData)
+	defer restoreReport(rh.ScanData, snap)
+	ApplySeverityFilters(rh.ScanData, scanInfo.MinSeverity, scanInfo.MaxSeverity)
 
+	// Display scan results in the UI first to give immediate value.
 	var printErr error
 
 	if err := rh.UiPrinter.ActionPrint(ctx, rh.ScanData, rh.ImageScanData); err != nil {
@@ -194,7 +250,7 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 			logger.L().Ctx(ctx).Warning("Deprecated format version", helpers.String("run", "--format-version=v2"))
 			return printerv1.NewJsonPrinter()
 		default:
-			return printerv2.NewJsonPrinter(scanInfo.MinSeverity)
+			return printerv2.NewJsonPrinter()
 		}
 	case printer.YamlFormat:
 		if scanInfo.FormatVersion == "v1" {

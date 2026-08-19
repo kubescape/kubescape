@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

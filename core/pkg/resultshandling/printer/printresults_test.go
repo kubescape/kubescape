@@ -211,3 +211,28 @@ func TestFormatOutputExtCoversAllFormats(t *testing.T) {
 		assert.NotEmpty(t, ext, "format %q maps to an empty extension", format)
 	}
 }
+
+func TestHasOutputExt(t *testing.T) {
+	tests := []struct {
+		name       string
+		outputFile string
+		ext        string
+		want       bool
+	}{
+		{"exact lowercase match", "report.json", ".json", true},
+		{"uppercase extension matches lowercase ext", "Report.JSON", ".json", true},
+		{"mixed case extension matches", "Report.Json", ".json", true},
+		{"different extension does not match", "report.yaml", ".json", false},
+		{"no extension does not match", "report", ".json", false},
+		{"empty outputFile does not match", "", ".json", false},
+		{"compound lowercase match", "report.cdx.json", ".cdx.json", true},
+		{"compound uppercase match", "Report.CDX.JSON", ".cdx.json", true},
+		{"compound partial match", "report.cdx.json", ".json", true},
+		{"compound different extension", "report.spdx.json", ".cdx.json", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, HasOutputExt(tt.outputFile, tt.ext))
+		})
+	}
+}

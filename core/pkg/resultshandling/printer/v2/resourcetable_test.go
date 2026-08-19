@@ -33,6 +33,13 @@ func TestAppendFailedPathsIfNotInPaths(t *testing.T) {
 			failedPaths:   []string{},
 			expectedPaths: []string{"path1", "path2"},
 		},
+		{
+			// a bare delete/fix/review path must still be recognized as covering its
+			// enriched " (current: <value>)" counterpart in failedPaths
+			paths:         []string{"spec.hostNetwork"},
+			failedPaths:   []string{"spec.hostNetwork (current: true)"},
+			expectedPaths: []string{"spec.hostNetwork"},
+		},
 	}
 
 	for _, testcase := range tests {

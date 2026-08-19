@@ -307,7 +307,7 @@ func TestDecryptReportAllowsWrappedDEKToRemain(t *testing.T) {
 	report := decodeTestObject(t, decrypted)
 	metadata := requireTestObject(t, report, "metadata")
 	encryptionMetadata := requireTestObject(t, metadata, "encryptionMetadata")
-	assert.Contains(t, encryptionMetadata["encryptedDEK"], "ENC[AES256_GCM,")
+	assert.Contains(t, encryptionMetadata["encryptedDEK"], kekPrefix)
 }
 
 func TestDecryptEmbeddedCiphertextsHandlesSlashesInsideEnvelopes(t *testing.T) {

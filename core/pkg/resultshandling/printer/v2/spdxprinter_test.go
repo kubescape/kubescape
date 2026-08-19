@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,6 +31,16 @@ func TestSetWriter_SPDX_AppendsExtension(t *testing.T) {
 	defer sp.CloseWriter()
 
 	assert.Contains(t, sp.writer.Name(), ".spdx.json")
+}
+
+func TestSetWriter_SPDX_CaseInsensitiveExtension(t *testing.T) {
+	sp := NewSPDXPrinter()
+	tmpDir := t.TempDir()
+	sp.SetWriter(context.TODO(), tmpDir+"/Report.SPDX.JSON")
+	defer sp.CloseWriter()
+
+	assert.NotContains(t, sp.writer.Name(), ".spdx.json.spdx.json")
+	assert.Contains(t, sp.writer.Name(), "Report.SPDX.JSON")
 }
 
 func TestActionPrint_SPDX_ImageScan(t *testing.T) {

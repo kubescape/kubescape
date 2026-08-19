@@ -4,15 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -97,8 +96,7 @@ func (pp *PolicyReportPrinter) SetWriter(ctx context.Context, outputFile string)
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = policyReportOutputFile
 		}
-		ext := filepath.Ext(strings.TrimSpace(outputFile))
-		if ext != printer.YamlOutputExt && ext != ".yml" {
+		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.YamlOutputExt) && !printer.HasOutputExt(strings.TrimSpace(outputFile), ".yml") {
 			outputFile = outputFile + printer.YamlOutputExt
 		}
 		var err error

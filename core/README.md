@@ -15,7 +15,7 @@ The `core` package provides the main Kubescape scanning engine as a Go library, 
 ## Installation
 
 ```bash
-go get github.com/kubescape/kubescape/v3/core
+go get github.com/kubescape/kubescape/v4/core
 ```
 
 ---
@@ -30,8 +30,8 @@ import (
     "fmt"
     "log"
 
-    "github.com/kubescape/kubescape/v3/core"
-    "github.com/kubescape/kubescape/v3/core/cautils"
+    "github.com/kubescape/kubescape/v4/core"
+    "github.com/kubescape/kubescape/v4/core/cautils"
 )
 
 func main() {
@@ -130,7 +130,7 @@ err := ks.Fix(fixInfo)
 
 ```go
 import (
-    "github.com/kubescape/kubescape/v3/core/cautils"
+    "github.com/kubescape/kubescape/v4/core/cautils"
     apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 )
 

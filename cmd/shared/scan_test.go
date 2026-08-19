@@ -3,7 +3,7 @@ package shared
 import (
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
@@ -78,6 +78,7 @@ func TestValidateCommonScanFlags(t *testing.T) {
 		name          string
 		severity      string
 		minSeverity   string
+		maxSeverity   string
 		format        string
 		formatChanged bool
 		submit        bool
@@ -138,6 +139,60 @@ func TestValidateCommonScanFlags(t *testing.T) {
 			formatChanged: true,
 			expectedErr:   "you can use `omit-raw-resources` or `submit`, but not both",
 		},
+		{
+			name:          "Valid max severity",
+			severity:      "High",
+			maxSeverity:   "Critical",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
+		{
+			name:          "Invalid max severity",
+			severity:      "High",
+			maxSeverity:   "Extreme",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "unknown severity",
+		},
+		{
+			name:          "Valid min and max severity range",
+			minSeverity:   "Medium",
+			maxSeverity:   "High",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
+		{
+			name:          "Invalid min and max severity range",
+			minSeverity:   "High",
+			maxSeverity:   "Medium",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "min severity cannot be greater than max severity",
+		},
+		{
+			name:          "Min equals max severity",
+			minSeverity:   "High",
+			maxSeverity:   "High",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
+		{
+			name:          "Padded min severity accepted",
+			minSeverity:   "  high  ",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
+		{
+			name:          "Padded max severity accepted",
+			maxSeverity:   "  critical  ",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -145,6 +200,7 @@ func TestValidateCommonScanFlags(t *testing.T) {
 			scanInfo := &cautils.ScanInfo{
 				FailThresholdSeverity: tt.severity,
 				MinSeverity:           tt.minSeverity,
+				MaxSeverity:           tt.maxSeverity,
 				Format:                tt.format,
 				Local:                 tt.local,
 				OmitRawResources:      tt.omitRaw,
