@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/spf13/cobra"
@@ -480,9 +481,15 @@ func checkResourceRulesInPolicyScope(rules []string, controlID, policyName strin
 		if err != nil {
 			return err
 		}
-		if !resourceRuleInScope(parsed, constraints.ResourceRules) {
+		switch classifyResourceRule(parsed, constraints.ResourceRules) {
+		case ruleOutsidePolicy:
 			return fmt.Errorf("resource rule %q is outside the matchConstraints of policy %s, so the binding would match nothing; the policy matches %s",
 				strings.TrimSpace(rule), policyName, describeResourceRules(constraints.ResourceRules))
+		case ruleConvertsToPolicy:
+			logger.L().Warning("resource rule names another API group or version than the policy constrains; the binding matches only if the cluster serves them as equivalent forms of one resource",
+				helpers.String("rule", strings.TrimSpace(rule)),
+				helpers.String("policy", policyName),
+				helpers.String("policyMatches", describeResourceRules(constraints.ResourceRules)))
 		}
 	}
 	return nil
@@ -501,23 +508,53 @@ func policyMatchConstraints(controlID, policyName string) (*admissionv1.MatchRes
 	return constraints, nil
 }
 
-// resourceRuleInScope reports whether a binding rule overlaps any of the
-// policy's resource rules. Only an empty overlap is refused, since narrowing the
-// policy is what --resource-rule is for. excludeResourceRules are not consulted:
-// they carve out part of a surface rather than define it.
+// resourceRuleScope is what this command can conclude offline about one
+// --resource-rule, given the policy it is being bound to.
+type resourceRuleScope int
+
+const (
+	// ruleOutsidePolicy: the policy constrains no resource the rule names, which
+	// no API conversion can bridge. The binding would match nothing.
+	ruleOutsidePolicy resourceRuleScope = iota
+	// ruleConvertsToPolicy: the policy constrains the resource, but at another
+	// API group or version. Whether those are equivalent forms of one resource
+	// is a cluster fact, so this is reported rather than refused.
+	ruleConvertsToPolicy
+	// ruleMatchesPolicy: the rule names a resource the policy constrains, at the
+	// same group and version.
+	ruleMatchesPolicy
+)
+
+// classifyResourceRule compares a binding rule against the policy's resource
+// rules. Only a resource mismatch is conclusive offline.
 //
-// Operations and scope are not compared either. A parsed --resource-rule always
-// carries "*" for both, so comparing them could never refuse anything.
-func resourceRuleInScope(rule admissionv1.NamedRuleWithOperations, constraints []admissionv1.NamedRuleWithOperations) bool {
+// A group or version mismatch is not, because matchResources defaults to
+// matchPolicy Equivalent and this command never sets it: the emitted binding
+// matches a request for the resource even when it arrives via another group or
+// version, so a rule naming apps/v1beta1/deployments still intersects a policy
+// constraining apps/v1/deployments. Which forms are equivalent is something only
+// the cluster knows, so the two cannot be told apart from a typo here. The
+// policy's own matchPolicy does not change this — the binding side alone is
+// enough to bridge the gap. A resource name, by contrast, is stable across
+// equivalent forms, and conversion never turns a subresource into a resource.
+//
+// excludeResourceRules are not consulted: they carve out part of a surface
+// rather than define it. Operations and scope are not compared either, since a
+// parsed --resource-rule always carries "*" for both.
+func classifyResourceRule(rule admissionv1.NamedRuleWithOperations, constraints []admissionv1.NamedRuleWithOperations) resourceRuleScope {
+	scope := ruleOutsidePolicy
 	for i := range constraints {
 		constraint := &constraints[i]
-		if valuesOverlap(rule.APIGroups, constraint.APIGroups) &&
-			valuesOverlap(rule.APIVersions, constraint.APIVersions) &&
-			resourcesOverlap(rule.Resources, constraint.Resources) {
-			return true
+		if !resourcesOverlap(rule.Resources, constraint.Resources) {
+			continue
 		}
+		if valuesOverlap(rule.APIGroups, constraint.APIGroups) &&
+			valuesOverlap(rule.APIVersions, constraint.APIVersions) {
+			return ruleMatchesPolicy
+		}
+		scope = ruleConvertsToPolicy
 	}
-	return false
+	return scope
 }
 
 func valuesOverlap(a, b []string) bool {
