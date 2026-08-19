@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestSplitPath(t *testing.T) {
@@ -493,6 +494,33 @@ func TestFailedPathsWithCurrentValues(t *testing.T) {
 		got := failedPathsWithCurrentValues(ctrl, objResource)
 		require.Len(t, got, 1)
 		assert.Equal(t, `spec.containers[0].securityContext (current: {"capabilities":{"add":["SYS_ADMIN"]},"privileged":true})`, got[0])
+	})
+
+	t.Run("container path is enriched when containers were replaced with typed structs", func(t *testing.T) {
+		// opaprocessor.removePodData sanitizes containers by calling workload.GetContainers()
+		// (which returns []corev1.Container) and writing that typed slice back into the object
+		// map via workloadinterface.SetInMap. By the time the printer runs, spec.containers is
+		// a []corev1.Container rather than []any, so the majority of posture findings - which
+		// target container-scoped fields - must still be walkable.
+		privileged := true
+		objResource := &mockResource{
+			obj: map[string]any{
+				"spec": map[string]any{
+					"containers": []corev1.Container{
+						{
+							Name: "app",
+							SecurityContext: &corev1.SecurityContext{
+								Privileged: &privileged,
+							},
+						},
+					},
+				},
+			},
+		}
+		ctrl := makeControlWithPaths([]string{"spec.containers[0].securityContext.privileged"}, nil)
+		got := failedPathsWithCurrentValues(ctrl, objResource)
+		require.Len(t, got, 1)
+		assert.Equal(t, "spec.containers[0].securityContext.privileged (current: true)", got[0])
 	})
 }
 
