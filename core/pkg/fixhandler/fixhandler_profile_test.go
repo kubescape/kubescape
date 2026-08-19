@@ -108,7 +108,7 @@ spec:
 	}
 
 	fixes := h.PrepareResourcesToFix(context.Background())
-	assert.Len(t, fixes, 1)
+	require.Len(t, fixes, 1)
 	assert.Greater(t, len(fixes[0].YamlExpressions), 0) // Should have seccomp fix from drift
 
 	// 3. Setup with mismatched namespace

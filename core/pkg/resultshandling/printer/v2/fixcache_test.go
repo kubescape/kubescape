@@ -190,7 +190,7 @@ func TestFixReportCache_FixRegionsCachesUnappliableExpression(t *testing.T) {
 	ctx := context.Background()
 
 	cache := newFixReportCache()
-	assert.Empty(t, cache.fixRegions(ctx, path, fixhandler.DocumentFix{Fix: armotypes.FixPath{Path: "this is not a yq expression", Value: ""}}))
+	assert.Empty(t, cache.fixRegions(ctx, path, fixhandler.DocumentFix{Fix: armotypes.FixPath{Path: "[invalid]", Value: ""}}))
 	assert.Len(t, cache.regions, 1, "an expression that cannot be applied is diagnosed once, not once per control")
 }
 

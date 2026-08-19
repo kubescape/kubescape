@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"sort"
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -795,6 +796,16 @@ func (h *FixHandler) getFileFixes(resourcesToFix []ResourceFixInfo) map[string][
 				Fix:           fixPath,
 			})
 		}
+	}
+
+	for fp, fixes := range fileFixes {
+		sort.SliceStable(fixes, func(i, j int) bool {
+			if fixes[i].DocumentIndex != fixes[j].DocumentIndex {
+				return fixes[i].DocumentIndex < fixes[j].DocumentIndex
+			}
+			return fixes[i].Fix.Path < fixes[j].Fix.Path
+		})
+		fileFixes[fp] = fixes
 	}
 
 	return fileFixes

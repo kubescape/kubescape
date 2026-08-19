@@ -13,7 +13,6 @@ import (
 	gitv5 "github.com/go-git/go-git/v5"
 	"github.com/kubescape/go-logger"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v4/internal/testutils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -166,7 +165,7 @@ func TestApplyFixToContent_CraftedFixPathLeaksNothing(t *testing.T) {
 	}
 	got, err := NewYAMLTreeEditor().ApplyFixes(yamlContent, fixes)
 	require.NoError(t, err)
-	assert.NotContains(t, got, "super-secret-token")
+	assert.Equal(t, yamlContent, got)
 }
 
 func TestJoinStrings(t *testing.T) {
@@ -1036,4 +1035,38 @@ func singleResourceReport(t *testing.T, sourcePath, relPath string) *reporthandl
 			}},
 		}},
 	}
+}
+
+func TestApplyFixToContent_MultiFixDeterministicOrder(t *testing.T) {
+	yamlContent := "apiVersion: v1\nkind: Pod\nmetadata:\n  name: demo\nspec:\n  containers:\n  - name: app\n"
+
+	rfi := &ResourceFixInfo{
+		FilePath: "pod.yaml",
+		YamlExpressions: map[string]armotypes.FixPath{
+			"spec.containers[0].securityContext.runAsNonRoot": {Path: "spec.containers[0].securityContext.runAsNonRoot", Value: "true"},
+			"spec.containers[0].securityContext.allowPrivilegeEscalation": {Path: "spec.containers[0].securityContext.allowPrivilegeEscalation", Value: "false"},
+			"spec.containers[0].securityContext.readOnlyRootFilesystem": {Path: "spec.containers[0].securityContext.readOnlyRootFilesystem", Value: "true"},
+		},
+	}
+
+	h := &FixHandler{}
+	fileFixes := h.getFileFixes([]ResourceFixInfo{*rfi})
+	fixes := fileFixes["pod.yaml"]
+
+	got, err := NewYAMLTreeEditor().ApplyFixes(yamlContent, fixes)
+	require.NoError(t, err)
+
+	expected := `apiVersion: v1
+kind: Pod
+metadata:
+  name: demo
+spec:
+  containers:
+    - name: app
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+`
+	assert.Equal(t, expected, got)
 }
