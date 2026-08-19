@@ -8,6 +8,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -219,6 +220,12 @@ func (s *stubHostSensor) Init(_ context.Context) error { return nil }
 func (s *stubHostSensor) TearDown() error              { return nil }
 func (s *stubHostSensor) CollectResources(_ context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
 	return nil, s.infoMap, nil
+}
+
+func (s *stubHostSensor) StreamTelemetry(_ context.Context) (<-chan hostsensorutils.SyscallEvent, error) {
+	events := make(chan hostsensorutils.SyscallEvent)
+	close(events)
+	return events, nil
 }
 
 // TestGetResources_HostSensorInfoMapMerged is a regression test for the bug

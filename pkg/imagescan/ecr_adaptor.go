@@ -17,14 +17,24 @@ type ECRAPI interface {
 	DescribeImageScanFindings(ctx context.Context, params *ecr.DescribeImageScanFindingsInput, optFns ...func(*ecr.Options)) (*ecr.DescribeImageScanFindingsOutput, error)
 }
 
+type awsConfigProvider func(ctx context.Context, optFns ...func(*config.LoadOptions) error) (aws.Config, error)
+type ecrClientFactory func(cfg aws.Config) ECRAPI
+
 // AWSECRAdaptor implements IContainerImageVulnerabilityAdaptor for AWS ECR.
 type AWSECRAdaptor struct {
-	client ECRAPI
+	client         ECRAPI
+	configProvider awsConfigProvider
+	clientFactory  ecrClientFactory
 }
 
 // NewAWSECRAdaptor creates a new ECR adaptor instance.
 func NewAWSECRAdaptor() *AWSECRAdaptor {
-	return &AWSECRAdaptor{}
+	return &AWSECRAdaptor{
+		configProvider: config.LoadDefaultConfig,
+		clientFactory: func(cfg aws.Config) ECRAPI {
+			return ecr.NewFromConfig(cfg)
+		},
+	}
 }
 
 // Login authenticates with AWS. It prioritizes the default credential chain.
@@ -43,12 +53,12 @@ func (a *AWSECRAdaptor) Login(ctx context.Context, registry string, credentials 
 		opts = append(opts, config.WithRegion(parts[3]))
 	}
 
-	cfg, err := config.LoadDefaultConfig(ctx, opts...)
+	cfg, err := a.configProvider(ctx, opts...)
 	if err != nil {
 		return fmt.Errorf("unable to load AWS SDK config: %w", err)
 	}
 
-	a.client = ecr.NewFromConfig(cfg)
+	a.client = a.clientFactory(cfg)
 	return nil
 }
 
@@ -69,6 +79,10 @@ func (a *AWSECRAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Cont
 				ImageID:         imageID,
 				IsScanAvailable: false,
 				IsBomAvailable:  false,
+			}
+
+			if imageID.Hash == "" && imageID.Tag == "" {
+				return status, nil
 			}
 
 			var ecrImageID types.ImageIdentifier
@@ -112,6 +126,10 @@ func (a *AWSECRAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			report := ContainerImageVulnerabilityReport{
 				ImageID:         imageID,
 				Vulnerabilities: []Vulnerability{},
+			}
+
+			if imageID.Hash == "" && imageID.Tag == "" {
+				return report, nil
 			}
 
 			var ecrImageID types.ImageIdentifier

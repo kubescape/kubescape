@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -33,8 +34,30 @@ func TestListFiles(t *testing.T) {
 	assert.Equal(t, 13, len(files))
 }
 
+func TestLoadResourcesFromFilesDoesNotSubstituteNestedBasenameForMissingExactPath(t *testing.T) {
+	root := t.TempDir()
+	nestedDir := filepath.Join(root, "nested")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(nestedDir, "manifest.yaml"), []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name: nested
+`), 0o600))
+
+	requestedPath := filepath.Join(root, "manifest.yaml")
+	workloads, skipped, err := LoadResourcesFromFiles(context.Background(), requestedPath, root, nil)
+
+	require.ErrorIs(t, err, ErrNoManifestFiles)
+	assert.Empty(t, workloads)
+	assert.Empty(t, skipped)
+
+	workloads, _, err = LoadResourcesFromFiles(context.Background(), filepath.Join(root, "*.yaml"), root, nil)
+	require.NoError(t, err)
+	assert.Contains(t, workloads, filepath.Join(nestedDir, "manifest.yaml"), "explicit glob behavior must remain recursive")
+}
+
 func TestLoadResourcesFromFiles(t *testing.T) {
-	workloads, err := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "", nil)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "", nil)
 	require.NoError(t, err)
 	assert.Equal(t, 12, len(workloads))
 
@@ -48,10 +71,25 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 	}
 }
 
+func TestLoadResourcesFromFiles_RejectsTrailingJSONInExplicitFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifests.json")
+	data := []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"first"}}
+{"apiVersion":"v1","kind":"Service","metadata":{"name":"second"}}`)
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+
+	workloads, skipped, err := LoadResourcesFromFiles(context.Background(), path, filepath.Dir(path), nil)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "multiple top-level JSON values")
+	assert.Empty(t, workloads)
+	require.Len(t, skipped, 1)
+	assert.Equal(t, path, skipped[0].Path)
+}
+
 func TestLoadResourcesFromFiles_SupportsMixedCaseExtensions(t *testing.T) {
 	o, _ := os.Getwd()
 	testDir := filepath.Join(o, "testdata", "mixed_extensions")
-	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, "", nil)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), testDir, "", nil)
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(workloads))
 
@@ -80,7 +118,7 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplates(t *testing.T) {
 		filepath.Join(testDir, "mychart"),
 		filepath.Join(testDir, "mychart", "charts", "mysubchart"),
 	}
-	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
 	require.NoError(t, err)
 
 	expectedFiles := []string{
@@ -99,7 +137,7 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplates(t *testing.T) {
 func TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart(t *testing.T) {
 	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
 	renderedCharts := []string{testDir, filepath.Join(testDir, "charts", "mysubchart")}
-	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, renderedCharts)
 	require.NoError(t, err)
 
 	expectedFile := filepath.Join(testDir, "crds", "widget.yaml")
@@ -114,7 +152,7 @@ func TestLoadResourcesFromFiles_SkipsHelmTemplatesOfScannedChart(t *testing.T) {
 func TestLoadResourcesFromFiles_ScansTemplatesOfUnrenderedChart(t *testing.T) {
 	testDir := filepath.Join(helmChartLayoutPath(), "mychart")
 	// no charts rendered successfully, so nothing may be excluded
-	workloads, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, nil)
+	workloads, _, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, nil)
 	require.NoError(t, err)
 
 	staticTemplate := filepath.Join(testDir, "templates", "serviceaccount.yaml")
@@ -193,6 +231,26 @@ func TestExcludeHelmTemplateFiles_NoCharts(t *testing.T) {
 	assert.Equal(t, files, excludeHelmTemplateFiles(files, nil))
 }
 
+// TestExcludeHelmChartMetadataFiles asserts that the fixed Helm chart-metadata
+// files are dropped by name while all other files survive, regardless of depth.
+func TestExcludeHelmChartMetadataFiles(t *testing.T) {
+	files := []string{
+		filepath.Join("repo", "chart", "Chart.yaml"),
+		filepath.Join("repo", "chart", "Chart.lock"),
+		filepath.Join("repo", "chart", "values.yaml"),
+		filepath.Join("repo", "chart", "templates", "deployment.yaml"),
+		filepath.Join("repo", "chart-docs", "Chart.yaml.example"),
+		filepath.Join("repo", "pod.yaml"),
+	}
+	remaining := excludeHelmChartMetadataFiles(files)
+	assert.Equal(t, []string{
+		filepath.Join("repo", "chart", "values.yaml"),
+		filepath.Join("repo", "chart", "templates", "deployment.yaml"),
+		filepath.Join("repo", "chart-docs", "Chart.yaml.example"),
+		filepath.Join("repo", "pod.yaml"),
+	}, remaining)
+}
+
 // TestIsUnderAnyDir asserts that containment is decided by canonical relative
 // paths, not by string prefix equality: siblings that merely share a directory
 // prefix must not be reported as contained, and a directory named "." must stay
@@ -252,6 +310,70 @@ func TestIsUnderAnyDir(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.contained, IsUnderAnyDir(tt.path, tt.dirs))
 		})
+	}
+}
+
+// TestDirSetContains asserts that the ancestor walk decides containment exactly
+// as the per-directory relative-path comparison it replaces, including for a
+// sibling sharing a name prefix and for a directory absent from the set.
+func TestDirSetContains(t *testing.T) {
+	set := newDirSet([]string{"/repo/app", "/repo/charts/web/templates"})
+
+	tests := []struct {
+		name      string
+		path      string
+		contained bool
+	}{
+		{name: "the directory itself", path: "/repo/app", contained: true},
+		{name: "file directly inside", path: "/repo/app/deployment.yaml", contained: true},
+		{name: "file nested below", path: "/repo/app/config/base/pod.yaml", contained: true},
+		{name: "second member of the set", path: "/repo/charts/web/templates/svc.yaml", contained: true},
+		{name: "sibling sharing a prefix", path: "/repo/app-docs/deployment.yaml", contained: false},
+		{name: "parent of a member", path: "/repo/charts/web/Chart.yaml", contained: false},
+		{name: "unrelated path", path: "/other/pod.yaml", contained: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.contained, set.contains(tt.path))
+		})
+	}
+
+	assert.False(t, newDirSet(nil).contains("/repo/app/deployment.yaml"), "an empty set contains nothing")
+	assert.True(t, newDirSet([]string{string(filepath.Separator)}).contains("/repo/app/deployment.yaml"),
+		"every absolute path is under the filesystem root")
+}
+
+// TestDirSetContains_UncleanDirs asserts that a member that is not lexically
+// clean still claims the paths below it, matching the filepath.Rel comparison
+// this lookup replaced, which cleaned its arguments itself.
+func TestDirSetContains_UncleanDirs(t *testing.T) {
+	for _, dir := range []string{"/repo/app/", "/repo/./app", "/repo//app", "/repo/other/../app"} {
+		t.Run(dir, func(t *testing.T) {
+			set := newDirSet([]string{dir})
+			assert.True(t, set.contains("/repo/app/deployment.yaml"), "an unclean member must still claim files below it")
+			assert.False(t, set.contains("/repo/app-docs/deployment.yaml"), "a prefix sibling stays outside")
+		})
+	}
+}
+
+// BenchmarkExcludeHelmTemplateFiles covers the repository-scan shape the lookup
+// is built for: many files checked against many rendered chart directories.
+func BenchmarkExcludeHelmTemplateFiles(b *testing.B) {
+	root := b.TempDir()
+
+	charts := make([]string, 0, 200)
+	for i := range 200 {
+		charts = append(charts, filepath.Join(root, "charts", strconv.Itoa(i)))
+	}
+	files := make([]string, 0, 2000)
+	for i := range 2000 {
+		files = append(files, filepath.Join(root, "manifests", strconv.Itoa(i), "deployment.yaml"))
+	}
+
+	b.ResetTimer()
+	for range b.N {
+		excludeHelmTemplateFiles(files, charts)
 	}
 }
 
@@ -434,7 +556,7 @@ func TestExcludeHelmTemplateFiles_PreservesLexicalOwnershipOfSymlinkedTemplate(t
 
 func TestLoadFiles(t *testing.T) {
 	files, _ := listFiles(onlineBoutiquePath())
-	_, errs := loadFiles("", files)
+	_, _, errs := loadFiles("", files)
 	assert.Len(t, errs, 1)
 	assert.Contains(t, errs[0].Error(), "invalid.yaml")
 }
@@ -772,6 +894,151 @@ metadata:
 	}
 }
 
+func TestReadYamlFileValidatesAgainstScheme(t *testing.T) {
+	tests := []struct {
+		name          string
+		content       string
+		wantCount     int
+		wantErrSubstr string
+	}{
+		{
+			name: "valid Pod is accepted",
+			content: `apiVersion: v1
+kind: Pod
+metadata:
+  name: valid-pod
+  namespace: default`,
+			wantCount: 1,
+		},
+		{
+			name: "valid custom resource is ignored",
+			content: `apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tls-cert
+spec:
+  secretName: tls-cert`,
+			wantCount: 1,
+		},
+		{
+			name: "wrong field type is surfaced",
+			content: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bad-deployment
+spec:
+  replicas: "not-a-number"`,
+			wantCount:     1,
+			wantErrSubstr: "structurally invalid",
+		},
+		{
+			name: "typo'd kind in a built-in group is surfaced",
+			content: `apiVersion: apps/v1
+kind: Deplyment
+metadata:
+  name: typo-deployment`,
+			wantCount:     1,
+			wantErrSubstr: "is not a valid Kubernetes kind",
+		},
+		{
+			name: "typo'd kind in the core group is surfaced",
+			content: `apiVersion: v1
+kind: Pods
+metadata:
+  name: typo-pod`,
+			wantCount:     1,
+			wantErrSubstr: "is not a valid Kubernetes kind",
+		},
+		{
+			name: "known kind in a future apiVersion is ignored",
+			content: `apiVersion: autoscaling/v99
+kind: HorizontalPodAutoscaler
+metadata:
+  name: future-hpa
+  namespace: default`,
+			wantCount: 1,
+		},
+		{
+			name: "removed-but-real kind is not flagged as a typo",
+			content: `apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: legacy-psp
+spec:
+  privileged: false`,
+			wantCount: 1,
+		},
+		{
+			name: "invalid built-in kind inside a List is surfaced",
+			content: `apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: good-pod
+      namespace: default
+  - apiVersion: apps/v1
+    kind: Deplyment
+    metadata:
+      name: typo-deployment`,
+			wantCount:     2,
+			wantErrSubstr: "is not a valid Kubernetes kind",
+		},
+		{
+			name: "valid List is accepted without errors",
+			content: `apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: good-pod
+      namespace: default
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: good-svc
+      namespace: default`,
+			wantCount: 2,
+		},
+		{
+			name: "non-manifest YAML without apiVersion is ignored",
+			content: `foo: bar
+baz: qux`,
+			wantCount: 0,
+		},
+		{
+			name: "multi-document manifest keeps valid docs and surfaces invalid ones",
+			content: `apiVersion: v1
+kind: Pod
+metadata:
+  name: good-pod
+  namespace: default
+---
+apiVersion: apps/v1
+kind: Deplyment
+metadata:
+  name: typo-deployment`,
+			wantCount:     2,
+			wantErrSubstr: "is not a valid Kubernetes kind",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := readYamlFile([]byte(tt.content))
+			if tt.wantErrSubstr != "" {
+				require.Error(t, err)
+				assert.ErrorContains(t, err, tt.wantErrSubstr)
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantCount, len(got))
+		})
+	}
+}
+
 func TestReadJsonFile(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -801,6 +1068,25 @@ func TestReadJsonFile(t *testing.T) {
 			content:   `{not valid json`,
 			wantCount: 0,
 			wantErr:   true,
+		},
+		{
+			name: "concatenated JSON objects are rejected instead of scanning only the first",
+			content: `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"first"}}
+				{"apiVersion":"v1","kind":"Service","metadata":{"name":"ignored-before-fix"}}`,
+			wantCount: 0,
+			wantErr:   true,
+		},
+		{
+			name:      "valid manifest followed by malformed data is rejected",
+			content:   `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"first"}} trailing`,
+			wantCount: 0,
+			wantErr:   true,
+		},
+		{
+			name: "trailing whitespace remains valid",
+			content: `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"whitespace"}}
+				   `,
+			wantCount: 1,
 		},
 		{
 			name:      "empty JSON object (no kind) returns no workloads",

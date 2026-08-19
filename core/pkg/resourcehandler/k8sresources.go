@@ -194,16 +194,30 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	}
 
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
-		policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
-		} else {
-			sessionObj.VAPPolicies = policies
-			sessionObj.VAPBindings = bindings
-		}
+		k8sHandler.collectVAPResources(ctx, sessionObj)
 	}
 
 	return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, nil
+}
+
+// collectVAPResources records the cluster's admission enforcement state on the
+// session. Clusters that do not serve the VAP API are skipped without a warning,
+// since having no policies to reconcile is not a scan failure.
+func (k8sHandler *K8sResourceHandler) collectVAPResources(ctx context.Context, sessionObj *cautils.OPASessionObj) {
+	if k8sHandler.k8s == nil {
+		return
+	}
+
+	policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
+	switch {
+	case errors.Is(err, vapreconcile.ErrUnsupported):
+		logger.L().Debug("skipping VAP reconciliation, cluster does not serve the API")
+	case err != nil:
+		logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
+	default:
+		sessionObj.VAPPolicies = policies
+		sessionObj.VAPBindings = bindings
+	}
 }
 
 func (k8sHandler *K8sResourceHandler) GetCloudProvider() string {
@@ -293,6 +307,22 @@ func streamingResourceScope(obj workloadinterface.IMetadata, namespaced *bool) s
 	return cautils.ClusterScope
 }
 
+// streamingKubernetesResourceCount returns the number of unique Kubernetes
+// resources retained across the resident and namespace batches. A single
+// resource scan may add an object to resident that was already collected in a
+// namespace batch, so resident IDs are excluded from the namespace count.
+func streamingKubernetesResourceCount(resident *cautils.ResourceBatch, namespaceBatches map[string]*cautils.ResourceBatch) int {
+	count := len(resident.AllResources)
+	for _, batch := range namespaceBatches {
+		for id := range batch.AllResources {
+			if _, alreadyCounted := resident.AllResources[id]; !alreadyCounted {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 // collectAndStreamBatches pulls every queryable GVR exactly once, partitions
 // the results into a single resident batch (cluster-scoped and external
 // resources) and one batch per namespace, then streams the resident batch
@@ -357,6 +387,15 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		}
 	}
 
+	// A resource served at several API versions is scoped identically under
+	// every version (same metadata.namespace), so its aliases always land in
+	// the same batch and can be deduplicated per batch. See
+	// dedupeServedVersionAliases.
+	dedupeServedVersionAliases(resident.K8SResources, resident.AllResources)
+	for _, batch := range namespaceBatches {
+		dedupeServedVersionAliases(batch.K8SResources, batch.AllResources)
+	}
+
 	// Preserve the eager collector's failure contract. Whole-GVR failures feed
 	// InfoMap, while selector failures for a GVR that returned some resources
 	// remain non-fatal and are surfaced as partial coverage.
@@ -392,6 +431,21 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		addSingleResourceToResourceMaps(resident.K8SResources, allResources, sessionObj.SingleResourceScan, resolver)
 	}
 
+	// Match the eager collector's metric timing: report the complete Kubernetes
+	// resource snapshot before adding host, RBAC, or cloud resources. Resource
+	// telemetry is independent of the worker-node LIST and must survive a node
+	// permission or transport failure.
+	metrics.UpdateKubernetesResourcesCount(ctx, int64(streamingKubernetesResourceCount(resident, namespaceBatches)))
+	if k8sHandler.k8s != nil {
+		numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
+		if err != nil {
+			logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
+		} else {
+			sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
+			metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
+		}
+	}
+
 	hostResources := cautils.MapHostResources(ksResourceMap)
 	// check that controls use host sensor resources
 	if len(hostResources) > 0 {
@@ -422,28 +476,27 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 
 	// allResources is resident.AllResources, which only ever holds
 	// cluster-scoped resources (see the partition loop above); namespaced
-	// resources live in namespaceBatches. Aggregate both before counting, and
-	// do it here, before namespaceBatches are drained into batchChan below.
-	countable := make(map[string]workloadinterface.IMetadata, len(allResources))
-	maps.Copy(countable, allResources)
+	// resources live in namespaceBatches. Count across both before the batches
+	// are drained below, without building a second whole-cluster map just for
+	// this report metadata. Count namespace batches first, then skip a resident
+	// entry when the same ID is already present in its namespace batch. This
+	// preserves the old merged-map deduplication for resources injected into the
+	// resident batch (for example SingleResourceScan and RBAC resources) without
+	// allocating a whole-cluster seen-ID set.
+	mapNamespaceToNumberOfResources := make(map[string]int)
 	for _, batch := range namespaceBatches {
-		maps.Copy(countable, batch.AllResources)
+		addNamespaceResourceCounts(ctx, batch.AllResources, mapNamespaceToNumberOfResources, nil)
 	}
-	setMapNamespaceToNumOfResources(ctx, countable, sessionObj)
+	addNamespaceResourceCounts(ctx, allResources, mapNamespaceToNumberOfResources, namespaceBatches)
+	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 	if len(cloudResources) > 0 {
 		if err := k8sHandler.collectCloudResources(ctx, sessionObj, allResources, ksResourceMap, cloudResources); err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
 		}
 	}
 
-	if scanInfo.GetScanningContext() == cautils.ContextCluster && k8sHandler.k8s != nil {
-		policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
-		} else {
-			sessionObj.VAPPolicies = policies
-			sessionObj.VAPBindings = bindings
-		}
+	if scanInfo.GetScanningContext() == cautils.ContextCluster {
+		k8sHandler.collectVAPResources(ctx, sessionObj)
 	}
 
 	for groupResource, ids := range ksResourceMap {
@@ -462,17 +515,6 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	// concurrent write against that read. ProcessWithStreaming copies the
 	// resident batch into the processor (sessionObj) after receiving it, so the
 	// maps still land on the session by the time downstream stages run.
-
-	if k8sHandler.k8s != nil {
-		numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
-		if err != nil {
-			logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
-		} else {
-			sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
-			metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
-			metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
-		}
-	}
 
 	// Stream resident batch first.
 	select {
@@ -672,9 +714,26 @@ func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo(ctx context.Contex
 
 // set  namespaceToNumOfResources map in report
 func setMapNamespaceToNumOfResources(ctx context.Context, allResources map[string]workloadinterface.IMetadata, sessionObj *cautils.OPASessionObj) {
-
 	mapNamespaceToNumberOfResources := make(map[string]int)
-	for _, resource := range allResources {
+	addNamespaceResourceCounts(ctx, allResources, mapNamespaceToNumberOfResources, nil)
+	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
+}
+
+// addNamespaceResourceCounts accumulates reportable top-level resources into
+// an existing namespace-count map. Keeping accumulation separate lets the
+// streaming collector count resident and namespace batches in place instead
+// of copying every resource into a temporary whole-cluster map. When
+// alreadyCounted is non-nil, a resource already present in its namespace batch
+// is skipped; callers with one already-unique map can pass nil.
+func addNamespaceResourceCounts(ctx context.Context, allResources map[string]workloadinterface.IMetadata, mapNamespaceToNumberOfResources map[string]int, alreadyCounted map[string]*cautils.ResourceBatch) {
+	for resourceID, resource := range allResources {
+		if alreadyCounted != nil {
+			if batch := alreadyCounted[resource.GetNamespace()]; batch != nil {
+				if _, counted := batch.AllResources[resourceID]; counted {
+					continue
+				}
+			}
+		}
 		if obj := workloadinterface.NewWorkloadObj(resource.GetObject()); obj != nil {
 			ownerReferences, err := obj.GetOwnerReferences()
 			if err == nil {
@@ -691,7 +750,6 @@ func setMapNamespaceToNumOfResources(ctx context.Context, allResources map[strin
 			}
 		}
 	}
-	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 }
 
 // queryFailure records a failed pull at query granularity (GVR + field selectors).
@@ -811,7 +869,96 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 	}
 
 	wg.Wait()
+	dedupeServedVersionAliases(k8sResources, allResources)
 	return k8sResources, allResources, failedQueries
+}
+
+// dedupeServedVersionAliases collapses objects the API server returned under
+// more than one served version of the same resource. A CRD served at both
+// v1alpha1 and v1beta1 answers each LIST with the same objects converted to the
+// requested version, so a control matching both versions collects, counts and
+// reports one custom resource twice.
+//
+// metadata.uid is the join key: Kubernetes keeps it stable across versions and
+// unique across the cluster, so equal uids are the same object and no two
+// distinct objects can be merged by mistake. Objects without one (offline and
+// synthetic resources) are left alone.
+//
+// Every GVR keeps pointing at the surviving object, so a rule declaring either
+// version still matches it.
+func dedupeServedVersionAliases(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata) {
+	byUID := make(map[string][]string, len(allResources))
+	for _, id := range slices.Sorted(maps.Keys(allResources)) {
+		if uid := resourceUID(allResources[id]); uid != "" {
+			byUID[uid] = append(byUID[uid], id)
+		}
+	}
+
+	alias := map[string]string{} // dropped resource ID -> surviving one
+	for _, ids := range byUID {
+		if len(ids) < 2 {
+			continue
+		}
+		survivor := ids[0]
+		for _, id := range ids[1:] {
+			if preferServedVersion(allResources[id], allResources[survivor]) {
+				survivor = id
+			}
+		}
+		for _, id := range ids {
+			if id != survivor {
+				alias[id] = survivor
+			}
+		}
+	}
+	if len(alias) == 0 {
+		return
+	}
+
+	for dropped := range alias {
+		delete(allResources, dropped)
+	}
+	for gvr, resourceIDs := range k8sResources {
+		seen := make(map[string]struct{}, len(resourceIDs))
+		deduped := make([]string, 0, len(resourceIDs))
+		for _, id := range resourceIDs {
+			if survivor, dropped := alias[id]; dropped {
+				id = survivor
+			}
+			if _, duplicate := seen[id]; duplicate {
+				continue
+			}
+			seen[id] = struct{}{}
+			deduped = append(deduped, id)
+		}
+		k8sResources[gvr] = deduped
+	}
+}
+
+// resourceUID reads metadata.uid off a collected object.
+func resourceUID(resource workloadinterface.IMetadata) string {
+	if resource == nil {
+		return ""
+	}
+	uid, _, err := unstructured.NestedString(resource.GetObject(), "metadata", "uid")
+	if err != nil {
+		return ""
+	}
+	return uid
+}
+
+// preferServedVersion reports whether candidate is the better copy to keep of
+// two aliases of one object. It follows the API server's own version ranking
+// (GA over beta over alpha, newest first), so a scan reports the version a
+// client would get by default. The ID comparison keeps the choice stable when
+// the ranking cannot separate them, since the pulls complete in any order.
+func preferServedVersion(candidate, current workloadinterface.IMetadata) bool {
+	_, candidateVersion := k8sinterface.SplitApiVersion(candidate.GetApiVersion())
+	_, currentVersion := k8sinterface.SplitApiVersion(current.GetApiVersion())
+	if ranking := version.CompareKubeAwareVersionStrings(candidateVersion, currentVersion); ranking != 0 {
+		return ranking > 0
+	}
+	return candidate.GetID() < current.GetID()
 }
 
 func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResources cautils.K8SResources, infoMap map[string]apis.StatusInfo) []cautils.PartialGVRPull {

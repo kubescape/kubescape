@@ -708,3 +708,37 @@ func TestGetFilteredCVEs(t *testing.T) {
 		})
 	}
 }
+
+// TestPrintTopComponents_PackageNameWithPercentVerbs guards against a
+// regression where a pre-built package summary line was passed as the format
+// argument to cautils.StarDisplay instead of as a %s value: a package name
+// containing %-verbs (reachable from scanned image metadata) was silently
+// corrupted by fmt's format-string interpretation instead of being printed
+// literally.
+func TestPrintTopComponents_PackageNameWithPercentVerbs(t *testing.T) {
+	f, err := os.CreateTemp("", "print-top-components")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	name := "left-pad-%s-%d-leaked"
+	summary := imageprinter.ImageScanSummary{
+		PackageScores: map[string]*imageprinter.PackageScore{
+			name: {
+				Name:    name,
+				Version: "1.0.0",
+			},
+		},
+	}
+
+	printTopComponents(f, summary)
+
+	f.Seek(0, 0)
+	got, err := io.ReadAll(f)
+	if err != nil {
+		panic(err)
+	}
+
+	assert.Contains(t, string(got), name, "package name must be printed literally, not interpreted as a format string")
+}

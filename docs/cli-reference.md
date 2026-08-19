@@ -43,6 +43,7 @@ kubescape scan [target] [flags]
 | `-e, --exclude-namespaces <ns>` | Namespaces to exclude (comma-separated) | - |
 | `--encrypt` | Encrypt sensitive report metadata using the master key provided through the `KUBESCAPE_MASTER_KEY` environment variable. Requires `--format json` for reports that will later be decrypted with `kubescape decrypt`. If both `--encrypt` and `--hide` are specified, `--encrypt` takes precedence. | `false` |
 | `--exceptions <path>` | Path to exceptions file | - |
+| `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `csv` | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
@@ -53,12 +54,25 @@ kubescape scan [target] [flags]
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
 | `--scan-images` | Also scan container images for vulnerabilities | `false` |
-| `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical` | - |
+| `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical`. Failed controls with unknown severity (missing base score) are treated as exceeding any threshold | - |
 | `--submit` | Submit results to Kubescape SaaS | `false` |
 | `--use-artifacts-from <path>` | Load artifacts from local directory (offline mode) | - |
 | `--use-from <path>` | Load specific policy from path | - |
 | `-v, --verbose` | Display all resources, not just failed ones | `false` |
 | `--view <type>` | View type: `security`, `control`, `resource` | `security` |
+
+### Exception Audit
+
+Use `--audit-exceptions --format json` to include an `exceptionAudit` object in scan output. The audit contains:
+
+| Field | Description |
+|-------|-------------|
+| `summary` | Counts for total, active, expired, matched, unused, and invalid-control exceptions |
+| `items` | One entry per loaded exception, including name, status, match count, control IDs, invalid controls, and matched resources when present |
+| `generated` | Indicates that the audit was requested and generated |
+
+Item `status` values are `matched`, `unused`, `expired`, and `invalid-control`.
+
 ### Examples
 
 ```bash
@@ -470,11 +484,18 @@ kubescape decrypt <report-file>
 
 ### Description
 
-Decrypts report metadata that was protected with
-`kubescape scan --encrypt`.
+Decrypts a JSON report that was protected with `kubescape scan --encrypt`.
+The command restores encrypted repository metadata, Kubernetes resource
+metadata, source paths, container fields, copied resource labels, raw resource
+copies in results, and recoverable resource ID references. If ciphertext or an
+irreversible legacy resource ID remains, decryption fails instead of returning
+a partially restored report.
 
-Only metadata encrypted by `kubescape scan --encrypt` is restored.
+Only fields encrypted by `kubescape scan --encrypt` are restored.
 Metadata pseudonymized with `--hide` cannot be recovered by `kubescape decrypt`.
+Older encrypted reports may contain `ref-<hash>` resource IDs that were written
+with a one-way mapping. Those IDs cannot be recovered, so the command reports
+an error rather than silently treating the report as fully decrypted.
 
 ### Flags
 
@@ -497,7 +518,7 @@ kubescape decrypt encrypted-report.json
 kubescape decrypt encrypted-report.json > decrypted-report.json
 ```
 
-> `kubescape decrypt` restores metadata encrypted by
+> `kubescape decrypt` restores report fields encrypted by
 > `kubescape scan --encrypt`. It does not reverse
 > deterministic pseudonymization produced by `--hide`.
 

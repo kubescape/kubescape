@@ -22,14 +22,19 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// cloudConfigMapLabelSelector is the label selector used to locate the Kubescape
+// config ConfigMap in the cluster. It is a kubernetes label selector, not a
+// credential; gosec's G101 rule over-matches the key=value form and is suppressed
+// via the G101 entry in .gosec.json.
+const cloudConfigMapLabelSelector = "kubescape.io/infra=config" // #nosec G101 -- kubernetes label selector, not a credential
+
 const (
 	configFileName     string = "config"
 	kubescapeNamespace string = "kubescape"
 
 	kubescapeConfigMapName string = "kubescape-config" // deprecated - for backward compatibility
 
-	cloudConfigMapLabelSelector string = "kubescape.io/infra=config"
-	credsLabelSelectors         string = "kubescape.io/infra=credentials" //nolint:gosec
+	credsLabelSelectors string = "kubescape.io/infra=credentials" //nolint:gosec
 
 	// env vars
 	defaultConfigMapNamespaceEnvVar string = "KS_DEFAULT_CONFIGMAP_NAMESPACE"
@@ -55,15 +60,7 @@ type ConfigObj struct {
 
 // Config - convert ConfigObj to config file
 func (co *ConfigObj) Config() []byte {
-
-	// remove cluster name before saving to file
-	clusterName := co.ClusterName
-	co.ClusterName = ""
-
-	b, err := json.MarshalIndent(co, "", "  ")
-
-	co.ClusterName = clusterName
-
+	b, err := marshalConfigObj(co)
 	if err == nil {
 		return b
 	}
@@ -220,7 +217,9 @@ func NewClusterConfig(ctx context.Context, k8s *k8sinterface.KubernetesApi, acco
 		}
 	}
 
-	loadUrlsFromFile(c.configObj)
+	if err := loadUrlsFromFile(c.configObj); err != nil {
+		logger.L().Debug("failed to load urls from config file", helpers.Error(err))
+	}
 
 	// second, load urls from config map
 	if err := c.updateConfigEmptyFieldsFromKubescapeConfigMap(ctx); err != nil {
@@ -277,7 +276,7 @@ func (c *ClusterConfig) GetContextName() string {
 
 func (c *ClusterConfig) ToMapString() map[string]any {
 	m := map[string]any{}
-	if bc, err := json.Marshal(c.configObj); err == nil {
+	if bc, err := json.Marshal(c.configObj); err == nil { // #nosec G117 -- config persists the cloud access key by design; secret handled as a credential
 		if err := json.Unmarshal(bc, &m); err != nil {
 			logger.L().Error("failed to unmarshal config", helpers.Error(err))
 		}
@@ -311,7 +310,9 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromKubescapeConfigMap(ctx contex
 			if err = json.Unmarshal([]byte(jsonConf), &tempCO); err != nil {
 				return err
 			}
-			c.configObj.updateEmptyFields(&tempCO)
+			if err := c.configObj.updateEmptyFields(&tempCO); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -344,7 +345,6 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromCredentialsSecret(ctx context
 	return nil
 }
 
-
 func existsConfigFile() bool {
 	_, err := os.ReadFile(ConfigFileFullPath())
 	return err == nil
@@ -362,14 +362,13 @@ var configMarshal = func(v any) ([]byte, error) {
 	return json.MarshalIndent(v, "", "  ") //nolint:gosec,nolintlint // G117: AccessKey is intentionally persisted to the local config file
 }
 
-// marshalConfigObj serializes co for persistence, stripping ClusterName
-// (runtime-only, must not be saved) before marshaling and restoring it after.
+// marshalConfigObj serializes co for persistence, stripping ClusterName from a
+// snapshot because it is runtime-only and must not be saved. Serializing the
+// snapshot keeps the shared runtime config unchanged for concurrent readers.
 func marshalConfigObj(co *ConfigObj) ([]byte, error) {
-	clusterName := co.ClusterName
-	co.ClusterName = ""
-	b, err := configMarshal(co)
-	co.ClusterName = clusterName
-	return b, err
+	snapshot := *co
+	snapshot.ClusterName = ""
+	return configMarshal(&snapshot)
 }
 
 func updateConfigFile(configObj *ConfigObj) error {
@@ -412,11 +411,11 @@ func updateConfigFile(configObj *ConfigObj) error {
 
 	data, err := marshalConfigObj(configObj)
 	if err != nil {
-		tmpFile.Close()
+		tmpFile.Close() // #nosec G104 -- best-effort close on the error path; the original error is already returned
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
+		tmpFile.Close() // #nosec G104 -- best-effort close on the error path; the original error is already returned
 		return err
 	}
 	if err := tmpFile.Close(); err != nil {
@@ -567,11 +566,15 @@ func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
 
 		if val := c.GetCloudAPIURL(); val != "" && val != ksCloud.GetCloudAPIURL() {
 			logger.L().Debug("updating KS Cloud API from config", helpers.String("old", ksCloud.GetCloudAPIURL()), helpers.String("new", val))
-			ksCloud.SetCloudAPIURL(val)
+			if err := ksCloud.SetCloudAPIURL(val); err != nil {
+				logger.L().Warning("failed to apply KS Cloud API URL from config", helpers.Error(err))
+			}
 		}
 		if val := c.GetCloudReportURL(); val != "" && val != ksCloud.GetCloudReportURL() {
 			logger.L().Debug("updating KS Cloud Report from config", helpers.String("old", ksCloud.GetCloudReportURL()), helpers.String("new", val))
-			ksCloud.SetCloudReportURL(val)
+			if err := ksCloud.SetCloudReportURL(val); err != nil {
+				logger.L().Warning("failed to apply KS Cloud Report URL from config", helpers.Error(err))
+			}
 		}
 		if val := c.GetAccountID(); val != "" && val != ksCloud.GetAccountID() {
 			logger.L().Debug("updating Account ID from config", helpers.String("old", ksCloud.GetAccountID()), helpers.String("new", val))
@@ -621,4 +624,3 @@ func GetTenantConfig(ctx context.Context, accountID, accessKey, clusterName, cus
 	}
 	return NewClusterConfig(ctx, k8s, accountID, accessKey, clusterName, customClusterName)
 }
-

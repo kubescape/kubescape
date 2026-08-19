@@ -1,0 +1,20 @@
+{
+  "name": "node-proxy-access-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Privilege Escalation::Node proxy access",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": ["rbac.authorization.k8s.io"],
+      "apiVersions": ["v1"],
+      "resources": ["RoleBinding", "ClusterRoleBinding", "Role", "ClusterRole"]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can access the nodes/proxy subresource, which exposes the kubelet API and can be used to execute commands on the node, equivalent to code execution on every pod scheduled there",
+  "remediation": "Restrict access to nodes/proxy to system components that require it (e.g. metrics-server) and avoid granting it to workload service accounts or broad user groups.",
+  "ruleQuery": "armo_builtins"
+}

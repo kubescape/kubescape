@@ -94,10 +94,24 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	fileName := fmt.Sprintf("%s:%s.json", patchInfo.ImageName, patchInfo.ImageTag)
 	fileName = strings.ReplaceAll(fileName, "/", "-")
 
-	writer := printer.GetWriter(ks.Context(), fileName)
+	writer, err := printer.GetWriterNoFallback(fileName)
+	if err != nil {
+		return false, fmt.Errorf("creating intermediate scan results file: %w", err)
+	}
+	defer func() {
+		if err := os.Remove(fileName); err != nil && !errors.Is(err, os.ErrNotExist) {
+			logger.L().Warning(fmt.Sprintf("failed to remove residual file: %v", fileName), helpers.Error(err))
+		}
+	}()
 
 	if err = pres.Present(writer); err != nil {
+		if closeErr := writer.Close(); closeErr != nil {
+			return false, errors.Join(err, fmt.Errorf("closing intermediate scan results file: %w", closeErr))
+		}
 		return false, err
+	}
+	if closeErr := writer.Close(); closeErr != nil {
+		return false, fmt.Errorf("closing intermediate scan results file: %w", closeErr)
 	}
 	logger.L().StopSuccess(fmt.Sprintf("Successfully scanned image: %s", patchInfo.Image))
 
@@ -122,12 +136,6 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Loaded locally: %s", patchedImageName))
 	case "oci", "local":
 		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Exported to: %s", patchInfo.OutputPath))
-	}
-
-	// ===================== Clean up =====================
-	// Remove the scan results file, which was used to patch the image
-	if err := os.Remove(fileName); err != nil {
-		logger.L().Warning(fmt.Sprintf("failed to remove residual file: %v", fileName), helpers.Error(err))
 	}
 
 	// ===================== Early return for OCI/Local exports =====================
@@ -238,11 +246,11 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 			return err
 		}
 		defer os.RemoveAll(workingFolder)
-		if err := os.Chmod(workingFolder, 0o744); err != nil {
+		if err := os.Chmod(workingFolder, 0o700); err != nil { // #nosec G302 -- working directory needs owner-execute (0o700) for a private area
 			return err
 		}
 	} else {
-		if isNew, err := utils.EnsurePath(workingFolder, 0o744); err != nil {
+		if isNew, err := utils.EnsurePath(workingFolder, 0o700); err != nil {
 			log.Errorf("failed to create workingFolder %s", workingFolder)
 			return err
 		} else if isNew {
@@ -433,11 +441,11 @@ func buildPatchExport(outputMode, outputPath, patchedImageName string) (client.E
 			},
 			Output: func(_ map[string]string) (io.WriteCloser, error) {
 				if dir := filepath.Dir(outputPath); dir != "." {
-					if err := os.MkdirAll(dir, 0o755); err != nil {
+					if err := os.MkdirAll(dir, 0o750); err != nil {
 						return nil, fmt.Errorf("failed to create parent directory for output-path %q: %w", outputPath, err)
 					}
 				}
-				return os.Create(outputPath)
+				return os.Create(filepath.Clean(outputPath))
 			},
 		}, nil, nil
 	case "local":

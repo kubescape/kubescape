@@ -209,6 +209,31 @@ func TestSetPathAndFilename(t *testing.T) {
 			expectedPath:     "sub",
 			expectedFilename: "nsa.json",
 		},
+		{
+			// Deep nested .json path pre-split
+			downloadInfo: &metav1.DownloadInfo{
+				Path:     filepath.Join("a", "b", "c"),
+				FileName: "framework.json",
+			},
+			expectedPath:     filepath.Join("a", "b", "c"),
+			expectedFilename: "framework.json",
+		},
+		{
+			// Deep nested .json file in full path
+			downloadInfo: &metav1.DownloadInfo{
+				Path: filepath.Join("custom", "output", "dir", "nsa.json"),
+			},
+			expectedPath:     filepath.Join("custom", "output", "dir"),
+			expectedFilename: "nsa.json",
+		},
+		{
+			// Deep nested directory with trailing directory format
+			downloadInfo: &metav1.DownloadInfo{
+				Path: filepath.Join("custom", "output", "nested_dir"),
+			},
+			expectedPath:     filepath.Join("custom", "output", "nested_dir"),
+			expectedFilename: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -262,6 +287,53 @@ func TestDownload_CreatesOutputDirectoryWithRestrictivePermissions(t *testing.T)
 	require.NoError(t, err)
 	mode := info.Mode().Perm()
 	assert.Zerof(t, mode&0o077, "directory %s has mode %o, more permissive than 0700", path, mode)
+}
+
+func TestDownload_CreatesNestedCustomOutputDirectory(t *testing.T) {
+	withTenantConfig(t, &fakeTenantConfig{})
+	want := &reporthandling.Framework{PortalBase: armotypes.PortalBase{Name: "nsa"}}
+	withPolicyGetter(t, &fakePolicyGetter{framework: want}, nil)
+
+	origDownloadFunc := downloadFunc
+	t.Cleanup(func() { downloadFunc = origDownloadFunc })
+
+	tempDir := t.TempDir()
+	nestedTargetDir := filepath.Join(tempDir, "custom", "nested", "reports")
+	targetFilePath := filepath.Join(nestedTargetDir, "nsa.json")
+
+	ks := NewKubescape(context.Background())
+	res, err := ks.Download(&metav1.DownloadInfo{
+		Target:     TargetFramework,
+		Identifier: "nsa",
+		Path:       targetFilePath,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.Len(t, res.Files, 1)
+
+	assert.FileExists(t, targetFilePath)
+	info, err := os.Stat(nestedTargetDir)
+	require.NoError(t, err)
+	assert.True(t, info.IsDir())
+	mode := info.Mode().Perm()
+	assert.Zerof(t, mode&0o077, "directory %s has mode %o, more permissive than 0700", nestedTargetDir, mode)
+}
+
+func TestDownload_DirectoryCreationErrorWrapped(t *testing.T) {
+	tempDir := t.TempDir()
+	filePath := filepath.Join(tempDir, "blocking-file")
+	require.NoError(t, os.WriteFile(filePath, []byte("data"), 0600))
+
+	// Attempting to create a directory under a file should fail
+	invalidDirPath := filepath.Join(filePath, "sub-dir")
+
+	ks := NewKubescape(context.Background())
+	_, err := ks.Download(&metav1.DownloadInfo{
+		Target: TargetFramework,
+		Path:   invalidDirPath,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create download directory")
 }
 
 // TestDownload_BareJSONOutputPathIsRespected is a regression test for
@@ -430,8 +502,8 @@ func withConfigInputsGetter(t *testing.T, g getter.IControlsInputsGetter, err er
 func withExceptionsGetter(t *testing.T, g getter.IExceptionsGetter, err error) {
 	t.Helper()
 	orig := exceptionsGetterFunc
-	exceptionsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IExceptionsGetter, error) {
-		return g, err
+	exceptionsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IExceptionsGetter, bool, error) {
+		return g, false, err
 	}
 	t.Cleanup(func() { exceptionsGetterFunc = orig })
 }

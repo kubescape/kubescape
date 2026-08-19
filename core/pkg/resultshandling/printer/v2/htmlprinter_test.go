@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewHtmlPrinter(t *testing.T) {
@@ -76,6 +77,20 @@ func TestSetWriter_Html(t *testing.T) {
 	}
 }
 
+func TestBuildResourceControlResult_AnnotatesInitAndEphemeralContainerNames(t *testing.T) {
+	control := &reportsummary.ControlSummary{
+		ControlID:   "C-0057",
+		Name:        "Privileged container",
+		ScoreFactor: 8.0,
+	}
+	ac := makeControlWithPaths(privilegedInitAndEphemeralPaths(), nil)
+	ac.ControlID = "C-0057"
+	ac.Name = "Privileged container"
+
+	got := buildResourceControlResult(*ac, control, privilegedInitAndEphemeralPod())
+	require.Equal(t, privilegedInitAndEphemeralNamedPaths(), got.FailedPaths)
+}
+
 func TestBuildResourceControlResultTable_MissingControl(t *testing.T) {
 	ac := resourcesresults.ResourceAssociatedControl{
 		ControlID: "C-MISSING",
@@ -109,6 +124,32 @@ func TestBuildResourceTableView_SkipsMissingResource(t *testing.T) {
 
 	view := buildResourceTableView(session)
 	assert.Empty(t, view, "missing resource should be skipped, not included with nil")
+}
+
+// Regression for issue-3328: the HTML report's logo previously loaded from
+// raw.githubusercontent.com at view time, so it silently broke for anyone
+// viewing an offline scan report without network access, and leaked the
+// viewer's IP/UA to GitHub on every view. The logo must be embedded and
+// inlined as a data URI instead.
+func TestHtmlPrinter_ActionPrint_LogoIsEmbeddedNotFetchedFromNetwork(t *testing.T) {
+	ctx := context.Background()
+	out := filepath.Join(t.TempDir(), "report.html")
+
+	hp := NewHtmlPrinter()
+	assert.NoError(t, hp.SetWriter(ctx, out))
+
+	session := cautils.NewOPASessionObjMock()
+	assert.NoError(t, hp.ActionPrint(ctx, session, nil))
+	assert.NoError(t, hp.CloseWriter())
+
+	content, err := os.ReadFile(out)
+	assert.NoError(t, err)
+	htmlContent := string(content)
+
+	assert.NotContains(t, htmlContent, "raw.githubusercontent.com",
+		"HTML report must not depend on fetching the logo from GitHub at view time")
+	assert.Contains(t, htmlContent, `<img class="logo" src="data:image/png;base64,`,
+		"HTML report must inline the logo as an embedded data URI")
 }
 
 func TestHtmlPrinter_ActionPrint_RiskScoreRounding(t *testing.T) {

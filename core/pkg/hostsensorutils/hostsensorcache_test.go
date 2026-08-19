@@ -1,8 +1,13 @@
 package hostsensorutils
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	restclient "k8s.io/client-go/rest"
 
@@ -28,6 +33,26 @@ func withTempCacheDir(t *testing.T) {
 	original := DefaultCacheDir
 	t.Cleanup(func() { DefaultCacheDir = original })
 	DefaultCacheDir = t.TempDir()
+}
+
+// writeCacheEntry writes a cache file directly, bypassing the saveToCache
+// guards, to stand in for an entry left behind by an earlier version.
+func writeCacheEntry(t *testing.T, clusterName, resourceName string, envelopes []hostsensor.HostSensorDataEnvelope) {
+	t.Helper()
+
+	path, err := getCacheFilePath(clusterName, resourceName)
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
+
+	data, err := json.Marshal(envelopes)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	_, err = gw.Write(data)
+	require.NoError(t, err)
+	require.NoError(t, gw.Close())
+	require.NoError(t, os.WriteFile(path, buf.Bytes(), 0600))
 }
 
 // TestLoadFromCache_DisabledByDefault guards against host sensor data being
@@ -90,6 +115,87 @@ func TestHostSensorCache_OptInRoundTrip(t *testing.T) {
 	withK8sHost(t, "https://cluster-b.example.com")
 	_, err = loadFromCache("kubernetes-admin@kubernetes", "KubeletInfo")
 	assert.Error(t, err, "cluster B must not read cluster A's cached host data")
+}
+
+func TestSaveToCache_ConcurrentWritersUseDistinctTemporaryFiles(t *testing.T) {
+	withTempCacheDir(t)
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+	withK8sHost(t, "https://cluster-a.example.com")
+
+	ready := make(chan struct{}, 2)
+	release := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+	renameAtBarrier := func(oldPath, newPath string) error {
+		ready <- struct{}{}
+		<-release
+		return os.Rename(oldPath, newPath)
+	}
+
+	errCh := make(chan error, 2)
+	for _, name := range []string{"node-a", "node-b"} {
+		env := hostsensor.HostSensorDataEnvelope{}
+		env.SetName(name)
+		go func() {
+			errCh <- saveToCacheWithRename("ctx", "KubeletInfo", []hostsensor.HostSensorDataEnvelope{env}, renameAtBarrier)
+		}()
+	}
+
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for range 2 {
+		select {
+		case <-ready:
+		case err := <-errCh:
+			require.NoError(t, err, "writer exited before reaching rename")
+			t.Fatal("writer exited before reaching rename")
+		case <-timer.C:
+			t.Fatal("writers did not reach rename barrier")
+		}
+	}
+	close(release)
+	released = true
+	require.NoError(t, <-errCh)
+	require.NoError(t, <-errCh)
+
+	got, err := loadFromCache("ctx", "KubeletInfo")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Contains(t, []string{"node-a", "node-b"}, got[0].GetName())
+}
+
+// TestSaveToCache_SkipsEmptyEnvelopes guards against a node-agent outage being
+// pinned for the whole TTL: an empty collection records the absence of node
+// data, which every later scan in the window would then serve as fact.
+func TestSaveToCache_SkipsEmptyEnvelopes(t *testing.T) {
+	withTempCacheDir(t)
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+	withK8sHost(t, "https://cluster-a.example.com")
+
+	require.NoError(t, saveToCache("ctx", "KubeletInfo", nil))
+	require.NoError(t, saveToCache("ctx", "KubeletInfo", []hostsensor.HostSensorDataEnvelope{}))
+
+	path, err := getCacheFilePath("ctx", "KubeletInfo")
+	require.NoError(t, err)
+	_, statErr := os.Stat(path)
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "an empty collection must not be persisted")
+}
+
+// An empty entry already on disk must read as a miss so the scan collects
+// again, rather than as a cluster with no node data.
+func TestLoadFromCache_EmptyEntryIsTreatedAsMiss(t *testing.T) {
+	withTempCacheDir(t)
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+	withK8sHost(t, "https://cluster-a.example.com")
+
+	writeCacheEntry(t, "ctx", "KubeletInfo", []hostsensor.HostSensorDataEnvelope{})
+
+	_, err := loadFromCache("ctx", "KubeletInfo")
+	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
 // TestLoadFromCache_UnresolvedClusterIdentityIsRejected guards against the

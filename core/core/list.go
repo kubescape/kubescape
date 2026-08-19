@@ -176,7 +176,7 @@ func listExceptions(ctx context.Context, listPolicies *metav1.ListPolicies) ([]s
 	tenant := cautils.GetTenantConfig(ctx, listPolicies.AccountID, listPolicies.AccessKey, "", "", getKubernetesApi())
 
 	var exceptionsNames []string
-	ksCloudAPI, err := getExceptionsGetter(ctx, "", tenant.GetAccountID(), nil, false)
+	ksCloudAPI, _, err := getExceptionsGetter(ctx, "", tenant.GetAccountID(), nil, false)
 	if err != nil {
 		return exceptionsNames, err
 	}

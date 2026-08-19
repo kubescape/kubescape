@@ -100,9 +100,9 @@ func TestRemoveData(t *testing.T) {
 			},
 		},
 		{
-			name: "remove configMap data",
+			name: "remove configMap data and binaryData",
 			args: args{
-				w: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "example-configmap", "namespace": "default", "annotations": {"kubectl.kubernetes.io/last-applied-configuration": "{}"}}, "data": {"exampleKey": "exampleValue"}}`,
+				w: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "example-configmap", "namespace": "default", "annotations": {"kubectl.kubernetes.io/last-applied-configuration": "{}"}}, "data": {"exampleKey": "exampleValue"}, "binaryData": {"example.bin": "dGVzdA=="}}`,
 			},
 		},
 	}
@@ -135,6 +135,14 @@ func TestRemoveData(t *testing.T) {
 				assert.True(t, ok)
 				for key := range stringData {
 					assert.Equalf(t, "XXXXXX", stringData[key], "stringData[%q] was not redacted", key)
+				}
+			}
+
+			if bd, ok := workloadinterface.InspectMap(workload.GetObject(), "binaryData"); ok {
+				binaryData, ok := bd.(map[string]any)
+				assert.True(t, ok)
+				for key := range binaryData {
+					assert.Equalf(t, "XXXXXX", binaryData[key], "binaryData[%q] was not redacted", key)
 				}
 			}
 

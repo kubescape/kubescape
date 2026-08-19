@@ -61,8 +61,12 @@ func (c *ScanCoverage) ComputeCoverageScore(totalControls int) {
 		c.EvaluatedControls = 0
 	}
 
-	score := float32(100)
-	if totalControls > 0 {
+	var score float32
+	if totalControls == 0 {
+		// No controls in scope means nothing was evaluated — report 0%
+		// coverage rather than a misleading 100%.
+		score = 0
+	} else {
 		score = float32(c.EvaluatedControls) / float32(totalControls) * 100
 	}
 
@@ -78,7 +82,7 @@ func (c *ScanCoverage) ComputeCoverageScore(totalControls int) {
 	}
 
 	c.CoverageScore = score
-	c.Degraded = len(c.FailedGVRPulls) > 0 || len(c.PartialGVRPulls) > 0 ||
+	c.Degraded = totalControls == 0 || len(c.FailedGVRPulls) > 0 || len(c.PartialGVRPulls) > 0 ||
 		len(c.PolicyDegradations) > 0 || len(c.NotEvaluatedControls) > 0
 }
 

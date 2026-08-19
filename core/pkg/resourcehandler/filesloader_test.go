@@ -221,7 +221,7 @@ items:
 
 // A single-file scan must yield a repository-relative RelativePath: the SARIF and GitLab SAST printers build the finding's file location from it, and the GitLab printer drops findings whose path is empty, absolute, or escaping the repo root. See #2496.
 func TestGetResourcesFromPath_SingleFileRelativePathIsRepositoryRelative(t *testing.T) {
-	workloadIDToSource, workloads, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/mixed_extensions/pod.yaml", cautils.HelmValueOptions{})
+	workloadIDToSource, workloads, _, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/mixed_extensions/pod.yaml", cautils.HelmValueOptions{})
 	require.NoError(t, err)
 	require.NotEmpty(t, workloads, "the single-file scan must discover the pod")
 
@@ -277,7 +277,7 @@ spec:
           image: nginx:1.27
 `), 0o600))
 
-	_, workloads, err := getResourcesFromPath(context.Background(), manifestPath, cautils.HelmValueOptions{})
+	_, workloads, _, err := getResourcesFromPath(context.Background(), manifestPath, cautils.HelmValueOptions{})
 	require.NoError(t, err)
 	require.Len(t, workloads, 1, "an exact file scan must not add resources from its parent tree")
 	assert.Equal(t, "ConfigMap", workloads[0].GetKind())
@@ -326,7 +326,7 @@ func TestGetResourcesFromPath_AnchorsOnRepositoryRootWithoutUsableGitMetadata(t 
 		t.Run(tt.name, func(t *testing.T) {
 			repoRoot := newRepoWithUnusableGitMetadata(t, manifest)
 
-			workloadIDToSource, workloads, err := getResourcesFromPath(context.TODO(), filepath.Join(repoRoot, filepath.FromSlash(tt.scanPath)), cautils.HelmValueOptions{})
+			workloadIDToSource, workloads, _, err := getResourcesFromPath(context.TODO(), filepath.Join(repoRoot, filepath.FromSlash(tt.scanPath)), cautils.HelmValueOptions{})
 			require.NoError(t, err)
 			require.NotEmpty(t, workloads)
 
@@ -355,7 +355,7 @@ spec:
 // would make those resources reach neither loader and vanish silently. Regression guard for the #2501
 // review: templates/ is excluded only for charts that rendered without errors.
 func TestGetResourcesFromPath_ScansTemplatesOfChartThatFailedToRender(t *testing.T) {
-	_, workloads, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/helm_chart_broken", cautils.HelmValueOptions{})
+	_, workloads, _, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/helm_chart_broken", cautils.HelmValueOptions{})
 	require.NoError(t, err)
 
 	var found bool
@@ -441,7 +441,7 @@ func TestResolveHelmRemotePath(t *testing.T) {
 // not scan them again (no duplicate, no malformed-template warnings), while crds/ and files outside
 // templates/ stay plainly scanned.
 func TestGetResourcesFromPath_RenderedChartTemplatesLoadedOnce(t *testing.T) {
-	_, workloads, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/helm_chart_layout", cautils.HelmValueOptions{})
+	_, workloads, _, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/helm_chart_layout", cautils.HelmValueOptions{})
 	require.NoError(t, err)
 
 	counts := map[string]int{}
@@ -460,7 +460,7 @@ func TestGetResourcesFromPath_RenderedChartTemplatesLoadedOnce(t *testing.T) {
 
 // Deduplicates resources discovered by both kustomize render and the plain-YAML glob.
 func TestGetResourcesFromPath_DeduplicatesKustomizeAndPlainYaml(t *testing.T) {
-	workloadIDToSource, workloads, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/kustomize/base", cautils.HelmValueOptions{})
+	workloadIDToSource, workloads, _, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/kustomize/base", cautils.HelmValueOptions{})
 	require.NoError(t, err)
 
 	var deployments []string
@@ -476,7 +476,7 @@ func TestGetResourcesFromPath_DeduplicatesKustomizeAndPlainYaml(t *testing.T) {
 
 // Kustomize transformers mutate identity fields, so path-based exclusion (not identity dedup) must keep the result single.
 func TestGetResourcesFromPath_KustomizeTransformersDoNotDuplicate(t *testing.T) {
-	workloadIDToSource, workloads, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/kustomize/transformed", cautils.HelmValueOptions{})
+	workloadIDToSource, workloads, _, err := getResourcesFromPath(context.TODO(), "../../cautils/testdata/kustomize/transformed", cautils.HelmValueOptions{})
 	require.NoError(t, err)
 
 	var deploymentIDs []string
@@ -520,7 +520,7 @@ metadata:
   name: {{ .Release.Name }}
 `), 0o600))
 
-	sources, workloads, err := getResourcesFromPath(context.Background(), root, cautils.HelmValueOptions{})
+	sources, workloads, _, err := getResourcesFromPath(context.Background(), root, cautils.HelmValueOptions{})
 	require.NoError(t, err)
 
 	counts := map[string]int{}
@@ -554,7 +554,6 @@ die() {
 }
 case "${1:-}" in
 version)
-    [ "$#" -eq 3 ] && [ "$2" = "-c" ] && [ "$3" = "--short" ] || die "unexpected version args: $*"
     printf '%s\n' 'v3.14.0+gtest'
     ;;
 template)
@@ -628,7 +627,7 @@ metadata:
   name: standalone
 `), 0o600))
 
-	sources, workloads, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
+	sources, workloads, _, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
 	require.NoError(t, err)
 
 	counts := map[string]int{}
@@ -681,7 +680,7 @@ helmCharts:
     releaseName: app
 `), 0o600))
 
-	sources, workloads, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
+	sources, workloads, _, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
 	require.NoError(t, err)
 
 	counts := map[string]int{}
@@ -759,7 +758,7 @@ helmCharts:
 				}
 			}
 
-			rawSources, err := cautils.LoadResourcesFromFiles(ctx, repoRoot, repoRoot, kustomizeResult.OwnedHelmChartDirectories)
+			rawSources, _, err := cautils.LoadResourcesFromFiles(ctx, repoRoot, repoRoot, kustomizeResult.OwnedHelmChartDirectories)
 			require.NoError(t, err)
 			var rawCRDs int
 			for source, rawWorkloads := range rawSources {
@@ -780,7 +779,7 @@ helmCharts:
 				assert.Equal(t, 1, rawCRDs, "the raw pass must retain the omitted CRD")
 			}
 
-			sources, workloads, err := getResourcesFromPath(ctx, repoRoot, cautils.HelmValueOptions{})
+			sources, workloads, _, err := getResourcesFromPath(ctx, repoRoot, cautils.HelmValueOptions{})
 			require.NoError(t, err)
 
 			var crds []workloadinterface.IMetadata
@@ -820,7 +819,7 @@ metadata:
   name: standalone
 `), 0o600))
 
-	sources, workloads, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
+	sources, workloads, _, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
 	require.NoError(t, err)
 
 	counts := map[string]int{}
@@ -841,12 +840,112 @@ func TestGetResourcesFromPathRejectsDirectoryWithoutKubernetesResources(t *testi
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "values.yaml"), []byte("replicas: 3\n"), 0o600))
 
-	sources, workloads, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
+	sources, workloads, skips, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
 
 	require.Error(t, err)
 	assert.Nil(t, sources)
 	assert.Nil(t, workloads)
+	assert.Empty(t, skips)
 	assert.Contains(t, err.Error(), "no scannable Kubernetes resources")
+}
+
+const terraformPodFixture = `
+resource "kubernetes_pod_v1" "example" {
+  metadata {
+    name      = "terraform-pod"
+    namespace = "default"
+  }
+  spec {
+    container {
+      name  = "pause"
+      image = "registry.k8s.io/pause:3.9"
+    }
+  }
+}
+`
+
+func writeTerraformFixture(t *testing.T, dir, contents string) string {
+	t.Helper()
+	path := filepath.Join(dir, "main.tf")
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o600))
+	return path
+}
+
+func TestGetResourcesFromPathLoadsTerraformOnlyDirectory(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTerraformFixture(t, dir, terraformPodFixture)
+
+	sources, workloads, skips, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
+
+	require.NoError(t, err)
+	assert.Empty(t, skips)
+	require.Len(t, workloads, 1)
+	assert.Equal(t, "Pod", workloads[0].GetKind())
+	assert.Equal(t, "terraform-pod", workloads[0].GetName())
+	source := sources[workloads[0].GetID()]
+	assert.Equal(t, "Terraform", source.FileType)
+	assert.Equal(t, filepath.Base(path), source.RelativePath)
+}
+
+func TestGetResourcesFromPathLoadsExplicitTerraformFile(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTerraformFixture(t, dir, terraformPodFixture)
+
+	_, workloads, _, err := getResourcesFromPath(context.Background(), path, cautils.HelmValueOptions{})
+
+	require.NoError(t, err)
+	require.Len(t, workloads, 1)
+	assert.Equal(t, "terraform-pod", workloads[0].GetName())
+}
+
+func TestGetResourcesFromPathReturnsTerraformErrorForMalformedTerraformOnlyDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeTerraformFixture(t, dir, `resource "kubernetes_pod_v1" "broken" {`)
+
+	sources, workloads, skips, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
+
+	require.Error(t, err)
+	assert.Nil(t, sources)
+	assert.Nil(t, workloads)
+	assert.Empty(t, skips)
+	assert.Contains(t, err.Error(), "failed to render Terraform resources")
+	assert.NotContains(t, err.Error(), "no YAML or JSON manifest files")
+}
+
+func TestGetResourcesFromPathKeepsNoManifestErrorForUnsupportedTerraformOnlyDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeTerraformFixture(t, dir, `resource "null_resource" "example" {}`)
+
+	sources, workloads, skips, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, cautils.ErrNoManifestFiles)
+	assert.Nil(t, sources)
+	assert.Nil(t, workloads)
+	assert.Empty(t, skips)
+}
+
+func TestGetResourcesFromPathLoadsMixedYamlAndTerraformDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeTerraformFixture(t, dir, terraformPodFixture)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(`
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yaml-config
+`), 0o600))
+
+	_, workloads, _, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
+
+	require.NoError(t, err)
+	resources := map[string]bool{}
+	for _, workload := range workloads {
+		resources[workload.GetKind()+"/"+workload.GetName()] = true
+	}
+	assert.Equal(t, map[string]bool{
+		"ConfigMap/yaml-config": true,
+		"Pod/terraform-pod":     true,
+	}, resources)
 }
 
 func TestGetResourcesFromPathPropagatesKustomizeFailure(t *testing.T) {
@@ -858,7 +957,7 @@ resources:
 `
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(kustomization), 0o600))
 
-	sources, workloads, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
+	sources, workloads, _, err := getResourcesFromPath(context.Background(), dir, cautils.HelmValueOptions{})
 
 	require.Error(t, err)
 	assert.Nil(t, sources)
@@ -894,7 +993,7 @@ spec:
           image: nginx:1.27
 `), 0o600))
 
-	_, workloads, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
+	_, workloads, _, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
 	require.NoError(t, err)
 
 	counts := map[string]int{}
@@ -939,7 +1038,7 @@ metadata:
   name: standalone
 `), 0o600))
 
-	_, workloads, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
+	_, workloads, _, err := getResourcesFromPath(context.Background(), repoRoot, cautils.HelmValueOptions{})
 	require.NoError(t, err)
 
 	counts := map[string]int{}
@@ -955,7 +1054,8 @@ metadata:
 // files, survive. The containment check is directory-aware, so a root located
 // just above the scan tree must not swallow unrelated inputs.
 func TestExcludeFilesUnderDirectories(t *testing.T) {
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	appDir := filepath.Join(root, "app")
 	nestedDir := filepath.Join(appDir, "config", "base")
 	require.NoError(t, os.MkdirAll(nestedDir, 0o750))

@@ -81,7 +81,7 @@ func DownloadSupportCommands() []string {
 func (ks *Kubescape) Download(downloadInfo *metav1.DownloadInfo) (*metav1.DownloadResult, error) {
 	setPathAndFilename(downloadInfo)
 	if err := os.MkdirAll(downloadInfo.Path, downloadDirPerm); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create download directory %q: %w", downloadInfo.Path, err)
 	}
 	files, err := downloadArtifact(ks.Context(), downloadInfo, downloadFunc)
 	if err != nil {
@@ -110,6 +110,8 @@ func setPathAndFilename(downloadInfo *metav1.DownloadInfo) {
 	if downloadInfo.FileName != "" {
 		if downloadInfo.Path == "" {
 			downloadInfo.Path = "."
+		} else {
+			downloadInfo.Path = filepath.Clean(downloadInfo.Path)
 		}
 		return
 	}
@@ -139,6 +141,8 @@ func setPathAndFilename(downloadInfo *metav1.DownloadInfo) {
 	if strings.Contains(file, ".json") {
 		downloadInfo.Path = filepath.Clean(dir)
 		downloadInfo.FileName = file
+	} else {
+		downloadInfo.Path = filepath.Clean(downloadInfo.Path)
 	}
 }
 
@@ -199,7 +203,7 @@ func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo
 
 func downloadExceptions(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]string, error) {
 	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
-	exceptionsGetter, err := exceptionsGetterFunc(ctx, "", tenant.GetAccountID(), nil, false)
+	exceptionsGetter, _, err := exceptionsGetterFunc(ctx, "", tenant.GetAccountID(), nil, false)
 	if err != nil {
 		return nil, err
 	}

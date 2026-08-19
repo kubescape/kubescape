@@ -131,10 +131,24 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 	containPrettyPrinter := false
 	outputPrinters := make([]printer.IPrinter, 0)
 	resolvedPaths := make(map[string]string)
+	// closeConfiguredPrinters closes already configured output printers upon setup failure.
+	closeConfiguredPrinters := func() error {
+		var closeErr error
+		for _, configuredPrinter := range outputPrinters {
+			if closer, ok := configuredPrinter.(interface{ CloseWriter() error }); ok {
+				if err := closer.CloseWriter(); err != nil {
+					closeErr = errors.Join(closeErr, err)
+				}
+			} else if closer, ok := configuredPrinter.(interface{ CloseWriter() }); ok {
+				closer.CloseWriter()
+			}
+		}
+		return closeErr
+	}
 	for _, format := range formats {
 		usesPrettyPrinter, err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format)
 		if err != nil {
-			return nil, err
+			return nil, errors.Join(err, closeConfiguredPrinters())
 		}
 
 		if usesPrettyPrinter && containPrettyPrinter {
@@ -143,13 +157,15 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 
 		if path := resolvedOutputPath(format, scanInfo.Output); path != "" {
 			if existing, collision := resolvedPaths[path]; collision {
-				return nil, fmt.Errorf("output path collision: formats %q and %q both resolve to %q; specify distinct output paths or use format-specific file extensions", existing, format, path)
+				return nil, errors.Join(fmt.Errorf("output path collision: formats %q and %q both resolve to %q; specify distinct output paths or use format-specific file extensions", existing, format, path), closeConfiguredPrinters())
 			}
 			resolvedPaths[path] = format
 		}
 
 		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo, clusterName)
-		printerHandler.SetWriter(ctx, scanInfo.Output)
+		if err := printerHandler.SetWriter(ctx, scanInfo.Output); err != nil {
+			return nil, errors.Join(fmt.Errorf("configure %q output: %w", format, err), closeConfiguredPrinters())
+		}
 		outputPrinters = append(outputPrinters, printerHandler)
 
 		if usesPrettyPrinter {
@@ -177,33 +193,22 @@ func resolvedOutputPath(format, outputFile string) string {
 	return trimmed
 }
 
+// fileExtForFormat returns the extension the format's printer appends to
+// --output. An unknown format falls back to the pretty extension because
+// NewPrinter falls back to the pretty printer for it.
 func fileExtForFormat(format string) string {
-	switch format {
-	case printer.JsonFormat:
-		return printer.JsonOutputExt
-	case printer.YamlFormat:
-		return printer.YamlOutputExt
-	case printer.JunitResultFormat:
-		return printer.JunitOutputExt
-	case printer.SARIFFormat:
-		return printer.SARIFOutputExt
-	case printer.GitLabSASTFormat:
-		return printer.JsonOutputExt
-	case printer.HtmlFormat:
-		return printer.HtmlOutputExt
-	case printer.PdfFormat:
-		return printer.PdfOutputExt
-	case printer.PrometheusFormat:
-		return printer.PrometheusOutputExt
-	case printer.CsvFormat:
-		return printer.CsvOutputExt
-	case printer.CycloneDXFormat:
-		return printer.CycloneDXOutputExt
-	case printer.SPDXFormat:
-		return printer.SPDXOutputExt
-	default:
-		return printer.PrettyOutputExt
+	if ext, ok := printer.FormatOutputExt[format]; ok {
+		return ext
 	}
+	return printer.PrettyOutputExt
+}
+
+// collectPolicies pins the shared handler for exactly as long as its caches are
+// in use, so an idle registry sweep cannot close them during collection.
+func collectPolicies(ctx context.Context, clusterName string, policyIdentifiers []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (*cautils.OPASessionObj, error) {
+	policyHandler, release := policyhandler.NewPolicyHandlerWithRelease(clusterName)
+	defer release()
+	return policyHandler.CollectPolicies(ctx, policyIdentifiers, scanInfo, getters)
 }
 
 func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
@@ -256,12 +261,13 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 		return nil, err
 	}
 	var controlInputsFromCache bool
-	getters.ControlsInputsGetter, controlInputsFromCache, err = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped)
+	getters.ControlsInputsGetter, controlInputsFromCache, err = getConfigInputsGetterForTarget(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster, airGapped, interfaces.k8s)
 	if err != nil {
 		spanInit.End()
 		return nil, err
 	}
-	getters.ExceptionsGetter, err = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped)
+	var exceptionsFromCache bool
+	getters.ExceptionsGetter, exceptionsFromCache, err = getExceptionsGetterForTarget(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, airGapped, interfaces.k8s)
 	if err != nil {
 		spanInit.End()
 		return nil, err
@@ -272,9 +278,20 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 		return nil, err
 	}
 
-	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {
+		// Add all frameworks
 		policyIdentifiers = cautils.AppendPolicyIdentifiers(policyIdentifiers, listFrameworksNames(getters.PolicyGetter), apisv1.KindFramework)
+
+		// Add all controls
+		if controls, err := getters.PolicyGetter.ListControls(); err == nil {
+			controlIDs := make([]string, 0, len(controls))
+			for _, control := range controls {
+				controlIDs = append(controlIDs, parseControlEntry(control).ID)
+			}
+			policyIdentifiers = cautils.AppendPolicyIdentifiers(policyIdentifiers, controlIDs, apisv1.KindControl)
+		} else {
+			logger.L().Ctx(ctxInit).Warning("failed to list controls for ScanAll", helpers.Error(err))
+		}
 	}
 
 	logger.L().StopSuccess("Initialized scanner")
@@ -283,8 +300,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 
 	// ===================== policies =====================
 	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies")
-	policyHandler := policyhandler.NewPolicyHandler(interfaces.tenantConfig.GetContextName())
-	scanData, err := policyHandler.CollectPolicies(ctxPolicies, policyIdentifiers, scanInfo, &getters)
+	scanData, err := collectPolicies(ctxPolicies, interfaces.tenantConfig.GetContextName(), policyIdentifiers, scanInfo, &getters)
 	if err != nil {
 		spanInit.End()
 		return resultsHandling, err
@@ -292,7 +308,24 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 	if controlInputsFromCache {
 		scanData.PolicyDegradations = append(scanData.PolicyDegradations, cautils.PolicyDegradation{Component: "controlInputs", Reason: "failed to fetch from GitHub, loaded from local cache"})
 	}
+	if exceptionsFromCache {
+		scanData.PolicyDegradations = append(scanData.PolicyDegradations, cautils.PolicyDegradation{Component: "exceptions", Reason: "failed to fetch from GitHub, loaded from local cache"})
+	}
 	spanPolicies.End()
+
+	if scanInfo.DryRun {
+		spanInit.End()
+		resultsHandling.SetData(scanData)
+		result, err := interfaces.resourceHandler.Preflight(ctxInit, scanData, scanInfo)
+		if err != nil {
+			return resultsHandling, err
+		}
+		printPreflightResult(result)
+		if denied := result.Denied(); len(denied) > 0 {
+			return resultsHandling, fmt.Errorf("dry-run: %d required resource type(s) cannot be listed with the current credentials", len(denied))
+		}
+		return resultsHandling, nil
+	}
 
 	// ===================== resources =====================
 	ctxResources, spanResources := otel.Tracer("").Start(ctxInit, "resources")
@@ -340,6 +373,9 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 		reportResults.ControlTimeout = scanInfo.ControlTimeout
 		if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
 			logger.L().Ctx(ctxOpa).Error("failed to process rules", helpers.Error(err))
+			// The eager listener finalizes its accumulated results before returning
+			// an error. Streaming errors can return before that invariant holds.
+			resultsHandling.SetData(scanData)
 			return resultsHandling, fmt.Errorf("%w", err)
 		}
 	}
@@ -703,4 +739,32 @@ func getAllWorkloadImages(wl *workloadinterface.Workload) ([]string, []error) {
 		}
 	}
 	return images, containerErrors
+}
+
+// printPreflightResult prints the --dry-run RBAC check to stdout.
+func printPreflightResult(result *resourcehandler.PreflightResult) {
+	for _, f := range result.DiscoveryFailures {
+		fmt.Printf("DISCOVERY FAILED  %s: %s\n", f.GVR, f.Error)
+	}
+
+	errored := result.Errored()
+	for _, c := range errored {
+		fmt.Printf("CHECK FAILED  list %s: %s\n", c.GVR, c.Reason)
+	}
+
+	denied := result.Denied()
+	if len(denied) == 0 && len(errored) == 0 {
+		fmt.Printf("All %d required resource type(s) can be listed with the current credentials.\n", len(result.Checks))
+		return
+	}
+
+	for _, c := range denied {
+		fmt.Printf("DENIED  list %s\n", c.GVR)
+		if len(c.AffectedControls) > 0 {
+			fmt.Printf("        -> %s will not evaluate\n", strings.Join(c.AffectedControls, ", "))
+		}
+	}
+
+	allowed := len(result.Checks) - len(denied) - len(errored)
+	fmt.Printf("\n%d/%d required resource type(s) can be listed. %d denied, %d could not be checked.\n", allowed, len(result.Checks), len(denied), len(errored))
 }

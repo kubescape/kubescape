@@ -74,8 +74,8 @@ func (rp *RepoPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling.IR
 		name := wl.GetName()
 		kind := wl.GetKind()
 		cmdPrefix := getWorkloadPrefixForCmd(ns, kind, name)
-		cautils.SimpleDisplay(rp.writer, fmt.Sprintf("%d. %s\n", i+1, cmdPrefix))
-		cautils.SimpleDisplay(rp.writer, fmt.Sprintf("   %s\n", getCallToActionString(rp.getWorkloadScanCommand(ns, kind, name, *wl.GetSource()))))
+		cautils.SimpleDisplay(rp.writer, "%d. %s\n", i+1, cmdPrefix)
+		cautils.SimpleDisplay(rp.writer, "   %s\n", getCallToActionString(rp.getWorkloadScanCommand(ns, kind, name, *wl.GetSource())))
 	}
 
 	cautils.SimpleDisplay(rp.writer, "\n")

@@ -35,7 +35,8 @@ func NewPdfPrinter() *PdfPrinter {
 	return &PdfPrinter{}
 }
 
-func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	outputFile = strings.TrimSpace(outputFile)
 	if outputFile == "" {
 		// Binary PDF must never fall back to stdout: it corrupts TTYs and
@@ -46,10 +47,15 @@ func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) {
 	} else if filepath.Ext(outputFile) != printer.PdfOutputExt {
 		outputFile = outputFile + printer.PdfOutputExt
 	}
-	// PDF must never fall back to stdout on file-create errors either
-	// (e.g. read-only cwd) — use the no-stdout-fallback helper, which
-	// falls back to a temp file rather than corrupting the TTY.
+	if explicitOutput {
+		var err error
+		pp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
+	// The implicit PDF destination must never fall back to stdout. Preserve
+	// the existing temp-file fallback if the default path cannot be opened.
 	pp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+printer.PdfOutputExt)
+	return nil
 }
 
 func (pp *PdfPrinter) Score(score float32) {
@@ -193,8 +199,10 @@ func getSeverityColor(severity string) *props.Color {
 	return &props.BlackColor
 }
 
-func (p *PdfPrinter) CloseWriter() {
+// CloseWriter closes the PDF output writer, returning any error from flushing or closing.
+func (p *PdfPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }

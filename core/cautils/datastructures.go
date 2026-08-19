@@ -35,6 +35,15 @@ type ImageScanData struct {
 	VulnerabilityProvider vulnerability.Provider
 }
 
+// SkippedManifest records a manifest file that was discovered but could not
+// be loaded or identified as a Kubernetes object during scan. It is populated
+// at the file-loading layer so the user knows which manifests were not
+// evaluated.
+type SkippedManifest struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
 type ScanTypes string
 
 const (
@@ -66,9 +75,12 @@ type OPASessionObj struct {
 	ScanCoverage          ScanCoverage                       // runtime coverage gaps (failed GVR pulls + not-evaluated controls)
 	PartialGVRFailures    []PartialGVRPull                   // per-selector LIST failures for GVRs that were partially collected
 	PolicyDegradations    []PolicyDegradation                // policy inputs (control configurations, exceptions) served from a fallback
+	SkippedManifests      []SkippedManifest                  // manifest files skipped during loading (invalid YAML, missing kind, etc.)
 	SessionID             string                             // SessionID
 	Policies              []reporthandling.Framework         // list of frameworks to scan
 	Exceptions            []armotypes.PostureExceptionPolicy // list of exceptions to apply on scan results
+	ExceptionAudit        *ExceptionAudit                    // optional exception usage audit
+	AuditExceptions       bool                               // include exception usage audit in supported outputs
 	OmitRawResources      bool                               // omit raw resources from output
 	SingleResourceScan    workloadinterface.IWorkload        // single resource scan
 	TopWorkloadsByScore   []reporthandling.IResource
@@ -94,9 +106,44 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 		SessionID:             scanInfo.ScanID,
 		Metadata:              scanInfoToScanMetadata(ctx, scanInfo, policyIdentifiers),
 		OmitRawResources:      scanInfo.OmitRawResources,
+		AuditExceptions:       scanInfo.AuditExceptions,
 		TriggeredByCLI:        scanInfo.TriggeredByCLI,
 		LabelsToCopy:          scanInfo.LabelsToCopy,
 	}
+}
+
+type ExceptionAudit struct {
+	Summary   ExceptionAuditSummary `json:"summary"`
+	Items     []ExceptionAuditItem  `json:"items"`
+	Generated bool                  `json:"generated"`
+}
+
+type ExceptionAuditSummary struct {
+	Total          int `json:"total"`
+	Active         int `json:"active"`
+	Expired        int `json:"expired"`
+	Matched        int `json:"matched"`
+	Unused         int `json:"unused"`
+	InvalidControl int `json:"invalidControl"`
+}
+
+type ExceptionAuditItem struct {
+	Name             string                `json:"name"`
+	Status           string                `json:"status"`
+	MatchCount       int                   `json:"matchCount"`
+	Expired          bool                  `json:"expired,omitempty"`
+	InvalidControls  []string              `json:"invalidControls,omitempty"`
+	ControlIDs       []string              `json:"controlIDs,omitempty"`
+	MatchedResources []ExceptionAuditMatch `json:"matchedResources,omitempty"`
+}
+
+type ExceptionAuditMatch struct {
+	ResourceID string `json:"resourceID"`
+	Kind       string `json:"kind,omitempty"`
+	Namespace  string `json:"namespace,omitempty"`
+	Name       string `json:"name,omitempty"`
+	ControlID  string `json:"controlID"`
+	RuleName   string `json:"ruleName,omitempty"`
 }
 
 func estimateClusterSize(k8sResources K8SResources) int {

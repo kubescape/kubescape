@@ -107,6 +107,58 @@ This output formatting is helpful when you want to:
 3. compare a local cached configuration with a generated YAML or JSON payload
 4. debug configuration drift between environments
 
+## Output contract
+
+The rendered fields use stable lower camel case names:
+
+- `accountID`
+- `clusterName`
+- `cloudReportURL`
+- `cloudAPIURL`
+- `accessKey`
+
+`accessKey` is a credential, so it is rendered masked in every format: only its
+last four characters are shown, prefixed with `****` (a key of eight characters
+or fewer is masked in full). The command is meant for CI logs and shared
+terminals, so it never prints the key itself; read the cached configuration file
+directly if you need the full value.
+
+By default, fields with empty values are not rendered. This keeps terminal
+output short and avoids noisy structured payloads in scripts that only need
+configured values.
+
+When `--include-empty` is set, every supported field is rendered even if its
+value is empty. This is useful for tools that validate the expected shape of
+the cached configuration.
+
+The `text` format renders one `key: value` pair per line. It is designed for
+operators reading logs or terminals, not for strict machine parsing.
+
+The `json` format renders a JSON object. Scripts can read the fields with tools
+such as `jq` without depending on the text layout.
+
+The `yaml` format renders a YAML mapping. This is convenient when comparing the
+cached values with Kubernetes manifests, Helm values, or other YAML-oriented
+configuration files.
+
+Unknown output formats return an error instead of falling back to text. This
+helps automation fail early when a flag value is misspelled.
+
+The command only reads and renders the cached configuration. It does not create,
+update, delete, or normalize the saved configuration file.
+
+### Scripting guidance
+
+For scripts, prefer `-o json` and check for missing keys explicitly.
+
+For reviews, prefer `-o yaml --include-empty` so unset fields are visible.
+
+For logs, prefer the default text format because it is compact.
+
+Do not treat omitted fields as deleted configuration values.
+
+Quote shell variables that may contain URLs or access keys.
+
 ## Use cases
 
 ### Troubleshooting a missing account ID

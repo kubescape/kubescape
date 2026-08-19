@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -38,14 +39,16 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	for path := range scanInfo.InputPatterns {
 		var workloadIDToSource map[string]reporthandling.Source
 		var workloads []workloadinterface.IMetadata
+		var skipped []cautils.SkippedManifest
 		var err error
 
 		helmValueOpts := helmValueOptionsFromScanInfo(scanInfo)
 		if scanInfo.ChartPath != "" && scanInfo.FilePath != "" {
 			workloadIDToSource, workloads, err = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath, helmValueOpts)
 		} else {
-			workloadIDToSource, workloads, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path], helmValueOpts)
+			workloadIDToSource, workloads, skipped, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path], helmValueOpts)
 		}
+		sessionObj.SkippedManifests = append(sessionObj.SkippedManifests, skipped...)
 		if err != nil {
 			return nil, allResources, nil, nil, err
 		}
@@ -89,6 +92,13 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		}
 	}
 
+	if len(sessionObj.SkippedManifests) > 0 {
+		logger.L().Ctx(ctx).Warning(fmt.Sprintf("%d manifests skipped during scan", len(sessionObj.SkippedManifests)))
+		for _, sk := range sessionObj.SkippedManifests {
+			logger.L().Ctx(ctx).Warning(fmt.Sprintf("  %s: %s", sk.Path, sk.Reason))
+		}
+	}
+
 	logger.L().StopSuccess("Done accessing local objects")
 	// save input resource in resource maps
 	addSingleResourceToResourceMaps(k8sResources, allResources, sessionObj.SingleResourceScan, offlineResolver)
@@ -98,6 +108,12 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 func (fileHandler *FileResourceHandler) GetCloudProvider() string {
 	return ""
+}
+
+// Preflight is not supported for file-based scans: there is no API server to
+// check RBAC access against.
+func (fileHandler *FileResourceHandler) Preflight(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*PreflightResult, error) {
+	return nil, ErrPreflightNotSupported
 }
 
 // EstimateClusterSize always returns 0 for file-based scans since streaming
@@ -288,9 +304,10 @@ func excludeFilesUnderDirectories(sourceToWorkloads map[string][]workloadinterfa
 // getResourcesFromPath loads every scannable resource under path, from plain
 // manifests, helm charts and kustomize directories, and maps each workload to the
 // source file it came from.
-func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
+func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions) (map[string]reporthandling.Source, []workloadinterface.IMetadata, []cautils.SkippedManifest, error) {
 	workloadIDToSource := make(map[string]reporthandling.Source)
 	var workloads []workloadinterface.IMetadata
+	var allSkips []cautils.SkippedManifest
 
 	clonedRepo := cautils.GetClonedPath(path)
 	if clonedRepo != "" {
@@ -312,14 +329,14 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	// only the configurations whose builds actually succeeded.
 	kustomizeResult, err := cautils.LoadResourcesFromKustomizeDirectories(ctx, path)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Charts owned by a successful Kustomize build must not also be rendered as
 	// standalone Helm releases. Unreferenced charts remain in generic discovery.
 	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmChartsExcludingDirectories(ctx, path, helmValueOpts, kustomizeResult.OwnedHelmChartDirectories)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// load resource from local file system
@@ -327,13 +344,24 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	// generic Helm renderer left them alone. CRDs are filtered separately according
 	// to includeCRDs, so an omitted CRD remains available to the raw-file pass.
 	coveredChartDirectories := append(append([]string{}, renderedCharts...), kustomizeResult.OwnedHelmChartDirectories...)
-	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, coveredChartDirectories)
-	if err != nil {
-		return nil, nil, err
+	sourceToWorkloads, fileSkips, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, coveredChartDirectories)
+	allSkips = append(allSkips, fileSkips...)
+	filesErr := err
+	if err != nil && !errors.Is(err, cautils.ErrNoManifestFiles) {
+		return nil, nil, allSkips, err
 	}
 	terraformSourceToWorkloads, err := cautils.LoadResourcesFromTerraform(ctx, path)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, allSkips, err
+	}
+	if filesErr != nil {
+		terraformWorkloads := 0
+		for _, ws := range terraformSourceToWorkloads {
+			terraformWorkloads += len(ws)
+		}
+		if terraformWorkloads == 0 {
+			return nil, nil, allSkips, filesErr
+		}
 	}
 
 	// merge Terraform-derived workloads, same pattern as the Kustomize block below
@@ -523,10 +551,10 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	// backstop: drop cross-provider identity collisions the path-level kustomize skip can't see (e.g. helm + raw YAML)
 	workloads, workloadIDToSource = dedupWorkloads(workloads, workloadIDToSource)
 	if len(workloads) == 0 {
-		return nil, nil, fmt.Errorf("no scannable Kubernetes resources found for input %q", path)
+		return nil, nil, allSkips, fmt.Errorf("no scannable Kubernetes resources found for input %q", path)
 	}
 
-	return workloadIDToSource, workloads, nil
+	return workloadIDToSource, workloads, allSkips, nil
 }
 
 // extractGitRepo returns the root every reported path for this scan is relative to,

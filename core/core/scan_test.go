@@ -2,8 +2,11 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,12 +16,75 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/pkg/imagescan"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/version"
 )
+
+func TestScan_ReturnsFinalizedPartialDataOnOPAError(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "pod.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name: partial-result-probe
+  namespace: default
+`), 0o600))
+
+	rule := reporthandling.PolicyRule{
+		Rule:         "package armo_builtins\nthis is not valid rego at all {{{",
+		RuleLanguage: reporthandling.RegoLanguage,
+		Match: []reporthandling.RuleMatchObjects{{
+			APIGroups:   []string{""},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"Pod"},
+		}},
+	}
+	rule.Name = "broken-rule"
+	control := reporthandling.Control{ControlID: "C-BROKEN", BaseScore: 5, Rules: []reporthandling.PolicyRule{rule}}
+	control.Name = "broken-control"
+	framework := reporthandling.Framework{Controls: []reporthandling.Control{control}}
+	framework.Name = "broken-framework"
+	frameworkBytes, err := json.Marshal(framework)
+	require.NoError(t, err)
+	frameworkPath := filepath.Join(dir, "framework.json")
+	require.NoError(t, os.WriteFile(frameworkPath, frameworkBytes, 0o600))
+	controlsInputsPath := filepath.Join(dir, "controls-inputs.json")
+	require.NoError(t, os.WriteFile(controlsInputsPath, []byte(`{"probe":["value"]}`), 0o600))
+	exceptionsPath := filepath.Join(dir, "exceptions.json")
+	require.NoError(t, os.WriteFile(exceptionsPath, []byte(`[]`), 0o600))
+	attackTracksPath := filepath.Join(dir, "attack-tracks.json")
+	require.NoError(t, os.WriteFile(attackTracksPath, []byte(`[]`), 0o600))
+
+	scanInfo := &cautils.ScanInfo{
+		UseFrom:          []string{frameworkPath},
+		ControlsInputs:   controlsInputsPath,
+		UseExceptions:    exceptionsPath,
+		AttackTracks:     attackTracksPath,
+		InputPatterns:    []string{manifestPath},
+		Local:            true,
+		FrameworkScan:    true,
+		ScanType:         cautils.ScanTypeFramework,
+		OmitRawResources: true,
+	}
+	scanInfo.Submit.SetBool(false)
+
+	results, err := NewKubescape(context.Background()).Scan(scanInfo, []cautils.PolicyIdentifier{{
+		Identifier: framework.Name,
+		Kind:       apisv1.KindFramework,
+	}})
+
+	require.ErrorContains(t, err, "broken-rule")
+	require.NotNil(t, results)
+	require.NotNil(t, results.GetData(), "the finalized partial session must remain available alongside the scan error")
+	require.Len(t, results.GetData().ResourcesResult, 1)
+	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
+	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+}
 
 type recordingImageScanService struct {
 	image              string
@@ -60,6 +126,10 @@ func (m estimateClusterSizeMock) GetClusterAPIServerInfo(ctx context.Context) *v
 
 func (m estimateClusterSizeMock) GetCloudProvider() string {
 	return ""
+}
+
+func (m estimateClusterSizeMock) Preflight(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (*resourcehandler.PreflightResult, error) {
+	return nil, nil
 }
 
 func TestEstimateClusterSize(t *testing.T) {
@@ -131,6 +201,36 @@ func TestGetOutputPrinters(t *testing.T) {
 	assert.Equal(t, 3, len(outputPrinters))
 }
 
+func TestGetOutputPrintersReturnsExplicitSetupErrorsForEveryFormat(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-directory")
+	require.NoError(t, os.WriteFile(blocker, []byte("block"), 0o600))
+	requestedOutput := filepath.Join(blocker, "report")
+
+	for _, format := range printer.AllFormats {
+		t.Run(format, func(t *testing.T) {
+			scanType := cautils.ScanTypeControl
+			if format == printer.CycloneDXFormat || format == printer.SPDXFormat {
+				scanType = cautils.ScanTypeImage
+			}
+			scanInfo := &cautils.ScanInfo{
+				ScanType:      scanType,
+				Format:        format,
+				Output:        requestedOutput,
+				InputPatterns: []string{dir},
+			}
+
+			outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+
+			require.Error(t, err)
+			assert.Nil(t, outputPrinters)
+			assert.Contains(t, err.Error(), "configure \""+format+"\" output")
+			assert.True(t, strings.Contains(err.Error(), "create output directory") || strings.Contains(err.Error(), "open output file"))
+			assert.NoFileExists(t, resolvedOutputPath(format, requestedOutput))
+		})
+	}
+}
+
 func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
 	scanInfo := &cautils.ScanInfo{
 		ScanType: cautils.ScanTypeControl,
@@ -155,11 +255,31 @@ func TestResolvedOutputPath(t *testing.T) {
 		{"append CycloneDX", printer.CycloneDXFormat, "report.json", "report.json.cdx.json"},
 		{"preserve SPDX", printer.SPDXFormat, "report.spdx.json", "report.spdx.json"},
 		{"append SPDX", printer.SPDXFormat, "report.json", "report.json.spdx.json"},
+		{"append markdown", printer.MarkdownFormat, "report", "report.md"},
+		{"preserve markdown", printer.MarkdownFormat, "report.md", "report.md"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			assert.Equal(t, test.want, resolvedOutputPath(test.format, test.outputFile))
+		})
+	}
+}
+
+// markdown writes report.md and pretty-printer writes report.txt, so sharing
+// an --output must not be rejected as a collision.
+func TestGetOutputPrintersAllowsMarkdownAlongsideTextFormats(t *testing.T) {
+	for _, format := range []string{printer.PrettyFormat, printer.PrometheusFormat} {
+		t.Run(format, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				ScanType: cautils.ScanTypeControl,
+				Format:   printer.MarkdownFormat + "," + format,
+				Output:   filepath.Join(t.TempDir(), "report"),
+			}
+
+			outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "")
+			require.NoError(t, err)
+			assert.Len(t, outputPrinters, 2)
 		})
 	}
 }
@@ -495,6 +615,10 @@ func (m *streamingCancelMock) GetClusterAPIServerInfo(context.Context) *version.
 
 func (m *streamingCancelMock) GetCloudProvider() string {
 	return m.cloudProvider
+}
+
+func (m *streamingCancelMock) Preflight(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (*resourcehandler.PreflightResult, error) {
+	return nil, nil
 }
 
 func TestCollectAndProcessResourcesWithStreaming_InitializesProviderScope(t *testing.T) {

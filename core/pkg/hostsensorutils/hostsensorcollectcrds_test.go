@@ -3,9 +3,11 @@ package hostsensorutils
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	k8shostsensor "github.com/kubescape/k8s-interface/hostsensor"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -83,7 +85,7 @@ func newCRDDynamicClient(t *testing.T, items ...*unstructured.Unstructured) *fak
 func TestGetCRDResources_UnsupportedResourceType(t *testing.T) {
 	hsh := &HostSensorHandler{}
 
-	got, err := hsh.getCRDResources(context.Background(), k8shostsensor.KubeletConfiguration)
+	got, _, err := hsh.getCRDResources(context.Background(), k8shostsensor.KubeletConfiguration)
 
 	require.Nil(t, got)
 	require.ErrorContains(t, err, "unsupported resource type")
@@ -111,7 +113,7 @@ func TestCRDResourceGetters(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		query func(context.Context) ([]hostsensor.HostSensorDataEnvelope, error)
+		query func(context.Context) ([]hostsensor.HostSensorDataEnvelope, int, error)
 	}{
 		{"OsReleaseFile", hsh.getOsReleaseFile},
 		{"KernelVersion", hsh.getKernelVersion},
@@ -127,13 +129,37 @@ func TestCRDResourceGetters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.query(ctx)
+			got, _, err := tt.query(ctx)
 			require.NoError(t, err)
 			require.Len(t, got, 1)
 			assert.Equal(t, "node-1", got[0].GetName())
 			assert.Equal(t, tt.name, got[0].GetKind())
 		})
 	}
+}
+
+// Covers the scan sequence a node-agent restart produces: one scan collects
+// nothing, the next one collects normally. With the cache enabled, the second
+// scan must query the cluster instead of being served the empty first result.
+func TestGetCRDResources_RecoversAfterEmptyCollection(t *testing.T) {
+	withTempCacheDir(t)
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+	withK8sHost(t, "https://cluster-a.example.com")
+
+	hsh := &HostSensorHandler{dynamicClient: newCRDDynamicClient(t)}
+	got, rawCount, err := hsh.getKubeletInfo(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.Zero(t, rawCount)
+
+	item := newCRDItem("KubeletInfo", "node-1", map[string]any{"KubeletInfo": map[string]any{"version": "v1.30.0"}})
+	hsh.dynamicClient = newCRDDynamicClient(t, item)
+
+	got, rawCount, err = hsh.getKubeletInfo(context.Background())
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, 1, rawCount)
+	assert.Equal(t, "node-1", got[0].GetName())
 }
 
 func TestCollectResources_SkipsControlPlaneInfoWhenCloudProviderPresent(t *testing.T) {
@@ -191,6 +217,36 @@ func TestCollectResources_RecordsQueryErrors(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, res)
 	assert.Len(t, infoMap, 2)
+}
+
+func TestCollectResources_RecordsZeroItemsErrors(t *testing.T) {
+	client := newCRDDynamicClient(t)
+	// Empty client with no CRD items created, but simulate 1 node existing
+	hsh := &HostSensorHandler{dynamicClient: client, nodeCount: 1}
+
+	res, infoMap, err := hsh.CollectResources(context.Background())
+
+	require.NoError(t, err)
+	assert.Empty(t, res)
+	assert.Len(t, infoMap, 9)
+	for _, resource := range []k8shostsensor.HostSensorResource{
+		k8shostsensor.OsReleaseFile,
+		k8shostsensor.KernelVersion,
+		k8shostsensor.LinuxSecurityHardeningStatus,
+		k8shostsensor.OpenPortsList,
+		k8shostsensor.LinuxKernelVariables,
+		k8shostsensor.KubeletInfo,
+		k8shostsensor.KubeProxyInfo,
+		k8shostsensor.CNIInfo,
+		k8shostsensor.ControlPlaneInfo,
+	} {
+		expectedErr := fmt.Sprintf("node-agent didn't report any %s for 1 nodes", resource.String())
+		group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(resource))
+		for _, r := range k8sinterface.ResourceGroupToString(group, version, resource.String()) {
+			assert.Contains(t, infoMap, r)
+			assert.Equal(t, expectedErr, infoMap[r].InnerInfo)
+		}
+	}
 }
 
 func hasKind(envelopes []hostsensor.HostSensorDataEnvelope, kind k8shostsensor.HostSensorResource) bool {

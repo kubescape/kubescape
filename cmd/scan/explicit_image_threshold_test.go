@@ -19,9 +19,9 @@ type explicitThresholdPrinter struct{}
 func (explicitThresholdPrinter) ActionPrint(context.Context, *cautils.OPASessionObj, []cautils.ImageScanData) error {
 	return nil
 }
-func (explicitThresholdPrinter) PrintNextSteps()                   {}
-func (explicitThresholdPrinter) Score(float32)                     {}
-func (explicitThresholdPrinter) SetWriter(context.Context, string) {}
+func (explicitThresholdPrinter) PrintNextSteps()                         {}
+func (explicitThresholdPrinter) Score(float32)                           {}
+func (explicitThresholdPrinter) SetWriter(context.Context, string) error { return nil }
 
 type explicitThresholdProvider struct {
 	severity string

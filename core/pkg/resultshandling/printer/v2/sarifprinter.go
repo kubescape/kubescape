@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -78,7 +79,8 @@ func NewSARIFPrinter() *SARIFPrinter {
 func (sp *SARIFPrinter) Score(score float32) {
 }
 
-func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	if outputFile != "" {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = sarifOutputFile
@@ -87,7 +89,13 @@ func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) {
 			outputFile = outputFile + printer.SARIFOutputExt
 		}
 	}
+	if explicitOutput {
+		var err error
+		sp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
 	sp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 // addRule adds a rule description to the scan run based on the given control summary
@@ -110,15 +118,19 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 		})
 }
 
-// addResult adds a result of checking a rule to the scan run based on the given control summary
-func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) *sarif.Result {
+// addResult adds a result of checking a rule to the scan run based on the given control summary.
+// failedPathLocations, when non-empty, adds one relatedLocation per resolved FailedPath so each
+// field that actually caused the failure gets its own precise location in the manifest, distinct
+// from the single primary location (which points at the fix, not necessarily at every failed field).
+func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, failedPathLocations map[string]locationresolver.Location) *sarif.Result {
 	msg := ctl.GetDescription()
 	if resource != nil {
 		if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
+			addContainerNameToAssistedRemediation(resource, &paths)
 			msg += "\n\nAffected fields:\n" + strings.Join(paths, "\n")
 		}
 	}
-	return scanRun.CreateResultForRule(ctl.GetID()).
+	result := scanRun.CreateResultForRule(ctl.GetID()).
 		WithMessage(sarif.NewTextMessage(msg)).
 		WithLocations([]*sarif.Location{
 			sarif.NewLocationWithPhysicalLocation(
@@ -130,6 +142,69 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 				),
 			),
 		})
+
+	// Sort for deterministic output - map iteration order is randomized and this feeds
+	// directly into the written SARIF file.
+	paths := make([]string, 0, len(failedPathLocations))
+	for p := range failedPathLocations {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	for _, p := range paths {
+		loc := failedPathLocations[p]
+		result.AddRelatedLocation(
+			sarif.NewLocation().
+				WithMessage(sarif.NewTextMessage(p)).
+				WithPhysicalLocation(
+					sarif.NewPhysicalLocation().
+						WithArtifactLocation(
+							sarif.NewSimpleArtifactLocation(filepath),
+						).WithRegion(
+						sarif.NewRegion().WithStartLine(loc.Line).WithStartColumn(loc.Column),
+					),
+				),
+		)
+	}
+
+	return result
+}
+
+// resolveFailedPathLocations resolves each of ac's FailedPaths to its location in the source
+// manifest, using the same locationResolver already built for the fix location. Unlike
+// resolveFixLocation, which returns one location for the highest-priority remediation path, this
+// resolves every FailedPath independently so each field that actually caused the failure can get
+// its own precise location instead of all sharing the fix location. A path that doesn't resolve
+// (unknown docIndex, or ResolveLocation finding nothing) is omitted rather than defaulted to line
+// 1 - a relatedLocation with a fabricated line number would be worse than no relatedLocation at all.
+func resolveFailedPathLocations(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) map[string]locationresolver.Location {
+	if locationResolver == nil {
+		return nil
+	}
+	docIndex, ok := getDocIndex(opaSessionObj, resourceID)
+	if !ok {
+		return nil
+	}
+
+	var locations map[string]locationresolver.Location
+	for i := range ac.ResourceAssociatedRules {
+		for _, p := range ac.ResourceAssociatedRules[i].Paths {
+			if p.FailedPath == "" {
+				continue
+			}
+			if _, seen := locations[p.FailedPath]; seen {
+				continue
+			}
+			location, err := locationResolver.ResolveLocation(p.FailedPath, docIndex)
+			if err != nil || location.Line == 0 {
+				continue
+			}
+			if locations == nil {
+				locations = make(map[string]locationresolver.Location)
+			}
+			locations[p.FailedPath] = location
+		}
+	}
+	return locations
 }
 
 func (sp *SARIFPrinter) printImageScan(scanResults cautils.ImageScanData) error {
@@ -252,9 +327,10 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 					continue
 				}
 				location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
+				failedPathLocations := resolveFailedPathLocations(opaSessionObj, locationResolver, &ac, resource.resourceID)
 				sp.addRule(run, ctl)
 				rsrc := opaSessionObj.AllResources[resource.resourceID]
-				r := sp.addResult(run, ctl, resource.relPath, location, &ac, rsrc)
+				r := sp.addResult(run, ctl, resource.relPath, location, &ac, rsrc, failedPathLocations)
 				collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath)
 			}
 		}
@@ -466,7 +542,12 @@ func collectFixes(ctx context.Context, cache *fixReportCache, result *sarif.Resu
 				continue
 			}
 
+			// Empty means the path is not a plain yaml path and must not be
+			// evaluated as a yq expression.
 			yamlExpression := fixhandler.FixPathToValidYamlExpression(fixPath, rulePaths.FixPath.Value, documentIndex)
+			if yamlExpression == "" {
+				continue
+			}
 			addFixRegions(result, filepath, cache.fixRegions(ctx, rsrcAbsPath, yamlExpression))
 		}
 	}
@@ -484,13 +565,18 @@ func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, 
 	// wrong segment for any path containing more than one colon (e.g. a
 	// Windows path like "C:\repo\deploy.yaml:0"), producing a non-numeric
 	// value that Atoi rejects and this function reporting "no doc index"
-	// even though one exists. This matches how fixhandler.getFilePathAndIndex
-	// parses the same convention.
+	// even though one exists. We also explicitly ignore the volume name
+	// to prevent treating a drive letter colon as the document index separator.
+	// This matches how fixhandler.getFilePathAndIndex parses the same convention.
 	path := localworkload.GetPath()
-	lastColon := strings.LastIndex(path, ":")
+	volume := filepath.VolumeName(path)
+	pathWithoutVolume := path[len(volume):]
+
+	lastColon := strings.LastIndex(pathWithoutVolume, ":")
 	if lastColon == -1 {
 		return 0, false
 	}
+	lastColon += len(volume)
 
 	docIndex, err := strconv.Atoi(path[lastColon+1:])
 	if err != nil {
@@ -542,8 +628,10 @@ func hashArtifactChange(artifactChange *sarif.ArtifactChange) [32]byte {
 	return sha256.Sum256(acJson)
 }
 
-func (p *SARIFPrinter) CloseWriter() {
+// CloseWriter closes the SARIF output writer, returning any error from flushing or closing.
+func (p *SARIFPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }

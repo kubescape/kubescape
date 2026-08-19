@@ -1,0 +1,20 @@
+{
+  "name": "create-serviceaccount-token-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Privilege Escalation::Mint service account token",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": ["rbac.authorization.k8s.io"],
+      "apiVersions": ["v1"],
+      "resources": ["RoleBinding", "ClusterRoleBinding", "Role", "ClusterRole"]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can create TokenRequests for the serviceaccounts/token subresource, letting them mint valid tokens for any service account they can name and act as that identity",
+  "remediation": "Restrict create access to serviceaccounts/token to a small, trusted set of subjects. Combine with least-privilege service accounts, since minting a token is equivalent to gaining that account's full RBAC rights.",
+  "ruleQuery": "armo_builtins"
+}

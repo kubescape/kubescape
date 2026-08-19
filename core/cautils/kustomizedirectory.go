@@ -148,7 +148,7 @@ func collectKustomizeInputOwnership(
 	seenKustomizations[absKustomizationPath] = struct{}{}
 	appendUniquePath(absKustomizationPath, seenSourcePaths, &ownership.SourcePaths)
 
-	contents, err := os.ReadFile(absKustomizationPath)
+	contents, err := os.ReadFile(filepath.Clean(absKustomizationPath))
 	if err != nil {
 		return fmt.Errorf("failed to read Kustomization %q: %w", absKustomizationPath, err)
 	}

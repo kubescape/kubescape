@@ -1095,6 +1095,32 @@ func TestFinalizeResults_PreservesExistingGenerationTime(t *testing.T) {
 	assert.Equal(t, preset, session.Report.ReportGenerationTime)
 }
 
+func TestFinalizeResults_SetsReportIDFromSession(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.SessionID = "scan-6f012842"
+	require.Empty(t, session.Report.ReportID,
+		"precondition: the report has not been assigned an ID")
+
+	report := FinalizeResults(session)
+
+	require.NotNil(t, report)
+	assert.Equal(t, "scan-6f012842", report.ReportID)
+	assert.Equal(t, "scan-6f012842", session.Report.ReportID,
+		"FinalizeResults must write the ID back so every downstream consumer observes the same identity")
+}
+
+func TestFinalizeResults_PreservesExistingReportID(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.SessionID = "scan-new"
+	session.Report.ReportID = "report-preset"
+
+	report := FinalizeResults(session)
+
+	require.NotNil(t, report)
+	assert.Equal(t, "report-preset", report.ReportID)
+	assert.Equal(t, "report-preset", session.Report.ReportID)
+}
+
 // TestFinalizeResults_SetsClusterNameWhenEmpty is the regression test for
 // kubescape/kubescape#2856: JSON reports always had an empty clusterName
 // because nothing on the scan path ever assigned OPASessionObj.Report.ClusterName,

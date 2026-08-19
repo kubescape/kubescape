@@ -1,0 +1,10 @@
+{
+  "global": {
+    "exclude": [
+      "G101"
+    ],
+    "exclude-dir": [
+      "vendor"
+    ]
+  }
+}

@@ -74,7 +74,6 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	select {
 	case handler.scanRequestChan <- scanParams:
 	default:
-		handler.state.setNotBusy(scanID)
 		w.Header().Set("Retry-After", "1")
 		handler.writeErrorWithStatus(w,
 			fmt.Errorf("scan queue is full; retry the request later"),

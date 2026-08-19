@@ -77,13 +77,18 @@ func TestValidateCommonScanFlags(t *testing.T) {
 	tests := []struct {
 		name          string
 		severity      string
+		minSeverity   string
 		format        string
 		formatChanged bool
+		submit        bool
+		local         bool
+		omitRaw       bool
 		expectedErr   string
 	}{
 		{
 			name:          "Valid setup",
 			severity:      "High",
+			minSeverity:   "Medium",
 			format:        "json",
 			formatChanged: true,
 			expectedErr:   "",
@@ -91,6 +96,14 @@ func TestValidateCommonScanFlags(t *testing.T) {
 		{
 			name:          "Invalid severity",
 			severity:      "Extreme",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "unknown severity",
+		},
+		{
+			name:          "Invalid minimum severity",
+			severity:      "High",
+			minSeverity:   "Extreme",
 			format:        "json",
 			formatChanged: true,
 			expectedErr:   "unknown severity",
@@ -109,13 +122,33 @@ func TestValidateCommonScanFlags(t *testing.T) {
 			formatChanged: true,
 			expectedErr:   "invalid format",
 		},
+		{
+			name:          "Submit with keep-local",
+			submit:        true,
+			local:         true,
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "you can use `keep-local` or `submit`, but not both",
+		},
+		{
+			name:          "Submit with omit-raw-resources",
+			submit:        true,
+			omitRaw:       true,
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "you can use `omit-raw-resources` or `submit`, but not both",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			scanInfo := &cautils.ScanInfo{
 				FailThresholdSeverity: tt.severity,
+				MinSeverity:           tt.minSeverity,
 				Format:                tt.format,
+				Local:                 tt.local,
+				OmitRawResources:      tt.omitRaw,
+				Submit:                cautils.NewBoolPtr(&tt.submit),
 			}
 
 			cmd := &cobra.Command{}

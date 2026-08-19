@@ -3,11 +3,11 @@ package printer
 import (
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 
@@ -29,6 +29,25 @@ const (
 //go:embed html/report.gohtml
 var reportTemplate string
 
+// The HTML report previously loaded this logo from raw.githubusercontent.com
+// at view time, so the report only rendered correctly with network access
+// and leaked the viewer's IP/UA to GitHub every time an offline scan report
+// was opened. Embed the same logo the PDF printer already ships
+// (pdf/logo.png) and inline it as a data URI instead.
+//
+//go:embed pdf/logo.png
+var htmlLogoPNG []byte
+
+// logoDataURI returns the embedded Kubescape logo as a data: URI. It is
+// returned as template.URL, not a plain string, so html/template's URL
+// sanitizer (which rejects the data: scheme by default) doesn't replace it
+// with "#ZgotmplZ" when used as an <img src>.
+func logoDataURI() template.URL {
+	// #nosec G203 -- the input is our own go:embed'd logo.png, not
+	// attacker-controlled data, so bypassing the URL sanitizer here is safe.
+	return template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(htmlLogoPNG))
+}
+
 var _ printer.IPrinter = &HtmlPrinter{}
 
 type HTMLReportingCtx struct {
@@ -37,6 +56,9 @@ type HTMLReportingCtx struct {
 	// ImageScanSummary is set instead of the two fields above when this report
 	// is for an image scan rather than a posture scan (#2782).
 	ImageScanSummary *imageprinter.ImageScanSummary
+	// LogoDataURI is the embedded Kubescape logo, inlined so the report
+	// renders correctly without network access.
+	LogoDataURI template.URL
 }
 
 type HtmlPrinter struct {
@@ -47,7 +69,8 @@ func NewHtmlPrinter() *HtmlPrinter {
 	return &HtmlPrinter{}
 }
 
-func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	explicitOutput := outputFile != ""
 	outputFile = strings.TrimSpace(outputFile)
 	if outputFile == "" {
 		// Raw HTML markup must never fall back to stdout on a TTY.
@@ -57,9 +80,14 @@ func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
 	} else if filepath.Ext(outputFile) != printer.HtmlOutputExt {
 		outputFile = outputFile + printer.HtmlOutputExt
 	}
-	// HTML must never fall back to stdout on file-create errors either
-	// (e.g. read-only cwd) — use the no-stdout-fallback helper.
+	if explicitOutput {
+		var err error
+		hp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
+	// Preserve the temp-file fallback for the implicit HTML destination.
 	hp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+printer.HtmlOutputExt)
+	return nil
 }
 
 func (hp *HtmlPrinter) PrintNextSteps() {
@@ -132,7 +160,7 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		imageScanSummary = buildImageScanSummary(imageScanData)
 	}
 
-	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView, imageScanSummary}
+	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView, imageScanSummary, logoDataURI()}
 	err := tpl.Execute(hp.writer, reportingCtx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to render template", helpers.Error(err))
@@ -164,35 +192,13 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableV
 	return resourceTableView
 }
 
-// buildImageScanSummary aggregates CVE, package-score, and severity data for an image scan report (#2782)
-func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.ImageScanSummary {
-	imageScanSummary := &imageprinter.ImageScanSummary{
-		CVEs:                  []imageprinter.CVE{},
-		PackageScores:         map[string]*imageprinter.PackageScore{},
-		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
-	}
-
-	for i := range imageScanData {
-		if !slices.Contains(imageScanSummary.Images, imageScanData[i].Image) {
-			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
-		}
-
-		cves := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
-		imageScanSummary.CVEs = append(imageScanSummary.CVEs, cves...)
-
-		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
-		setSeverityToSummaryMap(cves, imageScanSummary.MapsSeverityToSummary)
-	}
-
-	return imageScanSummary
-}
-
 func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary, resource workloadinterface.IMetadata) ResourceControlResult {
 	ctlSeverity := apis.ControlSeverityToString(control.GetScoreFactor())
 	ctlName := resourceControl.GetName()
 	ctlID := resourceControl.GetID()
 	ctlURL := cautils.GetControlLink(resourceControl.GetID())
 	failedPaths := AssistedRemediationPathsWithCurrentValues(&resourceControl, resource)
+	addContainerNameToAssistedRemediation(resource, &failedPaths)
 
 	return ResourceControlResult{ctlSeverity, ctlName, ctlID, ctlURL, failedPaths}
 }
@@ -214,8 +220,10 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 	return ctlResults
 }
 
-func (p *HtmlPrinter) CloseWriter() {
+// CloseWriter closes the HTML output writer, returning any error from flushing or closing.
+func (p *HtmlPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }

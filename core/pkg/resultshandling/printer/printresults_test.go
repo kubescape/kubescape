@@ -143,6 +143,20 @@ func TestGetWriter_CreateFailsFallsBackToStdout(t *testing.T) {
 	assert.Same(t, os.Stdout, f)
 }
 
+func TestGetWriterNoFallback_ReturnsExplicitSetupError(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-directory")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
+	target := filepath.Join(blocker, "report.json")
+
+	f, err := GetWriterNoFallback(target)
+
+	require.Error(t, err)
+	assert.Nil(t, f)
+	assert.ErrorContains(t, err, "create output directory")
+	assert.NoFileExists(t, target)
+}
+
 func TestGetWriterNoStdoutFallback_ValidFileName(t *testing.T) {
 	ctx := context.Background()
 	target := filepath.Join(t.TempDir(), "nested", "report.pdf")
@@ -187,5 +201,13 @@ func TestLogOutputFile(t *testing.T) {
 	for _, sink := range []string{os.Stdout.Name(), os.Stderr.Name(), os.DevNull} {
 		out := captureLog(t, func() { LogOutputFile(sink) })
 		assert.Empty(t, strings.TrimSpace(out), "expected no log for %s", sink)
+	}
+}
+
+func TestFormatOutputExtCoversAllFormats(t *testing.T) {
+	for _, format := range AllFormats {
+		ext, ok := FormatOutputExt[format]
+		assert.True(t, ok, "format %q has no entry in FormatOutputExt", format)
+		assert.NotEmpty(t, ext, "format %q maps to an empty extension", format)
 	}
 }
