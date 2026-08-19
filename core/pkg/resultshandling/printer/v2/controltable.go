@@ -81,6 +81,9 @@ func getSortedControlsIDs(controls reportsummary.ControlSummaries) [][]string {
 	for k := range controls {
 		c := controls[k]
 		i := apis.ControlSeverityToInt(c.GetScoreFactor())
+		if i < 0 || i >= len(controlIDs) {
+			i = 0
+		}
 		controlIDs[i] = append(controlIDs[i], c.GetID())
 	}
 	for i := range controlIDs {

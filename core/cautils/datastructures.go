@@ -3,6 +3,7 @@ package cautils
 import (
 	"context"
 	"sort"
+	"time"
 
 	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/pkg"
@@ -34,6 +35,10 @@ type ImageScanData struct {
 	Packages              []pkg.Package
 	SBOM                  *sbom.SBOM
 	VulnerabilityProvider vulnerability.Provider
+	// VulnDBBuilt is the build timestamp of the vulnerability DB used for this
+	// scan. It lets users (especially air-gapped ones) see how fresh the data
+	// was. Nil when the DB status is unknown.
+	VulnDBBuilt *time.Time `json:"vulnDBBuilt,omitempty"`
 }
 
 // Target identifies the exact image variant represented by these results.

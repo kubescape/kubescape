@@ -78,7 +78,7 @@ func deduplicateExceptions(
 		return merged
 	}
 
-	covered := coveredPostureScopes(cloudExceptions)
+	covered, global := coveredPostureScopes(cloudExceptions)
 	matcher := newScopeMatcher()
 
 	for _, crd := range crdExceptions {
@@ -89,6 +89,14 @@ func deduplicateExceptions(
 		}
 
 		for _, policy := range crd.PosturePolicies {
+			if matcher.coveredBy(global, policy) {
+				// A cloud exception with no Resources at all applies with no scope
+				// constraint - the same convention hasExplicitControlException uses
+				// for manual controls - so it already covers this policy everywhere
+				// and fully subsumes the CRD policy, not just designators it happens
+				// to share a resource key with.
+				continue
+			}
 			filteredResources := make([]identifiers.PortalDesignator, 0, len(crd.Resources))
 			for _, resource := range crd.Resources {
 				if !matcher.coveredBy(covered[designatorDedupKey(resource)], policy) {
@@ -109,13 +117,24 @@ func deduplicateExceptions(
 }
 
 // coveredPostureScopes indexes the primary posture-policy scopes by workload
-// designator. A policy without a control ID carries nothing to measure a CRD policy
-// against, so it never suppresses one.
-func coveredPostureScopes(exceptions []armotypes.PostureExceptionPolicy) map[string][]armotypes.PosturePolicy {
-	covered := make(map[string][]armotypes.PosturePolicy, len(exceptions))
+// designator, and separately collects policies from a primary exception that has
+// no Resources at all into global. Such an exception applies with no scope
+// constraint - the same convention hasExplicitControlException already uses for
+// manual controls - so it covers every designator for a matching control/framework/
+// rule scope, not just one indexed by a specific resource key. A policy without a
+// control ID carries nothing to measure a CRD policy against, so it never
+// suppresses one.
+func coveredPostureScopes(exceptions []armotypes.PostureExceptionPolicy) (covered map[string][]armotypes.PosturePolicy, global []armotypes.PosturePolicy) {
+	covered = make(map[string][]armotypes.PosturePolicy, len(exceptions))
 	for _, exception := range exceptions {
 		for _, policy := range exception.PosturePolicies {
 			if policy.ControlID == "" {
+				continue
+			}
+			if len(exception.Resources) == 0 {
+				if !slices.Contains(global, policy) {
+					global = append(global, policy)
+				}
 				continue
 			}
 			for _, resource := range exception.Resources {
@@ -126,7 +145,7 @@ func coveredPostureScopes(exceptions []armotypes.PostureExceptionPolicy) map[str
 			}
 		}
 	}
-	return covered
+	return covered, global
 }
 
 // scopeMatcher compares posture-policy scopes the way the exception processor does

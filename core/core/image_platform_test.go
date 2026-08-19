@@ -630,7 +630,7 @@ func TestImageScanTargetString(t *testing.T) {
 	}).String())
 }
 
-func TestPlatformConstraintIgnoresMatchFields(t *testing.T) {
+func TestPlatformConstraintKeepsPlatformExpressionsAlongsideMatchFields(t *testing.T) {
 	spec := &corev1.PodSpec{Affinity: requiredNodeAffinity(corev1.NodeSelectorTerm{
 		MatchExpressions: []corev1.NodeSelectorRequirement{
 			inRequirement(stableOSLabel, "linux"),
@@ -642,6 +642,83 @@ func TestPlatformConstraintIgnoresMatchFields(t *testing.T) {
 	})}
 
 	assert.Equal(t, []string{"linux/amd64"}, platformsFromSchedulingConstraints(spec))
+}
+
+func TestInferWorkloadPlatformsHonorsRequiredNodeNameMatchField(t *testing.T) {
+	workload := platformTestPod("pinned", "example/app:latest", map[string]any{
+		"affinity": map[string]any{
+			"nodeAffinity": map[string]any{
+				"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{
+					"nodeSelectorTerms": []any{
+						map[string]any{
+							"matchFields": []any{
+								map[string]any{
+									"key": nodeNameField, "operator": "In", "values": []any{"arm-worker"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	assert.Equal(t, []string{"linux/arm64"}, inferWorkloadPlatforms(workload, map[string]string{
+		"amd-worker": "linux/amd64",
+		"arm-worker": "linux/arm64",
+	}))
+}
+
+func TestInferWorkloadPlatformsHonorsRequiredNodeNameNotInField(t *testing.T) {
+	workload := platformTestPod("excluded", "example/app:latest", map[string]any{
+		"affinity": map[string]any{
+			"nodeAffinity": map[string]any{
+				"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{
+					"nodeSelectorTerms": []any{
+						map[string]any{
+							"matchFields": []any{
+								map[string]any{
+									"key": nodeNameField, "operator": "NotIn", "values": []any{"amd-worker"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	assert.Equal(t, []string{"linux/arm64"}, inferWorkloadPlatforms(workload, map[string]string{
+		"amd-worker": "linux/amd64",
+		"arm-worker": "linux/arm64",
+	}))
+}
+
+func TestInferWorkloadPlatformsReturnsNoVariantForMissingRequiredNodeName(t *testing.T) {
+	workload := platformTestPod("missing", "example/app:latest", map[string]any{
+		"affinity": map[string]any{
+			"nodeAffinity": map[string]any{
+				"requiredDuringSchedulingIgnoredDuringExecution": map[string]any{
+					"nodeSelectorTerms": []any{
+						map[string]any{
+							"matchFields": []any{
+								map[string]any{
+									"key": nodeNameField, "operator": "In", "values": []any{"missing-worker"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	selection := selectWorkloadPlatforms(workload, map[string]string{
+		"amd-worker": "linux/amd64",
+		"arm-worker": "linux/arm64",
+	})
+	assert.True(t, selection.constrained)
+	assert.Empty(t, selection.platforms)
 }
 
 func TestPreferredAffinityDoesNotNarrowHardPlatformSet(t *testing.T) {

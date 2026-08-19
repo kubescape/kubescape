@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
 // ApplySeverityFilters removes controls from the OPASessionObj that fall outside the
@@ -35,14 +36,15 @@ func ApplySeverityFilters(sessionObj *cautils.OPASessionObj, minSeverity, maxSev
 		}
 	}
 
-	for i := range sessionObj.Report.Results {
-		ac := sessionObj.Report.Results[i].AssociatedControls[:0]
-		for _, ctrl := range sessionObj.Report.Results[i].AssociatedControls {
+	for id, result := range sessionObj.ResourcesResult {
+		ac := make([]resourcesresults.ResourceAssociatedControl, 0, len(result.AssociatedControls))
+		for _, ctrl := range result.AssociatedControls {
 			if _, ok := retained[ctrl.GetID()]; ok {
 				ac = append(ac, ctrl)
 			}
 		}
-		sessionObj.Report.Results[i].AssociatedControls = ac
+		result.AssociatedControls = ac
+		sessionObj.ResourcesResult[id] = result
 	}
 }
 

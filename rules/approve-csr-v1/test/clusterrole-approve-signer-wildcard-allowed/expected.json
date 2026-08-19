@@ -1,0 +1,41 @@
+[{
+  "alertMessage": "Subject: User-test-user can create and approve CertificateSigningRequests, and so mint arbitrary client certificates",
+  "alertScore": 9,
+  "packagename": "armo_builtins",
+  "reviewPaths": [
+    "relatedObjects[0].rules[0].resources[0]",
+    "relatedObjects[0].rules[0].verbs[0]",
+    "relatedObjects[0].rules[0].apiGroups[0]",
+    "relatedObjects[0].rules[1].resources[0]",
+    "relatedObjects[0].rules[1].verbs[0]",
+    "relatedObjects[0].rules[1].apiGroups[0]",
+    "relatedObjects[0].rules[2].resources[0]",
+    "relatedObjects[0].rules[2].verbs[0]",
+    "relatedObjects[0].rules[2].apiGroups[0]",
+    "relatedObjects[0].roleRef.name",
+    "relatedObjects[0].subjects[0]"
+  ],
+  "failedPaths": [
+    "relatedObjects[0].rules[0].resources[0]",
+    "relatedObjects[0].rules[0].verbs[0]",
+    "relatedObjects[0].rules[0].apiGroups[0]",
+    "relatedObjects[0].rules[1].resources[0]",
+    "relatedObjects[0].rules[1].verbs[0]",
+    "relatedObjects[0].rules[1].apiGroups[0]",
+    "relatedObjects[0].rules[2].resources[0]",
+    "relatedObjects[0].rules[2].verbs[0]",
+    "relatedObjects[0].rules[2].apiGroups[0]",
+    "relatedObjects[0].roleRef.name",
+    "relatedObjects[0].subjects[0]"
+  ],
+  "fixPaths": [],
+  "alertObject": {
+    "k8sApiObjects": [],
+    "externalObjects": {
+      "kind": "User",
+      "name": "test-user",
+      "namespace": "",
+      "apiGroup": "rbac.authorization.k8s.io"
+    }
+  }
+}]

@@ -172,8 +172,27 @@ func TestExtractValueAtPath(t *testing.T) {
 		},
 	}
 
+	mapSliceObj := map[string]any{
+		"spec": map[string]any{
+			"containers": []map[string]any{
+				{
+					"name":  "main",
+					"image": "nginx:latest",
+					"securityContext": map[string]any{
+						"privileged": true,
+					},
+				},
+				{
+					"name":  "sidecar",
+					"image": "envoy:v1",
+				},
+			},
+		},
+	}
+
 	cases := []struct {
 		name   string
+		obj    map[string]any
 		path   string
 		want   string
 		wantOK bool
@@ -282,7 +301,36 @@ func TestExtractValueAtPath(t *testing.T) {
 		},
 		{
 			name:   "empty object",
+			obj:    map[string]any{},
 			path:   "spec.containers[0].image",
+			want:   "",
+			wantOK: false,
+		},
+		{
+			name:   "indexed path into []map[string]any",
+			obj:    mapSliceObj,
+			path:   "spec.containers[0].image",
+			want:   "nginx:latest",
+			wantOK: true,
+		},
+		{
+			name:   "second index into []map[string]any",
+			obj:    mapSliceObj,
+			path:   "spec.containers[1].image",
+			want:   "envoy:v1",
+			wantOK: true,
+		},
+		{
+			name:   "nested key after indexing []map[string]any",
+			obj:    mapSliceObj,
+			path:   "spec.containers[0].securityContext.privileged",
+			want:   "true",
+			wantOK: true,
+		},
+		{
+			name:   "out-of-range index into []map[string]any",
+			obj:    mapSliceObj,
+			path:   "spec.containers[5].image",
 			want:   "",
 			wantOK: false,
 		},
@@ -291,8 +339,8 @@ func TestExtractValueAtPath(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			obj := deploymentObj
-			if tc.name == "empty object" {
-				obj = map[string]any{}
+			if tc.obj != nil {
+				obj = tc.obj
 			}
 			got, ok := extractValueAtPath(obj, tc.path)
 			assert.Equal(t, tc.wantOK, ok, "ok mismatch")
@@ -320,6 +368,10 @@ func TestIsSensitivePath(t *testing.T) {
 		{name: "Deployment data field", kind: "Deployment", path: "data.key", want: false},
 		{name: "ConfigMap data field", kind: "ConfigMap", path: "data.config", want: false},
 		{name: "empty kind", kind: "", path: "data.key", want: false},
+		{name: "container env value", kind: "Deployment", path: "spec.template.spec.containers[0].env[1].value", want: true},
+		{name: "initContainer env value", kind: "Pod", path: "spec.initContainers[0].env[0].value", want: true},
+		{name: "container env name is not sensitive", kind: "Deployment", path: "spec.template.spec.containers[0].env[1].name", want: false},
+		{name: "container env valueFrom is not a literal", kind: "Deployment", path: "spec.containers[0].env[0].valueFrom.secretKeyRef.name", want: false},
 	}
 
 	for _, tc := range cases {
@@ -543,6 +595,23 @@ func TestAssistedRemediationPathsWithCurrentValues(t *testing.T) {
 		assert.Contains(t, got, "spec.hostPID (current: true)")
 		assert.Len(t, got, 2)
 	})
+
+	t.Run("path shared by delete and failed path is printed once", func(t *testing.T) {
+		// reproduces rules such as C-0012 that assign the same path to both
+		// DeletePath and FailedPath - the enriched failed path must not duplicate
+		// the bare delete path for the same field
+		ctrl := &resourcesresults.ResourceAssociatedControl{
+			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+				{
+					Paths: []armotypes.PosturePaths{
+						{FailedPath: "spec.hostPID", DeletePath: "spec.hostPID"},
+					},
+				},
+			},
+		}
+		got := AssistedRemediationPathsWithCurrentValues(ctrl, resource)
+		assert.Equal(t, []string{"spec.hostPID"}, got)
+	})
 }
 
 func TestAssistedRemediationPathsWithCurrentValuesFiltered(t *testing.T) {
@@ -599,6 +668,33 @@ func TestAssistedRemediationPathsWithCurrentValuesFiltered(t *testing.T) {
 		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, true)
 		require.Len(t, got, 1)
 		assert.Equal(t, "spec.containers[0].securityContext.privileged (current: true)", got[0])
+	})
+
+	t.Run("container env value with showSecrets=false is redacted", func(t *testing.T) {
+		resource := &mockResource{
+			kind: "Deployment",
+			obj: map[string]any{
+				"spec": map[string]any{
+					"template": map[string]any{
+						"spec": map[string]any{
+							"containers": []any{
+								map[string]any{
+									"env": []any{
+										map[string]any{"name": "LOG_LEVEL", "value": "debug"},
+										map[string]any{"name": "DB_PASSWORD", "value": "s3cret"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		ctrl := makeControlWithPaths([]string{"spec.template.spec.containers[0].env[1].value"}, nil)
+		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, false)
+		require.Len(t, got, 1)
+		assert.Equal(t, "spec.template.spec.containers[0].env[1].value (current: "+redactedValue+")", got[0])
+		assert.NotContains(t, got[0], "s3cret")
 	})
 
 	t.Run("empty paths returns nil", func(t *testing.T) {

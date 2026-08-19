@@ -15,6 +15,7 @@ const (
 	stableArchLabel = "kubernetes.io/arch"
 	betaOSLabel     = "beta.kubernetes.io/os"
 	betaArchLabel   = "beta.kubernetes.io/arch"
+	nodeNameField   = "metadata.name"
 )
 
 // ImageScanTarget is an image plus the OCI platform variant that must be
@@ -123,7 +124,7 @@ func selectWorkloadPlatforms(workload *workloadinterface.Workload, nodePlatforms
 	}
 
 	observed := uniqueNodePlatforms(nodePlatforms)
-	filtered, constrained := filterObservedPlatforms(podSpec, observed)
+	filtered, constrained := filterObservedPlatforms(podSpec, nodePlatforms)
 	if constrained {
 		return workloadPlatformSelection{
 			platforms:       filtered,
@@ -141,7 +142,8 @@ func selectWorkloadPlatforms(workload *workloadinterface.Workload, nodePlatforms
 	}
 }
 
-func filterObservedPlatforms(podSpec *corev1.PodSpec, observed []string) ([]string, bool) {
+func filterObservedPlatforms(podSpec *corev1.PodSpec, nodePlatforms map[string]string) ([]string, bool) {
+	observed := uniqueNodePlatforms(nodePlatforms)
 	if podSpec == nil {
 		return observed, false
 	}
@@ -159,14 +161,19 @@ func filterObservedPlatforms(podSpec *corev1.PodSpec, observed []string) ([]stri
 					hasConstraint = true
 				}
 			}
+			for _, field := range term.MatchFields {
+				if isFilterableNodeField(field) {
+					hasConstraint = true
+				}
+			}
 		}
 	}
 	if !hasConstraint {
 		return observed, false
 	}
 
-	filtered := make([]string, 0, len(observed))
-	for _, platform := range observed {
+	platformSet := make(map[string]struct{}, len(observed))
+	for nodeName, platform := range nodePlatforms {
 		parts := strings.Split(platform, "/")
 		if len(parts) < 2 {
 			continue
@@ -175,14 +182,19 @@ func filterObservedPlatforms(podSpec *corev1.PodSpec, observed []string) ([]stri
 			stableOSLabel: parts[0], betaOSLabel: parts[0],
 			stableArchLabel: parts[1], betaArchLabel: parts[1],
 		}
-		if platformMatchesSchedulingConstraints(podSpec, labels) {
-			filtered = append(filtered, platform)
+		if platformMatchesSchedulingConstraints(podSpec, nodeName, labels) {
+			platformSet[platform] = struct{}{}
 		}
 	}
+	filtered := make([]string, 0, len(platformSet))
+	for platform := range platformSet {
+		filtered = append(filtered, platform)
+	}
+	sort.Strings(filtered)
 	return filtered, true
 }
 
-func platformMatchesSchedulingConstraints(podSpec *corev1.PodSpec, labels map[string]string) bool {
+func platformMatchesSchedulingConstraints(podSpec *corev1.PodSpec, nodeName string, labels map[string]string) bool {
 	for key, expected := range podSpec.NodeSelector {
 		if isPlatformLabel(key) && labels[key] != expected {
 			return false
@@ -201,11 +213,43 @@ func platformMatchesSchedulingConstraints(podSpec *corev1.PodSpec, labels map[st
 				break
 			}
 		}
+		for _, field := range term.MatchFields {
+			if isFilterableNodeField(field) && !nodeFieldMatches(field, nodeName) {
+				matches = false
+				break
+			}
+		}
 		if matches {
 			return true
 		}
 	}
 	return false
+}
+
+func isFilterableNodeField(requirement corev1.NodeSelectorRequirement) bool {
+	if requirement.Key != nodeNameField {
+		return false
+	}
+	return requirement.Operator == corev1.NodeSelectorOpIn || requirement.Operator == corev1.NodeSelectorOpNotIn
+}
+
+func nodeFieldMatches(requirement corev1.NodeSelectorRequirement, nodeName string) bool {
+	contains := false
+	for _, candidate := range requirement.Values {
+		if nodeName == candidate {
+			contains = true
+			break
+		}
+	}
+
+	switch requirement.Operator {
+	case corev1.NodeSelectorOpIn:
+		return contains
+	case corev1.NodeSelectorOpNotIn:
+		return !contains
+	default:
+		return false
+	}
 }
 
 func isFilterablePlatformExpression(expression corev1.NodeSelectorRequirement) bool {

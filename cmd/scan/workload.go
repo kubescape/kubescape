@@ -119,7 +119,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				return err
 			}
 
-			return nil
+			return enforceBaselineDrift(ks.Context(), results, scanInfo)
 		},
 	}
 

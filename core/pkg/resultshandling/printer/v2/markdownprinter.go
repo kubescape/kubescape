@@ -64,7 +64,11 @@ func (mp *MarkdownPrinter) ActionPrint(ctx context.Context, opaSessionObj *cauti
 
 	ew := &mdErrWriter{w: w}
 	ew.printf("# Kubescape Security Report\n\n")
-	ew.printf("**Compliance Score:** %d\n\n", cautils.ComplianceScoreToInt(summaryDetails.ComplianceScore))
+	if score := cautils.ComplianceScoreToInt(summaryDetails.ComplianceScore); score < 0 {
+		ew.printf("**Compliance Score:** N/A\n\n")
+	} else {
+		ew.printf("**Compliance Score:** %d%%\n\n", score)
+	}
 	if ew.err != nil {
 		return ew.err
 	}

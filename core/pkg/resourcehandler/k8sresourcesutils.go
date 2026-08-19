@@ -123,6 +123,15 @@ func mapKSResourceToApiGroup(resource string) []string {
 	return []string{}
 }
 
+// isExternalResource reports whether a resolved group/version/resource triplet
+// names a resource Kubescape serves itself - host sensor data, cloud provider
+// descriptions, image vulnerabilities. Their API groups belong to Kubescape, so
+// no cluster ever serves them and they are never collected with a LIST.
+func isExternalResource(triplet string) bool {
+	_, _, resource := k8sinterface.StringToResourceGroup(triplet)
+	return len(mapKSResourceToApiGroup(resource)) > 0
+}
+
 func insertControls(resource string, resourceToControl map[string][]string, control reporthandling.Control) {
 	ksResources := mapKSResourceToApiGroup(resource)
 	for _, ksResource := range ksResources {

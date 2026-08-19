@@ -912,12 +912,12 @@ func TestHandleResults_RestoresReportAfterSeverityFilter(t *testing.T) {
 					"C-medium": {ControlID: "C-medium", ScoreFactor: 4},
 				},
 			},
-			Results: []resourcesresults.Result{
-				{
-					AssociatedControls: []resourcesresults.ResourceAssociatedControl{
-						{ControlID: "C-low"},
-						{ControlID: "C-high"},
-					},
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			"resource-1": {
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{ControlID: "C-low"},
+					{ControlID: "C-high"},
 				},
 			},
 		},
@@ -936,7 +936,7 @@ func TestHandleResults_RestoresReportAfterSeverityFilter(t *testing.T) {
 	// Both Controls and AssociatedControls must be fully restored so that
 	// any caller reading rh.ScanData after HandleResults sees a consistent report.
 	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 3, "Controls must be unfiltered after HandleResults")
-	assert.Len(t, rh.ScanData.Report.Results[0].AssociatedControls, 2, "AssociatedControls must be unfiltered after HandleResults")
+	assert.Len(t, rh.ScanData.ResourcesResult["resource-1"].AssociatedControls, 2, "AssociatedControls must be unfiltered after HandleResults")
 }
 
 func makeFilteredSession() *cautils.OPASessionObj {
@@ -948,12 +948,12 @@ func makeFilteredSession() *cautils.OPASessionObj {
 					"C-high": {ControlID: "C-high", ScoreFactor: 7},
 				},
 			},
-			Results: []resourcesresults.Result{
-				{
-					AssociatedControls: []resourcesresults.ResourceAssociatedControl{
-						{ControlID: "C-low"},
-						{ControlID: "C-high"},
-					},
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			"resource-1": {
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{ControlID: "C-low"},
+					{ControlID: "C-high"},
 				},
 			},
 		},
@@ -977,7 +977,7 @@ func TestHandleResults_RestoresReportOnPrinterError(t *testing.T) {
 
 	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 2,
 		"Controls must be restored after printer error")
-	assert.Len(t, rh.ScanData.Report.Results[0].AssociatedControls, 2,
+	assert.Len(t, rh.ScanData.ResourcesResult["resource-1"].AssociatedControls, 2,
 		"AssociatedControls must be restored after printer error")
 }
 
@@ -1012,6 +1012,6 @@ func TestHandleResults_RestoresReportOnSubmitError(t *testing.T) {
 
 	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 2,
 		"Controls must be restored after submit error")
-	assert.Len(t, rh.ScanData.Report.Results[0].AssociatedControls, 2,
+	assert.Len(t, rh.ScanData.ResourcesResult["resource-1"].AssociatedControls, 2,
 		"AssociatedControls must be restored after submit error")
 }

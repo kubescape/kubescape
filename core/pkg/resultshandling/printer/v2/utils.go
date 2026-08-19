@@ -461,6 +461,10 @@ func buildImageScanSummaryWithTarget(imageScanData []cautils.ImageScanData, incl
 			imageScanSummary.Images = append(imageScanSummary.Images, image)
 		}
 
+		if imageScanSummary.VulnDBBuilt == nil {
+			imageScanSummary.VulnDBBuilt = imageScanData[i].VulnDBBuilt
+		}
+
 		cves := extractCVEs(imageScanData[i].Matches, image)
 		imageScanSummary.CVEs = append(imageScanSummary.CVEs, cves...)
 

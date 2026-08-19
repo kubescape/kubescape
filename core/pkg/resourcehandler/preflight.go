@@ -78,6 +78,12 @@ func (k8sHandler *K8sResourceHandler) Preflight(ctx context.Context, sessionObj 
 	result := &PreflightResult{DiscoveryFailures: discoveryFailures}
 	seen := make(map[string]struct{}, len(queryableResources))
 	for _, qr := range queryableResources {
+		// An access review for a resource Kubescape serves itself is always
+		// denied, which would fail the dry-run over a resource the scan never
+		// asks the API server for.
+		if isExternalResource(qr.GroupVersionResourceTriplet) {
+			continue
+		}
 		if _, ok := seen[qr.GroupVersionResourceTriplet]; ok {
 			continue
 		}

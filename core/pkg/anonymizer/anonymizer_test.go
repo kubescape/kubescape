@@ -69,7 +69,7 @@ func TestApplyEncrypted(t *testing.T) {
 
 	assert.Equal(t, "v1", metadata.Version)
 	assert.Equal(t, "AES256_GCM", metadata.DEKAlgorithm)
-	assert.Equal(t, "AES256_GCM", metadata.KEKAlgorithm)
+	assert.Equal(t, "ARGON2ID_AES256_GCM", metadata.KEKAlgorithm)
 	assert.NotEmpty(t, metadata.EncryptedDEK)
 
 	unwrappedDEK, err := reportcrypto.UnwrapDEK(
