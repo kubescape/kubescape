@@ -97,10 +97,10 @@ type OPASessionObj struct {
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *OPASessionObj {
-	// Inline annotation exceptions are off by default for cluster/workload/image scans
-	// and on by default for manifest/repo scans, unless the CLI explicitly sets the flag.
+	// Inline annotation exceptions are off by default for live-cluster scans and on by
+	// default when scanning local manifests, unless the CLI explicitly sets the flag.
 	if scanInfo.HonorInlineExceptions.Get() == nil {
-		scanInfo.HonorInlineExceptions.SetBool(scanInfo.ScanType == ScanTypeRepo)
+		scanInfo.HonorInlineExceptions.SetBool(len(scanInfo.InputPatterns) > 0)
 	}
 	clusterSize := max(estimateClusterSize(k8sResources), 100)
 
