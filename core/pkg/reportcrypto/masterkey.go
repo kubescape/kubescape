@@ -31,8 +31,25 @@ const (
 	// distinct from prefix so that a wrapped DEK is never mistaken for a
 	// DEK-encrypted field, and so that report.go's leftover-ciphertext scan
 	// (which matches on prefix) keeps meaning exactly what it meant before.
-	kekPrefix   = "ENC[ARGON2ID_AES256_GCM,"
-	kekVersion  = "v1"
+	kekPrefix = "ENC[ARGON2ID_AES256_GCM,"
+
+	// kekVersion is the original envelope: work factors, salt, and the inner
+	// ciphertext, with no associated data anywhere. Still written by the
+	// deprecated WrapDEK and still read, so reports from earlier releases keep
+	// opening.
+	kekVersion = "v1"
+
+	// kekVersionBound adds the per-report binding value between the salt and
+	// the inner ciphertext. Every envelope written by WrapReportKey uses it.
+	//
+	// The version lives here rather than in the field envelope on purpose: the
+	// DEK is unwrapped before any field is touched, so one version check at the
+	// top of the report decides how every ciphertext in it is opened. Putting
+	// it in the field envelope instead would have meant a second prefix for
+	// report.go's embedded-ciphertext scan and its leftover-ciphertext
+	// validator to recognise, for no extra information.
+	kekVersionBound = "v2"
+
 	kekSaltSize = 16
 
 	// KEKAlgorithm is recorded in EncryptionMetadata.kekAlgorithm so a report
@@ -242,31 +259,52 @@ func deriveKEK(masterKey []byte, params kekParams) ([]byte, error) {
 // The inner envelope is reused verbatim rather than resealed so that the DEK is
 // encrypted by exactly the same primitive as every other field in the report,
 // with one implementation to audit.
-func formatKEKCiphertext(params kekParams, inner string) (string, error) {
+// A nil binding emits the original unbound envelope, so the deprecated
+// bare-DEK path keeps producing byte-identical output.
+func formatKEKCiphertext(params kekParams, binding []byte, inner string) (string, error) {
 	payload, err := ciphertextPayload(inner)
 	if err != nil {
 		return "", err
 	}
 
+	if binding == nil {
+		return fmt.Sprintf(
+			"%s%s,%d,%d,%d,%s,%s%s",
+			kekPrefix,
+			kekVersion,
+			params.time,
+			params.memoryKiB,
+			params.threads,
+			base64.StdEncoding.EncodeToString(params.salt),
+			payload,
+			suffix,
+		), nil
+	}
+
 	return fmt.Sprintf(
-		"%s%s,%d,%d,%d,%s,%s%s",
+		"%s%s,%d,%d,%d,%s,%s,%s%s",
 		kekPrefix,
-		kekVersion,
+		kekVersionBound,
 		params.time,
 		params.memoryKiB,
 		params.threads,
 		base64.StdEncoding.EncodeToString(params.salt),
+		base64.StdEncoding.EncodeToString(binding),
 		payload,
 		suffix,
 	), nil
 }
 
-// parseKEKCiphertext splits an envelope into its work factors and the inner
-// ENC[AES256_GCM,...] envelope that DecryptString understands.
-func parseKEKCiphertext(ciphertext string) (kekParams, string, error) {
+// parseKEKCiphertext splits an envelope into its work factors, its per-report
+// binding, and the inner ENC[AES256_GCM,...] envelope that openString
+// understands.
+//
+// The binding is nil for a v1 envelope, which is what tells the caller to open
+// that report's ciphertexts with no associated data.
+func parseKEKCiphertext(ciphertext string) (kekParams, []byte, string, error) {
 	if !strings.HasPrefix(ciphertext, kekPrefix) ||
 		!strings.HasSuffix(ciphertext, suffix) {
-		return kekParams{}, "", ErrInvalidKEKEnvelope
+		return kekParams{}, nil, "", ErrInvalidKEKEnvelope
 	}
 
 	payload := strings.TrimSuffix(
@@ -274,18 +312,62 @@ func parseKEKCiphertext(ciphertext string) (kekParams, string, error) {
 		suffix,
 	)
 
-	// version, time, memory, threads, salt, nonce, ciphertext
+	// v1: version, time, memory, threads, salt, nonce, ciphertext
+	// v2: version, time, memory, threads, salt, binding, nonce, ciphertext
 	parts := strings.Split(payload, ",")
-	if len(parts) != 7 {
-		return kekParams{}, "", fmt.Errorf(
-			"%w: got %d fields, want 7",
-			ErrInvalidKEKEnvelope,
-			len(parts),
-		)
-	}
 
-	if parts[0] != kekVersion {
-		return kekParams{}, "", fmt.Errorf(
+	var (
+		binding    []byte
+		nonceField string
+		dataField  string
+	)
+
+	switch parts[0] {
+	case kekVersion:
+		if len(parts) != 7 {
+			return kekParams{}, nil, "", fmt.Errorf(
+				"%w: got %d fields, want 7",
+				ErrInvalidKEKEnvelope,
+				len(parts),
+			)
+		}
+
+		nonceField, dataField = parts[5], parts[6]
+
+	case kekVersionBound:
+		if len(parts) != 8 {
+			return kekParams{}, nil, "", fmt.Errorf(
+				"%w: got %d fields, want 8",
+				ErrInvalidKEKEnvelope,
+				len(parts),
+			)
+		}
+
+		decoded, err := base64.StdEncoding.DecodeString(parts[5])
+		if err != nil {
+			return kekParams{}, nil, "", fmt.Errorf(
+				"%w: binding is not valid base64",
+				ErrInvalidKEKEnvelope,
+			)
+		}
+
+		// Pinned rather than range-checked: the binding is written by this
+		// package alone, so any other length is a corrupt or crafted envelope,
+		// not an older format.
+		if len(decoded) != bindingSize {
+			return kekParams{}, nil, "", fmt.Errorf(
+				"%w: binding is %d bytes, want %d",
+				ErrInvalidKEKEnvelope,
+				len(decoded),
+				bindingSize,
+			)
+		}
+
+		binding = decoded
+		nonceField, dataField = parts[6], parts[7]
+
+	default:
+		return kekParams{}, nil, "", fmt.Errorf(
 			"%w: unsupported envelope version %q",
 			ErrInvalidKEKEnvelope,
 			parts[0],
@@ -294,20 +376,20 @@ func parseKEKCiphertext(ciphertext string) (kekParams, string, error) {
 
 	timeCost, err := parseUint32Field(parts[1], "argon2 time cost")
 	if err != nil {
-		return kekParams{}, "", err
+		return kekParams{}, nil, "", err
 	}
 
 	memoryCost, err := parseUint32Field(parts[2], "argon2 memory cost")
 	if err != nil {
-		return kekParams{}, "", err
+		return kekParams{}, nil, "", err
 	}
 
 	threads, err := parseUint32Field(parts[3], "argon2 parallelism")
 	if err != nil {
-		return kekParams{}, "", err
+		return kekParams{}, nil, "", err
 	}
 	if threads > uint32(maxArgon2Threads) {
-		return kekParams{}, "", fmt.Errorf(
+		return kekParams{}, nil, "", fmt.Errorf(
 			"%w: unsupported argon2 parallelism %d",
 			ErrInvalidKEKEnvelope,
 			threads,
@@ -316,7 +398,7 @@ func parseKEKCiphertext(ciphertext string) (kekParams, string, error) {
 
 	salt, err := base64.StdEncoding.DecodeString(parts[4])
 	if err != nil {
-		return kekParams{}, "", fmt.Errorf(
+		return kekParams{}, nil, "", fmt.Errorf(
 			"%w: salt is not valid base64",
 			ErrInvalidKEKEnvelope,
 		)
@@ -329,7 +411,7 @@ func parseKEKCiphertext(ciphertext string) (kekParams, string, error) {
 		salt:      salt,
 	}
 
-	return params, formatCiphertext(parts[5], parts[6]), nil
+	return params, binding, formatCiphertext(nonceField, dataField), nil
 }
 
 func parseUint32Field(value string, name string) (uint32, error) {

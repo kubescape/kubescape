@@ -391,7 +391,7 @@ func TestDecryptResourceSource_RoundTrip(
 
 	err = DecryptResourceSource(
 		source,
-		dek,
+		UnboundReportKey(dek),
 	)
 
 	require.NoError(t, err)
@@ -471,7 +471,7 @@ func TestDecryptResourceSource_Nil(
 ) {
 	err := DecryptResourceSource(
 		nil,
-		make([]byte, 32),
+		UnboundReportKey(make([]byte, 32)),
 	)
 
 	require.NoError(t, err)
@@ -508,7 +508,7 @@ func TestDecryptResourceMetadata_RoundTrip(
 
 	err = DecryptResourceMetadata(
 		resource,
-		dek,
+		UnboundReportKey(dek),
 	)
 
 	require.NoError(t, err)
@@ -531,7 +531,7 @@ func TestDecryptResourceMetadata_Nil(
 ) {
 	err := DecryptResourceMetadata(
 		nil,
-		make([]byte, 32),
+		UnboundReportKey(make([]byte, 32)),
 	)
 
 	require.NoError(t, err)
@@ -568,7 +568,7 @@ func TestDecryptResourceLabels_RoundTrip(t *testing.T) {
 
 	err = DecryptResourceLabels(
 		resource,
-		dek,
+		UnboundReportKey(dek),
 	)
 	require.NoError(t, err)
 
@@ -618,7 +618,7 @@ func TestDecryptResourceAnnotations_RoundTrip(t *testing.T) {
 
 	err = DecryptResourceAnnotations(
 		resource,
-		dek,
+		UnboundReportKey(dek),
 	)
 	require.NoError(t, err)
 
@@ -658,7 +658,7 @@ func TestDecryptResourceObjectSourcePath_RoundTrip(t *testing.T) {
 
 	err = DecryptResourceObjectSourcePath(
 		resource,
-		dek,
+		UnboundReportKey(dek),
 	)
 	require.NoError(t, err)
 
@@ -672,7 +672,7 @@ func TestDecryptResourceObjectSourcePath_RoundTrip(t *testing.T) {
 func TestDecryptResourceLabels_Nil(t *testing.T) {
 	err := DecryptResourceLabels(
 		nil,
-		make([]byte, 32),
+		UnboundReportKey(make([]byte, 32)),
 	)
 
 	require.NoError(t, err)
@@ -681,7 +681,7 @@ func TestDecryptResourceLabels_Nil(t *testing.T) {
 func TestDecryptResourceAnnotations_Nil(t *testing.T) {
 	err := DecryptResourceAnnotations(
 		nil,
-		make([]byte, 32),
+		UnboundReportKey(make([]byte, 32)),
 	)
 
 	require.NoError(t, err)
@@ -690,7 +690,7 @@ func TestDecryptResourceAnnotations_Nil(t *testing.T) {
 func TestDecryptResourceObjectSourcePath_Nil(t *testing.T) {
 	err := DecryptResourceObjectSourcePath(
 		nil,
-		make([]byte, 32),
+		UnboundReportKey(make([]byte, 32)),
 	)
 
 	require.NoError(t, err)
@@ -709,7 +709,7 @@ func TestDecryptResourceLabels_Plaintext(t *testing.T) {
 		},
 	)
 
-	err := DecryptResourceLabels(resource, make([]byte, 32))
+	err := DecryptResourceLabels(resource, UnboundReportKey(make([]byte, 32)))
 	require.NoError(t, err)
 
 	assert.Equal(t, "backend", resource.GetLabels()["team"])
@@ -731,7 +731,7 @@ func TestDecryptIfEncrypted_PreservesPlaintextWhitespace(t *testing.T) {
 	}
 
 	for _, plaintext := range plaintexts {
-		got, err := decryptIfEncrypted(plaintext, dek)
+		got, err := decryptIfEncrypted(plaintext, UnboundReportKey(dek))
 		require.NoError(t, err)
 		assert.Equal(t, plaintext, got, "plaintext must not be rewritten")
 	}
@@ -745,7 +745,7 @@ func TestDecryptIfEncrypted_TolerantOfEnvelopeWhitespace(t *testing.T) {
 	require.NoError(t, err)
 
 	// An envelope padded by whitespace still decrypts to the exact plaintext.
-	got, err := decryptIfEncrypted("  "+ciphertext+"\n", dek)
+	got, err := decryptIfEncrypted("  "+ciphertext+"\n", UnboundReportKey(dek))
 	require.NoError(t, err)
 	assert.Equal(t, "secret-value", got)
 }
@@ -765,7 +765,7 @@ func TestDecryptResourceAnnotations_PreservesPlaintextValue(t *testing.T) {
 		},
 	)
 
-	require.NoError(t, DecryptResourceAnnotations(resource, make([]byte, 32)))
+	require.NoError(t, DecryptResourceAnnotations(resource, UnboundReportKey(make([]byte, 32))))
 
 	metadata := resource.GetObject()["metadata"].(map[string]any)
 	annotations := metadata["annotations"].(map[string]any)

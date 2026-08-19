@@ -47,8 +47,16 @@ func ApplyEncrypted(
 	masterKey []byte,
 ) error {
 
-	wrappedDEK, err := reportcrypto.WrapDEK(
-		dek,
+	// The binding is generated here, once, and shared by the wrapped DEK and
+	// every field this transformer seals. That is what ties the report's
+	// ciphertexts to this report rather than leaving them interchangeable.
+	key, err := reportcrypto.NewReportKey(dek)
+	if err != nil {
+		return err
+	}
+
+	wrappedDEK, err := reportcrypto.WrapReportKey(
+		key,
 		masterKey,
 	)
 	if err != nil {
@@ -57,7 +65,7 @@ func ApplyEncrypted(
 
 	if err := applyWithTransformer(
 		resultsHandler,
-		NewEncryptionTransformer(dek),
+		NewEncryptionTransformer(key),
 	); err != nil {
 		return err
 	}
