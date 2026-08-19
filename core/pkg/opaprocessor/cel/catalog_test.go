@@ -97,3 +97,42 @@ spec:
 	require.NotNil(t, named)
 	assert.Equal(t, "C-1001", named.ControlID)
 }
+
+// TestMatchConstraintsForControl checks the constraints come off the embedded
+// policy, since cmd/vap refuses a --resource-rule that falls outside them.
+func TestMatchConstraintsForControl(t *testing.T) {
+	constraints, err := MatchConstraintsForControl("C-0016")
+	require.NoError(t, err)
+	require.NotNil(t, constraints)
+
+	var resources []string
+	for _, rule := range constraints.ResourceRules {
+		resources = append(resources, rule.Resources...)
+	}
+	assert.Contains(t, resources, "pods")
+	assert.NotContains(t, resources, "sandboxes")
+
+	_, err = MatchConstraintsForControl("C-9999")
+	require.Error(t, err)
+}
+
+// TestMatchConstraintsForPolicyCopiesBundle proves callers get their own copy,
+// so mutating the answer cannot poison the catalog every later lookup reads.
+func TestMatchConstraintsForPolicyCopiesBundle(t *testing.T) {
+	constraints, found, err := MatchConstraintsForPolicy("kubescape-c-0016-allow-privilege-escalation")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotEmpty(t, constraints.ResourceRules)
+
+	constraints.ResourceRules[0].Resources = []string{"sandboxes"}
+
+	fresh, _, err := MatchConstraintsForPolicy("kubescape-c-0016-allow-privilege-escalation")
+	require.NoError(t, err)
+	assert.NotEqual(t, []string{"sandboxes"}, fresh.ResourceRules[0].Resources)
+
+	// A name outside the bundle reports found=false rather than erroring, so a
+	// user-supplied policy name is left unchecked instead of blocked.
+	_, found, err = MatchConstraintsForPolicy("some-custom-policy")
+	require.NoError(t, err)
+	assert.False(t, found)
+}
