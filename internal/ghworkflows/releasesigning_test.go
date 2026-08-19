@@ -114,9 +114,24 @@ type goreleaserArchive struct {
 	NameTemplate string `yaml:"name_template"`
 }
 
+// goreleaserBuild is the subset of a `builds` entry these tests assert on. The
+// goos/goarch product, less anything under `ignore`, is the set of platforms a
+// release publishes archives for, which .krew.yaml has to list by hand - see
+// TestKrewPlatformsMatchGoreleaserBuildMatrix in krew_test.go.
+type goreleaserBuild struct {
+	ID     string   `yaml:"id"`
+	Goos   []string `yaml:"goos"`
+	Goarch []string `yaml:"goarch"`
+	Ignore []struct {
+		Goos   string `yaml:"goos"`
+		Goarch string `yaml:"goarch"`
+	} `yaml:"ignore"`
+}
+
 type goreleaserConfig struct {
 	Signs    []goreleaserSign    `yaml:"signs"`
 	Archives []goreleaserArchive `yaml:"archives"`
+	Builds   []goreleaserBuild   `yaml:"builds"`
 	Checksum struct {
 		NameTemplate string `yaml:"name_template"`
 	} `yaml:"checksum"`

@@ -76,6 +76,9 @@ const (
 	// krewPluginAPIVersion picks the documentation's copy of the template out of
 	// the other YAML blocks around it.
 	krewPluginAPIVersion = "apiVersion: krew.googlecontainertools.github.com/v1alpha2"
+
+	// krewBuildID is the .goreleaser.yaml build whose archives krew installs.
+	krewBuildID = "cli"
 )
 
 // krewRenderCases are the tags the render assertions run over.
@@ -422,6 +425,56 @@ func krewTemplateBlock(t *testing.T, doc string) string {
 			"one documents the template", krewDocName, krewPluginAPIVersion, len(matched))
 
 	return strings.TrimRight(matched[0], "\n")
+}
+
+// TestKrewPlatformsMatchGoreleaserBuildMatrix ties krewPlatforms, and through it
+// .krew.yaml, to the targets a release actually builds.
+//
+// krewPlatforms is a hand-maintained fixture that currently agrees with the
+// template. Adding a goos to the `cli` build would publish archives .krew.yaml
+// never lists, and removing one would leave it pointing at assets that no longer
+// exist - in both directions every other test in this file still passes, because
+// they all check the template against the same fixture.
+func TestKrewPlatformsMatchGoreleaserBuildMatrix(t *testing.T) {
+	config := loadGoreleaserConfig(t)
+
+	var cli *goreleaserBuild
+	for i := range config.Builds {
+		if config.Builds[i].ID == krewBuildID {
+			cli = &config.Builds[i]
+			break
+		}
+	}
+	require.NotNilf(t, cli, "%s declares no %q build, which is the artifact krew installs",
+		goreleaserConfigName, krewBuildID)
+
+	// `ignore` entries can also pin goarm/goamd64, which this does not decode. An
+	// entry of that shape simply excludes nothing here, so the expected set stays
+	// a superset and the assertion fails loudly rather than passing quietly.
+	ignored := make(map[[2]string]bool, len(cli.Ignore))
+	for _, entry := range cli.Ignore {
+		ignored[[2]string{entry.Goos, entry.Goarch}] = true
+	}
+
+	built := make([][2]string, 0, len(cli.Goos)*len(cli.Goarch))
+	for _, goos := range cli.Goos {
+		for _, goarch := range cli.Goarch {
+			if !ignored[[2]string{goos, goarch}] {
+				built = append(built, [2]string{goos, goarch})
+			}
+		}
+	}
+	require.NotEmptyf(t, built, "the %q build declares no goos/goarch product", krewBuildID)
+
+	listed := make([][2]string, 0, len(krewPlatforms))
+	for _, platform := range krewPlatforms {
+		listed = append(listed, [2]string{platform.os, platform.arch})
+	}
+
+	assert.ElementsMatchf(t, built, listed,
+		"the %q build in %s covers different platforms than %s lists; update %s and krewPlatforms "+
+			"together, or krew offers an install for a platform with no asset",
+		krewBuildID, goreleaserConfigName, krewTemplateName, krewTemplateName)
 }
 
 // TestGoreleaserArchivesUseDefaultNaming pins the assumption the asset-name test
