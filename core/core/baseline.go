@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/diff"
-	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/diff"
+	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 )
 
 // EnforceBaseline compares the just-completed scan against scanInfo.Baseline
@@ -106,7 +106,7 @@ func writeBaselineHeadReport(ctx context.Context, results *resultshandling.Resul
 	}
 	cleanup = func() { _ = os.Remove(tmpPath) }
 
-	jsonPrinter := printerv2.NewJsonPrinter("")
+	jsonPrinter := printerv2.NewJsonPrinter()
 	jsonPrinter.SetWriter(ctx, tmpPath)
 	if err := jsonPrinter.ActionPrint(ctx, results.GetData(), results.ImageScanData); err != nil {
 		jsonPrinter.CloseWriter()
