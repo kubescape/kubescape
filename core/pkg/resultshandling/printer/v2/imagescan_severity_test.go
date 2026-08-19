@@ -150,7 +150,7 @@ func TestSARIFPrinter_ImageScan_HonorsSeverityExceptions(t *testing.T) {
 	sp := NewSARIFPrinter()
 	sp.writer = tmp
 
-	require.NoError(t, sp.printImageScan(imageScanData))
+	require.NoError(t, sp.printImageScan([]cautils.ImageScanData{imageScanData}))
 
 	raw, err := os.ReadFile(tmp.Name())
 	require.NoError(t, err)
@@ -176,7 +176,7 @@ func TestSARIFPrinter_ImageScan_StdoutPipeCompletes(t *testing.T) {
 	if os.Getenv(imageSARIFStdoutHelperEnv) == "1" {
 		sp := NewSARIFPrinter()
 		sp.SetWriter(context.Background(), "")
-		if err := sp.printImageScan(buildSeverityExceptionImageScanData()); err != nil {
+		if err := sp.printImageScan([]cautils.ImageScanData{buildSeverityExceptionImageScanData()}); err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
