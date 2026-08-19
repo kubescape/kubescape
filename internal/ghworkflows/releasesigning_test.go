@@ -116,10 +116,12 @@ type goreleaserArchive struct {
 
 // goreleaserBuild is the subset of a `builds` entry these tests assert on. The
 // goos/goarch product, less anything under `ignore`, is the set of platforms a
-// release publishes archives for, which .krew.yaml has to list by hand - see
+// release publishes archives for, and Binary is the executable inside each of
+// them. .krew.yaml has to restate both by hand - see
 // TestKrewPlatformsMatchGoreleaserBuildMatrix in krew_test.go.
 type goreleaserBuild struct {
 	ID     string   `yaml:"id"`
+	Binary string   `yaml:"binary"`
 	Goos   []string `yaml:"goos"`
 	Goarch []string `yaml:"goarch"`
 	Ignore []struct {

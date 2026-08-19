@@ -475,6 +475,26 @@ func TestKrewPlatformsMatchGoreleaserBuildMatrix(t *testing.T) {
 		"the %q build in %s covers different platforms than %s lists; update %s and krewPlatforms "+
 			"together, or krew offers an install for a platform with no asset",
 		krewBuildID, goreleaserConfigName, krewTemplateName, krewTemplateName)
+
+	// `bin` is the path krew runs out of the extracted archive, so it has to be
+	// the executable GoReleaser put there. That is builds[].binary, with .exe
+	// appended on Windows. Renaming the binary without editing .krew.yaml leaves
+	// krew invoking a file the archive does not contain.
+	require.NotEmptyf(t, cli.Binary, "the %q build declares no binary", krewBuildID)
+
+	for _, platform := range krewPlatforms {
+		t.Run(platform.os+"/"+platform.arch, func(t *testing.T) {
+			want := cli.Binary
+			if platform.os == "windows" {
+				want += ".exe"
+			}
+
+			assert.Equalf(t, want, platform.binary,
+				"%s lists bin %q for %s/%s, but the %q build produces %q; krew would run a file that "+
+					"is not in the archive", krewTemplateName, platform.binary,
+				platform.os, platform.arch, krewBuildID, want)
+		})
+	}
 }
 
 // TestGoreleaserArchivesUseDefaultNaming pins the assumption the asset-name test
