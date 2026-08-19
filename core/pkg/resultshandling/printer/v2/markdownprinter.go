@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -39,7 +38,7 @@ func (mp *MarkdownPrinter) SetWriter(ctx context.Context, outputFile string) err
 		outputFile = markdownOutputFile + printer.MarkdownOutputExt
 		logger.L().Info("no --output specified for markdown format; writing to default file",
 			helpers.String("filename", outputFile))
-	} else if filepath.Ext(outputFile) != printer.MarkdownOutputExt {
+	} else if !printer.HasOutputExt(outputFile, printer.MarkdownOutputExt) {
 		outputFile = outputFile + printer.MarkdownOutputExt
 	}
 	if explicitOutput {

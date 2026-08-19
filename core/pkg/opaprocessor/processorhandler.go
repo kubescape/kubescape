@@ -41,8 +41,6 @@ import (
 
 const ScoreConfigPath = "/resources/config"
 
-
-
 // ControlAttributeRequiresWholeClusterInput marks a control whose rules join
 // objects that live in different namespaces. Such a control must be evaluated
 // once against the whole cluster — after per-namespace evaluation has merged
@@ -116,6 +114,11 @@ type OPAProcessor struct {
 	// getNamespaceName) is made once per scan instead of drifting mid-scan as
 	// rules write aggregator-produced resources back into AllResources.
 	initialResourceCount int
+	// largeClusterSizeThreshold is the cluster size above which a scan is
+	// evaluated one namespace at a time. It is read from the LARGE_CLUSTER_SIZE
+	// environment variable once at construction so that the decision does not
+	// race on a package-level global.
+	largeClusterSizeThreshold int
 }
 
 // NewOPAProcessor snapshots len(sessionObj.AllResources) at construction for
@@ -134,18 +137,24 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		initialResourceCount = len(sessionObj.AllResources)
 	}
 
+	largeClusterSizeThreshold, _ := cautils.ParseIntEnvVar("LARGE_CLUSTER_SIZE", cautils.DefaultLargeClusterSize)
+	if largeClusterSizeThreshold <= 0 {
+		largeClusterSizeThreshold = cautils.DefaultLargeClusterSize
+	}
+
 	return &OPAProcessor{
-		OPASessionObj:          sessionObj,
-		regoDependenciesData:   regoDependenciesData,
-		clusterName:            clusterName,
-		exceptionEventRecorder: exceptionEventRecorder,
-		excludeNamespaces:      split(excludeNamespaces),
-		includeNamespaces:      split(includeNamespaces),
-		printEnabled:           enableRegoPrint,
-		compiledModules:        make(map[string]compiledRule),
-		TimedOutControls:       make(map[string]string),
-		initialResourceCount:   initialResourceCount,
-		celNamespaceIndex:      indexNamespaces(sessionObj),
+		OPASessionObj:             sessionObj,
+		regoDependenciesData:      regoDependenciesData,
+		clusterName:               clusterName,
+		exceptionEventRecorder:    exceptionEventRecorder,
+		excludeNamespaces:         split(excludeNamespaces),
+		includeNamespaces:         split(includeNamespaces),
+		printEnabled:              enableRegoPrint,
+		compiledModules:           make(map[string]compiledRule),
+		TimedOutControls:          make(map[string]string),
+		initialResourceCount:      initialResourceCount,
+		celNamespaceIndex:         indexNamespaces(sessionObj),
+		largeClusterSizeThreshold: largeClusterSizeThreshold,
 	}
 }
 
@@ -642,7 +651,7 @@ func (scope evaluationScope) matchedObjects(rule *reporthandling.PolicyRule) []w
 // so aggregator write-back during evaluation cannot re-bucket namespaces
 // mid-scan.
 func (opap *OPAProcessor) evaluationScopes() []evaluationScope {
-	resident, batches := cautils.PartitionResources(opap.initialResourceCount, opap.K8SResources, opap.ExternalResources, opap.AllResources)
+	resident, batches := cautils.PartitionResources(opap.initialResourceCount, opap.K8SResources, opap.ExternalResources, opap.AllResources, opap.largeClusterSizeThreshold)
 
 	residentGroups := newResidentIndex(resident)
 

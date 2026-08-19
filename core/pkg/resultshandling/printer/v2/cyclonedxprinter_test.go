@@ -32,6 +32,16 @@ func TestSetWriter_CycloneDX_AppendsExtension(t *testing.T) {
 	assert.Contains(t, cp.writer.Name(), ".cdx.json")
 }
 
+func TestSetWriter_CycloneDX_CaseInsensitiveExtension(t *testing.T) {
+	cp := NewCycloneDXPrinter()
+	tmpDir := t.TempDir()
+	cp.SetWriter(context.TODO(), tmpDir+"/Report.CDX.JSON")
+	defer cp.CloseWriter()
+
+	assert.NotContains(t, cp.writer.Name(), ".cdx.json.cdx.json")
+	assert.Contains(t, cp.writer.Name(), "Report.CDX.JSON")
+}
+
 func TestActionPrint_CycloneDX_ImageScan(t *testing.T) {
 	imageScanData := []cautils.ImageScanData{buildSeverityExceptionImageScanData()}
 

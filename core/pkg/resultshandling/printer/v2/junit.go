@@ -5,7 +5,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -105,7 +104,7 @@ func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) error 
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = junitOutputFile
 		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != printer.JunitOutputExt {
+		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.JunitOutputExt) {
 			outputFile = outputFile + printer.JunitOutputExt
 		}
 	}
