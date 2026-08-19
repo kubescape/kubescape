@@ -78,6 +78,23 @@ const (
 	krewPluginAPIVersion = "apiVersion: krew.googlecontainertools.github.com/v1alpha2"
 )
 
+// krewRenderCases are the tags the render assertions run over.
+//
+// krewSampleTag is the anchor: it shipped, so the URLs expected for it can be
+// checked by hand against that release's assets and against its entry in
+// kubernetes-sigs/krew-index. On its own it is a weak test of the version
+// handling, because every derivation of "4.0.12" from "v4.0.12" agrees at that
+// one input - a version hardcoded into the template would pass. The second tag
+// is synthetic and differs in digit count, so it fails for a hardcoded version
+// and for a trim that only works on a single-digit major.
+var krewRenderCases = []struct {
+	tag     string
+	version string
+}{
+	{tag: krewSampleTag, version: krewSampleVersion},
+	{tag: "v10.2.0", version: "10.2.0"},
+}
+
 // krewPlatform is one entry of the plugin manifest's `platforms` list. The
 // binary name differs on Windows, which is the only reason the manifest carries
 // six entries rather than one per os/arch pair generated from a matrix.
@@ -250,17 +267,21 @@ func TestKrewTemplateRendersUnderReleaseBotFuncs(t *testing.T) {
 // never published. The expected names here match the release v4.0.12 published
 // and the entry it produced in kubernetes-sigs/krew-index.
 func TestKrewTemplateURIsMatchGoreleaserAssetNames(t *testing.T) {
-	_, render := renderKrewTemplate(t, krewSampleTag)
+	for _, renderCase := range krewRenderCases {
+		t.Run(renderCase.tag, func(t *testing.T) {
+			_, render := renderKrewTemplate(t, renderCase.tag)
 
-	expected := make([]string, 0, len(krewPlatforms))
-	for _, platform := range krewPlatforms {
-		expected = append(expected, expectedKrewURI(krewSampleTag, krewSampleVersion, platform))
+			expected := make([]string, 0, len(krewPlatforms))
+			for _, platform := range krewPlatforms {
+				expected = append(expected, expectedKrewURI(renderCase.tag, renderCase.version, platform))
+			}
+
+			assert.ElementsMatchf(t, expected, render.uris,
+				"%s builds asset URLs that do not match what GoReleaser publishes for %s; addURIAndSha "+
+					"downloads each one to checksum it, so a wrong name fails the release with a 404 "+
+					"instead of opening a krew-index pull request", krewTemplateName, renderCase.tag)
+		})
 	}
-
-	assert.ElementsMatchf(t, expected, render.uris,
-		"%s builds asset URLs that do not match what GoReleaser publishes; addURIAndSha downloads "+
-			"each one to checksum it, so a wrong name fails the release with a 404 instead of "+
-			"opening a krew-index pull request", krewTemplateName)
 }
 
 // TestKrewTemplateRendersValidPluginManifest checks the output is a manifest
@@ -268,60 +289,66 @@ func TestKrewTemplateURIsMatchGoreleaserAssetNames(t *testing.T) {
 // sha256 line addURIAndSha emits is padded by exactly four spaces, so an entry
 // indented differently silently reparents sha256 or breaks the document.
 func TestKrewTemplateRendersValidPluginManifest(t *testing.T) {
-	rendered, _ := renderKrewTemplate(t, krewSampleTag)
+	for _, renderCase := range krewRenderCases {
+		t.Run(renderCase.tag, func(t *testing.T) {
+			rendered, _ := renderKrewTemplate(t, renderCase.tag)
 
-	var manifest krewPluginSpec
-	require.NoErrorf(t, yaml.Unmarshal([]byte(rendered), &manifest),
-		"%s renders invalid YAML:\n%s", krewTemplateName, rendered)
+			var manifest krewPluginSpec
+			require.NoErrorf(t, yaml.Unmarshal([]byte(rendered), &manifest),
+				"%s renders invalid YAML:\n%s", krewTemplateName, rendered)
 
-	assert.Equalf(t, krewSampleTag, manifest.Spec.Version,
-		"spec.version must be the tag; krew-index rejects a manifest whose version does not match "+
-			"the release it points at")
+			assert.Equalf(t, renderCase.tag, manifest.Spec.Version,
+				"spec.version must be the tag; krew-index rejects a manifest whose version does not "+
+					"match the release it points at")
 
-	require.Lenf(t, manifest.Spec.Platforms, len(krewPlatforms),
-		"%s rendered %d platforms, expected %d",
-		krewTemplateName, len(manifest.Spec.Platforms), len(krewPlatforms))
+			require.Lenf(t, manifest.Spec.Platforms, len(krewPlatforms),
+				"%s rendered %d platforms, expected %d",
+				krewTemplateName, len(manifest.Spec.Platforms), len(krewPlatforms))
 
-	// Assert the whole mapping, not that the fields are populated. krew picks a
-	// platform by its selector and then runs whatever `bin` that entry names, so
-	// a uri or a bin attached to the wrong selector installs the wrong artifact
-	// while every field is present and every URL resolves.
-	expected := make(map[[2]string]krewPlatform, len(krewPlatforms))
-	for _, platform := range krewPlatforms {
-		expected[[2]string{platform.os, platform.arch}] = platform
-	}
+			// Assert the whole mapping, not that the fields are populated. krew picks
+			// a platform by its selector and then runs whatever `bin` that entry
+			// names, so a uri or a bin attached to the wrong selector installs the
+			// wrong artifact while every field is present and every URL resolves.
+			expected := make(map[[2]string]krewPlatform, len(krewPlatforms))
+			for _, platform := range krewPlatforms {
+				expected[[2]string{platform.os, platform.arch}] = platform
+			}
 
-	seen := make(map[[2]string]bool, len(krewPlatforms))
-	for _, rendered := range manifest.Spec.Platforms {
-		selector := [2]string{rendered.Selector.MatchLabels.OS, rendered.Selector.MatchLabels.Arch}
+			seen := make(map[[2]string]bool, len(krewPlatforms))
+			for _, entry := range manifest.Spec.Platforms {
+				selector := [2]string{entry.Selector.MatchLabels.OS, entry.Selector.MatchLabels.Arch}
 
-		t.Run(selector[0]+"/"+selector[1], func(t *testing.T) {
-			want, ok := expected[selector]
-			require.Truef(t, ok, "manifest declares %s/%s, which .goreleaser.yaml does not build for the "+
-				"`cli` artifact; krew would offer an install that has no asset", selector[0], selector[1])
+				t.Run(selector[0]+"/"+selector[1], func(t *testing.T) {
+					want, ok := expected[selector]
+					require.Truef(t, ok, "manifest declares %s/%s, which .goreleaser.yaml does not build "+
+						"for the `cli` artifact; krew would offer an install that has no asset",
+						selector[0], selector[1])
 
-			assert.Falsef(t, seen[selector], "%s/%s appears twice; the duplicate shadows whichever entry "+
-				"krew resolves second", selector[0], selector[1])
-			seen[selector] = true
+					assert.Falsef(t, seen[selector], "%s/%s appears twice; the duplicate shadows "+
+						"whichever entry krew resolves second", selector[0], selector[1])
+					seen[selector] = true
 
-			assert.Equalf(t, want.binary, rendered.Bin,
-				"%s/%s names bin %q; krew runs that path out of the extracted archive, and the Windows "+
-					"archives carry kubescape.exe", selector[0], selector[1], rendered.Bin)
+					assert.Equalf(t, want.binary, entry.Bin,
+						"%s/%s names bin %q; krew runs that path out of the extracted archive, and the "+
+							"Windows archives carry kubescape.exe", selector[0], selector[1], entry.Bin)
 
-			assert.Equalf(t, expectedKrewURI(krewSampleTag, krewSampleVersion, want), rendered.URI,
-				"%s/%s points at the wrong asset; a uri under the wrong selector installs another "+
-					"platform's binary", selector[0], selector[1])
+					assert.Equalf(t, expectedKrewURI(renderCase.tag, renderCase.version, want), entry.URI,
+						"%s/%s points at the wrong asset; a uri under the wrong selector installs "+
+							"another platform's binary", selector[0], selector[1])
 
-			assert.Equalf(t, krewStubSha, rendered.Sha256,
-				"%s/%s has no sha256 at the expected nesting; addURIAndSha pads it by four spaces, "+
-					"so the template call must sit at that indentation", selector[0], selector[1])
+					assert.Equalf(t, krewStubSha, entry.Sha256,
+						"%s/%s has no sha256 at the expected nesting; addURIAndSha pads it by four "+
+							"spaces, so the template call must sit at that indentation",
+						selector[0], selector[1])
+				})
+			}
+
+			for _, platform := range krewPlatforms {
+				assert.Truef(t, seen[[2]string{platform.os, platform.arch}],
+					"%s renders no entry for %s/%s, so krew cannot install on it",
+					krewTemplateName, platform.os, platform.arch)
+			}
 		})
-	}
-
-	for _, platform := range krewPlatforms {
-		assert.Truef(t, seen[[2]string{platform.os, platform.arch}],
-			"%s renders no entry for %s/%s, so krew cannot install on it",
-			krewTemplateName, platform.os, platform.arch)
 	}
 }
 
