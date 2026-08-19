@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -44,7 +43,7 @@ func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) e
 		if outputFile == "" {
 			outputFile = prometheusOutputFile
 		}
-		if filepath.Ext(outputFile) != printer.PrometheusOutputExt {
+		if !printer.HasOutputExt(outputFile, printer.PrometheusOutputExt) {
 			outputFile = outputFile + printer.PrometheusOutputExt
 		}
 	}

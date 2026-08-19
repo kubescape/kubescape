@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -178,7 +177,7 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error
 			outputFile = prettyOutputFile
 		}
 		// os.DevNull is used to silence the UI printer, appending an extension would turn it into a regular file
-		if outputFile != os.DevNull && filepath.Ext(outputFile) != printer.PrettyOutputExt {
+		if outputFile != os.DevNull && !printer.HasOutputExt(outputFile, printer.PrettyOutputExt) {
 			outputFile = outputFile + printer.PrettyOutputExt
 		}
 	}

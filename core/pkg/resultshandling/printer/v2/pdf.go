@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -44,7 +43,7 @@ func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) error {
 		outputFile = pdfOutputFile + printer.PdfOutputExt
 		logger.L().Info("no --output specified for pdf format; writing to default file",
 			helpers.String("filename", outputFile))
-	} else if filepath.Ext(outputFile) != printer.PdfOutputExt {
+	} else if !printer.HasOutputExt(outputFile, printer.PdfOutputExt) {
 		outputFile = outputFile + printer.PdfOutputExt
 	}
 	if explicitOutput {
