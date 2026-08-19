@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -206,6 +207,17 @@ func printTopComponents(writer *os.File, summary imageprinter.ImageScanSummary) 
 }
 
 func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSummary, verboseMode bool) {
+	if summary.VulnDBBuilt != nil {
+		age := time.Since(*summary.VulnDBBuilt)
+		days := int(age.Hours() / 24)
+		info := summary.VulnDBBuilt.UTC().Format("2006-01-02")
+		if days < 1 {
+			cautils.InfoDisplay(writer, fmt.Sprintf("Vulnerability DB built: %s\n", info))
+		} else {
+			cautils.InfoDisplay(writer, fmt.Sprintf("Vulnerability DB built: %s (%d days ago)\n", info, days))
+		}
+	}
+
 	mapSeverityTSummary := getSeverityToSummaryMap(summary, verboseMode)
 
 	// sort keys by severity
