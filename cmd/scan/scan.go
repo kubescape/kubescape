@@ -11,8 +11,10 @@ import (
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/core"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/spf13/cobra"
@@ -52,6 +54,9 @@ var scanCmdExamples = fmt.Sprintf(`
 
   # Scan different clusters from the kubectl context
   %[1]s scan --kube-context <kubernetes context>
+
+  # Compare a live scan against a saved baseline report and fail CI on new high-severity+ drift
+  %[1]s scan --baseline base.json --baseline-fail-on-new --baseline-severity-threshold high
 `, cautils.ExecName())
 
 func GetScanCommand(ks meta.IKubescape) *cobra.Command {
@@ -79,6 +84,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 					"invalid --controls-version %q: must be a regolibrary release tag and cannot contain '/'",
 					scanInfo.ControlsVersion,
 				)
+			}
+			if scanInfo.Baseline != "" && scanInfo.BaselineSeverityThreshold != "" {
+				if err := shared.ValidateSeverity(scanInfo.BaselineSeverityThreshold); err != nil {
+					return err
+				}
 			}
 			captureKubeconfigSelection(cmd, &scanInfo)
 			applyRegistryCredentialsFromEnv(cmd, &scanInfo)
@@ -243,6 +253,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	// Retrieve --kubeconfig flag from https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/cmd.go
 	scanCmd.PersistentFlags().AddGoFlag(flag.Lookup("kubeconfig"))
 
+	scanCmd.PersistentFlags().StringVar(&scanInfo.Baseline, "baseline", "", "Path to a saved JSON scan report to diff the fresh scan against.")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.BaselineFailOnNew, "baseline-fail-on-new", false, "With --baseline, exit with code 1 when new failures are found versus the baseline.")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineSeverityThreshold, "baseline-severity-threshold", "", "With --baseline, only count new failures at or above this severity when using --baseline-fail-on-new.")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineGranularity, "baseline-granularity", "evidence", "With --baseline, comparison unit: evidence or control.")
+
 	scanCmd.AddCommand(getControlCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getWorkloadCmd(ks, &scanInfo))
@@ -327,7 +342,25 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifie
 		return err
 	}
 
+	return enforceBaselineDrift(ks.Context(), results, &scanInfo)
+}
+
+func enforceBaselineDrift(ctx context.Context, results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) error {
+	newFailures, err := core.EnforceBaseline(ctx, results, scanInfo)
+	if err != nil {
+		return err
+	}
+	if scanInfo.BaselineFailOnNew && newFailures > 0 {
+		return fmt.Errorf("baseline drift: found %d new failure(s) at or above baseline severity threshold %q", newFailures, severityLabelOrAll(scanInfo.BaselineSeverityThreshold))
+	}
 	return nil
+}
+
+func severityLabelOrAll(s string) string {
+	if s == "" {
+		return "all"
+	}
+	return s
 }
 
 func enforceImageSeverityThresholds(imageScanData []cautils.ImageScanData, scanInfo *cautils.ScanInfo) error {
