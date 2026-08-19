@@ -1031,3 +1031,112 @@ func TestFilterExpiredExceptions(t *testing.T) {
 		})
 	}
 }
+
+func makeTestWorkload(t *testing.T, raw string) workloadinterface.IMetadata {
+	t.Helper()
+	workload, err := workloadinterface.NewWorkload([]byte(raw))
+	require.NoError(t, err)
+	require.NotNil(t, workload)
+	return workload
+}
+
+func TestParseControlList(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  []string
+	}{
+		{"empty string", "", []string{}},
+		{"single id", "C-0016", []string{"C-0016"}},
+		{"comma separated with spaces", "C-0016, C-0017 , C-0018", []string{"C-0016", "C-0017", "C-0018"}},
+		{"extra commas", ",C-0016,,C-0017,", []string{"C-0016", "C-0017"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, parseControlList(tt.value))
+		})
+	}
+}
+
+func TestInlineExceptionFromResource(t *testing.T) {
+	workload := makeTestWorkload(t, `{
+		"apiVersion": "v1",
+		"kind": "Pod",
+		"metadata": {
+			"name": "nginx",
+			"namespace": "default",
+			"annotations": {
+				"kubescape.io/skip-controls": "C-0016, C-0017",
+				"kubescape.io/skip-reason":   "accepted by security team",
+				"kubescape.io/skip-expiry":   "2026-12-31T23:59:59Z"
+			}
+		},
+		"spec": {"containers": [{"name": "nginx", "image": "nginx"}]}
+	}`)
+
+	got := inlineExceptionFromResource(workload, "test-cluster")
+	require.Len(t, got, 1)
+
+	ex := got[0]
+	assert.Equal(t, "postureExceptionPolicy", ex.PolicyType)
+	assert.Equal(t, "inline-"+workload.GetID(), ex.Name)
+	require.Len(t, ex.PosturePolicies, 2)
+	assert.Equal(t, "C-0016", ex.PosturePolicies[0].ControlID)
+	assert.Equal(t, "C-0017", ex.PosturePolicies[1].ControlID)
+
+	require.NotNil(t, ex.Reason)
+	assert.Equal(t, "accepted by security team", *ex.Reason)
+
+	require.NotNil(t, ex.ExpirationDate)
+	expected, _ := time.Parse(time.RFC3339, "2026-12-31T23:59:59Z")
+	assert.Equal(t, expected.UTC(), ex.ExpirationDate.UTC())
+
+	require.Len(t, ex.Resources, 1)
+	attrs := ex.Resources[0].Attributes
+	assert.Equal(t, "nginx", attrs["name"])
+	assert.Equal(t, "Pod", attrs["kind"])
+	assert.Equal(t, "default", attrs["namespace"])
+	assert.Equal(t, workload.GetID(), attrs["resourceID"])
+}
+
+func TestInlineExceptionFromResource_NoSkipAnnotation(t *testing.T) {
+	workload := makeTestWorkload(t, `{
+		"apiVersion": "v1",
+		"kind": "Pod",
+		"metadata": {"name": "nginx", "namespace": "default"},
+		"spec": {"containers": [{"name": "nginx", "image": "nginx"}]}
+	}`)
+
+	assert.Empty(t, inlineExceptionFromResource(workload, "test-cluster"))
+}
+
+func TestGatherInlineExceptions(t *testing.T) {
+	withSkip := makeTestWorkload(t, `{
+		"apiVersion": "v1",
+		"kind": "Pod",
+		"metadata": {
+			"name": "nginx",
+			"namespace": "default",
+			"annotations": {"kubescape.io/skip-controls": "C-0001"}
+		}
+	}`)
+	withoutSkip := makeTestWorkload(t, `{
+		"apiVersion": "v1",
+		"kind": "Pod",
+		"metadata": {"name": "redis", "namespace": "default"}
+	}`)
+
+	opap := &OPAProcessor{
+		OPASessionObj: &cautils.OPASessionObj{
+			AllResources: map[string]workloadinterface.IMetadata{
+				withSkip.GetID():    withSkip,
+				withoutSkip.GetID(): withoutSkip,
+			},
+		},
+		clusterName: "test-cluster",
+	}
+
+	got := opap.gatherInlineExceptions()
+	require.Len(t, got, 1)
+	assert.Equal(t, "C-0001", got[0].PosturePolicies[0].ControlID)
+}
