@@ -25,6 +25,12 @@ on:
     # "**.sh" respectively, so a PR touching only one of them runs no check at
     # all. Release signing was absent from .goreleaser.yaml for exactly that
     # reason - nothing was looking.
+    #
+    # .krew.yaml and KREW_RELEASE.md are the same story once more, across two
+    # patterns: the krew plugin template matches "**.yaml" and the document that
+    # embeds a copy of it matches "**.md". Neither was checked, and the template
+    # drifted into a form that could not render at all while its own
+    # documentation drifted into a different one.
     paths:
       - ".github/**"
       - "internal/ghworkflows/**"
@@ -32,6 +38,8 @@ on:
       - ".goreleaser.yaml"
       - "install.sh"
       - "install.ps1"
+      - ".krew.yaml"
+      - "KREW_RELEASE.md"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
