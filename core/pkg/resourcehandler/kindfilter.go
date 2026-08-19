@@ -92,6 +92,24 @@ func filterQueryableResourcesByKind(queryableResources QueryableResources, scanI
 	)
 }
 
+// kindFilterHint describes the active kind filters, empty when neither narrows
+// anything. A scan that collected nothing reads as an empty cluster otherwise,
+// when the flags are the likelier reason.
+func kindFilterHint(scanInfo *cautils.ScanInfo) string {
+	filters := newKindFilters(scanInfo)
+	if !filters.active() {
+		return ""
+	}
+	flags := make([]string, 0, 2)
+	if filters.include != nil {
+		flags = append(flags, "--include-kinds "+strings.TrimSpace(scanInfo.IncludeKinds))
+	}
+	if filters.exclude != nil {
+		flags = append(flags, "--exclude-kinds "+strings.TrimSpace(scanInfo.ExcludeKinds))
+	}
+	return strings.Join(flags, " ")
+}
+
 // kindAllowed reports whether kind (already lowercased) passes the include/exclude
 // filters. When include is non-nil only listed kinds pass; when exclude is
 // non-nil listed kinds are rejected. Both filters may be active simultaneously:
