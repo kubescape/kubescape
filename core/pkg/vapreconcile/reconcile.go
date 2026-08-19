@@ -49,6 +49,9 @@ var ErrUnsupported = errors.New("cluster does not serve ValidatingAdmissionPolic
 func Collect(ctx context.Context, k8s *k8sinterface.KubernetesApi) ([]unstructured.Unstructured, []unstructured.Unstructured, error) {
 	version, err := resolveVersion(k8s.DiscoveryClient)
 	if err != nil {
+		if errors.Is(err, ErrUnsupported) {
+			return nil, nil, nil
+		}
 		return nil, nil, err
 	}
 

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"

@@ -2,7 +2,6 @@ package fixhandler
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"sort"
 	"strings"
 
