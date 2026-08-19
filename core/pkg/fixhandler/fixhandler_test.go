@@ -1043,9 +1043,9 @@ func TestApplyFixToContent_MultiFixDeterministicOrder(t *testing.T) {
 	rfi := &ResourceFixInfo{
 		FilePath: "pod.yaml",
 		YamlExpressions: map[string]armotypes.FixPath{
-			"spec.containers[0].securityContext.runAsNonRoot": {Path: "spec.containers[0].securityContext.runAsNonRoot", Value: "true"},
+			"spec.containers[0].securityContext.runAsNonRoot":             {Path: "spec.containers[0].securityContext.runAsNonRoot", Value: "true"},
 			"spec.containers[0].securityContext.allowPrivilegeEscalation": {Path: "spec.containers[0].securityContext.allowPrivilegeEscalation", Value: "false"},
-			"spec.containers[0].securityContext.readOnlyRootFilesystem": {Path: "spec.containers[0].securityContext.readOnlyRootFilesystem", Value: "true"},
+			"spec.containers[0].securityContext.readOnlyRootFilesystem":   {Path: "spec.containers[0].securityContext.readOnlyRootFilesystem", Value: "true"},
 		},
 	}
 
@@ -1062,11 +1062,11 @@ metadata:
   name: demo
 spec:
   containers:
-    - name: app
-      securityContext:
-        allowPrivilegeEscalation: false
-        readOnlyRootFilesystem: true
-        runAsNonRoot: true
+  - name: app
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
 `
 	assert.Equal(t, expected, got)
 }

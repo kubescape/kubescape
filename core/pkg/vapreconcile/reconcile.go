@@ -127,7 +127,6 @@ func list(ctx context.Context, client dynamic.Interface, version, resource strin
 	return listed.Items, nil
 }
 
-
 // BuildIndex builds a map of controlId -> VAPEnforcementStatus by reading the
 // controlId label that cel-admission-library stamps on every VAP, then joining
 // bindings back via spec.policyName to determine the enforcement mode.
@@ -211,7 +210,7 @@ func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[str
 		Kind:    "ValidatingAdmissionPolicy",
 	})
 	vap.SetName(name)
-	
+
 	// Add spec with CEL expression and parameter schema linkage
 	spec := map[string]interface{}{
 		"validations": []interface{}{
@@ -252,9 +251,9 @@ func GenerateValidatingAdmissionPolicyBinding(name, policyName, apiVersion strin
 		Kind:    "ValidatingAdmissionPolicyBinding",
 	})
 	vapb.SetName(name)
-	
+
 	spec := map[string]interface{}{
-		"policyName": policyName,
+		"policyName":        policyName,
 		"validationActions": []interface{}{"Deny"},
 	}
 	vapb.Object["spec"] = spec

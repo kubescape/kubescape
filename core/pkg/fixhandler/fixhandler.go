@@ -10,8 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"

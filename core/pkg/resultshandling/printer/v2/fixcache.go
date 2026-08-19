@@ -25,10 +25,10 @@ type fixRegion struct {
 // fixCacheKey identifies one yq expression applied to one manifest. Both halves
 // matter: regions differ per file and per expression.
 type fixCacheKey struct {
-	path       string
-	docIndex   int
-	fixPath    string
-	fixValue   string
+	path     string
+	docIndex int
+	fixPath  string
+	fixValue string
 }
 
 // readResult keeps a read with its error, so a failed read is answered from the

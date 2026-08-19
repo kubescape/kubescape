@@ -548,7 +548,7 @@ func collectFixes(ctx context.Context, cache *fixReportCache, result *sarif.Resu
 			if yamlExpression == "" {
 				continue
 			}
-			
+
 			docFix := fixhandler.DocumentFix{
 				DocumentIndex: documentIndex,
 				Fix:           rulePaths.FixPath,
