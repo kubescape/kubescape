@@ -864,7 +864,7 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 		}
 	}
 
-	if opap.incrementalCache != nil && controlCacheEligible(control) {
+	if len(ruleErrs) == 0 && opap.incrementalCache != nil && controlCacheEligible(control) {
 		for resourceID, result := range resourcesAssociatedControl {
 			resource, ok := opap.AllResources[resourceID]
 			if !ok {
@@ -874,7 +874,6 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 			opap.incrementalCache.Put(control.ControlID, resourceID, hash, result)
 		}
 	}
-
 	return resourcesAssociatedControl, errors.Join(ruleErrs...)
 }
 
