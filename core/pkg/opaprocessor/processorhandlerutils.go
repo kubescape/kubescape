@@ -9,6 +9,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -247,9 +248,15 @@ func inlineExceptionFromResource(obj workloadinterface.IMetadata, clusterName st
 
 	var expirationDate *time.Time
 	if expiry != "" {
-		if t, err := time.Parse(time.RFC3339, expiry); err == nil {
-			expirationDate = &t
+		t, err := time.Parse(time.RFC3339, expiry)
+		if err != nil {
+			logger.L().Warning("ignoring kubescape.io/skip-expiry annotation: malformed timestamp; inline exception will not be created",
+				helpers.String("resourceID", obj.GetID()),
+				helpers.String("expiry", expiry),
+				helpers.Error(err))
+			return nil
 		}
+		expirationDate = &t
 	}
 
 	policies := make([]armotypes.PosturePolicy, 0, len(controls))

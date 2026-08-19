@@ -1110,6 +1110,23 @@ func TestInlineExceptionFromResource_NoSkipAnnotation(t *testing.T) {
 	assert.Empty(t, inlineExceptionFromResource(workload, "test-cluster"))
 }
 
+func TestInlineExceptionFromResource_MalformedExpiry(t *testing.T) {
+	workload := makeTestWorkload(t, `{
+		"apiVersion": "v1",
+		"kind": "Pod",
+		"metadata": {
+			"name": "nginx",
+			"namespace": "default",
+			"annotations": {
+				"kubescape.io/skip-controls": "C-0001",
+				"kubescape.io/skip-expiry":   "2026-12-31"
+			}
+		}
+	}`)
+
+	assert.Empty(t, inlineExceptionFromResource(workload, "test-cluster"))
+}
+
 func TestGatherInlineExceptions(t *testing.T) {
 	withSkip := makeTestWorkload(t, `{
 		"apiVersion": "v1",
