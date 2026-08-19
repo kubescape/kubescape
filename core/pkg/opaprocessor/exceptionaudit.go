@@ -6,7 +6,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
@@ -25,6 +25,7 @@ func buildExceptionAudit(
 	allResources map[string]workloadinterface.IMetadata,
 	policies *cautils.Policies,
 	processor *exceptions.Processor,
+	manualControlMatches []manualControlExceptionMatch,
 ) *cautils.ExceptionAudit {
 	items := make(map[string]*cautils.ExceptionAuditItem, len(loadedExceptions))
 	active := make(map[string]struct{}, len(activeExceptions))
@@ -55,6 +56,19 @@ func buildExceptionAudit(
 				}
 			}
 		}
+	}
+
+	// Manual controls never appear in results (they have no resourcesresults.Result
+	// entries at all), so without this an exception that only suppresses a manual
+	// control is reported as unused even though it is actively applied.
+	for _, match := range manualControlMatches {
+		key := exceptionAuditKey(match.exception)
+		if _, ok := items[key]; !ok {
+			item := exceptionAuditItem(match.exception, policies, processor)
+			items[key] = &item
+		}
+		items[key].MatchCount++
+		items[key].MatchedResources = append(items[key].MatchedResources, cautils.ExceptionAuditMatch{ControlID: match.controlID})
 	}
 
 	audit := &cautils.ExceptionAudit{

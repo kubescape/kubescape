@@ -23,11 +23,11 @@ import (
 	"github.com/docker/cli/cli/config"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	ksmetav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/pkg/imagescan"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
@@ -94,10 +94,24 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	fileName := fmt.Sprintf("%s:%s.json", patchInfo.ImageName, patchInfo.ImageTag)
 	fileName = strings.ReplaceAll(fileName, "/", "-")
 
-	writer := printer.GetWriter(ks.Context(), fileName)
+	writer, err := printer.GetWriterNoFallback(fileName)
+	if err != nil {
+		return false, fmt.Errorf("creating intermediate scan results file: %w", err)
+	}
+	defer func() {
+		if err := os.Remove(fileName); err != nil && !errors.Is(err, os.ErrNotExist) {
+			logger.L().Warning(fmt.Sprintf("failed to remove residual file: %v", fileName), helpers.Error(err))
+		}
+	}()
 
 	if err = pres.Present(writer); err != nil {
+		if closeErr := writer.Close(); closeErr != nil {
+			return false, errors.Join(err, fmt.Errorf("closing intermediate scan results file: %w", closeErr))
+		}
 		return false, err
+	}
+	if closeErr := writer.Close(); closeErr != nil {
+		return false, fmt.Errorf("closing intermediate scan results file: %w", closeErr)
 	}
 	logger.L().StopSuccess(fmt.Sprintf("Successfully scanned image: %s", patchInfo.Image))
 
@@ -122,12 +136,6 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Loaded locally: %s", patchedImageName))
 	case "oci", "local":
 		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Exported to: %s", patchInfo.OutputPath))
-	}
-
-	// ===================== Clean up =====================
-	// Remove the scan results file, which was used to patch the image
-	if err := os.Remove(fileName); err != nil {
-		logger.L().Warning(fmt.Sprintf("failed to remove residual file: %v", fileName), helpers.Error(err))
 	}
 
 	// ===================== Early return for OCI/Local exports =====================

@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -39,7 +38,7 @@ func (mp *MarkdownPrinter) SetWriter(ctx context.Context, outputFile string) err
 		outputFile = markdownOutputFile + printer.MarkdownOutputExt
 		logger.L().Info("no --output specified for markdown format; writing to default file",
 			helpers.String("filename", outputFile))
-	} else if filepath.Ext(outputFile) != printer.MarkdownOutputExt {
+	} else if !printer.HasOutputExt(outputFile, printer.MarkdownOutputExt) {
 		outputFile = outputFile + printer.MarkdownOutputExt
 	}
 	if explicitOutput {
@@ -65,7 +64,11 @@ func (mp *MarkdownPrinter) ActionPrint(ctx context.Context, opaSessionObj *cauti
 
 	ew := &mdErrWriter{w: w}
 	ew.printf("# Kubescape Security Report\n\n")
-	ew.printf("**Compliance Score:** %d\n\n", cautils.ComplianceScoreToInt(summaryDetails.ComplianceScore))
+	if score := cautils.ComplianceScoreToInt(summaryDetails.ComplianceScore); score < 0 {
+		ew.printf("**Compliance Score:** N/A\n\n")
+	} else {
+		ew.printf("**Compliance Score:** %d%%\n\n", score)
+	}
 	if ew.err != nil {
 		return ew.err
 	}

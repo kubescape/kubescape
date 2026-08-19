@@ -3,9 +3,9 @@ package meta
 import (
 	"context"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 )
 
 type IKubescape interface {

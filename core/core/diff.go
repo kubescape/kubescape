@@ -6,14 +6,16 @@ import (
 	"io"
 	"os"
 
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/diff"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/diff"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 )
 
-// Diff writes the diff between the two scan reports and returns the number of new failures at or above the severity threshold; the caller decides whether to exit 1.
+// Diff writes the diff between the two scan reports and returns the number of new or incomparable failures at or above the severity threshold; the caller decides whether to exit 1.
 func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error) {
-	cs, err := diff.Compute(diffInfo.BaseFile, diffInfo.HeadFile)
+	cs, err := diff.ComputeWithOptions(diffInfo.BaseFile, diffInfo.HeadFile, diff.Options{
+		Granularity: diff.Granularity(diffInfo.Granularity),
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -44,7 +46,7 @@ func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error
 		}
 	}
 
-	return len(diff.FilterBySeverity(cs.New, diffInfo.SeverityThreshold)), nil
+	return len(diff.FilterBySeverity(cs.New, diffInfo.SeverityThreshold)) + len(diff.FilterBySeverity(cs.Incomparable, diffInfo.SeverityThreshold)), nil
 }
 
 func closeDiffOutput(closer io.Closer, err error) error {

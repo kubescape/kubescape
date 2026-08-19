@@ -1,0 +1,29 @@
+{
+  "name": "modify-node-status-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Lateral Movement::Cluster internal networking",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        "rbac.authorization.k8s.io"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "RoleBinding",
+        "ClusterRoleBinding",
+        "Role",
+        "ClusterRole"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can modify the nodes/status subresource, letting them set or remove node labels and so bypass the nodeSelector and nodeAffinity scheduling constraints that keep sensitive workloads away from untrusted nodes",
+  "remediation": "Remove update and patch on nodes/status from the cluster role, and grant them only to the components that reconcile node state, such as the kubelet and the node lifecycle controller. Avoid wildcard resources and */status entries in cluster roles bound to workloads or users, and keep the NodeRestriction admission plugin enabled so kubelets cannot relabel their own node.",
+  "ruleQuery": "armo_builtins"
+}

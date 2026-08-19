@@ -33,9 +33,12 @@ func TestFormatConfigOutputYAML(t *testing.T) {
 	output, err := FormatConfigOutput(cfg, "yaml", true)
 	require.NoError(t, err)
 
-	assert.Contains(t, string(output), "accountID: account-123")
-	assert.Contains(t, string(output), "accessKey: super-secret")
-	assert.Contains(t, string(output), "clusterName: prod-cluster")
+	var payload map[string]string
+	require.NoError(t, yaml.Unmarshal(output, &payload))
+
+	assert.Equal(t, "account-123", payload["accountID"])
+	assert.Equal(t, "****cret", payload["accessKey"])
+	assert.Equal(t, "prod-cluster", payload["clusterName"])
 }
 
 func TestFormatConfigOutputText(t *testing.T) {
@@ -162,4 +165,43 @@ func TestFormatConfigOutputYAMLParsesAsMap(t *testing.T) {
 	assert.Equal(t, "https://api.example.com", payload["cloudAPIURL"])
 	assert.Equal(t, "https://report.example.com", payload["cloudReportURL"])
 	assert.NotContains(t, payload, "accessKey")
+}
+
+func TestFormatConfigOutputMasksAccessKey(t *testing.T) {
+	const accessKey = "test-access-key-1234"
+	cfg := &ConfigObj{AccountID: "account-123", AccessKey: accessKey}
+
+	for _, format := range []string{"text", "json", "yaml"} {
+		t.Run(format, func(t *testing.T) {
+			output, err := FormatConfigOutput(cfg, format, false)
+			require.NoError(t, err)
+
+			assert.NotContains(t, string(output), accessKey)
+			assert.Contains(t, string(output), "****1234")
+			assert.Contains(t, string(output), "account-123")
+		})
+	}
+}
+
+func TestFormatConfigOutputMasksShortAccessKeyInFull(t *testing.T) {
+	for _, accessKey := range []string{"k", "12345678"} {
+		t.Run(accessKey, func(t *testing.T) {
+			output, err := FormatConfigOutput(&ConfigObj{AccessKey: accessKey}, "text", false)
+			require.NoError(t, err)
+
+			assert.Equal(t, "accessKey: ****\n", string(output))
+		})
+	}
+}
+
+func TestFormatConfigOutputKeepsEmptyAccessKeyEmpty(t *testing.T) {
+	output, err := FormatConfigOutput(&ConfigObj{AccountID: "account-123"}, "json", true)
+	require.NoError(t, err)
+
+	var payload map[string]string
+	require.NoError(t, json.Unmarshal(output, &payload))
+
+	accessKey, ok := payload["accessKey"]
+	require.True(t, ok, "--include-empty must still render the accessKey field")
+	assert.Equal(t, "", accessKey)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +24,9 @@ func TestScanControls_WhitespaceOnlyIDs(t *testing.T) {
 }
 
 func TestScanControls_TrimsIDs(t *testing.T) {
-	srv := &KubescapeMcpserver{}
+	srv := &KubescapeMcpserver{
+		policyGetter: getter.NewDownloadReleasedPolicy(),
+	}
 	_, err := srv.ScanControls(context.Background(), "", []string{" C-0012 ", "  C-0017"})
 	if err != nil {
 		assert.NotContains(t, err.Error(), "at least one control ID",

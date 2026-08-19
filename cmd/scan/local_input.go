@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 )
 
 const stdinManifestTempPattern = "tmp-kubescape*.yaml"

@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
+	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

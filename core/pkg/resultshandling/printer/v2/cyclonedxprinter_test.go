@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,6 +30,16 @@ func TestSetWriter_CycloneDX_AppendsExtension(t *testing.T) {
 	defer cp.CloseWriter()
 
 	assert.Contains(t, cp.writer.Name(), ".cdx.json")
+}
+
+func TestSetWriter_CycloneDX_CaseInsensitiveExtension(t *testing.T) {
+	cp := NewCycloneDXPrinter()
+	tmpDir := t.TempDir()
+	cp.SetWriter(context.TODO(), tmpDir+"/Report.CDX.JSON")
+	defer cp.CloseWriter()
+
+	assert.NotContains(t, cp.writer.Name(), ".cdx.json.cdx.json")
+	assert.Contains(t, cp.writer.Name(), "Report.CDX.JSON")
 }
 
 func TestActionPrint_CycloneDX_ImageScan(t *testing.T) {

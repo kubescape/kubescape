@@ -11,7 +11,8 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -381,6 +382,29 @@ func TestAddRule_SetsSecuritySeverity(t *testing.T) {
 	require.NotNil(t, rule.Properties, "rule properties must be set")
 	assert.Equal(t, "8.5", rule.Properties["security-severity"],
 		"security-severity must mirror the control score factor")
+}
+
+func TestAddResult_AnnotatesInitAndEphemeralContainerNames(t *testing.T) {
+	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+	control := &reportsummary.ControlSummary{
+		ControlID:   "C-0057",
+		Name:        "Privileged container",
+		Description: "Privileged containers should be avoided",
+		ScoreFactor: 8.0,
+	}
+
+	sp := NewSARIFPrinter()
+	sp.addRule(run, control)
+
+	ac := makeControlWithPaths(privilegedInitAndEphemeralPaths(), nil)
+	ac.ControlID = "C-0057"
+
+	result := sp.addResult(run, control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, privilegedInitAndEphemeralPod(), nil)
+	require.NotNil(t, result.Message)
+	require.NotNil(t, result.Message.Text)
+	for _, path := range privilegedInitAndEphemeralNamedPaths() {
+		assert.Contains(t, *result.Message.Text, path)
+	}
 }
 
 func TestPrintConfigurationScan_MissingControl(t *testing.T) {
@@ -913,6 +937,152 @@ spec:
 		"SARIF must resolve the privileged field to line %d, got startLines=%v", privilegedLine, startLines)
 	assert.NotEqual(t, []int{1}, startLines,
 		"all findings must not collapse to line 1 for absolute-path file scans")
+}
+
+// TestPrintConfigurationScan_FailedPathGetsRelatedLocation is a regression test for evidence
+// locations: a control's FailedPath previously had no location of its own in SARIF output - only
+// the (possibly different) FixPath got the primary Locations entry. This asserts the FailedPath
+// now resolves to its own relatedLocations entry, pointing at the actual line the failing field
+// lives on, independent of where the fix would apply.
+func TestPrintConfigurationScan_FailedPathGetsRelatedLocation(t *testing.T) {
+	const (
+		imageLine      = 12
+		privilegedLine = 13
+	)
+
+	manifestDir := t.TempDir()
+	manifestPath := filepath.Join(manifestDir, "deploy.yaml")
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata: {name: demo, namespace: default}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: demo}}
+  template:
+    metadata: {labels: {app: demo}}
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.23
+        securityContext: {privileged: true}
+`
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0600))
+
+	resourceID := "apps/v1/Deployment/default/demo"
+	obj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "demo",
+			"namespace": "default",
+		},
+		"spec": map[string]interface{}{},
+	}
+	lw := localworkload.NewLocalWorkload(obj)
+	lw.SetPath("deploy.yaml:0")
+
+	controlID := "C-0001"
+	// FixPath targets a different field (image) than FailedPath (privileged), so their
+	// resolved locations diverge - the test would pass by coincidence if they matched.
+	ac := resourcesresults.ResourceAssociatedControl{
+		ControlID: controlID,
+		Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+			{
+				Name:   "privileged-container",
+				Status: apis.StatusFailed,
+				Paths: []armotypes.PosturePaths{
+					{
+						FailedPath: "spec.template.spec.containers[0].securityContext.privileged",
+						FixPath: armotypes.FixPath{
+							Path:  "spec.template.spec.containers[0].image",
+							Value: "nginx:1.25",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	session := cautils.NewOPASessionObjMock()
+	session.Metadata = &reporthandlingv2.Metadata{
+		ScanMetadata: reporthandlingv2.ScanMetadata{
+			ScanningTarget: reporthandlingv2.File,
+		},
+		ContextMetadata: reporthandlingv2.ContextMetadata{
+			FileContextMetadata: &reporthandlingv2.FileContextMetadata{
+				FilePath: manifestPath,
+			},
+		},
+	}
+	session.ResourcesResult[resourceID] = resourcesresults.Result{
+		ResourceID:         resourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{ac},
+	}
+	session.ResourceSource = map[string]reporthandling.Source{
+		resourceID: {
+			Path:         manifestDir,
+			RelativePath: "deploy.yaml",
+			FileType:     reporthandling.SourceTypeYaml,
+		},
+	}
+	session.AllResources[resourceID] = lw
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				controlID: reportsummary.ControlSummary{
+					ControlID:   controlID,
+					Name:        "Privileged container",
+					Description: "Do not run privileged containers",
+					Remediation: "Set privileged to false",
+					ScoreFactor: 8.0,
+				},
+			},
+		},
+	}
+
+	tmp, err := os.CreateTemp("", "sarif-related-location-*.sarif")
+	require.NoError(t, err)
+	defer func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	}()
+
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	otherWD := t.TempDir()
+	require.NoError(t, os.Chdir(otherWD))
+
+	sp := NewSARIFPrinter()
+	sp.writer = tmp
+	require.NoError(t, sp.printConfigurationScan(context.Background(), session))
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 1)
+	require.Len(t, report.Runs[0].Results, 1)
+
+	result := report.Runs[0].Results[0]
+
+	// Primary location follows the fix path (image), as before this change.
+	require.NotEmpty(t, result.Locations)
+	require.NotNil(t, result.Locations[0].PhysicalLocation.Region)
+	assert.Equal(t, imageLine, *result.Locations[0].PhysicalLocation.Region.StartLine,
+		"primary location should still resolve to the FixPath's line")
+
+	// The FailedPath now gets its own relatedLocations entry, at its own line.
+	require.Len(t, result.RelatedLocations, 1)
+	relatedLoc := result.RelatedLocations[0]
+	require.NotNil(t, relatedLoc.PhysicalLocation)
+	require.NotNil(t, relatedLoc.PhysicalLocation.Region)
+	assert.Equal(t, privilegedLine, *relatedLoc.PhysicalLocation.Region.StartLine,
+		"relatedLocations must resolve the FailedPath to its own line, distinct from the fix location")
+	require.NotNil(t, relatedLoc.Message)
+	assert.Equal(t, "spec.template.spec.containers[0].securityContext.privileged", *relatedLoc.Message.Text)
 }
 
 // TestPrintImageScan_WriterIsNonSeekablePipe is a regression test for image

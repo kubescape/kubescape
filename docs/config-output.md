@@ -117,6 +117,12 @@ The rendered fields use stable lower camel case names:
 - `cloudAPIURL`
 - `accessKey`
 
+`accessKey` is a credential, so it is rendered masked in every format: only its
+last four characters are shown, prefixed with `****` (a key of eight characters
+or fewer is masked in full). The command is meant for CI logs and shared
+terminals, so it never prints the key itself; read the cached configuration file
+directly if you need the full value.
+
 By default, fields with empty values are not rendered. This keeps terminal
 output short and avoids noisy structured payloads in scripts that only need
 configured values.

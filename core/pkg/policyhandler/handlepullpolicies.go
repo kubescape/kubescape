@@ -9,8 +9,8 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"go.opentelemetry.io/otel"
@@ -23,6 +23,10 @@ const (
 type cachedPoliciesEntry struct {
 	identifiers []string
 	frameworks  []reporthandling.Framework
+}
+
+type policyArtifactPersistence interface {
+	ShouldPersistPolicyArtifacts() bool
 }
 
 // PolicyHandler
@@ -196,7 +200,10 @@ func deepCopyPolicies(src []reporthandling.Framework) ([]reporthandling.Framewor
 
 func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, getters *cautils.Getters) ([]reporthandling.Framework, error) {
 	frameworks := []reporthandling.Framework{}
-	_, isLocalPolicy := getters.PolicyGetter.(*getter.LoadPolicy)
+	persistPolicyArtifacts := true
+	if persistence, ok := getters.PolicyGetter.(policyArtifactPersistence); ok {
+		persistPolicyArtifacts = persistence.ShouldPersistPolicyArtifacts()
+	}
 
 	switch getScanKind(policyIdentifier) {
 	case apisv1.KindFramework: // Download frameworks
@@ -211,8 +218,8 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 			}
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
-				if isLocalPolicy {
-					continue // skip caching for local files
+				if !persistPolicyArtifacts {
+					continue
 				}
 				cache, err := getter.PolicyCachePath(rule.Identifier)
 				if err != nil {
@@ -236,8 +243,8 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 			}
 			if receivedControl != nil {
 				f.Controls = append(f.Controls, *receivedControl)
-				if isLocalPolicy {
-					continue // skip caching for local files
+				if !persistPolicyArtifacts {
+					continue
 				}
 				cache, err := getter.PolicyCachePath(policy.Identifier)
 				if err != nil {

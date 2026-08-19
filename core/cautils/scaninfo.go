@@ -16,7 +16,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -152,6 +152,8 @@ type ScanInfo struct {
 	FrameworkScan         bool                         // false if scanning control
 	ScanAll               bool                         // true if scan all frameworks
 	OmitRawResources      bool                         // true if omit raw resources from the output
+	ShowEvidence          bool                         // Show evidence paths with current field values in pretty-printer output (-E / --show-evidence)
+	ShowSecrets           bool                         // Show secret field values in evidence output; redacted by default (--show-secrets)
 	PrintAttackTree       bool                         // true if print attack tree
 	EnableRegoPrint       bool                         // true if print rego
 	ScanObject            *objectsenvelopes.ScanObject // identifies a single resource (k8s object) to be scanned
@@ -187,6 +189,7 @@ type ScanInfo struct {
 	RegistryToken         string            // Bearer token for workload image registry authentication
 	ImageScanConcurrency  int               // Number of concurrent workers for image scanning
 	MinSeverity           string            // Only include controls at or above this severity in the output
+	MaxSeverity           string            // Only include controls at or below this severity in the output
 }
 
 type Getters struct {

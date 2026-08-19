@@ -4,9 +4,11 @@ import (
 	"fmt"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/pkg/securityexception"
+	"github.com/kubescape/kubescape/v4/core/pkg/securityexception"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 func (opap *OPAProcessor) emitExceptionMatchEvents(resource workloadinterface.IMetadata, result resourcesresults.Result) {
@@ -34,16 +36,22 @@ func (opap *OPAProcessor) emitExceptionMatchEvents(resource workloadinterface.IM
 		}
 		for _, rule := range control.ResourceAssociatedRules {
 			for _, exception := range rule.Exception {
-				ref, ok := securityexception.CRDReferenceFromPolicy(exception)
-				if !ok {
-					continue
+				var obj runtime.Object
+				var key string
+				if ref, ok := securityexception.CRDReferenceFromPolicy(exception); ok {
+					key = fmt.Sprintf("crd/%s/%s/%s/%s/%s", ref.Kind, ref.Namespace, ref.Name, control.ControlID, resourceID)
+					obj = securityexception.UnstructuredForCRD(ref)
+				} else {
+					// A file/cloud-sourced exception has no CRD instance of its
+					// own to attach the event to, so fall back to the scanned
+					// resource the exception was matched against.
+					key = fmt.Sprintf("resource/%s/%s", control.ControlID, resourceID)
+					obj = &unstructured.Unstructured{Object: resource.GetObject()}
 				}
-				key := fmt.Sprintf("%s/%s/%s/%s/%s", ref.Kind, ref.Namespace, ref.Name, control.ControlID, resourceID)
 				if _, exists := emitted[key]; exists {
 					continue
 				}
 				emitted[key] = struct{}{}
-				obj := securityexception.UnstructuredForCRD(ref)
 				opap.exceptionEventRecorder.Eventf(
 					obj,
 					corev1.EventTypeNormal,

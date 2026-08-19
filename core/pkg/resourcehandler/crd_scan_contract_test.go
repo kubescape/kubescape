@@ -4,14 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/discovery"
 	discoveryfake "k8s.io/client-go/discovery/fake"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
@@ -464,6 +467,147 @@ func TestK8sResourceHandlerUsesDiscoveredGVRsAndNamespaceScope(t *testing.T) {
 		assert.Equal(t, "metadata.namespace=agents", seenSelectors[gvr])
 		assert.Contains(t, resources, k8sinterface.GroupVersionResourceToString(&gvr))
 	}
+}
+
+// servedResource is one object as a single served version returns it: same
+// metadata.uid, apiVersion of the version that was listed.
+func servedResource(apiVersion, kind, namespace, name, uid string) *unstructured.Unstructured {
+	resource := unstructuredResource(apiVersion, kind, namespace, name)
+	resource.SetUID(types.UID(uid))
+	return resource
+}
+
+func servedWorkload(apiVersion, kind, namespace, name, uid string) workloadinterface.IMetadata {
+	return workloadinterface.NewWorkloadObj(servedResource(apiVersion, kind, namespace, name, uid).Object)
+}
+
+func TestPullResourcesDeduplicatesResourceServedAtSeveralVersions(t *testing.T) {
+	const uid = "11111111-1111-1111-1111-111111111111"
+	alpha := schema.GroupVersionResource{Group: "agents.x-k8s.io", Version: "v1alpha1", Resource: "sandboxes"}
+	beta := schema.GroupVersionResource{Group: "agents.x-k8s.io", Version: "v1beta1", Resource: "sandboxes"}
+
+	// One Sandbox, returned by both served versions as a real CRD does.
+	served := map[schema.GroupVersionResource]*unstructured.Unstructured{
+		alpha: servedResource("agents.x-k8s.io/v1alpha1", "Sandbox", "agents", "alpha-sandbox", uid),
+		beta:  servedResource("agents.x-k8s.io/v1beta1", "Sandbox", "agents", "alpha-sandbox", uid),
+	}
+	listKinds := map[schema.GroupVersionResource]string{alpha: "CustomResourceList", beta: "CustomResourceList"}
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds)
+	dynamicClient.PrependReactor("list", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		list := &unstructured.UnstructuredList{}
+		if object, ok := served[action.GetResource()]; ok {
+			list.Items = []unstructured.Unstructured{*object}
+		}
+		return true, list, nil
+	})
+
+	handler := &K8sResourceHandler{k8s: &k8sinterface.KubernetesApi{
+		DynamicClient:   dynamicClient,
+		DiscoveryClient: agentRuntimeDiscovery(),
+	}}
+	resolver, discoveryFailures := newDiscoveryResourceResolver(handler.k8s.DiscoveryClient)
+	require.Empty(t, discoveryFailures)
+
+	match := reporthandling.RuleMatchObjects{
+		APIGroups:   []string{"agents.x-k8s.io"},
+		APIVersions: []string{"v1alpha1", "v1beta1"},
+		Resources:   []string{"Sandbox"},
+	}
+	framework := *mockFramework("agent-runtime", []reporthandling.Control{
+		mockControl("agent-runtime", []reporthandling.PolicyRule{
+			mockRule("agent-runtime", []reporthandling.RuleMatchObjects{match}, ""),
+		}),
+	})
+	queryable, _ := getQueryableResourceMapFromPolicies(
+		[]reporthandling.Framework{framework}, nil, reporthandling.ScopeCluster, resolver)
+	resources, allResources, failures := handler.pullResources(context.Background(), queryable, NewIncludeSelector("agents"), "")
+
+	assert.Empty(t, failures)
+	require.Len(t, allResources, 1, "one Sandbox served at two versions must be collected once")
+
+	surviving := slices.Collect(maps.Keys(allResources))[0]
+	assert.Equal(t, "agents.x-k8s.io/v1beta1/agents/Sandbox/alpha-sandbox", surviving,
+		"the newest served version must survive")
+
+	// A rule declaring either version still resolves to the same object.
+	for _, gvr := range []schema.GroupVersionResource{alpha, beta} {
+		assert.Equal(t, []string{surviving}, resources[k8sinterface.GroupVersionResourceToString(&gvr)])
+	}
+}
+
+func TestDedupeServedVersionAliases(t *testing.T) {
+	const uid = "11111111-1111-1111-1111-111111111111"
+
+	t.Run("prefers GA over pre-release versions", func(t *testing.T) {
+		allResources := map[string]workloadinterface.IMetadata{}
+		for _, apiVersion := range []string{"ate.dev/v1alpha1", "ate.dev/v1beta1", "ate.dev/v1"} {
+			workload := servedWorkload(apiVersion, "WorkerPool", "agents", "shared", uid)
+			allResources[workload.GetID()] = workload
+		}
+		require.Len(t, allResources, 3)
+
+		dedupeServedVersionAliases(cautils.K8SResources{}, allResources)
+
+		require.Len(t, allResources, 1)
+		assert.Equal(t, "ate.dev/v1", slices.Collect(maps.Values(allResources))[0].GetApiVersion())
+	})
+
+	t.Run("keeps objects with different uids", func(t *testing.T) {
+		first := servedWorkload("ate.dev/v1alpha1", "WorkerPool", "agents", "first", uid)
+		second := servedWorkload("ate.dev/v1alpha1", "WorkerPool", "agents", "second", "22222222-2222-2222-2222-222222222222")
+		allResources := map[string]workloadinterface.IMetadata{
+			first.GetID(): first, second.GetID(): second,
+		}
+
+		dedupeServedVersionAliases(cautils.K8SResources{}, allResources)
+
+		assert.Len(t, allResources, 2)
+	})
+
+	t.Run("leaves objects without a uid alone", func(t *testing.T) {
+		first := workloadinterface.NewWorkloadObj(unstructuredResource("ate.dev/v1alpha1", "WorkerPool", "agents", "first").Object)
+		second := workloadinterface.NewWorkloadObj(unstructuredResource("ate.dev/v1beta1", "WorkerPool", "agents", "first").Object)
+		allResources := map[string]workloadinterface.IMetadata{
+			first.GetID(): first, second.GetID(): second,
+		}
+
+		dedupeServedVersionAliases(cautils.K8SResources{}, allResources)
+
+		assert.Len(t, allResources, 2)
+	})
+
+	t.Run("rewrites every reference to the dropped alias", func(t *testing.T) {
+		alpha := servedWorkload("ate.dev/v1alpha1", "WorkerPool", "agents", "shared", uid)
+		beta := servedWorkload("ate.dev/v1beta1", "WorkerPool", "agents", "shared", uid)
+		allResources := map[string]workloadinterface.IMetadata{
+			alpha.GetID(): alpha, beta.GetID(): beta,
+		}
+		k8sResources := cautils.K8SResources{
+			"ate.dev/v1alpha1/workerpools": {alpha.GetID()},
+			"ate.dev/v1beta1/workerpools":  {beta.GetID()},
+		}
+
+		dedupeServedVersionAliases(k8sResources, allResources)
+
+		assert.Equal(t, []string{beta.GetID()}, k8sResources["ate.dev/v1alpha1/workerpools"])
+		assert.Equal(t, []string{beta.GetID()}, k8sResources["ate.dev/v1beta1/workerpools"])
+		assert.NotContains(t, allResources, alpha.GetID())
+	})
+
+	t.Run("collapses an alias listed twice under one resource", func(t *testing.T) {
+		alpha := servedWorkload("ate.dev/v1alpha1", "WorkerPool", "agents", "shared", uid)
+		beta := servedWorkload("ate.dev/v1beta1", "WorkerPool", "agents", "shared", uid)
+		allResources := map[string]workloadinterface.IMetadata{
+			alpha.GetID(): alpha, beta.GetID(): beta,
+		}
+		k8sResources := cautils.K8SResources{
+			"ate.dev/v1beta1/workerpools": {alpha.GetID(), beta.GetID()},
+		}
+
+		dedupeServedVersionAliases(k8sResources, allResources)
+
+		assert.Equal(t, []string{beta.GetID()}, k8sResources["ate.dev/v1beta1/workerpools"])
+	})
 }
 
 func TestFileResourceHandlerUsesManifestAPIVersionsForBuiltIns(t *testing.T) {

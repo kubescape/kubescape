@@ -1,3 +1,8 @@
+// Package opaprocessor evaluates Open Policy Agent (OPA) Rego rules and
+// dispatches CEL rules against scanned Kubernetes resources. CEL evaluation is
+// not yet implemented. It is the engine that consumes the rules defined in the
+// kubescape/regolibrary repository and produces Kubescape's misconfiguration
+// results.
 package opaprocessor
 
 import (
@@ -16,9 +21,9 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor/cel"
-	"github.com/kubescape/kubescape/v3/core/pkg/score"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
+	"github.com/kubescape/kubescape/v4/core/pkg/score"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -115,6 +120,11 @@ type OPAProcessor struct {
 	// getNamespaceName) is made once per scan instead of drifting mid-scan as
 	// rules write aggregator-produced resources back into AllResources.
 	initialResourceCount int
+	// largeClusterSizeThreshold is the cluster size above which a scan is
+	// evaluated one namespace at a time. It is read from the LARGE_CLUSTER_SIZE
+	// environment variable once at construction so that the decision does not
+	// race on a package-level global.
+	largeClusterSizeThreshold int
 }
 
 // NewOPAProcessor snapshots len(sessionObj.AllResources) at construction for
@@ -133,18 +143,24 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		initialResourceCount = len(sessionObj.AllResources)
 	}
 
+	largeClusterSizeThreshold, _ := cautils.ParseIntEnvVar("LARGE_CLUSTER_SIZE", cautils.DefaultLargeClusterSize)
+	if largeClusterSizeThreshold <= 0 {
+		largeClusterSizeThreshold = cautils.DefaultLargeClusterSize
+	}
+
 	return &OPAProcessor{
-		OPASessionObj:          sessionObj,
-		regoDependenciesData:   regoDependenciesData,
-		clusterName:            clusterName,
-		exceptionEventRecorder: exceptionEventRecorder,
-		excludeNamespaces:      split(excludeNamespaces),
-		includeNamespaces:      split(includeNamespaces),
-		printEnabled:           enableRegoPrint,
-		compiledModules:        make(map[string]compiledRule),
-		TimedOutControls:       make(map[string]string),
-		initialResourceCount:   initialResourceCount,
-		celNamespaceIndex:      indexNamespaces(sessionObj),
+		OPASessionObj:             sessionObj,
+		regoDependenciesData:      regoDependenciesData,
+		clusterName:               clusterName,
+		exceptionEventRecorder:    exceptionEventRecorder,
+		excludeNamespaces:         split(excludeNamespaces),
+		includeNamespaces:         split(includeNamespaces),
+		printEnabled:              enableRegoPrint,
+		compiledModules:           make(map[string]compiledRule),
+		TimedOutControls:          make(map[string]string),
+		initialResourceCount:      initialResourceCount,
+		celNamespaceIndex:         indexNamespaces(sessionObj),
+		largeClusterSizeThreshold: largeClusterSizeThreshold,
 	}
 }
 
@@ -641,7 +657,7 @@ func (scope evaluationScope) matchedObjects(rule *reporthandling.PolicyRule) []w
 // so aggregator write-back during evaluation cannot re-bucket namespaces
 // mid-scan.
 func (opap *OPAProcessor) evaluationScopes() []evaluationScope {
-	resident, batches := cautils.PartitionResources(opap.initialResourceCount, opap.K8SResources, opap.ExternalResources, opap.AllResources)
+	resident, batches := cautils.PartitionResources(opap.initialResourceCount, opap.K8SResources, opap.ExternalResources, opap.AllResources, opap.largeClusterSizeThreshold)
 
 	residentGroups := newResidentIndex(resident)
 
@@ -918,6 +934,12 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 	// Record CEL resources with unknown verdicts as skipped before pass-inference.
 	opap.seedCELSkips(resources, rule, ruleRegoDependenciesData, celOut.skipped)
 
+	// incompleteCoverage is computed once per rule-scope call (not per
+	// resource, it's the same answer for all of them) so a Passed verdict
+	// below can be tagged with apis.SubStatusIncompleteCoverage when at least one
+	// of this control's dependency GVRs failed to collect in this scope.
+	incompleteCoverage := opap.hasUnreachableDependency(controlID)
+
 	// Build the set of failed IDs so we can correctly mark the remainder as passed.
 	// Resources are only written to the result map after a successful OPA evaluation,
 	// preventing stale StatusPassed entries when evaluation fails.
@@ -954,11 +976,15 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		if existing, ok := resources[id]; ok && (existing.Status == apis.StatusFailed || existing.Status == apis.StatusSkipped) {
 			continue
 		}
-		resources[id] = &resourcesresults.ResourceAssociatedRule{
+		passResult := &resourcesresults.ResourceAssociatedRule{
 			Name:                  rule.Name,
 			ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
 			Status:                apis.StatusPassed,
 		}
+		if incompleteCoverage {
+			passResult.SubStatus = apis.SubStatusIncompleteCoverage
+		}
+		resources[id] = passResult
 	}
 
 	// ruleResponse to ruleResult
@@ -998,6 +1024,30 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		}
 	}
 	return resources, nil
+}
+
+// hasUnreachableDependency reports whether controlID depends (per
+// ResourceToControlsMap, built from the control's declared rule.Match/
+// DynamicMatch resources) on at least one GVR that failed to collect this
+// scan. opap.InfoMap is mixed-purpose (whole-GVR pull failures keyed by GVR
+// string, plus per-resource eval skips keyed by resource ID); checking that
+// the key is also present in ResourceToControlsMap, the same guard
+// cautils.BuildScanCoverage uses, is what keeps this from matching a
+// per-resource skip as if it were a GVR pull failure.
+//
+// This runs once per rule-scope evaluation (not once per resource), so its
+// O(len(ResourceToControlsMap)) cost is paid a small, bounded number of times
+// per scan rather than once per resource.
+func (opap *OPAProcessor) hasUnreachableDependency(controlID string) bool {
+	for gvr, controlIDs := range opap.ResourceToControlsMap {
+		if !slices.Contains(controlIDs, controlID) {
+			continue
+		}
+		if info, ok := opap.InfoMap[gvr]; ok && info.InnerStatus == apis.StatusSkipped {
+			return true
+		}
+	}
+	return false
 }
 
 // markResourcesSkipped seeds the result map with StatusSkipped entries for every

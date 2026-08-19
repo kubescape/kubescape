@@ -10,8 +10,8 @@ import (
 	"github.com/anchore/syft/syft/format/spdxjson"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 )
 
 const (
@@ -34,7 +34,7 @@ func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = spdxOutputFile
 		}
-		if !strings.HasSuffix(strings.TrimSpace(outputFile), printer.SPDXOutputExt) {
+		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.SPDXOutputExt) {
 			outputFile = outputFile + printer.SPDXOutputExt
 		}
 	}

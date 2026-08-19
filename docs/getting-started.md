@@ -513,15 +513,22 @@ kubescape vap create-policy-binding \
 | `-p, --policy` | Policy/control to bind | Yes |
 | `--namespace` | Namespace selector (can be repeated) | No |
 | `--label` | Label selector in `key=value` format | No |
-| `-a, --action` | Action on failure: `Deny`, `Audit`, `Warn` | No (default: `Deny`) |
+| `-a, --action` | Action on failure: `Deny`, `Audit`, `Warn` (can be repeated; `Deny` and `Warn` cannot be combined) | No (default: `Deny`) |
 | `-r, --parameter-reference` | Parameter reference object name | No |
 
 ### Example
 
 ```bash
-# Create a policy that denies non-compliant resources in production
+# Report on non-compliant resources in production first
 kubescape vap create-policy-binding \
-  --name deny-privileged-containers \
+  --name privileged-containers \
+  --policy c-0057 \
+  --namespace production \
+  --action Audit --action Warn | kubectl apply -f -
+
+# Once the findings look right, switch the same binding to Deny
+kubescape vap create-policy-binding \
+  --name privileged-containers \
   --policy c-0057 \
   --namespace production \
   --action Deny | kubectl apply -f -

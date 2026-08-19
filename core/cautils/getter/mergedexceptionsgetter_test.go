@@ -285,6 +285,34 @@ func TestMergedExceptionsGetter_Deduplication(t *testing.T) {
 			crd:   []armotypes.PostureExceptionPolicy{posturePolicy("crd", "C-0034", nginx("production"))},
 			want:  []armotypes.PostureExceptionPolicy{posturePolicy("crd", "C-0034", nginx("production"))},
 		},
+		{
+			// Regression for issue-3367: a cloud exception with no Resources at
+			// all applies with no scope constraint (the same "no resources = no
+			// scope constraint" convention used for manual controls), so it must
+			// subsume a CRD exception for the same control on any workload, not
+			// just one that happens to share a resource key.
+			name: "scope-less cloud exception subsumes a narrower CRD exception for the same control",
+			cloud: []armotypes.PostureExceptionPolicy{{
+				PolicyType:      "cloud",
+				PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0034"}},
+			}},
+			crd:  []armotypes.PostureExceptionPolicy{posturePolicy("crd", "C-0034", nginx("production"))},
+			want: []armotypes.PostureExceptionPolicy{{PolicyType: "cloud", PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0034"}}}},
+		},
+		{
+			// The scope-less cloud exception only covers the control it names;
+			// a CRD exception for a different control must survive untouched.
+			name: "scope-less cloud exception does not subsume a CRD exception for a different control",
+			cloud: []armotypes.PostureExceptionPolicy{{
+				PolicyType:      "cloud",
+				PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0034"}},
+			}},
+			crd: []armotypes.PostureExceptionPolicy{posturePolicy("crd", "C-0035", nginx("production"))},
+			want: []armotypes.PostureExceptionPolicy{
+				{PolicyType: "cloud", PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0034"}}},
+				posturePolicy("crd", "C-0035", nginx("production")),
+			},
+		},
 	}
 
 	for _, tc := range tests {

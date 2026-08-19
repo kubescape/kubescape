@@ -11,7 +11,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -71,7 +71,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	}
 
 	// manual controls have no resource results, so exceptions must be applied directly on the summary.
-	applyExceptionsToManualControls(&opap.Report.SummaryDetails, opap.Exceptions, opap.clusterName, processor)
+	manualControlMatches := applyExceptionsToManualControls(&opap.Report.SummaryDetails, opap.Exceptions, opap.clusterName, processor)
 
 	// set result summary
 	// map control to error
@@ -79,43 +79,62 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
 
 	if opap.AuditExceptions {
-		opap.ExceptionAudit = buildExceptionAudit(loadedExceptions, opap.Exceptions, opap.ResourcesResult, opap.AllResources, opap.AllPolicies, processor)
+		opap.ExceptionAudit = buildExceptionAudit(loadedExceptions, opap.Exceptions, opap.ResourcesResult, opap.AllResources, opap.AllPolicies, processor, manualControlMatches)
 	}
+}
+
+// manualControlExceptionMatch records that exception matched controlID via the
+// manual-control exception path, so buildExceptionAudit can count it as a match the
+// same way it already counts a resource-backed one - manual controls never appear in
+// opap.ResourcesResult, so without this the audit reports such an exception as unused
+// even while it is actively suppressing the control.
+type manualControlExceptionMatch struct {
+	exception armotypes.PostureExceptionPolicy
+	controlID string
 }
 
 // applyExceptionsToManualControls marks manual controls as passed+w/exceptions when
 // an explicit exception exists for them. Updates both the top-level and per-framework
 // control maps since manual controls produce no resource results for the normal exception loop.
+// Returns the exceptions that matched a manual control, for exception-audit bookkeeping.
 func applyExceptionsToManualControls(
 	summaryDetails *reportsummary.SummaryDetails,
 	exceptionPolicies []armotypes.PostureExceptionPolicy,
 	clusterName string,
 	processor *exceptions.Processor,
-) {
+) []manualControlExceptionMatch {
 	if len(exceptionPolicies) == 0 {
-		return
+		return nil
 	}
 
-	applyExceptionsToControlSummaries(summaryDetails.Controls, exceptionPolicies, clusterName, processor)
+	matches := applyExceptionsToControlSummaries(summaryDetails.Controls, exceptionPolicies, clusterName, processor)
 
 	for i := range summaryDetails.Frameworks {
+		// Top-level and per-framework Controls mirror the same controlIDs, so the
+		// matches collected from the top-level pass above already cover this one;
+		// collecting them again here would only duplicate audit bookkeeping.
 		applyExceptionsToControlSummaries(summaryDetails.Frameworks[i].Controls, exceptionPolicies, clusterName, processor)
 	}
+
+	return matches
 }
 
 // applyExceptionsToControlSummaries updates manual controls in a single ControlSummaries map.
+// Returns the exceptions that matched, for exception-audit bookkeeping.
 func applyExceptionsToControlSummaries(
 	controlSummaries reportsummary.ControlSummaries,
 	exceptionPolicies []armotypes.PostureExceptionPolicy,
 	clusterName string,
 	processor *exceptions.Processor,
-) {
+) []manualControlExceptionMatch {
+	var matches []manualControlExceptionMatch
 	for controlID, ctrl := range controlSummaries {
 		if ctrl.GetSubStatus() != apis.SubStatusManualReview {
 			continue
 		}
 
-		if !hasExplicitControlException(exceptionPolicies, controlID, clusterName, processor) {
+		matchingExceptions := matchingControlExceptions(exceptionPolicies, controlID, clusterName, processor)
+		if len(matchingExceptions) == 0 {
 			continue
 		}
 
@@ -124,7 +143,12 @@ func applyExceptionsToControlSummaries(
 			SubStatus:   apis.SubStatusException,
 		})
 		controlSummaries[controlID] = ctrl
+
+		for _, exception := range matchingExceptions {
+			matches = append(matches, manualControlExceptionMatch{exception: exception, controlID: controlID})
+		}
 	}
+	return matches
 }
 
 // requiresResourceMatch reports whether the designator has constraints
@@ -158,9 +182,12 @@ func filterExpiredExceptions(exceptions []armotypes.PostureExceptionPolicy) []ar
 	return valid
 }
 
-// hasExplicitControlException reports whether an exception policy targets controlID
-// with a cluster-or-global-only designator matching clusterName.
-func hasExplicitControlException(exceptionPolicies []armotypes.PostureExceptionPolicy, controlID, clusterName string, processor *exceptions.Processor) bool {
+// matchingControlExceptions returns the exception policies that explicitly target
+// controlID with a cluster-or-global-only designator matching clusterName. An exception
+// object is returned at most once even if more than one of its PosturePolicies matches.
+func matchingControlExceptions(exceptionPolicies []armotypes.PostureExceptionPolicy, controlID, clusterName string, processor *exceptions.Processor) []armotypes.PostureExceptionPolicy {
+	var matches []armotypes.PostureExceptionPolicy
+policyLoop:
 	for _, policy := range exceptionPolicies {
 		for _, pp := range policy.PosturePolicies {
 			if !processor.RegexCompareControlID(pp.ControlID, controlID) {
@@ -168,19 +195,21 @@ func hasExplicitControlException(exceptionPolicies []armotypes.PostureExceptionP
 			}
 			// no resources = no scope constraint, matches any cluster
 			if len(policy.Resources) == 0 {
-				return true
+				matches = append(matches, policy)
+				continue policyLoop
 			}
 			for _, resource := range policy.Resources {
 				if requiresResourceMatch(resource) {
 					continue
 				}
 				if processor.MatchesCluster(&resource, clusterName) {
-					return true
+					matches = append(matches, policy)
+					continue policyLoop
 				}
 			}
 		}
 	}
-	return false
+	return matches
 }
 
 func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[string]apis.StatusInfo, controlSummary reportsummary.ControlSummaries) map[string]apis.StatusInfo {

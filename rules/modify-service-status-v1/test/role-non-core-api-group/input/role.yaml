@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gateway-status-writer
+  namespace: mesh
+rules:
+- apiGroups: ["gateway.networking.k8s.io"]
+  resources: ["services/status", "*/status"]
+  verbs: ["update", "patch"]

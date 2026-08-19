@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -195,7 +195,7 @@ func TestMarkdownPrinter_ActionPrint_Header(t *testing.T) {
 	out := mdRunActionPrint(t, mdSessionFixture())
 
 	assert.True(t, strings.HasPrefix(out, "# Kubescape Security Report"), "must start with h1 heading")
-	assert.Contains(t, out, "**Compliance Score:** 42", "compliance score must appear")
+	assert.Contains(t, out, "**Compliance Score:** 42%", "compliance score must appear with percentage")
 }
 
 func TestMarkdownPrinter_ActionPrint_SummaryTablePresent(t *testing.T) {
@@ -285,8 +285,54 @@ func TestMarkdownPrinter_ActionPrint_EmptyControls(t *testing.T) {
 	out := mdRunActionPrint(t, session)
 
 	assert.Contains(t, out, "# Kubescape Security Report")
-	assert.Contains(t, out, "**Compliance Score:** 0")
+	assert.Contains(t, out, "**Compliance Score:** 0%")
 	assert.Contains(t, out, "## Summary")
+}
+
+func TestMarkdownPrinter_ActionPrint_NegativeScoreRendersNA(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			ComplianceScore: -1,
+			Controls:        reportsummary.ControlSummaries{},
+		},
+	}
+
+	out := mdRunActionPrint(t, session)
+
+	assert.Contains(t, out, "# Kubescape Security Report")
+	assert.Contains(t, out, "**Compliance Score:** N/A")
+	assert.NotContains(t, out, "**Compliance Score:** -1")
+}
+
+func TestMarkdownPrinter_ActionPrint_PerfectScoreRenders100Percent(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			ComplianceScore: 100,
+			Controls:        reportsummary.ControlSummaries{},
+		},
+	}
+
+	out := mdRunActionPrint(t, session)
+
+	assert.Contains(t, out, "# Kubescape Security Report")
+	assert.Contains(t, out, "**Compliance Score:** 100%")
+}
+
+func TestMarkdownPrinter_ActionPrint_FractionalScoreRendersPercentage(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			ComplianceScore: 99.5,
+			Controls:        reportsummary.ControlSummaries{},
+		},
+	}
+
+	out := mdRunActionPrint(t, session)
+
+	assert.Contains(t, out, "# Kubescape Security Report")
+	assert.Contains(t, out, "**Compliance Score:** 99%")
 }
 
 func TestMdSortedControls(t *testing.T) {

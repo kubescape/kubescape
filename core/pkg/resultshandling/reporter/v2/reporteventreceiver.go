@@ -14,9 +14,9 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/reporter"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -193,7 +193,7 @@ func (report *ReportEventReceiver) setResults(ctx context.Context, reportObj *re
 			continue
 		}
 
-		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Results) > 0 {
+		if *counter+len(r) >= MAX_REPORT_SIZE && (len(reportObj.Results) > 0 || len(reportObj.Resources) > 0) {
 
 			// send report
 			if err := report.sendReport(ctx, reportObj, *reportCounter, false); err != nil {
