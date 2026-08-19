@@ -46,13 +46,14 @@ func TestListCRDsWithPagination_MultiPage(t *testing.T) {
 		listFunc: func(opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			pageCount++
 			list := &unstructured.UnstructuredList{}
-			if opts.Continue == "" {
+			switch opts.Continue {
+			case "":
 				list.Items = []unstructured.Unstructured{{}, {}}
 				list.SetContinue("token1")
-			} else if opts.Continue == "token1" {
+			case "token1":
 				list.Items = []unstructured.Unstructured{{}}
 				list.SetContinue("")
-			} else {
+			default:
 				return nil, fmt.Errorf("unexpected token")
 			}
 			return list, nil
