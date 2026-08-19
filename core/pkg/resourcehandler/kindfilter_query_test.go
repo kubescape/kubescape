@@ -243,3 +243,27 @@ func TestPreflightSkipsAccessReviewForKindFilteredResource(t *testing.T) {
 	assert.Empty(t, result.Denied())
 	assert.NotEmpty(t, result.Checks)
 }
+
+func TestKindFilterHint(t *testing.T) {
+	tests := []struct {
+		name     string
+		scanInfo *cautils.ScanInfo
+		want     string
+	}{
+		{name: "no filters", scanInfo: &cautils.ScanInfo{}},
+		{name: "blank filter is not a filter", scanInfo: &cautils.ScanInfo{IncludeKinds: " , "}},
+		{name: "include only", scanInfo: &cautils.ScanInfo{IncludeKinds: "Sandbox"}, want: "--include-kinds Sandbox"},
+		{name: "exclude only", scanInfo: &cautils.ScanInfo{ExcludeKinds: "Job,CronJob"}, want: "--exclude-kinds Job,CronJob"},
+		{
+			name:     "both filters",
+			scanInfo: &cautils.ScanInfo{IncludeKinds: " Sandbox ", ExcludeKinds: "Job"},
+			want:     "--include-kinds Sandbox --exclude-kinds Job",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, kindFilterHint(test.scanInfo))
+		})
+	}
+}
