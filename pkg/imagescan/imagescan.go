@@ -46,7 +46,7 @@ func (c RegistryCredentials) hasAuthenticator() bool {
 	return c.Token != "" || (c.Username != "" && c.Password != "")
 }
 
-func NewDefaultDBConfig(grypeURL string) (distribution.Config, installation.Config, bool, error) {
+func NewDefaultDBConfig(grypeURL string, skipDBUpdate bool) (distribution.Config, installation.Config, bool, error) {
 	dir := filepath.Join(xdg.CacheHome, defaultDBDirName)
 	finalURL := defaultGrypeListingURL
 
@@ -71,7 +71,7 @@ func NewDefaultDBConfig(grypeURL string) (distribution.Config, installation.Conf
 		finalURL = cleanedGrypeURL
 	}
 
-	shouldUpdate := true
+	shouldUpdate := !skipDBUpdate
 
 	return distribution.Config{
 			LatestURL: finalURL,
@@ -333,19 +333,19 @@ func NewScanService(distCfg distribution.Config, installCfg installation.Config)
 }
 
 func NewScanServiceWithMatchers(distCfg distribution.Config, installCfg installation.Config, useDefaultMatchers bool) (*Service, error) {
-	return NewScanServiceWithMatchersAndSources(distCfg, installCfg, useDefaultMatchers, nil)
+	return NewScanServiceWithMatchersAndSources(distCfg, installCfg, useDefaultMatchers, nil, true)
 }
 
 // NewRemoteOnlyScanService creates a Service restricted to remote registry sources only,
 // preventing resolution of local files or local daemon images (used by MCP server).
 func NewRemoteOnlyScanService(distCfg distribution.Config, installCfg installation.Config) (*Service, error) {
-	return NewScanServiceWithMatchersAndSources(distCfg, installCfg, true, []string{"registry"})
+	return NewScanServiceWithMatchersAndSources(distCfg, installCfg, true, []string{"registry"}, true)
 }
 
-func NewScanServiceWithMatchersAndSources(distCfg distribution.Config, installCfg installation.Config, useDefaultMatchers bool, sources []string) (*Service, error) {
-	vp, status, err := NewVulnerabilityDB(distCfg, installCfg, true)
+func NewScanServiceWithMatchersAndSources(distCfg distribution.Config, installCfg installation.Config, useDefaultMatchers bool, sources []string, shouldUpdate bool) (*Service, error) {
+	vp, status, err := NewVulnerabilityDB(distCfg, installCfg, shouldUpdate)
 	if err = validateDBLoad(err, status); err != nil {
-		return nil, err
+		return nil, wrapDBLoadError(err, shouldUpdate)
 	}
 	return &Service{
 		vp:                 vp,
@@ -353,6 +353,15 @@ func NewScanServiceWithMatchersAndSources(distCfg distribution.Config, installCf
 		useDefaultMatchers: useDefaultMatchers,
 		sources:            sources,
 	}, nil
+}
+
+// wrapDBLoadError adds a hint when the database update was skipped and the
+// load failed, so users know the local cache must be populated first.
+func wrapDBLoadError(err error, shouldUpdate bool) error {
+	if shouldUpdate {
+		return err
+	}
+	return fmt.Errorf("%w; no vulnerability database found locally — run once without --skip-db-update to download it", err)
 }
 
 // ParseSeverity returns a Grype severity given a severity string

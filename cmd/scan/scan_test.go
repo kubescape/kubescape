@@ -1192,3 +1192,11 @@ func TestGetScanCommandRegistersImagePlatformFlag(t *testing.T) {
 	assert.Contains(t, flag.Usage, "linux/amd64")
 	assert.Contains(t, flag.Usage, "overrides platform inferred")
 }
+
+func TestScanCommandRegistersSkipDBUpdateFlag(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	flag := cmd.PersistentFlags().Lookup("skip-db-update")
+	require.NotNil(t, flag)
+	assert.Equal(t, "false", flag.DefValue)
+}

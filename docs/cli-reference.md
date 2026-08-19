@@ -56,6 +56,7 @@ kubescape scan [target] [flags]
 | `--scan-images` | Also scan container images for vulnerabilities | `false` |
 | `--image-platform <platform>` | OCI platform for workload image scans, such as `linux/amd64`. Overrides platform inferred from Nodes and hard scheduling constraints | inferred |
 | `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical`. Failed controls with unknown severity (missing base score) are treated as exceeding any threshold | - |
+| `--skip-db-update` | Do not update the vulnerability database before scanning images; uses the locally cached database. Fails if none is cached (run once without this flag to download it). | `false` |
 | `--submit` | Submit results to Kubescape SaaS | `false` |
 | `--use-artifacts-from <path>` | Load artifacts from local directory (offline mode) | - |
 | `--use-from <path>` | Load specific policy from path | - |

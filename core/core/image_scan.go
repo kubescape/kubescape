@@ -359,12 +359,12 @@ func scanWithRegistryMapping(
 func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (bool, error) {
 	logger.L().Start(fmt.Sprintf("Scanning image %s...", imgScanInfo.Image))
 
-	distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL)
+	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, scanInfo.SkipDBUpdate)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Invalid Grype database URL '%s': %v", scanInfo.ListingURL, err))
 		return false, err
 	}
-	svc, err := imagescan.NewScanServiceWithMatchers(distCfg, installCfg, imgScanInfo.UseDefaultMatchers)
+	svc, err := imagescan.NewScanServiceWithMatchersAndSources(distCfg, installCfg, imgScanInfo.UseDefaultMatchers, nil, shouldUpdate)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to initialize image scanner: %s", err))
 		return false, err
