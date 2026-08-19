@@ -368,6 +368,10 @@ func TestIsSensitivePath(t *testing.T) {
 		{name: "Deployment data field", kind: "Deployment", path: "data.key", want: false},
 		{name: "ConfigMap data field", kind: "ConfigMap", path: "data.config", want: false},
 		{name: "empty kind", kind: "", path: "data.key", want: false},
+		{name: "container env value", kind: "Deployment", path: "spec.template.spec.containers[0].env[1].value", want: true},
+		{name: "initContainer env value", kind: "Pod", path: "spec.initContainers[0].env[0].value", want: true},
+		{name: "container env name is not sensitive", kind: "Deployment", path: "spec.template.spec.containers[0].env[1].name", want: false},
+		{name: "container env valueFrom is not a literal", kind: "Deployment", path: "spec.containers[0].env[0].valueFrom.secretKeyRef.name", want: false},
 	}
 
 	for _, tc := range cases {
@@ -664,6 +668,33 @@ func TestAssistedRemediationPathsWithCurrentValuesFiltered(t *testing.T) {
 		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, true)
 		require.Len(t, got, 1)
 		assert.Equal(t, "spec.containers[0].securityContext.privileged (current: true)", got[0])
+	})
+
+	t.Run("container env value with showSecrets=false is redacted", func(t *testing.T) {
+		resource := &mockResource{
+			kind: "Deployment",
+			obj: map[string]any{
+				"spec": map[string]any{
+					"template": map[string]any{
+						"spec": map[string]any{
+							"containers": []any{
+								map[string]any{
+									"env": []any{
+										map[string]any{"name": "LOG_LEVEL", "value": "debug"},
+										map[string]any{"name": "DB_PASSWORD", "value": "s3cret"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		ctrl := makeControlWithPaths([]string{"spec.template.spec.containers[0].env[1].value"}, nil)
+		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, false)
+		require.Len(t, got, 1)
+		assert.Equal(t, "spec.template.spec.containers[0].env[1].value (current: "+redactedValue+")", got[0])
+		assert.NotContains(t, got[0], "s3cret")
 	})
 
 	t.Run("empty paths returns nil", func(t *testing.T) {
