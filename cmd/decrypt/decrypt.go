@@ -9,10 +9,9 @@ import (
 )
 
 var decryptCmdExamples = `
-  # The key is used as raw bytes and must be exactly 32 characters long.
-  # Note: openssl rand -base64 32 (44 chars) and openssl rand -hex 32 (64 chars)
-  # are NOT valid because they exceed 32 bytes when passed as raw text.
-  export KUBESCAPE_MASTER_KEY="01234567890123456789012345678901"
+  # Supply the same passphrase that encrypted the report. Hex-encoded key
+  # material goes in KUBESCAPE_MASTER_KEY_HEX instead.
+  export KUBESCAPE_MASTER_KEY="$(cat master-key.txt)"
 
   # Decrypt an encrypted report
   kubescape decrypt encrypted-report.json
@@ -26,7 +25,8 @@ func GetDecryptCommand() *cobra.Command {
 		Use:          "decrypt <report.json>",
 		Short:        "Decrypt a report produced by kubescape scan --encrypt",
 		SilenceUsage: true,
-		Long: `Decrypt all encrypted report fields using KUBESCAPE_MASTER_KEY.
+		Long: `Decrypt all encrypted report fields using KUBESCAPE_MASTER_KEY
+(or KUBESCAPE_MASTER_KEY_HEX).
 
 The command restores metadata, resources, result raw resources, resource
 labels, and resource ID references. The decrypted report is written to
