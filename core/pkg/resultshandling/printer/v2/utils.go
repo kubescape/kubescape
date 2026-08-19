@@ -9,9 +9,9 @@ import (
 	"github.com/anchore/grype/grype/match"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
@@ -445,6 +445,10 @@ func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.
 		if _, seen := seenImages[image]; !seen {
 			seenImages[image] = struct{}{}
 			imageScanSummary.Images = append(imageScanSummary.Images, image)
+		}
+
+		if imageScanSummary.VulnDBBuilt == nil {
+			imageScanSummary.VulnDBBuilt = imageScanData[i].VulnDBBuilt
 		}
 
 		cves := extractCVEs(imageScanData[i].Matches, image)

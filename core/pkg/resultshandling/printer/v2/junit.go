@@ -5,7 +5,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -13,9 +12,9 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/shared"
@@ -105,7 +104,7 @@ func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) error 
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = junitOutputFile
 		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != printer.JunitOutputExt {
+		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.JunitOutputExt) {
 			outputFile = outputFile + printer.JunitOutputExt
 		}
 	}

@@ -1,14 +1,17 @@
 package opaprocessor
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -58,6 +61,7 @@ func TestBuildExceptionAudit(t *testing.T) {
 			},
 		},
 		exceptions.NewProcessor(),
+		nil,
 	)
 
 	require.NotNil(t, audit)
@@ -90,6 +94,70 @@ func TestBuildExceptionAudit(t *testing.T) {
 	assert.Equal(t, []string{"C-9999"}, items["invalid-control-exception"].InvalidControls)
 }
 
+// Regression for issue-3366: an exception that exists solely to suppress a
+// manual-review control has no resourcesresults.Result entries at all (manual
+// controls produce none), so the audit must be told about the match through
+// manualControlMatches instead - otherwise it reports the exception as unused
+// even though applyExceptionsToManualControls actively applied it.
+func TestBuildExceptionAuditCountsManualControlMatches(t *testing.T) {
+	manualOnlyException := auditException("manual-control-exception", "C-0286", nil)
+
+	audit := buildExceptionAudit(
+		[]armotypes.PostureExceptionPolicy{manualOnlyException},
+		[]armotypes.PostureExceptionPolicy{manualOnlyException},
+		nil, // no resource-backed results at all
+		nil,
+		nil,
+		exceptions.NewProcessor(),
+		[]manualControlExceptionMatch{
+			{exception: manualOnlyException, controlID: "C-0286"},
+		},
+	)
+
+	require.NotNil(t, audit)
+	require.Len(t, audit.Items, 1)
+	item := audit.Items[0]
+
+	assert.Equal(t, exceptionAuditStatusMatched, item.Status, "an exception that suppressed a manual control must not be reported as unused")
+	assert.Equal(t, 1, item.MatchCount)
+	require.Len(t, item.MatchedResources, 1)
+	assert.Equal(t, "C-0286", item.MatchedResources[0].ControlID)
+	assert.Equal(t, 1, audit.Summary.Matched)
+	assert.Equal(t, 0, audit.Summary.Unused)
+}
+
+// End-to-end regression for issue-3366: runs the real updateResults path (via
+// a manual-review-only control summary and AuditExceptions enabled) and checks
+// the resulting ExceptionAudit, rather than calling buildExceptionAudit directly.
+func TestUpdateResults_ExceptionAuditCountsManualControlMatch(t *testing.T) {
+	manualException := auditException("manual-control-exception", "C-0286", nil)
+
+	session := cautils.NewOPASessionObjMock()
+	session.AuditExceptions = true
+	session.Exceptions = []armotypes.PostureExceptionPolicy{manualException}
+	session.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+		"C-0286": reportsummary.ControlSummary{
+			ControlID: "C-0286",
+			StatusInfo: apis.StatusInfo{
+				InnerStatus: apis.StatusSkipped,
+				SubStatus:   apis.SubStatusManualReview,
+			},
+		},
+	}
+
+	opap := &OPAProcessor{OPASessionObj: session}
+	opap.updateResults(context.Background())
+
+	require.NotNil(t, opap.ExceptionAudit)
+	require.Len(t, opap.ExceptionAudit.Items, 1)
+	item := opap.ExceptionAudit.Items[0]
+	assert.Equal(t, exceptionAuditStatusMatched, item.Status, "the manual control's exception must not be reported as unused")
+	assert.Equal(t, 1, item.MatchCount)
+
+	ctrl := opap.Report.SummaryDetails.Controls["C-0286"]
+	assert.Equal(t, apis.StatusPassed, ctrl.GetStatus().Status(), "sanity check: the exception did actually suppress the manual control")
+}
+
 func TestBuildExceptionAuditTreatsRegexControlAsValid(t *testing.T) {
 	regexException := auditException("regex-exception", "C-000[12]", nil)
 
@@ -104,6 +172,7 @@ func TestBuildExceptionAuditTreatsRegexControlAsValid(t *testing.T) {
 			},
 		},
 		exceptions.NewProcessor(),
+		nil,
 	)
 
 	require.NotNil(t, audit)
@@ -128,6 +197,7 @@ func TestBuildExceptionAuditDoesNotCollapseDuplicateNamesWithDifferentGUIDs(t *t
 			},
 		},
 		exceptions.NewProcessor(),
+		nil,
 	)
 
 	require.NotNil(t, audit)

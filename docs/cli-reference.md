@@ -54,7 +54,7 @@ kubescape scan [target] [flags]
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
 | `--scan-images` | Also scan container images for vulnerabilities | `false` |
-| `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical` | - |
+| `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical`. Failed controls with unknown severity (missing base score) are treated as exceeding any threshold | - |
 | `--submit` | Submit results to Kubescape SaaS | `false` |
 | `--use-artifacts-from <path>` | Load artifacts from local directory (offline mode) | - |
 | `--use-from <path>` | Load specific policy from path | - |

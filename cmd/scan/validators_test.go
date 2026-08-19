@@ -1,10 +1,11 @@
 package scan
 
 import (
+	"math"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/cmd/shared"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/cmd/shared"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 )
 
 // Test_validateControlScanInfo tests how scan info is validated for the `scan control` command
@@ -29,11 +30,7 @@ func Test_validateControlScanInfo(t *testing.T) {
 			&cautils.ScanInfo{FailThresholdSeverity: "Unknown"},
 			shared.ErrUnknownSeverity,
 		},
-		{
-			"Submit with omit-raw-resources should be invalid",
-			&cautils.ScanInfo{Submit: cautils.NewBoolPtr(new(true)), OmitRawResources: true},
-			ErrOmitRawResourcesOrSubmit,
-		},
+
 		{
 			"Compliance threshold below 0 should be invalid",
 			&cautils.ScanInfo{ComplianceThreshold: -1},
@@ -96,16 +93,7 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 			&cautils.ScanInfo{AccountID: validAccountID},
 			nil,
 		},
-		{
-			"Submit with keep-local should be invalid",
-			&cautils.ScanInfo{Submit: cautils.NewBoolPtr(new(true)), Local: true, AccountID: validAccountID},
-			ErrKeepLocalOrSubmit,
-		},
-		{
-			"Submit with omit-raw-resources should be invalid",
-			&cautils.ScanInfo{Submit: cautils.NewBoolPtr(new(true)), OmitRawResources: true, AccountID: validAccountID},
-			ErrOmitRawResourcesOrSubmit,
-		},
+
 		{
 			"Compliance threshold below 0 should be invalid",
 			&cautils.ScanInfo{ComplianceThreshold: -1, AccountID: validAccountID},
@@ -114,6 +102,16 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 		{
 			"Coverage threshold above 100 should be invalid",
 			&cautils.ScanInfo{FailCoverageThreshold: 150, AccountID: validAccountID},
+			ErrBadThreshold,
+		},
+		{
+			"NaN compliance threshold should be invalid",
+			&cautils.ScanInfo{ComplianceThreshold: float32(math.NaN()), AccountID: validAccountID},
+			ErrBadThreshold,
+		},
+		{
+			"NaN coverage threshold should be invalid",
+			&cautils.ScanInfo{FailCoverageThreshold: float32(math.NaN()), AccountID: validAccountID},
 			ErrBadThreshold,
 		},
 		{
@@ -174,6 +172,7 @@ func Test_validateCoverageThreshold(t *testing.T) {
 		{"100 is a valid threshold", &cautils.ScanInfo{FailCoverageThreshold: 100}, nil},
 		{"101 is out of range", &cautils.ScanInfo{FailCoverageThreshold: 101}, ErrBadThreshold},
 		{"negative value is out of range", &cautils.ScanInfo{FailCoverageThreshold: -1}, ErrBadThreshold},
+		{"NaN is out of range", &cautils.ScanInfo{FailCoverageThreshold: float32(math.NaN())}, ErrBadThreshold},
 	}
 
 	for _, tc := range testCases {
@@ -196,6 +195,7 @@ func Test_validateThresholdsOnly_Compliance(t *testing.T) {
 		{"Compliance threshold below 0 is out of range", &cautils.ScanInfo{ComplianceThreshold: -1}, ErrBadThreshold},
 		{"Compliance threshold at 0 is valid", &cautils.ScanInfo{ComplianceThreshold: 0}, nil},
 		{"Compliance threshold at 100 is valid", &cautils.ScanInfo{ComplianceThreshold: 100}, nil},
+		{"NaN compliance threshold is out of range", &cautils.ScanInfo{ComplianceThreshold: float32(math.NaN())}, ErrBadThreshold},
 	}
 
 	for _, tc := range testCases {

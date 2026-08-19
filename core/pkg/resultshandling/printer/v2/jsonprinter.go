@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/anchore/clio"
@@ -13,9 +12,9 @@ import (
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -26,12 +25,11 @@ const (
 var _ printer.IPrinter = &JsonPrinter{}
 
 type JsonPrinter struct {
-	writer      *os.File
-	minSeverity string
+	writer *os.File
 }
 
-func NewJsonPrinter(minSeverity string) *JsonPrinter {
-	return &JsonPrinter{minSeverity: minSeverity}
+func NewJsonPrinter() *JsonPrinter {
+	return &JsonPrinter{}
 }
 
 func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) error {
@@ -40,7 +38,7 @@ func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) error {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = jsonOutputFile
 		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != printer.JsonOutputExt {
+		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.JsonOutputExt) {
 			outputFile = outputFile + printer.JsonOutputExt
 		}
 	}
@@ -108,7 +106,6 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScan
 	// extract specified labels from workloads, and attach scan coverage gaps.
 	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverage(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources, &opaSessionObj.ScanCoverage)
 	reportWithSeverity.ExceptionAudit = opaSessionObj.ExceptionAudit
-	FilterBySeverity(reportWithSeverity, jp.minSeverity)
 
 	r, err := json.Marshal(reportWithSeverity)
 	if err != nil {

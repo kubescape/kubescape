@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: wildcard-token-minter-rb
+  namespace: staging
+subjects:
+- kind: ServiceAccount
+  name: release-sa
+  namespace: staging
+roleRef:
+  kind: Role
+  name: wildcard-token-minter
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,10 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: named-secret-reader
+  namespace: build
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["builder-token"]
+  verbs: ["get"]

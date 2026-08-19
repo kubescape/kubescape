@@ -12,7 +12,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/pkg/securityexception"
+	"github.com/kubescape/kubescape/v4/core/pkg/securityexception"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -65,6 +65,17 @@ func NewCRDExceptionsGetter(k8sClient client.Client) *CRDExceptionsGetter {
 	}
 	getter.client = client
 	return getter
+}
+
+// NewCRDExceptionsGetterWithClients creates a CRD-backed exceptions getter from
+// clients that belong to the same scan target. Callers that already resolved a
+// Kubernetes target should use this constructor instead of consulting the
+// process-global Kubernetes configuration again.
+func NewCRDExceptionsGetterWithClients(dynamicClient dynamic.Interface, k8sClient client.Client) *CRDExceptionsGetter {
+	return &CRDExceptionsGetter{
+		client:    dynamicClient,
+		k8sClient: k8sClient,
+	}
 }
 
 func (g *CRDExceptionsGetter) GetExceptions(ctx context.Context, _ string) ([]armotypes.PostureExceptionPolicy, error) {
@@ -244,6 +255,13 @@ func buildResourceDesignators(
 			names, err := resolveNamespaceSelector(ctx, labelSelector, k8sClient)
 			if err != nil {
 				return nil, err
+			}
+			if len(names) == 0 {
+				// A selector matching no namespace must not fall through to the
+				// scopeless-exception fallback below: an empty designator list
+				// means "matches every cluster" downstream, which would turn a
+				// deliberately narrow exception into a cluster-wide one.
+				return nil, fmt.Errorf("namespaceSelector matched no namespaces")
 			}
 			namespaceNames = names
 		}

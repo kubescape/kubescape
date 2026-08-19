@@ -108,7 +108,7 @@ func stubRequest(obj map[string]any) map[string]any {
 // kept only for an object with no determinable kind, which objectGVR reports
 // and appliesTo already treats as "evaluate and let it error".
 func resourcePlural(obj map[string]any) string {
-	gvr, ok := objectGVR(obj)
+	gvr, _, ok := objectGVR(obj)
 	if !ok {
 		return ""
 	}

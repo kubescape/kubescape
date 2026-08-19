@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: service-editor-crb
+subjects:
+- kind: ServiceAccount
+  name: ingress-controller
+  namespace: ingress
+roleRef:
+  kind: ClusterRole
+  name: service-editor
+  apiGroup: rbac.authorization.k8s.io

@@ -39,9 +39,9 @@ Supported tests:
 3. E2E yaml scanning
 
 TODO:
-1. Test formats + output
-2. Test --compliance-threshold
-3. Test known supported FW
-4. Test FW list
-5. Test Controls list
+1. Test formats + output - DONE
+2. Test --compliance-threshold - DONE
+3. Test known supported FW - DONE
+4. Test FW list - DONE
+5. Test Controls list - DONE
 '''

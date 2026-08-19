@@ -19,6 +19,10 @@ deny contains msga if {
 
 	rule := role.rules[p]
 
+	# a rule restricted to named pods cannot be pointed at an arbitrary pod's ephemeral containers
+	# (an omitted or explicitly empty resourceNames list is unrestricted)
+	count(object.get(rule, "resourceNames", [])) == 0
+
 	subject := rolebinding.subjects[k]
 	is_same_subjects(subjectVector, subject)
 

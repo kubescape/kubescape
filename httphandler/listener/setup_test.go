@@ -54,7 +54,7 @@ func TestLoadTLSKey(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, pair)
 		require.Contains(t, err.Error(), "failed to load key pair")
-		
+
 		// We expect the error to wrap fs.ErrNotExist because the file is missing.
 		require.ErrorIs(t, err, os.ErrNotExist)
 	})

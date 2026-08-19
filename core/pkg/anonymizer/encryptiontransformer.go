@@ -1,6 +1,6 @@
 package anonymizer
 
-import "github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
+import "github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
 
 // EncryptionTransformer implements Transformer using AES-256-GCM encryption.
 //

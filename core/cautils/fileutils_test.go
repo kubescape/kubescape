@@ -34,6 +34,28 @@ func TestListFiles(t *testing.T) {
 	assert.Equal(t, 13, len(files))
 }
 
+func TestLoadResourcesFromFilesDoesNotSubstituteNestedBasenameForMissingExactPath(t *testing.T) {
+	root := t.TempDir()
+	nestedDir := filepath.Join(root, "nested")
+	require.NoError(t, os.MkdirAll(nestedDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(nestedDir, "manifest.yaml"), []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name: nested
+`), 0o600))
+
+	requestedPath := filepath.Join(root, "manifest.yaml")
+	workloads, skipped, err := LoadResourcesFromFiles(context.Background(), requestedPath, root, nil)
+
+	require.ErrorIs(t, err, ErrNoManifestFiles)
+	assert.Empty(t, workloads)
+	assert.Empty(t, skipped)
+
+	workloads, _, err = LoadResourcesFromFiles(context.Background(), filepath.Join(root, "*.yaml"), root, nil)
+	require.NoError(t, err)
+	assert.Contains(t, workloads, filepath.Join(nestedDir, "manifest.yaml"), "explicit glob behavior must remain recursive")
+}
+
 func TestLoadResourcesFromFiles(t *testing.T) {
 	workloads, _, err := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "", nil)
 	require.NoError(t, err)
@@ -47,6 +69,21 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 			assert.Equal(t, "/v1//Service/adservice", getRelativePath(w[1].GetID()))
 		}
 	}
+}
+
+func TestLoadResourcesFromFiles_RejectsTrailingJSONInExplicitFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "manifests.json")
+	data := []byte(`{"apiVersion":"v1","kind":"Pod","metadata":{"name":"first"}}
+{"apiVersion":"v1","kind":"Service","metadata":{"name":"second"}}`)
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+
+	workloads, skipped, err := LoadResourcesFromFiles(context.Background(), path, filepath.Dir(path), nil)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "multiple top-level JSON values")
+	assert.Empty(t, workloads)
+	require.Len(t, skipped, 1)
+	assert.Equal(t, path, skipped[0].Path)
 }
 
 func TestLoadResourcesFromFiles_SupportsMixedCaseExtensions(t *testing.T) {
@@ -390,6 +427,82 @@ func TestLoadResourcesFromHelmCharts(t *testing.T) {
 			assert.Failf(t, "missing case for file: %s", filepath.Base(file))
 		}
 	}
+}
+
+func writeTerraformFixture(t *testing.T, directory, resourceName string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(directory, 0o750))
+	contents := `
+resource "kubernetes_manifest" "` + resourceName + `" {
+  manifest = {
+    "apiVersion" = "v1"
+    "kind"       = "ConfigMap"
+    "metadata" = {
+      "name"      = "` + resourceName + `"
+      "namespace" = "default"
+    }
+  }
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(directory, "main.tf"), []byte(contents), 0o600))
+}
+
+// Regression for issue-3348: the Terraform loader used to only inspect the
+// single directory it was pointed at, unlike the Helm/Kustomize loaders which
+// both discover their configs recursively. A module living below the scan
+// root (the extremely common modules/<name>/*.tf layout) was silently never
+// scanned - no error, just 0 resources found for the top-level path.
+func TestLoadResourcesFromTerraform_DiscoversNestedModuleDirectories(t *testing.T) {
+	root := resolvedTempDir(t)
+	writeTerraformFixture(t, filepath.Join(root, "modules", "foo"), "root-config")
+
+	sourceToWorkloads, err := LoadResourcesFromTerraform(context.Background(), root)
+	require.NoError(t, err)
+
+	total := 0
+	for _, wls := range sourceToWorkloads {
+		total += len(wls)
+	}
+	require.Equal(t, 1, total, "resource defined only in modules/foo/main.tf must still be found when scanning the repo root")
+
+	nestedFile := filepath.Join(root, "modules", "foo", "main.tf")
+	require.Contains(t, sourceToWorkloads, nestedFile)
+	assert.Equal(t, "root-config", sourceToWorkloads[nestedFile][0].GetName())
+}
+
+func TestLoadResourcesFromTerraform_MixedSuccessAndFailure(t *testing.T) {
+	root := resolvedTempDir(t)
+	writeTerraformFixture(t, filepath.Join(root, "modules", "good"), "good-config")
+
+	// Create a malformed module
+	badModuleDir := filepath.Join(root, "modules", "bad")
+	require.NoError(t, os.MkdirAll(badModuleDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(badModuleDir, "main.tf"), []byte("this is not valid HCL"), 0o600))
+
+	sourceToWorkloads, err := LoadResourcesFromTerraform(context.Background(), root)
+	require.NoError(t, err, "a single bad module should not fail the whole scan")
+
+	total := 0
+	for _, wls := range sourceToWorkloads {
+		total += len(wls)
+	}
+	require.Equal(t, 1, total, "the good module should still be discovered and rendered")
+
+	goodFile := filepath.Join(root, "modules", "good", "main.tf")
+	require.Contains(t, sourceToWorkloads, goodFile)
+	assert.Equal(t, "good-config", sourceToWorkloads[goodFile][0].GetName())
+}
+
+// A directory with no .tf files anywhere must keep returning (nil, nil), the
+// same "not a Terraform input" signal LoadResourcesFromTerraform always gave,
+// so callers that branch on a nil map don't see a spurious behavior change.
+func TestLoadResourcesFromTerraform_NoTerraformFilesReturnsNil(t *testing.T) {
+	root := resolvedTempDir(t)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "not-terraform.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n"), 0o600))
+
+	sourceToWorkloads, err := LoadResourcesFromTerraform(context.Background(), root)
+	require.NoError(t, err)
+	assert.Nil(t, sourceToWorkloads)
 }
 
 func writeHelmChartFixture(t *testing.T, directory, name string) {
@@ -1031,6 +1144,25 @@ func TestReadJsonFile(t *testing.T) {
 			content:   `{not valid json`,
 			wantCount: 0,
 			wantErr:   true,
+		},
+		{
+			name: "concatenated JSON objects are rejected instead of scanning only the first",
+			content: `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"first"}}
+				{"apiVersion":"v1","kind":"Service","metadata":{"name":"ignored-before-fix"}}`,
+			wantCount: 0,
+			wantErr:   true,
+		},
+		{
+			name:      "valid manifest followed by malformed data is rejected",
+			content:   `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"first"}} trailing`,
+			wantCount: 0,
+			wantErr:   true,
+		},
+		{
+			name: "trailing whitespace remains valid",
+			content: `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"whitespace"}}
+				   `,
+			wantCount: 1,
 		},
 		{
 			name:      "empty JSON object (no kind) returns no workloads",

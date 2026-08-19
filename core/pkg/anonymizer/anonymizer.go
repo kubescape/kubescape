@@ -1,8 +1,8 @@
 package anonymizer
 
 import (
-	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
@@ -65,7 +65,7 @@ func ApplyEncrypted(
 	encryptionMetadata := &reporthandlingv2.EncryptionMetadata{
 		Version:      "v1",
 		DEKAlgorithm: "AES256_GCM",
-		KEKAlgorithm: "AES256_GCM",
+		KEKAlgorithm: reportcrypto.KEKAlgorithm,
 		EncryptedDEK: wrappedDEK,
 	}
 

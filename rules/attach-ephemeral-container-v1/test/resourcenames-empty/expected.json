@@ -1,0 +1,54 @@
+[
+    {
+        "alertMessage": "Subject: ServiceAccount-debugger-empty-resourcenames-sa can attach ephemeral containers to pods",
+        "reviewPaths": [
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "failedPaths": [
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 8,
+        "alertObject": {
+            "externalObjects": {
+                "kind": "ServiceAccount",
+                "name": "debugger-empty-resourcenames-sa",
+                "namespace": "kube-system",
+                "relatedObjects": [
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRoleBinding",
+                        "metadata": { "name": "debugger-empty-resourcenames-crb" },
+                        "roleRef": {
+                            "apiGroup": "rbac.authorization.k8s.io",
+                            "kind": "ClusterRole",
+                            "name": "ephemeral-debugger-empty-resourcenames"
+                        },
+                        "subjects": [
+                            { "kind": "ServiceAccount", "name": "debugger-empty-resourcenames-sa", "namespace": "kube-system" }
+                        ]
+                    },
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "ClusterRole",
+                        "metadata": { "name": "ephemeral-debugger-empty-resourcenames" },
+                        "rules": [
+                            { "apiGroups": [""], "resources": ["pods/ephemeralcontainers"], "verbs": ["patch"], "resourceNames": [] }
+                        ]
+                    }
+                ]
+            },
+            "k8sApiObjects": []
+        }
+    }
+]

@@ -10,10 +10,10 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
-	"github.com/kubescape/kubescape/v3/core/pkg/policyhandler"
-	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor"
+	"github.com/kubescape/kubescape/v4/core/pkg/policyhandler"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/kubescape/opa-utils/resources"
@@ -53,36 +53,17 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 		}
 	}
 
-	timeout := 10 * time.Second
-	if wantComplianceScore {
-		timeout = 30 * time.Second
-	}
-	if namespace == "" || namespace == "*" {
-		if wantComplianceScore {
-			timeout = 120 * time.Second
-		} else {
-			timeout = 60 * time.Second
-		}
-	}
-	if namespace == "*" {
-		namespace = ""
-	}
+	scanInfo := buildScanInfo(namespace, wantComplianceScore, inputPatterns)
 
+	policyGetter := ksServer.getPolicyGetter()
 	getters := cautils.Getters{
-		PolicyGetter:         ksServer.policyGetter,
-		ExceptionsGetter:     ksServer.policyGetter,
-		ControlsInputsGetter: ksServer.policyGetter,
-		AttackTracksGetter:   ksServer.policyGetter,
+		PolicyGetter:         policyGetter,
+		ExceptionsGetter:     policyGetter,
+		ControlsInputsGetter: policyGetter,
+		AttackTracksGetter:   policyGetter,
 	}
 	if customGetters != nil {
 		getters = *customGetters
-	}
-
-	scanInfo := &cautils.ScanInfo{
-		ScanAll:           false,
-		IncludeNamespaces: namespace,
-		ScanTimeout:       timeout,
-		InputPatterns:     inputPatterns,
 	}
 
 	scanCtx, cancel := context.WithTimeout(ctx, scanInfo.ScanTimeout)
@@ -109,7 +90,7 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 	deps := resources.NewRegoDependenciesData(k8sConfig, "")
 	opap := opaprocessor.NewOPAProcessor(scanData, deps, "", scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, false, nil)
 	if wantComplianceScore {
-		opap.ControlTimeout = timeout / 4
+		opap.ControlTimeout = scanInfo.ScanTimeout / 4
 	}
 
 	err = opap.ProcessRulesListener(scanCtx, cautils.NewProgressHandler(""))
@@ -150,6 +131,29 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 	}
 
 	return responseJSON, nil
+}
+
+func buildScanInfo(namespace string, wantComplianceScore bool, inputPatterns []string) *cautils.ScanInfo {
+	timeout := 10 * time.Second
+	if wantComplianceScore {
+		timeout = 30 * time.Second
+	}
+	if namespace == "" || namespace == "*" {
+		if wantComplianceScore {
+			timeout = 120 * time.Second
+		} else {
+			timeout = 60 * time.Second
+		}
+	}
+	if namespace == "*" {
+		namespace = ""
+	}
+	return &cautils.ScanInfo{
+		ScanAll:           false,
+		IncludeNamespaces: namespace,
+		ScanTimeout:       timeout,
+		InputPatterns:     inputPatterns,
+	}
 }
 
 func buildScanResponse(results map[string]resourcesresults.Result, complianceScore *float32, frameworkName string, degraded bool, notEvaluated int, totalControls int) scanResponse {

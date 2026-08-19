@@ -7,7 +7,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -30,31 +30,33 @@ func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDeta
 		summaryDetails.Controls = make(map[string]reportsummary.ControlSummary)
 	}
 	for i := range frameworks {
+		fw := &frameworks[i]
 		controls := map[string]reportsummary.ControlSummary{}
-		for j := range frameworks[i].Controls {
-			id := frameworks[i].Controls[j].ControlID
+		for j := range fw.Controls {
+			ctrl := &fw.Controls[j]
+			id := ctrl.ControlID
 			if _, ok := policies.Controls[id]; ok {
 				c := reportsummary.ControlSummary{
-					Name:        frameworks[i].Controls[j].Name,
+					Name:        ctrl.Name,
 					ControlID:   id,
-					ScoreFactor: frameworks[i].Controls[j].BaseScore,
-					Description: frameworks[i].Controls[j].Description,
-					Remediation: frameworks[i].Controls[j].Remediation,
-					Category:    frameworks[i].Controls[j].Category,
+					ScoreFactor: ctrl.BaseScore,
+					Description: ctrl.Description,
+					Remediation: ctrl.Remediation,
+					Category:    ctrl.Category,
 				}
-				if frameworks[i].Controls[j].GetActionRequiredAttribute() == string(apis.SubStatusManualReview) {
+				if ctrl.GetActionRequiredAttribute() == string(apis.SubStatusManualReview) {
 					c.Status = apis.StatusSkipped
 					c.StatusInfo.InnerStatus = apis.StatusSkipped
 					c.StatusInfo.SubStatus = apis.SubStatusManualReview
 					c.StatusInfo.InnerInfo = string(apis.SubStatusManualReviewInfo)
 				}
-				controls[frameworks[i].Controls[j].ControlID] = c
+				controls[ctrl.ControlID] = c
 				summaryDetails.Controls[id] = c
 			}
 		}
-		if slices.Contains(policies.Frameworks, frameworks[i].Name) {
+		if slices.Contains(policies.Frameworks, fw.Name) {
 			summaryDetails.Frameworks = append(summaryDetails.Frameworks, reportsummary.FrameworkSummary{
-				Name:     frameworks[i].Name,
+				Name:     fw.Name,
 				Controls: controls,
 			})
 		}

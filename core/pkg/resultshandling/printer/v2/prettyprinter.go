@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -14,9 +13,9 @@ import (
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/jwalton/gchalk"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -38,9 +37,11 @@ type PrettyPrinter struct {
 	inputPatterns   []string
 	verboseMode     bool
 	printAttackTree bool
+	showEvidence    bool
+	showSecrets     bool
 }
 
-func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string, clusterName string) *PrettyPrinter {
+func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string, clusterName string, showEvidence bool, showSecrets bool) *PrettyPrinter {
 	prettyPrinter := &PrettyPrinter{
 		verboseMode:     verboseMode,
 		formatVersion:   formatVersion,
@@ -49,6 +50,8 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, v
 		scanType:        scanType,
 		inputPatterns:   inputPatterns,
 		clusterName:     clusterName,
+		showEvidence:    showEvidence,
+		showSecrets:     showSecrets,
 	}
 
 	return prettyPrinter
@@ -174,7 +177,7 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error
 			outputFile = prettyOutputFile
 		}
 		// os.DevNull is used to silence the UI printer, appending an extension would turn it into a regular file
-		if outputFile != os.DevNull && filepath.Ext(outputFile) != printer.PrettyOutputExt {
+		if outputFile != os.DevNull && !printer.HasOutputExt(outputFile, printer.PrettyOutputExt) {
 			outputFile = outputFile + printer.PrettyOutputExt
 		}
 	}
@@ -286,7 +289,7 @@ func (pp *PrettyPrinter) printGroupedResource(indent string, title string, rsc [
 
 	sort.Strings(resources)
 	for i := range resources {
-		cautils.SimpleDisplay(pp.writer, resources[i]+"\n")
+		cautils.SimpleDisplay(pp.writer, "%s\n", resources[i])
 	}
 }
 

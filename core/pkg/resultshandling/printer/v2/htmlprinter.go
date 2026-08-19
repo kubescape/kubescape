@@ -3,19 +3,19 @@ package printer
 import (
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -28,6 +28,25 @@ const (
 //go:embed html/report.gohtml
 var reportTemplate string
 
+// The HTML report previously loaded this logo from raw.githubusercontent.com
+// at view time, so the report only rendered correctly with network access
+// and leaked the viewer's IP/UA to GitHub every time an offline scan report
+// was opened. Embed the same logo the PDF printer already ships
+// (pdf/logo.png) and inline it as a data URI instead.
+//
+//go:embed pdf/logo.png
+var htmlLogoPNG []byte
+
+// logoDataURI returns the embedded Kubescape logo as a data: URI. It is
+// returned as template.URL, not a plain string, so html/template's URL
+// sanitizer (which rejects the data: scheme by default) doesn't replace it
+// with "#ZgotmplZ" when used as an <img src>.
+func logoDataURI() template.URL {
+	// #nosec G203 -- the input is our own go:embed'd logo.png, not
+	// attacker-controlled data, so bypassing the URL sanitizer here is safe.
+	return template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(htmlLogoPNG))
+}
+
 var _ printer.IPrinter = &HtmlPrinter{}
 
 type HTMLReportingCtx struct {
@@ -36,6 +55,9 @@ type HTMLReportingCtx struct {
 	// ImageScanSummary is set instead of the two fields above when this report
 	// is for an image scan rather than a posture scan (#2782).
 	ImageScanSummary *imageprinter.ImageScanSummary
+	// LogoDataURI is the embedded Kubescape logo, inlined so the report
+	// renders correctly without network access.
+	LogoDataURI template.URL
 }
 
 type HtmlPrinter struct {
@@ -54,7 +76,7 @@ func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) error {
 		outputFile = htmlOutputFile + printer.HtmlOutputExt
 		logger.L().Info("no --output specified for html format; writing to default file",
 			helpers.String("filename", outputFile))
-	} else if filepath.Ext(outputFile) != printer.HtmlOutputExt {
+	} else if !printer.HasOutputExt(outputFile, printer.HtmlOutputExt) {
 		outputFile = outputFile + printer.HtmlOutputExt
 	}
 	if explicitOutput {
@@ -137,7 +159,7 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		imageScanSummary = buildImageScanSummary(imageScanData)
 	}
 
-	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView, imageScanSummary}
+	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView, imageScanSummary, logoDataURI()}
 	err := tpl.Execute(hp.writer, reportingCtx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to render template", helpers.Error(err))
@@ -175,6 +197,7 @@ func buildResourceControlResult(resourceControl resourcesresults.ResourceAssocia
 	ctlID := resourceControl.GetID()
 	ctlURL := cautils.GetControlLink(resourceControl.GetID())
 	failedPaths := AssistedRemediationPathsWithCurrentValues(&resourceControl, resource)
+	addContainerNameToAssistedRemediation(resource, &failedPaths)
 
 	return ResourceControlResult{ctlSeverity, ctlName, ctlID, ctlURL, failedPaths}
 }

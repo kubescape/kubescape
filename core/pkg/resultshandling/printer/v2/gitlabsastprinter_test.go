@@ -12,7 +12,7 @@ import (
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -512,4 +512,54 @@ func TestGitLabImageScan_NoData(t *testing.T) {
 	info, err := os.Stat(tmp.Name())
 	require.NoError(t, err)
 	assert.Zero(t, info.Size())
+}
+
+// TestGitLabSASTPrintConfigurationScan_SolutionFieldPopulated verifies that the Solution field
+// is populated with fix paths when the resource is present in AllResources
+func TestGitLabSASTPrintConfigurationScan_SolutionFieldPopulated(t *testing.T) {
+	report := gitLabReportFor(t, gitLabSessionFixture(t, "C-0057", 8.0))
+
+	require.Len(t, report.Vulnerabilities, 1)
+	vuln := report.Vulnerabilities[0]
+	// the fixture has a FixPath for spec.template.spec.containers[0].securityContext.privileged=false
+	assert.NotEmpty(t, vuln.Solution, "Solution field must be populated when fix paths exist")
+	assert.Contains(t, vuln.Solution, "spec.template.spec.containers[0].securityContext.privileged")
+}
+
+// TestGitLabSASTPrintConfigurationScan_NilResourceDoesNotPanic verifies that a resourceID
+// present in ResourcesResult but absent from AllResources degrades gracefully.
+// The vulnerability must still be emitted and the solution key must be absent
+// from the serialized JSON entirely (omitempty), not just an empty string.
+func TestGitLabSASTPrintConfigurationScan_NilResourceDoesNotPanic(t *testing.T) {
+	const controlID = "C-0057"
+	session := gitLabSessionFixture(t, controlID, 8.0)
+
+	// remove the resource from AllResources to simulate the missing-key scenario
+	for k := range session.AllResources {
+		delete(session.AllResources, k)
+	}
+
+	tmp, err := os.CreateTemp("", "gitlab-sast-nil-*.json")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	})
+
+	gp := NewGitLabSASTPrinter()
+	gp.writer = tmp
+	require.NotPanics(t, func() {
+		_ = gp.printConfigurationScan(context.Background(), session)
+	})
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var report gitLabSASTReport
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Vulnerabilities, 1)
+
+	// solution key must be absent from JSON entirely when resource is missing
+	assert.NotContains(t, string(raw), `"solution"`,
+		"solution key must be omitted from JSON when resource is absent from AllResources")
 }

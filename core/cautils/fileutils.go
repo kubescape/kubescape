@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -17,7 +19,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils/helmprovenance"
+	"github.com/kubescape/kubescape/v4/core/cautils/helmprovenance"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"gopkg.in/yaml.v3"
@@ -216,6 +218,21 @@ func listKustomizeDirs(basePath string) ([]string, []error) {
 		}
 	}
 	return kustomizeDirectories, errs
+}
+
+// listTerraformDirs scans a given path (recursively) and returns the directories holding
+// Terraform (.tf) files. A module nested below basePath (e.g. modules/<name>/) is found on
+// its own the same way an overlay nested below a Kustomize root is, even when basePath itself
+// has no .tf files directly in it.
+func listTerraformDirs(basePath string) ([]string, []error) {
+	directories, errs := listDirs(basePath)
+	terraformDirectories := make([]string, 0)
+	for _, dir := range directories {
+		if isTerraformDirectory(dir) {
+			terraformDirectories = append(terraformDirectories, dir)
+		}
+	}
+	return terraformDirectories, errs
 }
 
 // excludeHelmTemplateFiles drops the files living under the templates/ directory of a helm chart.
@@ -587,20 +604,46 @@ func LoadResourcesFromNestedKustomizeDirectories(ctx context.Context, basePath s
 	return sourceToWorkloads, renderedDirs
 }
 
+// LoadResourcesFromTerraform loads Kubernetes resources embedded in Terraform files under
+// basePath. Unlike the Helm and Kustomize loaders, an explicit .tf file is scanned on its own
+// (Terraform files are not self-contained the way a chart or kustomization is), but a directory
+// input is discovered recursively: every directory under basePath that contains .tf files is
+// scanned, so a module nested below the scan root (e.g. modules/<name>/) is not silently skipped.
 func LoadResourcesFromTerraform(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, error) {
-	if !isTerraformDirectory(basePath) && !IsTerraformFile(basePath) {
+	if IsTerraformFile(basePath) {
+		dir := filepath.Dir(basePath)
+		td := NewTerraformDirectory(dir)
+		wls, errs := td.GetWorkloads(dir)
+		if len(errs) > 0 {
+			return wls, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
+		}
+		return wls, nil
+	}
+
+	dirs, discoveryErrs := listTerraformDirs(basePath)
+	for _, err := range discoveryErrs {
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Terraform directories", helpers.Error(err))
+	}
+	if len(dirs) == 0 {
 		return nil, nil
 	}
-	dir := basePath
-	if IsTerraformFile(basePath) {
-		dir = filepath.Dir(basePath)
+
+	explicitTerraformDir := isTerraformDirectory(basePath)
+
+	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
+	for _, dir := range dirs {
+		td := NewTerraformDirectory(dir)
+		wls, dirErrs := td.GetWorkloads(dir)
+		if len(dirErrs) > 0 {
+			if explicitTerraformDir && dir == basePath {
+				return sourceToWorkloads, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(dirErrs...))
+			}
+			logger.L().Ctx(ctx).Warning("Skipping nested Terraform configuration that failed to render", helpers.String("path", dir), helpers.Error(errors.Join(dirErrs...)))
+			continue
+		}
+		maps.Copy(sourceToWorkloads, wls)
 	}
-	td := NewTerraformDirectory(dir)
-	wls, errs := td.GetWorkloads(dir)
-	if len(errs) > 0 {
-		return wls, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
-	}
-	return wls, nil
+	return sourceToWorkloads, nil
 }
 
 // LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts
@@ -667,11 +710,15 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 
 		w, e := ReadFile(f, getFileFormat(filePaths[i]))
 		if e != nil {
-			// Raw Helm templates are a best-effort fallback when chart rendering
-			// fails. Go-template actions are not valid YAML, so keep scanning any
-			// static templates without treating templated siblings as corrupt
-			// standalone manifests.
-			if !bytes.Contains(f, []byte("{{")) {
+			// Only chart-owned templates/ files reach this loader unrendered —
+			// excludeHelmTemplateFiles drops the templates of every chart whose
+			// render succeeded — and their Go-template actions are not valid
+			// YAML, so record the drop without treating it as manifest
+			// corruption. Any other parse failure is always reported: "{{" in a
+			// comment, label value or string is not evidence of a template.
+			if isUnrenderedHelmTemplate(filePaths[i]) {
+				skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "unrendered Helm template: " + e.Error()})
+			} else {
 				errs = append(errs, fmt.Errorf("failed to parse %q: %w", filePaths[i], e))
 				skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "parse error: " + e.Error()})
 			}
@@ -695,6 +742,28 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 		}
 	}
 	return workloads, skips, errs
+}
+
+// isUnrenderedHelmTemplate reports whether path lives below the templates/
+// directory of a Helm chart, detected with the same chart-directory check
+// chart discovery uses. excludeHelmTemplateFiles removes the templates of
+// every chart whose render succeeded, so a chart-owned file parsed here
+// belongs to a chart whose render failed; its Go-template actions are
+// expected to be unparseable as plain YAML.
+func isUnrenderedHelmTemplate(path string) bool {
+	dir := filepath.Dir(path)
+	for {
+		if filepath.Base(dir) == "templates" {
+			if isChart, err := IsHelmDirectory(filepath.Dir(dir)); err == nil && isChart {
+				return true
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
 }
 
 func loadFile(filePath string) ([]byte, error) {
@@ -735,6 +804,11 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool) ([]string, []e
 		paths = append(paths, pattern)
 		return paths, errs
 	}
+	// A concrete path is an exact scan target. Do not reinterpret a missing
+	// file as a recursive basename pattern and silently scan a nested namesake.
+	if !isDir(pattern) && !hasGlobMeta(pattern) {
+		return paths, errs
+	}
 
 	root, shouldMatch := filepath.Split(pattern)
 
@@ -753,6 +827,15 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool) ([]string, []e
 	}
 
 	return paths, errs
+}
+
+// hasGlobMeta mirrors the set of magic characters recognized by filepath.Match.
+func hasGlobMeta(path string) bool {
+	magicChars := `*?[`
+	if runtime.GOOS != "windows" {
+		magicChars = `*?[\`
+	}
+	return strings.ContainsAny(path, magicChars)
 }
 
 func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err error) {
@@ -842,6 +925,18 @@ func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err
 	decoder.UseNumber()
 	if err := decoder.Decode(&jsonObj); err != nil {
 		return workloads, err
+	}
+
+	// A manifest file must contain exactly one top-level JSON value. Decoder.Decode
+	// intentionally stops after the first value, so without this EOF check a file
+	// containing a valid manifest followed by another value or malformed trailing
+	// data is accepted and the unscanned suffix is silently ignored.
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return workloads, errors.New("multiple top-level JSON values are not supported; use a JSON array or Kubernetes List")
+		}
+		return workloads, fmt.Errorf("invalid trailing JSON data: %w", err)
 	}
 
 	if convertErr := convertJsonToWorkload(jsonObj, &workloads); convertErr != nil {

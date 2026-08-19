@@ -1,0 +1,77 @@
+[
+    {
+        "alertMessage": "Subject: ServiceAccount-payments-operator can modify pods/status and so relabel a pod to match a service's selector, intercepting connections to services in the pod's namespace",
+        "failedPaths": [
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].verbs[1]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "reviewPaths": [
+            "relatedObjects[1].rules[0].apiGroups[0]",
+            "relatedObjects[1].rules[0].resources[0]",
+            "relatedObjects[1].rules[0].verbs[0]",
+            "relatedObjects[1].rules[0].verbs[1]",
+            "relatedObjects[0].roleRef.name",
+            "relatedObjects[0].subjects[0]"
+        ],
+        "deletePaths": null,
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 3,
+        "alertObject": {
+            "externalObjects": {
+                "kind": "ServiceAccount",
+                "name": "payments-operator",
+                "namespace": "payments",
+                "relatedObjects": [
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "RoleBinding",
+                        "metadata": {
+                            "name": "pod-status-writer-rb",
+                            "namespace": "payments"
+                        },
+                        "roleRef": {
+                            "apiGroup": "rbac.authorization.k8s.io",
+                            "kind": "Role",
+                            "name": "pod-status-writer"
+                        },
+                        "subjects": [
+                            {
+                                "kind": "ServiceAccount",
+                                "name": "payments-operator",
+                                "namespace": "payments"
+                            }
+                        ]
+                    },
+                    {
+                        "apiVersion": "rbac.authorization.k8s.io/v1",
+                        "kind": "Role",
+                        "metadata": {
+                            "name": "pod-status-writer",
+                            "namespace": "payments"
+                        },
+                        "rules": [
+                            {
+                                "apiGroups": [
+                                    ""
+                                ],
+                                "resources": [
+                                    "pods/status"
+                                ],
+                                "verbs": [
+                                    "update",
+                                    "patch"
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }
+]

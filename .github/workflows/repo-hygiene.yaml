@@ -3,6 +3,11 @@ permissions:
   contents: read
 on:
   workflow_dispatch: {}
+  schedule:
+    # Expiry is a property of time, not of change: SECURITY-INSIGHTS.yml goes
+    # stale while nobody touches it, so the freshness assertions in
+    # internal/ghworkflows must also run while the repository is idle.
+    - cron: '0 0 1 * *'
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
     # 00-pr-scanner.yaml skips a PR whose every file matches its paths-ignore
@@ -11,9 +16,22 @@ on:
     # at all, which is how an invalid config disabled Dependabot for three
     # months. This workflow uses `paths` - an allow-list - to cover exactly the
     # blind spot the other workflow's deny-list leaves open.
+    # SECURITY-INSIGHTS.yml sits at the repository root and matches the
+    # deny-list's "**.yml" the same way, so it is covered here too.
+    #
+    # .goreleaser.yaml and the install scripts sit in the same blind spot and
+    # are worse placed to be in it: they define what a release publishes and
+    # what a user verifies before executing it, and they match "**.yaml" and
+    # "**.sh" respectively, so a PR touching only one of them runs no check at
+    # all. Release signing was absent from .goreleaser.yaml for exactly that
+    # reason - nothing was looking.
     paths:
       - ".github/**"
       - "internal/ghworkflows/**"
+      - "SECURITY-INSIGHTS.yml"
+      - ".goreleaser.yaml"
+      - "install.sh"
+      - "install.ps1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,5 +49,5 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Validate workflow and Dependabot configuration
+      - name: Validate workflow, Dependabot and security-insights configuration
         run: go test -v ./internal/ghworkflows/...

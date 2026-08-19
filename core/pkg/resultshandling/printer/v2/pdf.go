@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -13,11 +12,11 @@ import (
 	"github.com/johnfercher/maroto/v2/pkg/props"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/pdf"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/pdf"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -44,7 +43,7 @@ func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) error {
 		outputFile = pdfOutputFile + printer.PdfOutputExt
 		logger.L().Info("no --output specified for pdf format; writing to default file",
 			helpers.String("filename", outputFile))
-	} else if filepath.Ext(outputFile) != printer.PdfOutputExt {
+	} else if !printer.HasOutputExt(outputFile, printer.PdfOutputExt) {
 		outputFile = outputFile + printer.PdfOutputExt
 	}
 	if explicitOutput {

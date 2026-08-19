@@ -1,0 +1,29 @@
+{
+  "name": "weak-namespace-token-access-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Credential Access::Obtain service account tokens in unprivileged namespaces",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        "rbac.authorization.k8s.io"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "RoleBinding",
+        "ClusterRoleBinding",
+        "Role",
+        "ClusterRole"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can obtain service account tokens in unprivileged namespaces, either by reading or writing secrets or by creating a TokenRequest against serviceaccounts/token, letting them act as a service account that may hold broader permissions over the cluster than the namespace itself implies",
+  "remediation": "Grant access to secrets and to the serviceaccounts/token subresource only to subjects that genuinely need it, and scope such rules with resourceNames where possible. Keep the service accounts of an ordinary namespace least privileged, so that a token obtained there is worth no more than the namespace itself.",
+  "ruleQuery": "armo_builtins"
+}

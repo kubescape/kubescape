@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v3/cmd/shared"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/meta"
+	"github.com/kubescape/kubescape/v4/cmd/shared"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/meta"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/spf13/cobra"
 )
@@ -100,7 +100,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
 				return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
 			}
-			if err := enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo); err != nil {
+			if err := enforceSeverityThresholds(&results.GetResults().SummaryDetails, scanInfo); err != nil {
 				return err
 			}
 			if scanInfo.ScanImages {
@@ -123,10 +123,6 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 // validateControlScanInfo validates the ScanInfo struct for the `control` command
 func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 	severity := scanInfo.FailThresholdSeverity
-
-	if scanInfo.Submit.GetBool() && scanInfo.OmitRawResources {
-		return ErrOmitRawResourcesOrSubmit
-	}
 
 	if err := validateControlTimeout(scanInfo); err != nil {
 		return err

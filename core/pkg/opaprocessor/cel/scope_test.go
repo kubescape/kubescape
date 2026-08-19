@@ -250,6 +250,76 @@ func TestVAPAppliesToOperations(t *testing.T) {
 	})
 }
 
+// withScope returns a copy of the rule constrained to the given scope.
+func withScope(r admissionregistrationv1.NamedRuleWithOperations, scope admissionregistrationv1.ScopeType) admissionregistrationv1.NamedRuleWithOperations {
+	r.Scope = &scope
+	return r
+}
+
+// inNamespace returns a copy of the object placed in a namespace, which is what
+// proves it namespaced offline.
+func inNamespace(o map[string]any, namespace string) map[string]any {
+	meta, _ := o["metadata"].(map[string]any)
+	placed := make(map[string]any, len(meta))
+	for k, v := range meta {
+		placed[k] = v
+	}
+	placed["namespace"] = namespace
+
+	out := make(map[string]any, len(o))
+	for k, v := range o {
+		out[k] = v
+	}
+	out["metadata"] = placed
+	return out
+}
+
+// TestVAPAppliesToScope pins the scope side of rule matching. A Cluster rule is
+// the only one that narrows offline: an object carrying a namespace is proven
+// namespaced, so admission would never hand it to that rule. An absent
+// namespace proves nothing (the apiserver defaults it before admission), so
+// every other combination stays matched.
+func TestVAPAppliesToScope(t *testing.T) {
+	pods := rule([]string{""}, []string{"v1"}, []string{"pods"})
+
+	cases := []struct {
+		name      string
+		scope     *admissionregistrationv1.ScopeType
+		namespace string
+		want      bool
+	}{
+		{"unset scope matches a namespaced object", nil, "prod", true},
+		{"unset scope matches an object with no namespace", nil, "", true},
+		{"wildcard scope matches a namespaced object", scopePtr(admissionregistrationv1.AllScopes), "prod", true},
+		{"Namespaced scope matches a namespaced object", scopePtr(admissionregistrationv1.NamespacedScope), "prod", true},
+		{"Namespaced scope still matches when the namespace is absent", scopePtr(admissionregistrationv1.NamespacedScope), "", true},
+		{"Cluster scope does not match a namespaced object", scopePtr(admissionregistrationv1.ClusterScope), "prod", false},
+		{"Cluster scope matches when the namespace is absent", scopePtr(admissionregistrationv1.ClusterScope), "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := pods
+			r.Scope = tc.scope
+			o := obj("v1", "Pod")
+			if tc.namespace != "" {
+				o = inNamespace(o, tc.namespace)
+			}
+			assert.Equal(t, tc.want, vapWithConstraints(r).appliesTo(o))
+		})
+	}
+
+	t.Run("a Cluster-scoped exclusion does not exempt a namespaced object", func(t *testing.T) {
+		v := &VAP{matchConstraints: &admissionregistrationv1.MatchResources{
+			ResourceRules:        []admissionregistrationv1.NamedRuleWithOperations{pods},
+			ExcludeResourceRules: []admissionregistrationv1.NamedRuleWithOperations{withScope(pods, admissionregistrationv1.ClusterScope)},
+		}}
+		assert.True(t, v.appliesTo(inNamespace(obj("v1", "Pod"), "prod")),
+			"the exclusion only covers cluster-scoped objects, so a namespaced one is still matched")
+	})
+}
+
+func scopePtr(s admissionregistrationv1.ScopeType) *admissionregistrationv1.ScopeType { return &s }
+
 // TestBundleControlRulesAllMatchModeledCreate is the safety case for honoring
 // operations, and it is the assertion the kind sweep cannot make: that sweep
 // skips subresources, which is exactly where the bundle's non-CREATE rules
@@ -295,6 +365,8 @@ func TestBundleUsesNoUnevaluatedScoping(t *testing.T) {
 		for _, rr := range rules {
 			assert.Emptyf(t, rr.ResourceNames,
 				"policy %q now uses resourceNames: appliesTo matches it against metadata.name, so confirm the scanned manifests carry the names it expects", name)
+			assert.Truef(t, rr.Scope == nil || *rr.Scope == admissionregistrationv1.AllScopes,
+				"policy %q now scopes a rule to %v: appliesTo narrows a Cluster rule by the object's namespace, so confirm that matches the policy's intent", name, rr.Scope)
 		}
 	}
 }
@@ -380,4 +452,31 @@ func TestVAPAppliesToResourceNames(t *testing.T) {
 		delete(o["metadata"].(map[string]any), "name")
 		assert.False(t, vapWithConstraints(named("coredns")).appliesTo(o))
 	})
+}
+
+// TestVAPAppliesToKindPluralCandidates covers the kinds whose registered plural
+// the apimachinery guess gets wrong: a sibilant ending takes "es" and a
+// vowel+"y" ending takes "s", so an exact compare against the single guess drops
+// the object and the control reads clean.
+func TestVAPAppliesToKindPluralCandidates(t *testing.T) {
+	cases := []struct {
+		name     string
+		kind     string
+		resource string
+		want     bool
+	}{
+		{"x ending pluralizes with es", "Sandbox", "sandboxes", true},
+		{"sh ending pluralizes with es", "Mesh", "meshes", true},
+		{"ch ending pluralizes with es", "Batch", "batches", true},
+		{"vowel y ending pluralizes with s", "Gateway", "gateways", true},
+		{"consonant y ending still pluralizes with ies", "NetworkPolicy", "networkpolicies", true},
+		{"the apimachinery guess stays accepted", "Sandbox", "sandboxs", true},
+		{"an unrelated plural is out of scope", "Sandbox", "sandboxtemplates", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := vapWithConstraints(rule([]string{"agents.x-k8s.io"}, []string{"v1alpha1"}, []string{tc.resource}))
+			assert.Equal(t, tc.want, v.appliesTo(obj("agents.x-k8s.io/v1alpha1", tc.kind)))
+		})
+	}
 }

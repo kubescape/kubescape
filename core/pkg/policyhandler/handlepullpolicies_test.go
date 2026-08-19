@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,6 +33,15 @@ var (
 type ExceptionsGetterMock struct{}
 type ControlsInputsGetterMock struct{}
 type PolicyGetterMock struct{}
+type nonPersistentPolicyGetterMock struct{ PolicyGetterMock }
+
+func (mock *nonPersistentPolicyGetterMock) ShouldPersistPolicyArtifacts() bool {
+	return false
+}
+
+func (mock *nonPersistentPolicyGetterMock) GetControl(name string) (*reporthandling.Control, error) {
+	return &reporthandling.Control{ControlID: name}, nil
+}
 
 func (mock *ExceptionsGetterMock) GetExceptions(ctx context.Context, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	return CachedExceptions, nil
@@ -324,6 +333,51 @@ func TestGetScanPolicies_LocalSourceBypassesSharedCache(t *testing.T) {
 	assert.Equal(t, remotePolicies[0].Controls[0].ControlID, remotePoliciesAgain[0].Controls[0].ControlID,
 		"a local request must not replace the shared remote-policy cache")
 	assert.NotEqual(t, "local-control", remotePoliciesAgain[0].Controls[0].ControlID)
+}
+
+func TestDownloadScanPolicies_NonPersistentSourcePreservesSharedFallback(t *testing.T) {
+	cacheDir := t.TempDir()
+	originalLocalStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = cacheDir
+	t.Cleanup(func() { getter.DefaultLocalStore = originalLocalStore })
+
+	cachePath, err := getter.PolicyCachePath(FrameworkName)
+	require.NoError(t, err)
+	rollingFallback := []byte(`{"name":"rolling-fallback","controls":[{"controlID":"rolling-control"}]}`)
+	require.NoError(t, os.WriteFile(cachePath, rollingFallback, 0o600))
+
+	policyHandler := NewRequestScopedPolicyHandler("non-persistent-policy-source")
+	t.Cleanup(policyHandler.Close)
+	getters := &cautils.Getters{PolicyGetter: &nonPersistentPolicyGetterMock{}}
+	policyIdent := []cautils.PolicyIdentifier{{Identifier: FrameworkName, Kind: "Framework"}}
+
+	frameworks, err := policyHandler.downloadScanPolicies(context.Background(), policyIdent, getters)
+	require.NoError(t, err)
+	require.NotEmpty(t, frameworks, "the requested policy must still be returned to the current scan")
+
+	after, err := os.ReadFile(cachePath)
+	require.NoError(t, err)
+	require.Equal(t, rollingFallback, after,
+		"a source without cache provenance must not replace the shared rolling fallback")
+
+	const controlID = "control-from-non-persistent-source"
+	controlCachePath, err := getter.PolicyCachePath(controlID)
+	require.NoError(t, err)
+	rollingControlFallback := []byte(`{"controlID":"rolling-control"}`)
+	require.NoError(t, os.WriteFile(controlCachePath, rollingControlFallback, 0o600))
+
+	controlIdentifiers := []cautils.PolicyIdentifier{{Identifier: controlID, Kind: "Control"}}
+	controlFrameworks, err := policyHandler.downloadScanPolicies(context.Background(), controlIdentifiers, getters)
+	require.NoError(t, err)
+	require.Len(t, controlFrameworks, 1)
+	require.Len(t, controlFrameworks[0].Controls, 1)
+	require.Equal(t, controlID, controlFrameworks[0].Controls[0].ControlID,
+		"the requested control must still be returned to the current scan")
+
+	controlAfter, err := os.ReadFile(controlCachePath)
+	require.NoError(t, err)
+	require.Equal(t, rollingControlFallback, controlAfter,
+		"a non-persistent control source must not replace the shared rolling fallback")
 }
 
 type ControlsInputsGetterEmptyMock struct{}

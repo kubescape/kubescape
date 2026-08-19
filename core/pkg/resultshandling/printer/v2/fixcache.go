@@ -7,8 +7,8 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/locationresolver"
+	"github.com/kubescape/kubescape/v4/core/pkg/fixhandler"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 

@@ -1,8 +1,8 @@
 package config
 
 import (
-	"github.com/kubescape/kubescape/v3/core/meta"
-	v1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/meta"
+	v1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 

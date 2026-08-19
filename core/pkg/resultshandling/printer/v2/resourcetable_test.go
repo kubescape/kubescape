@@ -33,6 +33,13 @@ func TestAppendFailedPathsIfNotInPaths(t *testing.T) {
 			failedPaths:   []string{},
 			expectedPaths: []string{"path1", "path2"},
 		},
+		{
+			// a bare delete/fix/review path must still be recognized as covering its
+			// enriched " (current: <value>)" counterpart in failedPaths
+			paths:         []string{"spec.hostNetwork"},
+			failedPaths:   []string{"spec.hostNetwork (current: true)"},
+			expectedPaths: []string{"spec.hostNetwork"},
+		},
 	}
 
 	for _, testcase := range tests {
@@ -517,7 +524,7 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rows := generateResourceRows(tt.controls, &tt.summaryDetails, tt.resource)
+			rows := generateResourceRows(tt.controls, &tt.summaryDetails, tt.resource, true, false, "")
 			assert.Equal(t, tt.expectedLen, len(rows))
 			//remediation is the last column of the first row
 			if len(rows) != 0 {
@@ -595,6 +602,12 @@ func TestAddContainerNameToAssistedRemediation_OutOfBounds(t *testing.T) {
 				"spec.containers[10].securityContext.readOnlyRootFilesystem",
 				"spec.containers[1].securityContext.allowPrivilegeEscalation (sidecar)",
 			},
+		},
+		{
+			name:          "init and ephemeral container indices append names",
+			resource:      privilegedInitAndEphemeralPod(),
+			paths:         privilegedInitAndEphemeralPaths(),
+			expectedPaths: privilegedInitAndEphemeralNamedPaths(),
 		},
 		{
 			name: "path without container index is unchanged",
