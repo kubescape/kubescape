@@ -44,7 +44,10 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	processor := exceptions.NewProcessor()
 
 	// synthesise inline exceptions from resource annotations before filtering
-	opap.Exceptions = append(opap.Exceptions, opap.gatherInlineExceptions()...)
+	// (only when the caller has opted in; disabled by default for cluster scans)
+	if opap.HonorInlineExceptions {
+		opap.Exceptions = append(opap.Exceptions, opap.gatherInlineExceptions()...)
+	}
 	loadedExceptions := append([]armotypes.PostureExceptionPolicy(nil), opap.Exceptions...)
 
 	// filter expired exceptions before applying them

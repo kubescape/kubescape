@@ -86,6 +86,7 @@ type OPASessionObj struct {
 	Exceptions            []armotypes.PostureExceptionPolicy // list of exceptions to apply on scan results
 	ExceptionAudit        *ExceptionAudit                    // optional exception usage audit
 	AuditExceptions       bool                               // include exception usage audit in supported outputs
+	HonorInlineExceptions bool                               // honor kubescape.io/skip-* annotations as inline exception policies
 	OmitRawResources      bool                               // omit raw resources from output
 	SingleResourceScan    workloadinterface.IWorkload        // single resource scan
 	TopWorkloadsByScore   []reporthandling.IResource
@@ -96,6 +97,11 @@ type OPASessionObj struct {
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *OPASessionObj {
+	// Inline annotation exceptions are off by default for cluster/workload/image scans
+	// and on by default for manifest/repo scans, unless the CLI explicitly sets the flag.
+	if scanInfo.HonorInlineExceptions.Get() == nil {
+		scanInfo.HonorInlineExceptions.SetBool(scanInfo.ScanType == ScanTypeRepo)
+	}
 	clusterSize := max(estimateClusterSize(k8sResources), 100)
 
 	return &OPASessionObj{
@@ -112,6 +118,7 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 		Metadata:              scanInfoToScanMetadata(ctx, scanInfo, policyIdentifiers),
 		OmitRawResources:      scanInfo.OmitRawResources,
 		AuditExceptions:       scanInfo.AuditExceptions,
+		HonorInlineExceptions: scanInfo.HonorInlineExceptions.GetBool(),
 		TriggeredByCLI:        scanInfo.TriggeredByCLI,
 		LabelsToCopy:          scanInfo.LabelsToCopy,
 	}

@@ -114,16 +114,17 @@ type PolicyIdentifier struct {
 }
 
 type ScanInfo struct {
-	UseExceptions             string   // Load file with exceptions configuration
-	AuditExceptions           bool     // Include exception usage audit in supported scan outputs
-	ControlsInputs            string   // Load file with inputs for controls
-	AttackTracks              string   // Load file with attack tracks
-	UseFrom                   []string // Load framework from local file (instead of download). Use when running offline
-	UseDefault                bool     // Load framework from cached file (instead of download). Use when running offline
-	UseArtifactsFrom          string   // Load artifacts from local path. Use when running offline
-	ControlsVersion           string   // Pin the regolibrary release used to download policies (e.g. "v2.0.301"). Empty uses the latest release
-	VerboseMode               bool     // Display all the input resources and not only failed resources
-	Hide                      bool     // Hide sensitive identifiers (names, namespaces, images) in results
+	UseExceptions             string      // Load file with exceptions configuration
+	AuditExceptions           bool        // Include exception usage audit in supported scan outputs
+	HonorInlineExceptions     BoolPtrFlag // Honor kubescape.io/skip-* annotations as inline exception policies
+	ControlsInputs            string      // Load file with inputs for controls
+	AttackTracks              string      // Load file with attack tracks
+	UseFrom                   []string    // Load framework from local file (instead of download). Use when running offline
+	UseDefault                bool        // Load framework from cached file (instead of download). Use when running offline
+	UseArtifactsFrom          string      // Load artifacts from local path. Use when running offline
+	ControlsVersion           string      // Pin the regolibrary release used to download policies (e.g. "v2.0.301"). Empty uses the latest release
+	VerboseMode               bool        // Display all the input resources and not only failed resources
+	Hide                      bool        // Hide sensitive identifiers (names, namespaces, images) in results
 	EncryptionEnabled         bool
 	View                      string                       //
 	Format                    string                       // Format results (table, json, junit ...)

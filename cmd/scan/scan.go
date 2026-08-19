@@ -193,6 +193,10 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	hostF := scanCmd.PersistentFlags().VarPF(&scanInfo.HostSensorEnabled, "host-scan", "", "Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use --host-scan=false to disable host data collection. See https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator for the operator-based alternative")
 	hostF.NoOptDefVal = "true"
 
+	// Off by default for cluster/image/workload scans, on by default for manifest/repo scans.
+	honorInlineF := scanCmd.PersistentFlags().VarPF(&scanInfo.HonorInlineExceptions, "honor-inline-exceptions", "", "Honor kubescape.io/skip-* annotations as inline exception policies. By default this is enabled for manifest scans and disabled for cluster/image/workload scans")
+	honorInlineF.NoOptDefVal = "true"
+
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", fmt.Sprintf(`Output file format. Supported formats: "%s"`, strings.Join(shared.ScanFormats, `", "`)))
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.LabelSelector, "label-selector", "", "Filter collected Kubernetes resources by label selector. Accepts any selector that kubectl -l supports, e.g: --label-selector app=nginx,env!=dev")
