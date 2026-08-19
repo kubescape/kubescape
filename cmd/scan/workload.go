@@ -91,6 +91,9 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			}
 
 			policyIdentifiers := setWorkloadScanInfo(scanInfo, kind, name, apiVersion)
+			if err := validateCombinedImageScanFlags(scanInfo); err != nil {
+				return err
+			}
 
 			results, err := ks.Scan(scanInfo, policyIdentifiers)
 			if err != nil {

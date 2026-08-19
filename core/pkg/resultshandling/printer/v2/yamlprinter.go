@@ -104,7 +104,7 @@ func printConfigurationsScanningYaml(opaSessionObj *cautils.OPASessionObj, image
 	finalizedReport := FinalizeResults(opaSessionObj)
 
 	if imageScanData != nil {
-		imageScanSummary := buildImageScanSummary(imageScanData)
+		imageScanSummary := buildMachineImageScanSummary(imageScanData)
 		finalizedReport.SummaryDetails.Vulnerabilities.MapsSeverityToSummary = convertToReportSummary(imageScanSummary.MapsSeverityToSummary)
 		finalizedReport.SummaryDetails.Vulnerabilities.CVESummary = convertToCVESummary(imageScanSummary.CVEs)
 		finalizedReport.SummaryDetails.Vulnerabilities.PackageScores = convertToPackageScores(imageScanSummary.PackageScores)

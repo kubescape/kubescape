@@ -188,6 +188,7 @@ type ScanInfo struct {
 	RegistryPassword          string            // Password for workload image registry authentication
 	RegistryToken             string            // Bearer token for workload image registry authentication
 	ImageScanConcurrency      int               // Number of concurrent workers for image scanning
+	ImagePlatform             string            // OCI platform used for image scanning (os/architecture[/variant])
 	MinSeverity               string            // Only include controls at or above this severity in the output
 	MaxSeverity               string            // Only include controls at or below this severity in the output
 	Baseline                  string            // Path to a saved JSON scan report; when set, the fresh scan is diffed against it

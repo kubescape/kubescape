@@ -265,7 +265,7 @@ func TestGetProviderConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			providerConfig := getProviderConfig(tt.creds, nil)
+			providerConfig := getProviderConfig(tt.creds, nil, ScanOptions{})
 			assert.NotNil(t, providerConfig)
 			assert.Equal(t, true, providerConfig.GenerateMissingCPEs)
 			assert.Equal(t, tt.wantCreds, providerConfig.RegistryOptions.Credentials)

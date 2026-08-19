@@ -74,6 +74,9 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			if err := validateFrameworkScanInfo(scanInfo); err != nil {
 				return err
 			}
+			if err := validateCombinedImageScanFlags(scanInfo); err != nil {
+				return err
+			}
 			scanInfo.FrameworkScan = true
 
 			// We do not scan all frameworks by default when triggering scan from the CLI

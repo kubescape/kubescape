@@ -103,8 +103,9 @@ func (pp *PdfPrinter) generateImagePdf(imageScanData []cautils.ImageScanData) ([
 	var allCVEs []imageprinter.CVE
 	var images []string
 	for i := range imageScanData {
-		allCVEs = append(allCVEs, extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)...)
-		images = append(images, imageScanData[i].Image)
+		target := imageScanData[i].Target()
+		allCVEs = append(allCVEs, extractCVEs(imageScanData[i].Matches, target)...)
+		images = append(images, target)
 	}
 
 	template := pdf.NewReportTemplate()

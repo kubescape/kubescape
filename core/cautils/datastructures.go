@@ -30,6 +30,7 @@ type ImageScanData struct {
 	Context               pkg.Context
 	IgnoredMatches        []match.IgnoredMatch
 	Image                 string
+	Platform              string
 	Matches               match.Matches
 	Packages              []pkg.Package
 	SBOM                  *sbom.SBOM
@@ -38,6 +39,24 @@ type ImageScanData struct {
 	// scan. It lets users (especially air-gapped ones) see how fresh the data
 	// was. Nil when the DB status is unknown.
 	VulnDBBuilt *time.Time `json:"vulnDBBuilt,omitempty"`
+}
+
+// Target identifies the exact image variant represented by these results.
+// Existing reports keep their original image spelling when no platform was
+// selected, while multi-architecture scans remain distinguishable everywhere
+// the image name is used as a label or grouping key.
+func (d ImageScanData) Target() string {
+	return ImageScanTarget(d.Image, d.Platform)
+}
+
+// ImageScanTarget formats an image variant for human-facing output and logs.
+// Machine-readable identifiers should keep image and platform in separate
+// fields so adding platform awareness does not change existing fingerprints.
+func ImageScanTarget(image, platform string) string {
+	if platform == "" {
+		return image
+	}
+	return image + " [" + platform + "]"
 }
 
 // SkippedManifest records a manifest file that was discovered but could not

@@ -98,18 +98,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			if err := shared.ValidateCommonScanFlags(cmd, &scanInfo, shared.ScanFormats); err != nil {
 				return err
 			}
-			if scanInfo.ScanImages {
-				if err := shared.ValidateImageScanInfo(&scanInfo); err != nil {
-					return err
-				}
-				if err := shared.ValidateWorkloadImageCredentials(shared.ImageCredentials{
-					Authority: scanInfo.RegistryAuthority,
-					Username:  scanInfo.RegistryUsername,
-					Password:  scanInfo.RegistryPassword,
-					Token:     scanInfo.RegistryToken,
-				}); err != nil {
-					return err
-				}
+			if err := validateCombinedImageScanFlags(&scanInfo); err != nil {
+				return err
 			}
 
 			if scanInfo.EncryptionEnabled {
@@ -214,6 +204,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.EnableRegoPrint, "enable-rego-prints", "", false, "Enable sending to rego prints to the logs (use with debug log level: -l debug)")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ScanImages, "scan-images", "", false, "Scan resources images")
 	scanCmd.PersistentFlags().IntVar(&scanInfo.ImageScanConcurrency, "image-scan-concurrency", 1, "Number of concurrent workers for image scanning")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.ImagePlatform, "image-platform", "", "OCI platform for --scan-images, for example linux/amd64; overrides platform inferred from workload scheduling constraints")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.UseDefaultMatchers, "use-default-matchers", "", true, "Use default matchers (true) or CPE matchers (false) for image scanning")
 	scanCmd.PersistentFlags().StringToStringVar(&scanInfo.RegistryMapping, "registry-mapping", nil, "Map internal registry hosts to reachable ones, e.g. --registry-mapping image-registry.openshift-image-registry.svc:5000=registry.company.com (host[:port], no scheme)")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.RegistryUsername, "registry-username", "", "Username for image registry login when no docker config or credential helper is available; can also be set with KUBESCAPE_REGISTRY_USERNAME")
@@ -265,6 +256,21 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.AddCommand(getImageCmd(ks, &scanInfo))
 
 	return scanCmd
+}
+
+func validateCombinedImageScanFlags(scanInfo *cautils.ScanInfo) error {
+	if scanInfo == nil || !scanInfo.ScanImages {
+		return nil
+	}
+	if err := shared.ValidateImageScanInfo(scanInfo); err != nil {
+		return err
+	}
+	return shared.ValidateWorkloadImageCredentials(shared.ImageCredentials{
+		Authority: scanInfo.RegistryAuthority,
+		Username:  scanInfo.RegistryUsername,
+		Password:  scanInfo.RegistryPassword,
+		Token:     scanInfo.RegistryToken,
+	})
 }
 
 func applyRegistryCredentialsFromEnv(cmd *cobra.Command, scanInfo *cautils.ScanInfo) {
