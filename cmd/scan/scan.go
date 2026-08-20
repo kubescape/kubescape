@@ -318,37 +318,15 @@ func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) []cautil
 // deriveTimeoutContext returns a context bound to ks.Context() with a
 // deadline of scanInfo.ScanTimeout, when that's > 0, and a cancel func the
 // caller must defer. When ScanTimeout <= 0 it returns ks.Context() unchanged
-// and a no-op cancel. Unlike the applyTimeout helper this replaces, it does
-// not call ks.SetContext: the derived context is threaded explicitly through
-// ScanContext/HandleResults/enforceBaselineDrift instead of being stashed on
-// the shared ks, so it can't be observed or clobbered by another operation
-// sharing the same *Kubescape instance.
+// and a no-op cancel. It never calls ks.SetContext: the derived context is
+// threaded explicitly through ScanContext/HandleResults/enforceBaselineDrift
+// instead of being stashed on the shared ks, so it can't be observed or
+// clobbered by another operation sharing the same *Kubescape instance.
 func deriveTimeoutContext(scanInfo *cautils.ScanInfo, ks meta.IKubescape) (context.Context, func()) {
 	if scanInfo.ScanTimeout <= 0 {
 		return ks.Context(), func() {}
 	}
 	return context.WithTimeout(ks.Context(), scanInfo.ScanTimeout)
-}
-
-// applyTimeout wraps ks with a deadline context when ScanTimeout > 0 and
-// returns a cleanup function that cancels the context and restores the
-// original. Only ks.ScanImage still needs this: unlike ScanContext, it has
-// no explicit-context entry point yet, so it can only observe a deadline via
-// ks.Context()/ks.SetContext() mutation. Prefer deriveTimeoutContext for any
-// path that can pass a context explicitly.
-//
-//	defer applyTimeout(scanInfo, ks)()
-func applyTimeout(scanInfo *cautils.ScanInfo, ks meta.IKubescape) func() {
-	if scanInfo.ScanTimeout <= 0 {
-		return func() {}
-	}
-	originalCtx := ks.Context()
-	timeoutCtx, cancel := context.WithTimeout(originalCtx, scanInfo.ScanTimeout)
-	ks.SetContext(timeoutCtx)
-	return func() {
-		cancel()
-		ks.SetContext(originalCtx)
-	}
 }
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {

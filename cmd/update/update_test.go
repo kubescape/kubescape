@@ -53,6 +53,9 @@ func (s *stubKubescape) Patch(*metav1.PatchInfo, *cautils.ScanInfo) (bool, error
 func (s *stubKubescape) ScanImage(*metav1.ImageScanInfo, *cautils.ScanInfo) (bool, error) {
 	return false, nil
 }
+func (s *stubKubescape) ScanImageContext(context.Context, *metav1.ImageScanInfo, *cautils.ScanInfo) (bool, error) {
+	return false, nil
+}
 
 var _ meta.IKubescape = (*stubKubescape)(nil)
 

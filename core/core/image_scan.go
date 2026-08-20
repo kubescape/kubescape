@@ -356,7 +356,24 @@ func scanWithRegistryMapping(
 	return nil, lastErr
 }
 
+// ScanImage scans imgScanInfo.Image using ks.Context() as the operation's
+// context. It is a compatibility wrapper around ScanImageContext for callers
+// that have not migrated to passing their own context explicitly; see
+// ScanImageContext's documentation for why that matters when a *Kubescape
+// instance is reused or scan operations can overlap.
 func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (bool, error) {
+	return ks.ScanImageContext(ks.Context(), imgScanInfo, scanInfo)
+}
+
+// ScanImageContext scans imgScanInfo.Image bound to the given ctx for its
+// complete execution, rather than re-reading ks.Context() at each stage as
+// ScanImage's predecessor did (matching Kubescape.Scan's own ScanContext
+// migration, #3237). Callers that need a deadline or cancellation should
+// derive ctx themselves and pass it in directly, instead of calling
+// ks.SetContext beforehand: mutating the shared *Kubescape's context is not
+// safe if the instance is reused or another operation could run
+// concurrently against it.
+func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (bool, error) {
 	logger.L().Start(fmt.Sprintf("Scanning image %s...", imgScanInfo.Image))
 
 	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, scanInfo.SkipDBUpdate)
@@ -391,7 +408,7 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 	}
 
 	imageScanData, err := scanWithRegistryMapping(
-		ks.Context(), svc, imgScanInfo.Image, []imagescan.RegistryCredentials{creds},
+		ctx, svc, imgScanInfo.Image, []imagescan.RegistryCredentials{creds},
 		scanInfo.RegistryMapping, vulnerabilityExceptions, severityExceptions, imgScanInfo.Platform,
 	)
 	if err != nil {
@@ -403,18 +420,18 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 
 	scanInfo.SetScanType(cautils.ScanTypeImage)
 
-	outputPrinters, err := GetOutputPrinters(scanInfo, ks.Context(), "")
+	outputPrinters, err := GetOutputPrinters(scanInfo, ctx, "")
 	if err != nil {
 		return false, err
 	}
 
-	uiPrinter := GetUIPrinter(ks.Context(), scanInfo, "")
+	uiPrinter := GetUIPrinter(ctx, scanInfo, "")
 
 	resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
 
 	resultsHandler.ImageScanData = []cautils.ImageScanData{*imageScanData}
 
-	return svc.ExceedsSeverityThreshold(imagescan.ParseSeverity(scanInfo.FailThresholdSeverity), imageScanData.Matches, scanInfo.OnlyFixable), resultsHandler.HandleResults(ks.Context(), scanInfo)
+	return svc.ExceedsSeverityThreshold(imagescan.ParseSeverity(scanInfo.FailThresholdSeverity), imageScanData.Matches, scanInfo.OnlyFixable), resultsHandler.HandleResults(ctx, scanInfo)
 }
 
 // ScanErrorCategory defines distinct vulnerability scan failure categories.
