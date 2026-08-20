@@ -41,6 +41,48 @@ func TestPerContextOutputPath(t *testing.T) {
 	}
 }
 
+// TestPerContextOutputPaths_RejectsCollidingContexts is a regression test
+// for a real review finding on #3438: perContextOutputPath's sanitization
+// isn't injective, so two distinct context names - e.g. "prod/us-east-1"
+// and "prod_us-east-1" - can derive the same output path and silently
+// overwrite each other's report, with fleetScan never noticing since both
+// individual scans "succeed." perContextOutputPaths must catch this before
+// any scanning starts, not after.
+func TestPerContextOutputPaths_RejectsCollidingContexts(t *testing.T) {
+	_, err := perContextOutputPaths("report.json", []string{"prod/us-east-1", "prod_us-east-1", "ctx-c"})
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "prod/us-east-1")
+	assert.ErrorContains(t, err, "prod_us-east-1")
+	assert.ErrorContains(t, err, "report.prod_us-east-1.json")
+}
+
+func TestPerContextOutputPaths_NoCollisions(t *testing.T) {
+	paths, err := perContextOutputPaths("report.json", []string{"ctx-a", "ctx-b", "ctx-c"})
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{
+		"ctx-a": "report.ctx-a.json",
+		"ctx-b": "report.ctx-b.json",
+		"ctx-c": "report.ctx-c.json",
+	}, paths)
+}
+
+func TestFleetScan_RejectsCollidingContextsBeforeScanningAny(t *testing.T) {
+	ks := &fleetTrackingKubescape{}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"prod/us-east-1", "prod_us-east-1"},
+		Output:       "report.json",
+		ScanType:     cautils.ScanTypeCluster,
+	}
+
+	err := fleetScan(scanInfo, ks, nil)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "colliding")
+	assert.Empty(t, ks.callsOutputs, "no context should be scanned once a collision is detected up front")
+}
+
 func TestFleetScan_RequiresClusterScanningContext(t *testing.T) {
 	scanInfo := cautils.ScanInfo{
 		KubeContexts:  []string{"ctx-a"},
