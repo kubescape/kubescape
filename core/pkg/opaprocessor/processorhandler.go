@@ -779,12 +779,19 @@ func splitWholeClusterControls(policies *cautils.Policies, controlIDs []string) 
 // ruleCacheEligible reports whether a rule's verdict for one resource can be
 // safely cached keyed on that resource's own hash.
 //
-// A rule that matches more than one resource kind (len(rule.Match) > 1) is
-// ineligible even without DynamicMatch: the whole matched set is passed to
-// OPA as one input array, and a static Rego rule is free to derive one
-// resource's verdict from another resource in that same array (e.g. a
-// Service's verdict influencing a Deployment's). Restricting to single-kind
-// Match rules keeps caching to rules that are provably resource-local.
+// len(rule.Match) is not the right signal for "matches more than one
+// resource kind": a single RuleMatchObjects entry can itself list several
+// kinds in its own Resources field (e.g. rules/bind-roles-clusterroles-v1
+// matches RoleBinding, ClusterRoleBinding, Role, and ClusterRole in one
+// match block via resourcesAggregator). Any of those kinds can end up in the
+// same OPA input array, and a static Rego rule is free to derive one
+// resource's verdict from another resource in that array (e.g. pairing a
+// RoleBinding with its Role). So this counts the union of resource kinds
+// across every Match entry, and separately excludes any rule carrying the
+// resourcesAggregator attribute outright, since that attribute is the
+// authoritative signal a rule is designed to correlate resources even in
+// the edge case where it's paired with a single wildcard/degenerate kind
+// list that this counting wouldn't otherwise catch.
 func ruleCacheEligible(control *reporthandling.Control, rule *reporthandling.PolicyRule) bool {
 	if controlRequiresWholeClusterInput(control) {
 		return false
@@ -792,7 +799,16 @@ func ruleCacheEligible(control *reporthandling.Control, rule *reporthandling.Pol
 	if rule.DynamicMatch != nil {
 		return false
 	}
-	if len(rule.Match) > 1 {
+	if _, hasAggregator := rule.Attributes["resourcesAggregator"]; hasAggregator {
+		return false
+	}
+	kinds := make(map[string]struct{})
+	for _, m := range rule.Match {
+		for _, resource := range m.Resources {
+			kinds[strings.ToLower(resource)] = struct{}{}
+		}
+	}
+	if len(kinds) > 1 {
 		return false
 	}
 	if rule.RuleLanguage == reporthandling.CELLanguage {

@@ -132,5 +132,9 @@ func VersionKey(parts ...[]byte) string {
 }
 
 func Delete(cacheDir string) error {
-	return os.Remove(filepath.Join(cacheDir, "incremental-scan-cache.json"))
+	err := os.Remove(filepath.Join(cacheDir, "incremental-scan-cache.json"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
