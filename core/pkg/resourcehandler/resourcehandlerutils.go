@@ -214,6 +214,7 @@ func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMa
 					queryableResource := QueryableResource{
 						GroupVersionResourceTriplet: resolved.groupVersionResourceTriplet,
 						Namespaced:                  resolved.namespaced,
+						Kind:                        resolved.kind,
 					}
 					queryableResource.AddFieldSelector(globalFieldSelector)
 
