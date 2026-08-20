@@ -22,7 +22,7 @@ import (
 func DEKFromMetadata(
 	metadata *reporthandlingv2.Metadata,
 	masterKey []byte,
-) ([]byte, error) {
+) (*ReportKey, error) {
 
 	if metadata == nil {
 		return nil, fmt.Errorf("metadata is nil")
@@ -36,7 +36,7 @@ func DEKFromMetadata(
 		return nil, fmt.Errorf("encrypted DEK not found")
 	}
 
-	return UnwrapDEK(
+	return UnwrapReportKey(
 		metadata.EncryptionMetadata.EncryptedDEK,
 		masterKey,
 	)
@@ -74,11 +74,7 @@ func DecryptRepoContextMetadata(
 		return err
 	}
 
-	defer func() {
-		for i := range dek {
-			dek[i] = 0
-		}
-	}()
+	defer dek.Zero()
 
 	return decryptRepoContextMetadata(metadata, dek)
 }
@@ -87,7 +83,7 @@ func DecryptRepoContextMetadata(
 // of report decryption with an already unwrapped data-encryption key. Keeping
 // this internal avoids unwrapping the same key twice during whole-report
 // decryption while the exported helper retains its existing master-key API.
-func decryptRepoContextMetadata(metadata *reporthandlingv2.Metadata, dek []byte) error {
+func decryptRepoContextMetadata(metadata *reporthandlingv2.Metadata, dek *ReportKey) error {
 	if metadata == nil {
 		return fmt.Errorf("metadata is nil")
 	}
@@ -191,7 +187,7 @@ func decryptRepoContextMetadata(metadata *reporthandlingv2.Metadata, dek []byte)
 // This operation mutates the supplied LastCommit object in place.
 func decryptLastCommit(
 	commit *reporthandling.LastCommit,
-	dek []byte,
+	dek *ReportKey,
 ) error {
 	if commit == nil {
 		return nil
@@ -274,7 +270,7 @@ func decryptLastCommit(
 //   - LastCommit.Message
 func DecryptResourceSource(
 	source *reporthandling.Source,
-	dek []byte,
+	dek *ReportKey,
 ) error {
 	if source == nil {
 		return nil
@@ -399,7 +395,7 @@ func DecryptResourceSource(
 //   - Namespace
 func DecryptResourceMetadata(
 	resource workloadinterface.IMetadata,
-	dek []byte,
+	dek *ReportKey,
 ) error {
 	if resource == nil {
 		return nil
@@ -449,7 +445,7 @@ func DecryptResourceMetadata(
 // encrypted in the first place — annotation values such as
 // kubectl.kubernetes.io/last-applied-configuration routinely carry a trailing
 // newline that is part of the data.
-func decryptIfEncrypted(value string, dek []byte) (string, error) {
+func decryptIfEncrypted(value string, dek *ReportKey) (string, error) {
 	if value == "" {
 		return value, nil
 	}
@@ -460,14 +456,14 @@ func decryptIfEncrypted(value string, dek []byte) (string, error) {
 		return value, nil
 	}
 
-	return DecryptString(trimmed, dek)
+	return dek.DecryptString(trimmed)
 }
 
 // DecryptResourceLabels restores encrypted resource label values.
 //
 // Every label value is passed through decryptIfEncrypted, which leaves
 // plaintext values unchanged while restoring encrypted values.
-func DecryptResourceLabels(resource workloadinterface.IMetadata, dek []byte) error {
+func DecryptResourceLabels(resource workloadinterface.IMetadata, dek *ReportKey) error {
 
 	if resource == nil {
 		return nil
@@ -511,7 +507,7 @@ func DecryptResourceLabels(resource workloadinterface.IMetadata, dek []byte) err
 
 // DecryptResourceAnnotations restores encrypted annotation values
 // throughout a workload object, including nested workload templates.
-func DecryptResourceAnnotations(resource workloadinterface.IMetadata, dek []byte) error {
+func DecryptResourceAnnotations(resource workloadinterface.IMetadata, dek *ReportKey) error {
 
 	if resource == nil {
 		return nil
@@ -537,7 +533,7 @@ func DecryptResourceAnnotations(resource workloadinterface.IMetadata, dek []byte
 // decryptAnnotationNodes recursively traverses resource objects to
 // locate metadata.annotations blocks regardless of workload nesting
 // depth.
-func decryptAnnotationNodes(node any, dek []byte) error {
+func decryptAnnotationNodes(node any, dek *ReportKey) error {
 
 	switch v := node.(type) {
 
@@ -576,7 +572,7 @@ func decryptAnnotationNodes(node any, dek []byte) error {
 
 // decryptAnnotationMap restores encrypted annotation values while
 // preserving annotation keys.
-func decryptAnnotationMap(obj map[string]any, dek []byte) error {
+func decryptAnnotationMap(obj map[string]any, dek *ReportKey) error {
 
 	rawMetadata, ok := obj["metadata"]
 	if !ok || rawMetadata == nil {
@@ -625,7 +621,7 @@ func decryptAnnotationMap(obj map[string]any, dek []byte) error {
 
 // DecryptResourceObjectSourcePath restores object.sourcePath while
 // preserving trailing line-number context.
-func DecryptResourceObjectSourcePath(resource workloadinterface.IMetadata, dek []byte) error {
+func DecryptResourceObjectSourcePath(resource workloadinterface.IMetadata, dek *ReportKey) error {
 
 	if resource == nil {
 		return nil
@@ -662,7 +658,7 @@ func DecryptResourceObjectSourcePath(resource workloadinterface.IMetadata, dek [
 
 // decryptSourcePath restores the path portion of a sourcePath while
 // preserving any trailing line-number suffix.
-func decryptSourcePath(sourcePath string, dek []byte) (string, error) {
+func decryptSourcePath(sourcePath string, dek *ReportKey) (string, error) {
 
 	lastColon := strings.LastIndex(
 		sourcePath,

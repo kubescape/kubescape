@@ -90,7 +90,7 @@ func TestResolveMappedIDEncryptionFallbackIsReversible(t *testing.T) {
 	original := "apps/v1/production/Deployment/payments-api"
 	idMapping := map[string]string{}
 	transformed, err := resolveMappedID(
-		NewEncryptionTransformer(dek),
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
 		idMapping,
 		original,
 		"ref",
@@ -103,7 +103,7 @@ func TestResolveMappedIDEncryptionFallbackIsReversible(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, original, restored)
 
-	repeated, err := resolveMappedID(NewEncryptionTransformer(dek), idMapping, original, "ref")
+	repeated, err := resolveMappedID(NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)), idMapping, original, "ref")
 	require.NoError(t, err)
 	assert.Equal(t, transformed, repeated)
 }
@@ -816,7 +816,7 @@ func TestTransformRepoContextMetadata_EncryptionTransformer(
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	repo := &reporthandlingv2.RepoContextMetadata{
 		Provider:      "github",
@@ -953,7 +953,7 @@ func TestTransformResourceSource_EncryptionTransformer(
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	source := &reporthandling.Source{
 		Path: "/workspace/private/app.yaml",
@@ -1045,7 +1045,7 @@ func TestTransformSession_ResourceSourceEncryption(
 	err = transformSession(
 		session,
 		NewMapping(),
-		NewEncryptionTransformer(dek),
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
 	)
 	require.NoError(t, err)
 
@@ -1083,7 +1083,7 @@ func TestTransformResourceMetadata_EncryptionTransformer(
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	resource := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
@@ -1187,7 +1187,7 @@ func TestTransformResourceLabels_EncryptionTransformer(t *testing.T) {
 	err = transformResourceLabels(
 		resource,
 		[]string{"team", "env"},
-		NewEncryptionTransformer(dek),
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
 	)
 	require.NoError(t, err)
 
@@ -1223,7 +1223,7 @@ func TestTransformResourceAnnotations_EncryptionTransformer(t *testing.T) {
 
 	err = transformResourceAnnotations(
 		resource,
-		NewEncryptionTransformer(dek),
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
 	)
 	require.NoError(t, err)
 
@@ -1258,7 +1258,7 @@ func TestTransformResourceObjectSourcePath_EncryptionTransformer(t *testing.T) {
 
 	err = transformResourceObjectSourcePath(
 		resource,
-		NewEncryptionTransformer(dek),
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
 	)
 	require.NoError(t, err)
 
@@ -1280,7 +1280,7 @@ func TestTransformSourcePath_EncryptionTransformer(t *testing.T) {
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	transformed, err := transformSourcePath(
 		"/workspace/manifests/payment.yaml:42",
@@ -1314,7 +1314,7 @@ func TestTransformSourcePath_WindowsDriveLetterNoLineSuffix(t *testing.T) {
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	// A bare Windows path has no trailing ":<index>" suffix, so its only
 	// colon is the drive letter's. That colon must not be mistaken for a
@@ -1338,7 +1338,7 @@ func TestTransformSourcePath_WindowsDriveLetterWithLineSuffix(t *testing.T) {
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	transformed, err := transformSourcePath(
 		`C:\Users\alice\manifests\payment.yaml:7`,
