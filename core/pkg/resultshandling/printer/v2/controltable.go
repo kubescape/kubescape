@@ -84,6 +84,7 @@ func getSortedControlsIDs(controls reportsummary.ControlSummaries) [][]string {
 		if i < 0 || i >= len(controlIDs) {
 			i = 0
 		}
+		//nolint:gosec // range is bounded above
 		controlIDs[i] = append(controlIDs[i], c.GetID())
 	}
 	for i := range controlIDs {
