@@ -309,10 +309,27 @@ func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) []cautil
 	return cautils.BuildPolicyIdentifiers([]string{"clusterscan", "mitre", "nsa"}, v1.KindFramework)
 }
 
+// deriveTimeoutContext returns a context bound to ks.Context() with a
+// deadline of scanInfo.ScanTimeout, when that's > 0, and a cancel func the
+// caller must defer. When ScanTimeout <= 0 it returns ks.Context() unchanged
+// and a no-op cancel. Unlike the applyTimeout helper this replaces, it does
+// not call ks.SetContext: the derived context is threaded explicitly through
+// ScanContext/HandleResults/enforceBaselineDrift instead of being stashed on
+// the shared ks, so it can't be observed or clobbered by another operation
+// sharing the same *Kubescape instance.
+func deriveTimeoutContext(scanInfo *cautils.ScanInfo, ks meta.IKubescape) (context.Context, func()) {
+	if scanInfo.ScanTimeout <= 0 {
+		return ks.Context(), func() {}
+	}
+	return context.WithTimeout(ks.Context(), scanInfo.ScanTimeout)
+}
+
 // applyTimeout wraps ks with a deadline context when ScanTimeout > 0 and
 // returns a cleanup function that cancels the context and restores the
-// original. The caller must defer the returned function so the deadline
-// covers both ks.Scan() and results.HandleResults().
+// original. Only ks.ScanImage still needs this: unlike ScanContext, it has
+// no explicit-context entry point yet, so it can only observe a deadline via
+// ks.Context()/ks.SetContext() mutation. Prefer deriveTimeoutContext for any
+// path that can pass a context explicitly.
 //
 //	defer applyTimeout(scanInfo, ks)()
 func applyTimeout(scanInfo *cautils.ScanInfo, ks meta.IKubescape) func() {
@@ -329,14 +346,15 @@ func applyTimeout(scanInfo *cautils.ScanInfo, ks meta.IKubescape) func() {
 }
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
-	defer applyTimeout(&scanInfo, ks)()
+	ctx, cancel := deriveTimeoutContext(&scanInfo, ks)
+	defer cancel()
 
-	results, err := ks.Scan(&scanInfo, policyIdentifiers)
+	results, err := ks.ScanContext(ctx, &scanInfo, policyIdentifiers)
 	if err != nil {
 		return err
 	}
 
-	if err = results.HandleResults(ks.Context(), &scanInfo); err != nil {
+	if err = results.HandleResults(ctx, &scanInfo); err != nil {
 		return err
 	}
 
@@ -355,7 +373,7 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifie
 		return err
 	}
 
-	return enforceBaselineDrift(ks.Context(), results, &scanInfo)
+	return enforceBaselineDrift(ctx, results, &scanInfo)
 }
 
 func enforceBaselineDrift(ctx context.Context, results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) error {

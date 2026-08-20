@@ -25,7 +25,13 @@ import (
 	"k8s.io/apimachinery/pkg/version"
 )
 
-func TestScan_ReturnsFinalizedPartialDataOnOPAError(t *testing.T) {
+// buildBrokenRuleScanInfo writes a local, offline-loadable scan target (one
+// manifest, one framework with a deliberately invalid rego rule, and empty
+// controls-inputs/exceptions/attack-tracks so nothing needs a network call)
+// into its own temp dir, so callers get fully independent *cautils.ScanInfo
+// values suitable for running concurrently against a shared *Kubescape.
+func buildBrokenRuleScanInfo(t *testing.T) (*cautils.ScanInfo, []cautils.PolicyIdentifier, reporthandling.Control) {
+	t.Helper()
 	dir := t.TempDir()
 	manifestPath := filepath.Join(dir, "pod.yaml")
 	require.NoError(t, os.WriteFile(manifestPath, []byte(`apiVersion: v1
@@ -73,10 +79,17 @@ metadata:
 	}
 	scanInfo.Submit.SetBool(false)
 
-	results, err := NewKubescape(context.Background()).Scan(scanInfo, []cautils.PolicyIdentifier{{
+	policyIdentifiers := []cautils.PolicyIdentifier{{
 		Identifier: framework.Name,
 		Kind:       apisv1.KindFramework,
-	}})
+	}}
+	return scanInfo, policyIdentifiers, control
+}
+
+func TestScan_ReturnsFinalizedPartialDataOnOPAError(t *testing.T) {
+	scanInfo, policyIdentifiers, control := buildBrokenRuleScanInfo(t)
+
+	results, err := NewKubescape(context.Background()).Scan(scanInfo, policyIdentifiers)
 
 	require.ErrorContains(t, err, "broken-rule")
 	require.NotNil(t, results)
@@ -84,6 +97,57 @@ metadata:
 	require.Len(t, results.GetData().ResourcesResult, 1)
 	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
 	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+}
+
+// TestScanContext_ReturnsFinalizedPartialDataOnOPAError exercises the new
+// explicit-context entry point directly (#3237), mirroring
+// TestScan_ReturnsFinalizedPartialDataOnOPAError's assertions to confirm
+// ScanContext behaves identically to Scan when called with ks.Context().
+func TestScanContext_ReturnsFinalizedPartialDataOnOPAError(t *testing.T) {
+	scanInfo, policyIdentifiers, control := buildBrokenRuleScanInfo(t)
+	ks := NewKubescape(context.Background())
+
+	results, err := ks.ScanContext(ks.Context(), scanInfo, policyIdentifiers)
+
+	require.ErrorContains(t, err, "broken-rule")
+	require.NotNil(t, results)
+	require.NotNil(t, results.GetData(), "the finalized partial session must remain available alongside the scan error")
+	require.Len(t, results.GetData().ResourcesResult, 1)
+	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
+	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+}
+
+// TestScanContext_DoesNotMutateSharedKubescapeContext is a regression test
+// for #3237: ScanContext must operate purely on the ctx argument it's given
+// and never read or write ks's own Ctx field, so two operations sharing one
+// *Kubescape can't observe or clobber each other's context the way the old
+// Scan()+SetContext(timeout)+restore pattern could.
+//
+// This intentionally does not run two ScanContext calls concurrently under
+// -race: doing so trips an unrelated, pre-existing data race in
+// k8sinterface.IsConnectedToCluster/SetConnectedToCluster (a package-level
+// cache in github.com/kubescape/k8s-interface, exercised via getInterfaces
+// regardless of scan type). That's a real bug, but it's in a shared
+// dependency's global state, not in *Kubescape's context ownership, and
+// fixing it is out of scope here: #3237 explicitly does not claim the whole
+// scanner is safe for unrestricted parallel execution, only that Scan's own
+// context handling is.
+func TestScanContext_DoesNotMutateSharedKubescapeContext(t *testing.T) {
+	scanInfo, policyIdentifiers, control := buildBrokenRuleScanInfo(t)
+	ks := NewKubescape(context.Background())
+
+	type ctxKey struct{}
+	operationCtx := context.WithValue(context.Background(), ctxKey{}, "operation-owned")
+
+	results, err := ks.ScanContext(operationCtx, scanInfo, policyIdentifiers)
+
+	require.ErrorContains(t, err, "broken-rule")
+	require.NotNil(t, results)
+	require.NotNil(t, results.GetData())
+	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
+	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+
+	assert.Equal(t, context.Background(), ks.Context(), "ScanContext must not call SetContext or otherwise mutate ks's own context")
 }
 
 type recordingImageScanService struct {

@@ -211,8 +211,27 @@ func collectPolicies(ctx context.Context, clusterName string, policyIdentifiers 
 	return policyHandler.CollectPolicies(ctx, policyIdentifiers, scanInfo, getters)
 }
 
+// Scan runs a scan using ks.Context() as the operation's context. It is a
+// compatibility wrapper around ScanContext for callers that have not
+// migrated to passing their own context explicitly; see ScanContext's
+// documentation for why that matters when a *Kubescape instance is reused
+// or scan operations can overlap.
 func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
-	ctxInit, spanInit := otel.Tracer("").Start(ks.Context(), "initialization")
+	return ks.ScanContext(ks.Context(), scanInfo, policyIdentifiers)
+}
+
+// ScanContext runs a scan bound to the given ctx for its complete execution
+// (initialization, policy/resource collection, OPA evaluation, image
+// scanning, prioritization, and teardown all observe this same ctx), rather
+// than re-reading ks.Context() at each stage. Callers that need a deadline
+// or cancellation should derive ctx themselves (e.g. context.WithTimeout)
+// and pass it in directly, instead of calling ks.SetContext beforehand:
+// mutating the shared *Kubescape's context is not safe if the instance is
+// reused or another operation could run concurrently against it, since a
+// mid-operation ks.Context() read could observe a different deadline than
+// the one that started the operation, or an already-restored/canceled one.
+func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
 	logger.L().Start("Kubescape scanner initializing...")
 
 	// ===================== Initialization =====================
@@ -237,7 +256,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 	// remove host scanner components
 	defer func() {
 		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
-			logger.L().Ctx(ks.Context()).StopError("Failed to tear down host scanner", helpers.Error(err))
+			logger.L().Ctx(ctx).StopError("Failed to tear down host scanner", helpers.Error(err))
 		}
 	}()
 
@@ -350,7 +369,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 	}
 
 	// OPA context for both streaming and non-streaming paths
-	ctxOpa, spanOpa := otel.Tracer("").Start(ks.Context(), "opa testing")
+	ctxOpa, spanOpa := otel.Tracer("").Start(ctx, "opa testing")
 	defer spanOpa.End()
 
 	if enableStreaming {
@@ -391,7 +410,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 	if scanInfo.PrintAttackTree || isPrioritizationScanType(scanInfo.ScanType) {
 		_, spanPrioritization := otel.Tracer("").Start(ctxOpa, "prioritization")
 		if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
-			logger.L().Ctx(ks.Context()).Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
 		} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 			return resultsHandling, fmt.Errorf("%w", err)
 		}
@@ -402,7 +421,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 	}
 
 	if scanInfo.ScanImages {
-		resultsHandling.SetScanError(scanImages(scanInfo.ScanType, scanData, ks.Context(), resultsHandling, scanInfo, interfaces.k8s))
+		resultsHandling.SetScanError(scanImages(scanInfo.ScanType, scanData, ctx, resultsHandling, scanInfo, interfaces.k8s))
 	}
 	// ========================= results handling =====================
 	resultsHandling.SetData(scanData)

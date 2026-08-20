@@ -40,6 +40,10 @@ func (m *scanInputCaptureKubescape) Context() context.Context {
 	return context.Background()
 }
 
+func (m *scanInputCaptureKubescape) ScanContext(_ context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return m.Scan(scanInfo, policyIdentifiers)
+}
+
 func TestPrepareScanLocalInput(t *testing.T) {
 	t.Run("positional inputs populate input patterns", func(t *testing.T) {
 		scanInfo := cautils.ScanInfo{}

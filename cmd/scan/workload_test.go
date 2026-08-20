@@ -40,6 +40,10 @@ func (m *workloadScanCaptureKubescape) Scan(scanInfo *cautils.ScanInfo, _ []caut
 	return results, nil
 }
 
+func (m *workloadScanCaptureKubescape) ScanContext(_ context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return m.Scan(scanInfo, policyIdentifiers)
+}
+
 func TestSetWorkloadScanInfo(t *testing.T) {
 	tests := []struct {
 		Description  string
@@ -562,6 +566,10 @@ func (m *recordingKubescape) Scan(scanInfo *cautils.ScanInfo, _ []cautils.Policy
 	rh := resultshandling.NewResultsHandler(nil, []printer.IPrinter{&fakePrinter{}}, &fakePrinter{})
 	rh.SetData(cautils.NewOPASessionObjMock())
 	return rh, nil
+}
+
+func (m *recordingKubescape) ScanContext(_ context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return m.Scan(scanInfo, policyIdentifiers)
 }
 
 func TestGetWorkloadCmd_ApiVersion(t *testing.T) {
