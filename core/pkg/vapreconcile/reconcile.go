@@ -34,10 +34,16 @@ var vapVersions = []string{"v1", "v1beta1", "v1alpha1"}
 // there is no enforcement state to reconcile.
 var ErrUnsupported = errors.New("cluster does not serve ValidatingAdmissionPolicy resources")
 
+// ErrForbidden reports credentials that may not list the VAP API. Enforcement
+// state enriches a scan rather than feeding it, so being denied it leaves the
+// scan intact.
+var ErrForbidden = errors.New("not permitted to list ValidatingAdmissionPolicy resources")
+
 // Collect lists ValidatingAdmissionPolicy and ValidatingAdmissionPolicyBinding
 // resources from the live cluster, using whichever version of the API the
 // cluster serves. Both resource types are cluster-scoped so no namespace
-// selector is needed. Clusters without the API return ErrUnsupported.
+// selector is needed. A cluster without the API returns ErrUnsupported, and
+// credentials that may not list it ErrForbidden.
 func Collect(ctx context.Context, k8s *k8sinterface.KubernetesApi) ([]unstructured.Unstructured, []unstructured.Unstructured, error) {
 	version, err := resolveVersion(k8s.DiscoveryClient)
 	if err != nil {
@@ -110,13 +116,17 @@ func serves(resources *metav1.APIResourceList, names ...string) bool {
 
 // list pulls every object of one cluster-scoped VAP resource. A resource that
 // discovery advertised but the API server does not route is reported as
-// unsupported rather than as a scan failure.
+// unsupported, and one the credentials may not read as forbidden; neither is a
+// scan failure.
 func list(ctx context.Context, client dynamic.Interface, version, resource string) ([]unstructured.Unstructured, error) {
 	gvr := schema.GroupVersionResource{Group: vapGroup, Version: version, Resource: resource}
 	listed, err := client.Resource(gvr).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil, ErrUnsupported
+		}
+		if apierrors.IsForbidden(err) {
+			return nil, fmt.Errorf("%w: %s", ErrForbidden, gvr.String())
 		}
 		return nil, fmt.Errorf("failed to list %s: %w", gvr.String(), err)
 	}
