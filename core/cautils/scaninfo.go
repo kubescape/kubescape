@@ -185,6 +185,7 @@ type ScanInfo struct {
 	contextResolved           bool
 	cleanups                  []func()
 	ListingURL                string            //Grype vulnerability database URL
+	SkipDBUpdate              bool              // Do not update the vulnerability database before image scanning
 	RegistryMapping           map[string]string // Map internal registry URLs to external ones
 	RegistryAuthority         string            // Registry host[:port] explicit credentials apply to
 	RegistryUsername          string            // Username for workload image registry authentication

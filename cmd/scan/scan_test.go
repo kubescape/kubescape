@@ -1192,3 +1192,29 @@ func TestGetScanCommandRegistersImagePlatformFlag(t *testing.T) {
 	assert.Contains(t, flag.Usage, "linux/amd64")
 	assert.Contains(t, flag.Usage, "overrides platform inferred")
 }
+
+func TestScanCommandRegistersSkipDBUpdateFlag(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	flag := cmd.PersistentFlags().Lookup("skip-db-update")
+	require.NotNil(t, flag)
+	assert.Equal(t, "false", flag.DefValue)
+}
+
+func TestGetScanCommand_SkipDBUpdateReachesScanInfo(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"image", "--skip-db-update", "nginx:latest"})
+	require.NoError(t, cmd.Execute())
+	require.NotNil(t, mockKubescape.scanInfo)
+	assert.True(t, mockKubescape.scanInfo.SkipDBUpdate)
+}
+
+func TestGetScanCommand_SkipDBUpdateDefaultsToFalse(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"image", "nginx:latest"})
+	require.NoError(t, cmd.Execute())
+	require.NotNil(t, mockKubescape.scanInfo)
+	assert.False(t, mockKubescape.scanInfo.SkipDBUpdate)
+}
