@@ -226,7 +226,7 @@ func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resource
 		var resolved []resolvedResource
 		var skippedUnlistable []string
 		for _, candidate := range discovered {
-			if !matchesDiscoveryValue(group, candidate.gvr.Group) ||
+			if !matchesDiscoveryValue(normalizeAPIGroup(group), candidate.gvr.Group) ||
 				!matchesDiscoveryValue(version, candidate.gvr.Version) ||
 				!matchesDiscoveryResource(resource, candidate) {
 				continue
