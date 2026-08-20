@@ -30,10 +30,11 @@ const (
 	CycloneDXFormat    string = "cyclonedx-json"
 	SPDXFormat         string = "spdx-json"
 	PolicyReportFormat string = "policyreport"
+	OtelFormat         string = "otel"
 )
 
 // AllFormats lists every output format kubescape can emit.
-var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat, PolicyReportFormat}
+var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat, PolicyReportFormat, OtelFormat}
 
 // ImageFormats lists formats whose printers support image-scan data. CSV is
 // deliberately excluded: CsvPrinter.ActionPrint requires opaSessionObj and
@@ -42,7 +43,7 @@ var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, Prometheu
 //
 // CycloneDXFormat and SPDXFormat are the inverse: they encode the SBOM that
 // only exists on image scans, so they are image-scan-only (see ValidatePrinter).
-var ImageFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CycloneDXFormat, SPDXFormat}
+var ImageFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CycloneDXFormat, SPDXFormat, OtelFormat}
 
 const (
 	JsonOutputExt         = ".json"
@@ -58,6 +59,10 @@ const (
 	CycloneDXOutputExt    = ".cdx.json"
 	SPDXOutputExt         = ".spdx.json"
 	PolicyReportOutputExt = ".yaml"
+	// OtelOutputExt is nominal only: the "otel" format never writes a file
+	// (see OtelPrinter.SetWriter), it exports over OTLP instead. It is
+	// listed here purely so FormatOutputExt stays total over AllFormats.
+	OtelOutputExt = ".otel"
 )
 
 // HasOutputExt reports whether outputFile already ends with ext, compared
@@ -91,6 +96,7 @@ var FormatOutputExt = map[string]string{
 	CycloneDXFormat:    CycloneDXOutputExt,
 	SPDXFormat:         SPDXOutputExt,
 	PolicyReportFormat: PolicyReportOutputExt,
+	OtelFormat:         OtelOutputExt,
 }
 
 type IPrinter interface {

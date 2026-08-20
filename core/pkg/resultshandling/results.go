@@ -263,6 +263,8 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		return printerv2.NewJunitPrinter(scanInfo.VerboseMode)
 	case printer.PrometheusFormat:
 		return printerv2.NewPrometheusPrinter(scanInfo.VerboseMode)
+	case printer.OtelFormat:
+		return printerv2.NewOtelPrinter(scanInfo.VerboseMode)
 	case printer.PdfFormat:
 		return printerv2.NewPdfPrinter()
 	case printer.HtmlFormat:
@@ -309,7 +311,7 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 	}
 
 	switch printFormat {
-	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat, printer.MarkdownFormat, printer.PolicyReportFormat:
+	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat, printer.MarkdownFormat, printer.PolicyReportFormat, printer.OtelFormat:
 		return false, nil
 	default:
 		return true, nil

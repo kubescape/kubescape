@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
@@ -15,9 +17,11 @@ import (
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/telemetry"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel"
 )
 
 var scanCmdExamples = fmt.Sprintf(`
@@ -61,6 +65,13 @@ var scanCmdExamples = fmt.Sprintf(`
 
 func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
+	// otelShutdown flushes/releases the OTel providers registered by
+	// telemetry.Setup in PersistentPreRunE below. It defaults to a no-op so
+	// PersistentPostRunE can call it unconditionally, including on scan
+	// invocations where --otel-endpoint/OTEL_EXPORTER_OTLP_ENDPOINT was never
+	// set (the common case) or where PersistentPreRunE returned early on a
+	// validation error before telemetry.Setup ran.
+	var otelShutdown telemetry.ShutdownFunc = func(context.Context) error { return nil }
 
 	// scanCmd represents the scan command
 	scanCmd := &cobra.Command{
@@ -92,7 +103,28 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			}
 			captureKubeconfigSelection(cmd, &scanInfo)
 			applyRegistryCredentialsFromEnv(cmd, &scanInfo)
+
+			// OTel export (issue #3402): only touches the OTel SDK at all
+			// when an endpoint was actually requested, so a bare `scan` run
+			// never pays for it.
+			if endpoint := telemetry.ResolveEndpoint(scanInfo.OtelEndpoint); endpoint != "" {
+				shutdown, err := telemetry.Setup(cmd.Context(), endpoint, versioncheck.BuildNumber)
+				if err != nil {
+					return fmt.Errorf("failed to set up --otel-endpoint %q: %w", endpoint, err)
+				}
+				otelShutdown = shutdown
+			}
 			return nil
+		},
+		// PersistentPostRunE flushes OTel spans/metrics after the scan (and
+		// result printing) has finished. cobra.EnableTraverseRunHooks (set in
+		// cmd/root.go) makes this fire for every scan subcommand
+		// (scan, scan control, scan framework, scan workload, scan image),
+		// matching PersistentPreRunE's traversal above.
+		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			return otelShutdown(shutdownCtx)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := shared.ValidateCommonScanFlags(cmd, &scanInfo, shared.ScanFormats); err != nil {
@@ -221,6 +253,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ControlTimeout, "control-timeout", 0, "Maximum duration for evaluating a single control (e.g. 30s, 1m). 0 means no timeout. Controls that exceed this are marked as not evaluated and the scan continues. Must be lower than --scan-timeout when both are set.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.EnableStreaming, "enable-streaming", false, "Enable resource streaming for large clusters to reduce memory usage. Resources are processed in batches instead of loading all at once. Automatically enabled for clusters with >2500 resources.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.DryRun, "dry-run", false, "Check whether the current credentials can list every resource type the requested policies need, without collecting resources or evaluating controls. Cluster scans only.")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.OtelEndpoint, "otel-endpoint", "", "OTLP/gRPC endpoint (host:port, e.g. localhost:4317) to export scan spans and metrics to. Falls back to the OTEL_EXPORTER_OTLP_ENDPOINT env var. Unset by default: no OTel SDK is initialized and there is no export overhead. Combine with --format otel to also export scan-level metrics (duration, resource/control counts) as a printer, in addition to the always-on spans this flag enables")
 
 	// Helm value override flags. Mirror `helm install` so users can pass overrides through verbatim
 	// when scanning a Helm chart directory. Note: -f is already taken by --format, so --values is long-only.
@@ -323,6 +356,17 @@ func applyTimeout(scanInfo *cautils.ScanInfo, ks meta.IKubescape) func() {
 	}
 }
 
+// handleResultsWithReportingSpan wraps results.HandleResults in a
+// "reporting" span, alongside the "initialization" / "policies" /
+// "resources" / "opa testing" spans core/core/scan.go already emits via
+// otel.Tracer(""), so a scan's exported OTel trace covers the full pipeline
+// through result printing and submission (issue #3402).
+func handleResultsWithReportingSpan(ctx context.Context, results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) error {
+	ctx, span := otel.Tracer("").Start(ctx, "reporting")
+	defer span.End()
+	return results.HandleResults(ctx, scanInfo)
+}
+
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
 	defer applyTimeout(&scanInfo, ks)()
 
@@ -331,7 +375,7 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifie
 		return err
 	}
 
-	if err = results.HandleResults(ks.Context(), &scanInfo); err != nil {
+	if err = handleResultsWithReportingSpan(ks.Context(), results, &scanInfo); err != nil {
 		return err
 	}
 
