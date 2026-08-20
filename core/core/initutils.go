@@ -168,6 +168,10 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 		return resourcehandler.NewFileResourceHandler()
 	}
 
+	if len(scanInfo.ExcludePaths) > 0 {
+		logger.L().Ctx(ctx).Warning("--exclude-path has no effect on a cluster scan; it applies to file, directory and repository scans")
+	}
+
 	// Only initialize cloud connector if not in air-gapped mode
 	// This call initializes the global cloud API connector for later use
 	if !isAirGappedMode(scanInfo) {

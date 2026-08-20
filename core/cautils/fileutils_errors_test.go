@@ -151,7 +151,7 @@ func TestListHelmChartDirsReportsMetadataIOErrorsAndKeepsValidCharts(t *testing.
 		t.Skipf("symlinks are unavailable: %v", err)
 	}
 
-	charts, errs := listHelmChartDirs(dir)
+	charts, errs := listHelmChartDirs(dir, nil)
 
 	assert.Contains(t, charts, validChart)
 	require.NotEmpty(t, errs)
