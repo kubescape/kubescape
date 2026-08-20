@@ -211,8 +211,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 }
 
 // collectVAPResources records the cluster's admission enforcement state on the
-// session. Clusters that do not serve the VAP API are skipped without a warning,
-// since having no policies to reconcile is not a scan failure.
+// session. Clusters that do not serve the VAP API, and credentials that may not
+// read it, are skipped without a warning: enforcement state enriches the report
+// and its absence is not a scan failure.
 func (k8sHandler *K8sResourceHandler) collectVAPResources(ctx context.Context, sessionObj *cautils.OPASessionObj) {
 	if k8sHandler.k8s == nil {
 		return
@@ -222,6 +223,8 @@ func (k8sHandler *K8sResourceHandler) collectVAPResources(ctx context.Context, s
 	switch {
 	case errors.Is(err, vapreconcile.ErrUnsupported):
 		logger.L().Debug("skipping VAP reconciliation, cluster does not serve the API")
+	case errors.Is(err, vapreconcile.ErrForbidden):
+		logger.L().Debug("skipping VAP reconciliation, credentials may not list admission policies", helpers.Error(err))
 	case err != nil:
 		logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
 	default:
