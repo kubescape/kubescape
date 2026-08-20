@@ -12,8 +12,8 @@ import (
 )
 
 type Entry struct {
-	Hash    string                                       `json:"hash"`
-	Verdict resourcesresults.ResourceAssociatedControl   `json:"verdict"`
+	Hash    string                                     `json:"hash"`
+	Verdict resourcesresults.ResourceAssociatedControl `json:"verdict"`
 }
 
 // Store is keyed by "<controlsConfigVersion>|<controlID>|<resourceID>".
@@ -89,26 +89,48 @@ func (s *Store) Flush() error {
 	return os.WriteFile(s.path, b, 0o644)
 }
 
-// ResourceHash hashes kind+namespace+name+spec+labels+annotations.
+// ResourceHash hashes the whole object except fields known to change
+// without affecting control evaluation (status and volatile metadata).
+// Everything else is included, so a change to any evaluation-relevant field
+// — including root-level fields like RoleBinding.roleRef/subjects or
+// Role.rules — cannot be missed.
 func ResourceHash(obj map[string]any) string {
+	stripped := make(map[string]any, len(obj))
+	for k, v := range obj {
+		stripped[k] = v
+	}
+	delete(stripped, "status")
+	if md, ok := stripped["metadata"].(map[string]any); ok {
+		mdCopy := make(map[string]any, len(md))
+		for k, v := range md {
+			mdCopy[k] = v
+		}
+		delete(mdCopy, "managedFields")
+		delete(mdCopy, "resourceVersion")
+		delete(mdCopy, "generation")
+		delete(mdCopy, "creationTimestamp")
+		delete(mdCopy, "uid")
+		stripped["metadata"] = mdCopy
+	}
+
 	h := sha256.New()
 	enc := json.NewEncoder(h)
-	// Only hash fields that affect control evaluation; drop status/managedFields/resourceVersion.
-	stripped := map[string]any{
-		"kind":       obj["kind"],
-		"apiVersion": obj["apiVersion"],
-	}
-	if md, ok := obj["metadata"].(map[string]any); ok {
-		stripped["metadata"] = map[string]any{
-			"name":        md["name"],
-			"namespace":   md["namespace"],
-			"labels":      md["labels"],
-			"annotations": md["annotations"],
-		}
-	}
-	stripped["spec"] = obj["spec"]
-	stripped["data"] = obj["data"] // ConfigMaps/Secrets
 	_ = enc.Encode(stripped)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// VersionKey builds a stable content hash from the given byte slices (e.g.
+// the resolved policy frameworks, optionally combined with local
+// controls-config file bytes) for use as the cache's invalidation version.
+// Unlike a raw pinned-version flag (empty when the user didn't pin one),
+// this changes whenever the actual policy/config content changes, so
+// "latest" resolutions still invalidate correctly.
+func VersionKey(parts ...[]byte) string {
+	h := sha256.New()
+	for _, p := range parts {
+		h.Write(p)
+		h.Write([]byte{0})
+	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 

@@ -777,14 +777,22 @@ func splitWholeClusterControls(policies *cautils.Policies, controlIDs []string) 
 }
 
 // ruleCacheEligible reports whether a rule's verdict for one resource can be
-// safely cached keyed on that resource's own hash. Ineligible for anything
-// that can join across resources (DynamicMatch, whole-cluster controls) or
-// whose scoping isn't hash-verified yet (CEL/VAP matchConstraints).
+// safely cached keyed on that resource's own hash.
+//
+// A rule that matches more than one resource kind (len(rule.Match) > 1) is
+// ineligible even without DynamicMatch: the whole matched set is passed to
+// OPA as one input array, and a static Rego rule is free to derive one
+// resource's verdict from another resource in that same array (e.g. a
+// Service's verdict influencing a Deployment's). Restricting to single-kind
+// Match rules keeps caching to rules that are provably resource-local.
 func ruleCacheEligible(control *reporthandling.Control, rule *reporthandling.PolicyRule) bool {
 	if controlRequiresWholeClusterInput(control) {
 		return false
 	}
 	if rule.DynamicMatch != nil {
+		return false
+	}
+	if len(rule.Match) > 1 {
 		return false
 	}
 	if rule.RuleLanguage == reporthandling.CELLanguage {
