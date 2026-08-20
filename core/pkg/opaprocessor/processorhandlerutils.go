@@ -62,7 +62,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 		if resource, ok := opap.AllResources[i]; ok {
 			t.SetExceptions(
 				resource,
-				opap.Exceptions,
+				resourceScopedExceptions(opap.Exceptions, i),
 				opap.clusterName,
 				opap.AllPolicies.Controls, // update status depending on action required
 				resourcesresults.WithExceptionsProcessor(processor),
@@ -310,6 +310,49 @@ func (opap *OPAProcessor) gatherInlineExceptions() []armotypes.PostureExceptionP
 		exceptions = append(exceptions, inlineExceptionFromResource(resource, opap.clusterName)...)
 	}
 	return exceptions
+}
+
+// resourceScopedExceptions returns exceptionPolicies with every scope-less exception
+// (Resources unset) given a designator naming resourceID, so the vendored opa-utils
+// exceptions.Processor evaluates it the same way it evaluates any other resource-backed
+// exception. Without this, a scope-less exception silently matches zero resources for
+// resource-backed findings: exceptions.Processor.getResourceExceptions iterates
+// ruleException.Resources per candidate, so an empty Resources list is zero iterations
+// and therefore never a match - the opposite of the "no resources = no scope constraint,
+// matches any cluster" convention matchingControlExceptions already implements for manual
+// controls below, and that a scope-less exception is documented to mean (see #1994).
+//
+// Only exceptions with an empty Resources list are touched; anything already scoped is
+// returned unchanged. Since a scope-less exception currently matches nothing at all for
+// resource-backed findings, this can only add a match where there was none - it cannot
+// change the outcome of any exception that already resolves correctly today.
+func resourceScopedExceptions(exceptionPolicies []armotypes.PostureExceptionPolicy, resourceID string) []armotypes.PostureExceptionPolicy {
+	needsScoping := false
+	for i := range exceptionPolicies {
+		if len(exceptionPolicies[i].Resources) == 0 {
+			needsScoping = true
+			break
+		}
+	}
+	if !needsScoping {
+		return exceptionPolicies
+	}
+
+	scoped := make([]armotypes.PostureExceptionPolicy, len(exceptionPolicies))
+	for i, policy := range exceptionPolicies {
+		if len(policy.Resources) != 0 {
+			scoped[i] = policy
+			continue
+		}
+		policy.Resources = []identifiers.PortalDesignator{
+			{
+				DesignatorType: identifiers.DesignatorAttributes,
+				Attributes:     map[string]string{identifiers.AttributeResourceID: resourceID},
+			},
+		}
+		scoped[i] = policy
+	}
+	return scoped
 }
 
 // matchingControlExceptions returns the exception policies that explicitly target
