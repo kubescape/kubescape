@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -118,54 +119,73 @@ func list(ctx context.Context, client dynamic.Interface, version, resource strin
 // BuildIndex builds a map of controlId -> VAPEnforcementStatus by reading the
 // controlId label that cel-admission-library stamps on every VAP, then joining
 // bindings back via spec.policyName to determine the enforcement mode.
+//
+// More than one policy can carry the same control: an upgrade that renames the
+// library policy leaves the old one behind, and a hand-written policy can stamp
+// the same label. Enforcement is resolved per policy and only then reduced to
+// the control, so a binding is credited to the policy it names rather than to
+// whichever policy the listing ended on. Names are sorted so the reported
+// policy does not move between scans.
 func BuildIndex(policies, bindings []unstructured.Unstructured) map[string]*reportsummary.VAPEnforcementStatus {
-	// map policyName -> controlId so we can join bindings
-	policyNameToControlID := make(map[string]string, len(policies))
-	index := make(map[string]*reportsummary.VAPEnforcementStatus, len(policies))
+	controlByPolicy := make(map[string]string, len(policies))
+	policiesByControl := make(map[string][]string, len(policies))
 
 	for i := range policies {
-		vap := &policies[i]
-		controlID := vap.GetLabels()[controlIDLabel]
-		if controlID == "" {
+		name := policies[i].GetName()
+		controlID := policies[i].GetLabels()[controlIDLabel]
+		if name == "" || controlID == "" {
 			continue
 		}
-		policyNameToControlID[vap.GetName()] = controlID
-		index[controlID] = &reportsummary.VAPEnforcementStatus{
-			PolicyName: vap.GetName(),
-			Bound:      false,
+		if _, seen := controlByPolicy[name]; seen {
+			continue // a repeated name is the same policy listed twice
 		}
+		controlByPolicy[name] = controlID
+		policiesByControl[controlID] = append(policiesByControl[controlID], name)
 	}
 
-	seenActions := make(map[string]map[string]struct{})
-
+	// Presence in this map is what binds a policy: a binding declaring no
+	// action still binds the policy it names.
+	actionsByPolicy := make(map[string][]string, len(bindings))
 	for i := range bindings {
-		vapb := &bindings[i]
-		spec, ok := vapb.Object["spec"].(map[string]any)
+		spec, ok := bindings[i].Object["spec"].(map[string]any)
 		if !ok {
 			continue
 		}
 		policyName, _ := spec["policyName"].(string)
-		controlID, ok := policyNameToControlID[policyName]
-		if !ok {
+		if _, known := controlByPolicy[policyName]; !known {
 			continue
 		}
-
-		status, ok := index[controlID]
-		if !ok {
-			continue
-		}
-		status.Bound = true
-
-		if seenActions[controlID] == nil {
-			seenActions[controlID] = make(map[string]struct{})
-		}
+		actions := actionsByPolicy[policyName]
 		for _, action := range bindingActions(spec) {
-			if _, dup := seenActions[controlID][action]; dup {
+			if !slices.Contains(actions, action) {
+				actions = append(actions, action)
+			}
+		}
+		actionsByPolicy[policyName] = actions
+	}
+
+	index := make(map[string]*reportsummary.VAPEnforcementStatus, len(policiesByControl))
+	for controlID, names := range policiesByControl {
+		slices.Sort(names)
+		status := &reportsummary.VAPEnforcementStatus{PolicyName: names[0]}
+		for _, name := range names {
+			actions, bound := actionsByPolicy[name]
+			if !bound {
 				continue
 			}
-			seenActions[controlID][action] = struct{}{}
-			status.Actions = append(status.Actions, action)
+			if !status.Bound {
+				// The name has to be a bound policy, or the status reads as
+				// enforced by a policy nothing binds.
+				status.Bound = true
+				status.PolicyName = name
+			}
+			for _, action := range actions {
+				if !slices.Contains(status.Actions, action) {
+					status.Actions = append(status.Actions, action)
+				}
+			}
 		}
+		index[controlID] = status
 	}
 
 	return index
