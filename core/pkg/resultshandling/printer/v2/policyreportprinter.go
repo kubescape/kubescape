@@ -316,8 +316,10 @@ func mapPolicyReportSeverity(severity string) string {
 	}
 }
 
-func (pp *PolicyReportPrinter) CloseWriter() {
+// CloseWriter closes the PolicyReport output writer, returning any error from flushing or closing.
+func (pp *PolicyReportPrinter) CloseWriter() error {
 	if pp.writer != nil && pp.writer != os.Stdout {
-		pp.writer.Close()
+		return pp.writer.Close()
 	}
+	return nil
 }
