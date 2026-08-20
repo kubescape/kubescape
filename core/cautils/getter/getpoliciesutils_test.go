@@ -100,6 +100,12 @@ func TestPolicyCacheFilename(t *testing.T) {
 		require.Error(t, err)
 		require.Empty(t, got)
 	})
+
+	t.Run("should error on an identifier containing a pipe", func(t *testing.T) {
+		got, err := PolicyCacheFilename("C-0001|control name|frameworks")
+		require.Error(t, err)
+		require.Empty(t, got)
+	})
 }
 
 func TestPolicyCachePath(t *testing.T) {
