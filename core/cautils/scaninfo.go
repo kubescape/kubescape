@@ -117,6 +117,7 @@ type ScanInfo struct {
 	UseExceptions             string      // Load file with exceptions configuration
 	AuditExceptions           bool        // Include exception usage audit in supported scan outputs
 	HonorInlineExceptions     BoolPtrFlag // Honor kubescape.io/skip-* annotations as inline exception policies
+	CustomRules               string      // Path to a directory of custom *.rego rules
 	ControlsInputs            string      // Load file with inputs for controls
 	AttackTracks              string      // Load file with attack tracks
 	UseFrom                   []string    // Load framework from local file (instead of download). Use when running offline
