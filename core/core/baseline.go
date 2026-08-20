@@ -107,7 +107,10 @@ func writeBaselineHeadReport(ctx context.Context, results *resultshandling.Resul
 	cleanup = func() { _ = os.Remove(tmpPath) }
 
 	jsonPrinter := printerv2.NewJsonPrinter()
-	jsonPrinter.SetWriter(ctx, tmpPath)
+	if err := jsonPrinter.SetWriter(ctx, tmpPath); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
 	if err := jsonPrinter.ActionPrint(ctx, results.GetData(), results.ImageScanData); err != nil {
 		jsonPrinter.CloseWriter()
 		cleanup()
