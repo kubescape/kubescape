@@ -217,6 +217,11 @@ func TestTransformContainerMetadata(t *testing.T) {
 
 				assert.Contains(t, containers[0].Env[0].ValueFrom.SecretKeyRef.Name, "ref-")
 				assert.Contains(t, containers[0].Env[1].ValueFrom.ConfigMapKeyRef.Name, "ref-")
+
+				assert.NotEqual(t, "SECRET_TOKEN", containers[0].Env[0].Name)
+				assert.Contains(t, containers[0].Env[0].Name, "env-")
+				assert.NotEqual(t, "CONFIG_PATH", containers[0].Env[1].Name)
+				assert.Contains(t, containers[0].Env[1].Name, "env-")
 			},
 		},
 		{
@@ -305,6 +310,177 @@ func TestTransformContainerMetadata(t *testing.T) {
 				assert.NotEqual(t, "payment-config", configRef["name"])
 				assert.Contains(t, secretRef["name"], "ref-")
 				assert.Contains(t, configRef["name"], "ref-")
+
+				assert.NotEqual(t, "SECRET_TOKEN", secretEnv["name"])
+				assert.Contains(t, secretEnv["name"], "env-")
+				assert.NotEqual(t, "CONFIG_PATH", configEnv["name"])
+				assert.Contains(t, configEnv["name"], "env-")
+			},
+		},
+		{
+			name: "typed env var names referencing secrets/configmaps should be anonymized even when not sensitive",
+			object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"spec": map[string]any{
+					"containers": []corev1.Container{
+						{
+							Name:  "app",
+							Image: "busybox:latest",
+							Env: []corev1.EnvVar{
+								{
+									Name: "USER",
+									ValueFrom: &corev1.EnvVarSource{
+										SecretKeyRef: &corev1.SecretKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "my-secret",
+											},
+										},
+									},
+								},
+								{
+									Name: "SOMEKEY",
+									ValueFrom: &corev1.EnvVarSource{
+										ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+											LocalObjectReference: corev1.LocalObjectReference{
+												Name: "my-cm",
+											},
+										},
+									},
+								},
+								{
+									Name:  "PLAIN",
+									Value: "not-a-secret",
+								},
+							},
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, spec map[string]any) {
+				containers, ok := spec["containers"].([]corev1.Container)
+				if !assert.True(t, ok, "expected typed containers") {
+					return
+				}
+				if !assert.Len(t, containers, 1) {
+					return
+				}
+
+				env := containers[0].Env
+
+				assert.NotEqual(t, "USER", env[0].Name)
+				assert.Contains(t, env[0].Name, "env-")
+				assert.NotEqual(t, "my-secret", env[0].ValueFrom.SecretKeyRef.Name)
+				assert.Contains(t, env[0].ValueFrom.SecretKeyRef.Name, "ref-")
+
+				assert.NotEqual(t, "SOMEKEY", env[1].Name)
+				assert.Contains(t, env[1].Name, "env-")
+				assert.NotEqual(t, "my-cm", env[1].ValueFrom.ConfigMapKeyRef.Name)
+				assert.Contains(t, env[1].ValueFrom.ConfigMapKeyRef.Name, "ref-")
+
+				assert.Equal(t, "PLAIN", env[2].Name)
+				assert.Equal(t, "not-a-secret", env[2].Value)
+			},
+		},
+		{
+			name: "unstructured env var names referencing secrets/configmaps should be anonymized even when not sensitive",
+			object: map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":  "app",
+							"image": "busybox:latest",
+							"env": []any{
+								map[string]any{
+									"name": "USER",
+									"valueFrom": map[string]any{
+										"secretKeyRef": map[string]any{
+											"name": "my-secret",
+										},
+									},
+								},
+								map[string]any{
+									"name": "SOMEKEY",
+									"valueFrom": map[string]any{
+										"configMapKeyRef": map[string]any{
+											"name": "my-cm",
+										},
+									},
+								},
+								map[string]any{
+									"name":  "PLAIN",
+									"value": "not-a-secret",
+								},
+							},
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, spec map[string]any) {
+				containers, ok := spec["containers"].([]any)
+				if !assert.True(t, ok, "expected unstructured containers") {
+					return
+				}
+				if !assert.Len(t, containers, 1) {
+					return
+				}
+
+				container, ok := containers[0].(map[string]any)
+				if !assert.True(t, ok, "expected unstructured container map") {
+					return
+				}
+
+				env, ok := container["env"].([]any)
+				if !assert.True(t, ok, "expected env slice") {
+					return
+				}
+				if !assert.Len(t, env, 3) {
+					return
+				}
+
+				secretEnv, ok := env[0].(map[string]any)
+				if !assert.True(t, ok, "expected secret env map") {
+					return
+				}
+				configEnv, ok := env[1].(map[string]any)
+				if !assert.True(t, ok, "expected config env map") {
+					return
+				}
+				plainEnv, ok := env[2].(map[string]any)
+				if !assert.True(t, ok, "expected plain env map") {
+					return
+				}
+
+				assert.NotEqual(t, "USER", secretEnv["name"])
+				assert.Contains(t, secretEnv["name"], "env-")
+
+				secretValueFrom, ok := secretEnv["valueFrom"].(map[string]any)
+				if !assert.True(t, ok, "expected secret valueFrom map") {
+					return
+				}
+				secretRef, ok := secretValueFrom["secretKeyRef"].(map[string]any)
+				if !assert.True(t, ok, "expected secretKeyRef map") {
+					return
+				}
+				assert.NotEqual(t, "my-secret", secretRef["name"])
+				assert.Contains(t, secretRef["name"], "ref-")
+
+				assert.NotEqual(t, "SOMEKEY", configEnv["name"])
+				assert.Contains(t, configEnv["name"], "env-")
+
+				configValueFrom, ok := configEnv["valueFrom"].(map[string]any)
+				if !assert.True(t, ok, "expected config valueFrom map") {
+					return
+				}
+				configRef, ok := configValueFrom["configMapKeyRef"].(map[string]any)
+				if !assert.True(t, ok, "expected configMapKeyRef map") {
+					return
+				}
+				assert.NotEqual(t, "my-cm", configRef["name"])
+				assert.Contains(t, configRef["name"], "ref-")
+
+				assert.Equal(t, "PLAIN", plainEnv["name"])
+				assert.Equal(t, "not-a-secret", plainEnv["value"])
 			},
 		},
 		{
