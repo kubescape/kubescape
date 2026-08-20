@@ -236,6 +236,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	opap.updateResults(ctx)
 
 	opap.markNotEvaluatedControlsSkipped()
+	opap.ScanCoverage.VacuousFrameworks = cautils.DetectVacuousFrameworks(opap.Report.SummaryDetails.Frameworks)
 
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
@@ -425,6 +426,7 @@ done:
 	// Update results
 	opap.updateResults(ctx)
 	opap.markNotEvaluatedControlsSkipped()
+	opap.ScanCoverage.VacuousFrameworks = cautils.DetectVacuousFrameworks(opap.Report.SummaryDetails.Frameworks)
 
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {

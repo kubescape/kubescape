@@ -364,7 +364,7 @@ func isPrintSeparatorType(scanType cautils.ScanTypes) bool {
 // failures caused controls to be skipped or partial data was collected.
 // Nothing is printed on a clean scan.
 func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
-	if len(coverage.FailedGVRPulls) == 0 && len(coverage.NotEvaluatedControls) == 0 && len(coverage.PartialGVRPulls) == 0 && len(coverage.PolicyDegradations) == 0 {
+	if len(coverage.FailedGVRPulls) == 0 && len(coverage.NotEvaluatedControls) == 0 && len(coverage.PartialGVRPulls) == 0 && len(coverage.PolicyDegradations) == 0 && len(coverage.VacuousFrameworks) == 0 {
 		return
 	}
 
@@ -406,6 +406,13 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 			fmt.Fprintf(pp.writer, "  • %s: %s\n", d.Component, d.Reason)
 		}
 		fmt.Fprintf(pp.writer, "\nControls depending on these inputs were evaluated against default configuration, which may not reflect your environment.\n")
+	}
+
+	if len(coverage.VacuousFrameworks) > 0 {
+		fmt.Fprintf(pp.writer, "\nThe following frameworks scored 100%% because no matching resources were found in this cluster:\n")
+		for _, f := range coverage.VacuousFrameworks {
+			fmt.Fprintf(pp.writer, "  • %s\n", f)
+		}
 	}
 
 	if len(coverage.FailedGVRPulls) > 0 || len(coverage.PartialGVRPulls) > 0 {

@@ -136,6 +136,22 @@ func TestPrintScanCoverage_AllSectionsRendered(t *testing.T) {
 	assert.Contains(t, out, "/v1/pods")
 }
 
+// TestPrintScanCoverage_VacuousFrameworksOnlyRendered verifies that a
+// ScanCoverage with only VacuousFrameworks (no GVR or policy failures) is
+// still rendered, and the framework name appears in the warning.
+func TestPrintScanCoverage_VacuousFrameworksOnlyRendered(t *testing.T) {
+	pp, read := newTestPrettyPrinterFile(t)
+
+	coverage := cautils.ScanCoverage{
+		VacuousFrameworks: []string{"istio-security"},
+	}
+	pp.printScanCoverage(coverage)
+
+	out := read()
+	assert.Contains(t, out, "Scan Coverage Warning", "header must appear for vacuous-framework-only coverage")
+	assert.Contains(t, out, "istio-security", "framework name must appear in output")
+}
+
 func TestSetWriter_Pretty(t *testing.T) {
 	sourceTreeArtifact := "customFilename.txt"
 	require.NoFileExists(t, sourceTreeArtifact, "test setup requires no leftover output file in the package directory")
