@@ -409,7 +409,7 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 	}
 
 	if len(coverage.VacuousFrameworks) > 0 {
-		fmt.Fprintf(pp.writer, "\nThe following frameworks scored 100%% because none of their target resource types were found in this cluster:\n")
+		fmt.Fprintf(pp.writer, "\nThe following frameworks scored 100%% because no matching resources were found in this cluster:\n")
 		for _, f := range coverage.VacuousFrameworks {
 			fmt.Fprintf(pp.writer, "  • %s\n", f)
 		}

@@ -1075,6 +1075,16 @@ func TestConvertToPostureReport_VacuousFrameworksOnlyCoverageAttached(t *testing
 	require.NotNil(t, result)
 	require.NotNil(t, result.ScanCoverage, "ScanCoverage must be attached when VacuousFrameworks is non-empty")
 	assert.Equal(t, []string{"istio-security"}, result.ScanCoverage.VacuousFrameworks)
+
+	raw, err := json.Marshal(result)
+	require.NoError(t, err)
+	var decoded struct {
+		ScanCoverage struct {
+			VacuousFrameworks []string `json:"vacuousFrameworks"`
+		} `json:"scanCoverage"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+	assert.Equal(t, []string{"istio-security"}, decoded.ScanCoverage.VacuousFrameworks)
 }
 
 // TestFinalizeResults_SetsGenerationTimeWhenZero is the regression test for

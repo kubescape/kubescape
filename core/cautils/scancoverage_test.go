@@ -420,6 +420,16 @@ func evaluatedControl(id string) reportsummary.ControlSummary {
 	return c
 }
 
+// irrelevantControlWithResources carries the Irrelevant sub-status but still
+// lists a matched resource, the shape a passed-and-irrelevant control cannot
+// actually take in a real report. It exists to prove DetectVacuousFrameworks
+// checks the resource count in addition to the sub-status.
+func irrelevantControlWithResources(id string) reportsummary.ControlSummary {
+	c := irrelevantControl(id)
+	c.ResourceIDs.Append(apis.StatusPassed, "resource-1")
+	return c
+}
+
 func TestDetectVacuousFrameworks_AllControlsIrrelevant(t *testing.T) {
 	frameworks := []reportsummary.FrameworkSummary{
 		{
@@ -444,6 +454,24 @@ func TestDetectVacuousFrameworks_MixedControlsNotFlagged(t *testing.T) {
 		},
 	}
 	assert.Empty(t, DetectVacuousFrameworks(frameworks))
+}
+
+func TestDetectVacuousFrameworks_IrrelevantWithResourcesNotFlagged(t *testing.T) {
+	frameworks := []reportsummary.FrameworkSummary{
+		{
+			Name: "istio-security",
+			Controls: reportsummary.ControlSummaries{
+				"C-ISTIO-1": irrelevantControlWithResources("C-ISTIO-1"),
+			},
+		},
+		{
+			Name: "nsa",
+			Controls: reportsummary.ControlSummaries{
+				"C-0001": irrelevantControl("C-0001"),
+			},
+		},
+	}
+	assert.Equal(t, []string{"nsa"}, DetectVacuousFrameworks(frameworks))
 }
 
 func TestDetectVacuousFrameworks_EmptyFrameworkNotFlagged(t *testing.T) {

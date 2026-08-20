@@ -294,26 +294,26 @@ func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap
 // all Irrelevant (GetSubStatus() == apis.SubStatusIrrelevant with no matched
 // resources), mirroring the check the scoring library uses to award such a
 // framework a 100% score. A framework in this state was never meaningfully
-// evaluated - the resource types its controls target simply do not exist in
-// the cluster - so its perfect score is vacuous rather than earned. Empty
-// frameworks (no controls at all) are not included.
+// evaluated - no resource in the cluster matched any of its controls - so
+// its perfect score is vacuous rather than earned. Empty frameworks (no
+// controls at all) are not included.
 func DetectVacuousFrameworks(frameworks []reportsummary.FrameworkSummary) []string {
 	var vacuous []string
 	for i := range frameworks {
-		controls := frameworks[i].Controls
-		if len(controls) == 0 {
+		fw := frameworks[i]
+		if len(fw.Controls) == 0 {
 			continue
 		}
 		allIrrelevant := true
-		for id := range controls {
-			ctrl := controls[id]
+		for id := range fw.Controls {
+			ctrl := fw.Controls[id]
 			if ctrl.GetSubStatus() != apis.SubStatusIrrelevant || ctrl.ListResourcesIDs(nil).Len() != 0 {
 				allIrrelevant = false
 				break
 			}
 		}
 		if allIrrelevant {
-			vacuous = append(vacuous, frameworks[i].Name)
+			vacuous = append(vacuous, fw.Name)
 		}
 	}
 	return vacuous
