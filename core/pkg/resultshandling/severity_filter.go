@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
@@ -45,6 +46,73 @@ func ApplySeverityFilters(sessionObj *cautils.OPASessionObj, minSeverity, maxSev
 		}
 		result.AssociatedControls = ac
 		sessionObj.ResourcesResult[id] = result
+	}
+
+	recomputeSummaryDetails(sessionObj)
+}
+
+// recomputeSummaryDetails refreshes every derived summary field that was
+// computed against the full control set before severity filtering. After
+// ApplySeverityFilters removes lower-severity controls, the compliance score,
+// framework compliance scores and severity counters would otherwise describe
+// controls that are no longer present in the report. The risk score
+// (SummaryDetails.Score) is deliberately left unrecomputed: it is a
+// WCS-weighted aggregate whose weights are not available at filter time, so a
+// plain average would not reproduce it.
+func recomputeSummaryDetails(sessionObj *cautils.OPASessionObj) {
+	if sessionObj == nil || sessionObj.Report == nil {
+		return
+	}
+	summary := &sessionObj.Report.SummaryDetails
+
+	var complianceSum float32
+	count := 0
+	for _, ctrl := range summary.Controls {
+		complianceSum += ctrl.GetComplianceScore()
+		count++
+	}
+	if count > 0 {
+		summary.ComplianceScore = complianceSum / float32(count)
+	} else {
+		summary.ComplianceScore = 0
+	}
+
+	for i := range summary.Frameworks {
+		var fSum float32
+		fCount := 0
+		for id, ctrl := range summary.Frameworks[i].Controls {
+			if _, ok := summary.Controls[id]; ok {
+				fSum += ctrl.GetComplianceScore()
+				fCount++
+			}
+		}
+		if fCount > 0 {
+			summary.Frameworks[i].ComplianceScore = fSum / float32(fCount)
+		} else {
+			summary.Frameworks[i].ComplianceScore = 0
+		}
+	}
+
+	summary.ControlsSeverityCounters = reportsummary.SeverityCounters{}
+	for _, ctrl := range summary.Controls {
+		if ctrl.GetStatus().IsFailed() {
+			summary.ControlsSeverityCounters.Increase(apis.ControlSeverityToString(ctrl.GetScoreFactor()), 1)
+		}
+	}
+
+	summary.ResourcesSeverityCounters = reportsummary.SeverityCounters{}
+	for _, result := range sessionObj.ResourcesResult {
+		if !result.GetStatus(nil).IsFailed() {
+			continue
+		}
+		for _, ac := range result.AssociatedControls {
+			if !ac.GetStatus(nil).IsFailed() {
+				continue
+			}
+			if ctrl, ok := summary.Controls[ac.GetID()]; ok {
+				summary.ResourcesSeverityCounters.Increase(apis.ControlSeverityToString(ctrl.GetScoreFactor()), 1)
+			}
+		}
 	}
 }
 

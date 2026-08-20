@@ -142,6 +142,13 @@ type reportSnapshot struct {
 	controls map[string]reportsummary.ControlSummary
 	// Per-resource copies of AssociatedControls, keyed like ScanData.ResourcesResult.
 	associatedControls map[string][]resourcesresults.ResourceAssociatedControl
+	// Derived summary fields recomputed over the filtered control set. They are
+	// restored so the caller (cmd/scan) evaluates exit thresholds against the
+	// true unfiltered score while printers and submission saw the filtered one.
+	complianceScore            float32
+	frameworksComplianceScores []float32
+	controlsSeverityCounters   reportsummary.SeverityCounters
+	resourcesSeverityCounters  reportsummary.SeverityCounters
 }
 
 func snapshotReport(sessionObj *cautils.OPASessionObj) reportSnapshot {
@@ -162,7 +169,19 @@ func snapshotReport(sessionObj *cautils.OPASessionObj) reportSnapshot {
 		ac[id] = copy_
 	}
 
-	return reportSnapshot{controls: controls, associatedControls: ac}
+	fwScores := make([]float32, len(sessionObj.Report.SummaryDetails.Frameworks))
+	for i := range sessionObj.Report.SummaryDetails.Frameworks {
+		fwScores[i] = sessionObj.Report.SummaryDetails.Frameworks[i].ComplianceScore
+	}
+
+	return reportSnapshot{
+		controls:                   controls,
+		associatedControls:         ac,
+		complianceScore:            sessionObj.Report.SummaryDetails.ComplianceScore,
+		frameworksComplianceScores: fwScores,
+		controlsSeverityCounters:   sessionObj.Report.SummaryDetails.ControlsSeverityCounters,
+		resourcesSeverityCounters:  sessionObj.Report.SummaryDetails.ResourcesSeverityCounters,
+	}
 }
 
 func restoreReport(sessionObj *cautils.OPASessionObj, snap reportSnapshot) {
@@ -170,6 +189,14 @@ func restoreReport(sessionObj *cautils.OPASessionObj, snap reportSnapshot) {
 		return
 	}
 	sessionObj.Report.SummaryDetails.Controls = snap.controls
+	sessionObj.Report.SummaryDetails.ComplianceScore = snap.complianceScore
+	sessionObj.Report.SummaryDetails.ControlsSeverityCounters = snap.controlsSeverityCounters
+	sessionObj.Report.SummaryDetails.ResourcesSeverityCounters = snap.resourcesSeverityCounters
+	for i := range sessionObj.Report.SummaryDetails.Frameworks {
+		if i < len(snap.frameworksComplianceScores) {
+			sessionObj.Report.SummaryDetails.Frameworks[i].ComplianceScore = snap.frameworksComplianceScores[i]
+		}
+	}
 	for id, ac := range snap.associatedControls {
 		if result, ok := sessionObj.ResourcesResult[id]; ok {
 			result.AssociatedControls = ac
@@ -185,12 +212,14 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 		vapreconcile.EnrichSummary(rh.ScanData.Report.SummaryDetails.Controls, index)
 	}
 
-	// Snapshot both Report.SummaryDetails.Controls and every
-	// ResourcesResult[id].AssociatedControls before applying severity filters.
-	// ApplySeverityFilters mutates both in place; printers and submission see
-	// the narrowed set, but the caller (cmd/scan) evaluates exit thresholds
-	// and coverage counts after HandleResults returns and must see the full
-	// unfiltered report. Other consumers of rh.ScanData (httphandler /v1/results,
+	// Snapshot Report.SummaryDetails.Controls, every
+	// ResourcesResult[id].AssociatedControls, and the derived summary fields
+	// (compliance score, framework compliance scores, severity counters) before
+	// applying severity filters. ApplySeverityFilters mutates all of these in
+	// place; printers and submission see the recomputed set, but the caller
+	// (cmd/scan) evaluates exit thresholds and coverage counts after
+	// HandleResults returns and must see the full unfiltered report.
+	// Other consumers of rh.ScanData (httphandler /v1/results,
 	// StorePostureReportResults) also read the report after this call and
 	// must not receive an internally inconsistent PostureReport.
 	snap := snapshotReport(rh.ScanData)
