@@ -148,6 +148,17 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateKindFilters(scanInfo); err != nil {
 		return err
 	}
+	if err := ValidateExcludePaths(scanInfo); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ValidateExcludePaths fails the command on a malformed pattern before any resource is collected.
+func ValidateExcludePaths(scanInfo *cautils.ScanInfo) error {
+	if err := cautils.ValidateCommandLinePatterns(scanInfo.ExcludePaths); err != nil {
+		return fmt.Errorf("--exclude-path: %w", err)
+	}
 	return nil
 }
 

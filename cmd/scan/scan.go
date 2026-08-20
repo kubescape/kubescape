@@ -29,6 +29,9 @@ var scanCmdExamples = fmt.Sprintf(`
   # Scan kubernetes manifest files
   %[1]s scan .
 
+  # Scan manifest files, leaving test fixtures and generated output out of the scan
+  %[1]s scan . --exclude-path 'test/**' --exclude-path '*.generated.yaml'
+
   # Scan and save the results in the JSON format
   %[1]s scan --format json --output results.json
 
@@ -191,6 +194,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeKinds, "include-kinds", "", "scan only the specified Kubernetes resource kinds (case-insensitive, Kind name only — not group/version qualified). e.g: --include-kinds Deployment,DaemonSet")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ExcludeKinds, "exclude-kinds", "", "exclude the specified Kubernetes resource kinds from the scan (case-insensitive, Kind name only — not group/version qualified). e.g: --exclude-kinds Job,CronJob")
+	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.ExcludePaths, "exclude-path", nil, fmt.Sprintf("Exclude paths from file, directory and repository scans (repeat for more than one). Patterns use gitignore syntax and are relative to the scan root, e.g: --exclude-path 'test/**' --exclude-path '!test/prod.yaml'. Combined with the patterns in a %s file at the scan root. Helm charts, Kustomize configurations and Terraform modules are excluded as whole directories", cautils.IgnoreFileName))
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.NoIgnoreFile, "no-ignore-file", false, fmt.Sprintf("Ignore the %s file at the scan root; only --exclude-path patterns apply", cautils.IgnoreFileName))
 	scanCmd.PersistentFlags().StringVar(&scanInfo.LabelSelector, "label-selector", "", "Filter collected Kubernetes resources by label selector. Accepts any selector that kubectl -l supports, e.g: --label-selector app=nginx,env!=dev")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to configured backend.")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
