@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -11,9 +12,20 @@ import (
 	"github.com/kubescape/kubescape/v4/core/meta"
 )
 
-// fleetScan runs securityScan's per-cluster behavior once for every context
-// in baseScanInfo.KubeContexts, sequentially, writing one report per
-// context. It's the --kube-contexts entry point invoked from securityScan.
+// fleetRunner runs one cluster's scan to completion for a specific scan
+// subcommand - Scan/ScanContext, HandleResults, and every threshold/drift
+// enforcement that subcommand's non-fleet RunE performs - exactly as if
+// scanInfo.KubeContexts had never been set. securityScan, the framework
+// command, the control command, and the workload command each pass their
+// own such function (runSecurityScan, runFrameworkScan, runControlScan,
+// runWorkloadScan) to fleetScan so every --kube-contexts-aware subcommand
+// runs the exact per-cluster behavior its single-context path always ran,
+// instead of a parallel, divergent copy of that logic.
+type fleetRunner func(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error
+
+// fleetScan runs run once for every context in baseScanInfo.KubeContexts,
+// sequentially, writing one report per context. It's the --kube-contexts
+// entry point shared by every scan subcommand that supports fleet mode.
 //
 // Contexts are scanned one at a time, not concurrently: k8sinterface's
 // process-global connection state (K8SConfig, clientConfigAPI,
@@ -29,7 +41,7 @@ import (
 // error - and therefore its exit code - reflects whether any context
 // failed, matching the single-context command's existing all-or-nothing
 // exit-code semantics from the caller's point of view.
-func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) error {
 	if baseScanInfo.GetScanningContext() != cautils.ContextCluster {
 		return fmt.Errorf("--kube-contexts requires a live-cluster scan: it selects which cluster to connect to, so it can't be combined with scanning local files/directories")
 	}
@@ -52,7 +64,7 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 
 		leave := cautils.EnterClusterContext(kubeContext)
 		ctx, cancel := deriveTimeoutContext(contextScanInfo, ks)
-		err = runSecurityScan(ctx, contextScanInfo, ks, policyIdentifiers)
+		err = run(ctx, contextScanInfo, ks, policyIdentifiers)
 		cancel()
 		leave()
 

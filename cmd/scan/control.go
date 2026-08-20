@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -51,9 +52,6 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
-			defer cancel()
-
 			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ScanFormats); err != nil {
 				return err
 			}
@@ -91,37 +89,52 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				return err
 			}
 
-			results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
-			if err != nil {
-				return err
-			}
-			if err := results.HandleResults(ctx, scanInfo); err != nil {
-				return err
-			}
-			if !scanInfo.VerboseMode {
-				logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
-			}
-			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-				return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
-			}
-			if err := enforceSeverityThresholds(&results.GetResults().SummaryDetails, scanInfo); err != nil {
-				return err
-			}
-			if scanInfo.ScanImages {
-				if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
-					return err
-				}
-			}
-			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetResults().SummaryDetails.Controls), scanInfo); err != nil {
-				return err
-			}
-			if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
-				return err
+			if len(scanInfo.KubeContexts) > 0 {
+				return fleetScan(*scanInfo, ks, policyIdentifiers, runControlScan)
 			}
 
-			return enforceBaselineDrift(ctx, results, scanInfo)
+			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
+			defer cancel()
+			return runControlScan(ctx, scanInfo, ks, policyIdentifiers)
 		},
 	}
+}
+
+// runControlScan runs one cluster's control scan to completion: Scan,
+// HandleResults, then every threshold/drift enforcement the control command
+// performs for the single-context path. Factored out so fleetScan can run
+// the exact same per-cluster behavior once per --kube-contexts entry,
+// instead of a parallel, divergent copy of this logic.
+func runControlScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+	results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
+	if err != nil {
+		return err
+	}
+	if err := results.HandleResults(ctx, scanInfo); err != nil {
+		return err
+	}
+	if !scanInfo.VerboseMode {
+		logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
+	}
+	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
+		return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
+	}
+	if err := enforceSeverityThresholds(&results.GetResults().SummaryDetails, scanInfo); err != nil {
+		return err
+	}
+	if scanInfo.ScanImages {
+		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+			return err
+		}
+	}
+	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetResults().SummaryDetails.Controls), scanInfo); err != nil {
+		return err
+	}
+	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
+		return err
+	}
+
+	return enforceBaselineDrift(ctx, results, scanInfo)
 }
 
 // validateControlScanInfo validates the ScanInfo struct for the `control` command
