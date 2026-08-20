@@ -107,9 +107,6 @@ func ResourceHash(obj map[string]any) string {
 		}
 		delete(mdCopy, "managedFields")
 		delete(mdCopy, "resourceVersion")
-		delete(mdCopy, "generation")
-		delete(mdCopy, "creationTimestamp")
-		delete(mdCopy, "uid")
 		stripped["metadata"] = mdCopy
 	}
 
