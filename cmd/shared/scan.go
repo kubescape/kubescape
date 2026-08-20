@@ -151,6 +151,18 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateExcludePaths(scanInfo); err != nil {
 		return err
 	}
+	if err := ValidateExcludeControls(scanInfo); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ValidateExcludeControls(scanInfo *cautils.ScanInfo) error {
+	for _, control := range scanInfo.ExcludeControls {
+		if strings.TrimSpace(control) == "" {
+			return fmt.Errorf("--exclude-controls contains an empty control identifier")
+		}
+	}
 	return nil
 }
 

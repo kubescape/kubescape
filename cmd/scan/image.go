@@ -54,6 +54,9 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ImageScanFormats); err != nil {
 				return err
 			}
+			if len(scanInfo.ExcludeControls) > 0 {
+				return fmt.Errorf("--exclude-controls is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
+			}
 			if err := shared.ValidateImageScanInfo(scanInfo); err != nil {
 				return err
 			}
