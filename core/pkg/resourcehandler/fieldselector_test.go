@@ -23,16 +23,16 @@ func TestExcludedNamespacesSelectors(t *testing.T) {
 	k8sinterface.InitializeMapResourcesMock()
 
 	es := NewExcludeSelector("default,ingress")
-	selectors := es.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"}, nil)
+	selectors := es.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"})
 	assert.Equal(t, 1, len(selectors))
 	assert.Equal(t, "metadata.namespace!=default,metadata.namespace!=ingress", selectors[0])
 
-	selectors2 := es.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "namespaces"}, nil)
+	selectors2 := es.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "namespaces"})
 	assert.Equal(t, 1, len(selectors2))
 	assert.Equal(t, "metadata.name!=default,metadata.name!=ingress", selectors2[0])
 
 	esSpace := NewExcludeSelector("default, ingress")
-	selectorsSpace := esSpace.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"}, nil)
+	selectorsSpace := esSpace.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"})
 	assert.Equal(t, 1, len(selectorsSpace))
 	assert.Equal(t, "metadata.namespace!=default,metadata.namespace!=ingress", selectorsSpace[0])
 }
@@ -41,18 +41,18 @@ func TestIncludeNamespacesSelectors(t *testing.T) {
 	k8sinterface.InitializeMapResourcesMock()
 
 	is := NewIncludeSelector("default,ingress")
-	selectors := is.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"}, nil)
+	selectors := is.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"})
 	assert.Equal(t, 2, len(selectors))
 	assert.Equal(t, "metadata.namespace==default", selectors[0])
 	assert.Equal(t, "metadata.namespace==ingress", selectors[1])
 
-	selectors2 := is.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "namespaces"}, nil)
+	selectors2 := is.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "namespaces"})
 	assert.Equal(t, 2, len(selectors2))
 	assert.Equal(t, "metadata.name==default", selectors2[0])
 	assert.Equal(t, "metadata.name==ingress", selectors2[1])
 
 	isSpace := NewIncludeSelector("default, ingress")
-	selectorsSpace := isSpace.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"}, nil)
+	selectorsSpace := isSpace.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"})
 	assert.Equal(t, 2, len(selectorsSpace))
 	assert.Equal(t, "metadata.namespace==default", selectorsSpace[0])
 	assert.Equal(t, "metadata.namespace==ingress", selectorsSpace[1])
@@ -61,19 +61,19 @@ func TestIncludeNamespacesSelectors(t *testing.T) {
 	// regardless of how many namespaces were included; otherwise
 	// pullSingleResource would LIST the collection once per namespace and
 	// duplicate every cluster-scoped object N times in k8sResources[gvr].
-	clusterScopedSelectors := is.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "nodes"}, nil)
+	clusterScopedSelectors := is.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "nodes"})
 	assert.Equal(t, []string{""}, clusterScopedSelectors)
 
 	manyNs := NewIncludeSelector("a,b,c,d,e")
-	assert.Equal(t, []string{""}, manyNs.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "clusterroles"}, nil))
+	assert.Equal(t, []string{""}, manyNs.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "clusterroles"}))
 
 	// empty namespace string: no valid namespace to include, so result is empty
 	emptyNs := NewIncludeSelector("")
-	assert.Empty(t, emptyNs.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"}, nil))
+	assert.Empty(t, emptyNs.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"}))
 
 	// malformed input with empty segments: empty segments are skipped
 	malformed := NewIncludeSelector("ns1,,ns3")
-	malformedSelectors := malformed.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"}, nil)
+	malformedSelectors := malformed.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"})
 	assert.Equal(t, 2, len(malformedSelectors))
 	assert.Equal(t, "metadata.namespace==ns1", malformedSelectors[0])
 	assert.Equal(t, "metadata.namespace==ns3", malformedSelectors[1])

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 )
 

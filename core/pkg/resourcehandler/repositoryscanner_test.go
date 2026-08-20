@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -220,116 +219,6 @@ func TestGithubParse(t *testing.T) {
 		assert.Equal(t, "examples/online-boutique", gh.path)
 		assert.False(t, gh.isFile)
 	}
-}
-
-// roundTripFunc lets a test supply a RoundTrip implementation inline.
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
-
-// TestHttpGet_NonSuccessStatusReturnsError guards against a regression where
-// httpGet returned the response body as-is regardless of the HTTP status
-// code. An upstream error response (e.g. GitHub's 404/403/401 JSON error
-// body) would previously be parsed as if it were a successful response,
-// silently producing an empty/wrong result instead of a clear error.
-func TestHttpGet_NonSuccessStatusReturnsError(t *testing.T) {
-	tests := []struct {
-		name       string
-		statusCode int
-		status     string
-		body       string
-	}{
-		{name: "not found", statusCode: http.StatusNotFound, status: "404 Not Found", body: `{"message":"Not Found"}`},
-		{name: "forbidden / rate limited", statusCode: http.StatusForbidden, status: "403 Forbidden", body: `{"message":"API rate limit exceeded"}`},
-		{name: "unauthorized", statusCode: http.StatusUnauthorized, status: "401 Unauthorized", body: `{"message":"Bad credentials"}`},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			client := &http.Client{
-				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-					return &http.Response{
-						Status:     tt.status,
-						StatusCode: tt.statusCode,
-						Body:       io.NopCloser(bytes.NewBufferString(tt.body)),
-						Header:     make(http.Header),
-					}, nil
-				}),
-			}
-
-			body, err := httpGet(client, "https://api.github.com/repos/owner/repo", nil)
-			assert.Error(t, err)
-			assert.Nil(t, body)
-			assert.Contains(t, err.Error(), tt.status)
-			assert.Contains(t, err.Error(), tt.body, tt.name+": error should surface the response body for diagnosis")
-		})
-	}
-}
-
-// TestHttpGet_NonSuccessStatusReturnsError_URLInError checks that the
-// request URL, not just the status and body, appears in the returned error -
-// the other half of the error contract, alongside truncation, that's easy to
-// regress silently.
-func TestHttpGet_NonSuccessStatusReturnsError_URLInError(t *testing.T) {
-	client := &http.Client{
-		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return &http.Response{
-				Status:     "404 Not Found",
-				StatusCode: http.StatusNotFound,
-				Body:       io.NopCloser(bytes.NewBufferString(`{"message":"Not Found"}`)),
-				Header:     make(http.Header),
-			}, nil
-		}),
-	}
-
-	const url = "https://api.github.com/repos/owner/repo"
-	body, err := httpGet(client, url, nil)
-	assert.Error(t, err)
-	assert.Nil(t, body)
-	assert.Contains(t, err.Error(), url)
-}
-
-// TestHttpGet_NonSuccessStatusReturnsError_TruncatesLargeBody guards the
-// 1024-byte cap on the error body: without it, an oversized upstream error
-// response (or one that never closes) would grow the returned error
-// unbounded.
-func TestHttpGet_NonSuccessStatusReturnsError_TruncatesLargeBody(t *testing.T) {
-	const maxBodyInError = 1024
-	oversized := strings.Repeat("a", maxBodyInError*4) + "TAIL-SHOULD-BE-CUT"
-
-	client := &http.Client{
-		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return &http.Response{
-				Status:     "500 Internal Server Error",
-				StatusCode: http.StatusInternalServerError,
-				Body:       io.NopCloser(bytes.NewBufferString(oversized)),
-				Header:     make(http.Header),
-			}, nil
-		}),
-	}
-
-	body, err := httpGet(client, "https://api.github.com/repos/owner/repo", nil)
-	assert.Error(t, err)
-	assert.Nil(t, body)
-	assert.NotContains(t, err.Error(), "TAIL-SHOULD-BE-CUT")
-	assert.LessOrEqual(t, len(err.Error()), maxBodyInError+256, "error message should stay close to the 1024-byte body cap, not grow with the response size")
-}
-
-func TestHttpGet_SuccessReturnsBody(t *testing.T) {
-	client := &http.Client{
-		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return &http.Response{
-				Status:     "200 OK",
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(bytes.NewBufferString(`{"default_branch":"main"}`)),
-				Header:     make(http.Header),
-			}, nil
-		}),
-	}
-
-	body, err := httpGet(client, "https://api.github.com/repos/owner/repo", nil)
-	assert.NoError(t, err)
-	assert.Equal(t, `{"default_branch":"main"}`, string(body))
 }
 
 func TestGetFilesFromTree(t *testing.T) {

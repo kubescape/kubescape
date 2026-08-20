@@ -10,10 +10,10 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v4/core/cautils"
-	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor"
-	"github.com/kubescape/kubescape/v4/core/pkg/policyhandler"
-	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
+	"github.com/kubescape/kubescape/v3/core/pkg/policyhandler"
+	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/kubescape/opa-utils/resources"
@@ -75,7 +75,9 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 	}
 
 	scanInfo := &cautils.ScanInfo{
+		Getters:           getters,
 		ScanAll:           false,
+		PolicyIdentifier:  policyIdentifiers,
 		IncludeNamespaces: namespace,
 		ScanTimeout:       timeout,
 		InputPatterns:     inputPatterns,
@@ -86,7 +88,7 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 
 	policyHandler := policyhandler.NewRequestScopedPolicyHandler("")
 	defer policyHandler.Close()
-	scanData, err := policyHandler.CollectPolicies(scanCtx, policyIdentifiers, scanInfo, &getters)
+	scanData, err := policyHandler.CollectPolicies(scanCtx, scanInfo.PolicyIdentifier, scanInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect %s policies: %w", label, err)
 	}

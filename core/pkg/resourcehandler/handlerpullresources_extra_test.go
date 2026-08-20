@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,23 +35,10 @@ func (m collectResourcesMock) GetCloudProvider() string {
 	return m.cloudProvider
 }
 
-func (m collectResourcesMock) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
-	return nil, nil, 0, errors.New("not implemented in mock")
-}
-
-func (m collectResourcesMock) EstimateClusterSize(ctx context.Context, scanInfo *cautils.ScanInfo) (int, error) {
-	return 0, nil
-}
-
-func (m collectResourcesMock) Preflight(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (*PreflightResult, error) {
-	return nil, nil
-}
-
 func TestCollectResources(t *testing.T) {
 	tests := []struct {
 		name       string
 		handler    collectResourcesMock
-		scanInfo   *cautils.ScanInfo
 		wantErr    string
 		assertions func(t *testing.T, session *cautils.OPASessionObj)
 	}{
@@ -92,15 +79,6 @@ func TestCollectResources(t *testing.T) {
 			wantErr: "no resources found to scan",
 		},
 		{
-			name: "names the kind filter that emptied the scan",
-			handler: collectResourcesMock{
-				k8sResources: cautils.K8SResources{},
-				allResources: map[string]workloadinterface.IMetadata{},
-			},
-			scanInfo: &cautils.ScanInfo{IncludeKinds: "Sandbox", ExcludeKinds: "Job"},
-			wantErr:  "kind filter (--include-kinds Sandbox --exclude-kinds Job) left nothing to evaluate",
-		},
-		{
 			name: "ignores unknown cloud provider",
 			handler: collectResourcesMock{
 				k8sResources:  cautils.K8SResources{"v1/configmaps": []string{"cm-1"}},
@@ -120,12 +98,7 @@ func TestCollectResources(t *testing.T) {
 				Report:   &reportv2.PostureReport{},
 			}
 
-			scanInfo := tt.scanInfo
-			if scanInfo == nil {
-				scanInfo = &cautils.ScanInfo{}
-			}
-
-			err := CollectResources(context.Background(), tt.handler, session, scanInfo)
+			err := CollectResources(context.Background(), tt.handler, session, &cautils.ScanInfo{})
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)
 			} else {

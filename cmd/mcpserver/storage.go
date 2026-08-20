@@ -3,7 +3,7 @@ package mcpserver
 import (
 	"time"
 
-	"github.com/kubescape/kubescape/v4/pkg/ksinit"
+	"github.com/kubescape/kubescape/v3/pkg/ksinit"
 
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 )

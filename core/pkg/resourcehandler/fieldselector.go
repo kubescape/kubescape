@@ -14,14 +14,14 @@ const (
 )
 
 type IFieldSelector interface {
-	GetNamespacesSelectors(*schema.GroupVersionResource, *bool) []string
+	GetNamespacesSelectors(*schema.GroupVersionResource) []string
 	GetClusterScope(*schema.GroupVersionResource) bool
 }
 
 type EmptySelector struct {
 }
 
-func (es *EmptySelector) GetNamespacesSelectors(resource *schema.GroupVersionResource, namespaced *bool) []string {
+func (es *EmptySelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
 	return []string{""} //
 }
 
@@ -55,26 +55,26 @@ func (is *IncludeSelector) GetClusterScope(resource *schema.GroupVersionResource
 	return resource.Resource == "namespaces"
 }
 
-func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource, namespaced *bool) []string {
+func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
 	fieldSelectors := ""
 	for n := range strings.SplitSeq(es.namespace, FieldSelectorsSeparator) {
 		n = strings.TrimSpace(n)
 		if n != "" {
-			fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespacesSelectorWithOptionalScope(resource, n, FieldSelectorsNotEqualsOperator, namespaced))
+			fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespacesSelector(resource.Resource, n, FieldSelectorsNotEqualsOperator))
 		}
 	}
 	return []string{fieldSelectors}
 
 }
 
-func (is *IncludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource, namespaced *bool) []string {
+func (is *IncludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
 	fieldSelectors := []string{}
 	for n := range strings.SplitSeq(is.namespace, FieldSelectorsSeparator) {
 		n = strings.TrimSpace(n)
 		if n == "" {
 			continue
 		}
-		sel := getNamespacesSelectorWithOptionalScope(resource, n, FieldSelectorsEqualsOperator, namespaced)
+		sel := getNamespacesSelector(resource.Resource, n, FieldSelectorsEqualsOperator)
 		if sel == "" {
 			// Cluster-scoped target: per-namespace filtering is meaningless, so a
 			// single unfiltered query suffices. Returning one entry per namespace
@@ -85,26 +85,6 @@ func (is *IncludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionR
 		fieldSelectors = append(fieldSelectors, sel)
 	}
 	return fieldSelectors
-}
-
-func getNamespacesSelectorWithOptionalScope(resource *schema.GroupVersionResource, ns, operator string, namespaced *bool) string {
-	if namespaced == nil {
-		return getNamespacesSelector(resource.Resource, ns, operator)
-	}
-	return getNamespacesSelectorForScope(resource, ns, operator, *namespaced)
-}
-
-func getNamespacesSelectorForScope(resource *schema.GroupVersionResource, ns, operator string, namespaced bool) string {
-	if ns == "" {
-		return ""
-	}
-	if resource.Resource == "namespaces" {
-		return getNameFieldSelectorString(ns, operator)
-	}
-	if namespaced {
-		return getNamespaceFieldSelectorString(ns, operator)
-	}
-	return ""
 }
 
 func getNamespacesSelector(kind, ns, operator string) string {

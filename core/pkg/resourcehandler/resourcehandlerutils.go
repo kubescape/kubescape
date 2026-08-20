@@ -1,20 +1,16 @@
 package resourcehandler
 
 import (
-	"slices"
-	"strings"
-
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // utils which are common to all resource handlers
-func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IWorkload, resolver resourceResolver) {
+func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IWorkload) {
 	if wl == nil {
 		return
 	}
@@ -22,38 +18,37 @@ func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResou
 	// 	return
 	// }
 
-	resolved := resolver(wl.GetGroup(), wl.GetVersion(), wl.GetKind())
-	if len(resolved) != 1 {
-		logger.L().Warning("unable to resolve object resource", helpers.String("kind", wl.GetKind()), helpers.String("id", wl.GetID()))
+	allResources[wl.GetID()] = wl
+
+	// ResourceGroupToSlice can return an empty slice for a group/version/kind
+	// it can't resolve; every current caller gates on IsTypeWorkload first, so
+	// this is unreachable today, but the guard doesn't depend on that holding.
+	groups := k8sinterface.ResourceGroupToSlice(wl.GetGroup(), wl.GetVersion(), wl.GetKind())
+	if len(groups) == 0 {
+		logger.L().Warning("failed to resolve resource group for workload, skipping",
+			helpers.String("id", wl.GetID()), helpers.String("kind", wl.GetKind()),
+			helpers.String("apiVersion", wl.GetApiVersion()))
 		return
 	}
 
-	resourceGroups := append([]string{resolved[0].groupVersionResourceTriplet}, resolved[0].comparisonTriplets...)
-	seen := make(map[string]struct{}, len(resourceGroups))
-	for _, resourceGroup := range resourceGroups {
-		if _, exists := seen[resourceGroup]; exists {
-			continue
-		}
-		seen[resourceGroup] = struct{}{}
-		k8sResources[resourceGroup] = append(k8sResources[resourceGroup], wl.GetID())
-	}
-	allResources[wl.GetID()] = wl
+	// [0] is a deliberate pick when multiple groups resolve (only possible
+	// with an empty group and >1 group serving the resource at that version);
+	// current callers can't reach that case either, since IsTypeWorkload also
+	// requires exactly one match.
+	resourceGroup := groups[0]
+	k8sResources[resourceGroup] = append(k8sResources[resourceGroup], wl.GetID())
 }
 
-func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload, scanningScope reporthandling.ScanningScopeType, resolver resourceResolver) (QueryableResources, map[string]bool) {
-	return getQueryableResourceMapFromPoliciesWithWarned(frameworks, resource, scanningScope, resolver, make(map[string]struct{}))
-}
-
-func getQueryableResourceMapFromPoliciesWithWarned(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload, scanningScope reporthandling.ScanningScopeType, resolver resourceResolver, warned map[string]struct{}) (QueryableResources, map[string]bool) {
+func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload, scanningScope reporthandling.ScanningScopeType) (QueryableResources, map[string]bool) {
 	queryableResources := make(QueryableResources)
 	excludedRulesMap := make(map[string]bool)
-	namespace := getScannedResourceNamespace(resource, resolver)
+	namespace := getScannedResourceNamespace(resource)
 
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {
 			for _, rule := range control.Rules {
 				// check if the rule should be skipped according to the scanning scope and the rule attributes
-				if cautils.ShouldSkipRuleWithWarned(control, rule, scanningScope, warned) {
+				if cautils.ShouldSkipRule(control, rule, scanningScope) {
 					continue
 				}
 
@@ -67,9 +62,8 @@ func getQueryableResourceMapFromPoliciesWithWarned(frameworks []reporthandling.F
 					}
 				}
 				for i := range rule.Match {
-					updateQueryableResourcesMapFromRuleMatchObject(&rule.Match[i], resourcesFilterMap, queryableResources, namespace, resolver)
+					updateQueryableResourcesMapFromRuleMatchObject(&rule.Match[i], resourcesFilterMap, queryableResources, namespace)
 				}
-				addCELNamespaceQuery(rule, resource, namespace, queryableResources, resolver)
 			}
 		}
 	}
@@ -77,40 +71,16 @@ func getQueryableResourceMapFromPoliciesWithWarned(frameworks []reporthandling.F
 	return queryableResources, excludedRulesMap
 }
 
-func addCELNamespaceQuery(rule reporthandling.PolicyRule, resource workloadinterface.IWorkload, namespace string, queryableResources QueryableResources, resolver resourceResolver) {
-	if rule.RuleLanguage != reporthandling.CELLanguage {
-		return
-	}
-	if resource != nil && namespace == "" {
-		return
-	}
-
-	namespaceMatch := reporthandling.RuleMatchObjects{
-		APIGroups:   []string{""},
-		APIVersions: []string{"v1"},
-		Resources:   []string{"Namespace"},
-	}
-	updateQueryableResourcesMapFromRuleMatchObject(&namespaceMatch, nil, queryableResources, namespace, resolver)
-}
-
 // getScannedResourceNamespace returns the namespace of the scanned resource.
 // If input is nil (e.g. cluster scan), returns an empty string
 // If the resource is a namespaced or the Namespace itself, returns the namespace name
 // In all other cases, returns an empty string
-func getScannedResourceNamespace(workload workloadinterface.IWorkload, resolver resourceResolver) string {
+func getScannedResourceNamespace(workload workloadinterface.IWorkload) string {
 	if workload == nil {
 		return ""
 	}
 	if workload.GetKind() == "Namespace" {
 		return workload.GetName()
-	}
-
-	resolved := resolver(workload.GetGroup(), workload.GetVersion(), workload.GetKind())
-	if len(resolved) == 1 && resolved[0].namespaced != nil {
-		if *resolved[0].namespaced {
-			return workload.GetNamespace()
-		}
-		return ""
 	}
 
 	if k8sinterface.IsResourceInNamespaceScope(workload.GetKind()) {
@@ -131,28 +101,8 @@ func filterRuleMatchesForResource(resourceKind string, matchObjects []reporthand
 		}
 	}
 
-	resourceAliases := make(map[string]struct{})
-	for _, alias := range offlineManifestResourceAliases(resourceKind) {
-		resourceAliases[alias] = struct{}{}
-	}
-	matchesInputResource := func(resource string) bool {
-		_, exists := resourceAliases[strings.ToLower(resource)]
-		return exists
-	}
-
-	ruleApplies := false
-	for resource := range resourceMap {
-		// A wildcard resource matches any scanned resource kind.
-		if resource == "*" {
-			ruleApplies = true
-			break
-		}
-		if matchesInputResource(resource) {
-			ruleApplies = true
-			break
-		}
-	}
-	if !ruleApplies {
+	// rule does not apply to this workload
+	if _, exists := resourceMap[resourceKind]; !exists {
 		return nil
 	}
 
@@ -166,25 +116,15 @@ func filterRuleMatchesForResource(resourceKind string, matchObjects []reporthand
 		"Job":         false,
 	}
 
-	isWorkloadResource := func(resource string) bool {
-		resource = strings.ToLower(resource)
-		for kind := range workloadKinds {
-			if slices.Contains(offlineManifestResourceAliases(kind), resource) {
-				return true
-			}
-		}
-		return false
-	}
-
-	isInputResourceWorkload := isWorkloadResource(resourceKind)
+	_, isInputResourceWorkload := workloadKinds[resourceKind]
 
 	for r := range resourceMap {
 		// we don't need to query the same resource
-		if matchesInputResource(r) {
+		if r == resourceKind {
 			continue
 		}
 
-		isCurrentResourceWorkload := isWorkloadResource(r)
+		_, isCurrentResourceWorkload := workloadKinds[r]
 		resourceMap[r] = !isCurrentResourceWorkload || !isInputResourceWorkload
 	}
 
@@ -194,32 +134,24 @@ func filterRuleMatchesForResource(resourceKind string, matchObjects []reporthand
 // updateQueryableResourcesMapFromRuleMatchObject updates the queryableResources map with the relevant resources from the match object.
 // if namespace is not empty, the namespace filter is added to the queryable resources (which are namespaced)
 // if resourcesFilterMap is not nil, only the resources with value 'true' will be added to the queryable resources
-func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMatchObjects, resourcesFilterMap map[string]bool, queryableResources QueryableResources, namespace string, resolver resourceResolver) {
+func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMatchObjects, resourcesFilterMap map[string]bool, queryableResources QueryableResources, namespace string) {
 	for _, apiGroup := range match.APIGroups {
 		for _, apiVersions := range match.APIVersions {
-			var handledResources []string
 			for _, resource := range match.Resources {
 				if resourcesFilterMap != nil {
 					if relevant := resourcesFilterMap[resource]; !relevant {
 						continue
 					}
 				}
-				if sharesOfflineResourceAlias(resource, handledResources) {
-					continue
-				}
-				handledResources = append(handledResources, resource)
 
-				for _, resolved := range resolver(apiGroup, apiVersions, resource) {
-					resolvedGroup, resolvedVersion, resourceName := k8sinterface.StringToResourceGroup(resolved.groupVersionResourceTriplet)
-					gvr := &schema.GroupVersionResource{Group: resolvedGroup, Version: resolvedVersion, Resource: resourceName}
-					globalFieldSelector := getNamespacesSelector(resource, namespace, "=")
-					if resolved.namespaced != nil {
-						globalFieldSelector = getNamespacesSelectorForScope(gvr, namespace, "=", *resolved.namespaced)
-					}
+				groupResources := k8sinterface.ResourceGroupToString(apiGroup, apiVersions, resource)
+				// if namespace filter is set, we are scanning a workload in a specific namespace
+				// calling the getNamespacesSelector will add the namespace field selector (or name for Namespace resource)
+				globalFieldSelector := getNamespacesSelector(resource, namespace, "=")
+
+				for _, groupResource := range groupResources {
 					queryableResource := QueryableResource{
-						GroupVersionResourceTriplet: resolved.groupVersionResourceTriplet,
-						Namespaced:                  resolved.namespaced,
-						Kind:                        resolved.kind,
+						GroupVersionResourceTriplet: groupResource,
 					}
 					queryableResource.AddFieldSelector(globalFieldSelector)
 
@@ -238,16 +170,4 @@ func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMa
 			}
 		}
 	}
-}
-
-func sharesOfflineResourceAlias(resource string, handledResources []string) bool {
-	resource = strings.ToLower(resource)
-	for _, handled := range handledResources {
-		handled = strings.ToLower(handled)
-		if resource == handled || slices.Contains(offlineManifestResourceAliases(resource), handled) ||
-			slices.Contains(offlineManifestResourceAliases(handled), resource) {
-			return true
-		}
-	}
-	return false
 }

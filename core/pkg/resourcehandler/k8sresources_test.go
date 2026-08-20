@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 )
@@ -624,8 +624,7 @@ func TestCloudResourceRequired(t *testing.T) {
 	cloudResources := []string{"container.googleapis.com/v1/ClusterDescribe",
 		"eks.amazonaws.com/v1/DescribeRepositories",
 		"eks.amazonaws.com/v1/ListEntitiesForPolicies",
-		"eks.amazonaws.com/v1/ClusterDescribe",
-		"management.azure.com/v1/ListEntitiesForPolicies"}
+		"eks.amazonaws.com/v1/ClusterDescribe"}
 
 	assert.True(t, cloudResourceRequired(cloudResources, ClusterDescribe))
 	assert.False(t, cloudResourceRequired(cloudResources, "ListRolePolicies"))
