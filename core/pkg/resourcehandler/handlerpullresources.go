@@ -37,6 +37,9 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, opaSess
 	}
 
 	if len(opaSessionObj.K8SResources) == 0 && len(opaSessionObj.ExternalResources) == 0 || len(opaSessionObj.AllResources) == 0 {
+		if hint := kindFilterHint(scanInfo); hint != "" {
+			return fmt.Errorf("no resources found to scan: the kind filter (%s) left nothing to evaluate", hint)
+		}
 		return fmt.Errorf("no resources found to scan")
 	}
 

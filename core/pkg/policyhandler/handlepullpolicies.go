@@ -95,6 +95,17 @@ func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyI
 		return opaSessionObj, err
 	}
 
+	// load user-authored custom rules, if any
+	if scanInfo.CustomRules != "" {
+		customFramework, err := getter.LoadCustomRules(scanInfo.CustomRules)
+		if err != nil {
+			return opaSessionObj, err
+		}
+		if customFramework != nil {
+			policies = append(policies, *customFramework)
+		}
+	}
+
 	opaSessionObj.Policies = policies
 	opaSessionObj.Exceptions = exceptions
 	if controlInputs == nil {

@@ -224,3 +224,140 @@ func TestValidateCommonScanFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateKindFilters(t *testing.T) {
+	tests := []struct {
+		name         string
+		includeKinds string
+		excludeKinds string
+		expectedErr  string
+	}{
+		{
+			name:         "both empty is valid",
+			includeKinds: "",
+			excludeKinds: "",
+			expectedErr:  "",
+		},
+		{
+			name:         "valid include-kinds",
+			includeKinds: "Deployment,DaemonSet",
+			excludeKinds: "",
+			expectedErr:  "",
+		},
+		{
+			name:         "valid exclude-kinds",
+			includeKinds: "",
+			excludeKinds: "Job,CronJob",
+			expectedErr:  "",
+		},
+		{
+			name:         "both set is valid",
+			includeKinds: "Deployment",
+			excludeKinds: "DaemonSet",
+			expectedErr:  "",
+		},
+		{
+			name:         "include-kinds whitespace-only tokens are rejected",
+			includeKinds: " , , ",
+			excludeKinds: "",
+			expectedErr:  "contains no valid kind names",
+		},
+		{
+			name:         "exclude-kinds whitespace-only tokens are rejected",
+			includeKinds: "",
+			excludeKinds: "  ,  ",
+			expectedErr:  "contains no valid kind names",
+		},
+		{
+			name:         "single valid kind in include",
+			includeKinds: "Pod",
+			excludeKinds: "",
+			expectedErr:  "",
+		},
+		{
+			name:         "padded valid kind passes",
+			includeKinds: "  Deployment  ",
+			excludeKinds: "",
+			expectedErr:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				IncludeKinds: tt.includeKinds,
+				ExcludeKinds: tt.excludeKinds,
+			}
+			err := ValidateKindFilters(scanInfo)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
+func TestValidateExcludePaths(t *testing.T) {
+	tests := []struct {
+		name         string
+		excludePaths []string
+		expectedErr  string
+	}{
+		{
+			name:         "no patterns is valid",
+			excludePaths: nil,
+			expectedErr:  "",
+		},
+		{
+			name:         "gitignore syntax is accepted",
+			excludePaths: []string{"test/**", "!test/prod.yaml", "/vendor/", "*.tmpl.yaml"},
+			expectedErr:  "",
+		},
+		{
+			name:         "a comment typed as an argument is rejected",
+			excludePaths: []string{"# a comment"},
+			expectedErr:  "carries no rule",
+		},
+		{
+			name:         "a blank argument is rejected",
+			excludePaths: []string{"  "},
+			expectedErr:  "carries no rule",
+		},
+		{
+			name:         "an anchored pattern is still accepted",
+			excludePaths: []string{"/vendor"},
+			expectedErr:  "",
+		},
+		{
+			name:         "unclosed character class is rejected",
+			excludePaths: []string{"pod[.yaml"},
+			expectedErr:  "invalid exclusion pattern",
+		},
+		{
+			name:         "pattern with nothing to match is rejected",
+			excludePaths: []string{"!"},
+			expectedErr:  "exclusion pattern is empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateExcludePaths(&cautils.ScanInfo{ExcludePaths: tt.excludePaths})
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
+// Commas are significant inside a glob alternation, so --exclude-path must not split
+// on them the way a comma-separated flag would.
+func TestValidateExcludePathsAcceptsBraceAlternation(t *testing.T) {
+	err := ValidateExcludePaths(&cautils.ScanInfo{ExcludePaths: []string{"*.{yaml,json}"}})
+	assert.NoError(t, err)
+}

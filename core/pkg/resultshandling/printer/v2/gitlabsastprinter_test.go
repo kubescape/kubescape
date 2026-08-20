@@ -384,7 +384,8 @@ func gitLabImageReportFor(t *testing.T, imageScanData []cautils.ImageScanData) g
 func TestGitLabImageScan_LocationHasFile(t *testing.T) {
 	imageScanData := []cautils.ImageScanData{
 		{
-			Image: "nginx:1.25",
+			Image:    "nginx:1.25",
+			Platform: "linux/arm64",
 			Matches: match.NewMatches(match.Match{
 				Package: grypepkg.Package{ID: "pkg-1", Name: "openssl", Version: "3.0.0"},
 				Vulnerability: vulnerability.Vulnerability{
@@ -402,6 +403,14 @@ func TestGitLabImageScan_LocationHasFile(t *testing.T) {
 	assert.NotEmpty(t, report.Vulnerabilities[0].Location.File,
 		"location.file is required by the dependency_scanning schema")
 	assert.Equal(t, "nginx:1.25", report.Vulnerabilities[0].Location.File)
+	assert.Contains(t, report.Vulnerabilities[0].Description, "Scanned platform: linux/arm64.")
+
+	withoutPlatform := imageScanData
+	withoutPlatform[0].Platform = ""
+	legacyReport := gitLabImageReportFor(t, withoutPlatform)
+	require.Len(t, legacyReport.Vulnerabilities, 1)
+	assert.Equal(t, legacyReport.Vulnerabilities[0].ID, report.Vulnerabilities[0].ID,
+		"adding platform metadata must not change GitLab's vulnerability fingerprint")
 }
 
 // TestGitLabImageScan_VersionKeyAlwaysPresent guards against #2782's schema violation:

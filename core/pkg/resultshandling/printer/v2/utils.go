@@ -179,7 +179,7 @@ func ConvertToPostureReportWithSeverityLabelsAndCoverage(report *reporthandlingv
 
 	// only attach coverage when there is something to show
 	var scanCoverage *cautils.ScanCoverage
-	if coverage != nil && (len(coverage.FailedGVRPulls) > 0 || len(coverage.NotEvaluatedControls) > 0 || len(coverage.PartialGVRPulls) > 0 || len(coverage.PolicyDegradations) > 0) {
+	if coverage != nil && (len(coverage.FailedGVRPulls) > 0 || len(coverage.NotEvaluatedControls) > 0 || len(coverage.PartialGVRPulls) > 0 || len(coverage.PolicyDegradations) > 0 || len(coverage.VacuousFrameworks) > 0) {
 		scanCoverage = coverage
 	}
 
@@ -433,6 +433,17 @@ func extractCVEs(matches match.Matches, image string) []imageprinter.CVE {
 // O(N) in the number of images; the printer-local copies this replaces used
 // slices.Contains and were O(N^2) on large image sets.
 func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.ImageScanSummary {
+	return buildImageScanSummaryWithTarget(imageScanData, true)
+}
+
+// buildMachineImageScanSummary preserves the historical image reference used
+// by JSON and YAML reports. Platform metadata must not silently change image
+// identifiers that downstream consumers use for joins and deduplication.
+func buildMachineImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.ImageScanSummary {
+	return buildImageScanSummaryWithTarget(imageScanData, false)
+}
+
+func buildImageScanSummaryWithTarget(imageScanData []cautils.ImageScanData, includePlatform bool) *imageprinter.ImageScanSummary {
 	imageScanSummary := &imageprinter.ImageScanSummary{
 		CVEs:                  []imageprinter.CVE{},
 		PackageScores:         map[string]*imageprinter.PackageScore{},
@@ -442,6 +453,9 @@ func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.
 	seenImages := make(map[string]struct{}, len(imageScanData))
 	for i := range imageScanData {
 		image := imageScanData[i].Image
+		if includePlatform {
+			image = imageScanData[i].Target()
+		}
 		if _, seen := seenImages[image]; !seen {
 			seenImages[image] = struct{}{}
 			imageScanSummary.Images = append(imageScanSummary.Images, image)

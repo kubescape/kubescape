@@ -167,6 +167,25 @@ func TestAddSingleResourceToResourceMaps_KnownApiVersion(t *testing.T) {
 	assert.Contains(t, k8sResources["apps/v1/deployments"], wl.GetID())
 }
 
+func TestFilterRuleMatchesForResource_Wildcard(t *testing.T) {
+	match := []reporthandling.RuleMatchObjects{{
+		APIGroups:   []string{"*"},
+		APIVersions: []string{"*"},
+		Resources:   []string{"*"},
+	}}
+
+	// wildcard should match any concrete resource kind, e.g. a single Pod scan
+	got := filterRuleMatchesForResource("Pod", match)
+	assert.NotNil(t, got)
+	assert.True(t, got["*"])
+
+	// a non-wildcard resource that does not match should still be filtered out
+	nonMatching := []reporthandling.RuleMatchObjects{{
+		Resources: []string{"ConfigMap"},
+	}}
+	assert.Nil(t, filterRuleMatchesForResource("Pod", nonMatching))
+}
+
 func TestAddSingleResourceToResourceMaps_NilWorkload(t *testing.T) {
 	k8sResources := cautils.K8SResources{}
 	allResources := map[string]workloadinterface.IMetadata{}

@@ -946,8 +946,12 @@ func TestGetVapHelperCmd(t *testing.T) {
 }
 
 func TestLabelSelectorRegexEdgeCases(t *testing.T) {
-	validLabels := []string{"app=nginx", "env1=prod2", "App=Value", "appName=NginxValue", "app-name=nginx", "app.name=nginx", "app_name=nginx", "app.kubernetes.io/name=nginx", "key=", "app = nginx"}
-	invalidLabels := []string{"key value", "=value", "key=val=extra", "app@=nginx", "app=nginx@", "app!=nginx", "app", "app==nginx"}
+	// Regression for issue-3403: "==" is DoubleEquals, a distinct operator from
+	// "=" (Equals) in k8s.io/apimachinery/pkg/selection, but both spellings mean
+	// the same thing - a plain equality selector - and kubectl treats them
+	// identically. "app==nginx" belongs in validLabels, not invalidLabels.
+	validLabels := []string{"app=nginx", "env1=prod2", "App=Value", "appName=NginxValue", "app-name=nginx", "app.name=nginx", "app_name=nginx", "app.kubernetes.io/name=nginx", "key=", "app = nginx", "app==nginx"}
+	invalidLabels := []string{"key value", "=value", "key=val=extra", "app@=nginx", "app=nginx@", "app!=nginx", "app"}
 
 	for _, label := range validLabels {
 		t.Run("valid label "+label, func(t *testing.T) {
@@ -964,7 +968,7 @@ func TestLabelSelectorRegexEdgeCases(t *testing.T) {
 			cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--label", label})
 			err := cmd.Execute()
 			require.Error(t, err)
-			assert.True(t, strings.Contains(err.Error(), "invalid label selector") || strings.Contains(err.Error(), "only '=' equality"), "unexpected error: %v", err)
+			assert.True(t, strings.Contains(err.Error(), "invalid label selector") || strings.Contains(err.Error(), "only equality label selectors"), "unexpected error: %v", err)
 		})
 	}
 }
@@ -1220,5 +1224,179 @@ func TestDownloadFileToStringTimeout(t *testing.T) {
 		result, err := downloadFileToString(server.URL, 5*time.Second)
 		require.NoError(t, err)
 		assert.Equal(t, "fast", result)
+	})
+}
+
+// TestCheckResourceRulesInPolicyScope covers the refusal of a --resource-rule
+// the bound policy can never match. The apiserver intersects the binding with
+// the policy's matchConstraints, so such a rule yields a binding that applies
+// cleanly and enforces nothing.
+func TestCheckResourceRulesInPolicyScope(t *testing.T) {
+	const c0016Policy = "kubescape-c-0016-allow-privilege-escalation"
+
+	t.Run("rule outside the policy is refused", func(t *testing.T) {
+		err := checkResourceRulesInPolicyScope([]string{"agents.x-k8s.io/v1beta1/sandboxes"}, "C-0016", c0016Policy)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "would match nothing")
+		assert.Contains(t, err.Error(), "apps/v1/deployments", "the refusal names what the policy does match")
+	})
+
+	t.Run("rule inside the policy is accepted", func(t *testing.T) {
+		require.NoError(t, checkResourceRulesInPolicyScope([]string{"apps/v1/deployments", "/v1/pods"}, "C-0016", c0016Policy))
+	})
+
+	t.Run("one out-of-scope rule refuses the whole binding", func(t *testing.T) {
+		err := checkResourceRulesInPolicyScope([]string{"/v1/pods", "ate.dev/v1alpha1/actortemplates"}, "C-0016", c0016Policy)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ate.dev/v1alpha1/actortemplates")
+	})
+
+	t.Run("policy resolved by name only", func(t *testing.T) {
+		err := checkResourceRulesInPolicyScope([]string{"ate.dev/v1alpha1/workerpools"}, "", c0016Policy)
+		require.Error(t, err)
+	})
+
+	// Equivalent matching is the default and this command never sets matchPolicy,
+	// so a rule the apiserver may convert into the policy is reported, not refused.
+	t.Run("another version of a constrained resource is allowed", func(t *testing.T) {
+		require.NoError(t, checkResourceRulesInPolicyScope([]string{"apps/v1beta1/deployments"}, "C-0016", c0016Policy))
+		require.NoError(t, checkResourceRulesInPolicyScope([]string{"extensions/v1beta1/deployments"}, "C-0016", c0016Policy))
+	})
+
+	t.Run("policy outside the bundle is left unchecked", func(t *testing.T) {
+		require.NoError(t, checkResourceRulesInPolicyScope([]string{"ate.dev/v1alpha1/workerpools"}, "", "my-own-sandbox-policy"))
+	})
+
+	t.Run("no rules is nothing to check", func(t *testing.T) {
+		require.NoError(t, checkResourceRulesInPolicyScope(nil, "C-0016", c0016Policy))
+	})
+
+	// A subresource policy is a separate surface: binding it to the bare
+	// resource would enforce nothing.
+	t.Run("bare resource does not reach a subresource policy", func(t *testing.T) {
+		err := checkResourceRulesInPolicyScope([]string{"/v1/pods"}, "", "cluster-policy-deny-exec")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "/v1/pods/exec")
+
+		require.NoError(t, checkResourceRulesInPolicyScope([]string{"/v1/pods/exec"}, "", "cluster-policy-deny-exec"))
+	})
+}
+
+// TestClassifyResourceRule covers what the offline check can and cannot
+// conclude. Only a resource mismatch is conclusive: matchResources defaults to
+// matchPolicy Equivalent, so a group or version the policy does not name may
+// still be an equivalent form of the same resource on the cluster.
+func TestClassifyResourceRule(t *testing.T) {
+	constraint := func(group, version, resource string) admissionv1.NamedRuleWithOperations {
+		rule, err := parseResourceRule(strings.Join([]string{group, version, resource}, "/"))
+		require.NoError(t, err)
+		return rule
+	}
+
+	tests := []struct {
+		name        string
+		rule        string
+		constraints []admissionv1.NamedRuleWithOperations
+		want        resourceRuleScope
+	}{
+		{
+			name:        "exact match",
+			rule:        "agents.x-k8s.io/v1beta1/sandboxes",
+			constraints: []admissionv1.NamedRuleWithOperations{constraint("agents.x-k8s.io", "v1beta1", "sandboxes")},
+			want:        ruleMatchesPolicy,
+		},
+		{
+			name:        "another version of the same resource may be converted",
+			rule:        "agents.x-k8s.io/v1alpha1/sandboxes",
+			constraints: []admissionv1.NamedRuleWithOperations{constraint("agents.x-k8s.io", "v1beta1", "sandboxes")},
+			want:        ruleConvertsToPolicy,
+		},
+		{
+			name:        "another group serving the same resource may be converted",
+			rule:        "extensions/v1beta1/deployments",
+			constraints: []admissionv1.NamedRuleWithOperations{constraint("apps", "v1", "deployments")},
+			want:        ruleConvertsToPolicy,
+		},
+		{
+			name:        "a resource the policy never constrains",
+			rule:        "agents.x-k8s.io/v1beta1/sandboxes",
+			constraints: []admissionv1.NamedRuleWithOperations{constraint("apps", "v1", "deployments")},
+			want:        ruleOutsidePolicy,
+		},
+		{
+			name:        "policy wildcard covers the rule",
+			rule:        "agents.x-k8s.io/v1beta1/sandboxes",
+			constraints: []admissionv1.NamedRuleWithOperations{constraint("*", "*", "*")},
+			want:        ruleMatchesPolicy,
+		},
+		{
+			name:        "rule wildcard reaches one of the policy's groups",
+			rule:        "*/v1/pods",
+			constraints: []admissionv1.NamedRuleWithOperations{constraint("", "v1", "pods")},
+			want:        ruleMatchesPolicy,
+		},
+		{
+			name:        "resource wildcard does not cover a subresource",
+			rule:        "/v1/*",
+			constraints: []admissionv1.NamedRuleWithOperations{constraint("", "v1", "pods/exec")},
+			want:        ruleOutsidePolicy,
+		},
+		{
+			name:        "full wildcard covers a subresource",
+			rule:        "/v1/*/*",
+			constraints: []admissionv1.NamedRuleWithOperations{constraint("", "v1", "pods/exec")},
+			want:        ruleMatchesPolicy,
+		},
+		{
+			name: "matches the second of several policy rules",
+			rule: "batch/v1/cronjobs",
+			constraints: []admissionv1.NamedRuleWithOperations{
+				constraint("", "v1", "pods"),
+				constraint("batch", "v1", "cronjobs"),
+			},
+			want: ruleMatchesPolicy,
+		},
+		{
+			name: "an exact match outranks a convertible one",
+			rule: "apps/v1/deployments",
+			constraints: []admissionv1.NamedRuleWithOperations{
+				constraint("extensions", "v1beta1", "deployments"),
+				constraint("apps", "v1", "deployments"),
+			},
+			want: ruleMatchesPolicy,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rule, err := parseResourceRule(tt.rule)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, classifyResourceRule(rule, tt.constraints))
+		})
+	}
+}
+
+func TestCreatePolicyBindingCmdResourceRuleScope(t *testing.T) {
+	t.Run("out-of-scope rule fails the command", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0016", "--resource-rule", "agents.x-k8s.io/v1beta1/sandboxes"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "would match nothing")
+	})
+
+	t.Run("in-scope rule is written to the binding", func(t *testing.T) {
+		outputFile := filepath.Join(t.TempDir(), "binding.yaml")
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0016", "--resource-rule", "batch/v1/cronjobs", "--output", outputFile})
+		require.NoError(t, cmd.Execute())
+
+		content, err := os.ReadFile(outputFile)
+		require.NoError(t, err)
+
+		var binding admissionv1.ValidatingAdmissionPolicyBinding
+		require.NoError(t, yaml.Unmarshal(content, &binding))
+		require.Len(t, binding.Spec.MatchResources.ResourceRules, 1)
+		assert.Equal(t, []string{"cronjobs"}, binding.Spec.MatchResources.ResourceRules[0].Resources)
 	})
 }

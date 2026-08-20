@@ -22,7 +22,7 @@ helmCharts:
     releaseName: app
 `)
 
-	inputs, errs := listKustomizeInputs(repoRoot)
+	inputs, errs := listKustomizeInputs(repoRoot, nil)
 	require.Empty(t, errs)
 	require.Equal(t, []string{appDir}, inputs)
 

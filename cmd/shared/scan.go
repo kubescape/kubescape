@@ -145,5 +145,40 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateScanFormat(scanInfo.Format, supportedFormats); err != nil {
 		return err
 	}
+	if err := ValidateKindFilters(scanInfo); err != nil {
+		return err
+	}
+	if err := ValidateExcludePaths(scanInfo); err != nil {
+		return err
+	}
 	return nil
+}
+
+// ValidateExcludePaths fails the command on a malformed pattern before any resource is collected.
+func ValidateExcludePaths(scanInfo *cautils.ScanInfo) error {
+	if err := cautils.ValidateCommandLinePatterns(scanInfo.ExcludePaths); err != nil {
+		return fmt.Errorf("--exclude-path: %w", err)
+	}
+	return nil
+}
+
+// ValidateKindFilters returns an error when --include-kinds or --exclude-kinds
+// contain only whitespace tokens, which would silently discard every resource.
+func ValidateKindFilters(scanInfo *cautils.ScanInfo) error {
+	if err := validateKindList("--include-kinds", scanInfo.IncludeKinds); err != nil {
+		return err
+	}
+	return validateKindList("--exclude-kinds", scanInfo.ExcludeKinds)
+}
+
+func validateKindList(flag, value string) error {
+	if value == "" {
+		return nil
+	}
+	for _, k := range strings.Split(value, ",") {
+		if strings.TrimSpace(k) != "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s value %q contains no valid kind names", flag, value)
 }

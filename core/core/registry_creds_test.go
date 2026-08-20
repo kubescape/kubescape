@@ -265,10 +265,11 @@ func TestCollectImageScanTargetsScopesPullSecretsToLiveCluster(t *testing.T) {
 				context.Background(),
 				tt.scanningContext,
 				k8sAPI,
+				"",
 			)
 
 			assert.Empty(t, containerErrors)
-			assert.True(t, images.Contains(image))
+			assert.True(t, images.Contains(ImageScanTarget{Image: image}))
 			if tt.expectSecretRead {
 				require.Len(t, client.Actions(), 1)
 				assert.Equal(t, "get", client.Actions()[0].GetVerb())

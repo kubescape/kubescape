@@ -22,6 +22,10 @@ type resolvedResource struct {
 	groupVersionResourceTriplet string
 	comparisonTriplets          []string
 	namespaced                  *bool
+	// kind is the Kind the resource is served as, empty when the resolver had no
+	// authoritative source for it — only discovery and a file scan's manifests
+	// know it, and a guess would be worse than reporting it unknown.
+	kind string
 }
 
 type resourceResolver func(group, version, resource string) []resolvedResource
@@ -113,6 +117,7 @@ func newOfflineManifestResourceResolver(mappedResources map[string][]workloadint
 				groupVersionResourceTriplet: primary,
 				comparisonTriplets:          comparisons,
 				namespaced:                  &namespaced,
+				kind:                        manifestResource.kind,
 			})
 		}
 		return resolved
@@ -227,6 +232,7 @@ func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resource
 			resolved = append(resolved, resolvedResource{
 				groupVersionResourceTriplet: k8sinterface.GroupVersionResourceToString(&candidate.gvr),
 				namespaced:                  &namespaced,
+				kind:                        candidate.kind,
 			})
 		}
 		if len(resolved) > 0 {

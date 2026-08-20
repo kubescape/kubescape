@@ -114,82 +114,94 @@ type PolicyIdentifier struct {
 }
 
 type ScanInfo struct {
-	UseExceptions         string   // Load file with exceptions configuration
-	AuditExceptions       bool     // Include exception usage audit in supported scan outputs
-	ControlsInputs        string   // Load file with inputs for controls
-	AttackTracks          string   // Load file with attack tracks
-	UseFrom               []string // Load framework from local file (instead of download). Use when running offline
-	UseDefault            bool     // Load framework from cached file (instead of download). Use when running offline
-	UseArtifactsFrom      string   // Load artifacts from local path. Use when running offline
-	ControlsVersion       string   // Pin the regolibrary release used to download policies (e.g. "v2.0.301"). Empty uses the latest release
-	VerboseMode           bool     // Display all the input resources and not only failed resources
-	Hide                  bool     // Hide sensitive identifiers (names, namespaces, images) in results
-	EncryptionEnabled     bool
-	View                  string                       //
-	Format                string                       // Format results (table, json, junit ...)
-	Output                string                       // Store results in an output file, Output file name
-	FormatVersion         string                       // Output object can be different between versions, this is for testing and backward compatibility
-	CustomClusterName     string                       // Set the custom name of the cluster
-	ExcludedNamespaces    string                       // used for host scanner namespace
-	IncludeNamespaces     string                       //
-	LabelSelector         string                       // filter collected resources by Kubernetes label selector (e.g. "app=nginx,env!=dev")
-	Namespace             string                       // target namespace for workload scans
-	InputPatterns         []string                     // Yaml files input patterns
-	Silent                bool                         // Silent mode - Do not print progress logs
-	FailThreshold         float32                      // DEPRECATED - Failure score threshold
-	ComplianceThreshold   float32                      // Compliance score threshold
-	FailThresholdSeverity string                       // Severity at and above which the command should fail
-	OnlyFixable           bool                         // Gate the severity threshold to only count CVEs that have an available fix
-	FailCoverageThreshold float32                      // Coverage threshold below which the command fails (0 = disabled)
-	FailOnDegradedConfig  bool                         // Fail the scan if control inputs or exceptions could not be loaded and a fallback was used
-	Submit                BoolPtrFlag                  // Submit results to Kubescape Cloud BE. Get() is nil unless explicitly set by the caller (flag/env/request field)
-	ScanID                string                       // Report id of the current scan
-	HostSensorEnabled     BoolPtrFlag                  // Deploy Kubescape K8s host scanner to collect data from certain controls
-	HostSensorYamlPath    string                       // Path to hostsensor file
-	Local                 bool                         // Do not submit results
-	AccountID             string                       // account ID
-	AccessKey             string                       // access key
-	FrameworkScan         bool                         // false if scanning control
-	ScanAll               bool                         // true if scan all frameworks
-	OmitRawResources      bool                         // true if omit raw resources from the output
-	ShowEvidence          bool                         // Show evidence paths with current field values in pretty-printer output (-E / --show-evidence)
-	ShowSecrets           bool                         // Show secret field values in evidence output; redacted by default (--show-secrets)
-	PrintAttackTree       bool                         // true if print attack tree
-	EnableRegoPrint       bool                         // true if print rego
-	ScanObject            *objectsenvelopes.ScanObject // identifies a single resource (k8s object) to be scanned
-	IsDeletedScanObject   bool                         // indicates whether the ScanObject is a deleted K8S resource
-	TriggeredByCLI        bool                         // indicates whether the scan was triggered by the CLI
-	ScanType              ScanTypes
-	ScanImages            bool
-	UseDefaultMatchers    bool
-	ScanTimeout           time.Duration // Maximum duration for the entire scan (0 = no timeout)
-	ControlTimeout        time.Duration // Maximum duration for evaluating a single control (0 = no timeout)
-	EnableStreaming       bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
-	DryRun                bool          // Check RBAC access for the resources the scan would need, without collecting or evaluating anything
-	ChartPath             string
-	FilePath              string
-	HelmValueFiles        []string // -f / --values: paths to Helm values YAML files (repeatable)
-	HelmSetValues         []string // --set: Helm value overrides as key=value (repeatable)
-	HelmSetStringValues   []string // --set-string: forced-string Helm value overrides
-	HelmSetFileValues     []string // --set-file: Helm value overrides whose value is read from a file
-	HelmReleaseName       string   // --release-name: Helm release name made available as .Release.Name during render
-	HelmReleaseNamespace  string   // --release-namespace: Helm release namespace made available as .Release.Namespace
-	LabelsToCopy          []string // Labels to copy from workloads to scan reports
-	scanningContext       *ScanningContext
-	kubeconfigPath        string
-	kubeContextOverride   string
-	clusterContextName    string
-	contextResolved       bool
-	cleanups              []func()
-	ListingURL            string            //Grype vulnerability database URL
-	RegistryMapping       map[string]string // Map internal registry URLs to external ones
-	RegistryAuthority     string            // Registry host[:port] explicit credentials apply to
-	RegistryUsername      string            // Username for workload image registry authentication
-	RegistryPassword      string            // Password for workload image registry authentication
-	RegistryToken         string            // Bearer token for workload image registry authentication
-	ImageScanConcurrency  int               // Number of concurrent workers for image scanning
-	MinSeverity           string            // Only include controls at or above this severity in the output
-	MaxSeverity           string            // Only include controls at or below this severity in the output
+	UseExceptions             string      // Load file with exceptions configuration
+	AuditExceptions           bool        // Include exception usage audit in supported scan outputs
+	HonorInlineExceptions     BoolPtrFlag // Honor kubescape.io/skip-* annotations as inline exception policies
+	CustomRules               string      // Path to a directory of custom *.rego rules
+	ControlsInputs            string      // Load file with inputs for controls
+	AttackTracks              string      // Load file with attack tracks
+	UseFrom                   []string    // Load framework from local file (instead of download). Use when running offline
+	UseDefault                bool        // Load framework from cached file (instead of download). Use when running offline
+	UseArtifactsFrom          string      // Load artifacts from local path. Use when running offline
+	ControlsVersion           string      // Pin the regolibrary release used to download policies (e.g. "v2.0.301"). Empty uses the latest release
+	VerboseMode               bool        // Display all the input resources and not only failed resources
+	Hide                      bool        // Hide sensitive identifiers (names, namespaces, images) in results
+	EncryptionEnabled         bool
+	View                      string                       //
+	Format                    string                       // Format results (table, json, junit ...)
+	Output                    string                       // Store results in an output file, Output file name
+	FormatVersion             string                       // Output object can be different between versions, this is for testing and backward compatibility
+	CustomClusterName         string                       // Set the custom name of the cluster
+	ExcludedNamespaces        string                       // used for host scanner namespace
+	IncludeNamespaces         string                       //
+	IncludeKinds              string                       // comma-separated Kubernetes kinds to include (case-insensitive, Kind name only); e.g. "Deployment,DaemonSet"
+	ExcludeKinds              string                       // comma-separated Kubernetes kinds to exclude (case-insensitive, Kind name only); e.g. "Job,CronJob"
+	LabelSelector             string                       // filter collected resources by Kubernetes label selector (e.g. "app=nginx,env!=dev")
+	ExcludePaths              []string                     // gitignore-style patterns excluding paths from file, directory and repository scans
+	NoIgnoreFile              bool                         // do not read the .kubescapeignore file at the scan root
+	Namespace                 string                       // target namespace for workload scans
+	InputPatterns             []string                     // Yaml files input patterns
+	Silent                    bool                         // Silent mode - Do not print progress logs
+	FailThreshold             float32                      // DEPRECATED - Failure score threshold
+	ComplianceThreshold       float32                      // Compliance score threshold
+	FailThresholdSeverity     string                       // Severity at and above which the command should fail
+	OnlyFixable               bool                         // Gate the severity threshold to only count CVEs that have an available fix
+	FailCoverageThreshold     float32                      // Coverage threshold below which the command fails (0 = disabled)
+	FailOnDegradedConfig      bool                         // Fail the scan if control inputs or exceptions could not be loaded and a fallback was used
+	Submit                    BoolPtrFlag                  // Submit results to Kubescape Cloud BE. Get() is nil unless explicitly set by the caller (flag/env/request field)
+	ScanID                    string                       // Report id of the current scan
+	HostSensorEnabled         BoolPtrFlag                  // Deploy Kubescape K8s host scanner to collect data from certain controls
+	HostSensorYamlPath        string                       // Path to hostsensor file
+	Local                     bool                         // Do not submit results
+	AccountID                 string                       // account ID
+	AccessKey                 string                       // access key
+	FrameworkScan             bool                         // false if scanning control
+	ScanAll                   bool                         // true if scan all frameworks
+	OmitRawResources          bool                         // true if omit raw resources from the output
+	ShowEvidence              bool                         // Show evidence paths with current field values in pretty-printer output (-E / --show-evidence)
+	ShowSecrets               bool                         // Show secret field values in evidence output; redacted by default (--show-secrets)
+	PrintAttackTree           bool                         // true if print attack tree
+	EnableRegoPrint           bool                         // true if print rego
+	ScanObject                *objectsenvelopes.ScanObject // identifies a single resource (k8s object) to be scanned
+	IsDeletedScanObject       bool                         // indicates whether the ScanObject is a deleted K8S resource
+	TriggeredByCLI            bool                         // indicates whether the scan was triggered by the CLI
+	ScanType                  ScanTypes
+	ScanImages                bool
+	UseDefaultMatchers        bool
+	ScanTimeout               time.Duration // Maximum duration for the entire scan (0 = no timeout)
+	ControlTimeout            time.Duration // Maximum duration for evaluating a single control (0 = no timeout)
+	EnableStreaming           bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
+	DryRun                    bool          // Check RBAC access for the resources the scan would need, without collecting or evaluating anything
+	ChartPath                 string
+	FilePath                  string
+	HelmValueFiles            []string // -f / --values: paths to Helm values YAML files (repeatable)
+	HelmSetValues             []string // --set: Helm value overrides as key=value (repeatable)
+	HelmSetStringValues       []string // --set-string: forced-string Helm value overrides
+	HelmSetFileValues         []string // --set-file: Helm value overrides whose value is read from a file
+	HelmReleaseName           string   // --release-name: Helm release name made available as .Release.Name during render
+	HelmReleaseNamespace      string   // --release-namespace: Helm release namespace made available as .Release.Namespace
+	LabelsToCopy              []string // Labels to copy from workloads to scan reports
+	scanningContext           *ScanningContext
+	kubeconfigPath            string
+	kubeContextOverride       string
+	clusterContextName        string
+	contextResolved           bool
+	cleanups                  []func()
+	ListingURL                string            //Grype vulnerability database URL
+	SkipDBUpdate              bool              // Do not update the vulnerability database before image scanning
+	RegistryMapping           map[string]string // Map internal registry URLs to external ones
+	RegistryAuthority         string            // Registry host[:port] explicit credentials apply to
+	RegistryUsername          string            // Username for workload image registry authentication
+	RegistryPassword          string            // Password for workload image registry authentication
+	RegistryToken             string            // Bearer token for workload image registry authentication
+	ImageScanConcurrency      int               // Number of concurrent workers for image scanning
+	ImagePlatform             string            // OCI platform used for image scanning (os/architecture[/variant])
+	MinSeverity               string            // Only include controls at or above this severity in the output
+	MaxSeverity               string            // Only include controls at or below this severity in the output
+	Baseline                  string            // Path to a saved JSON scan report; when set, the fresh scan is diffed against it
+	BaselineFailOnNew         bool              // Exit with code 1 when the baseline diff finds new or incomparable failures
+	BaselineSeverityThreshold string            // Only count new/incomparable baseline failures at or above this severity when enforcing BaselineFailOnNew
+	BaselineGranularity       string            // Comparison unit for the baseline diff: "evidence" (default) or "control"
 }
 
 type Getters struct {

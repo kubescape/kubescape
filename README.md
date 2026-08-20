@@ -241,7 +241,12 @@ kubescape scan image nginx:1.21 -v
 
 # Scan a private registry image
 kubescape scan image myregistry/myimage:tag --username user --password pass
+
+# Scan a specific variant from a multi-architecture image index
+kubescape scan image nginx:1.27 --platform linux/amd64
 ```
+
+For workload scans, Kubescape can infer image platforms from scheduled Nodes, node selectors, and required node affinity. Use `--image-platform` with `--scan-images` to override inference. See [multi-architecture image scanning](docs/multi-architecture-image-scanning.md) for details.
 
 #### Using an Offline Grype Database
 ```bash

@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestSplitPath(t *testing.T) {
@@ -368,6 +369,10 @@ func TestIsSensitivePath(t *testing.T) {
 		{name: "Deployment data field", kind: "Deployment", path: "data.key", want: false},
 		{name: "ConfigMap data field", kind: "ConfigMap", path: "data.config", want: false},
 		{name: "empty kind", kind: "", path: "data.key", want: false},
+		{name: "container env value", kind: "Deployment", path: "spec.template.spec.containers[0].env[1].value", want: true},
+		{name: "initContainer env value", kind: "Pod", path: "spec.initContainers[0].env[0].value", want: true},
+		{name: "container env name is not sensitive", kind: "Deployment", path: "spec.template.spec.containers[0].env[1].name", want: false},
+		{name: "container env valueFrom is not a literal", kind: "Deployment", path: "spec.containers[0].env[0].valueFrom.secretKeyRef.name", want: false},
 	}
 
 	for _, tc := range cases {
@@ -542,6 +547,33 @@ func TestFailedPathsWithCurrentValues(t *testing.T) {
 		require.Len(t, got, 1)
 		assert.Equal(t, `spec.containers[0].securityContext (current: {"capabilities":{"add":["SYS_ADMIN"]},"privileged":true})`, got[0])
 	})
+
+	t.Run("container path is enriched when containers were replaced with typed structs", func(t *testing.T) {
+		// opaprocessor.removePodData sanitizes containers by calling workload.GetContainers()
+		// (which returns []corev1.Container) and writing that typed slice back into the object
+		// map via workloadinterface.SetInMap. By the time the printer runs, spec.containers is
+		// a []corev1.Container rather than []any, so the majority of posture findings - which
+		// target container-scoped fields - must still be walkable.
+		privileged := true
+		objResource := &mockResource{
+			obj: map[string]any{
+				"spec": map[string]any{
+					"containers": []corev1.Container{
+						{
+							Name: "app",
+							SecurityContext: &corev1.SecurityContext{
+								Privileged: &privileged,
+							},
+						},
+					},
+				},
+			},
+		}
+		ctrl := makeControlWithPaths([]string{"spec.containers[0].securityContext.privileged"}, nil)
+		got := failedPathsWithCurrentValues(ctrl, objResource)
+		require.Len(t, got, 1)
+		assert.Equal(t, "spec.containers[0].securityContext.privileged (current: true)", got[0])
+	})
 }
 
 func TestReviewPathsWithCurrentValues(t *testing.T) {
@@ -664,6 +696,33 @@ func TestAssistedRemediationPathsWithCurrentValuesFiltered(t *testing.T) {
 		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, true)
 		require.Len(t, got, 1)
 		assert.Equal(t, "spec.containers[0].securityContext.privileged (current: true)", got[0])
+	})
+
+	t.Run("container env value with showSecrets=false is redacted", func(t *testing.T) {
+		resource := &mockResource{
+			kind: "Deployment",
+			obj: map[string]any{
+				"spec": map[string]any{
+					"template": map[string]any{
+						"spec": map[string]any{
+							"containers": []any{
+								map[string]any{
+									"env": []any{
+										map[string]any{"name": "LOG_LEVEL", "value": "debug"},
+										map[string]any{"name": "DB_PASSWORD", "value": "s3cret"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		ctrl := makeControlWithPaths([]string{"spec.template.spec.containers[0].env[1].value"}, nil)
+		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, false)
+		require.Len(t, got, 1)
+		assert.Equal(t, "spec.template.spec.containers[0].env[1].value (current: "+redactedValue+")", got[0])
+		assert.NotContains(t, got[0], "s3cret")
 	})
 
 	t.Run("empty paths returns nil", func(t *testing.T) {

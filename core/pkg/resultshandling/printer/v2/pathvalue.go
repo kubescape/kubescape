@@ -93,6 +93,29 @@ func anyToString(v any) (string, bool) {
 	}
 }
 
+// normalizeForPathExtraction converts obj into a tree built entirely from
+// encoding/json's generic decoding types (map[string]any, []any, float64,
+// string, bool, nil). Earlier processing stages (for example
+// opaprocessor.removePodData, which reads containers via
+// workload.GetContainers() and writes the resulting []corev1.Container back
+// into the object map) can leave typed structs in place of the plain
+// map/slice shape the manifest originally had. extractValueAtPath only knows
+// how to walk map[string]any and []any, so those typed sections would
+// otherwise be invisible to it - which is most posture findings, since they
+// target container-scoped fields. Round-tripping through JSON once per
+// resource makes the whole tree walkable regardless of how it got there.
+func normalizeForPathExtraction(obj map[string]any) map[string]any {
+	b, err := json.Marshal(obj)
+	if err != nil {
+		return obj
+	}
+	var normalized map[string]any
+	if err := json.Unmarshal(b, &normalized); err != nil {
+		return obj
+	}
+	return normalized
+}
+
 func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 	if len(obj) == 0 || path == "" {
 		return "", false
@@ -158,19 +181,42 @@ func indexList(v any, i int) (any, bool) {
 }
 
 // isSensitivePath reports whether a path targets a field whose value must
-// not be surfaced in scan output. Secret data and stringData contain
-// credentials that are base64-encoded (or plaintext) and must never be
-// printed regardless of what the existing redaction in updateResults has done.
+// not be surfaced in scan output unless --show-secrets is set. Secret
+// data/stringData and container env[N].value (C-0012 plaintext credentials)
+// are treated as sensitive.
 func isSensitivePath(kind, path string) bool {
-	if kind != "Secret" {
-		return false
-	}
 	if i := strings.Index(path, "="); i >= 0 {
 		path = path[:i]
 	}
 	path = strings.TrimLeft(path, ".")
-	return path == "data" || strings.HasPrefix(path, "data.") ||
-		path == "stringData" || strings.HasPrefix(path, "stringData.")
+	if kind == "Secret" {
+		return path == "data" || strings.HasPrefix(path, "data.") ||
+			path == "stringData" || strings.HasPrefix(path, "stringData.")
+	}
+	// C-0012 plaintext credentials live on container env .value, not Secret.data.
+	return isContainerEnvValuePath(path)
+}
+
+// isContainerEnvValuePath reports whether path selects env[N].value
+// (including under spec.template.spec / initContainers / ephemeralContainers).
+func isContainerEnvValuePath(path string) bool {
+	if !strings.HasSuffix(path, "].value") {
+		return false
+	}
+	env := strings.LastIndex(path, "env[")
+	if env < 0 {
+		return false
+	}
+	inner := path[env+len("env[") : len(path)-len("].value")]
+	if inner == "" {
+		return false
+	}
+	for i := 0; i < len(inner); i++ {
+		if inner[i] < '0' || inner[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // enrichedPathsForField iterates a control's rule paths, extracts the string
@@ -180,7 +226,7 @@ func isSensitivePath(kind, path string) bool {
 // path string so the output is never degraded or a security risk.
 func enrichedPathsForField(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
 	var paths []string
-	obj := resource.GetObject()
+	obj := normalizeForPathExtraction(resource.GetObject())
 	kind := resource.GetKind()
 	for j := range control.ResourceAssociatedRules {
 		for k := range control.ResourceAssociatedRules[j].Paths {
@@ -239,7 +285,7 @@ func fixPathsToStringFiltered(control *resourcesresults.ResourceAssociatedContro
 // Secret.data / Secret.stringData values surfaced.
 func enrichedPathsForFieldUnredacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
 	var paths []string
-	obj := resource.GetObject()
+	obj := normalizeForPathExtraction(resource.GetObject())
 	for j := range control.ResourceAssociatedRules {
 		for k := range control.ResourceAssociatedRules[j].Paths {
 			p := getPath(control.ResourceAssociatedRules[j].Paths[k])
@@ -285,7 +331,7 @@ func AssistedRemediationPathsWithCurrentValuesFiltered(control *resourcesresults
 
 func enrichedPathsForFieldRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
 	var paths []string
-	obj := resource.GetObject()
+	obj := normalizeForPathExtraction(resource.GetObject())
 	kind := resource.GetKind()
 	for j := range control.ResourceAssociatedRules {
 		for k := range control.ResourceAssociatedRules[j].Paths {

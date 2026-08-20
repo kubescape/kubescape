@@ -478,6 +478,11 @@ func (m *scanCallCounter) Scan(_ *cautils.ScanInfo, _ []cautils.PolicyIdentifier
 	return nil, errors.New("scan reached")
 }
 
+func (m *scanCallCounter) ScanContext(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
+	m.calls++
+	return nil, errors.New("scan reached")
+}
+
 func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -583,20 +588,28 @@ func TestScanInfo_ScanTimeoutField(t *testing.T) {
 	}
 }
 
-// contextTrackingKubescape is a test-local IKubescape that records what
-// context was active when Scan() was called, so we can assert the deadline.
-// Scan() returns a sentinel error so securityScan exits before HandleResults,
-// avoiding a nil-pointer dereference on the stub ResultsHandler.
+// contextTrackingKubescape is a test-local IKubescape that records the ctx
+// argument ScanContext() was called with (rather than reading it back off
+// m.ctx, which is how the pre-fix version of this double worked when
+// securityScan mutated the shared context via SetContext), plus whether
+// SetContext was ever invoked, so tests can assert securityScan no longer
+// touches the receiver's own context at all. ScanContext() returns a
+// sentinel error so securityScan exits before HandleResults, avoiding a
+// nil-pointer dereference on the stub ResultsHandler.
 type contextTrackingKubescape struct {
 	mocks.MockIKubescape
-	ctx            context.Context
-	scanCalledWith context.Context
+	ctx              context.Context
+	setContextCalled bool
+	scanCalledWith   context.Context
 }
 
-func (m *contextTrackingKubescape) Context() context.Context       { return m.ctx }
-func (m *contextTrackingKubescape) SetContext(ctx context.Context) { m.ctx = ctx }
-func (m *contextTrackingKubescape) Scan(_ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
-	m.scanCalledWith = m.ctx
+func (m *contextTrackingKubescape) Context() context.Context { return m.ctx }
+func (m *contextTrackingKubescape) SetContext(ctx context.Context) {
+	m.setContextCalled = true
+	m.ctx = ctx
+}
+func (m *contextTrackingKubescape) ScanContext(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
+	m.scanCalledWith = ctx
 	return nil, errors.New("stub: scan not implemented in test")
 }
 
@@ -607,18 +620,18 @@ func TestSecurityScan_TimeoutDeadlineActiveForScan(t *testing.T) {
 	_ = securityScan(scanInfo, ks, nil)
 
 	_, hasDeadline := ks.scanCalledWith.Deadline()
-	assert.True(t, hasDeadline, "Scan() must receive a context with a deadline when ScanTimeout > 0")
+	assert.True(t, hasDeadline, "ScanContext() must receive a context with a deadline when ScanTimeout > 0")
 }
 
-func TestSecurityScan_TimeoutContextRestoredAfterReturn(t *testing.T) {
+func TestSecurityScan_TimeoutDoesNotMutateSharedContext(t *testing.T) {
 	originalCtx := context.Background()
 	ks := &contextTrackingKubescape{ctx: originalCtx}
 	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
 
 	_ = securityScan(scanInfo, ks, nil)
 
-	_, hasDeadline := ks.Context().Deadline()
-	assert.False(t, hasDeadline, "original context must be restored on ks after securityScan returns")
+	assert.False(t, ks.setContextCalled, "securityScan must not call SetContext on the shared Kubescape instance")
+	assert.Equal(t, originalCtx, ks.Context(), "the shared Kubescape's own context must be untouched by securityScan")
 }
 
 func TestSecurityScan_ZeroTimeoutNoDeadline(t *testing.T) {
@@ -628,7 +641,7 @@ func TestSecurityScan_ZeroTimeoutNoDeadline(t *testing.T) {
 	_ = securityScan(scanInfo, ks, nil)
 
 	_, hasDeadline := ks.scanCalledWith.Deadline()
-	assert.False(t, hasDeadline, "Scan() must not receive a deadline when ScanTimeout is 0")
+	assert.False(t, hasDeadline, "ScanContext() must not receive a deadline when ScanTimeout is 0")
 }
 
 func TestGetScanCommand_RegistryCredentialFlags(t *testing.T) {
@@ -1086,4 +1099,135 @@ func TestGetScanCommand_RunE_SubmitExclusivity(t *testing.T) {
 
 	err := cmd.RunE(cmd, []string{""})
 	assert.EqualError(t, err, "you can use `keep-local` or `submit`, but not both")
+}
+
+func TestValidateCombinedImageScanFlags(t *testing.T) {
+	tests := []struct {
+		name         string
+		scanInfo     *cautils.ScanInfo
+		wantErr      string
+		wantPlatform string
+	}{
+		{
+			name:     "nil scan info is ignored",
+			scanInfo: nil,
+		},
+		{
+			name: "image flags are ignored when scanning is disabled",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:    false,
+				ImagePlatform: "linux/not-real",
+			},
+			wantPlatform: "linux/not-real",
+		},
+		{
+			name: "empty image options are valid",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages: true,
+			},
+		},
+		{
+			name: "platform is canonicalized",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:    true,
+				ImagePlatform: "x86_64",
+			},
+			wantPlatform: "linux/amd64",
+		},
+		{
+			name: "valid platform and scoped token are accepted",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:        true,
+				ImagePlatform:     "linux/arm64",
+				RegistryAuthority: "registry.example.com",
+				RegistryToken:     "token",
+			},
+			wantPlatform: "linux/arm64",
+		},
+		{
+			name: "invalid platform is rejected",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:    true,
+				ImagePlatform: "linux/toaster",
+			},
+			wantErr: "invalid image platform",
+		},
+		{
+			name: "credentials still require an authority",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:    true,
+				ImagePlatform: "linux/amd64",
+				RegistryToken: "token",
+			},
+			wantErr: shared.ErrRegistryAuthorityMissing.Error(),
+		},
+		{
+			name: "authority still requires credentials",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:        true,
+				RegistryAuthority: "registry.example.com",
+			},
+			wantErr: shared.ErrRegistryAuthorityNoAuth.Error(),
+		},
+		{
+			name: "username and password remain a pair",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:        true,
+				RegistryAuthority: "registry.example.com",
+				RegistryUsername:  "user",
+			},
+			wantErr: shared.ErrRegistryUsernamePassword.Error(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCombinedImageScanFlags(tt.scanInfo)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			if tt.scanInfo != nil {
+				assert.Equal(t, tt.wantPlatform, tt.scanInfo.ImagePlatform)
+			}
+		})
+	}
+}
+
+func TestGetScanCommandRegistersImagePlatformFlag(t *testing.T) {
+	cmd := GetScanCommand(&mocks.MockIKubescape{})
+
+	flag := cmd.PersistentFlags().Lookup("image-platform")
+	require.NotNil(t, flag)
+	assert.Empty(t, flag.DefValue)
+	assert.Contains(t, flag.Usage, "linux/amd64")
+	assert.Contains(t, flag.Usage, "overrides platform inferred")
+}
+
+func TestScanCommandRegistersSkipDBUpdateFlag(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	flag := cmd.PersistentFlags().Lookup("skip-db-update")
+	require.NotNil(t, flag)
+	assert.Equal(t, "false", flag.DefValue)
+}
+
+func TestGetScanCommand_SkipDBUpdateReachesScanInfo(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"image", "--skip-db-update", "nginx:latest"})
+	require.NoError(t, cmd.Execute())
+	require.NotNil(t, mockKubescape.scanInfo)
+	assert.True(t, mockKubescape.scanInfo.SkipDBUpdate)
+}
+
+func TestGetScanCommand_SkipDBUpdateDefaultsToFalse(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"image", "nginx:latest"})
+	require.NoError(t, cmd.Execute())
+	require.NotNil(t, mockKubescape.scanInfo)
+	assert.False(t, mockKubescape.scanInfo.SkipDBUpdate)
 }

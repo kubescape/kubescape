@@ -1,3 +1,17 @@
+{{/*
+krew-release-bot renders this file with a function map holding exactly two
+entries, `indent` and `addURIAndSha` (see pkg/source/template.go upstream).
+There is no sprig, so no trimPrefix, and addURIAndSha takes two arguments: a URL
+- itself a template, over a value carrying only .TagName and no functions - and
+the tag. Anything else has to be computed out here and interpolated with printf.
+
+GoReleaser names archives {{"{{.ProjectName}}_{{.Version}}_{{.Os}}_{{.Arch}}"}},
+and .Version is the tag without its leading "v", so a v4.0.12 release publishes
+kubescape_4.0.12_linux_amd64.tar.gz. The URL path needs the tag; the file name
+needs the trimmed form. 02-release.yaml only fires on v[0-9]+.[0-9]+.[0-9]+, so
+the leading "v" is guaranteed to be there to strip.
+*/}}
+{{- $version := slice .TagName 1 -}}
 apiVersion: krew.googlecontainertools.github.com/v1alpha2
 kind: Plugin
 metadata:
@@ -9,37 +23,37 @@ spec:
       matchLabels:
         os: linux
         arch: amd64
-    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_linux_amd64.tar.gz" .TagName) .TagName }}
+    {{ addURIAndSha (printf "https://github.com/kubescape/kubescape/releases/download/%s/kubescape_%s_linux_amd64.tar.gz" .TagName $version) .TagName }}
     bin: kubescape
   - selector:
       matchLabels:
         os: linux
         arch: arm64
-    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_linux_arm64.tar.gz" .TagName) .TagName }}
+    {{ addURIAndSha (printf "https://github.com/kubescape/kubescape/releases/download/%s/kubescape_%s_linux_arm64.tar.gz" .TagName $version) .TagName }}
     bin: kubescape
   - selector:
       matchLabels:
         os: darwin
         arch: amd64
-    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_darwin_amd64.tar.gz" .TagName) .TagName }}
+    {{ addURIAndSha (printf "https://github.com/kubescape/kubescape/releases/download/%s/kubescape_%s_darwin_amd64.tar.gz" .TagName $version) .TagName }}
     bin: kubescape
   - selector:
       matchLabels:
         os: darwin
         arch: arm64
-    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_darwin_arm64.tar.gz" .TagName) .TagName }}
+    {{ addURIAndSha (printf "https://github.com/kubescape/kubescape/releases/download/%s/kubescape_%s_darwin_arm64.tar.gz" .TagName $version) .TagName }}
     bin: kubescape
   - selector:
       matchLabels:
         os: windows
         arch: amd64
-    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_windows_amd64.tar.gz" .TagName) .TagName }}
+    {{ addURIAndSha (printf "https://github.com/kubescape/kubescape/releases/download/%s/kubescape_%s_windows_amd64.tar.gz" .TagName $version) .TagName }}
     bin: kubescape.exe
   - selector:
       matchLabels:
         os: windows
         arch: arm64
-    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_windows_arm64.tar.gz" .TagName) .TagName }}
+    {{ addURIAndSha (printf "https://github.com/kubescape/kubescape/releases/download/%s/kubescape_%s_windows_arm64.tar.gz" .TagName $version) .TagName }}
     bin: kubescape.exe
   shortDescription: Scan resources and cluster configs against security frameworks.
   description: |

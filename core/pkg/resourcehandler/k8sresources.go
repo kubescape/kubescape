@@ -91,6 +91,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
 	policyWarnings := make(map[string]struct{})
 	queryableResources, excludedRulesMap := getQueryableResourceMapFromPoliciesWithWarned(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, policyWarnings)
+	filterQueryableResourcesByKind(queryableResources, scanInfo)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
 	recordDiscoveryFailureDependencies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, discoveryFailures, resourceToControl, policyWarnings)
 
@@ -139,6 +140,15 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	// add single resource to k8s resources map (for single resource scan)
 	if !scanInfo.IsDeletedScanObject {
 		addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan, resolver)
+	}
+
+	// Apply kind filter before external resource collection (host, RBAC, cloud)
+	// so that external control-plane data added below is never discarded.
+	// Pass the single-resource-scan target so the filter can fail fast instead
+	// of silently dropping the explicitly requested workload.
+	if err := applyKindFilter(k8sResourcesMap, allResources, scanInfo, sessionObj.SingleResourceScan); err != nil {
+		cautils.StopSpinner()
+		return nil, nil, nil, nil, err
 	}
 
 	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
@@ -202,8 +212,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 }
 
 // collectVAPResources records the cluster's admission enforcement state on the
-// session. Clusters that do not serve the VAP API are skipped without a warning,
-// since having no policies to reconcile is not a scan failure.
+// session. Clusters that do not serve the VAP API, and credentials that may not
+// read it, are skipped without a warning: enforcement state enriches the report
+// and its absence is not a scan failure.
 func (k8sHandler *K8sResourceHandler) collectVAPResources(ctx context.Context, sessionObj *cautils.OPASessionObj) {
 	if k8sHandler.k8s == nil {
 		return
@@ -211,6 +222,12 @@ func (k8sHandler *K8sResourceHandler) collectVAPResources(ctx context.Context, s
 
 	policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
 	if err != nil {
+	switch {
+	case errors.Is(err, vapreconcile.ErrUnsupported):
+		logger.L().Debug("skipping VAP reconciliation, cluster does not serve the API")
+	case errors.Is(err, vapreconcile.ErrForbidden):
+		logger.L().Debug("skipping VAP reconciliation, credentials may not list admission policies", helpers.Error(err))
+	case err != nil:
 		logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
 	} else {
 		sessionObj.VAPPolicies = policies
@@ -261,6 +278,7 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 	resourceToControl := make(map[string][]string)
 	policyWarnings := make(map[string]struct{})
 	queryableResources, excludedRulesMap := getQueryableResourceMapFromPoliciesWithWarned(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, policyWarnings)
+	filterQueryableResourcesByKind(queryableResources, scanInfo)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
 	recordDiscoveryFailureDependencies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, discoveryFailures, resourceToControl, policyWarnings)
 	sessionObj.ResourceToControlsMap = resourceToControl
@@ -427,6 +445,15 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 
 	if !scanInfo.IsDeletedScanObject && sessionObj.SingleResourceScan != nil {
 		addSingleResourceToResourceMaps(resident.K8SResources, allResources, sessionObj.SingleResourceScan, resolver)
+	}
+
+	if err := applyKindFilter(resident.K8SResources, resident.AllResources, scanInfo, sessionObj.SingleResourceScan); err != nil {
+		return err
+	}
+	for _, batch := range namespaceBatches {
+		if err := applyKindFilter(batch.K8SResources, batch.AllResources, scanInfo, nil); err != nil {
+			return err
+		}
 	}
 
 	// Match the eager collector's metric timing: report the complete Kubernetes
