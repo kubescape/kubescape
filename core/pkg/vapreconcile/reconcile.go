@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -120,18 +121,27 @@ func serves(resources *metav1.APIResourceList, names ...string) bool {
 // scan failure.
 func list(ctx context.Context, client dynamic.Interface, version, resource string) ([]unstructured.Unstructured, error) {
 	gvr := schema.GroupVersionResource{Group: vapGroup, Version: version, Resource: resource}
-	listed, err := client.Resource(gvr).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, ErrUnsupported
+
+	var items []unstructured.Unstructured
+	listFunc := func(opts metav1.ListOptions) (string, error) {
+		listed, err := client.Resource(gvr).List(ctx, opts)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return "", ErrUnsupported
+			}
+			if apierrors.IsForbidden(err) {
+				return "", fmt.Errorf("%w: %s", ErrForbidden, gvr.String())
+			}
+			return "", fmt.Errorf("failed to list %s: %w", gvr.String(), err)
 		}
-		if apierrors.IsForbidden(err) {
-			return nil, fmt.Errorf("%w: %s", ErrForbidden, gvr.String())
-		}
-		return nil, fmt.Errorf("failed to list %s: %w", gvr.String(), err)
+		items = append(items, listed.Items...)
+		return listed.GetContinue(), nil
 	}
 
-	return listed.Items, nil
+	if err := getter.ListWithPagination(ctx, listFunc); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 // BuildIndex builds a map of controlId -> VAPEnforcementStatus by reading the

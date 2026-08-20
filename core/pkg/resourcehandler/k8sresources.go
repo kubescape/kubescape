@@ -18,6 +18,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/metrics"
 	"github.com/kubescape/kubescape/v4/core/pkg/hostsensorutils"
 	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
@@ -1179,23 +1180,26 @@ func splitNamespaces(s string) []string {
 }
 
 func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber(ctx context.Context) (int, error) {
-	nodesList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	scheduableNodes := v1.NodeList{}
-	if nodesList != nil {
-		for _, node := range nodesList.Items {
-			if len(node.Spec.Taints) == 0 {
-				scheduableNodes.Items = append(scheduableNodes.Items, node)
-			} else {
-				if !isMasterNodeTaints(node.Spec.Taints) {
-					scheduableNodes.Items = append(scheduableNodes.Items, node)
+	schedulableCount := 0
+	err := getter.ListWithPagination(ctx, func(opts metav1.ListOptions) (string, error) {
+		chunk, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, opts)
+		if err != nil {
+			return "", err
+		}
+		if chunk != nil {
+			for _, node := range chunk.Items {
+				if len(node.Spec.Taints) == 0 || !isMasterNodeTaints(node.Spec.Taints) {
+					schedulableCount++
 				}
 			}
+			return chunk.GetContinue(), nil
 		}
-	}
+		return "", nil
+	})
 	if err != nil {
 		return 0, err
 	}
-	return len(scheduableNodes.Items), nil
+	return schedulableCount, nil
 }
 
 // namespacedResourcesToEstimate is the set of common namespaced GVRs used to
@@ -1255,11 +1259,25 @@ func (k8sHandler *K8sResourceHandler) EstimateClusterSize(ctx context.Context, s
 }
 
 func (k8sHandler *K8sResourceHandler) setCloudProvider(ctx context.Context) error {
-	nodeList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	var provider string
+	err := getter.ListWithPagination(ctx, func(opts metav1.ListOptions) (string, error) {
+		chunk, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, opts)
+		if err != nil {
+			return "", err
+		}
+		if chunk != nil {
+			provider = cloudsupport.GetCloudProvider(chunk)
+			if provider != "" {
+				return "", nil
+			}
+			return chunk.GetContinue(), nil
+		}
+		return "", nil
+	})
 	if err != nil {
 		return err
 	}
-	k8sHandler.cloudProvider = cloudsupport.GetCloudProvider(nodeList)
+	k8sHandler.cloudProvider = provider
 	return nil
 }
 
