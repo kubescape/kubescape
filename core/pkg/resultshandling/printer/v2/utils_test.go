@@ -1057,6 +1057,26 @@ func TestConvertToPostureReport_NilCoverageNotAttached(t *testing.T) {
 	assert.Nil(t, result.ScanCoverage)
 }
 
+// TestConvertToPostureReport_VacuousFrameworksOnlyCoverageAttached verifies
+// that a ScanCoverage containing only VacuousFrameworks (no GVR pull
+// failures, no NotEvaluatedControls) is still attached to the serialized
+// report, so a framework that scored 100% purely because its target
+// resource types are absent from the cluster is visible to JSON/API
+// consumers.
+func TestConvertToPostureReport_VacuousFrameworksOnlyCoverageAttached(t *testing.T) {
+	coverage := &cautils.ScanCoverage{
+		VacuousFrameworks: []string{"istio-security"},
+	}
+
+	result := ConvertToPostureReportWithSeverityLabelsAndCoverage(
+		minimalPostureReport(),
+		nil, nil, coverage,
+	)
+	require.NotNil(t, result)
+	require.NotNil(t, result.ScanCoverage, "ScanCoverage must be attached when VacuousFrameworks is non-empty")
+	assert.Equal(t, []string{"istio-security"}, result.ScanCoverage.VacuousFrameworks)
+}
+
 // TestFinalizeResults_SetsGenerationTimeWhenZero is the regression test for
 // kubescape/kubescape#2325: JSON reports were emitting
 // "generationTime":"0001-01-01T00:00:00Z" because nothing on the scan path

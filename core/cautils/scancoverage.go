@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
 // ScanCoverage holds runtime gaps discovered during a scan: GVRs that could
@@ -38,6 +39,11 @@ type ScanCoverage struct {
 	// so the failure is not already accounted for by NotEvaluatedControls. It is
 	// computed by BuildScanCoverage and applied as a penalty by ComputeCoverageScore.
 	SilentFailedGVRCount int `json:"silentFailedGVRCount,omitempty"`
+	// VacuousFrameworks lists frameworks whose reported score is 100% only
+	// because every control in them was Irrelevant (no resource of the
+	// required type was found in the cluster), not because anything was
+	// actually checked. Populated by DetectVacuousFrameworks.
+	VacuousFrameworks []string `json:"vacuousFrameworks,omitempty"`
 }
 
 // Fixed penalties (in percentage points) applied to the coverage score for
@@ -282,4 +288,33 @@ func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap
 	})
 
 	return coverage
+}
+
+// DetectVacuousFrameworks returns the names of frameworks whose controls are
+// all Irrelevant (GetSubStatus() == apis.SubStatusIrrelevant with no matched
+// resources), mirroring the check the scoring library uses to award such a
+// framework a 100% score. A framework in this state was never meaningfully
+// evaluated - the resource types its controls target simply do not exist in
+// the cluster - so its perfect score is vacuous rather than earned. Empty
+// frameworks (no controls at all) are not included.
+func DetectVacuousFrameworks(frameworks []reportsummary.FrameworkSummary) []string {
+	var vacuous []string
+	for i := range frameworks {
+		controls := frameworks[i].Controls
+		if len(controls) == 0 {
+			continue
+		}
+		allIrrelevant := true
+		for id := range controls {
+			ctrl := controls[id]
+			if ctrl.GetSubStatus() != apis.SubStatusIrrelevant || ctrl.ListResourcesIDs(nil).Len() != 0 {
+				allIrrelevant = false
+				break
+			}
+		}
+		if allIrrelevant {
+			vacuous = append(vacuous, frameworks[i].Name)
+		}
+	}
+	return vacuous
 }
