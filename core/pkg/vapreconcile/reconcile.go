@@ -59,25 +59,33 @@ func Collect(ctx context.Context, k8s *k8sinterface.KubernetesApi) ([]unstructur
 // resolveVersion returns the first VAP version the cluster both advertises and
 // serves both resources for. Without a discovery client the newest version is
 // assumed, which is what the API server routing did before discovery existed.
+// A discovery error on one version does not stop the remaining ones from being
+// probed: an unreachable v1 must not hide a v1beta1 the cluster does serve.
 func resolveVersion(client discovery.DiscoveryInterface) (string, error) {
 	if client == nil {
 		return vapVersions[0], nil
 	}
 
+	// A version we could not ask about is not a version the cluster fails to
+	// serve, so keep probing and only report the error if nothing answers.
+	var probeErr error
 	for _, version := range vapVersions {
 		gv := schema.GroupVersion{Group: vapGroup, Version: version}
 		resources, err := client.ServerResourcesForGroupVersion(gv.String())
 		if err != nil {
-			if apierrors.IsNotFound(err) {
-				continue
+			if !apierrors.IsNotFound(err) && probeErr == nil {
+				probeErr = fmt.Errorf("failed to discover %s: %w", gv.String(), err)
 			}
-			return "", fmt.Errorf("failed to discover %s: %w", gv.String(), err)
+			continue
 		}
 		if serves(resources, vapResource, vapBindingResource) {
 			return version, nil
 		}
 	}
 
+	if probeErr != nil {
+		return "", probeErr
+	}
 	return "", ErrUnsupported
 }
 
