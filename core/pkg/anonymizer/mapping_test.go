@@ -1,6 +1,8 @@
 package anonymizer
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 
@@ -131,6 +133,35 @@ func TestMapping_GetOrCreate_SuffixRetainsEnoughDigest(t *testing.T) {
 	assert.Len(t, suffix, pseudoIDHashLength)
 	assert.GreaterOrEqual(t, len(suffix), 32,
 		"a suffix shorter than 128 bits brings collisions back within reach of a single large report")
+}
+
+// TestMapping_GetOrCreate_DisambiguatesOnSeenCollision covers the defensive
+// check added alongside pseudoIDHashLength: even at 128 bits, GetOrCreate
+// must not merge two distinct values that ever do produce the same
+// pseudo-ID. A real SHA-256 collision cannot be brute-forced for a test
+// fixture the way the 32-bit case in
+// TestMapping_GetOrCreate_TruncatedHashDoesNotCollide could (~90k tries), so
+// this seeds m.seen directly to simulate one: "as if" some earlier value
+// already claimed the exact pseudo-ID a different value is about to compute.
+func TestMapping_GetOrCreate_DisambiguatesOnSeenCollision(t *testing.T) {
+	mapping := NewMapping()
+
+	const collidingValue = "value-that-will-collide"
+	hash := sha256.Sum256([]byte(collidingValue))
+	naivePseudo := "res-" + hex.EncodeToString(hash[:])[:pseudoIDHashLength]
+
+	mapping.seen[naivePseudo] = "some-other-already-seen-value"
+
+	result := mapping.GetOrCreate("res", collidingValue)
+
+	assert.NotEqual(t, naivePseudo, result,
+		"GetOrCreate must not return a pseudo-ID already claimed by a different value")
+	assert.True(t, strings.HasPrefix(result, naivePseudo+"-"),
+		"a disambiguated pseudo-ID should extend the colliding one, not replace it unrecognizably")
+
+	// A repeat call for the same (prefix, value) must stay stable - the
+	// forward cache, not re-derivation, is what guarantees that.
+	assert.Equal(t, result, mapping.GetOrCreate("res", collidingValue))
 }
 
 func TestMapping_GetOrCreate_PrefixIsolationAcrossMultiplePrefixes(t *testing.T) {
