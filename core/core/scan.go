@@ -751,7 +751,17 @@ func loadIncrementalCacheIfEnabled(ctx context.Context, scanInfo *cautils.ScanIn
 		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
 		return nil
 	}
-	versionParts := [][]byte{[]byte(scanInfo.ControlsVersion), policyBytes}
+	allPoliciesBytes, marshalErr := json.Marshal(scanData.AllPolicies)
+	if marshalErr != nil {
+		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
+		return nil
+	}
+	regoInputBytes, marshalErr := json.Marshal(scanData.RegoInputData)
+	if marshalErr != nil {
+		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
+		return nil
+	}
+	versionParts := [][]byte{[]byte(scanInfo.ControlsVersion), policyBytes, allPoliciesBytes, regoInputBytes}
 	if scanInfo.ControlsInputs != "" {
 		if localConfig, readErr := os.ReadFile(scanInfo.ControlsInputs); readErr == nil {
 			versionParts = append(versionParts, localConfig)
