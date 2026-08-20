@@ -51,7 +51,8 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			defer applyTimeout(scanInfo, ks)()
+			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
+			defer cancel()
 
 			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ScanFormats); err != nil {
 				return err
@@ -90,11 +91,11 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				return err
 			}
 
-			results, err := ks.Scan(scanInfo, policyIdentifiers)
+			results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 			if err != nil {
 				return err
 			}
-			if err := results.HandleResults(ks.Context(), scanInfo); err != nil {
+			if err := results.HandleResults(ctx, scanInfo); err != nil {
 				return err
 			}
 			if !scanInfo.VerboseMode {
@@ -118,7 +119,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				return err
 			}
 
-			return enforceBaselineDrift(ks.Context(), results, scanInfo)
+			return enforceBaselineDrift(ctx, results, scanInfo)
 		},
 	}
 }

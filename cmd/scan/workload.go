@@ -57,7 +57,8 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			return validateWorkloadArgs(args, scanInfo)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			defer applyTimeout(scanInfo, ks)()
+			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
+			defer cancel()
 
 			if err := validateWorkloadArgs(args, scanInfo); err != nil {
 				return err
@@ -95,12 +96,12 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				return err
 			}
 
-			results, err := ks.Scan(scanInfo, policyIdentifiers)
+			results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 			if err != nil {
 				return err
 			}
 
-			if err = results.HandleResults(ks.Context(), scanInfo); err != nil {
+			if err = results.HandleResults(ctx, scanInfo); err != nil {
 				return err
 			}
 
@@ -119,7 +120,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				return err
 			}
 
-			return enforceBaselineDrift(ks.Context(), results, scanInfo)
+			return enforceBaselineDrift(ctx, results, scanInfo)
 		},
 	}
 
