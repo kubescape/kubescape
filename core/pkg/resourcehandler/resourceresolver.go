@@ -159,6 +159,9 @@ func defaultResourceResolver(group, version, resource string) []resolvedResource
 	if version == "" || resource == "" {
 		return nil
 	}
+	// Resolve the alias before the triplet is built: "core/v1/pods" names an
+	// API group no cluster serves, so the query it produces can only fail.
+	group = normalizeAPIGroup(group)
 	_, builtInErr := k8sinterface.GetGroupVersionResource(resource)
 	isUnknown := builtInErr != nil && len(mapKSResourceToApiGroup(resource)) == 0
 	if isUnknown && (group == "" || group == "*" || version == "*" || resource == "*") {
