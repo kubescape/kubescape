@@ -257,6 +257,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	// Retrieve --kubeconfig flag from https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/cmd.go
 	scanCmd.PersistentFlags().AddGoFlag(flag.Lookup("kubeconfig"))
 
+	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.KubeContexts, "kube-contexts", nil, "Scan each of these kube contexts in one run (comma-separated, or repeat the flag), writing one report per context to a context-suffixed --output path. Requires --output. Distinct from --kube-context, which selects a single context; when --kube-contexts is set it takes over the scan instead.")
+
 	scanCmd.PersistentFlags().StringVar(&scanInfo.Baseline, "baseline", "", "Path to a saved JSON scan report to diff the fresh scan against.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.BaselineFailOnNew, "baseline-fail-on-new", false, "With --baseline, exit with code 1 when new failures are found versus the baseline.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineSeverityThreshold, "baseline-severity-threshold", "", "With --baseline, only count new failures at or above this severity when using --baseline-fail-on-new.")
@@ -352,34 +354,46 @@ func applyTimeout(scanInfo *cautils.ScanInfo, ks meta.IKubescape) func() {
 }
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+	if len(scanInfo.KubeContexts) > 0 {
+		return fleetScan(scanInfo, ks, policyIdentifiers)
+	}
+
 	ctx, cancel := deriveTimeoutContext(&scanInfo, ks)
 	defer cancel()
+	return runSecurityScan(ctx, &scanInfo, ks, policyIdentifiers)
+}
 
-	results, err := ks.ScanContext(ctx, &scanInfo, policyIdentifiers)
+// runSecurityScan runs one cluster's scan to completion: Scan, HandleResults,
+// then every threshold/drift enforcement securityScan performs for the
+// single-context path. It's factored out so fleetScan (cmd/scan/fleetscan.go)
+// can run the exact same per-cluster behavior once per requested context,
+// instead of a parallel, divergent copy of this logic.
+func runSecurityScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+	results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 	if err != nil {
 		return err
 	}
 
-	if err = results.HandleResults(ctx, &scanInfo); err != nil {
+	if err = results.HandleResults(ctx, scanInfo); err != nil {
 		return err
 	}
 
-	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, &scanInfo); err != nil {
+	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
 		return err
 	}
 	if scanInfo.ScanImages {
-		if err := enforceImageSeverityThresholds(results.ImageScanData, &scanInfo); err != nil {
+		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
 			return err
 		}
 	}
-	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), &scanInfo); err != nil {
+	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
 		return err
 	}
-	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, &scanInfo); err != nil {
+	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
 		return err
 	}
 
-	return enforceBaselineDrift(ctx, results, &scanInfo)
+	return enforceBaselineDrift(ctx, results, scanInfo)
 }
 
 func enforceBaselineDrift(ctx context.Context, results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) error {
