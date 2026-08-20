@@ -175,7 +175,6 @@ func TestSARIFPrinter_ImageScan_HonorsSeverityExceptions(t *testing.T) {
 	sp := NewSARIFPrinter()
 	sp.writer = tmp
 
-	require.NoError(t, sp.printImageScan(context.Background(), imageScanData))
 	require.NoError(t, sp.printImageScan([]cautils.ImageScanData{imageScanData}))
 
 	raw, err := os.ReadFile(tmp.Name())
@@ -224,6 +223,20 @@ func TestSARIFPrinter_ImageScan_HonorsSeverityExceptions(t *testing.T) {
 	assert.True(t, foundFixed, "CVE-FIXED missing")
 	assert.True(t, foundNotAffected, "CVE-NOT-AFFECTED missing")
 	assert.True(t, foundUnchanged, "CVE-UNCHANGED missing")
+
+	if run.Tool.Driver != nil {
+		for _, rule := range run.Tool.Driver.Rules {
+			if strings.HasPrefix(rule.ID, "CVE-FIXED") || strings.HasPrefix(rule.ID, "CVE-NOT-AFFECTED") {
+				require.NotNil(t, rule.Properties)
+				assert.Equal(t, "0.0", rule.Properties["security-severity"])
+			} else if strings.HasPrefix(rule.ID, "CVE-UNCHANGED") {
+				// shouldn't be modified
+				if rule.Properties != nil {
+					assert.NotEqual(t, "0.0", rule.Properties["security-severity"])
+				}
+			}
+		}
+	}
 }
 
 const imageSARIFStdoutHelperEnv = "KUBESCAPE_TEST_IMAGE_SARIF_STDOUT_HELPER"
@@ -237,7 +250,6 @@ func TestSARIFPrinter_ImageScan_StdoutPipeCompletes(t *testing.T) {
 	if os.Getenv(imageSARIFStdoutHelperEnv) == "1" {
 		sp := NewSARIFPrinter()
 		sp.SetWriter(context.Background(), "")
-		if err := sp.printImageScan(context.Background(), buildSeverityExceptionImageScanData()); err != nil {
 		if err := sp.printImageScan([]cautils.ImageScanData{buildSeverityExceptionImageScanData()}); err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)

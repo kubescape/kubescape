@@ -238,14 +238,13 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 }
 
 func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string) (*cautils.ImageScanData, error) {
-	packages, pkgContext, sbom, err := pkg.Provide(userInput, getProviderConfig(creds, s.sources))
 	return s.ScanWithOptions(ctx, userInput, creds, vulnerabilityExceptions, severityExceptions, ScanOptions{})
 }
 
 // ScanWithOptions scans an image using explicit source-selection options. In
 // particular, Platform prevents a multi-architecture image index from silently
 // resolving to the architecture of the machine running Kubescape.
-func (s *Service) ScanWithOptions(_ context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string, options ScanOptions) (*cautils.ImageScanData, error) {
+func (s *Service) ScanWithOptions(ctx context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string, options ScanOptions) (*cautils.ImageScanData, error) {
 	platform, err := NormalizePlatform(options.Platform)
 	if err != nil {
 		return nil, err

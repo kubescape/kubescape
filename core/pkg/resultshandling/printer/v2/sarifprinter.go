@@ -207,9 +207,6 @@ func resolveFailedPathLocations(opaSessionObj *cautils.OPASessionObj, locationRe
 	return locations
 }
 
-func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults cautils.ImageScanData) error {
-	model, err := models.NewDocument(clio.Identification{}, scanResults.Packages, scanResults.Context,
-		scanResults.Matches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
 func (sp *SARIFPrinter) printImageScan(scanResults []cautils.ImageScanData) error {
 	combinedReport, err := sarif.New(sarif.Version210)
 	if err != nil {
@@ -235,36 +232,48 @@ func (sp *SARIFPrinter) printImageScan(scanResults []cautils.ImageScanData) erro
 			return err
 		}
 
-	// Inject VEX Statuses
-	if len(scanResults.VexStatuses) > 0 {
-		logger.L().Ctx(ctx).Info("Injecting VEX statuses into SARIF output")
-		for _, run := range sarifReport.Runs {
-			for _, result := range run.Results {
-				if result.RuleID != nil {
-					// Grype formats RuleIDs as <vuln-id>-<package-name>
-					for vulnID, status := range scanResults.VexStatuses {
-						if *result.RuleID == vulnID || strings.HasPrefix(*result.RuleID, vulnID+"-") {
-							if status.Status == "not_affected" || status.Status == "fixed" {
-								result.WithLevel("note")
-								if result.Message.Text != nil {
-									msg := fmt.Sprintf("%s\nVEX Status: %s. Justification: %s", *result.Message.Text, status.Status, status.Justification)
-									result.Message.Text = &msg
+		var sarifReport sarif.Report
+		if err := json.Unmarshal(rendered.Bytes(), &sarifReport); err != nil {
+			return err
+		}
+
+		// Inject VEX Statuses
+		if len(scan.VexStatuses) > 0 {
+			logger.L().Info("Injecting VEX statuses into SARIF output")
+			for _, run := range sarifReport.Runs {
+				for _, result := range run.Results {
+					if result.RuleID != nil {
+						// Grype formats RuleIDs as <vuln-id>-<package-name>
+						for vulnID, status := range scan.VexStatuses {
+							if *result.RuleID == vulnID || strings.HasPrefix(*result.RuleID, vulnID+"-") {
+								if status.Status == "not_affected" || status.Status == "fixed" {
+									result.WithLevel("note")
+									if result.Message.Text != nil {
+										msg := fmt.Sprintf("%s\nVEX Status: %s. Justification: %s", *result.Message.Text, status.Status, status.Justification)
+										result.Message.Text = &msg
+									}
 								}
+								break
 							}
-							break
+						}
+					}
+				}
+
+				if run.Tool.Driver != nil {
+					for _, rule := range run.Tool.Driver.Rules {
+						for vulnID, status := range scan.VexStatuses {
+							if rule.ID == vulnID || strings.HasPrefix(rule.ID, vulnID+"-") {
+								if status.Status == "not_affected" || status.Status == "fixed" {
+									if rule.Properties != nil {
+										rule.Properties["security-severity"] = "0.0"
+									}
+								}
+								break
+							}
 						}
 					}
 				}
 			}
-		}
-	}
-
-	// Patch driver name to Kubescape
-	for i := range sarifReport.Runs {
-		sarifReport.Runs[i].Tool.Driver.Name = "Kubescape"
-		var sarifReport sarif.Report
-		if err := json.Unmarshal(rendered.Bytes(), &sarifReport); err != nil {
-			return err
 		}
 
 		// Patch driver name to Kubescape and aggregate runs
@@ -299,7 +308,6 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 		}
 
 		// image scan
-		if err := sp.printImageScan(ctx, imageScanData[0]); err != nil {
 		if err := sp.printImageScan(imageScanData); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
 			return fmt.Errorf("failed to write results in sarif format: %w", err)
