@@ -19,6 +19,10 @@ const (
 	vapGroup           = "admissionregistration.k8s.io"
 	vapResource        = "validatingadmissionpolicies"
 	vapBindingResource = "validatingadmissionpolicybindings"
+
+	// controlIDLabel is the label cel-admission-library stamps a control's
+	// policy with. Policies without it are not addressable by control.
+	controlIDLabel = "controlId"
 )
 
 // vapVersions lists the served versions of the VAP API in preference order:
@@ -121,9 +125,8 @@ func BuildIndex(policies, bindings []unstructured.Unstructured) map[string]*repo
 
 	for i := range policies {
 		vap := &policies[i]
-		labels := vap.GetLabels()
-		controlID, ok := labels["controlId"]
-		if !ok || controlID == "" {
+		controlID := vap.GetLabels()[controlIDLabel]
+		if controlID == "" {
 			continue
 		}
 		policyNameToControlID[vap.GetName()] = controlID
@@ -156,19 +159,33 @@ func BuildIndex(policies, bindings []unstructured.Unstructured) map[string]*repo
 		if seenActions[controlID] == nil {
 			seenActions[controlID] = make(map[string]struct{})
 		}
-		if actionsRaw, ok := spec["validationActions"].([]any); ok {
-			for _, a := range actionsRaw {
-				if s, ok := a.(string); ok {
-					if _, dup := seenActions[controlID][s]; !dup {
-						seenActions[controlID][s] = struct{}{}
-						status.Actions = append(status.Actions, s)
-					}
-				}
+		for _, action := range bindingActions(spec) {
+			if _, dup := seenActions[controlID][action]; dup {
+				continue
 			}
+			seenActions[controlID][action] = struct{}{}
+			status.Actions = append(status.Actions, action)
 		}
 	}
 
 	return index
+}
+
+// bindingActions reads a binding's spec.validationActions. An entry that is not
+// a string is dropped rather than failing the whole binding: the rest of its
+// actions still describe how the policy is enforced.
+func bindingActions(spec map[string]any) []string {
+	raw, ok := spec["validationActions"].([]any)
+	if !ok {
+		return nil
+	}
+	actions := make([]string, 0, len(raw))
+	for _, entry := range raw {
+		if action, ok := entry.(string); ok {
+			actions = append(actions, action)
+		}
+	}
+	return actions
 }
 
 // EnrichSummary attaches VAPEnforcementStatus to each ControlSummary whose
