@@ -326,7 +326,8 @@ func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]
 			return nil, err
 		}
 		var files []string
-		for _, controlID := range controls {
+		for _, listEntry := range controls {
+			controlID := strings.Split(listEntry, "|")[0]
 			control, err := g.GetControl(controlID)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("failed to download control", helpers.String("ID", controlID), helpers.Error(err))

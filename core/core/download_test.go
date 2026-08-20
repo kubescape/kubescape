@@ -420,7 +420,10 @@ func (f *fakePolicyGetter) GetFramework(string) (*reporthandling.Framework, erro
 func (f *fakePolicyGetter) GetFrameworks() ([]reporthandling.Framework, error) {
 	return f.frameworks, f.frameworksErr
 }
-func (f *fakePolicyGetter) GetControl(string) (*reporthandling.Control, error) {
+func (f *fakePolicyGetter) GetControl(id string) (*reporthandling.Control, error) {
+	if f.control != nil && f.control.ControlID != "" && f.control.ControlID != id {
+		return nil, fmt.Errorf("control %q not found", id)
+	}
 	return f.control, f.controlErr
 }
 func (f *fakePolicyGetter) ListFrameworks() ([]string, error) { return nil, nil }
@@ -800,7 +803,7 @@ func TestDownloadControl(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
 		wantControl := &reporthandling.Control{ControlID: "C-0001"}
 		withPolicyGetter(t, &fakePolicyGetter{
-			controlsList: []string{"C-0001"},
+			controlsList: []string{"C-0001|control name|framework1, framework2"},
 			control:      wantControl,
 		}, nil)
 
