@@ -271,19 +271,21 @@ func TestApplySeverityFilters_RecomputesComplianceScore(t *testing.T) {
 	assert.Equal(t, float32(10), s.Report.SummaryDetails.ComplianceScore)
 }
 
-func TestApplySeverityFilters_RecomputesRiskScore(t *testing.T) {
+func TestApplySeverityFilters_DoesNotRecomputeRiskScore(t *testing.T) {
 	controls := map[string]reportsummary.ControlSummary{
 		"C-low":      {ControlID: "C-low", ScoreFactor: scoreLow, Score: 90},
 		"C-medium":   {ControlID: "C-medium", ScoreFactor: scoreMedium, Score: 50},
 		"C-critical": {ControlID: "C-critical", ScoreFactor: scoreCritical, Score: 20},
 	}
 	s := makeSessionWithControls(controls)
-	s.Report.SummaryDetails.Score = 53.3 // stale full-set value
+	s.Report.SummaryDetails.Score = 53.3
 
 	ApplySeverityFilters(s, "critical", "")
 
 	require.Len(t, s.Report.SummaryDetails.Controls, 1)
-	assert.Equal(t, float32(20), s.Report.SummaryDetails.Score)
+	// The risk score is a WCS-weighted aggregate whose weights are not available
+	// at filter time; a plain average would not reproduce it, so it is left as-is.
+	assert.Equal(t, float32(53.3), s.Report.SummaryDetails.Score)
 }
 
 func TestApplySeverityFilters_RecomputesFrameworkComplianceScores(t *testing.T) {
@@ -374,7 +376,7 @@ func TestApplySeverityFilters_RecomputesResourcesSeverityCounters(t *testing.T) 
 	assert.Equal(t, 1, got.CriticalSeverityCounter)
 }
 
-func TestApplySeverityFilters_ZeroRetainedZeroesScoresAndCounters(t *testing.T) {
+func TestApplySeverityFilters_ZeroRetainedZeroesComplianceScoreAndCounters(t *testing.T) {
 	controls := map[string]reportsummary.ControlSummary{
 		"C-low": makeCompliantControl("C-low", scoreLow, 100),
 	}
@@ -387,7 +389,8 @@ func TestApplySeverityFilters_ZeroRetainedZeroesScoresAndCounters(t *testing.T) 
 
 	require.Len(t, s.Report.SummaryDetails.Controls, 0)
 	assert.Equal(t, float32(0), s.Report.SummaryDetails.ComplianceScore)
-	assert.Equal(t, float32(0), s.Report.SummaryDetails.Score)
 	assert.Equal(t, reportsummary.SeverityCounters{}, s.Report.SummaryDetails.ControlsSeverityCounters)
 	assert.Equal(t, reportsummary.SeverityCounters{}, s.Report.SummaryDetails.ResourcesSeverityCounters)
+	// The risk score is not recomputed at filter time; it is left unchanged.
+	assert.Equal(t, float32(100), s.Report.SummaryDetails.Score)
 }

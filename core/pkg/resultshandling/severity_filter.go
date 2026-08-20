@@ -54,28 +54,27 @@ func ApplySeverityFilters(sessionObj *cautils.OPASessionObj, minSeverity, maxSev
 // recomputeSummaryDetails refreshes every derived summary field that was
 // computed against the full control set before severity filtering. After
 // ApplySeverityFilters removes lower-severity controls, the compliance score,
-// risk score, framework compliance scores and severity counters would otherwise
-// describe controls that are no longer present in the report.
+// framework compliance scores and severity counters would otherwise describe
+// controls that are no longer present in the report. The risk score
+// (SummaryDetails.Score) is deliberately left unrecomputed: it is a
+// WCS-weighted aggregate whose weights are not available at filter time, so a
+// plain average would not reproduce it.
 func recomputeSummaryDetails(sessionObj *cautils.OPASessionObj) {
 	if sessionObj == nil || sessionObj.Report == nil {
 		return
 	}
 	summary := &sessionObj.Report.SummaryDetails
 
-	var scoreSum float32
 	var complianceSum float32
 	count := 0
 	for _, ctrl := range summary.Controls {
-		scoreSum += ctrl.GetScore()
 		complianceSum += ctrl.GetComplianceScore()
 		count++
 	}
 	if count > 0 {
 		summary.ComplianceScore = complianceSum / float32(count)
-		summary.Score = scoreSum / float32(count)
 	} else {
 		summary.ComplianceScore = 0
-		summary.Score = 0
 	}
 
 	for i := range summary.Frameworks {

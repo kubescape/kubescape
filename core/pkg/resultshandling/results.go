@@ -146,7 +146,6 @@ type reportSnapshot struct {
 	// restored so the caller (cmd/scan) evaluates exit thresholds against the
 	// true unfiltered score while printers and submission saw the filtered one.
 	complianceScore            float32
-	score                      float32
 	frameworksComplianceScores []float32
 	controlsSeverityCounters   reportsummary.SeverityCounters
 	resourcesSeverityCounters  reportsummary.SeverityCounters
@@ -179,7 +178,6 @@ func snapshotReport(sessionObj *cautils.OPASessionObj) reportSnapshot {
 		controls:                   controls,
 		associatedControls:         ac,
 		complianceScore:            sessionObj.Report.SummaryDetails.ComplianceScore,
-		score:                      sessionObj.Report.SummaryDetails.Score,
 		frameworksComplianceScores: fwScores,
 		controlsSeverityCounters:   sessionObj.Report.SummaryDetails.ControlsSeverityCounters,
 		resourcesSeverityCounters:  sessionObj.Report.SummaryDetails.ResourcesSeverityCounters,
@@ -192,7 +190,6 @@ func restoreReport(sessionObj *cautils.OPASessionObj, snap reportSnapshot) {
 	}
 	sessionObj.Report.SummaryDetails.Controls = snap.controls
 	sessionObj.Report.SummaryDetails.ComplianceScore = snap.complianceScore
-	sessionObj.Report.SummaryDetails.Score = snap.score
 	sessionObj.Report.SummaryDetails.ControlsSeverityCounters = snap.controlsSeverityCounters
 	sessionObj.Report.SummaryDetails.ResourcesSeverityCounters = snap.resourcesSeverityCounters
 	for i := range sessionObj.Report.SummaryDetails.Frameworks {
@@ -217,11 +214,11 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 
 	// Snapshot Report.SummaryDetails.Controls, every
 	// ResourcesResult[id].AssociatedControls, and the derived summary fields
-	// (compliance score, risk score, framework compliance scores, severity
-	// counters) before applying severity filters. ApplySeverityFilters mutates
-	// all of these in place; printers and submission see the recomputed set,
-	// but the caller (cmd/scan) evaluates exit thresholds and coverage counts
-	// after HandleResults returns and must see the full unfiltered report.
+	// (compliance score, framework compliance scores, severity counters) before
+	// applying severity filters. ApplySeverityFilters mutates all of these in
+	// place; printers and submission see the recomputed set, but the caller
+	// (cmd/scan) evaluates exit thresholds and coverage counts after
+	// HandleResults returns and must see the full unfiltered report.
 	// Other consumers of rh.ScanData (httphandler /v1/results,
 	// StorePostureReportResults) also read the report after this call and
 	// must not receive an internally inconsistent PostureReport.
