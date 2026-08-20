@@ -159,15 +159,9 @@ func registeredToolResult(t *testing.T, message mcp.JSONRPCMessage) *mcp.CallToo
 	t.Helper()
 	response, ok := message.(mcp.JSONRPCResponse)
 	require.True(t, ok, "tool call returned a protocol error: %#v", message)
-	switch res := response.Result.(type) {
-	case *mcp.CallToolResult:
-		return res
-	case mcp.CallToolResult:
-		return &res
-	default:
-		require.Fail(t, "unexpected result type", "got %T", response.Result)
-		return nil
-	}
+	result, ok := response.Result.(mcp.CallToolResult)
+	require.True(t, ok)
+	return &result
 }
 
 func newRegisteredStorageToolTestServer(objects ...runtime.Object) *KubescapeMcpserver {

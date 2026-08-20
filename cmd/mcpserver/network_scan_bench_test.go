@@ -32,7 +32,6 @@ func BenchmarkNetworkScan_Isolation(b *testing.B) {
 		ControlsInputsGetter: getter.NewLoadPolicy([]string{"../../core/cautils/getter/testdata/controls-inputs.json"}),
 		AttackTracksGetter:   getter.NewLoadPolicy([]string{"../../core/cautils/getter/testdata/attack-tracks.json"}),
 	}
-
 	policyIdentifiers := []cautils.PolicyIdentifier{
 		{Kind: apisv1.KindControl, Identifier: "C-0030"},
 	}

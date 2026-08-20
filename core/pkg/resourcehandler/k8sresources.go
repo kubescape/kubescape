@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	"golang.org/x/time/rate"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -52,7 +51,6 @@ type K8sResourceHandler struct {
 	k8s               *k8sinterface.KubernetesApi
 	hostSensorHandler hostsensorutils.IHostSensor
 	rbacObjectsAPI    *cautils.RBACObjects
-	apiLimiter        *rate.Limiter
 }
 
 func NewK8sResourceHandler(ctx context.Context, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, clusterName string) *K8sResourceHandler {
@@ -61,7 +59,6 @@ func NewK8sResourceHandler(ctx context.Context, k8s *k8sinterface.KubernetesApi,
 		k8s:               k8s,
 		hostSensorHandler: hostSensorHandler,
 		rbacObjectsAPI:    rbacObjects,
-		apiLimiter:        rate.NewLimiter(rate.Limit(50), 100), // 50 requests/sec, burst of 100
 	}
 	if err := k8sHandler.setCloudProvider(ctx); err != nil {
 		logger.L().Warning("failed to set cloud provider", helpers.Error(err))
@@ -213,12 +210,9 @@ func (k8sHandler *K8sResourceHandler) collectVAPResources(ctx context.Context, s
 	}
 
 	policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
-	switch {
-	case errors.Is(err, vapreconcile.ErrUnsupported):
-		logger.L().Debug("skipping VAP reconciliation, cluster does not serve the API")
-	case err != nil:
+	if err != nil {
 		logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
-	default:
+	} else {
 		sessionObj.VAPPolicies = policies
 		sessionObj.VAPBindings = bindings
 	}
@@ -811,7 +805,6 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 
 	// Bounded worker pool with token-bucket rate limiting against the k8s API
 	sem := make(chan struct{}, maxParallelResourcePulls)
-	apiLimiter := k8sHandler.apiLimiter
 
 	for key := range queryableResources {
 		qr := queryableResources[key]
@@ -831,18 +824,6 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 				return
 			}
 			defer func() { <-sem }()
-
-			if apiLimiter != nil {
-				if err := apiLimiter.Wait(ctx); err != nil {
-					mu.Lock()
-					failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
-						gvr: qr.GroupVersionResourceTriplet,
-						err: err,
-					}
-					mu.Unlock()
-					return
-				}
-			}
 
 			apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}

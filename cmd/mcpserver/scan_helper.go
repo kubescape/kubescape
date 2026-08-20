@@ -46,24 +46,39 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 
 	var client *k8sinterface.KubernetesApi
 	if rsrcHandler == nil {
-		var err error
-		client, err = ksServer.getK8sClient()
-		if err != nil {
-			return nil, err
+		if !k8sinterface.IsConnectedToCluster() {
+			return nil, fmt.Errorf("no reachable kubernetes cluster: ensure KUBECONFIG is set or the server is running inside a cluster")
+		}
+		client = ksServer.getK8sClient()
+	}
+
+	timeout := 10 * time.Second
+	if wantComplianceScore {
+		timeout = 30 * time.Second
+	}
+	if namespace == "" || namespace == "*" {
+		if wantComplianceScore {
+			timeout = 120 * time.Second
+		} else {
+			timeout = 60 * time.Second
 		}
 	}
 
-	scanInfo := buildScanInfo(namespace, wantComplianceScore, inputPatterns)
-
-	policyGetter := ksServer.getPolicyGetter()
 	getters := cautils.Getters{
-		PolicyGetter:         policyGetter,
-		ExceptionsGetter:     policyGetter,
-		ControlsInputsGetter: policyGetter,
-		AttackTracksGetter:   policyGetter,
+		PolicyGetter:         ksServer.policyGetter,
+		ExceptionsGetter:     ksServer.policyGetter,
+		ControlsInputsGetter: ksServer.policyGetter,
+		AttackTracksGetter:   ksServer.policyGetter,
 	}
 	if customGetters != nil {
 		getters = *customGetters
+	}
+
+	scanInfo := &cautils.ScanInfo{
+		ScanAll:           false,
+		IncludeNamespaces: namespace,
+		ScanTimeout:       timeout,
+		InputPatterns:     inputPatterns,
 	}
 
 	scanCtx, cancel := context.WithTimeout(ctx, scanInfo.ScanTimeout)
@@ -90,7 +105,7 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 	deps := resources.NewRegoDependenciesData(k8sConfig, "")
 	opap := opaprocessor.NewOPAProcessor(scanData, deps, "", scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, false, nil)
 	if wantComplianceScore {
-		opap.ControlTimeout = scanInfo.ScanTimeout / 4
+		opap.ControlTimeout = timeout / 4
 	}
 
 	err = opap.ProcessRulesListener(scanCtx, cautils.NewProgressHandler(""))
@@ -131,29 +146,6 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 	}
 
 	return responseJSON, nil
-}
-
-func buildScanInfo(namespace string, wantComplianceScore bool, inputPatterns []string) *cautils.ScanInfo {
-	timeout := 10 * time.Second
-	if wantComplianceScore {
-		timeout = 30 * time.Second
-	}
-	if namespace == "" || namespace == "*" {
-		if wantComplianceScore {
-			timeout = 120 * time.Second
-		} else {
-			timeout = 60 * time.Second
-		}
-	}
-	if namespace == "*" {
-		namespace = ""
-	}
-	return &cautils.ScanInfo{
-		ScanAll:           false,
-		IncludeNamespaces: namespace,
-		ScanTimeout:       timeout,
-		InputPatterns:     inputPatterns,
-	}
 }
 
 func buildScanResponse(results map[string]resourcesresults.Result, complianceScore *float32, frameworkName string, degraded bool, notEvaluated int, totalControls int) scanResponse {
