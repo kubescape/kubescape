@@ -25,7 +25,16 @@ func TestLoadCustomRules_NoRegoFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "not-a-rule.txt"), []byte("hello"), 0o600))
 
 	fw, err := LoadCustomRules(dir)
-	assert.NoError(t, err)
+	assert.Error(t, err)
+	assert.Nil(t, fw)
+}
+
+func TestLoadCustomRules_WrongExtension(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "not-a-rule.txt")
+	require.NoError(t, os.WriteFile(f, []byte("hello"), 0o600))
+
+	fw, err := LoadCustomRules(f)
+	assert.Error(t, err)
 	assert.Nil(t, fw)
 }
 

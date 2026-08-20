@@ -40,10 +40,12 @@ func LoadCustomRules(path string) (*reporthandling.Framework, error) {
 		sort.Strings(files)
 	} else if strings.HasSuffix(path, ".rego") {
 		files = []string{path}
+	} else {
+		return nil, fmt.Errorf("custom rules path %q is not a .rego file or directory", path)
 	}
 
 	if len(files) == 0 {
-		return nil, nil
+		return nil, fmt.Errorf("no .rego files found in %q", path)
 	}
 
 	controls := make([]reporthandling.Control, 0, len(files))
