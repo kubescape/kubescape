@@ -394,3 +394,84 @@ func TestApplySeverityFilters_ZeroRetainedZeroesComplianceScoreAndCounters(t *te
 	// The risk score is not recomputed at filter time; it is left unchanged.
 	assert.Equal(t, float32(100), s.Report.SummaryDetails.Score)
 }
+
+func TestApplySeverityFilters_FrameworkControlsFilteredAlongWithSummary(t *testing.T) {
+	s := makeSessionWithControls(map[string]reportsummary.ControlSummary{
+		"C-1": makeControl("C-1", scoreLow),
+		"C-2": makeControl("C-2", scoreHigh),
+		"C-3": makeControl("C-3", scoreCritical),
+	})
+	s.Report.SummaryDetails.Frameworks = []reportsummary.FrameworkSummary{
+		{
+			Name: "NSA",
+			Controls: map[string]reportsummary.ControlSummary{
+				"C-1": makeControl("C-1", scoreLow),
+				"C-2": makeControl("C-2", scoreHigh),
+			},
+		},
+		{
+			Name: "MITRE",
+			Controls: map[string]reportsummary.ControlSummary{
+				"C-3": makeControl("C-3", scoreCritical),
+			},
+		},
+	}
+
+	ApplySeverityFilters(s, "high", "")
+
+	assert.ElementsMatch(t, []string{"C-2", "C-3"}, controlIDsOf(s.Report.SummaryDetails.Controls))
+	assert.ElementsMatch(t, []string{"C-2"}, controlIDsOf(s.Report.SummaryDetails.Frameworks[0].Controls))
+	assert.ElementsMatch(t, []string{"C-3"}, controlIDsOf(s.Report.SummaryDetails.Frameworks[1].Controls))
+}
+
+func TestApplySeverityFilters_FrameworkWithoutControls(t *testing.T) {
+	s := makeSessionWithControls(map[string]reportsummary.ControlSummary{
+		"C-1": makeControl("C-1", scoreCritical),
+	})
+	s.Report.SummaryDetails.Frameworks = []reportsummary.FrameworkSummary{{Name: "NSA"}}
+
+	ApplySeverityFilters(s, "high", "")
+
+	assert.Empty(t, s.Report.SummaryDetails.Frameworks[0].Controls)
+}
+
+func controlIDsOf(controls map[string]reportsummary.ControlSummary) []string {
+	ids := make([]string, 0, len(controls))
+	for id := range controls {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func makeControlWithResources(id string, scoreFactor float32, status apis.ScanningStatus, resourceIDs ...string) reportsummary.ControlSummary {
+	c := makeControl(id, scoreFactor)
+	c.Status = status
+	c.ResourceIDs.Append(status, resourceIDs...)
+	return c
+}
+
+func TestApplySeverityFilters_StatusCountersRecomputedOverRetainedControls(t *testing.T) {
+	lowFail := makeControlWithResources("C-1", scoreLow, apis.StatusFailed, "res-1")
+	criticalPass := makeControlWithResources("C-2", scoreCritical, apis.StatusPassed, "res-1")
+
+	s := makeSessionWithControls(map[string]reportsummary.ControlSummary{
+		"C-1": lowFail,
+		"C-2": criticalPass,
+	})
+	s.Report.SummaryDetails.Frameworks = []reportsummary.FrameworkSummary{{
+		Name: "NSA",
+		Controls: map[string]reportsummary.ControlSummary{
+			"C-1": lowFail,
+			"C-2": criticalPass,
+		},
+	}}
+
+	ApplySeverityFilters(s, "critical", "")
+
+	summary := &s.Report.SummaryDetails
+	assert.Equal(t, 0, summary.StatusCounters.Failed())
+	assert.Equal(t, 1, summary.StatusCounters.Passed())
+	assert.Equal(t, apis.StatusPassed, summary.Status)
+	assert.Equal(t, 0, summary.Frameworks[0].StatusCounters.Failed())
+	assert.Equal(t, apis.StatusPassed, summary.Frameworks[0].Status)
+}
