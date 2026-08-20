@@ -361,7 +361,16 @@ func severityRank(value string) int {
 	}
 }
 
-// FilterBySeverity returns changes at or above the requested threshold.
+// FilterBySeverity returns changes at or above the requested threshold. A
+// change whose severity cannot be resolved to a known bucket (severityRank
+// returns 0 for anything other than low/medium/high/critical, e.g. a control
+// with a zero or missing baseScore) is treated as at or above any threshold
+// rather than silently excluded - the same fail-closed policy
+// enforceSeverityThresholds already applies to the plain scan gate for the
+// identical case (see countFailedResourcesWithUnbucketedSeverity in
+// cmd/scan/framework.go). Dropping a finding whose real severity is simply
+// unknown would be the exact "false-green output" ChangeSet's own doc
+// comment says Incomparable findings exist to prevent.
 func FilterBySeverity(changes []ControlChange, threshold string) []ControlChange {
 	if threshold == "" {
 		return changes
@@ -369,7 +378,7 @@ func FilterBySeverity(changes []ControlChange, threshold string) []ControlChange
 	minimum := severityRank(threshold)
 	filtered := make([]ControlChange, 0, len(changes))
 	for _, change := range changes {
-		if severityRank(change.Severity) >= minimum {
+		if rank := severityRank(change.Severity); rank == 0 || rank >= minimum {
 			filtered = append(filtered, change)
 		}
 	}

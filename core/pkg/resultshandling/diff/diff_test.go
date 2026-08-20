@@ -325,6 +325,47 @@ func TestFilterBySeverity_BelowThresholdReturnsEmpty(t *testing.T) {
 	assert.Empty(t, result)
 }
 
+// Regression for issue-3405: a change whose severity could not be resolved
+// (empty, or "Unknown" - what apis.ControlSeverityToString returns for a
+// control with a zero/missing baseScore, see buildSeverityMap) must not be
+// silently dropped by a severity threshold. Dropping it would be the exact
+// "false-green output" ChangeSet's own doc comment says Incomparable findings
+// exist to prevent, and contradicts the fail-closed policy
+// countFailedResourcesWithUnbucketedSeverity already applies to the plain
+// scan gate for the identical case.
+func TestFilterBySeverity_UnresolvableSeverityFailsClosed(t *testing.T) {
+	changes := []ControlChange{
+		{ControlID: "C-KNOWN-LOW", Severity: "Low"},
+		{ControlID: "C-UNKNOWN", Severity: "Unknown"},
+		{ControlID: "C-EMPTY", Severity: ""},
+	}
+
+	result := FilterBySeverity(changes, "critical")
+
+	var gotIDs []string
+	for _, c := range result {
+		gotIDs = append(gotIDs, c.ControlID)
+	}
+	assert.ElementsMatch(t, []string{"C-UNKNOWN", "C-EMPTY"}, gotIDs,
+		"unresolvable-severity findings must fail closed (kept) even under the highest threshold, while a known Low finding is correctly filtered out")
+}
+
+// End-to-end regression for issue-3405: an Incomparable finding with
+// unresolvable severity must still count toward Regressions' output - and
+// therefore toward the real kubescape diff --fail-on-new exit code, which
+// core/core/diff.go computes from exactly this filtered set - instead of
+// disappearing once --severity-threshold is set.
+func TestRegressions_IncomparableUnknownSeverityNotDroppedByThreshold(t *testing.T) {
+	cs := &ChangeSet{
+		Incomparable: []ControlChange{
+			{ResourceID: "res-1", ControlID: "C-9999", Severity: "Unknown", BaseStatus: "failed", HeadStatus: "failed", Reason: "scan coverage changed"},
+		},
+	}
+
+	assert.Len(t, Regressions(cs, "").Incomparable, 1)
+	assert.Len(t, Regressions(cs, "medium").Incomparable, 1, "an Incomparable finding with unresolvable severity must still gate the build under a threshold")
+}
+
 func TestFilterBySeverity_CIGate(t *testing.T) {
 	sum := summaryDetails{Controls: map[string]controlSummary{
 		"C-HIGH":     {ScoreFactor: 7.0},
