@@ -404,12 +404,14 @@ func TestDownload_ArtifactsJSONOutputWritesToCurrentDirectory(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type fakePolicyGetter struct {
-	frameworks    []reporthandling.Framework
-	frameworksErr error
-	framework     *reporthandling.Framework
-	frameworkErr  error
-	control       *reporthandling.Control
-	controlErr    error
+	frameworks      []reporthandling.Framework
+	frameworksErr   error
+	framework       *reporthandling.Framework
+	frameworkErr    error
+	control         *reporthandling.Control
+	controlErr      error
+	controlsList    []string
+	controlsListErr error
 }
 
 func (f *fakePolicyGetter) GetFramework(string) (*reporthandling.Framework, error) {
@@ -422,7 +424,7 @@ func (f *fakePolicyGetter) GetControl(string) (*reporthandling.Control, error) {
 	return f.control, f.controlErr
 }
 func (f *fakePolicyGetter) ListFrameworks() ([]string, error) { return nil, nil }
-func (f *fakePolicyGetter) ListControls() ([]string, error)   { return nil, nil }
+func (f *fakePolicyGetter) ListControls() ([]string, error)   { return f.controlsList, f.controlsListErr }
 
 type fakeExceptionsGetter struct {
 	exceptions []armotypes.PostureExceptionPolicy
@@ -786,12 +788,30 @@ func TestDownloadControl(t *testing.T) {
 		require.EqualError(t, err, "boom")
 	})
 
-	t.Run("returns error when the identifier is missing", func(t *testing.T) {
+	t.Run("returns error from ListControls when identifier is missing", func(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
-		withPolicyGetter(t, &fakePolicyGetter{}, nil)
+		withPolicyGetter(t, &fakePolicyGetter{controlsListErr: errors.New("list failed")}, nil)
 
 		_, err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir()})
-		require.EqualError(t, err, "missing control ID")
+		require.EqualError(t, err, "list failed")
+	})
+
+	t.Run("succeeds downloading all controls when identifier is missing", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		wantControl := &reporthandling.Control{ControlID: "C-0001"}
+		withPolicyGetter(t, &fakePolicyGetter{
+			controlsList: []string{"C-0001"},
+			control:      wantControl,
+		}, nil)
+
+		dir := t.TempDir()
+		info := &metav1.DownloadInfo{Target: TargetControl, Path: dir}
+		_, err := downloadControl(context.Background(), info)
+		require.NoError(t, err)
+
+		var got reporthandling.Control
+		readJSONFile(t, filepath.Join(dir, "c-0001.json"), &got)
+		assert.Equal(t, wantControl.ControlID, got.ControlID)
 	})
 
 	t.Run("returns error from PolicyCacheFilename", func(t *testing.T) {
