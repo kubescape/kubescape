@@ -123,7 +123,12 @@ func (k8sHandler *K8sResourceHandler) checkListAccess(ctx context.Context, gvrTr
 		return check
 	}
 
-	check.Allowed = resp.Status.Allowed
-	check.Reason = resp.Status.Reason
+	applyAccessReviewStatus(&check, resp.Status)
 	return check
+}
+
+// applyAccessReviewStatus records the API server's access decision on the check.
+func applyAccessReviewStatus(check *GVRCheck, status authorizationv1.SubjectAccessReviewStatus) {
+	check.Allowed = status.Allowed
+	check.Reason = status.Reason
 }
