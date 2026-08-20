@@ -846,8 +846,17 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 		}
 	}()
 
+	docs, splitErr := splitYAMLDocuments(yamlFile)
+
 	var parseErrs []error
-	for i, doc := range splitYAMLDocuments(yamlFile) {
+	if splitErr != nil {
+		// The scanner stopped before reaching the end of input. Any documents
+		// already split out are still reported below, but the caller must be
+		// told the file was not read in full rather than silently receiving
+		// what looks like a complete document list.
+		parseErrs = append(parseErrs, splitErr)
+	}
+	for i, doc := range docs {
 		var t any
 		if unmarshalErr := yaml.Unmarshal(doc, &t); unmarshalErr != nil {
 			parseErrs = append(parseErrs, fmt.Errorf("document %d: %w", i+1, unmarshalErr))
@@ -872,12 +881,20 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 	return yamlObjs, errors.Join(parseErrs...)
 }
 
-func splitYAMLDocuments(data []byte) [][]byte {
+func splitYAMLDocuments(data []byte) ([][]byte, error) {
+	return scanYAMLDocuments(bytes.NewReader(data), len(data)+1)
+}
+
+// scanYAMLDocuments is the reader-based core of splitYAMLDocuments, split out
+// so a scan failure mid-stream can be exercised directly in tests: with a
+// bytes.Reader the underlying Read never fails, so there is no way to observe
+// this error path through splitYAMLDocuments alone.
+func scanYAMLDocuments(r io.Reader, bufMax int) ([][]byte, error) {
 	var docs [][]byte
 	var current bytes.Buffer
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, bufio.MaxScanTokenSize), len(data)+1)
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, bufio.MaxScanTokenSize), bufMax)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if isYAMLDocumentSeparator(line) {
@@ -891,12 +908,18 @@ func splitYAMLDocuments(data []byte) [][]byte {
 		current.WriteByte('\n')
 	}
 	if err := scanner.Err(); err != nil {
-		logger.L().Warning(fmt.Sprintf("error scanning YAML input: %v", err))
+		// The scan stopped before reaching the end of input, so any bytes
+		// still buffered in current belong to a document that was never
+		// fully read; discard them rather than treat a truncated document as
+		// complete. Documents already appended to docs were each terminated
+		// by a real "---" separator and remain valid, but the caller must
+		// still be told the read did not finish.
+		return docs, fmt.Errorf("scanning YAML input: %w", err)
 	}
 	if doc := bytes.TrimSpace(current.Bytes()); len(doc) > 0 {
 		docs = append(docs, append([]byte{}, doc...))
 	}
-	return docs
+	return docs, nil
 }
 
 func isYAMLDocumentSeparator(line []byte) bool {
