@@ -86,7 +86,7 @@ func (s *Store) Flush() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.path, b, 0o644)
+	return os.WriteFile(s.path, b, 0o600)
 }
 
 // ResourceHash hashes the whole object except fields known to change
