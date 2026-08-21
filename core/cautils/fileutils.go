@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -826,13 +827,13 @@ func isUnrenderedHelmTemplate(path string) bool {
 
 // getMaxFileSize returns the configured per-file size limit in bytes.
 // It reads MaxFileSizeEnvVar as decimal bytes when set, otherwise defaults to
-// DefaultMaxFileSize. Non-positive or unparsable values fall back to the default
-// so the scan stays bounded.
+// DefaultMaxFileSize. Non-positive, unparsable, or math.MaxInt64 values fall
+// back to the default so the scan stays bounded and limit+1 does not overflow.
 func getMaxFileSize() int64 {
 	if v, ok := os.LookupEnv(MaxFileSizeEnvVar); ok {
 		trimmed := strings.TrimSpace(v)
 		if trimmed != "" {
-			if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil && parsed > 0 {
+			if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil && parsed > 0 && parsed != math.MaxInt64 {
 				return parsed
 			}
 			logger.L().Warning("invalid KUBESCAPE_MAX_FILE_SIZE, using default", helpers.String("value", v), helpers.Int("default", int(DefaultMaxFileSize)))
@@ -860,7 +861,13 @@ func loadFile(filePath string) ([]byte, error) {
 
 	// Use LimitReader at limit+1 so we can detect an oversized file even when
 	// Stat is unavailable (e.g. /proc, pipes) or reports 0.
-	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	// Guard against overflow when limit == MaxInt64 (rejected above, but keep
+	// defense-in-depth).
+	limitPlusOne := limit
+	if limit != math.MaxInt64 {
+		limitPlusOne = limit + 1
+	}
+	data, err := io.ReadAll(io.LimitReader(f, limitPlusOne))
 	if err != nil {
 		return nil, err
 	}

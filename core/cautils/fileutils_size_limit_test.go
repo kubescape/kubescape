@@ -116,8 +116,25 @@ func TestGetMaxFileSize_EnvVarOverride(t *testing.T) {
 	t.Setenv(MaxFileSizeEnvVar, "-5")
 	assert.Equal(t, DefaultMaxFileSize, getMaxFileSize(), "non-positive must fall back to default")
 
+	t.Setenv(MaxFileSizeEnvVar, "9223372036854775807")
+	assert.Equal(t, DefaultMaxFileSize, getMaxFileSize(), "math.MaxInt64 must fall back to default to avoid overflow")
+
 	t.Setenv(MaxFileSizeEnvVar, "")
 	assert.Equal(t, DefaultMaxFileSize, getMaxFileSize())
+}
+
+func TestGetMaxFileSize_MaxInt64IsRejected(t *testing.T) {
+	// Regression for overflow: limit+1 with MaxInt64 would wrap to negative and make
+	// LimitReader return EOF → empty data instead of ErrFileTooLarge.
+	t.Setenv(MaxFileSizeEnvVar, "9223372036854775807")
+	assert.Equal(t, DefaultMaxFileSize, getMaxFileSize())
+
+	dir := t.TempDir()
+	// File smaller than default 32MiB should still succeed (proves fallback, not MaxInt64)
+	small := filepath.Join(dir, "small.yaml")
+	require.NoError(t, os.WriteFile(small, []byte("apiVersion: v1\nkind: Pod\nmetadata:\n  name: x\n"), 0o600))
+	_, err := loadFile(small)
+	require.NoError(t, err)
 }
 
 func TestLoadFile_DefaultLimitIs32MiB(t *testing.T) {
