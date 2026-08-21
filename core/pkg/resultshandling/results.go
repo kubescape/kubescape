@@ -224,6 +224,15 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 	// must not receive an internally inconsistent PostureReport.
 	snap := snapshotReport(rh.ScanData)
 	defer restoreReport(rh.ScanData, snap)
+	if scanInfo.MinSeverity != "" || scanInfo.MaxSeverity != "" {
+		// Severity filtering is output-only (see snapshotReport/restoreReport):
+		// printers see the filtered report, but --compliance-threshold,
+		// --severity-threshold, --fail-coverage-below and --fail-on-degraded-config
+		// are evaluated after restoreReport on the full report. Warn once so a
+		// user combining e.g. --min-severity high with html+junit does not
+		// assume the filter also narrows what fails the build.
+		logger.L().Warning("Severity filtering (--min-severity/--max-severity) is output-only and does not affect exit-code thresholds")
+	}
 	ApplySeverityFilters(rh.ScanData, scanInfo.MinSeverity, scanInfo.MaxSeverity)
 
 	// Display scan results in the UI first to give immediate value.
