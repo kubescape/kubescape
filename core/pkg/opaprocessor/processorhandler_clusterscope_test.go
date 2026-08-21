@@ -89,7 +89,7 @@ deny contains msga if {
 	}
 	rule.Name = "cluster-role-path-accumulation"
 
-	got, err := opap.processRule(context.Background(), rule, nil, evaluationScope{}, "")
+	got, err := opap.processRule(context.Background(), rule, nil, evaluationScope{}, &reporthandling.Control{})
 	assert.NoError(t, err)
 
 	crResult, ok := got[clusterRole.GetID()]
@@ -188,7 +188,7 @@ func TestProcessRule_NamespaceBucketingStableAcrossAggregatorGrowth(t *testing.T
 	aggregatorRule.Name = "subject-role-rolebinding-aggregator"
 	aggregatorRule.Attributes = map[string]interface{}{"resourcesAggregator": "subject-role-rolebinding"}
 
-	_, err := opap.processRule(context.Background(), aggregatorRule, nil, evaluationScope{}, "")
+	_, err := opap.processRule(context.Background(), aggregatorRule, nil, evaluationScope{}, &reporthandling.Control{})
 	assert.NoError(t, err)
 
 	assert.True(t, cautils.IsLargeCluster(len(opap.AllResources)),
@@ -223,7 +223,7 @@ deny[msga] {
 	}
 	podRule.Name = "pods-evaluated-together"
 
-	got, err := opap.processRule(context.Background(), podRule, nil, evaluationScope{}, "")
+	got, err := opap.processRule(context.Background(), podRule, nil, evaluationScope{}, &reporthandling.Control{})
 	assert.NoError(t, err)
 
 	podAResult, ok := got[podA.GetID()]
