@@ -86,6 +86,10 @@ var guardedFiles = append([]string{
 	krewTemplateName,
 	krewDocName,
 	filepath.Join("internal", "ghworkflows", "krew_test.go"),
+	// comments_test.go guards comments.yaml's trust gate; comments.yaml sits in
+	// the same "**.yaml" blind spot as everything else in this list.
+	filepath.Join(".github", "workflows", commentsWorkflowName),
+	filepath.Join("internal", "ghworkflows", "comments_test.go"),
 }, installScripts...)
 
 // goreleaserSign is the subset of a `signs` / `docker_signs` entry these tests
