@@ -118,6 +118,57 @@ func capturePrintImagesCommands(t *testing.T, images []string) string {
 	return string(contents)
 }
 
+func capturePrintTopComponents(t *testing.T, summary imageprinter.ImageScanSummary) string {
+	t.Helper()
+
+	output, err := os.CreateTemp(t.TempDir(), "top-components-*.txt")
+	require.NoError(t, err)
+	defer output.Close()
+
+	printTopComponents(output, summary)
+	require.NoError(t, output.Sync())
+	_, err = output.Seek(0, io.SeekStart)
+	require.NoError(t, err)
+	contents, err := io.ReadAll(output)
+	require.NoError(t, err)
+	return string(contents)
+}
+
+// TestPrintTopComponents_EmptySeverityMapKeepsTrailingDash is a regression
+// test for #3450: the function assumed its output always ended in the
+// trailing comma appended by the per-severity loop, and stripped the last
+// character unconditionally. With no recorded severities that loop never
+// runs, so it stripped the seed string's own trailing "-" instead, leaving
+// a dangling space ("* pkg (1.0.0) " instead of "* pkg (1.0.0) -").
+func TestPrintTopComponents_EmptySeverityMapKeepsTrailingDash(t *testing.T) {
+	summary := imageprinter.ImageScanSummary{
+		PackageScores: map[string]*imageprinter.PackageScore{
+			"pkg": {Name: "pkg", Version: "1.0.0"}, // no MapSeverityToCVEsNumber entries
+		},
+	}
+
+	got := capturePrintTopComponents(t, summary)
+
+	assert.Contains(t, got, "pkg (1.0.0) -")
+}
+
+func TestPrintTopComponents_WithSeveritiesStripsTrailingComma(t *testing.T) {
+	summary := imageprinter.ImageScanSummary{
+		PackageScores: map[string]*imageprinter.PackageScore{
+			"pkg": {
+				Name:                    "pkg",
+				Version:                 "1.0.0",
+				MapSeverityToCVEsNumber: map[string]int{"Critical": 2},
+			},
+		},
+	}
+
+	got := capturePrintTopComponents(t, summary)
+
+	assert.Contains(t, got, "pkg (1.0.0) - 2 Critical")
+	assert.NotContains(t, got, "Critical,\n", "trailing comma before the newline must still be stripped when severities are present")
+}
+
 func TestGetWorkloadPrefixForCmd(t *testing.T) {
 	tests := []struct {
 		name      string

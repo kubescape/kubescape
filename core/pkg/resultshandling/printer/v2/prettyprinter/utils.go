@@ -198,7 +198,13 @@ func printTopComponents(writer *os.File, summary imageprinter.ImageScanSummary) 
 			output += fmt.Sprintf(" %d %s,", topPkg.MapSeverityToCVEsNumber[sortedCVEs[j]], utils.GetColorForVulnerabilitySeverity(sortedCVEs[j])(sortedCVEs[j]))
 		}
 
-		output = output[:len(output)-1]
+		// Only the per-severity loop above appends a trailing comma to strip.
+		// With no recorded severities it never runs, so output still ends in
+		// the seed string's own trailing "-" - stripping unconditionally would
+		// eat that dash instead of a comma.
+		if len(sortedCVEs) > 0 {
+			output = output[:len(output)-1]
+		}
 
 		cautils.StarDisplay(writer, "%s\n", output)
 	}
