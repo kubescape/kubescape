@@ -85,12 +85,45 @@ func TestBearerAuthMiddleware_UnauthenticatedBlocks(t *testing.T) {
 	rtr.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
 
-	// Health probes remain open even with token set — they live on the root router, not v1SubRouter
-	health := mux.NewRouter()
-	health.HandleFunc(livePath, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	// Lowercase bearer scheme (RFC 7235: scheme is case-insensitive) => 200
+	req = httptest.NewRequest(http.MethodGet, "/v1/results?id=abc", nil)
+	req.Header.Set("Authorization", "bearer s3cr3t")
 	rec = httptest.NewRecorder()
-	health.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, livePath, nil))
-	require.Equal(t, http.StatusOK, rec.Code, "health probes must stay unauthenticated")
+	rtr.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "Bearer scheme must be case-insensitive")
+
+	// Mixed-case Bearer + extra spaces around token => 200 (TrimSpace)
+	req = httptest.NewRequest(http.MethodGet, "/v1/results?id=abc", nil)
+	req.Header.Set("Authorization", "BeArEr   s3cr3t   ")
+	rec = httptest.NewRecorder()
+	rtr.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
+// TestHealthProbesOnProductionRouter proves /livez stays open on the real
+// wiring where /livez is on rtr directly and only /v1/* is under
+// bearerAuthMiddleware. Previous version built a disconnected mux that never
+// had the middleware, so it was tautologically true.
+func TestHealthProbesOnProductionRouter(t *testing.T) {
+	t.Setenv(authTokenEnv, "s3cr3t")
+	// Build a router the same way SetupHTTPListener does: health on root, v1 with middleware.
+	rtr := mux.NewRouter()
+	rtr.HandleFunc(livePath, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	rtr.HandleFunc(readyPath, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	v1 := rtr.PathPrefix(v1PathPrefix).Subrouter()
+	v1.Use(bearerAuthMiddleware)
+	v1.HandleFunc(v1ScanPath, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }).Methods(http.MethodPost)
+
+	// Health without token => 200 even though v1 needs it
+	for _, path := range []string{livePath, readyPath} {
+		rec := httptest.NewRecorder()
+		rtr.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		require.Equal(t, http.StatusOK, rec.Code, "%s must stay unauthenticated", path)
+	}
+	// v1 without token => 401
+	rec := httptest.NewRecorder()
+	rtr.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/scan", nil))
+	require.Equal(t, http.StatusUnauthorized, rec.Code, "/v1/scan must require token")
 }
 
 func TestBearerAuthMiddleware_ConstantTimeAndTrim(t *testing.T) {

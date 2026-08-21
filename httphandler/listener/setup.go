@@ -181,7 +181,8 @@ func getAuthToken() string {
 
 // bearerAuthMiddleware enforces `Authorization: Bearer <token>` when KS_API_TOKEN is set.
 // When the env var is unset/empty it is a no-op for backward compatibility.
-// It uses subtle.ConstantTimeCompare to avoid timing side-channels.
+// It uses subtle.ConstantTimeCompare to avoid timing side-channels and accepts
+// the Bearer scheme case-insensitively per RFC 7235 (e.g. `bearer` is valid).
 func bearerAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		expected := getAuthToken()
@@ -190,13 +191,13 @@ func bearerAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		hdr := r.Header.Get("Authorization")
-		const prefix = "Bearer "
-		if !strings.HasPrefix(hdr, prefix) {
+		scheme, token, ok := strings.Cut(hdr, " ")
+		if !ok || !strings.EqualFold(scheme, "Bearer") {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="kubescape"`)
 			http.Error(w, `{"error":"missing or invalid Authorization header"}`, http.StatusUnauthorized)
 			return
 		}
-		got := strings.TrimSpace(strings.TrimPrefix(hdr, prefix))
+		got := strings.TrimSpace(token)
 		if got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(expected)) != 1 {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="kubescape"`)
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
