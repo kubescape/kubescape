@@ -5,6 +5,12 @@ on:
 
 jobs:
   pr_agent:
+    # issue_comment always runs with the base repo's token, even for a comment
+    # left on a fork's PR, and this job holds issues/pull-requests write
+    # access. Gate on the commenter's GitHub-computed relationship to the
+    # repo so an untrusted comment can't drive a write-scoped bot or reach
+    # OPENAI_KEY.
+    if: ${{ contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association) }}
     permissions:
       issues: write
       pull-requests: write
