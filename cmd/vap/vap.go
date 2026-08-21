@@ -393,6 +393,12 @@ func isSupportedValidationAction(action admissionv1.ValidationAction) bool {
 // Only equality selectors are accepted: matchLabels is an equality map, so an
 // Exists or In requirement has nowhere to go on the binding. "=" and "==" are
 // distinct operators in apimachinery but mean the same thing, so both pass.
+//
+// Naming one key twice with different values is refused rather than resolved.
+// matchLabels is ANDed, so no object can carry both, and letting the last one
+// win emitted a binding that enforced the policy on a set the caller never
+// asked for. Repeating a key with the same value is the same requirement twice,
+// so it is accepted.
 func parseObjectSelectorLabels(values []string) (map[string]string, error) {
 	matchLabels := make(map[string]string, len(values))
 	for _, value := range values {
@@ -411,6 +417,9 @@ func parseObjectSelectorLabels(values []string) (map[string]string, error) {
 			selected := requirement.Values().List()
 			if len(selected) != 1 {
 				return nil, fmt.Errorf("label selector %s must name exactly one value", value)
+			}
+			if existing, seen := matchLabels[requirement.Key()]; seen && existing != selected[0] {
+				return nil, fmt.Errorf("conflicting values for label %q: %q and %q; a binding requires both at once, so it would match nothing", requirement.Key(), existing, selected[0])
 			}
 			matchLabels[requirement.Key()] = selected[0]
 		}
