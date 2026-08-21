@@ -20,6 +20,10 @@ func (m *MockIKubescape) Scan(_ *cautils.ScanInfo, _ []cautils.PolicyIdentifier)
 	return nil, nil
 }
 
+func (m *MockIKubescape) ScanContext(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return nil, nil
+}
+
 func (m *MockIKubescape) List(_ *metav1.ListPolicies) (*metav1.ListResult, error) {
 	return &metav1.ListResult{}, nil
 }
@@ -53,5 +57,9 @@ func (m *MockIKubescape) Patch(_ *metav1.PatchInfo, _ *cautils.ScanInfo) (bool, 
 }
 
 func (m *MockIKubescape) ScanImage(_ *metav1.ImageScanInfo, _ *cautils.ScanInfo) (bool, error) {
+	return false, nil
+}
+
+func (m *MockIKubescape) ScanImageContext(_ context.Context, _ *metav1.ImageScanInfo, _ *cautils.ScanInfo) (bool, error) {
 	return false, nil
 }

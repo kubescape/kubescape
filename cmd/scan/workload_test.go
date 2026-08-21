@@ -40,6 +40,10 @@ func (m *workloadScanCaptureKubescape) Scan(scanInfo *cautils.ScanInfo, _ []caut
 	return results, nil
 }
 
+func (m *workloadScanCaptureKubescape) ScanContext(_ context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return m.Scan(scanInfo, policyIdentifiers)
+}
+
 func TestSetWorkloadScanInfo(t *testing.T) {
 	tests := []struct {
 		Description  string
@@ -564,6 +568,10 @@ func (m *recordingKubescape) Scan(scanInfo *cautils.ScanInfo, _ []cautils.Policy
 	return rh, nil
 }
 
+func (m *recordingKubescape) ScanContext(_ context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return m.Scan(scanInfo, policyIdentifiers)
+}
+
 func TestGetWorkloadCmd_ApiVersion(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -601,6 +609,59 @@ func TestGetWorkloadCmd_ApiVersion(t *testing.T) {
 			assert.Equal(t, tt.wantApiVersion, mock.captured.ScanObject.GetApiVersion())
 		})
 	}
+}
+
+func TestGetWorkloadCmd_ValidatesImageOptionsAfterEnablingImageScan(t *testing.T) {
+	tests := []struct {
+		name     string
+		scanInfo cautils.ScanInfo
+		wantErr  string
+	}{
+		{
+			name: "invalid platform is rejected before scan",
+			scanInfo: cautils.ScanInfo{
+				ImagePlatform: "win/arm/v7",
+			},
+			wantErr: "invalid image platform",
+		},
+		{
+			name: "unscoped token is rejected before scan",
+			scanInfo: cautils.ScanInfo{
+				RegistryToken: "token",
+			},
+			wantErr: "registry authority",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := tt.scanInfo
+			mock := &recordingKubescape{}
+			cmd := getWorkloadCmd(mock, &scanInfo)
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetArgs([]string{"Deployment/nginx"})
+
+			err := cmd.Execute()
+
+			require.ErrorContains(t, err, tt.wantErr)
+			assert.True(t, scanInfo.ScanImages, "workload setup must enable image scanning before validation")
+			assert.Nil(t, mock.captured, "Kubescape.Scan must not run after invalid image options")
+		})
+	}
+}
+
+func TestGetWorkloadCmd_NormalizesImagePlatformBeforeScan(t *testing.T) {
+	scanInfo := cautils.ScanInfo{ImagePlatform: "aarch64"}
+	mock := &recordingKubescape{}
+	cmd := getWorkloadCmd(mock, &scanInfo)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"Deployment/nginx"})
+
+	require.NoError(t, cmd.Execute())
+	require.NotNil(t, mock.captured)
+	assert.Equal(t, "linux/arm64", mock.captured.ImagePlatform)
 }
 
 func TestGetWorkloadCmd_RejectsLabelSelector(t *testing.T) {

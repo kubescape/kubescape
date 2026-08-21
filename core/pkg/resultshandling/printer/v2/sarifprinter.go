@@ -207,36 +207,85 @@ func resolveFailedPathLocations(opaSessionObj *cautils.OPASessionObj, locationRe
 	return locations
 }
 
-func (sp *SARIFPrinter) printImageScan(scanResults cautils.ImageScanData) error {
-	model, err := models.NewDocument(clio.Identification{}, scanResults.Packages, scanResults.Context,
-		scanResults.Matches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
+func (sp *SARIFPrinter) printImageScan(scanResults []cautils.ImageScanData) error {
+	combinedReport, err := sarif.New(sarif.Version210)
 	if err != nil {
-		return fmt.Errorf("failed to create document: %w", err)
-	}
-
-	// Render into an in-memory buffer rather than sp.writer directly: when no
-	// --output file is given, sp.writer is os.Stdout, and reopening it by
-	// name below to patch the driver name would deadlock if stdout is a pipe
-	// (this process still holds the write end open, so a second reader on
-	// the same pipe never sees EOF). Rendering and patching in memory, then
-	// writing to sp.writer exactly once, avoids that entirely.
-	var rendered bytes.Buffer
-	pres := grypesarif.NewPresenter(models.PresenterConfig{Document: model, SBOM: scanResults.SBOM})
-	if err := pres.Present(&rendered); err != nil {
 		return err
 	}
 
-	var sarifReport sarif.Report
-	if err := json.Unmarshal(rendered.Bytes(), &sarifReport); err != nil {
-		return err
+	for _, scan := range scanResults {
+		model, err := models.NewDocument(clio.Identification{}, scan.Packages, scan.Context,
+			scan.Matches, scan.IgnoredMatches, scan.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
+		if err != nil {
+			return fmt.Errorf("failed to create document: %w", err)
+		}
+
+		// Render into an in-memory buffer rather than sp.writer directly: when no
+		// --output file is given, sp.writer is os.Stdout, and reopening it by
+		// name below to patch the driver name would deadlock if stdout is a pipe
+		// (this process still holds the write end open, so a second reader on
+		// the same pipe never sees EOF). Rendering and patching in memory, then
+		// writing to sp.writer exactly once, avoids that entirely.
+		var rendered bytes.Buffer
+		pres := grypesarif.NewPresenter(models.PresenterConfig{Document: model, SBOM: scan.SBOM})
+		if err := pres.Present(&rendered); err != nil {
+			return err
+		}
+
+		var sarifReport sarif.Report
+		if err := json.Unmarshal(rendered.Bytes(), &sarifReport); err != nil {
+			return err
+		}
+
+		// Inject VEX Statuses
+		if len(scan.VexStatuses) > 0 {
+			logger.L().Info("Injecting VEX statuses into SARIF output")
+			for _, run := range sarifReport.Runs {
+				for _, result := range run.Results {
+					if result.RuleID != nil {
+						// Grype formats RuleIDs as <vuln-id>-<package-name>
+						for vulnID, status := range scan.VexStatuses {
+							if *result.RuleID == vulnID || strings.HasPrefix(*result.RuleID, vulnID+"-") {
+								if status.Status == "not_affected" || status.Status == "fixed" {
+									result.WithLevel("note")
+									if result.Message.Text != nil {
+										msg := fmt.Sprintf("%s\nVEX Status: %s. Justification: %s", *result.Message.Text, status.Status, status.Justification)
+										result.Message.Text = &msg
+									}
+								}
+								break
+							}
+						}
+					}
+				}
+
+				if run.Tool.Driver != nil {
+					for _, rule := range run.Tool.Driver.Rules {
+						for vulnID, status := range scan.VexStatuses {
+							if rule.ID == vulnID || strings.HasPrefix(rule.ID, vulnID+"-") {
+								if status.Status == "not_affected" || status.Status == "fixed" {
+									if rule.Properties != nil {
+										rule.Properties["security-severity"] = "0.0"
+									}
+								}
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Patch driver name to Kubescape and aggregate runs
+		for _, run := range sarifReport.Runs {
+			if run.Tool.Driver != nil {
+				run.Tool.Driver.Name = "Kubescape"
+			}
+			combinedReport.AddRun(run)
+		}
 	}
 
-	// Patch driver name to Kubescape
-	for i := range sarifReport.Runs {
-		sarifReport.Runs[i].Tool.Driver.Name = "Kubescape"
-	}
-
-	updatedSarifReport, err := json.MarshalIndent(sarifReport, "", "  ")
+	updatedSarifReport, err := json.MarshalIndent(combinedReport, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -259,7 +308,7 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 		}
 
 		// image scan
-		if err := sp.printImageScan(imageScanData[0]); err != nil {
+		if err := sp.printImageScan(imageScanData); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
 			return fmt.Errorf("failed to write results in sarif format: %w", err)
 		}

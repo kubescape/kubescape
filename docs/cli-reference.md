@@ -54,7 +54,9 @@ kubescape scan [target] [flags]
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
 | `--scan-images` | Also scan container images for vulnerabilities | `false` |
+| `--image-platform <platform>` | OCI platform for workload image scans, such as `linux/amd64`. Overrides platform inferred from Nodes and hard scheduling constraints | inferred |
 | `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical`. Failed controls with unknown severity (missing base score) are treated as exceeding any threshold | - |
+| `--skip-db-update` | Do not update the vulnerability database before scanning images; uses the locally cached database. Fails if the local database is missing or unusable (run once without this flag to download it). | `false` |
 | `--submit` | Submit results to Kubescape SaaS | `false` |
 | `--use-artifacts-from <path>` | Load artifacts from local directory (offline mode) | - |
 | `--use-from <path>` | Load specific policy from path | - |
@@ -273,6 +275,7 @@ kubescape scan image <image>:<tag> [flags]
 |------|-------------|
 | `--exceptions <path>` | Path to exceptions file |
 | `-p, --password <pass>` | Registry password |
+| `--platform <platform>` | OCI platform to scan, for example `linux/amd64`, `linux/arm64/v8`, or `windows/amd64` |
 | `-u, --username <user>` | Registry username |
 | `--use-default-matchers` | Use default vulnerability matchers | `true` |
 
@@ -287,7 +290,12 @@ kubescape scan image nginx:1.21 -v
 
 # Scan private registry image
 kubescape scan image myregistry.io/myimage:tag -u myuser -p mypass
+
+# Scan the amd64 variant even when Kubescape runs on an ARM machine
+kubescape scan image nginx:1.27 --platform linux/amd64
 ```
+
+See [multi-architecture image scanning](multi-architecture-image-scanning.md) for workload inference, heterogeneous clusters, and CI examples.
 
 ---
 

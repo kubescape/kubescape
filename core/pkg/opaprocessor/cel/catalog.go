@@ -71,3 +71,36 @@ func copyParamKind(paramKind *admissionregistrationv1.ParamKind) *admissionregis
 	c := *paramKind
 	return &c
 }
+
+// MatchConstraintsForControl returns the spec.matchConstraints of the control's
+// policy, nil when the policy declares none. The apiserver intersects a
+// binding's matchResources with these constraints, so they decide whether a
+// narrowed binding can match anything at all. It errors when the control has no
+// policy in the bundle.
+func MatchConstraintsForControl(controlID string) (*admissionregistrationv1.MatchResources, error) {
+	vap, err := lookupVAP(controlID)
+	if err != nil {
+		return nil, err
+	}
+	return vap.matchConstraints.DeepCopy(), nil
+}
+
+// MatchConstraintsForPolicy is the name-keyed variant of
+// MatchConstraintsForControl, covering every policy in the bundle including the
+// cluster-scoped helpers that carry no controlId. found reports whether the name
+// is in the bundle at all, so a caller handed a policy name from outside the
+// library (e.g. cmd/vap --policy) skips the constraint check rather than fails.
+func MatchConstraintsForPolicy(policyName string) (matchConstraints *admissionregistrationv1.MatchResources, found bool, err error) {
+	catalog, err := getVAPCatalog()
+	if err != nil {
+		return nil, false, err
+	}
+	if _, dup := catalog.dupNames[policyName]; dup {
+		return nil, false, fmt.Errorf("policy %q is defined more than once in the VAP bundle; refusing it rather than pick one", policyName)
+	}
+	vap, ok := catalog.byName[policyName]
+	if !ok {
+		return nil, false, nil
+	}
+	return vap.matchConstraints.DeepCopy(), true, nil
+}

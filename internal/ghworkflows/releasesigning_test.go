@@ -80,6 +80,16 @@ var guardedFiles = append([]string{
 	goreleaserConfigName,
 	filepath.Join(".github", "workflows", releaseWorkflowName),
 	filepath.Join("internal", "ghworkflows", "releasesigning_test.go"),
+	// krew_test.go guards these two, and both sit in the same blind spot as the
+	// files above: .krew.yaml matches "**.yaml" and KREW_RELEASE.md matches
+	// "**.md" in 00-pr-scanner.yaml's deny-list.
+	krewTemplateName,
+	krewDocName,
+	filepath.Join("internal", "ghworkflows", "krew_test.go"),
+	// comments_test.go guards comments.yaml's trust gate; comments.yaml sits in
+	// the same "**.yaml" blind spot as everything else in this list.
+	filepath.Join(".github", "workflows", commentsWorkflowName),
+	filepath.Join("internal", "ghworkflows", "comments_test.go"),
 }, installScripts...)
 
 // goreleaserSign is the subset of a `signs` / `docker_signs` entry these tests
@@ -100,8 +110,34 @@ type goreleaserSign struct {
 	Stdin       string   `yaml:"stdin"`
 }
 
+// goreleaserArchive is the subset of an `archives` entry these tests assert on.
+// NameTemplate decides every published asset name, which .krew.yaml has to
+// reproduce by hand - see TestGoreleaserArchivesUseDefaultNaming in krew_test.go.
+type goreleaserArchive struct {
+	ID           string `yaml:"id"`
+	NameTemplate string `yaml:"name_template"`
+}
+
+// goreleaserBuild is the subset of a `builds` entry these tests assert on. The
+// goos/goarch product, less anything under `ignore`, is the set of platforms a
+// release publishes archives for, and Binary is the executable inside each of
+// them. .krew.yaml has to restate both by hand - see
+// TestKrewPlatformsMatchGoreleaserBuildMatrix in krew_test.go.
+type goreleaserBuild struct {
+	ID     string   `yaml:"id"`
+	Binary string   `yaml:"binary"`
+	Goos   []string `yaml:"goos"`
+	Goarch []string `yaml:"goarch"`
+	Ignore []struct {
+		Goos   string `yaml:"goos"`
+		Goarch string `yaml:"goarch"`
+	} `yaml:"ignore"`
+}
+
 type goreleaserConfig struct {
-	Signs    []goreleaserSign `yaml:"signs"`
+	Signs    []goreleaserSign    `yaml:"signs"`
+	Archives []goreleaserArchive `yaml:"archives"`
+	Builds   []goreleaserBuild   `yaml:"builds"`
 	Checksum struct {
 		NameTemplate string `yaml:"name_template"`
 	} `yaml:"checksum"`

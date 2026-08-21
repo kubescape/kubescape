@@ -9,6 +9,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -42,6 +43,12 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	}
 
 	processor := exceptions.NewProcessor()
+
+	// synthesise inline exceptions from resource annotations before filtering
+	// (only when the caller has opted in; disabled by default for cluster scans)
+	if opap.HonorInlineExceptions {
+		opap.Exceptions = append(opap.Exceptions, opap.gatherInlineExceptions()...)
+	}
 	loadedExceptions := append([]armotypes.PostureExceptionPolicy(nil), opap.Exceptions...)
 
 	// filter expired exceptions before applying them
@@ -180,6 +187,129 @@ func filterExpiredExceptions(exceptions []armotypes.PostureExceptionPolicy) []ar
 		}
 	}
 	return valid
+}
+
+const (
+	skipControlsAnnotation = "kubescape.io/skip-controls"
+	skipReasonAnnotation   = "kubescape.io/skip-reason"
+	skipExpiryAnnotation   = "kubescape.io/skip-expiry"
+)
+
+// getAnnotation returns the value of a Kubernetes annotation from a workload
+// metadata object. It prefers the typed accessor when available, and falls back
+// to a manual map inspection for non-workload implementations of IMetadata.
+func getAnnotation(obj workloadinterface.IMetadata, key string) (string, bool) {
+	if w, ok := obj.(interface {
+		GetAnnotation(string) (string, bool)
+	}); ok {
+		return w.GetAnnotation(key)
+	}
+
+	if val, ok := workloadinterface.InspectMap(obj.GetObject(), "metadata", "annotations"); ok {
+		if m, ok := val.(map[string]interface{}); ok {
+			if v, ok := m[key]; ok {
+				if s, ok := v.(string); ok {
+					return s, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+// parseControlList splits a comma-separated control ID list and trims whitespace.
+func parseControlList(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// inlineExceptionFromResource synthesises a PostureExceptionPolicy from the
+// kubescape.io/skip-* annotations on a single resource.
+func inlineExceptionFromResource(obj workloadinterface.IMetadata, clusterName string) []armotypes.PostureExceptionPolicy {
+	raw, ok := getAnnotation(obj, skipControlsAnnotation)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+
+	controls := parseControlList(raw)
+	if len(controls) == 0 {
+		return nil
+	}
+
+	reason, _ := getAnnotation(obj, skipReasonAnnotation)
+	expiry, _ := getAnnotation(obj, skipExpiryAnnotation)
+
+	var expirationDate *time.Time
+	if expiry != "" {
+		t, err := time.Parse(time.RFC3339, expiry)
+		if err != nil {
+			logger.L().Warning("ignoring kubescape.io/skip-expiry annotation: malformed timestamp; inline exception will not be created",
+				helpers.String("resourceID", obj.GetID()),
+				helpers.String("expiry", expiry),
+				helpers.Error(err))
+			return nil
+		}
+		expirationDate = &t
+	}
+
+	policies := make([]armotypes.PosturePolicy, 0, len(controls))
+	for _, c := range controls {
+		policies = append(policies, armotypes.PosturePolicy{ControlID: c})
+	}
+
+	attrs := map[string]string{}
+	if name := obj.GetName(); name != "" {
+		attrs["name"] = name
+	}
+	if kind := obj.GetKind(); kind != "" {
+		attrs["kind"] = kind
+	}
+	if ns := obj.GetNamespace(); ns != "" {
+		attrs["namespace"] = ns
+	}
+	if id := obj.GetID(); id != "" {
+		attrs["resourceID"] = id
+	}
+
+	var reasonPtr *string
+	if reason != "" {
+		reasonPtr = &reason
+	}
+
+	return []armotypes.PostureExceptionPolicy{{
+		PortalBase: armotypes.PortalBase{
+			Name: "inline-" + obj.GetID(),
+		},
+		PolicyType:      "postureExceptionPolicy",
+		PosturePolicies: policies,
+		Resources: []identifiers.PortalDesignator{{
+			DesignatorType: identifiers.DesignatorAttributes,
+			Attributes:     attrs,
+		}},
+		Reason:         reasonPtr,
+		ExpirationDate: expirationDate,
+		Actions:        []armotypes.PostureExceptionPolicyActions{armotypes.Disable},
+	}}
+}
+
+// gatherInlineExceptions scans all collected resources and returns exception
+// policies synthesised from their kubescape.io/skip-* annotations.
+func (opap *OPAProcessor) gatherInlineExceptions() []armotypes.PostureExceptionPolicy {
+	var exceptions []armotypes.PostureExceptionPolicy
+	for _, resource := range opap.AllResources {
+		if resource == nil {
+			continue
+		}
+		exceptions = append(exceptions, inlineExceptionFromResource(resource, opap.clusterName)...)
+	}
+	return exceptions
 }
 
 // matchingControlExceptions returns the exception policies that explicitly target

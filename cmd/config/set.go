@@ -72,6 +72,7 @@ func parseSetArgs(args []string) (*metav1.SetConfig, error) {
 		if key == "" {
 			return nil, fmt.Errorf("invalid arguments: key cannot be empty")
 		}
+		//nolint:gosec // len(args) is checked in switch
 		value = args[1]
 	default:
 		return nil, fmt.Errorf("too many arguments: expected KEY=VALUE or KEY VALUE; supported keys: %s", supported)

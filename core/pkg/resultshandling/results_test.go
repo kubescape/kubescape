@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -912,12 +913,12 @@ func TestHandleResults_RestoresReportAfterSeverityFilter(t *testing.T) {
 					"C-medium": {ControlID: "C-medium", ScoreFactor: 4},
 				},
 			},
-			Results: []resourcesresults.Result{
-				{
-					AssociatedControls: []resourcesresults.ResourceAssociatedControl{
-						{ControlID: "C-low"},
-						{ControlID: "C-high"},
-					},
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			"resource-1": {
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{ControlID: "C-low"},
+					{ControlID: "C-high"},
 				},
 			},
 		},
@@ -936,7 +937,7 @@ func TestHandleResults_RestoresReportAfterSeverityFilter(t *testing.T) {
 	// Both Controls and AssociatedControls must be fully restored so that
 	// any caller reading rh.ScanData after HandleResults sees a consistent report.
 	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 3, "Controls must be unfiltered after HandleResults")
-	assert.Len(t, rh.ScanData.Report.Results[0].AssociatedControls, 2, "AssociatedControls must be unfiltered after HandleResults")
+	assert.Len(t, rh.ScanData.ResourcesResult["resource-1"].AssociatedControls, 2, "AssociatedControls must be unfiltered after HandleResults")
 }
 
 func makeFilteredSession() *cautils.OPASessionObj {
@@ -948,12 +949,12 @@ func makeFilteredSession() *cautils.OPASessionObj {
 					"C-high": {ControlID: "C-high", ScoreFactor: 7},
 				},
 			},
-			Results: []resourcesresults.Result{
-				{
-					AssociatedControls: []resourcesresults.ResourceAssociatedControl{
-						{ControlID: "C-low"},
-						{ControlID: "C-high"},
-					},
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			"resource-1": {
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{ControlID: "C-low"},
+					{ControlID: "C-high"},
 				},
 			},
 		},
@@ -977,7 +978,7 @@ func TestHandleResults_RestoresReportOnPrinterError(t *testing.T) {
 
 	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 2,
 		"Controls must be restored after printer error")
-	assert.Len(t, rh.ScanData.Report.Results[0].AssociatedControls, 2,
+	assert.Len(t, rh.ScanData.ResourcesResult["resource-1"].AssociatedControls, 2,
 		"AssociatedControls must be restored after printer error")
 }
 
@@ -1012,6 +1013,110 @@ func TestHandleResults_RestoresReportOnSubmitError(t *testing.T) {
 
 	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 2,
 		"Controls must be restored after submit error")
-	assert.Len(t, rh.ScanData.Report.Results[0].AssociatedControls, 2,
+	assert.Len(t, rh.ScanData.ResourcesResult["resource-1"].AssociatedControls, 2,
 		"AssociatedControls must be restored after submit error")
+}
+
+// capturingScorePrinter records the summary values it observes while printing,
+// so tests can assert printers see the severity-filtered (recomputed) report.
+type capturingScorePrinter struct {
+	score         float32
+	controlsCount reportsummary.SeverityCounters
+}
+
+func (c *capturingScorePrinter) SetWriter(_ context.Context, _ string) error { return nil }
+func (c *capturingScorePrinter) PrintNextSteps()                             {}
+func (c *capturingScorePrinter) ActionPrint(_ context.Context, data *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
+	if data != nil && data.Report != nil {
+		c.score = data.Report.SummaryDetails.ComplianceScore
+		c.controlsCount = data.Report.SummaryDetails.ControlsSeverityCounters
+	}
+	return nil
+}
+func (c *capturingScorePrinter) Score(score float32) { c.score = score }
+
+// TestHandleResults_PrintsFilteredScoreAndRestoresUnfiltered verifies that a
+// severity filter makes printers (including p.Score(rh.GetComplianceScore()))
+// see the recomputed score over the retained controls, while the post-call
+// GetComplianceScore()/GetRiskScore() used by the exit gate return the
+// original unfiltered values. Restoring the recomputed fields is what keeps
+// --compliance-threshold semantics unchanged when --min-severity is set.
+func TestHandleResults_PrintsFilteredScoreAndRestoresUnfiltered(t *testing.T) {
+	compLow := float32(100)
+	compHigh := float32(20)
+	compCritical := float32(10)
+	sessionObj := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: reportsummary.ControlSummaries{
+					"C-low":      {ControlID: "C-low", ScoreFactor: 1, ComplianceScore: &compLow},
+					"C-high":     {ControlID: "C-high", ScoreFactor: 7, ComplianceScore: &compHigh, StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusFailed}},
+					"C-critical": {ControlID: "C-critical", ScoreFactor: 9, ComplianceScore: &compCritical, StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusFailed}},
+				},
+				ComplianceScore:          43.33, // stale full-set values, restored after HandleResults
+				Score:                    44.44,
+				ControlsSeverityCounters: reportsummary.SeverityCounters{HighSeverityCounter: 9, CriticalSeverityCounter: 1},
+			},
+		},
+	}
+
+	capture := &capturingScorePrinter{}
+	rh := &ResultsHandler{
+		ScanData:    sessionObj,
+		UiPrinter:   &SpyPrinter{},
+		PrinterObjs: []printer.IPrinter{capture},
+	}
+
+	require.NoError(t, rh.HandleResults(context.Background(), &cautils.ScanInfo{MinSeverity: "high"}))
+
+	// Printers ran inside the filtered window: score and counters must reflect
+	// only the retained (high/critical) controls.
+	assert.Equal(t, float32(15), capture.score, "printed score must be recomputed over retained controls")
+	assert.Equal(t, reportsummary.SeverityCounters{HighSeverityCounter: 1, CriticalSeverityCounter: 1}, capture.controlsCount,
+		"printed severity counters must be recomputed over retained controls")
+
+	// After HandleResults returns, the report is restored so the exit gate sees
+	// the true unfiltered score.
+	assert.Equal(t, float32(43.33), rh.GetComplianceScore(), "exit gate must see the unfiltered compliance score")
+	assert.Equal(t, float32(44.44), rh.GetRiskScore(), "exit gate must see the unfiltered risk score")
+	assert.Equal(t, reportsummary.SeverityCounters{HighSeverityCounter: 9, CriticalSeverityCounter: 1}, rh.ScanData.Report.SummaryDetails.ControlsSeverityCounters,
+		"severity counters must be restored after HandleResults")
+	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 3, "Controls must be unfiltered after HandleResults")
+}
+
+func TestResultsHandlerHandleResultsRestoresFrameworkControls(t *testing.T) {
+	scanData := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: map[string]reportsummary.ControlSummary{
+					"C-1": {ControlID: "C-1", ScoreFactor: 2},
+					"C-2": {ControlID: "C-2", ScoreFactor: 9},
+				},
+				StatusCounters: reportsummary.StatusCounters{FailedResources: 3},
+				Status:         apis.StatusFailed,
+				Frameworks: []reportsummary.FrameworkSummary{{
+					Name: "NSA",
+					Controls: map[string]reportsummary.ControlSummary{
+						"C-1": {ControlID: "C-1", ScoreFactor: 2},
+						"C-2": {ControlID: "C-2", ScoreFactor: 9},
+					},
+					StatusCounters: reportsummary.StatusCounters{FailedResources: 3},
+					Status:         apis.StatusFailed,
+				}},
+			},
+		},
+	}
+
+	spy := &SpyPrinter{}
+	rh := NewResultsHandler(&DummyReporter{}, nil, spy)
+	rh.SetData(scanData)
+
+	require.NoError(t, rh.HandleResults(context.Background(), &cautils.ScanInfo{MinSeverity: "high"}))
+
+	assert.Len(t, scanData.Report.SummaryDetails.Controls, 2)
+	assert.Len(t, scanData.Report.SummaryDetails.Frameworks[0].Controls, 2)
+	assert.Equal(t, 3, scanData.Report.SummaryDetails.StatusCounters.Failed())
+	assert.Equal(t, apis.StatusFailed, scanData.Report.SummaryDetails.Status)
+	assert.Equal(t, 3, scanData.Report.SummaryDetails.Frameworks[0].StatusCounters.Failed())
+	assert.Equal(t, apis.StatusFailed, scanData.Report.SummaryDetails.Frameworks[0].Status)
 }

@@ -29,7 +29,7 @@ func TestListFiles(t *testing.T) {
 
 	filesPath := onlineBoutiquePath()
 
-	files, errs := listFiles(filesPath)
+	files, errs := listFiles(filesPath, nil)
 	assert.Equal(t, 0, len(errs))
 	assert.Equal(t, 13, len(files))
 }
@@ -631,18 +631,18 @@ func TestExcludeHelmTemplateFiles_PreservesLexicalOwnershipOfSymlinkedTemplate(t
 }
 
 func TestLoadFiles(t *testing.T) {
-	files, _ := listFiles(onlineBoutiquePath())
+	files, _ := listFiles(onlineBoutiquePath(), nil)
 	_, _, errs := loadFiles("", files)
 	assert.Len(t, errs, 1)
 	assert.Contains(t, errs[0].Error(), "invalid.yaml")
 }
 
 func TestListDirs(t *testing.T) {
-	dirs, _ := listDirs(filepath.Join(onlineBoutiquePath(), "adservice.yaml"))
+	dirs, _ := listDirs(filepath.Join(onlineBoutiquePath(), "adservice.yaml"), nil)
 	assert.Equal(t, 0, len(dirs))
 
 	expectedDirs := []string{filepath.Join("examples", "helm_chart"), filepath.Join("examples", "helm_chart", "templates")}
-	dirs, _ = listDirs(helmChartPath())
+	dirs, _ = listDirs(helmChartPath(), nil)
 	assert.Equal(t, len(expectedDirs), len(dirs))
 	for i := range expectedDirs {
 		assert.Contains(t, dirs[i], expectedDirs[i])
@@ -650,7 +650,7 @@ func TestListDirs(t *testing.T) {
 }
 
 func TestLoadFile(t *testing.T) {
-	files, _ := listFiles(filepath.Join(onlineBoutiquePath(), "adservice.yaml"))
+	files, _ := listFiles(filepath.Join(onlineBoutiquePath(), "adservice.yaml"), nil)
 	assert.Equal(t, 1, len(files))
 
 	_, err := loadFile(files[0])

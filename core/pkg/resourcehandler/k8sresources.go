@@ -20,6 +20,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/metrics"
 	"github.com/kubescape/kubescape/v4/core/pkg/hostsensorutils"
 	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
@@ -92,6 +93,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
 	policyWarnings := make(map[string]struct{})
 	queryableResources, excludedRulesMap := getQueryableResourceMapFromPoliciesWithWarned(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, policyWarnings)
+	filterQueryableResourcesByKind(queryableResources, scanInfo)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
 	recordDiscoveryFailureDependencies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, discoveryFailures, resourceToControl, policyWarnings)
 
@@ -140,6 +142,15 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	// add single resource to k8s resources map (for single resource scan)
 	if !scanInfo.IsDeletedScanObject {
 		addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan, resolver)
+	}
+
+	// Apply kind filter before external resource collection (host, RBAC, cloud)
+	// so that external control-plane data added below is never discarded.
+	// Pass the single-resource-scan target so the filter can fail fast instead
+	// of silently dropping the explicitly requested workload.
+	if err := applyKindFilter(k8sResourcesMap, allResources, scanInfo, sessionObj.SingleResourceScan); err != nil {
+		cautils.StopSpinner()
+		return nil, nil, nil, nil, err
 	}
 
 	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
@@ -203,8 +214,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 }
 
 // collectVAPResources records the cluster's admission enforcement state on the
-// session. Clusters that do not serve the VAP API are skipped without a warning,
-// since having no policies to reconcile is not a scan failure.
+// session. Clusters that do not serve the VAP API, and credentials that may not
+// read it, are skipped without a warning: enforcement state enriches the report
+// and its absence is not a scan failure.
 func (k8sHandler *K8sResourceHandler) collectVAPResources(ctx context.Context, sessionObj *cautils.OPASessionObj) {
 	if k8sHandler.k8s == nil {
 		return
@@ -214,6 +226,8 @@ func (k8sHandler *K8sResourceHandler) collectVAPResources(ctx context.Context, s
 	switch {
 	case errors.Is(err, vapreconcile.ErrUnsupported):
 		logger.L().Debug("skipping VAP reconciliation, cluster does not serve the API")
+	case errors.Is(err, vapreconcile.ErrForbidden):
+		logger.L().Debug("skipping VAP reconciliation, credentials may not list admission policies", helpers.Error(err))
 	case err != nil:
 		logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
 	default:
@@ -265,6 +279,7 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 	resourceToControl := make(map[string][]string)
 	policyWarnings := make(map[string]struct{})
 	queryableResources, excludedRulesMap := getQueryableResourceMapFromPoliciesWithWarned(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, policyWarnings)
+	filterQueryableResourcesByKind(queryableResources, scanInfo)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
 	recordDiscoveryFailureDependencies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, discoveryFailures, resourceToControl, policyWarnings)
 	sessionObj.ResourceToControlsMap = resourceToControl
@@ -441,6 +456,15 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 
 	if !scanInfo.IsDeletedScanObject && sessionObj.SingleResourceScan != nil {
 		addSingleResourceToResourceMaps(resident.K8SResources, allResources, sessionObj.SingleResourceScan, resolver)
+	}
+
+	if err := applyKindFilter(resident.K8SResources, resident.AllResources, scanInfo, sessionObj.SingleResourceScan); err != nil {
+		return err
+	}
+	for _, batch := range namespaceBatches {
+		if err := applyKindFilter(batch.K8SResources, batch.AllResources, scanInfo, nil); err != nil {
+			return err
+		}
 	}
 
 	// Match the eager collector's metric timing: report the complete Kubernetes
@@ -1140,26 +1164,32 @@ func (k8sHandler *K8sResourceHandler) countNamespaces(ctx context.Context, scanI
 	if k8sHandler.k8s == nil || k8sHandler.k8s.KubernetesClient == nil {
 		return 0
 	}
-	nsList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
-	if err != nil {
+
+	include := splitNamespaces(scanInfo.IncludeNamespaces)
+	exclude := splitNamespaces(scanInfo.ExcludedNamespaces)
+	count := 0
+
+	if err := getter.ListWithPagination(ctx, func(opts metav1.ListOptions) (string, error) {
+		chunk, err := k8sHandler.k8s.KubernetesClient.CoreV1().Namespaces().List(ctx, opts)
+		if err != nil {
+			return "", err
+		}
+		for _, ns := range chunk.Items {
+			if len(include) > 0 {
+				if !slices.Contains(include, ns.Name) {
+					continue
+				}
+			} else if slices.Contains(exclude, ns.Name) {
+				continue
+			}
+			count++
+		}
+		return chunk.GetContinue(), nil
+	}); err != nil {
 		logger.L().Ctx(ctx).Debug("failed to list namespaces for progress estimate", helpers.Error(err))
 		return 0
 	}
 
-	include := splitNamespaces(scanInfo.IncludeNamespaces)
-	exclude := splitNamespaces(scanInfo.ExcludedNamespaces)
-
-	count := 0
-	for _, ns := range nsList.Items {
-		if len(include) > 0 {
-			if !slices.Contains(include, ns.Name) {
-				continue
-			}
-		} else if slices.Contains(exclude, ns.Name) {
-			continue
-		}
-		count++
-	}
 	return count
 }
 
@@ -1180,23 +1210,26 @@ func splitNamespaces(s string) []string {
 }
 
 func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber(ctx context.Context) (int, error) {
-	nodesList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	scheduableNodes := v1.NodeList{}
-	if nodesList != nil {
-		for _, node := range nodesList.Items {
-			if len(node.Spec.Taints) == 0 {
-				scheduableNodes.Items = append(scheduableNodes.Items, node)
-			} else {
-				if !isMasterNodeTaints(node.Spec.Taints) {
-					scheduableNodes.Items = append(scheduableNodes.Items, node)
+	schedulableCount := 0
+	err := getter.ListWithPagination(ctx, func(opts metav1.ListOptions) (string, error) {
+		chunk, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, opts)
+		if err != nil {
+			return "", err
+		}
+		if chunk != nil {
+			for _, node := range chunk.Items {
+				if len(node.Spec.Taints) == 0 || !isMasterNodeTaints(node.Spec.Taints) {
+					schedulableCount++
 				}
 			}
+			return chunk.GetContinue(), nil
 		}
-	}
+		return "", nil
+	})
 	if err != nil {
 		return 0, err
 	}
-	return len(scheduableNodes.Items), nil
+	return schedulableCount, nil
 }
 
 // namespacedResourcesToEstimate is the set of common namespaced GVRs used to
@@ -1256,11 +1289,25 @@ func (k8sHandler *K8sResourceHandler) EstimateClusterSize(ctx context.Context, s
 }
 
 func (k8sHandler *K8sResourceHandler) setCloudProvider(ctx context.Context) error {
-	nodeList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	var provider string
+	err := getter.ListWithPagination(ctx, func(opts metav1.ListOptions) (string, error) {
+		chunk, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, opts)
+		if err != nil {
+			return "", err
+		}
+		if chunk != nil {
+			provider = cloudsupport.GetCloudProvider(chunk)
+			if provider != "" {
+				return "", nil
+			}
+			return chunk.GetContinue(), nil
+		}
+		return "", nil
+	})
 	if err != nil {
 		return err
 	}
-	k8sHandler.cloudProvider = cloudsupport.GetCloudProvider(nodeList)
+	k8sHandler.cloudProvider = provider
 	return nil
 }
 

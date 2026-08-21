@@ -26,18 +26,44 @@ import (
 type K8SResources map[string][]string
 type ExternalResources map[string][]string
 
+// VexStatus represents the evaluated VEX status for a vulnerability.
+type VexStatus struct {
+	Status        string
+	Justification string
+}
+
 type ImageScanData struct {
 	Context               pkg.Context
 	IgnoredMatches        []match.IgnoredMatch
 	Image                 string
+	Platform              string
 	Matches               match.Matches
 	Packages              []pkg.Package
 	SBOM                  *sbom.SBOM
 	VulnerabilityProvider vulnerability.Provider
+	VexStatuses           map[string]VexStatus
 	// VulnDBBuilt is the build timestamp of the vulnerability DB used for this
 	// scan. It lets users (especially air-gapped ones) see how fresh the data
 	// was. Nil when the DB status is unknown.
 	VulnDBBuilt *time.Time `json:"vulnDBBuilt,omitempty"`
+}
+
+// Target identifies the exact image variant represented by these results.
+// Existing reports keep their original image spelling when no platform was
+// selected, while multi-architecture scans remain distinguishable everywhere
+// the image name is used as a label or grouping key.
+func (d ImageScanData) Target() string {
+	return ImageScanTarget(d.Image, d.Platform)
+}
+
+// ImageScanTarget formats an image variant for human-facing output and logs.
+// Machine-readable identifiers should keep image and platform in separate
+// fields so adding platform awareness does not change existing fingerprints.
+func ImageScanTarget(image, platform string) string {
+	if platform == "" {
+		return image
+	}
+	return image + " [" + platform + "]"
 }
 
 // SkippedManifest records a manifest file that was discovered but could not
@@ -86,6 +112,7 @@ type OPASessionObj struct {
 	Exceptions            []armotypes.PostureExceptionPolicy // list of exceptions to apply on scan results
 	ExceptionAudit        *ExceptionAudit                    // optional exception usage audit
 	AuditExceptions       bool                               // include exception usage audit in supported outputs
+	HonorInlineExceptions bool                               // honor kubescape.io/skip-* annotations as inline exception policies
 	OmitRawResources      bool                               // omit raw resources from output
 	SingleResourceScan    workloadinterface.IWorkload        // single resource scan
 	TopWorkloadsByScore   []reporthandling.IResource
@@ -96,6 +123,11 @@ type OPASessionObj struct {
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *OPASessionObj {
+	// Inline annotation exceptions are off by default for live-cluster scans and on by
+	// default when scanning local manifests, unless the CLI explicitly sets the flag.
+	if scanInfo.HonorInlineExceptions.Get() == nil {
+		scanInfo.HonorInlineExceptions.SetBool(len(scanInfo.InputPatterns) > 0)
+	}
 	clusterSize := max(estimateClusterSize(k8sResources), 100)
 
 	return &OPASessionObj{
@@ -112,6 +144,7 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 		Metadata:              scanInfoToScanMetadata(ctx, scanInfo, policyIdentifiers),
 		OmitRawResources:      scanInfo.OmitRawResources,
 		AuditExceptions:       scanInfo.AuditExceptions,
+		HonorInlineExceptions: scanInfo.HonorInlineExceptions.GetBool(),
 		TriggeredByCLI:        scanInfo.TriggeredByCLI,
 		LabelsToCopy:          scanInfo.LabelsToCopy,
 	}

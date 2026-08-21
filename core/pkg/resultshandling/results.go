@@ -15,6 +15,7 @@ import (
 	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/reporter"
 	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -135,15 +136,25 @@ func (rh *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
 	return printerv2.FinalizeResults(rh.ScanData)
 }
 
-// reportSnapshot holds the parts of ScanData.Report that ApplySeverityFilters
-// mutates in place, so HandleResults can restore them after printers and
-// submission have run.
+// reportSnapshot holds the parts of ScanData that ApplySeverityFilters mutates
+// in place, so HandleResults can restore them after printers and submission
+// have run.
 type reportSnapshot struct {
 	controls map[string]reportsummary.ControlSummary
-	// Per-result copies of AssociatedControls. The filter uses a [:0] append
-	// which overwrites the backing array, so we must copy the elements before
-	// the filter runs — saving the slice header alone is not enough.
-	associatedControls [][]resourcesresults.ResourceAssociatedControl
+	// Per-resource copies of AssociatedControls, keyed like ScanData.ResourcesResult.
+	associatedControls map[string][]resourcesresults.ResourceAssociatedControl
+	// Derived summary fields recomputed over the filtered control set. They are
+	// restored so the caller (cmd/scan) evaluates exit thresholds against the
+	// true unfiltered score while printers and submission saw the filtered one.
+	complianceScore            float32
+	frameworksComplianceScores []float32
+	frameworksControls         []reportsummary.ControlSummaries
+	controlsSeverityCounters   reportsummary.SeverityCounters
+	resourcesSeverityCounters  reportsummary.SeverityCounters
+	statusCounters             reportsummary.StatusCounters
+	status                     apis.ScanningStatus
+	frameworksStatusCounters   []reportsummary.StatusCounters
+	frameworksStatuses         []apis.ScanningStatus
 }
 
 func snapshotReport(sessionObj *cautils.OPASessionObj) reportSnapshot {
@@ -157,15 +168,37 @@ func snapshotReport(sessionObj *cautils.OPASessionObj) reportSnapshot {
 		controls[k] = v
 	}
 
-	results := sessionObj.Report.Results
-	ac := make([][]resourcesresults.ResourceAssociatedControl, len(results))
-	for i, r := range results {
+	ac := make(map[string][]resourcesresults.ResourceAssociatedControl, len(sessionObj.ResourcesResult))
+	for id, r := range sessionObj.ResourcesResult {
 		copy_ := make([]resourcesresults.ResourceAssociatedControl, len(r.AssociatedControls))
 		copy(copy_, r.AssociatedControls)
-		ac[i] = copy_
+		ac[id] = copy_
 	}
 
-	return reportSnapshot{controls: controls, associatedControls: ac}
+	fwScores := make([]float32, len(sessionObj.Report.SummaryDetails.Frameworks))
+	fwControls := make([]reportsummary.ControlSummaries, len(sessionObj.Report.SummaryDetails.Frameworks))
+	fwStatusCounters := make([]reportsummary.StatusCounters, len(sessionObj.Report.SummaryDetails.Frameworks))
+	fwStatuses := make([]apis.ScanningStatus, len(sessionObj.Report.SummaryDetails.Frameworks))
+	for i := range sessionObj.Report.SummaryDetails.Frameworks {
+		fwScores[i] = sessionObj.Report.SummaryDetails.Frameworks[i].ComplianceScore
+		fwControls[i] = sessionObj.Report.SummaryDetails.Frameworks[i].Controls
+		fwStatusCounters[i] = sessionObj.Report.SummaryDetails.Frameworks[i].StatusCounters
+		fwStatuses[i] = sessionObj.Report.SummaryDetails.Frameworks[i].Status
+	}
+
+	return reportSnapshot{
+		controls:                   controls,
+		associatedControls:         ac,
+		complianceScore:            sessionObj.Report.SummaryDetails.ComplianceScore,
+		frameworksComplianceScores: fwScores,
+		frameworksControls:         fwControls,
+		controlsSeverityCounters:   sessionObj.Report.SummaryDetails.ControlsSeverityCounters,
+		resourcesSeverityCounters:  sessionObj.Report.SummaryDetails.ResourcesSeverityCounters,
+		statusCounters:             sessionObj.Report.SummaryDetails.StatusCounters,
+		status:                     sessionObj.Report.SummaryDetails.Status,
+		frameworksStatusCounters:   fwStatusCounters,
+		frameworksStatuses:         fwStatuses,
+	}
 }
 
 func restoreReport(sessionObj *cautils.OPASessionObj, snap reportSnapshot) {
@@ -173,9 +206,27 @@ func restoreReport(sessionObj *cautils.OPASessionObj, snap reportSnapshot) {
 		return
 	}
 	sessionObj.Report.SummaryDetails.Controls = snap.controls
-	for i := range sessionObj.Report.Results {
-		if i < len(snap.associatedControls) {
-			sessionObj.Report.Results[i].AssociatedControls = snap.associatedControls[i]
+	sessionObj.Report.SummaryDetails.ComplianceScore = snap.complianceScore
+	sessionObj.Report.SummaryDetails.ControlsSeverityCounters = snap.controlsSeverityCounters
+	sessionObj.Report.SummaryDetails.ResourcesSeverityCounters = snap.resourcesSeverityCounters
+	sessionObj.Report.SummaryDetails.StatusCounters = snap.statusCounters
+	sessionObj.Report.SummaryDetails.Status = snap.status
+	for i := range sessionObj.Report.SummaryDetails.Frameworks {
+		if i < len(snap.frameworksComplianceScores) {
+			sessionObj.Report.SummaryDetails.Frameworks[i].ComplianceScore = snap.frameworksComplianceScores[i]
+		}
+		if i < len(snap.frameworksControls) {
+			sessionObj.Report.SummaryDetails.Frameworks[i].Controls = snap.frameworksControls[i]
+		}
+		if i < len(snap.frameworksStatusCounters) {
+			sessionObj.Report.SummaryDetails.Frameworks[i].StatusCounters = snap.frameworksStatusCounters[i]
+			sessionObj.Report.SummaryDetails.Frameworks[i].Status = snap.frameworksStatuses[i]
+		}
+	}
+	for id, ac := range snap.associatedControls {
+		if result, ok := sessionObj.ResourcesResult[id]; ok {
+			result.AssociatedControls = ac
+			sessionObj.ResourcesResult[id] = result
 		}
 	}
 }
@@ -187,16 +238,27 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 		vapreconcile.EnrichSummary(rh.ScanData.Report.SummaryDetails.Controls, index)
 	}
 
-	// Snapshot both Report.SummaryDetails.Controls and every
-	// Results[i].AssociatedControls before applying severity filters.
-	// ApplySeverityFilters mutates both in place; printers and submission see
-	// the narrowed set, but the caller (cmd/scan) evaluates exit thresholds
-	// and coverage counts after HandleResults returns and must see the full
-	// unfiltered report. Other consumers of rh.ScanData (httphandler /v1/results,
+	// Snapshot Report.SummaryDetails.Controls, every
+	// ResourcesResult[id].AssociatedControls, and the derived summary fields
+	// (compliance score, framework compliance scores, severity counters) before
+	// applying severity filters. ApplySeverityFilters mutates all of these in
+	// place; printers and submission see the recomputed set, but the caller
+	// (cmd/scan) evaluates exit thresholds and coverage counts after
+	// HandleResults returns and must see the full unfiltered report.
+	// Other consumers of rh.ScanData (httphandler /v1/results,
 	// StorePostureReportResults) also read the report after this call and
 	// must not receive an internally inconsistent PostureReport.
 	snap := snapshotReport(rh.ScanData)
 	defer restoreReport(rh.ScanData, snap)
+	if scanInfo.MinSeverity != "" || scanInfo.MaxSeverity != "" {
+		// Severity filtering is output-only (see snapshotReport/restoreReport):
+		// printers see the filtered report, but --compliance-threshold,
+		// --severity-threshold, --fail-coverage-below and --fail-on-degraded-config
+		// are evaluated after restoreReport on the full report. Warn once so a
+		// user combining e.g. --min-severity high with html+junit does not
+		// assume the filter also narrows what fails the build.
+		logger.L().Warning("Severity filtering (--min-severity/--max-severity) is output-only and does not affect exit-code thresholds")
+	}
 	ApplySeverityFilters(rh.ScanData, scanInfo.MinSeverity, scanInfo.MaxSeverity)
 
 	// Display scan results in the UI first to give immediate value.

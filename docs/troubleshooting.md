@@ -199,6 +199,24 @@ Ensure your kubeconfig user has sufficient permissions. At minimum, you need rea
 
 ## Image Scanning Issues
 
+### Findings belong to the wrong CPU architecture
+
+**Symptom:** Package versions or CVEs do not match the image that runs in the target cluster, especially when Kubescape runs on an ARM laptop and the workload runs on amd64 Nodes, or the reverse.
+
+**Solution:** Select the OCI platform explicitly for a direct image scan:
+
+```bash
+kubescape scan image registry.example.com/team/app:v2 --platform linux/amd64
+```
+
+For `--scan-images`, Kubescape uses collected Node labels and hard workload scheduling constraints when possible. Offline manifests often lack that context, so provide an override:
+
+```bash
+kubescape scan ./manifests --scan-images --image-platform linux/arm64
+```
+
+The selected platform is shown next to the image in scan summaries. See [multi-architecture image scanning](multi-architecture-image-scanning.md) for the full inference rules.
+
 ### Image not found
 
 **Symptom:** `kubescape scan image` fails to find the image.

@@ -1057,6 +1057,36 @@ func TestConvertToPostureReport_NilCoverageNotAttached(t *testing.T) {
 	assert.Nil(t, result.ScanCoverage)
 }
 
+// TestConvertToPostureReport_VacuousFrameworksOnlyCoverageAttached verifies
+// that a ScanCoverage containing only VacuousFrameworks (no GVR pull
+// failures, no NotEvaluatedControls) is still attached to the serialized
+// report, so a framework that scored 100% purely because its target
+// resource types are absent from the cluster is visible to JSON/API
+// consumers.
+func TestConvertToPostureReport_VacuousFrameworksOnlyCoverageAttached(t *testing.T) {
+	coverage := &cautils.ScanCoverage{
+		VacuousFrameworks: []string{"istio-security"},
+	}
+
+	result := ConvertToPostureReportWithSeverityLabelsAndCoverage(
+		minimalPostureReport(),
+		nil, nil, coverage,
+	)
+	require.NotNil(t, result)
+	require.NotNil(t, result.ScanCoverage, "ScanCoverage must be attached when VacuousFrameworks is non-empty")
+	assert.Equal(t, []string{"istio-security"}, result.ScanCoverage.VacuousFrameworks)
+
+	raw, err := json.Marshal(result)
+	require.NoError(t, err)
+	var decoded struct {
+		ScanCoverage struct {
+			VacuousFrameworks []string `json:"vacuousFrameworks"`
+		} `json:"scanCoverage"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+	assert.Equal(t, []string{"istio-security"}, decoded.ScanCoverage.VacuousFrameworks)
+}
+
 // TestFinalizeResults_SetsGenerationTimeWhenZero is the regression test for
 // kubescape/kubescape#2325: JSON reports were emitting
 // "generationTime":"0001-01-01T00:00:00Z" because nothing on the scan path
@@ -1278,6 +1308,22 @@ func TestFilterBySeverity_EmptyMinSeverityNoOp(t *testing.T) {
 	}
 	FilterBySeverity(report, "")
 	assert.Len(t, report.SummaryDetails.Controls, 1)
+}
+
+func TestBuildMachineImageScanSummaryKeepsStableImageIdentity(t *testing.T) {
+	data := []cautils.ImageScanData{
+		{Image: "example/app:latest", Platform: "linux/amd64"},
+		{Image: "example/app:latest", Platform: "linux/arm64"},
+	}
+
+	machine := buildMachineImageScanSummary(data)
+	display := buildImageScanSummary(data)
+
+	assert.Equal(t, []string{"example/app:latest"}, machine.Images)
+	assert.Equal(t, []string{
+		"example/app:latest [linux/amd64]",
+		"example/app:latest [linux/arm64]",
+	}, display.Images)
 }
 
 func TestBuildImageScanSummary_CarriesVulnDBBuilt(t *testing.T) {

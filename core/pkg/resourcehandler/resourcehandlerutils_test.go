@@ -167,6 +167,25 @@ func TestAddSingleResourceToResourceMaps_KnownApiVersion(t *testing.T) {
 	assert.Contains(t, k8sResources["apps/v1/deployments"], wl.GetID())
 }
 
+func TestFilterRuleMatchesForResource_Wildcard(t *testing.T) {
+	match := []reporthandling.RuleMatchObjects{{
+		APIGroups:   []string{"*"},
+		APIVersions: []string{"*"},
+		Resources:   []string{"*"},
+	}}
+
+	// wildcard should match any concrete resource kind, e.g. a single Pod scan
+	got := filterRuleMatchesForResource("Pod", match)
+	assert.NotNil(t, got)
+	assert.True(t, got["*"])
+
+	// a non-wildcard resource that does not match should still be filtered out
+	nonMatching := []reporthandling.RuleMatchObjects{{
+		Resources: []string{"ConfigMap"},
+	}}
+	assert.Nil(t, filterRuleMatchesForResource("Pod", nonMatching))
+}
+
 func TestAddSingleResourceToResourceMaps_NilWorkload(t *testing.T) {
 	k8sResources := cautils.K8SResources{}
 	allResources := map[string]workloadinterface.IMetadata{}
@@ -208,9 +227,9 @@ func TestGetQueryableResourceMapFromPolicies(t *testing.T) {
 				"apps/v1/pods",
 				"apps/v1/replicasets",
 				"apps/v1beta/pods",
-				"core/v1/secrets",
-				"core/v1/secrets/metadata.name=secret1",
-				"core/v1/secrets/metadata.name=secret2,metadata.namespace=default",
+				"/v1/secrets",
+				"/v1/secrets/metadata.name=secret1",
+				"/v1/secrets/metadata.name=secret2,metadata.namespace=default",
 			},
 		},
 		{
@@ -231,7 +250,7 @@ func TestGetQueryableResourceMapFromPolicies(t *testing.T) {
 			},
 			expectedResourceGroups: []string{
 				"/v1/nodes",
-				"core/v1/secrets/metadata.namespace=ns1",
+				"/v1/secrets/metadata.namespace=ns1",
 				"apps/v1/deployments/metadata.namespace=ns1",
 				"apps/v1/replicasets/metadata.namespace=ns1",
 			},
@@ -248,7 +267,7 @@ func TestGetQueryableResourceMapFromPolicies(t *testing.T) {
 			},
 			expectedExcludedRules: []string{},
 			expectedResourceGroups: []string{
-				"core/v1/secrets/metadata.namespace=ns1",
+				"/v1/secrets/metadata.namespace=ns1",
 				"/v1/namespaces/metadata.name=ns1",
 				"/v1/nodes",
 			},
@@ -265,7 +284,7 @@ func TestGetQueryableResourceMapFromPolicies(t *testing.T) {
 			},
 			expectedExcludedRules: []string{},
 			expectedResourceGroups: []string{
-				"core/v1/secrets",
+				"/v1/secrets",
 				"/v1/namespaces",
 				"apps/v1/deployments",
 				"apps/v1/replicasets",
@@ -337,16 +356,16 @@ func TestUpdateQueryableResourcesMapFromRuleMatchObject(t *testing.T) {
 				"apps/v1beta/pods",
 				"apps/v1/deployments",
 				"apps/v1/replicasets",
-				"core/v1/secrets",
-				"core/v1/secrets/metadata.name=secret1",
-				"core/v1/secrets/metadata.name=secret2,metadata.namespace=default",
+				"/v1/secrets",
+				"/v1/secrets/metadata.name=secret1",
+				"/v1/secrets/metadata.name=secret2,metadata.namespace=default",
 			},
 			expectedK8SResourceGroups: []string{
 				"apps/v1/pods",
 				"apps/v1beta/pods",
 				"apps/v1/deployments",
 				"apps/v1/replicasets",
-				"core/v1/secrets",
+				"/v1/secrets",
 			},
 		},
 		{
@@ -364,14 +383,14 @@ func TestUpdateQueryableResourcesMapFromRuleMatchObject(t *testing.T) {
 			expectedQueryableResourceGroups: []string{
 				"apps/v1/pods",
 				"apps/v1beta/pods",
-				"core/v1/secrets",
-				"core/v1/secrets/metadata.name=secret1",
-				"core/v1/secrets/metadata.name=secret2,metadata.namespace=default",
+				"/v1/secrets",
+				"/v1/secrets/metadata.name=secret1",
+				"/v1/secrets/metadata.name=secret2,metadata.namespace=default",
 			},
 			expectedK8SResourceGroups: []string{
 				"apps/v1/pods",
 				"apps/v1beta/pods",
-				"core/v1/secrets",
+				"/v1/secrets",
 			},
 		},
 		{

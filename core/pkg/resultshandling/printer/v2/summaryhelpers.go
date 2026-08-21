@@ -10,8 +10,9 @@ import (
 )
 
 type WorkloadSummary struct {
-	resource workloadinterface.IMetadata
-	status   apis.ScanningStatus
+	resource            workloadinterface.IMetadata
+	status              apis.ScanningStatus
+	assistedRemediation string
 }
 
 func workloadSummaryFailed(workloadSummary *WorkloadSummary) bool {

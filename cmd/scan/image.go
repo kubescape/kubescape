@@ -26,6 +26,9 @@ var (
   # Scan the 'nginx' image and use exceptions
   %[1]s scan image "nginx" --exceptions exceptions.json
 
+  # Scan the linux/amd64 variant from a multi-architecture image index
+  %[1]s scan image "nginx" --platform linux/amd64
+
 `, cautils.ExecName())
 )
 
@@ -42,7 +45,8 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			defer applyTimeout(scanInfo, ks)()
+			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
+			defer cancel()
 
 			if len(args) != 1 {
 				return fmt.Errorf("the command takes exactly one image name as an argument")
@@ -50,6 +54,9 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 
 			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ImageScanFormats); err != nil {
 				return err
+			}
+			if len(scanInfo.ExcludeControls) > 0 {
+				return fmt.Errorf("--exclude-controls is not supported for image scans: an image scan evaluates vulnerabilities, not posture controls")
 			}
 			if err := shared.ValidateImageScanInfo(scanInfo); err != nil {
 				return err
@@ -74,6 +81,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			imgScanInfo := &metav1.ImageScanInfo{
 				Authority:          credentials.Authority,
 				Image:              imageName,
+				Platform:           scanInfo.ImagePlatform,
 				Username:           credentials.Username,
 				Password:           credentials.Password,
 				Token:              credentials.Token,
@@ -81,7 +89,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 				UseDefaultMatchers: scanInfo.UseDefaultMatchers,
 			}
 
-			exceedsSeverityThreshold, err := ks.ScanImage(imgScanInfo, scanInfo)
+			exceedsSeverityThreshold, err := ks.ScanImageContext(ctx, imgScanInfo, scanInfo)
 			if err != nil {
 				return err
 			}
@@ -96,6 +104,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 
 	cmd.PersistentFlags().StringVarP(&scanInfo.RegistryUsername, "username", "u", "", "Username for registry login")
 	cmd.PersistentFlags().StringVarP(&scanInfo.RegistryPassword, "password", "p", "", "Password for registry login")
+	cmd.PersistentFlags().StringVar(&scanInfo.ImagePlatform, "platform", "", "OCI platform to scan, for example linux/amd64 or linux/arm64/v8")
 
 	return cmd
 }

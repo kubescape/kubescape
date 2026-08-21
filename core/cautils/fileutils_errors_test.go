@@ -147,9 +147,11 @@ func TestListHelmChartDirsReportsMetadataIOErrorsAndKeepsValidCharts(t *testing.
 	brokenChart := filepath.Join(dir, "z-broken")
 	require.NoError(t, os.Mkdir(brokenChart, 0o700))
 	chartFile := filepath.Join(brokenChart, "Chart.yaml")
-	require.NoError(t, os.Symlink("Chart.yaml", chartFile))
+	if err := os.Symlink("Chart.yaml", chartFile); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
 
-	charts, errs := listHelmChartDirs(dir)
+	charts, errs := listHelmChartDirs(dir, nil)
 
 	assert.Contains(t, charts, validChart)
 	require.NotEmpty(t, errs)

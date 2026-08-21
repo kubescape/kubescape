@@ -32,8 +32,13 @@ func TestGetDiffCmd_FormatValidation(t *testing.T) {
 		{"default pretty-printer", "pretty-printer", false},
 		{"json", "json", false},
 		{"yaml", "yaml", false},
+		{"sarif", "sarif", false},
+		{"junit", "junit", false},
+		{"gitlab-sast", "gitlab-sast", false},
+		{"markdown", "markdown", false},
 		{"unsupported format is rejected", "html", true},
-		{"scan-only format is rejected", "sarif", true},
+		{"scan report format is rejected", "pdf", true},
+		{"image sbom format is rejected", "spdx-json", true},
 		{"comma-separated multi-format is rejected", "json,pretty-printer", true},
 	}
 
@@ -128,6 +133,8 @@ func TestGetDiffCmd_HelpExplainsEvidenceComparison(t *testing.T) {
 	assert.Contains(t, help, `"evidence" or "control"`)
 	assert.Contains(t, help, "failed rules and paths are compared")
 	assert.Contains(t, help, "--granularity control")
+	assert.Contains(t, help, `--format string`)
+	assert.Contains(t, help, `"pretty-printer", "json", "yaml", "sarif", "junit", "gitlab-sast", "markdown"`)
 }
 
 func TestGetDiffCmd_FailOnNewAndSeverity(t *testing.T) {

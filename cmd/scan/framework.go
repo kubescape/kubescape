@@ -66,12 +66,16 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			defer applyTimeout(scanInfo, ks)()
+			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
+			defer cancel()
 
 			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ScanFormats); err != nil {
 				return err
 			}
 			if err := validateFrameworkScanInfo(scanInfo); err != nil {
+				return err
+			}
+			if err := validateCombinedImageScanFlags(scanInfo); err != nil {
 				return err
 			}
 			scanInfo.FrameworkScan = true
@@ -107,12 +111,12 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 
 			policyIdentifiers := cautils.BuildPolicyIdentifiers(frameworks, apisv1.KindFramework)
 
-			results, err := ks.Scan(scanInfo, policyIdentifiers)
+			results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 			if err != nil {
 				return err
 			}
 
-			if err = results.HandleResults(ks.Context(), scanInfo); err != nil {
+			if err = results.HandleResults(ctx, scanInfo); err != nil {
 				return err
 			}
 
@@ -134,7 +138,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
 				return err
 			}
-			return nil
+			return enforceBaselineDrift(ctx, results, scanInfo)
 		},
 	}
 
@@ -158,12 +162,21 @@ func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCou
 		{reporthandlingapis.SeverityCriticalString, severityCounters.NumberOfCriticalSeverity},
 	}
 
+	normalizedTarget := strings.TrimSpace(targetSeverity)
+
 	targetSeverityIdx := 0
+	found := false
 	for idx, description := range getFailedResourcesFuncsBySeverity {
-		if strings.EqualFold(description.SeverityName, targetSeverity) {
+		if strings.EqualFold(description.SeverityName, normalizedTarget) {
 			targetSeverityIdx = idx
+			found = true
 			break
 		}
+	}
+	if !found {
+		// Defensive: ValidateSeverity passed but severity not in ordered slice.
+		// Return explicit error instead of silently falling back to lowest index.
+		return false, fmt.Errorf("%w: %q", shared.ErrUnknownSeverity, targetSeverity)
 	}
 
 	for _, description := range getFailedResourcesFuncsBySeverity[targetSeverityIdx:] {

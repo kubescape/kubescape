@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
 const (
@@ -95,7 +96,7 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 
 		switch pp.viewType {
 		case cautils.ControlViewType:
-			pp.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, sortedControlIDs)
+			pp.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, opaSessionObj.ResourcesResult, sortedControlIDs)
 		case cautils.ResourceViewType:
 			if pp.verboseMode {
 				pp.resourceTable(opaSessionObj)
@@ -198,12 +199,12 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error
 func (pp *PrettyPrinter) Score(_ float32) {
 }
 
-func (pp *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, sortedControlIDs [][]string) {
+func (pp *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, resourcesResult map[string]resourcesresults.Result, sortedControlIDs [][]string) {
 	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
 		for _, c := range sortedControlID {
 			controlSummary := controls.GetControl(reportsummary.EControlCriteriaID, c) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
 			pp.printTitle(controlSummary)
-			pp.printResources(controlSummary, allResources)
+			pp.printResources(controlSummary, allResources, resourcesResult)
 			pp.printSummary(controlSummary)
 		}
 	}
@@ -242,9 +243,12 @@ func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.ICon
 	}
 }
 
-func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata) {
+func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata, resourcesResult map[string]resourcesresults.Result) {
 
 	workloadsSummary := listResultSummary(controlSummary, allResources)
+	if pp.verboseMode {
+		attachAssistedRemediation(workloadsSummary, controlSummary.GetID(), resourcesResult, pp.showSecrets)
+	}
 
 	failedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummaryFailed)
 	skippedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummarySkipped)
@@ -268,6 +272,31 @@ func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSum
 
 }
 
+func attachAssistedRemediation(workloads []WorkloadSummary, controlID string, resourcesResult map[string]resourcesresults.Result, showSecrets bool) {
+	for i := range workloads {
+		if workloads[i].status != apis.StatusFailed {
+			continue
+		}
+		result, ok := resourcesResult[workloads[i].resource.GetID()]
+		if !ok {
+			continue
+		}
+		for j := range result.AssociatedControls {
+			if result.AssociatedControls[j].GetID() != controlID {
+				continue
+			}
+			if !result.AssociatedControls[j].GetStatus(nil).IsFailed() {
+				continue
+			}
+			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&result.AssociatedControls[j], workloads[i].resource, showSecrets)
+			if len(paths) > 0 {
+				workloads[i].assistedRemediation = strings.Join(paths, ", ")
+			}
+			break
+		}
+	}
+}
+
 func (pp *PrettyPrinter) printGroupedResources(workloads map[string][]WorkloadSummary) {
 	indent := "  "
 	for title, rsc := range workloads {
@@ -284,7 +313,11 @@ func (pp *PrettyPrinter) printGroupedResource(indent string, title string, rsc [
 	resources := []string{}
 	for r := range rsc {
 		relatedObjectsStr := generateRelatedObjectsStr(rsc[r])
-		resources = append(resources, fmt.Sprintf("%s%s - %s %s", indent, rsc[r].resource.GetKind(), rsc[r].resource.GetName(), relatedObjectsStr))
+		line := fmt.Sprintf("%s%s - %s %s", indent, rsc[r].resource.GetKind(), rsc[r].resource.GetName(), relatedObjectsStr)
+		if rsc[r].assistedRemediation != "" {
+			line = strings.TrimRight(line, " ") + " " + rsc[r].assistedRemediation
+		}
+		resources = append(resources, line)
 	}
 
 	sort.Strings(resources)
@@ -331,7 +364,7 @@ func isPrintSeparatorType(scanType cautils.ScanTypes) bool {
 // failures caused controls to be skipped or partial data was collected.
 // Nothing is printed on a clean scan.
 func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
-	if len(coverage.FailedGVRPulls) == 0 && len(coverage.NotEvaluatedControls) == 0 && len(coverage.PartialGVRPulls) == 0 && len(coverage.PolicyDegradations) == 0 {
+	if len(coverage.FailedGVRPulls) == 0 && len(coverage.NotEvaluatedControls) == 0 && len(coverage.PartialGVRPulls) == 0 && len(coverage.PolicyDegradations) == 0 && len(coverage.VacuousFrameworks) == 0 {
 		return
 	}
 
@@ -373,6 +406,13 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 			fmt.Fprintf(pp.writer, "  • %s: %s\n", d.Component, d.Reason)
 		}
 		fmt.Fprintf(pp.writer, "\nControls depending on these inputs were evaluated against default configuration, which may not reflect your environment.\n")
+	}
+
+	if len(coverage.VacuousFrameworks) > 0 {
+		fmt.Fprintf(pp.writer, "\nThe following frameworks scored 100%% because no matching resources were found in this cluster:\n")
+		for _, f := range coverage.VacuousFrameworks {
+			fmt.Fprintf(pp.writer, "  • %s\n", f)
+		}
 	}
 
 	if len(coverage.FailedGVRPulls) > 0 || len(coverage.PartialGVRPulls) > 0 {

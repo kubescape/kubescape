@@ -1135,3 +1135,30 @@ func TestPrintImageScan_WriterIsNonSeekablePipe(t *testing.T) {
 	require.Len(t, report.Runs, 1)
 	assert.Equal(t, "Kubescape", report.Runs[0].Tool.Driver.Name, "driver name must still be patched when writing to a pipe")
 }
+
+func TestPrintImageScan_MultipleImagesAggregatesRuns(t *testing.T) {
+	tmp, err := os.CreateTemp("", "sarif-multiimage-*.sarif")
+	require.NoError(t, err)
+	defer func() { _ = os.Remove(tmp.Name()) }()
+
+	sp := NewSARIFPrinter()
+	sp.writer = tmp
+
+	scan1 := buildSeverityExceptionImageScanData()
+	scan2 := buildSeverityExceptionImageScanData()
+
+	err = sp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{scan1, scan2})
+	require.NoError(t, err)
+	require.NoError(t, tmp.Close())
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 2, "SARIF report must contain a run for each scanned image")
+	for i, run := range report.Runs {
+		require.NotNil(t, run.Tool.Driver)
+		assert.Equal(t, "Kubescape", run.Tool.Driver.Name, "driver name must be Kubescape for run %d", i)
+	}
+}

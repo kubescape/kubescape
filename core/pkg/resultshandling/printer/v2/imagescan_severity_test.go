@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,13 +67,19 @@ func makeSeverityRegressionMatch(id string) match.Match {
 // severityExceptions are configured.
 func buildSeverityExceptionImageScanData() cautils.ImageScanData {
 	keptMatch := makeSeverityRegressionMatch("CVE-KEPT")
+	fixedMatch := makeSeverityRegressionMatch("CVE-FIXED")
+	notAffectedMatch := makeSeverityRegressionMatch("CVE-NOT-AFFECTED")
+	unchangedMatch := makeSeverityRegressionMatch("CVE-UNCHANGED")
 
-	filteredMatches := match.NewMatches(keptMatch)
+	filteredMatches := match.NewMatches(keptMatch, fixedMatch, notAffectedMatch, unchangedMatch)
 
 	provider := severityRegressionVulnerabilityProvider{
 		metadataByID: map[string]*vulnerability.Metadata{
-			"CVE-KEPT":     {ID: "CVE-KEPT", Severity: "High"},
-			"CVE-EXCEPTED": {ID: "CVE-EXCEPTED", Severity: "Low"},
+			"CVE-KEPT":         {ID: "CVE-KEPT", Severity: "High"},
+			"CVE-FIXED":        {ID: "CVE-FIXED", Severity: "High"},
+			"CVE-NOT-AFFECTED": {ID: "CVE-NOT-AFFECTED", Severity: "High"},
+			"CVE-UNCHANGED":    {ID: "CVE-UNCHANGED", Severity: "High"},
+			"CVE-EXCEPTED":     {ID: "CVE-EXCEPTED", Severity: "Low"},
 		},
 	}
 
@@ -86,6 +93,9 @@ func buildSeverityExceptionImageScanData() cautils.ImageScanData {
 		},
 		Packages: []grypepkg.Package{
 			{ID: grypepkg.ID("pkg-CVE-KEPT"), Name: "pkg-CVE-KEPT", Version: "1.0.0"},
+			{ID: grypepkg.ID("pkg-CVE-FIXED"), Name: "pkg-CVE-FIXED", Version: "1.0.0"},
+			{ID: grypepkg.ID("pkg-CVE-NOT-AFFECTED"), Name: "pkg-CVE-NOT-AFFECTED", Version: "1.0.0"},
+			{ID: grypepkg.ID("pkg-CVE-UNCHANGED"), Name: "pkg-CVE-UNCHANGED", Version: "1.0.0"},
 			{ID: grypepkg.ID("pkg-CVE-EXCEPTED"), Name: "pkg-CVE-EXCEPTED", Version: "1.0.0"},
 		},
 		Matches:               filteredMatches,
@@ -140,6 +150,21 @@ func TestJsonPrinter_ImageScan_HonorsSeverityExceptions(t *testing.T) {
 func TestSARIFPrinter_ImageScan_HonorsSeverityExceptions(t *testing.T) {
 	imageScanData := buildSeverityExceptionImageScanData()
 
+	imageScanData.VexStatuses = map[string]cautils.VexStatus{
+		"CVE-FIXED": {
+			Status:        "fixed",
+			Justification: "component_not_present",
+		},
+		"CVE-NOT-AFFECTED": {
+			Status:        "not_affected",
+			Justification: "vulnerable_code_not_in_execute_path",
+		},
+		"CVE-UNCHANGED": {
+			Status:        "affected",
+			Justification: "",
+		},
+	}
+
 	tmp, err := os.CreateTemp("", "sarif-severity-exception-*.sarif")
 	require.NoError(t, err)
 	defer func() {
@@ -150,7 +175,7 @@ func TestSARIFPrinter_ImageScan_HonorsSeverityExceptions(t *testing.T) {
 	sp := NewSARIFPrinter()
 	sp.writer = tmp
 
-	require.NoError(t, sp.printImageScan(imageScanData))
+	require.NoError(t, sp.printImageScan([]cautils.ImageScanData{imageScanData}))
 
 	raw, err := os.ReadFile(tmp.Name())
 	require.NoError(t, err)
@@ -163,6 +188,55 @@ func TestSARIFPrinter_ImageScan_HonorsSeverityExceptions(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &report))
 	require.NotEmpty(t, report.Runs)
 	assert.Equal(t, "Kubescape", report.Runs[0].Tool.Driver.Name)
+
+	run := report.Runs[0]
+	foundFixed, foundNotAffected, foundUnchanged := false, false, false
+
+	for _, result := range run.Results {
+		if result.RuleID != nil {
+			if strings.HasPrefix(*result.RuleID, "CVE-FIXED") {
+				foundFixed = true
+				assert.Equal(t, "note", *result.Level)
+				require.NotNil(t, result.Message.Text)
+				assert.Contains(t, *result.Message.Text, "VEX Status: fixed. Justification: component_not_present")
+			} else if strings.HasPrefix(*result.RuleID, "CVE-NOT-AFFECTED") {
+				foundNotAffected = true
+				assert.Equal(t, "note", *result.Level)
+				require.NotNil(t, result.Message.Text)
+				assert.Contains(t, *result.Message.Text, "VEX Status: not_affected. Justification: vulnerable_code_not_in_execute_path")
+			} else if strings.HasPrefix(*result.RuleID, "CVE-UNCHANGED") {
+				foundUnchanged = true
+				if result.Level != nil {
+					assert.NotEqual(t, "note", *result.Level)
+				}
+				if result.Message.Text != nil {
+					assert.NotContains(t, *result.Message.Text, "VEX Status:")
+				}
+			} else if !strings.HasPrefix(*result.RuleID, "CVE-KEPT") {
+				t.Logf("Found unexpected RuleID: %s", *result.RuleID)
+			}
+		} else {
+			t.Log("Found result with nil RuleID")
+		}
+	}
+
+	assert.True(t, foundFixed, "CVE-FIXED missing")
+	assert.True(t, foundNotAffected, "CVE-NOT-AFFECTED missing")
+	assert.True(t, foundUnchanged, "CVE-UNCHANGED missing")
+
+	if run.Tool.Driver != nil {
+		for _, rule := range run.Tool.Driver.Rules {
+			if strings.HasPrefix(rule.ID, "CVE-FIXED") || strings.HasPrefix(rule.ID, "CVE-NOT-AFFECTED") {
+				require.NotNil(t, rule.Properties)
+				assert.Equal(t, "0.0", rule.Properties["security-severity"])
+			} else if strings.HasPrefix(rule.ID, "CVE-UNCHANGED") {
+				// shouldn't be modified
+				if rule.Properties != nil {
+					assert.NotEqual(t, "0.0", rule.Properties["security-severity"])
+				}
+			}
+		}
+	}
 }
 
 const imageSARIFStdoutHelperEnv = "KUBESCAPE_TEST_IMAGE_SARIF_STDOUT_HELPER"
@@ -176,7 +250,7 @@ func TestSARIFPrinter_ImageScan_StdoutPipeCompletes(t *testing.T) {
 	if os.Getenv(imageSARIFStdoutHelperEnv) == "1" {
 		sp := NewSARIFPrinter()
 		sp.SetWriter(context.Background(), "")
-		if err := sp.printImageScan(buildSeverityExceptionImageScanData()); err != nil {
+		if err := sp.printImageScan([]cautils.ImageScanData{buildSeverityExceptionImageScanData()}); err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

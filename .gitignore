@@ -31,3 +31,4 @@ customFilename.txt
 *.orig
 *.rej
 
+*_dump.txt

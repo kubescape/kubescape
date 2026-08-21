@@ -2,8 +2,10 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -26,6 +28,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v4/core/pkg/scancache"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/resources"
@@ -211,8 +214,27 @@ func collectPolicies(ctx context.Context, clusterName string, policyIdentifiers 
 	return policyHandler.CollectPolicies(ctx, policyIdentifiers, scanInfo, getters)
 }
 
+// Scan runs a scan using ks.Context() as the operation's context. It is a
+// compatibility wrapper around ScanContext for callers that have not
+// migrated to passing their own context explicitly; see ScanContext's
+// documentation for why that matters when a *Kubescape instance is reused
+// or scan operations can overlap.
 func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
-	ctxInit, spanInit := otel.Tracer("").Start(ks.Context(), "initialization")
+	return ks.ScanContext(ks.Context(), scanInfo, policyIdentifiers)
+}
+
+// ScanContext runs a scan bound to the given ctx for its complete execution
+// (initialization, policy/resource collection, OPA evaluation, image
+// scanning, prioritization, and teardown all observe this same ctx), rather
+// than re-reading ks.Context() at each stage. Callers that need a deadline
+// or cancellation should derive ctx themselves (e.g. context.WithTimeout)
+// and pass it in directly, instead of calling ks.SetContext beforehand:
+// mutating the shared *Kubescape's context is not safe if the instance is
+// reused or another operation could run concurrently against it, since a
+// mid-operation ks.Context() read could observe a different deadline than
+// the one that started the operation, or an already-restored/canceled one.
+func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
 	logger.L().Start("Kubescape scanner initializing...")
 
 	// ===================== Initialization =====================
@@ -237,7 +259,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 	// remove host scanner components
 	defer func() {
 		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
-			logger.L().Ctx(ks.Context()).StopError("Failed to tear down host scanner", helpers.Error(err))
+			logger.L().Ctx(ctx).StopError("Failed to tear down host scanner", helpers.Error(err))
 		}
 	}()
 
@@ -350,7 +372,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 	}
 
 	// OPA context for both streaming and non-streaming paths
-	ctxOpa, spanOpa := otel.Tracer("").Start(ks.Context(), "opa testing")
+	ctxOpa, spanOpa := otel.Tracer("").Start(ctx, "opa testing")
 	defer spanOpa.End()
 
 	if enableStreaming {
@@ -371,6 +393,14 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 		}
 		reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, exceptionRecorder)
 		reportResults.ControlTimeout = scanInfo.ControlTimeout
+		if cacheStore := loadIncrementalCacheIfEnabled(ctxOpa, scanInfo, scanData); cacheStore != nil {
+			reportResults.SetIncrementalCache(cacheStore)
+			defer func() {
+				if flushErr := cacheStore.Flush(); flushErr != nil {
+					logger.L().Ctx(ctxOpa).Warning("failed to persist incremental scan cache", helpers.Error(flushErr))
+				}
+			}()
+		}
 		if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
 			logger.L().Ctx(ctxOpa).Error("failed to process rules", helpers.Error(err))
 			// The eager listener finalizes its accumulated results before returning
@@ -391,7 +421,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 	if scanInfo.PrintAttackTree || isPrioritizationScanType(scanInfo.ScanType) {
 		_, spanPrioritization := otel.Tracer("").Start(ctxOpa, "prioritization")
 		if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
-			logger.L().Ctx(ks.Context()).Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
 		} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 			return resultsHandling, fmt.Errorf("%w", err)
 		}
@@ -402,7 +432,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 	}
 
 	if scanInfo.ScanImages {
-		resultsHandling.SetScanError(scanImages(scanInfo.ScanType, scanData, ks.Context(), resultsHandling, scanInfo, interfaces.k8s))
+		resultsHandling.SetScanError(scanImages(scanInfo.ScanType, scanData, ctx, resultsHandling, scanInfo, interfaces.k8s))
 	}
 	// ========================= results handling =====================
 	resultsHandling.SetData(scanData)
@@ -473,17 +503,21 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 	if scanInfo != nil {
 		scanningContext = scanInfo.GetScanningContext()
 	}
-	imagesToScan, imageToCreds, containerErrors := collectImageScanTargets(scanType, scanData, ctx, scanningContext, k8sApi)
+	platformOverride := ""
+	if scanInfo != nil {
+		platformOverride = scanInfo.ImagePlatform
+	}
+	imagesToScan, imageToCreds, containerErrors := collectImageScanTargets(scanType, scanData, ctx, scanningContext, k8sApi, platformOverride)
 	if imagesToScan.IsEmpty() {
 		return errors.Join(containerErrors...)
 	}
 
-	distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL)
+	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, scanInfo.SkipDBUpdate)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Invalid Grype database URL '%s': %v", scanInfo.ListingURL, err))
 		return errors.Join(append(containerErrors, fmt.Errorf("invalid Grype database URL %q: %w", scanInfo.ListingURL, err))...)
 	}
-	svc, err := imagescan.NewScanServiceWithMatchers(distCfg, installCfg, scanInfo.UseDefaultMatchers)
+	svc, err := imagescan.NewScanServiceWithMatchersAndSources(distCfg, installCfg, scanInfo.UseDefaultMatchers, nil, shouldUpdate)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to initialize image scanner: %s", err))
 		return errors.Join(append(containerErrors, fmt.Errorf("failed to initialize image scanner: %w", err))...)
@@ -491,7 +525,8 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 	defer svc.Close()
 	defaultCreds := registryCredentialsFromScanInfo(scanInfo)
 	var jobs []ImageScanJob
-	for img := range imagesToScan.Iter() {
+	for target := range imagesToScan.Iter() {
+		img := target.Image
 		credsList := []imagescan.RegistryCredentials{}
 		if resolvedCreds, ok := imageToCreds[img]; ok {
 			sort.Slice(resolvedCreds, func(i, j int) bool {
@@ -514,11 +549,19 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		}
 
 		jobs = append(jobs, ImageScanJob{
-			Image:               img,
-			RegistryCredentials: credsList,
-			RegistryMapping:     scanInfo.RegistryMapping,
+			Image:                   img,
+			Platform:                target.Platform,
+			SkipUnavailablePlatform: target.SkipUnavailable,
+			RegistryCredentials:     credsList,
+			RegistryMapping:         scanInfo.RegistryMapping,
 		})
 	}
+	sort.Slice(jobs, func(i, j int) bool {
+		if jobs[i].Image != jobs[j].Image {
+			return jobs[i].Image < jobs[j].Image
+		}
+		return jobs[i].Platform < jobs[j].Platform
+	})
 
 	concurrency := scanInfo.ImageScanConcurrency
 	if concurrency <= 0 {
@@ -537,15 +580,27 @@ func scanImageJobs(ctx context.Context, svc imageScanService, concurrency int, j
 	logger.L().Info(fmt.Sprintf("Scanning %d images concurrently with %d workers...", len(jobs), concurrency))
 	orchestrator := NewImageScanOrchestrator(svc, concurrency)
 	results := orchestrator.ScanImages(ctx, jobs)
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Image != results[j].Image {
+			return results[i].Image < results[j].Image
+		}
+		return results[i].Platform < results[j].Platform
+	})
 
 	for _, res := range results {
+		target := imageScanTarget(res.Image, res.Platform)
+		if res.SkipReason != nil {
+			logger.L().Warning("Skipping unavailable inferred image platform",
+				helpers.String("image", target), helpers.Error(res.SkipReason))
+			continue
+		}
 		if res.Error != nil {
-			logger.L().Error("failed to scan", helpers.String("image", res.Image), helpers.Error(res.Error))
+			logger.L().Error("failed to scan", helpers.String("image", target), helpers.Error(res.Error))
 			continue
 		}
 		if res.ScanData != nil {
 			resultsHandling.ImageScanData = append(resultsHandling.ImageScanData, *res.ScanData)
-			logger.L().Success("Done scanning", helpers.String("image", res.Image))
+			logger.L().Success("Done scanning", helpers.String("image", target))
 		}
 	}
 	if agg := orchestrator.GetErrorAggregator(); agg != nil && agg.HasErrors() {
@@ -555,10 +610,11 @@ func scanImageJobs(ctx context.Context, svc imageScanService, concurrency int, j
 	return nil
 }
 
-func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, scanningContext cautils.ScanningContext, k8sApi *k8sinterface.KubernetesApi) (mapset.Set[string], map[string][]imagescan.RegistryCredentials, []error) {
-	imagesToScan := mapset.NewSet[string]()
+func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, scanningContext cautils.ScanningContext, k8sApi *k8sinterface.KubernetesApi, platformOverride string) (mapset.Set[ImageScanTarget], map[string][]imagescan.RegistryCredentials, []error) {
+	imagesToScan := mapset.NewSet[ImageScanTarget]()
 	imageToCreds := make(map[string][]imagescan.RegistryCredentials)
 	var containerErrors []error
+	nodePlatforms := buildNodePlatformIndex(scanData.AllResources)
 	if scanningContext != cautils.ContextCluster {
 		// imagePullSecrets belong to a live cluster target. A manifest or repository
 		// may contain the same Secret name as the current kube context, but that must
@@ -572,8 +628,31 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 			logger.L().Error("failed to collect image scan targets", helpers.Error(containerErr))
 			containerErrors = append(containerErrors, containerErr)
 		}
+		platforms := []string{platformOverride}
+		skipUnavailable := false
+		if platformOverride == "" {
+			selection := selectWorkloadPlatforms(wl, nodePlatforms)
+			platforms = selection.platforms
+			skipUnavailable = selection.skipUnavailable
+			if len(platforms) == 0 {
+				if selection.constrained {
+					containerErrors = append(containerErrors, fmt.Errorf(
+						"no observed image platform satisfies the scheduling constraints for %s", wl.GetID()))
+					return
+				}
+				platforms = []string{""}
+			}
+		}
 		for _, image := range images {
-			imagesToScan.Add(image)
+			if skipUnavailable {
+				logger.L().Info("Scanning image across inferred platform variants",
+					helpers.String("image", image), helpers.Int("platforms", len(platforms)))
+			}
+			for _, platform := range platforms {
+				addImageScanTarget(imagesToScan, ImageScanTarget{
+					Image: image, Platform: platform, SkipUnavailable: skipUnavailable,
+				})
+			}
 			if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, image); ok {
 				found := false
 				for _, c := range imageToCreds[image] {
@@ -600,6 +679,20 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 	return imagesToScan, imageToCreds, containerErrors
 }
 
+func addImageScanTarget(targets mapset.Set[ImageScanTarget], target ImageScanTarget) {
+	for _, existing := range targets.ToSlice() {
+		if existing.Image != target.Image || existing.Platform != target.Platform {
+			continue
+		}
+		if !existing.SkipUnavailable || target.SkipUnavailable {
+			return
+		}
+		targets.Remove(existing)
+		break
+	}
+	targets.Add(target)
+}
+
 func registryCredentialsFromScanInfo(scanInfo *cautils.ScanInfo) imagescan.RegistryCredentials {
 	if scanInfo == nil {
 		return imagescan.RegistryCredentials{}
@@ -616,7 +709,7 @@ func scanSingleImage(ctx context.Context, img string, svc imageScanService, resu
 
 	scanResults, err := scanWithRegistryMapping(
 		ctx, svc, img, []imagescan.RegistryCredentials{creds},
-		registryMapping, nil, nil,
+		registryMapping, nil, nil, "",
 	)
 	if err != nil {
 		return err
@@ -663,6 +756,45 @@ func estimateClusterSize(resourceHandler resourcehandler.IResourceHandler, ctx c
 // decision was made from; the OPA processor uses it as its frozen resource
 // count because sessionObj.AllResources is populated asynchronously by the
 // producer goroutine.
+// loadIncrementalCacheIfEnabled builds the version key from scanData's
+// resolved policies (plus local controls-config bytes when set) and loads
+// the incremental scan cache. Returns (nil, nil) when --incremental is off,
+// so callers can call SetIncrementalCache unconditionally with the result
+// only when non-nil.
+func loadIncrementalCacheIfEnabled(ctx context.Context, scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj) *scancache.Store {
+	if !scanInfo.Incremental {
+		return nil
+	}
+	policyBytes, marshalErr := json.Marshal(scanData.Policies)
+	if marshalErr != nil {
+		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
+		return nil
+	}
+	allPoliciesBytes, marshalErr := json.Marshal(scanData.AllPolicies)
+	if marshalErr != nil {
+		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
+		return nil
+	}
+	regoInputBytes, marshalErr := json.Marshal(scanData.RegoInputData)
+	if marshalErr != nil {
+		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
+		return nil
+	}
+	versionParts := [][]byte{[]byte(scanInfo.ControlsVersion), policyBytes, allPoliciesBytes, regoInputBytes}
+	if scanInfo.ControlsInputs != "" {
+		if localConfig, readErr := os.ReadFile(scanInfo.ControlsInputs); readErr == nil {
+			versionParts = append(versionParts, localConfig)
+		}
+	}
+	cacheVersion := scancache.VersionKey(versionParts...)
+	cacheStore, cacheErr := scancache.Load(getter.DefaultLocalStore, cacheVersion)
+	if cacheErr != nil {
+		logger.L().Ctx(ctx).Warning("failed to load incremental scan cache, proceeding without it", helpers.Error(cacheErr))
+		return nil
+	}
+	return cacheStore
+}
+
 func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandler resourcehandler.IResourceHandler, scanData *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, clusterName string, excludedNamespaces string, includeNamespaces string, enableRegoPrint bool, controlTimeout time.Duration, estimatedClusterSize int) error {
 	// The eager collector initializes this metadata before constructing the OPA
 	// processor. Do the same here because the cloud provider is a policy input,
@@ -682,6 +814,14 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	}
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, clusterName, excludedNamespaces, includeNamespaces, enableRegoPrint, exceptionRecorder)
 	reportResults.ControlTimeout = controlTimeout
+	if cacheStore := loadIncrementalCacheIfEnabled(ctx, scanInfo, scanData); cacheStore != nil {
+		reportResults.SetIncrementalCache(cacheStore)
+		defer func() {
+			if flushErr := cacheStore.Flush(); flushErr != nil {
+				logger.L().Ctx(ctx).Warning("failed to persist incremental scan cache", helpers.Error(flushErr))
+			}
+		}()
+	}
 
 	// Stream resources in batches
 	streamCtx, cancel := context.WithCancel(ctx)
@@ -759,7 +899,13 @@ func printPreflightResult(result *resourcehandler.PreflightResult) {
 	}
 
 	for _, c := range denied {
-		fmt.Printf("DENIED  list %s\n", c.GVR)
+		// The API server's reason is what tells a user which binding to fix, so
+		// print it when there is one; RBAC often answers with none.
+		if c.Reason != "" {
+			fmt.Printf("DENIED  list %s: %s\n", c.GVR, c.Reason)
+		} else {
+			fmt.Printf("DENIED  list %s\n", c.GVR)
+		}
 		if len(c.AffectedControls) > 0 {
 			fmt.Printf("        -> %s will not evaluate\n", strings.Join(c.AffectedControls, ", "))
 		}
