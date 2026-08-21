@@ -320,8 +320,37 @@ func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]
 	}
 
 	if downloadInfo.Identifier == "" {
-		// TODO - support
-		return nil, fmt.Errorf("missing control ID")
+		// if control ID not specified - download all controls
+		controls, err := g.ListControls()
+		if err != nil {
+			return nil, err
+		}
+		var files []string
+		for _, listEntry := range controls {
+			controlID := strings.Split(listEntry, "|")[0]
+			control, err := g.GetControl(controlID)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("failed to download control", helpers.String("ID", controlID), helpers.Error(err))
+				continue
+			}
+			if control == nil {
+				logger.L().Ctx(ctx).Warning("failed to download control - received empty objects", helpers.String("ID", controlID))
+				continue
+			}
+			filename, err := getter.PolicyCacheFilename(controlID)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("skipping control with invalid ID", helpers.String("ID", controlID), helpers.Error(err))
+				continue
+			}
+			downloadTo := filepath.Join(downloadInfo.Path, filename)
+			err = getter.SaveInFile(control, downloadTo)
+			if err != nil {
+				return nil, err
+			}
+			logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("ID", controlID), helpers.String("path", downloadTo))
+			files = append(files, downloadTo)
+		}
+		return files, nil
 	}
 	if downloadInfo.FileName == "" {
 		filename, err := getter.PolicyCacheFilename(downloadInfo.Identifier)
