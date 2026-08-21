@@ -899,7 +899,13 @@ func printPreflightResult(result *resourcehandler.PreflightResult) {
 	}
 
 	for _, c := range denied {
-		fmt.Printf("DENIED  list %s\n", c.GVR)
+		// The API server's reason is what tells a user which binding to fix, so
+		// print it when there is one; RBAC often answers with none.
+		if c.Reason != "" {
+			fmt.Printf("DENIED  list %s: %s\n", c.GVR, c.Reason)
+		} else {
+			fmt.Printf("DENIED  list %s\n", c.GVR)
+		}
 		if len(c.AffectedControls) > 0 {
 			fmt.Printf("        -> %s will not evaluate\n", strings.Join(c.AffectedControls, ", "))
 		}
