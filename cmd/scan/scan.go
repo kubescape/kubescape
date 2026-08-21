@@ -10,6 +10,8 @@ import (
 
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/backend/pkg/versioncheck"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
@@ -67,13 +69,6 @@ var scanCmdExamples = fmt.Sprintf(`
 
 func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
-	// otelShutdown flushes/releases the OTel providers registered by
-	// telemetry.Setup in PersistentPreRunE below. It defaults to a no-op so
-	// PersistentPostRunE can call it unconditionally, including on scan
-	// invocations where --otel-endpoint/OTEL_EXPORTER_OTLP_ENDPOINT was never
-	// set (the common case) or where PersistentPreRunE returned early on a
-	// validation error before telemetry.Setup ran.
-	var otelShutdown telemetry.ShutdownFunc = func(context.Context) error { return nil }
 
 	// scanCmd represents the scan command
 	scanCmd := &cobra.Command{
@@ -105,28 +100,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			}
 			captureKubeconfigSelection(cmd, &scanInfo)
 			applyRegistryCredentialsFromEnv(cmd, &scanInfo)
-
-			// OTel export (issue #3402): only touches the OTel SDK at all
-			// when an endpoint was actually requested, so a bare `scan` run
-			// never pays for it.
-			if endpoint := telemetry.ResolveEndpoint(scanInfo.OtelEndpoint); endpoint != "" {
-				shutdown, err := telemetry.Setup(cmd.Context(), endpoint, versioncheck.BuildNumber)
-				if err != nil {
-					return fmt.Errorf("failed to set up --otel-endpoint %q: %w", endpoint, err)
-				}
-				otelShutdown = shutdown
-			}
 			return nil
-		},
-		// PersistentPostRunE flushes OTel spans/metrics after the scan (and
-		// result printing) has finished. cobra.EnableTraverseRunHooks (set in
-		// cmd/root.go) makes this fire for every scan subcommand
-		// (scan, scan control, scan framework, scan workload, scan image),
-		// matching PersistentPreRunE's traversal above.
-		PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
-			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			return otelShutdown(shutdownCtx)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := shared.ValidateCommonScanFlags(cmd, &scanInfo, shared.ScanFormats); err != nil {
@@ -295,13 +269,60 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineSeverityThreshold, "baseline-severity-threshold", "", "With --baseline, only count new failures at or above this severity when using --baseline-fail-on-new.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineGranularity, "baseline-granularity", "evidence", "With --baseline, comparison unit: evidence or control.")
 
-	scanCmd.AddCommand(getControlCmd(ks, &scanInfo))
-	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))
-	scanCmd.AddCommand(getWorkloadCmd(ks, &scanInfo))
+	scanCmd.RunE = withTelemetry(&scanInfo, scanCmd.RunE)
 
-	scanCmd.AddCommand(getImageCmd(ks, &scanInfo))
+	controlCmd := getControlCmd(ks, &scanInfo)
+	controlCmd.RunE = withTelemetry(&scanInfo, controlCmd.RunE)
+	scanCmd.AddCommand(controlCmd)
+
+	frameworkCmd := getFrameworkCmd(ks, &scanInfo)
+	frameworkCmd.RunE = withTelemetry(&scanInfo, frameworkCmd.RunE)
+	scanCmd.AddCommand(frameworkCmd)
+
+	workloadCmd := getWorkloadCmd(ks, &scanInfo)
+	workloadCmd.RunE = withTelemetry(&scanInfo, workloadCmd.RunE)
+	scanCmd.AddCommand(workloadCmd)
+
+	imageCmd := getImageCmd(ks, &scanInfo)
+	imageCmd.RunE = withTelemetry(&scanInfo, imageCmd.RunE)
+	scanCmd.AddCommand(imageCmd)
 
 	return scanCmd
+}
+
+// withTelemetry wraps a RunE with OTel setup/shutdown, replacing the earlier
+// PersistentPreRunE/PersistentPostRunE pair (issue #3402). Cobra skips
+// PostRunE when RunE returns an error, which silently dropped telemetry for
+// the run you'd most want it for: a failed one (see PR #3447 review). A
+// defer around the wrapped RunE call runs regardless of its outcome instead.
+//
+// A shutdown failure (e.g. a transient collector hiccup) is only logged, not
+// returned: it must never flip an otherwise-successful scan's exit code.
+// getFrameworkCmd(ks, &scanInfo).RunE(cmd, args), called directly from
+// scanCmd's own RunE for the non-security-view bare-scan path, builds a
+// fresh, unwrapped *cobra.Command each call -- distinct from the wrapped
+// instance registered via AddCommand above -- so it is not double-wrapped.
+func withTelemetry(scanInfo *cautils.ScanInfo, runE func(cmd *cobra.Command, args []string) error) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		shutdown := telemetry.ShutdownFunc(func(context.Context) error { return nil })
+		if endpoint := telemetry.ResolveEndpoint(scanInfo.OtelEndpoint); endpoint != "" {
+			s, err := telemetry.Setup(cmd.Context(), endpoint, versioncheck.BuildNumber)
+			if err != nil {
+				return fmt.Errorf("failed to set up --otel-endpoint %q: %w", endpoint, err)
+			}
+			shutdown = s
+		}
+
+		runErr := runE(cmd, args)
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if shutdownErr := shutdown(shutdownCtx); shutdownErr != nil {
+			logger.L().Ctx(cmd.Context()).Warning("failed to flush OTel telemetry", helpers.Error(shutdownErr))
+		}
+
+		return runErr
+	}
 }
 
 func validateCombinedImageScanFlags(scanInfo *cautils.ScanInfo) error {
@@ -361,7 +382,6 @@ func deriveTimeoutContext(scanInfo *cautils.ScanInfo, ks meta.IKubescape) (conte
 	}
 	return context.WithTimeout(ks.Context(), scanInfo.ScanTimeout)
 }
-
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
 	ctx, cancel := deriveTimeoutContext(&scanInfo, ks)

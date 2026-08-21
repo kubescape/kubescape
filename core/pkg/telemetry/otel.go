@@ -16,6 +16,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -27,7 +29,36 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"google.golang.org/grpc/credentials"
 )
+
+// EnvInsecure is the standard OTel SDK env var for opting into plaintext
+// gRPC (see https://opentelemetry.io/docs/specs/otel/protocol/exporter/).
+const EnvInsecure = "OTEL_EXPORTER_OTLP_INSECURE"
+
+// resolveInsecure strips an explicit http(s):// scheme from endpoint if
+// present and reports whether the connection should be plaintext.
+//
+// A bare host:port (no scheme) -- the flag's own example, and the #3402
+// acceptance criterion `--otel-endpoint localhost:4317` -- defaults to
+// insecure so scanning against a local collector with no TLS keeps working
+// out of the box; set OTEL_EXPORTER_OTLP_INSECURE=false to require TLS for a
+// bare endpoint instead.
+func resolveInsecure(endpoint string) (cleanEndpoint string, insecure bool) {
+	switch {
+	case strings.HasPrefix(endpoint, "https://"):
+		return strings.TrimPrefix(endpoint, "https://"), false
+	case strings.HasPrefix(endpoint, "http://"):
+		return strings.TrimPrefix(endpoint, "http://"), true
+	}
+	if v, ok := os.LookupEnv(EnvInsecure); ok {
+		parsed, err := strconv.ParseBool(v)
+		if err == nil {
+			return endpoint, parsed
+		}
+	}
+	return endpoint, true
+}
 
 // EnvEndpoint is the standard OTel SDK env var kubescape falls back to when
 // --otel-endpoint is not set.
@@ -77,18 +108,25 @@ func Setup(ctx context.Context, endpoint, version string) (ShutdownFunc, error) 
 		return noopShutdown, fmt.Errorf("build otel resource: %w", err)
 	}
 
-	traceExporter, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint(endpoint),
-		otlptracegrpc.WithInsecure(),
-	)
+	cleanEndpoint, insecure := resolveInsecure(endpoint)
+
+	traceOpts := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(cleanEndpoint)}
+	metricOpts := []otlpmetricgrpc.Option{otlpmetricgrpc.WithEndpoint(cleanEndpoint)}
+	if insecure {
+		traceOpts = append(traceOpts, otlptracegrpc.WithInsecure())
+		metricOpts = append(metricOpts, otlpmetricgrpc.WithInsecure())
+	} else {
+		creds := credentials.NewTLS(nil) // nil config: system root CA pool
+		traceOpts = append(traceOpts, otlptracegrpc.WithTLSCredentials(creds))
+		metricOpts = append(metricOpts, otlpmetricgrpc.WithTLSCredentials(creds))
+	}
+
+	traceExporter, err := otlptracegrpc.New(ctx, traceOpts...)
 	if err != nil {
 		return noopShutdown, fmt.Errorf("create otlp trace exporter for %q: %w", endpoint, err)
 	}
 
-	metricExporter, err := otlpmetricgrpc.New(ctx,
-		otlpmetricgrpc.WithEndpoint(endpoint),
-		otlpmetricgrpc.WithInsecure(),
-	)
+	metricExporter, err := otlpmetricgrpc.New(ctx, metricOpts...)
 	if err != nil {
 		return noopShutdown, fmt.Errorf("create otlp metric exporter for %q: %w", endpoint, err)
 	}

@@ -86,8 +86,12 @@ func (op *OtelPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		logger.L().Ctx(ctx).Warning("failed to record otel scan duration", helpers.Error(err))
 	}
 
-	switch {
-	case opaSessionObj != nil:
+	// Not mutually exclusive: a cluster/repo scan run with --scan-images
+	// populates both opaSessionObj and imageScanData, and both must be
+	// recorded (a prior switch/case here recorded only whichever matched
+	// first, silently dropping image CVE metrics on that combined path).
+	recordedSomething := false
+	if opaSessionObj != nil {
 		m := &Metrics{}
 		m.setComplianceScores(&opaSessionObj.Report.SummaryDetails)
 
@@ -97,11 +101,15 @@ func (op *OtelPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		if err := op.recordControlCounts(ctx, meter, m); err != nil {
 			logger.L().Ctx(ctx).Warning("failed to record otel control counts", helpers.Error(err))
 		}
-	case len(imageScanData) > 0:
+		recordedSomething = true
+	}
+	if len(imageScanData) > 0 {
 		if err := op.recordImageMetrics(ctx, meter, imageScanData); err != nil {
 			logger.L().Ctx(ctx).Warning("failed to record otel image metrics", helpers.Error(err))
 		}
-	default:
+		recordedSomething = true
+	}
+	if !recordedSomething {
 		return fmt.Errorf("failed to print results, missing data")
 	}
 
