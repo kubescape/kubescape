@@ -367,7 +367,7 @@ require (
 	github.com/knqyf263/go-deb-version v0.0.0-20241115132648-6f4aee6ccd23 // indirect
 	github.com/knqyf263/go-rpm-version v0.0.0-20220614171824-631e686d1075 // indirect
 	github.com/kubescape/go-git-url v0.0.31 // indirect
-	github.com/kubescape/kubescape/v3 v3.0.4 // indirect
+	github.com/kubescape/kubescape/v4 v3.0.4 // indirect
 	github.com/kubescape/rbac-utils v0.0.21 // indirect
 	github.com/kubescape/regolibrary v1.0.317-0.20240320124840-1d84ac7186ea // indirect
 	github.com/kubescape/regolibrary/v2 v2.0.1 // indirect
