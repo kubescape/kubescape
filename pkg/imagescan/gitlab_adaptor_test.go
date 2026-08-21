@@ -131,6 +131,26 @@ func TestGitlabAdaptor_Login(t *testing.T) {
 	}
 }
 
+func TestGitlabAPIWrapperRejectsOversizedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("123456789"))
+	}))
+	defer server.Close()
+
+	wrapper := &gitlabAPIWrapper{
+		baseURL:         server.URL,
+		token:           "token",
+		httpClient:      server.Client(),
+		maxResponseSize: 8,
+	}
+
+	body, err := wrapper.DoGraphQL(context.Background(), "query { currentUser { username } }", nil)
+
+	assert.Nil(t, body)
+	assert.ErrorContains(t, err, "exceeds the 8-byte limit")
+}
+
 func TestSplitGitLabProjectPath(t *testing.T) {
 	tests := []struct {
 		repo             string

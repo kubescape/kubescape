@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -21,9 +20,10 @@ type GitlabAPI interface {
 }
 
 type gitlabAPIWrapper struct {
-	baseURL    string
-	token      string
-	httpClient *http.Client
+	baseURL         string
+	token           string
+	httpClient      *http.Client
+	maxResponseSize int64
 }
 
 func (w *gitlabAPIWrapper) DoGraphQL(ctx context.Context, query string, variables map[string]interface{}) ([]byte, error) {
@@ -50,7 +50,7 @@ func (w *gitlabAPIWrapper) DoGraphQL(ctx context.Context, query string, variable
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := readRegistryAPIResponse(resp.Body, w.maxResponseSize)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -92,9 +92,10 @@ func (a *GitlabAdaptor) Login(ctx context.Context, registry string, credentials 
 	baseURL := fmt.Sprintf("%s://%s", scheme, host)
 
 	wrapper := &gitlabAPIWrapper{
-		baseURL:    baseURL,
-		token:      credentials.Token,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		baseURL:         baseURL,
+		token:           credentials.Token,
+		httpClient:      &http.Client{Timeout: 15 * time.Second},
+		maxResponseSize: maxRegistryAPIResponseBytes,
 	}
 
 	data, err := wrapper.DoGraphQL(ctx, `query { currentUser { username } }`, nil)
