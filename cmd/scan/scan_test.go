@@ -132,7 +132,7 @@ func TestExceedsSeverity(t *testing.T) {
 				t.Errorf("got: %v, want: %v", got, want)
 			}
 
-			if err != testCase.Error {
+			if !errors.Is(err, testCase.Error) {
 				t.Errorf(`got error "%v", want "%v"`, err, testCase.Error)
 			}
 		})

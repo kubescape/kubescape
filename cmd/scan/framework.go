@@ -162,12 +162,21 @@ func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCou
 		{reporthandlingapis.SeverityCriticalString, severityCounters.NumberOfCriticalSeverity},
 	}
 
+	normalizedTarget := strings.TrimSpace(targetSeverity)
+
 	targetSeverityIdx := 0
+	found := false
 	for idx, description := range getFailedResourcesFuncsBySeverity {
-		if strings.EqualFold(description.SeverityName, targetSeverity) {
+		if strings.EqualFold(description.SeverityName, normalizedTarget) {
 			targetSeverityIdx = idx
+			found = true
 			break
 		}
+	}
+	if !found {
+		// Defensive: ValidateSeverity passed but severity not in ordered slice.
+		// Return explicit error instead of silently falling back to lowest index.
+		return false, fmt.Errorf("%w: %q", shared.ErrUnknownSeverity, targetSeverity)
 	}
 
 	for _, description := range getFailedResourcesFuncsBySeverity[targetSeverityIdx:] {
