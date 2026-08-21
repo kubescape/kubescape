@@ -1400,3 +1400,128 @@ func TestCreatePolicyBindingCmdResourceRuleScope(t *testing.T) {
 		assert.Equal(t, []string{"cronjobs"}, binding.Spec.MatchResources.ResourceRules[0].Resources)
 	})
 }
+
+func TestParseObjectSelectorLabels(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  []string
+		want   map[string]string
+		errMsg string
+	}{
+		{name: "no labels", input: nil, want: map[string]string{}},
+		{name: "single equality", input: []string{"app=nginx"}, want: map[string]string{"app": "nginx"}},
+		{name: "double equals means the same thing", input: []string{"app==nginx"}, want: map[string]string{"app": "nginx"}},
+		{name: "whitespace around the operator is trimmed", input: []string{"app = nginx"}, want: map[string]string{"app": "nginx"}},
+		{name: "empty value is a real requirement", input: []string{"app="}, want: map[string]string{"app": ""}},
+		{name: "several keys", input: []string{"app=nginx", "env=prod"}, want: map[string]string{"app": "nginx", "env": "prod"}},
+		{name: "several requirements in one value", input: []string{"app=nginx,env=prod"}, want: map[string]string{"app": "nginx", "env": "prod"}},
+		{name: "repeated key with the same value", input: []string{"app=nginx", "app=nginx"}, want: map[string]string{"app": "nginx"}},
+		{name: "repeated key across operator spellings", input: []string{"app=nginx", "app==nginx"}, want: map[string]string{"app": "nginx"}},
+
+		{name: "repeated key with conflicting values", input: []string{"app=nginx", "app=redis"}, errMsg: "conflicting values for label"},
+		{name: "conflicting values in one value", input: []string{"app=nginx,app=redis"}, errMsg: "conflicting values for label"},
+		{name: "trailing comma leaves a blank entry", input: []string{"app=nginx", ""}, want: map[string]string{"app": "nginx"}},
+		{name: "leading comma leaves a blank entry", input: []string{"", "app=nginx"}, want: map[string]string{"app": "nginx"}},
+		{name: "only a blank entry", input: []string{""}, errMsg: "selects nothing"},
+		{name: "only whitespace", input: []string{"   "}, errMsg: "selects nothing"},
+		{name: "only blank entries", input: []string{"", ""}, errMsg: "selects nothing"},
+		{name: "set-based operator", input: []string{"app in (nginx)"}, errMsg: "only equality label selectors"},
+		{name: "exists operator", input: []string{"app"}, errMsg: "only equality label selectors"},
+		{name: "not-equal operator", input: []string{"app!=nginx"}, errMsg: "only equality label selectors"},
+		{name: "unparsable selector", input: []string{"app=val=extra"}, errMsg: "invalid label selector"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseObjectSelectorLabels(tt.input)
+			if tt.errMsg != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errMsg)
+				assert.Nil(t, got)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestCreatePolicyBindingObjectSelector(t *testing.T) {
+	// A conflicting pair used to collapse onto the last value, emitting a
+	// binding that enforced the policy on a set the caller never asked for.
+	t.Run("conflicting labels emit no binding", func(t *testing.T) {
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, []string{"app=nginx", "app=redis"}, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "conflicting values for label")
+		assert.Empty(t, out)
+	})
+
+	// Blank values used to emit an empty objectSelector, which matches every
+	// object the policy matches rather than narrowing anything.
+	t.Run("labels that select nothing emit no binding", func(t *testing.T) {
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, []string{""}, nil)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "selects nothing")
+		assert.Empty(t, out)
+	})
+
+	t.Run("repeated label with the same value binds once", func(t *testing.T) {
+		out, err := createPolicyBinding("my-binding", "c-0016", []admissionv1.ValidationAction{admissionv1.Deny}, "", nil, []string{"app=nginx", "app=nginx"}, nil)
+		require.NoError(t, err)
+
+		var binding admissionv1.ValidatingAdmissionPolicyBinding
+		require.NoError(t, yaml.Unmarshal([]byte(out), &binding))
+		require.NotNil(t, binding.Spec.MatchResources.ObjectSelector)
+		assert.Equal(t, map[string]string{"app": "nginx"}, binding.Spec.MatchResources.ObjectSelector.MatchLabels)
+	})
+}
+
+func TestCreatePolicyBindingCmdLabelSelector(t *testing.T) {
+	t.Run("conflicting labels fail the command", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--label", "app=nginx", "--label", "app=redis"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "conflicting values for label")
+	})
+
+	// The flag is comma-split, so a lone comma is how a caller reaches a slice
+	// of nothing but blanks.
+	t.Run("labels that select nothing fail the command", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--label", ","})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "selects nothing")
+	})
+
+	t.Run("a trailing comma still binds the labels given", func(t *testing.T) {
+		outputFile := filepath.Join(t.TempDir(), "binding.yaml")
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--label", "app=nginx,", "--output", outputFile})
+		require.NoError(t, cmd.Execute())
+
+		content, err := os.ReadFile(outputFile)
+		require.NoError(t, err)
+
+		var binding admissionv1.ValidatingAdmissionPolicyBinding
+		require.NoError(t, yaml.Unmarshal(content, &binding))
+		require.NotNil(t, binding.Spec.MatchResources.ObjectSelector)
+		assert.Equal(t, map[string]string{"app": "nginx"}, binding.Spec.MatchResources.ObjectSelector.MatchLabels)
+	})
+
+	t.Run("labels are written to the binding", func(t *testing.T) {
+		outputFile := filepath.Join(t.TempDir(), "binding.yaml")
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "c-0016", "--label", "app=nginx", "--label", "env=prod", "--output", outputFile})
+		require.NoError(t, cmd.Execute())
+
+		content, err := os.ReadFile(outputFile)
+		require.NoError(t, err)
+
+		var binding admissionv1.ValidatingAdmissionPolicyBinding
+		require.NoError(t, yaml.Unmarshal(content, &binding))
+		require.NotNil(t, binding.Spec.MatchResources.ObjectSelector)
+		assert.Equal(t, map[string]string{"app": "nginx", "env": "prod"}, binding.Spec.MatchResources.ObjectSelector.MatchLabels)
+	})
+}
