@@ -11,6 +11,7 @@ import (
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -46,7 +47,7 @@ func Test_getCloudMetadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
-			got := newCloudMetadata(tt.provider)
+			got := newCloudMetadata(tt.provider, "")
 			if got == nil {
 				t.Errorf("getCloudMetadata() = %v, want %v", got, tt.want.Provider())
 				return
@@ -56,6 +57,22 @@ func Test_getCloudMetadata(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSetCloudMetadataUsesSessionContext(t *testing.T) {
+	k8sinterface.SetClusterContextName("context-b")
+	t.Cleanup(func() { k8sinterface.SetClusterContextName("") })
+	session := &cautils.OPASessionObj{
+		Metadata: &reportv2.Metadata{ContextMetadata: reportv2.ContextMetadata{
+			ClusterContextMetadata: &reportv2.ClusterMetadata{ContextName: "context-a"},
+		}},
+		Report: &reportv2.PostureReport{},
+	}
+
+	setCloudMetadata(session, "aks")
+
+	require.NotNil(t, session.Metadata.ContextMetadata.ClusterContextMetadata.CloudMetadata)
+	assert.Equal(t, "context-a", session.Metadata.ContextMetadata.ClusterContextMetadata.CloudMetadata.GetFullName())
 }
 
 // vapTestScheme returns a runtime.Scheme with VAP and VAPBinding list types
