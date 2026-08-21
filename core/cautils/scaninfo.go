@@ -134,6 +134,7 @@ type ScanInfo struct {
 	CustomClusterName         string                       // Set the custom name of the cluster
 	ExcludedNamespaces        string                       // used for host scanner namespace
 	IncludeNamespaces         string                       //
+	ExcludeControls           []string                     // control IDs, or legacy CIS section numbers, to leave out of the scan (case-insensitive)
 	IncludeKinds              string                       // comma-separated Kubernetes kinds to include (case-insensitive, Kind name only); e.g. "Deployment,DaemonSet"
 	ExcludeKinds              string                       // comma-separated Kubernetes kinds to exclude (case-insensitive, Kind name only); e.g. "Job,CronJob"
 	LabelSelector             string                       // filter collected resources by Kubernetes label selector (e.g. "app=nginx,env!=dev")
@@ -171,6 +172,7 @@ type ScanInfo struct {
 	ScanTimeout               time.Duration // Maximum duration for the entire scan (0 = no timeout)
 	ControlTimeout            time.Duration // Maximum duration for evaluating a single control (0 = no timeout)
 	EnableStreaming           bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
+	Incremental               bool          // Cache verdicts per resource, keyed by resource hash + controls-config version, and skip re-evaluating unchanged resources
 	DryRun                    bool          // Check RBAC access for the resources the scan would need, without collecting or evaluating anything
 	ChartPath                 string
 	FilePath                  string

@@ -12,10 +12,12 @@ import (
 )
 
 // GVRCheck is the preflight result for a single resource type the scan needs to list.
-// Errored is set when the SelfSubjectAccessReview request itself could not be
-// completed (timeout, API failure, ...), which is not the same as the API
-// server answering that "list" is denied — Allowed stays false in both cases,
-// so callers must check Errored before treating a check as a real denial.
+// Errored is set when no access decision was obtained: the
+// SelfSubjectAccessReview request itself could not be completed (timeout, API
+// failure, ...), or the API server answered without one of its authorizers
+// reaching a verdict. Neither is the same as the API server answering that
+// "list" is denied — Allowed stays false in all of these cases, so callers must
+// check Errored before treating a check as a real denial.
 type GVRCheck struct {
 	GVR              string
 	Allowed          bool
@@ -44,8 +46,8 @@ func (r *PreflightResult) Denied() []GVRCheck {
 	return denied
 }
 
-// Errored returns the checks whose SelfSubjectAccessReview request itself
-// failed, so no access decision was obtained.
+// Errored returns the checks for which no access decision was obtained, whether
+// the request failed or an authorizer never reached a verdict.
 func (r *PreflightResult) Errored() []GVRCheck {
 	var errored []GVRCheck
 	for _, c := range r.Checks {
@@ -123,7 +125,27 @@ func (k8sHandler *K8sResourceHandler) checkListAccess(ctx context.Context, gvrTr
 		return check
 	}
 
-	check.Allowed = resp.Status.Allowed
-	check.Reason = resp.Status.Reason
+	applyAccessReviewStatus(&check, resp.Status)
 	return check
+}
+
+// applyAccessReviewStatus records the API server's access decision on the check.
+//
+// Allowed=false with Denied=false means no authorizer had an opinion, which is a
+// real denial only when they all actually reached one. An EvaluationError says
+// one of them did not: a webhook authorizer that times out or errors produces
+// exactly this shape, and reporting it as a denial fails the dry-run over access
+// the credentials may well have. An explicit Denied, or no opinion with every
+// authorizer reporting cleanly, stays the denial it is.
+func applyAccessReviewStatus(check *GVRCheck, status authorizationv1.SubjectAccessReviewStatus) {
+	check.Allowed = status.Allowed
+	check.Reason = status.Reason
+	if status.Allowed || status.Denied || status.EvaluationError == "" {
+		return
+	}
+	check.Errored = true
+	check.Reason = status.EvaluationError
+	if status.Reason != "" {
+		check.Reason = status.Reason + ": " + status.EvaluationError
+	}
 }

@@ -358,7 +358,7 @@ func TestRecordFailedQueryStatuses_PartialFailureSessionField(t *testing.T) {
 
 	// The GVR has data (from selector 1), so InfoMap must NOT have a whole-GVR
 	// skip entry — that would incorrectly mark the control as NotEvaluated.
-	_, inInfoMap := sessionObj.InfoMap["core/v1/secrets"]
+	_, inInfoMap := sessionObj.InfoMap["/v1/secrets"]
 	assert.False(t, inInfoMap, "a partially-collected GVR must not appear as a whole-GVR skip in InfoMap")
 
 	// The per-selector failure must surface in PartialGVRFailures so the caller

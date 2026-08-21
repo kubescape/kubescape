@@ -15,10 +15,11 @@ import (
 	cloudv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/metrics"
-	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
-	"github.com/kubescape/kubescape/v3/core/pkg/vapreconcile"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/metrics"
+	"github.com/kubescape/kubescape/v4/core/pkg/hostsensorutils"
+	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	v1 "k8s.io/api/core/v1"
@@ -611,32 +612,104 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 	return nil
 }
 
-func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber(ctx context.Context) (int, error) {
-	nodesList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	scheduableNodes := v1.NodeList{}
-	if nodesList != nil {
-		for _, node := range nodesList.Items {
-			if len(node.Spec.Taints) == 0 {
-				scheduableNodes.Items = append(scheduableNodes.Items, node)
-			} else {
-				if !isMasterNodeTaints(node.Spec.Taints) {
-					scheduableNodes.Items = append(scheduableNodes.Items, node)
+// countNamespaces returns the number of namespaces that can contribute a
+// namespace batch to the streaming scan, used as the expected-batch count for
+// progress reporting. It honours the scan's include/exclude namespace filters
+// (mirroring skipNamespace in the OPA processor: include takes precedence).
+// The result is deliberately an upper bound: a namespace batch is only created
+// once a namespace actually holds a queryable resource, so sparse or filtered
+// clusters progress faster than the estimate suggests.
+func (k8sHandler *K8sResourceHandler) countNamespaces(ctx context.Context, scanInfo *cautils.ScanInfo) int {
+	if k8sHandler.k8s == nil || k8sHandler.k8s.KubernetesClient == nil {
+		return 0
+	}
+
+	include := splitNamespaces(scanInfo.IncludeNamespaces)
+	exclude := splitNamespaces(scanInfo.ExcludedNamespaces)
+	count := 0
+
+	if err := getter.ListWithPagination(ctx, func(opts metav1.ListOptions) (string, error) {
+		chunk, err := k8sHandler.k8s.KubernetesClient.CoreV1().Namespaces().List(ctx, opts)
+		if err != nil {
+			return "", err
+		}
+		for _, ns := range chunk.Items {
+			if len(include) > 0 {
+				if !slices.Contains(include, ns.Name) {
+					continue
 				}
+			} else if slices.Contains(exclude, ns.Name) {
+				continue
 			}
+			count++
+		}
+		return chunk.GetContinue(), nil
+	}); err != nil {
+		logger.L().Ctx(ctx).Debug("failed to list namespaces for progress estimate", helpers.Error(err))
+		return 0
+	}
+
+	return count
+}
+
+// splitNamespaces parses a comma-separated namespace list (as passed to
+// --include-namespaces / --exclude-namespaces) into a clean slice. Empty
+// entries and surrounding whitespace are dropped.
+func splitNamespaces(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for p := range strings.SplitSeq(s, ",") {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
 		}
 	}
+	return out
+}
+func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber(ctx context.Context) (int, error) {
+	schedulableCount := 0
+	err := getter.ListWithPagination(ctx, func(opts metav1.ListOptions) (string, error) {
+		chunk, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, opts)
+		if err != nil {
+			return "", err
+		}
+		if chunk != nil {
+			for _, node := range chunk.Items {
+				if len(node.Spec.Taints) == 0 || !isMasterNodeTaints(node.Spec.Taints) {
+					schedulableCount++
+				}
+			}
+			return chunk.GetContinue(), nil
+		}
+		return "", nil
+	})
 	if err != nil {
 		return 0, err
 	}
-	return len(scheduableNodes.Items), nil
+	return schedulableCount, nil
 }
 
 func (k8sHandler *K8sResourceHandler) setCloudProvider(ctx context.Context) error {
-	nodeList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	var provider string
+	err := getter.ListWithPagination(ctx, func(opts metav1.ListOptions) (string, error) {
+		chunk, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, opts)
+		if err != nil {
+			return "", err
+		}
+		if chunk != nil {
+			provider = cloudsupport.GetCloudProvider(chunk)
+			if provider != "" {
+				return "", nil
+			}
+			return chunk.GetContinue(), nil
+		}
+		return "", nil
+	})
 	if err != nil {
 		return err
 	}
-	k8sHandler.cloudProvider = cloudsupport.GetCloudProvider(nodeList)
+	k8sHandler.cloudProvider = provider
 	return nil
 }
 

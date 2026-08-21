@@ -59,3 +59,7 @@ func (m *MockIKubescape) Patch(_ *metav1.PatchInfo, _ *cautils.ScanInfo) (bool, 
 func (m *MockIKubescape) ScanImage(_ *metav1.ImageScanInfo, _ *cautils.ScanInfo) (bool, error) {
 	return false, nil
 }
+
+func (m *MockIKubescape) ScanImageContext(_ context.Context, _ *metav1.ImageScanInfo, _ *cautils.ScanInfo) (bool, error) {
+	return false, nil
+}

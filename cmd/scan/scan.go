@@ -160,8 +160,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseArtifactsFrom, "use-artifacts-from", "", "Load artifacts from local directory. If not used will download them")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.CustomRules, "custom-rules", "", "Path to a directory containing user-authored *.rego custom rules")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. e.g: --exclude-namespaces ns-a,ns-b. Notice, when running with `exclude-namespace` kubescape does not scan cluster-scoped objects.")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "Only include controls at or above this severity (low, medium, high, critical) in the output")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "Only include controls at or below this severity (low, medium, high, critical) in the output")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "Only include controls at or above this severity (low, medium, high, critical) in the output. Does not affect exit codes — --compliance-threshold, --severity-threshold, --fail-coverage-below and --fail-on-degraded-config are always computed on the full unfiltered report")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "Only include controls at or below this severity (low, medium, high, critical) in the output. Does not affect exit codes — thresholds are always computed on the full unfiltered report")
 
 	scanCmd.PersistentFlags().Float32VarP(&scanInfo.ComplianceThreshold, "compliance-threshold", "", 0, "Compliance threshold is the percent below which the command fails and returns exit code 1. Applies to 'scan framework', 'scan control', and '--view resource|control'")
 	scanCmd.PersistentFlags().Float32Var(&scanInfo.FailCoverageThreshold, "fail-coverage-below", 0, "Fail (exit code 1) when the scan coverage score drops below this percentage (0 to disable). The score is the ratio of evaluated controls discounted by 3 points per silent failed GVR pull (a resource type that failed to collect entirely but whose dependent controls still evaluated via other resource types), 2 points per partial GVR pull, and 5 points per degraded policy input, so a scan with every control evaluated can still fail on partial resource collection or fallback policy inputs")
@@ -193,6 +193,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", fmt.Sprintf(`Output file format. Supported formats: "%s"`, strings.Join(shared.ScanFormats, `", "`)))
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
+	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.ExcludeControls, "exclude-controls", nil, "Controls to leave out of the scan, by control ID (case-insensitive), applied to every framework in the scan. A control's CIS section number is accepted where the control carries one. Excluded controls are not evaluated and do not affect the compliance score. e.g: --exclude-controls C-0016,C-0017")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeKinds, "include-kinds", "", "scan only the specified Kubernetes resource kinds (case-insensitive, Kind name only — not group/version qualified). e.g: --include-kinds Deployment,DaemonSet")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ExcludeKinds, "exclude-kinds", "", "exclude the specified Kubernetes resource kinds from the scan (case-insensitive, Kind name only — not group/version qualified). e.g: --exclude-kinds Job,CronJob")
 	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.ExcludePaths, "exclude-path", nil, fmt.Sprintf("Exclude paths from file, directory and repository scans (repeat for more than one). Patterns use gitignore syntax and are relative to the scan root, e.g: --exclude-path 'test/**' --exclude-path '!test/prod.yaml'. Combined with the patterns in a %s file at the scan root. Helm charts, Kustomize configurations and Terraform modules are excluded as whole directories", cautils.IgnoreFileName))
@@ -232,6 +233,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ControlTimeout, "control-timeout", 0, "Maximum duration for evaluating a single control (e.g. 30s, 1m). 0 means no timeout. Controls that exceed this are marked as not evaluated and the scan continues. Must be lower than --scan-timeout when both are set.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.EnableStreaming, "enable-streaming", false, "Enable resource streaming for large clusters to reduce memory usage. Resources are processed in batches instead of loading all at once. Automatically enabled for clusters with >2500 resources.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.DryRun, "dry-run", false, "Check whether the current credentials can list every resource type the requested policies need, without collecting resources or evaluating controls. Cluster scans only.")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.Incremental, "incremental", false, "Cache the verdict for each resource, keyed by a hash of its spec/metadata plus the controls-config version, and skip re-evaluating unchanged resources on the next scan. Opt-in; scan output is unaffected. Cache automatically invalidates when the controls-config version changes; clear it manually with 'kubescape config delete cache'.")
 
 	// Helm value override flags. Mirror `helm install` so users can pass overrides through verbatim
 	// when scanning a Helm chart directory. Note: -f is already taken by --format, so --values is long-only.
@@ -318,37 +320,15 @@ func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) []cautil
 // deriveTimeoutContext returns a context bound to ks.Context() with a
 // deadline of scanInfo.ScanTimeout, when that's > 0, and a cancel func the
 // caller must defer. When ScanTimeout <= 0 it returns ks.Context() unchanged
-// and a no-op cancel. Unlike the applyTimeout helper this replaces, it does
-// not call ks.SetContext: the derived context is threaded explicitly through
-// ScanContext/HandleResults/enforceBaselineDrift instead of being stashed on
-// the shared ks, so it can't be observed or clobbered by another operation
-// sharing the same *Kubescape instance.
+// and a no-op cancel. It never calls ks.SetContext: the derived context is
+// threaded explicitly through ScanContext/HandleResults/enforceBaselineDrift
+// instead of being stashed on the shared ks, so it can't be observed or
+// clobbered by another operation sharing the same *Kubescape instance.
 func deriveTimeoutContext(scanInfo *cautils.ScanInfo, ks meta.IKubescape) (context.Context, func()) {
 	if scanInfo.ScanTimeout <= 0 {
 		return ks.Context(), func() {}
 	}
 	return context.WithTimeout(ks.Context(), scanInfo.ScanTimeout)
-}
-
-// applyTimeout wraps ks with a deadline context when ScanTimeout > 0 and
-// returns a cleanup function that cancels the context and restores the
-// original. Only ks.ScanImage still needs this: unlike ScanContext, it has
-// no explicit-context entry point yet, so it can only observe a deadline via
-// ks.Context()/ks.SetContext() mutation. Prefer deriveTimeoutContext for any
-// path that can pass a context explicitly.
-//
-//	defer applyTimeout(scanInfo, ks)()
-func applyTimeout(scanInfo *cautils.ScanInfo, ks meta.IKubescape) func() {
-	if scanInfo.ScanTimeout <= 0 {
-		return func() {}
-	}
-	originalCtx := ks.Context()
-	timeoutCtx, cancel := context.WithTimeout(originalCtx, scanInfo.ScanTimeout)
-	ks.SetContext(timeoutCtx)
-	return func() {
-		cancel()
-		ks.SetContext(originalCtx)
-	}
 }
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {

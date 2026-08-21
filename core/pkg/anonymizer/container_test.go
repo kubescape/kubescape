@@ -988,3 +988,66 @@ func TestTransformUnstructuredEnv_LeaksAPIKeyValue(t *testing.T) {
 		t.Fatalf("env var APIKEY value was not transformed; secret leaked into output")
 	}
 }
+
+func TestTransformContainerList_TypedSlice(t *testing.T) {
+	obj := map[string]any{
+		"containers": []corev1.Container{
+			{
+				Name:  "my-container",
+				Image: "registry.internal.corp/team/app:1.0",
+				Env:   []corev1.EnvVar{{Name: "API_KEY", Value: "s3cret"}},
+			},
+		},
+	}
+
+	assert.NoError(t, transformContainerList(obj, "containers", NewMappingTransformer()))
+
+	containers, ok := obj["containers"].([]corev1.Container)
+	assert.True(t, ok)
+	assert.NotEqual(t, "my-container", containers[0].Name)
+	assert.NotEqual(t, "registry.internal.corp/team/app:1.0", containers[0].Image)
+	assert.NotEqual(t, "s3cret", containers[0].Env[0].Value)
+}
+
+func TestTransformEphemeralContainerList_TypedSlice(t *testing.T) {
+	obj := map[string]any{
+		"ephemeralContainers": []corev1.EphemeralContainer{
+			{
+				EphemeralContainerCommon: corev1.EphemeralContainerCommon{
+					Name:  "debugger",
+					Image: "registry.internal.corp/team/debug:1.0",
+				},
+			},
+		},
+	}
+
+	assert.NoError(t, transformEphemeralContainerList(obj, "ephemeralContainers", NewMappingTransformer()))
+
+	containers, ok := obj["ephemeralContainers"].([]corev1.EphemeralContainer)
+	assert.True(t, ok)
+	assert.NotEqual(t, "debugger", containers[0].Name)
+	assert.NotEqual(t, "registry.internal.corp/team/debug:1.0", containers[0].Image)
+}
+
+func TestTransformPodSpecs_TypedContainersFromScanPipeline(t *testing.T) {
+	obj := map[string]any{
+		"spec": map[string]any{
+			"containers": []corev1.Container{
+				{Name: "app", Image: "registry.internal.corp/team/app:1.0"},
+			},
+			"initContainers": []corev1.Container{
+				{Name: "migrate", Image: "registry.internal.corp/team/migrate:1.0"},
+			},
+		},
+	}
+
+	assert.NoError(t, transformPodSpecs(obj, NewMappingTransformer()))
+
+	spec := obj["spec"].(map[string]any)
+	containers := spec["containers"].([]corev1.Container)
+	initContainers := spec["initContainers"].([]corev1.Container)
+	assert.NotEqual(t, "app", containers[0].Name)
+	assert.NotEqual(t, "migrate", initContainers[0].Name)
+	assert.NotContains(t, containers[0].Image, "registry.internal.corp")
+	assert.NotContains(t, initContainers[0].Image, "registry.internal.corp")
+}

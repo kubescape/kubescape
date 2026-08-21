@@ -26,6 +26,12 @@ import (
 type K8SResources map[string][]string
 type ExternalResources map[string][]string
 
+// VexStatus represents the evaluated VEX status for a vulnerability.
+type VexStatus struct {
+	Status        string
+	Justification string
+}
+
 type ImageScanData struct {
 	Context               pkg.Context
 	IgnoredMatches        []match.IgnoredMatch
@@ -35,6 +41,7 @@ type ImageScanData struct {
 	Packages              []pkg.Package
 	SBOM                  *sbom.SBOM
 	VulnerabilityProvider vulnerability.Provider
+	VexStatuses           map[string]VexStatus
 	// VulnDBBuilt is the build timestamp of the vulnerability DB used for this
 	// scan. It lets users (especially air-gapped ones) see how fresh the data
 	// was. Nil when the DB status is unknown.

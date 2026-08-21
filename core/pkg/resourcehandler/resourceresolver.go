@@ -30,6 +30,20 @@ type resolvedResource struct {
 
 type resourceResolver func(group, version, resource string) []resolvedResource
 
+// coreAPIGroupAlias is how a policy rule may spell the core API group. Every
+// other identity in a scan carries it as the empty string, so the two have to
+// be reconciled before a rule is compared against anything.
+const coreAPIGroupAlias = "core"
+
+// normalizeAPIGroup resolves a rule's API group to the spelling discovery, the
+// resource triplets and the API server all use.
+func normalizeAPIGroup(group string) string {
+	if group == coreAPIGroupAlias {
+		return ""
+	}
+	return group
+}
+
 type offlineManifestResource struct {
 	group      string
 	version    string
@@ -88,7 +102,7 @@ func newOfflineManifestResourceResolver(mappedResources map[string][]workloadint
 
 		var resolved []resolvedResource
 		for _, manifestResource := range resources {
-			if !matchesOfflineManifestValue(group, manifestResource.group) ||
+			if !matchesOfflineManifestValue(normalizeAPIGroup(group), manifestResource.group) ||
 				!matchesOfflineManifestValue(version, manifestResource.version) ||
 				!matchesOfflineManifestResource(resource, manifestResource.kind) {
 				continue
@@ -125,10 +139,7 @@ func newOfflineManifestResourceResolver(mappedResources map[string][]workloadint
 }
 
 func matchesOfflineManifestValue(policyValue, manifestValue string) bool {
-	if policyValue == "*" || policyValue == manifestValue {
-		return true
-	}
-	return policyValue == "core" && manifestValue == ""
+	return policyValue == "*" || policyValue == manifestValue
 }
 
 func matchesOfflineManifestResource(policyResource, manifestKind string) bool {
@@ -148,6 +159,9 @@ func defaultResourceResolver(group, version, resource string) []resolvedResource
 	if version == "" || resource == "" {
 		return nil
 	}
+	// Resolve the alias before the triplet is built: "core/v1/pods" names an
+	// API group no cluster serves, so the query it produces can only fail.
+	group = normalizeAPIGroup(group)
 	_, builtInErr := k8sinterface.GetGroupVersionResource(resource)
 	isUnknown := builtInErr != nil && len(mapKSResourceToApiGroup(resource)) == 0
 	if isUnknown && (group == "" || group == "*" || version == "*" || resource == "*") {
@@ -215,7 +229,7 @@ func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resource
 		var resolved []resolvedResource
 		var skippedUnlistable []string
 		for _, candidate := range discovered {
-			if !matchesDiscoveryValue(group, candidate.gvr.Group) ||
+			if !matchesDiscoveryValue(normalizeAPIGroup(group), candidate.gvr.Group) ||
 				!matchesDiscoveryValue(version, candidate.gvr.Version) ||
 				!matchesDiscoveryResource(resource, candidate) {
 				continue
@@ -384,7 +398,7 @@ func matchingDiscoveryFailureGroupVersion(failure cautils.PartialGVRPull, group,
 	if err != nil {
 		return schema.GroupVersion{}, false
 	}
-	groupMatches := group == "*" || group == groupVersion.Group || (group == "core" && groupVersion.Group == "")
+	groupMatches := group == "*" || normalizeAPIGroup(group) == groupVersion.Group
 	versionMatches := version == "*" || version == groupVersion.Version
 	return groupVersion, groupMatches && versionMatches
 }
@@ -392,10 +406,7 @@ func matchingDiscoveryFailureGroupVersion(failure cautils.PartialGVRPull, group,
 func resolvesGroupVersion(resolved []resolvedResource, groupVersion schema.GroupVersion) bool {
 	for _, candidate := range resolved {
 		group, version, _ := k8sinterface.StringToResourceGroup(candidate.groupVersionResourceTriplet)
-		if group == "core" {
-			group = ""
-		}
-		if group == groupVersion.Group && version == groupVersion.Version {
+		if normalizeAPIGroup(group) == groupVersion.Group && version == groupVersion.Version {
 			return true
 		}
 	}

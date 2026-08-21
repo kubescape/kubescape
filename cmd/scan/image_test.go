@@ -1,10 +1,12 @@
 package scan
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
@@ -17,14 +19,25 @@ import (
 
 type imageScanCaptureKubescape struct {
 	mocks.MockIKubescape
-	imgScanInfo *metav1.ImageScanInfo
-	scanInfo    *cautils.ScanInfo
+	imgScanInfo      *metav1.ImageScanInfo
+	scanInfo         *cautils.ScanInfo
+	scanCalledWith   context.Context
+	setContextCalled bool
+}
+
+func (m *imageScanCaptureKubescape) SetContext(_ context.Context) {
+	m.setContextCalled = true
 }
 
 func (m *imageScanCaptureKubescape) ScanImage(imgScanInfo *metav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (bool, error) {
 	m.imgScanInfo = imgScanInfo
 	m.scanInfo = scanInfo
 	return false, nil
+}
+
+func (m *imageScanCaptureKubescape) ScanImageContext(ctx context.Context, imgScanInfo *metav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (bool, error) {
+	m.scanCalledWith = ctx
+	return m.ScanImage(imgScanInfo, scanInfo)
 }
 
 func TestGetImageCmd(t *testing.T) {
@@ -111,6 +124,44 @@ func TestGetImageCmd_RunE_Success(t *testing.T) {
 
 	err := cmd.RunE(cmd, []string{"nginx"})
 	assert.NoError(t, err)
+}
+
+// TestGetImageCmd_RunE_TimeoutDeadlineActiveForScan and
+// TestGetImageCmd_RunE_TimeoutDoesNotMutateSharedContext are regression tests
+// mirroring securityScan's own #3237 coverage (TestSecurityScan_
+// TimeoutDeadlineActiveForScan / TestSecurityScan_TimeoutDoesNotMutateShared
+// Context): now that `scan image` uses ScanImageContext instead of the old
+// applyTimeout(scanInfo, ks)()+ScanImage() pattern, --scan-timeout must still
+// produce a deadline context, and the shared *Kubescape's own context must
+// never be mutated via SetContext to get it there.
+func TestGetImageCmd_RunE_TimeoutDeadlineActiveForScan(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
+
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.AddCommand(cmd)
+
+	require.NoError(t, cmd.RunE(cmd, []string{"nginx"}))
+
+	require.NotNil(t, mockKubescape.scanCalledWith)
+	_, hasDeadline := mockKubescape.scanCalledWith.Deadline()
+	assert.True(t, hasDeadline, "ScanImageContext must receive a context with a deadline when --scan-timeout is set")
+}
+
+func TestGetImageCmd_RunE_TimeoutDoesNotMutateSharedContext(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
+
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "")
+	parentCmd.AddCommand(cmd)
+
+	require.NoError(t, cmd.RunE(cmd, []string{"nginx"}))
+
+	assert.False(t, mockKubescape.setContextCalled, "scan image must not call SetContext on the shared Kubescape instance")
 }
 
 func TestGetImageCmd_RunE_ForwardsRegistryTokenCredentials(t *testing.T) {

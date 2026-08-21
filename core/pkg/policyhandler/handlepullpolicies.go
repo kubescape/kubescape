@@ -106,6 +106,19 @@ func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyI
 		}
 	}
 
+	if scanInfo != nil && len(scanInfo.ExcludeControls) > 0 {
+		result, err := excludeControls(policies, scanInfo.ExcludeControls)
+		if err != nil {
+			return opaSessionObj, err
+		}
+		if len(result.unmatched) > 0 {
+			logger.L().Ctx(ctx).Warning("--exclude-controls matched no control",
+				helpers.String("controls", quoteIdentifiers(result.unmatched)))
+		}
+		logger.L().Info("Controls excluded from the scan", helpers.Int("count", result.excluded))
+		policies = result.policies
+	}
+
 	opaSessionObj.Policies = policies
 	opaSessionObj.Exceptions = exceptions
 	if controlInputs == nil {

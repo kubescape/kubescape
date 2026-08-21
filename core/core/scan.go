@@ -2,8 +2,10 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -26,6 +28,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v4/core/pkg/scancache"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/resources"
@@ -390,6 +393,14 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 		}
 		reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, exceptionRecorder)
 		reportResults.ControlTimeout = scanInfo.ControlTimeout
+		if cacheStore := loadIncrementalCacheIfEnabled(ctxOpa, scanInfo, scanData); cacheStore != nil {
+			reportResults.SetIncrementalCache(cacheStore)
+			defer func() {
+				if flushErr := cacheStore.Flush(); flushErr != nil {
+					logger.L().Ctx(ctxOpa).Warning("failed to persist incremental scan cache", helpers.Error(flushErr))
+				}
+			}()
+		}
 		if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
 			logger.L().Ctx(ctxOpa).Error("failed to process rules", helpers.Error(err))
 			// The eager listener finalizes its accumulated results before returning
@@ -745,6 +756,45 @@ func estimateClusterSize(resourceHandler resourcehandler.IResourceHandler, ctx c
 // decision was made from; the OPA processor uses it as its frozen resource
 // count because sessionObj.AllResources is populated asynchronously by the
 // producer goroutine.
+// loadIncrementalCacheIfEnabled builds the version key from scanData's
+// resolved policies (plus local controls-config bytes when set) and loads
+// the incremental scan cache. Returns (nil, nil) when --incremental is off,
+// so callers can call SetIncrementalCache unconditionally with the result
+// only when non-nil.
+func loadIncrementalCacheIfEnabled(ctx context.Context, scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj) *scancache.Store {
+	if !scanInfo.Incremental {
+		return nil
+	}
+	policyBytes, marshalErr := json.Marshal(scanData.Policies)
+	if marshalErr != nil {
+		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
+		return nil
+	}
+	allPoliciesBytes, marshalErr := json.Marshal(scanData.AllPolicies)
+	if marshalErr != nil {
+		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
+		return nil
+	}
+	regoInputBytes, marshalErr := json.Marshal(scanData.RegoInputData)
+	if marshalErr != nil {
+		logger.L().Ctx(ctx).Warning("failed to derive incremental scan cache version, proceeding without cache", helpers.Error(marshalErr))
+		return nil
+	}
+	versionParts := [][]byte{[]byte(scanInfo.ControlsVersion), policyBytes, allPoliciesBytes, regoInputBytes}
+	if scanInfo.ControlsInputs != "" {
+		if localConfig, readErr := os.ReadFile(scanInfo.ControlsInputs); readErr == nil {
+			versionParts = append(versionParts, localConfig)
+		}
+	}
+	cacheVersion := scancache.VersionKey(versionParts...)
+	cacheStore, cacheErr := scancache.Load(getter.DefaultLocalStore, cacheVersion)
+	if cacheErr != nil {
+		logger.L().Ctx(ctx).Warning("failed to load incremental scan cache, proceeding without it", helpers.Error(cacheErr))
+		return nil
+	}
+	return cacheStore
+}
+
 func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandler resourcehandler.IResourceHandler, scanData *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, clusterName string, excludedNamespaces string, includeNamespaces string, enableRegoPrint bool, controlTimeout time.Duration, estimatedClusterSize int) error {
 	// The eager collector initializes this metadata before constructing the OPA
 	// processor. Do the same here because the cloud provider is a policy input,
@@ -764,6 +814,14 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	}
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, clusterName, excludedNamespaces, includeNamespaces, enableRegoPrint, exceptionRecorder)
 	reportResults.ControlTimeout = controlTimeout
+	if cacheStore := loadIncrementalCacheIfEnabled(ctx, scanInfo, scanData); cacheStore != nil {
+		reportResults.SetIncrementalCache(cacheStore)
+		defer func() {
+			if flushErr := cacheStore.Flush(); flushErr != nil {
+				logger.L().Ctx(ctx).Warning("failed to persist incremental scan cache", helpers.Error(flushErr))
+			}
+		}()
+	}
 
 	// Stream resources in batches
 	streamCtx, cancel := context.WithCancel(ctx)
@@ -841,7 +899,13 @@ func printPreflightResult(result *resourcehandler.PreflightResult) {
 	}
 
 	for _, c := range denied {
-		fmt.Printf("DENIED  list %s\n", c.GVR)
+		// The API server's reason is what tells a user which binding to fix, so
+		// print it when there is one; RBAC often answers with none.
+		if c.Reason != "" {
+			fmt.Printf("DENIED  list %s: %s\n", c.GVR, c.Reason)
+		} else {
+			fmt.Printf("DENIED  list %s\n", c.GVR)
+		}
 		if len(c.AffectedControls) > 0 {
 			fmt.Printf("        -> %s will not evaluate\n", strings.Join(c.AffectedControls, ", "))
 		}

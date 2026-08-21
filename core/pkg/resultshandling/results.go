@@ -15,6 +15,7 @@ import (
 	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/reporter"
 	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -147,8 +148,13 @@ type reportSnapshot struct {
 	// true unfiltered score while printers and submission saw the filtered one.
 	complianceScore            float32
 	frameworksComplianceScores []float32
+	frameworksControls         []reportsummary.ControlSummaries
 	controlsSeverityCounters   reportsummary.SeverityCounters
 	resourcesSeverityCounters  reportsummary.SeverityCounters
+	statusCounters             reportsummary.StatusCounters
+	status                     apis.ScanningStatus
+	frameworksStatusCounters   []reportsummary.StatusCounters
+	frameworksStatuses         []apis.ScanningStatus
 }
 
 func snapshotReport(sessionObj *cautils.OPASessionObj) reportSnapshot {
@@ -170,8 +176,14 @@ func snapshotReport(sessionObj *cautils.OPASessionObj) reportSnapshot {
 	}
 
 	fwScores := make([]float32, len(sessionObj.Report.SummaryDetails.Frameworks))
+	fwControls := make([]reportsummary.ControlSummaries, len(sessionObj.Report.SummaryDetails.Frameworks))
+	fwStatusCounters := make([]reportsummary.StatusCounters, len(sessionObj.Report.SummaryDetails.Frameworks))
+	fwStatuses := make([]apis.ScanningStatus, len(sessionObj.Report.SummaryDetails.Frameworks))
 	for i := range sessionObj.Report.SummaryDetails.Frameworks {
 		fwScores[i] = sessionObj.Report.SummaryDetails.Frameworks[i].ComplianceScore
+		fwControls[i] = sessionObj.Report.SummaryDetails.Frameworks[i].Controls
+		fwStatusCounters[i] = sessionObj.Report.SummaryDetails.Frameworks[i].StatusCounters
+		fwStatuses[i] = sessionObj.Report.SummaryDetails.Frameworks[i].Status
 	}
 
 	return reportSnapshot{
@@ -179,8 +191,13 @@ func snapshotReport(sessionObj *cautils.OPASessionObj) reportSnapshot {
 		associatedControls:         ac,
 		complianceScore:            sessionObj.Report.SummaryDetails.ComplianceScore,
 		frameworksComplianceScores: fwScores,
+		frameworksControls:         fwControls,
 		controlsSeverityCounters:   sessionObj.Report.SummaryDetails.ControlsSeverityCounters,
 		resourcesSeverityCounters:  sessionObj.Report.SummaryDetails.ResourcesSeverityCounters,
+		statusCounters:             sessionObj.Report.SummaryDetails.StatusCounters,
+		status:                     sessionObj.Report.SummaryDetails.Status,
+		frameworksStatusCounters:   fwStatusCounters,
+		frameworksStatuses:         fwStatuses,
 	}
 }
 
@@ -192,9 +209,18 @@ func restoreReport(sessionObj *cautils.OPASessionObj, snap reportSnapshot) {
 	sessionObj.Report.SummaryDetails.ComplianceScore = snap.complianceScore
 	sessionObj.Report.SummaryDetails.ControlsSeverityCounters = snap.controlsSeverityCounters
 	sessionObj.Report.SummaryDetails.ResourcesSeverityCounters = snap.resourcesSeverityCounters
+	sessionObj.Report.SummaryDetails.StatusCounters = snap.statusCounters
+	sessionObj.Report.SummaryDetails.Status = snap.status
 	for i := range sessionObj.Report.SummaryDetails.Frameworks {
 		if i < len(snap.frameworksComplianceScores) {
 			sessionObj.Report.SummaryDetails.Frameworks[i].ComplianceScore = snap.frameworksComplianceScores[i]
+		}
+		if i < len(snap.frameworksControls) {
+			sessionObj.Report.SummaryDetails.Frameworks[i].Controls = snap.frameworksControls[i]
+		}
+		if i < len(snap.frameworksStatusCounters) {
+			sessionObj.Report.SummaryDetails.Frameworks[i].StatusCounters = snap.frameworksStatusCounters[i]
+			sessionObj.Report.SummaryDetails.Frameworks[i].Status = snap.frameworksStatuses[i]
 		}
 	}
 	for id, ac := range snap.associatedControls {
@@ -224,6 +250,15 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 	// must not receive an internally inconsistent PostureReport.
 	snap := snapshotReport(rh.ScanData)
 	defer restoreReport(rh.ScanData, snap)
+	if scanInfo.MinSeverity != "" || scanInfo.MaxSeverity != "" {
+		// Severity filtering is output-only (see snapshotReport/restoreReport):
+		// printers see the filtered report, but --compliance-threshold,
+		// --severity-threshold, --fail-coverage-below and --fail-on-degraded-config
+		// are evaluated after restoreReport on the full report. Warn once so a
+		// user combining e.g. --min-severity high with html+junit does not
+		// assume the filter also narrows what fails the build.
+		logger.L().Warning("Severity filtering (--min-severity/--max-severity) is output-only and does not affect exit-code thresholds")
+	}
 	ApplySeverityFilters(rh.ScanData, scanInfo.MinSeverity, scanInfo.MaxSeverity)
 
 	// Display scan results in the UI first to give immediate value.
