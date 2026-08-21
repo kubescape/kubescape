@@ -181,7 +181,8 @@ func TestNewFixHandler_BasePathFlag_AcceptsReportPathInsideBasePath(t *testing.T
 
 	h, err := NewFixHandler(&metav1.FixInfo{ReportFile: reportFile, BasePath: trustedRoot})
 	require.NoError(t, err)
-	resolvedScannedDir, _ := filepath.EvalSymlinks(scannedDir)
+	resolvedScannedDir, err := filepath.EvalSymlinks(scannedDir)
+	require.NoError(t, err, "failed to resolve symlinks in test dir (needed on macOS)")
 	assert.Equal(t, resolvedScannedDir, h.localBasePath)
 }
 
@@ -191,7 +192,8 @@ func TestNewFixHandler_BasePathFlag_ReportPathEqualsBasePathIsAccepted(t *testin
 
 	h, err := NewFixHandler(&metav1.FixInfo{ReportFile: reportFile, BasePath: trustedRoot})
 	require.NoError(t, err)
-	resolvedTrustedRoot, _ := filepath.EvalSymlinks(trustedRoot)
+	resolvedTrustedRoot, err := filepath.EvalSymlinks(trustedRoot)
+	require.NoError(t, err, "failed to resolve symlinks in test dir (needed on macOS)")
 	assert.Equal(t, resolvedTrustedRoot, h.localBasePath)
 }
 

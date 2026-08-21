@@ -2,7 +2,8 @@ package gvisor
 
 import (
 	"context"
-	"fmt"
+
+	"github.com/kubescape/go-logger"
 )
 
 // TraceIngester defines the pipeline for reading runsc trace events
@@ -17,9 +18,10 @@ func NewTraceIngester(socket string) *TraceIngester {
 	}
 }
 
-// Start begins listening to the gVisor runsc trace events
+// Start is a scaffold method that currently blocks until the context is canceled.
+// It does not yet implement actual runsc trace ingestion using the trace socket.
 func (t *TraceIngester) Start(ctx context.Context) error {
-	fmt.Println("Starting gVisor runsc trace ingestion pipeline...")
+	logger.L().Info("Starting gVisor runsc trace ingestion pipeline (scaffold mode)...")
 	// Dummy logic to simulate ingestion
 	<-ctx.Done()
 	return nil
