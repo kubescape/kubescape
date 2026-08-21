@@ -11,6 +11,8 @@
 package ghworkflows
 
 import (
+	"encoding/json"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -63,9 +65,23 @@ func TestPRAgentJobRequiresTrustedCommenter(t *testing.T) {
 			"author_association is GitHub's own server-computed field and the only one of these inputs "+
 			"a commenter cannot forge", commentsWorkflowName, prAgentJobName)
 
-	for _, trusted := range []string{"OWNER", "MEMBER", "COLLABORATOR"} {
-		assert.Containsf(t, job.If, trusted,
-			"%s's %q job's trust gate no longer allows %q commenters",
-			commentsWorkflowName, prAgentJobName, trusted)
-	}
+	// Exact allowlist check — the previous substring loop (`Contains` each trusted value)
+	// would still pass if the gate were widened to also include "CONTRIBUTOR" (or any other
+	// association). That matters because CONTRIBUTOR (someone whose PR was once merged) is
+	// NOT repo-trusted the way COLLABORATOR is, so widening reopens a weaker version of the
+	// exact pwn-request hole this guard closes. Parse the fromJSON('[...]') payload and assert
+	// it equals {OWNER, MEMBER, COLLABORATOR} exactly.
+	expectedTrusted := []string{"OWNER", "MEMBER", "COLLABORATOR"}
+	re := regexp.MustCompile(`fromJSON\('([^']+)'\)`)
+	matches := re.FindStringSubmatch(job.If)
+	require.NotEmptyf(t, matches,
+		"%s's %q job's trust gate must use fromJSON('[...]') to list allowed associations; got %q",
+		commentsWorkflowName, prAgentJobName, job.If)
+	var actualTrusted []string
+	require.NoErrorf(t, json.Unmarshal([]byte(matches[1]), &actualTrusted),
+		"%s's %q job's fromJSON payload is not valid JSON; got %q",
+		commentsWorkflowName, prAgentJobName, matches[1])
+	assert.ElementsMatchf(t, expectedTrusted, actualTrusted,
+		"%s's %q job's trust gate allowlist must be exactly %v; got %v — adding %q (or any other association) would reopen the hole this guard closes",
+		commentsWorkflowName, prAgentJobName, expectedTrusted, actualTrusted, "CONTRIBUTOR")
 }
