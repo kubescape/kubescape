@@ -45,7 +45,8 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			defer applyTimeout(scanInfo, ks)()
+			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
+			defer cancel()
 
 			if len(args) != 1 {
 				return fmt.Errorf("the command takes exactly one image name as an argument")
@@ -85,7 +86,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 				UseDefaultMatchers: scanInfo.UseDefaultMatchers,
 			}
 
-			exceedsSeverityThreshold, err := ks.ScanImage(imgScanInfo, scanInfo)
+			exceedsSeverityThreshold, err := ks.ScanImageContext(ctx, imgScanInfo, scanInfo)
 			if err != nil {
 				return err
 			}
