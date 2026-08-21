@@ -18,6 +18,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"go.opentelemetry.io/otel"
 )
 
 type ResultsHandler struct {
@@ -180,6 +181,13 @@ func restoreReport(sessionObj *cautils.OPASessionObj, snap reportSnapshot) {
 
 // HandleResults handles all necessary actions for the scan results
 func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.ScanInfo) error {
+	// Reporting span (issue #3402): lives here, not in a per-caller wrapper,
+	// so every caller of HandleResults -- cmd/scan/*, core/core/image_scan.go,
+	// core/core/patch.go -- gets it for free. A wrapper at each call site
+	// missed image scans and patch flow (see PR #3447 review).
+	ctx, span := otel.Tracer("").Start(ctx, "reporting")
+	defer span.End()
+
 	if rh.ScanData != nil && len(rh.ScanData.VAPPolicies) > 0 {
 		index := vapreconcile.BuildIndex(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings)
 		vapreconcile.EnrichSummary(rh.ScanData.Report.SummaryDetails.Controls, index)

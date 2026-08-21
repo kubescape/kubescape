@@ -21,7 +21,6 @@ import (
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/spf13/cobra"
-	"go.opentelemetry.io/otel"
 )
 
 var scanCmdExamples = fmt.Sprintf(`
@@ -356,16 +355,6 @@ func applyTimeout(scanInfo *cautils.ScanInfo, ks meta.IKubescape) func() {
 	}
 }
 
-// handleResultsWithReportingSpan wraps results.HandleResults in a
-// "reporting" span, alongside the "initialization" / "policies" /
-// "resources" / "opa testing" spans core/core/scan.go already emits via
-// otel.Tracer(""), so a scan's exported OTel trace covers the full pipeline
-// through result printing and submission (issue #3402).
-func handleResultsWithReportingSpan(ctx context.Context, results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) error {
-	ctx, span := otel.Tracer("").Start(ctx, "reporting")
-	defer span.End()
-	return results.HandleResults(ctx, scanInfo)
-}
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
 	defer applyTimeout(&scanInfo, ks)()
@@ -375,7 +364,7 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifie
 		return err
 	}
 
-	if err = handleResultsWithReportingSpan(ks.Context(), results, &scanInfo); err != nil {
+	if err = results.HandleResults(ks.Context(), &scanInfo); err != nil {
 		return err
 	}
 

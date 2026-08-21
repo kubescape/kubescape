@@ -100,7 +100,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				return err
 			}
 
-			if err = handleResultsWithReportingSpan(ks.Context(), results, scanInfo); err != nil {
+			if err = results.HandleResults(ks.Context(), scanInfo); err != nil {
 				return err
 			}
 
