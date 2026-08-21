@@ -143,6 +143,7 @@ var canonicalKinds = map[string]string{
 	"serviceaccounts": "ServiceAccount",
 	"services":        "Service",
 	"statefulsets":    "StatefulSet",
+	"actortemplates":  "ActorTemplate",
 }
 
 // TestVAPAppliesToCoversEveryBundleKind walks every policy in the embedded bundle
