@@ -249,6 +249,9 @@ func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
 			mcp.Description("Type of vulnerability manifests to list"),
 			mcp.Enum("image", "workload", "both"),
 		),
+		mcp.WithString("continue",
+			mcp.Description("Optional Kubernetes continuation token for pagination"),
+		),
 	)
 
 	ksServer.s.AddTool(listManifestsTool, ksServer.toolHandler(listManifestsTool.Name))
@@ -304,6 +307,9 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 		mcp.WithString("namespace",
 			mcp.Description("Filter by namespace (optional)"),
 		),
+		mcp.WithString("continue",
+			mcp.Description("Optional Kubernetes continuation token for pagination"),
+		),
 	)
 
 	ksServer.s.AddTool(listConfigsTool, ksServer.toolHandler(listConfigsTool.Name))
@@ -339,6 +345,9 @@ func createRuntimeToolsAndResources(ksServer *KubescapeMcpserver) {
 		mcp.WithDescription("Discover available container profiles at workload level (this returns a list of profiles, not the profile results themselves, to get the profile results, use the get_container_profile tool)"),
 		mcp.WithString("namespace",
 			mcp.Description("Filter by namespace (optional)"),
+		),
+		mcp.WithString("continue",
+			mcp.Description("Optional Kubernetes continuation token for pagination"),
 		),
 	)
 
@@ -720,26 +729,33 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			labelSelector = "kubescape.io/context=non-filtered"
 		}
 
-		var manifests *v1beta1.VulnerabilityManifestList
-		var err error
-		if labelSelector == "" {
-			client, ksErr := ksServer.getKsClient()
-			if ksErr != nil {
-				return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+		continueToken := ""
+		if c, ok := arguments["continue"]; ok {
+			if cStr, ok := c.(string); ok {
+				continueToken = cStr
 			}
-			manifests, err = client.VulnerabilityManifests(namespace).List(ctx, metav1.ListOptions{})
-		} else {
-			client, ksErr := ksServer.getKsClient()
-			if ksErr != nil {
-				return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
-			}
-			manifests, err = client.VulnerabilityManifests(namespace).List(ctx, metav1.ListOptions{
-				LabelSelector: labelSelector,
-			})
 		}
+
+		client, ksErr := ksServer.getKsClient()
+		if ksErr != nil {
+			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+		}
+
+		listOpts := metav1.ListOptions{Limit: 100, Continue: continueToken}
+		if labelSelector != "" {
+			listOpts.LabelSelector = labelSelector
+		}
+		chunk, err := client.VulnerabilityManifests(namespace).List(ctx, listOpts)
 		if err != nil {
 			return nil, err
 		}
+
+		if chunk.GetContinue() != "" {
+			result["continue"] = chunk.GetContinue()
+		}
+
+		var manifests v1beta1.VulnerabilityManifestList
+		manifests.Items = chunk.Items
 
 		logger.L().Info(fmt.Sprintf("Found %d manifests", len(manifests.Items)))
 
@@ -886,10 +902,20 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if ksErr != nil {
 			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
 		}
-		manifests, err := client.WorkloadConfigurationScans(namespaceStr).List(ctx, metav1.ListOptions{})
+		continueToken := ""
+		if c, ok := arguments["continue"]; ok {
+			if cStr, ok := c.(string); ok {
+				continueToken = cStr
+			}
+		}
+
+		chunk, err := client.WorkloadConfigurationScans(namespaceStr).List(ctx, metav1.ListOptions{Limit: 100, Continue: continueToken})
 		if err != nil {
 			return nil, err
 		}
+
+		var manifests v1beta1.WorkloadConfigurationScanList
+		manifests.Items = chunk.Items
 		logger.L().Info(fmt.Sprintf("Found %d configuration manifests", len(manifests.Items)))
 		configManifests := []map[string]any{}
 		for _, manifest := range manifests.Items {
@@ -907,6 +933,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			"available_templates": map[string]string{
 				"configuration_manifest_details": "kubescape://configuration-manifests/{namespace}/{manifest_name}",
 			},
+		}
+		if chunk.GetContinue() != "" {
+			result["continue"] = chunk.GetContinue()
 		}
 		content, err := json.Marshal(result)
 		if err != nil {
@@ -972,10 +1001,20 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if ksErr != nil {
 			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
 		}
-		profiles, err := client.ContainerProfiles(namespace).List(ctx, metav1.ListOptions{})
+		continueToken := ""
+		if c, ok := arguments["continue"]; ok {
+			if cStr, ok := c.(string); ok {
+				continueToken = cStr
+			}
+		}
+
+		chunk, err := client.ContainerProfiles(namespace).List(ctx, metav1.ListOptions{Limit: 100, Continue: continueToken})
 		if err != nil {
 			return nil, err
 		}
+
+		var profiles v1beta1.ContainerProfileList
+		profiles.Items = chunk.Items
 		logger.L().Info(fmt.Sprintf("Found %d container profiles", len(profiles.Items)))
 		containerProfilesList := []map[string]any{}
 		for _, profile := range profiles.Items {
@@ -993,6 +1032,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			"available_templates": map[string]string{
 				"container_profile_details": "kubescape://container-profiles/{namespace}/{profile_name}",
 			},
+		}
+		if chunk.GetContinue() != "" {
+			result["continue"] = chunk.GetContinue()
 		}
 		content, err := json.Marshal(result)
 		if err != nil {
