@@ -1140,26 +1140,32 @@ func (k8sHandler *K8sResourceHandler) countNamespaces(ctx context.Context, scanI
 	if k8sHandler.k8s == nil || k8sHandler.k8s.KubernetesClient == nil {
 		return 0
 	}
-	nsList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
-	if err != nil {
+
+	include := splitNamespaces(scanInfo.IncludeNamespaces)
+	exclude := splitNamespaces(scanInfo.ExcludedNamespaces)
+	count := 0
+
+	if err := getter.ListWithPagination(ctx, func(opts metav1.ListOptions) (string, error) {
+		chunk, err := k8sHandler.k8s.KubernetesClient.CoreV1().Namespaces().List(ctx, opts)
+		if err != nil {
+			return "", err
+		}
+		for _, ns := range chunk.Items {
+			if len(include) > 0 {
+				if !slices.Contains(include, ns.Name) {
+					continue
+				}
+			} else if slices.Contains(exclude, ns.Name) {
+				continue
+			}
+			count++
+		}
+		return chunk.GetContinue(), nil
+	}); err != nil {
 		logger.L().Ctx(ctx).Debug("failed to list namespaces for progress estimate", helpers.Error(err))
 		return 0
 	}
 
-	include := splitNamespaces(scanInfo.IncludeNamespaces)
-	exclude := splitNamespaces(scanInfo.ExcludedNamespaces)
-
-	count := 0
-	for _, ns := range nsList.Items {
-		if len(include) > 0 {
-			if !slices.Contains(include, ns.Name) {
-				continue
-			}
-		} else if slices.Contains(exclude, ns.Name) {
-			continue
-		}
-		count++
-	}
 	return count
 }
 
