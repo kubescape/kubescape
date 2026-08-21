@@ -320,6 +320,8 @@ func TestCollect_GracefulSkip(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Nil(t, vaps)
 	assert.Nil(t, vapbs)
+}
+
 // erroringDiscovery answers one group version with an error instead of a
 // resource list, standing in for a cluster whose discovery for that version is
 // unreachable.

@@ -98,6 +98,7 @@ func resolveVersion(client discovery.DiscoveryInterface) (string, error) {
 		if err != nil {
 			if isDiscoveryMissingError(err) {
 				continue
+			}
 			if !apierrors.IsNotFound(err) && probeErr == nil {
 				probeErr = fmt.Errorf("failed to discover %s: %w", gv.String(), err)
 			}
