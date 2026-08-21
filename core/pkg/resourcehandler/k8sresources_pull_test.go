@@ -136,7 +136,7 @@ func TestGetResources_SurfacesMissingGVRFailuresInInfoMap(t *testing.T) {
 	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
 	assert.NoError(t, err)
 
-	info, ok := sessionObj.InfoMap["core/v1/secrets"]
+	info, ok := sessionObj.InfoMap["/v1/secrets"]
 	assert.True(t, ok, "expected missing secrets GVR to be surfaced in InfoMap")
 	assert.Contains(t, info.InnerInfo, "simulated API failure")
 }
