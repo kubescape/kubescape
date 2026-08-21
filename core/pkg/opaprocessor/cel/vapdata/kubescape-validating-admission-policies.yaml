@@ -2919,3 +2919,31 @@ spec:
       )
     message: RBAC Role or ClusterRole has access to the certificatesigningrequests/approval
       sub-resource which can lead to privilege escalation! (see more at https://kubescape.io/docs/controls/c-0280/)
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kubescape-agent-runtime-hardening
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/agent-runtime-hardening/
+  labels:
+    controlId: agent-runtime-hardening
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - "example.com"
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - actortemplates
+  paramKind:
+    apiVersion: example.com/v1
+    kind: WorkerPool
+  validations:
+  - expression: "!(has(object.spec.egress) && object.spec.egress == 'marginal' && has(params.spec.networkAccess) && params.spec.networkAccess == 'broad')"
+    message: "ActorTemplate has marginal egress controls which is critical if deployed to a WorkerPool with broader network access (violates Agent Runtime Hardening)"
