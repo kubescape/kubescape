@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type mockGitlabAPI struct {
@@ -353,6 +354,148 @@ func TestGitlabAdaptor_GetImagesVulnerabilities(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Len(t, reportsUnmatched, 1)
 	assert.Len(t, reportsUnmatched[0].Vulnerabilities, 0) // Should match nothing because the digest isn't present
+}
+
+func TestGitlabAdaptor_GetImagesVulnerabilitiesRejectsStalledPagination(t *testing.T) {
+	tests := []struct {
+		name      string
+		responses map[string][]byte
+		wantError string
+		wantCalls map[string]int
+	}{
+		{
+			name: "missing cursor",
+			responses: map[string][]byte{
+				"my-group/my-project": []byte(`{
+					"data":{"project":{"vulnerabilities":{
+						"pageInfo":{"hasNextPage":true,"endCursor":""},
+						"nodes":[]
+					}}}
+				}`),
+			},
+			wantError: "without an end cursor",
+			wantCalls: map[string]int{"my-group/my-project": 1},
+		},
+		{
+			name: "immediately repeated cursor",
+			responses: map[string][]byte{
+				"my-group/my-project": []byte(`{
+					"data":{"project":{"vulnerabilities":{
+						"pageInfo":{"hasNextPage":true,"endCursor":"cursor-a"},
+						"nodes":[]
+					}}}
+				}`),
+				"my-group/my-project_cursor-a": []byte(`{
+					"data":{"project":{"vulnerabilities":{
+						"pageInfo":{"hasNextPage":true,"endCursor":"cursor-a"},
+						"nodes":[]
+					}}}
+				}`),
+			},
+			wantError: "repeated cursor \"cursor-a\"",
+			wantCalls: map[string]int{
+				"my-group/my-project":          1,
+				"my-group/my-project_cursor-a": 1,
+			},
+		},
+		{
+			name: "cursor cycle",
+			responses: map[string][]byte{
+				"my-group/my-project": []byte(`{
+					"data":{"project":{"vulnerabilities":{
+						"pageInfo":{"hasNextPage":true,"endCursor":"cursor-a"},
+						"nodes":[]
+					}}}
+				}`),
+				"my-group/my-project_cursor-a": []byte(`{
+					"data":{"project":{"vulnerabilities":{
+						"pageInfo":{"hasNextPage":true,"endCursor":"cursor-b"},
+						"nodes":[]
+					}}}
+				}`),
+				"my-group/my-project_cursor-b": []byte(`{
+					"data":{"project":{"vulnerabilities":{
+						"pageInfo":{"hasNextPage":true,"endCursor":"cursor-a"},
+						"nodes":[]
+					}}}
+				}`),
+			},
+			wantError: "repeated cursor \"cursor-a\"",
+			wantCalls: map[string]int{
+				"my-group/my-project":          1,
+				"my-group/my-project_cursor-a": 1,
+				"my-group/my-project_cursor-b": 1,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockAPI := &mockGitlabAPI{responses: tt.responses}
+			adaptor := NewGitlabAdaptor()
+			adaptor.client = mockAPI
+
+			reports, err := adaptor.GetImagesVulnerabilities(context.Background(), []ContainerImageIdentifier{{
+				Repository: "my-group/my-project/app",
+				Tag:        "latest",
+			}})
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantError)
+			require.Len(t, reports, 1)
+			assert.Empty(t, reports[0].Vulnerabilities)
+			assert.Equal(t, tt.wantCalls, mockAPI.callCount)
+		})
+	}
+}
+
+func TestNextGitLabVulnerabilityCursorEnforcesPageLimit(t *testing.T) {
+	seen := make(map[string]struct{})
+
+	cursor, more, err := nextGitLabVulnerabilityCursor(true, "final-cursor", seen, maxGitLabVulnerabilityPages)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "1000-page safety limit")
+	assert.Empty(t, cursor)
+	assert.False(t, more)
+	assert.Empty(t, seen)
+}
+
+func TestNextGitLabVulnerabilityCursorAcceptsValidProgress(t *testing.T) {
+	tests := []struct {
+		name        string
+		hasNextPage bool
+		endCursor   string
+		wantCursor  string
+		wantMore    bool
+	}{
+		{
+			name:       "terminal page",
+			endCursor:  "ignored-terminal-cursor",
+			wantCursor: "",
+		},
+		{
+			name:        "fresh next page",
+			hasNextPage: true,
+			endCursor:   "cursor-2",
+			wantCursor:  "cursor-2",
+			wantMore:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seen := map[string]struct{}{"cursor-1": {}}
+			cursor, more, err := nextGitLabVulnerabilityCursor(tt.hasNextPage, tt.endCursor, seen, 1)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCursor, cursor)
+			assert.Equal(t, tt.wantMore, more)
+			if tt.wantMore {
+				assert.Contains(t, seen, tt.wantCursor)
+			}
+		})
+	}
 }
 
 func TestNormalizeGitlabSeverity(t *testing.T) {
