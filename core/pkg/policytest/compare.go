@@ -2,6 +2,7 @@ package policytest
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -37,7 +38,21 @@ func normalize(responses []reporthandling.RuleResponse) []reporthandling.RuleRes
 		if out[i].AlertMessage != out[j].AlertMessage {
 			return out[i].AlertMessage < out[j].AlertMessage
 		}
-		return len(out[i].FailedPaths) < len(out[j].FailedPaths)
+		return sortKey(out[i]) < sortKey(out[j])
 	})
 	return out
+}
+
+// sortKey joins a response's (already sorted) path lists into a single
+// string, so two responses that share an AlertMessage but differ in their
+// failed/review/delete paths still sort deterministically instead of
+// depending on their input order.
+func sortKey(r reporthandling.RuleResponse) string {
+	var b strings.Builder
+	b.WriteString(strings.Join(r.FailedPaths, ","))
+	b.WriteByte('|')
+	b.WriteString(strings.Join(r.ReviewPaths, ","))
+	b.WriteByte('|')
+	b.WriteString(strings.Join(r.DeletePaths, ","))
+	return b.String()
 }

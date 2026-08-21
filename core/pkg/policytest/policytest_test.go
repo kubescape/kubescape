@@ -87,3 +87,27 @@ func TestCompare_ReportsRealDifference(t *testing.T) {
 
 	assert.NotEmpty(t, Compare(got, want))
 }
+
+// TestCompare_SameMessageAndPathCountSortsByContent proves that two
+// responses sharing an AlertMessage and the same number of FailedPaths, but
+// different path contents, still sort deterministically: reversing their
+// order in got must not produce a false diff against want.
+func TestCompare_SameMessageAndPathCountSortsByContent(t *testing.T) {
+	x := reporthandling.RuleResponse{
+		AlertMessage: "same alert",
+		AssistedRemediation: reporthandling.AssistedRemediation{
+			FailedPaths: []string{"spec.a"},
+		},
+	}
+	y := reporthandling.RuleResponse{
+		AlertMessage: "same alert",
+		AssistedRemediation: reporthandling.AssistedRemediation{
+			FailedPaths: []string{"spec.b"},
+		},
+	}
+
+	want := []reporthandling.RuleResponse{x, y}
+	got := []reporthandling.RuleResponse{y, x}
+
+	assert.Empty(t, Compare(got, want), "reversed order of same-message, same-count responses must still compare equal")
+}
