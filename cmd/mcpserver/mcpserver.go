@@ -86,18 +86,32 @@ type KubescapeMcpserver struct {
 	ksClient   spdxv1beta1.SpdxV1beta1Interface
 	// ksClientInit overrides newKsClient for this server instance; used by
 	// tests. Nil means use newKsClient.
-	ksClientInit func() (spdxv1beta1.SpdxV1beta1Interface, error)
-	k8sClientMu  sync.Mutex
-	k8sClient    *k8sinterface.KubernetesApi
-	policyGetter *getter.DownloadReleasedPolicy
-	scanSemMu    sync.Mutex
-	scanSem      *semaphore.Weighted
-	scanGroup    singleflight.Group
-	scanCtxMu    sync.Mutex
-	scanCtxs     map[string]*scanCtxState
+	ksClientInit   func() (spdxv1beta1.SpdxV1beta1Interface, error)
+	k8sClientMu    sync.Mutex
+	k8sClient      *k8sinterface.KubernetesApi
+	policyGetterMu sync.Mutex
+	policyGetter   *getter.DownloadReleasedPolicy
+	scanSemMu      sync.Mutex
+	scanSem        *semaphore.Weighted
+	scanGroup      singleflight.Group
+	scanCtxMu      sync.Mutex
+	scanCtxs       map[string]*scanCtxState
 }
 
+// getPolicyGetter lazily constructs policyGetter on first use, guarded so
+// concurrent MCP tool calls can't race on the check-then-set (the underlying
+// server dispatches each request on its own goroutine, same reason the
+// ksClient/k8sClient/scanSem/scanCtxs fields on this struct are already
+// guarded - this field wasn't, which was a real data race: go test -race
+// flags concurrent calls immediately, see #3444). A plain mutex, not
+// sync.Once, because mcpServerEntrypoint pre-populates policyGetter directly
+// in the struct literal and warms it via SetRegoObjectsWithFallback before
+// any tool call can reach this method - sync.Once wouldn't know that
+// initialization already happened, and would discard the warmed instance on
+// the first concurrent call.
 func (ksServer *KubescapeMcpserver) getPolicyGetter() *getter.DownloadReleasedPolicy {
+	ksServer.policyGetterMu.Lock()
+	defer ksServer.policyGetterMu.Unlock()
 	if ksServer.policyGetter == nil {
 		ksServer.policyGetter = getter.NewDownloadReleasedPolicy()
 	}
