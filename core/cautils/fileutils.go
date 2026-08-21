@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -35,6 +36,9 @@ var (
 	// ErrNoManifestFiles lets resource orchestrators defer this specific error
 	// while another supported loader examines the same input.
 	ErrNoManifestFiles = errors.New("no YAML or JSON manifest files found")
+
+	// ErrFileTooLarge is returned when a manifest file exceeds the configured per-file size limit.
+	ErrFileTooLarge = errors.New("file too large")
 )
 
 type FileFormat string
@@ -42,6 +46,16 @@ type FileFormat string
 const (
 	YAML_FILE_FORMAT FileFormat = "yaml"
 	JSON_FILE_FORMAT FileFormat = "json"
+
+	// DefaultMaxFileSize is the default per-file read cap for the file-scan path.
+	// 32 MiB is large enough for any legitimate manifest (the largest chart in the
+	// wild is <5 MiB) but stops a single attacker-supplied multi-GB YAML from OOMing
+	// a CI runner. Override via KUBESCAPE_MAX_FILE_SIZE env var (bytes).
+	DefaultMaxFileSize int64 = 32 << 20 // 32 MiB
+
+	// MaxFileSizeEnvVar is the env var that overrides DefaultMaxFileSize.
+	// Value is parsed as decimal bytes (e.g. "33554432" or "67108864" for 64 MiB).
+	MaxFileSizeEnvVar = "KUBESCAPE_MAX_FILE_SIZE"
 )
 
 type Chart struct {
@@ -733,6 +747,17 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 	for i := range filePaths {
 		f, err := loadFile(filePaths[i])
 		if err != nil {
+			// Oversized files are recorded as skipped manifests rather than aborting the
+			// entire scan - a single attacker-supplied huge file in a repo must not
+			// deny service to the rest of the manifests.
+			if errors.Is(err, ErrFileTooLarge) {
+				skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: err.Error()})
+				// Still append to errs so LoadResourcesFromFilesFiltered's best-effort
+				// vs hard-failure logic is preserved: directory scans warn, single-file
+				// inputs return the error to the caller.
+				errs = append(errs, err)
+				continue
+			}
 			errs = append(errs, err)
 			skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "read error: " + err.Error()})
 			continue
@@ -799,8 +824,50 @@ func isUnrenderedHelmTemplate(path string) bool {
 	}
 }
 
+// getMaxFileSize returns the configured per-file size limit in bytes.
+// It reads MaxFileSizeEnvVar as decimal bytes when set, otherwise defaults to
+// DefaultMaxFileSize. Non-positive or unparsable values fall back to the default
+// so the scan stays bounded.
+func getMaxFileSize() int64 {
+	if v, ok := os.LookupEnv(MaxFileSizeEnvVar); ok {
+		trimmed := strings.TrimSpace(v)
+		if trimmed != "" {
+			if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil && parsed > 0 {
+				return parsed
+			}
+			logger.L().Warning("invalid KUBESCAPE_MAX_FILE_SIZE, using default", helpers.String("value", v), helpers.Int("default", int(DefaultMaxFileSize)))
+		}
+	}
+	return DefaultMaxFileSize
+}
+
 func loadFile(filePath string) ([]byte, error) {
-	return os.ReadFile(filepath.Clean(filePath))
+	cleaned := filepath.Clean(filePath)
+	f, err := os.Open(cleaned)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	limit := getMaxFileSize()
+
+	// Fast-path: if Stat succeeds and size is known to exceed limit, fail
+	// without allocating. This also covers sparse files that report a large
+	// logical size.
+	if fi, statErr := f.Stat(); statErr == nil && fi.Size() > limit {
+		return nil, fmt.Errorf("%w: %q size %d exceeds limit %d bytes", ErrFileTooLarge, filePath, fi.Size(), limit)
+	}
+
+	// Use LimitReader at limit+1 so we can detect an oversized file even when
+	// Stat is unavailable (e.g. /proc, pipes) or reports 0.
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q size exceeds limit %d bytes", ErrFileTooLarge, filePath, limit)
+	}
+	return data, nil
 }
 func ReadFile(fileContent []byte, fileFormat FileFormat) ([]workloadinterface.IMetadata, error) {
 
