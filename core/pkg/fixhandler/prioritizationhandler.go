@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"gopkg.in/yaml.v3"
 
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
@@ -34,8 +36,10 @@ func DetectProfileDrift(manifest []byte, profile *storagev1beta1.ContainerProfil
 
 	var obj map[string]interface{}
 	if err := yaml.Unmarshal(manifest, &obj); err != nil {
+		logger.L().Debug("error unmarshaling manifest", helpers.Error(err))
 		return fixes
 	}
+	logger.L().Debug("evaluating profile capabilities", helpers.Interface("profile_caps", profile.Spec.Capabilities))
 
 	var containersPath string
 	var containersList []interface{}

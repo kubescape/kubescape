@@ -694,9 +694,10 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 	updatedFiles := make(map[string]bool)
 	errors := make([]error, 0)
 
-	fileYamlExpressions := h.getFileYamlExpressions(resourcesToFix)
+	fileFixes := h.getFileFixes(resourcesToFix)
+	editor := NewYAMLTreeEditor()
 
-	for filepath, yamlExpression := range fileYamlExpressions {
+	for filepath, fixes := range fileFixes {
 		fileAsString, err := GetFileString(filepath)
 
 		if err != nil {
@@ -704,10 +705,10 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 			continue
 		}
 
-		fixedYamlString, err := ApplyFixToContent(ctx, fileAsString, yamlExpression)
+		fixedYamlString, err := editor.ApplyFixes(fileAsString, fixes)
 
 		if err != nil {
-			errors = append(errors, fmt.Errorf("failed to fix file %s: %w ", filepath, err))
+			errors = append(errors, fmt.Errorf("failed to fix file %s: %w", filepath, err))
 			continue
 		}
 
@@ -784,54 +785,30 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 	return filePath, documentIndex, nil
 }
 
-func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string) (fixedString string, err error) {
-	yamlAsString = sanitizeYaml(yamlAsString)
-	newline := determineNewlineSeparator(yamlAsString)
-
-	yamlLines := strings.Split(yamlAsString, newline)
-
-	originalRootNodes, err := decodeDocumentRoots(yamlAsString)
-
-	if err != nil {
-		return "", err
-	}
-
-	fixedRootNodes, err := getFixedNodes(ctx, yamlAsString, yamlExpression)
-
-	if err != nil {
-		return "", err
-	}
-
-	fixInfo, err := getFixInfo(ctx, originalRootNodes, fixedRootNodes)
-	if err != nil {
-		return "", err
-	}
-
-	fixedYamlLines := getFixedYamlLines(yamlLines, fixInfo, newline)
-
-	fixedString = getStringFromSlice(fixedYamlLines, newline)
-	fixedString = revertSanitizeYaml(fixedString)
-
-	return fixedString, nil
-}
-
-func (h *FixHandler) getFileYamlExpressions(resourcesToFix []ResourceFixInfo) map[string]string {
-	fileYamlExpressions := make(map[string]string, 0)
-	for _, toPin := range resourcesToFix {
-		resourceToFix := toPin
-
-		singleExpression := reduceYamlExpressions(&resourceToFix)
+func (h *FixHandler) getFileFixes(resourcesToFix []ResourceFixInfo) map[string][]DocumentFix {
+	fileFixes := make(map[string][]DocumentFix)
+	for _, resourceToFix := range resourcesToFix {
 		resourceFilePath := resourceToFix.FilePath
 
-		if _, pathExistsInMap := fileYamlExpressions[resourceFilePath]; !pathExistsInMap {
-			fileYamlExpressions[resourceFilePath] = singleExpression
-		} else {
-			fileYamlExpressions[resourceFilePath] = joinStrings(fileYamlExpressions[resourceFilePath], " | ", singleExpression)
+		for _, fixPath := range resourceToFix.YamlExpressions {
+			fileFixes[resourceFilePath] = append(fileFixes[resourceFilePath], DocumentFix{
+				DocumentIndex: resourceToFix.DocumentIndex,
+				Fix:           fixPath,
+			})
 		}
-
 	}
 
-	return fileYamlExpressions
+	for fp, fixes := range fileFixes {
+		sort.SliceStable(fixes, func(i, j int) bool {
+			if fixes[i].DocumentIndex != fixes[j].DocumentIndex {
+				return fixes[i].DocumentIndex < fixes[j].DocumentIndex
+			}
+			return fixes[i].Fix.Path < fixes[j].Fix.Path
+		})
+		fileFixes[fp] = fixes
+	}
+
+	return fileFixes
 }
 
 // plannedPathsFromExpressions returns the distinct, non-empty FixPath.Path
@@ -972,7 +949,7 @@ func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(docu
 				skippedReasons = append(skippedReasons, "skipped: fix path is not a plain yaml path")
 				continue
 			}
-			rfi.YamlExpressions[yamlExpression] = rulePaths.FixPath
+			rfi.YamlExpressions[rulePaths.FixPath.Path] = rulePaths.FixPath
 			added++
 		}
 
@@ -983,16 +960,6 @@ func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(docu
 		}
 	}
 	return added, skippedReasons
-}
-
-// reduceYamlExpressions reduces the number of yaml expressions to a single one
-func reduceYamlExpressions(resource *ResourceFixInfo) string {
-	expressions := make([]string, 0, len(resource.YamlExpressions))
-	for expr := range resource.YamlExpressions {
-		expressions = append(expressions, expr)
-	}
-	sort.Strings(expressions)
-	return strings.Join(expressions, " | ")
 }
 
 // safeFixPath matches the subset of yq's expression grammar that a fix path is

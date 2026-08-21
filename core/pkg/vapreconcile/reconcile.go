@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -26,6 +27,18 @@ const (
 	// policy with. Policies without it are not addressable by control.
 	controlIDLabel = "controlId"
 )
+
+func isDiscoveryMissingError(err error) bool {
+	if apierrors.IsNotFound(err) {
+		return true
+	}
+	var discoveryErr *discovery.ErrGroupDiscoveryFailed
+	if errors.As(err, &discoveryErr) {
+		return true
+	}
+	var noMatchErr *meta.NoResourceMatchError
+	return errors.As(err, &noMatchErr)
+}
 
 // vapVersions lists the served versions of the VAP API in preference order:
 // v1 since Kubernetes 1.30, v1beta1 since 1.28, v1alpha1 since 1.26.
@@ -48,6 +61,9 @@ var ErrForbidden = errors.New("not permitted to list ValidatingAdmissionPolicy r
 func Collect(ctx context.Context, k8s *k8sinterface.KubernetesApi) ([]unstructured.Unstructured, []unstructured.Unstructured, error) {
 	version, err := resolveVersion(k8s.DiscoveryClient)
 	if err != nil {
+		if errors.Is(err, ErrUnsupported) {
+			return nil, nil, nil
+		}
 		return nil, nil, err
 	}
 
@@ -80,6 +96,9 @@ func resolveVersion(client discovery.DiscoveryInterface) (string, error) {
 		gv := schema.GroupVersion{Group: vapGroup, Version: version}
 		resources, err := client.ServerResourcesForGroupVersion(gv.String())
 		if err != nil {
+			if isDiscoveryMissingError(err) {
+				continue
+			}
 			if !apierrors.IsNotFound(err) && probeErr == nil {
 				probeErr = fmt.Errorf("failed to discover %s: %w", gv.String(), err)
 			}
@@ -245,4 +264,66 @@ func EnrichSummary(controls reportsummary.ControlSummaries, index map[string]*re
 			controls[controlID] = cs
 		}
 	}
+}
+
+// GenerateValidatingAdmissionPolicy creates a ValidatingAdmissionPolicy manifest
+func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[string]interface{}, apiVersion string, targetResource string) *unstructured.Unstructured {
+	if apiVersion == "" {
+		apiVersion = "v1"
+	}
+	vap := &unstructured.Unstructured{}
+	vap.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "admissionregistration.k8s.io",
+		Version: apiVersion,
+		Kind:    "ValidatingAdmissionPolicy",
+	})
+	vap.SetName(name)
+
+	// Add spec with CEL expression and parameter schema linkage
+	spec := map[string]interface{}{
+		"validations": []interface{}{
+			map[string]interface{}{
+				"expression": celExpr,
+			},
+		},
+		"matchConstraints": map[string]interface{}{
+			"resourceRules": []interface{}{
+				map[string]interface{}{
+					"apiGroups":   []interface{}{"*"},
+					"apiVersions": []interface{}{"*"},
+					"operations":  []interface{}{"CREATE", "UPDATE"},
+					"resources":   []interface{}{targetResource},
+				},
+			},
+		},
+	}
+	if len(paramSchema) > 0 {
+		spec["paramKind"] = map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+		}
+	}
+	vap.Object["spec"] = spec
+	return vap
+}
+
+// GenerateValidatingAdmissionPolicyBinding creates a ValidatingAdmissionPolicyBinding manifest
+func GenerateValidatingAdmissionPolicyBinding(name, policyName, apiVersion string) *unstructured.Unstructured {
+	if apiVersion == "" {
+		apiVersion = "v1"
+	}
+	vapb := &unstructured.Unstructured{}
+	vapb.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "admissionregistration.k8s.io",
+		Version: apiVersion,
+		Kind:    "ValidatingAdmissionPolicyBinding",
+	})
+	vapb.SetName(name)
+
+	spec := map[string]interface{}{
+		"policyName":        policyName,
+		"validationActions": []interface{}{"Deny"},
+	}
+	vapb.Object["spec"] = spec
+	return vapb
 }

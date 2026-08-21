@@ -1180,12 +1180,16 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			containerName = profile.GetLabels()["kubescape.io/workload-container-name"]
 			profileKind := profile.GetLabels()["kubescape.io/workload-kind"]
 			profileName := profile.GetLabels()["kubescape.io/workload-name"]
+			profileNamespace := profile.GetLabels()["kubescape.io/workload-namespace"]
 
 			if profileKind != "" && !strings.EqualFold(profileKind, workloadKindStr) {
 				return mcp.NewToolResultError(fmt.Sprintf("profile workload kind mismatch: expected %s, got %s", workloadKindStr, profileKind)), nil
 			}
 			if profileName != "" && profileName != workloadNameStr {
 				return mcp.NewToolResultError(fmt.Sprintf("profile workload name mismatch: expected %s, got %s", workloadNameStr, profileName)), nil
+			}
+			if profileNamespace != "" && profileNamespace != namespaceStr {
+				return mcp.NewToolResultError(fmt.Sprintf("profile workload namespace mismatch: expected %s, got %s", namespaceStr, profileNamespace)), nil
 			}
 		}
 		fixes := fixhandler.DetectProfileDrift(rawManifest, profile, workloadKindStr, containerName, 0)
