@@ -399,9 +399,21 @@ func isSupportedValidationAction(action admissionv1.ValidationAction) bool {
 // win emitted a binding that enforced the policy on a set the caller never
 // asked for. Repeating a key with the same value is the same requirement twice,
 // so it is accepted.
+//
+// A --label that ends up selecting nothing is refused. labels.Parse reads a
+// blank value as the empty selector, which contributes no requirement, so a
+// flag made only of those emitted an objectSelector that matches every object
+// the policy matches — the opposite of the narrowing that was asked for, and
+// silent.
 func parseObjectSelectorLabels(values []string) (map[string]string, error) {
 	matchLabels := make(map[string]string, len(values))
 	for _, value := range values {
+		// The flag is comma-split, so a trailing or doubled comma leaves a blank
+		// entry behind. It carries no requirement of its own; the check after
+		// the loop catches the case where nothing else carried one either.
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
 		parsed, err := labels.Parse(value)
 		if err != nil {
 			return nil, fmt.Errorf("invalid label selector: %s", value)
@@ -423,6 +435,9 @@ func parseObjectSelectorLabels(values []string) (map[string]string, error) {
 			}
 			matchLabels[requirement.Key()] = selected[0]
 		}
+	}
+	if len(values) > 0 && len(matchLabels) == 0 {
+		return nil, fmt.Errorf("--label %q selects nothing; omit the flag to bind everything the policy matches", strings.Join(values, ","))
 	}
 	return matchLabels, nil
 }
@@ -676,7 +691,7 @@ func createPolicyBinding(bindingName string, policyName string, actions []admiss
 	if err != nil {
 		return "", err
 	}
-	if len(labelMatch) > 0 {
+	if len(matchLabels) > 0 {
 		policyBinding.Spec.MatchResources.ObjectSelector = &metav1.LabelSelector{MatchLabels: matchLabels}
 	}
 
