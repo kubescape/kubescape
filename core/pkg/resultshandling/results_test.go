@@ -1083,3 +1083,40 @@ func TestHandleResults_PrintsFilteredScoreAndRestoresUnfiltered(t *testing.T) {
 		"severity counters must be restored after HandleResults")
 	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 3, "Controls must be unfiltered after HandleResults")
 }
+
+func TestResultsHandlerHandleResultsRestoresFrameworkControls(t *testing.T) {
+	scanData := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: map[string]reportsummary.ControlSummary{
+					"C-1": {ControlID: "C-1", ScoreFactor: 2},
+					"C-2": {ControlID: "C-2", ScoreFactor: 9},
+				},
+				StatusCounters: reportsummary.StatusCounters{FailedResources: 3},
+				Status:         apis.StatusFailed,
+				Frameworks: []reportsummary.FrameworkSummary{{
+					Name: "NSA",
+					Controls: map[string]reportsummary.ControlSummary{
+						"C-1": {ControlID: "C-1", ScoreFactor: 2},
+						"C-2": {ControlID: "C-2", ScoreFactor: 9},
+					},
+					StatusCounters: reportsummary.StatusCounters{FailedResources: 3},
+					Status:         apis.StatusFailed,
+				}},
+			},
+		},
+	}
+
+	spy := &SpyPrinter{}
+	rh := NewResultsHandler(&DummyReporter{}, nil, spy)
+	rh.SetData(scanData)
+
+	require.NoError(t, rh.HandleResults(context.Background(), &cautils.ScanInfo{MinSeverity: "high"}))
+
+	assert.Len(t, scanData.Report.SummaryDetails.Controls, 2)
+	assert.Len(t, scanData.Report.SummaryDetails.Frameworks[0].Controls, 2)
+	assert.Equal(t, 3, scanData.Report.SummaryDetails.StatusCounters.Failed())
+	assert.Equal(t, apis.StatusFailed, scanData.Report.SummaryDetails.Status)
+	assert.Equal(t, 3, scanData.Report.SummaryDetails.Frameworks[0].StatusCounters.Failed())
+	assert.Equal(t, apis.StatusFailed, scanData.Report.SummaryDetails.Frameworks[0].Status)
+}

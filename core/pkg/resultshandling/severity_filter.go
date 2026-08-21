@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
@@ -35,6 +36,20 @@ func ApplySeverityFilters(sessionObj *cautils.OPASessionObj, minSeverity, maxSev
 		} else {
 			retained[id] = struct{}{}
 		}
+	}
+
+	for i := range sessionObj.Report.SummaryDetails.Frameworks {
+		controls := sessionObj.Report.SummaryDetails.Frameworks[i].Controls
+		if len(controls) == 0 {
+			continue
+		}
+		filtered := make(reportsummary.ControlSummaries, len(controls))
+		for id, ctrl := range controls {
+			if _, ok := retained[id]; ok {
+				filtered[id] = ctrl
+			}
+		}
+		sessionObj.Report.SummaryDetails.Frameworks[i].Controls = filtered
 	}
 
 	for id, result := range sessionObj.ResourcesResult {
@@ -100,6 +115,8 @@ func recomputeSummaryDetails(sessionObj *cautils.OPASessionObj) {
 		}
 	}
 
+	recomputeStatusCounters(summary)
+
 	summary.ResourcesSeverityCounters = reportsummary.SeverityCounters{}
 	for _, result := range sessionObj.ResourcesResult {
 		if !result.GetStatus(nil).IsFailed() {
@@ -113,6 +130,23 @@ func recomputeSummaryDetails(sessionObj *cautils.OPASessionObj) {
 				summary.ResourcesSeverityCounters.Increase(apis.ControlSeverityToString(ctrl.GetScoreFactor()), 1)
 			}
 		}
+	}
+}
+
+func recomputeStatusCounters(summary *reportsummary.SummaryDetails) {
+	l := helpersv1.GetAllListsFromPool()
+	defer helpersv1.PutAllListsToPool(l)
+
+	summary.StatusCounters = reportsummary.StatusCounters{}
+	summary.StatusCounters.Set(summary.ListResourcesIDs(l))
+	summary.CalculateStatus()
+
+	for i := range summary.Frameworks {
+		fl := helpersv1.GetAllListsFromPool()
+		summary.Frameworks[i].StatusCounters = reportsummary.StatusCounters{}
+		summary.Frameworks[i].StatusCounters.Set(summary.Frameworks[i].ListResourcesIDs(fl))
+		summary.Frameworks[i].CalculateStatus()
+		helpersv1.PutAllListsToPool(fl)
 	}
 }
 
