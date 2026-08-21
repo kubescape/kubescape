@@ -5,11 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 )
 
@@ -485,6 +489,50 @@ func TestGetKsClient_DefaultInitializerIsUsedAndCached(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("expected default initializer to run once, got %d calls", calls)
 	}
+}
+
+// TestGetPolicyGetter_ConcurrentCallsDoNotRace is a regression test for
+// #3444: getPolicyGetter's check-then-set on policyGetter was unguarded,
+// unlike its ksClient/k8sClient/scanSem/scanCtxs siblings on the same
+// struct, and go test -race flagged concurrent calls immediately before the
+// fix.
+func TestGetPolicyGetter_ConcurrentCallsDoNotRace(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+	var wg sync.WaitGroup
+	wg.Add(8)
+	for i := 0; i < 8; i++ {
+		go func() {
+			defer wg.Done()
+			_ = ksServer.getPolicyGetter()
+		}()
+	}
+	wg.Wait()
+}
+
+func TestGetPolicyGetter_LazilyConstructsOnceAndCaches(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+
+	first := ksServer.getPolicyGetter()
+	require.NotNil(t, first)
+	second := ksServer.getPolicyGetter()
+
+	assert.Same(t, first, second, "getPolicyGetter must return the same instance across calls instead of constructing a new one each time")
+}
+
+// TestGetPolicyGetter_DoesNotDiscardPreInitializedInstance is a regression
+// test for the fix's own correctness: mcpServerEntrypoint pre-populates
+// policyGetter directly in the struct literal and warms it via
+// SetRegoObjectsWithFallback before any tool call can reach getPolicyGetter.
+// A sync.Once-based fix (instead of the mutex this uses) would not know
+// that initialization already happened, and would discard the warmed
+// instance on the first call.
+func TestGetPolicyGetter_DoesNotDiscardPreInitializedInstance(t *testing.T) {
+	preInitialized := getter.NewDownloadReleasedPolicy()
+	ksServer := &KubescapeMcpserver{policyGetter: preInitialized}
+
+	got := ksServer.getPolicyGetter()
+
+	assert.Same(t, preInitialized, got, "getPolicyGetter must not replace an already-initialized policyGetter")
 }
 
 func TestGetK8sClient_NotConnectedReturnsError(t *testing.T) {

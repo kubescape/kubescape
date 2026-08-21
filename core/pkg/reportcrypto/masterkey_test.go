@@ -71,7 +71,7 @@ func TestWrapDEKEnvelopeAnnouncesDerivation(t *testing.T) {
 		wrapped,
 	)
 
-	_, inner, err := parseKEKCiphertext(wrapped)
+	_, _, inner, err := parseKEKCiphertext(wrapped)
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(inner, prefix))
 }
@@ -92,10 +92,10 @@ func TestWrapDEKUsesUniqueSaltPerEnvelope(t *testing.T) {
 	second, err := WrapDEK(dek, masterKey)
 	require.NoError(t, err)
 
-	firstParams, _, err := parseKEKCiphertext(first)
+	firstParams, _, _, err := parseKEKCiphertext(first)
 	require.NoError(t, err)
 
-	secondParams, _, err := parseKEKCiphertext(second)
+	secondParams, _, _, err := parseKEKCiphertext(second)
 	require.NoError(t, err)
 
 	assert.NotEqual(t, firstParams.salt, secondParams.salt)
@@ -185,7 +185,7 @@ func TestUnwrapDEKRejectsHostileWorkFactors(t *testing.T) {
 	wrapped, err := WrapDEK(dek, masterKey)
 	require.NoError(t, err)
 
-	_, inner, err := parseKEKCiphertext(wrapped)
+	_, _, inner, err := parseKEKCiphertext(wrapped)
 	require.NoError(t, err)
 
 	payload, err := ciphertextPayload(inner)
@@ -304,7 +304,7 @@ func TestEnvelopeReportsCurrentWorkFactors(t *testing.T) {
 	wrapped, err := WrapDEK(dek, []byte("a-sufficiently-long-passphrase"))
 	require.NoError(t, err)
 
-	params, _, err := parseKEKCiphertext(wrapped)
+	params, _, _, err := parseKEKCiphertext(wrapped)
 	require.NoError(t, err)
 
 	assert.Equal(t, argon2Time, params.time)

@@ -114,16 +114,18 @@ type PolicyIdentifier struct {
 }
 
 type ScanInfo struct {
-	UseExceptions             string   // Load file with exceptions configuration
-	AuditExceptions           bool     // Include exception usage audit in supported scan outputs
-	ControlsInputs            string   // Load file with inputs for controls
-	AttackTracks              string   // Load file with attack tracks
-	UseFrom                   []string // Load framework from local file (instead of download). Use when running offline
-	UseDefault                bool     // Load framework from cached file (instead of download). Use when running offline
-	UseArtifactsFrom          string   // Load artifacts from local path. Use when running offline
-	ControlsVersion           string   // Pin the regolibrary release used to download policies (e.g. "v2.0.301"). Empty uses the latest release
-	VerboseMode               bool     // Display all the input resources and not only failed resources
-	Hide                      bool     // Hide sensitive identifiers (names, namespaces, images) in results
+	UseExceptions             string      // Load file with exceptions configuration
+	AuditExceptions           bool        // Include exception usage audit in supported scan outputs
+	HonorInlineExceptions     BoolPtrFlag // Honor kubescape.io/skip-* annotations as inline exception policies
+	CustomRules               string      // Path to a directory of custom *.rego rules
+	ControlsInputs            string      // Load file with inputs for controls
+	AttackTracks              string      // Load file with attack tracks
+	UseFrom                   []string    // Load framework from local file (instead of download). Use when running offline
+	UseDefault                bool        // Load framework from cached file (instead of download). Use when running offline
+	UseArtifactsFrom          string      // Load artifacts from local path. Use when running offline
+	ControlsVersion           string      // Pin the regolibrary release used to download policies (e.g. "v2.0.301"). Empty uses the latest release
+	VerboseMode               bool        // Display all the input resources and not only failed resources
+	Hide                      bool        // Hide sensitive identifiers (names, namespaces, images) in results
 	EncryptionEnabled         bool
 	View                      string                       //
 	Format                    string                       // Format results (table, json, junit ...)
@@ -132,9 +134,12 @@ type ScanInfo struct {
 	CustomClusterName         string                       // Set the custom name of the cluster
 	ExcludedNamespaces        string                       // used for host scanner namespace
 	IncludeNamespaces         string                       //
+	ExcludeControls           []string                     // control IDs, or legacy CIS section numbers, to leave out of the scan (case-insensitive)
 	IncludeKinds              string                       // comma-separated Kubernetes kinds to include (case-insensitive, Kind name only); e.g. "Deployment,DaemonSet"
 	ExcludeKinds              string                       // comma-separated Kubernetes kinds to exclude (case-insensitive, Kind name only); e.g. "Job,CronJob"
 	LabelSelector             string                       // filter collected resources by Kubernetes label selector (e.g. "app=nginx,env!=dev")
+	ExcludePaths              []string                     // gitignore-style patterns excluding paths from file, directory and repository scans
+	NoIgnoreFile              bool                         // do not read the .kubescapeignore file at the scan root
 	Namespace                 string                       // target namespace for workload scans
 	InputPatterns             []string                     // Yaml files input patterns
 	Silent                    bool                         // Silent mode - Do not print progress logs
@@ -167,6 +172,7 @@ type ScanInfo struct {
 	ScanTimeout               time.Duration // Maximum duration for the entire scan (0 = no timeout)
 	ControlTimeout            time.Duration // Maximum duration for evaluating a single control (0 = no timeout)
 	EnableStreaming           bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
+	Incremental               bool          // Cache verdicts per resource, keyed by resource hash + controls-config version, and skip re-evaluating unchanged resources
 	DryRun                    bool          // Check RBAC access for the resources the scan would need, without collecting or evaluating anything
 	ChartPath                 string
 	FilePath                  string
@@ -184,6 +190,7 @@ type ScanInfo struct {
 	contextResolved           bool
 	cleanups                  []func()
 	ListingURL                string            //Grype vulnerability database URL
+	SkipDBUpdate              bool              // Do not update the vulnerability database before image scanning
 	RegistryMapping           map[string]string // Map internal registry URLs to external ones
 	RegistryAuthority         string            // Registry host[:port] explicit credentials apply to
 	RegistryUsername          string            // Username for workload image registry authentication

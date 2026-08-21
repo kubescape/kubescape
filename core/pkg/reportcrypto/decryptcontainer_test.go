@@ -65,7 +65,7 @@ func TestDecryptContainerMetadataUnstructured(t *testing.T) {
 		},
 	})
 
-	require.NoError(t, DecryptContainerMetadata(resource, dek))
+	require.NoError(t, DecryptContainerMetadata(resource, UnboundReportKey(dek)))
 
 	podSpec := resource.GetObject()["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
 	assert.Equal(t, "workload-sa", podSpec["serviceAccountName"])
@@ -116,7 +116,7 @@ func TestDecryptContainerMetadataTyped(t *testing.T) {
 	}
 	resource := workloadinterface.NewWorkloadObj(map[string]any{"spec": podSpec})
 
-	require.NoError(t, DecryptContainerMetadata(resource, dek))
+	require.NoError(t, DecryptContainerMetadata(resource, UnboundReportKey(dek)))
 
 	containers := podSpec["containers"].([]corev1.Container)
 	assert.Equal(t, "api", containers[0].Name)
@@ -133,24 +133,24 @@ func TestDecryptContainerMetadataTyped(t *testing.T) {
 }
 
 func TestDecryptContainerMetadataHandlesNilPlaintextAndErrors(t *testing.T) {
-	require.NoError(t, DecryptContainerMetadata(nil, make([]byte, 32)))
+	require.NoError(t, DecryptContainerMetadata(nil, UnboundReportKey(make([]byte, 32))))
 
 	resource := workloadinterface.NewWorkloadObj(nil)
-	require.NoError(t, DecryptContainerMetadata(resource, make([]byte, 32)))
+	require.NoError(t, DecryptContainerMetadata(resource, UnboundReportKey(make([]byte, 32))))
 
 	resource = workloadinterface.NewWorkloadObj(map[string]any{
 		"spec": map[string]any{
 			"containers": []any{map[string]any{"name": "plaintext", "image": "nginx:latest"}},
 		},
 	})
-	require.NoError(t, DecryptContainerMetadata(resource, make([]byte, 32)))
+	require.NoError(t, DecryptContainerMetadata(resource, UnboundReportKey(make([]byte, 32))))
 
 	resource = workloadinterface.NewWorkloadObj(map[string]any{
 		"spec": map[string]any{
 			"containers": []any{map[string]any{"name": "ENC[AES256_GCM,invalid]"}},
 		},
 	})
-	err := DecryptContainerMetadata(resource, make([]byte, 32))
+	err := DecryptContainerMetadata(resource, UnboundReportKey(make([]byte, 32)))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid ciphertext payload")
 }

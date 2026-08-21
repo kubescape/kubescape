@@ -33,6 +33,7 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: ubuntu-large
+    timeout-minutes: 20
     steps:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -79,5 +80,6 @@ jobs:
         continue-on-error: false
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
         with:
+          version: v2.12.2
           args: --timeout 10m
           only-new-issues: true

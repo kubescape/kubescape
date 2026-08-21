@@ -338,6 +338,8 @@ func transformTypedEnv(envVars []corev1.EnvVar, transformer Transformer) error {
 			continue
 		}
 
+		hasRef := false
+
 		if secretRef := envVar.ValueFrom.SecretKeyRef; secretRef != nil &&
 			secretRef.Name != "" {
 
@@ -345,12 +347,21 @@ func transformTypedEnv(envVars []corev1.EnvVar, transformer Transformer) error {
 			if err != nil {
 				return err
 			}
+			hasRef = true
 		}
 
 		if configMapRef := envVar.ValueFrom.ConfigMapKeyRef; configMapRef != nil &&
 			configMapRef.Name != "" {
 
 			configMapRef.Name, err = transformValue(transformer, "ref", configMapRef.Name)
+			if err != nil {
+				return err
+			}
+			hasRef = true
+		}
+
+		if hasRef && envVar.Name != "" {
+			envVar.Name, err = transformValue(transformer, "env", envVar.Name)
 			if err != nil {
 				return err
 			}
@@ -412,12 +423,30 @@ func transformUnstructuredEnv(container map[string]any, transformer Transformer)
 			continue
 		}
 
+		hasRef := false
+
 		if err := transformUnstructuredReference(valueFrom, "secretKeyRef", transformer); err != nil {
 			return err
+		}
+		if _, ok := valueFrom["secretKeyRef"]; ok {
+			hasRef = true
 		}
 
 		if err := transformUnstructuredReference(valueFrom, "configMapKeyRef", transformer); err != nil {
 			return err
+		}
+		if _, ok := valueFrom["configMapKeyRef"]; ok {
+			hasRef = true
+		}
+
+		if hasRef {
+			if name, ok := envVar["name"].(string); ok && name != "" {
+				transformedName, err := transformValue(transformer, "env", name)
+				if err != nil {
+					return err
+				}
+				envVar["name"] = transformedName
+			}
 		}
 	}
 

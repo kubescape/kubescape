@@ -63,6 +63,10 @@ func (m *explicitThresholdKubescape) Scan(scanInfo *cautils.ScanInfo, _ []cautil
 	return results, nil
 }
 
+func (m *explicitThresholdKubescape) ScanContext(_ context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return m.Scan(scanInfo, policyIdentifiers)
+}
+
 func TestExplicitScanCommandsEnforceImageSeverityThreshold(t *testing.T) {
 	tests := []struct {
 		name string

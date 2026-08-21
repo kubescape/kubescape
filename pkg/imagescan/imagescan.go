@@ -27,6 +27,7 @@ import (
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 )
 
@@ -46,7 +47,7 @@ func (c RegistryCredentials) hasAuthenticator() bool {
 	return c.Token != "" || (c.Username != "" && c.Password != "")
 }
 
-func NewDefaultDBConfig(grypeURL string) (distribution.Config, installation.Config, bool, error) {
+func NewDefaultDBConfig(grypeURL string, skipDBUpdate bool) (distribution.Config, installation.Config, bool, error) {
 	dir := filepath.Join(xdg.CacheHome, defaultDBDirName)
 	finalURL := defaultGrypeListingURL
 
@@ -71,7 +72,7 @@ func NewDefaultDBConfig(grypeURL string) (distribution.Config, installation.Conf
 		finalURL = cleanedGrypeURL
 	}
 
-	shouldUpdate := true
+	shouldUpdate := !skipDBUpdate
 
 	return distribution.Config{
 			LatestURL: finalURL,
@@ -164,10 +165,11 @@ func getProviderConfig(creds RegistryCredentials, sources []string, options Scan
 // It performs image scanning and everything needed in between.
 type Service struct {
 	useDefaultMatchers bool
+	vp                 vulnerability.Provider
+	vexClient          VexClient
 	// sources specifies allowed provider sources (nil = all providers).
 	// Used by MCP server to restrict scans to remote registry providers.
 	sources []string
-	vp      vulnerability.Provider
 	// dbStatus carries the loaded vulnerability DB status so scan results can
 	// surface DB freshness (ProviderStatus.Built). Nil when the DB failed to load.
 	dbStatus *vulnerability.ProviderStatus
@@ -242,7 +244,7 @@ func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCred
 // ScanWithOptions scans an image using explicit source-selection options. In
 // particular, Platform prevents a multi-architecture image index from silently
 // resolving to the architecture of the machine running Kubescape.
-func (s *Service) ScanWithOptions(_ context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string, options ScanOptions) (*cautils.ImageScanData, error) {
+func (s *Service) ScanWithOptions(ctx context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string, options ScanOptions) (*cautils.ImageScanData, error) {
 	platform, err := NormalizePlatform(options.Platform)
 	if err != nil {
 		return nil, err
@@ -261,6 +263,12 @@ func (s *Service) ScanWithOptions(_ context.Context, userInput string, creds Reg
 
 	filteredMatches := filterMatchesBasedOnSeverity(severityExceptions, *remainingMatches, s.vp)
 
+	vexStatuses, err := s.vexClient.GetVexStatuses(ctx, userInput)
+	if err != nil {
+		// Log error but continue scanning
+		logger.L().Warning("Failed to fetch VEX statuses", helpers.Error(err))
+	}
+
 	pb := cautils.ImageScanData{
 		Context:               pkgContext,
 		IgnoredMatches:        ignoredMatches,
@@ -270,6 +278,7 @@ func (s *Service) ScanWithOptions(_ context.Context, userInput string, creds Reg
 		Packages:              packages,
 		SBOM:                  sbom,
 		VulnerabilityProvider: s.vp,
+		VexStatuses:           vexStatuses,
 	}
 
 	applyDBFreshness(&pb, s.dbStatus)
@@ -333,26 +342,38 @@ func NewScanService(distCfg distribution.Config, installCfg installation.Config)
 }
 
 func NewScanServiceWithMatchers(distCfg distribution.Config, installCfg installation.Config, useDefaultMatchers bool) (*Service, error) {
-	return NewScanServiceWithMatchersAndSources(distCfg, installCfg, useDefaultMatchers, nil)
+	return NewScanServiceWithMatchersAndSources(distCfg, installCfg, useDefaultMatchers, nil, true)
 }
 
 // NewRemoteOnlyScanService creates a Service restricted to remote registry sources only,
 // preventing resolution of local files or local daemon images (used by MCP server).
 func NewRemoteOnlyScanService(distCfg distribution.Config, installCfg installation.Config) (*Service, error) {
-	return NewScanServiceWithMatchersAndSources(distCfg, installCfg, true, []string{"registry"})
+	return NewScanServiceWithMatchersAndSources(distCfg, installCfg, true, []string{"registry"}, true)
 }
 
-func NewScanServiceWithMatchersAndSources(distCfg distribution.Config, installCfg installation.Config, useDefaultMatchers bool, sources []string) (*Service, error) {
-	vp, status, err := NewVulnerabilityDB(distCfg, installCfg, true)
+func NewScanServiceWithMatchersAndSources(distCfg distribution.Config, installCfg installation.Config, useDefaultMatchers bool, sources []string, shouldUpdate bool) (*Service, error) {
+	vp, status, err := NewVulnerabilityDB(distCfg, installCfg, shouldUpdate)
 	if err = validateDBLoad(err, status); err != nil {
-		return nil, err
+		return nil, wrapDBLoadError(err, shouldUpdate)
 	}
 	return &Service{
 		vp:                 vp,
 		dbStatus:           status,
 		useDefaultMatchers: useDefaultMatchers,
+		vexClient:          NewVexClient(),
 		sources:            sources,
 	}, nil
+}
+
+// wrapDBLoadError adds a hint when the database update was skipped and the
+// load failed, so users know the local database must be usable first. The
+// wording is neutral because the failure may be a missing, corrupt, or
+// incompatible local database, not only an absent one.
+func wrapDBLoadError(err error, shouldUpdate bool) error {
+	if shouldUpdate {
+		return err
+	}
+	return fmt.Errorf("%w; the local vulnerability database could not be used (update was skipped) — run once without --skip-db-update to download it", err)
 }
 
 // ParseSeverity returns a Grype severity given a severity string

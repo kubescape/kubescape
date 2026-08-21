@@ -20,7 +20,7 @@ type rawObject map[string]json.RawMessage
 // A single instance is used for the complete report so every cross-reference
 // is rewritten consistently.
 type reportDecryptor struct {
-	dek       []byte
+	dek       *ReportKey
 	idMapping map[string]string
 	masterKey []byte
 	report    rawObject
@@ -48,7 +48,7 @@ func DecryptReport(data, masterKey []byte) ([]byte, error) {
 		report:    report,
 	}
 	defer func() {
-		zeroBytes(decryptor.dek)
+		decryptor.dek.Zero()
 	}()
 
 	if err := decryptor.decryptMetadata(); err != nil {
@@ -608,7 +608,7 @@ func (d *reportDecryptor) remapResourceID(id, context string) (string, error) {
 
 // decryptEmbeddedCiphertexts decrypts complete ENC envelopes without splitting
 // the surrounding resource ID, since base64 ciphertext may itself contain '/'.
-func decryptEmbeddedCiphertexts(value string, dek []byte) (string, error) {
+func decryptEmbeddedCiphertexts(value string, dek *ReportKey) (string, error) {
 	if !strings.Contains(value, prefix) {
 		return value, nil
 	}
@@ -630,7 +630,7 @@ func decryptEmbeddedCiphertexts(value string, dek []byte) (string, error) {
 		}
 		end := payloadStart + endOffset + len(suffix)
 		envelope := remainder[start:end]
-		plaintext, err := DecryptString(envelope, dek)
+		plaintext, err := dek.DecryptString(envelope)
 		if err != nil {
 			return "", fmt.Errorf("failed to decrypt embedded resource ID envelope: %w", err)
 		}

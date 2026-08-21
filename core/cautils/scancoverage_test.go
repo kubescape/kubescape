@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -396,4 +397,104 @@ func makeNotEvaluatedControls(n int) []NotEvaluatedControl {
 		ne[i] = NotEvaluatedControl{ControlID: string(rune('A' + i))}
 	}
 	return ne
+}
+
+func irrelevantControl(id string) reportsummary.ControlSummary {
+	return reportsummary.ControlSummary{
+		ControlID: id,
+		StatusInfo: apis.StatusInfo{
+			InnerStatus: apis.StatusPassed,
+			SubStatus:   apis.SubStatusIrrelevant,
+		},
+	}
+}
+
+func evaluatedControl(id string) reportsummary.ControlSummary {
+	c := reportsummary.ControlSummary{
+		ControlID: id,
+		StatusInfo: apis.StatusInfo{
+			InnerStatus: apis.StatusFailed,
+		},
+	}
+	c.ResourceIDs.Append(apis.StatusFailed, "resource-1")
+	return c
+}
+
+// irrelevantControlWithResources carries the Irrelevant sub-status but still
+// lists a matched resource, the shape a passed-and-irrelevant control cannot
+// actually take in a real report. It exists to prove DetectVacuousFrameworks
+// checks the resource count in addition to the sub-status.
+func irrelevantControlWithResources(id string) reportsummary.ControlSummary {
+	c := irrelevantControl(id)
+	c.ResourceIDs.Append(apis.StatusPassed, "resource-1")
+	return c
+}
+
+func TestDetectVacuousFrameworks_AllControlsIrrelevant(t *testing.T) {
+	frameworks := []reportsummary.FrameworkSummary{
+		{
+			Name: "istio-security",
+			Controls: reportsummary.ControlSummaries{
+				"C-ISTIO-1": irrelevantControl("C-ISTIO-1"),
+				"C-ISTIO-2": irrelevantControl("C-ISTIO-2"),
+			},
+		},
+	}
+	assert.Equal(t, []string{"istio-security"}, DetectVacuousFrameworks(frameworks))
+}
+
+func TestDetectVacuousFrameworks_MixedControlsNotFlagged(t *testing.T) {
+	frameworks := []reportsummary.FrameworkSummary{
+		{
+			Name: "nsa",
+			Controls: reportsummary.ControlSummaries{
+				"C-0001": irrelevantControl("C-0001"),
+				"C-0002": evaluatedControl("C-0002"),
+			},
+		},
+	}
+	assert.Empty(t, DetectVacuousFrameworks(frameworks))
+}
+
+func TestDetectVacuousFrameworks_IrrelevantWithResourcesNotFlagged(t *testing.T) {
+	frameworks := []reportsummary.FrameworkSummary{
+		{
+			Name: "istio-security",
+			Controls: reportsummary.ControlSummaries{
+				"C-ISTIO-1": irrelevantControlWithResources("C-ISTIO-1"),
+			},
+		},
+		{
+			Name: "nsa",
+			Controls: reportsummary.ControlSummaries{
+				"C-0001": irrelevantControl("C-0001"),
+			},
+		},
+	}
+	assert.Equal(t, []string{"nsa"}, DetectVacuousFrameworks(frameworks))
+}
+
+func TestDetectVacuousFrameworks_EmptyFrameworkNotFlagged(t *testing.T) {
+	frameworks := []reportsummary.FrameworkSummary{
+		{Name: "empty", Controls: reportsummary.ControlSummaries{}},
+	}
+	assert.Empty(t, DetectVacuousFrameworks(frameworks))
+}
+
+func TestDetectVacuousFrameworks_OnlyVacuousFrameworksReturned(t *testing.T) {
+	frameworks := []reportsummary.FrameworkSummary{
+		{
+			Name: "istio-security",
+			Controls: reportsummary.ControlSummaries{
+				"C-ISTIO-1": irrelevantControl("C-ISTIO-1"),
+			},
+		},
+		{
+			Name: "nsa",
+			Controls: reportsummary.ControlSummaries{
+				"C-0001": evaluatedControl("C-0001"),
+			},
+		},
+	}
+	assert.Equal(t, []string{"istio-security"}, DetectVacuousFrameworks(frameworks))
 }

@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -27,6 +28,86 @@ func parseKindSet(kinds string) map[string]struct{} {
 		return nil
 	}
 	return set
+}
+
+// kindFilters is the parsed --include-kinds/--exclude-kinds pair. Parsing the
+// flags once keeps query planning and the post-collection pass reading them the
+// same way.
+type kindFilters struct {
+	include map[string]struct{}
+	exclude map[string]struct{}
+}
+
+func newKindFilters(scanInfo *cautils.ScanInfo) kindFilters {
+	return kindFilters{
+		include: parseKindSet(scanInfo.IncludeKinds),
+		exclude: parseKindSet(scanInfo.ExcludeKinds),
+	}
+}
+
+func (f kindFilters) active() bool {
+	return f.include != nil || f.exclude != nil
+}
+
+func (f kindFilters) allows(kind string) bool {
+	return kindAllowed(strings.ToLower(kind), f.include, f.exclude)
+}
+
+// filterQueryableResourcesByKind drops the queries whose Kind the filters
+// reject. Pruning only after collection still listed every excluded kind
+// cluster-wide, and a listing that failed reached InfoMap, where
+// BuildScanCoverage docks the coverage score over a kind the scan was told to
+// leave out.
+//
+// A query whose Kind the resolver could not name is kept; applyKindFilter still
+// prunes its objects after collection.
+func filterQueryableResourcesByKind(queryableResources QueryableResources, scanInfo *cautils.ScanInfo) {
+	filters := newKindFilters(scanInfo)
+	if !filters.active() {
+		return
+	}
+
+	skipped := make(map[string]struct{})
+	for key := range queryableResources {
+		kind := queryableResources[key].Kind
+		if kind == "" || filters.allows(kind) {
+			continue
+		}
+		skipped[queryableResources[key].GroupVersionResourceTriplet] = struct{}{}
+		delete(queryableResources, key)
+	}
+	if len(skipped) == 0 {
+		return
+	}
+
+	triplets := make([]string, 0, len(skipped))
+	for triplet := range skipped {
+		triplets = append(triplets, triplet)
+	}
+	sort.Strings(triplets)
+	logger.L().Debug("kind filter skipped resource queries",
+		helpers.String("skipped", strings.Join(triplets, ",")),
+		helpers.String("include", scanInfo.IncludeKinds),
+		helpers.String("exclude", scanInfo.ExcludeKinds),
+	)
+}
+
+// kindFilterHint describes the active kind filters, empty when neither narrows
+// anything. A scan that collected nothing reads as an empty cluster otherwise,
+// when the flags are the likelier reason.
+func kindFilterHint(scanInfo *cautils.ScanInfo) string {
+	filters := newKindFilters(scanInfo)
+	if !filters.active() {
+		return ""
+	}
+	flags := make([]string, 0, 2)
+	if filters.include != nil {
+		flags = append(flags, "--include-kinds "+strings.TrimSpace(scanInfo.IncludeKinds))
+	}
+	if filters.exclude != nil {
+		flags = append(flags, "--exclude-kinds "+strings.TrimSpace(scanInfo.ExcludeKinds))
+	}
+	return strings.Join(flags, " ")
 }
 
 // kindAllowed reports whether kind (already lowercased) passes the include/exclude
@@ -65,15 +146,13 @@ func applyKindFilter(
 	scanInfo *cautils.ScanInfo,
 	singleScan workloadinterface.IMetadata,
 ) error {
-	include := parseKindSet(scanInfo.IncludeKinds)
-	exclude := parseKindSet(scanInfo.ExcludeKinds)
-	if include == nil && exclude == nil {
+	filters := newKindFilters(scanInfo)
+	if !filters.active() {
 		return nil
 	}
 
 	if singleScan != nil {
-		kind := strings.ToLower(singleScan.GetKind())
-		if !kindAllowed(kind, include, exclude) {
+		if !filters.allows(singleScan.GetKind()) {
 			return fmt.Errorf(
 				"kind filter excludes the explicitly requested scan target %q (kind: %s); "+
 					"adjust --include-kinds / --exclude-kinds or remove the conflicting filter",
@@ -84,7 +163,7 @@ func applyKindFilter(
 
 	removed := make(map[string]struct{})
 	for id, res := range allResources {
-		if !kindAllowed(strings.ToLower(res.GetKind()), include, exclude) {
+		if !filters.allows(res.GetKind()) {
 			removed[id] = struct{}{}
 			delete(allResources, id)
 		}

@@ -3,6 +3,10 @@ package anonymizer
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
+
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 // pseudoIDHashLength is the number of hex characters of the SHA-256 digest
@@ -22,12 +26,14 @@ import (
 const pseudoIDHashLength = 32
 
 type Mapping struct {
-	data map[string]string
+	data map[string]string // "prefix:value" -> pseudo-ID, the forward cache GetOrCreate reads/writes
+	seen map[string]string // pseudo-ID -> the value that first produced it, kept only to detect a hash collision
 }
 
 func NewMapping() *Mapping {
 	return &Mapping{
 		data: make(map[string]string),
+		seen: make(map[string]string),
 	}
 }
 
@@ -83,9 +89,40 @@ func (m *Mapping) GetOrCreate(prefix, value string) string {
 	// this function exists to preserve. That combined trade-off needs an
 	// explicit decision, not a change made incidentally here.
 	hash := sha256.Sum256([]byte(value))
-	pseudo := prefix + "-" + hex.EncodeToString(hash[:])[:pseudoIDHashLength]
+	suffix := hex.EncodeToString(hash[:])[:pseudoIDHashLength]
+	pseudo := prefix + "-" + suffix
+
+	// A 128-bit suffix (see pseudoIDHashLength) puts a genuine SHA-256
+	// collision far beyond the reach of any realistic report, but returning
+	// a colliding pseudo-ID unchanged would merge two distinct resources
+	// into one report entry - the exact failure that suffix width exists to
+	// prevent - so detect it defensively rather than trust the odds alone.
+	//
+	// A hit in m.seen here can only be a genuine collision, never the
+	// intentional same-value/different-prefix suffix sharing documented
+	// above: that sharing ties suffixes together, not full pseudo-IDs, and
+	// an identical (prefix, value) pair would already have returned via the
+	// m.data lookup at the top of this function.
+	//
+	// Disambiguating trades away one property: if two colliding values are
+	// never scanned together, each keeps the plain "<prefix>-<suffix>" form
+	// across runs as documented; only the run where both happen to appear
+	// gives the later one an appended counter, so this one pseudo-ID is not
+	// guaranteed identical across every future report. That is an
+	// acceptable trade for never silently merging two resources.
+	for attempt := 1; ; attempt++ {
+		if _, collided := m.seen[pseudo]; !collided {
+			break
+		}
+
+		logger.L().Warning("anonymizer: pseudo-ID collision detected, disambiguating to avoid merging distinct resources",
+			helpers.String("prefix", prefix), helpers.String("pseudo", pseudo))
+
+		pseudo = prefix + "-" + suffix + "-" + strconv.Itoa(attempt)
+	}
 
 	m.data[key] = pseudo
+	m.seen[pseudo] = value
 
 	return pseudo
 }
