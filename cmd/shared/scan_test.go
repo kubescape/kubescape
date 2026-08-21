@@ -361,3 +361,44 @@ func TestValidateExcludePathsAcceptsBraceAlternation(t *testing.T) {
 	err := ValidateExcludePaths(&cautils.ScanInfo{ExcludePaths: []string{"*.{yaml,json}"}})
 	assert.NoError(t, err)
 }
+
+func TestValidateExcludeControls(t *testing.T) {
+	tests := []struct {
+		name            string
+		excludeControls []string
+		expectedErr     string
+	}{
+		{
+			name:            "no controls is valid",
+			excludeControls: nil,
+			expectedErr:     "",
+		},
+		{
+			name:            "control ids are valid",
+			excludeControls: []string{"C-0016", "C-0017"},
+			expectedErr:     "",
+		},
+		{
+			name:            "a control name is valid",
+			excludeControls: []string{"Immutable container filesystem"},
+			expectedErr:     "",
+		},
+		{
+			name:            "an empty identifier is rejected",
+			excludeControls: []string{"C-0016", "  "},
+			expectedErr:     "empty control identifier",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateExcludeControls(&cautils.ScanInfo{ExcludeControls: tt.excludeControls})
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
