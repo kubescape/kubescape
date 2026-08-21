@@ -148,17 +148,8 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 					return fmt.Errorf("invalid namespace %s: %w", namespace, err)
 				}
 			}
-			for _, label := range labelArr {
-				parsed, err := labels.Parse(label)
-				if err != nil {
-					return fmt.Errorf("invalid label selector: %s", label)
-				}
-				requirements, _ := parsed.Requirements()
-				for _, r := range requirements {
-					if r.Operator() != selection.Equals && r.Operator() != selection.DoubleEquals {
-						return fmt.Errorf("only equality label selectors ('=' or '==') are supported: %s", label)
-					}
-				}
+			if _, err := parseObjectSelectorLabels(labelArr); err != nil {
+				return err
 			}
 			actions, err := parseValidationActions(actionArr)
 			if err != nil {
@@ -392,6 +383,63 @@ func isSupportedValidationAction(action admissionv1.ValidationAction) bool {
 		}
 	}
 	return false
+}
+
+// parseObjectSelectorLabels turns the --label values into the matchLabels of
+// the binding's objectSelector. The flag validation and the emitted binding
+// both read the labels through here, so what the command accepts and what it
+// writes cannot drift apart.
+//
+// Only equality selectors are accepted: matchLabels is an equality map, so an
+// Exists or In requirement has nowhere to go on the binding. "=" and "==" are
+// distinct operators in apimachinery but mean the same thing, so both pass.
+//
+// Naming one key twice with different values is refused rather than resolved.
+// matchLabels is ANDed, so no object can carry both, and letting the last one
+// win emitted a binding that enforced the policy on a set the caller never
+// asked for. Repeating a key with the same value is the same requirement twice,
+// so it is accepted.
+//
+// A --label that ends up selecting nothing is refused. labels.Parse reads a
+// blank value as the empty selector, which contributes no requirement, so a
+// flag made only of those emitted an objectSelector that matches every object
+// the policy matches — the opposite of the narrowing that was asked for, and
+// silent.
+func parseObjectSelectorLabels(values []string) (map[string]string, error) {
+	matchLabels := make(map[string]string, len(values))
+	for _, value := range values {
+		// The flag is comma-split, so a trailing or doubled comma leaves a blank
+		// entry behind. It carries no requirement of its own; the check after
+		// the loop catches the case where nothing else carried one either.
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		parsed, err := labels.Parse(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid label selector: %s", value)
+		}
+		requirements, _ := parsed.Requirements()
+		for _, requirement := range requirements {
+			if requirement.Operator() != selection.Equals && requirement.Operator() != selection.DoubleEquals {
+				return nil, fmt.Errorf("only equality label selectors ('=' or '==') are supported: %s", value)
+			}
+			// An equality requirement carries exactly one value; anything else
+			// is refused rather than skipped, so no label can go missing from
+			// the selector without the command saying so.
+			selected := requirement.Values().List()
+			if len(selected) != 1 {
+				return nil, fmt.Errorf("label selector %s must name exactly one value", value)
+			}
+			if existing, seen := matchLabels[requirement.Key()]; seen && existing != selected[0] {
+				return nil, fmt.Errorf("conflicting values for label %q: %q and %q; a binding requires both at once, so it would match nothing", requirement.Key(), existing, selected[0])
+			}
+			matchLabels[requirement.Key()] = selected[0]
+		}
+	}
+	if len(values) > 0 && len(matchLabels) == 0 {
+		return nil, fmt.Errorf("--label %q selects nothing; omit the flag to bind everything the policy matches", strings.Join(values, ","))
+	}
+	return matchLabels, nil
 }
 
 // resourceRuleParts is the group/version/resource form of --resource-rule. The
@@ -639,21 +687,12 @@ func createPolicyBinding(bindingName string, policyName string, actions []admiss
 		}
 	}
 
-	if len(labelMatch) > 0 {
-		policyBinding.Spec.MatchResources.ObjectSelector = &metav1.LabelSelector{}
-		policyBinding.Spec.MatchResources.ObjectSelector.MatchLabels = make(map[string]string)
-		for _, label := range labelMatch {
-			parsed, err := labels.Parse(label)
-			if err != nil {
-				continue
-			}
-			requirements, _ := parsed.Requirements()
-			for _, r := range requirements {
-				if len(r.Values().List()) > 0 {
-					policyBinding.Spec.MatchResources.ObjectSelector.MatchLabels[r.Key()] = r.Values().List()[0]
-				}
-			}
-		}
+	matchLabels, err := parseObjectSelectorLabels(labelMatch)
+	if err != nil {
+		return "", err
+	}
+	if len(matchLabels) > 0 {
+		policyBinding.Spec.MatchResources.ObjectSelector = &metav1.LabelSelector{MatchLabels: matchLabels}
 	}
 
 	// Left empty, matchResources binds everything the policy matches, so a rule
