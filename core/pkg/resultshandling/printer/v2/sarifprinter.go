@@ -237,6 +237,45 @@ func (sp *SARIFPrinter) printImageScan(scanResults []cautils.ImageScanData) erro
 			return err
 		}
 
+		// Inject VEX Statuses
+		if len(scan.VexStatuses) > 0 {
+			logger.L().Info("Injecting VEX statuses into SARIF output")
+			for _, run := range sarifReport.Runs {
+				for _, result := range run.Results {
+					if result.RuleID != nil {
+						// Grype formats RuleIDs as <vuln-id>-<package-name>
+						for vulnID, status := range scan.VexStatuses {
+							if *result.RuleID == vulnID || strings.HasPrefix(*result.RuleID, vulnID+"-") {
+								if status.Status == "not_affected" || status.Status == "fixed" {
+									result.WithLevel("note")
+									if result.Message.Text != nil {
+										msg := fmt.Sprintf("%s\nVEX Status: %s. Justification: %s", *result.Message.Text, status.Status, status.Justification)
+										result.Message.Text = &msg
+									}
+								}
+								break
+							}
+						}
+					}
+				}
+
+				if run.Tool.Driver != nil {
+					for _, rule := range run.Tool.Driver.Rules {
+						for vulnID, status := range scan.VexStatuses {
+							if rule.ID == vulnID || strings.HasPrefix(rule.ID, vulnID+"-") {
+								if status.Status == "not_affected" || status.Status == "fixed" {
+									if rule.Properties != nil {
+										rule.Properties["security-severity"] = "0.0"
+									}
+								}
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+
 		// Patch driver name to Kubescape and aggregate runs
 		for _, run := range sarifReport.Runs {
 			if run.Tool.Driver != nil {
