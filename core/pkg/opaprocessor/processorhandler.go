@@ -1055,6 +1055,9 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		var toEvaluate []workloadinterface.IMetadata
 		cacheHitIDs = make(map[string]struct{})
 		for _, r := range resourceToScan {
+			if opap.skipNamespace(r.GetNamespace()) {
+				continue
+			}
 			hash := scancache.ResourceHash(r.GetObject())
 			if cached, ok := opap.incrementalCache.Get(controlID, r.GetID(), hash); ok {
 				for _, cr := range cached.ResourceAssociatedRules {
