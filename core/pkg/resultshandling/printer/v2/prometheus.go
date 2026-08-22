@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -37,16 +36,7 @@ func (pp *PrometheusPrinter) PrintNextSteps() {
 }
 
 func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) error {
-	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		outputFile = strings.TrimSpace(outputFile)
-		if outputFile == "" {
-			outputFile = prometheusOutputFile
-		}
-		if !printer.HasOutputExt(outputFile, printer.PrometheusOutputExt) {
-			outputFile = outputFile + printer.PrometheusOutputExt
-		}
-	}
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.PrometheusFormat, outputFile, prometheusOutputFile)
 	if explicitOutput {
 		var err error
 		pp.writer, err = printer.GetWriterNoFallback(outputFile)

@@ -28,13 +28,19 @@ func TestJsonPrinterSetWriter(t *testing.T) {
 		},
 		{
 			name:       "blank output uses default report name",
-			outputFile: filepath.Join(t.TempDir(), "   "),
-			wantSuffix: "   .json",
+			outputFile: "   ",
+			wantSuffix: "report.json",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			workingDir := t.TempDir()
+			originalDir, err := os.Getwd()
+			assert.NoError(t, err)
+			assert.NoError(t, os.Chdir(workingDir))
+			t.Cleanup(func() { assert.NoError(t, os.Chdir(originalDir)) })
+
 			p := NewJsonPrinter()
 			p.SetWriter(context.Background(), tt.outputFile)
 			defer p.writer.Close()

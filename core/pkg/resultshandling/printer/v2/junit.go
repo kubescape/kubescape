@@ -99,15 +99,7 @@ func NewJunitPrinter(verbose bool) *JunitPrinter {
 }
 
 func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) error {
-	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = junitOutputFile
-		}
-		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.JunitOutputExt) {
-			outputFile = outputFile + printer.JunitOutputExt
-		}
-	}
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JunitResultFormat, outputFile, junitOutputFile)
 	if explicitOutput {
 		var err error
 		jp.writer, err = printer.GetWriterNoFallback(outputFile)
