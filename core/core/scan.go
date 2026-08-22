@@ -180,30 +180,7 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 }
 
 func resolvedOutputPath(format, outputFile string) string {
-	trimmed := strings.TrimSpace(outputFile)
-	if trimmed == "" {
-		return ""
-	}
-	ext := fileExtForFormat(format)
-
-	if ext == printer.YamlOutputExt && strings.HasSuffix(trimmed, ".yml") {
-		return trimmed
-	}
-
-	if ext != "" && !strings.HasSuffix(trimmed, ext) {
-		return trimmed + ext
-	}
-	return trimmed
-}
-
-// fileExtForFormat returns the extension the format's printer appends to
-// --output. An unknown format falls back to the pretty extension because
-// NewPrinter falls back to the pretty printer for it.
-func fileExtForFormat(format string) string {
-	if ext, ok := printer.FormatOutputExt[format]; ok {
-		return ext
-	}
-	return printer.PrettyOutputExt
+	return printer.ResolveOutputPath(format, outputFile)
 }
 
 // collectPolicies pins the shared handler for exactly as long as its caches are

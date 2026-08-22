@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/anchore/clio"
 	grypejson "github.com/anchore/grype/grype/presenter/json"
@@ -33,18 +32,9 @@ func NewYamlPrinter() *YamlPrinter {
 
 func (yp *YamlPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = yamlOutputFile
-		}
-		trimmed := strings.TrimSpace(outputFile)
-		if !printer.HasOutputExt(trimmed, printer.YamlOutputExt) && !printer.HasOutputExt(trimmed, ".yml") {
-			outputFile = outputFile + printer.YamlOutputExt
-		}
-	}
 	if explicitOutput {
 		var err error
-		yp.writer, err = printer.GetWriterNoFallback(outputFile)
+		yp.writer, err = printer.GetWriterNoFallback(printer.ResolveOutputPath(printer.YamlFormat, outputFile))
 		return err
 	}
 	yp.writer = printer.GetWriter(ctx, outputFile)

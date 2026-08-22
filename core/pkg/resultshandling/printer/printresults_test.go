@@ -236,3 +236,51 @@ func TestHasOutputExt(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveOutputPath(t *testing.T) {
+	tests := []struct {
+		name       string
+		format     string
+		outputFile string
+		want       string
+	}{
+		{"empty string returns empty", JsonFormat, "", ""},
+		{"whitespace only defaults to report.json", JsonFormat, "   ", "report.json"},
+		{"whitespace only defaults to report.yaml", YamlFormat, "  \t\n  ", "report.yaml"},
+		{"whitespace only defaults to report.yaml for policyreport", PolicyReportFormat, "   ", "report.yaml"},
+		{"trims whitespace around bare filename", JsonFormat, "  my-report  ", "my-report.json"},
+		{"trims whitespace around extension filename", JsonFormat, "  my-report.json  ", "my-report.json"},
+		{"preserves uppercase extension", JsonFormat, "  Report.JSON  ", "Report.JSON"},
+		{"preserves lowercase yaml extension", YamlFormat, "  report.yaml  ", "report.yaml"},
+		{"preserves lowercase yml extension for yaml", YamlFormat, "  report.yml  ", "report.yml"},
+		{"preserves uppercase YML extension for yaml", YamlFormat, "  report.YML  ", "report.YML"},
+		{"preserves lowercase yml extension for policyreport", PolicyReportFormat, "  report.yml  ", "report.yml"},
+		{"preserves uppercase YML extension for policyreport", PolicyReportFormat, "  report.YML  ", "report.YML"},
+		{"appends yaml extension when different extension", YamlFormat, "  report.json  ", "report.json.yaml"},
+		{"preserves cyclonedx compound extension", CycloneDXFormat, "  report.cdx.json  ", "report.cdx.json"},
+		{"appends cyclonedx to plain json", CycloneDXFormat, "  report.json  ", "report.json.cdx.json"},
+		{"preserves spdx compound extension", SPDXFormat, "  report.spdx.json  ", "report.spdx.json"},
+		{"appends spdx to plain json", SPDXFormat, "  report.json  ", "report.json.spdx.json"},
+		{"preserves os.DevNull", PrettyFormat, os.DevNull, os.DevNull},
+		{"appends pretty txt extension", PrettyFormat, "  report  ", "report.txt"},
+		{"unknown format falls back to pretty extension", "unknown", "  report  ", "report.txt"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, ResolveOutputPath(tt.format, tt.outputFile))
+		})
+	}
+}
+
+func TestResolveOutputPath_AllFormats(t *testing.T) {
+	for _, format := range AllFormats {
+		t.Run(format, func(t *testing.T) {
+			ext := FormatOutputExt[format]
+			assert.Equal(t, "", ResolveOutputPath(format, ""))
+			assert.Equal(t, "report"+ext, ResolveOutputPath(format, "   "))
+			assert.Equal(t, "custom"+ext, ResolveOutputPath(format, "  custom  "))
+			assert.Equal(t, "custom"+ext, ResolveOutputPath(format, "custom"+ext))
+		})
+	}
+}

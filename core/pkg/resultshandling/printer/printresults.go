@@ -60,6 +60,10 @@ const (
 	PolicyReportOutputExt = ".yaml"
 )
 
+const (
+	DefaultOutputFile = "report"
+)
+
 // HasOutputExt reports whether outputFile already ends with ext, compared
 // case-insensitively. Every v2 printer's SetWriter previously re-implemented
 // this check with a case-sensitive filepath.Ext(...) != ext comparison, so
@@ -91,6 +95,48 @@ var FormatOutputExt = map[string]string{
 	CycloneDXFormat:    CycloneDXOutputExt,
 	SPDXFormat:         SPDXOutputExt,
 	PolicyReportFormat: PolicyReportOutputExt,
+}
+
+// ResolveOutputPath standardizes output file path resolution across all printers.
+// It trims whitespace from explicit paths, defaults whitespace-only inputs to "report",
+// preserves special targets like os.DevNull, and applies extension rules (including
+// case-insensitive matching and accepting .yml for YAML outputs).
+// It returns an empty string if outputFile is empty.
+func ResolveOutputPath(format, outputFile string) string {
+	if outputFile == "" {
+		return ""
+	}
+	trimmed := strings.TrimSpace(outputFile)
+	if trimmed == "" {
+		trimmed = DefaultOutputFile
+	}
+	if trimmed == os.DevNull {
+		return os.DevNull
+	}
+
+	dir, file := filepath.Split(trimmed)
+	file = strings.TrimSpace(file)
+	if file == "" {
+		file = DefaultOutputFile
+	}
+	var target string
+	if dir != "" {
+		target = filepath.Join(dir, file)
+	} else {
+		target = file
+	}
+
+	ext, ok := FormatOutputExt[format]
+	if !ok || ext == "" {
+		ext = PrettyOutputExt
+	}
+	if ext == YamlOutputExt && (HasOutputExt(target, YamlOutputExt) || HasOutputExt(target, ".yml")) {
+		return target
+	}
+	if HasOutputExt(target, ext) {
+		return target
+	}
+	return target + ext
 }
 
 type IPrinter interface {

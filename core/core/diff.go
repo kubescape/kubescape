@@ -85,11 +85,5 @@ func diffOutputPath(format, outputFile string) string {
 	if !ok || ext == "" {
 		return outputFile
 	}
-	if ext == printer.YamlOutputExt && strings.HasSuffix(outputFile, ".yml") {
-		return outputFile
-	}
-	if printer.HasOutputExt(outputFile, ext) {
-		return outputFile
-	}
-	return outputFile + ext
+	return printer.ResolveOutputPath(format, outputFile)
 }
