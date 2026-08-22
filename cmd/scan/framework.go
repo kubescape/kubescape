@@ -17,7 +17,6 @@ import (
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/spf13/cobra"
-	"k8s.io/apimachinery/pkg/labels"
 )
 
 var (
@@ -283,11 +282,6 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 		return err
 	}
 
-	if scanInfo.LabelSelector != "" {
-		if _, err := labels.Parse(scanInfo.LabelSelector); err != nil {
-			return fmt.Errorf("invalid --label-selector %q: %w", scanInfo.LabelSelector, err)
-		}
-	}
 
 	// Validate the user's credentials
 	return cautils.ValidateAccountID(scanInfo.AccountID)
