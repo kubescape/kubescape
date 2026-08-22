@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"k8s.io/apimachinery/pkg/labels"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/spf13/cobra"
@@ -151,6 +152,11 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateExcludePaths(scanInfo); err != nil {
 		return err
 	}
+	if scanInfo.LabelSelector != "" {
+		if _, err := labels.Parse(scanInfo.LabelSelector); err != nil {
+			return fmt.Errorf("invalid --label-selector %q: %w", scanInfo.LabelSelector, err)
+		}
+	}
 	if err := ValidateExcludeControls(scanInfo); err != nil {
 		return err
 	}
@@ -161,10 +167,6 @@ func ValidateExcludeControls(scanInfo *cautils.ScanInfo) error {
 	for _, control := range scanInfo.ExcludeControls {
 		if strings.TrimSpace(control) == "" {
 			return fmt.Errorf("--exclude-controls contains an empty control identifier")
-		}
-	}
-	return nil
-}
 
 // ValidateExcludePaths fails the command on a malformed pattern before any resource is collected.
 func ValidateExcludePaths(scanInfo *cautils.ScanInfo) error {
