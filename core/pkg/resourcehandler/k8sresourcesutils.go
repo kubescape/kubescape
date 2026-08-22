@@ -48,7 +48,7 @@ var (
 		ImageVulnerabilities: {"armo.vuln.images/v1", "image.vulnscan.com/v1"}}
 	MapResourceToApiGroupCloud = map[string][]string{
 		ClusterDescribe:         {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"},
-		DescribeRepositories:    {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"},
+		DescribeRepositories:    {"container.googleapis.com/v1", "eks.amazonaws.com/v1"}, //TODO - add azure when ensure-image-scanning-enabled-cloud supports ACR
 		ListEntitiesForPolicies: {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"},
 	}
 )

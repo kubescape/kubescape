@@ -181,7 +181,6 @@ func TestBuildScanCoverage_PartialGVRFailureControlStillEvaluated(t *testing.T) 
 	// C-0001 depends on two GVRs but only one failed -> should NOT appear in NotEvaluatedControls
 	infoMap := map[string]apis.StatusInfo{
 		"networking.k8s.io/v1/networkpolicies": {InnerStatus: apis.StatusSkipped, InnerInfo: "RBAC denied"},
-		"apps/v1/deployments":                  {InnerStatus: apis.StatusPassed},
 	}
 	resourceToControlsMap := map[string][]string{
 		"networking.k8s.io/v1/networkpolicies": {"C-0001"},
