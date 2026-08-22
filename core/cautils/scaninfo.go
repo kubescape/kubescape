@@ -204,6 +204,7 @@ type ScanInfo struct {
 	BaselineFailOnNew         bool              // Exit with code 1 when the baseline diff finds new or incomparable failures
 	BaselineSeverityThreshold string            // Only count new/incomparable baseline failures at or above this severity when enforcing BaselineFailOnNew
 	BaselineGranularity       string            // Comparison unit for the baseline diff: "evidence" (default) or "control"
+	KubeContexts              []string          // --kube-contexts: scan each of these kube contexts sequentially, one report per context (fleet mode)
 }
 
 type Getters struct {
@@ -468,6 +469,31 @@ func (scanInfo *ScanInfo) SetKubeconfigSelection(path, contextName string) {
 	scanInfo.kubeContextOverride = contextName
 	scanInfo.clusterContextName = ""
 	scanInfo.contextResolved = false
+}
+
+// CloneForContext returns a copy of scanInfo prepared for scanning one kube
+// context as part of a multi-context ("fleet") scan, reusing the same
+// kubeconfig file the parent ScanInfo was configured with (fleet mode
+// switches context within one kubeconfig, not the file itself) but
+// targeting kubeContext. Every field is copied verbatim except the three
+// that must not be shared across sibling scans sharing one parent ScanInfo:
+//   - ScanID: cleared, so Init generates a fresh one for this context instead
+//     of reusing whichever sibling happened to run first.
+//   - cleanups: dropped, so this context's Cleanup() doesn't re-invoke
+//     closures another sibling already ran (or hasn't registered yet).
+//   - Output: replaced with the caller-supplied path (fleet mode gives each
+//     context its own report file; see cmd/scan/fleetscan.go).
+//
+// SetKubeconfigSelection also resets clusterContextName/contextResolved so
+// each clone re-resolves its own context rather than inheriting the
+// parent's.
+func (scanInfo *ScanInfo) CloneForContext(kubeContext, output string) *ScanInfo {
+	clone := *scanInfo
+	clone.ScanID = ""
+	clone.cleanups = nil
+	clone.Output = output
+	clone.SetKubeconfigSelection(scanInfo.kubeconfigPath, kubeContext)
+	return &clone
 }
 
 // ResolveClusterContextName resolves the context from the same kubeconfig

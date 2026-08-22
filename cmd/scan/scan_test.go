@@ -516,6 +516,56 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 	}
 }
 
+// TestGetScanCommand_KubeContextsRejectedWhereUnsupported is a regression
+// test for a real review finding on #3438: --kube-contexts is registered on
+// scanCmd's persistent flags, so every subcommand and --view inherits it,
+// but only the default security view's securityScan actually calls
+// fleetScan. Before this fix, every other combination silently accepted
+// the flag and scanned only one context - the same silently-wrong-cluster
+// failure mode #3217/#3218 closed for sequential scans, recurring as "the
+// flag had no effect."
+func TestGetScanCommand_KubeContextsRejectedWhereUnsupported(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "scan control", args: []string{"control", "C-0058", "--kube-contexts=ctx-a,ctx-b"}},
+		{name: "scan framework", args: []string{"framework", "nsa", "--kube-contexts=ctx-a,ctx-b"}},
+		{name: "scan workload", args: []string{"workload", "Deployment/nginx", "--kube-contexts=ctx-a,ctx-b"}},
+		{name: "scan image", args: []string{"image", "nginx:latest", "--kube-contexts=ctx-a,ctx-b"}},
+		{name: "scan --view=resource", args: []string{"--view=resource", "--kube-contexts=ctx-a,ctx-b"}},
+		{name: "scan --view=control", args: []string{"--view=control", "--kube-contexts=ctx-a,ctx-b"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &scanCallCounter{}
+			cmd := GetScanCommand(ks)
+			cmd.SilenceUsage = true
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+
+			require.ErrorContains(t, err, "--kube-contexts is not yet supported")
+			assert.Equal(t, 0, ks.calls, "scan must not run when --kube-contexts is rejected up front")
+		})
+	}
+}
+
+func TestGetScanCommand_KubeContextsAcceptedForDefaultSecurityView(t *testing.T) {
+	ks := &scanCallCounter{}
+	cmd := GetScanCommand(ks)
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"--kube-contexts=ctx-a,ctx-b", "--output=report.json"})
+
+	err := cmd.Execute()
+
+	// Reaches fleetScan (which then reaches ScanContext once per context via
+	// the scanCallCounter mock) rather than being rejected by the guard -
+	// the guard's error text must not appear here.
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "is not yet supported")
+}
+
 func TestGetScanCommand_ScanTimeoutFlagRegistered(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	cmd := GetScanCommand(mockKubescape)
