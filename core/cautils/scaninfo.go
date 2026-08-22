@@ -204,6 +204,7 @@ type ScanInfo struct {
 	BaselineFailOnNew         bool              // Exit with code 1 when the baseline diff finds new or incomparable failures
 	BaselineSeverityThreshold string            // Only count new/incomparable baseline failures at or above this severity when enforcing BaselineFailOnNew
 	BaselineGranularity       string            // Comparison unit for the baseline diff: "evidence" (default) or "control"
+	OtelEndpoint              string            // OTLP endpoint (host:port, e.g. "localhost:4317") to export scan traces/metrics to via gRPC. Falls back to OTEL_EXPORTER_OTLP_ENDPOINT when empty. Empty means OTel export is disabled
 }
 
 type Getters struct {

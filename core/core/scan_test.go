@@ -273,6 +273,10 @@ func TestGetOutputPrintersReturnsExplicitSetupErrorsForEveryFormat(t *testing.T)
 
 	for _, format := range printer.AllFormats {
 		t.Run(format, func(t *testing.T) {
+			if format == printer.OtelFormat {
+				t.Skip("otel format never writes to --output; see OtelPrinter.SetWriter")
+			}
+
 			scanType := cautils.ScanTypeControl
 			if format == printer.CycloneDXFormat || format == printer.SPDXFormat {
 				scanType = cautils.ScanTypeImage

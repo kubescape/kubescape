@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/kubescape/backend/pkg/versioncheck"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
@@ -15,6 +19,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/telemetry"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/spf13/cobra"
@@ -233,7 +238,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ControlTimeout, "control-timeout", 0, "Maximum duration for evaluating a single control (e.g. 30s, 1m). 0 means no timeout. Controls that exceed this are marked as not evaluated and the scan continues. Must be lower than --scan-timeout when both are set.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.EnableStreaming, "enable-streaming", false, "Enable resource streaming for large clusters to reduce memory usage. Resources are processed in batches instead of loading all at once. Automatically enabled for clusters with >2500 resources.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.DryRun, "dry-run", false, "Check whether the current credentials can list every resource type the requested policies need, without collecting resources or evaluating controls. Cluster scans only.")
-	scanCmd.PersistentFlags().BoolVar(&scanInfo.Incremental, "incremental", false, "Cache the verdict for each resource, keyed by a hash of its spec/metadata plus the controls-config version, and skip re-evaluating unchanged resources on the next scan. Opt-in; scan output is unaffected. Cache automatically invalidates when the controls-config version changes; clear it manually with 'kubescape config delete cache'.")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.OtelEndpoint, "otel-endpoint", "", "OTLP/gRPC endpoint (host:port, e.g. localhost:4317) to export scan spans and metrics to. Falls back to the OTEL_EXPORTER_OTLP_ENDPOINT env var. Unset by default: no OTel SDK is initialized and there is no export overhead. Combine with --format otel to also export scan-level metrics (duration, resource/control counts) as a printer, in addition to the always-on spans this flag enables")
 
 	// Helm value override flags. Mirror `helm install` so users can pass overrides through verbatim
 	// when scanning a Helm chart directory. Note: -f is already taken by --format, so --values is long-only.
@@ -264,13 +269,60 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineSeverityThreshold, "baseline-severity-threshold", "", "With --baseline, only count new failures at or above this severity when using --baseline-fail-on-new.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.BaselineGranularity, "baseline-granularity", "evidence", "With --baseline, comparison unit: evidence or control.")
 
-	scanCmd.AddCommand(getControlCmd(ks, &scanInfo))
-	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))
-	scanCmd.AddCommand(getWorkloadCmd(ks, &scanInfo))
+	scanCmd.RunE = withTelemetry(&scanInfo, scanCmd.RunE)
 
-	scanCmd.AddCommand(getImageCmd(ks, &scanInfo))
+	controlCmd := getControlCmd(ks, &scanInfo)
+	controlCmd.RunE = withTelemetry(&scanInfo, controlCmd.RunE)
+	scanCmd.AddCommand(controlCmd)
+
+	frameworkCmd := getFrameworkCmd(ks, &scanInfo)
+	frameworkCmd.RunE = withTelemetry(&scanInfo, frameworkCmd.RunE)
+	scanCmd.AddCommand(frameworkCmd)
+
+	workloadCmd := getWorkloadCmd(ks, &scanInfo)
+	workloadCmd.RunE = withTelemetry(&scanInfo, workloadCmd.RunE)
+	scanCmd.AddCommand(workloadCmd)
+
+	imageCmd := getImageCmd(ks, &scanInfo)
+	imageCmd.RunE = withTelemetry(&scanInfo, imageCmd.RunE)
+	scanCmd.AddCommand(imageCmd)
 
 	return scanCmd
+}
+
+// withTelemetry wraps a RunE with OTel setup/shutdown, replacing the earlier
+// PersistentPreRunE/PersistentPostRunE pair (issue #3402). Cobra skips
+// PostRunE when RunE returns an error, which silently dropped telemetry for
+// the run you'd most want it for: a failed one (see PR #3447 review). A
+// defer around the wrapped RunE call runs regardless of its outcome instead.
+//
+// A shutdown failure (e.g. a transient collector hiccup) is only logged, not
+// returned: it must never flip an otherwise-successful scan's exit code.
+// getFrameworkCmd(ks, &scanInfo).RunE(cmd, args), called directly from
+// scanCmd's own RunE for the non-security-view bare-scan path, builds a
+// fresh, unwrapped *cobra.Command each call -- distinct from the wrapped
+// instance registered via AddCommand above -- so it is not double-wrapped.
+func withTelemetry(scanInfo *cautils.ScanInfo, runE func(cmd *cobra.Command, args []string) error) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		shutdown := telemetry.ShutdownFunc(func(context.Context) error { return nil })
+		if endpoint := telemetry.ResolveEndpoint(scanInfo.OtelEndpoint); endpoint != "" {
+			s, err := telemetry.Setup(cmd.Context(), endpoint, versioncheck.BuildNumber)
+			if err != nil {
+				return fmt.Errorf("failed to set up --otel-endpoint %q: %w", endpoint, err)
+			}
+			shutdown = s
+		}
+
+		runErr := runE(cmd, args)
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if shutdownErr := shutdown(shutdownCtx); shutdownErr != nil {
+			logger.L().Ctx(cmd.Context()).Warning("failed to flush OTel telemetry", helpers.Error(shutdownErr))
+		}
+
+		return runErr
+	}
 }
 
 func validateCombinedImageScanFlags(scanInfo *cautils.ScanInfo) error {
