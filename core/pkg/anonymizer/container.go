@@ -360,6 +360,12 @@ func transformTypedEnv(envVars []corev1.EnvVar, transformer Transformer) error {
 			hasRef = true
 		}
 
+		if envVar.ValueFrom.FieldRef != nil {
+			hasRef = true
+		}
+		if envVar.ValueFrom.ResourceFieldRef != nil {
+			hasRef = true
+		}
 		if hasRef && envVar.Name != "" {
 			envVar.Name, err = transformValue(transformer, "env", envVar.Name)
 			if err != nil {
@@ -436,6 +442,12 @@ func transformUnstructuredEnv(container map[string]any, transformer Transformer)
 			return err
 		}
 		if _, ok := valueFrom["configMapKeyRef"]; ok {
+			hasRef = true
+		}
+		if _, ok := valueFrom["fieldRef"]; ok {
+			hasRef = true
+		}
+		if _, ok := valueFrom["resourceFieldRef"]; ok {
 			hasRef = true
 		}
 
