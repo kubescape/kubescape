@@ -33,13 +33,11 @@ func NewMarkdownPrinter() *MarkdownPrinter {
 
 func (mp *MarkdownPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	explicitOutput := outputFile != ""
-	outputFile = strings.TrimSpace(outputFile)
+	outputFile = printer.ResolveOutputPath(printer.MarkdownFormat, outputFile)
 	if outputFile == "" {
 		outputFile = markdownOutputFile + printer.MarkdownOutputExt
 		logger.L().Info("no --output specified for markdown format; writing to default file",
 			helpers.String("filename", outputFile))
-	} else if !printer.HasOutputExt(outputFile, printer.MarkdownOutputExt) {
-		outputFile = outputFile + printer.MarkdownOutputExt
 	}
 	if explicitOutput {
 		var err error

@@ -172,19 +172,8 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error
 	}
 
 	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		outputFile = strings.TrimSpace(outputFile)
-		if outputFile == "" {
-			outputFile = prettyOutputFile
-		}
-		// os.DevNull is used to silence the UI printer, appending an extension would turn it into a regular file
-		if outputFile != os.DevNull && !printer.HasOutputExt(outputFile, printer.PrettyOutputExt) {
-			outputFile = outputFile + printer.PrettyOutputExt
-		}
-	}
-
 	if explicitOutput {
-		writer, err := printer.GetWriterNoFallback(outputFile)
+		writer, err := printer.GetWriterNoFallback(printer.ResolveOutputPath(printer.PrettyFormat, outputFile))
 		if err != nil {
 			return err
 		}

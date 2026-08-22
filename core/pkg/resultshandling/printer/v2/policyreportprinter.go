@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/kubescape/go-logger"
@@ -92,15 +91,10 @@ func NewPolicyReportPrinter() *PolicyReportPrinter {
 }
 
 func (pp *PolicyReportPrinter) SetWriter(ctx context.Context, outputFile string) error {
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = policyReportOutputFile
-		}
-		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.YamlOutputExt) && !printer.HasOutputExt(strings.TrimSpace(outputFile), ".yml") {
-			outputFile = outputFile + printer.YamlOutputExt
-		}
+	explicitOutput := outputFile != ""
+	if explicitOutput {
 		var err error
-		pp.writer, err = printer.GetWriterNoFallback(outputFile)
+		pp.writer, err = printer.GetWriterNoFallback(printer.ResolveOutputPath(printer.PolicyReportFormat, outputFile))
 		return err
 	}
 	pp.writer = printer.GetWriter(ctx, outputFile)

@@ -27,9 +27,14 @@ func TestJsonPrinterSetWriter(t *testing.T) {
 			wantSuffix: "scan-result.json",
 		},
 		{
+			name:       "whitespace padded output trims and adds json extension",
+			outputFile: "  scan-result  ",
+			wantSuffix: "scan-result.json",
+		},
+		{
 			name:       "blank output uses default report name",
-			outputFile: filepath.Join(t.TempDir(), "   "),
-			wantSuffix: "   .json",
+			outputFile: "   ",
+			wantSuffix: "report.json",
 		},
 	}
 
@@ -38,6 +43,7 @@ func TestJsonPrinterSetWriter(t *testing.T) {
 			p := NewJsonPrinter()
 			p.SetWriter(context.Background(), tt.outputFile)
 			defer p.writer.Close()
+			t.Cleanup(func() { _ = os.Remove(p.writer.Name()) })
 
 			assert.True(t, strings.HasSuffix(p.writer.Name(), tt.wantSuffix), p.writer.Name())
 		})

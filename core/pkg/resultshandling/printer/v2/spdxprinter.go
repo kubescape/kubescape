@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/anchore/syft/syft/format"
 	"github.com/anchore/syft/syft/format/spdxjson"
@@ -31,17 +30,9 @@ func NewSPDXPrinter() *SPDXPrinter {
 
 func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = spdxOutputFile
-		}
-		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.SPDXOutputExt) {
-			outputFile = outputFile + printer.SPDXOutputExt
-		}
-	}
 	if explicitOutput {
 		var err error
-		sp.writer, err = printer.GetWriterNoFallback(outputFile)
+		sp.writer, err = printer.GetWriterNoFallback(printer.ResolveOutputPath(printer.SPDXFormat, outputFile))
 		return err
 	}
 	sp.writer = printer.GetWriter(ctx, outputFile)

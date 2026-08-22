@@ -130,20 +130,11 @@ func NewGitLabSASTPrinter() *GitLabSASTPrinter {
 func (gp *GitLabSASTPrinter) Score(score float32) {
 }
 
-// SetWriter opens outputFile for writing, defaulting the name and forcing a .json extension
 func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = gitLabSASTOutputFile
-		}
-		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.JsonOutputExt) {
-			outputFile = outputFile + printer.JsonOutputExt
-		}
-	}
 	if explicitOutput {
 		var err error
-		gp.writer, err = printer.GetWriterNoFallback(outputFile)
+		gp.writer, err = printer.GetWriterNoFallback(printer.ResolveOutputPath(printer.GitLabSASTFormat, outputFile))
 		return err
 	}
 	gp.writer = printer.GetWriter(ctx, outputFile)

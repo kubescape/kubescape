@@ -32,17 +32,9 @@ func NewCsvPrinter() *CsvPrinter {
 
 func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = csvOutputFile
-		}
-		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.CsvOutputExt) {
-			outputFile = outputFile + printer.CsvOutputExt
-		}
-	}
 	if explicitOutput {
 		var err error
-		cp.writer, err = printer.GetWriterNoFallback(outputFile)
+		cp.writer, err = printer.GetWriterNoFallback(printer.ResolveOutputPath(printer.CsvFormat, outputFile))
 		return err
 	}
 	cp.writer = printer.GetWriter(ctx, outputFile)
