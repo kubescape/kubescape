@@ -25,6 +25,10 @@ import (
 // sensor data is live node state that a scan is expected to reflect.
 const HostSensorCacheTtlEnvVar = "HOSTSENSOR_CACHE_TTL"
 
+// maxHostSensorCachePayloadBytes bounds decompressed cache reads to prevent
+// memory exhaustion / decompression bombs from corrupted or oversized cache files.
+const maxHostSensorCachePayloadBytes = 50 * 1024 * 1024 // 50 MB
+
 var DefaultCacheDir string
 
 func init() {
@@ -111,7 +115,7 @@ func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDat
 	}
 	defer gr.Close()
 
-	data, err := io.ReadAll(gr)
+	data, err := io.ReadAll(io.LimitReader(gr, maxHostSensorCachePayloadBytes))
 	if err != nil {
 		return nil, err
 	}

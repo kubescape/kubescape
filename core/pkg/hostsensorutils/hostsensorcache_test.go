@@ -221,3 +221,36 @@ func TestLoadFromCache_UnresolvedClusterIdentityIsRejected(t *testing.T) {
 	_, err = loadFromCache("kubernetes-admin@kubernetes", "KubeletInfo")
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
+
+// TestLoadFromCache_BoundedDecompressionRead guards against decompression bombs
+// or corrupted oversized cache files triggering unbounded memory allocation.
+func TestLoadFromCache_BoundedDecompressionRead(t *testing.T) {
+	withTempCacheDir(t)
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+	withK8sHost(t, "https://cluster-a.example.com")
+
+	path, err := getCacheFilePath("kubernetes-admin@kubernetes", "KubeletInfo")
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0700))
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	_, err = gw.Write([]byte(`[{"name":"test"},`))
+	require.NoError(t, err)
+
+	paddingChunk := bytes.Repeat([]byte(" "), 1024*1024)
+	for range maxHostSensorCachePayloadBytes/(1024*1024) + 1 {
+		_, err = gw.Write(paddingChunk)
+		require.NoError(t, err)
+	}
+
+	_, err = gw.Write([]byte(`{"name":"end"}]`))
+	require.NoError(t, err)
+	require.NoError(t, gw.Close())
+	require.NoError(t, os.WriteFile(path, buf.Bytes(), 0600))
+
+	_, err = loadFromCache("kubernetes-admin@kubernetes", "KubeletInfo")
+	assert.Error(t, err)
+}
+
+
