@@ -98,6 +98,13 @@ func (v *VAP) failOnError() bool {
 // GUARANTEED to exist; the seam for honoring it is guaranteeing Namespace
 // collection whenever a loaded policy needs it.
 //
+// A paramKind is refused for the same reason. Live, a binding's ParamRef points
+// the policy at real objects of that kind, so a policy taking anything other
+// than the ControlConfiguration the bundle ships has no offline params at all.
+// Evaluating it anyway reads params.* off the wrong object, and every such read
+// is a verdict admission never made. The seam for honoring one is resolving a
+// ParamRef against objects the scan collected.
+//
 // The other matchConstraints narrowings do not need refusing, because their
 // inputs are on the scanned object itself and appliesTo evaluates them:
 // objectSelector (the object's own labels) and a resource rule's operations
@@ -105,6 +112,15 @@ func (v *VAP) failOnError() bool {
 func (v *VAP) requireSupported() error {
 	if v.matchConstraints != nil && selectorNarrows(v.matchConstraints.NamespaceSelector) {
 		return fmt.Errorf("control %q scopes matchConstraints with a namespaceSelector, whose input (namespace labels) the scan cannot guarantee to have; refusing it to preserve scan/admission parity", v.ControlID)
+	}
+	if v.paramKind != nil {
+		shipped, err := controlConfigParamKind()
+		if err != nil {
+			return err
+		}
+		if *v.paramKind != *shipped {
+			return fmt.Errorf("control %q takes params of kind %s %s, which the scan has no binding to resolve (only the bundled %s %s is available); refusing it to preserve scan/admission parity", v.ControlID, v.paramKind.APIVersion, v.paramKind.Kind, shipped.APIVersion, shipped.Kind)
+		}
 	}
 	return nil
 }
