@@ -247,12 +247,12 @@ func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap
 				for gvr := range gvrSet {
 					if _, failed := failedDependencyKeys[gvr]; failed {
 						missingGVRs = append(missingGVRs, gvr)
-					} else {
+					} else if _, attempted := infoMap[gvr]; attempted {
 						allFailed = false
 						break
 					}
 				}
-				if allFailed && len(missingGVRs) == len(gvrSet) {
+				if allFailed && len(missingGVRs) > 0 {
 					sort.Strings(missingGVRs)
 					notEvaluated[controlID] = NotEvaluatedControl{
 						ControlID:   controlID,

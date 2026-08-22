@@ -58,6 +58,7 @@ require (
 	github.com/mikefarah/yq/v4 v4.29.1
 	github.com/moby/buildkit v0.29.0
 	github.com/open-policy-agent/opa v1.19.0
+	github.com/openvex/go-vex v0.2.7
 	github.com/owenrumney/go-sarif/v2 v2.2.0
 	github.com/project-copacetic/copacetic v0.10.0
 	github.com/prometheus/common v0.70.0
@@ -454,7 +455,6 @@ require (
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/opencontainers/runtime-spec v1.3.0 // indirect
 	github.com/opencontainers/selinux v1.13.1 // indirect
-	github.com/openvex/go-vex v0.2.7 // indirect
 	github.com/owenrumney/go-sarif v1.1.2-0.20231003122901-1000f5e05554 // indirect
 	github.com/package-url/packageurl-go v0.1.3 // indirect
 	github.com/pandatix/go-cvss v0.6.2 // indirect
@@ -630,6 +630,6 @@ replace github.com/google/go-containerregistry => github.com/matthyx/go-containe
 
 replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.0-20260322054632-16583c73e9b8
 
-replace github.com/kubescape/k8s-interface => github.com/doraem-on/k8s-interface v0.0.218-0.20260815050130-fa6fe1e9bc98
-
 replace github.com/distribution/reference => github.com/distribution/reference v0.5.0
+
+replace github.com/kubescape/k8s-interface => github.com/doraem-on/k8s-interface v0.0.218-0.20260815050130-fa6fe1e9bc98
