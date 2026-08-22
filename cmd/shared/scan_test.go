@@ -439,7 +439,6 @@ func TestValidateLabelSelector(t *testing.T) {
 				Format:        "pretty-printer",
 			}
 			err := ValidateCommonScanFlags(cmd, scanInfo, ScanFormats)
->>>>>>> 25a246e1 (fix(scan): validate --label-selector in ValidateCommonScanFlags)
 			if tt.expectedErr == "" {
 				assert.NoError(t, err)
 			} else {
