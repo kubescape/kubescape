@@ -614,3 +614,78 @@ func ruleData(rule *reporthandling.PolicyRule) string {
 func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
 	return rule.ResourceEnumerator
 }
+
+// buildControlExcludedRules merges the existing rule-exclusion map with any
+// --skip-controls or --include-controls filters. The resulting map marks
+// individual rule names with `true` so that convertFrameworksToPolicies drops
+// them. Include is a whitelist; skip is a blacklist and wins over include.
+func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling.Framework, skip, include []string) map[string]bool {
+	excludedRules := make(map[string]bool, len(base)+4)
+	for k, v := range base {
+		excludedRules[k] = v
+	}
+
+	if len(skip) == 0 && len(include) == 0 {
+		return excludedRules
+	}
+
+	skipSet := make(map[string]struct{}, len(skip))
+	for _, id := range skip {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			skipSet[id] = struct{}{}
+		}
+	}
+
+	includeSet := make(map[string]struct{}, len(include))
+	for _, id := range include {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			includeSet[id] = struct{}{}
+		}
+	}
+
+	knownIDs := make(map[string]struct{})
+	for _, fw := range frameworks {
+		for i := range fw.Controls {
+			knownIDs[fw.Controls[i].ControlID] = struct{}{}
+		}
+	}
+
+	for id := range skipSet {
+		if _, ok := knownIDs[id]; !ok {
+			logger.L().Warning("skip control not found in loaded policies", helpers.String("control", id))
+		}
+	}
+	for id := range includeSet {
+		if _, ok := knownIDs[id]; !ok {
+			logger.L().Warning("include control not found in loaded policies", helpers.String("control", id))
+		}
+	}
+
+	if len(include) > 0 {
+		for _, fw := range frameworks {
+			for i := range fw.Controls {
+				if _, keep := includeSet[fw.Controls[i].ControlID]; keep {
+					continue
+				}
+				for r := range fw.Controls[i].Rules {
+					excludedRules[fw.Controls[i].Rules[r].Name] = true
+				}
+			}
+		}
+	}
+
+	for _, fw := range frameworks {
+		for i := range fw.Controls {
+			if _, skip := skipSet[fw.Controls[i].ControlID]; !skip {
+				continue
+			}
+			for r := range fw.Controls[i].Rules {
+				excludedRules[fw.Controls[i].Rules[r].Name] = true
+			}
+		}
+	}
+
+	return excludedRules
+}
