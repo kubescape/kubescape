@@ -138,6 +138,33 @@ contexts:
 	})
 }
 
+func TestCloneForContext(t *testing.T) {
+	kubeconfig := writeScanInfoMultiContextKubeconfig(t)
+	parent := &ScanInfo{
+		ScanID:  "parent-scan-id",
+		Output:  "report.json",
+		Format:  "json",
+		ScanAll: true,
+	}
+	parent.SetKubeconfigSelection(kubeconfig, "context-current")
+	require.NoError(t, parent.ResolveClusterContextName())
+	require.Equal(t, "context-current", parent.GetClusterContextName())
+	parent.AddCleanup(func() { t.Fatal("parent's cleanup must not run from the clone") })
+
+	clone := parent.CloneForContext("context-selected", "report.context-selected.json")
+
+	assert.Empty(t, clone.ScanID, "ScanID must be cleared so Init generates a fresh one per context")
+	assert.Equal(t, "report.context-selected.json", clone.Output)
+	assert.Equal(t, "json", clone.Format, "unrelated fields must be copied verbatim")
+	assert.True(t, clone.ScanAll)
+
+	require.NoError(t, clone.ResolveClusterContextName())
+	assert.Equal(t, "context-selected", clone.GetClusterContextName(), "clone must resolve its own context, not inherit the parent's")
+	assert.Equal(t, "context-current", parent.GetClusterContextName(), "cloning must not mutate the parent's already-resolved context")
+
+	clone.Cleanup() // must not panic or invoke the parent's registered cleanup
+}
+
 func TestResolveClusterContextNameUsesDefaultLoadingRulesForOverride(t *testing.T) {
 	defaultPath := writeScanInfoMultiContextKubeconfig(t)
 	t.Setenv(clientcmd.RecommendedConfigPathEnvVar, defaultPath)

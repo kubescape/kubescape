@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -57,9 +58,6 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			return validateWorkloadArgs(args, scanInfo)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
-			defer cancel()
-
 			if err := validateWorkloadArgs(args, scanInfo); err != nil {
 				return err
 			}
@@ -96,31 +94,13 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				return err
 			}
 
-			results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
-			if err != nil {
-				return err
+			if len(scanInfo.KubeContexts) > 0 {
+				return fleetScan(*scanInfo, ks, policyIdentifiers, runWorkloadScan)
 			}
 
-			if err = results.HandleResults(ctx, scanInfo); err != nil {
-				return err
-			}
-
-			if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
-				return err
-			}
-			if scanInfo.ScanImages {
-				if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
-					return err
-				}
-			}
-			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
-				return err
-			}
-			if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
-				return err
-			}
-
-			return enforceBaselineDrift(ctx, results, scanInfo)
+			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
+			defer cancel()
+			return runWorkloadScan(ctx, scanInfo, ks, policyIdentifiers)
 		},
 	}
 
@@ -130,6 +110,39 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 	workloadCmd.PersistentFlags().StringVar(&apiVersion, "api-version", "", "API version of the workload (e.g. apps/v1). Default will be empty.")
 
 	return workloadCmd
+}
+
+// runWorkloadScan runs one cluster's workload scan to completion: Scan,
+// HandleResults, then every threshold/drift enforcement the workload
+// command performs for the single-context path. Factored out so fleetScan
+// can run the exact same per-cluster behavior once per --kube-contexts
+// entry, instead of a parallel, divergent copy of this logic.
+func runWorkloadScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+	results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
+	if err != nil {
+		return err
+	}
+
+	if err = results.HandleResults(ctx, scanInfo); err != nil {
+		return err
+	}
+
+	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
+		return err
+	}
+	if scanInfo.ScanImages {
+		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+			return err
+		}
+	}
+	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
+		return err
+	}
+	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
+		return err
+	}
+
+	return enforceBaselineDrift(ctx, results, scanInfo)
 }
 
 func validateWorkloadArgs(args []string, scanInfo *cautils.ScanInfo) error {
