@@ -14,29 +14,7 @@ import (
 
 func resetMetricsForTest(t *testing.T) {
 	t.Helper()
-
-	lastValueMu.Lock()
-	savedKubernetesResourcesCount := kubernetesResourcesCount
-	savedWorkerNodesCount := workerNodesCount
-	savedLastKubernetesResourcesCount := lastKubernetesResourcesCount
-	savedLastWorkerNodesCount := lastWorkerNodesCount
-	kubernetesResourcesCount = nil
-	workerNodesCount = nil
-	lastKubernetesResourcesCount = 0
-	lastWorkerNodesCount = 0
-	lastValueMu.Unlock()
-
-	initOnce = sync.Once{}
-
-	t.Cleanup(func() {
-		initOnce = sync.Once{}
-		lastValueMu.Lock()
-		kubernetesResourcesCount = savedKubernetesResourcesCount
-		workerNodesCount = savedWorkerNodesCount
-		lastKubernetesResourcesCount = savedLastKubernetesResourcesCount
-		lastWorkerNodesCount = savedLastWorkerNodesCount
-		lastValueMu.Unlock()
-	})
+	ResetForTest(t)
 }
 
 func setMeterProviderForTest(t *testing.T, provider *sdkmetric.MeterProvider) {
