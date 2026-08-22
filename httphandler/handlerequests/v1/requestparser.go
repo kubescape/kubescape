@@ -99,7 +99,7 @@ func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParam
 	{
 		readBuffer, err := io.ReadAll(r.Body)
 		if err != nil {
-			// handler.writeError(w, fmt.Errorf("failed to read request body, reason: %w", err), scanID)
+			// handler.writeError(w, fmt.Errorf("failed to read request body, reason: %w", err))
 			return nil, fmt.Errorf("failed to read request body: %w", err)
 		}
 		if err := json.Unmarshal(readBuffer, &scanRequest); err != nil {
