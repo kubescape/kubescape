@@ -1,8 +1,8 @@
 package policytest
 
 import (
+	"encoding/json"
 	"sort"
-	"strings"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -35,24 +35,24 @@ func normalize(responses []reporthandling.RuleResponse) []reporthandling.RuleRes
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].AlertMessage != out[j].AlertMessage {
-			return out[i].AlertMessage < out[j].AlertMessage
-		}
 		return sortKey(out[i]) < sortKey(out[j])
 	})
 	return out
 }
 
-// sortKey joins a response's (already sorted) path lists into a single
-// string, so two responses that share an AlertMessage but differ in their
-// failed/review/delete paths still sort deterministically instead of
-// depending on their input order.
+// sortKey serializes the entire normalized response to JSON. Two responses
+// only produce the same key if they are equal in every field cmp.Diff
+// compares, so this is a true total order: unlike picking a handful of
+// fields by hand, it cannot silently miss one and let unrelated responses
+// tie, which would make their relative order depend on sort.Slice's
+// unspecified tie-breaking instead of their actual content.
 func sortKey(r reporthandling.RuleResponse) string {
-	var b strings.Builder
-	b.WriteString(strings.Join(r.FailedPaths, ","))
-	b.WriteByte('|')
-	b.WriteString(strings.Join(r.ReviewPaths, ","))
-	b.WriteByte('|')
-	b.WriteString(strings.Join(r.DeletePaths, ","))
-	return b.String()
+	b, err := json.Marshal(r)
+	if err != nil {
+		// RuleResponse holds only JSON-safe data (strings, slices, maps of
+		// primitives), so Marshal cannot fail in practice; AlertMessage is a
+		// reasonable, if weaker, fallback key if it somehow did.
+		return r.AlertMessage
+	}
+	return string(b)
 }

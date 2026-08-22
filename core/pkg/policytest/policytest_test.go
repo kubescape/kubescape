@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -110,4 +111,28 @@ func TestCompare_SameMessageAndPathCountSortsByContent(t *testing.T) {
 	got := []reporthandling.RuleResponse{y, x}
 
 	assert.Empty(t, Compare(got, want), "reversed order of same-message, same-count responses must still compare equal")
+}
+
+// TestCompare_TiedOnPathsDistinguishedByFixPaths covers the exact tie the
+// earlier fix missed: two responses with identical AlertMessage, FailedPaths,
+// ReviewPaths, and DeletePaths, differing only in FixPaths. A sort key that
+// ignores FixPaths treats them as equal and leaves their relative order to
+// sort.Slice's unspecified tie-breaking, which can then disagree between got
+// and want even though both sets are logically equal.
+func TestCompare_TiedOnPathsDistinguishedByFixPaths(t *testing.T) {
+	base := reporthandling.RuleResponse{
+		AlertMessage: "same alert",
+		AssistedRemediation: reporthandling.AssistedRemediation{
+			FailedPaths: []string{"spec.a"},
+		},
+	}
+	x := base
+	x.FixPaths = []armotypes.FixPath{{Path: "spec.a", Value: "true"}}
+	y := base
+	y.FixPaths = []armotypes.FixPath{{Path: "spec.a", Value: "false"}}
+
+	want := []reporthandling.RuleResponse{x, y}
+	got := []reporthandling.RuleResponse{y, x}
+
+	assert.Empty(t, Compare(got, want), "reversed order of responses tied on paths but distinct FixPaths must still compare equal")
 }
