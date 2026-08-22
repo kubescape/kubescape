@@ -302,6 +302,26 @@ type vulnCacheEntry struct {
 	err   error
 }
 
+const maxGitLabVulnerabilityPages = 1000
+
+func nextGitLabVulnerabilityCursor(hasNextPage bool, endCursor string, seen map[string]struct{}, pagesFetched int) (string, bool, error) {
+	if !hasNextPage {
+		return "", false, nil
+	}
+	if endCursor == "" {
+		return "", false, fmt.Errorf("gitlab vulnerability pagination reported another page without an end cursor")
+	}
+	if _, exists := seen[endCursor]; exists {
+		return "", false, fmt.Errorf("gitlab vulnerability pagination repeated cursor %q", endCursor)
+	}
+	if pagesFetched >= maxGitLabVulnerabilityPages {
+		return "", false, fmt.Errorf("gitlab vulnerability pagination exceeded the %d-page safety limit", maxGitLabVulnerabilityPages)
+	}
+
+	seen[endCursor] = struct{}{}
+	return endCursor, true, nil
+}
+
 // imageMatches provides a boundary-safe match for the image location.
 func imageMatches(locationImage string, imageID ContainerImageIdentifier) bool {
 	if imageID.Hash != "" {
@@ -383,6 +403,8 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 			var afterCursor string
 			hasNextPage := true
 			var fetchErr error
+			seenCursors := make(map[string]struct{})
+			pagesFetched := 0
 
 			for hasNextPage {
 				variables := map[string]interface{}{
@@ -419,9 +441,18 @@ func (a *GitlabAdaptor) GetImagesVulnerabilities(ctx context.Context, imageIDs [
 				}
 
 				projectNodes = append(projectNodes, resp.Data.Project.Vulnerabilities.Nodes...)
+				pagesFetched++
 
-				hasNextPage = resp.Data.Project.Vulnerabilities.PageInfo.HasNextPage
-				afterCursor = resp.Data.Project.Vulnerabilities.PageInfo.EndCursor
+				afterCursor, hasNextPage, fetchErr = nextGitLabVulnerabilityCursor(
+					resp.Data.Project.Vulnerabilities.PageInfo.HasNextPage,
+					resp.Data.Project.Vulnerabilities.PageInfo.EndCursor,
+					seenCursors,
+					pagesFetched,
+				)
+				if fetchErr != nil {
+					logger.L().Warning("stopping invalid gitlab vulnerability pagination", helpers.Error(fetchErr))
+					break
+				}
 			}
 
 			cache[fullPath] = vulnCacheEntry{nodes: projectNodes, err: fetchErr}
