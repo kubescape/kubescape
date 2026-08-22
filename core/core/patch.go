@@ -215,11 +215,11 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 			return err
 		}
 		defer os.RemoveAll(workingFolder)
-		if err := os.Chmod(workingFolder, 0o744); err != nil {
+		if err := os.Chmod(workingFolder, 0o700); err != nil {
 			return err
 		}
 	} else {
-		if isNew, err := utils.EnsurePath(workingFolder, 0o744); err != nil {
+		if isNew, err := utils.EnsurePath(workingFolder, 0o700); err != nil {
 			log.Errorf("failed to create workingFolder %s", workingFolder)
 			return err
 		} else if isNew {

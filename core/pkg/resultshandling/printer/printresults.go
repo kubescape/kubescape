@@ -44,7 +44,7 @@ type IPrinter interface {
 
 func GetWriter(ctx context.Context, outputFile string) *os.File {
 	if outputFile != "" {
-		if err := os.MkdirAll(filepath.Dir(outputFile), os.ModePerm); err != nil {
+		if err := os.MkdirAll(filepath.Dir(outputFile), 0750); err != nil {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to create directory, reason: %s", err.Error()))
 			return os.Stdout
 		}
@@ -67,7 +67,7 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 // It never returns os.Stdout.
 func GetWriterNoStdoutFallback(ctx context.Context, outputFile, tempPattern string) *os.File {
 	if outputFile != "" {
-		if err := os.MkdirAll(filepath.Dir(outputFile), os.ModePerm); err == nil {
+		if err := os.MkdirAll(filepath.Dir(outputFile), 0750); err == nil {
 			if f, err := os.Create(outputFile); err == nil {
 				return f
 			} else {

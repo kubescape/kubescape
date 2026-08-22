@@ -46,7 +46,7 @@ func DownloadSupportCommands() []string {
 
 func (ks *Kubescape) Download(downloadInfo *metav1.DownloadInfo) error {
 	setPathAndFilename(downloadInfo)
-	if err := os.MkdirAll(downloadInfo.Path, os.ModePerm); err != nil {
+	if err := os.MkdirAll(downloadInfo.Path, 0750); err != nil {
 		return err
 	}
 	if err := downloadArtifact(ks.Context(), downloadInfo, downloadFunc); err != nil {
