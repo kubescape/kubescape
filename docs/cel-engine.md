@@ -24,7 +24,7 @@ to agree, and that agreement is the point of the engine.
 `core/pkg/opaprocessor/processorhandler.go` already dispatched on
 `rule.RuleLanguage`. CEL is a second branch alongside Rego:
 
-```
+```text
 processControl(control)
   └─ processRule(rule, control.ControlID)
        └─ runOPAOnSingleRule(...)
@@ -50,6 +50,30 @@ A rule opts in through the existing language field:
 `reporthandling.CELLanguage` is defined in
 [`opa-utils`](https://github.com/kubescape/opa-utils). A rule with any other
 language continues through the Rego path untouched.
+
+A CEL rule must not also declare a `ResourceEnumerator`. It scopes through the
+policy's `matchConstraints` instead, and routing it through the enumerator would
+run its validations *as* the enumerator, silently dropping every compliant
+resource. `enumerateData` rejects the combination rather than trusting it not to
+happen.
+
+### Trying it before regolibrary marks anything CEL
+
+No rule shipped in regolibrary carries `ruleLanguage: CEL` yet, so a plain
+`kubescape scan control <ID>` takes the Rego path. Until
+[#2002](https://github.com/kubescape/kubescape/issues/2002) lands, reaching the
+engine means scanning from a control document you have marked yourself:
+
+```sh
+kubescape download control C-0016 --output C-0016.json
+# edit that file: set "ruleLanguage": "CEL" on each of its rules
+grep ruleLanguage C-0016.json         # confirm the edit took
+kubescape scan control C-0016 --use-from C-0016.json
+```
+
+The `grep` is worth doing. A Rego run of the same control prints an identical
+results table, so a scan that skipped the edit looks exactly like a scan that
+used it.
 
 ### How the engine finds the policy
 
@@ -94,7 +118,7 @@ embedded into the binary with `//go:embed`, under
 The copy is refreshed from a pinned `cel-admission-library` release rather than
 maintained by hand:
 
-```
+```sh
 make sync-vap        # honours CEL_LIBRARY_VERSION in the Makefile
 ```
 
@@ -131,8 +155,10 @@ Six variables are declared:
 | `variables` | the policy's own `variables:` block | same |
 
 `authorizer` is deliberately **not** declared. It cannot be resolved offline, so a
-policy referencing it fails to compile and the control is reported as skipped
-rather than being given a verdict the scan cannot justify.
+validation referencing it fails to compile, and every resource that validation was
+evaluated against is reported as skipped rather than given a verdict the scan
+cannot justify. The skip is per resource: the other validations in the same policy
+still reach verdicts, and a violation confirmed by one of them stands.
 
 ### Why oldObject is null rather than absent
 
@@ -236,6 +262,14 @@ Several pieces hold this up:
 An expression that errors, or returns a non-boolean, sets an error on the result
 rather than passing. An unknown verdict is never reported as a pass.
 
+What becomes of that error follows the policy's `spec.failurePolicy`, as it does
+at admission. Under `Fail`, which is the default and what every policy in the
+bundle uses, an errored expression denies the object, so the scan reports a
+failure whose message is the error instead of quietly downgrading it to a skip.
+Under `Ignore` the resource is skipped. Compile failures, budget exhaustion and
+cancellation stay unknown verdicts either way: a cluster never produces them, so
+there is no admission outcome to mirror.
+
 ### Verifying it against a cluster
 
 The guarantee is checked by hand rather than in CI, since it needs a cluster:
@@ -244,7 +278,10 @@ The guarantee is checked by hand rather than in CI, since it needs a cluster:
 2. apply one policy and a binding with `validationActions: [Deny]`
 3. apply a fixture that should fail and one that should pass, confirming the
    cluster rejects the first and admits the second
-4. run `kubescape scan control <ID>` over those same two files
+4. scan those same two files through the engine, using the marked control
+   document from "Trying it before regolibrary marks anything CEL" above. A
+   plain `kubescape scan control <ID>` takes the Rego path and proves nothing
+   here
 5. confirm all four verdicts agree
 
 ## Known gaps
@@ -252,8 +289,10 @@ The guarantee is checked by hand rather than in CI, since it needs a cluster:
 These are gaps in what a scan can know, not defects. In each case the engine
 reports a skip rather than a verdict.
 
-**`authorizer`** is not available offline. A policy performing authorization checks
-fails to compile and its control is skipped.
+**`authorizer`** is not available offline. A validation performing authorization
+checks fails to compile, and each resource it was evaluated against is skipped.
+The skip is per resource, not control-wide: only a policy that fails to load
+skips a whole control.
 
 **`request.userInfo`** is empty. The identity performing an operation does not
 exist in a file scan.
