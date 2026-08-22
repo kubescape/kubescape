@@ -72,6 +72,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Long:    `Scan a Kubernetes cluster, YAML files, Helm charts, Kustomize directories, Git repositories, or container images for security misconfigurations and vulnerabilities.`,
 		Example: scanCmdExamples,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Name() == "validate-contract" {
+				return nil
+			}
 			// runs for the bare scan command and all subcommands (framework, control, workload, image)
 			if scanInfo.FormatVersion != "v1" && scanInfo.FormatVersion != "v2" {
 				return fmt.Errorf("invalid --format-version %q: supported versions are v1 and v2", scanInfo.FormatVersion)
@@ -269,6 +272,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.AddCommand(getWorkloadCmd(ks, &scanInfo))
 
 	scanCmd.AddCommand(getImageCmd(ks, &scanInfo))
+	scanCmd.AddCommand(getValidateContractCmd(&scanInfo))
 
 	return scanCmd
 }
