@@ -632,4 +632,5 @@ replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.
 
 replace github.com/distribution/reference => github.com/distribution/reference v0.5.0
 
-replace github.com/kubescape/k8s-interface => github.com/doraem-on/k8s-interface v0.0.218-0.20260815050130-fa6fe1e9bc98
+// Use unofficial fork to include cache-invalidation fix for Doraemon fork until upstream k8s-interface#161 is merged
+replace github.com/kubescape/k8s-interface v0.0.209 => github.com/doraem-on/k8s-interface v0.0.218-0.20260815050130-fa6fe1e9bc98
