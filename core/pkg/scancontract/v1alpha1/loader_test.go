@@ -101,6 +101,17 @@ func TestLoadRejectsNewerMinimumVersion(t *testing.T) {
 	assert.Contains(t, err.Error(), "requires Kubescape v4.1.0 or newer")
 }
 
+func TestLoadSkipsCompatibilityForNonReleaseBuilds(t *testing.T) {
+	for _, runningVersion := range []string{"", "dev", "unknown", "(devel)"} {
+		t.Run(runningVersion, func(t *testing.T) {
+			options := testOptions()
+			options.RunningVersion = runningVersion
+			_, err := Load([]byte(validContract), options)
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestLoadRejectsDuplicateKeys(t *testing.T) {
 	input := strings.Replace(validContract, "  name: payments-service", "  name: payments-service\n  name: duplicate", 1)
 	_, err := Load([]byte(input), testOptions())

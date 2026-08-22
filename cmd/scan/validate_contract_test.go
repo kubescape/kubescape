@@ -58,6 +58,22 @@ func TestValidateContractCommand(t *testing.T) {
 	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, selected.ContractDigest)
 }
 
+func TestValidateContractCommandAcceptsDevelopmentBuild(t *testing.T) {
+	originalBuildNumber := versioncheck.BuildNumber
+	versioncheck.BuildNumber = "dev"
+	t.Cleanup(func() { versioncheck.BuildNumber = originalBuildNumber })
+
+	contractPath := filepath.Join(t.TempDir(), "kubescape.yaml")
+	require.NoError(t, os.WriteFile(contractPath, []byte(commandContract), 0o600))
+
+	cmd := GetScanCommand(core.NewKubescape(context.Background()))
+	output := &bytes.Buffer{}
+	cmd.SetOut(output)
+	cmd.SetArgs([]string{"validate-contract", contractPath})
+	require.NoError(t, cmd.Execute())
+	assert.Contains(t, output.String(), `Scan contract "example" is valid`)
+}
+
 func TestValidateContractCommandWritesOutputFile(t *testing.T) {
 	originalBuildNumber := versioncheck.BuildNumber
 	versioncheck.BuildNumber = "v4.1.0"

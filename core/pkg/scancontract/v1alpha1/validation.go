@@ -20,11 +20,11 @@ func validateVersionEnvelope(apiVersion, kind, minimumVersion, runningVersion st
 	if !semver.IsValid(minimumVersion) {
 		return fmt.Errorf("spec.minimumKubescapeVersion %q is not a valid semantic version", minimumVersion)
 	}
-	if runningVersion == "" {
-		return nil
-	}
 	if !semver.IsValid(runningVersion) {
-		return fmt.Errorf("running Kubescape version %q is not a valid semantic version", runningVersion)
+		// Development and other non-release builds use values such as "dev",
+		// "unknown", or "(devel)". There is no meaningful ordering for those
+		// identifiers, so validate the contract schema but skip compatibility.
+		return nil
 	}
 	if semver.Compare(runningVersion, minimumVersion) < 0 {
 		return fmt.Errorf("contract requires Kubescape %s or newer; running %s", minimumVersion, runningVersion)
