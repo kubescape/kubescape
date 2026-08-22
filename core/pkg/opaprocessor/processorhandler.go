@@ -34,11 +34,17 @@ import (
 	"github.com/kubescape/opa-utils/resources"
 	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/open-policy-agent/opa/v1/rego"
-	"github.com/open-policy-agent/opa/v1/storage"
 	opaprint "github.com/open-policy-agent/opa/v1/topdown/print"
 	"go.opentelemetry.io/otel"
 	"k8s.io/client-go/tools/record"
 )
+
+var astEvalBufferPool = sync.Pool{
+	New: func() any {
+		b := make([]map[string]any, 0, 1024)
+		return &b
+	},
+}
 
 const ScoreConfigPath = "/resources/config"
 
@@ -980,7 +986,18 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		return resources, nil // no resources found for testing
 	}
 
-	inputRawResources := workloadinterface.ListMetaToMap(inputResources)
+	bufPtr := astEvalBufferPool.Get().(*[]map[string]any)
+	inputRawResources := (*bufPtr)[:0]
+	for _, ir := range inputResources {
+		inputRawResources = append(inputRawResources, ir.GetObject())
+	}
+	defer func() {
+		for i := range inputRawResources {
+			inputRawResources[i] = nil
+		}
+		*bufPtr = inputRawResources
+		astEvalBufferPool.Put(bufPtr)
+	}()
 
 	// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data
 	enumeratedData, err := opap.enumerateData(ctx, rule, inputRawResources, controlID)
@@ -1286,7 +1303,7 @@ func appendPaths(paths []armotypes.PosturePaths, assistedRemediation reporthandl
 func (opap *OPAProcessor) runOPAOnSingleRule(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData, controlID string) ([]reporthandling.RuleResponse, celOutcome, error) {
 	switch rule.RuleLanguage {
 	case reporthandling.RegoLanguage, reporthandling.RegoLanguage2:
-		responses, err := opap.runRegoOnK8s(ctx, rule, k8sObjects, getRuleData, ruleRegoDependenciesData)
+		responses, err := opap.runRegoOnK8s(ctx, rule, k8sObjects, getRuleData, ruleRegoDependenciesData, controlID)
 		return responses, celOutcome{}, err
 	case reporthandling.CELLanguage:
 		return opap.runCELOnK8s(ctx, rule, k8sObjects, getRuleData, controlID)
@@ -1593,7 +1610,7 @@ func init() {
 }
 
 // runRegoOnK8s compiles an OPA PolicyRule and evaluates its against k8s
-func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
+func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]any, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData, controlID string) ([]reporthandling.RuleResponse, error) {
 	registerOPABuiltins()
 
 	ruleData := getRuleData(rule)
@@ -1607,7 +1624,21 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 		return nil, err
 	}
 
-	results, err := opap.regoEval(ctx, k8sObjects, compiled, regoVersion, &store)
+	regoInst := rego.New(
+		rego.SetRegoVersion(regoVersion),
+		rego.Query("data.armo_builtins"),
+		rego.Compiler(compiled),
+		rego.Store(store),
+		rego.EnablePrintStatements(opap.printEnabled),
+		rego.PrintHook(opap),
+	)
+
+	pq, err := regoInst.PrepareForEval(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("rule '%s': failed to prepare query: %w", rule.Name, err)
+	}
+
+	results, err := opap.regoEval(ctx, k8sObjects, pq)
 	if err != nil {
 		return nil, fmt.Errorf("rule '%s': rego eval failed: %w", rule.Name, err)
 	}
@@ -1621,19 +1652,9 @@ func (opap *OPAProcessor) Print(ctx opaprint.Context, str string) error {
 	return nil
 }
 
-func (opap *OPAProcessor) regoEval(ctx context.Context, inputObj []map[string]any, compiledRego *ast.Compiler, regoVersion ast.RegoVersion, store *storage.Store) ([]reporthandling.RuleResponse, error) {
-	rego := rego.New(
-		rego.SetRegoVersion(regoVersion),
-		rego.Query("data.armo_builtins"), // get package name from rule
-		rego.Compiler(compiledRego),
-		rego.Input(inputObj),
-		rego.Store(*store),
-		rego.EnablePrintStatements(opap.printEnabled),
-		rego.PrintHook(opap),
-	)
-
+func (opap *OPAProcessor) regoEval(ctx context.Context, inputObj []map[string]any, pq rego.PreparedEvalQuery) ([]reporthandling.RuleResponse, error) {
 	// Run evaluation
-	resultSet, err := rego.Eval(ctx)
+	resultSet, err := pq.Eval(ctx, rego.EvalInput(inputObj))
 	if err != nil {
 		return nil, err
 	}
