@@ -1095,6 +1095,10 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		for i := range inputRawResources {
 			inputRawResources[i] = nil
 		}
+		if cap(inputRawResources) <= 1024 {
+			*bufPtr = inputRawResources[:0]
+			astEvalBufferPool.Put(bufPtr)
+		}
 		*bufPtr = inputRawResources
 		astEvalBufferPool.Put(bufPtr)
 	}()

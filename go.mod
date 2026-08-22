@@ -46,6 +46,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.31
 	github.com/kubescape/go-logger v0.0.28
 	github.com/kubescape/k8s-interface v0.0.209
+	github.com/kubescape/kubescape/v3 v3.0.4
 	github.com/kubescape/opa-utils v0.0.307
 	github.com/kubescape/rbac-utils v0.0.21
 	github.com/kubescape/regolibrary/v2 v2.0.1
@@ -73,10 +74,11 @@ require (
 	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/metric v1.45.0
 	go.opentelemetry.io/otel/sdk/metric v1.45.0
-	golang.org/x/crypto v0.53.0
-	golang.org/x/mod v0.37.0
+	golang.org/x/crypto v0.55.0
+	golang.org/x/mod v0.39.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/term v0.45.0
+	golang.org/x/time v0.15.0
 	google.golang.org/api v0.280.0
 	google.golang.org/genproto v0.0.0-20260319201613-d00831a3d3e7
 	google.golang.org/grpc v1.82.1
@@ -269,6 +271,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/edsrzf/mmap-go v1.2.0 // indirect
 	github.com/elliotchance/orderedmap v1.5.0 // indirect
 	github.com/elliotchance/phpserialize v1.4.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
@@ -387,7 +390,6 @@ require (
 	github.com/knqyf263/go-apk-version v0.0.0-20200609155635-041fdbb8563f // indirect
 	github.com/knqyf263/go-deb-version v0.0.0-20241115132648-6f4aee6ccd23 // indirect
 	github.com/knqyf263/go-rpm-version v0.0.0-20220614171824-631e686d1075 // indirect
-	github.com/kubescape/kubescape/v3 v3.0.4 // indirect
 	github.com/kubescape/regolibrary v1.0.317-0.20240320124840-1d84ac7186ea // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect
@@ -588,14 +590,13 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
-	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
+	golang.org/x/exp v0.0.0-20260820142414-ca536658362e // indirect
 	golang.org/x/image v0.44.0 // indirect
-	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
-	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.47.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/tools v0.49.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	gonum.org/v1/gonum v0.17.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect

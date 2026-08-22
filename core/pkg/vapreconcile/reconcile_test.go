@@ -164,7 +164,7 @@ func TestCollect_UnsupportedClusterIsNotAFailure(t *testing.T) {
 
 	policies, bindings, err := Collect(context.Background(), k8s)
 
-	assert.ErrorIs(t, err, ErrUnsupported)
+	assert.NoError(t, err)
 	assert.Nil(t, policies)
 	assert.Nil(t, bindings)
 }
@@ -305,6 +305,21 @@ func TestEnrichSummary_NoMatchingControl(t *testing.T) {
 		EnrichSummary(controls, index)
 	})
 	assert.Nil(t, controls["C-0041"].VAPEnforcement)
+}
+
+func TestCollect_GracefulSkip(t *testing.T) {
+	discovery := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	discovery.Resources = []*metav1.APIResourceList{} // No resources
+
+	k8s := &k8sinterface.KubernetesApi{
+		DiscoveryClient: discovery,
+	}
+
+	vaps, vapbs, err := Collect(context.Background(), k8s)
+
+	assert.NoError(t, err)
+	assert.Nil(t, vaps)
+	assert.Nil(t, vapbs)
 }
 
 // erroringDiscovery answers one group version with an error instead of a
