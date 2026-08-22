@@ -228,7 +228,13 @@ func (opap *OPAProcessor) SetIncrementalCache(cache *scancache.Store) {
 
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
 	scanningScope := cautils.GetScanningScope(opap.Metadata.ContextMetadata)
-	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.ExcludedRules, scanningScope)
+
+	excludedRules := opap.ExcludedRules
+	if opap.SkipControls != "" || opap.IncludeControls != "" {
+		excludedRules = buildControlExcludedRules(excludedRules, opap.Policies, split(opap.SkipControls), split(opap.IncludeControls))
+	}
+
+	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, excludedRules, scanningScope)
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
