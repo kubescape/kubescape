@@ -215,25 +215,51 @@ itself carries:
 API conversions, and a scan never converts: the object is matched at the exact
 group and version it was scanned at.
 
+### Match conditions
+
+`spec.matchConditions` is a second gate, applied after `matchConstraints`. At
+admission a policy whose conditions do not all hold is skipped and none of its
+validations run, so offline an object the gate turns away is excluded exactly as
+an unmatched one is.
+
+Three details of the gate follow the apiserver's matcher rather than the obvious
+reading:
+
+- **A false condition outranks one that errored**, whichever order they appear
+  in. The apiserver evaluates every condition, collects the errors, and still
+  returns not-matched the moment it sees a false. Returning on the first error
+  instead would deny an object under `Fail` that admission simply skips.
+- **The gate gets its own cost budget and its own activation.** The apiserver's
+  matcher runs on a fresh matchConditions budget and discards the remainder, so
+  charging the validations for the gate would exhaust a scan a cluster handles
+  fine. Separate activations because `variables` memoize per activation, and
+  sharing one would hand the validations work the gate already paid for.
+- **`namespaceObject` is bound to null inside the gate**, even when the scan
+  captured a real Namespace, because the apiserver's matcher passes a nil
+  namespace while the validations that follow get the resolved one.
+
+A gate that reaches no verdict follows `spec.failurePolicy` the way a validation
+does: `Fail` denies, `Ignore` skips the policy. An offline-only failure, meaning a
+condition that will not compile, an exhausted budget or a cancelled scan, stays an
+unknown verdict either way.
+
 ## Policies the engine refuses
 
-Two constructs cause a policy to be refused at load rather than evaluated. Refusal
+One construct causes a policy to be refused at load rather than evaluated. Refusal
 surfaces as a skip, which is loud, instead of a verdict that might silently differ
 from admission.
-
-**`spec.matchConditions`** gates whether a policy applies using CEL expressions
-that the engine does not evaluate. Running the validations without the gate would
-emit violations that live admission, which honours the gate, would never raise.
 
 **`matchConstraints.namespaceSelector`** reads the *namespace's* labels. The scan
 only has those when some control's match happened to collect Namespace objects.
 Evaluating the selector against an absent namespace would either exempt objects
 admission matches or match objects admission exempts, depending on which way the
-selector points. Both are silent parity breaks.
+selector points. Both are silent parity breaks. A selector that narrows nothing is
+not a refusal: an absent one, and the empty one the apiserver defaults an omitted
+selector to, both match every object.
 
-The distinction that governs both cases: a `matchConstraints` knob whose input the
-scanned object carries is evaluated; one whose input the scan cannot guarantee to
-have is refused.
+The distinction that governs it: a `matchConstraints` knob whose input the scanned
+object carries is evaluated; one whose input the scan cannot guarantee to have is
+refused.
 
 Refusal is not free. A load failure makes the whole control error, which marks
 every resource skipped for that control across the scan. So the refusal set is kept
@@ -286,7 +312,7 @@ The guarantee is checked by hand rather than in CI, since it needs a cluster:
 
 ## Known gaps
 
-These are gaps in what a scan can know, not defects. In each case the engine
+These are gaps in what a scan can know, not defects. In most of them the engine
 reports a skip rather than a verdict.
 
 **`authorizer`** is not available offline. A validation performing authorization
@@ -301,11 +327,13 @@ exist in a file scan.
 scan happened to collect Namespace objects, and namespace collection is driven by
 the framework's own policy matches rather than by what the CEL policies need. The
 same control can therefore see a real Namespace under one framework and null under
-another. A policy that selects into `namespaceObject` unguarded gets an evaluation
-error and a skip, which is the safe outcome. A policy that null-guards its access
-reaches a verdict that may not be the one admission would reach. Making this
-unconditional means guaranteeing Namespace collection whenever a loaded policy
-needs it.
+another. A policy that null-guards its access reaches a verdict that may not be the
+one admission would reach. One that selects into `namespaceObject` unguarded gets
+an evaluation error, and under `failurePolicy: Fail` that is reported as a failure,
+so an uncollected Namespace can produce a finding a cluster would not. This is the
+one gap here that is not a safe skip. Nothing in the bundle reads `namespaceObject`
+today, so it is latent. Making it unconditional means guaranteeing Namespace
+collection whenever a loaded policy needs it.
 
 **Only CREATE is modelled.** A policy whose resource rules exclude CREATE is never
 matched offline.
