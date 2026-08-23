@@ -393,6 +393,16 @@ func TestValidateExcludeControls(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidateExcludeControls(&cautils.ScanInfo{ExcludeControls: tt.excludeControls})
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
 func TestValidateLabelSelector(t *testing.T) {
 	tests := []struct {
 		name          string
