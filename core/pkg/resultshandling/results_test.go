@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -132,6 +135,39 @@ func TestResultsHandlerHandleResultsImageScanNilScanData(t *testing.T) {
 	assert.Equal(t, 1, outputPrinter.ActionPrintCalls)
 	// ...but the compliance score is skipped, as it requires ScanData.
 	assert.Equal(t, 0, outputPrinter.ScoreCalls)
+}
+
+func TestResultsHandlerNotifyIsBestEffortAndDeliversOnlySummary(t *testing.T) {
+	var received []byte
+	success := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		var err error
+		received, err = io.ReadAll(r.Body)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer success.Close()
+
+	failure := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer failure.Close()
+
+	scanData := cautils.NewOPASessionObjMock()
+	want, err := json.Marshal(scanData.Report.SummaryDetails)
+	require.NoError(t, err)
+	handler := NewResultsHandler(nil, nil, &SpyPrinter{})
+	handler.SetData(scanData)
+
+	require.NoError(t, handler.HandleResults(context.Background(), &cautils.ScanInfo{
+		NotifyURLs: []string{failure.URL + "/first?token=secret", success.URL + "/second?token=secret"},
+	}))
+	assert.JSONEq(t, string(want), string(received))
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(received, &payload))
+	assert.NotContains(t, payload, "results")
+	assert.NotContains(t, payload, "rawResources")
 }
 
 func TestResultsHandlerHandleResultsReturnsPrinterErrors(t *testing.T) {
