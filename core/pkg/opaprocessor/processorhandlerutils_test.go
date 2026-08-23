@@ -1293,3 +1293,66 @@ func TestUpdateResults_ScopeLessExceptionSuppressesResourceBackedFinding(t *test
 			"an exception for an unrelated control must not suppress this finding")
 	})
 }
+
+func TestBuildControlExcludedRules(t *testing.T) {
+	framework := []reporthandling.Framework{{
+		Controls: []reporthandling.Control{
+			{ControlID: "C-0001", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-a"}}}},
+			{ControlID: "C-0002", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-b"}}}},
+			{ControlID: "C-0003", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-c"}}}},
+		},
+	}}
+
+	tests := []struct {
+		name          string
+		base          map[string]bool
+		skip          []string
+		include       []string
+		excludedRules []string
+		notExcluded   []string
+	}{
+		{
+			name:          "no filters",
+			base:          map[string]bool{"rule-a": false},
+			excludedRules: nil,
+			notExcluded:   []string{"rule-a", "rule-b", "rule-c"},
+		},
+		{
+			name:          "skip one control",
+			skip:          []string{"C-0002"},
+			excludedRules: []string{"rule-b"},
+			notExcluded:   []string{"rule-a", "rule-c"},
+		},
+		{
+			name:          "include only two controls",
+			include:       []string{"C-0001", "C-0002"},
+			excludedRules: []string{"rule-c"},
+			notExcluded:   []string{"rule-a", "rule-b"},
+		},
+		{
+			name:          "include two and skip one of them",
+			include:       []string{"C-0001", "C-0002"},
+			skip:          []string{"C-0002"},
+			excludedRules: []string{"rule-b", "rule-c"},
+			notExcluded:   []string{"rule-a"},
+		},
+		{
+			name:          "unknown control ids are ignored",
+			skip:          []string{"C-9999"},
+			excludedRules: nil,
+			notExcluded:   []string{"rule-a", "rule-b", "rule-c"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildControlExcludedRules(tt.base, framework, tt.skip, tt.include)
+			for _, rule := range tt.excludedRules {
+				assert.True(t, got[rule], "expected rule %q to be excluded", rule)
+			}
+			for _, rule := range tt.notExcluded {
+				assert.False(t, got[rule], "expected rule %q not to be excluded", rule)
+			}
+		})
+	}
+}

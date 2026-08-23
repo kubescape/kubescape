@@ -21,12 +21,6 @@ func transformContainerMetadata(resource workloadinterface.IMetadata, transforme
 		return nil
 	}
 
-	if wl, ok := resource.(workloadinterface.IWorkload); ok {
-		if err := transformTypedWorkloadContainers(wl, transformer); err != nil {
-			return err
-		}
-	}
-
 	obj := resource.GetObject()
 	if obj == nil {
 		return nil
@@ -37,34 +31,6 @@ func transformContainerMetadata(resource workloadinterface.IMetadata, transforme
 	}
 
 	resource.SetObject(obj)
-
-	return nil
-}
-
-func transformTypedWorkloadContainers(wl workloadinterface.IWorkload, transformer Transformer) error {
-	kind := wl.GetKind()
-	scope := workloadinterface.PodSpec(kind)
-
-	if containers, err := wl.GetContainers(); err == nil && len(containers) > 0 {
-		if err := transformTypedContainerList(containers, transformer); err != nil {
-			return err
-		}
-		workloadinterface.SetInMap(wl.GetObject(), scope, "containers", containers)
-	}
-
-	if initContainers, err := wl.GetInitContainers(); err == nil && len(initContainers) > 0 {
-		if err := transformTypedContainerList(initContainers, transformer); err != nil {
-			return err
-		}
-		workloadinterface.SetInMap(wl.GetObject(), scope, "initContainers", initContainers)
-	}
-
-	if ephemeralContainers, err := wl.GetEphemeralContainers(); err == nil && len(ephemeralContainers) > 0 {
-		if err := transformTypedEphemeralContainerList(ephemeralContainers, transformer); err != nil {
-			return err
-		}
-		workloadinterface.SetInMap(wl.GetObject(), scope, "ephemeralContainers", ephemeralContainers)
-	}
 
 	return nil
 }
@@ -258,7 +224,8 @@ func transformContainerList(obj map[string]any, key string, transformer Transfor
 		return nil
 	}
 
-	if containers, ok := rawContainers.([]any); ok {
+	switch containers := rawContainers.(type) {
+	case []any:
 		for _, item := range containers {
 			container, ok := item.(map[string]any)
 			if !ok {
@@ -271,6 +238,10 @@ func transformContainerList(obj map[string]any, key string, transformer Transfor
 		}
 
 		obj[key] = containers
+	case []corev1.Container:
+		if err := transformTypedContainerList(containers, transformer); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -290,7 +261,8 @@ func transformEphemeralContainerList(obj map[string]any, key string, transformer
 		return nil
 	}
 
-	if containers, ok := rawContainers.([]any); ok {
+	switch containers := rawContainers.(type) {
+	case []any:
 		for _, item := range containers {
 			container, ok := item.(map[string]any)
 			if !ok {
@@ -303,6 +275,10 @@ func transformEphemeralContainerList(obj map[string]any, key string, transformer
 		}
 
 		obj[key] = containers
+	case []corev1.EphemeralContainer:
+		if err := transformTypedEphemeralContainerList(containers, transformer); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -360,6 +336,12 @@ func transformTypedEnv(envVars []corev1.EnvVar, transformer Transformer) error {
 			hasRef = true
 		}
 
+		if envVar.ValueFrom.FieldRef != nil {
+			hasRef = true
+		}
+		if envVar.ValueFrom.ResourceFieldRef != nil {
+			hasRef = true
+		}
 		if hasRef && envVar.Name != "" {
 			envVar.Name, err = transformValue(transformer, "env", envVar.Name)
 			if err != nil {
@@ -436,6 +418,12 @@ func transformUnstructuredEnv(container map[string]any, transformer Transformer)
 			return err
 		}
 		if _, ok := valueFrom["configMapKeyRef"]; ok {
+			hasRef = true
+		}
+		if _, ok := valueFrom["fieldRef"]; ok {
+			hasRef = true
+		}
+		if _, ok := valueFrom["resourceFieldRef"]; ok {
 			hasRef = true
 		}
 

@@ -26,6 +26,12 @@ import (
 type K8SResources map[string][]string
 type ExternalResources map[string][]string
 
+// VexStatus represents the evaluated VEX status for a vulnerability.
+type VexStatus struct {
+	Status        string
+	Justification string
+}
+
 type ImageScanData struct {
 	Context               pkg.Context
 	IgnoredMatches        []match.IgnoredMatch
@@ -35,6 +41,7 @@ type ImageScanData struct {
 	Packages              []pkg.Package
 	SBOM                  *sbom.SBOM
 	VulnerabilityProvider vulnerability.Provider
+	VexStatuses           map[string]VexStatus
 	// VulnDBBuilt is the build timestamp of the vulnerability DB used for this
 	// scan. It lets users (especially air-gapped ones) see how fresh the data
 	// was. Nil when the DB status is unknown.
@@ -111,6 +118,8 @@ type OPASessionObj struct {
 	TopWorkloadsByScore   []reporthandling.IResource
 	TriggeredByCLI        bool
 	LabelsToCopy          []string                    // Labels to copy from workloads to scan reports
+	SkipControls          string                      // Comma-separated control IDs to skip
+	IncludeControls       string                      // Comma-separated control IDs to include (all others skipped)
 	VAPPolicies           []unstructured.Unstructured // ValidatingAdmissionPolicy resources collected from the cluster
 	VAPBindings           []unstructured.Unstructured // ValidatingAdmissionPolicyBinding resources collected from the cluster
 }
@@ -140,6 +149,8 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 		HonorInlineExceptions: scanInfo.HonorInlineExceptions.GetBool(),
 		TriggeredByCLI:        scanInfo.TriggeredByCLI,
 		LabelsToCopy:          scanInfo.LabelsToCopy,
+		SkipControls:          scanInfo.SkipControls,
+		IncludeControls:       scanInfo.IncludeControls,
 	}
 }
 

@@ -171,17 +171,12 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error
 		return nil
 	}
 
-	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		outputFile = strings.TrimSpace(outputFile)
-		if outputFile == "" {
-			outputFile = prettyOutputFile
-		}
-		// os.DevNull is used to silence the UI printer, appending an extension would turn it into a regular file
-		if outputFile != os.DevNull && !printer.HasOutputExt(outputFile, printer.PrettyOutputExt) {
-			outputFile = outputFile + printer.PrettyOutputExt
-		}
+	if outputFile == os.DevNull {
+		pp.writer = printer.GetWriter(ctx, outputFile)
+		pp.SetMainPrinter()
+		return nil
 	}
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.PrettyFormat, outputFile, prettyOutputFile)
 
 	if explicitOutput {
 		writer, err := printer.GetWriterNoFallback(outputFile)
@@ -364,7 +359,7 @@ func isPrintSeparatorType(scanType cautils.ScanTypes) bool {
 // failures caused controls to be skipped or partial data was collected.
 // Nothing is printed on a clean scan.
 func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
-	if len(coverage.FailedGVRPulls) == 0 && len(coverage.NotEvaluatedControls) == 0 && len(coverage.PartialGVRPulls) == 0 && len(coverage.PolicyDegradations) == 0 {
+	if len(coverage.FailedGVRPulls) == 0 && len(coverage.NotEvaluatedControls) == 0 && len(coverage.PartialGVRPulls) == 0 && len(coverage.PolicyDegradations) == 0 && len(coverage.VacuousFrameworks) == 0 {
 		return
 	}
 
@@ -406,6 +401,13 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 			fmt.Fprintf(pp.writer, "  • %s: %s\n", d.Component, d.Reason)
 		}
 		fmt.Fprintf(pp.writer, "\nControls depending on these inputs were evaluated against default configuration, which may not reflect your environment.\n")
+	}
+
+	if len(coverage.VacuousFrameworks) > 0 {
+		fmt.Fprintf(pp.writer, "\nThe following frameworks scored 100%% because no matching resources were found in this cluster:\n")
+		for _, f := range coverage.VacuousFrameworks {
+			fmt.Fprintf(pp.writer, "  • %s\n", f)
+		}
 	}
 
 	if len(coverage.FailedGVRPulls) > 0 || len(coverage.PartialGVRPulls) > 0 {

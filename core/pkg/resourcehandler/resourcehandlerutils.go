@@ -142,6 +142,11 @@ func filterRuleMatchesForResource(resourceKind string, matchObjects []reporthand
 
 	ruleApplies := false
 	for resource := range resourceMap {
+		// A wildcard resource matches any scanned resource kind.
+		if resource == "*" {
+			ruleApplies = true
+			break
+		}
 		if matchesInputResource(resource) {
 			ruleApplies = true
 			break

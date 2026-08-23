@@ -7,7 +7,7 @@ import (
 )
 
 func getDeleteCmd(ks meta.IKubescape) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "delete",
 		Short: "Delete cached configurations",
 		Long:  ``,
@@ -15,4 +15,6 @@ func getDeleteCmd(ks meta.IKubescape) *cobra.Command {
 			return ks.DeleteCachedConfig(&v1.DeleteConfig{})
 		},
 	}
+	cmd.AddCommand(getDeleteCacheCmd())
+	return cmd
 }

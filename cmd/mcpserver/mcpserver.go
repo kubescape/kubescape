@@ -86,18 +86,32 @@ type KubescapeMcpserver struct {
 	ksClient   spdxv1beta1.SpdxV1beta1Interface
 	// ksClientInit overrides newKsClient for this server instance; used by
 	// tests. Nil means use newKsClient.
-	ksClientInit func() (spdxv1beta1.SpdxV1beta1Interface, error)
-	k8sClientMu  sync.Mutex
-	k8sClient    *k8sinterface.KubernetesApi
-	policyGetter *getter.DownloadReleasedPolicy
-	scanSemMu    sync.Mutex
-	scanSem      *semaphore.Weighted
-	scanGroup    singleflight.Group
-	scanCtxMu    sync.Mutex
-	scanCtxs     map[string]*scanCtxState
+	ksClientInit   func() (spdxv1beta1.SpdxV1beta1Interface, error)
+	k8sClientMu    sync.Mutex
+	k8sClient      *k8sinterface.KubernetesApi
+	policyGetterMu sync.Mutex
+	policyGetter   *getter.DownloadReleasedPolicy
+	scanSemMu      sync.Mutex
+	scanSem        *semaphore.Weighted
+	scanGroup      singleflight.Group
+	scanCtxMu      sync.Mutex
+	scanCtxs       map[string]*scanCtxState
 }
 
+// getPolicyGetter lazily constructs policyGetter on first use, guarded so
+// concurrent MCP tool calls can't race on the check-then-set (the underlying
+// server dispatches each request on its own goroutine, same reason the
+// ksClient/k8sClient/scanSem/scanCtxs fields on this struct are already
+// guarded - this field wasn't, which was a real data race: go test -race
+// flags concurrent calls immediately, see #3444). A plain mutex, not
+// sync.Once, because mcpServerEntrypoint pre-populates policyGetter directly
+// in the struct literal and warms it via SetRegoObjectsWithFallback before
+// any tool call can reach this method - sync.Once wouldn't know that
+// initialization already happened, and would discard the warmed instance on
+// the first concurrent call.
 func (ksServer *KubescapeMcpserver) getPolicyGetter() *getter.DownloadReleasedPolicy {
+	ksServer.policyGetterMu.Lock()
+	defer ksServer.policyGetterMu.Unlock()
 	if ksServer.policyGetter == nil {
 		ksServer.policyGetter = getter.NewDownloadReleasedPolicy()
 	}
@@ -249,6 +263,9 @@ func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
 			mcp.Description("Type of vulnerability manifests to list"),
 			mcp.Enum("image", "workload", "both"),
 		),
+		mcp.WithString("continue",
+			mcp.Description("Optional Kubernetes continuation token for pagination"),
+		),
 	)
 
 	ksServer.s.AddTool(listManifestsTool, ksServer.toolHandler(listManifestsTool.Name))
@@ -304,6 +321,9 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 		mcp.WithString("namespace",
 			mcp.Description("Filter by namespace (optional)"),
 		),
+		mcp.WithString("continue",
+			mcp.Description("Optional Kubernetes continuation token for pagination"),
+		),
 	)
 
 	ksServer.s.AddTool(listConfigsTool, ksServer.toolHandler(listConfigsTool.Name))
@@ -339,6 +359,9 @@ func createRuntimeToolsAndResources(ksServer *KubescapeMcpserver) {
 		mcp.WithDescription("Discover available container profiles at workload level (this returns a list of profiles, not the profile results themselves, to get the profile results, use the get_container_profile tool)"),
 		mcp.WithString("namespace",
 			mcp.Description("Filter by namespace (optional)"),
+		),
+		mcp.WithString("continue",
+			mcp.Description("Optional Kubernetes continuation token for pagination"),
 		),
 	)
 
@@ -720,26 +743,33 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			labelSelector = "kubescape.io/context=non-filtered"
 		}
 
-		var manifests *v1beta1.VulnerabilityManifestList
-		var err error
-		if labelSelector == "" {
-			client, ksErr := ksServer.getKsClient()
-			if ksErr != nil {
-				return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+		continueToken := ""
+		if c, ok := arguments["continue"]; ok {
+			if cStr, ok := c.(string); ok {
+				continueToken = cStr
 			}
-			manifests, err = client.VulnerabilityManifests(namespace).List(ctx, metav1.ListOptions{})
-		} else {
-			client, ksErr := ksServer.getKsClient()
-			if ksErr != nil {
-				return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
-			}
-			manifests, err = client.VulnerabilityManifests(namespace).List(ctx, metav1.ListOptions{
-				LabelSelector: labelSelector,
-			})
 		}
+
+		client, ksErr := ksServer.getKsClient()
+		if ksErr != nil {
+			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
+		}
+
+		listOpts := metav1.ListOptions{Limit: 100, Continue: continueToken}
+		if labelSelector != "" {
+			listOpts.LabelSelector = labelSelector
+		}
+		chunk, err := client.VulnerabilityManifests(namespace).List(ctx, listOpts)
 		if err != nil {
 			return nil, err
 		}
+
+		if chunk.GetContinue() != "" {
+			result["continue"] = chunk.GetContinue()
+		}
+
+		var manifests v1beta1.VulnerabilityManifestList
+		manifests.Items = chunk.Items
 
 		logger.L().Info(fmt.Sprintf("Found %d manifests", len(manifests.Items)))
 
@@ -886,10 +916,20 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if ksErr != nil {
 			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
 		}
-		manifests, err := client.WorkloadConfigurationScans(namespaceStr).List(ctx, metav1.ListOptions{})
+		continueToken := ""
+		if c, ok := arguments["continue"]; ok {
+			if cStr, ok := c.(string); ok {
+				continueToken = cStr
+			}
+		}
+
+		chunk, err := client.WorkloadConfigurationScans(namespaceStr).List(ctx, metav1.ListOptions{Limit: 100, Continue: continueToken})
 		if err != nil {
 			return nil, err
 		}
+
+		var manifests v1beta1.WorkloadConfigurationScanList
+		manifests.Items = chunk.Items
 		logger.L().Info(fmt.Sprintf("Found %d configuration manifests", len(manifests.Items)))
 		configManifests := []map[string]any{}
 		for _, manifest := range manifests.Items {
@@ -907,6 +947,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			"available_templates": map[string]string{
 				"configuration_manifest_details": "kubescape://configuration-manifests/{namespace}/{manifest_name}",
 			},
+		}
+		if chunk.GetContinue() != "" {
+			result["continue"] = chunk.GetContinue()
 		}
 		content, err := json.Marshal(result)
 		if err != nil {
@@ -972,10 +1015,20 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if ksErr != nil {
 			return nil, fmt.Errorf("failed to connect to Kubernetes cluster: %w", ksErr)
 		}
-		profiles, err := client.ContainerProfiles(namespace).List(ctx, metav1.ListOptions{})
+		continueToken := ""
+		if c, ok := arguments["continue"]; ok {
+			if cStr, ok := c.(string); ok {
+				continueToken = cStr
+			}
+		}
+
+		chunk, err := client.ContainerProfiles(namespace).List(ctx, metav1.ListOptions{Limit: 100, Continue: continueToken})
 		if err != nil {
 			return nil, err
 		}
+
+		var profiles v1beta1.ContainerProfileList
+		profiles.Items = chunk.Items
 		logger.L().Info(fmt.Sprintf("Found %d container profiles", len(profiles.Items)))
 		containerProfilesList := []map[string]any{}
 		for _, profile := range profiles.Items {
@@ -993,6 +1046,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			"available_templates": map[string]string{
 				"container_profile_details": "kubescape://container-profiles/{namespace}/{profile_name}",
 			},
+		}
+		if chunk.GetContinue() != "" {
+			result["continue"] = chunk.GetContinue()
 		}
 		content, err := json.Marshal(result)
 		if err != nil {
@@ -1217,7 +1273,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 	}
 }
 
-func mcpServerEntrypoint() error {
+func mcpServerEntrypoint(transport string, port int) error {
 	logger.L().Info("Starting MCP server...")
 
 	// Create a new MCP server
@@ -1252,12 +1308,25 @@ func mcpServerEntrypoint() error {
 	createIaCControlScanningTool(ksServer)
 	createControlScanningTools(ksServer)
 	createPolicyListingTools(ksServer)
+	createAdvancedTools(ksServer)
 
 	// Start the server
-	if err := server.ServeStdio(s); err != nil {
-		return fmt.Errorf("server error: %w", err)
+	if transport == "sse" {
+		sseServer := server.NewSSEServer(s)
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
+		logger.L().Info("Starting SSE server", helpers.String("addr", addr))
+		if err := sseServer.Start(addr); err != nil {
+			return fmt.Errorf("sse server error: %w", err)
+		}
+		return nil
+	} else if transport == "stdio" {
+		if err := server.ServeStdio(s); err != nil {
+			return fmt.Errorf("server error: %w", err)
+		}
+		return nil
+	} else {
+		return fmt.Errorf("unsupported transport '%s': must be 'sse' or 'stdio'", transport)
 	}
-	return nil
 }
 
 func createRBACScanningTools(ksServer *KubescapeMcpserver) {
@@ -1355,13 +1424,17 @@ func createPolicyListingTools(ksServer *KubescapeMcpserver) {
 }
 
 func GetMCPServerCmd() *cobra.Command {
+	var transport string
+	var port int
 	cmd := &cobra.Command{
 		Use:   "mcpserver",
 		Short: "Start the Kubescape MCP server",
 		Long:  `Start the Kubescape MCP server`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return mcpServerEntrypoint()
+			return mcpServerEntrypoint(transport, port)
 		},
 	}
+	cmd.Flags().StringVarP(&transport, "transport", "t", "stdio", "Transport protocol to use (stdio or sse)")
+	cmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to use for SSE transport")
 	return cmd
 }

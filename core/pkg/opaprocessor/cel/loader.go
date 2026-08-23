@@ -98,6 +98,13 @@ func (v *VAP) failOnError() bool {
 // GUARANTEED to exist; the seam for honoring it is guaranteeing Namespace
 // collection whenever a loaded policy needs it.
 //
+// A paramKind is refused for the same reason. Live, a binding's ParamRef points
+// the policy at real objects of that kind, so a policy taking anything other
+// than the ControlConfiguration the bundle ships has no offline params at all.
+// Evaluating it anyway reads params.* off the wrong object, and every such read
+// is a verdict admission never made. The seam for honoring one is resolving a
+// ParamRef against objects the scan collected.
+//
 // The other matchConstraints narrowings do not need refusing, because their
 // inputs are on the scanned object itself and appliesTo evaluates them:
 // objectSelector (the object's own labels) and a resource rule's operations
@@ -105,6 +112,15 @@ func (v *VAP) failOnError() bool {
 func (v *VAP) requireSupported() error {
 	if v.matchConstraints != nil && selectorNarrows(v.matchConstraints.NamespaceSelector) {
 		return fmt.Errorf("control %q scopes matchConstraints with a namespaceSelector, whose input (namespace labels) the scan cannot guarantee to have; refusing it to preserve scan/admission parity", v.ControlID)
+	}
+	if v.paramKind != nil {
+		shipped, err := controlConfigParamKind()
+		if err != nil {
+			return err
+		}
+		if *v.paramKind != *shipped {
+			return fmt.Errorf("control %q takes params of kind %s %s, which the scan has no binding to resolve (only the bundled %s %s is available); refusing it to preserve scan/admission parity", v.ControlID, v.paramKind.APIVersion, v.paramKind.Kind, shipped.APIVersion, shipped.Kind)
+		}
 	}
 	return nil
 }
@@ -306,6 +322,11 @@ func newVAP(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *VAP {
 // Otherwise the whole ControlConfiguration is returned so expressions can reach
 // params.settings.<field>, exactly what a live ParamRef would supply.
 //
+// A paramKind the shipped file does not answer is an error rather than the
+// config: binding the wrong object would answer the policy's params.* reads
+// with another kind's fields. loadVAP refuses such a policy before we get here
+// (see requireSupported), so this is the invariant kept where params are bound.
+//
 // The returned map is shared across calls (see controlConfig) and is treated as
 // read-only: the evaluator only binds it into a CEL activation, which never
 // mutates it.
@@ -313,11 +334,30 @@ func resolveParams(vap *VAP) (any, error) {
 	if vap.paramKind == nil {
 		return nil, nil
 	}
-	params, err := controlConfig()
+	shipped, err := controlConfigParamKind()
 	if err != nil {
 		return nil, err
 	}
-	return params, nil
+	if *vap.paramKind != *shipped {
+		return nil, fmt.Errorf("control %q takes params of kind %s %s, which the bundled %s %s cannot supply", vap.ControlID, vap.paramKind.APIVersion, vap.paramKind.Kind, shipped.APIVersion, shipped.Kind)
+	}
+	return controlConfig()
+}
+
+// controlConfigParamKind is the paramKind the embedded params file answers,
+// read off the file's own apiVersion and kind so a `make sync-vap` that bumps
+// the ControlConfiguration version carries the check with it.
+func controlConfigParamKind() (*admissionregistrationv1.ParamKind, error) {
+	config, err := controlConfig()
+	if err != nil {
+		return nil, err
+	}
+	apiVersion, _ := config["apiVersion"].(string)
+	kind, _ := config["kind"].(string)
+	if apiVersion == "" || kind == "" {
+		return nil, fmt.Errorf("embedded control configuration %q declares no apiVersion/kind, so no policy's paramKind can be matched against it", controlConfigFile)
+	}
+	return &admissionregistrationv1.ParamKind{APIVersion: apiVersion, Kind: kind}, nil
 }
 
 // controlConfig parses the embedded ControlConfiguration once and caches it. It

@@ -29,6 +29,9 @@ func (s *stubKubescape) SetContext(ctx context.Context) {
 func (s *stubKubescape) Scan(*cautils.ScanInfo, []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	return nil, nil
 }
+func (s *stubKubescape) ScanContext(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return nil, nil
+}
 func (s *stubKubescape) List(*metav1.ListPolicies) (*metav1.ListResult, error) {
 	return nil, nil
 }
@@ -48,6 +51,9 @@ func (s *stubKubescape) Patch(*metav1.PatchInfo, *cautils.ScanInfo) (bool, error
 	return false, nil
 }
 func (s *stubKubescape) ScanImage(*metav1.ImageScanInfo, *cautils.ScanInfo) (bool, error) {
+	return false, nil
+}
+func (s *stubKubescape) ScanImageContext(context.Context, *metav1.ImageScanInfo, *cautils.ScanInfo) (bool, error) {
 	return false, nil
 }
 

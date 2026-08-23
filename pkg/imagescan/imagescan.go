@@ -27,6 +27,7 @@ import (
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 )
 
@@ -164,10 +165,11 @@ func getProviderConfig(creds RegistryCredentials, sources []string, options Scan
 // It performs image scanning and everything needed in between.
 type Service struct {
 	useDefaultMatchers bool
+	vp                 vulnerability.Provider
+	vexClient          VexClient
 	// sources specifies allowed provider sources (nil = all providers).
 	// Used by MCP server to restrict scans to remote registry providers.
 	sources []string
-	vp      vulnerability.Provider
 	// dbStatus carries the loaded vulnerability DB status so scan results can
 	// surface DB freshness (ProviderStatus.Built). Nil when the DB failed to load.
 	dbStatus *vulnerability.ProviderStatus
@@ -242,7 +244,7 @@ func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCred
 // ScanWithOptions scans an image using explicit source-selection options. In
 // particular, Platform prevents a multi-architecture image index from silently
 // resolving to the architecture of the machine running Kubescape.
-func (s *Service) ScanWithOptions(_ context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string, options ScanOptions) (*cautils.ImageScanData, error) {
+func (s *Service) ScanWithOptions(ctx context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string, options ScanOptions) (*cautils.ImageScanData, error) {
 	platform, err := NormalizePlatform(options.Platform)
 	if err != nil {
 		return nil, err
@@ -261,6 +263,12 @@ func (s *Service) ScanWithOptions(_ context.Context, userInput string, creds Reg
 
 	filteredMatches := filterMatchesBasedOnSeverity(severityExceptions, *remainingMatches, s.vp)
 
+	vexStatuses, err := s.vexClient.GetVexStatuses(ctx, userInput)
+	if err != nil {
+		// Log error but continue scanning
+		logger.L().Warning("Failed to fetch VEX statuses", helpers.Error(err))
+	}
+
 	pb := cautils.ImageScanData{
 		Context:               pkgContext,
 		IgnoredMatches:        ignoredMatches,
@@ -270,6 +278,7 @@ func (s *Service) ScanWithOptions(_ context.Context, userInput string, creds Reg
 		Packages:              packages,
 		SBOM:                  sbom,
 		VulnerabilityProvider: s.vp,
+		VexStatuses:           vexStatuses,
 	}
 
 	applyDBFreshness(&pb, s.dbStatus)
@@ -351,6 +360,7 @@ func NewScanServiceWithMatchersAndSources(distCfg distribution.Config, installCf
 		vp:                 vp,
 		dbStatus:           status,
 		useDefaultMatchers: useDefaultMatchers,
+		vexClient:          NewVexClient(),
 		sources:            sources,
 	}, nil
 }

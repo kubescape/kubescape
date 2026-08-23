@@ -484,6 +484,118 @@ func TestTransformContainerMetadata(t *testing.T) {
 			},
 		},
 		{
+			name: "typed container env var names with fieldRef should be anonymized",
+			object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"spec": map[string]any{
+					"containers": []corev1.Container{
+						{
+							Name:  "app",
+							Image: "busybox:latest",
+							Env: []corev1.EnvVar{
+								{
+									Name: "MY_NODE_NAME",
+									ValueFrom: &corev1.EnvVarSource{
+										FieldRef: &corev1.ObjectFieldSelector{
+											FieldPath: "spec.nodeName",
+										},
+									},
+								},
+								{
+									Name: "MY_CPU_LIMIT",
+									ValueFrom: &corev1.EnvVarSource{
+										ResourceFieldRef: &corev1.ResourceFieldSelector{
+											Resource: "limits.cpu",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, spec map[string]any) {
+				containers, ok := spec["containers"].([]corev1.Container)
+				if !assert.True(t, ok, "expected typed containers") {
+					return
+				}
+				if !assert.Len(t, containers, 1) {
+					return
+				}
+				assert.NotEqual(t, "MY_NODE_NAME", containers[0].Env[0].Name,
+					"env var name referencing fieldRef should be anonymized")
+				assert.Contains(t, containers[0].Env[0].Name, "env-")
+				assert.NotEqual(t, "MY_CPU_LIMIT", containers[0].Env[1].Name,
+					"env var name referencing resourceFieldRef should be anonymized")
+				assert.Contains(t, containers[0].Env[1].Name, "env-")
+			},
+		},
+		{
+			name: "unstructured container env var names with fieldRef should be anonymized",
+			object: map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":  "app",
+							"image": "busybox:latest",
+							"env": []any{
+								map[string]any{
+									"name": "MY_POD_NAME",
+									"valueFrom": map[string]any{
+										"fieldRef": map[string]any{
+											"fieldPath": "metadata.name",
+										},
+									},
+								},
+								map[string]any{
+									"name": "MY_MEM_LIMIT",
+									"valueFrom": map[string]any{
+										"resourceFieldRef": map[string]any{
+											"resource": "limits.memory",
+										},
+									},
+								},
+								map[string]any{
+									"name":  "PLAIN",
+									"value": "not-a-secret",
+								},
+							},
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, spec map[string]any) {
+				containers, ok := spec["containers"].([]any)
+				if !assert.True(t, ok, "expected unstructured containers") {
+					return
+				}
+				container, ok := containers[0].(map[string]any)
+				if !assert.True(t, ok) {
+					return
+				}
+				env, ok := container["env"].([]any)
+				if !assert.True(t, ok) {
+					return
+				}
+				if !assert.Len(t, env, 3) {
+					return
+				}
+				fieldEnv := env[0].(map[string]any)
+				resourceEnv := env[1].(map[string]any)
+				plainEnv := env[2].(map[string]any)
+				assert.NotEqual(t, "MY_POD_NAME", fieldEnv["name"],
+					"env var name referencing fieldRef should be anonymized")
+				assert.Contains(t, fieldEnv["name"], "env-")
+				assert.NotEqual(t, "MY_MEM_LIMIT", resourceEnv["name"],
+					"env var name referencing resourceFieldRef should be anonymized")
+				assert.Contains(t, resourceEnv["name"], "env-")
+				assert.Equal(t, "PLAIN", plainEnv["name"],
+					"plain env var name should not be anonymized")
+			},
+		},
+
+		{
 			name: "typed container envFrom references should be anonymized",
 			object: map[string]any{
 				"apiVersion": "v1",
@@ -987,4 +1099,67 @@ func TestTransformUnstructuredEnv_LeaksAPIKeyValue(t *testing.T) {
 	if got == secret {
 		t.Fatalf("env var APIKEY value was not transformed; secret leaked into output")
 	}
+}
+
+func TestTransformContainerList_TypedSlice(t *testing.T) {
+	obj := map[string]any{
+		"containers": []corev1.Container{
+			{
+				Name:  "my-container",
+				Image: "registry.internal.corp/team/app:1.0",
+				Env:   []corev1.EnvVar{{Name: "API_KEY", Value: "s3cret"}},
+			},
+		},
+	}
+
+	assert.NoError(t, transformContainerList(obj, "containers", NewMappingTransformer()))
+
+	containers, ok := obj["containers"].([]corev1.Container)
+	assert.True(t, ok)
+	assert.NotEqual(t, "my-container", containers[0].Name)
+	assert.NotEqual(t, "registry.internal.corp/team/app:1.0", containers[0].Image)
+	assert.NotEqual(t, "s3cret", containers[0].Env[0].Value)
+}
+
+func TestTransformEphemeralContainerList_TypedSlice(t *testing.T) {
+	obj := map[string]any{
+		"ephemeralContainers": []corev1.EphemeralContainer{
+			{
+				EphemeralContainerCommon: corev1.EphemeralContainerCommon{
+					Name:  "debugger",
+					Image: "registry.internal.corp/team/debug:1.0",
+				},
+			},
+		},
+	}
+
+	assert.NoError(t, transformEphemeralContainerList(obj, "ephemeralContainers", NewMappingTransformer()))
+
+	containers, ok := obj["ephemeralContainers"].([]corev1.EphemeralContainer)
+	assert.True(t, ok)
+	assert.NotEqual(t, "debugger", containers[0].Name)
+	assert.NotEqual(t, "registry.internal.corp/team/debug:1.0", containers[0].Image)
+}
+
+func TestTransformPodSpecs_TypedContainersFromScanPipeline(t *testing.T) {
+	obj := map[string]any{
+		"spec": map[string]any{
+			"containers": []corev1.Container{
+				{Name: "app", Image: "registry.internal.corp/team/app:1.0"},
+			},
+			"initContainers": []corev1.Container{
+				{Name: "migrate", Image: "registry.internal.corp/team/migrate:1.0"},
+			},
+		},
+	}
+
+	assert.NoError(t, transformPodSpecs(obj, NewMappingTransformer()))
+
+	spec := obj["spec"].(map[string]any)
+	containers := spec["containers"].([]corev1.Container)
+	initContainers := spec["initContainers"].([]corev1.Container)
+	assert.NotEqual(t, "app", containers[0].Name)
+	assert.NotEqual(t, "migrate", initContainers[0].Name)
+	assert.NotContains(t, containers[0].Image, "registry.internal.corp")
+	assert.NotContains(t, initContainers[0].Image, "registry.internal.corp")
 }

@@ -117,6 +117,7 @@ type ScanInfo struct {
 	UseExceptions             string      // Load file with exceptions configuration
 	AuditExceptions           bool        // Include exception usage audit in supported scan outputs
 	HonorInlineExceptions     BoolPtrFlag // Honor kubescape.io/skip-* annotations as inline exception policies
+	CustomRules               string      // Path to a directory of custom *.rego rules
 	ControlsInputs            string      // Load file with inputs for controls
 	AttackTracks              string      // Load file with attack tracks
 	UseFrom                   []string    // Load framework from local file (instead of download). Use when running offline
@@ -133,9 +134,12 @@ type ScanInfo struct {
 	CustomClusterName         string                       // Set the custom name of the cluster
 	ExcludedNamespaces        string                       // used for host scanner namespace
 	IncludeNamespaces         string                       //
+	ExcludeControls           []string                     // control IDs, or legacy CIS section numbers, to leave out of the scan (case-insensitive)
 	IncludeKinds              string                       // comma-separated Kubernetes kinds to include (case-insensitive, Kind name only); e.g. "Deployment,DaemonSet"
 	ExcludeKinds              string                       // comma-separated Kubernetes kinds to exclude (case-insensitive, Kind name only); e.g. "Job,CronJob"
 	LabelSelector             string                       // filter collected resources by Kubernetes label selector (e.g. "app=nginx,env!=dev")
+	ExcludePaths              []string                     // gitignore-style patterns excluding paths from file, directory and repository scans
+	NoIgnoreFile              bool                         // do not read the .kubescapeignore file at the scan root
 	Namespace                 string                       // target namespace for workload scans
 	InputPatterns             []string                     // Yaml files input patterns
 	Silent                    bool                         // Silent mode - Do not print progress logs
@@ -168,6 +172,7 @@ type ScanInfo struct {
 	ScanTimeout               time.Duration // Maximum duration for the entire scan (0 = no timeout)
 	ControlTimeout            time.Duration // Maximum duration for evaluating a single control (0 = no timeout)
 	EnableStreaming           bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
+	Incremental               bool          // Cache verdicts per resource, keyed by resource hash + controls-config version, and skip re-evaluating unchanged resources
 	DryRun                    bool          // Check RBAC access for the resources the scan would need, without collecting or evaluating anything
 	ChartPath                 string
 	FilePath                  string
@@ -178,6 +183,8 @@ type ScanInfo struct {
 	HelmReleaseName           string   // --release-name: Helm release name made available as .Release.Name during render
 	HelmReleaseNamespace      string   // --release-namespace: Helm release namespace made available as .Release.Namespace
 	LabelsToCopy              []string // Labels to copy from workloads to scan reports
+	SkipControls              string   // Control IDs to skip, e.g. "C-0001,C-0020"
+	IncludeControls           string   // Control IDs to include (all others skipped), e.g. "C-0001,C-0002"
 	scanningContext           *ScanningContext
 	kubeconfigPath            string
 	kubeContextOverride       string

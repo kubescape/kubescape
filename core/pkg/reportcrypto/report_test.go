@@ -328,7 +328,7 @@ func TestDecryptEmbeddedCiphertextsHandlesSlashesInsideEnvelopes(t *testing.T) {
 	require.NoError(t, err)
 	encryptedID := "apps/v1/" + encryptedNamespace + "/Deployment/" + encryptedName
 
-	restored, err := decryptEmbeddedCiphertexts(encryptedID, dek)
+	restored, err := decryptEmbeddedCiphertexts(encryptedID, UnboundReportKey(dek))
 	require.NoError(t, err)
 	assert.Equal(t, "apps/v1/production/Deployment/checkout", restored)
 }

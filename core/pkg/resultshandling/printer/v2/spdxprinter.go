@@ -2,9 +2,9 @@ package printer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/anchore/syft/syft/format"
 	"github.com/anchore/syft/syft/format/spdxjson"
@@ -29,15 +29,7 @@ func NewSPDXPrinter() *SPDXPrinter {
 }
 
 func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
-	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = spdxOutputFile
-		}
-		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.SPDXOutputExt) {
-			outputFile = outputFile + printer.SPDXOutputExt
-		}
-	}
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.SPDXFormat, outputFile, spdxOutputFile)
 	if explicitOutput {
 		var err error
 		sp.writer, err = printer.GetWriterNoFallback(outputFile)
@@ -57,10 +49,6 @@ func (sp *SPDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		logger.L().Ctx(ctx).Error("spdx-json output is only supported for image scans")
 		return fmt.Errorf("spdx-json output is only supported for image scans")
 	}
-	if imageScanData[0].SBOM == nil {
-		logger.L().Ctx(ctx).Error("no SBOM data available for spdx-json output")
-		return fmt.Errorf("no SBOM data available for spdx-json output")
-	}
 
 	encoder, err := spdxjson.NewFormatEncoderWithConfig(spdxjson.DefaultEncoderConfig())
 	if err != nil {
@@ -68,13 +56,39 @@ func (sp *SPDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		return err
 	}
 
-	data, err := format.Encode(*imageScanData[0].SBOM, encoder)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to encode SBOM as spdx-json", helpers.Error(err))
-		return err
+	var encodedDocs []json.RawMessage
+	for _, scan := range imageScanData {
+		if scan.SBOM == nil {
+			logger.L().Ctx(ctx).Warning("skipping image with no SBOM data available for spdx-json output")
+			continue
+		}
+
+		data, err := format.Encode(*scan.SBOM, encoder)
+		if err != nil {
+			logger.L().Ctx(ctx).Error("failed to encode SBOM as spdx-json", helpers.Error(err))
+			return err
+		}
+
+		encodedDocs = append(encodedDocs, json.RawMessage(data))
 	}
 
-	if _, err := sp.writer.Write(data); err != nil {
+	if len(encodedDocs) == 0 {
+		logger.L().Ctx(ctx).Error("no SBOM data available for spdx-json output")
+		return fmt.Errorf("no SBOM data available for spdx-json output")
+	}
+
+	var outputBytes []byte
+	if len(encodedDocs) == 1 {
+		outputBytes = encodedDocs[0]
+	} else {
+		outputBytes, err = json.MarshalIndent(encodedDocs, "", "  ")
+		if err != nil {
+			logger.L().Ctx(ctx).Error("failed to marshal multi-image spdx-json output", helpers.Error(err))
+			return err
+		}
+	}
+
+	if _, err := sp.writer.Write(outputBytes); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write spdx-json output", helpers.Error(err))
 		return err
 	}

@@ -29,6 +29,9 @@ var scanCmdExamples = fmt.Sprintf(`
   # Scan kubernetes manifest files
   %[1]s scan .
 
+  # Scan manifest files, leaving test fixtures and generated output out of the scan
+  %[1]s scan . --exclude-path 'test/**' --exclude-path '*.generated.yaml'
+
   # Scan and save the results in the JSON format
   %[1]s scan --format json --output results.json
 
@@ -155,9 +158,10 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to an exceptions obj. If not set will download exceptions from ARMO management portal")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.AuditExceptions, "audit-exceptions", false, "Include an exception usage audit in supported scan outputs")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseArtifactsFrom, "use-artifacts-from", "", "Load artifacts from local directory. If not used will download them")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.CustomRules, "custom-rules", "", "Path to a directory containing user-authored *.rego custom rules")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. e.g: --exclude-namespaces ns-a,ns-b. Notice, when running with `exclude-namespace` kubescape does not scan cluster-scoped objects.")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "Only include controls at or above this severity (low, medium, high, critical) in the output")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "Only include controls at or below this severity (low, medium, high, critical) in the output")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "Only include controls at or above this severity (low, medium, high, critical) in the output. Does not affect exit codes — --compliance-threshold, --severity-threshold, --fail-coverage-below and --fail-on-degraded-config are always computed on the full unfiltered report")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "Only include controls at or below this severity (low, medium, high, critical) in the output. Does not affect exit codes — thresholds are always computed on the full unfiltered report")
 
 	scanCmd.PersistentFlags().Float32VarP(&scanInfo.ComplianceThreshold, "compliance-threshold", "", 0, "Compliance threshold is the percent below which the command fails and returns exit code 1. Applies to 'scan framework', 'scan control', and '--view resource|control'")
 	scanCmd.PersistentFlags().Float32Var(&scanInfo.FailCoverageThreshold, "fail-coverage-below", 0, "Fail (exit code 1) when the scan coverage score drops below this percentage (0 to disable). The score is the ratio of evaluated controls discounted by 3 points per silent failed GVR pull (a resource type that failed to collect entirely but whose dependent controls still evaluated via other resource types), 2 points per partial GVR pull, and 5 points per degraded policy input, so a scan with every control evaluated can still fail on partial resource collection or fallback policy inputs")
@@ -189,8 +193,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", fmt.Sprintf(`Output file format. Supported formats: "%s"`, strings.Join(shared.ScanFormats, `", "`)))
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
+	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.ExcludeControls, "exclude-controls", nil, "Controls to leave out of the scan, by control ID (case-insensitive), applied to every framework in the scan. A control's CIS section number is accepted where the control carries one. Excluded controls are not evaluated and do not affect the compliance score. e.g: --exclude-controls C-0016,C-0017")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeKinds, "include-kinds", "", "scan only the specified Kubernetes resource kinds (case-insensitive, Kind name only — not group/version qualified). e.g: --include-kinds Deployment,DaemonSet")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ExcludeKinds, "exclude-kinds", "", "exclude the specified Kubernetes resource kinds from the scan (case-insensitive, Kind name only — not group/version qualified). e.g: --exclude-kinds Job,CronJob")
+	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.ExcludePaths, "exclude-path", nil, fmt.Sprintf("Exclude paths from file, directory and repository scans (repeat for more than one). Patterns use gitignore syntax and are relative to the scan root, e.g: --exclude-path 'test/**' --exclude-path '!test/prod.yaml'. Combined with the patterns in a %s file at the scan root. Helm charts, Kustomize configurations and Terraform modules are excluded as whole directories", cautils.IgnoreFileName))
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.NoIgnoreFile, "no-ignore-file", false, fmt.Sprintf("Ignore the %s file at the scan root; only --exclude-path patterns apply", cautils.IgnoreFileName))
 	scanCmd.PersistentFlags().StringVar(&scanInfo.LabelSelector, "label-selector", "", "Filter collected Kubernetes resources by label selector. Accepts any selector that kubectl -l supports, e.g: --label-selector app=nginx,env!=dev")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to configured backend.")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
@@ -220,12 +227,15 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.Hide, "hide", false, "Replace sensitive report metadata with deterministic pseudonyms")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.EncryptionEnabled, "encrypt", false, "Encrypt sensitive report metadata using the KUBESCAPE_MASTER_KEY environment variable")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.LabelsToCopy, "labels-to-copy", nil, "Labels to copy from workloads to scan reports for easy identification. e.g: --labels-to-copy=app,team,environment")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.SkipControls, "skip-controls", "", "Comma-separated control IDs to skip, e.g. --skip-controls C-0001,C-0020")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeControls, "include-controls", "", "Comma-separated control IDs to include; all other controls are skipped, e.g. --include-controls C-0001,C-0002")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ListingURL, "grype-db-url", "", "Grype vulnerability database URL")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.SkipDBUpdate, "skip-db-update", false, "Do not update the vulnerability database before scanning images. Uses the locally cached database; fails if none is cached.")
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ScanTimeout, "scan-timeout", 0, "Maximum duration for the scan (e.g. 5m, 30s, 1h). 0 means no timeout. When the timeout is reached the scan exits with a non-zero code.")
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ControlTimeout, "control-timeout", 0, "Maximum duration for evaluating a single control (e.g. 30s, 1m). 0 means no timeout. Controls that exceed this are marked as not evaluated and the scan continues. Must be lower than --scan-timeout when both are set.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.EnableStreaming, "enable-streaming", false, "Enable resource streaming for large clusters to reduce memory usage. Resources are processed in batches instead of loading all at once. Automatically enabled for clusters with >2500 resources.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.DryRun, "dry-run", false, "Check whether the current credentials can list every resource type the requested policies need, without collecting resources or evaluating controls. Cluster scans only.")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.Incremental, "incremental", false, "Cache the verdict for each resource, keyed by a hash of its spec/metadata plus the controls-config version, and skip re-evaluating unchanged resources on the next scan. Opt-in; scan output is unaffected. Cache automatically invalidates when the controls-config version changes; clear it manually with 'kubescape config delete cache'.")
 
 	// Helm value override flags. Mirror `helm install` so users can pass overrides through verbatim
 	// when scanning a Helm chart directory. Note: -f is already taken by --format, so --values is long-only.
@@ -309,34 +319,30 @@ func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) []cautil
 	return cautils.BuildPolicyIdentifiers([]string{"clusterscan", "mitre", "nsa"}, v1.KindFramework)
 }
 
-// applyTimeout wraps ks with a deadline context when ScanTimeout > 0 and
-// returns a cleanup function that cancels the context and restores the
-// original. The caller must defer the returned function so the deadline
-// covers both ks.Scan() and results.HandleResults().
-//
-//	defer applyTimeout(scanInfo, ks)()
-func applyTimeout(scanInfo *cautils.ScanInfo, ks meta.IKubescape) func() {
+// deriveTimeoutContext returns a context bound to ks.Context() with a
+// deadline of scanInfo.ScanTimeout, when that's > 0, and a cancel func the
+// caller must defer. When ScanTimeout <= 0 it returns ks.Context() unchanged
+// and a no-op cancel. It never calls ks.SetContext: the derived context is
+// threaded explicitly through ScanContext/HandleResults/enforceBaselineDrift
+// instead of being stashed on the shared ks, so it can't be observed or
+// clobbered by another operation sharing the same *Kubescape instance.
+func deriveTimeoutContext(scanInfo *cautils.ScanInfo, ks meta.IKubescape) (context.Context, func()) {
 	if scanInfo.ScanTimeout <= 0 {
-		return func() {}
+		return ks.Context(), func() {}
 	}
-	originalCtx := ks.Context()
-	timeoutCtx, cancel := context.WithTimeout(originalCtx, scanInfo.ScanTimeout)
-	ks.SetContext(timeoutCtx)
-	return func() {
-		cancel()
-		ks.SetContext(originalCtx)
-	}
+	return context.WithTimeout(ks.Context(), scanInfo.ScanTimeout)
 }
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
-	defer applyTimeout(&scanInfo, ks)()
+	ctx, cancel := deriveTimeoutContext(&scanInfo, ks)
+	defer cancel()
 
-	results, err := ks.Scan(&scanInfo, policyIdentifiers)
+	results, err := ks.ScanContext(ctx, &scanInfo, policyIdentifiers)
 	if err != nil {
 		return err
 	}
 
-	if err = results.HandleResults(ks.Context(), &scanInfo); err != nil {
+	if err = results.HandleResults(ctx, &scanInfo); err != nil {
 		return err
 	}
 
@@ -355,7 +361,7 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifie
 		return err
 	}
 
-	return enforceBaselineDrift(ks.Context(), results, &scanInfo)
+	return enforceBaselineDrift(ctx, results, &scanInfo)
 }
 
 func enforceBaselineDrift(ctx context.Context, results *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) error {

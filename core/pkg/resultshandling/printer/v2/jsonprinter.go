@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/anchore/clio"
 	grypejson "github.com/anchore/grype/grype/presenter/json"
@@ -33,15 +32,7 @@ func NewJsonPrinter() *JsonPrinter {
 }
 
 func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) error {
-	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = jsonOutputFile
-		}
-		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.JsonOutputExt) {
-			outputFile = outputFile + printer.JsonOutputExt
-		}
-	}
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JsonFormat, outputFile, jsonOutputFile)
 	if explicitOutput {
 		var err error
 		jp.writer, err = printer.GetWriterNoFallback(outputFile)
