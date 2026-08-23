@@ -18,35 +18,26 @@ type ControlEvaluation struct {
 }
 
 // EvaluateControl loads the ValidatingAdmissionPolicy for a control from the
-// embedded bundle, checks the object is in the policy's scope, resolves params,
-// and evaluates the validations against the object.
-//
-// It is the single entry point the scanner (package opaprocessor) dispatches
-// through: loadVAP and resolveParams are unexported, so the scan path cannot
-// assemble a control evaluation itself. controlID is threaded down from the
-// scanner (processControl), never read off the rule.
-//
-// namespaceObject is the object's Namespace (nil for cluster-scoped resources
-// or when the scan did not capture it). params come from the embedded bundle
-// via resolveParams, matching what a live binding's ParamRef would supply.
-//
-// A control the offline engine cannot honor with scan/admission parity (e.g.
-// one narrowed by a namespaceSelector) is refused by loadVAP and surfaces here
-// as an error. The scanner maps that to a skipped status, never a silent pass.
-// An object outside the policy's matchConstraints returns Applicable=false
-// rather than an error, since it is a normal not-matched case, not a failure —
-// and so does an object a matchCondition gates out (see matchConditionsGate).
+// embedded bundle, checks the object is in the policy's scope, resolves the
+// bundled params, and evaluates the validations against the object.
 func (e *Evaluator) EvaluateControl(ctx context.Context, controlID string, obj, namespaceObject map[string]any) (ControlEvaluation, error) {
 	vap, err := loadVAP(controlID)
 	if err != nil {
 		return ControlEvaluation{}, err
 	}
-	if !vap.appliesTo(obj) {
-		return ControlEvaluation{Applicable: false}, nil
-	}
 	params, err := resolveParams(vap)
 	if err != nil {
 		return ControlEvaluation{}, err
+	}
+	return e.EvaluateVAP(ctx, vap, obj, namespaceObject, params)
+}
+
+// EvaluateVAP evaluates a loaded VAP against a single object. The caller is
+// responsible for resolving params (e.g. from a per-binding paramRef), which
+// makes it the path for binding-specific parameter objects.
+func (e *Evaluator) EvaluateVAP(ctx context.Context, vap *VAP, obj, namespaceObject map[string]any, params any) (ControlEvaluation, error) {
+	if !vap.appliesTo(obj) {
+		return ControlEvaluation{Applicable: false}, nil
 	}
 	// namespaceObject is not threaded into the gate: admission evaluates
 	// matchConditions with it bound to null and only resolves the real Namespace
