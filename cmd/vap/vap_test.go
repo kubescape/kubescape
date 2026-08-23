@@ -803,6 +803,83 @@ func TestCreatePolicyBindingCmdValidation(t *testing.T) {
 		err := cmd.Execute()
 		assert.NoError(t, err)
 	})
+
+	t.Run("non-parameterized control refuses a parameter reference", func(t *testing.T) {
+		// C-0016 declares no paramKind, so the apiserver ignores the paramRef
+		// and evaluates without params. This used to emit that binding silently,
+		// leaving the caller believing the reference had configured the control.
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0016", "--parameter-reference", "basic-control-configuration"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "takes no --parameter-reference")
+	})
+
+	t.Run("non-parameterized policy by name refuses a parameter reference", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "kubescape-c-0016-allow-privilege-escalation", "--parameter-reference", "basic-control-configuration"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "takes no --parameter-reference")
+	})
+
+	t.Run("policy name outside the bundle accepts a parameter reference", func(t *testing.T) {
+		// Neither direction of the check may fire on a policy we know nothing
+		// about: its paramKind is unreadable, not absent.
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "some-custom-policy", "--parameter-reference", "my-params"})
+		err := cmd.Execute()
+		assert.NoError(t, err)
+	})
+
+	t.Run("params refusal names the paramKind the policy takes", func(t *testing.T) {
+		// C-0281 takes an ate.dev WorkerPool, not the ControlConfiguration the
+		// library ships, so the refusal has to say which kind to point at.
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0281"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ate.dev/v1alpha1 WorkerPool")
+	})
+
+	t.Run("params refusal names the shipped ControlConfiguration kind", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0009"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "kubescape.io/v1 ControlConfiguration")
+	})
+}
+
+func TestPolicyParamKind(t *testing.T) {
+	t.Run("control resolves its paramKind and is always known", func(t *testing.T) {
+		paramKind, known, err := policyParamKind("C-0281", "")
+		require.NoError(t, err)
+		assert.True(t, known)
+		require.NotNil(t, paramKind)
+		assert.Equal(t, "ate.dev/v1alpha1", paramKind.APIVersion)
+		assert.Equal(t, "WorkerPool", paramKind.Kind)
+	})
+
+	t.Run("non-parameterized control is known with no paramKind", func(t *testing.T) {
+		paramKind, known, err := policyParamKind("C-0016", "")
+		require.NoError(t, err)
+		assert.True(t, known)
+		assert.Nil(t, paramKind)
+	})
+
+	t.Run("control absent from the bundle errors instead of reading as unknown", func(t *testing.T) {
+		_, known, err := policyParamKind("C-9999", "")
+		require.Error(t, err)
+		assert.False(t, known)
+	})
+
+	t.Run("policy outside the bundle is not known", func(t *testing.T) {
+		paramKind, known, err := policyParamKind("", "some-custom-policy")
+		require.NoError(t, err)
+		assert.False(t, known)
+		assert.Nil(t, paramKind)
+	})
 }
 
 func TestGetDeployLibraryCmd(t *testing.T) {
