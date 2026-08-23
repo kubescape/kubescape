@@ -492,14 +492,26 @@ func validateRuleSegment(kind string, value string, validate func(string) []stri
 // most policies want the ControlConfiguration it ships, but C-0281 wants an
 // ate.dev WorkerPool. "uses params" alone sent the caller to the wrong object,
 // which the apiserver accepts and then resolves to nothing.
+//
+// The reverse is refused too. A policy declaring no paramKind has the apiserver
+// ignore the binding's ParamRef outright and evaluate the rules without params,
+// so a caller who narrowed a control by pointing at a configuration object got a
+// binding enforcing the library defaults instead, with nothing saying so.
 func checkParameterReference(parameterReference, controlID, policyName string) error {
-	paramKind, err := policyParamKind(controlID, policyName)
+	paramKind, known, err := policyParamKind(controlID, policyName)
 	if err != nil {
 		return err
 	}
-	if parameterReference == "" && paramKind != nil {
+	if !known {
+		return nil
+	}
+	switch {
+	case parameterReference == "" && paramKind != nil:
 		return fmt.Errorf("%s requires --parameter-reference naming an object of kind %s %s, which its CEL policy takes as params",
 			describeBoundPolicy(controlID, policyName), paramKind.APIVersion, paramKind.Kind)
+	case parameterReference != "" && paramKind == nil:
+		return fmt.Errorf("%s takes no --parameter-reference: its CEL policy declares no paramKind, so the apiserver would ignore the binding's paramRef and evaluate the rules without params",
+			describeBoundPolicy(controlID, policyName))
 	}
 	return nil
 }
@@ -516,18 +528,22 @@ func describeBoundPolicy(controlID, policyName string) string {
 
 // policyParamKind resolves the bound policy's spec.paramKind, nil when it takes
 // no params. The lookup mirrors policyMatchConstraints: --control reads it off
-// the control's policy, --policy off the named one, and a policy we know nothing
-// about — a name outside the embedded bundle — is left unchecked rather than
-// blocked.
-func policyParamKind(controlID, policyName string) (*admissionv1.ParamKind, error) {
+// the control's policy, --policy off the named one.
+//
+// known reports whether the policy is in the embedded bundle at all. A name from
+// outside it (--policy pointing at a custom policy) tells us nothing about the
+// params it takes, so both directions of the check have to stay off it rather
+// than read the absent paramKind as "takes none". A control that is absent is an
+// error from the lookup instead, so a resolved control is always known.
+func policyParamKind(controlID, policyName string) (paramKind *admissionv1.ParamKind, known bool, err error) {
 	if controlID != "" {
-		return cel.ParamKindForControl(controlID)
+		paramKind, err := cel.ParamKindForControl(controlID)
+		if err != nil {
+			return nil, false, err
+		}
+		return paramKind, true, nil
 	}
-	paramKind, found, err := cel.ParamKindForPolicy(policyName)
-	if err != nil || !found {
-		return nil, err
-	}
-	return paramKind, nil
+	return cel.ParamKindForPolicy(policyName)
 }
 
 // checkResourceRulesInPolicyScope refuses a --resource-rule the bound policy can
