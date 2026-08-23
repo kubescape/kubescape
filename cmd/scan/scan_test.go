@@ -529,9 +529,6 @@ func TestGetScanCommand_KubeContextsRejectedWhereUnsupported(t *testing.T) {
 		name string
 		args []string
 	}{
-		{name: "scan control", args: []string{"control", "C-0058", "--kube-contexts=ctx-a,ctx-b"}},
-		{name: "scan framework", args: []string{"framework", "nsa", "--kube-contexts=ctx-a,ctx-b"}},
-		{name: "scan workload", args: []string{"workload", "Deployment/nginx", "--kube-contexts=ctx-a,ctx-b"}},
 		{name: "scan image", args: []string{"image", "nginx:latest", "--kube-contexts=ctx-a,ctx-b"}},
 		{name: "scan --view=resource", args: []string{"--view=resource", "--kube-contexts=ctx-a,ctx-b"}},
 		{name: "scan --view=control", args: []string{"--view=control", "--kube-contexts=ctx-a,ctx-b"}},
@@ -551,19 +548,30 @@ func TestGetScanCommand_KubeContextsRejectedWhereUnsupported(t *testing.T) {
 	}
 }
 
-func TestGetScanCommand_KubeContextsAcceptedForDefaultSecurityView(t *testing.T) {
-	ks := &scanCallCounter{}
-	cmd := GetScanCommand(ks)
-	cmd.SilenceUsage = true
-	cmd.SetArgs([]string{"--kube-contexts=ctx-a,ctx-b", "--output=report.json"})
+func TestGetScanCommand_KubeContextsAcceptedWhereSupported(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "scan", args: []string{"--kube-contexts=ctx-a,ctx-b", "--output=report.json"}},
+		{name: "scan control", args: []string{"control", "C-0058", "--kube-contexts=ctx-a,ctx-b", "--output=report.json"}},
+		{name: "scan framework", args: []string{"framework", "nsa", "--kube-contexts=ctx-a,ctx-b", "--output=report.json"}},
+		{name: "scan workload", args: []string{"workload", "Deployment/nginx", "--kube-contexts=ctx-a,ctx-b", "--output=report.json"}},
+	}
 
-	err := cmd.Execute()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &scanCallCounter{}
+			cmd := GetScanCommand(ks)
+			cmd.SilenceUsage = true
+			cmd.SetArgs(tt.args)
 
-	// Reaches fleetScan (which then reaches ScanContext once per context via
-	// the scanCallCounter mock) rather than being rejected by the guard -
-	// the guard's error text must not appear here.
-	require.Error(t, err)
-	assert.NotContains(t, err.Error(), "is not yet supported")
+			err := cmd.Execute()
+
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), "is not yet supported")
+		})
+	}
 }
 
 func TestGetScanCommand_ScanTimeoutFlagRegistered(t *testing.T) {

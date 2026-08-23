@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"github.com/kubescape/kubescape/v4/core/meta"
 	"context"
 	"errors"
 	"path/filepath"
@@ -12,6 +13,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+var dummyRunner = func(ctx context.Context, si *cautils.ScanInfo, ks meta.IKubescape, pi []cautils.PolicyIdentifier) error { 
+	return runSecurityScan(ctx, si, ks, pi) 
+}
 
 func TestPerContextOutputPath(t *testing.T) {
 	tests := []struct {
@@ -76,7 +81,7 @@ func TestFleetScan_RejectsCollidingContextsBeforeScanningAny(t *testing.T) {
 		ScanType:     cautils.ScanTypeCluster,
 	}
 
-	err := fleetScan(scanInfo, ks, nil)
+	err := fleetScan(scanInfo, ks, nil, dummyRunner)
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "colliding")
@@ -90,7 +95,7 @@ func TestFleetScan_RequiresClusterScanningContext(t *testing.T) {
 		InputPatterns: []string{"."}, // makes GetScanningContext() resolve to a non-cluster context
 	}
 
-	err := fleetScan(scanInfo, &mocks.MockIKubescape{}, nil)
+	err := fleetScan(scanInfo, &mocks.MockIKubescape{}, nil, dummyRunner)
 	require.ErrorContains(t, err, "live-cluster scan")
 }
 
@@ -99,7 +104,7 @@ func TestFleetScan_RequiresOutput(t *testing.T) {
 		KubeContexts: []string{"ctx-a"},
 	}
 
-	err := fleetScan(scanInfo, &mocks.MockIKubescape{}, nil)
+	err := fleetScan(scanInfo, &mocks.MockIKubescape{}, nil, dummyRunner)
 	require.ErrorContains(t, err, "--output")
 }
 
@@ -134,7 +139,7 @@ func TestFleetScan_ScansEveryContextAndDerivesDistinctOutputPaths(t *testing.T) 
 		ScanType:     cautils.ScanTypeCluster,
 	}
 
-	err := fleetScan(scanInfo, ks, nil)
+	err := fleetScan(scanInfo, ks, nil, dummyRunner)
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"report.ctx-a.json", "report.ctx-b.json", "report.ctx-c.json"}, ks.callsOutputs)
@@ -152,7 +157,7 @@ func TestFleetScan_ContinuesPastFailingContextAndReportsIt(t *testing.T) {
 		ScanType:     cautils.ScanTypeCluster,
 	}
 
-	err := fleetScan(scanInfo, ks, nil)
+	err := fleetScan(scanInfo, ks, nil, dummyRunner)
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "1 of 3 context(s) failed")
@@ -174,7 +179,7 @@ func TestFleetScan_EachContextGetsAFreshScanID(t *testing.T) {
 	}
 	scanInfo.ScanID = "should-not-be-reused"
 
-	require.NoError(t, fleetScan(scanInfo, ks, nil))
+	require.NoError(t, fleetScan(scanInfo, ks, nil, dummyRunner))
 
 	require.Len(t, scanIDs, 2)
 	assert.NotEqual(t, "should-not-be-reused", scanIDs[0])

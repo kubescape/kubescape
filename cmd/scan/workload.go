@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 
+	"context"
+
 	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
@@ -44,6 +46,34 @@ var (
 
 	ErrInvalidWorkloadIdentifier = errors.New("invalid workload identifier, expected <kind>[.<version>[.<group>]]/<name>")
 )
+
+func runWorkloadScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+	results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
+	if err != nil {
+		return err
+	}
+
+	if err = results.HandleResults(ctx, scanInfo); err != nil {
+		return err
+	}
+
+	if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
+		return err
+	}
+	if scanInfo.ScanImages {
+		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+			return err
+		}
+	}
+	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
+		return err
+	}
+	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
+		return err
+	}
+
+	return enforceBaselineDrift(ctx, results, scanInfo)
+}
 
 // controlCmd represents the control command
 func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
@@ -96,31 +126,11 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				return err
 			}
 
-			results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
-			if err != nil {
-				return err
+			if len(scanInfo.KubeContexts) > 0 {
+				return fleetScan(*scanInfo, ks, policyIdentifiers, runWorkloadScan)
 			}
 
-			if err = results.HandleResults(ctx, scanInfo); err != nil {
-				return err
-			}
-
-			if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
-				return err
-			}
-			if scanInfo.ScanImages {
-				if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
-					return err
-				}
-			}
-			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
-				return err
-			}
-			if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
-				return err
-			}
-
-			return enforceBaselineDrift(ctx, results, scanInfo)
+			return runWorkloadScan(ctx, scanInfo, ks, policyIdentifiers)
 		},
 	}
 

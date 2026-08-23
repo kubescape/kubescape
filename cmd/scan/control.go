@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/meta"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/spf13/cobra"
+	"context"
 )
 
 var (
@@ -30,6 +31,38 @@ var (
   https://kubescape.io/docs/controls/
 `, cautils.ExecName())
 )
+
+func runControlScan(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+	results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
+	if err != nil {
+		return err
+	}
+	if err := results.HandleResults(ctx, scanInfo); err != nil {
+		return err
+	}
+	if !scanInfo.VerboseMode {
+		logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
+	}
+	if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
+		return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
+	}
+	if err := enforceSeverityThresholds(&results.GetResults().SummaryDetails, scanInfo); err != nil {
+		return err
+	}
+	if scanInfo.ScanImages {
+		if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+			return err
+		}
+	}
+	if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetResults().SummaryDetails.Controls), scanInfo); err != nil {
+		return err
+	}
+	if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
+		return err
+	}
+
+	return enforceBaselineDrift(ctx, results, scanInfo)
+}
 
 // controlCmd represents the control command
 func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
@@ -91,35 +124,10 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				return err
 			}
 
-			results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
-			if err != nil {
-				return err
+			if len(scanInfo.KubeContexts) > 0 {
+				return fleetScan(*scanInfo, ks, policyIdentifiers, runControlScan)
 			}
-			if err := results.HandleResults(ctx, scanInfo); err != nil {
-				return err
-			}
-			if !scanInfo.VerboseMode {
-				logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
-			}
-			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-				return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
-			}
-			if err := enforceSeverityThresholds(&results.GetResults().SummaryDetails, scanInfo); err != nil {
-				return err
-			}
-			if scanInfo.ScanImages {
-				if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
-					return err
-				}
-			}
-			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetResults().SummaryDetails.Controls), scanInfo); err != nil {
-				return err
-			}
-			if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
-				return err
-			}
-
-			return enforceBaselineDrift(ctx, results, scanInfo)
+			return runControlScan(ctx, scanInfo, ks, policyIdentifiers)
 		},
 	}
 }
