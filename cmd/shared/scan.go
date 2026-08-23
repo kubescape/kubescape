@@ -152,6 +152,9 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	if err := ValidateExcludePaths(scanInfo); err != nil {
 		return err
 	}
+	if strings.TrimSpace(scanInfo.LabelSelector) == "" && scanInfo.LabelSelector != "" {
+		return fmt.Errorf("invalid --label-selector %q: must not be whitespace-only", scanInfo.LabelSelector)
+	}
 	if scanInfo.LabelSelector != "" {
 		if _, err := labels.Parse(scanInfo.LabelSelector); err != nil {
 			return fmt.Errorf("invalid --label-selector %q: %w", scanInfo.LabelSelector, err)

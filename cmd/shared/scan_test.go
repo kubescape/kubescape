@@ -415,6 +415,7 @@ func TestValidateLabelSelector(t *testing.T) {
 		{name: "set-based selector is accepted", labelSelector: "env in (prod,staging)", expectedErr: ""},
 		{name: "invalid selector is rejected", labelSelector: "invalid!!selector", expectedErr: "invalid --label-selector"},
 		{name: "invalid operator is rejected", labelSelector: "app==nginx==bad", expectedErr: "invalid --label-selector"},
+		{name: "whitespace-only selector is rejected", labelSelector: "   ", expectedErr: "invalid --label-selector"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
