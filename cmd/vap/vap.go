@@ -487,18 +487,31 @@ func validateRuleSegment(kind string, value string, validate func(string) []stri
 // with the bound policy's spec.paramKind. A policy declaring one needs a ParamRef
 // on its binding to be functional, so emitting a binding without one is silently
 // broken.
+//
+// The refusal names the paramKind because the library no longer takes only one:
+// most policies want the ControlConfiguration it ships, but C-0281 wants an
+// ate.dev WorkerPool. "uses params" alone sent the caller to the wrong object,
+// which the apiserver accepts and then resolves to nothing.
 func checkParameterReference(parameterReference, controlID, policyName string) error {
 	paramKind, err := policyParamKind(controlID, policyName)
 	if err != nil {
 		return err
 	}
 	if parameterReference == "" && paramKind != nil {
-		if controlID != "" {
-			return fmt.Errorf("control %s requires --parameter-reference because its CEL policy uses params", controlID)
-		}
-		return fmt.Errorf("policy %s requires --parameter-reference because it uses params", policyName)
+		return fmt.Errorf("%s requires --parameter-reference naming an object of kind %s %s, which its CEL policy takes as params",
+			describeBoundPolicy(controlID, policyName), paramKind.APIVersion, paramKind.Kind)
 	}
 	return nil
+}
+
+// describeBoundPolicy names the binding's target the way the caller asked for it,
+// so a refusal echoes the flag that was typed rather than a resolved name they
+// never mentioned.
+func describeBoundPolicy(controlID, policyName string) string {
+	if controlID != "" {
+		return "control " + controlID
+	}
+	return "policy " + policyName
 }
 
 // policyParamKind resolves the bound policy's spec.paramKind, nil when it takes
