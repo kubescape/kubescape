@@ -41,6 +41,8 @@ var vapHelperCmdExamples = fmt.Sprintf(`
   %[1]s vap create-policy-binding --name my-policy-binding --control C-0016 --action Audit --action Warn | kubectl apply -f -
   # Narrow a policy binding to specific resources, including custom ones
   %[1]s vap create-policy-binding --name my-policy-binding --control C-0016 --resource-rule apps/v1/deployments --resource-rule /v1/pods | kubectl apply -f -
+  # Bind a control that reads params, pointing it at the object it takes
+  %[1]s vap create-policy-binding --name my-policy-binding --control C-0009 --parameter-reference basic-control-configuration | kubectl apply -f -
 `, cautils.ExecName())
 
 func GetVapHelperCmd() *cobra.Command {
@@ -156,7 +158,7 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 	createPolicyBindingCmd.Flags().StringSliceVar(&labelArr, "label", []string{}, "Resource label selector")
 	createPolicyBindingCmd.Flags().StringSliceVarP(&actionArr, "action", "a", []string{string(admissionv1.Deny)}, "Action to take when policy fails, repeatable (Deny, Warn, Audit). Deny and Warn cannot be combined")
 	createPolicyBindingCmd.Flags().StringSliceVar(&resourceRuleArr, "resource-rule", []string{}, "Restrict the binding to a group/version/resource the policy already matches, repeatable (e.g. apps/v1/deployments, /v1/pods). Omit to bind everything the policy matches")
-	createPolicyBindingCmd.Flags().StringVarP(&parameterReference, "parameter-reference", "r", "", "Parameter reference object name")
+	createPolicyBindingCmd.Flags().StringVarP(&parameterReference, "parameter-reference", "r", "", "Name of the object the policy reads as params. Required for a policy declaring a paramKind, and rejected for one that declares none")
 	createPolicyBindingCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file instead of stdout")
 
 	return createPolicyBindingCmd
