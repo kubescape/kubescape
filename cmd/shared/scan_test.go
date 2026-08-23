@@ -402,3 +402,32 @@ func TestValidateExcludeControls(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateLabelSelector(t *testing.T) {
+	tests := []struct {
+		name          string
+		labelSelector string
+		expectedErr   string
+	}{
+		{name: "empty selector is accepted", labelSelector: "", expectedErr: ""},
+		{name: "simple key=value is accepted", labelSelector: "app=nginx", expectedErr: ""},
+		{name: "multiple selectors are accepted", labelSelector: "app=nginx,env!=dev", expectedErr: ""},
+		{name: "set-based selector is accepted", labelSelector: "env in (prod,staging)", expectedErr: ""},
+		{name: "invalid selector is rejected", labelSelector: "invalid!!selector", expectedErr: "invalid --label-selector"},
+		{name: "invalid operator is rejected", labelSelector: "app==nginx==bad", expectedErr: "invalid --label-selector"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &cobra.Command{}
+			cmd.Flags().String("format", "", "")
+			scanInfo := &cautils.ScanInfo{LabelSelector: tt.labelSelector, Format: "pretty-printer"}
+			err := ValidateCommonScanFlags(cmd, scanInfo, ScanFormats)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
