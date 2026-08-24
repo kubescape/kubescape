@@ -21,25 +21,26 @@ import (
 // list results per GVR.
 type gvrAwareDynamicClient struct {
 	dynamic.Interface
-	listFunc func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error)
+	listFunc func(gvr schema.GroupVersionResource, ns string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error)
 }
 
 func (m *gvrAwareDynamicClient) Resource(resource schema.GroupVersionResource) dynamic.NamespaceableResourceInterface {
-	return &gvrAwareResourceClient{gvr: resource, listFunc: m.listFunc}
+	return &gvrAwareResourceClient{gvr: resource, ns: "", listFunc: m.listFunc}
 }
 
 type gvrAwareResourceClient struct {
 	dynamic.NamespaceableResourceInterface
 	gvr      schema.GroupVersionResource
-	listFunc func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error)
+	ns       string
+	listFunc func(gvr schema.GroupVersionResource, ns string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error)
 }
 
 func (m *gvrAwareResourceClient) Namespace(s string) dynamic.ResourceInterface {
-	return m
+	return &gvrAwareResourceClient{gvr: m.gvr, ns: s, listFunc: m.listFunc}
 }
 
 func (m *gvrAwareResourceClient) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
-	return m.listFunc(m.gvr, ctx, opts)
+	return m.listFunc(m.gvr, m.ns, ctx, opts)
 }
 
 func TestEstimateClusterSize_NilClient(t *testing.T) {
@@ -78,7 +79,7 @@ func newLimitOneListWithRemaining(n int64) *unstructured.UnstructuredList {
 
 func TestEstimateClusterSize_CountsReturnedItems(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
-		listFunc: func(_ schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+		listFunc: func(_ schema.GroupVersionResource, _ string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			assert.Equal(t, int64(1), opts.Limit)
 			return newLimitOneList(), nil
 		},
@@ -96,7 +97,7 @@ func TestEstimateClusterSize_CountsReturnedItems(t *testing.T) {
 
 func TestEstimateClusterSize_SuccessfulEmptyLists(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
-		listFunc: func(_ schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+		listFunc: func(_ schema.GroupVersionResource, _ string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			assert.Equal(t, int64(1), opts.Limit)
 			return &unstructured.UnstructuredList{}, nil
 		},
@@ -113,7 +114,7 @@ func TestEstimateClusterSize_SuccessfulEmptyLists(t *testing.T) {
 
 func TestEstimateClusterSize_SmallCluster(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
-		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+		listFunc: func(gvr schema.GroupVersionResource, _ string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			assert.Equal(t, int64(1), opts.Limit)
 			var n int64 = 10
 			switch gvr.Resource {
@@ -142,7 +143,7 @@ func TestEstimateClusterSize_SmallCluster(t *testing.T) {
 
 func TestEstimateClusterSize_LargeCluster(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
-		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+		listFunc: func(gvr schema.GroupVersionResource, _ string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			return newLimitOneListWithRemaining(500), nil
 		},
 	}
@@ -159,7 +160,7 @@ func TestEstimateClusterSize_LargeCluster(t *testing.T) {
 
 func TestEstimateClusterSize_ListErrors(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
-		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+		listFunc: func(gvr schema.GroupVersionResource, _ string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			if gvr.Resource == "pods" {
 				return nil, errors.New("API server error")
 			}
@@ -179,7 +180,7 @@ func TestEstimateClusterSize_ListErrors(t *testing.T) {
 
 func TestEstimateClusterSize_AllListErrors(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
-		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+		listFunc: func(gvr schema.GroupVersionResource, _ string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			return nil, errors.New("API server error")
 		},
 	}
@@ -220,7 +221,7 @@ func TestCountNamespaces_AppliesNamespaceFilters(t *testing.T) {
 
 func TestEstimateClusterSize_NilRemainingItemCount(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
-		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+		listFunc: func(gvr schema.GroupVersionResource, _ string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			if gvr.Resource == "pods" {
 				// A complete one-item page has no remainingItemCount.
 				return newLimitOneList(), nil
@@ -237,4 +238,35 @@ func TestEstimateClusterSize_NilRemainingItemCount(t *testing.T) {
 	require.NoError(t, err)
 	// 14 GVRs * (200 remaining + 1 returned) + 1 returned pod = 2815.
 	assert.Equal(t, 2815, size)
+}
+
+func TestEstimateClusterSize_RespectsIncludeNamespaces(t *testing.T) {
+	var queriedNamespaces []string
+	mockClient := &gvrAwareDynamicClient{
+		listFunc: func(gvr schema.GroupVersionResource, ns string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			queriedNamespaces = append(queriedNamespaces, ns)
+			return newLimitOneListWithRemaining(10), nil
+		},
+	}
+
+	handler := &K8sResourceHandler{
+		k8s: &k8sinterface.KubernetesApi{DynamicClient: mockClient},
+	}
+
+	scanInfo := &cautils.ScanInfo{IncludeNamespaces: "default,kube-system"}
+	size, err := handler.EstimateClusterSize(context.Background(), scanInfo)
+	require.NoError(t, err)
+
+	// Each of the 15 GVRs should be queried once per namespace (2 namespaces).
+	assert.Equal(t, len(namespacedResourcesToEstimate)*2, len(queriedNamespaces),
+		"each GVR must be queried once per included namespace")
+
+	// Every queried namespace must be one of the included ones.
+	for _, ns := range queriedNamespaces {
+		assert.Contains(t, []string{"default", "kube-system"}, ns,
+			"queries must be scoped to included namespaces")
+	}
+
+	// 15 GVRs * 2 namespaces * (10 remaining + 1 returned) = 330
+	assert.Equal(t, 330, size)
 }
