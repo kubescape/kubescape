@@ -100,7 +100,7 @@
                                     "certificates.k8s.io"
                                 ],
                                 "resourceNames": [
-                                    "*"
+                                    "kubernetes.io/kube-apiserver-client"
                                 ],
                                 "resources": [
                                     "signers"

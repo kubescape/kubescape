@@ -23,6 +23,22 @@ func TestPolicyTestCmd_PassingRuleReturnsNoError(t *testing.T) {
 	assert.Contains(t, out.String(), "cases passed")
 }
 
+func TestPolicyTestCmd_AllInTreeRulesPass(t *testing.T) {
+	dir, err := filepath.Abs("../../rules")
+	require.NoError(t, err)
+
+	cmd := getPolicyTestCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{dir})
+	cmd.SilenceUsage = true
+
+	err = cmd.Execute()
+	require.NoError(t, err, out.String())
+	assert.Contains(t, out.String(), "cases passed")
+}
+
 func TestPolicyTestCmd_MissingPathReturnsError(t *testing.T) {
 	cmd := getPolicyTestCmd()
 	cmd.SetArgs([]string{"/nonexistent/path/for/policy/test"})
