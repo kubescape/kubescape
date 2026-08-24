@@ -53,6 +53,7 @@ kubescape scan [target] [flags]
 | `--keep-local` | Don't report results to backend | `false` |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
+| `--otel-endpoint <endpoint>` | Export scan traces and metrics to an OTLP collector — see [OpenTelemetry export](#opentelemetry-export). Accepts `host:port` (plaintext) or a `http(s)://` URL. | `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | `--scan-images` | Also scan container images for vulnerabilities | `false` |
 | `--image-platform <platform>` | OCI platform for workload image scans, such as `linux/amd64`. Overrides platform inferred from Nodes and hard scheduling constraints | inferred |
 | `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical`. Failed controls with unknown severity (missing base score) are treated as exceeding any threshold | - |
@@ -165,6 +166,72 @@ threshold — for example, a single silent failed GVR pull yields a score of 97.
 > controls. Pipelines that tuned `--fail-coverage-below` against that narrower
 > meaning may now fail on scans that previously passed. Re-check your threshold
 > if you rely on this flag in CI.
+
+### OpenTelemetry export
+
+`--otel-endpoint` sends the scan's traces and metrics to any OTLP collector.
+Kubescape already instruments its scan pipeline; the flag is what installs the
+exporter that makes those spans and metrics leave the process. When neither the
+flag nor `OTEL_EXPORTER_OTLP_ENDPOINT` is set, no telemetry SDK is initialised
+and the scan behaves exactly as before.
+
+```bash
+# Export to a collector listening on the standard gRPC port
+kubescape scan --otel-endpoint localhost:4317
+
+# The standard environment variable works too
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+kubescape scan
+```
+
+A bare `host:port` is sent in plaintext. Use an `https://` URL, or set
+`OTEL_EXPORTER_OTLP_INSECURE=false`, to require TLS. `OTEL_EXPORTER_OTLP_PROTOCOL`
+selects `grpc` (default) or `http/protobuf`, and `OTEL_SERVICE_NAME` overrides
+the reported service name (`kubescape`).
+
+Export failures never change the scan's results or its exit code: they are
+logged as a warning and the final flush is bounded, so an unreachable collector
+cannot hang a pipeline.
+
+**Spans.** One `kubescape.scan` root span per run, with the pipeline's phases
+nested beneath it:
+
+| Span | Phase |
+|------|-------|
+| `kubescape.scan` | Root span for the whole command |
+| `initialization` | Setup, policy download and resource collection |
+| `policies` / `policyHandler.getPolicies` | Loading frameworks and controls |
+| `resources` / `resourcehandler.CollectResources` | Resource collection |
+| `opa testing` / `OPAProcessor.Process` | Control evaluation |
+| `prioritization` | Attack-path prioritization |
+| `reporting` | Printing results and submission |
+
+**Metrics.** Recorded once per scan, alongside the existing `--format prometheus`
+output:
+
+| Metric | Type | Attributes |
+|--------|------|------------|
+| `kubescape_scan_duration_seconds` | histogram | `kubescape.scan.target` |
+| `kubescape_scan_compliance_score` | gauge | `kubescape.scan.target` |
+| `kubescape_scan_controls_evaluated_total` | counter | `kubescape.scan.target` |
+| `kubescape_scan_controls_total` | counter | `kubescape.scan.target`, `kubescape.control.status`, `kubescape.severity` |
+| `kubescape_scan_resources_total` | counter | `kubescape.scan.target`, `k8s.resource.kind` |
+| `kubescape_scan_image_vulnerabilities_total` | counter | `kubescape.image`, `kubescape.severity`, `kubescape.vulnerability.fixable` |
+
+`kubescape.vulnerability.fixable` partitions each severity, so summing over it
+gives that severity's total rather than double-counting the fixable findings.
+
+Counts describe the full scan. Narrowing the output with `--min-severity` or
+`--max-severity` does not change them, matching how the exit-code thresholds are
+evaluated.
+
+`kubescape.image` carries one value per scanned image, so a cluster with many
+distinct images produces a correspondingly wide series. With `--hide` or
+`--encrypt` the image name is dropped and the per-image counts are collapsed
+into a single unnamed series, and the host attributes are left off the exported
+resource — a run that anonymizes its report does not describe the same things
+to the collector in the clear.
 
 ---
 
