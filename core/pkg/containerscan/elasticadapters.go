@@ -33,6 +33,9 @@ func (scanresult *ScanResultReport) Summarize() *ElasticContainerScanSummaryResu
 	summary.PackagesName = make([]string, 0)
 
 	severitiesStats := map[string]SeverityStats{}
+	for severity := range KnownSeverities {
+		severitiesStats[severity] = SeverityStats{Severity: severity}
+	}
 
 	uniqueVulsMap := make(map[string]bool)
 	for _, layer := range scanresult.Layers {
@@ -43,7 +46,6 @@ func (scanresult *ScanResultReport) Summarize() *ElasticContainerScanSummaryResu
 			}
 			uniqueVulsMap[vul.Name] = true
 
-			// TODO: maybe add all severities just to have a placeholders
 			if !KnownSeverities[vul.Severity] {
 				vul.Severity = UnknownSeverity
 			}
