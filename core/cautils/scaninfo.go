@@ -174,6 +174,7 @@ type ScanInfo struct {
 	EnableStreaming           bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
 	Incremental               bool          // Cache verdicts per resource, keyed by resource hash + controls-config version, and skip re-evaluating unchanged resources
 	DryRun                    bool          // Check RBAC access for the resources the scan would need, without collecting or evaluating anything
+	OtelEndpoint              string        // OTLP collector endpoint for exporting scan traces and metrics (empty = telemetry disabled)
 	ChartPath                 string
 	FilePath                  string
 	HelmValueFiles            []string // -f / --values: paths to Helm values YAML files (repeatable)
