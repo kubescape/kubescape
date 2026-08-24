@@ -67,9 +67,11 @@ func TestIncludeNamespacesSelectors(t *testing.T) {
 	manyNs := NewIncludeSelector("a,b,c,d,e")
 	assert.Equal(t, []string{""}, manyNs.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "clusterroles"}, nil))
 
-	// empty namespace string: no valid namespace to include, so result is empty
+	// A value naming no namespace narrows nothing, so it collapses to the single
+	// unfiltered query. An empty slice would make pullSingleResource run no query
+	// at all and drop the resource without recording a failure.
 	emptyNs := NewIncludeSelector("")
-	assert.Empty(t, emptyNs.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"}, nil))
+	assert.Equal(t, []string{""}, emptyNs.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"}, nil))
 
 	// malformed input with empty segments: empty segments are skipped
 	malformed := NewIncludeSelector("ns1,,ns3")
