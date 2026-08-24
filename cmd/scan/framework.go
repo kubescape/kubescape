@@ -282,7 +282,6 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 		return err
 	}
 
-
 	// Validate the user's credentials
 	return cautils.ValidateAccountID(scanInfo.AccountID)
 }
