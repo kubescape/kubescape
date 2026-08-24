@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
@@ -14,7 +12,6 @@ import (
 
 const (
 	jsonOutputFile = "report"
-	jsonOutputExt  = ".json"
 )
 
 var _ printer.IPrinter = &JsonPrinter{}
@@ -28,15 +25,7 @@ func NewJsonPrinter() *JsonPrinter {
 }
 
 func (jsonPrinter *JsonPrinter) SetWriter(ctx context.Context, outputFile string) error {
-	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = jsonOutputFile
-		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != jsonOutputExt {
-			outputFile = outputFile + jsonOutputExt
-		}
-	}
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JsonFormat, outputFile, jsonOutputFile)
 	if explicitOutput {
 		var err error
 		jsonPrinter.writer, err = printer.GetWriterNoFallback(outputFile)

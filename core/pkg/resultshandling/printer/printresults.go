@@ -72,6 +72,41 @@ func HasOutputExt(outputFile, ext string) bool {
 	return strings.EqualFold(outputFile[len(outputFile)-len(ext):], ext)
 }
 
+// ResolveOutputFile applies Kubescape's shared output-path rules for a format:
+// blank or whitespace-only explicit paths use defaultBaseName, missing
+// extensions are appended from FormatOutputExt, and YAML accepts either .yaml
+// or .yml. The returned bool tells callers whether the user explicitly asked
+// for an output path before trimming, so whitespace-only paths still take the
+// explicit-output error path instead of silently falling back to stdout.
+func ResolveOutputFile(format, outputFile, defaultBaseName string) (string, bool) {
+	explicitOutput := outputFile != ""
+	if !explicitOutput {
+		return outputFile, false
+	}
+
+	outputFile = strings.TrimSpace(outputFile)
+	if outputFile == "" {
+		outputFile = defaultBaseName
+	}
+
+	ext, ok := FormatOutputExt[format]
+	if !ok || ext == "" {
+		return outputFile, true
+	}
+	if ext == YamlOutputExt && HasOutputExt(outputFile, ".yml") {
+		return outputFile, true
+	}
+	if HasOutputExt(outputFile, ext) {
+		return outputFile, true
+	}
+	return outputFile + ext, true
+}
+
+func ResolveDefaultOutputFile(format, defaultBaseName string) string {
+	outputFile, _ := ResolveOutputFile(format, " ", defaultBaseName)
+	return outputFile
+}
+
 // FormatOutputExt maps a format to the extension its printer enforces in
 // SetWriter. Callers resolving an --output path must read it from here rather
 // than re-deriving it, so a format can never resolve to a path its printer

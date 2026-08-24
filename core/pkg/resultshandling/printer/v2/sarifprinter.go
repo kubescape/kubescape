@@ -80,15 +80,7 @@ func (sp *SARIFPrinter) Score(score float32) {
 }
 
 func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) error {
-	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = sarifOutputFile
-		}
-		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.SARIFOutputExt) {
-			outputFile = outputFile + printer.SARIFOutputExt
-		}
-	}
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.SARIFFormat, outputFile, sarifOutputFile)
 	if explicitOutput {
 		var err error
 		sp.writer, err = printer.GetWriterNoFallback(outputFile)

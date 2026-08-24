@@ -91,6 +91,25 @@ func TestHarborAdaptor_Login(t *testing.T) {
 	}
 }
 
+func TestHarborAPIWrapperRejectsOversizedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("123456789"))
+	}))
+	defer server.Close()
+
+	wrapper := &harborAPIWrapper{
+		baseURL:         server.URL,
+		httpClient:      server.Client(),
+		maxResponseSize: 8,
+	}
+
+	body, err := wrapper.DoRequest(context.Background(), http.MethodGet, "/vulnerabilities")
+
+	assert.Nil(t, body)
+	assert.ErrorContains(t, err, "exceeds the 8-byte limit")
+}
+
 func TestExtractProjectAndRepo(t *testing.T) {
 	tests := []struct {
 		repo            string

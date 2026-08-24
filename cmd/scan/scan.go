@@ -72,6 +72,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Long:    `Scan a Kubernetes cluster, YAML files, Helm charts, Kustomize directories, Git repositories, or container images for security misconfigurations and vulnerabilities.`,
 		Example: scanCmdExamples,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Name() == "validate-contract" {
+				return nil
+			}
 			// runs for the bare scan command and all subcommands (framework, control, workload, image)
 			if scanInfo.FormatVersion != "v1" && scanInfo.FormatVersion != "v2" {
 				return fmt.Errorf("invalid --format-version %q: supported versions are v1 and v2", scanInfo.FormatVersion)
@@ -227,6 +230,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.Hide, "hide", false, "Replace sensitive report metadata with deterministic pseudonyms")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.EncryptionEnabled, "encrypt", false, "Encrypt sensitive report metadata using the KUBESCAPE_MASTER_KEY environment variable")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.LabelsToCopy, "labels-to-copy", nil, "Labels to copy from workloads to scan reports for easy identification. e.g: --labels-to-copy=app,team,environment")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.SkipControls, "skip-controls", "", "Comma-separated control IDs to skip, e.g. --skip-controls C-0001,C-0020")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeControls, "include-controls", "", "Comma-separated control IDs to include; all other controls are skipped, e.g. --include-controls C-0001,C-0002")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ListingURL, "grype-db-url", "", "Grype vulnerability database URL")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.SkipDBUpdate, "skip-db-update", false, "Do not update the vulnerability database before scanning images. Uses the locally cached database; fails if none is cached.")
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ScanTimeout, "scan-timeout", 0, "Maximum duration for the scan (e.g. 5m, 30s, 1h). 0 means no timeout. When the timeout is reached the scan exits with a non-zero code.")
@@ -269,6 +274,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.AddCommand(getWorkloadCmd(ks, &scanInfo))
 
 	scanCmd.AddCommand(getImageCmd(ks, &scanInfo))
+	scanCmd.AddCommand(getValidateContractCmd(&scanInfo))
 
 	return scanCmd
 }

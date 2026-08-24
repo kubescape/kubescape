@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"testing"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -53,6 +54,37 @@ func Init() {
 		lastValueMu.Lock()
 		kubernetesResourcesCount = resourcesCounter
 		workerNodesCount = workersCounter
+		lastValueMu.Unlock()
+	})
+}
+
+// ResetForTest re-arms initOnce and clears delta baselines so that a
+// subsequent Init call binds to whatever MeterProvider is current at that
+// time. It registers a cleanup function that restores the previous state.
+// This is intended only for use in tests outside the metrics package.
+func ResetForTest(t *testing.T) {
+	t.Helper()
+
+	lastValueMu.Lock()
+	savedKubernetesResourcesCount := kubernetesResourcesCount
+	savedWorkerNodesCount := workerNodesCount
+	savedLastKubernetesResourcesCount := lastKubernetesResourcesCount
+	savedLastWorkerNodesCount := lastWorkerNodesCount
+	kubernetesResourcesCount = nil
+	workerNodesCount = nil
+	lastKubernetesResourcesCount = 0
+	lastWorkerNodesCount = 0
+	lastValueMu.Unlock()
+
+	initOnce = sync.Once{}
+
+	t.Cleanup(func() {
+		initOnce = sync.Once{}
+		lastValueMu.Lock()
+		kubernetesResourcesCount = savedKubernetesResourcesCount
+		workerNodesCount = savedWorkerNodesCount
+		lastKubernetesResourcesCount = savedLastKubernetesResourcesCount
+		lastWorkerNodesCount = savedLastWorkerNodesCount
 		lastValueMu.Unlock()
 	})
 }

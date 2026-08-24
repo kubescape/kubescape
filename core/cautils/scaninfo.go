@@ -183,6 +183,8 @@ type ScanInfo struct {
 	HelmReleaseName           string   // --release-name: Helm release name made available as .Release.Name during render
 	HelmReleaseNamespace      string   // --release-namespace: Helm release namespace made available as .Release.Namespace
 	LabelsToCopy              []string // Labels to copy from workloads to scan reports
+	SkipControls              string   // Control IDs to skip, e.g. "C-0001,C-0020"
+	IncludeControls           string   // Control IDs to include (all others skipped), e.g. "C-0001,C-0002"
 	scanningContext           *ScanningContext
 	kubeconfigPath            string
 	kubeContextOverride       string
