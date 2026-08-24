@@ -145,7 +145,7 @@ func TestScanNotifyFlagIsRepeatableAndInherited(t *testing.T) {
 	require.NotNil(t, flag)
 	require.NoError(t, flag.Value.Set("https://one.example/hook?a=b,c"))
 	require.NoError(t, flag.Value.Set("https://two.example/hook"))
-	assert.Equal(t, "[https://one.example/hook?a=b,c,https://two.example/hook]", flag.Value.String())
+	assert.Equal(t, `["https://one.example/hook?a=b,c",https://two.example/hook]`, flag.Value.String())
 
 	for _, name := range []string{"framework", "control", "workload"} {
 		sub, _, err := cmd.Find([]string{name})
