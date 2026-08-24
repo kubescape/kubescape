@@ -662,6 +662,13 @@ func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
 // --skip-controls or --include-controls filters. The resulting map marks
 // individual rule names with `true` so that convertFrameworksToPolicies drops
 // them. Include is a whitelist; skip is a blacklist and wins over include.
+//
+// Matching is case-insensitive, mirroring --exclude-controls (see
+// policyhandler/controlfilter.go's normalizeExclusions/matchIdentifier):
+// without this, a lowercase control ID silently matches nothing, and since
+// --include-controls treats "not in the include set" as "exclude", a single
+// mistyped case produces a silently empty scan instead of the requested
+// control.
 func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling.Framework, skip, include []string) map[string]bool {
 	excludedRules := make(map[string]bool, len(base)+4)
 	for k, v := range base {
@@ -674,7 +681,7 @@ func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling
 
 	skipSet := make(map[string]struct{}, len(skip))
 	for _, id := range skip {
-		id = strings.TrimSpace(id)
+		id = strings.ToLower(strings.TrimSpace(id))
 		if id != "" {
 			skipSet[id] = struct{}{}
 		}
@@ -682,7 +689,7 @@ func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling
 
 	includeSet := make(map[string]struct{}, len(include))
 	for _, id := range include {
-		id = strings.TrimSpace(id)
+		id = strings.ToLower(strings.TrimSpace(id))
 		if id != "" {
 			includeSet[id] = struct{}{}
 		}
@@ -691,7 +698,7 @@ func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling
 	knownIDs := make(map[string]struct{})
 	for _, fw := range frameworks {
 		for i := range fw.Controls {
-			knownIDs[fw.Controls[i].ControlID] = struct{}{}
+			knownIDs[strings.ToLower(fw.Controls[i].ControlID)] = struct{}{}
 		}
 	}
 
@@ -709,7 +716,7 @@ func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling
 	if len(include) > 0 {
 		for _, fw := range frameworks {
 			for i := range fw.Controls {
-				if _, keep := includeSet[fw.Controls[i].ControlID]; keep {
+				if _, keep := includeSet[strings.ToLower(fw.Controls[i].ControlID)]; keep {
 					continue
 				}
 				for r := range fw.Controls[i].Rules {
@@ -721,7 +728,7 @@ func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling
 
 	for _, fw := range frameworks {
 		for i := range fw.Controls {
-			if _, skip := skipSet[fw.Controls[i].ControlID]; !skip {
+			if _, skip := skipSet[strings.ToLower(fw.Controls[i].ControlID)]; !skip {
 				continue
 			}
 			for r := range fw.Controls[i].Rules {

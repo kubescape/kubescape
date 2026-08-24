@@ -89,8 +89,11 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 
 		nextContinueToken := list.GetContinue()
 
-		// strip out noisy fields to save tokens
-		var simplifiedItems []map[string]any
+		// strip out noisy fields to save tokens. Initialized (not nil) so an
+		// empty result set marshals to "[]", not "null" -- MCP clients that
+		// validate the response against the tool's declared array schema
+		// reject a null.
+		simplifiedItems := make([]map[string]any, 0, len(list.Items))
 		for _, item := range list.Items {
 			simplifiedItems = append(simplifiedItems, map[string]any{
 				"apiVersion": item.GetAPIVersion(),

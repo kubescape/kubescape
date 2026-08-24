@@ -232,15 +232,21 @@ func (opap *OPAProcessor) SetIncrementalCache(cache *scancache.Store) {
 	opap.incrementalCache = cache
 }
 
+// effectiveExcludedRules merges the session's rule exclusions with the
+// --skip-controls and --include-controls filters. Both the eager and the
+// streaming entry point build AllPolicies from it, so the same cluster is
+// scanned against the same control set whichever path a scan takes.
+func (opap *OPAProcessor) effectiveExcludedRules() map[string]bool {
+	if opap.SkipControls == "" && opap.IncludeControls == "" {
+		return opap.ExcludedRules
+	}
+	return buildControlExcludedRules(opap.ExcludedRules, opap.Policies, split(opap.SkipControls), split(opap.IncludeControls))
+}
+
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
 	scanningScope := cautils.GetScanningScope(opap.Metadata.ContextMetadata)
 
-	excludedRules := opap.ExcludedRules
-	if opap.SkipControls != "" || opap.IncludeControls != "" {
-		excludedRules = buildControlExcludedRules(excludedRules, opap.Policies, split(opap.SkipControls), split(opap.IncludeControls))
-	}
-
-	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, excludedRules, scanningScope)
+	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.effectiveExcludedRules(), scanningScope)
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
@@ -294,7 +300,7 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-
 	opap.loggerStartScanning()
 	defer opap.loggerDoneScanning()
 
-	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.ExcludedRules, cautils.GetScanningScope(opap.Metadata.ContextMetadata))
+	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.effectiveExcludedRules(), cautils.GetScanningScope(opap.Metadata.ContextMetadata))
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
 	scopeControlIDs, wholeClusterControlIDs := splitWholeClusterControls(opap.AllPolicies, sortedControlIDs(opap.AllPolicies))
@@ -1055,6 +1061,9 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		var toEvaluate []workloadinterface.IMetadata
 		cacheHitIDs = make(map[string]struct{})
 		for _, r := range resourceToScan {
+			if opap.skipNamespace(r.GetNamespace()) {
+				continue
+			}
 			hash := scancache.ResourceHash(r.GetObject())
 			if cached, ok := opap.incrementalCache.Get(controlID, r.GetID(), hash); ok {
 				for _, cr := range cached.ResourceAssociatedRules {

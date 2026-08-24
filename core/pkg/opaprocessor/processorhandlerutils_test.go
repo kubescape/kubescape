@@ -1342,6 +1342,18 @@ func TestBuildControlExcludedRules(t *testing.T) {
 			excludedRules: nil,
 			notExcluded:   []string{"rule-a", "rule-b", "rule-c"},
 		},
+		{
+			name:          "include matches regardless of case",
+			include:       []string{"c-0002"},
+			excludedRules: []string{"rule-a", "rule-c"},
+			notExcluded:   []string{"rule-b"},
+		},
+		{
+			name:          "skip matches regardless of case",
+			skip:          []string{"c-0002"},
+			excludedRules: []string{"rule-b"},
+			notExcluded:   []string{"rule-a", "rule-c"},
+		},
 	}
 
 	for _, tt := range tests {

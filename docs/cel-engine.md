@@ -24,7 +24,7 @@ to agree, and that agreement is the point of the engine.
 `core/pkg/opaprocessor/processorhandler.go` already dispatched on
 `rule.RuleLanguage`. CEL is a second branch alongside Rego:
 
-```
+```text
 processControl(control)
   └─ processRule(rule, control.ControlID)
        └─ runOPAOnSingleRule(...)
@@ -50,6 +50,30 @@ A rule opts in through the existing language field:
 `reporthandling.CELLanguage` is defined in
 [`opa-utils`](https://github.com/kubescape/opa-utils). A rule with any other
 language continues through the Rego path untouched.
+
+A CEL rule must not also declare a `ResourceEnumerator`. It scopes through the
+policy's `matchConstraints` instead, and routing it through the enumerator would
+run its validations *as* the enumerator, silently dropping every compliant
+resource. `enumerateData` rejects the combination rather than trusting it not to
+happen.
+
+### Trying it before regolibrary marks anything CEL
+
+No rule shipped in regolibrary carries `ruleLanguage: CEL` yet, so a plain
+`kubescape scan control <ID>` takes the Rego path. Until
+[#2002](https://github.com/kubescape/kubescape/issues/2002) lands, reaching the
+engine means scanning from a control document you have marked yourself:
+
+```sh
+kubescape download control C-0016 --output C-0016.json
+# edit that file: set "ruleLanguage": "CEL" on each of its rules
+grep ruleLanguage C-0016.json         # confirm the edit took
+kubescape scan control C-0016 --use-from C-0016.json
+```
+
+The `grep` is worth doing. A Rego run of the same control prints an identical
+results table, so a scan that skipped the edit looks exactly like a scan that
+used it.
 
 ### How the engine finds the policy
 
@@ -94,7 +118,7 @@ embedded into the binary with `//go:embed`, under
 The copy is refreshed from a pinned `cel-admission-library` release rather than
 maintained by hand:
 
-```
+```sh
 make sync-vap        # honours CEL_LIBRARY_VERSION in the Makefile
 ```
 
@@ -131,8 +155,10 @@ Six variables are declared:
 | `variables` | the policy's own `variables:` block | same |
 
 `authorizer` is deliberately **not** declared. It cannot be resolved offline, so a
-policy referencing it fails to compile and the control is reported as skipped
-rather than being given a verdict the scan cannot justify.
+validation referencing it fails to compile, and every resource that validation was
+evaluated against is reported as skipped rather than given a verdict the scan
+cannot justify. The skip is per resource: the other validations in the same policy
+still reach verdicts, and a violation confirmed by one of them stands.
 
 ### Why oldObject is null rather than absent
 
@@ -189,25 +215,51 @@ itself carries:
 API conversions, and a scan never converts: the object is matched at the exact
 group and version it was scanned at.
 
+### Match conditions
+
+`spec.matchConditions` is a second gate, applied after `matchConstraints`. At
+admission a policy whose conditions do not all hold is skipped and none of its
+validations run, so offline an object the gate turns away is excluded exactly as
+an unmatched one is.
+
+Three details of the gate follow the apiserver's matcher rather than the obvious
+reading:
+
+- **A false condition outranks one that errored**, whichever order they appear
+  in. The apiserver evaluates every condition, collects the errors, and still
+  returns not-matched the moment it sees a false. Returning on the first error
+  instead would deny an object under `Fail` that admission simply skips.
+- **The gate gets its own cost budget and its own activation.** The apiserver's
+  matcher runs on a fresh matchConditions budget and discards the remainder, so
+  charging the validations for the gate would exhaust a scan a cluster handles
+  fine. Separate activations because `variables` memoize per activation, and
+  sharing one would hand the validations work the gate already paid for.
+- **`namespaceObject` is bound to null inside the gate**, even when the scan
+  captured a real Namespace, because the apiserver's matcher passes a nil
+  namespace while the validations that follow get the resolved one.
+
+A gate that reaches no verdict follows `spec.failurePolicy` the way a validation
+does: `Fail` denies, `Ignore` skips the policy. An offline-only failure, meaning a
+condition that will not compile, an exhausted budget or a cancelled scan, stays an
+unknown verdict either way.
+
 ## Policies the engine refuses
 
-Two constructs cause a policy to be refused at load rather than evaluated. Refusal
+One construct causes a policy to be refused at load rather than evaluated. Refusal
 surfaces as a skip, which is loud, instead of a verdict that might silently differ
 from admission.
-
-**`spec.matchConditions`** gates whether a policy applies using CEL expressions
-that the engine does not evaluate. Running the validations without the gate would
-emit violations that live admission, which honours the gate, would never raise.
 
 **`matchConstraints.namespaceSelector`** reads the *namespace's* labels. The scan
 only has those when some control's match happened to collect Namespace objects.
 Evaluating the selector against an absent namespace would either exempt objects
 admission matches or match objects admission exempts, depending on which way the
-selector points. Both are silent parity breaks.
+selector points. Both are silent parity breaks. A selector that narrows nothing is
+not a refusal: an absent one, and the empty one the apiserver defaults an omitted
+selector to, both match every object.
 
-The distinction that governs both cases: a `matchConstraints` knob whose input the
-scanned object carries is evaluated; one whose input the scan cannot guarantee to
-have is refused.
+The distinction that governs it: a `matchConstraints` knob whose input the scanned
+object carries is evaluated; one whose input the scan cannot guarantee to have is
+refused.
 
 Refusal is not free. A load failure makes the whole control error, which marks
 every resource skipped for that control across the scan. So the refusal set is kept
@@ -236,6 +288,14 @@ Several pieces hold this up:
 An expression that errors, or returns a non-boolean, sets an error on the result
 rather than passing. An unknown verdict is never reported as a pass.
 
+What becomes of that error follows the policy's `spec.failurePolicy`, as it does
+at admission. Under `Fail`, which is the default and what every policy in the
+bundle uses, an errored expression denies the object, so the scan reports a
+failure whose message is the error instead of quietly downgrading it to a skip.
+Under `Ignore` the resource is skipped. Compile failures, budget exhaustion and
+cancellation stay unknown verdicts either way: a cluster never produces them, so
+there is no admission outcome to mirror.
+
 ### Verifying it against a cluster
 
 The guarantee is checked by hand rather than in CI, since it needs a cluster:
@@ -244,16 +304,21 @@ The guarantee is checked by hand rather than in CI, since it needs a cluster:
 2. apply one policy and a binding with `validationActions: [Deny]`
 3. apply a fixture that should fail and one that should pass, confirming the
    cluster rejects the first and admits the second
-4. run `kubescape scan control <ID>` over those same two files
+4. scan those same two files through the engine, using the marked control
+   document from "Trying it before regolibrary marks anything CEL" above. A
+   plain `kubescape scan control <ID>` takes the Rego path and proves nothing
+   here
 5. confirm all four verdicts agree
 
 ## Known gaps
 
-These are gaps in what a scan can know, not defects. In each case the engine
+These are gaps in what a scan can know, not defects. In most of them the engine
 reports a skip rather than a verdict.
 
-**`authorizer`** is not available offline. A policy performing authorization checks
-fails to compile and its control is skipped.
+**`authorizer`** is not available offline. A validation performing authorization
+checks fails to compile, and each resource it was evaluated against is skipped.
+The skip is per resource, not control-wide: only a policy that fails to load
+skips a whole control.
 
 **`request.userInfo`** is empty. The identity performing an operation does not
 exist in a file scan.
@@ -262,11 +327,13 @@ exist in a file scan.
 scan happened to collect Namespace objects, and namespace collection is driven by
 the framework's own policy matches rather than by what the CEL policies need. The
 same control can therefore see a real Namespace under one framework and null under
-another. A policy that selects into `namespaceObject` unguarded gets an evaluation
-error and a skip, which is the safe outcome. A policy that null-guards its access
-reaches a verdict that may not be the one admission would reach. Making this
-unconditional means guaranteeing Namespace collection whenever a loaded policy
-needs it.
+another. A policy that null-guards its access reaches a verdict that may not be the
+one admission would reach. One that selects into `namespaceObject` unguarded gets
+an evaluation error, and under `failurePolicy: Fail` that is reported as a failure,
+so an uncollected Namespace can produce a finding a cluster would not. This is the
+one gap here that is not a safe skip. Nothing in the bundle reads `namespaceObject`
+today, so it is latent. Making it unconditional means guaranteeing Namespace
+collection whenever a loaded policy needs it.
 
 **Only CREATE is modelled.** A policy whose resource rules exclude CREATE is never
 matched offline.
