@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/anchore/clio"
@@ -113,8 +112,11 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScan
 			ComplianceScore:           opaSessionObj.Report.SummaryDetails.ComplianceScore,
 		},
 		Attributes:     opaSessionObj.Report.Attributes,
-		Metadata:       *opaSessionObj.Metadata,
 		ExceptionAudit: opaSessionObj.ExceptionAudit,
+	}
+
+	if opaSessionObj.Metadata != nil {
+		reportHeader.Metadata = *opaSessionObj.Metadata
 	}
 
 	if imageScanData != nil {

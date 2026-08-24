@@ -205,6 +205,24 @@ func (sp *SARIFPrinter) printImageScan(scanResults []cautils.ImageScanData) erro
 		return err
 	}
 
+	b, err := json.Marshal(combinedReport)
+	if err != nil {
+		return err
+	}
+
+	// Strip the closing `]}` to stream runs
+	if len(b) >= 2 && string(b[len(b)-2:]) == "]}" {
+		b = b[:len(b)-2]
+	}
+
+	if _, err := sp.writer.Write(b); err != nil {
+		return err
+	}
+
+	encoder := json.NewEncoder(sp.writer)
+	encoder.SetIndent("", "  ")
+	first := true
+
 	for _, scan := range scanResults {
 		model, err := models.NewDocument(clio.Identification{}, scan.Packages, scan.Context,
 			scan.Matches, scan.IgnoredMatches, scan.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
@@ -268,24 +286,30 @@ func (sp *SARIFPrinter) printImageScan(scanResults []cautils.ImageScanData) erro
 			}
 		}
 
-		// Patch driver name to Kubescape and aggregate runs
+		// Patch driver name to Kubescape and stream runs
 		for _, run := range sarifReport.Runs {
 			if run.Tool.Driver != nil {
 				run.Tool.Driver.Name = "Kubescape"
 			}
-			combinedReport.AddRun(run)
+			if !first {
+				if _, err := sp.writer.Write([]byte(`,`)); err != nil {
+					return err
+				}
+			}
+			first = false
+			if err := encoder.Encode(run); err != nil {
+				return err
+			}
 		}
 	}
 
-	encoder := json.NewEncoder(sp.writer)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(combinedReport); err != nil {
-		return fmt.Errorf("failed to write SARIF report: %w", err)
+	// Close the SARIF JSON
+	if _, err := sp.writer.Write([]byte(`]}`)); err != nil {
+		return err
 	}
 
 	return nil
 }
-
 func (sp *SARIFPrinter) PrintNextSteps() {
 
 }
@@ -347,9 +371,10 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 	}
 
 	var caches manifestCache
+	groupedFailed := groupByManifest(failed)
 	
 	// First pass: add all unique rules to the run.
-	for _, resource := range groupByManifest(failed) {
+	for _, resource := range groupedFailed {
 		for _, toPin := range opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls {
 			ac := toPin
 			if ac.GetStatus(nil).IsFailed() {
@@ -387,7 +412,7 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 	}
 
 	hasResults := false
-	for _, resource := range groupByManifest(failed) {
+	for _, resource := range groupedFailed {
 		for _, toPin := range opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls {
 			if toPin.GetStatus(nil).IsFailed() {
 				hasResults = true
@@ -407,7 +432,7 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 		encoder := json.NewEncoder(sp.writer)
 		first := true
 
-		for _, resource := range groupByManifest(failed) {
+		for _, resource := range groupedFailed {
 			cache := caches.get(resource.absPath)
 			locationResolver := cache.locationResolver(resource.absPath, "SARIF")
 
