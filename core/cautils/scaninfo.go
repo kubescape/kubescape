@@ -174,6 +174,7 @@ type ScanInfo struct {
 	EnableStreaming           bool          // Enable resource streaming for large clusters to keep the evaluation input bounded
 	Incremental               bool          // Cache verdicts per resource, keyed by resource hash + controls-config version, and skip re-evaluating unchanged resources
 	DryRun                    bool          // Check RBAC access for the resources the scan would need, without collecting or evaluating anything
+	OtelEndpoint              string        // OTLP collector endpoint for exporting scan traces and metrics (empty = telemetry disabled)
 	ChartPath                 string
 	FilePath                  string
 	HelmValueFiles            []string // -f / --values: paths to Helm values YAML files (repeatable)
@@ -183,6 +184,8 @@ type ScanInfo struct {
 	HelmReleaseName           string   // --release-name: Helm release name made available as .Release.Name during render
 	HelmReleaseNamespace      string   // --release-namespace: Helm release namespace made available as .Release.Namespace
 	LabelsToCopy              []string // Labels to copy from workloads to scan reports
+	SkipControls              string   // Control IDs to skip, e.g. "C-0001,C-0020"
+	IncludeControls           string   // Control IDs to include (all others skipped), e.g. "C-0001,C-0002"
 	scanningContext           *ScanningContext
 	kubeconfigPath            string
 	kubeContextOverride       string

@@ -1,6 +1,7 @@
 package listener
 
 import (
+	"crypto/subtle"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -31,6 +32,11 @@ const (
 	// healthcheck paths
 	livePath  = "/livez"
 	readyPath = "/readyz"
+
+	// authTokenEnv gates optional bearer-token auth for /v1/*. When set, every
+	// /v1/* request must present `Authorization: Bearer <token>`. When unset the
+	// listener remains unauthenticated for backward compatibility (in-cluster only).
+	authTokenEnv = "KS_API_TOKEN"
 )
 
 // SetupHTTPListener set up listening http servers
@@ -65,15 +71,41 @@ func SetupHTTPListener() error {
 
 	rtr := mux.NewRouter()
 
-	// non-monitored endpoints
+	// Health probes are intentionally unauthenticated — kubelet needs them without credentials.
 	rtr.HandleFunc(livePath, httpHandler.Live)
 	rtr.HandleFunc(readyPath, httpHandler.Ready)
 	rtr.PathPrefix(docs.OpenAPIV2Prefix).Methods("GET").Handler(openApiHandler)
 
-	// OpenTelemetry middleware for monitored endpoints
+	// -------------------------------------------------------------------------
+	// Trust boundary for /v1/* (scan trigger + results):
+	// By default the listener is unauthenticated and intended to be reachable
+	// only inside the cluster (ClusterIP / port-forward). This matches the
+	// historical in-cluster microservice deployment and preserves backward
+	// compatibility.
+	//
+	// If the operator exposes :8080 beyond the cluster (LoadBalancer, Ingress,
+	// NodePort on a public node), set KS_API_TOKEN to a cryptographically
+	// random bearer token. When set, every /v1/* request must present
+	// `Authorization: Bearer <token>`; otherwise 401 is returned. This is
+	// opt-in so existing in-cluster installs do not break on upgrade — see
+	// getAuthToken / bearerAuthMiddleware below. Unlike pprof (servePprof),
+	// which is off by default, the scan API is on by default because it is
+	// the product surface; the hardening is therefore additive and env-gated.
+	//
+	// Rate limiting is intentionally not added here: scan admission already
+	// enforces bounded queue depth (KS_SCAN_QUEUE_CAPACITY, default 10) with
+	// 429 + Retry-After and a 1 MiB body cap (KS_SCAN_REQUEST_MAX_BYTES).
+	// External L7 rate limiting should be done at the Ingress if needed.
+	// -------------------------------------------------------------------------
 	otelMiddleware := otelmux.Middleware("kubescape-svc")
 	v1SubRouter := rtr.PathPrefix(v1PathPrefix).Subrouter()
 	v1SubRouter.Use(otelMiddleware)
+	if tok := getAuthToken(); tok != "" {
+		logger.L().Info("API token authentication enabled for /v1/* endpoints", helpers.String("env", authTokenEnv))
+	} else {
+		logger.L().Warning("API token not configured — /v1/* endpoints are unauthenticated; ensure the service is not exposed beyond the cluster", helpers.String("env", authTokenEnv))
+	}
+	v1SubRouter.Use(bearerAuthMiddleware)
 	v1SubRouter.HandleFunc(v1PrometheusMetricsPath, httpHandler.Metrics) // deprecated
 	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.Scan).Methods(http.MethodPost)
 	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.CancelScan).Methods(http.MethodDelete)
@@ -141,6 +173,38 @@ func getPprofAddr() string {
 		return a
 	}
 	return "127.0.0.1:6060"
+}
+
+func getAuthToken() string {
+	return strings.TrimSpace(os.Getenv(authTokenEnv))
+}
+
+// bearerAuthMiddleware enforces `Authorization: Bearer <token>` when KS_API_TOKEN is set.
+// When the env var is unset/empty it is a no-op for backward compatibility.
+// It uses subtle.ConstantTimeCompare to avoid timing side-channels and accepts
+// the Bearer scheme case-insensitively per RFC 7235 (e.g. `bearer` is valid).
+func bearerAuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		expected := getAuthToken()
+		if expected == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		hdr := r.Header.Get("Authorization")
+		scheme, token, ok := strings.Cut(hdr, " ")
+		if !ok || !strings.EqualFold(scheme, "Bearer") {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="kubescape"`)
+			http.Error(w, `{"error":"missing or invalid Authorization header"}`, http.StatusUnauthorized)
+			return
+		}
+		got := strings.TrimSpace(token)
+		if got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(expected)) != 1 {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="kubescape"`)
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // servePprof starts the net/http/pprof debug server, but only when

@@ -136,8 +136,8 @@ func TestEstimateClusterSize_SmallCluster(t *testing.T) {
 
 	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
 	require.NoError(t, err)
-	// 50+10+5+20 + (12 other GVRs * 10 each) + 16 returned items = 221
-	assert.Equal(t, 221, size)
+	// 50+10+5+20 + (11 other GVRs * 10 each) + 15 returned items = 210
+	assert.Equal(t, 210, size)
 }
 
 func TestEstimateClusterSize_LargeCluster(t *testing.T) {
@@ -153,8 +153,8 @@ func TestEstimateClusterSize_LargeCluster(t *testing.T) {
 
 	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
 	require.NoError(t, err)
-	// 16 GVRs * (500 remaining + 1 returned) = 8016
-	assert.Equal(t, 8016, size)
+	// 15 GVRs * (500 remaining + 1 returned) = 7515
+	assert.Equal(t, 7515, size)
 }
 
 func TestEstimateClusterSize_ListErrors(t *testing.T) {
@@ -173,8 +173,8 @@ func TestEstimateClusterSize_ListErrors(t *testing.T) {
 
 	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
 	require.NoError(t, err)
-	// 15 GVRs * (100 remaining + 1 returned) = 1515 (pods error is skipped)
-	assert.Equal(t, 1515, size)
+	// 14 GVRs * (100 remaining + 1 returned) = 1414 (pods error is skipped)
+	assert.Equal(t, 1414, size)
 }
 
 func TestEstimateClusterSize_AllListErrors(t *testing.T) {
@@ -235,6 +235,6 @@ func TestEstimateClusterSize_NilRemainingItemCount(t *testing.T) {
 
 	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
 	require.NoError(t, err)
-	// 15 GVRs * (200 remaining + 1 returned) + 1 returned pod = 3016.
-	assert.Equal(t, 3016, size)
+	// 14 GVRs * (200 remaining + 1 returned) + 1 returned pod = 2815.
+	assert.Equal(t, 2815, size)
 }

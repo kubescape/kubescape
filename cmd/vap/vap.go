@@ -41,6 +41,8 @@ var vapHelperCmdExamples = fmt.Sprintf(`
   %[1]s vap create-policy-binding --name my-policy-binding --control C-0016 --action Audit --action Warn | kubectl apply -f -
   # Narrow a policy binding to specific resources, including custom ones
   %[1]s vap create-policy-binding --name my-policy-binding --control C-0016 --resource-rule apps/v1/deployments --resource-rule /v1/pods | kubectl apply -f -
+  # Bind a control that reads params, pointing it at the object it takes
+  %[1]s vap create-policy-binding --name my-policy-binding --control C-0009 --parameter-reference basic-control-configuration | kubectl apply -f -
 `, cautils.ExecName())
 
 func GetVapHelperCmd() *cobra.Command {
@@ -112,30 +114,9 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// A policy that declares a paramKind needs a ParamRef on its binding
-			// to be functional, so refuse to emit a silently broken binding. The
-			// check covers both flags: --control reads the paramKind off the
-			// control's policy, --policy off the named policy (a name outside
-			// the embedded bundle is left unchecked — we know nothing about it).
 			normalizedControlID := strings.ToUpper(strings.TrimSpace(controlID))
-			if parameterReference == "" {
-				if normalizedControlID != "" {
-					paramKind, err := cel.ParamKindForControl(normalizedControlID)
-					if err != nil {
-						return err
-					}
-					if paramKind != nil {
-						return fmt.Errorf("control %s requires --parameter-reference because its CEL policy uses params", normalizedControlID)
-					}
-				} else {
-					paramKind, found, err := cel.ParamKindForPolicy(resolvedPolicyName)
-					if err != nil {
-						return err
-					}
-					if found && paramKind != nil {
-						return fmt.Errorf("policy %s requires --parameter-reference because it uses params", resolvedPolicyName)
-					}
-				}
+			if err := checkParameterReference(parameterReference, normalizedControlID, resolvedPolicyName); err != nil {
+				return err
 			}
 			if err := isValidK8sObjectName(resolvedPolicyName); err != nil {
 				return fmt.Errorf("invalid policy name %s: %w", resolvedPolicyName, err)
@@ -177,7 +158,7 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 	createPolicyBindingCmd.Flags().StringSliceVar(&labelArr, "label", []string{}, "Resource label selector")
 	createPolicyBindingCmd.Flags().StringSliceVarP(&actionArr, "action", "a", []string{string(admissionv1.Deny)}, "Action to take when policy fails, repeatable (Deny, Warn, Audit). Deny and Warn cannot be combined")
 	createPolicyBindingCmd.Flags().StringSliceVar(&resourceRuleArr, "resource-rule", []string{}, "Restrict the binding to a group/version/resource the policy already matches, repeatable (e.g. apps/v1/deployments, /v1/pods). Omit to bind everything the policy matches")
-	createPolicyBindingCmd.Flags().StringVarP(&parameterReference, "parameter-reference", "r", "", "Parameter reference object name")
+	createPolicyBindingCmd.Flags().StringVarP(&parameterReference, "parameter-reference", "r", "", "Name of the object the policy reads as params. Required for a policy declaring a paramKind, and rejected for one that declares none")
 	createPolicyBindingCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file instead of stdout")
 
 	return createPolicyBindingCmd
@@ -502,6 +483,69 @@ func validateRuleSegment(kind string, value string, validate func(string) []stri
 		return fmt.Errorf("invalid %s %q: %s", kind, value, strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+// checkParameterReference refuses a --parameter-reference that does not agree
+// with the bound policy's spec.paramKind. A policy declaring one needs a ParamRef
+// on its binding to be functional, so emitting a binding without one is silently
+// broken.
+//
+// The refusal names the paramKind because the library no longer takes only one:
+// most policies want the ControlConfiguration it ships, but C-0281 wants an
+// ate.dev WorkerPool. "uses params" alone sent the caller to the wrong object,
+// which the apiserver accepts and then resolves to nothing.
+//
+// The reverse is refused too. A policy declaring no paramKind has the apiserver
+// ignore the binding's ParamRef outright and evaluate the rules without params,
+// so a caller who narrowed a control by pointing at a configuration object got a
+// binding enforcing the library defaults instead, with nothing saying so.
+func checkParameterReference(parameterReference, controlID, policyName string) error {
+	paramKind, known, err := policyParamKind(controlID, policyName)
+	if err != nil {
+		return err
+	}
+	if !known {
+		return nil
+	}
+	switch {
+	case parameterReference == "" && paramKind != nil:
+		return fmt.Errorf("%s requires --parameter-reference naming an object of kind %s %s, which its CEL policy takes as params",
+			describeBoundPolicy(controlID, policyName), paramKind.APIVersion, paramKind.Kind)
+	case parameterReference != "" && paramKind == nil:
+		return fmt.Errorf("%s takes no --parameter-reference: its CEL policy declares no paramKind, so the apiserver would ignore the binding's paramRef and evaluate the rules without params",
+			describeBoundPolicy(controlID, policyName))
+	}
+	return nil
+}
+
+// describeBoundPolicy names the binding's target the way the caller asked for it,
+// so a refusal echoes the flag that was typed rather than a resolved name they
+// never mentioned.
+func describeBoundPolicy(controlID, policyName string) string {
+	if controlID != "" {
+		return "control " + controlID
+	}
+	return "policy " + policyName
+}
+
+// policyParamKind resolves the bound policy's spec.paramKind, nil when it takes
+// no params. The lookup mirrors policyMatchConstraints: --control reads it off
+// the control's policy, --policy off the named one.
+//
+// known reports whether the policy is in the embedded bundle at all. A name from
+// outside it (--policy pointing at a custom policy) tells us nothing about the
+// params it takes, so both directions of the check have to stay off it rather
+// than read the absent paramKind as "takes none". A control that is absent is an
+// error from the lookup instead, so a resolved control is always known.
+func policyParamKind(controlID, policyName string) (paramKind *admissionv1.ParamKind, known bool, err error) {
+	if controlID != "" {
+		paramKind, err := cel.ParamKindForControl(controlID)
+		if err != nil {
+			return nil, false, err
+		}
+		return paramKind, true, nil
+	}
+	return cel.ParamKindForPolicy(policyName)
 }
 
 // checkResourceRulesInPolicyScope refuses a --resource-rule the bound policy can

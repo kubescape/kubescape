@@ -69,15 +69,12 @@ func NewHtmlPrinter() *HtmlPrinter {
 }
 
 func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) error {
-	explicitOutput := outputFile != ""
-	outputFile = strings.TrimSpace(outputFile)
-	if outputFile == "" {
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.HtmlFormat, outputFile, htmlOutputFile)
+	if !explicitOutput {
 		// Raw HTML markup must never fall back to stdout on a TTY.
-		outputFile = htmlOutputFile + printer.HtmlOutputExt
+		outputFile = printer.ResolveDefaultOutputFile(printer.HtmlFormat, htmlOutputFile)
 		logger.L().Info("no --output specified for html format; writing to default file",
 			helpers.String("filename", outputFile))
-	} else if !printer.HasOutputExt(outputFile, printer.HtmlOutputExt) {
-		outputFile = outputFile + printer.HtmlOutputExt
 	}
 	if explicitOutput {
 		var err error

@@ -232,9 +232,21 @@ func (opap *OPAProcessor) SetIncrementalCache(cache *scancache.Store) {
 	opap.incrementalCache = cache
 }
 
+// effectiveExcludedRules merges the session's rule exclusions with the
+// --skip-controls and --include-controls filters. Both the eager and the
+// streaming entry point build AllPolicies from it, so the same cluster is
+// scanned against the same control set whichever path a scan takes.
+func (opap *OPAProcessor) effectiveExcludedRules() map[string]bool {
+	if opap.SkipControls == "" && opap.IncludeControls == "" {
+		return opap.ExcludedRules
+	}
+	return buildControlExcludedRules(opap.ExcludedRules, opap.Policies, split(opap.SkipControls), split(opap.IncludeControls))
+}
+
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
 	scanningScope := cautils.GetScanningScope(opap.Metadata.ContextMetadata)
-	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.ExcludedRules, scanningScope)
+
+	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.effectiveExcludedRules(), scanningScope)
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
@@ -288,7 +300,7 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-
 	opap.loggerStartScanning()
 	defer opap.loggerDoneScanning()
 
-	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.ExcludedRules, cautils.GetScanningScope(opap.Metadata.ContextMetadata))
+	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.effectiveExcludedRules(), cautils.GetScanningScope(opap.Metadata.ContextMetadata))
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
 	scopeControlIDs, wholeClusterControlIDs := splitWholeClusterControls(opap.AllPolicies, sortedControlIDs(opap.AllPolicies))
@@ -800,6 +812,10 @@ func splitWholeClusterControls(policies *cautils.Policies, controlIDs []string) 
 // authoritative signal a rule is designed to correlate resources even in
 // the edge case where it's paired with a single wildcard/degenerate kind
 // list that this counting wouldn't otherwise catch.
+//
+// Rules reading a resource's status are excluded too, because ResourceHash
+// leaves status out of the cache key: a node upgrade changes only
+// status.nodeInfo, which would otherwise keep serving the pre-upgrade verdict.
 func ruleCacheEligible(control *reporthandling.Control, rule *reporthandling.PolicyRule) bool {
 	if controlRequiresWholeClusterInput(control) {
 		return false
@@ -808,6 +824,9 @@ func ruleCacheEligible(control *reporthandling.Control, rule *reporthandling.Pol
 		return false
 	}
 	if _, hasAggregator := rule.Attributes["resourcesAggregator"]; hasAggregator {
+		return false
+	}
+	if ruleReadsStatus(rule.Rule) {
 		return false
 	}
 	kinds := make(map[string]struct{})
@@ -823,6 +842,93 @@ func ruleCacheEligible(control *reporthandling.Control, rule *reporthandling.Pol
 		return false
 	}
 	return true
+}
+
+// statusReaders memoises ruleReadsStatus, which parses the rule. Rules repeat
+// across every evaluation scope, so without this a namespace-batched scan would
+// reparse the whole policy set once per namespace.
+var statusReaders sync.Map
+
+// ruleReadsStatus reports whether rego reads a resource's status. It works on
+// parsed syntax rather than the rule text, so whitespace inside an index or an
+// object.get path cannot hide a read, and the word appearing in a string
+// literal or a message is not mistaken for one. A rule that fails to parse is
+// reported as reading status, since an unparseable rule cannot be cleared.
+func ruleReadsStatus(rego string) bool {
+	if memoised, ok := statusReaders.Load(rego); ok {
+		return memoised.(bool)
+	}
+
+	reads := true
+	if module, err := ast.ParseModule("", rego); err == nil {
+		reads = moduleReadsStatus(module)
+	}
+
+	statusReaders.Store(rego, reads)
+	return reads
+}
+
+// statusAliases collects the variables bound to the literal "status", so that
+// an indirect read through them is recognised as well as a direct one.
+func statusAliases(module *ast.Module) map[ast.Var]struct{} {
+	aliases := map[ast.Var]struct{}{}
+	ast.WalkExprs(module, func(expr *ast.Expr) bool {
+		if !expr.IsAssignment() && !expr.IsEquality() {
+			return false
+		}
+		operands := expr.Operands()
+		if len(operands) != 2 {
+			return false
+		}
+		for i, operand := range operands {
+			name, isVar := operand.Value.(ast.Var)
+			if !isVar {
+				continue
+			}
+			if literal, ok := operands[1-i].Value.(ast.String); ok && literal == "status" {
+				aliases[name] = struct{}{}
+			}
+		}
+		return false
+	})
+	return aliases
+}
+
+func moduleReadsStatus(module *ast.Module) bool {
+	aliases := statusAliases(module)
+	isStatus := func(term *ast.Term) bool {
+		switch value := term.Value.(type) {
+		case ast.String:
+			return value == "status"
+		case ast.Var:
+			_, aliased := aliases[value]
+			return aliased
+		}
+		return false
+	}
+
+	reads := false
+	ast.WalkTerms(module, func(term *ast.Term) bool {
+		if reads {
+			return true
+		}
+		switch value := term.Value.(type) {
+		case ast.Ref:
+			for _, part := range value {
+				if isStatus(part) {
+					reads = true
+				}
+			}
+		case *ast.Array:
+			for i := 0; i < value.Len(); i++ {
+				if isStatus(value.Elem(i)) {
+					reads = true
+				}
+			}
+		}
+		return false
+	})
+	return reads
 }
 
 // controlCacheEligible reports whether every rule in control is safe to cache.
@@ -955,6 +1061,9 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		var toEvaluate []workloadinterface.IMetadata
 		cacheHitIDs = make(map[string]struct{})
 		for _, r := range resourceToScan {
+			if opap.skipNamespace(r.GetNamespace()) {
+				continue
+			}
 			hash := scancache.ResourceHash(r.GetObject())
 			if cached, ok := opap.incrementalCache.Get(controlID, r.GetID(), hash); ok {
 				for _, cr := range cached.ResourceAssociatedRules {
@@ -999,6 +1108,8 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 			*bufPtr = inputRawResources[:0]
 			astEvalBufferPool.Put(bufPtr)
 		}
+		*bufPtr = inputRawResources
+		astEvalBufferPool.Put(bufPtr)
 	}()
 
 	// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data

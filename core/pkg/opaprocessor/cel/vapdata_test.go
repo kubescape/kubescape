@@ -147,3 +147,46 @@ func TestBundleParamsSettingsAreShipped(t *testing.T) {
 			"knownMissingSettings lists params.settings.%s but no bundle policy reads it any more; remove the entry", key)
 	}
 }
+
+// knownUnresolvableParamKinds names the bundle policies whose paramKind the
+// offline engine refuses, with what the refusal costs. Offline there is no
+// binding, so only the shipped ControlConfiguration can answer a params.* read.
+var knownUnresolvableParamKinds = map[string]string{
+	"C-0281": "kubescape-c-0281-agent-runtime-hardening reads params.spec.networkAccess off an ate.dev WorkerPool, " +
+		"which a live binding's ParamRef supplies and a scan cannot. The control is skipped on every ActorTemplate " +
+		"until the scan can resolve a ParamRef against collected objects.",
+}
+
+// TestBundleParamKindsAreResolvable asserts every params-bearing policy in the
+// bundle takes the ControlConfiguration the bundle ships, so requireSupported
+// can honor it offline. A sync introducing another paramKind fails here rather
+// than silently turning that control into a skip.
+func TestBundleParamKindsAreResolvable(t *testing.T) {
+	catalog, err := getVAPCatalog()
+	require.NoError(t, err)
+
+	shipped, err := controlConfigParamKind()
+	require.NoError(t, err)
+
+	refused := map[string]bool{}
+	for name, vap := range catalog.byName {
+		if vap.paramKind == nil || *vap.paramKind == *shipped {
+			continue
+		}
+		refused[vap.ControlID] = true
+		reason, known := knownUnresolvableParamKinds[vap.ControlID]
+		assert.Truef(t, known,
+			"policy %s (control %q) takes params of kind %s %s, which the scan has no binding to resolve, so "+
+				"requireSupported refuses it and the control is skipped on every object it matches. Point its "+
+				"paramKind at the shipped %s %s, or add it to knownUnresolvableParamKinds with the consequence spelled out.",
+			name, vap.ControlID, vap.paramKind.APIVersion, vap.paramKind.Kind, shipped.APIVersion, shipped.Kind)
+		if known {
+			t.Logf("known gap: control %s, %s", vap.ControlID, reason)
+		}
+	}
+
+	for id := range knownUnresolvableParamKinds {
+		assert.Containsf(t, refused, id,
+			"knownUnresolvableParamKinds lists control %s but its paramKind now resolves (or it left the bundle); remove the entry", id)
+	}
+}

@@ -47,12 +47,21 @@ var operatorRemediateExamples = fmt.Sprintf(`
   # Revert a previously applied action (removes the annotation and/or NetworkPolicy on the target)
   %[1]s operator remediate revert --kind Deployment --target-namespace payments --name api --confirm
 
+  # Findings-driven: preview every workload failing a control at High or above.
+  # Targets are resolved from scan results already stored in the cluster — no re-scan.
+  %[1]s operator remediate quarantine --control C-0016 --min-severity High
+
+  # Apply it once the previewed plan has been reviewed
+  %[1]s operator remediate quarantine --control C-0016 --min-severity High --confirm
+
 `, cautils.ExecName())
 
 // getOperatorRemediateCmd wires the `operator remediate <action>` subcommand.
-// The action (annotate|revert) is a positional argument, matching the proposal's
-// CLI surface; remediation reuses the existing operator-scan transport, so the
-// command only assembles a RemediationInfo and hands it to the OperatorAdapter.
+// The action is a positional argument, matching the proposal's CLI surface;
+// remediation reuses the existing operator-scan transport, so the command only
+// assembles a RemediationInfo and hands it to the OperatorAdapter. The target is
+// either explicit (--kind/--name) or findings-driven (--control/--min-severity),
+// the latter resolved in-cluster by the operator from stored scan results.
 func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorInfo) *cobra.Command {
 	remediationInfo := &cautils.RemediationInfo{}
 
@@ -90,6 +99,13 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 				logger.L().Warning(fmt.Sprintf("no --reason provided; %s records an audit trail, consider adding --reason to justify the action", remediationInfo.Action))
 			}
 
+			// A confirmed selector run resolves cluster-wide and can write to many
+			// workloads at once; say so before it happens, since the caller named
+			// no single object and cannot see the resolved set from here.
+			if remediationInfo.HasSelector() && !remediationInfo.IsDryRun() {
+				logger.L().Warning(fmt.Sprintf("applying %q to every workload matching the selector, across all namespaces", remediationInfo.Action))
+			}
+
 			operatorAdapter, err := core.NewOperatorAdapter(operatorInfo.OperatorScanInfo, operatorInfo.Namespace)
 			if err != nil {
 				return err
@@ -108,7 +124,13 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 			// endpoint acknowledges receipt and queues the work), so the outcome is
 			// not returned here. It is emitted as a "KubescapeRemediation" Kubernetes
 			// Event on the target namespace and recorded in the operator logs.
-			eventsHint := fmt.Sprintf("kubectl get events -n %s --field-selector reason=KubescapeRemediation", remediationInfo.Namespace)
+			// A selector resolves targets across namespaces, so its audit Events are
+			// not confined to the one namespace an explicit target would name.
+			eventsScope := fmt.Sprintf("-n %s", remediationInfo.Namespace)
+			if remediationInfo.HasSelector() {
+				eventsScope = "--all-namespaces"
+			}
+			eventsHint := fmt.Sprintf("kubectl get events %s --field-selector reason=KubescapeRemediation", eventsScope)
 			if remediationInfo.IsDryRun() {
 				logger.L().StopSuccess(fmt.Sprintf("Submitted remediation (dry-run) — no changes are applied. Check the plan via '%s' or the operator logs; re-run with --confirm to apply.", eventsHint))
 			} else {
@@ -122,6 +144,8 @@ func getOperatorRemediateCmd(ks meta.IKubescape, operatorInfo cautils.OperatorIn
 	remediateCmd.PersistentFlags().StringVar(&remediationInfo.Kind, "kind", "", "target workload kind: Deployment, StatefulSet, DaemonSet or Pod")
 	remediateCmd.PersistentFlags().StringVar(&remediationInfo.Namespace, "target-namespace", "", "namespace of the target workload")
 	remediateCmd.PersistentFlags().StringVar(&remediationInfo.Name, "name", "", "name of the target workload")
+	remediateCmd.PersistentFlags().StringVar(&remediationInfo.Control, "control", "", "act on workloads failing this control, e.g. C-0016 (resolved from stored scan results; mutually exclusive with --kind/--name)")
+	remediateCmd.PersistentFlags().StringVar(&remediationInfo.MinSeverity, "min-severity", "", "act on workloads with a failing finding at or above this severity: Critical, High, Medium, Low or Unknown (mutually exclusive with --kind/--name)")
 	remediateCmd.PersistentFlags().StringVar(&remediationInfo.Reason, "reason", "", "human-readable justification recorded in the audit trail")
 	remediateCmd.PersistentFlags().StringVar(&remediationInfo.FindingRef, "finding-ref", "", "scan-result reference that justifies the action, e.g. workloadconfigurationscansummaries/payments/api")
 	remediateCmd.PersistentFlags().BoolVar(&remediationInfo.Confirm, "confirm", false, "perform the real cluster write; without it the action is a dry-run preview")
