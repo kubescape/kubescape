@@ -13,6 +13,22 @@ const (
 	FieldSelectorsNotEqualsOperator = "!="
 )
 
+// splitNamespaces parses a comma-separated namespace list (as passed to
+// --include-namespaces / --exclude-namespaces) into a clean slice. Empty
+// entries and surrounding whitespace are dropped.
+func splitNamespaces(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for p := range strings.SplitSeq(s, ",") {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 type IFieldSelector interface {
 	GetNamespacesSelectors(*schema.GroupVersionResource, *bool) []string
 	GetClusterScope(*schema.GroupVersionResource) bool
