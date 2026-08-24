@@ -45,7 +45,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/jwalton/gchalk v1.3.0
 	github.com/kubescape/backend v0.0.46
-	github.com/kubescape/go-git-url v0.0.31
+	github.com/kubescape/go-git-url v0.0.33
 	github.com/kubescape/go-logger v0.0.28
 	github.com/kubescape/k8s-interface v0.0.209
 	github.com/kubescape/opa-utils v0.0.309
