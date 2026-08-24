@@ -36,7 +36,7 @@ func TestPolicyTestCmd_AllInTreeRulesPass(t *testing.T) {
 
 	err = cmd.Execute()
 	require.NoError(t, err, out.String())
-	assert.Contains(t, out.String(), "cases passed")
+	assert.Regexp(t, `\n[1-9][0-9]*/[1-9][0-9]* cases passed\n`, out.String())
 }
 
 func TestPolicyTestCmd_MissingPathReturnsError(t *testing.T) {
