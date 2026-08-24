@@ -267,10 +267,19 @@ func EnrichSummary(controls reportsummary.ControlSummaries, index map[string]*re
 }
 
 // GenerateValidatingAdmissionPolicy creates a ValidatingAdmissionPolicy manifest
-func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[string]interface{}, apiVersion string, targetResource string) *unstructured.Unstructured {
+func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[string]interface{}, apiVersion string, targetResource string) (*unstructured.Unstructured, error) {
 	if apiVersion == "" {
 		apiVersion = "v1"
 	}
+	
+	if len(paramSchema) > 0 {
+		// Reject wildcard targetResource when a parameter schema is set,
+		// as ConfigMap parameter lookups require a namespace.
+		if targetResource == "*" {
+			return nil, fmt.Errorf("parameterized policies cannot target wildcard resources without explicit namespace bindings")
+		}
+	}
+
 	vap := &unstructured.Unstructured{}
 	vap.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "admissionregistration.k8s.io",
@@ -304,11 +313,11 @@ func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[str
 		}
 	}
 	vap.Object["spec"] = spec
-	return vap
+	return vap, nil
 }
 
 // GenerateValidatingAdmissionPolicyBinding creates a ValidatingAdmissionPolicyBinding manifest
-func GenerateValidatingAdmissionPolicyBinding(name, policyName, apiVersion, paramRefName string) *unstructured.Unstructured {
+func GenerateValidatingAdmissionPolicyBinding(name, policyName, apiVersion, paramRefName, paramRefNamespace string) *unstructured.Unstructured {
 	if apiVersion == "" {
 		apiVersion = "v1"
 	}
@@ -325,10 +334,14 @@ func GenerateValidatingAdmissionPolicyBinding(name, policyName, apiVersion, para
 		"validationActions": []interface{}{"Deny"},
 	}
 	if paramRefName != "" {
-		spec["paramRef"] = map[string]interface{}{
+		paramRef := map[string]interface{}{
 			"name":                    paramRefName,
 			"parameterNotFoundAction": "Deny",
 		}
+		if paramRefNamespace != "" {
+			paramRef["namespace"] = paramRefNamespace
+		}
+		spec["paramRef"] = paramRef
 	}
 	vapb.Object["spec"] = spec
 	return vapb
