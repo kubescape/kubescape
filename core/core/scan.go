@@ -51,6 +51,24 @@ type componentInterfaces struct {
 	k8s               *k8sinterface.KubernetesApi
 }
 
+func (interfaces componentInterfaces) closePrinters() error {
+	var closeErr error
+	printers := append([]printer.IPrinter{interfaces.uiPrinter}, interfaces.outputPrinters...)
+	for _, configuredPrinter := range printers {
+		if configuredPrinter == nil {
+			continue
+		}
+		if closer, ok := configuredPrinter.(interface{ CloseWriter() error }); ok {
+			closeErr = errors.Join(closeErr, closer.CloseWriter())
+			continue
+		}
+		if closer, ok := configuredPrinter.(interface{ CloseWriter() }); ok {
+			closer.CloseWriter()
+		}
+	}
+	return closeErr
+}
+
 func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (componentInterfaces, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "setup interfaces")
 	defer span.End()
@@ -233,7 +251,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo, policyIdentifiers []cautil
 // reused or another operation could run concurrently against it, since a
 // mid-operation ks.Context() read could observe a different deadline than
 // the one that started the operation, or an already-restored/canceled one.
-func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (scanResult *resultshandling.ResultsHandler, scanErr error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
 	logger.L().Start("Kubescape scanner initializing...")
 
@@ -254,6 +272,16 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 		spanInit.End()
 		return nil, err
 	}
+	// Output printers open their writers during interface setup. Scan owns
+	// those writers until a successful return hands them to ResultsHandler.
+	printersOwnedByScan := true
+	defer func() {
+		if printersOwnedByScan {
+			if err := interfaces.closePrinters(); err != nil {
+				scanErr = errors.Join(scanErr, fmt.Errorf("close printers after scan failure: %w", err))
+			}
+		}
+	}()
 	interfaces.report.SetTenantConfig(interfaces.tenantConfig)
 
 	// remove host scanner components
@@ -346,6 +374,7 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 		if denied := result.Denied(); len(denied) > 0 {
 			return resultsHandling, fmt.Errorf("dry-run: %d required resource type(s) cannot be listed with the current credentials", len(denied))
 		}
+		printersOwnedByScan = false
 		return resultsHandling, nil
 	}
 
@@ -485,6 +514,7 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 		}
 	}
 
+	printersOwnedByScan = false
 	return resultsHandling, nil
 }
 
