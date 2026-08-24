@@ -122,7 +122,7 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 // failedPathLocations, when non-empty, adds one relatedLocation per resolved FailedPath so each
 // field that actually caused the failure gets its own precise location in the manifest, distinct
 // from the single primary location (which points at the fix, not necessarily at every failed field).
-func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, failedPathLocations map[string]locationresolver.Location) *sarif.Result {
+func (sp *SARIFPrinter) createResult(ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, failedPathLocations map[string]locationresolver.Location) *sarif.Result {
 	msg := ctl.GetDescription()
 	if resource != nil {
 		if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
@@ -130,7 +130,7 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 			msg += "\n\nAffected fields:\n" + strings.Join(paths, "\n")
 		}
 	}
-	result := scanRun.CreateResultForRule(ctl.GetID()).
+	result := sarif.NewRuleResult(ctl.GetID()).
 		WithMessage(sarif.NewTextMessage(msg)).
 		WithLocations([]*sarif.Location{
 			sarif.NewLocationWithPhysicalLocation(
@@ -285,12 +285,9 @@ func (sp *SARIFPrinter) printImageScan(scanResults []cautils.ImageScanData) erro
 		}
 	}
 
-	updatedSarifReport, err := json.MarshalIndent(combinedReport, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	if _, err := sp.writer.Write(updatedSarifReport); err != nil {
+	encoder := json.NewEncoder(sp.writer)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(combinedReport); err != nil {
 		return fmt.Errorf("failed to write SARIF report: %w", err)
 	}
 
@@ -346,10 +343,6 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 		resourceSource := opaSessionObj.ResourceSource[resourceID]
 		relPath := resourceSource.RelativePath
 
-		// Github Code Scanning considers results not associated to a file path
-		// meaningless and invalid when uploading, and the location written to the
-		// report is the relative path alone, so a base path cannot stand in for a
-		// missing one
 		if relPath == "" {
 			continue
 		}
@@ -362,25 +355,17 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 	}
 
 	var caches manifestCache
+	
+	// First pass: add all unique rules to the run.
 	for _, resource := range groupByManifest(failed) {
-		cache := caches.get(resource.absPath)
-		locationResolver := cache.locationResolver(resource.absPath, "SARIF")
-
 		for _, toPin := range opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls {
 			ac := toPin
-
 			if ac.GetStatus(nil).IsFailed() {
 				ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
 				if ctl == nil {
-					logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
 					continue
 				}
-				location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
-				failedPathLocations := resolveFailedPathLocations(opaSessionObj, locationResolver, &ac, resource.resourceID)
 				sp.addRule(run, ctl)
-				rsrc := opaSessionObj.AllResources[resource.resourceID]
-				r := sp.addResult(run, ctl, resource.relPath, location, &ac, rsrc, failedPathLocations)
-				collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath)
 			}
 		}
 	}
@@ -395,9 +380,81 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 
 	report.AddRun(run)
 
-	// Surface write failures instead of silently leaving an empty/partial file.
-	if err := report.PrettyWrite(sp.writer); err != nil {
-		return fmt.Errorf("failed to write SARIF report: %w", err)
+	b, err := json.Marshal(report)
+	if err != nil {
+		return err
+	}
+
+	// Strip the closing `}]}` to stream results
+	if len(b) >= 3 && string(b[len(b)-3:]) == "}]}" {
+		b = b[:len(b)-3]
+	}
+
+	if _, err := sp.writer.Write(b); err != nil {
+		return err
+	}
+
+	hasResults := false
+	for _, resource := range groupByManifest(failed) {
+		for _, toPin := range opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls {
+			if toPin.GetStatus(nil).IsFailed() {
+				hasResults = true
+				break
+			}
+		}
+		if hasResults {
+			break
+		}
+	}
+
+	if hasResults {
+		if _, err := sp.writer.Write([]byte(`,"results":[`)); err != nil {
+			return err
+		}
+
+		encoder := json.NewEncoder(sp.writer)
+		first := true
+
+		for _, resource := range groupByManifest(failed) {
+			cache := caches.get(resource.absPath)
+			locationResolver := cache.locationResolver(resource.absPath, "SARIF")
+
+			for _, toPin := range opaSessionObj.ResourcesResult[resource.resourceID].AssociatedControls {
+				ac := toPin
+
+				if ac.GetStatus(nil).IsFailed() {
+					ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
+					if ctl == nil {
+						logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
+						continue
+					}
+					location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
+					failedPathLocations := resolveFailedPathLocations(opaSessionObj, locationResolver, &ac, resource.resourceID)
+					rsrc := opaSessionObj.AllResources[resource.resourceID]
+					r := sp.createResult(ctl, resource.relPath, location, &ac, rsrc, failedPathLocations)
+					collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath)
+
+					if !first {
+						if _, err := sp.writer.Write([]byte(`,`)); err != nil {
+							return err
+						}
+					}
+					first = false
+					if err := encoder.Encode(r); err != nil {
+						return err
+					}
+				}
+			}
+		}
+
+		if _, err := sp.writer.Write([]byte(`]`)); err != nil {
+			return err
+		}
+	}
+
+	// Close the SARIF JSON
+	if _, err := sp.writer.Write([]byte(`}]}`)); err != nil {
+		return err
 	}
 
 	return nil

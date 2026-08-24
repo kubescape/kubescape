@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/anchore/clio"
 	grypejson "github.com/anchore/grype/grype/presenter/json"
@@ -15,6 +17,8 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -88,32 +92,170 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 }
 
 func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData, jp *JsonPrinter) error {
-	// Finalize into the report owned by this renderer before adding image data.
-	// The same OPASessionObj is submitted after local output is written, so
-	// enriching opaSessionObj.Report here would make --format change the backend
-	// payload as a side effect.
-	finalizedReport := FinalizeResults(opaSessionObj)
+	if opaSessionObj.Report.ReportGenerationTime.IsZero() {
+		opaSessionObj.Report.ReportGenerationTime = time.Now().UTC()
+	}
+	if opaSessionObj.Report.ClusterName == "" {
+		opaSessionObj.Report.ClusterName = cautils.AdoptClusterName(scanContextName(opaSessionObj))
+	}
+	if opaSessionObj.Report.ReportID == "" {
+		opaSessionObj.Report.ReportID = opaSessionObj.SessionID
+	}
+
+	reportHeader := PostureReportWithSeverity{
+		ReportGenerationTime: opaSessionObj.Report.ReportGenerationTime.Format("2006-01-02T15:04:05Z07:00"),
+		ClusterAPIServerInfo: opaSessionObj.Report.ClusterAPIServerInfo,
+		ClusterCloudProvider: opaSessionObj.Report.ClusterCloudProvider,
+		CustomerGUID:         opaSessionObj.Report.CustomerGUID,
+		ClusterName:          opaSessionObj.Report.ClusterName,
+		ReportID:             opaSessionObj.Report.ReportID,
+		SummaryDetails: SummaryDetailsWithSeverity{
+			Controls:                  enrichControlsWithSeverity(opaSessionObj.Report.SummaryDetails.Controls),
+			Status:                    opaSessionObj.Report.SummaryDetails.Status,
+			Frameworks:                opaSessionObj.Report.SummaryDetails.Frameworks,
+			ResourcesSeverityCounters: opaSessionObj.Report.SummaryDetails.ResourcesSeverityCounters,
+			ControlsSeverityCounters:  opaSessionObj.Report.SummaryDetails.ControlsSeverityCounters,
+			StatusCounters:            opaSessionObj.Report.SummaryDetails.StatusCounters,
+			Vulnerabilities:           opaSessionObj.Report.SummaryDetails.Vulnerabilities,
+			Score:                     opaSessionObj.Report.SummaryDetails.Score,
+			ComplianceScore:           opaSessionObj.Report.SummaryDetails.ComplianceScore,
+		},
+		Attributes:     opaSessionObj.Report.Attributes,
+		Metadata:       *opaSessionObj.Metadata,
+		ExceptionAudit: opaSessionObj.ExceptionAudit,
+	}
 
 	if imageScanData != nil {
 		imageScanSummary := buildMachineImageScanSummary(imageScanData)
-		finalizedReport.SummaryDetails.Vulnerabilities.MapsSeverityToSummary = convertToReportSummary(imageScanSummary.MapsSeverityToSummary)
-		finalizedReport.SummaryDetails.Vulnerabilities.CVESummary = convertToCVESummary(imageScanSummary.CVEs)
-		finalizedReport.SummaryDetails.Vulnerabilities.PackageScores = convertToPackageScores(imageScanSummary.PackageScores)
-		finalizedReport.SummaryDetails.Vulnerabilities.Images = imageScanSummary.Images
+		reportHeader.SummaryDetails.Vulnerabilities.MapsSeverityToSummary = convertToReportSummary(imageScanSummary.MapsSeverityToSummary)
+		reportHeader.SummaryDetails.Vulnerabilities.CVESummary = convertToCVESummary(imageScanSummary.CVEs)
+		reportHeader.SummaryDetails.Vulnerabilities.PackageScores = convertToPackageScores(imageScanSummary.PackageScores)
+		reportHeader.SummaryDetails.Vulnerabilities.Images = imageScanSummary.Images
 	}
 
-	// Convert to PostureReportWithSeverity to add severity field to controls,
-	// extract specified labels from workloads, and attach scan coverage gaps.
-	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverage(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources, &opaSessionObj.ScanCoverage)
-	reportWithSeverity.ExceptionAudit = opaSessionObj.ExceptionAudit
+	var scanCoverage *cautils.ScanCoverage
+	coverage := &opaSessionObj.ScanCoverage
+	if coverage != nil && (len(coverage.FailedGVRPulls) > 0 || len(coverage.NotEvaluatedControls) > 0 || len(coverage.PartialGVRPulls) > 0 || len(coverage.PolicyDegradations) > 0 || len(coverage.VacuousFrameworks) > 0) {
+		scanCoverage = coverage
+	}
+	reportHeader.ScanCoverage = scanCoverage
 
-	r, err := json.Marshal(reportWithSeverity)
+	var resourceLabels map[string]map[string]string
+	if len(opaSessionObj.LabelsToCopy) > 0 && opaSessionObj.AllResources != nil {
+		resourceLabels = extractResourceLabels(opaSessionObj.AllResources, opaSessionObj.LabelsToCopy)
+	}
+	reportHeader.ResourceLabels = resourceLabels
+
+	b, err := json.Marshal(reportHeader)
 	if err != nil {
 		return err
 	}
-	_, err = jp.writer.Write(r)
+	
+	// Write header up to the closing brace
+	// b is guaranteed to end with '}' because it's marshaled from a struct
+	if len(b) > 0 && b[len(b)-1] == '}' {
+		b = b[:len(b)-1]
+	}
+	if _, err := jp.writer.Write(b); err != nil {
+		return err
+	}
 
-	return err
+	encoder := json.NewEncoder(jp.writer)
+	
+	resourceIDs := make([]string, 0, len(opaSessionObj.ResourcesResult))
+	for resourceID := range opaSessionObj.ResourcesResult {
+		resourceIDs = append(resourceIDs, resourceID)
+	}
+	sort.Strings(resourceIDs)
+
+	if len(resourceIDs) > 0 {
+		// Write results incrementally
+		if _, err := jp.writer.Write([]byte(`,"results":[`)); err != nil {
+			return err
+		}
+
+		for i, resourceID := range resourceIDs {
+			if i > 0 {
+				if _, err := jp.writer.Write([]byte(`,`)); err != nil {
+					return err
+				}
+			}
+			res := opaSessionObj.ResourcesResult[resourceID]
+			if v, exist := opaSessionObj.ResourcesPrioritized[resourceID]; exist {
+				res.PrioritizedResource = &v
+			}
+			
+			enrichedControls := make([]ResourceAssociatedControlWithSeverity, len(res.AssociatedControls))
+			for j, control := range res.AssociatedControls {
+				severity := "Unknown"
+				if controlSummary, exists := reportHeader.SummaryDetails.Controls[control.GetID()]; exists {
+					severity = apis.ControlSeverityToString(controlSummary.GetScoreFactor())
+				}
+				enrichedControls[j] = ResourceAssociatedControlWithSeverity{
+					ResourceAssociatedControl: control,
+					Severity:                  severity,
+				}
+			}
+			enrichedResult := ResultWithSeverity{
+				ResourceID:          res.ResourceID,
+				AssociatedControls:  enrichedControls,
+				PrioritizedResource: res.PrioritizedResource,
+			}
+			
+			if err := encoder.Encode(enrichedResult); err != nil {
+				return err
+			}
+		}
+		if _, err := jp.writer.Write([]byte(`]`)); err != nil {
+			return err
+		}
+	}
+
+	// Write resources incrementally
+	if !opaSessionObj.OmitRawResources && len(resourceIDs) > 0 {
+		// Check if we actually have any resources in AllResources
+		hasResources := false
+		for _, resourceID := range resourceIDs {
+			if _, ok := opaSessionObj.AllResources[resourceID]; ok {
+				hasResources = true
+				break
+			}
+		}
+
+		if hasResources {
+			if _, err := jp.writer.Write([]byte(`,"resources":[`)); err != nil {
+				return err
+			}
+			first := true
+			for _, resourceID := range resourceIDs {
+				if obj, ok := opaSessionObj.AllResources[resourceID]; ok {
+					resource := *reporthandling.NewResourceIMetadata(obj)
+					if r, ok := opaSessionObj.ResourceSource[resourceID]; ok {
+						resource.SetSource(&r)
+					}
+					if !first {
+						if _, err := jp.writer.Write([]byte(`,`)); err != nil {
+							return err
+						}
+					}
+					first = false
+					if err := encoder.Encode(resource); err != nil {
+						return err
+					}
+				}
+			}
+			if _, err := jp.writer.Write([]byte(`]`)); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Close the JSON object
+	if _, err := jp.writer.Write([]byte(`}`)); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func convertToPackageScores(packageScores map[string]*imageprinter.PackageScore) map[string]*reportsummary.PackageSummary {
