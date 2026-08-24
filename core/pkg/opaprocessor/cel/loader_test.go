@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 )
 
 // TestLoadVAPParamlessControl loads a known paramless control and checks the
@@ -295,4 +296,123 @@ spec:
 			assert.Contains(t, err.Error(), tc.refusedFor)
 		})
 	}
+}
+
+// TestLoadVAPRefusesForeignParamKind pins the paramKind refusal. Only the
+// ControlConfiguration the bundle ships can be resolved offline; any other kind
+// would come from a binding's ParamRef the scan does not have, so it is refused
+// (a loud skip) rather than evaluated against whatever params.* happens to be
+// bound.
+func TestLoadVAPRefusesForeignParamKind(t *testing.T) {
+	policy := func(paramKindYAML string) string {
+		return `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kubescape-c-1003
+  labels:
+    controlId: C-1003
+spec:
+` + paramKindYAML + `  matchConstraints:
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: ["v1"]
+      operations: ["CREATE"]
+      resources: ["pods"]
+  validations:
+  - expression: "false"
+`
+	}
+
+	cases := []struct {
+		name          string
+		paramKindYAML string
+		refused       bool
+	}{
+		{
+			name:          "no paramKind is supported",
+			paramKindYAML: "",
+		},
+		{
+			name: "the bundled ControlConfiguration is supported",
+			paramKindYAML: `  paramKind:
+    apiVersion: kubescape.io/v1
+    kind: ControlConfiguration
+`,
+		},
+		{
+			name: "another kind in the bundled group is refused",
+			paramKindYAML: `  paramKind:
+    apiVersion: kubescape.io/v1
+    kind: ScanConfiguration
+`,
+			refused: true,
+		},
+		{
+			name: "another version of the bundled kind is refused",
+			paramKindYAML: `  paramKind:
+    apiVersion: kubescape.io/v2
+    kind: ControlConfiguration
+`,
+			refused: true,
+		},
+		{
+			name: "a cluster CRD kind is refused",
+			paramKindYAML: `  paramKind:
+    apiVersion: ate.dev/v1alpha1
+    kind: WorkerPool
+`,
+			refused: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			catalog, err := parseVAPBundle([]byte(policy(tc.paramKindYAML)))
+			require.NoError(t, err)
+			vap := catalog.byControl["C-1003"]
+			require.NotNil(t, vap)
+
+			err = vap.requireSupported()
+			if !tc.refused {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err, "a paramKind the bundle cannot supply must be refused")
+			assert.Contains(t, err.Error(), "C-1003")
+			assert.Contains(t, err.Error(), vap.paramKind.Kind)
+		})
+	}
+}
+
+// TestResolveParamsRefusesForeignParamKind covers the same invariant where the
+// params are actually bound: a foreign paramKind must not silently receive the
+// ControlConfiguration, whose fields belong to another kind entirely.
+func TestResolveParamsRefusesForeignParamKind(t *testing.T) {
+	vap := &VAP{
+		ControlID: "C-1004",
+		paramKind: &admissionregistrationv1.ParamKind{APIVersion: "ate.dev/v1alpha1", Kind: "WorkerPool"},
+	}
+
+	params, err := resolveParams(vap)
+	require.Error(t, err, "resolveParams must not fall back to the ControlConfiguration")
+	assert.Nil(t, params)
+	assert.Contains(t, err.Error(), "WorkerPool")
+}
+
+// TestControlConfigParamKindMatchesShippedFile keeps the check honest against
+// the file it reads: the GVK comes off basic-control-configuration.yaml, so a
+// `make sync-vap` that renames or re-versions it moves the check with it rather
+// than refusing every params-bearing control.
+func TestControlConfigParamKindMatchesShippedFile(t *testing.T) {
+	shipped, err := controlConfigParamKind()
+	require.NoError(t, err)
+
+	config, err := controlConfig()
+	require.NoError(t, err)
+	assert.Equal(t, config["apiVersion"], shipped.APIVersion)
+	assert.Equal(t, config["kind"], shipped.Kind)
+
+	vap, err := loadVAP("C-0046")
+	require.NoError(t, err)
+	assert.Equal(t, *shipped, *vap.paramKind, "the bundle's params-bearing controls must still resolve")
 }

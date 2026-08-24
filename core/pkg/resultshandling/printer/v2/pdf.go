@@ -35,16 +35,13 @@ func NewPdfPrinter() *PdfPrinter {
 }
 
 func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) error {
-	explicitOutput := outputFile != ""
-	outputFile = strings.TrimSpace(outputFile)
-	if outputFile == "" {
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.PdfFormat, outputFile, pdfOutputFile)
+	if !explicitOutput {
 		// Binary PDF must never fall back to stdout: it corrupts TTYs and
 		// is rarely what the user intended. Default to ./report.pdf.
-		outputFile = pdfOutputFile + printer.PdfOutputExt
+		outputFile = printer.ResolveDefaultOutputFile(printer.PdfFormat, pdfOutputFile)
 		logger.L().Info("no --output specified for pdf format; writing to default file",
 			helpers.String("filename", outputFile))
-	} else if !printer.HasOutputExt(outputFile, printer.PdfOutputExt) {
-		outputFile = outputFile + printer.PdfOutputExt
 	}
 	if explicitOutput {
 		var err error

@@ -14,11 +14,13 @@ import (
 	printerv1 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v1"
 	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v4/core/pkg/telemetry"
 	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"go.opentelemetry.io/otel"
 )
 
 type ResultsHandler struct {
@@ -232,7 +234,33 @@ func restoreReport(sessionObj *cautils.OPASessionObj, snap reportSnapshot) {
 }
 
 // HandleResults handles all necessary actions for the scan results
-func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.ScanInfo) error {
+func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.ScanInfo) (err error) {
+	// The reporting span lives here rather than at the call sites so every
+	// entry point that produces output — scan, scan control/framework/workload,
+	// scan image and the patch flow — contributes the same phase to the trace.
+	ctx, span := otel.Tracer(telemetry.TracerName).Start(ctx, "reporting")
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+		}
+		span.End()
+	}()
+
+	// Registered before the severity-filter snapshot below so it runs after
+	// restoreReport: exported metrics describe the full scan, matching how
+	// --compliance-threshold and --severity-threshold are evaluated, and stay
+	// stable when a user narrows output with --min-severity.
+	//
+	// Building the outcome walks every resource, control and CVE match, so it
+	// stays behind the Active check: with no collector configured this must
+	// cost nothing.
+	defer func() {
+		if !telemetry.Active() {
+			return
+		}
+		telemetry.RecordScan(ctx, buildScanOutcome(rh.ScanData, rh.ImageScanData, scanInfo))
+	}()
+
 	if rh.ScanData != nil && len(rh.ScanData.VAPPolicies) > 0 {
 		index := vapreconcile.BuildIndex(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings)
 		vapreconcile.EnrichSummary(rh.ScanData.Report.SummaryDetails.Controls, index)

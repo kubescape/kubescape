@@ -118,6 +118,8 @@ type OPASessionObj struct {
 	TopWorkloadsByScore   []reporthandling.IResource
 	TriggeredByCLI        bool
 	LabelsToCopy          []string                    // Labels to copy from workloads to scan reports
+	SkipControls          string                      // Comma-separated control IDs to skip
+	IncludeControls       string                      // Comma-separated control IDs to include (all others skipped)
 	VAPPolicies           []unstructured.Unstructured // ValidatingAdmissionPolicy resources collected from the cluster
 	VAPBindings           []unstructured.Unstructured // ValidatingAdmissionPolicyBinding resources collected from the cluster
 }
@@ -147,6 +149,8 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 		HonorInlineExceptions: scanInfo.HonorInlineExceptions.GetBool(),
 		TriggeredByCLI:        scanInfo.TriggeredByCLI,
 		LabelsToCopy:          scanInfo.LabelsToCopy,
+		SkipControls:          scanInfo.SkipControls,
+		IncludeControls:       scanInfo.IncludeControls,
 	}
 }
 

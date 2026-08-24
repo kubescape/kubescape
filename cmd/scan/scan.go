@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/telemetry"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/spf13/cobra"
@@ -60,6 +61,9 @@ var scanCmdExamples = fmt.Sprintf(`
 
   # Compare a live scan against a saved baseline report and fail CI on new high-severity+ drift
   %[1]s scan --baseline base.json --baseline-fail-on-new --baseline-severity-threshold high
+
+  # Export scan traces and metrics to an OpenTelemetry collector
+  %[1]s scan --otel-endpoint localhost:4317
 `, cautils.ExecName())
 
 func GetScanCommand(ks meta.IKubescape) *cobra.Command {
@@ -72,6 +76,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Long:    `Scan a Kubernetes cluster, YAML files, Helm charts, Kustomize directories, Git repositories, or container images for security misconfigurations and vulnerabilities.`,
 		Example: scanCmdExamples,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Name() == "validate-contract" {
+				return nil
+			}
 			// runs for the bare scan command and all subcommands (framework, control, workload, image)
 			if scanInfo.FormatVersion != "v1" && scanInfo.FormatVersion != "v2" {
 				return fmt.Errorf("invalid --format-version %q: supported versions are v1 and v2", scanInfo.FormatVersion)
@@ -227,12 +234,15 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.Hide, "hide", false, "Replace sensitive report metadata with deterministic pseudonyms")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.EncryptionEnabled, "encrypt", false, "Encrypt sensitive report metadata using the KUBESCAPE_MASTER_KEY environment variable")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.LabelsToCopy, "labels-to-copy", nil, "Labels to copy from workloads to scan reports for easy identification. e.g: --labels-to-copy=app,team,environment")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.SkipControls, "skip-controls", "", "Comma-separated control IDs to skip, e.g. --skip-controls C-0001,C-0020")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeControls, "include-controls", "", "Comma-separated control IDs to include; all other controls are skipped, e.g. --include-controls C-0001,C-0002")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ListingURL, "grype-db-url", "", "Grype vulnerability database URL")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.SkipDBUpdate, "skip-db-update", false, "Do not update the vulnerability database before scanning images. Uses the locally cached database; fails if none is cached.")
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ScanTimeout, "scan-timeout", 0, "Maximum duration for the scan (e.g. 5m, 30s, 1h). 0 means no timeout. When the timeout is reached the scan exits with a non-zero code.")
 	scanCmd.PersistentFlags().DurationVar(&scanInfo.ControlTimeout, "control-timeout", 0, "Maximum duration for evaluating a single control (e.g. 30s, 1m). 0 means no timeout. Controls that exceed this are marked as not evaluated and the scan continues. Must be lower than --scan-timeout when both are set.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.EnableStreaming, "enable-streaming", false, "Enable resource streaming for large clusters to reduce memory usage. Resources are processed in batches instead of loading all at once. Automatically enabled for clusters with >2500 resources.")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.DryRun, "dry-run", false, "Check whether the current credentials can list every resource type the requested policies need, without collecting resources or evaluating controls. Cluster scans only.")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.OtelEndpoint, "otel-endpoint", "", fmt.Sprintf("Export scan traces and metrics to an OTLP collector, e.g. --otel-endpoint localhost:4317. Accepts host:port (plaintext) or a http(s):// URL. When unset, the standard %s environment variable is used; when neither is set no telemetry is collected.", telemetry.EnvEndpoint))
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.Incremental, "incremental", false, "Cache the verdict for each resource, keyed by a hash of its spec/metadata plus the controls-config version, and skip re-evaluating unchanged resources on the next scan. Opt-in; scan output is unaffected. Cache automatically invalidates when the controls-config version changes; clear it manually with 'kubescape config delete cache'.")
 
 	// Helm value override flags. Mirror `helm install` so users can pass overrides through verbatim
@@ -269,6 +279,10 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.AddCommand(getWorkloadCmd(ks, &scanInfo))
 
 	scanCmd.AddCommand(getImageCmd(ks, &scanInfo))
+	scanCmd.AddCommand(getValidateContractCmd(&scanInfo))
+
+	// Wrap after the subcommands are registered so each one is covered.
+	installTelemetry(scanCmd, ks, &scanInfo)
 
 	return scanCmd
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"math"
+	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +25,21 @@ func isRateLimitError(err error) bool {
 		strings.Contains(errStr, "too many requests") ||
 		strings.Contains(errStr, "rate exceeded") ||
 		strings.Contains(errStr, "throttlingexception")
+const maxRegistryAPIResponseBytes int64 = 64 << 20
+
+func readRegistryAPIResponse(body io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		limit = maxRegistryAPIResponseBytes
+	}
+
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read registry api response: %w", err)
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("registry api response exceeds the %d-byte limit", limit)
+	}
+	return data, nil
 }
 
 // FetchImagesInformation provides a shared implementation for GetImagesInformation across adaptors.

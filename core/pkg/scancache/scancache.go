@@ -89,11 +89,11 @@ func (s *Store) Flush() error {
 	return os.WriteFile(s.path, b, 0o600)
 }
 
-// ResourceHash hashes the whole object except fields known to change
-// without affecting control evaluation (status and volatile metadata).
-// Everything else is included, so a change to any evaluation-relevant field
-// — including root-level fields like RoleBinding.roleRef/subjects or
-// Role.rules — cannot be missed.
+// ResourceHash hashes the whole object except status and volatile metadata.
+// Rules that read status are kept out of the cache by ruleCacheEligible, so
+// stripping it here cannot hide an input change. Everything else is included,
+// so a change to any evaluation-relevant field — including root-level fields
+// like RoleBinding.roleRef/subjects or Role.rules — cannot be missed.
 func ResourceHash(obj map[string]any) string {
 	stripped := make(map[string]any, len(obj))
 	for k, v := range obj {

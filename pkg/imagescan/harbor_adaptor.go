@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,11 +16,12 @@ type HarborAPI interface {
 }
 
 type harborAPIWrapper struct {
-	baseURL    string
-	username   string
-	password   string
-	token      string
-	httpClient *http.Client
+	baseURL         string
+	username        string
+	password        string
+	token           string
+	httpClient      *http.Client
+	maxResponseSize int64
 }
 
 func (w *harborAPIWrapper) DoRequest(ctx context.Context, method, path string) ([]byte, error) {
@@ -48,7 +48,7 @@ func (w *harborAPIWrapper) DoRequest(ctx context.Context, method, path string) (
 		return nil, fmt.Errorf("harbor api returned status %d for %s", resp.StatusCode, path)
 	}
 
-	return io.ReadAll(resp.Body)
+	return readRegistryAPIResponse(resp.Body, w.maxResponseSize)
 }
 
 // HarborAdaptor implements IContainerImageVulnerabilityAdaptor for Harbor Container Registry.
@@ -77,8 +77,9 @@ func (a *HarborAdaptor) Login(ctx context.Context, registry string, credentials 
 	baseURL := fmt.Sprintf("%s://%s", scheme, a.host)
 
 	wrapper := &harborAPIWrapper{
-		baseURL:    baseURL,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		baseURL:         baseURL,
+		httpClient:      &http.Client{Timeout: 15 * time.Second},
+		maxResponseSize: maxRegistryAPIResponseBytes,
 	}
 
 	if credentials.hasAuthenticator() {

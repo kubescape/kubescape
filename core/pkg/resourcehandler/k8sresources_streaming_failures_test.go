@@ -295,6 +295,7 @@ func TestStreamingKubernetesResourceCount_DeduplicatesResidentOverlap(t *testing
 }
 
 func TestCollectAndStreamBatches_ReportsAllKubernetesResourcesWhenNodeCountFails(t *testing.T) {
+	metrics.ResetForTest(t)
 	previousProvider := otel.GetMeterProvider()
 	reader := sdkmetric.NewManualReader()
 	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))

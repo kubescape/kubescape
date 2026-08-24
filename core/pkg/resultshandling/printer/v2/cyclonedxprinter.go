@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/anchore/syft/syft/format"
 	"github.com/anchore/syft/syft/format/cyclonedxjson"
@@ -30,15 +29,7 @@ func NewCycloneDXPrinter() *CycloneDXPrinter {
 }
 
 func (cp *CycloneDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
-	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = cyclonedxOutputFile
-		}
-		if !printer.HasOutputExt(strings.TrimSpace(outputFile), printer.CycloneDXOutputExt) {
-			outputFile = outputFile + printer.CycloneDXOutputExt
-		}
-	}
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.CycloneDXFormat, outputFile, cyclonedxOutputFile)
 	if explicitOutput {
 		var err error
 		cp.writer, err = printer.GetWriterNoFallback(outputFile)
