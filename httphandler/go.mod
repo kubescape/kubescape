@@ -16,9 +16,9 @@ require (
 	github.com/gorilla/schema v1.4.1
 	github.com/kubescape/backend v0.0.46
 	github.com/kubescape/go-logger v0.0.33
-	github.com/kubescape/k8s-interface v0.0.217
+	github.com/kubescape/k8s-interface v0.0.218
 	github.com/kubescape/kubescape/v4 v4.0.12
-	github.com/kubescape/opa-utils v0.0.307
+	github.com/kubescape/opa-utils v0.0.309
 	github.com/kubescape/storage v0.0.258
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
@@ -627,3 +627,6 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.3 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+// TODO: remove this replace directive once kubescape/k8s-interface#161 is merged and released
+replace github.com/kubescape/k8s-interface v0.0.218 => github.com/doraem-on/k8s-interface v0.0.218-0.20260815050130-fa6fe1e9bc98

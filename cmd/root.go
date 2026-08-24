@@ -18,6 +18,7 @@ import (
 	"github.com/kubescape/kubescape/v4/cmd/mcpserver"
 	"github.com/kubescape/kubescape/v4/cmd/operator"
 	"github.com/kubescape/kubescape/v4/cmd/patch"
+	"github.com/kubescape/kubescape/v4/cmd/policy"
 	"github.com/kubescape/kubescape/v4/cmd/prerequisites"
 	"github.com/kubescape/kubescape/v4/cmd/scan"
 	"github.com/kubescape/kubescape/v4/cmd/update"
@@ -119,6 +120,7 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 	rootCmd.AddCommand(diff.GetDiffCmd(ks))
 	rootCmd.AddCommand(patch.GetPatchCmd(ks))
 	rootCmd.AddCommand(vap.GetVapHelperCmd())
+	rootCmd.AddCommand(policy.GetPolicyCmd())
 	rootCmd.AddCommand(operator.GetOperatorCmd(ks))
 	rootCmd.AddCommand(prerequisites.GetPreReqCmd(ks))
 	rootCmd.AddCommand(mcpserver.GetMCPServerCmd())

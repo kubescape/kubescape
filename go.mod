@@ -25,6 +25,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/chainguard-dev/git-urls v1.0.2
 	github.com/containerd/platforms v1.0.0-rc.2
+	github.com/cyberphone/json-canonicalization v0.0.0-20241213102144-19d51d7fe467
 	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/distribution/reference v0.6.0
 	github.com/docker/buildx v0.33.0
@@ -34,6 +35,7 @@ require (
 	github.com/francoispqt/gojay v1.2.13
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/google/cel-go v0.29.0
+	github.com/google/go-cmp v0.7.0
 	github.com/google/go-containerregistry v0.21.6
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/hcl/v2 v2.24.0
@@ -48,6 +50,7 @@ require (
 	github.com/kubescape/k8s-interface v0.0.209
 	github.com/kubescape/kubescape/v3 v3.0.4
 	github.com/kubescape/opa-utils v0.0.307
+	github.com/kubescape/opa-utils v0.0.309
 	github.com/kubescape/rbac-utils v0.0.21
 	github.com/kubescape/regolibrary/v2 v2.0.1
 	github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73
@@ -59,6 +62,7 @@ require (
 	github.com/mikefarah/yq/v4 v4.29.1
 	github.com/moby/buildkit v0.29.0
 	github.com/open-policy-agent/opa v1.19.0
+	github.com/openvex/go-vex v0.2.7
 	github.com/owenrumney/go-sarif/v2 v2.2.0
 	github.com/project-copacetic/copacetic v0.10.0
 	github.com/prometheus/common v0.70.0
@@ -255,7 +259,6 @@ require (
 	github.com/coreos/go-oidc/v3 v3.18.0 // indirect
 	github.com/cpuguy83/dockercfg v0.3.2 // indirect
 	github.com/cpuguy83/go-docker v0.3.0 // indirect
-	github.com/cyberphone/json-canonicalization v0.0.0-20241213102144-19d51d7fe467 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
@@ -341,7 +344,6 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/certificate-transparency-go v1.3.3 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-github/v73 v73.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
@@ -456,7 +458,6 @@ require (
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/opencontainers/runtime-spec v1.3.0 // indirect
 	github.com/opencontainers/selinux v1.13.1 // indirect
-	github.com/openvex/go-vex v0.2.7 // indirect
 	github.com/owenrumney/go-sarif v1.1.2-0.20231003122901-1000f5e05554 // indirect
 	github.com/package-url/packageurl-go v0.1.3 // indirect
 	github.com/pandatix/go-cvss v0.6.2 // indirect
@@ -631,6 +632,7 @@ replace github.com/google/go-containerregistry => github.com/matthyx/go-containe
 
 replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.0-20260322054632-16583c73e9b8
 
-replace github.com/kubescape/k8s-interface => github.com/doraem-on/k8s-interface v0.0.218-0.20260815050130-fa6fe1e9bc98
-
 replace github.com/distribution/reference => github.com/distribution/reference v0.5.0
+
+// Use unofficial fork to include cache-invalidation fix for Doraemon fork until upstream k8s-interface#161 is merged
+replace github.com/kubescape/k8s-interface v0.0.209 => github.com/doraem-on/k8s-interface v0.0.218-0.20260815050130-fa6fe1e9bc98

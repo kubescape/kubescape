@@ -627,6 +627,8 @@ github.com/docker/go-metrics v0.0.1 h1:AgB/0SvBxihN0X8OR4SjsblXkbMvalQ8cjmtKQ2rQ
 github.com/docker/go-metrics v0.0.1/go.mod h1:cG1hvH2utMXtqgqqYE9plW6lDxS3/5ayHzueweSI3Vw=
 github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4=
 github.com/docker/go-units v0.5.0/go.mod h1:fgPhTUdO+D/Jk86RDLlptpiXQzgHJF7gydDDbaIK4Dk=
+github.com/doraem-on/k8s-interface v0.0.218-0.20260815050130-fa6fe1e9bc98 h1:0d+svgGitcFu+mmf24/KPMa/Npapl6fouyRMVxSHgNA=
+github.com/doraem-on/k8s-interface v0.0.218-0.20260815050130-fa6fe1e9bc98/go.mod h1:sOZm48DJn8QO1cWRbuNsPPsk0TxLzm13Ws85EkiH0X0=
 github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707 h1:2tV76y6Q9BB+NEBasnqvs7e49aEBFI8ejC89PSnWH+4=
 github.com/dsnet/compress v0.0.2-0.20230904184137-39efe44ab707/go.mod h1:qssHWj60/X5sZFNxpG4HBPDHVqxNm4DfnCKgrbZOT+s=
 github.com/dsnet/golib v0.0.0-20171103203638-1ea166775780/go.mod h1:Lj+Z9rebOhdfkVLjJ8T6VcRQv3SXugXy999NBtR9aFY=
@@ -1222,12 +1224,10 @@ github.com/kubescape/go-git-url v0.0.31 h1:VZnvtdGLVc42cQaR7llQeGZz0PnOxcs+eDig2
 github.com/kubescape/go-git-url v0.0.31/go.mod h1:3ddc1HEflms1vMhD9owt/3FBES070UaYTUarcjx8jDk=
 github.com/kubescape/go-logger v0.0.33 h1:Gn+HhDsudPoyxW70e2zQehlg9wPrNchOuJrHFGWdDtc=
 github.com/kubescape/go-logger v0.0.33/go.mod h1:Alj7JBQ8/WCxbXe8Ura6ZheSRK45E0p21M3xeqedX90=
-github.com/kubescape/k8s-interface v0.0.217 h1:GTrXyw5d9SPG+NsVNay97Aiz6K5Z4EIMLnHju2+UVLU=
-github.com/kubescape/k8s-interface v0.0.217/go.mod h1:sOZm48DJn8QO1cWRbuNsPPsk0TxLzm13Ws85EkiH0X0=
 github.com/kubescape/kubescape/v3 v3.0.48 h1:h41+i5Rmmjra80YOkusuevXcN+tjqdt10Pfs6ljZJ+E=
 github.com/kubescape/kubescape/v3 v3.0.48/go.mod h1:yByvOFYdzgQYGblg5lkAOIObhYMgxnlJyzBBJ1Q64PA=
-github.com/kubescape/opa-utils v0.0.307 h1:YqJ26YGMVSGN1JBu3z95jH/7BxKoTp6nbhTCNoN6ZcY=
-github.com/kubescape/opa-utils v0.0.307/go.mod h1:dWNcjmiTwGYlNmclXvDvgH7UlLdpDvmEc9T7ACTqLo0=
+github.com/kubescape/opa-utils v0.0.309 h1:jc756tYiPPsFgaG5PmVuuHAwnb8R8N9wxbrFJ0ZnN9U=
+github.com/kubescape/opa-utils v0.0.309/go.mod h1:dWNcjmiTwGYlNmclXvDvgH7UlLdpDvmEc9T7ACTqLo0=
 github.com/kubescape/rbac-utils v0.0.21 h1:iRaGX8WKBd94dg31vpX10LHWoQZ/QKO5AMLzQf3kEkc=
 github.com/kubescape/rbac-utils v0.0.21/go.mod h1:t57AhSrjuNGQ+mpZWQM/hBzrCOeKBDHegFoVo4tbikQ=
 github.com/kubescape/regolibrary/v2 v2.0.1 h1:7lKj171gslgTbbcmmGVHk34AZNqxForOXZIINoQfdzQ=
