@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/yaml"
 )
 
@@ -25,6 +27,35 @@ func TestSetWriter_Yaml(t *testing.T) {
 	yp.SetWriter(context.TODO(), "")
 	assert.NotNil(t, yp.writer)
 	yp.CloseWriter()
+
+	tests := []struct {
+		name       string
+		outputFile string
+		wantFile   string
+	}{
+		{"bare name", "scan-result", "scan-result.yaml"},
+		{"whitespace padded", "  scan-result  ", "scan-result.yaml"},
+		{"whitespace only", "   ", "report.yaml"},
+		{"preserve .yaml", "scan-result.yaml", "scan-result.yaml"},
+		{"preserve .yml", "scan-result.yml", "scan-result.yml"},
+		{"preserve .YML", "scan-result.YML", "scan-result.YML"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workingDir := t.TempDir()
+			originalDir, err := os.Getwd()
+			require.NoError(t, err)
+			require.NoError(t, os.Chdir(workingDir))
+			t.Cleanup(func() { require.NoError(t, os.Chdir(originalDir)) })
+
+			p := NewYamlPrinter()
+			require.NoError(t, p.SetWriter(context.Background(), tt.outputFile))
+			defer p.CloseWriter()
+			assert.Equal(t, tt.wantFile, filepath.Base(p.writer.Name()))
+			assert.FileExists(t, filepath.Join(workingDir, tt.wantFile))
+		})
+	}
 }
 
 func TestScore_Yaml(t *testing.T) {
