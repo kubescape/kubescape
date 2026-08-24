@@ -4,11 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type failingRegistryReader struct {
@@ -122,4 +127,78 @@ func TestProcessImages(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, []string{"empty-repo1", "processed-repo2"}, results)
 	})
+}
+
+func TestIsRateLimitError(t *testing.T) {
+	tests := []struct {
+		name          string
+		err           error
+		wantIsRL      bool
+		wantRetryWait time.Duration
+	}{
+		{
+			name:     "nil error",
+			err:      nil,
+			wantIsRL: false,
+		},
+		{
+			name:     "text match 429",
+			err:      errors.New("http 429 too many requests"),
+			wantIsRL: true,
+		},
+		{
+			name:     "text match throttling",
+			err:      errors.New("ThrottlingException"),
+			wantIsRL: true,
+		},
+		{
+			name:     "grpc resource exhausted",
+			err:      status.Error(codes.ResourceExhausted, "quota exceeded"),
+			wantIsRL: true,
+		},
+		{
+			name:     "grpc wrapped resource exhausted",
+			err:      fmt.Errorf("wrap: %w", status.Error(codes.ResourceExhausted, "quota exceeded")),
+			wantIsRL: true,
+		},
+		{
+			name: "azure 429 with retry after seconds",
+			err: &azcore.ResponseError{
+				StatusCode: http.StatusTooManyRequests,
+				RawResponse: &http.Response{
+					Header: http.Header{
+						"Retry-After": []string{"10"},
+					},
+				},
+			},
+			wantIsRL:      true,
+			wantRetryWait: 10 * time.Second,
+		},
+		{
+			name: "azure wrapped 429",
+			err: fmt.Errorf("wrap: %w", &azcore.ResponseError{
+				StatusCode: http.StatusTooManyRequests,
+				RawResponse: &http.Response{
+					Header: http.Header{
+						"Retry-After": []string{"10"},
+					},
+				},
+			}),
+			wantIsRL:      true,
+			wantRetryWait: 10 * time.Second,
+		},
+		{
+			name:     "unrelated error",
+			err:      errors.New("some other error"),
+			wantIsRL: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotIsRL, gotWait := isRateLimitError(tt.err)
+			assert.Equal(t, tt.wantIsRL, gotIsRL)
+			assert.Equal(t, tt.wantRetryWait, gotWait)
+		})
+	}
 }

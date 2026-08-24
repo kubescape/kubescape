@@ -6,25 +6,69 @@ import (
 	"math"
 	"fmt"
 	"io"
+	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"golang.org/x/time/rate"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-// isRateLimitError checks if the given error is a rate limit (HTTP 429) error.
-func isRateLimitError(err error) bool {
-	if err == nil {
-		return false
+// parseRetryAfter parses the Retry-After header.
+func parseRetryAfter(resp *http.Response) time.Duration {
+	if resp == nil {
+		return 0
 	}
+	ra := resp.Header.Get("Retry-After")
+	if ra == "" {
+		return 0
+	}
+	// Try parsing as seconds
+	if s, err := strconv.Atoi(ra); err == nil {
+		return time.Duration(s) * time.Second
+	}
+	// Try parsing as HTTP date
+	if d, err := time.Parse(time.RFC1123, ra); err == nil {
+		return time.Until(d)
+	}
+	return 0
+}
+
+// isRateLimitError checks if the given error is a rate limit (HTTP 429) error, returning a boolean and an optional Retry-After duration.
+func isRateLimitError(err error) (bool, time.Duration) {
+	if err == nil {
+		return false, 0
+	}
+
+	// Check for gRPC ResourceExhausted
+	if st, ok := status.FromError(err); ok {
+		if st.Code() == codes.ResourceExhausted {
+			return true, 0
+		}
+	}
+
+	// Check for Azure azcore.ResponseError rate limiting
+	var azErr *azcore.ResponseError
+	if errors.As(err, &azErr) {
+		if azErr.StatusCode == http.StatusTooManyRequests {
+			return true, parseRetryAfter(azErr.RawResponse)
+		}
+	}
+
 	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "429") ||
+	isRL := strings.Contains(errStr, "429") ||
 		strings.Contains(errStr, "too many requests") ||
 		strings.Contains(errStr, "rate exceeded") ||
 		strings.Contains(errStr, "throttlingexception")
+	return isRL, 0
+}
+
 const maxRegistryAPIResponseBytes int64 = 64 << 20
 
 func readRegistryAPIResponse(body io.Reader, limit int64) ([]byte, error) {
@@ -73,7 +117,7 @@ func NormalizeSeverity(severity string) string {
 }
 
 // ProcessImages iterates over imageIDs and calls the provided fetch function, handling errors and aggregating results.
-// It implements concurrent processing with an adaptive rate limiting token bucket and exponential backoff mechanism.
+// It implements concurrent processing with a static rate limiting token bucket and exponential backoff mechanism.
 func ProcessImages[T any](
 	imageIDs []ContainerImageIdentifier,
 	processFunc func(imageID ContainerImageIdentifier) (T, error),
@@ -105,6 +149,9 @@ func ProcessImages[T any](
 	jobs := make(chan job, len(imageIDs))
 	var wg sync.WaitGroup
 
+	var cooldownsMutex sync.Mutex
+	cooldowns := make(map[string]time.Time)
+
 	for w := 0; w < numWorkers; w++ {
 		wg.Add(1)
 		go func() {
@@ -120,14 +167,45 @@ func ProcessImages[T any](
 					// Wait based on global rate limit before firing the request
 					_ = limiter.Wait(ctx)
 
+					registry := j.imageID.Registry
+					var waitTime time.Duration
+					if registry != "" {
+						cooldownsMutex.Lock()
+						if deadline, ok := cooldowns[registry]; ok {
+							if now := time.Now(); now.Before(deadline) {
+								waitTime = time.Until(deadline)
+							}
+						}
+						cooldownsMutex.Unlock()
+						if waitTime > 0 {
+							time.Sleep(waitTime)
+						}
+					}
+
 					res, err = processFunc(j.imageID)
 					if err == nil {
 						break
 					}
 
-					if isRateLimitError(err) && attempt < maxRetries {
-						backoff := time.Duration(math.Pow(2, float64(attempt))) * baseDelay
+					isRL, retryAfter := isRateLimitError(err)
+					if isRL && attempt < maxRetries {
+						var backoff time.Duration
+						if retryAfter > 0 {
+							backoff = retryAfter
+						} else {
+							backoff = time.Duration(math.Pow(2, float64(attempt))) * baseDelay
+						}
 						logger.L().Warning("rate limit hit, backing off", helpers.Int("attempt", attempt+1), helpers.String("backoff", backoff.String()))
+						
+						if registry != "" {
+							newDeadline := time.Now().Add(backoff)
+							cooldownsMutex.Lock()
+							if current, ok := cooldowns[registry]; !ok || current.Before(newDeadline) {
+								cooldowns[registry] = newDeadline
+							}
+							cooldownsMutex.Unlock()
+						}
+
 						time.Sleep(backoff)
 						continue
 					}
