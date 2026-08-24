@@ -122,7 +122,7 @@ jobs:
         name: Setup Syft
 
       - name: Create k8s Kind Cluster
-        uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
           cluster_name: kubescape-e2e
 
