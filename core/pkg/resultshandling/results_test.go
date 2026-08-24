@@ -853,12 +853,12 @@ func TestClosePrinter_AllV2PrintersImplementErrorCloser(t *testing.T) {
 			require.NoError(t, setErr)
 
 			// 1. Initial close on active writer must succeed
-			closeErr := closePrinter(tt.printer)
+			closeErr := ClosePrinter(tt.printer)
 			assert.NoError(t, closeErr)
 
 			// 2. Subsequent close on already-closed writer must surface the underlying error
-			secondCloseErr := closePrinter(tt.printer)
-			assert.Error(t, secondCloseErr, "closePrinter must surface error on already-closed writer for %s", tt.name)
+			secondCloseErr := ClosePrinter(tt.printer)
+			assert.Error(t, secondCloseErr, "ClosePrinter must surface error on already-closed writer for %s", tt.name)
 		})
 	}
 }

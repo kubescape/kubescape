@@ -64,13 +64,7 @@ func closePrinters(printers ...printer.IPrinter) error {
 		if configuredPrinter == nil {
 			continue
 		}
-		if closer, ok := configuredPrinter.(interface{ CloseWriter() error }); ok {
-			closeErr = errors.Join(closeErr, closer.CloseWriter())
-			continue
-		}
-		if closer, ok := configuredPrinter.(interface{ CloseWriter() }); ok {
-			closer.CloseWriter()
-		}
+		closeErr = errors.Join(closeErr, resultshandling.ClosePrinter(configuredPrinter))
 	}
 	return closeErr
 }
