@@ -76,6 +76,7 @@ func TestPullSingleResource_FieldSelectorDoesNotLeakAcrossIterations(t *testing.
 		"",
 		fieldSelector,
 		nil,
+		nil,
 	)
 
 	require.Empty(t, selectorErrs)

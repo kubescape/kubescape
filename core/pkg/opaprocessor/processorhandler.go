@@ -1099,8 +1099,6 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 			*bufPtr = inputRawResources[:0]
 			astEvalBufferPool.Put(bufPtr)
 		}
-		*bufPtr = inputRawResources
-		astEvalBufferPool.Put(bufPtr)
 	}()
 
 	// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data

@@ -67,7 +67,7 @@ func TestPullSingleResource_LabelSelectorPassthrough(t *testing.T) {
 			})
 
 			gvr := &schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-			handler.pullSingleResource(context.Background(), gvr, tt.labelSelector, "", &EmptySelector{}, nil)
+			handler.pullSingleResource(context.Background(), gvr, tt.labelSelector, "", &EmptySelector{}, nil, nil)
 
 			assert.Equal(t, tt.wantLabelRestriction, capturedLabel,
 				"label selector %q must reach listOptions.LabelSelector exactly", tt.labelSelector)

@@ -372,15 +372,7 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 
-		if err := apiLimiter.Wait(ctx); err != nil {
-			failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
-				gvr: qr.GroupVersionResourceTriplet,
-				err: err,
-			}
-			continue
-		}
-
-		result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, scanInfo.LabelSelector, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced)
+		result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, scanInfo.LabelSelector, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced, apiLimiter)
 		for k, v := range classifySelectorFailures(qr.GroupVersionResourceTriplet, selectorErrs) {
 			failedQueries[k] = v
 		}
@@ -632,7 +624,7 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 	if resource.GetNamespace() != "" && ((resolved[0].namespaced != nil && *resolved[0].namespaced) || (resolved[0].namespaced == nil && k8sinterface.IsNamespaceScope(&gvr))) {
 		fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespaceFieldSelectorString(resource.GetNamespace(), FieldSelectorsEqualsOperator))
 	}
-	result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, "", fieldSelectors, globalFieldSelector, resolved[0].namespaced)
+	result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, "", fieldSelectors, globalFieldSelector, resolved[0].namespaced, nil)
 	if len(result) == 0 && len(selectorErrs) > 0 {
 		return nil, fmt.Errorf("failed to get resource %s, reason: %v", getReadableID(resource), selectorErrs[0].err)
 	}
@@ -864,19 +856,9 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 			}
 			defer func() { <-sem }()
 
-			if err := apiLimiter.Wait(ctx); err != nil {
-				mu.Lock()
-				failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
-					gvr: qr.GroupVersionResourceTriplet,
-					err: err,
-				}
-				mu.Unlock()
-				return
-			}
-
 			apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-			result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, labelSelector, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced)
+			result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, labelSelector, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced, apiLimiter)
 			if err := ctx.Err(); err != nil {
 				mu.Lock()
 				failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
@@ -1029,7 +1011,7 @@ func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResourc
 	return partials
 }
 
-func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, resource *schema.GroupVersionResource, labelSelector string, fields string, fieldSelector IFieldSelector, namespaced *bool) ([]unstructured.Unstructured, []selectorFailure) {
+func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, resource *schema.GroupVersionResource, labelSelector string, fields string, fieldSelector IFieldSelector, namespaced *bool, apiLimiter *rate.Limiter) ([]unstructured.Unstructured, []selectorFailure) {
 	var resourceList []unstructured.Unstructured
 	var selectorErrs []selectorFailure
 
@@ -1055,6 +1037,11 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, re
 		lenBefore := len(resourceList)
 
 		if err := pager.New(func(pCtx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+			if apiLimiter != nil {
+				if err := apiLimiter.Wait(pCtx); err != nil {
+					return nil, err
+				}
+			}
 			return clientResource.List(pCtx, opts)
 		}).EachListItem(ctx, listOptions, func(obj runtime.Object) error {
 

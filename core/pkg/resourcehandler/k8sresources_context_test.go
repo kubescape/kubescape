@@ -35,7 +35,7 @@ func TestPullSingleResource_ContextPropagated(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), ctxKey{}, sentinel)
 	gvr := &schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-	handler.pullSingleResource(ctx, gvr, "", "", &EmptySelector{}, nil)
+	handler.pullSingleResource(ctx, gvr, "", "", &EmptySelector{}, nil, nil)
 
 	require.NotNil(t, capturedCtx)
 	assert.Equal(t, sentinel, capturedCtx.Value(ctxKey{}))

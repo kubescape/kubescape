@@ -308,7 +308,7 @@ func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[str
 }
 
 // GenerateValidatingAdmissionPolicyBinding creates a ValidatingAdmissionPolicyBinding manifest
-func GenerateValidatingAdmissionPolicyBinding(name, policyName, apiVersion string) *unstructured.Unstructured {
+func GenerateValidatingAdmissionPolicyBinding(name, policyName, apiVersion, paramRefName string) *unstructured.Unstructured {
 	if apiVersion == "" {
 		apiVersion = "v1"
 	}
@@ -323,6 +323,12 @@ func GenerateValidatingAdmissionPolicyBinding(name, policyName, apiVersion strin
 	spec := map[string]interface{}{
 		"policyName":        policyName,
 		"validationActions": []interface{}{"Deny"},
+	}
+	if paramRefName != "" {
+		spec["paramRef"] = map[string]interface{}{
+			"name":                    paramRefName,
+			"parameterNotFoundAction": "Deny",
+		}
 	}
 	vapb.Object["spec"] = spec
 	return vapb

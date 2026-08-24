@@ -9,7 +9,7 @@ import (
 	"k8s.io/apiserver/pkg/cel/environment"
 )
 
-// newEnv builds the CEL environment used to compile and evaluate VAP
+// NewEnv builds the CEL environment used to compile and evaluate VAP
 // expressions offline.
 //
 // It extends apiserver's base env set rather than hand-picking CEL libraries.
@@ -20,7 +20,7 @@ import (
 // function being present in one place and absent in the other, silently
 // breaking the equivalence guarantee. Always extend the base set; never replace
 // it.
-func newEnv() (*cel.Env, error) {
+func NewEnv() (*cel.Env, error) {
 	// Compatibility version pins the CEL feature/library set to what the
 	// apiserver guarantees, so scan and admission agree on what is available.
 	compatVersion := environment.DefaultCompatibilityVersion()

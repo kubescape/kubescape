@@ -42,7 +42,7 @@ func TestNoStaticMessageIsACELExpression(t *testing.T) {
 // referencing a variable that no longer exists - would only ever be caught
 // here, not by any real evaluation.
 func TestEveryMessageExpressionCompiles(t *testing.T) {
-	env, err := newEnv()
+	env, err := NewEnv()
 	require.NoError(t, err)
 
 	catalog, err := getVAPCatalog()

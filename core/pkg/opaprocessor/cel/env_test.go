@@ -11,7 +11,7 @@ import (
 // env works: a literal expression referencing the declared "object" variable
 // compiles with no error.
 func TestNewEnvCompilesObjectExpression(t *testing.T) {
-	env, err := newEnv()
+	env, err := NewEnv()
 	require.NoError(t, err)
 	require.NotNil(t, env)
 
@@ -24,7 +24,7 @@ func TestNewEnvCompilesObjectExpression(t *testing.T) {
 // the apiserver to the resource's namespace, so a policy referencing it must
 // compile offline rather than fail and get silently skipped.
 func TestNewEnvCompilesNamespaceObjectExpression(t *testing.T) {
-	env, err := newEnv()
+	env, err := NewEnv()
 	require.NoError(t, err)
 	require.NotNil(t, env)
 
@@ -36,7 +36,7 @@ func TestNewEnvCompilesNamespaceObjectExpression(t *testing.T) {
 // is deliberately not declared: a policy referencing it must fail to compile
 // rather than silently produce a wrong verdict.
 func TestNewEnvRejectsAuthorizer(t *testing.T) {
-	env, err := newEnv()
+	env, err := NewEnv()
 	require.NoError(t, err)
 
 	_, issues := env.Compile(`authorizer.path("x").allowed()`)

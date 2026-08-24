@@ -3,8 +3,8 @@ package transpiler
 import (
 	"fmt"
 
-	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/checker"
+	localcel "github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 )
 
 type dummyEstimator struct{}
@@ -19,7 +19,7 @@ func (d dummyEstimator) EstimateCallCost(function, overloadID string, target *ch
 
 // Optimize optimizes a CEL expression string to reduce cost unit evaluations.
 func Optimize(celExpr string) (string, error) {
-	env, err := cel.NewEnv()
+	env, err := localcel.NewEnv()
 	if err != nil {
 		return "", fmt.Errorf("failed to create CEL environment: %w", err)
 	}

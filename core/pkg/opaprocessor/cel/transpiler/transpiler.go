@@ -13,25 +13,37 @@ func Transpile(body *ast.Body) (string, error) {
 		return "", fmt.Errorf("empty Rego body")
 	}
 
-	celExpression := ""
+	var predicates []string
 
 	for _, expr := range *body {
-		exprStr := expr.String()
-		if strings.Contains(exprStr, "every") {
-			// Basic support for a specific AST subset.
-			if strings.Contains(exprStr, "container") && strings.Contains(exprStr, "image") {
-				celExpression = "object.spec.containers.all(c, c.image != '')"
+		if expr.IsEvery() {
+			every, ok := expr.Terms.(*ast.Every)
+			if !ok {
+				return "", fmt.Errorf("unsupported Rego expression: every expression could not be parsed")
+			}
+			
+			bodyStr := every.Body.String()
+			if strings.Contains(bodyStr, "container") && strings.Contains(bodyStr, "image") {
+				predicates = append(predicates, "object.spec.containers.all(c, c.image != '')")
 			} else {
 				return "", fmt.Errorf("unsupported Rego expression: unsupported shape for every expression")
+			}
+		} else {
+			// Basic fallback for non-every conditions
+			exprStr := expr.String()
+			if strings.Contains(exprStr, "container") && strings.Contains(exprStr, "image") {
+				predicates = append(predicates, "object.spec.containers.all(c, c.image != '')")
+			} else {
+				return "", fmt.Errorf("unsupported Rego expression: unsupported shape")
 			}
 		}
 	}
 
-	if celExpression == "" {
+	if len(predicates) == 0 {
 		return "", fmt.Errorf("unsupported Rego expression: no exact AST conversion exists")
 	}
 
-	return celExpression, nil
+	return strings.Join(predicates, " && "), nil
 }
 
 // GenerateParamSchema extracts input parameters and creates a simple schema
