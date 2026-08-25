@@ -139,6 +139,21 @@ func TestExceedsSeverity(t *testing.T) {
 	}
 }
 
+func TestScanNotifyFlagIsRepeatableAndInherited(t *testing.T) {
+	cmd := GetScanCommand(&mocks.MockIKubescape{})
+	flag := cmd.PersistentFlags().Lookup("notify")
+	require.NotNil(t, flag)
+	require.NoError(t, flag.Value.Set("https://one.example/hook?a=b,c"))
+	require.NoError(t, flag.Value.Set("https://two.example/hook"))
+	assert.Equal(t, `["https://one.example/hook?a=b,c",https://two.example/hook]`, flag.Value.String())
+
+	for _, name := range []string{"framework", "control", "workload"} {
+		sub, _, err := cmd.Find([]string{name})
+		require.NoError(t, err)
+		require.NotNil(t, sub.InheritedFlags().Lookup("notify"), "%s should inherit --notify", name)
+	}
+}
+
 func Test_enforceSeverityThresholds(t *testing.T) {
 	testCases := []struct {
 		Description    string

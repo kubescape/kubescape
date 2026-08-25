@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/notification"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	printerv1 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v1"
 	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
@@ -311,6 +312,26 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 		}
 		if err := closePrinter(p); err != nil {
 			printErr = errors.Join(printErr, fmt.Errorf("output printer %T close: %w", p, err))
+		}
+	}
+
+	// Deliver the same summary seen by output printers. Delivery is deliberately
+	// best-effort: a notification endpoint must never alter scan results or exit
+	// status.
+	if len(scanInfo.NotifyURLs) > 0 && rh.ScanData != nil && rh.ScanData.Report != nil {
+		payload, err := json.Marshal(rh.ScanData.Report.SummaryDetails)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("Failed to marshal scan summary for notification", helpers.Error(err))
+		} else {
+			client := notification.NewClient(notification.DefaultTimeout)
+			for _, endpoint := range scanInfo.NotifyURLs {
+				requestCtx, cancel := context.WithTimeout(ctx, notification.DefaultTimeout)
+				err := notification.Send(requestCtx, client, endpoint, payload)
+				cancel()
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("Failed to deliver scan notification", helpers.String("target", notification.SafeTarget(endpoint)), helpers.Error(err))
+				}
+			}
 		}
 	}
 
