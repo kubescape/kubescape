@@ -93,6 +93,100 @@ func TestAssistedRemediationPathsToString(t *testing.T) {
 	assert.Equal(t, expectedPaths, actualPaths)
 }
 
+func TestAssistedRemediationPathsToString_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		control  *resourcesresults.ResourceAssociatedControl
+		expected []string
+	}{
+		{
+			name:     "empty control with no rules and no paths",
+			control:  &resourcesresults.ResourceAssociatedControl{},
+			expected: nil,
+		},
+		{
+			name: "rules with empty path fields",
+			control: &resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Paths: []armotypes.PosturePaths{
+							{},
+							{FixPath: armotypes.FixPath{Path: "", Value: "value"}},
+						},
+					},
+				},
+			},
+			expected: nil,
+		},
+		{
+			name: "duplicate paths across FailedPath and ReviewPath are deduplicated",
+			control: &resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Paths: []armotypes.PosturePaths{
+							{ReviewPath: "shared-path"},
+							{FailedPath: "shared-path"},
+						},
+					},
+				},
+			},
+			expected: []string{"shared-path"},
+		},
+		{
+			name: "mixed valid and empty paths within the same rule",
+			control: &resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Paths: []armotypes.PosturePaths{
+							{},
+							{FailedPath: "valid-failed"},
+							{FixPath: armotypes.FixPath{Path: "", Value: "value"}},
+							{ReviewPath: "valid-review"},
+						},
+					},
+				},
+			},
+			expected: []string{"valid-review", "valid-failed"},
+		},
+		{
+			name: "all four path types present simultaneously",
+			control: &resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Paths: []armotypes.PosturePaths{
+							{FixPath: armotypes.FixPath{Path: "fix-path", Value: "fix-value"}},
+							{DeletePath: "delete-path"},
+							{ReviewPath: "review-path"},
+							{FailedPath: "failed-path"},
+						},
+					},
+				},
+			},
+			expected: []string{"fix-path=fix-value", "delete-path", "review-path", "failed-path"},
+		},
+		{
+			name: "nil and missing Paths slices",
+			control: &resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{Name: "rule-with-nil-paths"},
+					{
+						Name:  "rule-with-nil-paths-explicit",
+						Paths: nil,
+					},
+				},
+			},
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := AssistedRemediationPathsToString(tt.control)
+			assert.Equal(t, tt.expected, actual)
+		})
+	}
+}
+
 func TestReviewPathsToString(t *testing.T) {
 	// Create a test case with empty ResourceAssociatedRules
 	emptyControl := &resourcesresults.ResourceAssociatedControl{
