@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kubescape/kubescape/v4/cmd/shared"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
@@ -226,6 +227,49 @@ func TestContractAndCLIGateFloorsResolveMonotonically(t *testing.T) {
 			assert.Equal(t, tt.wantCompliance, scanInfo.ComplianceThreshold)
 			assert.Equal(t, tt.wantCoverage, scanInfo.FailCoverageThreshold)
 			assert.Equal(t, tt.wantDegraded, scanInfo.FailOnDegradedConfig)
+		})
+	}
+}
+
+func TestContractDoesNotMaskInvalidExplicitCLIGates(t *testing.T) {
+	tests := []struct {
+		name    string
+		failure string
+		flags   []string
+		wantErr error
+	}{
+		{
+			name:    "invalid severity",
+			failure: "severityAtLeast: high",
+			flags:   []string{"--severity-threshold", "hihg"},
+			wantErr: shared.ErrUnknownSeverity,
+		},
+		{
+			name:    "invalid compliance threshold",
+			failure: "complianceBelow: 80",
+			flags:   []string{"--compliance-threshold", "-1"},
+			wantErr: shared.ErrBadThreshold,
+		},
+		{
+			name:    "invalid coverage threshold",
+			failure: "coverageBelow: 90",
+			flags:   []string{"--fail-coverage-below", "101"},
+			wantErr: shared.ErrBadThreshold,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := fmt.Sprintf(`
+      policy:
+        frameworks: [nsa]
+      failure:
+        %s`, tt.failure)
+			args := append([]string{"."}, tt.flags...)
+			scanInfo, _, err := executeCapturedScan(t, body, args...)
+
+			assert.Nil(t, scanInfo)
+			require.ErrorIs(t, err, tt.wantErr)
 		})
 	}
 }

@@ -40,10 +40,33 @@ func loadAndApplyScanContract(cmd *cobra.Command, scanInfo *cautils.ScanInfo, pa
 	if err := validateContractRunnerConflicts(selected, scanInfo); err != nil {
 		return nil, err
 	}
+	if err := validateExplicitRunnerGateFloors(cmd, scanInfo); err != nil {
+		return nil, err
+	}
 
 	applyContractOrdinarySettings(cmd, scanInfo, selected.Contract)
 	applyContractGateFloors(cmd, scanInfo, selected.Contract)
 	return selected, nil
+}
+
+// validateExplicitRunnerGateFloors preserves the existing CLI validation
+// boundary when a contract is present. Contract floors are allowed to tighten
+// valid runner values, but must not replace malformed values before the normal
+// scan validation gets a chance to reject them.
+func validateExplicitRunnerGateFloors(cmd *cobra.Command, scanInfo *cautils.ScanInfo) error {
+	if commandFlagChanged(cmd, "severity-threshold") && scanInfo.FailThresholdSeverity != "" {
+		if err := shared.ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
+			return err
+		}
+	}
+
+	if commandFlagChanged(cmd, "compliance-threshold") || commandFlagChanged(cmd, "fail-coverage-below") {
+		if err := shared.ValidateThresholds(scanInfo); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func validateContractRunnerConflicts(selected *contractv1alpha1.SelectedContract, scanInfo *cautils.ScanInfo) error {
