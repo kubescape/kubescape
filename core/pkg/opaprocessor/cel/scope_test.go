@@ -52,7 +52,7 @@ func TestVAPAppliesTo(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, v.appliesTo(obj(tc.apiVersion, tc.kind)))
+			assert.Equal(t, tc.want, v.AppliesTo(obj(tc.apiVersion, tc.kind)))
 		})
 	}
 }
@@ -90,7 +90,7 @@ func TestVAPAppliesToCRDPlural(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			v := vapWithConstraints(rule([]string{"agentsubstrate.google.com"}, []string{"v1"}, tc.resources))
-			assert.Equal(t, tc.want, v.appliesTo(tc.obj))
+			assert.Equal(t, tc.want, v.AppliesTo(tc.obj))
 		})
 	}
 
@@ -99,30 +99,30 @@ func TestVAPAppliesToCRDPlural(t *testing.T) {
 			ResourceRules:        []admissionregistrationv1.NamedRuleWithOperations{rule([]string{"*"}, []string{"*"}, []string{"*"})},
 			ExcludeResourceRules: []admissionregistrationv1.NamedRuleWithOperations{rule([]string{"agentsubstrate.google.com"}, []string{"v1"}, []string{"worker-pools"})},
 		}}
-		assert.False(t, v.appliesTo(workerPool()))
-		assert.True(t, v.appliesTo(obj(apiVersion, "ActorTemplate")))
+		assert.False(t, v.AppliesTo(workerPool()))
+		assert.True(t, v.AppliesTo(obj(apiVersion, "ActorTemplate")))
 	})
 
 	t.Run("annotations that are not a string map fall back to the guess", func(t *testing.T) {
 		o := workerPool()
 		o["metadata"].(map[string]any)["annotations"] = map[string]any{resourcePluralAnnotation: 42}
 		v := vapWithConstraints(rule([]string{"agentsubstrate.google.com"}, []string{"v1"}, []string{"workerpools"}))
-		assert.True(t, v.appliesTo(o))
+		assert.True(t, v.AppliesTo(o))
 	})
 }
 
 func TestVAPAppliesToWildcards(t *testing.T) {
 	any := vapWithConstraints(rule([]string{"*"}, []string{"*"}, []string{"*"}))
-	assert.True(t, any.appliesTo(obj("v1", "Pod")))
-	assert.True(t, any.appliesTo(obj("apps/v1", "Deployment")))
-	assert.True(t, any.appliesTo(obj("networking.k8s.io/v1", "NetworkPolicy")))
+	assert.True(t, any.AppliesTo(obj("v1", "Pod")))
+	assert.True(t, any.AppliesTo(obj("apps/v1", "Deployment")))
+	assert.True(t, any.AppliesTo(obj("networking.k8s.io/v1", "NetworkPolicy")))
 }
 
 func TestVAPAppliesToNoConstraintsEvaluates(t *testing.T) {
 	// Missing matchConstraints is a malformed-policy edge; fall back to
 	// evaluating rather than silently skipping everything.
 	v := &VAP{}
-	assert.True(t, v.appliesTo(obj("v1", "Pod")))
+	assert.True(t, v.AppliesTo(obj("v1", "Pod")))
 }
 
 // canonicalKinds maps a matchConstraints resource to the Kind the scanner feeds
@@ -183,7 +183,7 @@ func TestVAPAppliesToCoversEveryBundleKind(t *testing.T) {
 						}
 						kind, ok := canonicalKinds[res]
 						require.Truef(t, ok, "policy %q constrains resource %q with no canonical Kind in the test; add it to canonicalKinds and confirm UnsafeGuessKindToResource maps that Kind back to %q", name, res, res)
-						assert.Truef(t, vap.appliesTo(obj(apiVersion, kind)),
+						assert.Truef(t, vap.AppliesTo(obj(apiVersion, kind)),
 							"policy %q constrains %q but appliesTo rejects a %s %s; annotate scanned %s objects with %s=%q if the guess cannot reach that plural", name, res, apiVersion, kind, kind, resourcePluralAnnotation, res)
 					}
 				}
@@ -206,8 +206,8 @@ func TestVAPAppliesToExcludeRules(t *testing.T) {
 		ResourceRules:        []admissionregistrationv1.NamedRuleWithOperations{rule([]string{""}, []string{"v1"}, []string{"pods", "configmaps"})},
 		ExcludeResourceRules: []admissionregistrationv1.NamedRuleWithOperations{rule([]string{""}, []string{"v1"}, []string{"configmaps"})},
 	}}
-	assert.True(t, v.appliesTo(obj("v1", "Pod")))
-	assert.False(t, v.appliesTo(obj("v1", "ConfigMap")), "excluded resource must not apply")
+	assert.True(t, v.AppliesTo(obj("v1", "Pod")))
+	assert.False(t, v.AppliesTo(obj("v1", "ConfigMap")), "excluded resource must not apply")
 }
 
 // withOps returns a copy of the rule constrained to the given operations.
@@ -238,7 +238,7 @@ func TestVAPAppliesToOperations(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			v := vapWithConstraints(withOps(pods, tc.ops...))
-			assert.Equal(t, tc.want, v.appliesTo(obj("v1", "Pod")))
+			assert.Equal(t, tc.want, v.AppliesTo(obj("v1", "Pod")))
 		})
 	}
 
@@ -247,7 +247,7 @@ func TestVAPAppliesToOperations(t *testing.T) {
 			ResourceRules:        []admissionregistrationv1.NamedRuleWithOperations{withOps(pods, admissionregistrationv1.Create)},
 			ExcludeResourceRules: []admissionregistrationv1.NamedRuleWithOperations{withOps(pods, admissionregistrationv1.Update)},
 		}}
-		assert.True(t, v.appliesTo(obj("v1", "Pod")), "the exclusion only covers UPDATE, so the CREATE we model is still matched")
+		assert.True(t, v.AppliesTo(obj("v1", "Pod")), "the exclusion only covers UPDATE, so the CREATE we model is still matched")
 	})
 }
 
@@ -305,7 +305,7 @@ func TestVAPAppliesToScope(t *testing.T) {
 			if tc.namespace != "" {
 				o = inNamespace(o, tc.namespace)
 			}
-			assert.Equal(t, tc.want, vapWithConstraints(r).appliesTo(o))
+			assert.Equal(t, tc.want, vapWithConstraints(r).AppliesTo(o))
 		})
 	}
 
@@ -314,7 +314,7 @@ func TestVAPAppliesToScope(t *testing.T) {
 			ResourceRules:        []admissionregistrationv1.NamedRuleWithOperations{pods},
 			ExcludeResourceRules: []admissionregistrationv1.NamedRuleWithOperations{withScope(pods, admissionregistrationv1.ClusterScope)},
 		}}
-		assert.True(t, v.appliesTo(inNamespace(obj("v1", "Pod"), "prod")),
+		assert.True(t, v.AppliesTo(inNamespace(obj("v1", "Pod"), "prod")),
 			"the exclusion only covers cluster-scoped objects, so a namespaced one is still matched")
 	})
 }
@@ -384,9 +384,9 @@ func TestVAPAppliesToObjectSelector(t *testing.T) {
 		v := vapWithConstraints(pods)
 		v.matchConstraints.ObjectSelector = &metav1.LabelSelector{MatchLabels: map[string]string{"app": "web"}}
 
-		assert.True(t, v.appliesTo(labelled(map[string]any{"app": "web"})))
-		assert.False(t, v.appliesTo(labelled(map[string]any{"app": "db"})), "a non-matching label must put the object out of scope")
-		assert.False(t, v.appliesTo(obj("v1", "Pod")), "an unlabelled object cannot satisfy matchLabels")
+		assert.True(t, v.AppliesTo(labelled(map[string]any{"app": "web"})))
+		assert.False(t, v.AppliesTo(labelled(map[string]any{"app": "db"})), "a non-matching label must put the object out of scope")
+		assert.False(t, v.AppliesTo(obj("v1", "Pod")), "an unlabelled object cannot satisfy matchLabels")
 	})
 
 	t.Run("matchExpressions are honored", func(t *testing.T) {
@@ -395,19 +395,19 @@ func TestVAPAppliesToObjectSelector(t *testing.T) {
 			MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "skip", Operator: metav1.LabelSelectorOpDoesNotExist}},
 		}
 
-		assert.True(t, v.appliesTo(obj("v1", "Pod")))
-		assert.False(t, v.appliesTo(labelled(map[string]any{"skip": "true"})), "an object carrying the exempting label must be out of scope")
+		assert.True(t, v.AppliesTo(obj("v1", "Pod")))
+		assert.False(t, v.AppliesTo(labelled(map[string]any{"skip": "true"})), "an object carrying the exempting label must be out of scope")
 	})
 
 	t.Run("nil and empty selectors match everything", func(t *testing.T) {
 		// The nil case is the one that bites: LabelSelectorAsSelector maps nil to
 		// "match nothing", the opposite of what an omitted selector means.
 		v := vapWithConstraints(pods)
-		assert.True(t, v.appliesTo(obj("v1", "Pod")), "an omitted objectSelector must not narrow anything")
+		assert.True(t, v.AppliesTo(obj("v1", "Pod")), "an omitted objectSelector must not narrow anything")
 
 		v.matchConstraints.ObjectSelector = &metav1.LabelSelector{}
-		assert.True(t, v.appliesTo(obj("v1", "Pod")))
-		assert.True(t, v.appliesTo(labelled(map[string]any{"app": "web"})))
+		assert.True(t, v.AppliesTo(obj("v1", "Pod")))
+		assert.True(t, v.AppliesTo(labelled(map[string]any{"app": "web"})))
 	})
 }
 
@@ -429,13 +429,13 @@ func TestVAPAppliesToResourceNames(t *testing.T) {
 
 	t.Run("only the named resource is in scope", func(t *testing.T) {
 		v := vapWithConstraints(named("coredns"))
-		assert.True(t, v.appliesTo(podNamed("coredns")))
-		assert.False(t, v.appliesTo(podNamed("nginx")), "a rule naming one pod must not pull in every pod")
+		assert.True(t, v.AppliesTo(podNamed("coredns")))
+		assert.False(t, v.AppliesTo(podNamed("nginx")), "a rule naming one pod must not pull in every pod")
 	})
 
 	t.Run("an empty resourceNames list matches every name", func(t *testing.T) {
 		v := vapWithConstraints(named())
-		assert.True(t, v.appliesTo(podNamed("anything")))
+		assert.True(t, v.AppliesTo(podNamed("anything")))
 	})
 
 	t.Run("a named exclusion exempts only that resource", func(t *testing.T) {
@@ -443,15 +443,15 @@ func TestVAPAppliesToResourceNames(t *testing.T) {
 			ResourceRules:        []admissionregistrationv1.NamedRuleWithOperations{named()},
 			ExcludeResourceRules: []admissionregistrationv1.NamedRuleWithOperations{named("kube-proxy")},
 		}}
-		assert.False(t, v.appliesTo(podNamed("kube-proxy")))
-		assert.True(t, v.appliesTo(podNamed("nginx")))
+		assert.False(t, v.AppliesTo(podNamed("kube-proxy")))
+		assert.True(t, v.AppliesTo(podNamed("nginx")))
 	})
 
 	t.Run("a generateName-only manifest does not match a named rule", func(t *testing.T) {
 		// Admission sees no name either at that point, so it would not match.
 		o := obj("v1", "Pod")
 		delete(o["metadata"].(map[string]any), "name")
-		assert.False(t, vapWithConstraints(named("coredns")).appliesTo(o))
+		assert.False(t, vapWithConstraints(named("coredns")).AppliesTo(o))
 	})
 }
 
@@ -477,7 +477,7 @@ func TestVAPAppliesToKindPluralCandidates(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			v := vapWithConstraints(rule([]string{"agents.x-k8s.io"}, []string{"v1alpha1"}, []string{tc.resource}))
-			assert.Equal(t, tc.want, v.appliesTo(obj("agents.x-k8s.io/v1alpha1", tc.kind)))
+			assert.Equal(t, tc.want, v.AppliesTo(obj("agents.x-k8s.io/v1alpha1", tc.kind)))
 		})
 	}
 }

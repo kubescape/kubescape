@@ -30,7 +30,7 @@ import (
 // genuinely irrelevant offline: Equivalent matching only widens a rule across
 // API conversions, and a scan never converts — the object is matched at the
 // exact group/version it was scanned at.
-func (v *VAP) appliesTo(obj map[string]any) bool {
+func (v *VAP) AppliesTo(obj map[string]any) bool {
 	if v.matchConstraints == nil || len(v.matchConstraints.ResourceRules) == 0 {
 		return true // no scoping info: evaluate (a malformed-policy edge)
 	}
