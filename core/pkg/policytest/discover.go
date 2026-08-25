@@ -1,12 +1,12 @@
 package policytest
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 
+	"github.com/kubescape/kubescape/v4/core/pkg/ruledir"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
 
@@ -28,94 +28,43 @@ type RuleUnderTest struct {
 }
 
 // DiscoverPath resolves path to the rules under test. If path is itself a
-// rule directory (contains raw.rego and rule.metadata.json), it is returned
-// as the sole result. Otherwise Discover is used to find rule directories
-// among path's immediate children.
+// rule directory, it is returned as the sole result. Otherwise Discover is
+// used to find rule directories among path's immediate children.
 func DiscoverPath(path string) ([]RuleUnderTest, error) {
-	if rule, ok, err := discoverRuleDir(path); err != nil {
+	dirs, err := ruledir.DiscoverPath(path)
+	if err != nil {
 		return nil, err
-	} else if ok {
-		return []RuleUnderTest{rule}, nil
 	}
-	return Discover(path)
+	return withCases(dirs)
 }
 
-// Discover walks root looking for rule directories: any immediate child
-// directory that contains both raw.rego and rule.metadata.json. It does not
-// require a test/ subdirectory to exist, but a rule with no cases produces
-// no CaseResults when run.
+// Discover walks root looking for rule directories among its immediate
+// children. It does not require a test/ subdirectory to exist, but a rule with
+// no cases produces no CaseResults when run.
 func Discover(root string) ([]RuleUnderTest, error) {
-	entries, err := os.ReadDir(root)
+	dirs, err := ruledir.Discover(root)
 	if err != nil {
-		return nil, fmt.Errorf("read %q: %w", root, err)
+		return nil, err
 	}
+	return withCases(dirs)
+}
 
-	var rules []RuleUnderTest
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		rule, ok, err := discoverRuleDir(filepath.Join(root, e.Name()))
+// withCases attaches the fixtures under each rule's test/ subdirectory.
+func withCases(dirs []ruledir.Rule) ([]RuleUnderTest, error) {
+	rules := make([]RuleUnderTest, 0, len(dirs))
+	for _, dir := range dirs {
+		cases, err := discoverCases(filepath.Join(dir.Dir, "test"))
 		if err != nil {
-			return nil, fmt.Errorf("rule %q: %w", e.Name(), err)
+			return nil, fmt.Errorf("rule %q: %w", dir.Name, err)
 		}
-		if ok {
-			rules = append(rules, rule)
-		}
+		rules = append(rules, RuleUnderTest{
+			Name:  dir.Name,
+			Dir:   dir.Dir,
+			Rule:  dir.Rule,
+			Cases: cases,
+		})
 	}
-
-	sort.Slice(rules, func(i, j int) bool { return rules[i].Name < rules[j].Name })
 	return rules, nil
-}
-
-// discoverRuleDir loads dir as a rule directory. ok is false, with no error,
-// when dir does not contain both raw.rego and rule.metadata.json.
-func discoverRuleDir(dir string) (RuleUnderTest, bool, error) {
-	regoPath := filepath.Join(dir, "raw.rego")
-	metaPath := filepath.Join(dir, "rule.metadata.json")
-	if _, err := os.Stat(regoPath); err != nil {
-		return RuleUnderTest{}, false, nil
-	}
-	if _, err := os.Stat(metaPath); err != nil {
-		return RuleUnderTest{}, false, nil
-	}
-
-	rule, err := loadRule(regoPath, metaPath)
-	if err != nil {
-		return RuleUnderTest{}, false, err
-	}
-
-	cases, err := discoverCases(filepath.Join(dir, "test"))
-	if err != nil {
-		return RuleUnderTest{}, false, err
-	}
-
-	return RuleUnderTest{
-		Name:  filepath.Base(dir),
-		Dir:   dir,
-		Rule:  rule,
-		Cases: cases,
-	}, true, nil
-}
-
-func loadRule(regoPath, metaPath string) (reporthandling.PolicyRule, error) {
-	var rule reporthandling.PolicyRule
-
-	metaRaw, err := os.ReadFile(metaPath)
-	if err != nil {
-		return rule, fmt.Errorf("read rule.metadata.json: %w", err)
-	}
-	if err := json.Unmarshal(metaRaw, &rule); err != nil {
-		return rule, fmt.Errorf("parse rule.metadata.json: %w", err)
-	}
-
-	regoRaw, err := os.ReadFile(regoPath)
-	if err != nil {
-		return rule, fmt.Errorf("read raw.rego: %w", err)
-	}
-	rule.Rule = string(regoRaw)
-
-	return rule, nil
 }
 
 func discoverCases(testDir string) ([]Case, error) {
