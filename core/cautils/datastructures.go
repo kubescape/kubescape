@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
 	"github.com/kubescape/opa-utils/reporthandling"
 	apis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -122,6 +123,15 @@ type OPASessionObj struct {
 	IncludeControls       string                      // Comma-separated control IDs to include (all others skipped)
 	VAPPolicies           []unstructured.Unstructured // ValidatingAdmissionPolicy resources collected from the cluster
 	VAPBindings           []unstructured.Unstructured // ValidatingAdmissionPolicyBinding resources collected from the cluster
+
+	// VAPCoverage refines VAPPolicies/VAPBindings' coarse "is any binding
+	// present" signal (see reportsummary.ControlSummary.VAPEnforcement) with
+	// per-resource binding-scope matching: a control's VAP can be Bound
+	// while its binding's namespaceSelector/objectSelector does not actually
+	// cover some or all of the resources that failed it. Populated by
+	// resultshandling after VAPPolicies/VAPBindings are enriched into the
+	// report, keyed by control ID.
+	VAPCoverage map[string]*vapreconcile.ControlCoverage
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *OPASessionObj {

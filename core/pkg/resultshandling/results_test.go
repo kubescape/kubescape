@@ -28,6 +28,7 @@ import (
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 type DummyReporter struct{}
@@ -974,6 +975,92 @@ func TestHandleResults_RestoresReportAfterSeverityFilter(t *testing.T) {
 	// any caller reading rh.ScanData after HandleResults sees a consistent report.
 	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 3, "Controls must be unfiltered after HandleResults")
 	assert.Len(t, rh.ScanData.ResourcesResult["resource-1"].AssociatedControls, 2, "AssociatedControls must be unfiltered after HandleResults")
+}
+
+// TestHandleResults_ComputesVAPCoverage verifies the vapreconcile.BuildCoverage
+// wiring added alongside the existing BuildIndex/EnrichSummary call: a
+// control bound to a policy whose only binding is scoped to a namespace the
+// failing resource is not in must come out Bound but not FullyCovered.
+func TestHandleResults_ComputesVAPCoverage(t *testing.T) {
+	vap := unstructured.Unstructured{}
+	vap.SetName("policy-a")
+	vap.SetLabels(map[string]string{"controlId": "C-scoped"})
+
+	binding := unstructured.Unstructured{
+		Object: map[string]any{
+			"spec": map[string]any{
+				"policyName": "policy-a",
+				"matchResources": map[string]any{
+					"namespaceSelector": map[string]any{
+						"matchLabels": map[string]any{"env": "prod"},
+					},
+				},
+			},
+		},
+	}
+	binding.SetName("binding-a")
+
+	failingResource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "app",
+			"namespace": "dev",
+		},
+	})
+	devNamespace := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]any{
+			"name":   "dev",
+			"labels": map[string]any{"env": "dev"},
+		},
+	})
+	resourceID := failingResource.GetID()
+
+	sessionObj := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: map[string]reportsummary.ControlSummary{
+					"C-scoped": {ControlID: "C-scoped", ScoreFactor: 7},
+				},
+			},
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			resourceID: {
+				ResourceID: resourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{ControlID: "C-scoped", Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}},
+				},
+			},
+		},
+		AllResources: map[string]workloadinterface.IMetadata{
+			resourceID:           failingResource,
+			devNamespace.GetID(): devNamespace,
+		},
+		VAPPolicies: []unstructured.Unstructured{vap},
+		VAPBindings: []unstructured.Unstructured{binding},
+	}
+
+	rh := &ResultsHandler{
+		ScanData:  sessionObj,
+		UiPrinter: &SpyPrinter{},
+	}
+
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{})
+	require.NoError(t, err)
+
+	require.Contains(t, rh.ScanData.VAPCoverage, "C-scoped")
+	coverage := rh.ScanData.VAPCoverage["C-scoped"]
+	assert.True(t, coverage.Bound, "the binding names the control's policy, so it must be Bound")
+	assert.False(t, coverage.FullyCovered(), "the binding's namespaceSelector only matches env=prod, so the dev-namespace failure must not be covered")
+	require.Len(t, coverage.Resources, 1)
+	assert.False(t, coverage.Resources[0].Covered)
+	assert.Contains(t, coverage.Resources[0].Reason, "namespaceSelector")
+
+	// The existing coarse signal must still be populated exactly as before.
+	require.NotNil(t, rh.ScanData.Report.SummaryDetails.Controls["C-scoped"].VAPEnforcement)
+	assert.True(t, rh.ScanData.Report.SummaryDetails.Controls["C-scoped"].VAPEnforcement.Bound)
 }
 
 func makeFilteredSession() *cautils.OPASessionObj {
