@@ -1465,8 +1465,19 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 		return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 	}
 
-	binding, _ := opap.celBindingFor(vap.PolicyName)
-	paramRef := celParamRefForBinding(binding)
+	bindings := opap.celBindingsFor(vap.PolicyName)
+	var paramRef *admissionregistrationv1.ParamRef
+	switch len(bindings) {
+	case 0:
+		// no live binding: fall back to the bundled ControlConfiguration
+	case 1:
+		if celBindingHasMatchResources(bindings[0]) {
+			return nil, celOutcome{}, fmt.Errorf("rule: '%s', binding for policy %q declares spec.matchResources, which the offline engine does not evaluate yet; refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName)
+		}
+		paramRef = celParamRefForBinding(bindings[0])
+	default:
+		return nil, celOutcome{}, fmt.Errorf("rule: '%s', policy %q is matched by %d live bindings; the offline engine does not yet select per-binding paramRefs, so refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName, len(bindings))
+	}
 	findParam := opap.celParamObjectFinder()
 
 	var responses []reporthandling.RuleResponse
@@ -1727,24 +1738,38 @@ func celResourceNamespace(obj map[string]any) string {
 	return ""
 }
 
-// celBindingFor returns the first live ValidatingAdmissionPolicyBinding that
-// names the policy, or a zero value and false when none is present. Multiple
-// bindings are not yet evaluated separately; the first is used as the paramRef
-// source.
-func (opap *OPAProcessor) celBindingFor(policyName string) (metav1unstructured.Unstructured, bool) {
+// celBindingsFor returns all live ValidatingAdmissionPolicyBindings that name
+// the policy. The caller decides how to handle multiple or scoped bindings.
+func (opap *OPAProcessor) celBindingsFor(policyName string) []metav1unstructured.Unstructured {
 	if opap.OPASessionObj == nil {
-		return metav1unstructured.Unstructured{}, false
+		return nil
 	}
+	var matches []metav1unstructured.Unstructured
 	for _, b := range opap.VAPBindings {
 		if b.Object == nil {
 			continue
 		}
 		pn, _, _ := metav1unstructured.NestedString(b.Object, "spec", "policyName")
 		if pn == policyName {
-			return b, true
+			matches = append(matches, b)
 		}
 	}
-	return metav1unstructured.Unstructured{}, false
+	return matches
+}
+
+// celBindingHasMatchResources reports whether a binding narrows the objects it
+// governs. The offline engine cannot evaluate that scoping yet, so a binding
+// that carries matchResources cannot safely supply its paramRef.
+func celBindingHasMatchResources(binding metav1unstructured.Unstructured) bool {
+	if binding.Object == nil {
+		return false
+	}
+	spec, ok := binding.Object["spec"].(map[string]any)
+	if !ok {
+		return false
+	}
+	mr, ok := spec["matchResources"].(map[string]any)
+	return ok && len(mr) > 0
 }
 
 // celParamRefForBinding extracts the binding's spec.paramRef, if any. Missing
