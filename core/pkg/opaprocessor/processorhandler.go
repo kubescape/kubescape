@@ -1796,20 +1796,20 @@ func celParamRefForBinding(binding metav1unstructured.Unstructured) *admissionre
 	return ref
 }
 
-// celParamObjectFinder builds an index of all scanned objects by kind/namespace/name
-// and returns a lookup that ResolveParamObject can use to find a binding's
-// parameter object in the offline input.
-func (opap *OPAProcessor) celParamObjectFinder() func(kind, namespace, name string) (map[string]any, bool) {
+// celParamObjectFinder builds an index of all scanned objects by
+// apiVersion/kind/namespace/name and returns a lookup that ResolveParamObject
+// can use to find a binding's parameter object in the offline input.
+func (opap *OPAProcessor) celParamObjectFinder() func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
 	if opap.OPASessionObj == nil {
-		return func(kind, namespace, name string) (map[string]any, bool) { return nil, false }
+		return func(apiVersion, kind, namespace, name string) (map[string]any, bool) { return nil, false }
 	}
 	idx := make(map[string]map[string]any, len(opap.AllResources))
 	for _, res := range opap.AllResources {
-		key := res.GetKind() + "/" + res.GetNamespace() + "/" + res.GetName()
+		key := res.GetApiVersion() + "/" + res.GetKind() + "/" + res.GetNamespace() + "/" + res.GetName()
 		idx[key] = res.GetObject()
 	}
-	return func(kind, namespace, name string) (map[string]any, bool) {
-		obj, ok := idx[kind+"/"+namespace+"/"+name]
+	return func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
+		obj, ok := idx[apiVersion+"/"+kind+"/"+namespace+"/"+name]
 		return obj, ok
 	}
 }

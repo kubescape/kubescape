@@ -453,8 +453,8 @@ func TestResolveParamObjectBinding(t *testing.T) {
 		},
 		"settings": map[string]any{"insecureCapabilities": []any{"ADD"}},
 	}
-	findParam := func(kind, namespace, name string) (map[string]any, bool) {
-		if kind == vap.paramKind.Kind && namespace == "default" && name == "custom" {
+	findParam := func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
+		if apiVersion == vap.paramKind.APIVersion && kind == vap.paramKind.Kind && namespace == "default" && name == "custom" {
 			return custom, true
 		}
 		return nil, false

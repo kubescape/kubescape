@@ -359,7 +359,7 @@ func newVAP(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *VAP {
 // binding that names a specific param object is resolved from the scanned input
 // via findParam. If the object is not found, ErrParamNotFound is returned so
 // the caller can honor parameterNotFoundAction.
-func ResolveParamObject(vap *VAP, paramRef *admissionregistrationv1.ParamRef, resourceNamespace string, findParam func(kind, namespace, name string) (map[string]any, bool)) (any, error) {
+func ResolveParamObject(vap *VAP, paramRef *admissionregistrationv1.ParamRef, resourceNamespace string, findParam func(apiVersion, kind, namespace, name string) (map[string]any, bool)) (any, error) {
 	if vap.paramKind == nil {
 		return nil, nil
 	}
@@ -370,7 +370,7 @@ func ResolveParamObject(vap *VAP, paramRef *admissionregistrationv1.ParamRef, re
 	if ns == "" {
 		ns = resourceNamespace
 	}
-	obj, ok := findParam(vap.paramKind.Kind, ns, paramRef.Name)
+	obj, ok := findParam(vap.paramKind.APIVersion, vap.paramKind.Kind, ns, paramRef.Name)
 	if !ok {
 		return nil, ErrParamNotFound
 	}
