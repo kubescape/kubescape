@@ -236,9 +236,11 @@ func (opap *OPAProcessor) SetIncrementalCache(cache *scancache.Store) {
 // --skip-controls and --include-controls filters. Both the eager and the
 // streaming entry point build AllPolicies from it, so the same cluster is
 // scanned against the same control set whichever path a scan takes.
-func (opap *OPAProcessor) effectiveExcludedRules() map[string]bool {
+// It returns a hard error when the filter leaves nothing to scan, preventing
+// a 0-control, exit-0 result that would silently pass a CI gate.
+func (opap *OPAProcessor) effectiveExcludedRules() (map[string]bool, error) {
 	if opap.SkipControls == "" && opap.IncludeControls == "" {
-		return opap.ExcludedRules
+		return opap.ExcludedRules, nil
 	}
 	return buildControlExcludedRules(opap.ExcludedRules, opap.Policies, split(opap.SkipControls), split(opap.IncludeControls))
 }
@@ -246,7 +248,11 @@ func (opap *OPAProcessor) effectiveExcludedRules() map[string]bool {
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
 	scanningScope := cautils.GetScanningScope(opap.Metadata.ContextMetadata)
 
-	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.effectiveExcludedRules(), scanningScope)
+	excludedRules, err := opap.effectiveExcludedRules()
+	if err != nil {
+		return err
+	}
+	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, excludedRules, scanningScope)
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
@@ -300,7 +306,11 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-
 	opap.loggerStartScanning()
 	defer opap.loggerDoneScanning()
 
-	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.effectiveExcludedRules(), cautils.GetScanningScope(opap.Metadata.ContextMetadata))
+	excludedRules, err := opap.effectiveExcludedRules()
+	if err != nil {
+		return err
+	}
+	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, excludedRules, cautils.GetScanningScope(opap.Metadata.ContextMetadata))
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
 	scopeControlIDs, wholeClusterControlIDs := splitWholeClusterControls(opap.AllPolicies, sortedControlIDs(opap.AllPolicies))
