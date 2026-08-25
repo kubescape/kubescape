@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
@@ -106,13 +107,13 @@ func TestIaCScanControlsReport_ReturnsPostureReport(t *testing.T) {
 		t.Fatalf("failed to write fixture: %v", err)
 	}
 
-	reportBytes, err := ksServer.runIaCScanControlsReport(context.Background(), fixture, []string{"C-0017"})
+	outcome, err := ksServer.runIaCScanControlsReport(context.Background(), fixture, []string{"C-0017"})
 	if err != nil {
 		t.Fatalf("unexpected error scanning fixture: %v", err)
 	}
 
 	var report reporthandlingv2.PostureReport
-	if err := json.Unmarshal(reportBytes, &report); err != nil {
+	if err := json.Unmarshal(outcome.ReportJSON, &report); err != nil {
 		t.Fatalf("failed to unmarshal posture report: %v", err)
 	}
 
@@ -137,5 +138,18 @@ func TestIaCScanControlsReport_ReturnsPostureReport(t *testing.T) {
 	// the report useless to it even though it parses.
 	if len(report.Resources) == 0 {
 		t.Error("expected the report to carry raw resources")
+	}
+
+	// ResultsHandler.ToJson adds scanCoverage alongside the PostureReport;
+	// mirror it here so coverage gaps (degraded runs, controls that were never
+	// evaluated) travel with the report instead of being dropped.
+	var envelope struct {
+		ScanCoverage *cautils.ScanCoverage `json:"scanCoverage"`
+	}
+	if err := json.Unmarshal(outcome.ReportJSON, &envelope); err != nil {
+		t.Fatalf("failed to unmarshal report envelope: %v", err)
+	}
+	if envelope.ScanCoverage == nil {
+		t.Error("expected the report JSON to carry scanCoverage")
 	}
 }

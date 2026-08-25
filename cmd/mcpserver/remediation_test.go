@@ -11,9 +11,12 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/fixhandler"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -107,15 +110,23 @@ func remediationReport(baseDir string, res *reporthandling.Resource, controls ..
 	}
 }
 
-// stubScanReport replaces the scan seam with a canned report so the test runs
+// stubScanOutcome replaces the scan seam with a canned outcome so the test runs
 // fully offline, and restores it afterwards.
-func stubScanReport(t *testing.T, report *reporthandlingv2.PostureReport) {
+func stubScanOutcome(t *testing.T, outcome *iacScanOutcome) {
 	t.Helper()
 	orig := iacScanReportFn
 	t.Cleanup(func() { iacScanReportFn = orig })
-	iacScanReportFn = func(s *KubescapeMcpserver, ctx context.Context, path string, ids []string) ([]byte, error) {
-		return json.Marshal(report)
+	iacScanReportFn = func(s *KubescapeMcpserver, ctx context.Context, path string, ids []string) (*iacScanOutcome, error) {
+		return outcome, nil
 	}
+}
+
+// stubScanReport is the common case: a healthy, non-degraded scan.
+func stubScanReport(t *testing.T, report *reporthandlingv2.PostureReport) {
+	t.Helper()
+	raw, err := json.Marshal(report)
+	require.NoError(t, err)
+	stubScanOutcome(t, &iacScanOutcome{ReportJSON: raw})
 }
 
 // countTempReports counts the staged report files the remediation flow creates,
@@ -217,7 +228,7 @@ func TestApplyRemediation_ArgumentValidation(t *testing.T) {
 func TestApplyRemediation_ScanFailurePropagates(t *testing.T) {
 	orig := iacScanReportFn
 	t.Cleanup(func() { iacScanReportFn = orig })
-	iacScanReportFn = func(s *KubescapeMcpserver, ctx context.Context, path string, ids []string) ([]byte, error) {
+	iacScanReportFn = func(s *KubescapeMcpserver, ctx context.Context, path string, ids []string) (*iacScanOutcome, error) {
 		return nil, fmt.Errorf("policy download exploded")
 	}
 
@@ -260,6 +271,135 @@ func TestApplyRemediation_NoFixableControlsReportsUnfixed(t *testing.T) {
 	require.NotEmpty(t, resp.UnfixedControls, "the agent must be told which controls it may not guess at")
 	assert.Equal(t, "C-0041", resp.UnfixedControls[0].ControlID)
 	assert.NotEmpty(t, resp.UnfixedControls[0].Reason)
+}
+
+// --- 4b. degraded scan must not silently drop a requested control ---------
+
+// TestApplyRemediation_DegradedScanSurfacesSkippedControl covers the review
+// finding: when rule processing partially fails, a requested control can be
+// dropped before it is ever evaluated. It then appears in neither files nor the
+// fixhandler's unfixed list, leaving the caller unable to distinguish "passed"
+// from "silently skipped".
+func TestApplyRemediation_DegradedScanSurfacesSkippedControl(t *testing.T) {
+	dir := t.TempDir()
+	fixture := filepath.Join(dir, "deployment.yaml")
+	require.NoError(t, os.WriteFile(fixture, []byte(deploymentNoSecurityContext), 0o600))
+
+	// The report only accounts for C-0013. C-0041 was requested but never
+	// evaluated, so it appears nowhere in the report.
+	res := remediationResource(dir, "deployment.yaml", "Deployment", "demo", 0)
+	report := remediationReport(dir, res,
+		remediationFailedControl("C-0013", "Non-root containers",
+			remediationFailedRuleWithFix("spec.template.spec.securityContext.runAsNonRoot", "true"),
+		),
+	)
+	raw, err := json.Marshal(report)
+	require.NoError(t, err)
+	stubScanOutcome(t, &iacScanOutcome{
+		ReportJSON: raw,
+		Degraded:   true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{ControlID: "C-0041", Reason: "control evaluation timed out"},
+		},
+	})
+
+	ksServer := &KubescapeMcpserver{}
+	result := callApplyRemediation(t, ksServer, map[string]any{
+		"path":        fixture,
+		"control_ids": "C-0013,C-0041",
+	})
+	require.False(t, result.IsError, "a degraded scan is still a usable result: %s", toolResultText(t, result))
+
+	var resp remediationResponse
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &resp))
+
+	assert.True(t, resp.Degraded, "a degraded scan must be visible to the caller")
+
+	// C-0013 was evaluated and fixed.
+	require.Len(t, resp.Files, 1)
+	assert.Contains(t, resp.Files[0].PatchedYAML, "runAsNonRoot: true")
+
+	// C-0041 must not vanish.
+	var found *fixhandler.UnfixedControl
+	for i := range resp.UnfixedControls {
+		if resp.UnfixedControls[i].ControlID == "C-0041" {
+			found = &resp.UnfixedControls[i]
+		}
+	}
+	require.NotNil(t, found, "an unevaluated control must surface in unfixed_controls, not vanish")
+	assert.Contains(t, found.Reason, "timed out", "the caller should be told why it was skipped")
+
+	// A control the scan did evaluate must not be reported as skipped.
+	for _, uc := range resp.UnfixedControls {
+		assert.NotEqual(t, "C-0013", uc.ControlID, "an evaluated control must not be flagged unaddressed")
+	}
+}
+
+// TestApplyRemediation_EvaluatedPassingControlIsNotFlagged guards the opposite
+// error: a control present in the report that simply produced no fix genuinely
+// passed, and must not be reported as skipped.
+func TestApplyRemediation_EvaluatedPassingControlIsNotFlagged(t *testing.T) {
+	dir := t.TempDir()
+	fixture := filepath.Join(dir, "deployment.yaml")
+	require.NoError(t, os.WriteFile(fixture, []byte(deploymentNoSecurityContext), 0o600))
+
+	res := remediationResource(dir, "deployment.yaml", "Deployment", "demo", 0)
+	report := remediationReport(dir, res,
+		remediationFailedControl("C-0013", "Non-root containers",
+			remediationFailedRuleWithFix("spec.template.spec.securityContext.runAsNonRoot", "true"),
+		),
+	)
+	// C-0999 was requested and evaluated; it passed, so it has no result entry
+	// but does appear in the summary.
+	report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+		"C-0999": reportsummary.ControlSummary{ControlID: "C-0999"},
+	}
+	raw, err := json.Marshal(report)
+	require.NoError(t, err)
+	stubScanOutcome(t, &iacScanOutcome{ReportJSON: raw})
+
+	ksServer := &KubescapeMcpserver{}
+	result := callApplyRemediation(t, ksServer, map[string]any{
+		"path":        fixture,
+		"control_ids": "C-0013,C-0999",
+	})
+	require.False(t, result.IsError, "unexpected tool error: %s", toolResultText(t, result))
+
+	var resp remediationResponse
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &resp))
+
+	assert.False(t, resp.Degraded)
+	for _, uc := range resp.UnfixedControls {
+		assert.NotEqual(t, "C-0999", uc.ControlID,
+			"a control the scan evaluated and passed must not be reported as skipped")
+	}
+}
+
+// TestApplyRemediation_ControlIDMatchingIsCaseInsensitive guards the diff
+// against a false "skipped" verdict when the caller lowercases the ID, since
+// parseControlIDs only trims.
+func TestApplyRemediation_ControlIDMatchingIsCaseInsensitive(t *testing.T) {
+	dir := t.TempDir()
+	fixture := filepath.Join(dir, "deployment.yaml")
+	require.NoError(t, os.WriteFile(fixture, []byte(deploymentNoSecurityContext), 0o600))
+
+	res := remediationResource(dir, "deployment.yaml", "Deployment", "demo", 0)
+	stubScanReport(t, remediationReport(dir, res,
+		remediationFailedControl("C-0013", "Non-root containers",
+			remediationFailedRuleWithFix("spec.template.spec.securityContext.runAsNonRoot", "true"),
+		),
+	))
+
+	ksServer := &KubescapeMcpserver{}
+	result := callApplyRemediation(t, ksServer, map[string]any{
+		"path":        fixture,
+		"control_ids": "c-0013",
+	})
+	require.False(t, result.IsError, "unexpected tool error: %s", toolResultText(t, result))
+
+	var resp remediationResponse
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &resp))
+	assert.Empty(t, resp.UnfixedControls, "lowercase c-0013 must match the report's C-0013")
 }
 
 // --- 5. multi-document file ----------------------------------------------

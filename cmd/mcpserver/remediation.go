@@ -10,14 +10,16 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v4/core/pkg/fixhandler"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
 // iacScanReportFn produces the PostureReport the remediation flow feeds to the
 // fixhandler. Package-level so tests can supply a canned report instead of
 // running a real scan.
-var iacScanReportFn = func(s *KubescapeMcpserver, ctx context.Context, path string, controlIDs []string) ([]byte, error) {
+var iacScanReportFn = func(s *KubescapeMcpserver, ctx context.Context, path string, controlIDs []string) (*iacScanOutcome, error) {
 	return s.runIaCScanControlsReport(ctx, path, controlIDs)
 }
 
@@ -34,9 +36,86 @@ type remediationResponse struct {
 	// FixedControlInstances counts (resource, control) tuples that produced at
 	// least one edit.
 	FixedControlInstances int `json:"fixed_control_instances"`
+	// Degraded reports that the scan behind this remediation did not fully
+	// complete, mirroring scanResponse.Degraded. An agent must not read an
+	// empty files list on a degraded run as "everything is compliant".
+	Degraded bool `json:"degraded"`
 	// UnfixedControls tells the caller which controls have no deterministic
-	// fix — the signal that stops an agent inventing one.
+	// fix — the signal that stops an agent inventing one. It also carries any
+	// requested control the scan never evaluated, so a control can never
+	// silently vanish from the response.
 	UnfixedControls []fixhandler.UnfixedControl `json:"unfixed_controls,omitempty"`
+}
+
+// normalizeControlID makes control IDs comparable regardless of how the caller
+// spelled them: parseControlIDs only trims, so "c-0013" must still match the
+// report's "C-0013".
+func normalizeControlID(id string) string {
+	return strings.ToUpper(strings.TrimSpace(id))
+}
+
+// reportedControlIDs collects every control the scan actually accounted for,
+// from both the summary and the per-resource results.
+func reportedControlIDs(reportJSON []byte) (map[string]bool, error) {
+	var report reporthandlingv2.PostureReport
+	if err := json.Unmarshal(reportJSON, &report); err != nil {
+		return nil, fmt.Errorf("failed to parse posture report: %w", err)
+	}
+	seen := make(map[string]bool)
+	for id := range report.SummaryDetails.Controls {
+		seen[normalizeControlID(id)] = true
+	}
+	for _, result := range report.Results {
+		for _, control := range result.AssociatedControls {
+			seen[normalizeControlID(control.ControlID)] = true
+		}
+	}
+	return seen, nil
+}
+
+// unaddressedControls returns an UnfixedControl for every requested control the
+// scan never accounted for.
+//
+// A degraded run can drop a control before it is ever evaluated. Such a control
+// appears in neither files (nothing was fixed for it) nor the fixhandler's own
+// unfixed list (which only covers controls the report marked failed), so
+// omitting it would leave the caller unable to tell "this control passed" from
+// "this control was skipped" — exactly the ambiguity apply_remediation exists to
+// remove. A control that is present in the report and simply produced no fix
+// genuinely passed, and is not reported here.
+func unaddressedControls(requested []string, reported map[string]bool, unfixed []fixhandler.UnfixedControl, notEvaluated []cautils.NotEvaluatedControl) []fixhandler.UnfixedControl {
+	covered := make(map[string]bool, len(unfixed))
+	for _, uc := range unfixed {
+		covered[normalizeControlID(uc.ControlID)] = true
+	}
+
+	reasons := make(map[string]string, len(notEvaluated))
+	for _, ne := range notEvaluated {
+		reason := ne.Reason
+		if reason == "" {
+			reason = "not evaluated: the scan could not evaluate this control"
+		}
+		if len(ne.MissingGVRs) > 0 {
+			reason = fmt.Sprintf("%s (missing resource types: %s)", reason, strings.Join(ne.MissingGVRs, ", "))
+		}
+		reasons[normalizeControlID(ne.ControlID)] = reason
+	}
+
+	out := make([]fixhandler.UnfixedControl, 0)
+	emitted := make(map[string]bool)
+	for _, id := range requested {
+		key := normalizeControlID(id)
+		if key == "" || covered[key] || emitted[key] || reported[key] {
+			continue
+		}
+		reason, ok := reasons[key]
+		if !ok {
+			reason = "not evaluated: control did not appear in the scan report"
+		}
+		emitted[key] = true
+		out = append(out, fixhandler.UnfixedControl{ControlID: id, Reason: reason})
+	}
+	return out
 }
 
 func createRemediationTools(ksServer *KubescapeMcpserver) {
@@ -54,10 +133,11 @@ func createRemediationTools(ksServer *KubescapeMcpserver) {
 
 func (ksServer *KubescapeMcpserver) runApplyRemediation(ctx context.Context, path string, controlIDs []string) ([]byte, error) {
 	// 1. Scan in memory.
-	reportBytes, err := iacScanReportFn(ksServer, ctx, path, controlIDs)
+	outcome, err := iacScanReportFn(ksServer, ctx, path, controlIDs)
 	if err != nil {
 		return nil, err
 	}
+	reportBytes := outcome.ReportJSON
 
 	// 2. NewFixHandler only accepts a report on disk, so stage one. Write and
 	//    close before handing it over — NewFixHandler opens and reads it
@@ -134,13 +214,23 @@ func (ksServer *KubescapeMcpserver) runApplyRemediation(ctx context.Context, pat
 		})
 	}
 
-	// 6. Always return the envelope, even with zero files: unfixed_controls
+	// 6. Reconcile what was asked for against what the scan actually covered, so
+	//    a control dropped by a degraded run surfaces instead of vanishing.
+	unfixed := handler.UnfixedControls()
+	reported, err := reportedControlIDs(reportBytes)
+	if err != nil {
+		return nil, err
+	}
+	unfixed = append(unfixed, unaddressedControls(controlIDs, reported, unfixed, outcome.NotEvaluatedControls)...)
+
+	// 7. Always return the envelope, even with zero files: unfixed_controls
 	//    then explains why nothing was fixable, which is more useful to an
 	//    agent than an error.
 	resp := remediationResponse{
 		Files:                 files,
 		FixedControlInstances: handler.FixedControlsCount(),
-		UnfixedControls:       handler.UnfixedControls(),
+		Degraded:              outcome.Degraded,
+		UnfixedControls:       unfixed,
 	}
 	return json.MarshalIndent(resp, "", "  ")
 }
