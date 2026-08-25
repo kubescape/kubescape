@@ -376,12 +376,20 @@ func ResolveParamObject(vap *VAP, paramRef *admissionregistrationv1.ParamRef, re
 
 // paramLookupNamespaces returns the namespaces to look the param object up in,
 // in order. An explicit namespace on the ref is the only candidate; without one
-// the paramKind's scope decides where the object lives.
+// the paramKind's scope decides where the object lives and offline there is no
+// discovery to read that scope from, so both candidates are tried: the scanned
+// resource's namespace for a namespaced kind, then the empty namespace the index
+// keys a cluster-scoped one by. A kind is registered at exactly one scope, so the
+// order cannot pick the wrong object. Trying only the resource's namespace missed
+// the bundled ControlConfiguration (scope: Cluster) for every namespaced resource.
 func paramLookupNamespaces(paramRef *admissionregistrationv1.ParamRef, resourceNamespace string) []string {
 	if paramRef.Namespace != "" {
 		return []string{paramRef.Namespace}
 	}
-	return []string{resourceNamespace}
+	if resourceNamespace == "" {
+		return []string{""}
+	}
+	return []string{resourceNamespace, ""}
 }
 
 // resolveParams returns the value bound to the evaluator's "params" variable. A
