@@ -80,6 +80,12 @@ func (v *VAP) failOnError() bool {
 	return v.failurePolicy != admissionregistrationv1.Ignore
 }
 
+// TakesParams reports whether the policy declares a spec.paramKind, i.e. whether
+// a binding's paramRef is something the apiserver resolves rather than ignores.
+func (v *VAP) TakesParams() bool {
+	return v.paramKind != nil
+}
+
 // requireSupported reports whether the offline engine can honor this policy with
 // scan/admission parity. A refusal maps to the same errored/skipped status a
 // Rego eval error takes, never a silent pass or a false violation. Removing a
