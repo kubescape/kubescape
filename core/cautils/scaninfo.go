@@ -130,7 +130,7 @@ type ScanInfo struct {
 	View                      string                       //
 	Format                    string                       // Format results (table, json, junit ...)
 	Output                    string                       // Store results in an output file, Output file name
-	NotifyURLs                []string                     // Generic webhook destinations that receive the posture summary JSON
+	NotifyURLs                []string                     // Webhook destinations that receive a formatted posture summary
 	FormatVersion             string                       // Output object can be different between versions, this is for testing and backward compatibility
 	CustomClusterName         string                       // Set the custom name of the cluster
 	ExcludedNamespaces        string                       // used for host scanner namespace

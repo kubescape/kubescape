@@ -319,18 +319,18 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 	// best-effort: a notification endpoint must never alter scan results or exit
 	// status.
 	if len(scanInfo.NotifyURLs) > 0 && rh.ScanData != nil && rh.ScanData.Report != nil {
-		payload, err := json.Marshal(rh.ScanData.Report.SummaryDetails)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("Failed to marshal scan summary for notification", helpers.Error(err))
-		} else {
-			client := notification.NewClient(notification.DefaultTimeout)
-			for _, endpoint := range scanInfo.NotifyURLs {
-				requestCtx, cancel := context.WithTimeout(ctx, notification.DefaultTimeout)
-				err := notification.Send(requestCtx, client, endpoint, payload)
-				cancel()
-				if err != nil {
-					logger.L().Ctx(ctx).Warning("Failed to deliver scan notification", helpers.String("target", notification.SafeTarget(endpoint)), helpers.Error(err))
-				}
+		client := notification.NewClient(notification.DefaultTimeout)
+		for _, endpoint := range scanInfo.NotifyURLs {
+			payload, err := notification.MarshalPayload(endpoint, &rh.ScanData.Report.SummaryDetails)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("Failed to marshal scan summary for notification", helpers.String("target", notification.SafeTarget(endpoint)), helpers.Error(err))
+				continue
+			}
+			requestCtx, cancel := context.WithTimeout(ctx, notification.DefaultTimeout)
+			sendErr := notification.Send(requestCtx, client, endpoint, payload)
+			cancel()
+			if sendErr != nil {
+				logger.L().Ctx(ctx).Warning("Failed to deliver scan notification", helpers.String("target", notification.SafeTarget(endpoint)), helpers.Error(sendErr))
 			}
 		}
 	}
