@@ -15,7 +15,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/schema v1.4.1
 	github.com/kubescape/backend v0.0.46
-	github.com/kubescape/go-logger v0.0.33
+	github.com/kubescape/go-logger v0.0.34
 	github.com/kubescape/k8s-interface v0.0.218
 	github.com/kubescape/kubescape/v4 v4.0.12
 	github.com/kubescape/opa-utils v0.0.309
