@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
+	"strings" // required for sanitizeDNS1123Subdomain / sanitizeLabelValue (Builder, ToLower, TrimRight)
 	"time"
 
 	"github.com/kubescape/go-logger"
