@@ -390,6 +390,8 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		return printerv2.NewSPDXPrinter()
 	case printer.PolicyReportFormat:
 		return printerv2.NewPolicyReportPrinter()
+	case printer.ExceptionsFormat:
+		return printerv2.NewExceptionsPrinter()
 	default:
 		if printFormat != printer.PrettyFormat {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
@@ -422,7 +424,7 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 	}
 
 	switch printFormat {
-	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat, printer.MarkdownFormat, printer.PolicyReportFormat:
+	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat, printer.MarkdownFormat, printer.PolicyReportFormat, printer.ExceptionsFormat:
 		return false, nil
 	default:
 		return true, nil
