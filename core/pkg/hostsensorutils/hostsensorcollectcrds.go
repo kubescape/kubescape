@@ -304,6 +304,14 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 			logger.L().Ctx(ctx).Warning("No readable CRD items",
 				helpers.String("resource", k8sInfo.Resource.String()),
 				helpers.Error(err))
+		case collected.dropped() > 0:
+			// Some nodes came through and some did not. The resource keeps the
+			// data it has, so it is not skipped, but the scan now covers fewer
+			// nodes than the cluster has and only the per-item warnings say so.
+			logger.L().Ctx(ctx).Warning("Some CRD items could not be read",
+				helpers.String("resource", k8sInfo.Resource.String()),
+				helpers.Int("read", collected.converted),
+				helpers.Int("reported", collected.listed))
 		}
 
 		if len(kcData) > 0 {
