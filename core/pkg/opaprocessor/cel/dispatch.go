@@ -36,7 +36,7 @@ func (e *Evaluator) EvaluateControl(ctx context.Context, controlID string, obj, 
 // responsible for resolving params (e.g. from a per-binding paramRef), which
 // makes it the path for binding-specific parameter objects.
 func (e *Evaluator) EvaluateVAP(ctx context.Context, vap *VAP, obj, namespaceObject map[string]any, params any) (ControlEvaluation, error) {
-	if !vap.appliesTo(obj) {
+	if !vap.AppliesTo(obj) {
 		return ControlEvaluation{Applicable: false}, nil
 	}
 	// namespaceObject is not threaded into the gate: admission evaluates

@@ -1476,14 +1476,28 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 			return nil, celOutcome{}, err
 		}
 
+		// Skip objects the policy's matchConstraints do not cover before doing any
+		// work that could fail for an object the policy never applies to.
+		if !vap.AppliesTo(obj) {
+			resID := celResourceID(obj)
+			outcome.excluded[resID] = struct{}{}
+			continue
+		}
+
 		// Resolve the params for this object: a binding's paramRef may point to a
 		// namespaced or cluster-scoped object the scan collected. If the object is
-		// missing and the binding says Allow, the policy does not apply.
+		// missing and the binding says Allow, the policy does not apply; otherwise
+		// it denies the object, exactly as admission does.
 		params, err := cel.ResolveParamObject(vap, paramRef, celResourceNamespace(obj), findParam)
 		if err != nil {
-			if errors.Is(err, cel.ErrParamNotFound) && paramRef != nil && paramRef.ParameterNotFoundAction != nil && string(*paramRef.ParameterNotFoundAction) == "Allow" {
+			if errors.Is(err, cel.ErrParamNotFound) {
 				resID := celResourceID(obj)
-				outcome.excluded[resID] = struct{}{}
+				if paramRef != nil && paramRef.ParameterNotFoundAction != nil && string(*paramRef.ParameterNotFoundAction) == "Allow" {
+					outcome.excluded[resID] = struct{}{}
+					continue
+				}
+				// parameterNotFoundAction is Deny (or unset, which defaults to Deny).
+				responses = append(responses, celErrorRuleResponse(rule, obj, err))
 				continue
 			}
 			return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
