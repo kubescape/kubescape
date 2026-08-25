@@ -281,15 +281,27 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 		}
 
 		kcData, collected, err := k8sInfo.Query(ctx)
-		if err != nil {
+		switch {
+		case err != nil:
 			addInfoToMap(k8sInfo.Resource, infoMap, err)
 			logger.L().Ctx(ctx).Warning("Failed to get resource from CRD",
 				helpers.String("resource", k8sInfo.Resource.String()),
 				helpers.Error(err))
-		} else if collected.listed == 0 && hsh.nodeCount > 0 {
+		case collected.listed == 0 && hsh.nodeCount > 0:
 			err = fmt.Errorf("node-agent didn't report any %s for %d nodes", k8sInfo.Resource.String(), hsh.nodeCount)
 			addInfoToMap(k8sInfo.Resource, infoMap, err)
 			logger.L().Ctx(ctx).Warning("Zero CRD items found",
+				helpers.String("resource", k8sInfo.Resource.String()),
+				helpers.Error(err))
+		case collected.converted == 0 && collected.listed > 0:
+			// The node-agent did report, but nothing survived conversion (a CRD
+			// whose spec is missing or not a map). Without this the resource is
+			// the one case that leaves no trace: the "didn't report any" arm
+			// above never fires, so the controls that read it are inferred as
+			// passing off data the scan never got.
+			err = fmt.Errorf("node-agent reported %d %s but none of them could be read", collected.listed, k8sInfo.Resource.String())
+			addInfoToMap(k8sInfo.Resource, infoMap, err)
+			logger.L().Ctx(ctx).Warning("No readable CRD items",
 				helpers.String("resource", k8sInfo.Resource.String()),
 				helpers.Error(err))
 		}
