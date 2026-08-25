@@ -3,6 +3,7 @@ package opaprocessor
 import (
 	"context"
 	"errors"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -265,18 +266,24 @@ func inlineExceptionFromResource(obj workloadinterface.IMetadata, clusterName st
 		policies = append(policies, armotypes.PosturePolicy{ControlID: c})
 	}
 
+	// The exceptions processor matches designator attributes as anchored
+	// regular expressions. These values are the resource's own literal
+	// identity, so they must be quoted: a name containing a regex
+	// metacharacter (a dot is legal in an RFC 1123 subdomain) would otherwise
+	// also suppress the annotated control on sibling resources whose names
+	// differ only where that metacharacter sits.
 	attrs := map[string]string{}
 	if name := obj.GetName(); name != "" {
-		attrs["name"] = name
+		attrs["name"] = regexp.QuoteMeta(name)
 	}
 	if kind := obj.GetKind(); kind != "" {
-		attrs["kind"] = kind
+		attrs["kind"] = regexp.QuoteMeta(kind)
 	}
 	if ns := obj.GetNamespace(); ns != "" {
-		attrs["namespace"] = ns
+		attrs["namespace"] = regexp.QuoteMeta(ns)
 	}
 	if id := obj.GetID(); id != "" {
-		attrs["resourceID"] = id
+		attrs["resourceID"] = regexp.QuoteMeta(id)
 	}
 
 	var reasonPtr *string
