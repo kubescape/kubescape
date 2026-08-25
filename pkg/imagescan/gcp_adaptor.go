@@ -168,7 +168,14 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 			}
 
 			it := a.client.ListOccurrences(ctx, req)
+			const maxScanStatusOccurrences = 1000
+			seen := 0
 			for {
+				if seen >= maxScanStatusOccurrences {
+					logger.L().Warning("truncated scan status occurrences", helpers.String("repository", imageID.Repository), helpers.Int("limit", maxScanStatusOccurrences))
+					break
+				}
+
 				occurrence, err := it.Next()
 				if err == iterator.Done {
 					break
@@ -176,6 +183,7 @@ func (a *GCPAdaptor) GetImagesScanStatus(ctx context.Context, imageIDs []Contain
 				if err != nil {
 					return status, fmt.Errorf("failed to query scan status for repository %s: %w", imageID.Repository, err)
 				}
+				seen++
 
 				if occurrence != nil && occurrence.GetDiscovery() != nil {
 					discovery := occurrence.GetDiscovery()
