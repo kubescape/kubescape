@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	contractv1alpha1 "github.com/kubescape/kubescape/v4/core/pkg/scancontract/v1alpha1"
 	"github.com/kubescape/kubescape/v4/core/pkg/telemetry"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -68,6 +69,9 @@ var scanCmdExamples = fmt.Sprintf(`
 
 func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
+	var scanContractPath string
+	var scanContractName string
+	var selectedContract *contractv1alpha1.SelectedContract
 
 	// scanCmd represents the scan command
 	scanCmd := &cobra.Command{
@@ -78,6 +82,14 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Name() == "validate-contract" {
 				return nil
+			}
+			if cmd.Name() == "image" && scanContractPath != "" {
+				return fmt.Errorf("--scan-contract is supported for posture scans, not image scans")
+			}
+			var err error
+			selectedContract, err = loadAndApplyScanContract(cmd, &scanInfo, scanContractPath, scanContractName)
+			if err != nil {
+				return err
 			}
 			// runs for the bare scan command and all subcommands (framework, control, workload, image)
 			if scanInfo.FormatVersion != "v1" && scanInfo.FormatVersion != "v2" {
@@ -127,6 +139,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 			scanInfo.View = requestedView
 
+			if policyIdentifiers := contractPolicyIdentifiers(selectedContract); len(policyIdentifiers) > 0 {
+				setContractScanTarget(args, &scanInfo)
+				return securityScan(scanInfo, ks, policyIdentifiers)
+			}
+
 			if scanInfo.View == string(cautils.SecurityViewType) {
 				policyIdentifiers := setSecurityViewScanInfo(args, &scanInfo)
 
@@ -158,6 +175,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	}
 
 	scanInfo.TriggeredByCLI = true
+
+	scanCmd.PersistentFlags().StringVar(&scanContractPath, "scan-contract", "", "Path to an explicit repository scan contract")
+	scanCmd.PersistentFlags().StringVar(&scanContractName, "contract", "", "Named contract to select; defaults to spec.defaultContract")
 
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
@@ -286,6 +306,15 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	installTelemetry(scanCmd, ks, &scanInfo)
 
 	return scanCmd
+}
+
+func setContractScanTarget(args []string, scanInfo *cautils.ScanInfo) {
+	if len(args) > 0 {
+		scanInfo.SetScanType(cautils.ScanTypeRepo)
+		scanInfo.InputPatterns = args
+		return
+	}
+	scanInfo.SetScanType(cautils.ScanTypeCluster)
 }
 
 func validateCombinedImageScanFlags(scanInfo *cautils.ScanInfo) error {
