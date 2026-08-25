@@ -298,7 +298,7 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 	}
 
 	rh.UiPrinter.PrintNextSteps()
-	if err := closePrinter(rh.UiPrinter); err != nil {
+	if err := ClosePrinter(rh.UiPrinter); err != nil {
 		printErr = errors.Join(printErr, fmt.Errorf("ui printer close: %w", err))
 	}
 
@@ -310,7 +310,7 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 		if rh.ScanData != nil {
 			p.Score(rh.GetComplianceScore())
 		}
-		if err := closePrinter(p); err != nil {
+		if err := ClosePrinter(p); err != nil {
 			printErr = errors.Join(printErr, fmt.Errorf("output printer %T close: %w", p, err))
 		}
 	}
@@ -429,11 +429,11 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 	}
 }
 
-// closePrinter closes p's output writer if p implements an optional close
+// ClosePrinter closes p's output writer if p implements an optional close
 // contract, returning any error so callers can surface incomplete writes.
 // Printers migrated to return an error from CloseWriter are preferred; the
 // legacy void contract is still supported for backwards compatibility.
-func closePrinter(p printer.IPrinter) error {
+func ClosePrinter(p printer.IPrinter) error {
 	type errorCloser interface {
 		CloseWriter() error
 	}
