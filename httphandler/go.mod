@@ -443,7 +443,7 @@ require (
 	github.com/opencontainers/selinux v1.13.1 // indirect
 	github.com/openvex/go-vex v0.2.7 // indirect
 	github.com/owenrumney/go-sarif v1.1.2-0.20231003122901-1000f5e05554 // indirect
-	github.com/owenrumney/go-sarif/v2 v2.3.0 // indirect
+	github.com/owenrumney/go-sarif/v2 v2.3.3 // indirect
 	github.com/package-url/packageurl-go v0.1.3 // indirect
 	github.com/pandatix/go-cvss v0.6.2 // indirect
 	github.com/pborman/indent v1.2.1 // indirect

@@ -61,7 +61,7 @@ require (
 	github.com/moby/buildkit v0.29.0
 	github.com/open-policy-agent/opa v1.19.0
 	github.com/openvex/go-vex v0.2.7
-	github.com/owenrumney/go-sarif/v2 v2.2.0
+	github.com/owenrumney/go-sarif/v2 v2.3.3
 	github.com/project-copacetic/copacetic v0.10.0
 	github.com/prometheus/common v0.70.0
 	github.com/quay/claircore v1.5.35
