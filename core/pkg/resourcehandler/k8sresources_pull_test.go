@@ -99,6 +99,44 @@ func TestPullResources_PartialFailureSurface(t *testing.T) {
 	assert.ErrorContains(t, fq.err, "simulated API failure")
 }
 
+// A namespace filter naming no namespace must not silence collection. The
+// selector emitted no query for it, so pullSingleResource never listed the
+// resource and left no selectorFailure behind, which reads downstream as a GVR
+// that was collected and came back empty rather than one that was skipped.
+func TestPullResources_NamespaceFilterNamingNoNamespaceStillCollects(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+
+	for _, value := range []string{" ", ",", ", ,"} {
+		t.Run(value, func(t *testing.T) {
+			var selectors []string
+			mockClient := &mockDynamicClient{
+				listFunc: func(_ context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+					selectors = append(selectors, opts.FieldSelector)
+					return &unstructured.UnstructuredList{Items: []unstructured.Unstructured{{
+						Object: map[string]any{
+							"apiVersion": "v1",
+							"kind":       "Pod",
+							"metadata":   map[string]any{"name": "test-pod", "namespace": "default"},
+						},
+					}}}, nil
+				},
+			}
+
+			handler := &K8sResourceHandler{k8s: &k8sinterface.KubernetesApi{DynamicClient: mockClient}}
+			queryableResources := QueryableResources{
+				"//v1/pods": QueryableResource{GroupVersionResourceTriplet: "//v1/pods"},
+			}
+
+			k8sResources, allResources, failedQueries := handler.pullResources(context.Background(), queryableResources, NewIncludeSelector(value), "")
+
+			assert.Equal(t, []string{""}, selectors, "expected one unfiltered LIST")
+			assert.Len(t, allResources, 1)
+			assert.Len(t, k8sResources["//v1/pods"], 1)
+			assert.Empty(t, failedQueries)
+		})
+	}
+}
+
 func TestGetResources_SurfacesMissingGVRFailuresInInfoMap(t *testing.T) {
 	k8sinterface.InitializeMapResourcesMock()
 	handler := getResourceHandlerMock()

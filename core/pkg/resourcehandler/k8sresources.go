@@ -1169,22 +1169,6 @@ func (k8sHandler *K8sResourceHandler) countNamespaces(ctx context.Context, scanI
 	return count
 }
 
-// splitNamespaces parses a comma-separated namespace list (as passed to
-// --include-namespaces / --exclude-namespaces) into a clean slice. Empty
-// entries and surrounding whitespace are dropped.
-func splitNamespaces(s string) []string {
-	if s == "" {
-		return nil
-	}
-	var out []string
-	for p := range strings.SplitSeq(s, ",") {
-		if v := strings.TrimSpace(p); v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
 func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber(ctx context.Context) (int, error) {
 	schedulableCount := 0
 	err := getter.ListWithPagination(ctx, func(opts metav1.ListOptions) (string, error) {
