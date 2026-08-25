@@ -835,14 +835,14 @@ Display version information.
 ### Synopsis
 
 ```bash
-kubescape version [--format text|json]
+kubescape version [--format text|json|yaml]
 ```
 
 ### Flags
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--format` | `-f` | `text` | Output format. Supported: `text`, `json` |
+| `--format` | `-f` | `text` | Output format. Supported: `text`, `json`, `yaml` |
 
 ### Examples
 
@@ -853,6 +853,12 @@ kubescape version
 # Machine-readable JSON output (safe to pipe to jq)
 kubescape version --format json
 # {"version":"v3.x.x","commit":"abc123","date":"2024-01-15"}
+
+# Machine-readable YAML output
+kubescape version --format yaml
+# commit: abc123
+# date: "2024-01-15"
+# version: v3.x.x
 ```
 
 ---
