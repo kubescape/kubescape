@@ -209,7 +209,7 @@ func TestKindFilteredQueryFailureStaysOutOfScanCoverage(t *testing.T) {
 	require.Empty(t, recordFailedQueryStatuses(failedQueries, k8sResources, infoMap))
 	assert.Empty(t, infoMap, "an excluded kind must not be reported as a failed dependency")
 
-	coverage := cautils.BuildScanCoverage(infoMap, resourceToControls, nil, nil, nil)
+	coverage := cautils.BuildScanCoverage(infoMap, resourceToControls, nil, nil, nil, nil)
 	coverage.ComputeCoverageScore(1)
 	assert.Empty(t, coverage.FailedGVRPulls)
 	assert.Empty(t, coverage.NotEvaluatedControls)
