@@ -439,10 +439,10 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr: nil,
 		},
 		{
-			name:      "markdown format for image scan should return error",
+			name:      "markdown format for image scan should not return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.MarkdownFormat,
-			expectErr: errors.New("format \"markdown\" is not supported for image scanning"),
+			expectErr: nil,
 		},
 	}
 
