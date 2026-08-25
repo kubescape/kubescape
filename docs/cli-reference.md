@@ -40,6 +40,7 @@ kubescape scan [target] [flags]
 | `--access-key <key>` | Kubescape SaaS access key | from cache |
 | `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, and `--view resource\|control` — see [score thresholds](#score-thresholds). | `0` |
 | `--controls-config <path>` | Path to controls configuration file | - |
+| `--custom-rules <path>` | Path to user-authored custom rules — see [custom rules](#custom-rules) | - |
 | `-e, --exclude-namespaces <ns>` | Namespaces to exclude (comma-separated) | - |
 | `--encrypt` | Encrypt sensitive report metadata using the master key provided through the `KUBESCAPE_MASTER_KEY` environment variable. Requires `--format json` for reports that will later be decrypted with `kubescape decrypt`. If both `--encrypt` and `--hide` are specified, `--encrypt` takes precedence. | `false` |
 | `--exceptions <path>` | Path to exceptions file | - |
@@ -77,6 +78,46 @@ kubescape scan manifests/ --notify https://ops.example.com/kubescape --notify ht
 Each destination gets one synchronous request with `Content-Type: application/json`; Kubescape allows up to five seconds per destination and does not follow redirects. Failures are logged as warnings and never override the scan's own exit status. The payload follows `--min-severity` and `--max-severity` output filtering. `--severity-threshold` continues to affect only the exit status.
 
 The summary may contain resource identifiers in control summaries. Use `--hide` where appropriate and send only to trusted webhook endpoints. Slack Block Kit and Microsoft Teams Adaptive Card formatting are not included in this generic phase.
+
+### Custom rules
+
+`--custom-rules` loads user-authored rules alongside the downloaded framework.
+Two on-disk layouts are accepted, and they can be mixed in one directory.
+
+A **rule directory** holds `raw.rego` next to `rule.metadata.json`. This is the
+layout of this repository's `rules/` tree and the one `kubescape policy test`
+reads, so a rule can be tested and then scanned without being reshaped:
+
+```
+myrules/
+  no-privileged-containers/
+    raw.rego
+    rule.metadata.json
+  no-host-network/
+    raw.rego
+    rule.metadata.json
+```
+
+```bash
+kubescape policy test ./myrules
+kubescape scan ./manifests --custom-rules ./myrules
+```
+
+Pass either the parent directory or a single rule directory. The metadata
+supplies the rule's name, description, remediation and `match` selectors, so the
+rule is only evaluated against the kinds it targets.
+
+A **bare `.rego` file** is also accepted, for a rule with no metadata:
+
+```bash
+kubescape scan ./manifests --custom-rules ./myrules/no-root.rego
+```
+
+A bare rule is matched against every resource kind, so it must filter input
+itself. Prefer a rule directory when the rule targets specific kinds.
+
+Every custom rule becomes a control named `custom-<rule>` in the report.
+
 
 ### Exception Audit
 
