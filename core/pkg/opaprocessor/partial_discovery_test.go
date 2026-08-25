@@ -46,6 +46,7 @@ func TestMarkNotEvaluatedControlsSkipped_LeavesPartiallyCollectedControlPassed(t
 		nil,
 		[]cautils.PartialGVRPull{{GVR: discoveryKey, Selector: "discovery", Error: "forbidden"}},
 		nil,
+		nil,
 	)
 
 	opap := NewOPAProcessor(session, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
