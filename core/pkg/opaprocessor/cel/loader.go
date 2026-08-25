@@ -366,15 +366,22 @@ func ResolveParamObject(vap *VAP, paramRef *admissionregistrationv1.ParamRef, re
 	if paramRef == nil || paramRef.Name == "" {
 		return resolveParams(vap)
 	}
-	ns := paramRef.Namespace
-	if ns == "" {
-		ns = resourceNamespace
+	for _, ns := range paramLookupNamespaces(paramRef, resourceNamespace) {
+		if obj, ok := findParam(vap.paramKind.APIVersion, vap.paramKind.Kind, ns, paramRef.Name); ok {
+			return obj, nil
+		}
 	}
-	obj, ok := findParam(vap.paramKind.APIVersion, vap.paramKind.Kind, ns, paramRef.Name)
-	if !ok {
-		return nil, ErrParamNotFound
+	return nil, ErrParamNotFound
+}
+
+// paramLookupNamespaces returns the namespaces to look the param object up in,
+// in order. An explicit namespace on the ref is the only candidate; without one
+// the paramKind's scope decides where the object lives.
+func paramLookupNamespaces(paramRef *admissionregistrationv1.ParamRef, resourceNamespace string) []string {
+	if paramRef.Namespace != "" {
+		return []string{paramRef.Namespace}
 	}
-	return obj, nil
+	return []string{resourceNamespace}
 }
 
 // resolveParams returns the value bound to the evaluator's "params" variable. A
