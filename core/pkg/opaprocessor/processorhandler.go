@@ -1149,7 +1149,7 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		opap.mu.Unlock()
 	}
 
-	ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData, controlID)
+	ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, enumeratedData, ruleData, ruleRegoDependenciesData, controlID)
 	if err != nil {
 		opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
 		return resources, fmt.Errorf("rego eval failed for namespace %q: %w", scope.name, err)
