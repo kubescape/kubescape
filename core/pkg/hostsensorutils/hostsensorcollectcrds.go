@@ -29,6 +29,35 @@ func (c crdCollection) dropped() int {
 	return c.listed - c.converted
 }
 
+// reportCollectionGaps records what one resource's collection lost.
+//
+// A resource whose reported items were all unreadable is recorded on the scan
+// like an empty one: it reached the scan with no data, and without an entry the
+// controls that read it are inferred as passing off data that never arrived.
+// A partial loss only warns, because the resource keeps what it did read and
+// marking it skipped would discard real results.
+//
+// The zero-item case is deliberately not judged here. Whether it is a problem
+// depends on what the caller expected: for a per-node resource it means the
+// node-agent has not reported for its nodes, while for CloudProviderInfo it is
+// the normal answer on an on-prem cluster.
+func reportCollectionGaps(ctx context.Context, resource k8shostsensor.HostSensorResource, collected crdCollection, infoMap map[string]apis.StatusInfo) {
+	switch {
+	case collected.listed == 0:
+	case collected.converted == 0:
+		err := fmt.Errorf("node-agent reported %d %s but none of them could be read", collected.listed, resource.String())
+		addInfoToMap(resource, infoMap, err)
+		logger.L().Ctx(ctx).Warning("No readable CRD items",
+			helpers.String("resource", resource.String()),
+			helpers.Error(err))
+	case collected.dropped() > 0:
+		logger.L().Ctx(ctx).Warning("Some CRD items could not be read",
+			helpers.String("resource", resource.String()),
+			helpers.Int("read", collected.converted),
+			helpers.Int("reported", collected.listed))
+	}
+}
+
 // getCRDResources retrieves resources from CRDs and converts them to HostSensorDataEnvelope format
 func (hsh *HostSensorHandler) getCRDResources(ctx context.Context, resourceType k8shostsensor.HostSensorResource) ([]hostsensor.HostSensorDataEnvelope, crdCollection, error) {
 	pluralName := k8shostsensor.MapResourceToPlural(resourceType)
@@ -293,25 +322,8 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 			logger.L().Ctx(ctx).Warning("Zero CRD items found",
 				helpers.String("resource", k8sInfo.Resource.String()),
 				helpers.Error(err))
-		case collected.converted == 0 && collected.listed > 0:
-			// The node-agent did report, but nothing survived conversion (a CRD
-			// whose spec is missing or not a map). Without this the resource is
-			// the one case that leaves no trace: the "didn't report any" arm
-			// above never fires, so the controls that read it are inferred as
-			// passing off data the scan never got.
-			err = fmt.Errorf("node-agent reported %d %s but none of them could be read", collected.listed, k8sInfo.Resource.String())
-			addInfoToMap(k8sInfo.Resource, infoMap, err)
-			logger.L().Ctx(ctx).Warning("No readable CRD items",
-				helpers.String("resource", k8sInfo.Resource.String()),
-				helpers.Error(err))
-		case collected.dropped() > 0:
-			// Some nodes came through and some did not. The resource keeps the
-			// data it has, so it is not skipped, but the scan now covers fewer
-			// nodes than the cluster has and only the per-item warnings say so.
-			logger.L().Ctx(ctx).Warning("Some CRD items could not be read",
-				helpers.String("resource", k8sInfo.Resource.String()),
-				helpers.Int("read", collected.converted),
-				helpers.Int("reported", collected.listed))
+		default:
+			reportCollectionGaps(ctx, k8sInfo.Resource, collected, infoMap)
 		}
 
 		if len(kcData) > 0 {
