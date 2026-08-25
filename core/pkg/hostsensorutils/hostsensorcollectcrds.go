@@ -248,11 +248,17 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 
 	var hasCloudProvider bool
 	// We first query CloudProviderInfo to determine if we should skip ControlPlaneInfo
-	cloudProviderData, _, err := hsh.getCloudProviderInfo(ctx)
+	cloudProviderData, collected, err := hsh.getCloudProviderInfo(ctx)
 	if err != nil {
 		addInfoToMap(k8shostsensor.CloudProviderInfo, infoMap, err)
 		logger.L().Ctx(ctx).Warning("Failed to get CloudProviderInfo from CRD", helpers.Error(err))
 	} else {
+		// This query runs ahead of the loop below, so it needs its own call:
+		// without one, CloudProviderInfo is the resource that can lose every
+		// item it reported and still leave no status behind. It also decides
+		// whether ControlPlaneInfo is collected at all, and an unreadable
+		// answer reads the same as "no cloud provider".
+		reportCollectionGaps(ctx, k8shostsensor.CloudProviderInfo, collected, infoMap)
 		hasCloudProvider = hasCloudProviderInfo(cloudProviderData)
 		if len(cloudProviderData) > 0 {
 			res = append(res, cloudProviderData...)
