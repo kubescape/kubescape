@@ -700,6 +700,31 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run IaC control scan: %v", err)), nil
 		}
 		return mcp.NewToolResultText(string(v.([]byte))), nil
+	case "apply_remediation":
+		path := ""
+		if p, ok := arguments["path"]; ok {
+			pStr, ok := p.(string)
+			if !ok {
+				return mcp.NewToolResultError("path argument must be a string"), nil
+			}
+			path = strings.TrimSpace(pStr)
+		}
+		if path == "" {
+			return mcp.NewToolResultError("path argument is required and cannot be empty"), nil
+		}
+		rawControlIDs, hasControlIDs := arguments["control_ids"]
+		controlIDs, toolErr := parseControlIDs(rawControlIDs, hasControlIDs)
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		key := fmt.Sprintf("apply_remediation:%s:%s", url.QueryEscape(path), url.QueryEscape(strings.Join(controlIDs, ",")))
+		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return ksServer.runApplyRemediation(scanCtx, path, controlIDs)
+		})
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to compute remediation: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(v.([]byte))), nil
 	case "run_network_security_scan":
 		namespace, err := mcpScanNamespace(arguments)
 		if err != nil {
@@ -1306,6 +1331,7 @@ func mcpServerEntrypoint(transport string, port int) error {
 	createFrameworkScanningTools(ksServer)
 	createIaCScanningTools(ksServer)
 	createIaCControlScanningTool(ksServer)
+	createRemediationTools(ksServer)
 	createControlScanningTools(ksServer)
 	createPolicyListingTools(ksServer)
 	createAdvancedTools(ksServer)
