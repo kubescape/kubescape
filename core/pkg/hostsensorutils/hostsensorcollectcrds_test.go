@@ -113,7 +113,7 @@ func TestCRDResourceGetters(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		query func(context.Context) ([]hostsensor.HostSensorDataEnvelope, int, error)
+		query func(context.Context) ([]hostsensor.HostSensorDataEnvelope, crdCollection, error)
 	}{
 		{"OsReleaseFile", hsh.getOsReleaseFile},
 		{"KernelVersion", hsh.getKernelVersion},
@@ -147,18 +147,18 @@ func TestGetCRDResources_RecoversAfterEmptyCollection(t *testing.T) {
 	withK8sHost(t, "https://cluster-a.example.com")
 
 	hsh := &HostSensorHandler{dynamicClient: newCRDDynamicClient(t)}
-	got, rawCount, err := hsh.getKubeletInfo(context.Background())
+	got, collected, err := hsh.getKubeletInfo(context.Background())
 	require.NoError(t, err)
 	require.Empty(t, got)
-	require.Zero(t, rawCount)
+	require.Zero(t, collected.listed)
 
 	item := newCRDItem("KubeletInfo", "node-1", map[string]any{"KubeletInfo": map[string]any{"version": "v1.30.0"}})
 	hsh.dynamicClient = newCRDDynamicClient(t, item)
 
-	got, rawCount, err = hsh.getKubeletInfo(context.Background())
+	got, collected, err = hsh.getKubeletInfo(context.Background())
 	require.NoError(t, err)
 	require.Len(t, got, 1)
-	assert.Equal(t, 1, rawCount)
+	assert.Equal(t, 1, collected.listed)
 	assert.Equal(t, "node-1", got[0].GetName())
 }
 
