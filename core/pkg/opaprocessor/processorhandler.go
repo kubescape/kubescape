@@ -1261,8 +1261,12 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 //
 // This runs once per rule-scope evaluation (not once per resource), so its
 // O(len(ResourceToControlsMap)) cost is paid a small, bounded number of times
-// per scan rather than once per resource.
+// per scan rather than once per resource. It runs on processScope's worker
+// goroutines concurrently with markResourcesSkipped/seedCELSkips, which write
+// InfoMap under mu, so the read must hold mu as well.
 func (opap *OPAProcessor) hasUnreachableDependency(controlID string) bool {
+	opap.mu.Lock()
+	defer opap.mu.Unlock()
 	for gvr, controlIDs := range opap.ResourceToControlsMap {
 		if !slices.Contains(controlIDs, controlID) {
 			continue
