@@ -13,6 +13,22 @@ const (
 	FieldSelectorsNotEqualsOperator = "!="
 )
 
+// splitNamespaces parses a comma-separated namespace list (as passed to
+// --include-namespaces / --exclude-namespaces) into a clean slice. Empty
+// entries and surrounding whitespace are dropped.
+func splitNamespaces(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for p := range strings.SplitSeq(s, ",") {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 type IFieldSelector interface {
 	GetNamespacesSelectors(*schema.GroupVersionResource, *bool) []string
 	GetClusterScope(*schema.GroupVersionResource) bool
@@ -67,6 +83,11 @@ func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionR
 
 }
 
+// GetNamespacesSelectors returns one field selector per query the collection has
+// to run for this resource. It never returns an empty slice: pullSingleResource
+// runs one query per entry, so no entry means the resource is never listed, and
+// a resource that is never listed leaves no failure behind either — the scan
+// reports it as collected and empty, and every control over it reads as clean.
 func (is *IncludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource, namespaced *bool) []string {
 	fieldSelectors := []string{}
 	for n := range strings.SplitSeq(is.namespace, FieldSelectorsSeparator) {
@@ -83,6 +104,11 @@ func (is *IncludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionR
 			return []string{""}
 		}
 		fieldSelectors = append(fieldSelectors, sel)
+	}
+	if len(fieldSelectors) == 0 {
+		// The value named no namespace, so it narrows nothing; fall back to the
+		// unfiltered query rather than dropping the resource.
+		return []string{""}
 	}
 	return fieldSelectors
 }

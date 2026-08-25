@@ -2,6 +2,7 @@ package opaprocessor
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -658,6 +659,18 @@ func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
 	return rule.ResourceEnumerator
 }
 
+// errIncludeControlsNoMatch is returned when --include-controls is set but
+// none of the requested IDs exist in the loaded frameworks. Returning a hard
+// error (instead of silently excluding every control and yielding 0 results
+// with exit 0) preserves CI-gate integrity: a typo like --include-controls
+// C-9999 must fail the scan, not pass it.
+var errIncludeControlsNoMatch = errors.New("--include-controls matched no known control")
+
+// errNoControlsAfterFilter is returned when --include-controls/--skip-controls
+// together filter out every control, mirroring policyhandler.excludeControls'
+// errAllControlsExcluded guard for --exclude-controls.
+var errNoControlsAfterFilter = errors.New("--include-controls/--skip-controls left no controls to scan")
+
 // buildControlExcludedRules merges the existing rule-exclusion map with any
 // --skip-controls or --include-controls filters. The resulting map marks
 // individual rule names with `true` so that convertFrameworksToPolicies drops
@@ -669,14 +682,14 @@ func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
 // --include-controls treats "not in the include set" as "exclude", a single
 // mistyped case produces a silently empty scan instead of the requested
 // control.
-func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling.Framework, skip, include []string) map[string]bool {
+func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling.Framework, skip, include []string) (map[string]bool, error) {
 	excludedRules := make(map[string]bool, len(base)+4)
 	for k, v := range base {
 		excludedRules[k] = v
 	}
 
 	if len(skip) == 0 && len(include) == 0 {
-		return excludedRules
+		return excludedRules, nil
 	}
 
 	skipSet := make(map[string]struct{}, len(skip))
@@ -707,13 +720,25 @@ func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling
 			logger.L().Warning("skip control not found in loaded policies", helpers.String("control", id))
 		}
 	}
-	for id := range includeSet {
-		if _, ok := knownIDs[id]; !ok {
-			logger.L().Warning("include control not found in loaded policies", helpers.String("control", id))
+	// include-controls is a whitelist: if the caller asked for specific
+	// controls but none of them exist, failing open with 0 controls and
+	// exit 0 breaks CI gates. Treat "no include matched" as a hard error,
+	// mirroring policyhandler.excludeControls' errAllControlsExcluded.
+	if len(includeSet) > 0 {
+		matchedInclude := 0
+		for id := range includeSet {
+			if _, ok := knownIDs[id]; ok {
+				matchedInclude++
+			} else {
+				logger.L().Warning("include control not found in loaded policies", helpers.String("control", id))
+			}
+		}
+		if matchedInclude == 0 {
+			return nil, errIncludeControlsNoMatch
 		}
 	}
 
-	if len(include) > 0 {
+	if len(includeSet) > 0 {
 		for _, fw := range frameworks {
 			for i := range fw.Controls {
 				if _, keep := includeSet[strings.ToLower(fw.Controls[i].ControlID)]; keep {
@@ -737,5 +762,31 @@ func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling
 		}
 	}
 
-	return excludedRules
+	// Guard against a filter that leaves nothing to scan. This can happen
+	// when --include-controls names only controls that are then removed by
+	// --skip-controls, or when --skip-controls alone excludes every loaded
+	// control. Mirroring excludeControls' remaining==0 check prevents a
+	// 0-control, 0-failure, exit-0 scan that silently passes a CI gate.
+	if countRemainingControls(frameworks, excludedRules) == 0 {
+		return nil, errNoControlsAfterFilter
+	}
+
+	return excludedRules, nil
+}
+
+// countRemainingControls returns the number of controls that still have at
+// least one rule not marked excluded.
+func countRemainingControls(frameworks []reporthandling.Framework, excludedRules map[string]bool) int {
+	count := 0
+	for _, fw := range frameworks {
+		for i := range fw.Controls {
+			for r := range fw.Controls[i].Rules {
+				if !excludedRules[fw.Controls[i].Rules[r].Name] {
+					count++
+					break
+				}
+			}
+		}
+	}
+	return count
 }

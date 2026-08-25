@@ -110,17 +110,32 @@ func (v *VAP) failOnError() bool {
 // objectSelector (the object's own labels) and a resource rule's operations
 // and resourceNames (the object's own name).
 func (v *VAP) requireSupported() error {
+	if err := v.requireNamespaceSelectorSupported(); err != nil {
+		return err
+	}
+	if err := v.requireParamKindSupported(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *VAP) requireNamespaceSelectorSupported() error {
 	if v.matchConstraints != nil && selectorNarrows(v.matchConstraints.NamespaceSelector) {
 		return fmt.Errorf("control %q scopes matchConstraints with a namespaceSelector, whose input (namespace labels) the scan cannot guarantee to have; refusing it to preserve scan/admission parity", v.ControlID)
 	}
-	if v.paramKind != nil {
-		shipped, err := controlConfigParamKind()
-		if err != nil {
-			return err
-		}
-		if *v.paramKind != *shipped {
-			return fmt.Errorf("control %q takes params of kind %s %s, which the scan has no binding to resolve (only the bundled %s %s is available); refusing it to preserve scan/admission parity", v.ControlID, v.paramKind.APIVersion, v.paramKind.Kind, shipped.APIVersion, shipped.Kind)
-		}
+	return nil
+}
+
+func (v *VAP) requireParamKindSupported() error {
+	if v.paramKind == nil {
+		return nil
+	}
+	shipped, err := controlConfigParamKind()
+	if err != nil {
+		return err
+	}
+	if *v.paramKind != *shipped {
+		return fmt.Errorf("control %q takes params of kind %s %s, which the scan has no binding to resolve (only the bundled %s %s is available); refusing it to preserve scan/admission parity", v.ControlID, v.paramKind.APIVersion, v.paramKind.Kind, shipped.APIVersion, shipped.Kind)
 	}
 	return nil
 }
@@ -211,6 +226,27 @@ func loadVAP(controlID string) (*VAP, error) {
 	}
 	return vap, nil
 }
+
+// LoadVAP is the exported entry point for callers that need the VAP to resolve
+// a per-binding paramRef. It does not refuse a VAP merely because its paramKind
+// is not the bundled one: a binding's paramRef may point to that kind in the
+// scanned input. It still refuses namespaceSelector-narrowed policies.
+func LoadVAP(controlID string) (*VAP, error) {
+	vap, err := lookupVAP(controlID)
+	if err != nil {
+		return nil, err
+	}
+	if err := vap.requireNamespaceSelectorSupported(); err != nil {
+		return nil, err
+	}
+	return vap, nil
+}
+
+// ErrParamNotFound signals that a binding's paramRef points to an object that
+// is not present in the scanned input. The caller applies the binding's
+// parameterNotFoundAction: Allow means the object is admitted, Deny/empty means
+// the policy cannot produce a verdict and the rule is skipped.
+var ErrParamNotFound = errors.New("param object not found")
 
 // parseVAPBundle turns a multi-document bundle into a vapCatalog.
 //
@@ -315,6 +351,30 @@ func newVAP(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *VAP {
 		})
 	}
 	return vap
+}
+
+// ResolveParamObject returns the value bound to the evaluator's "params"
+// variable for one binding's paramRef. A policy with no paramKind gets nil. A
+// binding with no paramRef falls back to the bundled ControlConfiguration. A
+// binding that names a specific param object is resolved from the scanned input
+// via findParam. If the object is not found, ErrParamNotFound is returned so
+// the caller can honor parameterNotFoundAction.
+func ResolveParamObject(vap *VAP, paramRef *admissionregistrationv1.ParamRef, resourceNamespace string, findParam func(apiVersion, kind, namespace, name string) (map[string]any, bool)) (any, error) {
+	if vap.paramKind == nil {
+		return nil, nil
+	}
+	if paramRef == nil || paramRef.Name == "" {
+		return resolveParams(vap)
+	}
+	ns := paramRef.Namespace
+	if ns == "" {
+		ns = resourceNamespace
+	}
+	obj, ok := findParam(vap.paramKind.APIVersion, vap.paramKind.Kind, ns, paramRef.Name)
+	if !ok {
+		return nil, ErrParamNotFound
+	}
+	return obj, nil
 }
 
 // resolveParams returns the value bound to the evaluator's "params" variable. A

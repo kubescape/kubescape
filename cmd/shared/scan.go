@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/spf13/cobra"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 // ScanFormats and ImageScanFormats are derived from printer.AllFormats and
@@ -150,6 +151,14 @@ func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, sup
 	}
 	if err := ValidateExcludePaths(scanInfo); err != nil {
 		return err
+	}
+	if strings.TrimSpace(scanInfo.LabelSelector) == "" && scanInfo.LabelSelector != "" {
+		return fmt.Errorf("invalid --label-selector %q: must not be whitespace-only", scanInfo.LabelSelector)
+	}
+	if scanInfo.LabelSelector != "" {
+		if _, err := labels.Parse(scanInfo.LabelSelector); err != nil {
+			return fmt.Errorf("invalid --label-selector %q: %w", scanInfo.LabelSelector, err)
+		}
 	}
 	if err := ValidateExcludeControls(scanInfo); err != nil {
 		return err

@@ -1169,22 +1169,6 @@ func (k8sHandler *K8sResourceHandler) countNamespaces(ctx context.Context, scanI
 	return count
 }
 
-// splitNamespaces parses a comma-separated namespace list (as passed to
-// --include-namespaces / --exclude-namespaces) into a clean slice. Empty
-// entries and surrounding whitespace are dropped.
-func splitNamespaces(s string) []string {
-	if s == "" {
-		return nil
-	}
-	var out []string
-	for p := range strings.SplitSeq(s, ",") {
-		if v := strings.TrimSpace(p); v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
 func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber(ctx context.Context) (int, error) {
 	schedulableCount := 0
 	err := getter.ListWithPagination(ctx, func(opts metav1.ListOptions) (string, error) {
@@ -1242,17 +1226,42 @@ func (k8sHandler *K8sResourceHandler) EstimateClusterSize(ctx context.Context, s
 		return 0, fmt.Errorf("kubernetes client not available")
 	}
 
+	namespaces := splitNamespaces(scanInfo.IncludeNamespaces)
+
 	var total int
 	var ok int
 	for _, gvr := range namespacedResourcesToEstimate {
-		result, err := k8sHandler.k8s.DynamicClient.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{Limit: 1})
-		if err != nil {
-			continue
-		}
-		ok++
-		total += len(result.Items)
-		if rc := result.GetRemainingItemCount(); rc != nil {
-			total += int(*rc)
+		if len(namespaces) > 0 {
+			// Scope estimation to the included namespaces only.
+			for _, ns := range namespaces {
+				result, err := k8sHandler.k8s.DynamicClient.Resource(gvr).Namespace(ns).List(ctx, metav1.ListOptions{Limit: 1})
+				if err != nil {
+					logger.L().Ctx(ctx).Debug("estimate: LIST failed",
+						helpers.String("gvr", gvr.Resource),
+						helpers.String("namespace", ns),
+						helpers.Error(err))
+					continue
+				}
+				ok++
+				total += len(result.Items)
+				if rc := result.GetRemainingItemCount(); rc != nil {
+					total += int(*rc)
+				}
+			}
+		} else {
+			// No include filter: query across all namespaces.
+			result, err := k8sHandler.k8s.DynamicClient.Resource(gvr).Namespace("").List(ctx, metav1.ListOptions{Limit: 1})
+			if err != nil {
+				logger.L().Ctx(ctx).Debug("estimate: LIST failed",
+					helpers.String("gvr", gvr.Resource),
+					helpers.Error(err))
+				continue
+			}
+			ok++
+			total += len(result.Items)
+			if rc := result.GetRemainingItemCount(); rc != nil {
+				total += int(*rc)
+			}
 		}
 	}
 

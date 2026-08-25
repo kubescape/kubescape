@@ -174,11 +174,16 @@ func getGroupNVersion(apiVersion string) (string, string) {
 	return group, version
 }
 
+// getFieldSelectorFromScanInfo picks the namespace filter the collection queries
+// carry. A flag is honored only when its value actually names a namespace: a
+// value made of separators and whitespace ("," or " ") narrows nothing, which is
+// already how countNamespaces and the report metadata read it, and an include
+// selector built from one emits no query at all (see GetNamespacesSelectors).
 func getFieldSelectorFromScanInfo(scanInfo *cautils.ScanInfo) IFieldSelector {
-	if scanInfo.IncludeNamespaces != "" {
+	if len(splitNamespaces(scanInfo.IncludeNamespaces)) > 0 {
 		return NewIncludeSelector(scanInfo.IncludeNamespaces)
 	}
-	if scanInfo.ExcludedNamespaces != "" {
+	if len(splitNamespaces(scanInfo.ExcludedNamespaces)) > 0 {
 		return NewExcludeSelector(scanInfo.ExcludedNamespaces)
 	}
 

@@ -7,7 +7,7 @@ replace github.com/kubescape/kubescape/v4 => ../
 replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.0-20260322054632-16583c73e9b8
 
 require (
-	github.com/armosec/armoapi-go v0.0.751
+	github.com/armosec/armoapi-go v0.0.754
 	github.com/armosec/utils-go v0.0.58
 	github.com/armosec/utils-k8s-go v0.0.35
 	github.com/go-openapi/runtime v0.33.0
@@ -15,16 +15,16 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/schema v1.4.1
 	github.com/kubescape/backend v0.0.46
-	github.com/kubescape/go-logger v0.0.33
+	github.com/kubescape/go-logger v0.0.34
 	github.com/kubescape/k8s-interface v0.0.218
 	github.com/kubescape/kubescape/v4 v4.0.12
-	github.com/kubescape/opa-utils v0.0.309
+	github.com/kubescape/opa-utils v0.0.310
 	github.com/kubescape/storage v0.0.258
 	github.com/spf13/viper v1.21.0
-	github.com/stretchr/testify v1.11.1
+	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux v0.70.0
 	go.opentelemetry.io/otel v1.45.0
-	k8s.io/apimachinery v0.36.3
+	k8s.io/apimachinery v0.36.4
 	k8s.io/client-go v0.35.4
 	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5
 )
@@ -348,7 +348,7 @@ require (
 	github.com/in-toto/in-toto-golang v0.11.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
-	github.com/jedib0t/go-pretty/v6 v6.7.8 // indirect
+	github.com/jedib0t/go-pretty/v6 v6.8.3 // indirect
 	github.com/jedisct1/go-minisign v0.0.0-20230811132847-661be99b8267 // indirect
 	github.com/jinzhu/copier v0.4.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
@@ -443,7 +443,7 @@ require (
 	github.com/opencontainers/selinux v1.13.1 // indirect
 	github.com/openvex/go-vex v0.2.7 // indirect
 	github.com/owenrumney/go-sarif v1.1.2-0.20231003122901-1000f5e05554 // indirect
-	github.com/owenrumney/go-sarif/v2 v2.3.0 // indirect
+	github.com/owenrumney/go-sarif/v2 v2.3.3 // indirect
 	github.com/package-url/packageurl-go v0.1.3 // indirect
 	github.com/pandatix/go-cvss v0.6.2 // indirect
 	github.com/pborman/indent v1.2.1 // indirect
@@ -579,7 +579,7 @@ require (
 	go.uber.org/dig v1.17.1 // indirect
 	go.uber.org/mock v0.6.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go4.org v0.0.0-20230225012048-214862532bf5 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/image v0.44.0 // indirect
@@ -612,7 +612,7 @@ require (
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260317180543-43fb72c5454a // indirect
 	k8s.io/kubectl v0.35.4 // indirect
-	k8s.io/streaming v0.36.3 // indirect
+	k8s.io/streaming v0.36.4 // indirect
 	modernc.org/libc v1.72.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

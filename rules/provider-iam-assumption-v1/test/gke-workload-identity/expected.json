@@ -17,7 +17,11 @@
                     "apiVersion": "v1",
                     "kind": "ServiceAccount",
                     "metadata": {
-                        "name": "gcs-reader"
+                        "annotations": {
+                            "iam.gke.io/gcp-service-account": "gcs-reader@my-project.iam.gserviceaccount.com"
+                        },
+                        "name": "gcs-reader",
+                        "namespace": "data"
                     }
                 }
             ]

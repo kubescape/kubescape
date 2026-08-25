@@ -51,6 +51,7 @@ kubescape scan [target] [flags]
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
 | `--label-selector <selector>` | Filter collected resources by Kubernetes label selector. Accepts any expression `kubectl -l` supports, e.g. `app=nginx,env!=dev` or `env in (prod,staging)`. Syntax is validated before scanning begins; filtering is applied during live cluster collection and ignored when scanning local files. | - |
 | `--keep-local` | Don't report results to backend | `false` |
+| `--notify <url>` | POST the posture scan's JSON summary to a trusted generic webhook URL. Repeat the flag for multiple endpoints. Delivery is best-effort and does not affect scan exit status. Not supported by `scan image`. | - |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
 | `--otel-endpoint <endpoint>` | Export scan traces and metrics to an OTLP collector — see [OpenTelemetry export](#opentelemetry-export). Accepts `host:port` (plaintext) or a `http(s)://` URL. | `OTEL_EXPORTER_OTLP_ENDPOINT` |
@@ -63,6 +64,19 @@ kubescape scan [target] [flags]
 | `--use-from <path>` | Load specific policy from path | - |
 | `-v, --verbose` | Display all resources, not just failed ones | `false` |
 | `--view <type>` | View type: `security`, `control`, `resource` | `security` |
+
+### Generic webhook notifications
+
+Use `--notify` to POST the existing JSON `summaryDetails` object after a posture scan:
+
+```bash
+kubescape scan manifests/ --notify https://hooks.example.com/kubescape
+kubescape scan manifests/ --notify https://ops.example.com/kubescape --notify https://audit.example.com/kubescape
+```
+
+Each destination gets one synchronous request with `Content-Type: application/json`; Kubescape allows up to five seconds per destination and does not follow redirects. Failures are logged as warnings and never override the scan's own exit status. The payload follows `--min-severity` and `--max-severity` output filtering. `--severity-threshold` continues to affect only the exit status.
+
+The summary may contain resource identifiers in control summaries. Use `--hide` where appropriate and send only to trusted webhook endpoints. Slack Block Kit and Microsoft Teams Adaptive Card formatting are not included in this generic phase.
 
 ### Exception Audit
 
