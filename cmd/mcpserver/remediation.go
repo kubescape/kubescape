@@ -105,11 +105,22 @@ func unaddressedControls(requested []string, reported map[string]bool, unfixed [
 	emitted := make(map[string]bool)
 	for _, id := range requested {
 		key := normalizeControlID(id)
-		if key == "" || covered[key] || emitted[key] || reported[key] {
+		if key == "" || covered[key] || emitted[key] {
 			continue
 		}
-		reason, ok := reasons[key]
-		if !ok {
+		// ScanCoverage is authoritative about what was not evaluated and must be
+		// consulted before the report. ConvertFrameworksToSummaryDetails seeds
+		// SummaryDetails.Controls with every in-scope control *before* evaluation,
+		// so a control can appear there — possibly with a skipped status — and
+		// still never have been evaluated. Testing the report first would drop the
+		// control-specific reason, and for a seeded summary would drop the entry
+		// entirely, reintroducing the vanishing-control bug this function exists
+		// to prevent.
+		reason, notEvaluated := reasons[key]
+		if !notEvaluated {
+			if reported[key] {
+				continue // evaluated; the absence of a fix means it passed
+			}
 			reason = "not evaluated: control did not appear in the scan report"
 		}
 		emitted[key] = true

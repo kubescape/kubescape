@@ -375,6 +375,65 @@ func TestApplyRemediation_EvaluatedPassingControlIsNotFlagged(t *testing.T) {
 	}
 }
 
+// TestApplyRemediation_NotEvaluatedWinsOverSeededSummary covers the overlap
+// case: ConvertFrameworksToSummaryDetails seeds SummaryDetails.Controls with
+// every in-scope control before evaluation, so a control can be present in the
+// report (here with a skipped status) *and* be listed in ScanCoverage as never
+// evaluated. ScanCoverage must win, and its specific reason must survive —
+// otherwise the control silently disappears from the response.
+func TestApplyRemediation_NotEvaluatedWinsOverSeededSummary(t *testing.T) {
+	dir := t.TempDir()
+	fixture := filepath.Join(dir, "deployment.yaml")
+	require.NoError(t, os.WriteFile(fixture, []byte(deploymentNoSecurityContext), 0o600))
+
+	res := remediationResource(dir, "deployment.yaml", "Deployment", "demo", 0)
+	report := remediationReport(dir, res,
+		remediationFailedControl("C-0013", "Non-root containers",
+			remediationFailedRuleWithFix("spec.template.spec.securityContext.runAsNonRoot", "true"),
+		),
+	)
+	// C-0041 is seeded into the summary with a skipped status, exactly as a real
+	// scan would, while ScanCoverage reports it was never evaluated.
+	report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+		"C-0041": reportsummary.ControlSummary{
+			ControlID:  "C-0041",
+			StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusSkipped},
+		},
+	}
+	raw, err := json.Marshal(report)
+	require.NoError(t, err)
+	stubScanOutcome(t, &iacScanOutcome{
+		ReportJSON: raw,
+		Degraded:   true,
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{
+			{ControlID: "C-0041", Reason: "control evaluation timed out", MissingGVRs: []string{"apps/v1/deployments"}},
+		},
+	})
+
+	ksServer := &KubescapeMcpserver{}
+	result := callApplyRemediation(t, ksServer, map[string]any{
+		"path":        fixture,
+		"control_ids": "C-0013,C-0041",
+	})
+	require.False(t, result.IsError, "unexpected tool error: %s", toolResultText(t, result))
+
+	var resp remediationResponse
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &resp))
+
+	var found *fixhandler.UnfixedControl
+	for i := range resp.UnfixedControls {
+		if resp.UnfixedControls[i].ControlID == "C-0041" {
+			found = &resp.UnfixedControls[i]
+		}
+	}
+	require.NotNil(t, found,
+		"a control present in the seeded summary but listed as not-evaluated must still surface")
+	assert.Contains(t, found.Reason, "timed out",
+		"the control-specific coverage reason must be preserved, not replaced by the generic one")
+	assert.Contains(t, found.Reason, "apps/v1/deployments",
+		"missing resource types should be carried through to the caller")
+}
+
 // TestApplyRemediation_ControlIDMatchingIsCaseInsensitive guards the diff
 // against a false "skipped" verdict when the caller lowercases the ID, since
 // parseControlIDs only trims.
