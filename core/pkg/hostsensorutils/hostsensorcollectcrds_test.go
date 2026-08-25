@@ -328,12 +328,17 @@ func TestCollectResources_KeepsPartiallyReadableItems(t *testing.T) {
 	}
 }
 
+// dropped is what tells a partial loss from a total one, so it is pinned
+// rather than left to the callers that branch on it.
 func TestCrdCollectionDropped(t *testing.T) {
 	assert.Equal(t, 2, crdCollection{listed: 3, converted: 1}.dropped())
 	assert.Zero(t, crdCollection{listed: 3, converted: 3}.dropped())
 	assert.Zero(t, crdCollection{}.dropped())
 }
 
+// assertInfoMapContains checks that a resource was recorded as skipped under
+// every key ResourceGroupToString spells it with, since that is what the scan
+// looks it up by.
 func assertInfoMapContains(t *testing.T, infoMap map[string]apis.StatusInfo, resource k8shostsensor.HostSensorResource, want string) {
 	t.Helper()
 
@@ -342,5 +347,38 @@ func assertInfoMapContains(t *testing.T, infoMap map[string]apis.StatusInfo, res
 		require.Contains(t, infoMap, r)
 		assert.Equal(t, want, infoMap[r].InnerInfo)
 		assert.Equal(t, apis.StatusSkipped, infoMap[r].InnerStatus)
+	}
+}
+
+// CloudProviderInfo is queried ahead of the loop, so it needs its own coverage:
+// it was the one resource that could lose every item it reported and still
+// carry no status.
+func TestCollectResources_RecordsUnreadableCloudProviderItems(t *testing.T) {
+	hsh := &HostSensorHandler{
+		dynamicClient: newCRDDynamicClient(t, newCRDShell("CloudProviderInfo", "node-1")),
+		nodeCount:     1,
+	}
+
+	res, infoMap, err := hsh.CollectResources(context.Background())
+
+	require.NoError(t, err)
+	assert.False(t, hasKind(res, k8shostsensor.CloudProviderInfo))
+	assertInfoMapContains(t, infoMap, k8shostsensor.CloudProviderInfo,
+		"node-agent reported 1 CloudProviderInfo but none of them could be read")
+}
+
+// A cluster that simply has no CloudProviderInfo is the normal on-prem case, so
+// the zero-item arm the per-node resources get must stay off this query.
+func TestCollectResources_IgnoresAbsentCloudProviderInfo(t *testing.T) {
+	hsh := &HostSensorHandler{
+		dynamicClient: newCRDDynamicClient(t, newCRDItem("OsReleaseFile", "node-1", map[string]any{"pretty": "Ubuntu"})),
+	}
+
+	_, infoMap, err := hsh.CollectResources(context.Background())
+
+	require.NoError(t, err)
+	group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(k8shostsensor.CloudProviderInfo))
+	for _, r := range k8sinterface.ResourceGroupToString(group, version, k8shostsensor.CloudProviderInfo.String()) {
+		assert.NotContains(t, infoMap, r)
 	}
 }
