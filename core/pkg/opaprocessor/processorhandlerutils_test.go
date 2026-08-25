@@ -1358,7 +1358,8 @@ func TestBuildControlExcludedRules(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildControlExcludedRules(tt.base, framework, tt.skip, tt.include)
+			got, err := buildControlExcludedRules(tt.base, framework, tt.skip, tt.include)
+			require.NoError(t, err)
 			for _, rule := range tt.excludedRules {
 				assert.True(t, got[rule], "expected rule %q to be excluded", rule)
 			}
@@ -1367,4 +1368,36 @@ func TestBuildControlExcludedRules(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildControlExcludedRules_IncludeNoMatchReturnsError(t *testing.T) {
+	framework := []reporthandling.Framework{{
+		Controls: []reporthandling.Control{
+			{ControlID: "C-0001", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-a"}}}},
+			{ControlID: "C-0002", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-b"}}}},
+		},
+	}}
+
+	_, err := buildControlExcludedRules(nil, framework, nil, []string{"C-9999"})
+	require.ErrorIs(t, err, errIncludeControlsNoMatch)
+
+	_, err = buildControlExcludedRules(nil, framework, nil, []string{"c-9999"})
+	require.ErrorIs(t, err, errIncludeControlsNoMatch)
+
+	_, err = buildControlExcludedRules(nil, framework, nil, []string{"C-9999", "C-8888"})
+	require.ErrorIs(t, err, errIncludeControlsNoMatch)
+
+	// Mixed: one valid + one invalid should NOT error, invalid is warned but valid keeps scan alive
+	got, err := buildControlExcludedRules(nil, framework, nil, []string{"C-0001", "C-9999"})
+	require.NoError(t, err)
+	assert.True(t, got["rule-b"], "rule-b should be excluded (not included)")
+	assert.False(t, got["rule-a"], "rule-a should not be excluded")
+
+	// Include valid then skip same => leaves zero controls => noControlsAfterFilter
+	_, err = buildControlExcludedRules(nil, framework, []string{"C-0001"}, []string{"C-0001"})
+	require.ErrorIs(t, err, errNoControlsAfterFilter)
+
+	// Skip all controls via skip alone => leaves zero
+	_, err = buildControlExcludedRules(nil, framework, []string{"C-0001", "C-0002"}, nil)
+	require.ErrorIs(t, err, errNoControlsAfterFilter)
 }
