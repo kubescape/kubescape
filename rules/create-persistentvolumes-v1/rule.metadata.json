@@ -1,0 +1,20 @@
+{
+  "name": "create-persistentvolumes-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Privilege Escalation::Create hostPath-capable PersistentVolume",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": ["rbac.authorization.k8s.io"],
+      "apiVersions": ["v1"],
+      "resources": ["RoleBinding", "ClusterRoleBinding", "Role", "ClusterRole"]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can create PersistentVolumes, which allows creation of hostPath-backed volumes that expose the underlying node's filesystem to any pod that mounts them",
+  "remediation": "Restrict create access to persistentvolumes to cluster storage administrators. Prefer StorageClasses with dynamic provisioning and disallow hostPath in a PodSecurity/OPA admission policy.",
+  "ruleQuery": "armo_builtins"
+}

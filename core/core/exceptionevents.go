@@ -9,25 +9,25 @@ import (
 	"k8s.io/client-go/tools/record"
 )
 
-func newSecurityExceptionEventRecorder() record.EventRecorder {
+func newSecurityExceptionEventRecorder() (record.EventRecorder, func()) {
 	if !k8sinterface.IsConnectedToCluster() {
-		return nil
+		return nil, nil
 	}
 
 	k8s := getKubernetesApi()
 	if k8s == nil || k8s.KubernetesClient == nil {
-		return nil
+		return nil, nil
 	}
 
 	return newSecurityExceptionEventRecorderWithClient(k8s.KubernetesClient)
 }
 
-func newSecurityExceptionEventRecorderWithClient(k8sClient kubernetes.Interface) record.EventRecorder {
+func newSecurityExceptionEventRecorderWithClient(k8sClient kubernetes.Interface) (record.EventRecorder, func()) {
 	if k8sClient == nil {
-		return nil
+		return nil, nil
 	}
 
 	broadcaster := record.NewBroadcaster()
 	broadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: k8sClient.CoreV1().Events("")})
-	return broadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "kubescape"})
+	return broadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "kubescape"}), broadcaster.Shutdown
 }

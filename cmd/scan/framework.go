@@ -3,17 +3,16 @@ package scan
 import (
 	"errors"
 	"fmt"
-	"io"
-	"os"
+	"math"
 	"slices"
 	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/cmd/shared"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-	"github.com/kubescape/kubescape/v3/core/meta"
+	"github.com/kubescape/kubescape/v4/cmd/shared"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/meta"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -43,8 +42,6 @@ var (
 	ErrSecurityViewNotSupported = errors.New("security view is not supported for framework scan")
 	ErrBadThreshold             = errors.New("bad argument: out of range threshold")
 	ErrControlTimeoutTooHigh    = errors.New("--control-timeout must be lower than --scan-timeout")
-	ErrKeepLocalOrSubmit        = errors.New("you can use `keep-local` or `submit`, but not both")
-	ErrOmitRawResourcesOrSubmit = errors.New("you can use `omit-raw-resources` or `submit`, but not both")
 )
 
 func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
@@ -68,20 +65,16 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			defer applyTimeout(scanInfo, ks)()
+			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
+			defer cancel()
 
-			if scanInfo.FailThresholdSeverity != "" {
-				if err := shared.ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
-					return err
-				}
-			}
-			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif")
-			}
-			if err := shared.ValidateScanFormat(scanInfo.Format, shared.ScanFormats); err != nil {
+			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ScanFormats); err != nil {
 				return err
 			}
 			if err := validateFrameworkScanInfo(scanInfo); err != nil {
+				return err
+			}
+			if err := validateCombinedImageScanFlags(scanInfo); err != nil {
 				return err
 			}
 			scanInfo.FrameworkScan = true
@@ -101,54 +94,57 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 					frameworks = getter.NativeFrameworks
 
 				}
-				if len(args) > 1 {
-					if args[1] != "-" {
-						scanInfo.InputPatterns = args[1:]
-						logger.L().Debug("List of input files", helpers.Interface("patterns", scanInfo.InputPatterns))
-					} else { // store stdin to file - do NOT move to separate function !!
-						tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
-						if err != nil {
-							return err
-						}
-						defer os.Remove(tempFile.Name())
-
-						if _, err := io.Copy(tempFile, os.Stdin); err != nil {
-							return err
-						}
-						scanInfo.InputPatterns = []string{tempFile.Name()}
-					}
+				cleanup, err := prepareScanLocalInput(cmd.InOrStdin(), args, scanInfo, scanLocalInputOptions{
+					FirstInputArg:    1,
+					RejectMixedStdin: true,
+				})
+				if err != nil {
+					return err
+				}
+				defer cleanup()
+				if len(scanInfo.InputPatterns) > 0 {
+					logger.L().Debug("List of input files", helpers.Interface("patterns", scanInfo.InputPatterns))
 				}
 			}
 			scanInfo.SetScanType(cautils.ScanTypeFramework)
 
-			scanInfo.SetPolicyIdentifiers(frameworks, apisv1.KindFramework)
+			policyIdentifiers := cautils.BuildPolicyIdentifiers(frameworks, apisv1.KindFramework)
 
-			results, err := ks.Scan(scanInfo)
+			results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 			if err != nil {
-				logger.L().Fatal(err.Error())
+				return err
 			}
 
-			if err = results.HandleResults(ks.Context(), scanInfo); err != nil {
-				logger.L().Fatal(err.Error())
+			if err = results.HandleResults(ctx, scanInfo); err != nil {
+				return err
 			}
 
-			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
-				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
-			}
 			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
-				logger.L().Fatal("scan compliance-score is below permitted threshold", helpers.String("compliance-score", fmt.Sprintf("%.2f", results.GetComplianceScore())), helpers.String("compliance-threshold", fmt.Sprintf("%.2f", scanInfo.ComplianceThreshold)))
+				return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
 			}
 
-			enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
-			enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo)
-			enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo)
-			return nil
+			if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
+				return err
+			}
+			if scanInfo.ScanImages {
+				if err := enforceImageSeverityThresholds(results.ImageScanData, scanInfo); err != nil {
+					return err
+				}
+			}
+			if err := enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo); err != nil {
+				return err
+			}
+			if err := enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo); err != nil {
+				return err
+			}
+			return enforceBaselineDrift(ctx, results, scanInfo)
 		},
 	}
 
 }
 
-// countersExceedSeverityThreshold returns true if severity of failed controls exceed the set severity threshold, else returns false
+// countersExceedSeverityThreshold returns true if a failed control has severity
+// at or above the configured threshold.
 func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCounters, scanInfo *cautils.ScanInfo) (bool, error) {
 	targetSeverity := scanInfo.FailThresholdSeverity
 	if err := shared.ValidateSeverity(targetSeverity); err != nil {
@@ -165,12 +161,21 @@ func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCou
 		{reporthandlingapis.SeverityCriticalString, severityCounters.NumberOfCriticalSeverity},
 	}
 
+	normalizedTarget := strings.TrimSpace(targetSeverity)
+
 	targetSeverityIdx := 0
+	found := false
 	for idx, description := range getFailedResourcesFuncsBySeverity {
-		if strings.EqualFold(description.SeverityName, targetSeverity) {
+		if strings.EqualFold(description.SeverityName, normalizedTarget) {
 			targetSeverityIdx = idx
+			found = true
 			break
 		}
+	}
+	if !found {
+		// Defensive: ValidateSeverity passed but severity not in ordered slice.
+		// Return explicit error instead of silently falling back to lowest index.
+		return false, fmt.Errorf("%w: %q", shared.ErrUnknownSeverity, targetSeverity)
 	}
 
 	for _, description := range getFailedResourcesFuncsBySeverity[targetSeverityIdx:] {
@@ -184,58 +189,81 @@ func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCou
 
 }
 
-// terminateOnExceedingSeverity terminates the application on exceeding severity
-func terminateOnExceedingSeverity(scanInfo *cautils.ScanInfo, l helpers.ILogger) {
-	l.Fatal("compliance result exceeds severity threshold", helpers.String("set severity threshold", scanInfo.FailThresholdSeverity))
-}
-
 // enforceCoverageThreshold fails the scan if the scan coverage score is below
 // scanInfo.FailCoverageThreshold. The score is computed once in the scan
 // pipeline (ScanCoverage.ComputeCoverageScore) so this gate agrees with what
 // the JSON, Prometheus and pretty-printer outputs report. A threshold of 0
 // disables the check.
-func enforceCoverageThreshold(coverage cautils.ScanCoverage, totalControls int, scanInfo *cautils.ScanInfo) {
+func enforceCoverageThreshold(coverage cautils.ScanCoverage, totalControls int, scanInfo *cautils.ScanInfo) error {
 	if scanInfo.FailCoverageThreshold <= 0 {
-		return
+		return nil
 	}
 	if totalControls == 0 {
-		return
+		return fmt.Errorf("scan loaded no controls: coverage is 0%% (fail-coverage-below: %.2f%%)", scanInfo.FailCoverageThreshold)
 	}
 	if coverage.CoverageScore < scanInfo.FailCoverageThreshold {
-		logger.L().Fatal("scan coverage is below permitted threshold",
-			helpers.String("coverage", fmt.Sprintf("%.2f%%", coverage.CoverageScore)),
-			helpers.String("fail-coverage-below", fmt.Sprintf("%.2f%%", scanInfo.FailCoverageThreshold)),
-		)
+		return fmt.Errorf("scan coverage is below permitted threshold: %.2f%% (fail-coverage-below: %.2f%%)", coverage.CoverageScore, scanInfo.FailCoverageThreshold)
 	}
+	return nil
 }
 
 // enforcePolicyDegradation fails the scan if control configurations or
 // exceptions could not be loaded from their configured source and the scan
 // proceeded with bundled defaults instead.
-func enforcePolicyDegradation(coverage cautils.ScanCoverage, scanInfo *cautils.ScanInfo) {
+func enforcePolicyDegradation(coverage cautils.ScanCoverage, scanInfo *cautils.ScanInfo) error {
 	if !scanInfo.FailOnDegradedConfig || len(coverage.PolicyDegradations) == 0 {
-		return
+		return nil
 	}
 	for _, d := range coverage.PolicyDegradations {
 		logger.L().Warning("policy input degraded, bundled defaults were used", helpers.String("component", d.Component), helpers.String("reason", d.Reason))
 	}
-	logger.L().Fatal("scan policy inputs were degraded", helpers.String("fail-on-degraded-config", "true"))
+	return fmt.Errorf("scan policy inputs were degraded (fail-on-degraded-config is true)")
+}
+
+// countFailedResourcesWithUnbucketedSeverity returns the number of failed
+// resources on controls whose severity SeverityCounters.Increase silently
+// drops: Unknown, Negligible, and any other severity it has no bucket for.
+// The severity is derived from the control's score factor the same way
+// SummaryDetails.AppendResourceResult derives it when feeding the counters.
+func countFailedResourcesWithUnbucketedSeverity(summaryDetails *reportsummary.SummaryDetails) int {
+	count := 0
+	for _, controlSummary := range summaryDetails.Controls {
+		switch reporthandlingapis.ControlSeverityToString(controlSummary.GetScoreFactor()) {
+		case reporthandlingapis.SeverityCriticalString,
+			reporthandlingapis.SeverityHighString,
+			reporthandlingapis.SeverityMediumString,
+			reporthandlingapis.SeverityLowString:
+		default:
+			count += controlSummary.StatusCounters.Failed()
+		}
+	}
+	return count
 }
 
 // enforceSeverityThresholds ensures that the scan results are below the defined severity threshold
 //
-// The function forces the application to terminate with an exit code 1 if at least one control failed control that exceeds the set severity threshold
-func enforceSeverityThresholds(severityCounters reportsummary.ISeverityCounters, scanInfo *cautils.ScanInfo, onExceed func(*cautils.ScanInfo, helpers.ILogger)) {
+// The function returns an error if at least one failed control has a severity at or above the set severity threshold
+func enforceSeverityThresholds(summaryDetails *reportsummary.SummaryDetails, scanInfo *cautils.ScanInfo) error {
 	// If a severity threshold is not set, we don’t need to enforce it
 	if scanInfo.FailThresholdSeverity == "" {
-		return
+		return nil
 	}
 
-	if val, err := countersExceedSeverityThreshold(severityCounters, scanInfo); val && err == nil {
-		onExceed(scanInfo, logger.L())
+	if val, err := countersExceedSeverityThreshold(summaryDetails.GetResourcesSeverityCounters(), scanInfo); val && err == nil {
+		return fmt.Errorf("compliance result exceeds severity threshold: %s", scanInfo.FailThresholdSeverity)
 	} else if err != nil {
-		logger.L().Fatal(err.Error())
+		return err
 	}
+
+	// Failed controls with a zero or missing baseScore never reach the
+	// counters above, so a threshold could pass on findings whose severity
+	// cannot be determined. Fail closed: treat them as at or above any
+	// threshold the user set.
+	if unbucketed := countFailedResourcesWithUnbucketedSeverity(summaryDetails); unbucketed > 0 {
+		logger.L().Warning("failed resources with unknown severity counted toward the severity threshold", helpers.Int("failedResources", unbucketed))
+		return fmt.Errorf("compliance result exceeds severity threshold: %s (%d failed resource(s) with unknown severity)", scanInfo.FailThresholdSeverity, unbucketed)
+	}
+	return nil
 }
 
 // validateFrameworkScanInfo validates the scan info struct for the `scan framework` command
@@ -243,21 +271,8 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if scanInfo.View == string(cautils.SecurityViewType) {
 		scanInfo.View = string(cautils.ResourceViewType)
 	}
-
-	if scanInfo.Submit && scanInfo.Local {
-		return ErrKeepLocalOrSubmit
-	}
-	if 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
+	if postureThresholdsOutOfRange(scanInfo) {
 		return ErrBadThreshold
-	}
-	if 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
-		return ErrBadThreshold
-	}
-	if 100 < scanInfo.FailCoverageThreshold || 0 > scanInfo.FailCoverageThreshold {
-		return ErrBadThreshold
-	}
-	if scanInfo.Submit && scanInfo.OmitRawResources {
-		return ErrOmitRawResourcesOrSubmit
 	}
 	if err := validateControlTimeout(scanInfo); err != nil {
 		return err
@@ -282,18 +297,19 @@ func validateControlTimeout(scanInfo *cautils.ScanInfo) error {
 }
 
 // validateThresholdsOnly validates only the numeric threshold ranges
-// (compliance-threshold and fail-threshold must be between 0 and 100).
+// (compliance-threshold and fail-coverage-threshold must be between 0 and 100).
 // Unlike validateFrameworkScanInfo, this function does not mutate scanInfo
 // or enforce unrelated constraints.
 func validateThresholdsOnly(scanInfo *cautils.ScanInfo) error {
-	if 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
-		return ErrBadThreshold
-	}
-	if 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
-		return ErrBadThreshold
-	}
-	if 100 < scanInfo.FailCoverageThreshold || 0 > scanInfo.FailCoverageThreshold {
+	if postureThresholdsOutOfRange(scanInfo) {
 		return ErrBadThreshold
 	}
 	return validateControlTimeout(scanInfo)
+}
+
+func postureThresholdsOutOfRange(scanInfo *cautils.ScanInfo) bool {
+	return math.IsNaN(float64(scanInfo.ComplianceThreshold)) ||
+		math.IsNaN(float64(scanInfo.FailCoverageThreshold)) ||
+		scanInfo.ComplianceThreshold < 0 || scanInfo.ComplianceThreshold > 100 ||
+		scanInfo.FailCoverageThreshold < 0 || scanInfo.FailCoverageThreshold > 100
 }

@@ -17,12 +17,12 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-	"github.com/kubescape/kubescape/v3/httphandler/config"
-	_ "github.com/kubescape/kubescape/v3/httphandler/docs"
-	"github.com/kubescape/kubescape/v3/httphandler/listener"
-	"github.com/kubescape/kubescape/v3/httphandler/storage"
-	"github.com/kubescape/kubescape/v3/pkg/ksinit"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/httphandler/config"
+	_ "github.com/kubescape/kubescape/v4/httphandler/docs"
+	"github.com/kubescape/kubescape/v4/httphandler/listener"
+	"github.com/kubescape/kubescape/v4/httphandler/storage"
+	"github.com/kubescape/kubescape/v4/pkg/ksinit"
 )
 
 // GoReleaser will fill these at build time
@@ -86,11 +86,13 @@ func initializeStorage(clusterName string, cfg config.Config) {
 	ksClient, err := ksinit.CreateKsObjectConnection(namespace, 0)
 	if err != nil {
 		logger.L().Fatal("storage initialization error", helpers.Error(err))
+		return
 	}
 
 	s, err := storage.NewAPIServerStorage(clusterName, namespace, ksClient, cfg.ContinuousPostureScan)
 	if err != nil {
 		logger.L().Fatal("storage initialization error", helpers.Error(err))
+		return
 	}
 	storage.SetStorage(s)
 }
@@ -116,16 +118,47 @@ func initializeLoggerLevel() {
 	}
 }
 
+// defaultServiceDiscoveryPath is a package-level indirection so tests can
+// override the fallback path without depending on /etc/config/services.json
+// being absent on the machine running the tests.
+var defaultServiceDiscoveryPath = "/etc/config/services.json"
+
 func initializeSaaSEnv() {
 	var sdGetter schema.IServiceDiscoveryServiceGetter
 
 	// Prefer file-based discovery: allows sidecar and private-cluster deployments
 	// to inject endpoints without network egress to api.armosec.io.
-	path := "/etc/config/services.json"
-	if p := os.Getenv("KS_SERVICE_DISCOVERY_FILE_PATH"); p != "" {
-		path = p
+	// A present-but-empty value (common for an unset Helm value) is treated
+	// the same as absent, not as an explicit override.
+	envPath, hasExplicitPath := os.LookupEnv("KS_SERVICE_DISCOVERY_FILE_PATH")
+	hasExplicitPath = hasExplicitPath && envPath != ""
+	path := defaultServiceDiscoveryPath
+	if hasExplicitPath {
+		path = envPath
 	}
-	if _, err := os.Stat(path); err == nil {
+	_, fileDiscoveryErr := os.Stat(path)
+	hasFileDiscovery := fileDiscoveryErr == nil
+
+	if !hasFileDiscovery {
+		// An explicit file path was configured but isn't there (typo, or a
+		// configmap that hasn't finished mounting yet) - this is a
+		// configuration problem, not "no backend configured", and falling
+		// back to the public SaaS endpoint would be a surprising thing to
+		// do silently for a deployer who opted into file-based discovery.
+		if hasExplicitPath {
+			logger.L().Warning("configured service-discovery file not found - skipping SaaS wiring", helpers.String("path", path), helpers.Error(fileDiscoveryErr))
+			return
+		}
+
+		// No backend was configured (no server URL and no account/access key) -
+		// do not reach out to the default public SaaS endpoint.
+		if os.Getenv("API_URL") == "" && config.GetAccount() == "" && config.GetAccessKey() == "" {
+			logger.L().Info("no backend configured (server/account/accessKey not set) - skipping SaaS wiring")
+			return
+		}
+	}
+
+	if hasFileDiscovery {
 		logger.L().Info("using file-based service discovery", helpers.String("path", path))
 		sdGetter = servicediscoveryv3.NewServiceDiscoveryFileV3(path)
 	} else {

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -330,6 +330,43 @@ func TestPrepareResourcesToFix_MissingFile(t *testing.T) {
 	assert.Empty(t, rtf)
 	if assert.Len(t, h.UnfixedControls(), 1) {
 		assert.Contains(t, h.UnfixedControls()[0].Reason, "file not found")
+	}
+}
+
+// TestPrepareResourcesToFix_UnresolvableResourceID guards against a panic
+// (nil pointer dereference on resourceObj.GetObject()) when a failed Result's
+// ResourceID has no backing resource — e.g. RawResource is nil and there is no
+// matching entry in the report's top-level Resources list, which can happen
+// with hand-edited or partially-trimmed report JSON. The fix must not merely
+// avoid the panic: the failed controls have to still show up in
+// UnfixedControls(), since dropping them silently reintroduces the
+// under-reporting bug from #2108.
+func TestPrepareResourcesToFix_UnresolvableResourceID(t *testing.T) {
+	dir := t.TempDir()
+
+	results := []resourcesresults.Result{
+		{
+			ResourceID: "no-such-resource",
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0057", "Privileged",
+					failedRuleWithFix("spec.privileged", "false"),
+				),
+				failedControl("C-0041", "HostNetwork", failedRuleNoFix()),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+
+	assert.NotPanics(t, func() {
+		rtf := h.PrepareResourcesToFix(context.Background())
+		assert.Empty(t, rtf)
+	})
+
+	if assert.Len(t, h.UnfixedControls(), 2) {
+		for _, u := range h.UnfixedControls() {
+			assert.Equal(t, "no-such-resource", u.ResourceName)
+			assert.Contains(t, u.Reason, "resource data missing")
+		}
 	}
 }
 

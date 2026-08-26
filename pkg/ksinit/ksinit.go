@@ -18,10 +18,19 @@ func CreateKsObjectConnection(namespace string, maxElapsedTime time.Duration) (s
 	if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
 		cfg, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 	} else {
-		home := os.Getenv("HOME")
-		kubeconfigPath := filepath.Join(home, ".kube", "config")
-		cfg, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
-		if err != nil {
+		// os.UserHomeDir resolves USERPROFILE on Windows (where HOME is
+		// normally not set at all) and reports an error when there is no home
+		// directory to resolve. Reading os.Getenv("HOME") instead left the
+		// home path empty, so filepath.Join produced the relative path
+		// ".kube/config" and the lookup silently became relative to the
+		// current working directory. Skip the file-based lookup entirely when
+		// there is no home directory and fall back to the in-cluster
+		// configuration, as before.
+		home, homeErr := os.UserHomeDir()
+		if homeErr == nil {
+			cfg, err = clientcmd.BuildConfigFromFlags("", filepath.Join(home, ".kube", "config"))
+		}
+		if homeErr != nil || err != nil {
 			cfg, err = rest.InClusterConfig()
 		}
 	}

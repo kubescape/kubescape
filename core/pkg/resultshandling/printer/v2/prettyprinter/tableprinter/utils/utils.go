@@ -9,7 +9,7 @@ import (
 	"github.com/enescakir/emoji"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jwalton/gchalk"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"golang.org/x/term"
@@ -100,16 +100,16 @@ func FrameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 		p.WriteString("Frameworks scanned: ")
 		i := 0
 		for ; i < len(frameworks)-1; i++ {
-			fmt.Fprintf(&p, "%s (compliance score: %.2f), ", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
+			fmt.Fprintf(&p, "%s (compliance score: %s), ", frameworks[i].GetName(), cautils.ComplianceScoreToString(frameworks[i].GetComplianceScore(), 2))
 		}
-		fmt.Fprintf(&p, "%s (compliance score: %.2f)\n", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
+		fmt.Fprintf(&p, "%s (compliance score: %s)\n", frameworks[i].GetName(), cautils.ComplianceScoreToString(frameworks[i].GetComplianceScore(), 2))
 		return p.String()
 	}
 	return ""
 }
 
 func PrintInfo(writer io.Writer, infoToPrintInfo []InfoStars) {
-	fmt.Println()
+	fmt.Fprintln(writer)
 	for i := range infoToPrintInfo {
 		cautils.InfoDisplay(writer, fmt.Sprintf("%s %s %s\n", emoji.PoliceCarLight, infoToPrintInfo[i].Stars, infoToPrintInfo[i].Info))
 	}
@@ -176,6 +176,26 @@ func CheckShortTerminalWidth(rows []table.Row, headers table.Row) bool {
 		return false
 	}
 	return termWidth <= maxWidth
+}
+
+// MaxControlNameLen is the truncation limit shared by the category and
+// summary table control-name columns, so the two stay in sync.
+const MaxControlNameLen = 50
+
+// TruncateName returns name unchanged if it is at most maxLen runes long,
+// otherwise truncates it to maxLen runes plus an appended "..." (so the
+// result is maxLen+3 runes when truncation happens).
+// Slicing a string by byte index (name[:maxLen]) can split a multi-byte
+// UTF-8 rune in half when name contains non-ASCII characters (e.g. non-Latin
+// script, accented characters, emoji in resource/control names), producing
+// invalid UTF-8 and garbled table output. Truncating by rune count avoids
+// that.
+func TruncateName(name string, maxLen int) string {
+	runes := []rune(name)
+	if len(runes) <= maxLen {
+		return name
+	}
+	return string(runes[:maxLen]) + "..."
 }
 
 func GetColorForVulnerabilitySeverity(severity string) func(...string) string {

@@ -3,19 +3,21 @@ package scan
 import (
 	"context"
 	"errors"
-	"os"
-	"reflect"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/cmd/shared"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/mocks"
-	resultshandlingpkg "github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/anchore/grype/grype/match"
+	grypepkg "github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/kubescape/kubescape/v4/cmd/shared"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/mocks"
+	resultshandlingpkg "github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -130,30 +132,80 @@ func TestExceedsSeverity(t *testing.T) {
 				t.Errorf("got: %v, want: %v", got, want)
 			}
 
-			if err != testCase.Error {
+			if !errors.Is(err, testCase.Error) {
 				t.Errorf(`got error "%v", want "%v"`, err, testCase.Error)
 			}
 		})
 	}
 }
 
+func TestScanNotifyFlagIsRepeatableAndInherited(t *testing.T) {
+	cmd := GetScanCommand(&mocks.MockIKubescape{})
+	flag := cmd.PersistentFlags().Lookup("notify")
+	require.NotNil(t, flag)
+	require.NoError(t, flag.Value.Set("https://one.example/hook?a=b,c"))
+	require.NoError(t, flag.Value.Set("https://two.example/hook"))
+	assert.Equal(t, `["https://one.example/hook?a=b,c",https://two.example/hook]`, flag.Value.String())
+
+	for _, name := range []string{"framework", "control", "workload"} {
+		sub, _, err := cmd.Find([]string{name})
+		require.NoError(t, err)
+		require.NotNil(t, sub.InheritedFlags().Lookup("notify"), "%s should inherit --notify", name)
+	}
+}
+
 func Test_enforceSeverityThresholds(t *testing.T) {
 	testCases := []struct {
-		Description      string
-		SeverityCounters *reportsummary.SeverityCounters
-		ScanInfo         *cautils.ScanInfo
-		Want             bool
+		Description    string
+		SummaryDetails *reportsummary.SummaryDetails
+		ScanInfo       *cautils.ScanInfo
+		Want           bool
 	}{
 		{
 			"Exceeding Critical severity counter should call the terminating function",
-			&reportsummary.SeverityCounters{CriticalSeverityCounter: 1},
+			&reportsummary.SummaryDetails{ResourcesSeverityCounters: reportsummary.SeverityCounters{CriticalSeverityCounter: 1}},
 			&cautils.ScanInfo{FailThresholdSeverity: apis.SeverityCriticalString},
 			true,
 		},
 		{
 			"Non-exceeding severity counter should call not the terminating function",
-			&reportsummary.SeverityCounters{},
+			&reportsummary.SummaryDetails{ResourcesSeverityCounters: reportsummary.SeverityCounters{}},
 			&cautils.ScanInfo{FailThresholdSeverity: apis.SeverityCriticalString},
+			false,
+		},
+		{
+			// Regression: SeverityCounters.Increase silently drops Unknown
+			// severity, so a failing control with a zero score factor never
+			// reaches the counters and used to pass every threshold.
+			"Failed resources on a control with unknown severity trip the lowest threshold",
+			&reportsummary.SummaryDetails{Controls: map[string]reportsummary.ControlSummary{
+				"C-0001": {ScoreFactor: 0, StatusCounters: reportsummary.StatusCounters{FailedResources: 2}},
+			}},
+			&cautils.ScanInfo{FailThresholdSeverity: apis.SeverityLowString},
+			true,
+		},
+		{
+			"Failed resources on a control with unknown severity trip the highest threshold",
+			&reportsummary.SummaryDetails{Controls: map[string]reportsummary.ControlSummary{
+				"C-0001": {ScoreFactor: 0, StatusCounters: reportsummary.StatusCounters{FailedResources: 1}},
+			}},
+			&cautils.ScanInfo{FailThresholdSeverity: apis.SeverityCriticalString},
+			true,
+		},
+		{
+			"Passed resources on a control with unknown severity do not trip the threshold",
+			&reportsummary.SummaryDetails{Controls: map[string]reportsummary.ControlSummary{
+				"C-0001": {ScoreFactor: 0, StatusCounters: reportsummary.StatusCounters{PassedResources: 3}},
+			}},
+			&cautils.ScanInfo{FailThresholdSeverity: apis.SeverityLowString},
+			false,
+		},
+		{
+			"Failed resources on bucketed severities are not counted as unknown",
+			&reportsummary.SummaryDetails{Controls: map[string]reportsummary.ControlSummary{
+				"C-0002": {ScoreFactor: 5, StatusCounters: reportsummary.StatusCounters{FailedResources: 4}},
+			}},
+			&cautils.ScanInfo{FailThresholdSeverity: apis.SeverityHighString},
 			false,
 		},
 	}
@@ -162,116 +214,41 @@ func Test_enforceSeverityThresholds(t *testing.T) {
 		t.Run(
 			tc.Description,
 			func(t *testing.T) {
-				severityCounters := tc.SeverityCounters
+				summaryDetails := tc.SummaryDetails
 				scanInfo := tc.ScanInfo
 				want := tc.Want
 
-				got := false
-				onExceed := func(*cautils.ScanInfo, helpers.ILogger) {
-					got = true
-				}
+				err := enforceSeverityThresholds(summaryDetails, scanInfo)
 
-				enforceSeverityThresholds(severityCounters, scanInfo, onExceed)
-
-				if got != want {
-					t.Errorf("got: %v, want %v", got, want)
+				if (err != nil) != want {
+					t.Errorf("got error: %v, want error: %v", err, want)
 				}
 			},
 		)
 	}
 }
 
-type spyLogMessage struct {
-	Message string
-	Details map[string]string
-}
+func Test_countFailedResourcesWithUnbucketedSeverity(t *testing.T) {
+	summaryDetails := &reportsummary.SummaryDetails{Controls: map[string]reportsummary.ControlSummary{
+		"C-0001": {ScoreFactor: 9.5, StatusCounters: reportsummary.StatusCounters{FailedResources: 3}}, // Critical
+		"C-0002": {ScoreFactor: 0, StatusCounters: reportsummary.StatusCounters{FailedResources: 2}},   // Unknown
+		"C-0003": {ScoreFactor: 2, StatusCounters: reportsummary.StatusCounters{FailedResources: 1}},   // Low
+		"C-0004": {ScoreFactor: 0, StatusCounters: reportsummary.StatusCounters{PassedResources: 7}},   // Unknown, passed only
+	}}
 
-type spyLogger struct {
-	setItems []spyLogMessage
-}
-
-var _ helpers.ILogger = &spyLogger{}
-
-func (l *spyLogger) Error(msg string, details ...helpers.IDetails)                    {}
-func (l *spyLogger) Success(msg string, details ...helpers.IDetails)                  {}
-func (l *spyLogger) Warning(msg string, details ...helpers.IDetails)                  {}
-func (l *spyLogger) Info(msg string, details ...helpers.IDetails)                     {}
-func (l *spyLogger) Debug(msg string, details ...helpers.IDetails)                    {}
-func (l *spyLogger) SetLevel(level string) error                                      { return nil }
-func (l *spyLogger) GetLevel() string                                                 { return "" }
-func (l *spyLogger) SetWriter(w *os.File)                                             {}
-func (l *spyLogger) GetWriter() *os.File                                              { return &os.File{} }
-func (l *spyLogger) LoggerName() string                                               { return "" }
-func (l *spyLogger) Ctx(_ context.Context) helpers.ILogger                            { return l }
-func (l *spyLogger) Start(msg string, details ...helpers.IDetails)                    {}
-func (l *spyLogger) StopSuccess(msg string, details ...helpers.IDetails)              {}
-func (l *spyLogger) StopError(msg string, details ...helpers.IDetails)                {}
-func (l *spyLogger) TimedWrapper(funcName string, timeout time.Duration, task func()) {}
-
-func (l *spyLogger) Fatal(msg string, details ...helpers.IDetails) {
-	firstDetail := details[0]
-	detailsMap := map[string]string{firstDetail.Key(): firstDetail.Value().(string)}
-
-	newMsg := spyLogMessage{msg, detailsMap}
-	l.setItems = append(l.setItems, newMsg)
-}
-
-func (l *spyLogger) GetSpiedItems() []spyLogMessage {
-	return l.setItems
-}
-
-func Test_terminateOnExceedingSeverity(t *testing.T) {
-	expectedMessage := "compliance result exceeds severity threshold"
-	expectedKey := "set severity threshold"
-
-	testCases := []struct {
-		Description     string
-		ExpectedMessage string
-		ExpectedKey     string
-		ExpectedValue   string
-		Logger          *spyLogger
-	}{
-		{
-			"Should log the Critical threshold that was set in scan info",
-			expectedMessage,
-			expectedKey,
-			apis.SeverityCriticalString,
-			&spyLogger{},
-		},
-		{
-			"Should log the High threshold that was set in scan info",
-			expectedMessage,
-			expectedKey,
-			apis.SeverityHighString,
-			&spyLogger{},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(
-			tc.Description,
-			func(t *testing.T) {
-				want := []spyLogMessage{
-					{tc.ExpectedMessage, map[string]string{tc.ExpectedKey: tc.ExpectedValue}},
-				}
-				scanInfo := &cautils.ScanInfo{FailThresholdSeverity: tc.ExpectedValue}
-
-				terminateOnExceedingSeverity(scanInfo, tc.Logger)
-
-				got := tc.Logger.GetSpiedItems()
-				if !reflect.DeepEqual(got, want) {
-					t.Errorf("got: %v, want: %v", got, want)
-				}
-			},
-		)
+	got := countFailedResourcesWithUnbucketedSeverity(summaryDetails)
+	want := 2
+	if got != want {
+		t.Errorf("got: %d, want: %d", got, want)
 	}
 }
 
 func TestSetSecurityViewScanInfo(t *testing.T) {
 	tests := []struct {
-		name string
-		args []string
-		want *cautils.ScanInfo
+		name         string
+		args         []string
+		want         *cautils.ScanInfo
+		wantPolicies []cautils.PolicyIdentifier
 	}{
 		{
 			name: "no args",
@@ -279,19 +256,19 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 			want: &cautils.ScanInfo{
 				InputPatterns: []string{},
 				ScanType:      cautils.ScanTypeCluster,
-				PolicyIdentifier: []cautils.PolicyIdentifier{
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "clusterscan",
-					},
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "mitre",
-					},
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "nsa",
-					},
+			},
+			wantPolicies: []cautils.PolicyIdentifier{
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "clusterscan",
+				},
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "mitre",
+				},
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "nsa",
 				},
 			},
 		},
@@ -307,15 +284,15 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 					"file.yaml",
 					"file2.yaml",
 				},
-				PolicyIdentifier: []cautils.PolicyIdentifier{
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "workloadscan",
-					},
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "allcontrols",
-					},
+			},
+			wantPolicies: []cautils.PolicyIdentifier{
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "workloadscan",
+				},
+				{
+					Kind:       v1.KindFramework,
+					Identifier: "allcontrols",
 				},
 			},
 		},
@@ -326,7 +303,7 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 			got := &cautils.ScanInfo{
 				View: string(cautils.SecurityViewType),
 			}
-			setSecurityViewScanInfo(tt.args, got)
+			policyIdentifiers := setSecurityViewScanInfo(tt.args, got)
 
 			if len(tt.want.InputPatterns) != len(got.InputPatterns) {
 				t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.InputPatterns, tt.want.InputPatterns)
@@ -349,16 +326,16 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 				}
 			}
 
-			for i := range tt.want.PolicyIdentifier {
+			for i := range tt.wantPolicies {
 				found := false
-				for j := range got.PolicyIdentifier {
-					if tt.want.PolicyIdentifier[i].Kind == got.PolicyIdentifier[j].Kind && tt.want.PolicyIdentifier[i].Identifier == got.PolicyIdentifier[j].Identifier {
+				for j := range policyIdentifiers {
+					if tt.wantPolicies[i].Kind == policyIdentifiers[j].Kind && tt.wantPolicies[i].Identifier == policyIdentifiers[j].Identifier {
 						found = true
 						break
 					}
 				}
 				if !found {
-					t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.PolicyIdentifier, tt.want.PolicyIdentifier)
+					t.Errorf("in test: %s, got: %v, want: %v", tt.name, policyIdentifiers, tt.wantPolicies)
 				}
 			}
 		})
@@ -379,6 +356,122 @@ func TestGetScanCommand(t *testing.T) {
 	assert.Equal(t, scanCmdExamples, cmd.Example)
 }
 
+func registryFixtureValue(parts ...string) string {
+	return strings.Join(parts, "-")
+}
+
+func TestSubmitFlag_TracksExplicitCommandLineUse(t *testing.T) {
+	// Regression test for https://github.com/kubescape/kubescape/issues/2555:
+	// --submit is bound directly as a cautils.BoolPtrFlag (like --enable-host-scan),
+	// so "not passed" (nil) is structurally distinguishable from "passed with any
+	// value" (non-nil) without any separate hand-rolled bookkeeping that could be
+	// forgotten at a call site or broken by a future PersistentPreRunE change.
+
+	// --submit not passed - flag not Changed
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	f := cmd.PersistentFlags().Lookup("submit")
+	require.NotNil(t, f, "--submit flag must be registered")
+	assert.False(t, f.Changed)
+	assert.Equal(t, "false", f.DefValue)
+
+	// --submit=false passed explicitly
+	mockKubescape = &mocks.MockIKubescape{}
+	cmd = GetScanCommand(mockKubescape)
+	require.NoError(t, cmd.ParseFlags([]string{"--submit=false"}))
+	f = cmd.PersistentFlags().Lookup("submit")
+	assert.True(t, f.Changed)
+	assert.Equal(t, "false", f.Value.String())
+
+	// --submit (bare, no value) passed explicitly - must still imply true, matching
+	// the original BoolVarP-based flag's behavior (NoOptDefVal="true")
+	mockKubescape = &mocks.MockIKubescape{}
+	cmd = GetScanCommand(mockKubescape)
+	require.NoError(t, cmd.ParseFlags([]string{"--submit"}))
+	f = cmd.PersistentFlags().Lookup("submit")
+	assert.True(t, f.Changed)
+	assert.Equal(t, "true", f.Value.String())
+}
+
+func TestSubmitFlag_PropagatesToAllSubcommands(t *testing.T) {
+	// Pins the invariant matthyx flagged in review: --submit must reach every
+	// scan subcommand. Because it's a cobra-inherited persistent flag rather
+	// than something wired through a hand-rolled PersistentPreRunE, this is a
+	// structural guarantee rather than something a future subcommand change
+	// could silently break.
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	for _, sub := range cmd.Commands() {
+		t.Run(sub.Name(), func(t *testing.T) {
+			f := sub.InheritedFlags().Lookup("submit")
+			require.NotNil(t, f, "subcommand %q must inherit --submit from the parent scan command", sub.Name())
+		})
+	}
+}
+
+func TestGetScanCommand_DeprecatedFlagsRemoved(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+
+	cmd := GetScanCommand(mockKubescape)
+	require.NotNil(t, cmd)
+
+	for _, removed := range []string{
+		"create-account",
+		"enable-host-scan",
+		"host-scan-yaml",
+	} {
+		assert.Nil(t, cmd.PersistentFlags().Lookup(removed),
+			"deprecated flag %q must no longer be registered", removed)
+	}
+}
+
+func TestGetScanCommand_FailThresholdKeptAsHiddenDeprecatedFlag(t *testing.T) {
+	// --fail-threshold's gating logic was removed, but the flag must stay registered
+	// (hidden + deprecated) so cobra keeps accepting it instead of erroring with
+	// "unknown flag" for existing callers - see https://github.com/kubescape/kubescape/issues/3056
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	require.NotNil(t, cmd)
+
+	f := cmd.PersistentFlags().Lookup("fail-threshold")
+	require.NotNil(t, f, "--fail-threshold must stay registered so it doesn't fail with 'unknown flag'")
+	assert.True(t, f.Hidden, "--fail-threshold must be hidden from help output")
+	assert.Equal(t, "use '--compliance-threshold' flag instead", f.Deprecated)
+
+	require.NoError(t, cmd.ParseFlags([]string{"--fail-threshold", "20"}))
+	assert.Equal(t, "20", f.Value.String())
+
+	require.NoError(t, cmd.ParseFlags([]string{"-t", "20"}))
+	assert.Equal(t, "20", f.Value.String())
+}
+
+func TestGetScanCommand_HostScanFlagTriState(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	// Removing the deprecated --enable-host-scan binding must not remove the
+	// CLI opt-out for host data collection: the initutils.go auto-detect branch
+	// turns host scanning on whenever the tri-state BoolPtrFlag is nil.
+	f := cmd.PersistentFlags().Lookup("host-scan")
+	require.NotNil(t, f, "--host-scan flag must be registered to keep a CLI opt-out for host data collection")
+	assert.Equal(t, "bool", f.Value.Type())
+
+	// not passed -> nil -> auto-detect node-agent CRDs (the default behavior)
+	assert.Equal(t, "", f.Value.String(), "unset --host-scan must leave the BoolPtrFlag nil (auto-detect)")
+
+	// --host-scan (bare) forces host data collection on
+	assert.Equal(t, "true", f.NoOptDefVal, "bare --host-scan must force host data collection on")
+
+	// --host-scan=false is the opt-out
+	require.NoError(t, cmd.PersistentFlags().Set("host-scan", "false"))
+	assert.Equal(t, "false", f.Value.String(), "--host-scan=false must explicitly disable host data collection")
+
+	// --host-scan=true forces it on
+	require.NoError(t, cmd.PersistentFlags().Set("host-scan", "true"))
+	assert.Equal(t, "true", f.Value.String(), "--host-scan=true must force host data collection on")
+}
+
 func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	cmd := GetScanCommand(mockKubescape)
@@ -386,7 +479,56 @@ func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
 	require.NoError(t, cmd.PersistentFlags().Set("format", "xml"))
 
 	err := cmd.RunE(cmd, []string{"."})
-	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif`)
+	errMessage := "invalid format \"xml\", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml, csv, markdown, cyclonedx-json, spdx-json, policyreport, exceptions"
+	assert.EqualError(t, err, errMessage)
+}
+
+type scanCallCounter struct {
+	mocks.MockIKubescape
+	calls int
+}
+
+func (m *scanCallCounter) Scan(_ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
+	m.calls++
+	return nil, errors.New("scan reached")
+}
+
+func (m *scanCallCounter) ScanContext(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
+	m.calls++
+	return nil, errors.New("scan reached")
+}
+
+func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		wantCalls int
+		wantError string
+	}{
+		{name: "rejects unsupported format version", args: []string{"--format-version=v3"}, wantError: "invalid --format-version"},
+		{name: "format version is case sensitive", args: []string{"--format-version=V2"}, wantError: "invalid --format-version"},
+		{name: "rejects empty format version", args: []string{"--format-version="}, wantError: "invalid --format-version"},
+		{name: "rejects negative scan timeout", args: []string{"--scan-timeout=-1s"}, wantError: "invalid --scan-timeout"},
+		{name: "rejects negative control timeout", args: []string{"--control-timeout=-1s"}, wantError: "invalid --control-timeout"},
+		{name: "accepts defaults", wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts format version v1", args: []string{"--format-version=v1"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts format version v2", args: []string{"--format-version=v2"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts zero timeouts", args: []string{"--scan-timeout=0", "--control-timeout=0"}, wantCalls: 1, wantError: "scan reached"},
+		{name: "accepts positive timeouts", args: []string{"--scan-timeout=2s", "--control-timeout=1s"}, wantCalls: 1, wantError: "scan reached"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &scanCallCounter{}
+			cmd := GetScanCommand(ks)
+			cmd.SilenceUsage = true
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+			require.ErrorContains(t, err, tt.wantError)
+			assert.Equal(t, tt.wantCalls, ks.calls)
+		})
+	}
 }
 
 func TestGetScanCommand_ScanTimeoutFlagRegistered(t *testing.T) {
@@ -461,20 +603,28 @@ func TestScanInfo_ScanTimeoutField(t *testing.T) {
 	}
 }
 
-// contextTrackingKubescape is a test-local IKubescape that records what
-// context was active when Scan() was called, so we can assert the deadline.
-// Scan() returns a sentinel error so securityScan exits before HandleResults,
-// avoiding a nil-pointer dereference on the stub ResultsHandler.
+// contextTrackingKubescape is a test-local IKubescape that records the ctx
+// argument ScanContext() was called with (rather than reading it back off
+// m.ctx, which is how the pre-fix version of this double worked when
+// securityScan mutated the shared context via SetContext), plus whether
+// SetContext was ever invoked, so tests can assert securityScan no longer
+// touches the receiver's own context at all. ScanContext() returns a
+// sentinel error so securityScan exits before HandleResults, avoiding a
+// nil-pointer dereference on the stub ResultsHandler.
 type contextTrackingKubescape struct {
 	mocks.MockIKubescape
-	ctx            context.Context
-	scanCalledWith context.Context
+	ctx              context.Context
+	setContextCalled bool
+	scanCalledWith   context.Context
 }
 
-func (m *contextTrackingKubescape) Context() context.Context       { return m.ctx }
-func (m *contextTrackingKubescape) SetContext(ctx context.Context) { m.ctx = ctx }
-func (m *contextTrackingKubescape) Scan(_ *cautils.ScanInfo) (*resultshandlingpkg.ResultsHandler, error) {
-	m.scanCalledWith = m.ctx
+func (m *contextTrackingKubescape) Context() context.Context { return m.ctx }
+func (m *contextTrackingKubescape) SetContext(ctx context.Context) {
+	m.setContextCalled = true
+	m.ctx = ctx
+}
+func (m *contextTrackingKubescape) ScanContext(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandlingpkg.ResultsHandler, error) {
+	m.scanCalledWith = ctx
 	return nil, errors.New("stub: scan not implemented in test")
 }
 
@@ -482,38 +632,170 @@ func TestSecurityScan_TimeoutDeadlineActiveForScan(t *testing.T) {
 	ks := &contextTrackingKubescape{ctx: context.Background()}
 	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
 
-	_ = securityScan(scanInfo, ks)
+	_ = securityScan(scanInfo, ks, nil)
 
 	_, hasDeadline := ks.scanCalledWith.Deadline()
-	assert.True(t, hasDeadline, "Scan() must receive a context with a deadline when ScanTimeout > 0")
+	assert.True(t, hasDeadline, "ScanContext() must receive a context with a deadline when ScanTimeout > 0")
 }
 
-func TestSecurityScan_TimeoutContextRestoredAfterReturn(t *testing.T) {
+func TestSecurityScan_TimeoutDoesNotMutateSharedContext(t *testing.T) {
 	originalCtx := context.Background()
 	ks := &contextTrackingKubescape{ctx: originalCtx}
 	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
 
-	_ = securityScan(scanInfo, ks)
+	_ = securityScan(scanInfo, ks, nil)
 
-	_, hasDeadline := ks.Context().Deadline()
-	assert.False(t, hasDeadline, "original context must be restored on ks after securityScan returns")
+	assert.False(t, ks.setContextCalled, "securityScan must not call SetContext on the shared Kubescape instance")
+	assert.Equal(t, originalCtx, ks.Context(), "the shared Kubescape's own context must be untouched by securityScan")
 }
 
 func TestSecurityScan_ZeroTimeoutNoDeadline(t *testing.T) {
 	ks := &contextTrackingKubescape{ctx: context.Background()}
 	scanInfo := cautils.ScanInfo{ScanTimeout: 0}
 
-	_ = securityScan(scanInfo, ks)
+	_ = securityScan(scanInfo, ks, nil)
 
 	_, hasDeadline := ks.scanCalledWith.Deadline()
-	assert.False(t, hasDeadline, "Scan() must not receive a deadline when ScanTimeout is 0")
+	assert.False(t, hasDeadline, "ScanContext() must not receive a deadline when ScanTimeout is 0")
 }
 
-// coverageWouldFail mirrors the gate logic in enforceCoverageThreshold so we
-// can test it without triggering os.Exit.
+func TestGetScanCommand_RegistryCredentialFlags(t *testing.T) {
+	cmd := GetScanCommand(&mocks.MockIKubescape{})
+
+	for _, name := range []string{"registry-username", "registry-password", "registry-token", "registry-authority"} {
+		flag := cmd.PersistentFlags().Lookup(name)
+		require.NotNil(t, flag, "expected %s flag to be registered", name)
+	}
+
+	registryMapping := cmd.PersistentFlags().Lookup("registry-mapping")
+	require.NotNil(t, registryMapping)
+	assert.NotContains(t, registryMapping.Usage, "anonymous")
+}
+
+func TestGetScanCommand_RunE_RejectsUnscopedRegistryCredentialsForScanImages(t *testing.T) {
+	cmd := GetScanCommand(&mocks.MockIKubescape{})
+
+	require.NoError(t, cmd.PersistentFlags().Set("scan-images", "true"))
+	require.NoError(t, cmd.PersistentFlags().Set("registry-username", "user"))
+	require.NoError(t, cmd.PersistentFlags().Set("registry-password", registryFixtureValue("scan", "credential")))
+
+	err := cmd.RunE(cmd, []string{})
+	assert.Equal(t, shared.ErrRegistryAuthorityMissing, err)
+}
+
+func TestApplyRegistryCredentialsFromEnv(t *testing.T) {
+	envUser := registryFixtureValue("env", "user")
+	envCredential := registryFixtureValue("env", "credential")
+	envBearer := registryFixtureValue("env", "bearer")
+
+	t.Setenv("KUBESCAPE_REGISTRY_USERNAME", envUser)
+	t.Setenv("KUBESCAPE_REGISTRY_PASSWORD", envCredential)
+	t.Setenv("KUBESCAPE_REGISTRY_TOKEN", envBearer)
+
+	scanInfo := cautils.ScanInfo{}
+	cmd := &cobra.Command{Use: "scan"}
+	cmd.PersistentFlags().StringVar(&scanInfo.RegistryUsername, "registry-username", "", "")
+	cmd.PersistentFlags().StringVar(&scanInfo.RegistryPassword, "registry-password", "", "")
+	cmd.PersistentFlags().StringVar(&scanInfo.RegistryToken, "registry-token", "", "")
+
+	applyRegistryCredentialsFromEnv(cmd, &scanInfo)
+
+	assert.Equal(t, envUser, scanInfo.RegistryUsername)
+	assert.Equal(t, envCredential, scanInfo.RegistryPassword)
+	assert.Equal(t, envBearer, scanInfo.RegistryToken)
+}
+
+func TestApplyRegistryCredentialsFromEnv_KeepsFlagPrecedence(t *testing.T) {
+	envUser := registryFixtureValue("env", "user")
+	envCredential := registryFixtureValue("env", "credential")
+	envBearer := registryFixtureValue("env", "bearer")
+	flagUser := registryFixtureValue("flag", "user")
+	flagCredential := registryFixtureValue("flag", "credential")
+
+	t.Setenv("KUBESCAPE_REGISTRY_USERNAME", envUser)
+	t.Setenv("KUBESCAPE_REGISTRY_PASSWORD", envCredential)
+	t.Setenv("KUBESCAPE_REGISTRY_TOKEN", envBearer)
+
+	scanInfo := cautils.ScanInfo{}
+	cmd := &cobra.Command{Use: "scan"}
+	cmd.PersistentFlags().StringVar(&scanInfo.RegistryUsername, "registry-username", "", "")
+	cmd.PersistentFlags().StringVar(&scanInfo.RegistryPassword, "registry-password", "", "")
+	cmd.PersistentFlags().StringVar(&scanInfo.RegistryToken, "registry-token", "", "")
+
+	require.NoError(t, cmd.PersistentFlags().Set("registry-username", flagUser))
+	require.NoError(t, cmd.PersistentFlags().Set("registry-password", flagCredential))
+	require.NoError(t, cmd.PersistentFlags().Set("registry-token", ""))
+
+	applyRegistryCredentialsFromEnv(cmd, &scanInfo)
+
+	assert.Equal(t, flagUser, scanInfo.RegistryUsername)
+	assert.Equal(t, flagCredential, scanInfo.RegistryPassword)
+	assert.Empty(t, scanInfo.RegistryToken)
+}
+
+func TestApplyRegistryCredentialsFromEnv_KeepsExplicitAuthMode(t *testing.T) {
+	envUser := registryFixtureValue("env", "user")
+	envCredential := registryFixtureValue("env", "credential")
+	envBearer := registryFixtureValue("env", "bearer")
+
+	t.Setenv("KUBESCAPE_REGISTRY_USERNAME", envUser)
+	t.Setenv("KUBESCAPE_REGISTRY_PASSWORD", envCredential)
+	t.Setenv("KUBESCAPE_REGISTRY_TOKEN", envBearer)
+
+	t.Run("token flag suppresses basic env credentials", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		cmd := &cobra.Command{Use: "scan"}
+		cmd.PersistentFlags().StringVar(&scanInfo.RegistryUsername, "registry-username", "", "")
+		cmd.PersistentFlags().StringVar(&scanInfo.RegistryPassword, "registry-password", "", "")
+		cmd.PersistentFlags().StringVar(&scanInfo.RegistryToken, "registry-token", "", "")
+
+		flagBearer := registryFixtureValue("flag", "bearer")
+		require.NoError(t, cmd.PersistentFlags().Set("registry-token", flagBearer))
+
+		applyRegistryCredentialsFromEnv(cmd, &scanInfo)
+
+		assert.Empty(t, scanInfo.RegistryUsername)
+		assert.Empty(t, scanInfo.RegistryPassword)
+		assert.Equal(t, flagBearer, scanInfo.RegistryToken)
+	})
+
+	t.Run("basic flag suppresses token env credential", func(t *testing.T) {
+		scanInfo := cautils.ScanInfo{}
+		cmd := &cobra.Command{Use: "scan"}
+		cmd.PersistentFlags().StringVar(&scanInfo.RegistryUsername, "registry-username", "", "")
+		cmd.PersistentFlags().StringVar(&scanInfo.RegistryPassword, "registry-password", "", "")
+		cmd.PersistentFlags().StringVar(&scanInfo.RegistryToken, "registry-token", "", "")
+
+		flagUser := registryFixtureValue("flag", "user")
+		require.NoError(t, cmd.PersistentFlags().Set("registry-username", flagUser))
+
+		applyRegistryCredentialsFromEnv(cmd, &scanInfo)
+
+		assert.Equal(t, flagUser, scanInfo.RegistryUsername)
+		assert.Equal(t, envCredential, scanInfo.RegistryPassword)
+		assert.Empty(t, scanInfo.RegistryToken)
+	})
+}
+
+// coverageWouldFail is a ratio-only mirror of enforceCoverageThreshold used
+// by the table-driven Test_enforceCoverageThreshold below. It models two of
+// the gate's branches: the threshold opt-out (threshold <= 0) and the
+// zero-controls failure (totalControls == 0 with a positive threshold).
+//
+// It does NOT model the gate's penalty-aware coverageScore comparison, so
+// any test that exercises silent failed GVR pulls, partial GVR pulls, or
+// policy degradations must call enforceCoverageThreshold directly. The
+// invariant that this mirror and the real gate agree on every ratio-only
+// input is enforced by TestCoverageWouldFail_MatchesGate, and the
+// penalty-aware path is pinned by Test_enforceCoverageThreshold_Direct.
 func coverageWouldFail(notEvaluated, totalControls int, threshold float32) bool {
-	if threshold <= 0 || totalControls == 0 {
+	if threshold <= 0 {
 		return false
+	}
+	if totalControls == 0 {
+		// Scan loaded no controls: coverage is 0%, which is below any positive
+		// threshold — mirror enforceCoverageThreshold's explicit error branch.
+		return true
 	}
 	pct := float32(totalControls-notEvaluated) / float32(totalControls) * 100
 	return pct < threshold
@@ -531,7 +813,14 @@ func Test_enforceCoverageThreshold(t *testing.T) {
 		{"all controls evaluated passes", 0, 10, 80, false},
 		{"coverage exactly at threshold passes", 2, 10, 80, false},
 		{"coverage below threshold fails", 5, 10, 80, true},
-		{"zero total controls never fails", 0, 0, 50, false},
+		// Zero loaded controls is a coverage failure regardless of how low the
+		// user-set threshold is (a 0% coverage never satisfies any threshold > 0),
+		// mirroring the production gate's behavior.
+		{"zero total controls fails at positive threshold", 0, 0, 50, true},
+		{"zero total controls still fails when only a 1% threshold is set", 0, 0, 1, true},
+		// A non-positive threshold is the only way to opt the zero-controls case out,
+		// matching the production `if scanInfo.FailCoverageThreshold <= 0 { return nil }` guard.
+		{"zero total controls with threshold disabled passes", 0, 0, 0, false},
 	}
 
 	for _, tt := range tests {
@@ -539,4 +828,421 @@ func Test_enforceCoverageThreshold(t *testing.T) {
 			assert.Equal(t, tt.wantFail, coverageWouldFail(tt.notEvaluated, tt.totalControls, tt.threshold))
 		})
 	}
+}
+
+// Test_enforceCoverageThreshold_Direct exercises the production gate itself
+// (not the mirror) so the zero-controls fix is regression-tested against the
+// real function: any future change to enforceCoverageThreshold that re-opens
+// the silent-pass will be caught here even if someone "simplifies" the test
+// mirror back to the old behavior.
+func Test_enforceCoverageThreshold_Direct(t *testing.T) {
+	tests := []struct {
+		name          string
+		coverage      cautils.ScanCoverage
+		totalControls int
+		threshold     float32
+		wantErr       bool
+		wantSubstring string
+	}{
+		{
+			name:          "zero controls with positive threshold returns error (was silent-pass before fix)",
+			coverage:      cautils.ScanCoverage{},
+			totalControls: 0,
+			threshold:     50,
+			wantErr:       true,
+			wantSubstring: "scan loaded no controls",
+		},
+		{
+			name:          "zero controls with threshold disabled returns nil (opt-out preserved)",
+			coverage:      cautils.ScanCoverage{},
+			totalControls: 0,
+			threshold:     0,
+			wantErr:       false,
+		},
+		{
+			name:          "full coverage passes",
+			coverage:      cautils.ScanCoverage{CoverageScore: 100},
+			totalControls: 10,
+			threshold:     80,
+			wantErr:       false,
+		},
+		{
+			name:          "below threshold returns error",
+			coverage:      cautils.ScanCoverage{CoverageScore: 50},
+			totalControls: 10,
+			threshold:     80,
+			wantErr:       true,
+			wantSubstring: "scan coverage is below permitted threshold",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{FailCoverageThreshold: tt.threshold}
+			err := enforceCoverageThreshold(tt.coverage, tt.totalControls, scanInfo)
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.wantSubstring != "" {
+					assert.Contains(t, err.Error(), tt.wantSubstring)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestCoverageWouldFail_MatchesGate is an invariant: the test mirror and the
+// real gate must agree on every input in the sweep. A divergence here means
+// the mirror has drifted from production and Test_enforceCoverageThreshold no
+// longer tests what enforceCoverageThreshold actually does.
+func TestCoverageWouldFail_MatchesGate(t *testing.T) {
+	thresholds := []float32{0, 1, 25, 50, 80, 99, 100}
+	totals := []int{0, 1, 2, 10, 50, 100}
+	notEvals := []int{0, 1, 5, 49}
+
+	for _, threshold := range thresholds {
+		for _, total := range totals {
+			for _, ne := range notEvals {
+				if ne > total {
+					continue
+				}
+				mirrored := coverageWouldFail(ne, total, threshold)
+
+				// Mirror production: build the same ScanCoverage + ScanInfo the
+				// gate receives and ask it directly.
+				coverage := cautils.ScanCoverage{}
+				if total > 0 {
+					coverage.ComputeCoverageScore(total)
+					// Force EvaluatedControls/TotalControls to mirror what the
+					// mirror function sees (the mirror does not run penalties;
+					// it computes pct from the raw ratio).
+					if ne > 0 {
+						coverage.NotEvaluatedControls = make([]cautils.NotEvaluatedControl, ne)
+					}
+					coverage.ComputeCoverageScore(total)
+				}
+				scanInfo := &cautils.ScanInfo{FailCoverageThreshold: threshold}
+				err := enforceCoverageThreshold(coverage, total, scanInfo)
+				gateFails := err != nil
+
+				if mirrored != gateFails {
+					t.Errorf("mirror/gate divergence threshold=%.0f total=%d notEvaluated=%d: mirror=%v gate=%v err=%v", threshold, total, ne, mirrored, gateFails, err)
+				}
+			}
+		}
+	}
+}
+
+// TestZeroControlsCoverage_EndToEnd pins the user-visible behavior: a scan
+// that loaded no controls must (1) report coverageScore=0 and Degraded=true
+// in the report, and (2) make enforceCoverageThreshold return a non-nil error
+// when FailCoverageThreshold > 0. Together these prove the bug is gone from
+// both the score and the gate. It would fail under the buggy code on (1) the
+// score (expected 0, would get 100) and (2) the gate (expected error, would
+// get nil).
+func TestZeroControlsCoverage_EndToEnd(t *testing.T) {
+	coverage := cautils.ScanCoverage{}
+	coverage.ComputeCoverageScore(0)
+
+	assert.Equal(t, float32(0), coverage.CoverageScore, "score must be 0, not the misleading 100")
+	assert.Equal(t, 0, coverage.EvaluatedControls)
+	assert.True(t, coverage.Degraded, "Degraded must be true so downstream consumers (MCP server, JSON) flag the scan")
+
+	scanInfo := &cautils.ScanInfo{FailCoverageThreshold: 1}
+	err := enforceCoverageThreshold(coverage, 0, scanInfo)
+	require.Error(t, err, "zero-controls scan must not silently pass the coverage gate")
+	assert.Contains(t, err.Error(), "scan loaded no controls")
+}
+
+type mockVulnerabilityProvider struct {
+	severity string
+}
+
+func (m mockVulnerabilityProvider) VulnerabilityMetadata(ref vulnerability.Reference) (*vulnerability.Metadata, error) {
+	return &vulnerability.Metadata{Severity: m.severity}, nil
+}
+func (m mockVulnerabilityProvider) PackageSearchNames(grypepkg.Package) []string { return nil }
+func (m mockVulnerabilityProvider) FindVulnerabilities(criteria ...vulnerability.Criteria) ([]vulnerability.Vulnerability, error) {
+	return nil, nil
+}
+func (m mockVulnerabilityProvider) Close() error { return nil }
+
+func TestEnforceImageSeverityThresholds(t *testing.T) {
+	tests := []struct {
+		name          string
+		threshold     string
+		matchSeverity string
+		metadata      *vulnerability.Metadata
+		fixState      vulnerability.FixState
+		onlyFixable   bool
+		expectedError bool
+	}{
+		{
+			name:          "no threshold",
+			threshold:     "",
+			matchSeverity: "Critical",
+			expectedError: false,
+		},
+		{
+			name:          "threshold unknown",
+			threshold:     "unknown",
+			matchSeverity: "Critical",
+			expectedError: false,
+		},
+		{
+			name:          "threshold met exactly",
+			threshold:     "high",
+			matchSeverity: "High",
+			expectedError: true,
+		},
+		{
+			name:          "threshold exceeded",
+			threshold:     "high",
+			matchSeverity: "Critical",
+			expectedError: true,
+		},
+		{
+			name:          "empty embedded severity falls back to provider metadata",
+			threshold:     "high",
+			matchSeverity: "Critical",
+			metadata:      &vulnerability.Metadata{},
+			expectedError: true,
+		},
+		{
+			name:          "unrecognized embedded severity falls back to provider metadata",
+			threshold:     "high",
+			matchSeverity: "Critical",
+			metadata:      &vulnerability.Metadata{Severity: "important"},
+			expectedError: true,
+		},
+		{
+			name:          "explicit unknown embedded severity falls back to provider metadata",
+			threshold:     "high",
+			matchSeverity: "Critical",
+			metadata:      &vulnerability.Metadata{Severity: vulnerability.UnknownSeverity.String()},
+			expectedError: true,
+		},
+		{
+			name:          "below threshold",
+			threshold:     "critical",
+			matchSeverity: "High",
+			expectedError: false,
+		},
+		{
+			name:          "unfixed vulnerability at threshold is ignored when only fixable is enabled",
+			threshold:     "high",
+			matchSeverity: "High",
+			fixState:      vulnerability.FixStateNotFixed,
+			onlyFixable:   true,
+			expectedError: false,
+		},
+		{
+			name:          "fixed vulnerability at threshold fails when only fixable is enabled",
+			threshold:     "high",
+			matchSeverity: "High",
+			fixState:      vulnerability.FixStateFixed,
+			onlyFixable:   true,
+			expectedError: true,
+		},
+		{
+			name:          "unfixed vulnerability at threshold still fails when only fixable is disabled",
+			threshold:     "high",
+			matchSeverity: "High",
+			fixState:      vulnerability.FixStateNotFixed,
+			expectedError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				FailThresholdSeverity: tt.threshold,
+				OnlyFixable:           tt.onlyFixable,
+			}
+
+			matches := match.NewMatches()
+			if tt.matchSeverity != "" {
+				matches.Add(match.Match{
+					Vulnerability: vulnerability.Vulnerability{
+						Reference: vulnerability.Reference{ID: "CVE-TEST"},
+						Metadata:  tt.metadata,
+						Fix:       vulnerability.Fix{State: tt.fixState},
+					},
+				})
+			}
+
+			imgData := []cautils.ImageScanData{
+				{
+					Matches:               matches,
+					VulnerabilityProvider: mockVulnerabilityProvider{severity: tt.matchSeverity},
+				},
+			}
+
+			err := enforceImageSeverityThresholds(imgData, scanInfo)
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestEnforceImageSeverityThresholdsUsesEmbeddedMetadataWithoutProvider(t *testing.T) {
+	matches := match.NewMatches(match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{ID: "CVE-TEST"},
+			Metadata:  &vulnerability.Metadata{Severity: vulnerability.CriticalSeverity.String()},
+		},
+	})
+
+	err := enforceImageSeverityThresholds(
+		[]cautils.ImageScanData{{Matches: matches}},
+		&cautils.ScanInfo{FailThresholdSeverity: "high"},
+	)
+
+	assert.EqualError(t, err, "image scan result exceeds severity threshold: high")
+}
+
+func TestGetScanCommand_RunE_SubmitExclusivity(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	require.NoError(t, cmd.PersistentFlags().Set("submit", "true"))
+	require.NoError(t, cmd.PersistentFlags().Set("keep-local", "true"))
+
+	err := cmd.RunE(cmd, []string{""})
+	assert.EqualError(t, err, "you can use `keep-local` or `submit`, but not both")
+}
+
+func TestValidateCombinedImageScanFlags(t *testing.T) {
+	tests := []struct {
+		name         string
+		scanInfo     *cautils.ScanInfo
+		wantErr      string
+		wantPlatform string
+	}{
+		{
+			name:     "nil scan info is ignored",
+			scanInfo: nil,
+		},
+		{
+			name: "image flags are ignored when scanning is disabled",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:    false,
+				ImagePlatform: "linux/not-real",
+			},
+			wantPlatform: "linux/not-real",
+		},
+		{
+			name: "empty image options are valid",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages: true,
+			},
+		},
+		{
+			name: "platform is canonicalized",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:    true,
+				ImagePlatform: "x86_64",
+			},
+			wantPlatform: "linux/amd64",
+		},
+		{
+			name: "valid platform and scoped token are accepted",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:        true,
+				ImagePlatform:     "linux/arm64",
+				RegistryAuthority: "registry.example.com",
+				RegistryToken:     "token",
+			},
+			wantPlatform: "linux/arm64",
+		},
+		{
+			name: "invalid platform is rejected",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:    true,
+				ImagePlatform: "linux/toaster",
+			},
+			wantErr: "invalid image platform",
+		},
+		{
+			name: "credentials still require an authority",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:    true,
+				ImagePlatform: "linux/amd64",
+				RegistryToken: "token",
+			},
+			wantErr: shared.ErrRegistryAuthorityMissing.Error(),
+		},
+		{
+			name: "authority still requires credentials",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:        true,
+				RegistryAuthority: "registry.example.com",
+			},
+			wantErr: shared.ErrRegistryAuthorityNoAuth.Error(),
+		},
+		{
+			name: "username and password remain a pair",
+			scanInfo: &cautils.ScanInfo{
+				ScanImages:        true,
+				RegistryAuthority: "registry.example.com",
+				RegistryUsername:  "user",
+			},
+			wantErr: shared.ErrRegistryUsernamePassword.Error(),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCombinedImageScanFlags(tt.scanInfo)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			if tt.scanInfo != nil {
+				assert.Equal(t, tt.wantPlatform, tt.scanInfo.ImagePlatform)
+			}
+		})
+	}
+}
+
+func TestGetScanCommandRegistersImagePlatformFlag(t *testing.T) {
+	cmd := GetScanCommand(&mocks.MockIKubescape{})
+
+	flag := cmd.PersistentFlags().Lookup("image-platform")
+	require.NotNil(t, flag)
+	assert.Empty(t, flag.DefValue)
+	assert.Contains(t, flag.Usage, "linux/amd64")
+	assert.Contains(t, flag.Usage, "overrides platform inferred")
+}
+
+func TestScanCommandRegistersSkipDBUpdateFlag(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	flag := cmd.PersistentFlags().Lookup("skip-db-update")
+	require.NotNil(t, flag)
+	assert.Equal(t, "false", flag.DefValue)
+}
+
+func TestGetScanCommand_SkipDBUpdateReachesScanInfo(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"image", "--skip-db-update", "nginx:latest"})
+	require.NoError(t, cmd.Execute())
+	require.NotNil(t, mockKubescape.scanInfo)
+	assert.True(t, mockKubescape.scanInfo.SkipDBUpdate)
+}
+
+func TestGetScanCommand_SkipDBUpdateDefaultsToFalse(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+	cmd.SetArgs([]string{"image", "nginx:latest"})
+	require.NoError(t, cmd.Execute())
+	require.NotNil(t, mockKubescape.scanInfo)
+	assert.False(t, mockKubescape.scanInfo.SkipDBUpdate)
 }

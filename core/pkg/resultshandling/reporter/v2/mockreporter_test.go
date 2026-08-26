@@ -16,9 +16,9 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
-	"github.com/kubescape/kubescape/v3/internal/testutils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v4/internal/testutils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -30,8 +30,6 @@ import (
 )
 
 func TestReportMockGetURL(t *testing.T) {
-	t.Parallel()
-
 	type fields struct {
 		query   string
 		message string
@@ -63,8 +61,6 @@ func TestReportMockGetURL(t *testing.T) {
 		tc := toPin
 
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
 			var reportMock reporter.IReport = NewReportMock(tc.fields.query, tc.fields.message)
 
 			t.Run("mock reports should support DisplayMessage", func(t *testing.T) {

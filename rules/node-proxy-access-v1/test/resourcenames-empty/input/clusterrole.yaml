@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-proxy-access-empty-resourcenames
+rules:
+- apiGroups: [""]
+  resources: ["nodes/proxy"]
+  verbs: ["get"]
+  resourceNames: []

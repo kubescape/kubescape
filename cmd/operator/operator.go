@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/meta"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/spf13/cobra"
 )
 
@@ -53,7 +53,7 @@ func GetOperatorCmd(ks meta.IKubescape) *cobra.Command {
 		},
 	}
 
-	operatorCmd.AddCommand(getOperatorScanCmd(ks, operatorInfo))
+	operatorCmd.AddCommand(getOperatorScanCmd(ks, &operatorInfo))
 	operatorCmd.AddCommand(getOperatorRemediateCmd(ks, operatorInfo))
 
 	return operatorCmd

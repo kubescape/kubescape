@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: named-pod-creator
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  resourceNames: ["debug-pod"]
+  verbs: ["create", "get"]

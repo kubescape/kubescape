@@ -225,6 +225,9 @@ kubescape scan --format html --output report.html
 
 # PDF report
 kubescape scan --format pdf --output report.pdf
+
+# CSV report
+kubescape scan --format csv --output results.csv
 ```
 
 ### Image Scanning
@@ -238,7 +241,12 @@ kubescape scan image nginx:1.21 -v
 
 # Scan a private registry image
 kubescape scan image myregistry/myimage:tag --username user --password pass
+
+# Scan a specific variant from a multi-architecture image index
+kubescape scan image nginx:1.27 --platform linux/amd64
 ```
+
+For workload scans, Kubescape can infer image platforms from scheduled Nodes, node selectors, and required node affinity. Use `--image-platform` with `--scan-images` to override inference. See [multi-architecture image scanning](docs/multi-architecture-image-scanning.md) for details.
 
 #### Using an Offline Grype Database
 ```bash
@@ -444,6 +452,7 @@ helm upgrade --install kubescape kubescape/kubescape-operator \
 | **GitHub Actions** | [kubescape/github-action](https://github.com/marketplace/actions/kubescape) |
 | **GitLab CI** | [Documentation](https://kubescape.io/docs/integrations/gitlab/) |
 | **Jenkins** | [Documentation](https://kubescape.io/docs/integrations/jenkins/) |
+| **MegaLinter** | [Documentation](https://megalinter.io/latest/descriptors/kubernetes_kubescape/) — open-source linters aggregator that embeds Kubescape and runs it when Kubernetes files are detected |
 
 ### IDE Extensions
 

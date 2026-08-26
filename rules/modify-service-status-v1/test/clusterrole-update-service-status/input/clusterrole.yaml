@@ -1,0 +1,8 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: service-status-writer
+rules:
+- apiGroups: [""]
+  resources: ["services/status"]
+  verbs: ["get", "update", "patch"]

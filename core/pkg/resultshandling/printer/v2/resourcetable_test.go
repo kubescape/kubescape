@@ -33,6 +33,13 @@ func TestAppendFailedPathsIfNotInPaths(t *testing.T) {
 			failedPaths:   []string{},
 			expectedPaths: []string{"path1", "path2"},
 		},
+		{
+			// a bare delete/fix/review path must still be recognized as covering its
+			// enriched " (current: <value>)" counterpart in failedPaths
+			paths:         []string{"spec.hostNetwork"},
+			failedPaths:   []string{"spec.hostNetwork (current: true)"},
+			expectedPaths: []string{"spec.hostNetwork"},
+		},
 	}
 
 	for _, testcase := range tests {
@@ -91,6 +98,100 @@ func TestAssistedRemediationPathsToString(t *testing.T) {
 	actualPaths = AssistedRemediationPathsToString(control2)
 	expectedPaths = []string{"some-path2", "random-path2"}
 	assert.Equal(t, expectedPaths, actualPaths)
+}
+
+func TestAssistedRemediationPathsToString_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name     string
+		control  *resourcesresults.ResourceAssociatedControl
+		expected []string
+	}{
+		{
+			name:     "empty control with no rules and no paths",
+			control:  &resourcesresults.ResourceAssociatedControl{},
+			expected: nil,
+		},
+		{
+			name: "rules with empty path fields",
+			control: &resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Paths: []armotypes.PosturePaths{
+							{},
+							{FixPath: armotypes.FixPath{Path: "", Value: "value"}},
+						},
+					},
+				},
+			},
+			expected: nil,
+		},
+		{
+			name: "duplicate paths across FailedPath and ReviewPath are deduplicated",
+			control: &resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Paths: []armotypes.PosturePaths{
+							{ReviewPath: "shared-path"},
+							{FailedPath: "shared-path"},
+						},
+					},
+				},
+			},
+			expected: []string{"shared-path"},
+		},
+		{
+			name: "mixed valid and empty paths within the same rule",
+			control: &resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Paths: []armotypes.PosturePaths{
+							{},
+							{FailedPath: "valid-failed"},
+							{FixPath: armotypes.FixPath{Path: "", Value: "value"}},
+							{ReviewPath: "valid-review"},
+						},
+					},
+				},
+			},
+			expected: []string{"valid-review", "valid-failed"},
+		},
+		{
+			name: "all four path types present simultaneously",
+			control: &resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{
+						Paths: []armotypes.PosturePaths{
+							{FixPath: armotypes.FixPath{Path: "fix-path", Value: "fix-value"}},
+							{DeletePath: "delete-path"},
+							{ReviewPath: "review-path"},
+							{FailedPath: "failed-path"},
+						},
+					},
+				},
+			},
+			expected: []string{"fix-path=fix-value", "delete-path", "review-path", "failed-path"},
+		},
+		{
+			name: "nil and missing Paths slices",
+			control: &resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+					{Name: "rule-with-nil-paths"},
+					{
+						Name:  "rule-with-nil-paths-explicit",
+						Paths: nil,
+					},
+				},
+			},
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := AssistedRemediationPathsToString(tt.control)
+			assert.Equal(t, tt.expected, actual)
+		})
+	}
 }
 
 func TestReviewPathsToString(t *testing.T) {
@@ -517,7 +618,7 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rows := generateResourceRows(tt.controls, &tt.summaryDetails, tt.resource)
+			rows := generateResourceRows(tt.controls, &tt.summaryDetails, tt.resource, true, false, "")
 			assert.Equal(t, tt.expectedLen, len(rows))
 			//remediation is the last column of the first row
 			if len(rows) != 0 {
@@ -595,6 +696,12 @@ func TestAddContainerNameToAssistedRemediation_OutOfBounds(t *testing.T) {
 				"spec.containers[10].securityContext.readOnlyRootFilesystem",
 				"spec.containers[1].securityContext.allowPrivilegeEscalation (sidecar)",
 			},
+		},
+		{
+			name:          "init and ephemeral container indices append names",
+			resource:      privilegedInitAndEphemeralPod(),
+			paths:         privilegedInitAndEphemeralPaths(),
+			expectedPaths: privilegedInitAndEphemeralNamedPaths(),
 		},
 		{
 			name: "path without container index is unchanged",

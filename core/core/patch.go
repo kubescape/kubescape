@@ -23,11 +23,11 @@ import (
 	"github.com/docker/cli/cli/config"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	ksmetav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/pkg/imagescan"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
@@ -53,12 +53,13 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	logger.L().Start(fmt.Sprintf("Scanning image: %s", patchInfo.Image))
 
 	// Setup the scan service
-	distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL)
+	// patch never exposes --skip-db-update; SkipDBUpdate is always false here, so the DB is always updated.
+	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, false)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Invalid Grype database URL '%s': %v", scanInfo.ListingURL, err))
 		return false, err
 	}
-	svc, err := imagescan.NewScanServiceWithMatchers(distCfg, installCfg, scanInfo.UseDefaultMatchers)
+	svc, err := imagescan.NewScanServiceWithMatchersAndSources(distCfg, installCfg, scanInfo.UseDefaultMatchers, nil, shouldUpdate)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to initialize image scanner: %s", err))
 		return false, err
@@ -74,8 +75,12 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		return false, err
 	}
 
+	// svc.Scan is called above with no vulnerability/severity exceptions, so scanResults.Matches
+	// is currently the full unfiltered set copa patches against. If exceptions are ever wired into
+	// this flow, keep them out of scanResults.Matches here - the patch document must still see every
+	// CVE so copa can patch it, even ones excepted from the posture report.
 	model, err := models.NewDocument(clio.Identification{}, scanResults.Packages, scanResults.Context,
-		*scanResults.RemainingMatches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
+		scanResults.Matches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
 	if err != nil {
 		return false, fmt.Errorf("failed to create document: %w", err)
 	}
@@ -90,10 +95,24 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	fileName := fmt.Sprintf("%s:%s.json", patchInfo.ImageName, patchInfo.ImageTag)
 	fileName = strings.ReplaceAll(fileName, "/", "-")
 
-	writer := printer.GetWriter(ks.Context(), fileName)
+	writer, err := printer.GetWriterNoFallback(fileName)
+	if err != nil {
+		return false, fmt.Errorf("creating intermediate scan results file: %w", err)
+	}
+	defer func() {
+		if err := os.Remove(fileName); err != nil && !errors.Is(err, os.ErrNotExist) {
+			logger.L().Warning(fmt.Sprintf("failed to remove residual file: %v", fileName), helpers.Error(err))
+		}
+	}()
 
 	if err = pres.Present(writer); err != nil {
+		if closeErr := writer.Close(); closeErr != nil {
+			return false, errors.Join(err, fmt.Errorf("closing intermediate scan results file: %w", closeErr))
+		}
 		return false, err
+	}
+	if closeErr := writer.Close(); closeErr != nil {
+		return false, fmt.Errorf("closing intermediate scan results file: %w", closeErr)
 	}
 	logger.L().StopSuccess(fmt.Sprintf("Successfully scanned image: %s", patchInfo.Image))
 
@@ -104,17 +123,12 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		return false, err
 	}
 
-	sout, serr := os.Stdout, os.Stderr
-	if logger.L().GetLevel() != "debug" {
-		disableCopaLogger()
-	}
-
-	if err = copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.OutputMode, patchInfo.OutputPath, patchInfo.BuildKitOpts); err != nil {
+	err = runWithCopaLoggerMuted(logger.L().GetLevel() == "debug", func() error {
+		return copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.OutputMode, patchInfo.OutputPath, patchInfo.BuildKitOpts)
+	})
+	if err != nil {
 		return false, err
 	}
-
-	// Restore the output streams
-	os.Stdout, os.Stderr = sout, serr
 
 	switch patchInfo.OutputMode {
 	case "image":
@@ -123,12 +137,6 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Loaded locally: %s", patchedImageName))
 	case "oci", "local":
 		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Exported to: %s", patchInfo.OutputPath))
-	}
-
-	// ===================== Clean up =====================
-	// Remove the scan results file, which was used to patch the image
-	if err := os.Remove(fileName); err != nil {
-		logger.L().Warning(fmt.Sprintf("failed to remove residual file: %v", fileName), helpers.Error(err))
 	}
 
 	// ===================== Early return for OCI/Local exports =====================
@@ -160,7 +168,7 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
 	resultsHandler.ImageScanData = []cautils.ImageScanData{*scanResultsPatched}
 
-	return svc.ExceedsSeverityThreshold(imagescan.ParseSeverity(scanInfo.FailThresholdSeverity), scanResultsPatched.Matches), resultsHandler.HandleResults(ks.Context(), scanInfo)
+	return svc.ExceedsSeverityThreshold(imagescan.ParseSeverity(scanInfo.FailThresholdSeverity), scanResultsPatched.Matches, scanInfo.OnlyFixable), resultsHandler.HandleResults(ks.Context(), scanInfo)
 }
 
 // buildPatchedImageName returns the canonical "<name>:<tag>" used as the buildkit
@@ -176,10 +184,25 @@ func buildPatchedImageName(image, patchedTag string) (string, error) {
 	return fmt.Sprintf("%s:%s", ref.Name(), patchedTag), nil
 }
 
-func disableCopaLogger() {
-	os.Stdout, os.Stderr = nil, nil
-	null, _ := os.Open(os.DevNull)
-	log.SetOutput(null)
+// runWithCopaLoggerMuted mutes copa's logrus output for the duration of fn,
+// unless debug is set. It does not touch os.Stdout/os.Stderr at all: logrus
+// resolves os.Stderr once, by value, at package init, so reassigning the os
+// package variables has no effect on it anyway (only log.SetOutput does),
+// and copaPatch's buildkit/containerd goroutines can still be running after
+// a timeout, so mutating those process-wide globals here would be an
+// unsynchronized write racing with any concurrent reader. The previous
+// logrus writer - whatever it actually was, not assumed to be os.Stderr - is
+// captured and restored before this function returns.
+func runWithCopaLoggerMuted(debug bool, fn func() error) error {
+	if debug {
+		return fn()
+	}
+
+	prevOut := log.StandardLogger().Out
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(prevOut)
+
+	return fn()
 }
 
 // copaPatch is a slightly modified copy of the Patch function from the original "project-copacetic/copacetic" repo
@@ -206,6 +229,15 @@ func copaPatch(ctx context.Context, timeout time.Duration, buildkitAddr, image, 
 	}
 }
 
+// resolveBuildkitOpts fills Addr from the --address flag unless a caller
+// already set it directly; empty means let buildkit.NewClient auto-detect.
+func resolveBuildkitOpts(buildkitAddr string, bkOpts buildkit.Opts) buildkit.Opts {
+	if bkOpts.Addr == "" {
+		bkOpts.Addr = buildkitAddr
+	}
+	return bkOpts
+}
+
 func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, ignoreError bool, outputMode, outputPath string, bkOpts buildkit.Opts) error {
 	// Ensure working folder exists for call to InstallUpdates
 	if workingFolder == "" {
@@ -215,11 +247,11 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 			return err
 		}
 		defer os.RemoveAll(workingFolder)
-		if err := os.Chmod(workingFolder, 0o744); err != nil {
+		if err := os.Chmod(workingFolder, 0o700); err != nil { // #nosec G302 -- working directory needs owner-execute (0o700) for a private area
 			return err
 		}
 	} else {
-		if isNew, err := utils.EnsurePath(workingFolder, 0o744); err != nil {
+		if isNew, err := utils.EnsurePath(workingFolder, 0o700); err != nil {
 			log.Errorf("failed to create workingFolder %s", workingFolder)
 			return err
 		} else if isNew {
@@ -233,6 +265,8 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 	if err != nil {
 		return err
 	}
+
+	bkOpts = resolveBuildkitOpts(buildkitAddr, bkOpts)
 
 	bkClient, err := buildkit.NewClient(ctx, bkOpts)
 	if err != nil {
@@ -302,9 +336,8 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 
 		log.Infof("Patching %d vulnerabilities", len(updates.Updates))
 		patchedImageState, errPkgs, err := manager.InstallUpdates(ctx, updates, ignoreError)
-		log.Infof("Error is: %v", err)
 		if err != nil {
-			return nil, nil
+			return nil, fmt.Errorf("copa: error installing updates :: %w", err)
 		}
 
 		platform := platforms.Normalize(platforms.DefaultSpec())
@@ -409,11 +442,11 @@ func buildPatchExport(outputMode, outputPath, patchedImageName string) (client.E
 			},
 			Output: func(_ map[string]string) (io.WriteCloser, error) {
 				if dir := filepath.Dir(outputPath); dir != "." {
-					if err := os.MkdirAll(dir, 0o755); err != nil {
+					if err := os.MkdirAll(dir, 0o750); err != nil {
 						return nil, fmt.Errorf("failed to create parent directory for output-path %q: %w", outputPath, err)
 					}
 				}
-				return os.Create(outputPath)
+				return os.Create(filepath.Clean(outputPath))
 			},
 		}, nil, nil
 	case "local":

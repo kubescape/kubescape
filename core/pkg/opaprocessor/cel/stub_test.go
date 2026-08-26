@@ -68,13 +68,125 @@ func TestStubRequestHasFullAdmissionRequestShape(t *testing.T) {
 		assert.Truef(t, ok, "request is missing field %q", key)
 	}
 
-	// resource is a GroupVersionResource: group/version are real, the plural
-	// resource name is the zero value (can't resolve a GVR plural offline).
+	// resource is a GroupVersionResource: group, version and the plural
+	// resource name are all real.
 	resource, ok := req["resource"].(map[string]any)
 	require.True(t, ok, "resource should be a map")
 	assert.Equal(t, "", resource["group"])
 	assert.Equal(t, "v1", resource["version"])
-	assert.Equal(t, "", resource["resource"])
+	assert.Equal(t, "pods", resource["resource"])
+}
+
+// TestStubRequestResourcePlural pins request.resource.resource to the plural a
+// cluster would report. An empty plural is a silent parity break, not an eval
+// error: request is cel.DynType, so a policy guarding on the plural just
+// compares against "" and passes (issue #3098).
+func TestStubRequestResourcePlural(t *testing.T) {
+	tests := []struct {
+		name string
+		obj  map[string]any
+		want string
+	}{
+		{
+			name: "core group",
+			obj:  namespacedPod(),
+			want: "pods",
+		},
+		{
+			name: "grouped api version",
+			obj:  clusterScopedRole(),
+			want: "clusterroles",
+		},
+		{
+			name: "kind ending in y pluralizes to ies",
+			obj: map[string]any{
+				"apiVersion": "networking.k8s.io/v1",
+				"kind":       "NetworkPolicy",
+			},
+			want: "networkpolicies",
+		},
+		{
+			name: "kind ending in s pluralizes to es",
+			obj: map[string]any{
+				"apiVersion": "policy/v1",
+				"kind":       "PodDisruptionBudget",
+			},
+			want: "poddisruptionbudgets",
+		},
+		{
+			name: "custom resource kind",
+			obj: map[string]any{
+				"apiVersion": "agents.x-k8s.io/v1alpha1",
+				"kind":       "ActorTemplate",
+			},
+			want: "actortemplates",
+		},
+		{
+			name: "sibilant kind pluralizes to es",
+			obj: map[string]any{
+				"apiVersion": "agents.x-k8s.io/v1alpha1",
+				"kind":       "Sandbox",
+			},
+			want: "sandboxes",
+		},
+		{
+			name: "vowel before a final y pluralizes to s",
+			obj: map[string]any{
+				"apiVersion": "gateway.networking.k8s.io/v1",
+				"kind":       "Gateway",
+			},
+			want: "gateways",
+		},
+		{
+			name: "an already plural kind is left alone",
+			obj: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Endpoints",
+			},
+			want: "endpoints",
+		},
+		{
+			name: "resource-plural annotation overrides the guess",
+			obj: map[string]any{
+				"apiVersion": "agentsubstrate.google.com/v1",
+				"kind":       "WorkerPool",
+				"metadata":   map[string]any{"annotations": map[string]any{"kubescape.io/resource-plural": "worker-pools"}},
+			},
+			want: "worker-pools",
+		},
+		{
+			name: "undeterminable kind stays empty",
+			obj:  map[string]any{"apiVersion": "v1"},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := stubRequest(tt.obj)
+
+			for _, field := range []string{"resource", "requestResource"} {
+				gvr, ok := req[field].(map[string]any)
+				require.Truef(t, ok, "%s should be a map", field)
+				assert.Equalf(t, tt.want, gvr["resource"], "%s.resource", field)
+			}
+		})
+	}
+}
+
+// TestStubRequestResourceMatchesScoping is the anti-drift guard: appliesTo
+// scopes a policy by the guessed plural, so a policy reading the plural off
+// request must see the same string. Two guesses that can disagree would let a
+// policy be scoped in and then self-guard itself back out.
+func TestStubRequestResourceMatchesScoping(t *testing.T) {
+	for _, obj := range []map[string]any{namespacedPod(), clusterScopedRole()} {
+		gvr, _, ok := objectGVR(obj)
+		require.True(t, ok)
+
+		req := stubRequest(obj)
+		resource := req["resource"].(map[string]any)
+		assert.Equal(t, gvr.Resource, resource["resource"])
+	}
 }
 
 func TestStubRequestGroupedAPIVersion(t *testing.T) {
@@ -100,7 +212,7 @@ func TestStubRequestSelectableAgainstEnv(t *testing.T) {
 		"request.namespace == 'production'",
 		"request.uid == ''",
 		"request.kind.kind == 'Pod'",
-		"request.resource.resource == ''",
+		"request.resource.resource == 'pods'",
 		"request.resource.group == ''",
 		"request.subResource == ''",
 		"request.requestKind.kind == 'Pod'",

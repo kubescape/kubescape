@@ -5,9 +5,8 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/core"
-	"github.com/kubescape/kubescape/v3/core/meta"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +17,9 @@ var operatorScanConfigExamples = fmt.Sprintf(`
 
 `, cautils.ExecName())
 
-func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo cautils.OperatorInfo) *cobra.Command {
+func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo *cautils.OperatorInfo) *cobra.Command {
+	configScanInfo := &cautils.ConfigScanInfo{}
+
 	configCmd := &cobra.Command{
 		Use:     "configurations",
 		Short:   "Trigger configuration scanning from the Kubescape Operator microservice",
@@ -29,7 +30,7 @@ func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo cautils.OperatorI
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			operatorAdapter, err := core.NewOperatorAdapter(operatorInfo.OperatorScanInfo, operatorInfo.Namespace)
+			operatorAdapter, err := newOperatorAdapter(configScanInfo, operatorInfo.Namespace)
 			if err != nil {
 				return err
 			}
@@ -44,12 +45,9 @@ func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo cautils.OperatorI
 		},
 	}
 
-	configScanInfo := &cautils.ConfigScanInfo{}
-	operatorInfo.OperatorScanInfo = configScanInfo
-
 	configCmd.PersistentFlags().StringSliceVar(&configScanInfo.IncludedNamespaces, "include-namespaces", nil, "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
 	configCmd.PersistentFlags().StringSliceVar(&configScanInfo.ExcludedNamespaces, "exclude-namespaces", nil, "Namespaces to exclude from scanning. e.g: --exclude-namespaces ns-a,ns-b. Notice, when running with `exclude-namespace` kubescape does not scan cluster-scoped objects.")
-	configCmd.PersistentFlags().StringSliceVar(&configScanInfo.Frameworks, "frameworks", nil, "Load frameworks for configuration scanning")
+	configCmd.PersistentFlags().StringSliceVar(&configScanInfo.Frameworks, "frameworks", []string{"all"}, "Load frameworks for configuration scanning (default: all)")
 	configCmd.PersistentFlags().BoolVarP(&configScanInfo.HostScanner, "enable-host-scan", "", false, "Deploy Kubescape host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valuable data from cluster nodes for certain controls. Yaml file: https://github.com/kubescape/kubescape/blob/master/core/pkg/hostsensorutils/hostsensor.yaml")
 
 	return configCmd

@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -135,4 +136,40 @@ func TestGetWorkloadScanCommand(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+// TestClusterScan_printTopWorkloads_ResourceNameWithPercentVerbs guards
+// against a regression where resource-derived text was passed as the format
+// argument to cautils.SimpleDisplay instead of as a %s value: a resource name
+// containing %-verbs (reachable from an untrusted scanned manifest) was
+// silently corrupted by fmt's format-string interpretation instead of being
+// printed literally.
+func TestClusterScan_printTopWorkloads_ResourceNameWithPercentVerbs(t *testing.T) {
+	f, err := os.CreateTemp("", "print-top-workloads")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	cp := &ClusterPrinter{writer: f}
+
+	name := "my-deployment-%s-%d-leaked"
+	resource := reporthandling.NewResource(map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      name,
+			"namespace": "default",
+		},
+	})
+
+	cp.printTopWorkloads([]reporthandling.IResource{resource})
+
+	f.Seek(0, 0)
+	got, err := io.ReadAll(f)
+	if err != nil {
+		panic(err)
+	}
+
+	assert.Contains(t, string(got), name, "resource name must be printed literally, not interpreted as a format string")
 }

@@ -7,7 +7,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
@@ -48,8 +48,8 @@ var (
 		ImageVulnerabilities: {"armo.vuln.images/v1", "image.vulnscan.com/v1"}}
 	MapResourceToApiGroupCloud = map[string][]string{
 		ClusterDescribe:         {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"},
-		DescribeRepositories:    {"eks.amazonaws.com/v1"}, //TODO - add google and azure when they are supported
-		ListEntitiesForPolicies: {"eks.amazonaws.com/v1"}, //TODO - add google and azure when they are supported
+		DescribeRepositories:    {"container.googleapis.com/v1", "eks.amazonaws.com/v1"}, //TODO - add azure when ensure-image-scanning-enabled-cloud supports ACR
+		ListEntitiesForPolicies: {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"},
 	}
 )
 
@@ -65,15 +65,14 @@ func isEmptyImgVulns(externalResourcesMap cautils.ExternalResources) bool {
 	return true
 }
 
-func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl map[string][]string) cautils.ExternalResources {
+func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl map[string][]string, resolver resourceResolver) cautils.ExternalResources {
 	externalResources := make(cautils.ExternalResources)
-	complexMap := setComplexKSResourceMap(frameworks, resourceToControl)
+	complexMap := setComplexKSResourceMap(frameworks, resourceToControl, resolver)
 	for group := range complexMap {
 		for version := range complexMap[group] {
 			for resource := range complexMap[group][version] {
-				groupResources := k8sinterface.ResourceGroupToString(group, version, resource)
-				for _, groupResource := range groupResources {
-					externalResources[groupResource] = nil
+				for _, resolved := range resolver(group, version, resource) {
+					externalResources[resolved.groupVersionResourceTriplet] = nil
 				}
 			}
 		}
@@ -82,7 +81,7 @@ func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl m
 }
 
 // [group][versionn][resource]
-func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToControls map[string][]string) map[string]map[string]map[string]any {
+func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToControls map[string][]string, resolver resourceResolver) map[string]map[string]map[string]any {
 	k8sResources := make(map[string]map[string]map[string]any)
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {
@@ -92,9 +91,10 @@ func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToCo
 					for _, apiGroup := range match.APIGroups {
 						for _, apiVersion := range match.APIVersions {
 							for _, resource := range match.Resources {
-								for _, groupResource := range k8sinterface.ResourceGroupToString(apiGroup, apiVersion, resource) {
-									if !slices.Contains(resourceToControls[groupResource], control.ControlID) {
-										resourceToControls[groupResource] = append(resourceToControls[groupResource], control.ControlID)
+								for _, resolved := range resolver(apiGroup, apiVersion, resource) {
+									resourceGroup := resolved.groupVersionResourceTriplet
+									if !slices.Contains(resourceToControls[resourceGroup], control.ControlID) {
+										resourceToControls[resourceGroup] = append(resourceToControls[resourceGroup], control.ControlID)
 									}
 								}
 							}
@@ -123,17 +123,22 @@ func mapKSResourceToApiGroup(resource string) []string {
 	return []string{}
 }
 
+// isExternalResource reports whether a resolved group/version/resource triplet
+// names a resource Kubescape serves itself - host sensor data, cloud provider
+// descriptions, image vulnerabilities. Their API groups belong to Kubescape, so
+// no cluster ever serves them and they are never collected with a LIST.
+func isExternalResource(triplet string) bool {
+	_, _, resource := k8sinterface.StringToResourceGroup(triplet)
+	return len(mapKSResourceToApiGroup(resource)) > 0
+}
+
 func insertControls(resource string, resourceToControl map[string][]string, control reporthandling.Control) {
 	ksResources := mapKSResourceToApiGroup(resource)
 	for _, ksResource := range ksResources {
 		group, version := k8sinterface.SplitApiVersion(ksResource)
 		r := k8sinterface.JoinResourceTriplets(group, version, resource)
-		if _, ok := resourceToControl[r]; !ok {
+		if !slices.Contains(resourceToControl[r], control.ControlID) {
 			resourceToControl[r] = append(resourceToControl[r], control.ControlID)
-		} else {
-			if !slices.Contains(resourceToControl[r], control.ControlID) {
-				resourceToControl[r] = append(resourceToControl[r], control.ControlID)
-			}
 		}
 	}
 }
@@ -160,20 +165,25 @@ func insertKSResourcesAndControls(k8sResources map[string]map[string]map[string]
 func getGroupNVersion(apiVersion string) (string, string) {
 	gv := strings.Split(apiVersion, "/")
 	group, version := "", ""
-	if len(gv) >= 1 {
+	if len(gv) == 1 {
+		version = gv[0]
+	} else if len(gv) >= 2 {
 		group = gv[0]
-	}
-	if len(gv) >= 2 {
 		version = gv[1]
 	}
 	return group, version
 }
 
+// getFieldSelectorFromScanInfo picks the namespace filter the collection queries
+// carry. A flag is honored only when its value actually names a namespace: a
+// value made of separators and whitespace ("," or " ") narrows nothing, which is
+// already how countNamespaces and the report metadata read it, and an include
+// selector built from one emits no query at all (see GetNamespacesSelectors).
 func getFieldSelectorFromScanInfo(scanInfo *cautils.ScanInfo) IFieldSelector {
-	if scanInfo.IncludeNamespaces != "" {
+	if len(splitNamespaces(scanInfo.IncludeNamespaces)) > 0 {
 		return NewIncludeSelector(scanInfo.IncludeNamespaces)
 	}
-	if scanInfo.ExcludedNamespaces != "" {
+	if len(splitNamespaces(scanInfo.ExcludedNamespaces)) > 0 {
 		return NewExcludeSelector(scanInfo.ExcludedNamespaces)
 	}
 

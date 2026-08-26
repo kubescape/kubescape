@@ -1,0 +1,10 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: empty-resourcenames-pod-exec
+  namespace: dev
+rules:
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  resourceNames: []
+  verbs: ["create"]
