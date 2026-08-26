@@ -740,7 +740,9 @@ func TestResourceTable_DoesNotExposeSensitiveData(t *testing.T) {
 		name        string
 		resourceID  string
 		resourceObj map[string]any
+		paths       []armotypes.PosturePaths
 		sensitive   []string
+		showSecrets bool
 	}{
 		{
 			name:       "Secret data is not rendered",
@@ -757,7 +759,12 @@ func TestResourceTable_DoesNotExposeSensitiveData(t *testing.T) {
 					"username": "PLACEHOLDER_BASE64_002",
 				},
 			},
-			sensitive: []string{"PLACEHOLDER_BASE64_001", "PLACEHOLDER_BASE64_002"},
+			paths: []armotypes.PosturePaths{
+				{FailedPath: "data.password"},
+				{FailedPath: "data.username"},
+			},
+			sensitive:   []string{"PLACEHOLDER_BASE64_001", "PLACEHOLDER_BASE64_002"},
+			showSecrets: false,
 		},
 		{
 			name:       "Pod env value is not rendered",
@@ -793,7 +800,33 @@ func TestResourceTable_DoesNotExposeSensitiveData(t *testing.T) {
 					},
 				},
 			},
-			sensitive: []string{"PLACEHOLDER_VALUE_003", "PLACEHOLDER_REF_NAME"},
+			paths: []armotypes.PosturePaths{
+				{FailedPath: "spec.containers[0].env[0].value"},
+			},
+			sensitive:   []string{"PLACEHOLDER_VALUE_003"},
+			showSecrets: false,
+		},
+		{
+			name:       "Secret data is rendered with --show-secrets",
+			resourceID: "/v1/default/Secret/example-secret",
+			resourceObj: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Secret",
+				"metadata": map[string]any{
+					"name":      "example-secret",
+					"namespace": "default",
+				},
+				"data": map[string]any{
+					"password": "PLACEHOLDER_BASE64_001",
+					"username": "PLACEHOLDER_BASE64_002",
+				},
+			},
+			paths: []armotypes.PosturePaths{
+				{FailedPath: "data.password"},
+				{FailedPath: "data.username"},
+			},
+			sensitive:   []string{"PLACEHOLDER_BASE64_001", "PLACEHOLDER_BASE64_002"},
+			showSecrets: true,
 		},
 	}
 
@@ -802,7 +835,7 @@ func TestResourceTable_DoesNotExposeSensitiveData(t *testing.T) {
 			f, err := os.CreateTemp(t.TempDir(), "resource-table-*.txt")
 			assert.NoError(t, err)
 
-			pp := &PrettyPrinter{writer: f}
+			pp := &PrettyPrinter{writer: f, showEvidence: true, showSecrets: tt.showSecrets}
 			resource := workloadinterface.NewWorkloadObj(tt.resourceObj)
 
 			session := cautils.NewOPASessionObjMock()
@@ -818,9 +851,7 @@ func TestResourceTable_DoesNotExposeSensitiveData(t *testing.T) {
 							{
 								Name:   "rule-1",
 								Status: "failed",
-								Paths: []armotypes.PosturePaths{
-									{FailedPath: "data.password"},
-								},
+								Paths:  tt.paths,
 							},
 						},
 					},
@@ -843,7 +874,11 @@ func TestResourceTable_DoesNotExposeSensitiveData(t *testing.T) {
 			assert.NoError(t, err)
 
 			for _, s := range tt.sensitive {
-				assert.NotContains(t, string(out), s, "sensitive value %q must not appear in resource table output", s)
+				if tt.showSecrets {
+					assert.Contains(t, string(out), s, "sensitive value %q must appear when --show-secrets is set", s)
+				} else {
+					assert.NotContains(t, string(out), s, "sensitive value %q must not appear in resource table output", s)
+				}
 			}
 		})
 	}
