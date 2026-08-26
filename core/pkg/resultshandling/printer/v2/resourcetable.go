@@ -145,15 +145,6 @@ func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata,
 		}
 		(*paths)[i] = (*paths)[i] + " (" + containerName + ")"
 	}
-	if cs, err := wl.GetEphemeralContainers(); err == nil {
-		names := make([]string, len(cs))
-		for i := range cs {
-			names[i] = cs[i].Name
-		}
-		namesByKind["ephemeralContainers"] = names
-	}
-
-	return namesByKind
 }
 
 func generateResourceHeader(short bool) table.Row {
