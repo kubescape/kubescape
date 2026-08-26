@@ -92,8 +92,10 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	// Save the scan results to a file in json format
 	pres := grypejson.NewPresenter(models.PresenterConfig{Document: model, SBOM: scanResults.SBOM})
 
-	fileName := fmt.Sprintf("%s:%s.json", patchInfo.ImageName, patchInfo.ImageTag)
-	fileName = strings.ReplaceAll(fileName, "/", "-")
+	// The intermediate name must be filesystem-safe on every OS: image
+	// references legally contain ':' (tags, registry ports) and '@'
+	// (digests), which are reserved filename characters on Windows.
+	fileName := fmt.Sprintf("%s.json", sanitizeImageRefForFilename(patchInfo.Image))
 
 	writer, err := printer.GetWriterNoFallback(fileName)
 	if err != nil {
@@ -182,6 +184,25 @@ func buildPatchedImageName(image, patchedTag string) (string, error) {
 		return "", fmt.Errorf("failed to parse image reference %q: %w", image, err)
 	}
 	return fmt.Sprintf("%s:%s", ref.Name(), patchedTag), nil
+}
+
+// sanitizeImageRefForFilename converts an image reference into a filename
+// component that is safe on every supported OS. Image references legally
+// contain ':' (tag separators, registry ports), '/' (repository paths) and '@'
+// (digests); ':' is a reserved character on Windows, where os.Create on such a
+// name fails outright.
+func sanitizeImageRefForFilename(image string) string {
+	replacer := strings.NewReplacer(":", "-", "/", "-", "@", "-", " ", "-")
+	return replacer.Replace(strings.TrimSpace(image))
+}
+
+// updatesCount reports how many package updates are targeted, tolerating the
+// update-all mode where no scanner report is provided and updates is nil.
+func updatesCount(updates *unversioned.UpdateManifest) int {
+	if updates == nil {
+		return 0
+	}
+	return len(updates.Updates)
 }
 
 // runWithCopaLoggerMuted mutes copa's logrus output for the duration of fn,
@@ -334,7 +355,7 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 			}
 		}
 
-		log.Infof("Patching %d vulnerabilities", len(updates.Updates))
+		log.Infof("Patching %d vulnerabilities", updatesCount(updates))
 		patchedImageState, errPkgs, err := manager.InstallUpdates(ctx, updates, ignoreError)
 		if err != nil {
 			return nil, fmt.Errorf("copa: error installing updates :: %w", err)
