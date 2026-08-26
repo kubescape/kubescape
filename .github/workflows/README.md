@@ -4,19 +4,25 @@ Tag terminology: `v<major>.<minor>.<patch>`
 
 ## Developing process
 
-Kubescape's main branch is `main`, any PR will be opened against the main branch.
+Kubescape's default branch is `master`; open every PR against `master`.
 
 ### Opening a PR
 
-When a user opens a PR, this will trigger some basic tests (units, license, etc.)
+Opening a PR triggers `00-pr-scanner.yaml`, which calls the reusable `a-pr-scanner.yaml` workflow. That runs, in order: `go test -race ./...`; a second race-enabled run over `./core/cautils/...` with `CGO_ENABLED=1`; the `httphandler` module tests, which run without the race detector; a GoReleaser snapshot build for the runner's own platform only (`build --clean --snapshot --single-target`); the `smoke_testing/init.py` smoke test against that binary; and `golangci-lint` in `only-new-issues` mode. Note that the job is named "Create cross-platform build" — it is not one. The cross-platform build happens in `02-release.yaml`.
+
+Two GitHub Apps report alongside it: the DCO check, which requires a `Signed-off-by:` trailer on every commit, and GitGuardian secret scanning.
+
+`00-pr-scanner.yaml` carries a `paths-ignore` filter, so a PR that touches nothing else can skip the build entirely. It ignores `**.md`, `**.yaml`, `**.yml` and `**.sh` at any depth, plus files sitting directly in `website/`, `examples/`, `docs/`, `build/` and `.github/`. Those last five are single-level patterns: a nested file such as `docs/guide/diagram.svg` does not match and will still start the workflow. The build is skipped only when *every* changed file in the PR matches one of the patterns.
 
 ### Reviewing a PR
 
-The reviewer/maintainer of a PR will decide whether the PR introduces changes that require running the E2E system tests. If so, the reviewer will add the `trigger-integration-test` label.
+The E2E system tests do not live in this repository. `00-pr-scanner.yaml` dispatches them to a private repository and polls for the result.
+
+They run automatically on every PR — there is no label to add and no approval gate. The `run-system-tests` job is gated only on the `wf-preparation` job finding the required organization secrets, which means it is **skipped on PRs from forks**. If you are contributing from a fork, the unit tests and the smoke test are the only automated verification available to you, so cover your change with unit tests.
 
 ### Approving a PR
 
-Once a maintainer approves the PR, if the `trigger-integration-test` label was added to the PR, the GitHub actions will trigger the system test. The PR will be merged only after the system tests passed successfully. If the label was not added, the PR can be merged. 
+Once a maintainer approves and the required checks are green, the PR can be merged.
 
 ### Merging a PR
 
@@ -25,27 +31,31 @@ The code is merged, no other actions are needed
 
 ## Release process
 
-Every two weeks, we will create a new tag by bumping the minor version, this will create the release and publish the artifacts. 
+Every two weeks, we will create a new tag by bumping the minor version, this will create the release and publish the artifacts.
 If we are introducing breaking changes, we will update the `major` version instead.
 
 When we wish to push a hot-fix/feature within the two weeks, we will bump the `patch`.
 
 ### Creating a new tag
+
 Every two weeks or upon the decision of the maintainers, a maintainer can create a tag.
 
-The tag should look as follows: `v<A>.<B>.<C>-rc.D` (release candidate). 
+The tag should look as follows: `v<A>.<B>.<C>`. Pushing it triggers `02-release.yaml`, whose tag filter matches release tags only — a pre-release suffix such as `-rc.0` will not start a release.
 
-When creating a tag, GitHub will trigger the following actions:
-1. Basic tests - unit tests, license, etc.
-2. System tests (integration tests). If the tests fail, the actions will stop here.
-3. Create a new tag: `v<A>.<B>.<C>` (same tag just without the `rc` suffix)
-4. Create a release
-5. Publish artifacts
-6. Build and publish the docker image (this is meanwhile until we separate the microservice code from the LCI codebase)
- 
+`02-release.yaml` then:
+
+1. Builds the cross-platform binaries and container images with GoReleaser.
+2. Runs the system tests against a Kind cluster and publishes a JUnit report.
+3. Signs the artifacts with Cosign and generates an SBOM with Syft.
+4. Attests the build provenance.
+5. Publishes the artifacts and the container images to `quay.io`.
+6. Opens the version bump against the krew index.
+
+The workflow can also be started manually via `workflow_dispatch`, which exposes a `skip_publish` input for dry runs.
+
 ## Additional Information
 
-The "callers" have the alphabetic prefix and the "executes" have the numeric prefix
+Reusable workflows — the ones invoked by another workflow through `on: workflow_call` — carry an alphabetic prefix (`a-pr-scanner.yaml`). A workflow that invokes one carries a numeric prefix (`00-pr-scanner.yaml`). `02-release.yaml` also carries a numeric prefix, but it invokes nothing: it is an event-triggered entrypoint that does its work inline. Workflows that are neither reusable nor callers, such as `scorecard.yml` and `comments.yaml`, sit outside the convention.
 
 ## Screenshot
 

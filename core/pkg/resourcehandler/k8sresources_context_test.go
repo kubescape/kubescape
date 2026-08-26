@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,7 +35,7 @@ func TestPullSingleResource_ContextPropagated(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), ctxKey{}, sentinel)
 	gvr := &schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-	handler.pullSingleResource(ctx, gvr, nil, "", &EmptySelector{})
+	handler.pullSingleResource(ctx, gvr, "", "", &EmptySelector{}, nil)
 
 	require.NotNil(t, capturedCtx)
 	assert.Equal(t, sentinel, capturedCtx.Value(ctxKey{}))
@@ -67,7 +67,7 @@ func TestPullResources_ContextCancellationUnblocksSlowList(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	_, _, failedQueries := handler.pullResources(ctx, qrs, &EmptySelector{})
+	_, _, failedQueries := handler.pullResources(ctx, qrs, &EmptySelector{}, "")
 	elapsed := time.Since(start)
 
 	assert.Less(t, elapsed, 3*time.Second)
@@ -111,7 +111,7 @@ func TestPullResources_SemaphoreContextCancellation(t *testing.T) {
 	var failedQueries map[string]queryFailure
 	go func() {
 		defer close(done)
-		_, _, failedQueries = handler.pullResources(ctx, qrs, &EmptySelector{})
+		_, _, failedQueries = handler.pullResources(ctx, qrs, &EmptySelector{}, "")
 	}()
 
 	for range maxParallelResourcePulls {
@@ -165,7 +165,7 @@ func TestPullResources_ContextPassedToGoroutines(t *testing.T) {
 		"//v1/pods": QueryableResource{GroupVersionResourceTriplet: "//v1/pods"},
 	}
 
-	handler.pullResources(ctx, qrs, &EmptySelector{})
+	handler.pullResources(ctx, qrs, &EmptySelector{}, "")
 
 	select {
 	case got := <-capturedCtxCh:
@@ -218,7 +218,7 @@ func TestPullResources_PostPullContextCancellation(t *testing.T) {
 		},
 	}
 
-	k8sResources, allResources, failedQueries := handler.pullResources(ctx, qrs, &EmptySelector{})
+	k8sResources, allResources, failedQueries := handler.pullResources(ctx, qrs, &EmptySelector{}, "")
 
 	ids, ok := k8sResources["//v1/pods"]
 	assert.True(t, ok)

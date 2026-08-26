@@ -5,19 +5,31 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	_ "net/http/pprof"
+	"os"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/schema"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 )
 
 var OutputDir = "./results/"
 var FailedOutputDir = "./failed/"
+
+const (
+	defaultScanQueueCapacity       = 10
+	defaultMaxScanRequestBodyBytes = int64(1 << 20) // 1 MiB
+	scanQueueCapacityEnv           = "KS_SCAN_QUEUE_CAPACITY"
+	scanRequestMaxBytesEnv         = "KS_SCAN_REQUEST_MAX_BYTES"
+	// outputDirPerm restricts OutputDir/FailedOutputDir to the owner plus
+	// group read/traverse, instead of os.ModePerm (0777, world-writable),
+	// which scan output/failure directories have no reason to be.
+	outputDirPerm = 0o750
+)
 
 // A Scan Response object
 //
@@ -28,19 +40,56 @@ type ScanResponse struct {
 }
 
 type HTTPHandler struct {
-	offline         bool
-	state           *serverState
-	scanRequestChan chan *scanRequestParams
+	offline             bool
+	state               *serverState
+	scanRequestChan     chan *scanRequestParams
+	cancelWatch         context.CancelFunc
+	maxRequestBodyBytes int64
 }
 
 func NewHTTPHandler(offline bool) *HTTPHandler {
-	handler := &HTTPHandler{
-		offline:         offline,
-		state:           newServerState(),
-		scanRequestChan: make(chan *scanRequestParams),
+	queueCapacity := configuredPositiveInt(scanQueueCapacityEnv, defaultScanQueueCapacity)
+	maxRequestBody := configuredPositiveInt64(scanRequestMaxBytesEnv, defaultMaxScanRequestBodyBytes)
+	return newHTTPHandler(offline, queueCapacity, maxRequestBody)
+}
+
+// Shutdown stops the background scan watcher goroutine. It should be called
+// when the HTTP handler is no longer needed (e.g. on server shutdown).
+func (handler *HTTPHandler) Shutdown() {
+	if handler.cancelWatch != nil {
+		handler.cancelWatch()
 	}
-	go handler.watchForScan()
+}
+
+func newHTTPHandler(offline bool, queueCapacity int, maxRequestBodyBytes int64) *HTTPHandler {
+	ctx, cancel := context.WithCancel(context.Background())
+	handler := &HTTPHandler{
+		offline:             offline,
+		state:               newServerState(),
+		scanRequestChan:     make(chan *scanRequestParams, queueCapacity),
+		cancelWatch:         cancel,
+		maxRequestBodyBytes: maxRequestBodyBytes,
+	}
+	go handler.watchForScan(ctx)
 	return handler
+}
+
+func configuredPositiveInt(name string, defaultValue int) int {
+	if raw, ok := os.LookupEnv(name); ok {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			return v
+		}
+	}
+	return defaultValue
+}
+
+func configuredPositiveInt64(name string, defaultValue int64) int64 {
+	if raw, ok := os.LookupEnv(name); ok {
+		if v, err := strconv.ParseInt(raw, 10, 64); err == nil && v > 0 {
+			return v
+		}
+	}
+	return defaultValue
 }
 
 // ============================================== STATUS ========================================================
@@ -58,29 +107,33 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	statusQueryParams := &StatusQueryParams{}
 	if err := schema.NewDecoder().Decode(statusQueryParams, r.URL.Query()); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), "")
 		return
 	}
 	logger.L().Info("requesting status", helpers.String("scanID", statusQueryParams.ScanID), helpers.String("api", "v1/status"))
 
+	scanID := statusQueryParams.ScanID
+	if scanID == "" {
+		// Resolve the implicit "latest" before consulting isBusy: isBusy("")
+		// falls back to latestID, which /v1/metrics scrapes overwrite just as
+		// much as user scans do, so an empty ID would otherwise report on a
+		// metrics scrape. An empty result here means no user scan has run.
+		scanID = handler.state.getLatestUserScanID()
+	}
+
 	w.WriteHeader(http.StatusOK)
-	if !handler.state.isBusy(statusQueryParams.ScanID) {
+	if scanID == "" || !handler.state.isBusy(scanID) {
 		response.Type = utilsapisv1.NotBusyScanResponseType
-		logger.L().Debug("status: not busy", helpers.String("ID", statusQueryParams.ScanID))
+		logger.L().Debug("status: not busy", helpers.String("ID", scanID))
 		w.Write(responseToBytes(&response))
 		return
 	}
 
-	if statusQueryParams.ScanID == "" {
-		statusQueryParams.ScanID = handler.state.getLatestID()
-	}
-
-	response.Response = statusQueryParams.ScanID
-	response.ID = statusQueryParams.ScanID
+	response.Response = scanID
+	response.ID = scanID
 	response.Type = utilsapisv1.BusyScanResponseType
 
-	logger.L().Debug("status: busy", helpers.String("ID", statusQueryParams.ScanID))
+	logger.L().Debug("status: busy", helpers.String("ID", scanID))
 	w.Write(responseToBytes(&response))
 }
 
@@ -97,26 +150,48 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	r.Body = http.MaxBytesReader(w, r.Body, handler.maxRequestBodyBytes)
 	scanRequestParams, err := getScanParamsFromRequest(r, scanID)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			handler.writeErrorWithStatus(w,
+				fmt.Errorf("scan request body exceeds the %d byte limit", handler.maxRequestBodyBytes),
+				"", http.StatusRequestEntityTooLarge)
+			return
+		}
 		handler.writeError(w, err, "")
 		return
 	}
-	scanRequestParams.ctx = context.WithoutCancel(r.Context())
+	cancelCtx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
+	scanRequestParams.ctx = cancelCtx
 
 	if handler.offline {
 		scanRequestParams.scanInfo.UseDefault = true
 		scanRequestParams.scanInfo.UseArtifactsFrom = getter.DefaultLocalStore
 	}
 
-	handler.state.setBusy(scanID)
-
-	// you must use a goroutine since the executeScan function is not always listening to the channel
-	go func() {
-		// send to scanning handler
-		logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
-		handler.scanRequestChan <- scanRequestParams
-	}()
+	// Mark busy, enqueue, and record the accepted user scan as one atomic
+	// admission step. Status and the offline Results fallback resolve "latest"
+	// through latestUserScanID, so it has to be written in the same critical
+	// section that decides acceptance -- otherwise two concurrent requests can
+	// be accepted in one order and recorded in the other.
+	admitted := handler.state.admitUserScan(scanID, cancel, func() bool {
+		select {
+		case handler.scanRequestChan <- scanRequestParams:
+			return true
+		default:
+			return false
+		}
+	})
+	if !admitted {
+		w.Header().Set("Retry-After", "1")
+		handler.writeErrorWithStatus(w,
+			fmt.Errorf("scan queue is full; retry the request later"),
+			"", http.StatusTooManyRequests)
+		return
+	}
+	logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
 
 	response := &utilsmetav1.Response{
 		ID:       scanID,
@@ -126,6 +201,20 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	if scanRequestParams.resp != nil {
 		// wait for scan to complete
 		response = <-scanRequestParams.resp
+
+		if response.Type == utilsapisv1.ResultsV1ScanResponseType {
+			// populate the response with the report before it is deleted below
+			if res, err := readResultsFile(scanID); err != nil {
+				response.Type = utilsapisv1.ErrorScanResponseType
+				if scanFailed, ok := errors.AsType[*ScanFailedError](err); ok {
+					response.Response = scanFailed.Message
+				} else {
+					response.Response = err.Error()
+				}
+			} else {
+				response.Response = res
+			}
+		}
 
 		if !scanRequestParams.scanQueryParams.KeepResults {
 			// delete results after returning
@@ -143,13 +232,53 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	w.Write(responseToBytes(response))
 }
 
+// CancelScan handles DELETE /v1/scan
+func (handler *HTTPHandler) CancelScan(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	defer handler.recover(r.Context(), w, "")
+	defer r.Body.Close()
+
+	cancelQueryParams := &CancelScanQueryParams{}
+	if err := schema.NewDecoder().Decode(cancelQueryParams, r.URL.Query()); err != nil {
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), "")
+		return
+	}
+
+	scanID := cancelQueryParams.ScanID
+	if scanID == "" {
+		scanID = handler.state.getRunningUserScanID()
+	}
+
+	logger.L().Info("requesting scan cancellation", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
+
+	if !handler.state.cancel(scanID) {
+		logger.L().Info("cancel: no in-flight scan", helpers.String("ID", scanID))
+		w.WriteHeader(http.StatusNotFound)
+		response := utilsmetav1.Response{
+			Response: fmt.Sprintf("no in-flight scan found for '%s'", scanID),
+			Type:     utilsapisv1.ErrorScanResponseType,
+		}
+		w.Write(responseToBytes(&response))
+		return
+	}
+
+	logger.L().Info("scan cancelled", helpers.String("ID", scanID))
+	w.WriteHeader(http.StatusOK)
+	response := utilsmetav1.Response{
+		ID:       scanID,
+		Response: fmt.Sprintf("scan '%s' cancelled", scanID),
+		Type:     utilsapisv1.NotBusyScanResponseType,
+	}
+	w.Write(responseToBytes(&response))
+}
+
 // ============================================== RESULTS ========================================================
 
 // parseResultsQueryParams extracts query parameters and validates them
 func (handler *HTTPHandler) parseResultsQueryParams(w http.ResponseWriter, r *http.Request) (*ResultsQueryParams, bool) {
 	resultsQueryParams := &ResultsQueryParams{}
 	if err := schema.NewDecoder().Decode(resultsQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %w", err), "")
 		return nil, false
 	}
 	logger.L().Info("requesting results", helpers.String("scanID", resultsQueryParams.ScanID), helpers.String("api", "v1/results"), helpers.String("method", r.Method))
@@ -160,7 +289,10 @@ func (handler *HTTPHandler) validateScanID(w http.ResponseWriter, resultsQueryPa
 	isLatestFallback := false
 	if resultsQueryParams.ScanID == "" {
 		if handler.offline {
-			resultsQueryParams.ScanID = handler.state.getLatestID()
+			// Latest *user* scan: latestID is also written by /v1/metrics
+			// scrapes, which would make this fallback serve a metrics run's
+			// output as if it were the caller's scan.
+			resultsQueryParams.ScanID = handler.state.getLatestUserScanID()
 			isLatestFallback = true
 		} else {
 			logger.L().Info("empty scan ID")
@@ -308,10 +440,13 @@ func (handler *HTTPHandler) recover(ctx context.Context, w http.ResponseWriter, 
 }
 
 func (handler *HTTPHandler) writeError(w http.ResponseWriter, err error, scanID string) {
+	handler.writeErrorWithStatus(w, err, scanID, http.StatusBadRequest)
+}
+
+func (handler *HTTPHandler) writeErrorWithStatus(w http.ResponseWriter, err error, scanID string, status int) {
 	response := utilsmetav1.Response{}
-	w.WriteHeader(http.StatusBadRequest)
+	w.WriteHeader(status)
 	response.Response = err.Error()
 	response.Type = utilsapisv1.ErrorScanResponseType
 	w.Write(responseToBytes(&response))
-	handler.state.setNotBusy(scanID)
 }

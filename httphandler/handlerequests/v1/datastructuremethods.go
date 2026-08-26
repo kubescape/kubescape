@@ -9,24 +9,25 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"k8s.io/utils/strings/slices"
 )
 
-func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
+func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) (*cautils.ScanInfo, []cautils.PolicyIdentifier) {
 	scanInfo := defaultScanInfo()
 
-	setTargetInScanInfo(scanRequest, scanInfo)
+	policyIdentifiers := setTargetInScanInfo(scanRequest, scanInfo)
 
-	if scanRequest.Account != "" {
-		scanInfo.AccountID = scanRequest.Account
-	}
-	if scanRequest.AccessKey != "" {
-		scanInfo.AccessKey = scanRequest.AccessKey
-	}
+	// scanRequest.Account/AccessKey are intentionally ignored: this endpoint has
+	// no authentication, so honoring client-supplied values would let any caller
+	// redirect scan results (which can include cluster secrets/RBAC data, see
+	// Submit below) to an attacker-controlled Kubescape Cloud account. The
+	// account/access key are only ever taken from this server's own trusted
+	// config, set in defaultScanInfo from KS_ACCOUNT_ID/KS_ACCESS_KEY or the
+	// credentials fetched at startup - never from the request body.
 	if len(scanRequest.ExcludedNamespaces) > 0 {
 		scanInfo.ExcludedNamespaces = strings.Join(scanRequest.ExcludedNamespaces, ",")
 	}
@@ -54,9 +55,7 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 
 	// submit
 	if scanRequest.Submit != nil {
-		if submit := cautils.NewBoolPtr(scanRequest.Submit); submit.Get() != nil {
-			scanInfo.Submit = *submit.Get()
-		}
+		scanInfo.Submit = cautils.NewBoolPtr(scanRequest.Submit)
 	}
 
 	// host scanner
@@ -83,10 +82,10 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 		}
 	}
 
-	return scanInfo
+	return scanInfo, policyIdentifiers
 }
 
-func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cautils.ScanInfo) {
+func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cautils.ScanInfo) []cautils.PolicyIdentifier {
 	if scanRequest.TargetType != "" && len(scanRequest.TargetNames) > 0 {
 		if strings.EqualFold(string(scanRequest.TargetType), string(apisv1.KindFramework)) {
 			scanRequest.TargetType = apisv1.KindFramework
@@ -102,11 +101,11 @@ func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cau
 			scanInfo.ScanAll = true
 			scanRequest.TargetNames = []string{}
 		}
-		scanInfo.SetPolicyIdentifiers(scanRequest.TargetNames, scanRequest.TargetType)
-	} else {
-		scanInfo.FrameworkScan = true
-		scanInfo.ScanAll = true
+		return cautils.BuildPolicyIdentifiers(scanRequest.TargetNames, scanRequest.TargetType)
 	}
+	scanInfo.FrameworkScan = true
+	scanInfo.ScanAll = true
+	return nil
 }
 
 func saveExceptions(exceptions []armotypes.PostureExceptionPolicy) (string, error) {

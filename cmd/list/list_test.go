@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/core"
-	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/core"
+	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
@@ -36,5 +36,5 @@ func TestGetListCmd(t *testing.T) {
 	assert.Nil(t, err)
 
 	err = listCmd.RunE(&cobra.Command{}, []string{"some-value"})
-	assert.Nil(t, err)
+	assert.ErrorContains(t, err, "invalid target")
 }

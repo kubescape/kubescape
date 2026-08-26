@@ -5,7 +5,7 @@ import (
 
 	"github.com/johnfercher/maroto/v2/pkg/props"
 	"github.com/johnfercher/maroto/v2/pkg/test"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/pdf"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/pdf"
 	"github.com/stretchr/testify/assert"
 )
 

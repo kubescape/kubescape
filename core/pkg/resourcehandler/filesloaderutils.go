@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -14,7 +15,7 @@ import (
 // providerRank ranks discovery providers so rendered output wins over raw file input.
 func providerRank(fileType string) int {
 	switch fileType {
-	case reporthandling.SourceTypeKustomizeDirectory, reporthandling.SourceTypeHelmChart:
+	case reporthandling.SourceTypeKustomizeDirectory, reporthandling.SourceTypeHelmChart, "Terraform":
 		return 2
 	case reporthandling.SourceTypeYaml, reporthandling.SourceTypeJson:
 		return 1
@@ -55,26 +56,54 @@ func dedupWorkloads(workloads []workloadinterface.IMetadata, workloadIDToSource 
 
 func addWorkloadsToResourcesMap(allResources map[string][]workloadinterface.IMetadata, workloads []workloadinterface.IMetadata) {
 	for i := range workloads {
-		groupVersionResource, err := k8sinterface.GetGroupVersionResource(workloads[i].GetKind())
-		if err != nil {
-			logger.L().Warning("unsupported/unmapped object kind", helpers.String("kind", workloads[i].GetKind()), helpers.String("id", workloads[i].GetID()), helpers.Error(err))
+		workload := workloads[i]
+		group, version := k8sinterface.SplitApiVersion(workload.GetApiVersion())
+		resourceTriplets := offlineManifestResourceTriplets(group, version, workload.GetKind())
+		if len(resourceTriplets) == 0 {
+			logger.L().Warning("unable to resolve object resource", helpers.String("kind", workload.GetKind()), helpers.String("id", workload.GetID()))
 			continue
 		}
 
-		if k8sinterface.IsTypeWorkload(workloads[i].GetObject()) {
-			w := workloadinterface.NewWorkloadObj(workloads[i].GetObject())
-			if groupVersionResource.Group != w.GetGroup() || groupVersionResource.Version != w.GetVersion() {
-				logger.L().Warning("workload GroupVersion mismatch", helpers.String("id", workloads[i].GetID()), helpers.String("kind", workloads[i].GetKind()), helpers.String("expectedGroup", groupVersionResource.Group), helpers.String("actualGroup", w.GetGroup()), helpers.String("expectedVersion", groupVersionResource.Version), helpers.String("actualVersion", w.GetVersion()))
-				continue
-			}
-		}
-		resourceTriplets := k8sinterface.JoinResourceTriplets(groupVersionResource.Group, groupVersionResource.Version, groupVersionResource.Resource)
-		if r, ok := allResources[resourceTriplets]; ok {
-			allResources[resourceTriplets] = append(r, workloads[i])
-		} else {
-			allResources[resourceTriplets] = []workloadinterface.IMetadata{workloads[i]}
+		for _, resourceTriplet := range resourceTriplets {
+			allResources[resourceTriplet] = append(allResources[resourceTriplet], workload)
 		}
 	}
+}
+
+func offlineManifestResourceTriplets(group, version, kind string) []string {
+	if version == "" || kind == "" {
+		return nil
+	}
+
+	aliases := offlineManifestResourceAliases(kind)
+
+	triplets := make([]string, 0, len(aliases))
+	for _, alias := range aliases {
+		triplets = append(triplets, k8sinterface.JoinResourceTriplets(group, version, alias))
+	}
+	return triplets
+}
+
+// offlineManifestResourceAliases returns comparison keys for file indexing.
+// They are never used to construct live API requests, so retaining all common
+// candidates is safer than guessing one plural without CRD discovery data.
+func offlineManifestResourceAliases(kind string) []string {
+	singular := strings.ToLower(kind)
+	aliases := []string{singular}
+	if strings.HasSuffix(singular, "s") {
+		return append(aliases, singular+"es")
+	}
+
+	aliases = append(aliases, singular+"s")
+	if strings.HasSuffix(singular, "x") || strings.HasSuffix(singular, "z") ||
+		strings.HasSuffix(singular, "ch") || strings.HasSuffix(singular, "sh") {
+		aliases = append(aliases, singular+"es")
+	}
+	if n := len(singular); n >= 2 && singular[n-1] == 'y' &&
+		!strings.ContainsRune("aeiou", rune(singular[n-2])) {
+		aliases = append(aliases, singular[:n-1]+"ies")
+	}
+	return aliases
 }
 
 /* unused for now
@@ -110,8 +139,14 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
 
 	var wls []workloadinterface.IWorkload
+	seenResources := make(map[string]struct{})
 	for _, resources := range mappedResources {
 		for _, r := range resources {
+			// File-loaded resource IDs include their source path, so aliases of
+			// one object collapse while distinct manifests remain distinguishable.
+			if _, seen := seenResources[r.GetID()]; seen {
+				continue
+			}
 			if r.GetKind() == resource.GetKind() && r.GetName() == resource.GetName() {
 				if resource.GetNamespace() != "" && resource.GetNamespace() != r.GetNamespace() {
 					continue
@@ -123,6 +158,7 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 				if k8sinterface.IsTypeWorkload(r.GetObject()) {
 					wl := workloadinterface.NewWorkloadObj(r.GetObject())
 					wls = append(wls, wl)
+					seenResources[r.GetID()] = struct{}{}
 				}
 			}
 		}

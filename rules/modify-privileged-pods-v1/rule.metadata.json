@@ -1,0 +1,29 @@
+{
+  "name": "modify-privileged-pods-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Privilege Escalation::Modify pods in privileged namespaces",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        "rbac.authorization.k8s.io"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "RoleBinding",
+        "ClusterRoleBinding",
+        "Role",
+        "ClusterRole"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can update or patch pods in privileged namespaces such as kube-system, which lets them gain code execution on pods that are likely to run with powerful service accounts",
+  "remediation": "Restrict update/patch access to pods in kube-system and other privileged namespaces to a small, trusted set of subjects. Prefer namespace-scoped Roles in unprivileged namespaces over ClusterRoles, and scope rules with resourceNames where a subject only needs to manage specific pods.",
+  "ruleQuery": "armo_builtins"
+}

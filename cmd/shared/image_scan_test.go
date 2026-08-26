@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -76,6 +76,31 @@ func TestValidateImageScanInfo(t *testing.T) {
 			nil,
 		},
 		{
+			"Canonical image platform is valid",
+			&cautils.ScanInfo{ImagePlatform: "linux/amd64"},
+			nil,
+		},
+		{
+			"Architecture-only image platform is valid",
+			&cautils.ScanInfo{ImagePlatform: "arm64"},
+			nil,
+		},
+		{
+			"Image platform variant is valid",
+			&cautils.ScanInfo{ImagePlatform: "linux/arm/v7"},
+			nil,
+		},
+		{
+			"Invalid image platform is rejected",
+			&cautils.ScanInfo{ImagePlatform: "linux/toaster"},
+			assert.AnError,
+		},
+		{
+			"Operating system without architecture is rejected",
+			&cautils.ScanInfo{ImagePlatform: "linux"},
+			assert.AnError,
+		},
+		{
 			"NaN fail threshold should be invalid",
 			&cautils.ScanInfo{FailThreshold: float32(math.NaN())},
 			ErrBadThreshold,
@@ -100,8 +125,150 @@ func TestValidateImageScanInfo(t *testing.T) {
 
 				got := ValidateImageScanInfo(tc.ScanInfo)
 
-				assert.Equal(t, want, got)
+				if want == assert.AnError {
+					assert.Error(t, got)
+				} else {
+					assert.Equal(t, want, got)
+				}
 			},
 		)
 	}
+}
+
+func TestValidateImageScanInfoNormalizesPlatform(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", input: "", want: ""},
+		{name: "architecture alias", input: "x86_64", want: "linux/amd64"},
+		{name: "ARM alias", input: "aarch64", want: "linux/arm64"},
+		{name: "surrounding whitespace", input: " linux/arm64 ", want: "linux/arm64"},
+		{name: "ARM variant", input: "linux/arm/v7", want: "linux/arm/v7"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{ImagePlatform: tt.input}
+			assert.NoError(t, ValidateImageScanInfo(scanInfo))
+			assert.Equal(t, tt.want, scanInfo.ImagePlatform)
+		})
+	}
+}
+
+func TestValidateImageScanInfoLeavesInvalidPlatformForDiagnostics(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{ImagePlatform: "linux/not-a-real-architecture"}
+
+	err := ValidateImageScanInfo(scanInfo)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), `invalid image platform "linux/not-a-real-architecture"`)
+	assert.Equal(t, "linux/not-a-real-architecture", scanInfo.ImagePlatform)
+}
+
+func TestValidateImageCredentials(t *testing.T) {
+	testCases := []struct {
+		Description string
+		Credentials ImageCredentials
+		Want        error
+	}{
+		{
+			Description: "Empty credentials are valid",
+			Credentials: ImageCredentials{},
+			Want:        nil,
+		},
+		{
+			Description: "Registry username and password should be accepted",
+			Credentials: ImageCredentials{Username: "user", Password: "pass"},
+			Want:        nil,
+		},
+		{
+			Description: "Registry token should be accepted",
+			Credentials: ImageCredentials{Token: "token"},
+			Want:        nil,
+		},
+		{
+			Description: "Registry authority with token should be accepted",
+			Credentials: ImageCredentials{Authority: "registry.example.com", Token: "token"},
+			Want:        nil,
+		},
+		{
+			Description: "Registry username without password should be invalid",
+			Credentials: ImageCredentials{Username: "user"},
+			Want:        ErrRegistryUsernamePassword,
+		},
+		{
+			Description: "Registry password without username should be invalid",
+			Credentials: ImageCredentials{Password: "pass"},
+			Want:        ErrRegistryUsernamePassword,
+		},
+		{
+			Description: "Registry token with username and password should be invalid",
+			Credentials: ImageCredentials{Username: "user", Password: "pass", Token: "token"},
+			Want:        ErrRegistryAuthConflict,
+		},
+		{
+			Description: "Registry authority without credentials should be invalid",
+			Credentials: ImageCredentials{Authority: "registry.example.com"},
+			Want:        ErrRegistryAuthorityNoAuth,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Description, func(t *testing.T) {
+			assert.Equal(t, tc.Want, ValidateImageCredentials(tc.Credentials))
+		})
+	}
+}
+
+func TestValidateWorkloadImageCredentialsRequiresAuthority(t *testing.T) {
+	testCases := []struct {
+		Description string
+		Credentials ImageCredentials
+		Want        error
+	}{
+		{
+			Description: "Username and password without authority are rejected",
+			Credentials: ImageCredentials{Username: "user", Password: "pass"},
+			Want:        ErrRegistryAuthorityMissing,
+		},
+		{
+			Description: "Token without authority is rejected",
+			Credentials: ImageCredentials{Token: "token"},
+			Want:        ErrRegistryAuthorityMissing,
+		},
+		{
+			Description: "Username and password with authority are accepted",
+			Credentials: ImageCredentials{Authority: "registry.example.com", Username: "user", Password: "pass"},
+			Want:        nil,
+		},
+		{
+			Description: "Token with authority is accepted",
+			Credentials: ImageCredentials{Authority: "registry.example.com", Token: "token"},
+			Want:        nil,
+		},
+		{
+			Description: "Partial credentials keep the more specific validation error",
+			Credentials: ImageCredentials{Authority: "registry.example.com", Username: "user"},
+			Want:        ErrRegistryUsernamePassword,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Description, func(t *testing.T) {
+			assert.Equal(t, tc.Want, ValidateWorkloadImageCredentials(tc.Credentials))
+		})
+	}
+}
+
+func TestValidateRegistryCredentials_EnvVarBug(t *testing.T) {
+	username := "my-username"
+	password := ""
+	token := "my-token"
+
+	err := ValidateRegistryCredentials(username, password, token, "")
+
+	// Should return conflict error because both token and username are present
+	assert.Equal(t, ErrRegistryAuthConflict, err)
 }

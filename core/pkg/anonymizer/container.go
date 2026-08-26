@@ -35,6 +35,66 @@ func transformContainerMetadata(resource workloadinterface.IMetadata, transforme
 	return nil
 }
 
+func transformTypedContainerList(containers []corev1.Container, transformer Transformer) error {
+	var err error
+
+	for i := range containers {
+		if containers[i].Name != "" {
+			containers[i].Name, err = transformValue(transformer, "ctr", containers[i].Name)
+			if err != nil {
+				return err
+			}
+		}
+
+		if containers[i].Image != "" {
+			containers[i].Image, err = transformValue(transformer, "img", containers[i].Image)
+			if err != nil {
+				return err
+			}
+		}
+
+		if err := transformTypedEnv(containers[i].Env, transformer); err != nil {
+			return err
+		}
+
+		if err := transformTypedEnvFrom(containers[i].EnvFrom, transformer); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func transformTypedEphemeralContainerList(containers []corev1.EphemeralContainer, transformer Transformer) error {
+	var err error
+
+	for i := range containers {
+		if containers[i].Name != "" {
+			containers[i].Name, err = transformValue(transformer, "ctr", containers[i].Name)
+			if err != nil {
+				return err
+			}
+		}
+
+		if containers[i].Image != "" {
+			containers[i].Image, err = transformValue(transformer, "img", containers[i].Image)
+			if err != nil {
+				return err
+			}
+		}
+
+		if err := transformTypedEnv(containers[i].Env, transformer); err != nil {
+			return err
+		}
+
+		if err := transformTypedEnvFrom(containers[i].EnvFrom, transformer); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // transformPodSpecs recursively traverses workload objects looking for
 // pod-spec-shaped sections where sensitive container metadata may exist.
 //
@@ -164,39 +224,8 @@ func transformContainerList(obj map[string]any, key string, transformer Transfor
 		return nil
 	}
 
-	var err error
-
-	if containers, ok := rawContainers.([]corev1.Container); ok {
-		for i := range containers {
-
-			if containers[i].Name != "" {
-				containers[i].Name, err = transformValue(transformer, "ctr", containers[i].Name)
-				if err != nil {
-					return err
-				}
-			}
-
-			if containers[i].Image != "" {
-				containers[i].Image, err = transformValue(transformer, "img", containers[i].Image)
-				if err != nil {
-					return err
-				}
-			}
-
-			if err := transformTypedEnv(containers[i].Env, transformer); err != nil {
-				return err
-			}
-
-			if err := transformTypedEnvFrom(containers[i].EnvFrom, transformer); err != nil {
-				return err
-			}
-		}
-
-		obj[key] = containers
-		return nil
-	}
-
-	if containers, ok := rawContainers.([]any); ok {
+	switch containers := rawContainers.(type) {
+	case []any:
 		for _, item := range containers {
 			container, ok := item.(map[string]any)
 			if !ok {
@@ -209,6 +238,10 @@ func transformContainerList(obj map[string]any, key string, transformer Transfor
 		}
 
 		obj[key] = containers
+	case []corev1.Container:
+		if err := transformTypedContainerList(containers, transformer); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -228,39 +261,8 @@ func transformEphemeralContainerList(obj map[string]any, key string, transformer
 		return nil
 	}
 
-	var err error
-
-	if containers, ok := rawContainers.([]corev1.EphemeralContainer); ok {
-		for i := range containers {
-
-			if containers[i].Name != "" {
-				containers[i].Name, err = transformValue(transformer, "ctr", containers[i].Name)
-				if err != nil {
-					return err
-				}
-			}
-
-			if containers[i].Image != "" {
-				containers[i].Image, err = transformValue(transformer, "img", containers[i].Image)
-				if err != nil {
-					return err
-				}
-			}
-
-			if err := transformTypedEnv(containers[i].Env, transformer); err != nil {
-				return err
-			}
-
-			if err := transformTypedEnvFrom(containers[i].EnvFrom, transformer); err != nil {
-				return err
-			}
-		}
-
-		obj[key] = containers
-		return nil
-	}
-
-	if containers, ok := rawContainers.([]any); ok {
+	switch containers := rawContainers.(type) {
+	case []any:
 		for _, item := range containers {
 			container, ok := item.(map[string]any)
 			if !ok {
@@ -273,6 +275,10 @@ func transformEphemeralContainerList(obj map[string]any, key string, transformer
 		}
 
 		obj[key] = containers
+	case []corev1.EphemeralContainer:
+		if err := transformTypedEphemeralContainerList(containers, transformer); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -308,6 +314,8 @@ func transformTypedEnv(envVars []corev1.EnvVar, transformer Transformer) error {
 			continue
 		}
 
+		hasRef := false
+
 		if secretRef := envVar.ValueFrom.SecretKeyRef; secretRef != nil &&
 			secretRef.Name != "" {
 
@@ -315,12 +323,27 @@ func transformTypedEnv(envVars []corev1.EnvVar, transformer Transformer) error {
 			if err != nil {
 				return err
 			}
+			hasRef = true
 		}
 
 		if configMapRef := envVar.ValueFrom.ConfigMapKeyRef; configMapRef != nil &&
 			configMapRef.Name != "" {
 
 			configMapRef.Name, err = transformValue(transformer, "ref", configMapRef.Name)
+			if err != nil {
+				return err
+			}
+			hasRef = true
+		}
+
+		if envVar.ValueFrom.FieldRef != nil {
+			hasRef = true
+		}
+		if envVar.ValueFrom.ResourceFieldRef != nil {
+			hasRef = true
+		}
+		if hasRef && envVar.Name != "" {
+			envVar.Name, err = transformValue(transformer, "env", envVar.Name)
 			if err != nil {
 				return err
 			}
@@ -382,12 +405,36 @@ func transformUnstructuredEnv(container map[string]any, transformer Transformer)
 			continue
 		}
 
+		hasRef := false
+
 		if err := transformUnstructuredReference(valueFrom, "secretKeyRef", transformer); err != nil {
 			return err
+		}
+		if _, ok := valueFrom["secretKeyRef"]; ok {
+			hasRef = true
 		}
 
 		if err := transformUnstructuredReference(valueFrom, "configMapKeyRef", transformer); err != nil {
 			return err
+		}
+		if _, ok := valueFrom["configMapKeyRef"]; ok {
+			hasRef = true
+		}
+		if _, ok := valueFrom["fieldRef"]; ok {
+			hasRef = true
+		}
+		if _, ok := valueFrom["resourceFieldRef"]; ok {
+			hasRef = true
+		}
+
+		if hasRef {
+			if name, ok := envVar["name"].(string); ok && name != "" {
+				transformedName, err := transformValue(transformer, "env", name)
+				if err != nil {
+					return err
+				}
+				envVar["name"] = transformedName
+			}
 		}
 	}
 

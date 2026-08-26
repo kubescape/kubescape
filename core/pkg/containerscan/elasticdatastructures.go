@@ -74,7 +74,7 @@ type ElasticContainerScanSummaryResult struct {
 	ContainerName string   `json:"containerName"`
 	PackagesName  []string `json:"packages"`
 
-	ListOfDangerousArtifcats []string `json:"listOfDangerousArtifcats"`
+	ListOfDangerousArtifacts []string `json:"listOfDangerousArtifcats"`
 
 	Status string `json:"status"`
 

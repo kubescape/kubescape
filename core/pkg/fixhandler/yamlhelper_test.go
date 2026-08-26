@@ -1,7 +1,7 @@
 package fixhandler
 
 import (
-	"fmt"
+	"context"
 	"reflect"
 	"testing"
 
@@ -57,7 +57,7 @@ func TestAdjustContentLines_AdjustsLineNumbersForContentToAddBasedOnEmptyOrComme
 	}
 
 	adjustContentLines(&contentToAdd, &linesSlice)
-	fmt.Println(contentToAdd)
+	t.Log(contentToAdd)
 	assert.Equal(t, 1, contentToAdd[0].line)
 	assert.Equal(t, 2, contentToAdd[1].line)
 	assert.Equal(t, 3, contentToAdd[2].line)
@@ -262,6 +262,20 @@ func TestAssignLastLine(t *testing.T) {
 	}
 }
 
+func TestGetLastLineOfResource_EmptyFile(t *testing.T) {
+	linesSlice := []string{
+		"# comment",
+		"",
+		" ",
+	}
+
+	_, err := getLastLineOfResource(&linesSlice, 1)
+
+	if err == nil {
+		t.Errorf("Expected an error for empty resource, but got none")
+	}
+}
+
 // returns the line number of the node at the given tracker position
 func TestGetNodeLine_ReturnsLineNumberOfNodeAtGivenTrackerPosition(t *testing.T) {
 	nodeList := []nodeInfo{
@@ -378,6 +392,39 @@ func TestGetFirstNodeInLine_LineNotFound(t *testing.T) {
 	index := getFirstNodeInLine(&list, line)
 
 	assert.Equal(t, -1, index)
+}
+
+// Skips the document node sharing the line and returns the first node that can be encoded
+func TestGetFirstNodeInLine_SkipsDocumentNode(t *testing.T) {
+	list := []nodeInfo{
+		{node: &yaml.Node{Line: 1, Kind: yaml.DocumentNode}},
+		{node: &yaml.Node{Line: 1, Kind: yaml.MappingNode}},
+		{node: &yaml.Node{Line: 1, Kind: yaml.ScalarNode, Value: "a"}},
+		{node: &yaml.Node{Line: 1, Kind: yaml.SequenceNode}},
+	}
+
+	index := getFirstNodeInLine(&list, 1)
+
+	assert.Equal(t, 2, index)
+}
+
+// Returns an error instead of panicking when the line holds no renderable node
+func TestReplaceSingleLineSequence_UnresolvableLine(t *testing.T) {
+	list := []nodeInfo{{node: &yaml.Node{Line: 1, Kind: yaml.ScalarNode}}}
+	contentToAdd := make([]contentToAdd, 0)
+	linesToRemove := make([]linesToRemove, 0)
+	fixInfoMetadata := &fixInfoMetadata{
+		originalList:  &list,
+		fixedList:     &list,
+		contentToAdd:  &contentToAdd,
+		linesToRemove: &linesToRemove,
+	}
+
+	assert.NotPanics(t, func() {
+		_, _, err := replaceSingleLineSequence(context.Background(), fixInfoMetadata, 99)
+
+		assert.Error(t, err)
+	})
 }
 
 // Function removes lines within specified range

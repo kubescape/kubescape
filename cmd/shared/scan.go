@@ -6,23 +6,30 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/spf13/cobra"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
-// ScanFormats and ImageScanFormats list the output formats supported by the scan commands.
-// They are built from the printer.*Format constants to keep a single source of truth.
+// ScanFormats and ImageScanFormats are derived from printer.AllFormats and
+// printer.ImageFormats to keep a single source of truth — see printresults.go
+// for why the two lists differ (not every printer supports image scans, e.g. CSV).
 var (
-	ScanFormats      = []string{printer.PrettyFormat, printer.JsonFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.HtmlFormat, printer.SARIFFormat}
-	ImageScanFormats = []string{printer.PrettyFormat, printer.JsonFormat, printer.SARIFFormat}
+	ScanFormats      = printer.AllFormats
+	ImageScanFormats = printer.ImageFormats
 )
 
 var ErrUnknownSeverity = fmt.Errorf("unknown severity. Supported severities are: %s", strings.Join(reporthandlingapis.GetSupportedSeverities(), ", "))
 
 // ErrBadThreshold is returned when a numeric threshold is outside the valid range [0, 100].
 var ErrBadThreshold = fmt.Errorf("bad argument: out of range threshold")
+
+var (
+	ErrKeepLocalOrSubmit        = fmt.Errorf("you can use `keep-local` or `submit`, but not both")
+	ErrOmitRawResourcesOrSubmit = fmt.Errorf("you can use `omit-raw-resources` or `submit`, but not both")
+)
 
 // ValidateThresholds validates that FailThreshold, ComplianceThreshold and
 // FailCoverageThreshold are all within [0, 100]. This mirrors the check in
@@ -42,13 +49,41 @@ func ValidateThresholds(scanInfo *cautils.ScanInfo) error {
 
 // ValidateSeverity returns an error if a given severity is not known, nil otherwise
 func ValidateSeverity(severity string) error {
+	trimmed := strings.TrimSpace(severity)
 	for _, val := range reporthandlingapis.GetSupportedSeverities() {
-		if strings.EqualFold(severity, val) {
+		if strings.EqualFold(trimmed, val) {
 			return nil
 		}
 	}
 	return ErrUnknownSeverity
+}
 
+// ValidateSeverityRange returns an error when min is greater than max, which
+// would produce empty output rather than an obvious error. Both values must
+// already have been validated by ValidateSeverity before this is called.
+func ValidateSeverityRange(min, max string) error {
+	if severityOrdinal(min) > severityOrdinal(max) {
+		return fmt.Errorf("min severity cannot be greater than max severity (%s > %s)", min, max)
+	}
+	return nil
+}
+
+// severityOrdinal maps a severity string to the same integer ordinal used by
+// reporthandlingapis.ControlSeverityToInt so that CLI-layer comparisons stay
+// in sync with the core library. Unknown values map to SeverityUnknown (0).
+func severityOrdinal(severity string) int {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case strings.ToLower(reporthandlingapis.SeverityCriticalString):
+		return reporthandlingapis.SeverityCritical
+	case strings.ToLower(reporthandlingapis.SeverityHighString):
+		return reporthandlingapis.SeverityHigh
+	case strings.ToLower(reporthandlingapis.SeverityMediumString):
+		return reporthandlingapis.SeverityMedium
+	case strings.ToLower(reporthandlingapis.SeverityLowString):
+		return reporthandlingapis.SeverityLow
+	default:
+		return reporthandlingapis.SeverityUnknown
+	}
 }
 
 // ValidateScanFormat returns an error if any comma-separated entry in format is not a supported format.
@@ -72,7 +107,99 @@ func ValidateScanFormat(format string, supported []string) error {
 	return nil
 }
 
-// TerminateOnExceedingSeverity terminates the program if the result exceeds the severity threshold
-func TerminateOnExceedingSeverity(scanInfo *cautils.ScanInfo, l helpers.ILogger) {
-	l.Fatal("result exceeds severity threshold", helpers.String("Set severity threshold", scanInfo.FailThresholdSeverity))
+// ValidateCommonScanFlags validates flags that are common to all scan subcommands
+func ValidateCommonScanFlags(cmd *cobra.Command, scanInfo *cautils.ScanInfo, supportedFormats []string) error {
+	if scanInfo.Submit.GetBool() && scanInfo.Local {
+		return ErrKeepLocalOrSubmit
+	}
+	if scanInfo.Submit.GetBool() && scanInfo.OmitRawResources {
+		return ErrOmitRawResourcesOrSubmit
+	}
+
+	if scanInfo.FailThresholdSeverity != "" {
+		if err := ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
+			return err
+		}
+	}
+	if scanInfo.MinSeverity != "" {
+		if err := ValidateSeverity(scanInfo.MinSeverity); err != nil {
+			return err
+		}
+	}
+	if scanInfo.MaxSeverity != "" {
+		if err := ValidateSeverity(scanInfo.MaxSeverity); err != nil {
+			return err
+		}
+	}
+	if scanInfo.MinSeverity != "" && scanInfo.MaxSeverity != "" {
+		if err := ValidateSeverityRange(scanInfo.MinSeverity, scanInfo.MaxSeverity); err != nil {
+			return err
+		}
+	}
+	f := cmd.Flags().Lookup("format")
+	if f == nil {
+		f = cmd.InheritedFlags().Lookup("format")
+	}
+	if f != nil && f.Changed && scanInfo.Format == "" {
+		return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(supportedFormats, ", "))
+	}
+	if err := ValidateScanFormat(scanInfo.Format, supportedFormats); err != nil {
+		return err
+	}
+	if err := ValidateKindFilters(scanInfo); err != nil {
+		return err
+	}
+	if err := ValidateExcludePaths(scanInfo); err != nil {
+		return err
+	}
+	if strings.TrimSpace(scanInfo.LabelSelector) == "" && scanInfo.LabelSelector != "" {
+		return fmt.Errorf("invalid --label-selector %q: must not be whitespace-only", scanInfo.LabelSelector)
+	}
+	if scanInfo.LabelSelector != "" {
+		if _, err := labels.Parse(scanInfo.LabelSelector); err != nil {
+			return fmt.Errorf("invalid --label-selector %q: %w", scanInfo.LabelSelector, err)
+		}
+	}
+	if err := ValidateExcludeControls(scanInfo); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ValidateExcludeControls(scanInfo *cautils.ScanInfo) error {
+	for _, control := range scanInfo.ExcludeControls {
+		if strings.TrimSpace(control) == "" {
+			return fmt.Errorf("--exclude-controls contains an empty control identifier")
+		}
+	}
+	return nil
+}
+
+// ValidateExcludePaths fails the command on a malformed pattern before any resource is collected.
+func ValidateExcludePaths(scanInfo *cautils.ScanInfo) error {
+	if err := cautils.ValidateCommandLinePatterns(scanInfo.ExcludePaths); err != nil {
+		return fmt.Errorf("--exclude-path: %w", err)
+	}
+	return nil
+}
+
+// ValidateKindFilters returns an error when --include-kinds or --exclude-kinds
+// contain only whitespace tokens, which would silently discard every resource.
+func ValidateKindFilters(scanInfo *cautils.ScanInfo) error {
+	if err := validateKindList("--include-kinds", scanInfo.IncludeKinds); err != nil {
+		return err
+	}
+	return validateKindList("--exclude-kinds", scanInfo.ExcludeKinds)
+}
+
+func validateKindList(flag, value string) error {
+	if value == "" {
+		return nil
+	}
+	for _, k := range strings.Split(value, ",") {
+		if strings.TrimSpace(k) != "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s value %q contains no valid kind names", flag, value)
 }

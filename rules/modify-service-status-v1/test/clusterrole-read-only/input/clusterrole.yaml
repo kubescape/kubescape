@@ -1,0 +1,8 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: service-status-reader
+rules:
+- apiGroups: [""]
+  resources: ["services", "services/status", "*/status"]
+  verbs: ["get", "list", "watch"]

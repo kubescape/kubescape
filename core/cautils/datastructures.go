@@ -3,13 +3,17 @@ package cautils
 import (
 	"context"
 	"sort"
+	"time"
 
 	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/syft/syft/sbom"
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
 	"github.com/kubescape/opa-utils/reporthandling"
 	apis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -23,15 +27,53 @@ import (
 type K8SResources map[string][]string
 type ExternalResources map[string][]string
 
+// VexStatus represents the evaluated VEX status for a vulnerability.
+type VexStatus struct {
+	Status        string
+	Justification string
+}
+
 type ImageScanData struct {
 	Context               pkg.Context
 	IgnoredMatches        []match.IgnoredMatch
 	Image                 string
+	Platform              string
 	Matches               match.Matches
 	Packages              []pkg.Package
-	RemainingMatches      *match.Matches
 	SBOM                  *sbom.SBOM
 	VulnerabilityProvider vulnerability.Provider
+	VexStatuses           map[string]VexStatus
+	// VulnDBBuilt is the build timestamp of the vulnerability DB used for this
+	// scan. It lets users (especially air-gapped ones) see how fresh the data
+	// was. Nil when the DB status is unknown.
+	VulnDBBuilt *time.Time `json:"vulnDBBuilt,omitempty"`
+}
+
+// Target identifies the exact image variant represented by these results.
+// Existing reports keep their original image spelling when no platform was
+// selected, while multi-architecture scans remain distinguishable everywhere
+// the image name is used as a label or grouping key.
+func (d ImageScanData) Target() string {
+	return ImageScanTarget(d.Image, d.Platform)
+}
+
+// ImageScanTarget formats an image variant for human-facing output and logs.
+// Machine-readable identifiers should keep image and platform in separate
+// fields so adding platform awareness does not change existing fingerprints.
+func ImageScanTarget(image, platform string) string {
+	if platform == "" {
+		return image
+	}
+	return image + " [" + platform + "]"
+}
+
+// SkippedManifest records a manifest file that was discovered but could not
+// be loaded or identified as a Kubernetes object during scan. It is populated
+// at the file-loading layer so the user knows which manifests were not
+// evaluated.
+type SkippedManifest struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
 }
 
 type ScanTypes string
@@ -65,19 +107,39 @@ type OPASessionObj struct {
 	ScanCoverage          ScanCoverage                       // runtime coverage gaps (failed GVR pulls + not-evaluated controls)
 	PartialGVRFailures    []PartialGVRPull                   // per-selector LIST failures for GVRs that were partially collected
 	PolicyDegradations    []PolicyDegradation                // policy inputs (control configurations, exceptions) served from a fallback
+	SkippedManifests      []SkippedManifest                  // manifest files skipped during loading (invalid YAML, missing kind, etc.)
 	SessionID             string                             // SessionID
 	Policies              []reporthandling.Framework         // list of frameworks to scan
 	Exceptions            []armotypes.PostureExceptionPolicy // list of exceptions to apply on scan results
+	ExceptionAudit        *ExceptionAudit                    // optional exception usage audit
+	AuditExceptions       bool                               // include exception usage audit in supported outputs
+	HonorInlineExceptions bool                               // honor kubescape.io/skip-* annotations as inline exception policies
 	OmitRawResources      bool                               // omit raw resources from output
 	SingleResourceScan    workloadinterface.IWorkload        // single resource scan
 	TopWorkloadsByScore   []reporthandling.IResource
 	TriggeredByCLI        bool
 	LabelsToCopy          []string                    // Labels to copy from workloads to scan reports
+	SkipControls          string                      // Comma-separated control IDs to skip
+	IncludeControls       string                      // Comma-separated control IDs to include (all others skipped)
 	VAPPolicies           []unstructured.Unstructured // ValidatingAdmissionPolicy resources collected from the cluster
 	VAPBindings           []unstructured.Unstructured // ValidatingAdmissionPolicyBinding resources collected from the cluster
+
+	// VAPCoverage refines VAPPolicies/VAPBindings' coarse "is any binding
+	// present" signal (see reportsummary.ControlSummary.VAPEnforcement) with
+	// per-resource binding-scope matching: a control's VAP can be Bound
+	// while its binding's namespaceSelector/objectSelector does not actually
+	// cover some or all of the resources that failed it. Populated by
+	// resultshandling after VAPPolicies/VAPBindings are enriched into the
+	// report, keyed by control ID.
+	VAPCoverage map[string]*vapreconcile.ControlCoverage
 }
 
-func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo) *OPASessionObj {
+func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *OPASessionObj {
+	// Inline annotation exceptions are off by default for live-cluster scans and on by
+	// default when scanning local manifests, unless the CLI explicitly sets the flag.
+	if scanInfo.HonorInlineExceptions.Get() == nil {
+		scanInfo.HonorInlineExceptions.SetBool(len(scanInfo.InputPatterns) > 0)
+	}
 	clusterSize := max(estimateClusterSize(k8sResources), 100)
 
 	return &OPASessionObj{
@@ -91,11 +153,49 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 		ResourceToControlsMap: make(map[string][]string, clusterSize/2),
 		ResourceSource:        make(map[string]reporthandling.Source, clusterSize),
 		SessionID:             scanInfo.ScanID,
-		Metadata:              scanInfoToScanMetadata(ctx, scanInfo),
+		Metadata:              scanInfoToScanMetadata(ctx, scanInfo, policyIdentifiers),
 		OmitRawResources:      scanInfo.OmitRawResources,
+		AuditExceptions:       scanInfo.AuditExceptions,
+		HonorInlineExceptions: scanInfo.HonorInlineExceptions.GetBool(),
 		TriggeredByCLI:        scanInfo.TriggeredByCLI,
 		LabelsToCopy:          scanInfo.LabelsToCopy,
+		SkipControls:          scanInfo.SkipControls,
+		IncludeControls:       scanInfo.IncludeControls,
 	}
+}
+
+type ExceptionAudit struct {
+	Summary   ExceptionAuditSummary `json:"summary"`
+	Items     []ExceptionAuditItem  `json:"items"`
+	Generated bool                  `json:"generated"`
+}
+
+type ExceptionAuditSummary struct {
+	Total          int `json:"total"`
+	Active         int `json:"active"`
+	Expired        int `json:"expired"`
+	Matched        int `json:"matched"`
+	Unused         int `json:"unused"`
+	InvalidControl int `json:"invalidControl"`
+}
+
+type ExceptionAuditItem struct {
+	Name             string                `json:"name"`
+	Status           string                `json:"status"`
+	MatchCount       int                   `json:"matchCount"`
+	Expired          bool                  `json:"expired,omitempty"`
+	InvalidControls  []string              `json:"invalidControls,omitempty"`
+	ControlIDs       []string              `json:"controlIDs,omitempty"`
+	MatchedResources []ExceptionAuditMatch `json:"matchedResources,omitempty"`
+}
+
+type ExceptionAuditMatch struct {
+	ResourceID string `json:"resourceID"`
+	Kind       string `json:"kind,omitempty"`
+	Namespace  string `json:"namespace,omitempty"`
+	Name       string `json:"name,omitempty"`
+	ControlID  string `json:"controlID"`
+	RuleName   string `json:"ruleName,omitempty"`
 }
 
 func estimateClusterSize(k8sResources K8SResources) int {
@@ -108,8 +208,6 @@ func estimateClusterSize(k8sResources K8SResources) int {
 
 // SetTopWorkloads sets the top workloads by score
 func (sessionObj *OPASessionObj) SetTopWorkloads() {
-	count := 0
-
 	topWorkloadsSorted := make([]prioritization.PrioritizedResource, 0)
 
 	// create list in order to sort
@@ -131,20 +229,25 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 
 	// set top workloads according to number of top workloads
 	topWorkloads := make([]reporthandling.IResource, 0, TopWorkloadsNumber)
-	for i := range TopWorkloadsNumber {
-		if i >= len(topWorkloadsSorted) {
+	for _, wl := range topWorkloadsSorted {
+		if len(topWorkloads) >= TopWorkloadsNumber {
 			break
 		}
 
-		source := sessionObj.ResourceSource[topWorkloadsSorted[i].ResourceID]
+		source := sessionObj.ResourceSource[wl.ResourceID]
 
+		res, ok := sessionObj.AllResources[wl.ResourceID]
+		if !ok {
+			logger.L().Debug("resource missing from AllResources, skipping",
+				helpers.String("resourceID", wl.ResourceID))
+			continue
+		}
 		wlObj := &reporthandling.Resource{
-			IMetadata: sessionObj.AllResources[topWorkloadsSorted[i].ResourceID],
+			IMetadata: res,
 			Source:    &source,
 		}
 
 		topWorkloads = append(topWorkloads, wlObj)
-		count++
 	}
 
 	sessionObj.TopWorkloadsByScore = topWorkloads

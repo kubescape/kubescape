@@ -48,13 +48,13 @@ spec:
                     type: integer
                   type: array
                 memoryLimitMax:
-                  type: integer
+                  type: string
                 memoryLimitMin:
-                  type: integer
+                  type: string
                 memoryRequestMax:
-                  type: integer
+                  type: string
                 memoryRequestMin:
-                  type: integer
+                  type: string
                 publicRegistries:
                   items:
                     type: string
@@ -68,6 +68,10 @@ spec:
                     type: string
                   type: array
                 sensitiveKeyNames:
+                  items:
+                    type: string
+                  type: array
+                sensitiveKeyNamesAllowed:
                   items:
                     type: string
                   type: array
