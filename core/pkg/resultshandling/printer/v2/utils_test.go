@@ -163,7 +163,7 @@ func TestExtractCVEs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actual := extractCVEs(tt.matches, tt.image)
+			actual := extractCVEs(tt.matches, tt.image, nil)
 			if len(actual) != len(tt.want) {
 				t.Errorf("extractCVEs() = %v, want %v", actual, tt.want)
 			}
@@ -198,6 +198,69 @@ func TestExtractCVEs(t *testing.T) {
 		})
 	}
 
+}
+
+func TestExtractCVEsAddsMatchingVEXStatus(t *testing.T) {
+	matches := match.NewMatches(match.Match{
+		Package: pkg.Package{
+			ID:      "1",
+			Name:    "openssl",
+			Version: "1.0.0",
+		},
+		Vulnerability: vulnerability.Vulnerability{
+			Metadata: &vulnerability.Metadata{
+				ID:       "CVE-2026-1234",
+				Severity: "High",
+			},
+			Fix: vulnerability.Fix{
+				State: vulnerability.FixStateNotFixed,
+			},
+		},
+	})
+	vexStatuses := map[string]cautils.VexStatus{
+		"CVE-2026-1234": {
+			Status:        "not_affected",
+			Justification: "component_not_present",
+		},
+		"CVE-2026-9999": {
+			Status:        "fixed",
+			Justification: "inline_mitigations_already_exist",
+		},
+	}
+
+	got := extractCVEs(matches, "registry.example.com/app:v1", vexStatuses)
+
+	require.Len(t, got, 1)
+	assert.Equal(t, "CVE-2026-1234", got[0].ID)
+	assert.Equal(t, "not_affected", got[0].VexStatus)
+	assert.Equal(t, "component_not_present", got[0].VexJustification)
+}
+
+func TestExtractCVEsLeavesUnmatchedVEXEmpty(t *testing.T) {
+	matches := match.NewMatches(match.Match{
+		Package: pkg.Package{
+			ID:      "1",
+			Name:    "openssl",
+			Version: "1.0.0",
+		},
+		Vulnerability: vulnerability.Vulnerability{
+			Metadata: &vulnerability.Metadata{
+				ID:       "CVE-2026-1234",
+				Severity: "High",
+			},
+		},
+	})
+
+	got := extractCVEs(matches, "registry.example.com/app:v1", map[string]cautils.VexStatus{
+		"CVE-2026-9999": {
+			Status:        "not_affected",
+			Justification: "component_not_present",
+		},
+	})
+
+	require.Len(t, got, 1)
+	assert.Empty(t, got[0].VexStatus)
+	assert.Empty(t, got[0].VexJustification)
 }
 
 func TestSetPkgNameToScoreMap(t *testing.T) {

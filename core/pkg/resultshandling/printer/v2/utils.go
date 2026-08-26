@@ -411,7 +411,7 @@ func setPkgNameToScoreMap(matches match.Matches, pkgScores map[string]*imageprin
 	}
 }
 
-func extractCVEs(matches match.Matches, image string) []imageprinter.CVE {
+func extractCVEs(matches match.Matches, image string, vexStatuses map[string]cautils.VexStatus) []imageprinter.CVE {
 	var CVEs []imageprinter.CVE
 	for _, m := range matches.Sorted() {
 		cve := imageprinter.CVE{
@@ -422,6 +422,10 @@ func extractCVEs(matches match.Matches, image string) []imageprinter.CVE {
 			FixVersions: m.Vulnerability.Fix.Versions,
 			FixedState:  m.Vulnerability.Fix.State.String(),
 			Image:       image,
+		}
+		if vexStatus, ok := vexStatuses[cve.ID]; ok {
+			cve.VexStatus = vexStatus.Status
+			cve.VexJustification = vexStatus.Justification
 		}
 		CVEs = append(CVEs, cve)
 	}
@@ -465,7 +469,7 @@ func buildImageScanSummaryWithTarget(imageScanData []cautils.ImageScanData, incl
 			imageScanSummary.VulnDBBuilt = imageScanData[i].VulnDBBuilt
 		}
 
-		cves := extractCVEs(imageScanData[i].Matches, image)
+		cves := extractCVEs(imageScanData[i].Matches, image, imageScanData[i].VexStatuses)
 		imageScanSummary.CVEs = append(imageScanSummary.CVEs, cves...)
 
 		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
