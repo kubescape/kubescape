@@ -1467,6 +1467,199 @@ func TestCreatePolicyBindingCmdResourceRuleScope(t *testing.T) {
 	})
 }
 
+// TestResourceSelectorReach covers what the command can conclude offline about
+// one resource a policy constrains. The apiserver's namespace matcher returns
+// "matched" for a cluster-scoped request before it parses the selector, so a
+// namespaceSelector narrows only what this reports as narrowable.
+func TestResourceSelectorReach(t *testing.T) {
+	cluster, namespaced := admissionv1.ClusterScope, admissionv1.NamespacedScope
+
+	tests := []struct {
+		name     string
+		scope    *admissionv1.ScopeType
+		groups   []string
+		resource string
+		want     selectorReach
+	}{
+		{name: "built-in namespaced resource", groups: []string{""}, resource: "pods", want: reachNarrows},
+		{name: "built-in cluster-scoped resource", groups: []string{"rbac.authorization.k8s.io"}, resource: "clusterroles", want: reachAlwaysMatches},
+		{name: "built-in resource in another group is a different resource", groups: []string{"custom.io"}, resource: "roles", want: reachUnknown},
+		{name: "wildcard group accepts the built-in answer", groups: []string{"*"}, resource: "clusterrolebindings", want: reachAlwaysMatches},
+
+		// The one resource with no namespace of its own that the selector still
+		// narrows: it is read against the Namespace's own labels.
+		{name: "namespaces are narrowed by their own labels", groups: []string{""}, resource: "namespaces", want: reachNarrows},
+		{name: "namespaces outrank a declared cluster scope", scope: &cluster, groups: []string{""}, resource: "namespaces", want: reachNarrows},
+		{name: "namespaces in another group are not the core one", groups: []string{"custom.io"}, resource: "namespaces", want: reachUnknown},
+
+		{name: "a declared scope answers for a custom resource", scope: &cluster, groups: []string{"agents.x-k8s.io"}, resource: "sandboxes", want: reachAlwaysMatches},
+		{name: "a declared namespaced scope narrows a custom resource", scope: &namespaced, groups: []string{"ate.dev"}, resource: "workerpools", want: reachNarrows},
+		{name: "an undeclared custom resource stays unknown", groups: []string{"agents.x-k8s.io"}, resource: "sandboxes", want: reachUnknown},
+
+		{name: "a wildcard resource sweeps cluster-scoped ones", groups: []string{"*"}, resource: "*", want: reachAlwaysMatches},
+		{name: "a subresource lives where its parent does", groups: []string{""}, resource: "pods/exec", want: reachNarrows},
+		{name: "an empty resource concludes nothing", groups: []string{""}, resource: "", want: reachUnknown},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, resourceSelectorReach(tt.scope, tt.groups, tt.resource))
+		})
+	}
+}
+
+// TestResolveNamespaceSelectorReach covers the surface the emitted binding
+// actually carries: the policy's matchConstraints, less whatever the caller's
+// own --resource-rule set drops.
+func TestResolveNamespaceSelectorReach(t *testing.T) {
+	constraint := func(group, version string, resources ...string) admissionv1.NamedRuleWithOperations {
+		rule, err := parseResourceRule(strings.Join([]string{group, version, resources[0]}, "/"))
+		require.NoError(t, err)
+		rule.Resources = resources
+		return rule
+	}
+	const rbac = "rbac.authorization.k8s.io"
+
+	t.Run("a mixed policy is partly narrowable", func(t *testing.T) {
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint(rbac, "v1", "rolebindings", "clusterrolebindings")}, nil)
+		assert.Equal(t, []string{rbac + "/v1/clusterrolebindings"}, reach.alwaysMatched)
+		assert.True(t, reach.narrowable)
+	})
+
+	t.Run("a resource rule drops what it does not name", func(t *testing.T) {
+		bindingRules, err := parseResourceRules([]string{rbac + "/v1/rolebindings"})
+		require.NoError(t, err)
+
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint(rbac, "v1", "rolebindings", "clusterrolebindings")}, bindingRules)
+		assert.Empty(t, reach.alwaysMatched)
+		assert.True(t, reach.narrowable)
+	})
+
+	// The resource name is what a binding rule is compared on: matchPolicy
+	// Equivalent may bridge a group or version, never one resource to another.
+	t.Run("a resource rule at another version still keeps the resource", func(t *testing.T) {
+		bindingRules, err := parseResourceRules([]string{rbac + "/v1beta1/clusterrolebindings"})
+		require.NoError(t, err)
+
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint(rbac, "v1", "rolebindings", "clusterrolebindings")}, bindingRules)
+		assert.Equal(t, []string{rbac + "/v1/clusterrolebindings"}, reach.alwaysMatched)
+		assert.False(t, reach.narrowable)
+	})
+
+	t.Run("a resource of unknown scope keeps the binding narrowable", func(t *testing.T) {
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{
+			constraint("agents.x-k8s.io", "v1beta1", "sandboxes"),
+			constraint(rbac, "v1", "clusterroles"),
+		}, nil)
+		assert.Equal(t, []string{rbac + "/v1/clusterroles"}, reach.alwaysMatched)
+		assert.True(t, reach.narrowable)
+	})
+
+	t.Run("each group and version of a cluster-scoped resource is named once", func(t *testing.T) {
+		rule := constraint(rbac, "v1", "clusterroles")
+		rule.APIVersions = []string{"v1", "v1beta1"}
+
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{rule, rule}, nil)
+		assert.Equal(t, []string{rbac + "/v1/clusterroles", rbac + "/v1beta1/clusterroles"}, reach.alwaysMatched)
+	})
+}
+
+// TestCheckNamespaceSelectorScope covers --namespace against the policies the
+// bundle actually ships. C-0225, C-0262 and C-0280 each constrain a namespaced
+// resource alongside a cluster-scoped one, which the emitted namespaceSelector
+// cannot narrow.
+func TestCheckNamespaceSelectorScope(t *testing.T) {
+	const (
+		rbac        = "rbac.authorization.k8s.io"
+		c0016Policy = "kubescape-c-0016-allow-privilege-escalation"
+		c0280Policy = "kubescape-c-0280-deny-access-to-csr-approval-subresource"
+	)
+
+	t.Run("a fully namespaced policy is accepted", func(t *testing.T) {
+		require.NoError(t, checkNamespaceSelectorScope([]string{"prod"}, nil, "C-0016", c0016Policy))
+	})
+
+	// Accepted, because the namespaced half of the binding is what was asked
+	// for. What the warning names is pinned on the constraints themselves.
+	t.Run("a mixed policy is accepted with a warning", func(t *testing.T) {
+		for control, clusterScoped := range map[string]string{
+			"C-0225": rbac + "/v1/clusterrolebindings",
+			"C-0262": rbac + "/v1/clusterrolebindings",
+			"C-0280": rbac + "/v1/clusterroles",
+		} {
+			constraints, err := policyMatchConstraints(control, "")
+			require.NoError(t, err)
+			require.NotNil(t, constraints)
+
+			reach := resolveNamespaceSelectorReach(constraints.ResourceRules, nil)
+			assert.Equal(t, []string{clusterScoped}, reach.alwaysMatched, control)
+			assert.True(t, reach.narrowable, control)
+
+			require.NoError(t, checkNamespaceSelectorScope([]string{"prod"}, nil, control, ""))
+		}
+	})
+
+	// Narrowed to the cluster-scoped half, the selector has nothing left to act
+	// on: the binding is exactly as broad as one carrying no --namespace.
+	t.Run("a binding covering only cluster-scoped resources is refused", func(t *testing.T) {
+		err := checkNamespaceSelectorScope([]string{"prod"}, []string{rbac + "/v1/clusterroles"}, "C-0280", c0280Policy)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "narrows nothing")
+		assert.Contains(t, err.Error(), rbac+"/v1/clusterroles")
+		assert.Contains(t, err.Error(), "control C-0280", "the refusal echoes the flag that was typed")
+	})
+
+	t.Run("narrowing to the namespaced half is accepted", func(t *testing.T) {
+		require.NoError(t, checkNamespaceSelectorScope([]string{"prod"}, []string{rbac + "/v1/roles"}, "C-0280", c0280Policy))
+	})
+
+	t.Run("no namespace is nothing to check", func(t *testing.T) {
+		require.NoError(t, checkNamespaceSelectorScope(nil, nil, "C-0280", c0280Policy))
+	})
+
+	t.Run("a policy outside the bundle is left unchecked", func(t *testing.T) {
+		require.NoError(t, checkNamespaceSelectorScope([]string{"prod"}, nil, "", "my-own-sandbox-policy"))
+	})
+
+	t.Run("an unresolvable control is reported", func(t *testing.T) {
+		require.Error(t, checkNamespaceSelectorScope([]string{"prod"}, nil, "C-9999", "kubescape-c-9999"))
+	})
+}
+
+// TestCreatePolicyBindingCmdNamespaceScope covers the command end to end: a
+// --namespace that narrows part of the policy still emits its binding, and one
+// that narrows none of it fails before anything is written.
+func TestCreatePolicyBindingCmdNamespaceScope(t *testing.T) {
+	const rbac = "rbac.authorization.k8s.io"
+
+	t.Run("a mixed policy still emits its binding", func(t *testing.T) {
+		outputFile := filepath.Join(t.TempDir(), "binding.yaml")
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0262", "--namespace", "prod", "--output", outputFile})
+		require.NoError(t, cmd.Execute())
+
+		content, err := os.ReadFile(outputFile)
+		require.NoError(t, err)
+
+		var binding admissionv1.ValidatingAdmissionPolicyBinding
+		require.NoError(t, yaml.Unmarshal(content, &binding))
+		require.NotNil(t, binding.Spec.MatchResources.NamespaceSelector)
+	})
+
+	t.Run("a namespace narrowing nothing fails the command", func(t *testing.T) {
+		outputFile := filepath.Join(t.TempDir(), "binding.yaml")
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0280", "--namespace", "prod", "--resource-rule", rbac + "/v1/clusterroles", "--output", outputFile})
+
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "narrows nothing")
+
+		_, statErr := os.Stat(outputFile)
+		assert.True(t, os.IsNotExist(statErr), "the binding must not be written")
+	})
+}
+
 func TestParseObjectSelectorLabels(t *testing.T) {
 	tests := []struct {
 		name   string
