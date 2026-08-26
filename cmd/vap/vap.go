@@ -12,6 +12,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/spf13/cobra"
@@ -128,6 +129,9 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 				if err := isValidNamespace(namespace); err != nil {
 					return fmt.Errorf("invalid namespace %s: %w", namespace, err)
 				}
+			}
+			if err := checkNamespaceSelectorScope(namespaceArr, resourceRuleArr, normalizedControlID, resolvedPolicyName); err != nil {
+				return err
 			}
 			if _, err := parseObjectSelectorLabels(labelArr); err != nil {
 				return err
@@ -730,6 +734,170 @@ func describeResourceRules(rules []admissionv1.NamedRuleWithOperations) string {
 		}
 	}
 	return strings.Join(described, ", ")
+}
+
+// selectorReach is what a binding's namespaceSelector does to one resource its
+// policy constrains.
+type selectorReach int
+
+const (
+	// reachUnknown: a custom resource whose rule declares no scope. Where it
+	// lives is a cluster fact, so nothing is concluded from it.
+	reachUnknown selectorReach = iota
+	// reachNarrows: the selector decides whether the resource is in scope.
+	reachNarrows
+	// reachAlwaysMatches: the apiserver admits the resource before it ever
+	// parses the selector, so the selector cannot narrow it.
+	reachAlwaysMatches
+)
+
+// namespacesResource is the one resource carrying no namespace of its own that
+// a namespaceSelector still narrows: the apiserver reads the selector against a
+// Namespace's own labels rather than exempting it as cluster-scoped.
+const namespacesResource = "namespaces"
+
+// resourceSelectorReach resolves what a namespaceSelector does to one resource a
+// policy rule names.
+//
+// The rule's own scope field wins over the built-in resource table: it is the
+// only source that can speak for a custom resource, and an author who set it has
+// stated the answer. The table answers for the rest, but only where the rule
+// names the resource at the group that table serves it from — pairing a custom
+// group with a built-in plural ("custom.io" + "roles") names a different
+// resource that happens to share a name.
+//
+// A resource neither source knows stays unknown rather than guessed: a wrong
+// guess either suppresses a warning the caller needs or raises one they cannot
+// act on.
+func resourceSelectorReach(scope *admissionv1.ScopeType, groups []string, resource string) selectorReach {
+	// A subresource lives wherever its parent does.
+	resource, _ = splitSubresource(strings.ToLower(strings.TrimSpace(resource)))
+	if resource == namespacesResource && valuesOverlap(groups, []string{""}) {
+		return reachNarrows
+	}
+	if scope != nil {
+		switch *scope {
+		case admissionv1.ClusterScope:
+			return reachAlwaysMatches
+		case admissionv1.NamespacedScope:
+			return reachNarrows
+		}
+	}
+	if resource == "*" {
+		return reachAlwaysMatches // the rule sweeps cluster-scoped resources too
+	}
+	gvr, err := k8sinterface.GetGroupVersionResource(resource)
+	if err != nil || gvr.Resource == "" || !valuesOverlap(groups, []string{gvr.Group}) {
+		return reachUnknown
+	}
+	if k8sinterface.IsNamespaceScope(&gvr) {
+		return reachNarrows
+	}
+	return reachAlwaysMatches
+}
+
+// namespaceSelectorReach splits the surface an emitted binding covers by what
+// its namespaceSelector does to each part.
+type namespaceSelectorReach struct {
+	// alwaysMatched are the resources the selector cannot narrow, in the
+	// group/version/resource form --resource-rule takes.
+	alwaysMatched []string
+	// narrowable reports whether the selector reaches anything at all. A
+	// resource of unknown scope counts, so this is false only where nothing the
+	// binding covers could be narrowed.
+	narrowable bool
+}
+
+// resolveNamespaceSelectorReach walks the surface the emitted binding covers —
+// the policy's matchConstraints, intersected with the binding's own resource
+// rules when the caller gave any — and reports what its namespaceSelector does
+// to it.
+//
+// The intersection is by resource name alone, the way classifyResourceRule
+// compares one: matchPolicy Equivalent lets a binding rule bridge a group or
+// version gap, but never turns one resource into another.
+func resolveNamespaceSelectorReach(constraints, bindingRules []admissionv1.NamedRuleWithOperations) namespaceSelectorReach {
+	var reach namespaceSelectorReach
+	seen := make(map[string]struct{})
+	for i := range constraints {
+		constraint := &constraints[i]
+		for _, resource := range constraint.Resources {
+			if !bindingCoversResource(bindingRules, resource) {
+				continue
+			}
+			if resourceSelectorReach(constraint.Scope, constraint.APIGroups, resource) != reachAlwaysMatches {
+				reach.narrowable = true
+				continue
+			}
+			for _, group := range constraint.APIGroups {
+				for _, version := range constraint.APIVersions {
+					entry := strings.Join([]string{group, version, resource}, "/")
+					if _, duplicate := seen[entry]; duplicate {
+						continue
+					}
+					seen[entry] = struct{}{}
+					reach.alwaysMatched = append(reach.alwaysMatched, entry)
+				}
+			}
+		}
+	}
+	return reach
+}
+
+// bindingCoversResource reports whether the binding's own resource rules keep
+// one of the policy's resources in scope. No rules is the default: the binding
+// covers everything the policy matches.
+func bindingCoversResource(rules []admissionv1.NamedRuleWithOperations, resource string) bool {
+	if len(rules) == 0 {
+		return true
+	}
+	for i := range rules {
+		if resourcesOverlap(rules[i].Resources, []string{resource}) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkNamespaceSelectorScope reports on a --namespace the apiserver will not
+// apply the way the flag reads.
+//
+// --namespace emits a namespaceSelector, and the apiserver's namespace matcher
+// returns "matched" for a cluster-scoped request before it ever parses the
+// selector (webhook/predicates/namespace matcher.go, which the VAP binding path
+// reuses). So the flag narrows the namespaced resources a policy constrains and
+// leaves its cluster-scoped ones enforced cluster-wide, silently: with the
+// default Deny action, a rollout meant for one namespace denies every
+// ClusterRoleBinding in the cluster. Three shipped controls mix the two
+// (C-0225, C-0262, C-0280).
+//
+// A warning rather than a refusal: the namespaced half of the binding is exactly
+// what was asked for, and --resource-rule can drop the rest.
+func checkNamespaceSelectorScope(namespaces, resourceRules []string, controlID, policyName string) error {
+	if len(namespaces) == 0 {
+		return nil
+	}
+	constraints, err := policyMatchConstraints(controlID, policyName)
+	if err != nil {
+		return err
+	}
+	if constraints == nil || len(constraints.ResourceRules) == 0 {
+		return nil
+	}
+	bindingRules, err := parseResourceRules(resourceRules)
+	if err != nil {
+		return err
+	}
+
+	reach := resolveNamespaceSelectorReach(constraints.ResourceRules, bindingRules)
+	if len(reach.alwaysMatched) == 0 {
+		return nil
+	}
+	logger.L().Warning("--namespace does not narrow the cluster-scoped resources this policy matches; the apiserver never exempts a cluster-scoped request from a binding's namespaceSelector, so the binding enforces on them cluster-wide",
+		helpers.String("policy", policyName),
+		helpers.String("clusterScoped", strings.Join(reach.alwaysMatched, ", ")),
+		helpers.String("hint", "drop them from the binding with --resource-rule"))
+	return nil
 }
 
 // Create a policy binding
