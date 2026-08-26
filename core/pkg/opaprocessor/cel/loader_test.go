@@ -478,3 +478,63 @@ func TestResolveParamObjectBinding(t *testing.T) {
 	_, err = ResolveParamObject(vap, &admissionregistrationv1.ParamRef{Name: "missing"}, "default", findParam)
 	require.ErrorIs(t, err, ErrParamNotFound)
 }
+
+// TestResolveParamObjectClusterScoped resolves a paramRef naming a cluster-scoped
+// param object while the scanned resource is namespaced. The bundled
+// ControlConfiguration is scope: Cluster, so this is the shape every binding that
+// names it takes.
+func TestResolveParamObjectClusterScoped(t *testing.T) {
+	vap, err := loadVAP("C-0046")
+	require.NoError(t, err)
+
+	clusterScoped := map[string]any{
+		"apiVersion": vap.paramKind.APIVersion,
+		"kind":       vap.paramKind.Kind,
+		"metadata":   map[string]any{"name": "custom"},
+		"settings":   map[string]any{"insecureCapabilities": []any{"ADD"}},
+	}
+	findParam := func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
+		if apiVersion == vap.paramKind.APIVersion && kind == vap.paramKind.Kind && namespace == "" && name == "custom" {
+			return clusterScoped, true
+		}
+		return nil, false
+	}
+
+	params, err := ResolveParamObject(vap, &admissionregistrationv1.ParamRef{Name: "custom"}, "prod", findParam)
+	require.NoError(t, err)
+	assert.Equal(t, clusterScoped, params)
+
+	// A cluster-scoped resource already looked the object up under "".
+	params, err = ResolveParamObject(vap, &admissionregistrationv1.ParamRef{Name: "custom"}, "", findParam)
+	require.NoError(t, err)
+	assert.Equal(t, clusterScoped, params)
+
+	// A namespace on the ref stays the only candidate: the apiserver rejects one
+	// against a cluster-scoped paramKind rather than falling back to it.
+	_, err = ResolveParamObject(vap, &admissionregistrationv1.ParamRef{Name: "custom", Namespace: "prod"}, "prod", findParam)
+	require.ErrorIs(t, err, ErrParamNotFound)
+}
+
+// TestResolveParamObjectPrefersResourceNamespace keeps a namespaced param object
+// ahead of the cluster-scoped candidate, so the fallback cannot take over a
+// lookup the resource's own namespace already answers.
+func TestResolveParamObjectPrefersResourceNamespace(t *testing.T) {
+	vap, err := loadVAP("C-0046")
+	require.NoError(t, err)
+
+	namespaced := map[string]any{"metadata": map[string]any{"name": "custom", "namespace": "prod"}}
+	clusterScoped := map[string]any{"metadata": map[string]any{"name": "custom"}}
+	findParam := func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
+		switch namespace {
+		case "prod":
+			return namespaced, true
+		case "":
+			return clusterScoped, true
+		}
+		return nil, false
+	}
+
+	params, err := ResolveParamObject(vap, &admissionregistrationv1.ParamRef{Name: "custom"}, "prod", findParam)
+	require.NoError(t, err)
+	assert.Equal(t, namespaced, params)
+}

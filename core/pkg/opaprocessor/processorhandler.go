@@ -1497,6 +1497,9 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 		if celBindingHasMatchResources(bindings[0]) {
 			return nil, celOutcome{}, fmt.Errorf("rule: '%s', binding for policy %q declares spec.matchResources, which the offline engine does not evaluate yet; refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName)
 		}
+		if vap.TakesParams() && celBindingSelectsParams(bindings[0]) {
+			return nil, celOutcome{}, fmt.Errorf("rule: '%s', binding for policy %q selects its params with spec.paramRef.selector, which the offline engine does not resolve yet; refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName)
+		}
 		paramRef = celParamRefForBinding(bindings[0])
 	default:
 		return nil, celOutcome{}, fmt.Errorf("rule: '%s', policy %q is matched by %d live bindings; the offline engine does not yet select per-binding paramRefs, so refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName, len(bindings))
@@ -1793,6 +1796,20 @@ func celBindingHasMatchResources(binding metav1unstructured.Unstructured) bool {
 	}
 	mr, ok := spec["matchResources"].(map[string]any)
 	return ok && len(mr) > 0
+}
+
+// celBindingSelectsParams reports whether the binding picks its params with
+// spec.paramRef.selector rather than naming one. celParamRefForBinding reads
+// only the name, so such a binding used to arrive as no paramRef at all and the
+// policy was evaluated against the bundled defaults instead of the objects the
+// binding selects. An empty selector is still a selection (it matches every
+// object of the paramKind), so presence is what counts, not length.
+func celBindingSelectsParams(binding metav1unstructured.Unstructured) bool {
+	if binding.Object == nil {
+		return false
+	}
+	_, found, err := metav1unstructured.NestedMap(binding.Object, "spec", "paramRef", "selector")
+	return err == nil && found
 }
 
 // celParamRefForBinding extracts the binding's spec.paramRef, if any. Missing
