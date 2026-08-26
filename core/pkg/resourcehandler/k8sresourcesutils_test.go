@@ -276,4 +276,6 @@ func TestSplitNamespaces(t *testing.T) {
 	assert.Nil(t, splitNamespaces(",,"))
 	assert.Equal(t, []string{"default"}, splitNamespaces("default,"))
 	assert.Equal(t, []string{"default", "prod"}, splitNamespaces(" default , prod "))
+	assert.Equal(t, []string{"default"}, splitNamespaces("default,default"))
+	assert.Equal(t, []string{"a", "b"}, splitNamespaces("a,b,a,b"))
 }
