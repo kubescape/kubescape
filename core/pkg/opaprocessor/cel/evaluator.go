@@ -370,7 +370,7 @@ func (e *Evaluator) applyFailurePolicy(res ValidationResult, val Validation, eva
 		res.Passed = false
 		return res
 	}
-	if *failurePolicy == admissionregistrationv1.Ignore {
+	if *failurePolicy == admissionregistrationv1.Ignore && IsExpressionError(evalErr) {
 		res.Passed = true
 		res.Err = nil
 		res.Message = ""
