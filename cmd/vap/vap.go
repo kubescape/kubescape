@@ -473,6 +473,28 @@ func parseResourceRule(rule string) (admissionv1.NamedRuleWithOperations, error)
 	}, nil
 }
 
+// parseResourceRules turns the whole --resource-rule set into the binding rules
+// it becomes. Both the checks that reason about the emitted binding's surface
+// and the binding itself read the flag through here, so what the command
+// validates and what it writes cannot drift apart.
+//
+// An empty flag stays nil rather than an empty slice: matchResources.resourceRules
+// is omitted from the emitted YAML when the caller did not narrow anything.
+func parseResourceRules(rules []string) ([]admissionv1.NamedRuleWithOperations, error) {
+	if len(rules) == 0 {
+		return nil, nil
+	}
+	parsed := make([]admissionv1.NamedRuleWithOperations, 0, len(rules))
+	for _, rule := range rules {
+		rule, err := parseResourceRule(rule)
+		if err != nil {
+			return nil, err
+		}
+		parsed = append(parsed, rule)
+	}
+	return parsed, nil
+}
+
 // validateRuleSegment checks one segment of a resource rule, accepting the "*"
 // wildcard the admission API allows in any of them.
 func validateRuleSegment(kind string, value string, validate func(string) []string) error {
@@ -568,18 +590,18 @@ func checkResourceRulesInPolicyScope(rules []string, controlID, policyName strin
 	if constraints == nil || len(constraints.ResourceRules) == 0 {
 		return nil
 	}
-	for _, rule := range rules {
-		parsed, err := parseResourceRule(rule)
-		if err != nil {
-			return err
-		}
-		switch classifyResourceRule(parsed, constraints.ResourceRules) {
+	parsed, err := parseResourceRules(rules)
+	if err != nil {
+		return err
+	}
+	for i, rule := range parsed {
+		switch classifyResourceRule(rule, constraints.ResourceRules) {
 		case ruleOutsidePolicy:
 			return fmt.Errorf("resource rule %q is outside the matchConstraints of policy %s, so the binding would match nothing; the policy matches %s",
-				strings.TrimSpace(rule), policyName, describeResourceRules(constraints.ResourceRules))
+				strings.TrimSpace(rules[i]), policyName, describeResourceRules(constraints.ResourceRules))
 		case ruleConvertsToPolicy:
 			logger.L().Warning("resource rule names another API group or version than the policy constrains; the binding matches only if the cluster serves them as equivalent forms of one resource",
-				helpers.String("rule", strings.TrimSpace(rule)),
+				helpers.String("rule", strings.TrimSpace(rules[i])),
 				helpers.String("policy", policyName),
 				helpers.String("policyMatches", describeResourceRules(constraints.ResourceRules)))
 		}
@@ -741,13 +763,11 @@ func createPolicyBinding(bindingName string, policyName string, actions []admiss
 
 	// Left empty, matchResources binds everything the policy matches, so a rule
 	// is only emitted when the caller asked to narrow it.
-	for _, rule := range resourceRuleArr {
-		parsed, err := parseResourceRule(rule)
-		if err != nil {
-			return "", err
-		}
-		policyBinding.Spec.MatchResources.ResourceRules = append(policyBinding.Spec.MatchResources.ResourceRules, parsed)
+	resourceRules, err := parseResourceRules(resourceRuleArr)
+	if err != nil {
+		return "", err
 	}
+	policyBinding.Spec.MatchResources.ResourceRules = resourceRules
 
 	policyBinding.Spec.ValidationActions = actions
 	paramAction := admissionv1.DenyAction
