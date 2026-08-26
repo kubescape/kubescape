@@ -46,7 +46,7 @@ deny[msga] {
         "packagename":  "armo_builtins",
         "alertScore":   5,
         "fixPaths":     [],
-        "failedPaths":  [sprintf("metadata.annotations.bound-by-%s", [pod.metadata.namespace])],
+        "reviewPaths":  [sprintf("metadata.annotations.bound-by-%s", [pod.metadata.namespace])],
         "alertObject":  {"k8sApiObjects": [cr]},
     }
 }
@@ -288,7 +288,7 @@ func TestProcess_ResidentVerdictsMergeAcrossScopes(t *testing.T) {
 
 	paths := map[string]bool{}
 	for _, path := range crossScope[0].ResourceAssociatedRules[0].Paths {
-		paths[path.FailedPath] = true
+		paths[path.ReviewPath] = true
 	}
 	assert.True(t, paths["metadata.annotations.bound-by-ns-a"], "ns-a verdict lost, got %v", paths)
 	assert.True(t, paths["metadata.annotations.bound-by-ns-b"], "ns-b verdict lost, got %v", paths)
@@ -306,7 +306,7 @@ deny[msga] {
         "packagename":  "armo_builtins",
         "alertScore":   1,
         "fixPaths":     [],
-        "failedPaths":  ["metadata.name"],
+        "reviewPaths":  ["metadata.name"],
         "alertObject":  {"k8sApiObjects": [cr]},
     }
 }
@@ -366,7 +366,7 @@ deny[msga] {
         "packagename":  "armo_builtins",
         "alertScore":   1,
         "fixPaths":     [],
-        "failedPaths":  [],
+        "reviewPaths":  [],
         "alertObject":  {"k8sApiObjects": [pods[_]]},
     }
 }

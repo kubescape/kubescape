@@ -400,7 +400,6 @@ func TestEnrichedPathsForField(t *testing.T) {
 		},
 	}
 
-
 	t.Run("getPath selects ReviewPath", func(t *testing.T) {
 		got := enrichedPathsForField(ctrl, deploymentResource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
 		require.Len(t, got, 1)
@@ -472,7 +471,6 @@ func (m *mockResource) SetWorkload(map[string]interface{}) {}
 func (m *mockResource) SetObject(map[string]interface{})   {}
 func (m *mockResource) SetApiVersion(string)               {}
 
-
 func TestReviewPathsWithCurrentValues(t *testing.T) {
 	obj := map[string]any{
 		"spec": map[string]any{
@@ -521,7 +519,7 @@ func TestAssistedRemediationPathsWithCurrentValues(t *testing.T) {
 		assert.Len(t, got, 2)
 	})
 
-	t.Run("path shared by delete and review path is printed alongside enriched review path", func(t *testing.T) {
+	t.Run("path shared by delete and review path is printed once", func(t *testing.T) {
 		// reproduces rules such as C-0012 that assign the same path to both
 		// DeletePath and FailedPath - the enriched failed path must not duplicate
 		// the bare delete path for the same field
@@ -535,7 +533,7 @@ func TestAssistedRemediationPathsWithCurrentValues(t *testing.T) {
 			},
 		}
 		got := AssistedRemediationPathsWithCurrentValues(ctrl, resource)
-		assert.Equal(t, []string{"spec.hostPID", "spec.hostPID (current: true)"}, got)
+		assert.Equal(t, []string{"spec.hostPID"}, got)
 	})
 }
 

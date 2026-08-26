@@ -375,7 +375,7 @@ func TestFindingDetails_IncludesUsefulFieldsAndOmitsEmptyFields(t *testing.T) {
 	assert.Contains(t, details, "Base status: passed")
 	assert.Contains(t, details, "Head status: failed")
 	assert.Contains(t, details, "Rule: rule-c-high")
-	assert.Contains(t, details, "Evidence: rule=rule-c-high type=failedPath path=spec.template.spec.containers[0].securityContext.privileged")
+	assert.Contains(t, details, "Evidence: rule=rule-c-high type=reviewPath path=spec.template.spec.containers[0].securityContext.privileged")
 	assert.Contains(t, details, "Evidence resource: resource/pod")
 	assert.NotContains(t, details, "Reason:")
 
@@ -404,7 +404,7 @@ func TestFindingTitle_HandlesUnnamedControls(t *testing.T) {
 }
 
 func TestEvidenceLabel(t *testing.T) {
-	assert.Equal(t, "rule=rule-a type=failedPath path=spec.containers[0].image", evidenceLabel(ControlChange{
+	assert.Equal(t, "rule=rule-a type=reviewPath path=spec.containers[0].image", evidenceLabel(ControlChange{
 		RuleName:     "rule-a",
 		EvidenceType: evidenceTypeReviewPath,
 		Path:         "spec.containers[0].image",

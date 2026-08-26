@@ -246,7 +246,6 @@ func enrichedPathsForField(control *resourcesresults.ResourceAssociatedControl, 
 	return paths
 }
 
-
 func reviewPathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
 	return enrichedPathsForField(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
 }
@@ -299,7 +298,6 @@ func enrichedPathsForFieldUnredacted(control *resourcesresults.ResourceAssociate
 	return paths
 }
 
-
 func reviewPathsWithCurrentValuesUnredacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
 	return enrichedPathsForFieldUnredacted(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
 }
@@ -312,13 +310,13 @@ func AssistedRemediationPathsWithCurrentValuesFiltered(control *resourcesresults
 		deletePaths := deletePathsToString(control)
 		enrichedReview := reviewPathsWithCurrentValuesUnredacted(control, resource)
 		paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
-		return paths
+		return deduplicatePaths(paths)
 	}
 	fixPaths := fixPathsToStringFiltered(control, kind, false)
 	deletePaths := deletePathsToString(control)
 	enrichedReview := reviewPathsWithCurrentValuesRedacted(control, resource)
 	paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
-	return paths
+	return deduplicatePaths(paths)
 }
 
 func enrichedPathsForFieldRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
@@ -345,7 +343,6 @@ func enrichedPathsForFieldRedacted(control *resourcesresults.ResourceAssociatedC
 	return paths
 }
 
-
 func reviewPathsWithCurrentValuesRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
 	return enrichedPathsForFieldRedacted(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
 }
@@ -355,5 +352,5 @@ func AssistedRemediationPathsWithCurrentValues(control *resourcesresults.Resourc
 	deletePaths := deletePathsToString(control)
 	enrichedReview := reviewPathsWithCurrentValues(control, resource)
 	paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
-	return paths
+	return deduplicatePaths(paths)
 }

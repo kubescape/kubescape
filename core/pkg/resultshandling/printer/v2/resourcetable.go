@@ -225,7 +225,23 @@ func reviewPathsToString(control *resourcesresults.ResourceAssociatedControl) []
 
 func AssistedRemediationPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
 	paths := append(fixPathsToString(control, false), append(deletePathsToString(control), reviewPathsToString(control)...)...)
-	return paths
+	return deduplicatePaths(paths)
+}
+
+func deduplicatePaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool)
+	deduped := make([]string, 0, len(paths))
+	for _, path := range paths {
+		key := dedupPathKey(path)
+		if !seen[key] {
+			seen[key] = true
+			deduped = append(deduped, path)
+		}
+	}
+	return deduped
 }
 
 // dedupPathKey strips the " (current: <value>)" suffix appended by evidence enrichment so a

@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-
 func TestAssistedRemediationPathsToString(t *testing.T) {
 	control1 := &resourcesresults.ResourceAssociatedControl{
 		ControlID: "control-1",
@@ -91,18 +90,18 @@ func TestAssistedRemediationPathsToString_EdgeCases(t *testing.T) {
 			expected: nil,
 		},
 		{
-			name: "duplicate paths across FailedPath and ReviewPath are deduplicated",
+			name: "duplicate paths across DeletePath and ReviewPath are deduplicated",
 			control: &resourcesresults.ResourceAssociatedControl{
 				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
 					{
 						Paths: []armotypes.PosturePaths{
-							{ReviewPath: "shared-path"},
+							{DeletePath: "shared-path"},
 							{ReviewPath: "shared-path"},
 						},
 					},
 				},
 			},
-			expected: []string{"shared-path", "shared-path"},
+			expected: []string{"shared-path"},
 		},
 		{
 			name: "mixed valid and empty paths within the same rule",
@@ -121,7 +120,7 @@ func TestAssistedRemediationPathsToString_EdgeCases(t *testing.T) {
 			expected: []string{"valid-failed", "valid-review"},
 		},
 		{
-			name: "all four path types present simultaneously",
+			name: "all three path types present simultaneously",
 			control: &resourcesresults.ResourceAssociatedControl{
 				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
 					{
@@ -129,12 +128,11 @@ func TestAssistedRemediationPathsToString_EdgeCases(t *testing.T) {
 							{FixPath: armotypes.FixPath{Path: "fix-path", Value: "fix-value"}},
 							{DeletePath: "delete-path"},
 							{ReviewPath: "review-path"},
-							{ReviewPath: "failed-path"},
 						},
 					},
 				},
 			},
-			expected: []string{"fix-path=fix-value", "delete-path", "review-path", "failed-path"},
+			expected: []string{"fix-path=fix-value", "delete-path", "review-path"},
 		},
 		{
 			name: "nil and missing Paths slices",
@@ -335,7 +333,6 @@ func TestFixPathsToString(t *testing.T) {
 	expectedPath = []string{"fix-path2=fix-path-value2", "fix-path3=fix-path-value3"}
 	assert.Equal(t, expectedPath, actualPaths)
 }
-
 
 func TestShortFormatResource(t *testing.T) {
 	// Create a test case with an empty resourceRows slice

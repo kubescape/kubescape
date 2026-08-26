@@ -27,7 +27,7 @@ func reportWithPath(path string) scanReport {
 	return evidenceReport(testResource, failedControlWithRules(
 		testControl,
 		"Require a security context",
-		failedRule(testRule, evidencePath{ResourceID: testResource}),
+		failedRule(testRule, evidencePath{ResourceID: testResource, ReviewPath: path}),
 	))
 }
 
@@ -52,6 +52,7 @@ func TestComputeEvidence_DetectsPathAddedInsideFailingControl(t *testing.T) {
 		head.Results[0].AssociatedControls[0].Rules[0].Paths,
 		evidencePath{
 			ResourceID: testResource,
+			ReviewPath: "spec.template.spec.containers[0].securityContext.privileged",
 		},
 	)
 
@@ -75,7 +76,7 @@ func TestComputeEvidence_DetectsNewFailedRuleInsideFailingControl(t *testing.T) 
 	head := reportWithPath("$.spec.hostPID")
 	head.Results[0].AssociatedControls[0].Rules = append(
 		head.Results[0].AssociatedControls[0].Rules,
-		failedRule("disallow-host-ipc", evidencePath{}),
+		failedRule("disallow-host-ipc", evidencePath{ReviewPath: "spec.hostIPC"}),
 	)
 
 	changes := computeReports(t, base, head)
@@ -138,7 +139,7 @@ func TestComputeEvidence_DetectsPathResolvedInsideFailingControl(t *testing.T) {
 	base := reportWithPath("$.spec.hostPID")
 	base.Results[0].AssociatedControls[0].Rules[0].Paths = append(
 		base.Results[0].AssociatedControls[0].Rules[0].Paths,
-		evidencePath{},
+		evidencePath{ReviewPath: "$.spec.hostIPC"},
 	)
 	head := reportWithPath("$.spec.hostPID")
 
@@ -169,8 +170,8 @@ func TestComputeEvidence_ReorderedRulesAndPathsAreUnchanged(t *testing.T) {
 		testControl,
 		"Control",
 		failedRule("rule-a",
-			evidencePath{},
-			evidencePath{},
+			evidencePath{ReviewPath: "$.spec.a"},
+			evidencePath{ReviewPath: "$.spec.b"},
 		),
 		failedRule("rule-b",
 			evidencePath{ReviewPath: "$.spec.c"},
@@ -183,8 +184,8 @@ func TestComputeEvidence_ReorderedRulesAndPathsAreUnchanged(t *testing.T) {
 			evidencePath{ReviewPath: ".spec.c"},
 		),
 		failedRule("rule-a",
-			evidencePath{},
-			evidencePath{},
+			evidencePath{ReviewPath: ".spec.a"},
+			evidencePath{ReviewPath: ".spec.b"},
 		),
 	)
 
@@ -239,7 +240,7 @@ func TestComputeEvidence_PathlessFailedRulesCompareByRuleName(t *testing.T) {
 	assert.Equal(t, "existing-rule", changes.Unchanged[0].RuleName)
 }
 
-func TestComputeEvidence_ReviewAndFailedPathsAreDifferentEvidence(t *testing.T) {
+func TestComputeEvidence_ReviewAndDeletePathsAreDifferentEvidence(t *testing.T) {
 	base := evidenceReport(testResource, failedControlWithRules(
 		testControl,
 		"Control",
@@ -248,13 +249,13 @@ func TestComputeEvidence_ReviewAndFailedPathsAreDifferentEvidence(t *testing.T) 
 	head := evidenceReport(testResource, failedControlWithRules(
 		testControl,
 		"Control",
-		failedRule(testRule, evidencePath{}),
+		failedRule(testRule, evidencePath{DeletePath: "$.spec.hostPID"}),
 	))
 
 	changes := computeReports(t, base, head)
 
 	require.Len(t, changes.New, 1)
-	assert.Equal(t, evidenceTypeReviewPath, changes.New[0].EvidenceType)
+	assert.Equal(t, evidenceTypeDeletePath, changes.New[0].EvidenceType)
 	require.Len(t, changes.Resolved, 1)
 	assert.Equal(t, evidenceTypeReviewPath, changes.Resolved[0].EvidenceType)
 	assert.Empty(t, changes.Unchanged)
@@ -491,7 +492,7 @@ func TestComputeEvidence_BothFailedNewEvidenceHonorsBaseCoverageSafety(t *testin
 	head := reportWithPath("$.spec.hostPID")
 	head.Results[0].AssociatedControls[0].Rules[0].Paths = append(
 		head.Results[0].AssociatedControls[0].Rules[0].Paths,
-		evidencePath{},
+		evidencePath{ReviewPath: "$.spec.hostIPC"},
 	)
 
 	changes := computeReports(t, base, head)
@@ -507,7 +508,7 @@ func TestComputeEvidence_BothFailedResolvedEvidenceHonorsHeadCoverageSafety(t *t
 	base := reportWithPath("$.spec.hostPID")
 	base.Results[0].AssociatedControls[0].Rules[0].Paths = append(
 		base.Results[0].AssociatedControls[0].Rules[0].Paths,
-		evidencePath{},
+		evidencePath{ReviewPath: "$.spec.hostIPC"},
 	)
 	head := reportWithPath("$.spec.hostPID")
 	head.ScanCoverage.NotEvaluatedControls = []notEvaluatedControl{{ControlID: testControl, Reason: "timeout"}}
@@ -525,7 +526,7 @@ func TestComputeEvidence_BothFailedResolvedEvidenceHonorsRuleSubStatus(t *testin
 	base := reportWithPath("$.spec.hostPID")
 	base.Results[0].AssociatedControls[0].Rules[0].Paths = append(
 		base.Results[0].AssociatedControls[0].Rules[0].Paths,
-		evidencePath{},
+		evidencePath{ReviewPath: "$.spec.hostIPC"},
 	)
 	head := reportWithPath("$.spec.hostPID")
 	head.Results[0].AssociatedControls[0].Rules[0].SubStatus = "notEvaluated"
@@ -750,13 +751,13 @@ func TestComputeEvidence_DeterministicEvidenceOrder(t *testing.T) {
 	base := evidenceReport(testResource, failedControlWithRules(
 		testControl,
 		"Control",
-		failedRule("z-rule", evidencePath{}),
-		failedRule("a-rule", evidencePath{}),
+		failedRule("z-rule", evidencePath{ReviewPath: "$.z"}),
+		failedRule("a-rule", evidencePath{ReviewPath: "$.a"}),
 	))
 	head := evidenceReport(testResource, failedControlWithRules(
 		testControl,
 		"Control",
-		failedRule("m-rule", evidencePath{}),
+		failedRule("m-rule", evidencePath{ReviewPath: "$.m"}),
 		failedRule("b-rule", evidencePath{ReviewPath: "$.b"}),
 	))
 

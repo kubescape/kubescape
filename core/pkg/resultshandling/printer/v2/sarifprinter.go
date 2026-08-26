@@ -179,6 +179,9 @@ func resolveReviewPathLocations(opaSessionObj *cautils.OPASessionObj, locationRe
 
 	var locations map[string]locationresolver.Location
 	for i := range ac.ResourceAssociatedRules {
+		if !ac.ResourceAssociatedRules[i].GetStatus(nil).IsFailed() {
+			continue
+		}
 		for _, p := range ac.ResourceAssociatedRules[i].Paths {
 			if p.ReviewPath == "" {
 				continue
