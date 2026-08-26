@@ -321,30 +321,29 @@ func indexUnique(index map[string]*VAP, duplicates map[string]struct{}, key stri
 
 // newVAP flattens a parsed policy into the evaluator's structs. The message and
 // messageExpression travel with each validation so the evaluator can resolve the
-// violation message the same way the apiserver does. matchConditions are carried
-// so the evaluator can honor the gate before running any validation.
+// violation message the same way the apiserver does. matchConditions and
+// matchConstraints are carried so the evaluator can honor the gate and scope
+// evaluation to the GVKs the policy applies to (see appliesTo).
 //
-// spec.matchConstraints is kept so the scan can scope evaluation to the kinds
-// the policy actually applies to (see appliesTo); without it a non-matching
-// object slips through the validations' self-guards as a pass. spec.failurePolicy
-// is resolved here (the apiserver defaults an omitted policy to Fail) so the
-// evaluator can report a validation whose expression errored as a deny, the
-// parity-safe direction that matches admission.
+// spec.failurePolicy is captured so the evaluator can map eval errors to the
+// same pass/violation outcome the apiserver would.
 func newVAP(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *VAP {
-	failurePolicy := admissionregistrationv1.Fail
-	if policy.Spec.FailurePolicy != nil {
-		failurePolicy = *policy.Spec.FailurePolicy
+	failurePolicy := policy.Spec.FailurePolicy
+	if failurePolicy == nil {
+		defaultPolicy := admissionregistrationv1.Fail
+		failurePolicy = &defaultPolicy
 	}
-
+	matchConditions := make([]MatchCondition, 0, len(policy.Spec.MatchConditions))
+	for _, c := range policy.Spec.MatchConditions {
+		matchConditions = append(matchConditions, MatchCondition{Name: c.Name, Expression: c.Expression})
+	}
 	vap := &VAP{
 		ControlID:        policy.Labels[controlIDLabel],
 		PolicyName:       policy.Name,
-		paramKind:        policy.Spec.ParamKind,
+		failurePolicy:    *failurePolicy,
+		matchConditions:  matchConditions,
 		matchConstraints: policy.Spec.MatchConstraints,
-		failurePolicy:    failurePolicy,
-	}
-	for _, c := range policy.Spec.MatchConditions {
-		vap.matchConditions = append(vap.matchConditions, MatchCondition{Name: c.Name, Expression: c.Expression})
+		paramKind:        policy.Spec.ParamKind,
 	}
 	for _, v := range policy.Spec.Variables {
 		vap.Variables = append(vap.Variables, Variable{Name: v.Name, Expression: v.Expression})
