@@ -23,6 +23,19 @@ type ResourceInfo struct {
 	Labels     map[string]string
 }
 
+// The core/v1 Namespace identity, which a namespaceSelector reads
+// differently from every other kind (see bindingScope.matches).
+const (
+	namespaceAPIVersion = "v1"
+	namespaceKind       = "Namespace"
+)
+
+// isNamespace reports whether the resource is a Namespace object. It carries
+// no metadata.namespace of its own, so scope has to be decided on the kind.
+func (r ResourceInfo) isNamespace() bool {
+	return r.APIVersion == namespaceAPIVersion && r.Kind == namespaceKind
+}
+
 // ResourceCoverage reports whether one specific resource that failed a
 // control actually falls within the scope of a live, bound VAPBinding for
 // that control's policy -- as opposed to merely having *some* binding exist
@@ -121,6 +134,16 @@ func (s *bindingScope) matches(res ResourceInfo, namespaceLabels map[string]stri
 		return false, "objectSelector does not match the resource's labels"
 	}
 	if !s.namespaceSelector.Empty() {
+		if res.isNamespace() {
+			// The namespace a Namespace is "in" is itself, so the selector is
+			// read against the object's own labels. Falling through to the
+			// cluster-scoped arm below covered it unconditionally, which
+			// overstated the reach of a binding that excludes it.
+			if !s.namespaceSelector.Matches(labels.Set(res.Labels)) {
+				return false, "namespaceSelector does not match the namespace's own labels"
+			}
+			return true, ""
+		}
 		if res.Namespace == "" {
 			// A cluster-scoped resource has no namespace whose labels the
 			// selector could be read against, and the apiserver does not
@@ -360,7 +383,7 @@ func CollectFailingResourcesByControl(
 func CollectNamespaceLabels(allResources map[string]workloadinterface.IMetadata) map[string]map[string]string {
 	nsLabels := make(map[string]map[string]string)
 	for _, resource := range allResources {
-		if resource == nil || resource.GetApiVersion() != "v1" || resource.GetKind() != "Namespace" {
+		if resource == nil || resource.GetApiVersion() != namespaceAPIVersion || resource.GetKind() != namespaceKind {
 			continue
 		}
 		name := resource.GetName()
