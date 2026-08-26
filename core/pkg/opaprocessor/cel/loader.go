@@ -321,13 +321,12 @@ func indexUnique(index map[string]*VAP, duplicates map[string]struct{}, key stri
 
 // newVAP flattens a parsed policy into the evaluator's structs. The message and
 // messageExpression travel with each validation so the evaluator can resolve the
-// violation message the same way the apiserver does. matchConditions are carried
-// so the evaluator can honor the gate before running any validation.
+// violation message the same way the apiserver does. matchConditions and
+// matchConstraints are carried so the evaluator can honor the gate and scope
+// evaluation to the GVKs the policy applies to (see appliesTo).
 //
-// spec.matchConstraints is intentionally dropped: offline resource selection is
-// the caller's job (and the bundle's validations already self-guard by
-// object.kind). spec.failurePolicy is captured so the evaluator can map eval
-// errors to the same pass/violation outcome the apiserver would.
+// spec.failurePolicy is captured so the evaluator can map eval errors to the
+// same pass/violation outcome the apiserver would.
 func newVAP(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *VAP {
 	failurePolicy := policy.Spec.FailurePolicy
 	if failurePolicy == nil {
