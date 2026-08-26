@@ -71,7 +71,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	var err error
 
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
-	resolver, discoveryFailures := newDiscoveryResourceResolver(k8sHandler.k8s.DiscoveryClient)
+	resolver, discoveryFailures, discoveredResources := newDiscoveryResourceResolverWithKinds(k8sHandler.k8s.DiscoveryClient)
 	sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, discoveryFailures...)
 
 	if scanInfo.IsDeletedScanObject {
@@ -92,6 +92,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	policyWarnings := make(map[string]struct{})
 	queryableResources, excludedRulesMap := getQueryableResourceMapFromPoliciesWithWarned(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, policyWarnings)
 	filterQueryableResourcesByKind(queryableResources, scanInfo)
+	sessionObj.UnexaminedKinds = computeUnexaminedKinds(discoveredResources, queryableResources)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
 	recordDiscoveryFailureDependencies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, discoveryFailures, resourceToControl, policyWarnings)
 
@@ -259,7 +260,7 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 
 	// Setup phase: collect metadata and queryable resources
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
-	resolver, discoveryFailures := newDiscoveryResourceResolver(k8sHandler.k8s.DiscoveryClient)
+	resolver, discoveryFailures, discoveredResources := newDiscoveryResourceResolverWithKinds(k8sHandler.k8s.DiscoveryClient)
 	sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, discoveryFailures...)
 
 	var setupErr error
@@ -278,6 +279,7 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 	policyWarnings := make(map[string]struct{})
 	queryableResources, excludedRulesMap := getQueryableResourceMapFromPoliciesWithWarned(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, policyWarnings)
 	filterQueryableResourcesByKind(queryableResources, scanInfo)
+	sessionObj.UnexaminedKinds = computeUnexaminedKinds(discoveredResources, queryableResources)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
 	recordDiscoveryFailureDependencies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, discoveryFailures, resourceToControl, policyWarnings)
 	sessionObj.ResourceToControlsMap = resourceToControl

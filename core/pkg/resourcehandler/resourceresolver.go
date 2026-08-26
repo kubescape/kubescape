@@ -198,6 +198,15 @@ type discoveredAPIResource struct {
 // built-in and Kubescape virtual resources retain the existing k8s-interface
 // behavior; unknown CRDs are not guessed into live queries.
 func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resourceResolver, []cautils.PartialGVRPull) {
+	resolver, discoveryFailures, _ := newDiscoveryResourceResolverWithKinds(client)
+	return resolver, discoveryFailures
+}
+
+// newDiscoveryResourceResolverWithKinds is newDiscoveryResourceResolver plus
+// the full set of listable kinds discovery reported, so a caller can compare
+// what the cluster serves against what the policy set actually queried (see
+// computeUnexaminedKinds).
+func newDiscoveryResourceResolverWithKinds(client discovery.DiscoveryInterface) (resourceResolver, []cautils.PartialGVRPull, []discoveredAPIResource) {
 	var discovered []discoveredAPIResource
 	var discoveryFailures []cautils.PartialGVRPull
 	if client != nil {
@@ -293,7 +302,7 @@ func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resource
 				helpers.String("resource", resource))
 		})
 		return nil
-	}, discoveryFailures
+	}, discoveryFailures, discovered
 }
 
 func getDiscoveryFailures(err error) []cautils.PartialGVRPull {

@@ -106,6 +106,7 @@ type OPASessionObj struct {
 	ResourceToControlsMap map[string][]string                // map[<apigroup/apiversion/resource>] = [<control_IDs>]
 	ScanCoverage          ScanCoverage                       // runtime coverage gaps (failed GVR pulls + not-evaluated controls)
 	PartialGVRFailures    []PartialGVRPull                   // per-selector LIST failures for GVRs that were partially collected
+	UnexaminedKinds       []UnexaminedKind                   // cluster-served resource kinds no control in the policy set queried
 	PolicyDegradations    []PolicyDegradation                // policy inputs (control configurations, exceptions) served from a fallback
 	SkippedManifests      []SkippedManifest                  // manifest files skipped during loading (invalid YAML, missing kind, etc.)
 	SessionID             string                             // SessionID
