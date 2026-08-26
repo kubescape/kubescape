@@ -41,7 +41,12 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 
 	// remove data from all objects
 	for i := range opap.AllResources {
-		removeData(opap.AllResources[i])
+		if refsByContainer := removeData(opap.AllResources[i]); len(refsByContainer) > 0 {
+			if opap.EnvVarSecretRefs == nil {
+				opap.EnvVarSecretRefs = make(map[string]map[string]map[string]struct{})
+			}
+			opap.EnvVarSecretRefs[i] = refsByContainer
+		}
 	}
 
 	processor := exceptions.NewProcessor()
@@ -561,18 +566,31 @@ func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 	return modules, nil
 }
 
-func removeData(obj workloadinterface.IMetadata) {
+// removeData strips sensitive data from obj before it reaches results
+// handling. For a Pod-shaped workload, it also returns, per container name,
+// the names of that container's env vars that had a ValueFrom reference
+// (SecretKeyRef, ConfigMapKeyRef, FieldRef, or ResourceFieldRef) before that
+// reference was cleared — never the reference target itself, never the
+// value, only the env var's own name. The anonymizer needs that name to keep
+// anonymizing reference-backed env var names under --hide/--encrypt after
+// this function has already cleared the reference it would otherwise
+// inspect. Keyed by container name rather than merged across the whole pod,
+// since a name shared by an ordinary env var in one container and a
+// reference-backed one in another must not anonymize the ordinary one.
+func removeData(obj workloadinterface.IMetadata) map[string]map[string]struct{} {
 	if !k8sinterface.IsTypeWorkload(obj.GetObject()) {
-		return // remove data only from kubernetes objects
+		return nil // remove data only from kubernetes objects
 	}
 	workload := workloadinterface.NewWorkloadObj(obj.GetObject())
 	switch workload.GetKind() {
 	case "Secret":
 		removeSecretData(workload)
+		return nil
 	case "ConfigMap":
 		removeConfigMapData(workload)
+		return nil
 	default:
-		removePodData(workload)
+		return removePodData(workload)
 	}
 }
 
@@ -612,50 +630,105 @@ func removeSecretData(workload workloadinterface.IWorkload) {
 	overrideStringData(workload)
 }
 
-func removePodData(workload workloadinterface.IWorkload) {
+func removePodData(workload workloadinterface.IWorkload) map[string]map[string]struct{} {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "status")
 
+	var refsByContainer map[string]map[string]struct{}
+	addRefsByContainer := func(byContainer map[string]map[string]struct{}) {
+		if len(byContainer) == 0 {
+			return
+		}
+		if refsByContainer == nil {
+			refsByContainer = make(map[string]map[string]struct{}, len(byContainer))
+		}
+		// Container names are unique across containers/initContainers/
+		// ephemeralContainers within one pod (enforced by the API server),
+		// so a name collision here would mean two container lists disagree
+		// about who owns that name -- not something to silently merge.
+		for name, refs := range byContainer {
+			refsByContainer[name] = refs
+		}
+	}
+
 	// containers
 	if containers, err := workload.GetContainers(); err == nil && len(containers) > 0 {
-		removeContainersData(containers)
+		addRefsByContainer(removeContainersData(containers))
 		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "containers", containers)
 	}
 
 	// init containers
 
 	if initContainers, err := workload.GetInitContainers(); err == nil && len(initContainers) > 0 {
-		removeContainersData(initContainers)
+		addRefsByContainer(removeContainersData(initContainers))
 		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "initContainers", initContainers)
 	}
 
 	// ephemeral containers
 	if ephemeralContainers, err := workload.GetEphemeralContainers(); err == nil && len(ephemeralContainers) > 0 {
-		removeEphemeralContainersData(ephemeralContainers)
+		addRefsByContainer(removeEphemeralContainersData(ephemeralContainers))
 		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "ephemeralContainers", ephemeralContainers)
 	}
+
+	return refsByContainer
 }
 
-func removeContainersData(containers []corev1.Container) {
+// removeContainersData clears each env var's value and reference, returning,
+// per container name, the names of that container's env vars that had a
+// reference before it was cleared (see removeData's doc comment for why
+// only the name is kept, and why this is scoped per container).
+func removeContainersData(containers []corev1.Container) map[string]map[string]struct{} {
+	var refsByContainer map[string]map[string]struct{}
 	for i := range containers {
 		container := &containers[i]
+		var refs map[string]struct{}
 		for j := range container.Env {
+			if container.Env[j].ValueFrom != nil {
+				if refs == nil {
+					refs = make(map[string]struct{})
+				}
+				refs[container.Env[j].Name] = struct{}{}
+			}
 			container.Env[j].Value = "XXXXXX"
 			container.Env[j].ValueFrom = nil
 		}
 		container.EnvFrom = nil
+		if len(refs) > 0 {
+			if refsByContainer == nil {
+				refsByContainer = make(map[string]map[string]struct{})
+			}
+			refsByContainer[container.Name] = refs
+		}
 	}
+	return refsByContainer
 }
-func removeEphemeralContainersData(containers []corev1.EphemeralContainer) {
+
+// removeEphemeralContainersData mirrors removeContainersData for ephemeral containers.
+func removeEphemeralContainersData(containers []corev1.EphemeralContainer) map[string]map[string]struct{} {
+	var refsByContainer map[string]map[string]struct{}
 	for i := range containers {
 		container := &containers[i]
+		var refs map[string]struct{}
 		for j := range container.Env {
+			if container.Env[j].ValueFrom != nil {
+				if refs == nil {
+					refs = make(map[string]struct{})
+				}
+				refs[container.Env[j].Name] = struct{}{}
+			}
 			container.Env[j].Value = "XXXXXX"
 			container.Env[j].ValueFrom = nil
 		}
 		container.EnvFrom = nil
+		if len(refs) > 0 {
+			if refsByContainer == nil {
+				refsByContainer = make(map[string]map[string]struct{})
+			}
+			refsByContainer[container.Name] = refs
+		}
 	}
+	return refsByContainer
 }
 
 func ruleData(rule *reporthandling.PolicyRule) string {

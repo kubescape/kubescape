@@ -1017,7 +1017,7 @@ func TestTransformContainerMetadata(t *testing.T) {
 			transformer := NewMappingTransformer()
 			resource := workloadinterface.NewWorkloadObj(test.object)
 
-			assert.NoError(t, transformContainerMetadata(resource, transformer))
+			assert.NoError(t, transformContainerMetadata(resource, nil, transformer))
 
 			spec, ok := resource.GetObject()["spec"].(map[string]any)
 			assert.True(t, ok, "expected spec to be a map[string]any")
@@ -1028,19 +1028,19 @@ func TestTransformContainerMetadata(t *testing.T) {
 }
 
 func TestTransformContainerMetadata_NilResource(t *testing.T) {
-	assert.NoError(t, transformContainerMetadata(nil, NewMappingTransformer()))
+	assert.NoError(t, transformContainerMetadata(nil, nil, NewMappingTransformer()))
 }
 
 func TestTransformContainerList_MissingKey(t *testing.T) {
 	obj := map[string]any{}
 
-	assert.NoError(t, transformContainerList(obj, "containers", NewMappingTransformer()))
+	assert.NoError(t, transformContainerList(obj, "containers", nil, NewMappingTransformer()))
 }
 
 func TestTransformContainerList_NilValue(t *testing.T) {
 	obj := map[string]any{"containers": nil}
 
-	assert.NoError(t, transformContainerList(obj, "containers", NewMappingTransformer()))
+	assert.NoError(t, transformContainerList(obj, "containers", nil, NewMappingTransformer()))
 }
 
 func TestTransformContainerList_InvalidType(t *testing.T) {
@@ -1048,7 +1048,7 @@ func TestTransformContainerList_InvalidType(t *testing.T) {
 		"containers": "invalid",
 	}
 
-	assert.NoError(t, transformContainerList(obj, "containers", NewMappingTransformer()))
+	assert.NoError(t, transformContainerList(obj, "containers", nil, NewMappingTransformer()))
 }
 
 func TestIsSensitiveEnvName_SeparatorlessVariants(t *testing.T) {
@@ -1093,7 +1093,7 @@ func TestTransformUnstructuredEnv_LeaksAPIKeyValue(t *testing.T) {
 		},
 	}
 
-	assert.NoError(t, transformUnstructuredEnv(container, NewMappingTransformer()))
+	assert.NoError(t, transformUnstructuredEnv(container, nil, NewMappingTransformer()))
 
 	got := container["env"].([]any)[0].(map[string]any)["value"].(string)
 	if got == secret {
@@ -1112,7 +1112,7 @@ func TestTransformContainerList_TypedSlice(t *testing.T) {
 		},
 	}
 
-	assert.NoError(t, transformContainerList(obj, "containers", NewMappingTransformer()))
+	assert.NoError(t, transformContainerList(obj, "containers", nil, NewMappingTransformer()))
 
 	containers, ok := obj["containers"].([]corev1.Container)
 	assert.True(t, ok)
@@ -1133,7 +1133,7 @@ func TestTransformEphemeralContainerList_TypedSlice(t *testing.T) {
 		},
 	}
 
-	assert.NoError(t, transformEphemeralContainerList(obj, "ephemeralContainers", NewMappingTransformer()))
+	assert.NoError(t, transformEphemeralContainerList(obj, "ephemeralContainers", nil, NewMappingTransformer()))
 
 	containers, ok := obj["ephemeralContainers"].([]corev1.EphemeralContainer)
 	assert.True(t, ok)
@@ -1153,7 +1153,7 @@ func TestTransformPodSpecs_TypedContainersFromScanPipeline(t *testing.T) {
 		},
 	}
 
-	assert.NoError(t, transformPodSpecs(obj, NewMappingTransformer()))
+	assert.NoError(t, transformPodSpecs(obj, nil, NewMappingTransformer()))
 
 	spec := obj["spec"].(map[string]any)
 	containers := spec["containers"].([]corev1.Container)
