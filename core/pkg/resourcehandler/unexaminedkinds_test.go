@@ -6,6 +6,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -114,6 +115,90 @@ func TestGetResources_PopulatesUnexaminedKinds(t *testing.T) {
 	}
 	assert.Contains(t, triplets, "gateway.networking.k8s.io/v1/httproutes")
 	assert.Contains(t, triplets, "gateway.networking.k8s.io/v1/gateways")
+}
+
+// TestGetResources_ExcludeKindsIsNotReportedAsUnexamined guards against
+// treating a deliberate --exclude-kinds narrowing as a policy coverage gap. A
+// control matching Deployment exists in the framework; --exclude-kinds
+// Deployment removes it from the query set, but a control did examine it, so
+// it must not show up in UnexaminedKinds.
+func TestGetResources_ExcludeKindsIsNotReportedAsUnexamined(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+	handler := getResourceHandlerMock()
+	discovery := clusterWithGatewayAPIDiscovery()
+	discovery.Resources = append(discovery.Resources, &metav1.APIResourceList{
+		GroupVersion: "apps/v1",
+		APIResources: []metav1.APIResource{
+			{Name: "deployments", Kind: "Deployment", Namespaced: true, Verbs: metav1.Verbs{"get", "list", "watch"}},
+		},
+	})
+	handler.k8s.DiscoveryClient = discovery
+	handler.k8s.DynamicClient = &mockDynamicClient{
+		listFunc: func(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			return &unstructured.UnstructuredList{}, nil
+		},
+	}
+
+	rule := mockRule("rule-a", []reporthandling.RuleMatchObjects{mockMatch(2)}, "")
+	control := mockControl("control-1", []reporthandling.PolicyRule{rule})
+	framework := mockFramework("test", []reporthandling.Control{control})
+
+	scanInfo := &cautils.ScanInfo{ExcludeKinds: "Deployment"}
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+	sessionObj.Policies = append(sessionObj.Policies, *framework)
+
+	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
+	require.NoError(t, err)
+
+	var triplets []string
+	for _, k := range sessionObj.UnexaminedKinds {
+		triplets = append(triplets, k.GroupVersionResource)
+	}
+	assert.NotContains(t, triplets, "apps/v1/deployments",
+		"a control examines Deployment; excluding it via --exclude-kinds must not be reported as a coverage gap")
+}
+
+// TestGetResources_SingleResourceScanSkipsUnexaminedKinds guards the other
+// case matthyx flagged: a single-resource scan deliberately narrows the query
+// set to one object, so it has no cluster-wide coverage question to answer.
+func TestGetResources_SingleResourceScanSkipsUnexaminedKinds(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+	handler := getResourceHandlerMock()
+	handler.k8s.DiscoveryClient = clusterWithGatewayAPIDiscovery()
+	handler.k8s.DynamicClient = &mockDynamicClient{
+		listFunc: func(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			return &unstructured.UnstructuredList{
+				Items: []unstructured.Unstructured{{
+					Object: map[string]any{
+						"apiVersion": "v1",
+						"kind":       "Pod",
+						"metadata":   map[string]any{"name": "test-pod", "namespace": "default"},
+					},
+				}},
+			}, nil
+		},
+	}
+
+	rule := mockRule("rule-a", []reporthandling.RuleMatchObjects{mockMatch(1)}, "")
+	control := mockControl("control-1", []reporthandling.PolicyRule{rule})
+	framework := mockFramework("test", []reporthandling.Control{control})
+
+	scanInfo := &cautils.ScanInfo{
+		ScanObject: &objectsenvelopes.ScanObject{
+			ApiVersion: "v1",
+			Kind:       "Pod",
+			Metadata:   objectsenvelopes.ScanObjectMetadata{Name: "test-pod", Namespace: "default"},
+		},
+	}
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo, nil)
+	sessionObj.Policies = append(sessionObj.Policies, *framework)
+
+	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
+	require.NoError(t, err)
+	require.NotNil(t, sessionObj.SingleResourceScan)
+
+	assert.Empty(t, sessionObj.UnexaminedKinds,
+		"a single-resource scan has no cluster-wide coverage question to answer")
 }
 
 // TestStreamResourcesBatches_PopulatesUnexaminedKinds mirrors
