@@ -1,11 +1,13 @@
 package printer
 
 import (
+	"os"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -730,6 +732,157 @@ func TestAddContainerNameToAssistedRemediation_OutOfBounds(t *testing.T) {
 	}
 }
 
+// TestResourceTable_DoesNotExposeSensitiveData is a regression test ensuring
+// that the verbose per-resource table never emits raw Secret data or container
+// environment values that may hold sensitive information.
+func TestResourceTable_DoesNotExposeSensitiveData(t *testing.T) {
+	tests := []struct {
+		name        string
+		resourceID  string
+		resourceObj map[string]any
+		paths       []armotypes.PosturePaths
+		sensitive   []string
+		showSecrets bool
+	}{
+		{
+			name:       "Secret data is not rendered",
+			resourceID: "/v1/default/Secret/example-secret",
+			resourceObj: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Secret",
+				"metadata": map[string]any{
+					"name":      "example-secret",
+					"namespace": "default",
+				},
+				"data": map[string]any{
+					"password": "PLACEHOLDER_BASE64_001",
+					"username": "PLACEHOLDER_BASE64_002",
+				},
+			},
+			paths: []armotypes.PosturePaths{
+				{FailedPath: "data.password"},
+				{FailedPath: "data.username"},
+			},
+			sensitive:   []string{"PLACEHOLDER_BASE64_001", "PLACEHOLDER_BASE64_002"},
+			showSecrets: false,
+		},
+		{
+			name:       "Pod env value is not rendered",
+			resourceID: "/v1/default/Pod/example-pod",
+			resourceObj: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]any{
+					"name":      "example-pod",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":  "app",
+							"image": "app:latest",
+							"env": []any{
+								map[string]any{
+									"name":  "DB_PASSWORD",
+									"value": "PLACEHOLDER_VALUE_003",
+								},
+								map[string]any{
+									"name": "SECRET_REF",
+									"valueFrom": map[string]any{
+										"secretKeyRef": map[string]any{
+											"name": "PLACEHOLDER_REF_NAME",
+											"key":  "password",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			paths: []armotypes.PosturePaths{
+				{FailedPath: "spec.containers[0].env[0].value"},
+			},
+			sensitive:   []string{"PLACEHOLDER_VALUE_003"},
+			showSecrets: false,
+		},
+		{
+			name:       "Secret data is rendered with --show-secrets",
+			resourceID: "/v1/default/Secret/example-secret",
+			resourceObj: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Secret",
+				"metadata": map[string]any{
+					"name":      "example-secret",
+					"namespace": "default",
+				},
+				"data": map[string]any{
+					"password": "PLACEHOLDER_BASE64_001",
+					"username": "PLACEHOLDER_BASE64_002",
+				},
+			},
+			paths: []armotypes.PosturePaths{
+				{FailedPath: "data.password"},
+				{FailedPath: "data.username"},
+			},
+			sensitive:   []string{"PLACEHOLDER_BASE64_001", "PLACEHOLDER_BASE64_002"},
+			showSecrets: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, err := os.CreateTemp(t.TempDir(), "resource-table-*.txt")
+			assert.NoError(t, err)
+
+			pp := &PrettyPrinter{writer: f, showEvidence: true, showSecrets: tt.showSecrets}
+			resource := workloadinterface.NewWorkloadObj(tt.resourceObj)
+
+			session := cautils.NewOPASessionObjMock()
+			session.AllResources[tt.resourceID] = resource
+			session.ResourcesResult[tt.resourceID] = resourcesresults.Result{
+				ResourceID: tt.resourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: "C-0001",
+						Name:      "Sensitive data exposure",
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+							{
+								Name:   "rule-1",
+								Status: "failed",
+								Paths:  tt.paths,
+							},
+						},
+					},
+				},
+			}
+			session.Report.SummaryDetails = reportsummary.SummaryDetails{
+				Controls: reportsummary.ControlSummaries{
+					"C-0001": {
+						ControlID:   "C-0001",
+						Name:        "Sensitive data exposure",
+						ScoreFactor: 8.0,
+					},
+				},
+			}
+
+			pp.resourceTable(session)
+
+			assert.NoError(t, f.Close())
+			out, err := os.ReadFile(f.Name())
+			assert.NoError(t, err)
+
+			for _, s := range tt.sensitive {
+				if tt.showSecrets {
+					assert.Contains(t, string(out), s, "sensitive value %q must appear when --show-secrets is set", s)
+				} else {
+					assert.NotContains(t, string(out), s, "sensitive value %q must not appear in resource table output", s)
+				}
+			}
+		})
+	}
+}
 func TestAddContainerNameToAssistedRemediation_EdgeCases(t *testing.T) {
 	podWithContainerTypes := workloadinterface.NewWorkloadObj(map[string]any{
 		"kind": "Pod",
