@@ -360,6 +360,7 @@ output:
 | `kubescape_scan_controls_total` | counter | `kubescape.scan.target`, `kubescape.control.status`, `kubescape.severity` |
 | `kubescape_scan_resources_total` | counter | `kubescape.scan.target`, `k8s.resource.kind` |
 | `kubescape_scan_image_vulnerabilities_total` | counter | `kubescape.image`, `kubescape.severity`, `kubescape.vulnerability.fixable` |
+| `kubescape_scan_image_vulnerability_db_age_seconds` | gauge | `kubescape.image` |
 
 `kubescape.vulnerability.fixable` partitions each severity, so summing over it
 gives that severity's total rather than double-counting the fixable findings.

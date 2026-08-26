@@ -31,6 +31,7 @@ const (
 	metricControls          = "kubescape_scan_controls_total"
 	metricComplianceScore   = "kubescape_scan_compliance_score"
 	metricImageVulns        = "kubescape_scan_image_vulnerabilities_total"
+	metricImageVulnDBAge    = "kubescape_scan_image_vulnerability_db_age_seconds"
 )
 
 const (
@@ -58,6 +59,8 @@ type ImageOutcome struct {
 	// either without a second instrument.
 	BySeverity        map[string]int64
 	FixableBySeverity map[string]int64
+	VulnDBBuilt       time.Time
+	HasVulnDBBuilt    bool
 }
 
 // ScanOutcome is the complete set of scan-level measurements recorded once per
@@ -83,6 +86,7 @@ type scanInstruments struct {
 	controls          metric.Int64Counter
 	complianceScore   metric.Float64Gauge
 	imageVulns        metric.Int64Counter
+	imageVulnDBAge    metric.Int64Gauge
 }
 
 var (
@@ -140,6 +144,14 @@ func initScanInstruments() {
 		metric.WithDescription("Vulnerabilities found in scanned images, by severity and fixability"),
 	); err != nil {
 		logger.L().Debug("failed to register instrument", helpers.String("name", metricImageVulns), helpers.Error(err))
+	}
+
+	if built.imageVulnDBAge, err = meter.Int64Gauge(
+		metricImageVulnDBAge,
+		metric.WithUnit("s"),
+		metric.WithDescription("Age of the vulnerability database used for image scanning"),
+	); err != nil {
+		logger.L().Debug("failed to register instrument", helpers.String("name", metricImageVulnDBAge), helpers.Error(err))
 	}
 
 	instrumentsMu.Lock()
@@ -206,6 +218,9 @@ func RecordScan(ctx context.Context, outcome ScanOutcome) {
 	if active.imageVulns != nil {
 		recordImages(ctx, active.imageVulns, outcome.Images)
 	}
+	if active.imageVulnDBAge != nil {
+		recordImageDBAge(ctx, active.imageVulnDBAge, outcome.Images, time.Now())
+	}
 }
 
 type controlKey struct {
@@ -263,6 +278,24 @@ func addImageCount(ctx context.Context, counter metric.Int64Counter, image, seve
 		attribute.String(attrSeverity, normalize(severity)),
 		attribute.Bool(attrFixable, fixable),
 	))
+}
+
+func recordImageDBAge(ctx context.Context, gauge metric.Int64Gauge, images []ImageOutcome, now time.Time) {
+	for _, image := range images {
+		if !image.HasVulnDBBuilt || image.VulnDBBuilt.IsZero() {
+			continue
+		}
+		gauge.Record(ctx, vulnDBAgeSeconds(now, image.VulnDBBuilt), metric.WithAttributes(
+			attribute.String(attrImage, normalize(image.Image)),
+		))
+	}
+}
+
+func vulnDBAgeSeconds(now, built time.Time) int64 {
+	if built.IsZero() || now.Before(built) {
+		return 0
+	}
+	return int64(now.Sub(built).Seconds())
 }
 
 // normalize keeps attribute cardinality predictable: values are lowercased and

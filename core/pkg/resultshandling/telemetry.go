@@ -1,6 +1,8 @@
 package resultshandling
 
 import (
+	"time"
+
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/telemetry"
@@ -81,6 +83,7 @@ func buildImageOutcomes(imageScanData []cautils.ImageScanData, redact bool) []te
 	outcomes := make([]telemetry.ImageOutcome, 0, len(imageScanData))
 	for _, data := range imageScanData {
 		outcome := newImageOutcome(data.Image)
+		setVulnDBBuilt(&outcome, data.VulnDBBuilt)
 		countMatches(&outcome, data)
 		outcomes = append(outcomes, outcome)
 	}
@@ -90,6 +93,7 @@ func buildImageOutcomes(imageScanData []cautils.ImageScanData, redact bool) []te
 func aggregateImages(imageScanData []cautils.ImageScanData) telemetry.ImageOutcome {
 	outcome := newImageOutcome("")
 	for _, data := range imageScanData {
+		setOldestVulnDBBuilt(&outcome, data.VulnDBBuilt)
 		countMatches(&outcome, data)
 	}
 	return outcome
@@ -116,5 +120,22 @@ func countMatches(outcome *telemetry.ImageOutcome, data cautils.ImageScanData) {
 		if m.Vulnerability.Fix.State == vulnerability.FixStateFixed {
 			outcome.FixableBySeverity[severity]++
 		}
+	}
+}
+
+func setVulnDBBuilt(outcome *telemetry.ImageOutcome, built *time.Time) {
+	if built == nil || built.IsZero() {
+		return
+	}
+	outcome.VulnDBBuilt = built.UTC()
+	outcome.HasVulnDBBuilt = true
+}
+
+func setOldestVulnDBBuilt(outcome *telemetry.ImageOutcome, built *time.Time) {
+	if built == nil || built.IsZero() {
+		return
+	}
+	if !outcome.HasVulnDBBuilt || built.Before(outcome.VulnDBBuilt) {
+		setVulnDBBuilt(outcome, built)
 	}
 }

@@ -72,6 +72,28 @@ func sumFor(t *testing.T, m metricdata.Metrics, want map[string]string) int64 {
 	return total
 }
 
+func gaugeValueFor(t *testing.T, m metricdata.Metrics, want map[string]string) (int64, bool) {
+	t.Helper()
+
+	gauge, ok := m.Data.(metricdata.Gauge[int64])
+	require.True(t, ok, "metric %s is not an int64 gauge", m.Name)
+
+	for _, point := range gauge.DataPoints {
+		matches := true
+		for key, value := range want {
+			actual, found := point.Attributes.Value(attribute.Key(key))
+			if !found || actual.String() != value {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return point.Value, true
+		}
+	}
+	return 0, false
+}
+
 func TestRecordScanWithoutSetupIsNoop(t *testing.T) {
 	resetScanInstruments()
 
@@ -163,6 +185,48 @@ func TestRecordScanExportsImageVulnerabilities(t *testing.T) {
 	// Summing across the fixable dimension recovers the true totals.
 	assert.Equal(t, int64(4), sumFor(t, vulns, map[string]string{attrSeverity: "critical"}))
 	assert.Equal(t, int64(13), sumFor(t, vulns, map[string]string{attrImage: "nginx:1.25"}))
+}
+
+func TestRecordScanExportsImageVulnDBAge(t *testing.T) {
+	reader := newTestMeterProvider(t)
+	built := time.Now().Add(-2 * time.Hour).UTC()
+
+	RecordScan(context.Background(), ScanOutcome{
+		Target: "image",
+		Images: []ImageOutcome{
+			{
+				Image:             "nginx:1.25",
+				BySeverity:        map[string]int64{"Critical": 1},
+				FixableBySeverity: map[string]int64{},
+				VulnDBBuilt:       built,
+				HasVulnDBBuilt:    true,
+			},
+		},
+	})
+
+	dbAge, ok := collect(t, reader)[metricImageVulnDBAge]
+	require.True(t, ok, "image vulnerability DB age was not exported")
+
+	age, found := gaugeValueFor(t, dbAge, map[string]string{attrImage: "nginx:1.25"})
+	require.True(t, found, "image DB age point was not exported")
+	assert.GreaterOrEqual(t, age, int64((2 * time.Hour).Seconds()))
+	assert.Less(t, age, int64((2*time.Hour + time.Minute).Seconds()))
+}
+
+func TestRecordScanSkipsMissingImageVulnDBAge(t *testing.T) {
+	reader := newTestMeterProvider(t)
+
+	RecordScan(context.Background(), ScanOutcome{
+		Target: "image",
+		Images: []ImageOutcome{{
+			Image:             "nginx:1.25",
+			BySeverity:        map[string]int64{"High": 1},
+			FixableBySeverity: map[string]int64{},
+		}},
+	})
+
+	metrics := collect(t, reader)
+	assert.NotContains(t, metrics, metricImageVulnDBAge)
 }
 
 func TestRecordScanClampsFixableAboveTotal(t *testing.T) {
