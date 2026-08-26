@@ -75,10 +75,10 @@ func NewDefaultDBConfig(grypeURL string, skipDBUpdate bool) (distribution.Config
 	shouldUpdate := !skipDBUpdate
 
 	return distribution.Config{
-			LatestURL: finalURL,
-		}, installation.Config{
-			DBRootDir: dir,
-		}, shouldUpdate, nil
+		LatestURL: finalURL,
+	}, installation.Config{
+		DBRootDir: dir,
+	}, shouldUpdate, nil
 }
 
 func getMatchers(useDefaultMatchers bool) []match.Matcher {
