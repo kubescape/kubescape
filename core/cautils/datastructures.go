@@ -132,6 +132,15 @@ type OPASessionObj struct {
 	// resultshandling after VAPPolicies/VAPBindings are enriched into the
 	// report, keyed by control ID.
 	VAPCoverage map[string]*vapreconcile.ControlCoverage
+
+	// EnvVarSecretRefs records, per resource ID, which container env var
+	// names had a ValueFrom reference (SecretKeyRef/ConfigMapKeyRef/FieldRef/
+	// ResourceFieldRef) before updateResults's removeData step clears
+	// ValueFrom and overwrites Value. It deliberately holds only the env var
+	// name, never the reference target or value, so the anonymizer can still
+	// recognize which env var names to anonymize under --hide/--encrypt
+	// after the scrub, without the scrub itself retaining anything sensitive.
+	EnvVarSecretRefs map[string]map[string]struct{}
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *OPASessionObj {

@@ -175,6 +175,60 @@ func TestRemoveData(t *testing.T) {
 	}
 }
 
+// TestRemoveData_ReturnsReferenceBackedEnvVarNamesOnly guards the contract
+// removeData/removePodData/removeContainersData now carry for kubescape#3567:
+// the only signal that survives the scrub for a reference-backed env var is
+// its name, never the reference target or a plain env var's name.
+func TestRemoveData_ReturnsReferenceBackedEnvVarNamesOnly(t *testing.T) {
+	raw := `{
+		"apiVersion": "v1",
+		"kind": "Pod",
+		"metadata": {"name": "app", "namespace": "default"},
+		"spec": {
+			"containers": [{
+				"name": "c1",
+				"env": [
+					{"name": "DB_PASSWORD", "valueFrom": {"secretKeyRef": {"name": "creds", "key": "password"}}},
+					{"name": "LOG_LEVEL", "value": "debug"}
+				]
+			}],
+			"initContainers": [{
+				"name": "init",
+				"env": [
+					{"name": "INIT_TOKEN", "valueFrom": {"configMapKeyRef": {"name": "cfg", "key": "token"}}}
+				]
+			}]
+		}
+	}`
+
+	obj, err := workloadinterface.NewWorkload([]byte(raw))
+	require.NoError(t, err)
+
+	refNames := removeData(obj)
+
+	require.Len(t, refNames, 2, "must record exactly the reference-backed names across containers and init containers, nothing else")
+	_, hasDBPassword := refNames["DB_PASSWORD"]
+	_, hasInitToken := refNames["INIT_TOKEN"]
+	assert.True(t, hasDBPassword)
+	assert.True(t, hasInitToken)
+	_, hasLogLevel := refNames["LOG_LEVEL"]
+	assert.False(t, hasLogLevel, "an ordinary env var's name must not be recorded")
+}
+
+// TestRemoveData_SecretAndConfigMapReturnNil documents that removeData's new
+// return value is specific to Pod-shaped workloads: Secret/ConfigMap scrubbing
+// has no env vars to report on.
+func TestRemoveData_SecretAndConfigMapReturnNil(t *testing.T) {
+	for _, raw := range []string{
+		`{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s","namespace":"default"},"type":"Opaque","data":{"k":"v"}}`,
+		`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"c","namespace":"default"},"data":{"k":"v"}}`,
+	} {
+		obj, err := workloadinterface.NewWorkload([]byte(raw))
+		require.NoError(t, err)
+		assert.Nil(t, removeData(obj))
+	}
+}
+
 func TestRemoveSecretData(t *testing.T) {
 	t.Run("stringData values are redacted", func(t *testing.T) {
 		raw := `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s","namespace":"default"},"type":"Opaque","stringData":{"token":"supersecret","apiKey":"abc123"}}`
