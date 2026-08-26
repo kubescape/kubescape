@@ -14,16 +14,20 @@ const (
 )
 
 // splitNamespaces parses a comma-separated namespace list (as passed to
-// --include-namespaces / --exclude-namespaces) into a clean slice. Empty
-// entries and surrounding whitespace are dropped.
+// --include-namespaces / --exclude-namespaces) into a deduplicated slice.
+// Empty entries, surrounding whitespace, and duplicate values are dropped.
 func splitNamespaces(s string) []string {
 	if s == "" {
 		return nil
 	}
+	seen := make(map[string]struct{})
 	var out []string
 	for p := range strings.SplitSeq(s, ",") {
 		if v := strings.TrimSpace(p); v != "" {
-			out = append(out, v)
+			if _, exists := seen[v]; !exists {
+				seen[v] = struct{}{}
+				out = append(out, v)
+			}
 		}
 	}
 	return out
