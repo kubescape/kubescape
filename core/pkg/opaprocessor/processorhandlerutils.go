@@ -2,6 +2,8 @@ package opaprocessor
 
 import (
 	"context"
+	"errors"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -39,7 +41,12 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 
 	// remove data from all objects
 	for i := range opap.AllResources {
-		removeData(opap.AllResources[i])
+		if refsByContainer := removeData(opap.AllResources[i]); len(refsByContainer) > 0 {
+			if opap.EnvVarSecretRefs == nil {
+				opap.EnvVarSecretRefs = make(map[string]map[string]map[string]struct{})
+			}
+			opap.EnvVarSecretRefs[i] = refsByContainer
+		}
 	}
 
 	processor := exceptions.NewProcessor()
@@ -264,18 +271,24 @@ func inlineExceptionFromResource(obj workloadinterface.IMetadata, clusterName st
 		policies = append(policies, armotypes.PosturePolicy{ControlID: c})
 	}
 
+	// The exceptions processor matches designator attributes as anchored
+	// regular expressions. These values are the resource's own literal
+	// identity, so they must be quoted: a name containing a regex
+	// metacharacter (a dot is legal in an RFC 1123 subdomain) would otherwise
+	// also suppress the annotated control on sibling resources whose names
+	// differ only where that metacharacter sits.
 	attrs := map[string]string{}
 	if name := obj.GetName(); name != "" {
-		attrs["name"] = name
+		attrs["name"] = regexp.QuoteMeta(name)
 	}
 	if kind := obj.GetKind(); kind != "" {
-		attrs["kind"] = kind
+		attrs["kind"] = regexp.QuoteMeta(kind)
 	}
 	if ns := obj.GetNamespace(); ns != "" {
-		attrs["namespace"] = ns
+		attrs["namespace"] = regexp.QuoteMeta(ns)
 	}
 	if id := obj.GetID(); id != "" {
-		attrs["resourceID"] = id
+		attrs["resourceID"] = regexp.QuoteMeta(id)
 	}
 
 	var reasonPtr *string
@@ -553,18 +566,31 @@ func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 	return modules, nil
 }
 
-func removeData(obj workloadinterface.IMetadata) {
+// removeData strips sensitive data from obj before it reaches results
+// handling. For a Pod-shaped workload, it also returns, per container name,
+// the names of that container's env vars that had a ValueFrom reference
+// (SecretKeyRef, ConfigMapKeyRef, FieldRef, or ResourceFieldRef) before that
+// reference was cleared — never the reference target itself, never the
+// value, only the env var's own name. The anonymizer needs that name to keep
+// anonymizing reference-backed env var names under --hide/--encrypt after
+// this function has already cleared the reference it would otherwise
+// inspect. Keyed by container name rather than merged across the whole pod,
+// since a name shared by an ordinary env var in one container and a
+// reference-backed one in another must not anonymize the ordinary one.
+func removeData(obj workloadinterface.IMetadata) map[string]map[string]struct{} {
 	if !k8sinterface.IsTypeWorkload(obj.GetObject()) {
-		return // remove data only from kubernetes objects
+		return nil // remove data only from kubernetes objects
 	}
 	workload := workloadinterface.NewWorkloadObj(obj.GetObject())
 	switch workload.GetKind() {
 	case "Secret":
 		removeSecretData(workload)
+		return nil
 	case "ConfigMap":
 		removeConfigMapData(workload)
+		return nil
 	default:
-		removePodData(workload)
+		return removePodData(workload)
 	}
 }
 
@@ -604,50 +630,105 @@ func removeSecretData(workload workloadinterface.IWorkload) {
 	overrideStringData(workload)
 }
 
-func removePodData(workload workloadinterface.IWorkload) {
+func removePodData(workload workloadinterface.IWorkload) map[string]map[string]struct{} {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "status")
 
+	var refsByContainer map[string]map[string]struct{}
+	addRefsByContainer := func(byContainer map[string]map[string]struct{}) {
+		if len(byContainer) == 0 {
+			return
+		}
+		if refsByContainer == nil {
+			refsByContainer = make(map[string]map[string]struct{}, len(byContainer))
+		}
+		// Container names are unique across containers/initContainers/
+		// ephemeralContainers within one pod (enforced by the API server),
+		// so a name collision here would mean two container lists disagree
+		// about who owns that name -- not something to silently merge.
+		for name, refs := range byContainer {
+			refsByContainer[name] = refs
+		}
+	}
+
 	// containers
 	if containers, err := workload.GetContainers(); err == nil && len(containers) > 0 {
-		removeContainersData(containers)
+		addRefsByContainer(removeContainersData(containers))
 		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "containers", containers)
 	}
 
 	// init containers
 
 	if initContainers, err := workload.GetInitContainers(); err == nil && len(initContainers) > 0 {
-		removeContainersData(initContainers)
+		addRefsByContainer(removeContainersData(initContainers))
 		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "initContainers", initContainers)
 	}
 
 	// ephemeral containers
 	if ephemeralContainers, err := workload.GetEphemeralContainers(); err == nil && len(ephemeralContainers) > 0 {
-		removeEphemeralContainersData(ephemeralContainers)
+		addRefsByContainer(removeEphemeralContainersData(ephemeralContainers))
 		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "ephemeralContainers", ephemeralContainers)
 	}
+
+	return refsByContainer
 }
 
-func removeContainersData(containers []corev1.Container) {
+// removeContainersData clears each env var's value and reference, returning,
+// per container name, the names of that container's env vars that had a
+// reference before it was cleared (see removeData's doc comment for why
+// only the name is kept, and why this is scoped per container).
+func removeContainersData(containers []corev1.Container) map[string]map[string]struct{} {
+	var refsByContainer map[string]map[string]struct{}
 	for i := range containers {
 		container := &containers[i]
+		var refs map[string]struct{}
 		for j := range container.Env {
+			if container.Env[j].ValueFrom != nil {
+				if refs == nil {
+					refs = make(map[string]struct{})
+				}
+				refs[container.Env[j].Name] = struct{}{}
+			}
 			container.Env[j].Value = "XXXXXX"
 			container.Env[j].ValueFrom = nil
 		}
 		container.EnvFrom = nil
+		if len(refs) > 0 {
+			if refsByContainer == nil {
+				refsByContainer = make(map[string]map[string]struct{})
+			}
+			refsByContainer[container.Name] = refs
+		}
 	}
+	return refsByContainer
 }
-func removeEphemeralContainersData(containers []corev1.EphemeralContainer) {
+
+// removeEphemeralContainersData mirrors removeContainersData for ephemeral containers.
+func removeEphemeralContainersData(containers []corev1.EphemeralContainer) map[string]map[string]struct{} {
+	var refsByContainer map[string]map[string]struct{}
 	for i := range containers {
 		container := &containers[i]
+		var refs map[string]struct{}
 		for j := range container.Env {
+			if container.Env[j].ValueFrom != nil {
+				if refs == nil {
+					refs = make(map[string]struct{})
+				}
+				refs[container.Env[j].Name] = struct{}{}
+			}
 			container.Env[j].Value = "XXXXXX"
 			container.Env[j].ValueFrom = nil
 		}
 		container.EnvFrom = nil
+		if len(refs) > 0 {
+			if refsByContainer == nil {
+				refsByContainer = make(map[string]map[string]struct{})
+			}
+			refsByContainer[container.Name] = refs
+		}
 	}
+	return refsByContainer
 }
 
 func ruleData(rule *reporthandling.PolicyRule) string {
@@ -657,6 +738,18 @@ func ruleData(rule *reporthandling.PolicyRule) string {
 func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
 	return rule.ResourceEnumerator
 }
+
+// errIncludeControlsNoMatch is returned when --include-controls is set but
+// none of the requested IDs exist in the loaded frameworks. Returning a hard
+// error (instead of silently excluding every control and yielding 0 results
+// with exit 0) preserves CI-gate integrity: a typo like --include-controls
+// C-9999 must fail the scan, not pass it.
+var errIncludeControlsNoMatch = errors.New("--include-controls matched no known control")
+
+// errNoControlsAfterFilter is returned when --include-controls/--skip-controls
+// together filter out every control, mirroring policyhandler.excludeControls'
+// errAllControlsExcluded guard for --exclude-controls.
+var errNoControlsAfterFilter = errors.New("--include-controls/--skip-controls left no controls to scan")
 
 // buildControlExcludedRules merges the existing rule-exclusion map with any
 // --skip-controls or --include-controls filters. The resulting map marks
@@ -669,14 +762,14 @@ func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
 // --include-controls treats "not in the include set" as "exclude", a single
 // mistyped case produces a silently empty scan instead of the requested
 // control.
-func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling.Framework, skip, include []string) map[string]bool {
+func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling.Framework, skip, include []string) (map[string]bool, error) {
 	excludedRules := make(map[string]bool, len(base)+4)
 	for k, v := range base {
 		excludedRules[k] = v
 	}
 
 	if len(skip) == 0 && len(include) == 0 {
-		return excludedRules
+		return excludedRules, nil
 	}
 
 	skipSet := make(map[string]struct{}, len(skip))
@@ -707,13 +800,25 @@ func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling
 			logger.L().Warning("skip control not found in loaded policies", helpers.String("control", id))
 		}
 	}
-	for id := range includeSet {
-		if _, ok := knownIDs[id]; !ok {
-			logger.L().Warning("include control not found in loaded policies", helpers.String("control", id))
+	// include-controls is a whitelist: if the caller asked for specific
+	// controls but none of them exist, failing open with 0 controls and
+	// exit 0 breaks CI gates. Treat "no include matched" as a hard error,
+	// mirroring policyhandler.excludeControls' errAllControlsExcluded.
+	if len(includeSet) > 0 {
+		matchedInclude := 0
+		for id := range includeSet {
+			if _, ok := knownIDs[id]; ok {
+				matchedInclude++
+			} else {
+				logger.L().Warning("include control not found in loaded policies", helpers.String("control", id))
+			}
+		}
+		if matchedInclude == 0 {
+			return nil, errIncludeControlsNoMatch
 		}
 	}
 
-	if len(include) > 0 {
+	if len(includeSet) > 0 {
 		for _, fw := range frameworks {
 			for i := range fw.Controls {
 				if _, keep := includeSet[strings.ToLower(fw.Controls[i].ControlID)]; keep {
@@ -737,5 +842,31 @@ func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling
 		}
 	}
 
-	return excludedRules
+	// Guard against a filter that leaves nothing to scan. This can happen
+	// when --include-controls names only controls that are then removed by
+	// --skip-controls, or when --skip-controls alone excludes every loaded
+	// control. Mirroring excludeControls' remaining==0 check prevents a
+	// 0-control, 0-failure, exit-0 scan that silently passes a CI gate.
+	if countRemainingControls(frameworks, excludedRules) == 0 {
+		return nil, errNoControlsAfterFilter
+	}
+
+	return excludedRules, nil
+}
+
+// countRemainingControls returns the number of controls that still have at
+// least one rule not marked excluded.
+func countRemainingControls(frameworks []reporthandling.Framework, excludedRules map[string]bool) int {
+	count := 0
+	for _, fw := range frameworks {
+		for i := range fw.Controls {
+			for r := range fw.Controls[i].Rules {
+				if !excludedRules[fw.Controls[i].Rules[r].Name] {
+					count++
+					break
+				}
+			}
+		}
+	}
+	return count
 }

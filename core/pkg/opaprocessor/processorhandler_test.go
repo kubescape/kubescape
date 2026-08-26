@@ -5,11 +5,13 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"reflect"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/opa-utils/resources"
@@ -1100,4 +1103,92 @@ func TestCELNamespaceObjectFor(t *testing.T) {
 		assert.Nil(t, (&OPAProcessor{}).celNamespaceObjectFor(podIn("prod")))
 		assert.Nil(t, NewOPAProcessor(nil, nil, "", "", "", false, nil).celNamespaceObjectFor(podIn("prod")))
 	})
+}
+
+// TestHasUnreachableDependency_GVRPullFailureGuard pins the mixed-purpose
+// InfoMap guard: only a whole-GVR pull failure (keyed by GVR string AND
+// listed in the control's dependency set) counts as an unreachable
+// dependency; per-resource eval skips keyed by resource ID must not match.
+func TestHasUnreachableDependency_GVRPullFailureGuard(t *testing.T) {
+	opap := NewOPAProcessor(&cautils.OPASessionObj{
+		InfoMap: map[string]apis.StatusInfo{
+			"apps/v1/deployments": {InnerStatus: apis.StatusSkipped},
+			"/v1/pods":            {InnerStatus: apis.StatusSkipped},
+		},
+		ResourceToControlsMap: map[string][]string{
+			"apps/v1/deployments": {"C-0001"},
+			"/v1/secrets":         {"C-0002"},
+		},
+	}, nil, "test", "", "", false, nil)
+
+	assert.True(t, opap.hasUnreachableDependency("C-0001"),
+		"control depending on a skipped GVR must report an unreachable dependency")
+	assert.False(t, opap.hasUnreachableDependency("C-0002"),
+		"a per-resource skip keyed by resource ID must not be mistaken for a GVR pull failure")
+	assert.False(t, opap.hasUnreachableDependency("C-9999"),
+		"control with no dependencies must report no unreachable dependency")
+}
+
+// TestHasUnreachableDependency_ConcurrentWithSkipWrites is a -race regression
+// test for #3562: hasUnreachableDependency used to read opap.InfoMap without
+// holding opap.mu while concurrent processScope workers wrote that same map
+// through markResourcesSkipped/seedCELSkips on the rule-error path, aborting
+// scans with "fatal error: concurrent map read and map write". The test
+// hammers exactly that read/write pair concurrently — wide write windows
+// (many resources per markResourcesSkipped call) and frequent reads — so a
+// run under -race trips quickly if the read ever loses its guard again.
+func TestHasUnreachableDependency_ConcurrentWithSkipWrites(t *testing.T) {
+	opap := NewOPAProcessor(&cautils.OPASessionObj{
+		InfoMap:               make(map[string]apis.StatusInfo),
+		ResourceToControlsMap: make(map[string][]string),
+	}, nil, "test", "", "", false, nil)
+
+	// Seed several dependency mappings so every reader iteration does real
+	// map work rather than falling out of the loop immediately.
+	for i := 0; i < 8; i++ {
+		gvr := fmt.Sprintf("apps/v1/deployments-set%d", i)
+		opap.ResourceToControlsMap[gvr] = []string{"C-0001", "C-0002"}
+	}
+
+	// Many input resources per call widens the write window: each
+	// markResourcesSkipped call takes and releases mu once per resource.
+	const resourcesPerWrite = 200
+	inputResources := make([]workloadinterface.IMetadata, 0, resourcesPerWrite)
+	for i := 0; i < resourcesPerWrite; i++ {
+		inputResources = append(inputResources, workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"name":      fmt.Sprintf("pod-%d", i),
+				"namespace": "default",
+			},
+		}))
+	}
+	erroringRule := &reporthandling.PolicyRule{PortalBase: armotypes.PortalBase{Name: "simulated-erroring-rule"}}
+
+	var wg sync.WaitGroup
+	const writers = 4
+	const readers = 4
+
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out := make(map[string]*resourcesresults.ResourceAssociatedRule)
+			for i := 0; i < 25; i++ {
+				opap.markResourcesSkipped(out, erroringRule, resources.RegoDependenciesData{}, inputResources, errors.New("simulated evaluation failure"))
+			}
+		}()
+	}
+	for r := 0; r < readers; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 500; i++ {
+				opap.hasUnreachableDependency("C-0001")
+				opap.hasUnreachableDependency("C-0002")
+			}
+		}()
+	}
+	wg.Wait()
 }

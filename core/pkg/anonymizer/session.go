@@ -46,8 +46,11 @@ func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Tr
 
 		// Container-related metadata is transformed separately to preserve the
 		// existing typed/unstructured traversal behavior while supporting
-		// multiple transformation strategies.
-		if err := transformContainerMetadata(resource, transformer); err != nil {
+		// multiple transformation strategies. session.EnvVarSecretRefs[oldID]
+		// is nil for a resource whose removeData pass found no reference-backed
+		// env vars; transformTypedEnv/transformUnstructuredEnv treat that the
+		// same as "no additional names to anonymize", which is correct.
+		if err := transformContainerMetadata(resource, session.EnvVarSecretRefs[oldID], transformer); err != nil {
 			return err
 		}
 

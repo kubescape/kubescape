@@ -832,16 +832,6 @@ func TestCreatePolicyBindingCmdValidation(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("params refusal names the paramKind the policy takes", func(t *testing.T) {
-		// C-0281 takes an ate.dev WorkerPool, not the ControlConfiguration the
-		// library ships, so the refusal has to say which kind to point at.
-		cmd := getCreatePolicyBindingCmd()
-		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0281"})
-		err := cmd.Execute()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "ate.dev/v1alpha1 WorkerPool")
-	})
-
 	t.Run("params refusal names the shipped ControlConfiguration kind", func(t *testing.T) {
 		cmd := getCreatePolicyBindingCmd()
 		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0009"})
@@ -853,12 +843,12 @@ func TestCreatePolicyBindingCmdValidation(t *testing.T) {
 
 func TestPolicyParamKind(t *testing.T) {
 	t.Run("control resolves its paramKind and is always known", func(t *testing.T) {
-		paramKind, known, err := policyParamKind("C-0281", "")
+		paramKind, known, err := policyParamKind("C-0009", "")
 		require.NoError(t, err)
 		assert.True(t, known)
 		require.NotNil(t, paramKind)
-		assert.Equal(t, "ate.dev/v1alpha1", paramKind.APIVersion)
-		assert.Equal(t, "WorkerPool", paramKind.Kind)
+		assert.Equal(t, "kubescape.io/v1", paramKind.APIVersion)
+		assert.Equal(t, "ControlConfiguration", paramKind.Kind)
 	})
 
 	t.Run("non-parameterized control is known with no paramKind", func(t *testing.T) {
@@ -985,15 +975,14 @@ func TestResolvePolicyName(t *testing.T) {
 			want:       "kubescape-c-0016-allow-privilege-escalation",
 		},
 		{
-			// The retired hand-typed map listed controls (e.g. C-0012) that the
-			// released bundle ships as a policy but without a controlId label, so
-			// PolicyNameForControl cannot resolve it; resolution now matches what
-			// deploy-library actually deploys and exposes by control ID, so this
-			// fails instead of producing a binding to a policy the caller could
-			// not otherwise have found by control ID either.
-			name:      "control absent from the released bundle",
+			// C-0012 used to ship as a policy with no controlId label, so
+			// resolution by control ID failed even though the bundle carried the
+			// policy. The library has since labelled it, and resolution matches
+			// what deploy-library exposes by control ID, so it resolves now. The
+			// unresolvable case is covered by "unsupported control" above.
+			name:      "control labelled by the library resolves",
 			controlID: "C-0012",
-			wantErr:   "unsupported control ID",
+			want:      "kubescape-c-0012-deny-resources-with-sensitive-information-in-environment-variables",
 		},
 	}
 

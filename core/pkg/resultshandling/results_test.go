@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -25,6 +28,7 @@ import (
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 type DummyReporter struct{}
@@ -132,6 +136,39 @@ func TestResultsHandlerHandleResultsImageScanNilScanData(t *testing.T) {
 	assert.Equal(t, 1, outputPrinter.ActionPrintCalls)
 	// ...but the compliance score is skipped, as it requires ScanData.
 	assert.Equal(t, 0, outputPrinter.ScoreCalls)
+}
+
+func TestResultsHandlerNotifyIsBestEffortAndDeliversOnlySummary(t *testing.T) {
+	var received []byte
+	success := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		var err error
+		received, err = io.ReadAll(r.Body)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer success.Close()
+
+	failure := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer failure.Close()
+
+	scanData := cautils.NewOPASessionObjMock()
+	want, err := json.Marshal(scanData.Report.SummaryDetails)
+	require.NoError(t, err)
+	handler := NewResultsHandler(nil, nil, &SpyPrinter{})
+	handler.SetData(scanData)
+
+	require.NoError(t, handler.HandleResults(context.Background(), &cautils.ScanInfo{
+		NotifyURLs: []string{failure.URL + "/first?token=secret", success.URL + "/second?token=secret"},
+	}))
+	assert.JSONEq(t, string(want), string(received))
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(received, &payload))
+	assert.NotContains(t, payload, "results")
+	assert.NotContains(t, payload, "rawResources")
 }
 
 func TestResultsHandlerHandleResultsReturnsPrinterErrors(t *testing.T) {
@@ -402,10 +439,10 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr: nil,
 		},
 		{
-			name:      "markdown format for image scan should return error",
+			name:      "markdown format for image scan should not return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.MarkdownFormat,
-			expectErr: errors.New("format \"markdown\" is not supported for image scanning"),
+			expectErr: nil,
 		},
 	}
 
@@ -822,6 +859,7 @@ func TestClosePrinter_AllV2PrintersImplementErrorCloser(t *testing.T) {
 		{"cyclonedx", printerv2.NewCycloneDXPrinter()},
 		{"gitlabsast", printerv2.NewGitLabSASTPrinter()},
 		{"csv", printerv2.NewCsvPrinter()},
+		{"exceptions", printerv2.NewExceptionsPrinter()},
 		{"pretty", printerv2.NewPrettyPrinter(false, "1.0", false, cautils.ControlViewType, cautils.ScanTypeCluster, nil, "", false, false)},
 		{"silent", &printerv2.SilentPrinter{}},
 	}
@@ -853,12 +891,12 @@ func TestClosePrinter_AllV2PrintersImplementErrorCloser(t *testing.T) {
 			require.NoError(t, setErr)
 
 			// 1. Initial close on active writer must succeed
-			closeErr := closePrinter(tt.printer)
+			closeErr := ClosePrinter(tt.printer)
 			assert.NoError(t, closeErr)
 
 			// 2. Subsequent close on already-closed writer must surface the underlying error
-			secondCloseErr := closePrinter(tt.printer)
-			assert.Error(t, secondCloseErr, "closePrinter must surface error on already-closed writer for %s", tt.name)
+			secondCloseErr := ClosePrinter(tt.printer)
+			assert.Error(t, secondCloseErr, "ClosePrinter must surface error on already-closed writer for %s", tt.name)
 		})
 	}
 }
@@ -938,6 +976,92 @@ func TestHandleResults_RestoresReportAfterSeverityFilter(t *testing.T) {
 	// any caller reading rh.ScanData after HandleResults sees a consistent report.
 	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 3, "Controls must be unfiltered after HandleResults")
 	assert.Len(t, rh.ScanData.ResourcesResult["resource-1"].AssociatedControls, 2, "AssociatedControls must be unfiltered after HandleResults")
+}
+
+// TestHandleResults_ComputesVAPCoverage verifies the vapreconcile.BuildCoverage
+// wiring added alongside the existing BuildIndex/EnrichSummary call: a
+// control bound to a policy whose only binding is scoped to a namespace the
+// failing resource is not in must come out Bound but not FullyCovered.
+func TestHandleResults_ComputesVAPCoverage(t *testing.T) {
+	vap := unstructured.Unstructured{}
+	vap.SetName("policy-a")
+	vap.SetLabels(map[string]string{"controlId": "C-scoped"})
+
+	binding := unstructured.Unstructured{
+		Object: map[string]any{
+			"spec": map[string]any{
+				"policyName": "policy-a",
+				"matchResources": map[string]any{
+					"namespaceSelector": map[string]any{
+						"matchLabels": map[string]any{"env": "prod"},
+					},
+				},
+			},
+		},
+	}
+	binding.SetName("binding-a")
+
+	failingResource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "app",
+			"namespace": "dev",
+		},
+	})
+	devNamespace := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]any{
+			"name":   "dev",
+			"labels": map[string]any{"env": "dev"},
+		},
+	})
+	resourceID := failingResource.GetID()
+
+	sessionObj := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: map[string]reportsummary.ControlSummary{
+					"C-scoped": {ControlID: "C-scoped", ScoreFactor: 7},
+				},
+			},
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			resourceID: {
+				ResourceID: resourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{ControlID: "C-scoped", Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}},
+				},
+			},
+		},
+		AllResources: map[string]workloadinterface.IMetadata{
+			resourceID:           failingResource,
+			devNamespace.GetID(): devNamespace,
+		},
+		VAPPolicies: []unstructured.Unstructured{vap},
+		VAPBindings: []unstructured.Unstructured{binding},
+	}
+
+	rh := &ResultsHandler{
+		ScanData:  sessionObj,
+		UiPrinter: &SpyPrinter{},
+	}
+
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{})
+	require.NoError(t, err)
+
+	require.Contains(t, rh.ScanData.VAPCoverage, "C-scoped")
+	coverage := rh.ScanData.VAPCoverage["C-scoped"]
+	assert.True(t, coverage.Bound, "the binding names the control's policy, so it must be Bound")
+	assert.False(t, coverage.FullyCovered(), "the binding's namespaceSelector only matches env=prod, so the dev-namespace failure must not be covered")
+	require.Len(t, coverage.Resources, 1)
+	assert.False(t, coverage.Resources[0].Covered)
+	assert.Contains(t, coverage.Resources[0].Reason, "namespaceSelector")
+
+	// The existing coarse signal must still be populated exactly as before.
+	require.NotNil(t, rh.ScanData.Report.SummaryDetails.Controls["C-scoped"].VAPEnforcement)
+	assert.True(t, rh.ScanData.Report.SummaryDetails.Controls["C-scoped"].VAPEnforcement.Bound)
 }
 
 func makeFilteredSession() *cautils.OPASessionObj {

@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuildScanCoverage_EmptyInfoMap(t *testing.T) {
-	coverage := BuildScanCoverage(nil, map[string][]string{"apps/v1/deployments": {"C-0001"}}, nil, nil, nil)
+	coverage := BuildScanCoverage(nil, map[string][]string{"apps/v1/deployments": {"C-0001"}}, nil, nil, nil, nil)
 	assert.Empty(t, coverage.FailedGVRPulls)
 	assert.Empty(t, coverage.NotEvaluatedControls)
 }
@@ -19,7 +19,7 @@ func TestBuildScanCoverage_NoFailedGVRs(t *testing.T) {
 	infoMap := map[string]apis.StatusInfo{
 		"networking.k8s.io/v1/networkpolicies": {InnerStatus: apis.StatusPassed},
 	}
-	coverage := BuildScanCoverage(infoMap, map[string][]string{"networking.k8s.io/v1/networkpolicies": {"C-0001"}}, nil, nil, nil)
+	coverage := BuildScanCoverage(infoMap, map[string][]string{"networking.k8s.io/v1/networkpolicies": {"C-0001"}}, nil, nil, nil, nil)
 	assert.Empty(t, coverage.FailedGVRPulls)
 	assert.Empty(t, coverage.NotEvaluatedControls)
 }
@@ -32,7 +32,7 @@ func TestBuildScanCoverage_MappedDiscoveryFailureIsNotEvaluated(t *testing.T) {
 		nil,
 		[]PartialGVRPull{{GVR: discoveryKey, Selector: "discovery", Error: "forbidden"}},
 		nil,
-	)
+		nil)
 	coverage.ComputeCoverageScore(1)
 
 	assert.Empty(t, coverage.FailedGVRPulls, "the discovery error is already present in PartialGVRPulls")
@@ -56,7 +56,7 @@ func TestBuildScanCoverage_DiscoveryFailureWithSuccessfulDependencyRemainsEvalua
 		nil,
 		[]PartialGVRPull{{GVR: discoveryKey, Selector: "discovery", Error: "forbidden"}},
 		nil,
-	)
+		nil)
 
 	assert.Empty(t, coverage.NotEvaluatedControls)
 	assert.Empty(t, coverage.FailedGVRPulls)
@@ -69,7 +69,7 @@ func TestBuildScanCoverage_UnmappedDiscoveryFailureDoesNotInventControlDependenc
 		nil,
 		[]PartialGVRPull{{GVR: "discovery:example.com/v1", Selector: "discovery", Error: "forbidden"}},
 		nil,
-	)
+		nil)
 
 	assert.Empty(t, coverage.NotEvaluatedControls)
 	assert.Empty(t, coverage.FailedGVRPulls)
@@ -85,7 +85,7 @@ func TestBuildScanCoverage_FailedGVRPopulated(t *testing.T) {
 	resourceToControlsMap := map[string][]string{
 		"networking.k8s.io/v1/networkpolicies": {"C-0001"},
 	}
-	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil)
+	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil, nil)
 	assert.Len(t, coverage.FailedGVRPulls, 1)
 	assert.Equal(t, "networking.k8s.io/v1/networkpolicies", coverage.FailedGVRPulls[0].GVR)
 	assert.Equal(t, "RBAC denied", coverage.FailedGVRPulls[0].Error)
@@ -97,7 +97,7 @@ func TestBuildScanCoverage_NoResourceMap(t *testing.T) {
 	infoMap := map[string]apis.StatusInfo{
 		"networking.k8s.io/v1/networkpolicies": {InnerStatus: apis.StatusSkipped},
 	}
-	coverage := BuildScanCoverage(infoMap, nil, nil, nil, nil)
+	coverage := BuildScanCoverage(infoMap, nil, nil, nil, nil, nil)
 	assert.Empty(t, coverage.FailedGVRPulls)
 }
 
@@ -110,7 +110,7 @@ func TestBuildScanCoverage_AllGVRsFailedControlNotEvaluated(t *testing.T) {
 		"networking.k8s.io/v1/networkpolicies":      {"C-0001", "C-0002"},
 		"rbac.authorization.k8s.io/v1/clusterroles": {"C-0002"},
 	}
-	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil)
+	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil, nil)
 
 	assert.Len(t, coverage.FailedGVRPulls, 2)
 
@@ -137,7 +137,7 @@ func TestBuildScanCoverage_IgnoresResourceLevelEvalSkips(t *testing.T) {
 		"networking.k8s.io/v1/networkpolicies": {"C-0001"},
 		"apps/v1/deployments":                  {"C-0002"},
 	}
-	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil)
+	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil, nil)
 
 	// Only the GVR-keyed entry should be in FailedGVRPulls
 	assert.Len(t, coverage.FailedGVRPulls, 1)
@@ -161,9 +161,9 @@ func TestBuildScanCoverage_DeterministicOrder(t *testing.T) {
 		"m/v1/mthings": {"C-0002"},
 	}
 
-	first := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil)
+	first := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil, nil)
 	for range 10 {
-		next := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil)
+		next := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil, nil)
 		assert.Equal(t, first, next)
 	}
 
@@ -186,7 +186,7 @@ func TestBuildScanCoverage_PartialGVRFailureControlStillEvaluated(t *testing.T) 
 		"networking.k8s.io/v1/networkpolicies": {"C-0001"},
 		"apps/v1/deployments":                  {"C-0001"},
 	}
-	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil)
+	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil, nil)
 
 	assert.Len(t, coverage.FailedGVRPulls, 1)
 	assert.Empty(t, coverage.NotEvaluatedControls)
@@ -205,7 +205,7 @@ func TestBuildScanCoverage_FailedGVRPullIsNotPhantomNotEvaluatedControl(t *testi
 			InnerInfo:   "failed to list resources",
 		},
 	}
-	coverage := BuildScanCoverage(infoMap, nil, nil, nil, nil)
+	coverage := BuildScanCoverage(infoMap, nil, nil, nil, nil, nil)
 
 	for _, ne := range coverage.NotEvaluatedControls {
 		assert.NotEqual(t, "networking.k8s.io/v1/networkpolicies", ne.ControlID)
@@ -307,7 +307,7 @@ func TestComputeCoverageScore_SilentFailedGVRReducesScore(t *testing.T) {
 		"networking.k8s.io/v1/networkpolicies": {"C-0001"},
 		"apps/v1/deployments":                  {"C-0001"},
 	}
-	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil)
+	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil, nil)
 	assert.Len(t, coverage.FailedGVRPulls, 1)
 	assert.Empty(t, coverage.NotEvaluatedControls)
 
@@ -329,7 +329,7 @@ func TestComputeCoverageScore_MixedDependencyFailedGVRIsCharged(t *testing.T) {
 		"networking.k8s.io/v1/networkpolicies": {"C-0001", "C-0002"},
 		"apps/v1/deployments":                  {"C-0002"},
 	}
-	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil)
+	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil, nil)
 
 	assert.Len(t, coverage.FailedGVRPulls, 1)
 	assert.Len(t, coverage.NotEvaluatedControls, 1)
@@ -350,7 +350,7 @@ func TestBuildScanCoverage_PartialGVRPullsPassedThrough(t *testing.T) {
 		{GVR: "/v1/pods", Selector: "metadata.namespace==prod", Error: "RBAC denied for prod"},
 		{GVR: "core/v1/secrets", Selector: "metadata.name==prod-secret", Error: "forbidden"},
 	}
-	coverage := BuildScanCoverage(nil, nil, nil, partials, nil)
+	coverage := BuildScanCoverage(nil, nil, nil, partials, nil, nil)
 
 	assert.Len(t, coverage.PartialGVRPulls, 2)
 	assert.Equal(t, "/v1/pods", coverage.PartialGVRPulls[0].GVR)
@@ -369,7 +369,7 @@ func TestBuildScanCoverage_SortsPartialGVRPullsWithoutMutatingInput(t *testing.T
 	}
 	original := append([]PartialGVRPull(nil), partials...)
 
-	coverage := BuildScanCoverage(nil, nil, nil, partials, nil)
+	coverage := BuildScanCoverage(nil, nil, nil, partials, nil, nil)
 
 	assert.Equal(t, []PartialGVRPull{
 		{GVR: "/v1/pods", Selector: "metadata.namespace==z", Error: "denied"},

@@ -80,6 +80,12 @@ func (v *VAP) failOnError() bool {
 	return v.failurePolicy != admissionregistrationv1.Ignore
 }
 
+// TakesParams reports whether the policy declares a spec.paramKind, i.e. whether
+// a binding's paramRef is something the apiserver resolves rather than ignores.
+func (v *VAP) TakesParams() bool {
+	return v.paramKind != nil
+}
+
 // requireSupported reports whether the offline engine can honor this policy with
 // scan/admission parity. A refusal maps to the same errored/skipped status a
 // Rego eval error takes, never a silent pass or a false violation. Removing a
@@ -110,17 +116,32 @@ func (v *VAP) failOnError() bool {
 // objectSelector (the object's own labels) and a resource rule's operations
 // and resourceNames (the object's own name).
 func (v *VAP) requireSupported() error {
+	if err := v.requireNamespaceSelectorSupported(); err != nil {
+		return err
+	}
+	if err := v.requireParamKindSupported(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *VAP) requireNamespaceSelectorSupported() error {
 	if v.matchConstraints != nil && selectorNarrows(v.matchConstraints.NamespaceSelector) {
 		return fmt.Errorf("control %q scopes matchConstraints with a namespaceSelector, whose input (namespace labels) the scan cannot guarantee to have; refusing it to preserve scan/admission parity", v.ControlID)
 	}
-	if v.paramKind != nil {
-		shipped, err := controlConfigParamKind()
-		if err != nil {
-			return err
-		}
-		if *v.paramKind != *shipped {
-			return fmt.Errorf("control %q takes params of kind %s %s, which the scan has no binding to resolve (only the bundled %s %s is available); refusing it to preserve scan/admission parity", v.ControlID, v.paramKind.APIVersion, v.paramKind.Kind, shipped.APIVersion, shipped.Kind)
-		}
+	return nil
+}
+
+func (v *VAP) requireParamKindSupported() error {
+	if v.paramKind == nil {
+		return nil
+	}
+	shipped, err := controlConfigParamKind()
+	if err != nil {
+		return err
+	}
+	if *v.paramKind != *shipped {
+		return fmt.Errorf("control %q takes params of kind %s %s, which the scan has no binding to resolve (only the bundled %s %s is available); refusing it to preserve scan/admission parity", v.ControlID, v.paramKind.APIVersion, v.paramKind.Kind, shipped.APIVersion, shipped.Kind)
 	}
 	return nil
 }
@@ -211,6 +232,27 @@ func loadVAP(controlID string) (*VAP, error) {
 	}
 	return vap, nil
 }
+
+// LoadVAP is the exported entry point for callers that need the VAP to resolve
+// a per-binding paramRef. It does not refuse a VAP merely because its paramKind
+// is not the bundled one: a binding's paramRef may point to that kind in the
+// scanned input. It still refuses namespaceSelector-narrowed policies.
+func LoadVAP(controlID string) (*VAP, error) {
+	vap, err := lookupVAP(controlID)
+	if err != nil {
+		return nil, err
+	}
+	if err := vap.requireNamespaceSelectorSupported(); err != nil {
+		return nil, err
+	}
+	return vap, nil
+}
+
+// ErrParamNotFound signals that a binding's paramRef points to an object that
+// is not present in the scanned input. The caller applies the binding's
+// parameterNotFoundAction: Allow means the object is admitted, Deny/empty means
+// the policy cannot produce a verdict and the rule is skipped.
+var ErrParamNotFound = errors.New("param object not found")
 
 // parseVAPBundle turns a multi-document bundle into a vapCatalog.
 //
@@ -315,6 +357,45 @@ func newVAP(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *VAP {
 		})
 	}
 	return vap
+}
+
+// ResolveParamObject returns the value bound to the evaluator's "params"
+// variable for one binding's paramRef. A policy with no paramKind gets nil. A
+// binding with no paramRef falls back to the bundled ControlConfiguration. A
+// binding that names a specific param object is resolved from the scanned input
+// via findParam. If the object is not found, ErrParamNotFound is returned so
+// the caller can honor parameterNotFoundAction.
+func ResolveParamObject(vap *VAP, paramRef *admissionregistrationv1.ParamRef, resourceNamespace string, findParam func(apiVersion, kind, namespace, name string) (map[string]any, bool)) (any, error) {
+	if vap.paramKind == nil {
+		return nil, nil
+	}
+	if paramRef == nil || paramRef.Name == "" {
+		return resolveParams(vap)
+	}
+	for _, ns := range paramLookupNamespaces(paramRef, resourceNamespace) {
+		if obj, ok := findParam(vap.paramKind.APIVersion, vap.paramKind.Kind, ns, paramRef.Name); ok {
+			return obj, nil
+		}
+	}
+	return nil, ErrParamNotFound
+}
+
+// paramLookupNamespaces returns the namespaces to look the param object up in,
+// in order. An explicit namespace on the ref is the only candidate; without one
+// the paramKind's scope decides where the object lives and offline there is no
+// discovery to read that scope from, so both candidates are tried: the scanned
+// resource's namespace for a namespaced kind, then the empty namespace the index
+// keys a cluster-scoped one by. A kind is registered at exactly one scope, so the
+// order cannot pick the wrong object. Trying only the resource's namespace missed
+// the bundled ControlConfiguration (scope: Cluster) for every namespaced resource.
+func paramLookupNamespaces(paramRef *admissionregistrationv1.ParamRef, resourceNamespace string) []string {
+	if paramRef.Namespace != "" {
+		return []string{paramRef.Namespace}
+	}
+	if resourceNamespace == "" {
+		return []string{""}
+	}
+	return []string{resourceNamespace, ""}
 }
 
 // resolveParams returns the value bound to the evaluator's "params" variable. A

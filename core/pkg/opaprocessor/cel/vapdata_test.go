@@ -69,12 +69,10 @@ var paramsSettingsRef = regexp.MustCompile(`params\.settings(?:\.(\w+)|\[['"]([^
 // neither can be fixed in this repo: the fix ships in the library's own
 // basic-control-configuration.yaml and arrives here at the next pin bump, at
 // which point the entry below must be deleted and this test will say so.
-var knownMissingSettings = map[string]string{
-	"cloudProvider": "read by C-0020 (kubescape-c-0020-deny-resources-having-volumes-with-potential-access-to-known-cloud-credentials). " +
-		"Only the library's test configuration sets it, which is why library CI does not catch it. " +
-		"CEL short-circuits, so the expression only reaches the key once a volume actually matches a sensitive path, " +
-		"meaning it errors on exactly the objects it should be flagging and a scan can never report a C-0020 violation.",
-}
+// Empty is the good state: every key a bundle policy reads is shipped. The last
+// entry here was cloudProvider, read by C-0020, which the library began shipping
+// in basic-control-configuration.yaml and which arrived with a pin bump.
+var knownMissingSettings = map[string]string{}
 
 // TestBundleParamsSettingsAreShipped asserts every params.settings key a bundle
 // policy reads is defined in the shipped control configuration.
@@ -151,11 +149,9 @@ func TestBundleParamsSettingsAreShipped(t *testing.T) {
 // knownUnresolvableParamKinds names the bundle policies whose paramKind the
 // offline engine refuses, with what the refusal costs. Offline there is no
 // binding, so only the shipped ControlConfiguration can answer a params.* read.
-var knownUnresolvableParamKinds = map[string]string{
-	"C-0281": "kubescape-c-0281-agent-runtime-hardening reads params.spec.networkAccess off an ate.dev WorkerPool, " +
-		"which a live binding's ParamRef supplies and a scan cannot. The control is skipped on every ActorTemplate " +
-		"until the scan can resolve a ParamRef against collected objects.",
-}
+// Empty is the good state: every params-bearing bundle policy takes the
+// ControlConfiguration the bundle ships, so none of them is silently skipped.
+var knownUnresolvableParamKinds = map[string]string{}
 
 // TestBundleParamKindsAreResolvable asserts every params-bearing policy in the
 // bundle takes the ControlConfiguration the bundle ships, so requireSupported
