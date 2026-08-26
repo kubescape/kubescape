@@ -742,7 +742,7 @@ kubescape decrypt encrypted-report.json > decrypted-report.json
 ---
 ## kubescape list
 
-List available frameworks and controls.
+List available frameworks, controls and control configuration.
 
 ### Synopsis
 
@@ -756,6 +756,8 @@ kubescape list <type> [flags]
 |------|-------------|
 | `frameworks` | List available security frameworks |
 | `controls` | List available security controls |
+| `controls-config` | Show the configurable inputs controls are evaluated against — see [control configuration](#control-configuration) |
+| `exceptions` | List available exception policies |
 
 ### Flags
 
@@ -763,7 +765,37 @@ kubescape list <type> [flags]
 |------|-------------|---------|
 | `--account <id>` | Account ID for custom frameworks | - |
 | `--access-key <key>` | Access key | - |
+| `--controls-config <path>` | Show the inputs a scan would use with this controls-config file. Only applies to `controls-config` | downloaded |
 | `--format <format>` | Output format: `pretty-print`, `json`, `yaml`, `csv` | `pretty-print` |
+
+### Control configuration
+
+Several controls are tunable: an allowlist of image repositories, the capabilities
+considered insecure, CPU and memory bounds. A scan resolves those inputs from the
+same sources it resolves policies from, but nothing printed them, so there was no
+way to see what a control was actually evaluated against or to confirm that a
+`--controls-config` override took effect.
+
+```bash
+# what the next scan will use
+kubescape list controls-config
+
+# what it would use with a local override
+kubescape list controls-config --controls-config ./controls-inputs.json --format json
+```
+
+Each row pairs a configuration key with the controls that read it:
+
+| Column | Meaning |
+|--------|---------|
+| `name` | The key as it appears in a controls-config file |
+| `title` | The label the controls declare it by |
+| `values` | The value in effect, empty when unset |
+| `controls` | The control IDs that read it |
+
+An input with no value is not an error — it is why a configurable control falls
+back to the default written into its rule. A value no control reads is usually a
+setting left behind by an older controls-config file.
 
 ### Examples
 
