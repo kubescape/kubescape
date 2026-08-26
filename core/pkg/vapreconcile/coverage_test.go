@@ -174,6 +174,73 @@ func TestBuildCoverage_ClusterScopedResourceIsNeverExemptedByNamespaceSelector(t
 	assert.True(t, c.FullyCovered(), "the apiserver enforces the binding on a cluster-scoped resource whatever the namespaceSelector says")
 }
 
+func TestBuildCoverage_ClusterScopedResourceStillHonorsObjectSelector(t *testing.T) {
+	policies := []unstructured.Unstructured{makeVAP("policy-a", "C-0001")}
+	bindings := []unstructured.Unstructured{
+		makeVAPBScoped("binding-a", "policy-a", matchLabels("env", "prod"), matchLabels("tier", "critical")),
+	}
+	failing := map[string][]ResourceInfo{
+		"C-0001": {{
+			ResourceID: "res-1",
+			APIVersion: "rbac.authorization.k8s.io/v1",
+			Kind:       "ClusterRole",
+			Labels:     map[string]string{"tier": "internal"},
+		}},
+	}
+
+	coverage := BuildCoverage(policies, bindings, failing, nil)
+
+	c := coverage["C-0001"]
+	require.NotNil(t, c)
+	assert.False(t, c.Resources[0].Covered, "the namespaceSelector does not apply, but the objectSelector still does")
+	assert.Contains(t, c.Resources[0].Reason, "objectSelector")
+}
+
+func TestBuildCoverage_NamespaceMatchedOnItsOwnLabels(t *testing.T) {
+	policies := []unstructured.Unstructured{makeVAP("policy-a", "C-0001")}
+	bindings := []unstructured.Unstructured{
+		makeVAPBScoped("binding-a", "policy-a", matchLabels("env", "prod"), nil),
+	}
+	failing := map[string][]ResourceInfo{
+		"C-0001": {{
+			ResourceID: "res-1",
+			APIVersion: "v1",
+			Kind:       "Namespace",
+			Labels:     map[string]string{"env": "prod"},
+		}},
+	}
+
+	// The collected-namespace index is deliberately empty: a Namespace is
+	// matched on the labels it carries itself, never through this map.
+	coverage := BuildCoverage(policies, bindings, failing, nil)
+
+	c := coverage["C-0001"]
+	require.NotNil(t, c)
+	assert.True(t, c.FullyCovered())
+}
+
+func TestBuildCoverage_NamespaceExcludedByItsOwnLabels(t *testing.T) {
+	policies := []unstructured.Unstructured{makeVAP("policy-a", "C-0001")}
+	bindings := []unstructured.Unstructured{
+		makeVAPBScoped("binding-a", "policy-a", matchLabels("env", "prod"), nil),
+	}
+	failing := map[string][]ResourceInfo{
+		"C-0001": {{
+			ResourceID: "res-1",
+			APIVersion: "v1",
+			Kind:       "Namespace",
+			Labels:     map[string]string{"env": "dev"},
+		}},
+	}
+
+	coverage := BuildCoverage(policies, bindings, failing, nil)
+
+	c := coverage["C-0001"]
+	require.NotNil(t, c)
+	assert.False(t, c.Resources[0].Covered)
+	assert.Contains(t, c.Resources[0].Reason, "own labels")
+}
+
 func TestBuildCoverage_MultipleBindingsOrSemantics(t *testing.T) {
 	policies := []unstructured.Unstructured{makeVAP("policy-a", "C-0001")}
 	bindings := []unstructured.Unstructured{
@@ -320,6 +387,8 @@ func TestCollectFailingResourcesByControl_OnlyIncludesFailedControls(t *testing.
 	require.Len(t, byControl["C-0001"], 1)
 	assert.Equal(t, resourceID, byControl["C-0001"][0].ResourceID)
 	assert.Equal(t, "default", byControl["C-0001"][0].Namespace)
+	assert.Equal(t, "apps/v1", byControl["C-0001"][0].APIVersion)
+	assert.Equal(t, "Deployment", byControl["C-0001"][0].Kind)
 	assert.Equal(t, map[string]string{"tier": "critical"}, byControl["C-0001"][0].Labels)
 
 	assert.NotContains(t, byControl, "C-0002", "passed controls must not be reported as failing")
