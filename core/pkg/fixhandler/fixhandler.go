@@ -1078,10 +1078,36 @@ func writeFixesToFile(path, content string) error {
 	if err != nil {
 		return fmt.Errorf("error writing fixes to file: %w", err)
 	}
-	defer file.Close()
 
+	return writeAndClose(file, content)
+}
+
+// writeStringCloser is the subset of *os.File that writeAndClose needs to
+// write the fixed manifest and close the file, checking both errors. It
+// exists so a fake can simulate a Close-time failure deterministically in
+// tests: reproducing that with a real file would require an actually faulty
+// filesystem (e.g. NFS, which can accept a Write into its client-side buffer
+// and only report ENOSPC when the buffer is flushed at Close), which isn't
+// something a portable unit test can arrange.
+type writeStringCloser interface {
+	WriteString(s string) (int, error)
+	Close() error
+}
+
+// writeAndClose writes content and closes file, checking both errors instead
+// of closing via defer. A write can appear to succeed while the underlying
+// filesystem only reports a real failure (e.g. out of space) when the file is
+// closed and its buffered data is finally flushed - discarding that error, as
+// a deferred Close() would, reports success for a fix that was silently never
+// written to disk.
+func writeAndClose(file writeStringCloser, content string) error {
 	if _, err := file.WriteString(content); err != nil {
+		_ = file.Close() // best-effort; the write error is already being reported
 		return fmt.Errorf("error writing fixes to file: %w", err)
+	}
+
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("error writing fixes to file: failed to flush: %w", err)
 	}
 
 	return nil
