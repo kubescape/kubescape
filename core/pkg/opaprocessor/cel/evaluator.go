@@ -206,7 +206,24 @@ func (e *Evaluator) EvaluateOnObject(
 
 	results := make([]ValidationResult, 0, len(validations))
 	for _, val := range validations {
-		results = append(results, e.evaluateValidation(ctx, val, activation, fp))
+		// A cancelled scan stops here rather than partway through whichever
+		// expression happens to be long enough for the runtime to notice.
+		// InterruptCheckFrequency only makes cel-go check #interrupted every N
+		// steps INSIDE one evaluation, so without this an ordinary policy of
+		// cheap expressions runs every one of them to completion after Ctrl+C.
+		if err := ctx.Err(); err != nil {
+			results = append(results, ValidationResult{Expression: val.Expression, Err: fmt.Errorf("evaluation stopped: %w", err)})
+			continue
+		}
+		if budget.exhausted() {
+			results = append(results, ValidationResult{Expression: val.Expression, Err: budget.err()})
+			continue
+		}
+		res := e.evaluateValidation(ctx, val, activation, budget, fp)
+		if res.Err == nil && !res.Passed {
+			res.Paths = e.violationPaths(ctx, val.Expression, obj, namespaceObject, params, variables)
+		}
+		results = append(results, res)
 	}
 	return results, nil
 }
@@ -321,7 +338,7 @@ func (e *Evaluator) lazyVariables(ctx context.Context, variables []Variable, act
 // A compile/eval failure or non-bool result is handled by applyFailurePolicy:
 // with no policy it is reported as an error, with Ignore it is a pass, and with
 // Fail it is a violation.
-func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, activation map[string]any, failurePolicy *admissionregistrationv1.FailurePolicyType) ValidationResult {
+func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, activation map[string]any, budget *costBudget, failurePolicy *admissionregistrationv1.FailurePolicyType) ValidationResult {
 	res := ValidationResult{Expression: val.Expression}
 
 	out, err := e.evalExpression(ctx, val.Expression, activation, budget)
@@ -331,7 +348,7 @@ func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, acti
 
 	passed, ok := out.Value().(bool)
 	if !ok {
-		return e.applyFailurePolicy(res, val, fmt.Errorf("validation expression must return bool, got %T", out.Value()), failurePolicy)
+		return e.applyFailurePolicy(res, val, &expressionError{fmt.Errorf("validation expression must return bool, got %T", out.Value())}, failurePolicy)
 	}
 
 	res.Passed = passed
@@ -343,9 +360,10 @@ func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, acti
 
 // applyFailurePolicy turns a validation eval/compile/type error into the
 // admission-time outcome dictated by spec.failurePolicy. Without a policy the
-// result is left as an unknown error (the parity-safe fallback). Ignore always
-// passes; Fail always fails, preferring the rule's static Message when present
-// and falling back to the error itself.
+// result is left as an unknown error (the parity-safe fallback). Ignore turns
+// the validation into a pass; Fail keeps the error so the scanner can report a
+// deny. Compile errors, budget exhaustion and cancellation are never expression
+// errors, so failurePolicy does not turn them into a deny.
 func (e *Evaluator) applyFailurePolicy(res ValidationResult, val Validation, evalErr error, failurePolicy *admissionregistrationv1.FailurePolicyType) ValidationResult {
 	if failurePolicy == nil {
 		res.Err = evalErr
@@ -354,14 +372,12 @@ func (e *Evaluator) applyFailurePolicy(res ValidationResult, val Validation, eva
 	}
 	if *failurePolicy == admissionregistrationv1.Ignore {
 		res.Passed = true
+		res.Err = nil
+		res.Message = ""
 		return res
 	}
 	res.Passed = false
-	if msg := strings.TrimSpace(val.Message); msg != "" {
-		res.Message = msg
-	} else {
-		res.Message = fmt.Sprintf("evaluating validation %q failed: %v", res.Expression, evalErr)
-	}
+	res.Err = evalErr
 	return res
 }
 

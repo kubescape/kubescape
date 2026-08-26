@@ -51,11 +51,6 @@ type VAP struct {
 	Variables   []Variable
 	Validations []Validation
 
-	// FailurePolicy is the VAP's spec.failurePolicy. When a validation expression
-	// errors, Ignore turns the result into a pass and Fail turns it into a
-	// violation; the evaluator applies it per-object.
-	FailurePolicy *admissionregistrationv1.FailurePolicyType
-
 	// matchConditions gates whether a policy runs at all: at admission a policy
 	// whose matchConditions evaluate to false is skipped and none of its
 	// validations run. The evaluator honors the gate offline the same way (see
@@ -339,12 +334,17 @@ func newVAP(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *VAP {
 		defaultPolicy := admissionregistrationv1.Fail
 		failurePolicy = &defaultPolicy
 	}
+	matchConditions := make([]MatchCondition, 0, len(policy.Spec.MatchConditions))
+	for _, c := range policy.Spec.MatchConditions {
+		matchConditions = append(matchConditions, MatchCondition{Name: c.Name, Expression: c.Expression})
+	}
 	vap := &VAP{
-		ControlID:       policy.Labels[controlIDLabel],
-		PolicyName:      policy.Name,
-		FailurePolicy:   failurePolicy,
-		matchConditions: policy.Spec.MatchConditions,
-		paramKind:       policy.Spec.ParamKind,
+		ControlID:        policy.Labels[controlIDLabel],
+		PolicyName:       policy.Name,
+		failurePolicy:    *failurePolicy,
+		matchConditions:  matchConditions,
+		matchConstraints: policy.Spec.MatchConstraints,
+		paramKind:        policy.Spec.ParamKind,
 	}
 	for _, v := range policy.Spec.Variables {
 		vap.Variables = append(vap.Variables, Variable{Name: v.Name, Expression: v.Expression})
