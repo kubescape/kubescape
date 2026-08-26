@@ -49,7 +49,7 @@ func TestGetSetCmd_SetCachedConfigReturnsError(t *testing.T) {
 
 // Should return a slice of keys when given a non-empty map
 func TestStringKeysToSlice(t *testing.T) {
-	m := map[string]func(*metav1.SetConfig, string){
+	m := map[string]func(*metav1.SetConfig, string) error{
 		"key1": nil,
 		"key2": nil,
 		"key3": nil,
@@ -144,4 +144,36 @@ func TestParseSetArgs_TooManyArgs(t *testing.T) {
 	_, err := parseSetArgs([]string{"accountID", "v", "extra"})
 	assert.ErrorContains(t, err, "too many arguments")
 	assert.ErrorContains(t, err, "supported keys:")
+}
+
+func TestParseSetArgs_CloudAPIURL_Invalid(t *testing.T) {
+	args := []string{"cloudAPIURL=hello-world"}
+	setConfig, err := parseSetArgs(args)
+	assert.Nil(t, setConfig)
+	assert.ErrorContains(t, err, "invalid cloudAPIURL")
+	assert.ErrorContains(t, err, "invalid URI for request")
+}
+
+func TestParseSetArgs_CloudAPIURL_InvalidScheme(t *testing.T) {
+	args := []string{"cloudAPIURL=ftp://example.com"}
+	setConfig, err := parseSetArgs(args)
+	assert.Nil(t, setConfig)
+	assert.ErrorContains(t, err, "invalid cloudAPIURL")
+	assert.ErrorContains(t, err, "URL scheme must be http or https")
+}
+
+func TestParseSetArgs_CloudReportURL_Invalid(t *testing.T) {
+	args := []string{"cloudReportURL=hello-world"}
+	setConfig, err := parseSetArgs(args)
+	assert.Nil(t, setConfig)
+	assert.ErrorContains(t, err, "invalid cloudReportURL")
+	assert.ErrorContains(t, err, "invalid URI for request")
+}
+
+func TestParseSetArgs_CloudReportURL_InvalidScheme(t *testing.T) {
+	args := []string{"cloudReportURL=ftp://example.com"}
+	setConfig, err := parseSetArgs(args)
+	assert.Nil(t, setConfig)
+	assert.ErrorContains(t, err, "invalid cloudReportURL")
+	assert.ErrorContains(t, err, "URL scheme must be http or https")
 }
