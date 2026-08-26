@@ -1,0 +1,24 @@
+{
+    "name": "anonymous-access-enabled",
+    "attributes": {
+    },
+    "ruleLanguage": "Rego",
+    "match": [
+        {
+            "apiGroups": [
+                "rbac.authorization.k8s.io"
+            ],
+            "apiVersions": [
+                "v1"
+            ],
+            "resources": [
+                "RoleBinding",
+                "ClusterRoleBinding"
+            ]
+        }
+    ],
+    "ruleDependencies": [],
+    "description": "Fails in case anonymous or unauthenticated user has any rbac permissions (is bound by a RoleBinding/ClusterRoleBinding)",
+    "remediation": "Remove any RBAC rules which allow anonymous users to perform actions",
+    "ruleQuery": "armo_builtins"
+}

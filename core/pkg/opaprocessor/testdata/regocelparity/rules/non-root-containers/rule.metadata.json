@@ -1,0 +1,50 @@
+{
+    "name": "non-root-containers",
+    "attributes": {
+    },
+    "ruleLanguage": "Rego",
+    "match": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "apiVersions": [
+          "v1"
+        ],
+        "resources": [
+          "Pod"
+        ]
+      },
+      {
+        "apiGroups": [
+          "apps"
+        ],
+        "apiVersions": [
+          "v1"
+        ],
+        "resources": [
+            "Deployment",
+            "ReplicaSet",
+            "DaemonSet",
+            "StatefulSet"
+        ]
+      },
+      {
+        "apiGroups": [
+          "batch"
+        ],
+        "apiVersions": [
+          "*"
+        ],
+        "resources": [
+            "Job",
+            "CronJob"
+        ]
+      }
+    ],
+    "ruleDependencies": [
+    ],
+    "description": "fails if container can run as root",
+    "remediation": "Make sure that the user/group in the securityContext of pod/container is set to an id over 0, or the runAsNonRoot flag is set to true.",
+    "ruleQuery": "armo_builtins"
+}

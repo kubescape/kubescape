@@ -1,0 +1,27 @@
+{
+    "name": "mismatching-selector",
+    "attributes": {
+    },
+    "ruleLanguage": "Rego",
+    "match": [
+        {
+            "apiGroups": ["apps"],
+            "apiVersions": ["v1"],
+            "resources": ["Deployment", "ReplicaSet", "DaemonSet", "StatefulSet"]
+        },
+        {
+            "apiGroups": [""],
+            "apiVersions": ["v1"],
+            "resources": ["ReplicationController"]
+        },
+        {
+            "apiGroups": ["batch"],
+            "apiVersions": ["v1"],
+            "resources": ["Job", "CronJob"]
+        }
+    ],
+    "ruleDependencies": [],
+    "description": "fails if a workload selector does not match the pod template labels",
+    "remediation": "Update spec.selector, spec.jobTemplate.spec.selector, or the pod template labels so the selector matches the pod template labels.",
+    "ruleQuery": "armo_builtins"
+}

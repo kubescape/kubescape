@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mismatching-selector-expressions
+spec:
+  selector:
+    matchExpressions:
+    - key: tier
+      operator: In
+      values:
+      - backend
+  template:
+    metadata:
+      labels:
+        tier: frontend
+    spec:
+      containers:
+      - name: app
+        image: nginx

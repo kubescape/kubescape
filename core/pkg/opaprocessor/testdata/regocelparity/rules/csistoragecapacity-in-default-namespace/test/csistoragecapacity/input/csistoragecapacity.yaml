@@ -1,0 +1,9 @@
+apiVersion: storage.k8s.io/v1beta1
+kind: CSIStorageCapacity
+metadata:
+  name: kubescape
+  namespace: default
+topology:
+  segments:
+    topology.storage.k8s.io/zone: us-east-1a
+storageClassName: example-storageclass

@@ -1,0 +1,49 @@
+{
+  "name": "rule-secrets-in-env-var",
+  "attributes": {
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        ""
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "Pod"
+      ]
+    },
+    {
+      "apiGroups": [
+        "apps"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+          "Deployment",
+          "ReplicaSet",
+          "DaemonSet",
+          "StatefulSet"
+      ]
+    },
+    {
+      "apiGroups": [
+        "batch"
+      ],
+      "apiVersions": [
+        "*"
+      ],
+      "resources": [
+          "Job",
+          "CronJob"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "fails if Pods have secrets in environment variables",
+  "remediation": "If possible, rewrite application code to read secrets from mounted secret files, rather than from environment variables.",
+  "ruleQuery": "armo_builtins"
+}

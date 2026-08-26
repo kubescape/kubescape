@@ -1,0 +1,24 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: hello
+spec:
+  schedule: "*/1 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: kubernetes-dashboard
+          restartPolicy: OnFailure
+          containers:
+          - name: hello
+            image: busybox:latest
+            env :
+              -
+                name : pwd
+                value : "Hpwd"
+            imagePullPolicy: IfNotPresent
+            command:
+            - /bin/sh
+            - -c
+            - date; echo Hello from the Kubernetes cluster

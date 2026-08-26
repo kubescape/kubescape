@@ -1,0 +1,13 @@
+kind: Pod
+apiVersion: v1
+metadata:
+  name: depName
+spec:
+  containers:
+  - image: k8s.gcr.io/e2e-test-images/busybox:1.29
+    name: busybox
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+    - name: depName
+      mountPath: "/mnt/secrets-store"
+      readOnly: true

@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test
+  namespace: not-default
+  labels:
+    purpose: demonstrate-command
+spec:
+  selector:
+    matchLabels:
+      purpose: demonstrate-command
+  template:
+    metadata:
+      labels:
+        purpose: demonstrate-command
+    spec:
+      securityContext :
+        runAsNonRoot : false
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80

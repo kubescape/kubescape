@@ -1,0 +1,8 @@
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: allow-port-forward
+rules:
+- apiGroups: ["*"]
+  resources: ["pods", "pods/portforward"] # we look for this resource or *
+  verbs: ["update", "patch", "create"]	  # we look for these verbs or *
