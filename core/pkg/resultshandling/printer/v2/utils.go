@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -300,6 +301,14 @@ func finalizeResults(results []resourcesresults.Result, resourcesResult map[stri
 
 	for index, resourceID := range resourceIDs {
 		results[index] = resourcesResult[resourceID]
+
+		// Deterministic per-resource layout: AssociatedControls arrive in
+		// whatever order concurrent evaluation appended them (or however a
+		// session built outside the processor assembled them), so sort by
+		// ControlID before the report leaves this function.
+		slices.SortFunc(results[index].AssociatedControls, func(a, b resourcesresults.ResourceAssociatedControl) int {
+			return strings.Compare(a.ControlID, b.ControlID)
+		})
 
 		// Add prioritization information to the result
 		if v, exist := prioritizedResources[resourceID]; exist {

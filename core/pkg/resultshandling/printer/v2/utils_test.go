@@ -1295,6 +1295,37 @@ func TestFinalizeResults_SortsResultsAndResourcesByResourceID(t *testing.T) {
 	}
 }
 
+// TestFinalizeResults_SortsAssociatedControlsByControlID pins deterministic
+// per-resource layout: identical scans must emit each resource's controls in
+// the same order regardless of the order concurrent evaluation appended them.
+func TestFinalizeResults_SortsAssociatedControlsByControlID(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+
+	resource := createWorkloadWithLabels("alpha", "default", nil)
+	result := resourcesresults.Result{ResourceID: resource.GetID()}
+
+	// Insert controls in deliberately shuffled order, mirroring whatever order
+	// concurrent evaluation workers happened to complete in.
+	for _, controlID := range []string{"C-0009", "C-0001", "C-0005", "C-0012", "C-0002"} {
+		result.AssociatedControls = append(result.AssociatedControls,
+			resourcesresults.ResourceAssociatedControl{ControlID: controlID})
+	}
+	session.ResourcesResult[resource.GetID()] = result
+
+	want := []string{"C-0001", "C-0002", "C-0005", "C-0009", "C-0012"}
+	for i := 0; i < 16; i++ {
+		report := FinalizeResults(session)
+		require.NotNil(t, report)
+		require.Len(t, report.Results, 1)
+
+		got := make([]string, 0, len(report.Results[0].AssociatedControls))
+		for _, control := range report.Results[0].AssociatedControls {
+			got = append(got, control.ControlID)
+		}
+		require.Equalf(t, want, got, "associated controls iteration %d", i)
+	}
+}
+
 func Test_mapInfoToPrintInfo_stableMarkers(t *testing.T) {
 	skipReasons := map[string]string{
 		"C-0001": "no cluster connection",
