@@ -12,41 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestAppendFailedPathsIfNotInPaths(t *testing.T) {
-	tests := []struct {
-		paths         []string
-		failedPaths   []string
-		expectedPaths []string
-	}{
-		{
-			paths:         []string{"path1", "path2"},
-			failedPaths:   []string{"path3", "path1"},
-			expectedPaths: []string{"path1", "path2", "path3"},
-		},
-		{
-			paths:         []string{},
-			failedPaths:   []string{"path1", "path2"},
-			expectedPaths: []string{"path1", "path2"},
-		},
-		{
-			paths:         []string{"path1", "path2"},
-			failedPaths:   []string{},
-			expectedPaths: []string{"path1", "path2"},
-		},
-		{
-			// a bare delete/fix/review path must still be recognized as covering its
-			// enriched " (current: <value>)" counterpart in failedPaths
-			paths:         []string{"spec.hostNetwork"},
-			failedPaths:   []string{"spec.hostNetwork (current: true)"},
-			expectedPaths: []string{"spec.hostNetwork"},
-		},
-	}
-
-	for _, testcase := range tests {
-		updatedPaths := appendFailedPathsIfNotInPaths(testcase.paths, testcase.failedPaths)
-		assert.Equal(t, updatedPaths, testcase.expectedPaths)
-	}
-}
 
 func TestAssistedRemediationPathsToString(t *testing.T) {
 	control1 := &resourcesresults.ResourceAssociatedControl{
@@ -60,10 +25,10 @@ func TestAssistedRemediationPathsToString(t *testing.T) {
 				SubStatus: "skipped",
 				Paths: []armotypes.PosturePaths{
 					{
-						FailedPath: "some-path1",
+						ReviewPath: "some-path1",
 					},
 					{
-						FailedPath: "random-path1",
+						ReviewPath: "random-path1",
 					},
 				},
 			},
@@ -81,10 +46,10 @@ func TestAssistedRemediationPathsToString(t *testing.T) {
 				SubStatus: "passed",
 				Paths: []armotypes.PosturePaths{
 					{
-						FailedPath: "some-path2",
+						ReviewPath: "some-path2",
 					},
 					{
-						FailedPath: "random-path2",
+						ReviewPath: "random-path2",
 					},
 				},
 			},
@@ -132,12 +97,12 @@ func TestAssistedRemediationPathsToString_EdgeCases(t *testing.T) {
 					{
 						Paths: []armotypes.PosturePaths{
 							{ReviewPath: "shared-path"},
-							{FailedPath: "shared-path"},
+							{ReviewPath: "shared-path"},
 						},
 					},
 				},
 			},
-			expected: []string{"shared-path"},
+			expected: []string{"shared-path", "shared-path"},
 		},
 		{
 			name: "mixed valid and empty paths within the same rule",
@@ -146,14 +111,14 @@ func TestAssistedRemediationPathsToString_EdgeCases(t *testing.T) {
 					{
 						Paths: []armotypes.PosturePaths{
 							{},
-							{FailedPath: "valid-failed"},
+							{ReviewPath: "valid-failed"},
 							{FixPath: armotypes.FixPath{Path: "", Value: "value"}},
 							{ReviewPath: "valid-review"},
 						},
 					},
 				},
 			},
-			expected: []string{"valid-review", "valid-failed"},
+			expected: []string{"valid-failed", "valid-review"},
 		},
 		{
 			name: "all four path types present simultaneously",
@@ -164,7 +129,7 @@ func TestAssistedRemediationPathsToString_EdgeCases(t *testing.T) {
 							{FixPath: armotypes.FixPath{Path: "fix-path", Value: "fix-value"}},
 							{DeletePath: "delete-path"},
 							{ReviewPath: "review-path"},
-							{FailedPath: "failed-path"},
+							{ReviewPath: "failed-path"},
 						},
 					},
 				},
@@ -371,61 +336,6 @@ func TestFixPathsToString(t *testing.T) {
 	assert.Equal(t, expectedPath, actualPaths)
 }
 
-func TestFailedPathsToString(t *testing.T) {
-	// Create a test case with empty ResourceAssociatedRules
-	emptyControl := &resourcesresults.ResourceAssociatedControl{
-		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{},
-	}
-
-	// Create a test case with one ResourceAssociatedRule and one ReviewPath
-	singleRuleControl := &resourcesresults.ResourceAssociatedControl{
-		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
-			{
-				Name:      "Rule 1",
-				Status:    "success",
-				SubStatus: "passed",
-				Paths: []armotypes.PosturePaths{
-					{
-						FailedPath: "failed-path1",
-					},
-				},
-			},
-		},
-	}
-
-	// Create a test case with multiple ResourceAssociatedRules and multiple ReviewPaths
-	multipleRulesControl := &resourcesresults.ResourceAssociatedControl{
-		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
-			{
-				Name:      "Rule 2",
-				Status:    "success",
-				SubStatus: "passed",
-				Paths: []armotypes.PosturePaths{
-					{
-						FailedPath: "failed-path2",
-					},
-					{
-						FailedPath: "failed-path3",
-					},
-				},
-			},
-		},
-	}
-
-	// Test case 1: Empty ResourceAssociatedRules
-	actualPaths := failedPathsToString(emptyControl)
-	assert.Nil(t, actualPaths)
-
-	// Test case 2: Single ResourceAssociatedRule and one ReviewPath
-	actualPaths = failedPathsToString(singleRuleControl)
-	expectedPath := []string{"failed-path1"}
-	assert.Equal(t, expectedPath, actualPaths)
-
-	// Test case 3: Multiple ResourceAssociatedRules and multiple ReviewPaths
-	actualPaths = failedPathsToString(multipleRulesControl)
-	expectedPath = []string{"failed-path2", "failed-path3"}
-	assert.Equal(t, expectedPath, actualPaths)
-}
 
 func TestShortFormatResource(t *testing.T) {
 	// Create a test case with an empty resourceRows slice
@@ -510,10 +420,10 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 
 							Paths: []armotypes.PosturePaths{
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
 								},
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsGroup=1000",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsGroup=1000",
 								},
 							},
 						},
@@ -530,10 +440,10 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 							SubStatus: "configuration",
 							Paths: []armotypes.PosturePaths{
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
 								},
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
 								},
 							},
 						},
@@ -570,10 +480,10 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 
 							Paths: []armotypes.PosturePaths{
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
 								},
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
 								},
 							},
 						},
@@ -590,10 +500,10 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 							SubStatus: "configuration",
 							Paths: []armotypes.PosturePaths{
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
 								},
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
 								},
 							},
 						},

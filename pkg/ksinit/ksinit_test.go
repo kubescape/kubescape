@@ -20,7 +20,7 @@ func TestCreateKsObjectConnectionReturnsKubeconfigErrors(t *testing.T) {
 			setupEnv: func(t *testing.T) {
 				t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "missing-config"))
 			},
-			wantErrSubstr: "no such file or directory",
+			wantErrSubstr: "missing-config",
 		},
 		{
 			name: "home kubeconfig path does not exist and in cluster config is unavailable",

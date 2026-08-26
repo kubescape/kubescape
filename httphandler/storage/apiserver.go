@@ -601,7 +601,6 @@ func parseScannedControlRules(control *resourcesresults.ResourceAssociatedContro
 		paths := make([]v1beta1.RulePath, len(rule.Paths))
 		for j, path := range rule.Paths {
 			paths[j] = v1beta1.RulePath{
-				FailedPath:   path.FailedPath,
 				FixPath:      path.FixPath.Path,
 				FixPathValue: path.FixPath.Value,
 				FixCommand:   path.FixCommand,

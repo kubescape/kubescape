@@ -156,7 +156,7 @@ func TestPrintSARIF_ResultPropertiesSurviveJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, "absent", properties["baseStatus"])
 	assert.Equal(t, "failed", properties["headStatus"])
 	assert.Equal(t, "rule-c-roundtrip", properties["ruleName"])
-	assert.Equal(t, "failedPath", properties["evidenceType"])
+	assert.Equal(t, "reviewPath", properties["evidenceType"])
 	assert.Equal(t, "spec.template.spec.containers[0].securityContext.privileged", properties["evidencePath"])
 	assert.Equal(t, "apps/v1/default/Pod/roundtrip", properties["evidenceResourceID"])
 	assert.Equal(t, "base report did not include this control", properties["incomparableReason"])

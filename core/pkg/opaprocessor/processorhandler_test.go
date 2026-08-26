@@ -578,7 +578,7 @@ func TestAppendPaths(t *testing.T) {
 		{
 			name: "All types of paths",
 			assistedRemediation: reporthandling.AssistedRemediation{
-				FailedPaths: []string{"path2"},
+				
 				DeletePaths: []string{"path4", "path5"},
 				ReviewPaths: []string{"path6", "path7"},
 				FixPaths: []armotypes.FixPath{
@@ -588,7 +588,7 @@ func TestAppendPaths(t *testing.T) {
 			},
 			resourceID: "2",
 			expected: []armotypes.PosturePaths{
-				{ResourceID: "2", FailedPath: "path2"},
+				
 				{ResourceID: "2", DeletePath: "path4"},
 				{ResourceID: "2", DeletePath: "path5"},
 				{ResourceID: "2", ReviewPath: "path6"},

@@ -723,7 +723,8 @@ func TestJunitGoldenFile(t *testing.T) {
 
 	want, err := os.ReadFile(goldenPath)
 	require.NoError(t, err, "golden fixture missing — run `go test -update-golden`")
-	assert.Equal(t, string(want), string(got), "marshalled JUnit output diverged from testdata/junit_golden.xml")
+	wantStr := strings.ReplaceAll(string(want), "\r\n", "\n")
+	assert.Equal(t, wantStr, string(got), "marshalled JUnit output diverged from testdata/junit_golden.xml")
 
 	// Also round-trip the golden file through encoding/xml and re-check the
 	// invariants on the *stored* fixture so a hand-edited golden that breaks

@@ -19,7 +19,7 @@ func printableChange() ControlChange {
 		BaseStatus:         "failed",
 		HeadStatus:         "failed",
 		RuleName:           "require-security-context",
-		EvidenceType:       evidenceTypeFailedPath,
+		EvidenceType:       evidenceTypeReviewPath,
 		Path:               "spec.template.spec.containers[0].securityContext.privileged",
 		EvidenceResourceID: "apps/v1/default/Pod/api-abc",
 	}
@@ -137,7 +137,7 @@ func TestPrintJSON_PreservesEvidenceSchema(t *testing.T) {
 	item, ok := newItems[0].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "require-security-context", item["ruleName"])
-	assert.Equal(t, "failedPath", item["evidenceType"])
+	assert.Equal(t, "reviewPath", item["evidenceType"])
 	assert.Equal(t, "spec.template.spec.containers[0].securityContext.privileged", item["path"])
 	assert.Equal(t, "apps/v1/default/Pod/api-abc", item["evidenceResourceID"])
 }

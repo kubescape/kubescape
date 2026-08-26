@@ -246,9 +246,6 @@ func enrichedPathsForField(control *resourcesresults.ResourceAssociatedControl, 
 	return paths
 }
 
-func failedPathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
-	return enrichedPathsForField(control, resource, func(p armotypes.PosturePaths) string { return p.FailedPath })
-}
 
 func reviewPathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
 	return enrichedPathsForField(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
@@ -302,9 +299,6 @@ func enrichedPathsForFieldUnredacted(control *resourcesresults.ResourceAssociate
 	return paths
 }
 
-func failedPathsWithCurrentValuesUnredacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
-	return enrichedPathsForFieldUnredacted(control, resource, func(p armotypes.PosturePaths) string { return p.FailedPath })
-}
 
 func reviewPathsWithCurrentValuesUnredacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
 	return enrichedPathsForFieldUnredacted(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
@@ -317,16 +311,14 @@ func AssistedRemediationPathsWithCurrentValuesFiltered(control *resourcesresults
 		fixPaths := fixPathsToStringFiltered(control, kind, true)
 		deletePaths := deletePathsToString(control)
 		enrichedReview := reviewPathsWithCurrentValuesUnredacted(control, resource)
-		enrichedFailed := failedPathsWithCurrentValuesUnredacted(control, resource)
 		paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
-		return appendFailedPathsIfNotInPaths(paths, enrichedFailed)
+		return paths
 	}
 	fixPaths := fixPathsToStringFiltered(control, kind, false)
 	deletePaths := deletePathsToString(control)
 	enrichedReview := reviewPathsWithCurrentValuesRedacted(control, resource)
-	enrichedFailed := failedPathsWithCurrentValuesRedacted(control, resource)
 	paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
-	return appendFailedPathsIfNotInPaths(paths, enrichedFailed)
+	return paths
 }
 
 func enrichedPathsForFieldRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
@@ -353,9 +345,6 @@ func enrichedPathsForFieldRedacted(control *resourcesresults.ResourceAssociatedC
 	return paths
 }
 
-func failedPathsWithCurrentValuesRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
-	return enrichedPathsForFieldRedacted(control, resource, func(p armotypes.PosturePaths) string { return p.FailedPath })
-}
 
 func reviewPathsWithCurrentValuesRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
 	return enrichedPathsForFieldRedacted(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
@@ -365,8 +354,6 @@ func AssistedRemediationPathsWithCurrentValues(control *resourcesresults.Resourc
 	fixPaths := fixPathsToString(control, false)
 	deletePaths := deletePathsToString(control)
 	enrichedReview := reviewPathsWithCurrentValues(control, resource)
-	enrichedFailed := failedPathsWithCurrentValues(control, resource)
-
 	paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
-	return appendFailedPathsIfNotInPaths(paths, enrichedFailed)
+	return paths
 }

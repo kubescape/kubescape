@@ -939,12 +939,12 @@ spec:
 		"all findings must not collapse to line 1 for absolute-path file scans")
 }
 
-// TestPrintConfigurationScan_FailedPathGetsRelatedLocation is a regression test for evidence
-// locations: a control's FailedPath previously had no location of its own in SARIF output - only
-// the (possibly different) FixPath got the primary Locations entry. This asserts the FailedPath
+// TestPrintConfigurationScan_ReviewPathGetsRelatedLocation is a regression test for evidence
+// locations: a control's ReviewPath previously had no location of its own in SARIF output - only
+// the (possibly different) FixPath got the primary Locations entry. This asserts the ReviewPath
 // now resolves to its own relatedLocations entry, pointing at the actual line the failing field
 // lives on, independent of where the fix would apply.
-func TestPrintConfigurationScan_FailedPathGetsRelatedLocation(t *testing.T) {
+func TestPrintConfigurationScan_ReviewPathGetsRelatedLocation(t *testing.T) {
 	const (
 		imageLine      = 12
 		privilegedLine = 13
@@ -982,7 +982,7 @@ spec:
 	lw.SetPath("deploy.yaml:0")
 
 	controlID := "C-0001"
-	// FixPath targets a different field (image) than FailedPath (privileged), so their
+	// FixPath targets a different field (image) than ReviewPath (privileged), so their
 	// resolved locations diverge - the test would pass by coincidence if they matched.
 	ac := resourcesresults.ResourceAssociatedControl{
 		ControlID: controlID,
@@ -993,7 +993,7 @@ spec:
 				Status: apis.StatusFailed,
 				Paths: []armotypes.PosturePaths{
 					{
-						FailedPath: "spec.template.spec.containers[0].securityContext.privileged",
+						ReviewPath: "spec.template.spec.containers[0].securityContext.privileged",
 						FixPath: armotypes.FixPath{
 							Path:  "spec.template.spec.containers[0].image",
 							Value: "nginx:1.25",
@@ -1074,13 +1074,13 @@ spec:
 	assert.Equal(t, imageLine, *result.Locations[0].PhysicalLocation.Region.StartLine,
 		"primary location should still resolve to the FixPath's line")
 
-	// The FailedPath now gets its own relatedLocations entry, at its own line.
+	// The ReviewPath now gets its own relatedLocations entry, at its own line.
 	require.Len(t, result.RelatedLocations, 1)
 	relatedLoc := result.RelatedLocations[0]
 	require.NotNil(t, relatedLoc.PhysicalLocation)
 	require.NotNil(t, relatedLoc.PhysicalLocation.Region)
 	assert.Equal(t, privilegedLine, *relatedLoc.PhysicalLocation.Region.StartLine,
-		"relatedLocations must resolve the FailedPath to its own line, distinct from the fix location")
+		"relatedLocations must resolve the ReviewPath to its own line, distinct from the fix location")
 	require.NotNil(t, relatedLoc.Message)
 	assert.Equal(t, "spec.template.spec.containers[0].securityContext.privileged", *relatedLoc.Message.Text)
 }

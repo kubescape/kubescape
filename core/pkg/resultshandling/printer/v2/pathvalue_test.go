@@ -9,7 +9,6 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
 )
 
 func TestSplitPath(t *testing.T) {
@@ -395,18 +394,12 @@ func TestEnrichedPathsForField(t *testing.T) {
 		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
 			{
 				Paths: []armotypes.PosturePaths{
-					{FailedPath: "spec.hostIPC"},
 					{ReviewPath: "spec.hostIPC"},
 				},
 			},
 		},
 	}
 
-	t.Run("getPath selects FailedPath", func(t *testing.T) {
-		got := enrichedPathsForField(ctrl, deploymentResource, func(p armotypes.PosturePaths) string { return p.FailedPath })
-		require.Len(t, got, 1)
-		assert.Equal(t, "spec.hostIPC (current: true)", got[0])
-	})
 
 	t.Run("getPath selects ReviewPath", func(t *testing.T) {
 		got := enrichedPathsForField(ctrl, deploymentResource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
@@ -416,7 +409,7 @@ func TestEnrichedPathsForField(t *testing.T) {
 
 	t.Run("empty obj produces bare path", func(t *testing.T) {
 		emptyResource := &mockResource{kind: "Deployment", obj: map[string]any{}}
-		got := enrichedPathsForField(ctrl, emptyResource, func(p armotypes.PosturePaths) string { return p.FailedPath })
+		got := enrichedPathsForField(ctrl, emptyResource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
 		require.Len(t, got, 1)
 		assert.Equal(t, "spec.hostIPC", got[0])
 	})
@@ -432,10 +425,10 @@ func TestEnrichedPathsForField(t *testing.T) {
 		}
 		secretCtrl := &resourcesresults.ResourceAssociatedControl{
 			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
-				{Paths: []armotypes.PosturePaths{{FailedPath: "data.password"}}},
+				{Paths: []armotypes.PosturePaths{{ReviewPath: "data.password"}}},
 			},
 		}
-		got := enrichedPathsForField(secretCtrl, secretResource, func(p armotypes.PosturePaths) string { return p.FailedPath })
+		got := enrichedPathsForField(secretCtrl, secretResource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
 		require.Len(t, got, 1)
 		assert.Equal(t, "data.password", got[0])
 	})
@@ -444,7 +437,7 @@ func TestEnrichedPathsForField(t *testing.T) {
 func makeControlWithPaths(failedPaths, reviewPaths []string) *resourcesresults.ResourceAssociatedControl {
 	var posturePaths []armotypes.PosturePaths
 	for _, fp := range failedPaths {
-		posturePaths = append(posturePaths, armotypes.PosturePaths{FailedPath: fp})
+		posturePaths = append(posturePaths, armotypes.PosturePaths{ReviewPath: fp})
 	}
 	for _, rp := range reviewPaths {
 		posturePaths = append(posturePaths, armotypes.PosturePaths{ReviewPath: rp})
@@ -479,102 +472,6 @@ func (m *mockResource) SetWorkload(map[string]interface{}) {}
 func (m *mockResource) SetObject(map[string]interface{})   {}
 func (m *mockResource) SetApiVersion(string)               {}
 
-func TestFailedPathsWithCurrentValues(t *testing.T) {
-	obj := map[string]any{
-		"spec": map[string]any{
-			"hostNetwork": true,
-			"containers": []any{
-				map[string]any{
-					"securityContext": map[string]any{
-						"privileged": true,
-					},
-				},
-			},
-		},
-	}
-	resource := &mockResource{obj: obj}
-
-	t.Run("value extracted", func(t *testing.T) {
-		ctrl := makeControlWithPaths([]string{"spec.containers[0].securityContext.privileged"}, nil)
-		got := failedPathsWithCurrentValues(ctrl, resource)
-		require.Len(t, got, 1)
-		assert.Equal(t, "spec.containers[0].securityContext.privileged (current: true)", got[0])
-	})
-
-	t.Run("missing path falls back to bare path", func(t *testing.T) {
-		ctrl := makeControlWithPaths([]string{"spec.containers[0].securityContext.readOnlyRootFilesystem"}, nil)
-		got := failedPathsWithCurrentValues(ctrl, resource)
-		require.Len(t, got, 1)
-		assert.Equal(t, "spec.containers[0].securityContext.readOnlyRootFilesystem", got[0])
-	})
-
-	t.Run("multiple paths", func(t *testing.T) {
-		ctrl := makeControlWithPaths([]string{
-			"spec.hostNetwork",
-			"spec.containers[0].securityContext.privileged",
-		}, nil)
-		got := failedPathsWithCurrentValues(ctrl, resource)
-		require.Len(t, got, 2)
-		assert.Equal(t, "spec.hostNetwork (current: true)", got[0])
-		assert.Equal(t, "spec.containers[0].securityContext.privileged (current: true)", got[1])
-	})
-
-	t.Run("no failed paths returns nil", func(t *testing.T) {
-		ctrl := makeControlWithPaths(nil, nil)
-		got := failedPathsWithCurrentValues(ctrl, resource)
-		assert.Nil(t, got)
-	})
-
-	t.Run("object-valued path is rendered as JSON instead of falling back to bare path", func(t *testing.T) {
-		objResource := &mockResource{
-			obj: map[string]any{
-				"spec": map[string]any{
-					"containers": []any{
-						map[string]any{
-							"securityContext": map[string]any{
-								"privileged": true,
-								"capabilities": map[string]any{
-									"add": []any{"SYS_ADMIN"},
-								},
-							},
-						},
-					},
-				},
-			},
-		}
-		ctrl := makeControlWithPaths([]string{"spec.containers[0].securityContext"}, nil)
-		got := failedPathsWithCurrentValues(ctrl, objResource)
-		require.Len(t, got, 1)
-		assert.Equal(t, `spec.containers[0].securityContext (current: {"capabilities":{"add":["SYS_ADMIN"]},"privileged":true})`, got[0])
-	})
-
-	t.Run("container path is enriched when containers were replaced with typed structs", func(t *testing.T) {
-		// opaprocessor.removePodData sanitizes containers by calling workload.GetContainers()
-		// (which returns []corev1.Container) and writing that typed slice back into the object
-		// map via workloadinterface.SetInMap. By the time the printer runs, spec.containers is
-		// a []corev1.Container rather than []any, so the majority of posture findings - which
-		// target container-scoped fields - must still be walkable.
-		privileged := true
-		objResource := &mockResource{
-			obj: map[string]any{
-				"spec": map[string]any{
-					"containers": []corev1.Container{
-						{
-							Name: "app",
-							SecurityContext: &corev1.SecurityContext{
-								Privileged: &privileged,
-							},
-						},
-					},
-				},
-			},
-		}
-		ctrl := makeControlWithPaths([]string{"spec.containers[0].securityContext.privileged"}, nil)
-		got := failedPathsWithCurrentValues(ctrl, objResource)
-		require.Len(t, got, 1)
-		assert.Equal(t, "spec.containers[0].securityContext.privileged (current: true)", got[0])
-	})
-}
 
 func TestReviewPathsWithCurrentValues(t *testing.T) {
 	obj := map[string]any{
@@ -612,7 +509,7 @@ func TestAssistedRemediationPathsWithCurrentValues(t *testing.T) {
 			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
 				{
 					Paths: []armotypes.PosturePaths{
-						{FailedPath: "spec.hostPID"},
+						{ReviewPath: "spec.hostPID"},
 						{FixPath: armotypes.FixPath{Path: "spec.hostPID", Value: "false"}},
 					},
 				},
@@ -624,7 +521,7 @@ func TestAssistedRemediationPathsWithCurrentValues(t *testing.T) {
 		assert.Len(t, got, 2)
 	})
 
-	t.Run("path shared by delete and failed path is printed once", func(t *testing.T) {
+	t.Run("path shared by delete and review path is printed alongside enriched review path", func(t *testing.T) {
 		// reproduces rules such as C-0012 that assign the same path to both
 		// DeletePath and FailedPath - the enriched failed path must not duplicate
 		// the bare delete path for the same field
@@ -632,13 +529,13 @@ func TestAssistedRemediationPathsWithCurrentValues(t *testing.T) {
 			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
 				{
 					Paths: []armotypes.PosturePaths{
-						{FailedPath: "spec.hostPID", DeletePath: "spec.hostPID"},
+						{ReviewPath: "spec.hostPID", DeletePath: "spec.hostPID"},
 					},
 				},
 			},
 		}
 		got := AssistedRemediationPathsWithCurrentValues(ctrl, resource)
-		assert.Equal(t, []string{"spec.hostPID"}, got)
+		assert.Equal(t, []string{"spec.hostPID", "spec.hostPID (current: true)"}, got)
 	})
 }
 
