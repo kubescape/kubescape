@@ -30,7 +30,20 @@ func (scanresult *ScanResultReport) Validate() bool {
 		return false
 	}
 
-	//TODO validate layers & vuls
+	if len(scanresult.Layers) == 0 {
+		return false
+	}
+
+	for i := range scanresult.Layers {
+		if scanresult.Layers[i].LayerHash == "" {
+			return false
+		}
+		for j := range scanresult.Layers[i].Vulnerabilities {
+			if scanresult.Layers[i].Vulnerabilities[j].Name == "" {
+				return false
+			}
+		}
+	}
 
 	return true
 }
