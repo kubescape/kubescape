@@ -71,7 +71,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	var err error
 
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
-	resolver, discoveryFailures := newDiscoveryResourceResolver(k8sHandler.k8s.DiscoveryClient)
+	resolver, discoveryFailures, discoveredResources := newDiscoveryResourceResolverWithKinds(k8sHandler.k8s.DiscoveryClient)
 	sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, discoveryFailures...)
 
 	if scanInfo.IsDeletedScanObject {
@@ -91,6 +91,15 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
 	policyWarnings := make(map[string]struct{})
 	queryableResources, excludedRulesMap := getQueryableResourceMapFromPoliciesWithWarned(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, policyWarnings)
+	// Computed against the policy-derived query set before --include-kinds/
+	// --exclude-kinds narrow it, so a deliberate scan-scope flag is not
+	// misreported as a policy coverage gap. A single-resource scan is
+	// narrowed to one object at the source (see resourcesFilterMap in
+	// getQueryableResourceMapFromPoliciesWithWarned) and has no cluster-wide
+	// coverage question to answer, so it is skipped.
+	if sessionObj.SingleResourceScan == nil {
+		sessionObj.UnexaminedKinds = computeUnexaminedKinds(discoveredResources, queryableResources)
+	}
 	filterQueryableResourcesByKind(queryableResources, scanInfo)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
 	recordDiscoveryFailureDependencies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, discoveryFailures, resourceToControl, policyWarnings)
@@ -259,7 +268,7 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 
 	// Setup phase: collect metadata and queryable resources
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
-	resolver, discoveryFailures := newDiscoveryResourceResolver(k8sHandler.k8s.DiscoveryClient)
+	resolver, discoveryFailures, discoveredResources := newDiscoveryResourceResolverWithKinds(k8sHandler.k8s.DiscoveryClient)
 	sessionObj.PartialGVRFailures = append(sessionObj.PartialGVRFailures, discoveryFailures...)
 
 	var setupErr error
@@ -277,6 +286,13 @@ func (k8sHandler *K8sResourceHandler) StreamResourcesBatches(ctx context.Context
 	resourceToControl := make(map[string][]string)
 	policyWarnings := make(map[string]struct{})
 	queryableResources, excludedRulesMap := getQueryableResourceMapFromPoliciesWithWarned(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, policyWarnings)
+	// See the matching comment in GetResources: computed before kind
+	// filtering narrows queryableResources, and skipped for single-resource
+	// scans, so a deliberate scan-scope narrowing is never reported as a
+	// policy coverage gap.
+	if sessionObj.SingleResourceScan == nil {
+		sessionObj.UnexaminedKinds = computeUnexaminedKinds(discoveredResources, queryableResources)
+	}
 	filterQueryableResourcesByKind(queryableResources, scanInfo)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
 	recordDiscoveryFailureDependencies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver, discoveryFailures, resourceToControl, policyWarnings)
