@@ -13,6 +13,11 @@ import (
 // the RCE tally with false positives on almost every vulnerability description.
 var rceAcronymRe = regexp.MustCompile(`(?i)\brce\b`)
 
+// vulnKey identifies a vulnerability uniquely inside a layer for duplicate detection.
+type vulnKey struct {
+	Name, RelatedPackageName, PackageVersion string
+}
+
 // GetPackagesNames retrieves the names of all the packages stored in the Packages field of the ScanResultLayer object and returns them as a slice of strings.
 func (layer *ScanResultLayer) GetPackagesNames() []string {
 	pkgsNames := []string{}
@@ -37,18 +42,32 @@ func (scanresult *ScanResultReport) Validate() bool {
 		return false
 	}
 
-	if len(scanresult.Layers) == 0 {
+	if scanresult.Layers == nil {
 		return false
 	}
 
+	seenHashes := make(map[string]struct{}, len(scanresult.Layers))
 	for i := range scanresult.Layers {
-		if scanresult.Layers[i].LayerHash == "" {
+		layer := &scanresult.Layers[i]
+		if layer.LayerHash == "" {
 			return false
 		}
-		for j := range scanresult.Layers[i].Vulnerabilities {
-			if scanresult.Layers[i].Vulnerabilities[j].Name == "" {
+		if _, exists := seenHashes[layer.LayerHash]; exists {
+			return false
+		}
+		seenHashes[layer.LayerHash] = struct{}{}
+
+		seenVulns := make(map[vulnKey]struct{}, len(layer.Vulnerabilities))
+		for j := range layer.Vulnerabilities {
+			v := &layer.Vulnerabilities[j]
+			if v.Name == "" {
 				return false
 			}
+			key := vulnKey{v.Name, v.RelatedPackageName, v.PackageVersion}
+			if _, exists := seenVulns[key]; exists {
+				return false
+			}
+			seenVulns[key] = struct{}{}
 		}
 	}
 
@@ -57,6 +76,10 @@ func (scanresult *ScanResultReport) Validate() bool {
 
 // IsRCE checks if a vulnerability description contains any keywords related to remote code execution (RCE) or arbitrary code injection.
 func (v *Vulnerability) IsRCE() bool {
+	if v == nil {
+		return false
+	}
+
 	desc := strings.ToLower(v.Description)
 
 	isRCE := rceAcronymRe.MatchString(v.Description)
