@@ -343,12 +343,12 @@ func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, acti
 
 	out, err := e.evalExpression(ctx, val.Expression, activation, budget)
 	if err != nil {
-		return e.applyFailurePolicy(res, val, err, failurePolicy)
+		return e.applyFailurePolicy(res, err, failurePolicy)
 	}
 
 	passed, ok := out.Value().(bool)
 	if !ok {
-		return e.applyFailurePolicy(res, val, &expressionError{fmt.Errorf("validation expression must return bool, got %T", out.Value())}, failurePolicy)
+		return e.applyFailurePolicy(res, &expressionError{fmt.Errorf("validation expression must return bool, got %T", out.Value())}, failurePolicy)
 	}
 
 	res.Passed = passed
@@ -364,7 +364,7 @@ func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, acti
 // the validation into a pass; Fail keeps the error so the scanner can report a
 // deny. Compile errors, budget exhaustion and cancellation are never expression
 // errors, so failurePolicy does not turn them into a deny.
-func (e *Evaluator) applyFailurePolicy(res ValidationResult, val Validation, evalErr error, failurePolicy *admissionregistrationv1.FailurePolicyType) ValidationResult {
+func (e *Evaluator) applyFailurePolicy(res ValidationResult, evalErr error, failurePolicy *admissionregistrationv1.FailurePolicyType) ValidationResult {
 	if failurePolicy == nil {
 		res.Err = evalErr
 		res.Passed = false
