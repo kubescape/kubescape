@@ -50,6 +50,11 @@ type VAP struct {
 	Variables   []Variable
 	Validations []Validation
 
+	// FailurePolicy is the VAP's spec.failurePolicy. When a validation expression
+	// errors, Ignore turns the result into a pass and Fail turns it into a
+	// violation; the evaluator applies it per-object.
+	FailurePolicy *admissionregistrationv1.FailurePolicyType
+
 	// matchConditions gates whether a policy runs at all: at admission a policy
 	// whose matchConditions evaluate to false is skipped and none of its
 	// validations run. The offline engine does not evaluate them yet, so we keep
@@ -180,15 +185,20 @@ func parseVAPBundle(data []byte) (map[string]*VAP, map[string]struct{}, error) {
 // violation message the same way the apiserver does. matchConditions is carried
 // so loadVAP can refuse a gated policy (see requireSupported).
 //
-// spec.matchConstraints and spec.failurePolicy are intentionally dropped:
-// offline resource selection is the caller's job (and the bundle's validations
-// already self-guard by object.kind), and eval errors are always mapped to an
-// errored/skipped status regardless of failurePolicy, which is the parity-safe
-// direction.
+// spec.matchConstraints is intentionally dropped: offline resource selection is
+// the caller's job (and the bundle's validations already self-guard by
+// object.kind). spec.failurePolicy is captured so the evaluator can map eval
+// errors to the same pass/violation outcome the apiserver would.
 func newVAP(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *VAP {
+	failurePolicy := policy.Spec.FailurePolicy
+	if failurePolicy == nil {
+		defaultPolicy := admissionregistrationv1.Fail
+		failurePolicy = &defaultPolicy
+	}
 	vap := &VAP{
 		ControlID:       policy.Labels[controlIDLabel],
 		PolicyName:      policy.Name,
+		FailurePolicy:   failurePolicy,
 		matchConditions: policy.Spec.MatchConditions,
 		paramKind:       policy.Spec.ParamKind,
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
 	"k8s.io/apiserver/pkg/cel/lazy"
 )
@@ -91,6 +92,9 @@ func NewEvaluator(opts ...Option) (*Evaluator, error) {
 //   - variables and validations come from the VAP. Once the loader is built it
 //     fills them from real YAML; for now tests fill them by hand. Same structs
 //     either way, so the signature does not change when the loader lands.
+//   - failurePolicy is the VAP's spec.failurePolicy. When a validation expression
+//     errors, Ignore turns the result into a pass and Fail turns it into a
+//     violation. If omitted, eval errors are reported as unknown (Err set).
 //
 // The activation is built once and reused. Variables are bound LAZILY, matching
 // the apiserver (pkg/admission/plugin/cel/composition.go): a variable is
@@ -113,6 +117,7 @@ func (e *Evaluator) EvaluateOnObject(
 	params any,
 	variables []Variable,
 	validations []Validation,
+	failurePolicy ...*admissionregistrationv1.FailurePolicyType,
 ) ([]ValidationResult, error) {
 	// stubBindings owns request, oldObject and namespaceObject. We add the
 	// remaining env-declared variables so every declared variable is bound (an
@@ -122,9 +127,14 @@ func (e *Evaluator) EvaluateOnObject(
 	activation["params"] = params
 	activation["variables"] = e.lazyVariables(ctx, variables, activation)
 
+	var fp *admissionregistrationv1.FailurePolicyType
+	if len(failurePolicy) > 0 {
+		fp = failurePolicy[0]
+	}
+
 	results := make([]ValidationResult, 0, len(validations))
 	for _, val := range validations {
-		results = append(results, e.evaluateValidation(ctx, val, activation))
+		results = append(results, e.evaluateValidation(ctx, val, activation, fp))
 	}
 	return results, nil
 }
@@ -156,26 +166,49 @@ func (e *Evaluator) lazyVariables(ctx context.Context, variables []Variable, act
 }
 
 // evaluateValidation evaluates one validation against the prepared activation.
-// Only a compile/eval failure of the validation expression sets Err; everything
-// else resolves to a clean pass or a violation with a message.
-func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, activation map[string]any) ValidationResult {
+// A compile/eval failure or non-bool result is handled by applyFailurePolicy:
+// with no policy it is reported as an error, with Ignore it is a pass, and with
+// Fail it is a violation.
+func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, activation map[string]any, failurePolicy *admissionregistrationv1.FailurePolicyType) ValidationResult {
 	res := ValidationResult{Expression: val.Expression}
 
 	out, err := e.evalExpression(ctx, val.Expression, activation)
 	if err != nil {
-		res.Err = err
-		return res
+		return e.applyFailurePolicy(res, val, err, failurePolicy)
 	}
 
 	passed, ok := out.Value().(bool)
 	if !ok {
-		res.Err = fmt.Errorf("validation expression must return bool, got %T", out.Value())
-		return res
+		return e.applyFailurePolicy(res, val, fmt.Errorf("validation expression must return bool, got %T", out.Value()), failurePolicy)
 	}
 
 	res.Passed = passed
 	if !passed {
 		res.Message = e.resolveMessage(ctx, val, activation)
+	}
+	return res
+}
+
+// applyFailurePolicy turns a validation eval/compile/type error into the
+// admission-time outcome dictated by spec.failurePolicy. Without a policy the
+// result is left as an unknown error (the parity-safe fallback). Ignore always
+// passes; Fail always fails, preferring the rule's static Message when present
+// and falling back to the error itself.
+func (e *Evaluator) applyFailurePolicy(res ValidationResult, val Validation, evalErr error, failurePolicy *admissionregistrationv1.FailurePolicyType) ValidationResult {
+	if failurePolicy == nil {
+		res.Err = evalErr
+		res.Passed = false
+		return res
+	}
+	if *failurePolicy == admissionregistrationv1.Ignore {
+		res.Passed = true
+		return res
+	}
+	res.Passed = false
+	if msg := strings.TrimSpace(val.Message); msg != "" {
+		res.Message = msg
+	} else {
+		res.Message = fmt.Sprintf("evaluating validation %q failed: %v", res.Expression, evalErr)
 	}
 	return res
 }
