@@ -391,7 +391,7 @@ func TestDecryptResourceSource_RoundTrip(
 
 	err = DecryptResourceSource(
 		source,
-		dek,
+		UnboundReportKey(dek),
 	)
 
 	require.NoError(t, err)
@@ -471,7 +471,7 @@ func TestDecryptResourceSource_Nil(
 ) {
 	err := DecryptResourceSource(
 		nil,
-		make([]byte, 32),
+		UnboundReportKey(make([]byte, 32)),
 	)
 
 	require.NoError(t, err)
@@ -508,7 +508,7 @@ func TestDecryptResourceMetadata_RoundTrip(
 
 	err = DecryptResourceMetadata(
 		resource,
-		dek,
+		UnboundReportKey(dek),
 	)
 
 	require.NoError(t, err)
@@ -531,8 +531,243 @@ func TestDecryptResourceMetadata_Nil(
 ) {
 	err := DecryptResourceMetadata(
 		nil,
-		make([]byte, 32),
+		UnboundReportKey(make([]byte, 32)),
 	)
 
 	require.NoError(t, err)
+}
+
+func TestDecryptResourceLabels_RoundTrip(t *testing.T) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	encryptedTeam, err := EncryptString(
+		"payments",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedEnv, err := EncryptString(
+		"production",
+		dek,
+	)
+	require.NoError(t, err)
+
+	resource := workloadinterface.NewWorkloadObj(
+		map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"labels": map[string]any{
+					"team": encryptedTeam,
+					"env":  encryptedEnv,
+				},
+			},
+		},
+	)
+
+	err = DecryptResourceLabels(
+		resource,
+		UnboundReportKey(dek),
+	)
+	require.NoError(t, err)
+
+	labels := resource.GetLabels()
+
+	assert.Equal(
+		t,
+		"payments",
+		labels["team"],
+	)
+
+	assert.Equal(
+		t,
+		"production",
+		labels["env"],
+	)
+}
+
+func TestDecryptResourceAnnotations_RoundTrip(t *testing.T) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	encryptedValue1, err := EncryptString(
+		"secret/data/payment",
+		dek,
+	)
+	require.NoError(t, err)
+
+	encryptedValue2, err := EncryptString(
+		"abcd1234",
+		dek,
+	)
+	require.NoError(t, err)
+
+	resource := workloadinterface.NewWorkloadObj(
+		map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Deployment",
+			"metadata": map[string]any{
+				"annotations": map[string]any{
+					"vault.hashicorp.com/path": encryptedValue1,
+					"example.com/token":        encryptedValue2,
+				},
+			},
+		},
+	)
+
+	err = DecryptResourceAnnotations(
+		resource,
+		UnboundReportKey(dek),
+	)
+	require.NoError(t, err)
+
+	metadata := resource.GetObject()["metadata"].(map[string]any)
+	annotations := metadata["annotations"].(map[string]any)
+
+	assert.Equal(
+		t,
+		"secret/data/payment",
+		annotations["vault.hashicorp.com/path"],
+	)
+
+	assert.Equal(
+		t,
+		"abcd1234",
+		annotations["example.com/token"],
+	)
+}
+
+func TestDecryptResourceObjectSourcePath_RoundTrip(t *testing.T) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	encryptedPath, err := EncryptString(
+		"/workspace/manifests/payment.yaml",
+		dek,
+	)
+	require.NoError(t, err)
+
+	resource := workloadinterface.NewWorkloadObj(
+		map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"sourcePath": encryptedPath + ":42",
+		},
+	)
+
+	err = DecryptResourceObjectSourcePath(
+		resource,
+		UnboundReportKey(dek),
+	)
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		"/workspace/manifests/payment.yaml:42",
+		resource.GetObject()["sourcePath"],
+	)
+}
+
+func TestDecryptResourceLabels_Nil(t *testing.T) {
+	err := DecryptResourceLabels(
+		nil,
+		UnboundReportKey(make([]byte, 32)),
+	)
+
+	require.NoError(t, err)
+}
+
+func TestDecryptResourceAnnotations_Nil(t *testing.T) {
+	err := DecryptResourceAnnotations(
+		nil,
+		UnboundReportKey(make([]byte, 32)),
+	)
+
+	require.NoError(t, err)
+}
+
+func TestDecryptResourceObjectSourcePath_Nil(t *testing.T) {
+	err := DecryptResourceObjectSourcePath(
+		nil,
+		UnboundReportKey(make([]byte, 32)),
+	)
+
+	require.NoError(t, err)
+}
+
+func TestDecryptResourceLabels_Plaintext(t *testing.T) {
+	resource := workloadinterface.NewWorkloadObj(
+		map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"labels": map[string]any{
+					"team": "backend",
+				},
+			},
+		},
+	)
+
+	err := DecryptResourceLabels(resource, UnboundReportKey(make([]byte, 32)))
+	require.NoError(t, err)
+
+	assert.Equal(t, "backend", resource.GetLabels()["team"])
+}
+
+func TestDecryptIfEncrypted_PreservesPlaintextWhitespace(t *testing.T) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	// Values that were never encrypted must survive decryption byte for byte.
+	// Trailing newlines in particular are meaningful: kubectl writes the
+	// last-applied-configuration annotation with one.
+	plaintexts := []string{
+		"{\"apiVersion\":\"v1\"}\n",
+		"  indented value",
+		"trailing spaces   ",
+		"multi\nline\nvalue\n",
+		"\ttabbed\t",
+	}
+
+	for _, plaintext := range plaintexts {
+		got, err := decryptIfEncrypted(plaintext, UnboundReportKey(dek))
+		require.NoError(t, err)
+		assert.Equal(t, plaintext, got, "plaintext must not be rewritten")
+	}
+}
+
+func TestDecryptIfEncrypted_TolerantOfEnvelopeWhitespace(t *testing.T) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	ciphertext, err := EncryptString("secret-value", dek)
+	require.NoError(t, err)
+
+	// An envelope padded by whitespace still decrypts to the exact plaintext.
+	got, err := decryptIfEncrypted("  "+ciphertext+"\n", UnboundReportKey(dek))
+	require.NoError(t, err)
+	assert.Equal(t, "secret-value", got)
+}
+
+func TestDecryptResourceAnnotations_PreservesPlaintextValue(t *testing.T) {
+	const lastApplied = "{\"apiVersion\":\"v1\",\"kind\":\"Pod\"}\n"
+
+	resource := workloadinterface.NewWorkloadObj(
+		map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"annotations": map[string]any{
+					"kubectl.kubernetes.io/last-applied-configuration": lastApplied,
+				},
+			},
+		},
+	)
+
+	require.NoError(t, DecryptResourceAnnotations(resource, UnboundReportKey(make([]byte, 32))))
+
+	metadata := resource.GetObject()["metadata"].(map[string]any)
+	annotations := metadata["annotations"].(map[string]any)
+	assert.Equal(t, lastApplied, annotations["kubectl.kubernetes.io/last-applied-configuration"])
 }

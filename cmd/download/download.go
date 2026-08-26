@@ -6,10 +6,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/core"
-	"github.com/kubescape/kubescape/v3/core/meta"
-	v1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/core"
+	"github.com/kubescape/kubescape/v4/core/meta"
+	v1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -73,7 +73,8 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 				}
 				downloadInfo.Identifier = args[1]
 			}
-			if err := ks.Download(&downloadInfo); err != nil {
+			_, err := ks.Download(&downloadInfo)
+			if err != nil {
 				return err
 			}
 			return nil

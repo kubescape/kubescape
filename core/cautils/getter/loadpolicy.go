@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 )
@@ -54,6 +57,12 @@ func NewLoadPolicy(filePaths []string) *LoadPolicy {
 	}
 }
 
+// ShouldPersistPolicyArtifacts prevents explicit local inputs from being
+// republished into Kubescape's shared disk fallback.
+func (lp *LoadPolicy) ShouldPersistPolicyArtifacts() bool {
+	return false
+}
+
 // GetControl returns a control from the policy file.
 func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, error) {
 	if controlID == "" {
@@ -61,7 +70,7 @@ func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, err
 	}
 
 	for _, filePath := range lp.filePaths {
-		buf, err := os.ReadFile(filePath)
+		buf, err := os.ReadFile(filepath.Clean(filePath))
 		if err != nil {
 			continue
 		}
@@ -97,14 +106,16 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framew
 	}
 
 	for _, filePath := range lp.filePaths {
-		buf, err := os.ReadFile(filePath)
+		buf, err := os.ReadFile(filepath.Clean(filePath))
 		if err != nil {
-			return nil, err
+			logger.L().Debug("skipping unreadable policy file", helpers.String("path", filePath), helpers.Error(err))
+			continue
 		}
 
 		var framework reporthandling.Framework
 		if err = json.Unmarshal(buf, &framework); err != nil {
-			return nil, err
+			logger.L().Debug("skipping unparsable policy file", helpers.String("path", filePath), helpers.Error(err))
+			continue
 		}
 
 		if strings.EqualFold(frameworkName, framework.Name) {
@@ -121,9 +132,10 @@ func (lp *LoadPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
 	seenFws := make(map[string]struct{})
 
 	for _, f := range lp.filePaths {
-		buf, err := os.ReadFile(f)
+		buf, err := os.ReadFile(filepath.Clean(f))
 		if err != nil {
-			return nil, err
+			logger.L().Debug("skipping unreadable policy file", helpers.String("path", f), helpers.Error(err))
+			continue
 		}
 
 		var framework reporthandling.Framework
@@ -150,9 +162,10 @@ func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
 	frameworkNames := make([]string, 0, 10)
 
 	for _, f := range lp.filePaths {
-		buf, err := os.ReadFile(f)
+		buf, err := os.ReadFile(filepath.Clean(f))
 		if err != nil {
-			return nil, err
+			logger.L().Debug("skipping unreadable policy file", helpers.String("path", f), helpers.Error(err))
+			continue
 		}
 
 		var framework reporthandling.Framework
@@ -182,7 +195,7 @@ func (lp *LoadPolicy) ListControls() ([]string, error) {
 	var orderedIDs []string
 
 	for _, filePath := range lp.filePaths {
-		buf, err := os.ReadFile(filePath)
+		buf, err := os.ReadFile(filepath.Clean(filePath))
 		if err != nil {
 			continue
 		}
@@ -246,11 +259,11 @@ func (lp *LoadPolicy) ListControls() ([]string, error) {
 // GetExceptions retrieves configured exceptions.
 //
 // NOTE: the cluster parameter is not used at this moment.
-func (lp *LoadPolicy) GetExceptions(_ /* clusterName */ string) ([]armotypes.PostureExceptionPolicy, error) {
+func (lp *LoadPolicy) GetExceptions(_ context.Context, _ /* clusterName */ string) ([]armotypes.PostureExceptionPolicy, error) {
 	// NOTE: this assumes that the first path contains a valid exceptions descriptor
 	filePath := lp.filePath()
 
-	buf, err := os.ReadFile(filePath)
+	buf, err := os.ReadFile(filepath.Clean(filePath))
 	if err != nil {
 		return nil, err
 	}
@@ -264,12 +277,12 @@ func (lp *LoadPolicy) GetExceptions(_ /* clusterName */ string) ([]armotypes.Pos
 // GetControlsInputs retrieves the map of control configs.
 //
 // NOTE: the cluster parameter is not used at this moment.
-func (lp *LoadPolicy) GetControlsInputs(_ /* clusterName */ string) (map[string][]string, error) {
+func (lp *LoadPolicy) GetControlsInputs(_ context.Context, _ /* clusterName */ string) (map[string][]string, error) {
 	// NOTE: this assumes that only the first path contains a valid control inputs descriptor
 	filePath := lp.filePath()
 	fileName := filepath.Base(filePath)
 
-	buf, err := os.ReadFile(filePath)
+	buf, err := os.ReadFile(filepath.Clean(filePath))
 	if err != nil {
 		formattedError := fmt.Errorf(
 			`error opening %s file, "controls-config" will be downloaded from ARMO management portal`,
@@ -296,7 +309,7 @@ func (lp *LoadPolicy) GetControlsInputs(_ /* clusterName */ string) (map[string]
 func (lp *LoadPolicy) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
 	attackTracks := make([]v1alpha1.AttackTrack, 0, 20)
 
-	buf, err := os.ReadFile(lp.filePath())
+	buf, err := os.ReadFile(filepath.Clean(lp.filePath()))
 	if err != nil {
 		return nil, err
 	}

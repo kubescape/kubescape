@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/spf13/cobra"
 )
 
@@ -37,13 +37,13 @@ func GetCompletionCmd() *cobra.Command {
 
 			switch strings.ToLower(args[0]) {
 			case "bash":
-				cmd.Root().GenBashCompletion(os.Stdout)
+				_ = cmd.Root().GenBashCompletion(os.Stdout) // #nosec G104 -- writing completion script to stdout
 			case "zsh":
-				cmd.Root().GenZshCompletion(os.Stdout)
+				_ = cmd.Root().GenZshCompletion(os.Stdout) // #nosec G104 -- writing completion script to stdout
 			case "fish":
-				cmd.Root().GenFishCompletion(os.Stdout, true)
+				_ = cmd.Root().GenFishCompletion(os.Stdout, true) // #nosec G104 -- writing completion script to stdout
 			case "powershell":
-				cmd.Root().GenPowerShellCompletionWithDesc(os.Stdout)
+				_ = cmd.Root().GenPowerShellCompletionWithDesc(os.Stdout) // #nosec G104 -- writing completion script to stdout
 			default:
 				fmt.Printf("Invalid argument %s", args[0])
 			}

@@ -15,7 +15,7 @@ The `core` package provides the main Kubescape scanning engine as a Go library, 
 ## Installation
 
 ```bash
-go get github.com/kubescape/kubescape/v3/core
+go get github.com/kubescape/kubescape/v4/core
 ```
 
 ---
@@ -30,8 +30,8 @@ import (
     "fmt"
     "log"
 
-    "github.com/kubescape/kubescape/v3/core"
-    "github.com/kubescape/kubescape/v3/core/cautils"
+    "github.com/kubescape/kubescape/v4/core"
+    "github.com/kubescape/kubescape/v4/core/cautils"
 )
 
 func main() {
@@ -46,8 +46,10 @@ func main() {
         ScanAll: true,
     }
 
+    var policyIdentifiers []cautils.PolicyIdentifier
+
     // Run scan
-    results, err := ks.Scan(scanInfo)
+    results, err := ks.Scan(scanInfo, policyIdentifiers)
     if err != nil {
         log.Fatalf("Scan failed: %v", err)
     }
@@ -77,21 +79,33 @@ ks := core.NewKubescape(ctx)
 
 ```go
 // Scan with configuration
-results, err := ks.Scan(scanInfo)
+var policyIdentifiers []cautils.PolicyIdentifier
+results, err := ks.Scan(scanInfo, policyIdentifiers)
 ```
 
 ### Listing Frameworks and Controls
 
 ```go
 // List available policies
-err := ks.List(listPolicies)
+listResult, err := ks.List(listPolicies)
+if err != nil {
+    // Handle list error
+}
+
+// Use listResult.Names for frameworks/exceptions
+// Use listResult.Controls for controls
 ```
 
 ### Downloading Artifacts
 
 ```go
 // Download for offline use
-err := ks.Download(downloadInfo)
+downloadResult, err := ks.Download(downloadInfo)
+if err != nil {
+    // Handle download error
+}
+
+// Use downloadResult.Files for the saved artifact paths
 ```
 
 ### Image Scanning
@@ -115,10 +129,15 @@ err := ks.Fix(fixInfo)
 ### Scan a Specific Framework
 
 ```go
-scanInfo := &cautils.ScanInfo{}
-scanInfo.SetPolicyIdentifiers([]string{"nsa"}, "framework")
+import (
+    "github.com/kubescape/kubescape/v4/core/cautils"
+    apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+)
 
-results, err := ks.Scan(scanInfo)
+scanInfo := &cautils.ScanInfo{}
+policyIdentifiers := cautils.BuildPolicyIdentifiers([]string{"nsa"}, apisv1.KindFramework)
+
+results, err := ks.Scan(scanInfo, policyIdentifiers)
 ```
 
 ### Scan Specific Namespaces
@@ -127,8 +146,9 @@ results, err := ks.Scan(scanInfo)
 scanInfo := &cautils.ScanInfo{
     IncludeNamespaces: "production,staging",
 }
+var policyIdentifiers []cautils.PolicyIdentifier
 
-results, err := ks.Scan(scanInfo)
+results, err := ks.Scan(scanInfo, policyIdentifiers)
 ```
 
 ### Scan Local YAML Files
@@ -138,14 +158,16 @@ scanInfo := &cautils.ScanInfo{
     InputPatterns: []string{"/path/to/manifests"},
 }
 scanInfo.SetScanType(cautils.ScanTypeRepo)
+var policyIdentifiers []cautils.PolicyIdentifier
 
-results, err := ks.Scan(scanInfo)
+results, err := ks.Scan(scanInfo, policyIdentifiers)
 ```
 
 ### Export Results to Different Formats
 
 ```go
-results, _ := ks.Scan(scanInfo)
+var policyIdentifiers []cautils.PolicyIdentifier
+results, _ := ks.Scan(scanInfo, policyIdentifiers)
 
 // JSON
 jsonData, _ := results.ToJson()
@@ -161,8 +183,9 @@ fmt.Printf("Compliance Score: %.2f%%\n", summary.ComplianceScore)
 scanInfo := &cautils.ScanInfo{
     ComplianceThreshold: 80.0, // Fail if below 80%
 }
+var policyIdentifiers []cautils.PolicyIdentifier
 
-results, err := ks.Scan(scanInfo)
+results, err := ks.Scan(scanInfo, policyIdentifiers)
 if err != nil {
     // Handle scan failure
 }
@@ -201,7 +224,8 @@ if results.GetData().Report.SummaryDetails.ComplianceScore < scanInfo.Compliance
 ## Error Handling
 
 ```go
-results, err := ks.Scan(scanInfo)
+var policyIdentifiers []cautils.PolicyIdentifier
+results, err := ks.Scan(scanInfo, policyIdentifiers)
 if err != nil {
     switch {
     case errors.Is(err, context.DeadlineExceeded):
@@ -231,7 +255,8 @@ for _, ns := range namespaces {
         scanInfo := &cautils.ScanInfo{
             IncludeNamespaces: namespace,
         }
-        results, _ := ks.Scan(scanInfo)
+        var policyIdentifiers []cautils.PolicyIdentifier
+        results, _ := ks.Scan(scanInfo, policyIdentifiers)
         // Process results...
     }(ns)
 }

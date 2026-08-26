@@ -19,7 +19,13 @@ dist/
 # Test output files
 customFilename.pdf
 customFilename.xml
+customFilename.txt
+customFilename.html
+core/core/report.html
+core/core/report.txt
 FETCH_HEAD
 tallation.md
 nginx:latest.json
 results.json
+customFilename.txt
+*_dump.txt

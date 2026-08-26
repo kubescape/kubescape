@@ -43,21 +43,29 @@ func NewCRDControlInputs() (*CRDControlInputs, error) {
 		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 
-	return &CRDControlInputs{
-		client: dynamicClient,
-	}, nil
+	return NewCRDControlInputsWithClient(dynamicClient)
+}
+
+// NewCRDControlInputsWithClient creates a control-input getter from the dynamic
+// client already selected for the scan target.
+func NewCRDControlInputsWithClient(dynamicClient dynamic.Interface) (*CRDControlInputs, error) {
+	if dynamicClient == nil {
+		return nil, fmt.Errorf("kubernetes dynamic client is nil")
+	}
+
+	return &CRDControlInputs{client: dynamicClient}, nil
 }
 
 // GetControlsInputs retrieves control inputs from the ControlInput CRD.
 // It looks for a ControlInput resource named "default" in the cluster scope.
-func (c *CRDControlInputs) GetControlsInputs(clusterName string) (map[string][]string, error) {
+func (c *CRDControlInputs) GetControlsInputs(ctx context.Context, clusterName string) (map[string][]string, error) {
 	gvr := schema.GroupVersionResource{
 		Group:    controlInputGroup,
 		Version:  controlInputVersion,
 		Resource: controlInputResource,
 	}
 
-	obj, err := c.client.Resource(gvr).Get(context.Background(), "default", metav1.GetOptions{})
+	obj, err := c.client.Resource(gvr).Get(ctx, "default", metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ControlInput CRD 'default': %w", err)
 	}

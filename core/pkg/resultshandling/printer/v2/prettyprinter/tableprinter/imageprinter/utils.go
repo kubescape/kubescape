@@ -8,7 +8,7 @@ import (
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 )
 
 func renderTable(writer io.Writer, headers table.Row, columnAlignments []table.ColumnConfig, rows []table.Row) {

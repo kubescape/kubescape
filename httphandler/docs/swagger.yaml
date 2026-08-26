@@ -269,6 +269,26 @@ paths:
       tags:
       - scanning
   /v1/scan:
+    delete:
+      description: Cancels an in-flight scan, releasing it so a new scan can
+        run in its place.
+      operationId: cancelScan
+      parameters:
+      - description: ID of the scan to cancel. If empty, the latest scan is
+          cancelled.
+        format: uuid4
+        in: query
+        name: id
+        type: string
+        x-go-name: ScanID
+      responses:
+        "200":
+          $ref: '#/responses/scanResponse'
+        "404":
+          $ref: '#/responses/scanResponseNotFound'
+      summary: Cancels a scan
+      tags:
+      - scanning
     post:
       description: The server will return a scan ID and execute the scan.
       operationId: triggerScan
@@ -318,6 +338,8 @@ paths:
       responses:
         "200":
           $ref: '#/responses/scanResponse'
+        "400":
+          $ref: '#/responses/scanResponseBadRequest'
       summary: Returns a scan’s status
       tags:
       - scanning
@@ -451,6 +473,60 @@ responses:
       A Scan Response that indicates no response body.
 
       Kubescape generates this response, for example, when results with given ID do not exist.
+  scanResponseNotFound:
+    description: A Scan Response that occures when no in-flight scan matches
+      the given ID
+    schema:
+      allOf:
+      - properties:
+          id:
+            description: ID of the scan
+            example: d13791eb-19b1-4222-867b-9a7c1799cfac
+            format: uuid4
+            type: string
+            x-go-name: ID
+          response:
+            description: The actual Response payload
+            example: d13791eb-19b1-4222-867b-9a7c1799cfac
+            type: object
+            x-go-name: Response
+          type:
+            description: |-
+              Type of this response
+              id IDScanResponseType  Deprecated: will return busy / notBusy instead
+              error ErrorScanResponseType  ErrorScanResponseType indicates a response that reports an error
+              v1results ResultsV1ScanResponseType  ResultsV1ScanResponseType indicates a response that carries a v1 Results object as payload
+              busy BusyScanResponseType  BusyScanResponseType indicates that a server is busy with a previous request
+              notBusy NotBusyScanResponseType  NotBusyScanResponseType indicates that a server is not busy with a previous request
+              ready ReadyScanResponseType  ReadyScanResponseType indicates that a server has successfully completed a request
+            enum:
+            - id
+            - error
+            - v1results
+            - busy
+            - notBusy
+            - ready
+            example: busy
+            type: string
+            x-go-enum-desc: |-
+              id IDScanResponseType  Deprecated: will return busy / notBusy instead
+              error ErrorScanResponseType  ErrorScanResponseType indicates a response that reports an error
+              v1results ResultsV1ScanResponseType  ResultsV1ScanResponseType indicates a response that carries a v1 Results object as payload
+              busy BusyScanResponseType  BusyScanResponseType indicates that a server is busy with a previous request
+              notBusy NotBusyScanResponseType  NotBusyScanResponseType indicates that a server is not busy with a previous request
+              ready ReadyScanResponseType  ReadyScanResponseType indicates that a server has successfully completed a request
+            x-go-name: Type
+        type: object
+      - properties:
+          response:
+            example: no in-flight scan found for 'd13791eb-19b1-4222-867b-9a7c1799cfac'
+            type: object
+            x-go-name: Resp
+          type:
+            example: error
+            type: string
+            x-go-name: Type
+        type: object
 schemes:
 - http
 swagger: "2.0"

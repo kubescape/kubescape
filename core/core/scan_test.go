@@ -2,12 +2,255 @@ package core
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/pkg/imagescan"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/version"
 )
+
+// buildBrokenRuleScanInfo writes a local, offline-loadable scan target (one
+// manifest, one framework with a deliberately invalid rego rule, and empty
+// controls-inputs/exceptions/attack-tracks so nothing needs a network call)
+// into its own temp dir, so callers get fully independent *cautils.ScanInfo
+// values suitable for running concurrently against a shared *Kubescape.
+func buildBrokenRuleScanInfo(t *testing.T) (*cautils.ScanInfo, []cautils.PolicyIdentifier, reporthandling.Control) {
+	t.Helper()
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "pod.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name: partial-result-probe
+  namespace: default
+`), 0o600))
+
+	rule := reporthandling.PolicyRule{
+		Rule:         "package armo_builtins\nthis is not valid rego at all {{{",
+		RuleLanguage: reporthandling.RegoLanguage,
+		Match: []reporthandling.RuleMatchObjects{{
+			APIGroups:   []string{""},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"Pod"},
+		}},
+	}
+	rule.Name = "broken-rule"
+	control := reporthandling.Control{ControlID: "C-BROKEN", BaseScore: 5, Rules: []reporthandling.PolicyRule{rule}}
+	control.Name = "broken-control"
+	framework := reporthandling.Framework{Controls: []reporthandling.Control{control}}
+	framework.Name = "broken-framework"
+	frameworkBytes, err := json.Marshal(framework)
+	require.NoError(t, err)
+	frameworkPath := filepath.Join(dir, "framework.json")
+	require.NoError(t, os.WriteFile(frameworkPath, frameworkBytes, 0o600))
+	controlsInputsPath := filepath.Join(dir, "controls-inputs.json")
+	require.NoError(t, os.WriteFile(controlsInputsPath, []byte(`{"probe":["value"]}`), 0o600))
+	exceptionsPath := filepath.Join(dir, "exceptions.json")
+	require.NoError(t, os.WriteFile(exceptionsPath, []byte(`[]`), 0o600))
+	attackTracksPath := filepath.Join(dir, "attack-tracks.json")
+	require.NoError(t, os.WriteFile(attackTracksPath, []byte(`[]`), 0o600))
+
+	scanInfo := &cautils.ScanInfo{
+		UseFrom:          []string{frameworkPath},
+		ControlsInputs:   controlsInputsPath,
+		UseExceptions:    exceptionsPath,
+		AttackTracks:     attackTracksPath,
+		InputPatterns:    []string{manifestPath},
+		Local:            true,
+		FrameworkScan:    true,
+		ScanType:         cautils.ScanTypeFramework,
+		OmitRawResources: true,
+	}
+	scanInfo.Submit.SetBool(false)
+
+	policyIdentifiers := []cautils.PolicyIdentifier{{
+		Identifier: framework.Name,
+		Kind:       apisv1.KindFramework,
+	}}
+	return scanInfo, policyIdentifiers, control
+}
+
+func TestScan_ReturnsFinalizedPartialDataOnOPAError(t *testing.T) {
+	scanInfo, policyIdentifiers, control := buildBrokenRuleScanInfo(t)
+
+	results, err := NewKubescape(context.Background()).Scan(scanInfo, policyIdentifiers)
+
+	require.ErrorContains(t, err, "broken-rule")
+	require.NotNil(t, results)
+	require.NotNil(t, results.GetData(), "the finalized partial session must remain available alongside the scan error")
+	require.Len(t, results.GetData().ResourcesResult, 1)
+	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
+	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+}
+
+// TestScanContext_ReturnsFinalizedPartialDataOnOPAError exercises the new
+// explicit-context entry point directly (#3237), mirroring
+// TestScan_ReturnsFinalizedPartialDataOnOPAError's assertions to confirm
+// ScanContext behaves identically to Scan when called with ks.Context().
+func TestScanContext_ReturnsFinalizedPartialDataOnOPAError(t *testing.T) {
+	scanInfo, policyIdentifiers, control := buildBrokenRuleScanInfo(t)
+	ks := NewKubescape(context.Background())
+
+	results, err := ks.ScanContext(ks.Context(), scanInfo, policyIdentifiers)
+
+	require.ErrorContains(t, err, "broken-rule")
+	require.NotNil(t, results)
+	require.NotNil(t, results.GetData(), "the finalized partial session must remain available alongside the scan error")
+	require.Len(t, results.GetData().ResourcesResult, 1)
+	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
+	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+}
+
+// TestScanContext_DoesNotMutateSharedKubescapeContext is a regression test
+// for #3237: ScanContext must operate purely on the ctx argument it's given
+// and never read or write ks's own Ctx field, so two operations sharing one
+// *Kubescape can't observe or clobber each other's context the way the old
+// Scan()+SetContext(timeout)+restore pattern could.
+//
+// This intentionally does not run two ScanContext calls concurrently under
+// -race: doing so trips an unrelated, pre-existing data race in
+// k8sinterface.IsConnectedToCluster/SetConnectedToCluster (a package-level
+// cache in github.com/kubescape/k8s-interface, exercised via getInterfaces
+// regardless of scan type). That's a real bug, but it's in a shared
+// dependency's global state, not in *Kubescape's context ownership, and
+// fixing it is out of scope here: #3237 explicitly does not claim the whole
+// scanner is safe for unrestricted parallel execution, only that Scan's own
+// context handling is.
+func TestScanContext_DoesNotMutateSharedKubescapeContext(t *testing.T) {
+	scanInfo, policyIdentifiers, control := buildBrokenRuleScanInfo(t)
+	ks := NewKubescape(context.Background())
+
+	type ctxKey struct{}
+	operationCtx := context.WithValue(context.Background(), ctxKey{}, "operation-owned")
+
+	results, err := ks.ScanContext(operationCtx, scanInfo, policyIdentifiers)
+
+	require.ErrorContains(t, err, "broken-rule")
+	require.NotNil(t, results)
+	require.NotNil(t, results.GetData())
+	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
+	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+
+	assert.Equal(t, context.Background(), ks.Context(), "ScanContext must not call SetContext or otherwise mutate ks's own context")
+}
+
+type recordingImageScanService struct {
+	image              string
+	credentials        imagescan.RegistryCredentials
+	registryMappingErr error
+}
+
+func (s *recordingImageScanService) Scan(_ context.Context, image string, credentials imagescan.RegistryCredentials, _, _ []string) (*cautils.ImageScanData, error) {
+	s.image = image
+	s.credentials = credentials
+	if s.registryMappingErr != nil {
+		return nil, s.registryMappingErr
+	}
+	return &cautils.ImageScanData{Image: image}, nil
+}
+
+// estimateClusterSizeMock implements resourcehandler.IResourceHandler with a
+// controllable EstimateClusterSize return value. All other methods are stubs.
+type estimateClusterSizeMock struct {
+	size int
+	err  error
+}
+
+func (m estimateClusterSizeMock) GetResources(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
+	return nil, nil, nil, nil, nil
+}
+
+func (m estimateClusterSizeMock) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
+	return nil, nil, 0, nil
+}
+
+func (m estimateClusterSizeMock) EstimateClusterSize(ctx context.Context, scanInfo *cautils.ScanInfo) (int, error) {
+	return m.size, m.err
+}
+
+func (m estimateClusterSizeMock) GetClusterAPIServerInfo(ctx context.Context) *version.Info {
+	return nil
+}
+
+func (m estimateClusterSizeMock) GetCloudProvider() string {
+	return ""
+}
+
+func (m estimateClusterSizeMock) Preflight(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (*resourcehandler.PreflightResult, error) {
+	return nil, nil
+}
+
+func TestEstimateClusterSize(t *testing.T) {
+	// A ScanInfo with no input patterns is treated as a cluster scan.
+	clusterScanInfo := &cautils.ScanInfo{}
+
+	// A ScanInfo with an explicit file input is treated as a file scan.
+	fileScanInfo := &cautils.ScanInfo{
+		InputPatterns: []string{"deployment.yaml"},
+	}
+
+	tests := []struct {
+		name     string
+		handler  resourcehandler.IResourceHandler
+		scanInfo *cautils.ScanInfo
+		want     int
+	}{
+		{
+			name:     "non-cluster context returns 0",
+			handler:  estimateClusterSizeMock{size: 5000},
+			scanInfo: fileScanInfo,
+			want:     0,
+		},
+		{
+			name:     "handler error falls back to 0",
+			handler:  estimateClusterSizeMock{err: errors.New("API unavailable")},
+			scanInfo: clusterScanInfo,
+			want:     0,
+		},
+		{
+			name:     "small cluster estimate",
+			handler:  estimateClusterSizeMock{size: 500},
+			scanInfo: clusterScanInfo,
+			want:     500,
+		},
+		{
+			name:     "large cluster estimate",
+			handler:  estimateClusterSizeMock{size: 10000},
+			scanInfo: clusterScanInfo,
+			want:     10000,
+		},
+		{
+			name:     "zero estimate (empty cluster)",
+			handler:  estimateClusterSizeMock{size: 0},
+			scanInfo: clusterScanInfo,
+			want:     0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := estimateClusterSize(tt.handler, context.Background(), tt.scanInfo)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
 
 func TestGetOutputPrinters(t *testing.T) {
 	ctx := context.Background()
@@ -23,6 +266,82 @@ func TestGetOutputPrinters(t *testing.T) {
 	assert.Equal(t, 3, len(outputPrinters))
 }
 
+func TestScanClosesOutputPrinterWhenPolicyLoadingFails(t *testing.T) {
+	if _, err := os.Stat("/proc/self/fd"); err != nil {
+		t.Skip("requires /proc/self/fd")
+	}
+
+	for _, formatVersion := range []string{"v1", "v2"} {
+		t.Run(formatVersion, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), "report.json")
+			missingPolicy := "missing-" + filepath.Base(t.TempDir())
+			scanInfo := &cautils.ScanInfo{
+				InputPatterns: []string{"../cautils/testdata/mixed_extensions/pod.yaml"},
+				UseFrom:       []string{filepath.Join(t.TempDir(), missingPolicy+".json")},
+				Format:        printer.JsonFormat,
+				FormatVersion: formatVersion,
+				Output:        output,
+				Local:         true,
+				FrameworkScan: true,
+				ScanType:      cautils.ScanTypeFramework,
+			}
+
+			results, err := NewKubescape(context.Background()).Scan(scanInfo, cautils.BuildPolicyIdentifiers([]string{missingPolicy}, apisv1.KindFramework))
+			require.Error(t, err)
+			require.ErrorContains(t, err, missingPolicy)
+			require.NotNil(t, results, "policy loading must fail after the configured printer is attached to a result handler")
+			assertNoOpenFileDescriptor(t, output)
+			// Keep the returned handler (and its printer) reachable while inspecting
+			// /proc so an os.File finalizer cannot hide the leak under test.
+			runtime.KeepAlive(results)
+		})
+	}
+}
+
+func assertNoOpenFileDescriptor(t *testing.T, path string) {
+	t.Helper()
+	absPath, err := filepath.Abs(path)
+	require.NoError(t, err)
+	entries, err := os.ReadDir("/proc/self/fd")
+	require.NoError(t, err)
+	for _, entry := range entries {
+		target, err := os.Readlink(filepath.Join("/proc/self/fd", entry.Name()))
+		if err == nil {
+			assert.NotEqual(t, absPath, strings.TrimSuffix(target, " (deleted)"), "leaked output file descriptor %s", entry.Name())
+		}
+	}
+}
+
+func TestGetOutputPrintersReturnsExplicitSetupErrorsForEveryFormat(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-directory")
+	require.NoError(t, os.WriteFile(blocker, []byte("block"), 0o600))
+	requestedOutput := filepath.Join(blocker, "report")
+
+	for _, format := range printer.AllFormats {
+		t.Run(format, func(t *testing.T) {
+			scanType := cautils.ScanTypeControl
+			if format == printer.CycloneDXFormat || format == printer.SPDXFormat {
+				scanType = cautils.ScanTypeImage
+			}
+			scanInfo := &cautils.ScanInfo{
+				ScanType:      scanType,
+				Format:        format,
+				Output:        requestedOutput,
+				InputPatterns: []string{dir},
+			}
+
+			outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+
+			require.Error(t, err)
+			assert.Nil(t, outputPrinters)
+			assert.Contains(t, err.Error(), "configure \""+format+"\" output")
+			assert.True(t, strings.Contains(err.Error(), "create output directory") || strings.Contains(err.Error(), "open output file"))
+			assert.NoFileExists(t, resolvedOutputPath(format, requestedOutput))
+		})
+	}
+}
+
 func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
 	scanInfo := &cautils.ScanInfo{
 		ScanType: cautils.ScanTypeControl,
@@ -34,6 +353,106 @@ func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "output path collision")
+}
+
+func TestGetOutputPrintersClosesV1JSONWriterAfterLaterSetupFailure(t *testing.T) {
+	if _, err := os.Stat("/proc/self/fd"); err != nil {
+		t.Skip("requires /proc/self/fd")
+	}
+
+	output := filepath.Join(t.TempDir(), "report")
+	scanInfo := &cautils.ScanInfo{
+		ScanType:      cautils.ScanTypeControl,
+		Format:        printer.JsonFormat + "," + printer.GitLabSASTFormat,
+		FormatVersion: "v1",
+		Output:        output,
+		InputPatterns: []string{"manifest.yaml"},
+	}
+
+	outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+
+	require.ErrorContains(t, err, "output path collision")
+	assert.Nil(t, outputPrinters)
+	assertNoOpenFileDescriptor(t, output+printer.JsonOutputExt)
+}
+
+func TestResolvedOutputPath(t *testing.T) {
+	tests := []struct {
+		name, format, outputFile, want string
+	}{
+		{"append JSON", printer.JsonFormat, "report", "report.json"},
+		{"preserve JSON", printer.JsonFormat, "report.json", "report.json"},
+		{"preserve YAML alias", printer.YamlFormat, "report.yml", "report.yml"},
+		{"preserve CycloneDX", printer.CycloneDXFormat, "report.cdx.json", "report.cdx.json"},
+		{"append CycloneDX", printer.CycloneDXFormat, "report.json", "report.json.cdx.json"},
+		{"preserve SPDX", printer.SPDXFormat, "report.spdx.json", "report.spdx.json"},
+		{"append SPDX", printer.SPDXFormat, "report.json", "report.json.spdx.json"},
+		{"append markdown", printer.MarkdownFormat, "report", "report.md"},
+		{"preserve markdown", printer.MarkdownFormat, "report.md", "report.md"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, resolvedOutputPath(test.format, test.outputFile))
+		})
+	}
+}
+
+// markdown writes report.md and pretty-printer writes report.txt, so sharing
+// an --output must not be rejected as a collision.
+func TestGetOutputPrintersAllowsMarkdownAlongsideTextFormats(t *testing.T) {
+	for _, format := range []string{printer.PrettyFormat, printer.PrometheusFormat} {
+		t.Run(format, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				ScanType: cautils.ScanTypeControl,
+				Format:   printer.MarkdownFormat + "," + format,
+				Output:   filepath.Join(t.TempDir(), "report"),
+			}
+
+			outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "")
+			require.NoError(t, err)
+			assert.Len(t, outputPrinters, 2)
+		})
+	}
+}
+
+func TestResolvedOutputPathExposesSBOMCollisions(t *testing.T) {
+	tests := []struct {
+		sbomFormat, outputFile string
+	}{
+		{printer.CycloneDXFormat, "report.cdx.json"},
+		{printer.SPDXFormat, "report.spdx.json"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.sbomFormat, func(t *testing.T) {
+			jsonPath := resolvedOutputPath(printer.JsonFormat, test.outputFile)
+			sbomPath := resolvedOutputPath(test.sbomFormat, test.outputFile)
+			assert.Equal(t, jsonPath, sbomPath)
+		})
+	}
+}
+
+func TestGetOutputPrintersRejectsSBOMMultipartExtensionCollisions(t *testing.T) {
+	tests := []struct {
+		format, outputFile string
+	}{
+		{"json,cyclonedx-json", "report.cdx.json"},
+		{"json,spdx-json", "report.spdx.json"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.format, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				ScanType: cautils.ScanTypeImage,
+				Format:   test.format,
+				Output:   filepath.Join(t.TempDir(), test.outputFile),
+			}
+
+			_, err := GetOutputPrinters(scanInfo, context.Background(), "")
+			require.ErrorContains(t, err, "output path collision")
+		})
+	}
 }
 
 func TestIsPrioritizationScanType(t *testing.T) {
@@ -74,6 +493,54 @@ func TestIsPrioritizationScanType(t *testing.T) {
 	}
 }
 
+func TestRegistryCredentialsFromScanInfo(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{
+		RegistryAuthority: "registry.example.com",
+		RegistryUsername:  "user",
+		RegistryPassword:  "pass",
+		RegistryToken:     "token",
+	}
+
+	creds := registryCredentialsFromScanInfo(scanInfo)
+
+	assert.Equal(t, imagescan.RegistryCredentials{
+		Authority: "registry.example.com",
+		Username:  "user",
+		Password:  "pass",
+		Token:     "token",
+	}, creds)
+	assert.Equal(t, imagescan.RegistryCredentials{}, registryCredentialsFromScanInfo(nil))
+}
+
+func TestScanSingleImageForwardsRegistryCredentials(t *testing.T) {
+	svc := &recordingImageScanService{}
+	results := &resultshandling.ResultsHandler{}
+	creds := imagescan.RegistryCredentials{
+		Authority: "registry.example.com",
+		Username:  "user",
+		Password:  "pass",
+	}
+
+	err := scanSingleImage(context.Background(), "registry.example.com/app:tag", svc, results, nil, creds)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "registry.example.com/app:tag", svc.image)
+	assert.Equal(t, creds, svc.credentials)
+	assert.Len(t, results.ImageScanData, 1)
+	assert.Equal(t, "registry.example.com/app:tag", results.ImageScanData[0].Image)
+}
+
+func TestScanSingleImageReturnsScannerError(t *testing.T) {
+	expectedErr := errors.New("scan failed")
+	svc := &recordingImageScanService{registryMappingErr: expectedErr}
+	results := &resultshandling.ResultsHandler{}
+
+	err := scanSingleImage(context.Background(), "registry.example.com/app:tag", svc, results, nil, imagescan.RegistryCredentials{})
+
+	assert.ErrorIs(t, err, expectedErr)
+	assert.Empty(t, results.ImageScanData)
+}
+
 func TestIsAirGappedMode(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -95,25 +562,25 @@ func TestIsAirGappedMode(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "air-gapped with ControlsInputs",
+			name: "not air-gapped with ControlsInputs",
 			scanInfo: &cautils.ScanInfo{
 				ControlsInputs: "/path/to/controls",
 			},
-			want: true,
+			want: false,
 		},
 		{
-			name: "air-gapped with UseExceptions",
+			name: "not air-gapped with UseExceptions",
 			scanInfo: &cautils.ScanInfo{
 				UseExceptions: "/path/to/exceptions",
 			},
-			want: true,
+			want: false,
 		},
 		{
-			name: "air-gapped with AttackTracks",
+			name: "not air-gapped with AttackTracks",
 			scanInfo: &cautils.ScanInfo{
 				AttackTracks: "/path/to/attack-tracks",
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name:     "not air-gapped - all empty",
@@ -249,4 +716,180 @@ func TestKubescape_SetContextRestoresOriginal(t *testing.T) {
 	ks.SetContext(originalCtx)
 	_, hasDeadline = ks.Context().Deadline()
 	assert.False(t, hasDeadline)
+}
+
+type streamingCancelMock struct {
+	estimateClusterSizeMock
+	passedCtx                     context.Context
+	apiServerInfo                 *version.Info
+	cloudProvider                 string
+	providerAtStreamingSetup      string
+	apiServerInfoAtStreamingSetup *version.Info
+	scanningScopeAtStreamingSetup reporthandling.ScanningScopeType
+}
+
+func (m *streamingCancelMock) StreamResourcesBatches(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (<-chan *cautils.ResourceBatch, <-chan error, int, error) {
+	m.passedCtx = ctx
+	m.providerAtStreamingSetup = sessionObj.Report.ClusterCloudProvider
+	m.apiServerInfoAtStreamingSetup = sessionObj.Report.ClusterAPIServerInfo
+	m.scanningScopeAtStreamingSetup = cautils.GetScanningScope(sessionObj.Metadata.ContextMetadata)
+	batchChan := make(chan *cautils.ResourceBatch, 1)
+	errChan := make(chan error, 1)
+	batchChan <- cautils.NewResourceBatch(cautils.ClusterScope)
+	close(batchChan)
+	close(errChan)
+	return batchChan, errChan, 0, nil
+}
+
+func (m *streamingCancelMock) GetClusterAPIServerInfo(context.Context) *version.Info {
+	return m.apiServerInfo
+}
+
+func (m *streamingCancelMock) GetCloudProvider() string {
+	return m.cloudProvider
+}
+
+func (m *streamingCancelMock) Preflight(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (*resourcehandler.PreflightResult, error) {
+	return nil, nil
+}
+
+func TestCollectAndProcessResourcesWithStreaming_InitializesProviderScope(t *testing.T) {
+	apiServerInfo := &version.Info{GitVersion: "v1.31.0-eks"}
+	mockHandler := &streamingCancelMock{
+		apiServerInfo: apiServerInfo,
+		cloudProvider: "eks",
+	}
+	sessionObj := cautils.NewOPASessionObjMock()
+	sessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
+		ContextName: "arn:aws:eks:us-east-1:123456789012:cluster/production",
+	}
+
+	err := collectAndProcessResourcesWithStreaming(context.Background(), mockHandler, sessionObj, &cautils.ScanInfo{}, "cluster", "", "", false, time.Second, 3000)
+
+	require.NoError(t, err)
+	assert.Same(t, apiServerInfo, sessionObj.Report.ClusterAPIServerInfo)
+	assert.Equal(t, "EKS", sessionObj.Report.ClusterCloudProvider)
+	require.NotNil(t, sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudMetadata)
+	assert.Equal(t, "EKS", mockHandler.providerAtStreamingSetup,
+		"cloud provider must be available before streaming starts")
+	assert.Same(t, apiServerInfo, mockHandler.apiServerInfoAtStreamingSetup,
+		"API server info must be available before streaming starts")
+	assert.Equal(t, reporthandling.ScopeCloudEKS, mockHandler.scanningScopeAtStreamingSetup,
+		"provider-scoped frameworks must not be filtered from streaming scans")
+}
+
+func TestCollectAndProcessResourcesWithStreaming_CancelsProducerContext(t *testing.T) {
+	mockHandler := &streamingCancelMock{}
+	sessionObj := cautils.NewOPASessionObjMock()
+	scanInfo := &cautils.ScanInfo{}
+
+	parentCtx := context.Background()
+
+	_ = collectAndProcessResourcesWithStreaming(parentCtx, mockHandler, sessionObj, scanInfo, "cluster", "", "", false, time.Second, 10)
+
+	require.NotNil(t, mockHandler.passedCtx)
+	assert.NoError(t, parentCtx.Err(), "parent context must remain uncanceled")
+	assert.Equal(t, context.Canceled, mockHandler.passedCtx.Err(), "derived producer context must be canceled when function returns")
+}
+
+func TestGetAllWorkloadImages(t *testing.T) {
+	podData := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]interface{}{
+			"name": "test-pod",
+		},
+		"spec": map[string]interface{}{
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name":  "main-app",
+					"image": "app:v1",
+				},
+			},
+			"initContainers": []interface{}{
+				map[string]interface{}{
+					"name":  "init-setup",
+					"image": "init:v1",
+				},
+			},
+			"ephemeralContainers": []interface{}{
+				map[string]interface{}{
+					"name":  "debug-tool",
+					"image": "debug:v1",
+				},
+			},
+		},
+	}
+
+	wl := workloadinterface.NewWorkloadObj(podData)
+	images, containerErrors := getAllWorkloadImages(wl)
+
+	require.Empty(t, containerErrors)
+	assert.Contains(t, images, "app:v1")
+	assert.Contains(t, images, "init:v1")
+	assert.Contains(t, images, "debug:v1")
+	assert.Len(t, images, 3)
+}
+
+func TestGetAllWorkloadImagesReturnsGetterErrorsAndPreservesOtherClasses(t *testing.T) {
+	tests := []struct {
+		name           string
+		malformedField string
+		containerClass string
+		wantImages     []string
+	}{
+		{
+			name:           "regular containers",
+			malformedField: "containers",
+			containerClass: "containers",
+			wantImages:     []string{"init:v1", "debug:v1"},
+		},
+		{
+			name:           "init containers",
+			malformedField: "initContainers",
+			containerClass: "init containers",
+			wantImages:     []string{"app:v1", "debug:v1"},
+		},
+		{
+			name:           "ephemeral containers",
+			malformedField: "ephemeralContainers",
+			containerClass: "ephemeral containers",
+			wantImages:     []string{"app:v1", "init:v1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{"name": "main-app", "image": "app:v1"},
+				},
+				"initContainers": []interface{}{
+					map[string]interface{}{"name": "init-setup", "image": "init:v1"},
+				},
+				"ephemeralContainers": []interface{}{
+					map[string]interface{}{"name": "debug-tool", "image": "debug:v1"},
+				},
+			}
+			spec[tt.malformedField] = "not-a-container-list"
+			wl := workloadinterface.NewWorkloadObj(map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]interface{}{
+					"name":      "malformed",
+					"namespace": "image-scan-test",
+				},
+				"spec": spec,
+			})
+
+			images, containerErrors := getAllWorkloadImages(wl)
+
+			assert.ElementsMatch(t, tt.wantImages, images)
+			require.Len(t, containerErrors, 1)
+			assert.Contains(t, containerErrors[0].Error(), "failed to get "+tt.containerClass)
+			assert.Contains(t, containerErrors[0].Error(), "kind: Pod")
+			assert.Contains(t, containerErrors[0].Error(), "name: malformed")
+			assert.Contains(t, containerErrors[0].Error(), "namespace: image-scan-test")
+		})
+	}
 }

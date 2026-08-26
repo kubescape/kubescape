@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: named-csr-create-crb
+subjects:
+- kind: ServiceAccount
+  name: named-create-sa
+  namespace: ci
+roleRef:
+  kind: ClusterRole
+  name: named-csr-create
+  apiGroup: rbac.authorization.k8s.io

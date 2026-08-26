@@ -3,7 +3,7 @@ package anonymizer
 import (
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
+	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -12,7 +12,7 @@ func TestEncryptionTransformer_Transform(t *testing.T) {
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	plaintext := "/workspace/demo-repository"
 
@@ -38,7 +38,7 @@ func TestEncryptionTransformer_UniqueCiphertexts(t *testing.T) {
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	ciphertext1, err := transformer.Transform(
 		"git",
@@ -57,7 +57,7 @@ func TestEncryptionTransformer_UniqueCiphertexts(t *testing.T) {
 
 func TestEncryptionTransformer_InvalidDEK(t *testing.T) {
 	transformer := NewEncryptionTransformer(
-		[]byte("short-key"),
+		reportcrypto.UnboundReportKey([]byte("short-key")),
 	)
 
 	_, err := transformer.Transform(

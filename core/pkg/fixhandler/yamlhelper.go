@@ -112,26 +112,28 @@ func enocodeIntoYaml(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) (
 
 	errorEncoding := encoder.Encode(parentForContent)
 	if errorEncoding != nil {
-		return "", fmt.Errorf("error debugging node, %v", errorEncoding.Error())
+		return "", fmt.Errorf("error debugging node, %w", errorEncoding)
 	}
 	errorClosingEncoder := encoder.Close()
 	if errorClosingEncoder != nil {
-		return "", fmt.Errorf("error closing encoder: %v", errorClosingEncoder.Error())
+		return "", fmt.Errorf("error closing encoder: %w", errorClosingEncoder)
 	}
 	return fmt.Sprintf(`%v`, buf.String()), nil
 }
 
-func getContent(ctx context.Context, parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) string {
+func getContent(ctx context.Context, parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) (string, error) {
 	content, err := enocodeIntoYaml(parentNode, nodeList, tracker)
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("Cannot Encode into YAML")
+		// Best-effort remediation rendering must not kill the process; let the
+		// caller skip this fix and still write the report.
+		return "", fmt.Errorf("cannot encode fix into YAML: %w", err)
 	}
 
 	indentationSpaces := parentNode.Column - 1
 
 	content = indentContent(content, indentationSpaces)
 
-	return strings.TrimSuffix(content, "\n")
+	return strings.TrimSuffix(content, "\n"), nil
 }
 
 func indentContent(content string, indentationSpaces int) string {
@@ -200,7 +202,7 @@ func getLastLineOfResource(linesSlice *[]string, currentLine int) (int, error) {
 	}
 
 	lastLine := len(*linesSlice)
-	for lastLine >= 0 {
+	for lastLine > 0 {
 		if !isEmptyLineOrComment((*linesSlice)[lastLine-1]) {
 			lastLinesOfResources = append(lastLinesOfResources, lastLine)
 			break
@@ -337,12 +339,21 @@ func safelyCloseFile(ctx context.Context, file *os.File) {
 
 // Remove the entire line and replace it with the sequence node in fixed info. This way,
 // the original formatting is lost.
-func replaceSingleLineSequence(ctx context.Context, fixInfoMetadata *fixInfoMetadata, line int) (int, int) {
+func replaceSingleLineSequence(ctx context.Context, fixInfoMetadata *fixInfoMetadata, line int) (int, int, error) {
 	originalListTracker := getFirstNodeInLine(fixInfoMetadata.originalList, line)
 	fixedListTracker := getFirstNodeInLine(fixInfoMetadata.fixedList, line)
 
+	// getFirstNodeInLine reports -1 when the line holds no renderable node. Indexing the
+	// list with it panics, so skip this fix and let the caller leave the file untouched.
+	if originalListTracker < 0 || fixedListTracker < 0 {
+		return 0, 0, fmt.Errorf("cannot resolve the node to replace at line %d", line)
+	}
+
 	currentDFSNode := (*fixInfoMetadata.fixedList)[fixedListTracker]
-	contentToInsert := getContent(ctx, currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
+	contentToInsert, err := getContent(ctx, currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
+	if err != nil {
+		return 0, 0, err
+	}
 
 	// Remove the Single line
 	*fixInfoMetadata.linesToRemove = append(*fixInfoMetadata.linesToRemove, linesToRemove{
@@ -359,14 +370,15 @@ func replaceSingleLineSequence(ctx context.Context, fixInfoMetadata *fixInfoMeta
 	originalListTracker = updateTracker(fixInfoMetadata.originalList, originalListTracker)
 	fixedListTracker = updateTracker(fixInfoMetadata.fixedList, fixedListTracker)
 
-	return originalListTracker, fixedListTracker
+	return originalListTracker, fixedListTracker, nil
 }
 
-// Returns the first node in the given line that is not mapping node
+// Returns the first node in the given line that is not a mapping or document node.
+// Both share their line with a child, and a document node has no parent to render against.
 func getFirstNodeInLine(list *[]nodeInfo, line int) int {
 	for tracker := 0; tracker < len(*list); tracker++ {
 		currentNode := (*list)[tracker].node
-		if currentNode.Line == line && currentNode.Kind != yaml.MappingNode {
+		if currentNode.Line == line && currentNode.Kind != yaml.MappingNode && currentNode.Kind != yaml.DocumentNode {
 			return tracker
 		}
 	}

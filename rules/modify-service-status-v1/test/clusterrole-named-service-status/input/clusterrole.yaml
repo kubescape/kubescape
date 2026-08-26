@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: named-service-status-writer
+rules:
+- apiGroups: [""]
+  resources: ["services/status"]
+  resourceNames: ["payments-api"]
+  verbs: ["update"]

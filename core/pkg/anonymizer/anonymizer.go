@@ -1,8 +1,8 @@
 package anonymizer
 
 import (
-	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
@@ -24,7 +24,7 @@ func applyWithTransformer(
 
 	mapping := NewMapping()
 
-	if err := anonymizeSession(
+	if err := transformSession(
 		resultsHandler.ScanData,
 		mapping,
 		transformer,
@@ -41,24 +41,22 @@ func applyWithTransformer(
 // The DEK is wrapped using the supplied master key (KEK)
 // and stored in EncryptionMetadata for future decryption
 // workflows.
-//
-// Repository context and resource metadata (for example,
-// resource names and namespaces) are reversibly encrypted.
-// Resource IDs are derived from the restored metadata during
-// decryption to preserve report referential integrity.
-//
-// Other anonymized fields, such as annotations, source paths,
-// labels, and additional session data, continue to use
-// mapping-based anonymization and remain irreversibly
-// pseudonymized.
 func ApplyEncrypted(
 	resultsHandler *resultshandling.ResultsHandler,
 	dek []byte,
 	masterKey []byte,
 ) error {
 
-	wrappedDEK, err := reportcrypto.WrapDEK(
-		dek,
+	// The binding is generated here, once, and shared by the wrapped DEK and
+	// every field this transformer seals. That is what ties the report's
+	// ciphertexts to this report rather than leaving them interchangeable.
+	key, err := reportcrypto.NewReportKey(dek)
+	if err != nil {
+		return err
+	}
+
+	wrappedDEK, err := reportcrypto.WrapReportKey(
+		key,
 		masterKey,
 	)
 	if err != nil {
@@ -67,7 +65,7 @@ func ApplyEncrypted(
 
 	if err := applyWithTransformer(
 		resultsHandler,
-		NewEncryptionTransformer(dek),
+		NewEncryptionTransformer(key),
 	); err != nil {
 		return err
 	}
@@ -75,7 +73,7 @@ func ApplyEncrypted(
 	encryptionMetadata := &reporthandlingv2.EncryptionMetadata{
 		Version:      "v1",
 		DEKAlgorithm: "AES256_GCM",
-		KEKAlgorithm: "AES256_GCM",
+		KEKAlgorithm: reportcrypto.KEKAlgorithm,
 		EncryptedDEK: wrappedDEK,
 	}
 

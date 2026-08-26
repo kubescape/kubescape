@@ -1,0 +1,30 @@
+[
+    {
+        "alertMessage": "ServiceAccount: gcs-reader is assigned the GCP service account gcs-reader@my-project.iam.gserviceaccount.com",
+        "failedPaths": [
+            "metadata.annotations[iam.gke.io/gcp-service-account]"
+        ],
+        "reviewPaths": [
+            "metadata.annotations[iam.gke.io/gcp-service-account]"
+        ],
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 3,
+        "alertObject": {
+            "k8sApiObjects": [
+                {
+                    "apiVersion": "v1",
+                    "kind": "ServiceAccount",
+                    "metadata": {
+                        "annotations": {
+                            "iam.gke.io/gcp-service-account": "gcs-reader@my-project.iam.gserviceaccount.com"
+                        },
+                        "name": "gcs-reader",
+                        "namespace": "data"
+                    }
+                }
+            ]
+        }
+    }
+]

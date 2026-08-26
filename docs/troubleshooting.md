@@ -199,6 +199,24 @@ Ensure your kubeconfig user has sufficient permissions. At minimum, you need rea
 
 ## Image Scanning Issues
 
+### Findings belong to the wrong CPU architecture
+
+**Symptom:** Package versions or CVEs do not match the image that runs in the target cluster, especially when Kubescape runs on an ARM laptop and the workload runs on amd64 Nodes, or the reverse.
+
+**Solution:** Select the OCI platform explicitly for a direct image scan:
+
+```bash
+kubescape scan image registry.example.com/team/app:v2 --platform linux/amd64
+```
+
+For `--scan-images`, Kubescape uses collected Node labels and hard workload scheduling constraints when possible. Offline manifests often lack that context, so provide an override:
+
+```bash
+kubescape scan ./manifests --scan-images --image-platform linux/arm64
+```
+
+The selected platform is shown next to the image in scan summaries. See [multi-architecture image scanning](multi-architecture-image-scanning.md) for the full inference rules.
+
 ### Image not found
 
 **Symptom:** `kubescape scan image` fails to find the image.
@@ -228,17 +246,29 @@ Ensure your kubeconfig user has sufficient permissions. At minimum, you need rea
 
 **Solutions:**
 
-1. Verify credentials work with docker:
+1. Verify credentials work with docker. Kubescape uses your docker config and configured credential helpers by default:
    ```bash
    docker login myregistry.io
    docker pull myregistry.io/myimage:tag
    ```
 
-2. Use environment variables for credentials:
+2. Use environment variables for credentials when a docker config or credential helper is not available:
    ```bash
-   export KUBESCAPE_REGISTRY_USERNAME=myuser
-   export KUBESCAPE_REGISTRY_PASSWORD=mypassword
+   export KUBESCAPE_REGISTRY_USERNAME=<registry-username>
+   export KUBESCAPE_REGISTRY_PASSWORD=<registry-password>
    kubescape scan image myregistry.io/myimage:tag
+   ```
+
+   If your registry uses bearer tokens, set `KUBESCAPE_REGISTRY_TOKEN` instead of username/password.
+
+   For `kubescape scan --scan-images`, also pass `--registry-authority myregistry.io` so the credentials are only used for that registry.
+
+   `kubescape patch` reads `KUBESCAPE_REGISTRY_USERNAME` / `KUBESCAPE_REGISTRY_PASSWORD` too (it has no token flag). Prefer them over `--password`, which is visible to other users on the host via `ps` and is written to your shell history:
+
+   ```bash
+   export KUBESCAPE_REGISTRY_USERNAME=<registry-username>
+   export KUBESCAPE_REGISTRY_PASSWORD=<registry-password>
+   kubescape patch --image myregistry.io/myimage:tag
    ```
 
 ### Vulnerability database outdated

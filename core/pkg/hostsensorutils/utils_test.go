@@ -8,7 +8,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/hostsensor"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,6 +45,9 @@ func TestMain(m *testing.M) {
 	k8sinterface.InitializeMapResources(&fakeHostSensorDiscovery{
 		FakeDiscovery: &fakediscovery.FakeDiscovery{Fake: &k8stesting.Fake{}},
 	})
+
+	DefaultCacheDir = "" // Disable cache by default for tests
+
 	os.Exit(m.Run())
 }
 
@@ -138,7 +141,7 @@ func TestAddInfoToMap_BuildScanCoverageRecognizesHostSensorFailure(t *testing.T)
 		expectedKey: {"C-0001"},
 	}
 
-	coverage := cautils.BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil)
+	coverage := cautils.BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil, nil, nil)
 
 	require.Len(t, coverage.FailedGVRPulls, 1)
 	assert.Equal(t, expectedKey, coverage.FailedGVRPulls[0].GVR)

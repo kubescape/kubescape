@@ -5,17 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 )
 
 const (
 	jsonOutputFile = "report"
-	jsonOutputExt  = ".json"
 )
 
 var _ printer.IPrinter = &JsonPrinter{}
@@ -28,27 +24,26 @@ func NewJsonPrinter() *JsonPrinter {
 	return &JsonPrinter{}
 }
 
-func (jsonPrinter *JsonPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = jsonOutputFile
-		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != jsonOutputExt {
-			outputFile = outputFile + jsonOutputExt
-		}
+func (jsonPrinter *JsonPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JsonFormat, outputFile, jsonOutputFile)
+	if explicitOutput {
+		var err error
+		jsonPrinter.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
 	}
 	jsonPrinter.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 func (jsonPrinter *JsonPrinter) Score(score float32) {
-	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
+	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.ComplianceScoreToInt(score))
 }
 
 func (jsonPrinter *JsonPrinter) PrintNextSteps() {
 
 }
 
-func (jsonPrinter *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, _ []cautils.ImageScanData) {
+func (jsonPrinter *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
 	report := cautils.ReportV2ToV1(opaSessionObj)
 
 	var postureReportStr []byte
@@ -61,20 +56,22 @@ func (jsonPrinter *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 	}
 
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("failed to convert posture report object")
+		return fmt.Errorf("failed to convert posture report object: %w", err)
 	}
 
 	_, err = jsonPrinter.writer.Write(postureReportStr)
 
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("failed to Write posture report object into JSON output")
+		return fmt.Errorf("failed to write posture report object into JSON output: %w", err)
 	} else {
 		printer.LogOutputFile(jsonPrinter.writer.Name())
 	}
+	return nil
 }
 
-func (p *JsonPrinter) CloseWriter() {
+func (p *JsonPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }

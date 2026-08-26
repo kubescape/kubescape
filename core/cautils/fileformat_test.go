@@ -1,9 +1,11 @@
 package cautils
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsYAMLDocumentSeparator(t *testing.T) {
@@ -96,8 +98,46 @@ func TestSplitYAMLDocuments(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			docs := splitYAMLDocuments([]byte(tt.input))
+			docs, err := splitYAMLDocuments([]byte(tt.input))
+			require.NoError(t, err)
 			assert.Len(t, docs, tt.wantLen)
 		})
 	}
+}
+
+// erroringReader yields data once, then fails with a fixed error instead of
+// io.EOF, simulating a read failure partway through a multi-document file
+// (e.g. a truncated stream or an I/O error on the underlying source).
+type erroringReader struct {
+	data []byte
+	pos  int
+	err  error
+}
+
+func (e *erroringReader) Read(p []byte) (int, error) {
+	if e.pos >= len(e.data) {
+		return 0, e.err
+	}
+	n := copy(p, e.data[e.pos:])
+	e.pos += n
+	return n, nil
+}
+
+// TestScanYAMLDocuments_PropagatesReaderError guards against a scan failure
+// being silently swallowed: a multi-document file with a read error after the
+// first document must surface that error to the caller, not just return the
+// documents seen before the failure as if they were the whole file.
+func TestScanYAMLDocuments_PropagatesReaderError(t *testing.T) {
+	wantErr := errors.New("boom: connection reset")
+	input := "apiVersion: v1\nkind: Pod\n---\napiVersion: v1\nkind: Service"
+	r := &erroringReader{data: []byte(input), err: wantErr}
+
+	docs, err := scanYAMLDocuments(r, len(input)+1)
+
+	require.Error(t, err, "a scan failure must be reported, not swallowed")
+	assert.ErrorIs(t, err, wantErr)
+	// The first document, terminated by a real "---" separator before the
+	// failure, is still valid and returned; the second was never read and
+	// must not appear as if the file only ever had one document.
+	assert.Len(t, docs, 1)
 }

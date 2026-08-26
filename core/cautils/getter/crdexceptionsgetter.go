@@ -12,8 +12,9 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/pkg/securityexception"
+	"github.com/kubescape/kubescape/v4/core/pkg/securityexception"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -67,52 +68,116 @@ func NewCRDExceptionsGetter(k8sClient client.Client) *CRDExceptionsGetter {
 	return getter
 }
 
-func (g *CRDExceptionsGetter) GetExceptions(_ string) ([]armotypes.PostureExceptionPolicy, error) {
+// NewCRDExceptionsGetterWithClients creates a CRD-backed exceptions getter from
+// clients that belong to the same scan target. Callers that already resolved a
+// Kubernetes target should use this constructor instead of consulting the
+// process-global Kubernetes configuration again.
+func NewCRDExceptionsGetterWithClients(dynamicClient dynamic.Interface, k8sClient client.Client) *CRDExceptionsGetter {
+	return &CRDExceptionsGetter{
+		client:    dynamicClient,
+		k8sClient: k8sClient,
+	}
+}
+
+func (g *CRDExceptionsGetter) GetExceptions(ctx context.Context, _ string) ([]armotypes.PostureExceptionPolicy, error) {
 	if g == nil || g.client == nil {
 		return []armotypes.PostureExceptionPolicy{}, nil
 	}
 
 	var out []armotypes.PostureExceptionPolicy
 
-	seList, err := g.client.Resource(securityExceptionGVR).List(context.Background(), metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-	for i := range seList.Items {
-		policies, convErr := convertCRDObjectToPosturePolicies(&seList.Items[i], "SecurityException", g.k8sClient)
-		if convErr != nil {
-			// Partial application: skip this one CRD but keep the rest, and make the
-			// drop observable instead of silently swallowing it.
-			logger.L().Warning("skipping SecurityException that failed to convert to posture exceptions",
-				helpers.String("name", seList.Items[i].GetName()),
-				helpers.String("namespace", seList.Items[i].GetNamespace()),
-				helpers.Error(convErr))
-			continue
+	processFunc := func(list *unstructured.UnstructuredList, kind string) error {
+		for i := range list.Items {
+			policies, convErr := convertCRDObjectToPosturePolicies(ctx, &list.Items[i], kind, g.k8sClient)
+			if convErr != nil {
+				if isContextErr(convErr) {
+					return convErr
+				}
+				logger.L().Warning(fmt.Sprintf("skipping %s that failed to convert to posture exceptions", kind),
+					helpers.String("name", list.Items[i].GetName()),
+					helpers.String("namespace", list.Items[i].GetNamespace()),
+					helpers.Error(convErr))
+				continue
+			}
+			out = append(out, policies...)
 		}
-		out = append(out, policies...)
+		return nil
 	}
 
-	cseList, err := g.client.Resource(clusterSecurityExceptionGVR).List(context.Background(), metav1.ListOptions{})
+	err := listCRDsWithPagination(ctx, securityExceptionGVR, g.client, func(list *unstructured.UnstructuredList) error {
+		return processFunc(list, "SecurityException")
+	})
 	if err != nil {
 		return nil, err
 	}
-	for i := range cseList.Items {
-		policies, convErr := convertCRDObjectToPosturePolicies(&cseList.Items[i], "ClusterSecurityException", g.k8sClient)
-		if convErr != nil {
-			// Partial application: skip this one CRD but keep the rest, and make the
-			// drop observable instead of silently swallowing it.
-			logger.L().Warning("skipping ClusterSecurityException that failed to convert to posture exceptions",
-				helpers.String("name", cseList.Items[i].GetName()),
-				helpers.Error(convErr))
-			continue
-		}
-		out = append(out, policies...)
+
+	err = listCRDsWithPagination(ctx, clusterSecurityExceptionGVR, g.client, func(list *unstructured.UnstructuredList) error {
+		return processFunc(list, "ClusterSecurityException")
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return out, nil
 }
 
+func listCRDsWithPagination(ctx context.Context, gvr schema.GroupVersionResource, dynamicClient dynamic.Interface, processFunc func(*unstructured.UnstructuredList) error) error {
+	limit := int64(100)
+	continueToken := ""
+
+	for {
+		listOptions := metav1.ListOptions{Limit: limit, Continue: continueToken}
+		var list *unstructured.UnstructuredList
+		var err error
+
+		retries := 5
+		backoff := 1 * time.Second
+		for i := 0; i < retries; i++ {
+			list, err = dynamicClient.Resource(gvr).List(ctx, listOptions)
+			if err != nil {
+				if k8serrors.IsTooManyRequests(err) {
+					logger.L().Warning("Rate limited (429) when listing CRDs, retrying",
+						helpers.String("gvr", gvr.String()),
+						helpers.Int("retry", i+1))
+
+					if i == retries-1 {
+						break
+					}
+
+					timer := time.NewTimer(backoff)
+					select {
+					case <-ctx.Done():
+						timer.Stop()
+						return ctx.Err()
+					case <-timer.C:
+						backoff *= 2
+						continue
+					}
+				}
+				break
+			}
+			break
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to list %s CRDs: %w", gvr.Resource, err)
+		}
+
+		if err := processFunc(list); err != nil {
+			return err
+		}
+
+		continueToken = list.GetContinue()
+		if continueToken == "" {
+			break
+		}
+	}
+
+	return nil
+}
+
 func convertCRDObjectToPosturePolicies(
+	ctx context.Context,
 	obj *unstructured.Unstructured,
 	kind string,
 	k8sClient client.Client,
@@ -146,7 +211,7 @@ func convertCRDObjectToPosturePolicies(
 	if !postureFound {
 		postureItems = nil
 	}
-	resources, err := buildResourceDesignators(obj, kind, k8sClient)
+	resources, err := buildResourceDesignators(ctx, obj, kind, k8sClient)
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +261,7 @@ func convertCRDObjectToPosturePolicies(
 }
 
 func buildResourceDesignators(
+	ctx context.Context,
 	obj *unstructured.Unstructured,
 	kind string,
 	k8sClient client.Client,
@@ -233,9 +299,16 @@ func buildResourceDesignators(
 			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(selectorMap, &labelSelector); err != nil {
 				return nil, fmt.Errorf("decode namespaceSelector: %w", err)
 			}
-			names, err := resolveNamespaceSelector(labelSelector, k8sClient)
+			names, err := resolveNamespaceSelector(ctx, labelSelector, k8sClient)
 			if err != nil {
 				return nil, err
+			}
+			if len(names) == 0 {
+				// A selector matching no namespace must not fall through to the
+				// scopeless-exception fallback below: an empty designator list
+				// means "matches every cluster" downstream, which would turn a
+				// deliberately narrow exception into a cluster-wide one.
+				return nil, fmt.Errorf("namespaceSelector matched no namespaces")
 			}
 			namespaceNames = names
 		}
@@ -351,7 +424,7 @@ func toArmoLabelSelector(sel metav1.LabelSelector) *armotypes.LabelSelector {
 }
 
 // resolveNamespaceSelector returns namespace names matching a label selector.
-func resolveNamespaceSelector(selector metav1.LabelSelector, k8sClient client.Client) ([]string, error) {
+func resolveNamespaceSelector(ctx context.Context, selector metav1.LabelSelector, k8sClient client.Client) ([]string, error) {
 	if k8sClient == nil {
 		return nil, fmt.Errorf("kubernetes client is nil")
 	}
@@ -366,7 +439,7 @@ func resolveNamespaceSelector(selector metav1.LabelSelector, k8sClient client.Cl
 	}
 
 	var namespaces corev1.NamespaceList
-	if err := k8sClient.List(context.Background(), &namespaces, client.MatchingLabelsSelector{Selector: parsedSelector}); err != nil {
+	if err := k8sClient.List(ctx, &namespaces, client.MatchingLabelsSelector{Selector: parsedSelector}); err != nil {
 		return nil, fmt.Errorf("list namespaces: %w", err)
 	}
 

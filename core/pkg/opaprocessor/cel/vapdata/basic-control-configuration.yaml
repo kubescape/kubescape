@@ -3,6 +3,9 @@ kind: ControlConfiguration
 metadata:
   name: basic-control-configuration
 settings:
+  # Set this to eks, aks or gke to make C-0020 check that cloud's credential
+  # paths. An empty value means "unknown cloud", so C-0020 checks none of them.
+  cloudProvider: ""
   cpuLimitMax: 5
   cpuLimitMin: 0.5
   cpuRequestMax: 5
@@ -45,10 +48,10 @@ settings:
   - 5
   maxHighVulnerabilities:
   - 10
-  memoryLimitMax: 4294967296
-  memoryLimitMin: 0
-  memoryRequestMax: 4294967296
-  memoryRequestMin: 0
+  memoryLimitMax: 4Gi
+  memoryLimitMin: 0.25Gi
+  memoryRequestMax: 4Gi
+  memoryRequestMin: 0.125Gi
   publicRegistries:
   - docker.io
   - gcr.io
@@ -92,6 +95,7 @@ settings:
   - Bearer
   - _key_
   - _secret_
+  sensitiveKeyNamesAllowed: []
   sensitiveValuesAllowed:
   - ''
   servicesNames:

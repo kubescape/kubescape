@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: named-service-status-writer-crb
+subjects:
+- kind: ServiceAccount
+  name: payments-operator
+  namespace: payments
+roleRef:
+  kind: ClusterRole
+  name: named-service-status-writer
+  apiGroup: rbac.authorization.k8s.io

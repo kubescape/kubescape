@@ -4,13 +4,17 @@ import (
 	"context"
 	"fmt"
 
+	"time"
+
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 )
 
 const (
@@ -25,6 +29,7 @@ const (
 type HostSensorHandler struct {
 	k8sObj        *k8sinterface.KubernetesApi
 	dynamicClient dynamic.Interface
+	nodeCount     int
 }
 
 // NewHostSensorHandler builds a new CRD-based host sensor handler.
@@ -36,9 +41,7 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, _ string) (*HostSe
 	if config == nil {
 		return nil, fmt.Errorf("failed to get k8s config")
 	}
-	// force GRPC
-	config.AcceptContentTypes = "application/vnd.kubernetes.protobuf"
-	config.ContentType = "application/vnd.kubernetes.protobuf"
+	config = rest.CopyConfig(config)
 
 	// Create dynamic client for CRD access
 	dynamicClient, err := dynamic.NewForConfig(config)
@@ -56,12 +59,14 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, _ string) (*HostSe
 	}
 
 	// Verify we can access nodes (basic sanity check)
-	if nodeList, err := k8sObj.KubernetesClient.CoreV1().Nodes().List(k8sObj.Context, metav1.ListOptions{}); err != nil || len(nodeList.Items) == 0 {
+	nodeList, err := k8sObj.KubernetesClient.CoreV1().Nodes().List(k8sObj.Context, metav1.ListOptions{})
+	if err != nil || len(nodeList.Items) == 0 {
 		if err == nil {
 			err = fmt.Errorf("no nodes to scan")
 		}
-		return hsh, fmt.Errorf("in NewHostSensorHandler, failed to get nodes list: %v", err)
+		return nil, fmt.Errorf("in NewHostSensorHandler, failed to get nodes list: %w", err)
 	}
+	hsh.nodeCount = len(nodeList.Items)
 
 	return hsh, nil
 }
@@ -102,7 +107,7 @@ func (hsh *HostSensorHandler) TearDown() error {
 }
 
 // listCRDResources is a generic function to list CRD resources and convert them to the expected format.
-func (hsh *HostSensorHandler) listCRDResources(ctx context.Context, resourceName, kind string) ([]unstructured.Unstructured, error) {
+func (hsh *HostSensorHandler) listCRDResources(ctx context.Context, resourceName, kind string, process func([]unstructured.Unstructured) error) error {
 	gvr := schema.GroupVersionResource{
 		Group:    hostDataGroup,
 		Version:  hostDataVersion,
@@ -113,14 +118,68 @@ func (hsh *HostSensorHandler) listCRDResources(ctx context.Context, resourceName
 		helpers.String("resource", resourceName),
 		helpers.String("kind", kind))
 
-	list, err := hsh.dynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list %s CRDs: %w", kind, err)
+	limit := int64(50)
+	continueToken := ""
+	totalCount := 0
+
+	for {
+		listOptions := metav1.ListOptions{Limit: limit, Continue: continueToken}
+		var list *unstructured.UnstructuredList
+		var err error
+
+		retries := 5
+		backoff := 1 * time.Second
+		for i := 0; i < retries; i++ {
+			list, err = hsh.dynamicClient.Resource(gvr).List(ctx, listOptions)
+			if err != nil {
+				if k8serrors.IsTooManyRequests(err) {
+					logger.L().Warning("Rate limited (429) when listing CRDs, retrying",
+						helpers.String("kind", kind),
+						helpers.Int("retry", i+1))
+
+					if i == retries-1 {
+						break
+					}
+
+					timer := time.NewTimer(backoff)
+					select {
+					case <-ctx.Done():
+						timer.Stop()
+						return ctx.Err()
+					case <-timer.C:
+						backoff *= 2
+						continue
+					}
+				}
+				break
+			}
+			break
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to list %s CRDs: %w", kind, err)
+		}
+
+		totalCount += len(list.Items)
+		if err := process(list.Items); err != nil {
+			return fmt.Errorf("failed to process %s CRDs page: %w", kind, err)
+		}
+
+		continueToken = list.GetContinue()
+		if continueToken == "" {
+			break
+		}
 	}
 
 	logger.L().Debug("Retrieved CRD resources",
 		helpers.String("kind", kind),
-		helpers.Int("count", len(list.Items)))
+		helpers.Int("count", totalCount))
 
-	return list.Items, nil
+	return nil
+}
+
+func (hsh *HostSensorHandler) StreamTelemetry(ctx context.Context) (<-chan SyscallEvent, error) {
+	events := make(chan SyscallEvent)
+	close(events)
+	return events, nil
 }
