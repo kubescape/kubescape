@@ -122,7 +122,12 @@ func (s *bindingScope) matches(res ResourceInfo, namespaceLabels map[string]stri
 	}
 	if !s.namespaceSelector.Empty() {
 		if res.Namespace == "" {
-			return false, "namespaceSelector is set but the resource is cluster-scoped"
+			// A cluster-scoped resource has no namespace whose labels the
+			// selector could be read against, and the apiserver does not
+			// exempt it for that: its namespace matcher returns "matches"
+			// before it ever parses the selector. Reporting it uncovered
+			// understated the reach of every binding scoped by namespace.
+			return true, ""
 		}
 		if !namespaceLabelsKnown {
 			return false, "namespaceSelector is set but the resource's Namespace object was not collected by the scan"

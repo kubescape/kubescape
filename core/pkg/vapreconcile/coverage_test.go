@@ -158,21 +158,20 @@ func TestBuildCoverage_UnknownNamespaceTreatedAsNotCovered(t *testing.T) {
 	assert.Contains(t, c.Resources[0].Reason, "not collected")
 }
 
-func TestBuildCoverage_ClusterScopedResourceWithNamespaceSelectorNotCovered(t *testing.T) {
+func TestBuildCoverage_ClusterScopedResourceIsNeverExemptedByNamespaceSelector(t *testing.T) {
 	policies := []unstructured.Unstructured{makeVAP("policy-a", "C-0001")}
 	bindings := []unstructured.Unstructured{
 		makeVAPBScoped("binding-a", "policy-a", matchLabels("env", "prod"), nil),
 	}
 	failing := map[string][]ResourceInfo{
-		"C-0001": {{ResourceID: "res-1", Namespace: ""}}, // cluster-scoped
+		"C-0001": {{ResourceID: "res-1", APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole"}},
 	}
 
 	coverage := BuildCoverage(policies, bindings, failing, nil)
 
 	c := coverage["C-0001"]
 	require.NotNil(t, c)
-	assert.False(t, c.Resources[0].Covered)
-	assert.Contains(t, c.Resources[0].Reason, "cluster-scoped")
+	assert.True(t, c.FullyCovered(), "the apiserver enforces the binding on a cluster-scoped resource whatever the namespaceSelector says")
 }
 
 func TestBuildCoverage_MultipleBindingsOrSemantics(t *testing.T) {
