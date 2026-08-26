@@ -477,6 +477,15 @@ func parseResourceRule(rule string) (admissionv1.NamedRuleWithOperations, error)
 	}, nil
 }
 
+// parsedResourceRule is one --resource-rule as both the value the caller typed
+// and the binding rule it parses to. The two travel together so a message about
+// a rule can echo it the way it was typed without walking a second slice
+// alongside this one.
+type parsedResourceRule struct {
+	raw  string
+	rule admissionv1.NamedRuleWithOperations
+}
+
 // parseResourceRules turns the whole --resource-rule set into the binding rules
 // it becomes. Both the checks that reason about the emitted binding's surface
 // and the binding itself read the flag through here, so what the command
@@ -484,19 +493,33 @@ func parseResourceRule(rule string) (admissionv1.NamedRuleWithOperations, error)
 //
 // An empty flag stays nil rather than an empty slice: matchResources.resourceRules
 // is omitted from the emitted YAML when the caller did not narrow anything.
-func parseResourceRules(rules []string) ([]admissionv1.NamedRuleWithOperations, error) {
+func parseResourceRules(rules []string) ([]parsedResourceRule, error) {
 	if len(rules) == 0 {
 		return nil, nil
 	}
-	parsed := make([]admissionv1.NamedRuleWithOperations, 0, len(rules))
-	for _, rule := range rules {
-		rule, err := parseResourceRule(rule)
+	parsed := make([]parsedResourceRule, 0, len(rules))
+	for _, raw := range rules {
+		rule, err := parseResourceRule(raw)
 		if err != nil {
 			return nil, err
 		}
-		parsed = append(parsed, rule)
+		parsed = append(parsed, parsedResourceRule{raw: strings.TrimSpace(raw), rule: rule})
 	}
 	return parsed, nil
+}
+
+// bindingResourceRules drops the typed form, for the callers that want only the
+// rules the binding carries. A nil set stays nil, so an unnarrowed binding still
+// omits matchResources.resourceRules.
+func bindingResourceRules(parsed []parsedResourceRule) []admissionv1.NamedRuleWithOperations {
+	if len(parsed) == 0 {
+		return nil
+	}
+	rules := make([]admissionv1.NamedRuleWithOperations, 0, len(parsed))
+	for _, entry := range parsed {
+		rules = append(rules, entry.rule)
+	}
+	return rules
 }
 
 // validateRuleSegment checks one segment of a resource rule, accepting the "*"
@@ -598,14 +621,14 @@ func checkResourceRulesInPolicyScope(rules []string, controlID, policyName strin
 	if err != nil {
 		return err
 	}
-	for i, rule := range parsed {
-		switch classifyResourceRule(rule, constraints.ResourceRules) {
+	for _, entry := range parsed {
+		switch classifyResourceRule(entry.rule, constraints.ResourceRules) {
 		case ruleOutsidePolicy:
 			return fmt.Errorf("resource rule %q is outside the matchConstraints of policy %s, so the binding would match nothing; the policy matches %s",
-				strings.TrimSpace(rules[i]), policyName, describeResourceRules(constraints.ResourceRules))
+				entry.raw, policyName, describeResourceRules(constraints.ResourceRules))
 		case ruleConvertsToPolicy:
 			logger.L().Warning("resource rule names another API group or version than the policy constrains; the binding matches only if the cluster serves them as equivalent forms of one resource",
-				helpers.String("rule", strings.TrimSpace(rules[i])),
+				helpers.String("rule", entry.raw),
 				helpers.String("policy", policyName),
 				helpers.String("policyMatches", describeResourceRules(constraints.ResourceRules)))
 		}
@@ -892,7 +915,7 @@ func checkNamespaceSelectorScope(namespaces, resourceRules []string, controlID, 
 		return err
 	}
 
-	reach := resolveNamespaceSelectorReach(constraints.ResourceRules, bindingRules)
+	reach := resolveNamespaceSelectorReach(constraints.ResourceRules, bindingResourceRules(bindingRules))
 	if len(reach.alwaysMatched) == 0 {
 		return nil
 	}
@@ -942,7 +965,7 @@ func createPolicyBinding(bindingName string, policyName string, actions []admiss
 	if err != nil {
 		return "", err
 	}
-	policyBinding.Spec.MatchResources.ResourceRules = resourceRules
+	policyBinding.Spec.MatchResources.ResourceRules = bindingResourceRules(resourceRules)
 
 	policyBinding.Spec.ValidationActions = actions
 	paramAction := admissionv1.DenyAction

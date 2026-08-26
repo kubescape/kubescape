@@ -1527,10 +1527,10 @@ func TestResolveNamespaceSelectorReach(t *testing.T) {
 	})
 
 	t.Run("a resource rule drops what it does not name", func(t *testing.T) {
-		bindingRules, err := parseResourceRules([]string{rbac + "/v1/rolebindings"})
+		parsed, err := parseResourceRules([]string{rbac + "/v1/rolebindings"})
 		require.NoError(t, err)
 
-		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint(rbac, "v1", "rolebindings", "clusterrolebindings")}, bindingRules)
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint(rbac, "v1", "rolebindings", "clusterrolebindings")}, bindingResourceRules(parsed))
 		assert.Empty(t, reach.alwaysMatched)
 		assert.True(t, reach.narrowable)
 	})
@@ -1538,10 +1538,10 @@ func TestResolveNamespaceSelectorReach(t *testing.T) {
 	// The resource name is what a binding rule is compared on: matchPolicy
 	// Equivalent may bridge a group or version, never one resource to another.
 	t.Run("a resource rule at another version still keeps the resource", func(t *testing.T) {
-		bindingRules, err := parseResourceRules([]string{rbac + "/v1beta1/clusterrolebindings"})
+		parsed, err := parseResourceRules([]string{rbac + "/v1beta1/clusterrolebindings"})
 		require.NoError(t, err)
 
-		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint(rbac, "v1", "rolebindings", "clusterrolebindings")}, bindingRules)
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint(rbac, "v1", "rolebindings", "clusterrolebindings")}, bindingResourceRules(parsed))
 		assert.Equal(t, []string{rbac + "/v1/clusterrolebindings"}, reach.alwaysMatched)
 		assert.False(t, reach.narrowable)
 	})
