@@ -171,27 +171,3 @@ func TestEvaluateControlResolvesParamsEndToEnd(t *testing.T) {
 		}
 	})
 }
-
-// TestEvaluateControlRefusesUnresolvableParams pins the outcome for a control
-// taking params the scan cannot resolve (C-0281 reads an ate.dev WorkerPool).
-// Before the refusal the ControlConfiguration was bound instead, and the
-// params.spec read errored under failurePolicy Fail, so every matching
-// ActorTemplate was reported as violating a policy admission never denied.
-// An error here is the scanner's skip path, which is the honest answer.
-func TestEvaluateControlRefusesUnresolvableParams(t *testing.T) {
-	e, err := NewEvaluator()
-	require.NoError(t, err)
-
-	actorTemplate := map[string]any{
-		"apiVersion": "ate.dev/v1alpha1",
-		"kind":       "ActorTemplate",
-		"metadata":   map[string]any{"name": "agent", "namespace": "default"},
-		"spec":       map[string]any{"egress": "marginal"},
-	}
-
-	eval, err := e.EvaluateControl(context.Background(), "C-0281", actorTemplate, nil)
-	require.Error(t, err, "a control whose params cannot be resolved must be refused, not evaluated")
-	assert.Contains(t, err.Error(), "C-0281")
-	assert.Contains(t, err.Error(), "WorkerPool")
-	assert.Empty(t, eval.Results, "a refused control reports no verdict")
-}

@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	contractv1alpha1 "github.com/kubescape/kubescape/v4/core/pkg/scancontract/v1alpha1"
 	"github.com/kubescape/kubescape/v4/core/pkg/telemetry"
 	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -68,6 +69,9 @@ var scanCmdExamples = fmt.Sprintf(`
 
 func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
+	var scanContractPath string
+	var scanContractName string
+	var selectedContract *contractv1alpha1.SelectedContract
 
 	// scanCmd represents the scan command
 	scanCmd := &cobra.Command{
@@ -78,6 +82,14 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Name() == "validate-contract" {
 				return nil
+			}
+			if cmd.Name() == "image" && scanContractPath != "" {
+				return fmt.Errorf("--scan-contract is supported for posture scans, not image scans")
+			}
+			var err error
+			selectedContract, err = loadAndApplyScanContract(cmd, &scanInfo, scanContractPath, scanContractName)
+			if err != nil {
+				return err
 			}
 			// runs for the bare scan command and all subcommands (framework, control, workload, image)
 			if scanInfo.FormatVersion != "v1" && scanInfo.FormatVersion != "v2" {
@@ -127,6 +139,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 			scanInfo.View = requestedView
 
+			if policyIdentifiers := contractPolicyIdentifiers(selectedContract); len(policyIdentifiers) > 0 {
+				setContractScanTarget(args, &scanInfo)
+				return securityScan(scanInfo, ks, policyIdentifiers)
+			}
+
 			if scanInfo.View == string(cautils.SecurityViewType) {
 				policyIdentifiers := setSecurityViewScanInfo(args, &scanInfo)
 
@@ -159,13 +176,16 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanInfo.TriggeredByCLI = true
 
+	scanCmd.PersistentFlags().StringVar(&scanContractPath, "scan-contract", "", "Path to an explicit repository scan contract")
+	scanCmd.PersistentFlags().StringVar(&scanContractName, "contract", "", "Named contract to select; defaults to spec.defaultContract")
+
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsInputs, "controls-config", "", "Path to an controls-config obj. If not set will download controls-config from ARMO management portal")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to an exceptions obj. If not set will download exceptions from ARMO management portal")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.AuditExceptions, "audit-exceptions", false, "Include an exception usage audit in supported scan outputs")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseArtifactsFrom, "use-artifacts-from", "", "Load artifacts from local directory. If not used will download them")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.CustomRules, "custom-rules", "", "Path to a directory containing user-authored *.rego custom rules")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.CustomRules, "custom-rules", "", "Path to user-authored custom rules: a rule directory holding raw.rego and rule.metadata.json (the layout used by 'kubescape policy test'), a directory of such rule directories, or a directory of bare *.rego files. A rule's declared match selectors are honoured; a bare .rego file is matched against every resource kind")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. e.g: --exclude-namespaces ns-a,ns-b. Notice, when running with `exclude-namespace` kubescape does not scan cluster-scoped objects.")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MinSeverity, "min-severity", "", "Only include controls at or above this severity (low, medium, high, critical) in the output. Does not affect exit codes — --compliance-threshold, --severity-threshold, --fail-coverage-below and --fail-on-degraded-config are always computed on the full unfiltered report")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.MaxSeverity, "max-severity", "", "Only include controls at or below this severity (low, medium, high, critical) in the output. Does not affect exit codes — thresholds are always computed on the full unfiltered report")
@@ -208,6 +228,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.LabelSelector, "label-selector", "", "Filter collected Kubernetes resources by label selector. Accepts any selector that kubectl -l supports, e.g: --label-selector app=nginx,env!=dev")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to configured backend.")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
+	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.NotifyURLs, "notify", nil, "POST the scan summary as JSON to this webhook URL; repeat for multiple destinations")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.VerboseMode, "verbose", "v", false, "Display all of the input resources and not only failed resources")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ShowEvidence, "show-evidence", "E", false, "Show evidence paths with current field values for each failed control (pretty-printer only)")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.ShowSecrets, "show-secrets", false, "Show secret field values in evidence output. By default secret values are redacted. Only effective with --show-evidence")
@@ -285,6 +306,15 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	installTelemetry(scanCmd, ks, &scanInfo)
 
 	return scanCmd
+}
+
+func setContractScanTarget(args []string, scanInfo *cautils.ScanInfo) {
+	if len(args) > 0 {
+		scanInfo.SetScanType(cautils.ScanTypeRepo)
+		scanInfo.InputPatterns = args
+		return
+	}
+	scanInfo.SetScanType(cautils.ScanTypeCluster)
 }
 
 func validateCombinedImageScanFlags(scanInfo *cautils.ScanInfo) error {

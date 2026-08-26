@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -265,6 +266,52 @@ func TestGetOutputPrinters(t *testing.T) {
 	assert.Equal(t, 3, len(outputPrinters))
 }
 
+func TestScanClosesOutputPrinterWhenPolicyLoadingFails(t *testing.T) {
+	if _, err := os.Stat("/proc/self/fd"); err != nil {
+		t.Skip("requires /proc/self/fd")
+	}
+
+	for _, formatVersion := range []string{"v1", "v2"} {
+		t.Run(formatVersion, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), "report.json")
+			missingPolicy := "missing-" + filepath.Base(t.TempDir())
+			scanInfo := &cautils.ScanInfo{
+				InputPatterns: []string{"../cautils/testdata/mixed_extensions/pod.yaml"},
+				UseFrom:       []string{filepath.Join(t.TempDir(), missingPolicy+".json")},
+				Format:        printer.JsonFormat,
+				FormatVersion: formatVersion,
+				Output:        output,
+				Local:         true,
+				FrameworkScan: true,
+				ScanType:      cautils.ScanTypeFramework,
+			}
+
+			results, err := NewKubescape(context.Background()).Scan(scanInfo, cautils.BuildPolicyIdentifiers([]string{missingPolicy}, apisv1.KindFramework))
+			require.Error(t, err)
+			require.ErrorContains(t, err, missingPolicy)
+			require.NotNil(t, results, "policy loading must fail after the configured printer is attached to a result handler")
+			assertNoOpenFileDescriptor(t, output)
+			// Keep the returned handler (and its printer) reachable while inspecting
+			// /proc so an os.File finalizer cannot hide the leak under test.
+			runtime.KeepAlive(results)
+		})
+	}
+}
+
+func assertNoOpenFileDescriptor(t *testing.T, path string) {
+	t.Helper()
+	absPath, err := filepath.Abs(path)
+	require.NoError(t, err)
+	entries, err := os.ReadDir("/proc/self/fd")
+	require.NoError(t, err)
+	for _, entry := range entries {
+		target, err := os.Readlink(filepath.Join("/proc/self/fd", entry.Name()))
+		if err == nil {
+			assert.NotEqual(t, absPath, strings.TrimSuffix(target, " (deleted)"), "leaked output file descriptor %s", entry.Name())
+		}
+	}
+}
+
 func TestGetOutputPrintersReturnsExplicitSetupErrorsForEveryFormat(t *testing.T) {
 	dir := t.TempDir()
 	blocker := filepath.Join(dir, "not-a-directory")
@@ -306,6 +353,27 @@ func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "output path collision")
+}
+
+func TestGetOutputPrintersClosesV1JSONWriterAfterLaterSetupFailure(t *testing.T) {
+	if _, err := os.Stat("/proc/self/fd"); err != nil {
+		t.Skip("requires /proc/self/fd")
+	}
+
+	output := filepath.Join(t.TempDir(), "report")
+	scanInfo := &cautils.ScanInfo{
+		ScanType:      cautils.ScanTypeControl,
+		Format:        printer.JsonFormat + "," + printer.GitLabSASTFormat,
+		FormatVersion: "v1",
+		Output:        output,
+		InputPatterns: []string{"manifest.yaml"},
+	}
+
+	outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+
+	require.ErrorContains(t, err, "output path collision")
+	assert.Nil(t, outputPrinters)
+	assertNoOpenFileDescriptor(t, output+printer.JsonOutputExt)
 }
 
 func TestResolvedOutputPath(t *testing.T) {

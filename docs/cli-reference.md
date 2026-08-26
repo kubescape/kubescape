@@ -40,22 +40,26 @@ kubescape scan [target] [flags]
 | `--access-key <key>` | Kubescape SaaS access key | from cache |
 | `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, and `--view resource\|control` — see [score thresholds](#score-thresholds). | `0` |
 | `--controls-config <path>` | Path to controls configuration file | - |
+| `--custom-rules <path>` | Path to user-authored custom rules — see [custom rules](#custom-rules) | - |
 | `-e, --exclude-namespaces <ns>` | Namespaces to exclude (comma-separated) | - |
 | `--encrypt` | Encrypt sensitive report metadata using the master key provided through the `KUBESCAPE_MASTER_KEY` environment variable. Requires `--format json` for reports that will later be decrypted with `kubescape decrypt`. If both `--encrypt` and `--hide` are specified, `--encrypt` takes precedence. | `false` |
 | `--exceptions <path>` | Path to exceptions file | - |
 | `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
-| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `csv` | `pretty-printer` |
+| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `csv`, `markdown`, `policyreport`, `exceptions` — see [generating an exceptions baseline](#generating-an-exceptions-baseline) | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
 | `--host-scan` | Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use `--host-scan=false` to disable host data collection. See the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for a managed alternative. | auto-detect |
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
 | `--label-selector <selector>` | Filter collected resources by Kubernetes label selector. Accepts any expression `kubectl -l` supports, e.g. `app=nginx,env!=dev` or `env in (prod,staging)`. Syntax is validated before scanning begins; filtering is applied during live cluster collection and ignored when scanning local files. | - |
 | `--keep-local` | Don't report results to backend | `false` |
+| `--notify <url>` | POST the posture scan's JSON summary to a trusted generic webhook URL. Repeat the flag for multiple endpoints. Delivery is best-effort and does not affect scan exit status. Not supported by `scan image`. | - |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
 | `--otel-endpoint <endpoint>` | Export scan traces and metrics to an OTLP collector — see [OpenTelemetry export](#opentelemetry-export). Accepts `host:port` (plaintext) or a `http(s)://` URL. | `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | `--scan-images` | Also scan container images for vulnerabilities | `false` |
 | `--image-platform <platform>` | OCI platform for workload image scans, such as `linux/amd64`. Overrides platform inferred from Nodes and hard scheduling constraints | inferred |
+| `--min-severity <sev>` | Only show controls at or above this severity: `low`, `medium`, `high`, `critical`. Output-only — exit codes are computed on the full unfiltered report | - |
+| `--max-severity <sev>` | Only show controls at or below this severity. Output-only — exit codes are computed on the full unfiltered report | - |
 | `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical`. Failed controls with unknown severity (missing base score) are treated as exceeding any threshold | - |
 | `--skip-db-update` | Do not update the vulnerability database before scanning images; uses the locally cached database. Fails if the local database is missing or unusable (run once without this flag to download it). | `false` |
 | `--submit` | Submit results to Kubescape SaaS | `false` |
@@ -63,6 +67,114 @@ kubescape scan [target] [flags]
 | `--use-from <path>` | Load specific policy from path | - |
 | `-v, --verbose` | Display all resources, not just failed ones | `false` |
 | `--view <type>` | View type: `security`, `control`, `resource` | `security` |
+
+### Generic webhook notifications
+
+Use `--notify` to POST the existing JSON `summaryDetails` object after a posture scan:
+
+```bash
+kubescape scan manifests/ --notify https://hooks.example.com/kubescape
+kubescape scan manifests/ --notify https://ops.example.com/kubescape --notify https://audit.example.com/kubescape
+```
+
+Each destination gets one synchronous request with `Content-Type: application/json`; Kubescape allows up to five seconds per destination and does not follow redirects. Failures are logged as warnings and never override the scan's own exit status. The payload follows `--min-severity` and `--max-severity` output filtering. `--severity-threshold` continues to affect only the exit status.
+
+The summary may contain resource identifiers in control summaries. Use `--hide` where appropriate and send only to trusted webhook endpoints. Slack Block Kit and Microsoft Teams Adaptive Card formatting are not included in this generic phase.
+
+### Generating an exceptions baseline
+
+`--exceptions` consumes a posture exception file, but there was no way to
+produce one from a scan. The `exceptions` output format writes the current
+failures as exception policies, so an existing posture can be accepted as a
+baseline and only new findings fail afterwards.
+
+```bash
+# capture today's failures
+kubescape scan . --format exceptions --output baseline
+
+# review and trim the file, then scan against it
+kubescape scan . --exceptions baseline.exceptions.json
+```
+
+The file holds one policy per failed control, listing the resources that failed
+it by `kind`, `namespace` and `name`, in the same shape as the samples under
+[examples/exceptions](../examples/exceptions). Designators carry no `cluster`
+attribute, so the same file applies wherever those workloads run. Policies use
+the `alertOnly` action.
+
+It is a normal output format, so it composes with the others and honours
+`--output`, writing `scan-result.json` and `scan-result.exceptions.json`:
+
+```bash
+kubescape scan . --format json,exceptions --output scan-result
+```
+
+Like every other format, the file reflects the report the printers were given,
+so `--min-severity` narrows the baseline to the findings it left in view.
+
+Kubescape matches control IDs and designator attributes as regular expressions,
+so generated values are escaped and match only what the scan reported: a name
+such as `web-1.2.3` is written `web-1\.2\.3` rather than a pattern that would
+also cover `web-1x2y3`.
+
+Every designator pins the namespace axis. A resource that reported no namespace
+— a cluster-scoped object, or a manifest that omits `metadata.namespace` — is
+written as `"namespace": "^$"`, matching the object as scanned rather than the
+same kind and name in any namespace. A `Namespace` object is pinned by its own
+name, which is how Kubescape matches that axis for the kind. Delete the line to
+widen the policy.
+
+Resources read from files also carry `"path"`, the manifest they came from, so a
+repository that declares the same object in more than one place — a kustomize
+base and its overlay — keeps a separate entry per file. Cluster scans have no
+path and omit the attribute.
+
+Everything in the file is meant to be reviewed before use: accepting a whole
+scan unedited silences every current finding. Narrow a policy by deleting
+resources from it, or widen one by replacing an escaped `name` with a regular
+expression of your own.
+
+Exceptions are posture-only and the format is rejected for `scan image`.
+
+### Custom rules
+
+`--custom-rules` loads user-authored rules alongside the downloaded framework.
+Two on-disk layouts are accepted, and they can be mixed in one directory.
+
+A **rule directory** holds `raw.rego` next to `rule.metadata.json`. This is the
+layout of this repository's `rules/` tree and the one `kubescape policy test`
+reads, so a rule can be tested and then scanned without being reshaped:
+
+```
+myrules/
+  no-privileged-containers/
+    raw.rego
+    rule.metadata.json
+  no-host-network/
+    raw.rego
+    rule.metadata.json
+```
+
+```bash
+kubescape policy test ./myrules
+kubescape scan ./manifests --custom-rules ./myrules
+```
+
+Pass either the parent directory or a single rule directory. The metadata
+supplies the rule's name, description, remediation and `match` selectors, so the
+rule is only evaluated against the kinds it targets.
+
+A **bare `.rego` file** is also accepted, for a rule with no metadata:
+
+```bash
+kubescape scan ./manifests --custom-rules ./myrules/no-root.rego
+```
+
+A bare rule is matched against every resource kind, so it must filter input
+itself. Prefer a rule directory when the rule targets specific kinds.
+
+Every custom rule becomes a control named `custom-<rule>` in the report.
+
 
 ### Exception Audit
 
@@ -835,14 +947,14 @@ Display version information.
 ### Synopsis
 
 ```bash
-kubescape version [--format text|json]
+kubescape version [--format text|json|yaml]
 ```
 
 ### Flags
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--format` | `-f` | `text` | Output format. Supported: `text`, `json` |
+| `--format` | `-f` | `text` | Output format. Supported: `text`, `json`, `yaml` |
 
 ### Examples
 
@@ -853,6 +965,12 @@ kubescape version
 # Machine-readable JSON output (safe to pipe to jq)
 kubescape version --format json
 # {"version":"v3.x.x","commit":"abc123","date":"2024-01-15"}
+
+# Machine-readable YAML output
+kubescape version --format yaml
+# commit: abc123
+# date: "2024-01-15"
+# version: v3.x.x
 ```
 
 ---

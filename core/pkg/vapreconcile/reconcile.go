@@ -271,7 +271,7 @@ func GenerateValidatingAdmissionPolicy(name, celExpr string, paramSchema map[str
 	if apiVersion == "" {
 		apiVersion = "v1"
 	}
-	
+
 	if len(paramSchema) > 0 {
 		// Reject wildcard targetResource when a parameter schema is set,
 		// as ConfigMap parameter lookups require a namespace.

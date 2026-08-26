@@ -179,7 +179,7 @@ func ConvertToPostureReportWithSeverityLabelsAndCoverage(report *reporthandlingv
 
 	// only attach coverage when there is something to show
 	var scanCoverage *cautils.ScanCoverage
-	if coverage != nil && (len(coverage.FailedGVRPulls) > 0 || len(coverage.NotEvaluatedControls) > 0 || len(coverage.PartialGVRPulls) > 0 || len(coverage.PolicyDegradations) > 0 || len(coverage.VacuousFrameworks) > 0) {
+	if coverage != nil && (len(coverage.FailedGVRPulls) > 0 || len(coverage.NotEvaluatedControls) > 0 || len(coverage.PartialGVRPulls) > 0 || len(coverage.PolicyDegradations) > 0 || len(coverage.VacuousFrameworks) > 0 || len(coverage.SkippedManifests) > 0) {
 		scanCoverage = coverage
 	}
 

@@ -359,7 +359,7 @@ func isPrintSeparatorType(scanType cautils.ScanTypes) bool {
 // failures caused controls to be skipped or partial data was collected.
 // Nothing is printed on a clean scan.
 func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
-	if len(coverage.FailedGVRPulls) == 0 && len(coverage.NotEvaluatedControls) == 0 && len(coverage.PartialGVRPulls) == 0 && len(coverage.PolicyDegradations) == 0 && len(coverage.VacuousFrameworks) == 0 {
+	if len(coverage.FailedGVRPulls) == 0 && len(coverage.NotEvaluatedControls) == 0 && len(coverage.PartialGVRPulls) == 0 && len(coverage.PolicyDegradations) == 0 && len(coverage.VacuousFrameworks) == 0 && len(coverage.SkippedManifests) == 0 {
 		return
 	}
 
@@ -408,6 +408,14 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 		for _, f := range coverage.VacuousFrameworks {
 			fmt.Fprintf(pp.writer, "  • %s\n", f)
 		}
+	}
+
+	if len(coverage.SkippedManifests) > 0 {
+		fmt.Fprintf(pp.writer, "\nThe following manifest files could not be loaded and were not scanned:\n")
+		for _, s := range coverage.SkippedManifests {
+			fmt.Fprintf(pp.writer, "  • %s: %s\n", s.Path, s.Reason)
+		}
+		fmt.Fprintf(pp.writer, "\nControls were evaluated against incomplete input. Fix or exclude these files.\n")
 	}
 
 	if len(coverage.FailedGVRPulls) > 0 || len(coverage.PartialGVRPulls) > 0 {

@@ -75,6 +75,15 @@ func TestGetImageCmd(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestGetImageCmdRejectsNotify(t *testing.T) {
+	mockKubescape := &imageScanCaptureKubescape{}
+	scanInfo := cautils.ScanInfo{NotifyURLs: []string{"https://example.com/webhook"}}
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	err := cmd.RunE(cmd, []string{"nginx"})
+	require.EqualError(t, err, "--notify is not supported for image-only scans yet")
+	assert.Nil(t, mockKubescape.imgScanInfo)
+}
+
 func TestGetImageCmd_RunE_InvalidSeverity(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	scanInfo := cautils.ScanInfo{FailThresholdSeverity: "unknown"}
@@ -110,7 +119,7 @@ func TestGetImageCmd_RunE_FormatFlagInvalid(t *testing.T) {
 	assert.NoError(t, parent.PersistentFlags().Set("format", "xml"))
 
 	err := cmd.RunE(cmd, []string{"nginx"})
-	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml, cyclonedx-json, spdx-json`)
+	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif, gitlab-sast, yaml, markdown, cyclonedx-json, spdx-json`)
 }
 
 func TestGetImageCmd_RunE_Success(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
 	"github.com/kubescape/opa-utils/reporthandling"
 	apis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -122,6 +123,32 @@ type OPASessionObj struct {
 	IncludeControls       string                      // Comma-separated control IDs to include (all others skipped)
 	VAPPolicies           []unstructured.Unstructured // ValidatingAdmissionPolicy resources collected from the cluster
 	VAPBindings           []unstructured.Unstructured // ValidatingAdmissionPolicyBinding resources collected from the cluster
+
+	// VAPCoverage refines VAPPolicies/VAPBindings' coarse "is any binding
+	// present" signal (see reportsummary.ControlSummary.VAPEnforcement) with
+	// per-resource binding-scope matching: a control's VAP can be Bound
+	// while its binding's namespaceSelector/objectSelector does not actually
+	// cover some or all of the resources that failed it. Populated by
+	// resultshandling after VAPPolicies/VAPBindings are enriched into the
+	// report, keyed by control ID.
+	VAPCoverage map[string]*vapreconcile.ControlCoverage
+
+	// EnvVarSecretRefs records, per resource ID and then per container name,
+	// which container env var names had a ValueFrom reference
+	// (SecretKeyRef/ConfigMapKeyRef/FieldRef/ResourceFieldRef) before
+	// updateResults's removeData step clears ValueFrom and overwrites Value.
+	// It deliberately holds only the env var name, never the reference
+	// target or value, so the anonymizer can still recognize which env var
+	// names to anonymize under --hide/--encrypt after the scrub, without the
+	// scrub itself retaining anything sensitive.
+	//
+	// Keyed by container name (unique across containers/initContainers/
+	// ephemeralContainers within one pod, enforced by the API server) rather
+	// than merged into one per-resource set: two containers in the same pod
+	// can have an env var with the same name where only one is
+	// reference-backed, and only that container's env var may be
+	// anonymized.
+	EnvVarSecretRefs map[string]map[string]map[string]struct{}
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo, policyIdentifiers []PolicyIdentifier) *OPASessionObj {

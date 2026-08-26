@@ -41,7 +41,16 @@ func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace
 	return runScan(ctx, ksServer, namespace, policyIdentifiers, label, false, nil, nil, nil)
 }
 
-func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, policyIdentifiers []cautils.PolicyIdentifier, label string, wantComplianceScore bool, rsrcHandler resourcehandler.IResourceHandler, inputPatterns []string, customGetters *cautils.Getters) ([]byte, error) {
+// executeScan runs the collect-policies → collect-resources → OPA pipeline and
+// returns the raw session object. It is the shared core of runScan (which
+// summarizes the session for scan tools) and runIaCScanControlsReport (which
+// serializes it as a full PostureReport for the remediation tool).
+//
+// The second return value is the non-fatal rule-processing error: rules that
+// failed to evaluate still leave usable partial results, so callers fold it
+// into a "degraded" signal rather than treating it as a failure. The third is a
+// genuine failure, where scanData is nil.
+func executeScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, policyIdentifiers []cautils.PolicyIdentifier, label string, wantComplianceScore bool, rsrcHandler resourcehandler.IResourceHandler, inputPatterns []string, customGetters *cautils.Getters) (*cautils.OPASessionObj, error, error) {
 	logger.L().Ctx(ctx).Info(fmt.Sprintf("Initiating on-demand MCP %s security scan", label), helpers.String("namespace", namespace))
 
 	var client *k8sinterface.KubernetesApi
@@ -49,7 +58,7 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 		var err error
 		client, err = ksServer.getK8sClient()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -73,14 +82,14 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 	defer policyHandler.Close()
 	scanData, err := policyHandler.CollectPolicies(scanCtx, policyIdentifiers, scanInfo, &getters)
 	if err != nil {
-		return nil, fmt.Errorf("failed to collect %s policies: %w", label, err)
+		return nil, nil, fmt.Errorf("failed to collect %s policies: %w", label, err)
 	}
 
 	if rsrcHandler == nil {
 		rsrcHandler = resourcehandler.NewK8sResourceHandler(scanCtx, client, nil, nil, "")
 	}
 	if err := resourcehandler.CollectResources(scanCtx, rsrcHandler, scanData, scanInfo); err != nil {
-		return nil, fmt.Errorf("failed to collect %s resources: %w", label, err)
+		return nil, nil, fmt.Errorf("failed to collect %s resources: %w", label, err)
 	}
 
 	k8sConfig := k8sinterface.GetK8sConfig()
@@ -93,9 +102,18 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 		opap.ControlTimeout = scanInfo.ScanTimeout / 4
 	}
 
-	err = opap.ProcessRulesListener(scanCtx, cautils.NewProgressHandler(""))
+	processErr := opap.ProcessRulesListener(scanCtx, cautils.NewProgressHandler(""))
+	if processErr != nil {
+		logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to fully process %s rules (partial results will be returned)", label), helpers.Error(processErr))
+	}
+
+	return scanData, processErr, nil
+}
+
+func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, policyIdentifiers []cautils.PolicyIdentifier, label string, wantComplianceScore bool, rsrcHandler resourcehandler.IResourceHandler, inputPatterns []string, customGetters *cautils.Getters) ([]byte, error) {
+	scanData, processErr, err := executeScan(ctx, ksServer, namespace, policyIdentifiers, label, wantComplianceScore, rsrcHandler, inputPatterns, customGetters)
 	if err != nil {
-		logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to fully process %s rules (partial results will be returned)", label), helpers.Error(err))
+		return nil, err
 	}
 
 	var complianceScore *float32
@@ -105,7 +123,7 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string
 	totalControls := 0
 
 	if scanData.Report != nil {
-		degraded = scanData.ScanCoverage.Degraded || err != nil
+		degraded = scanData.ScanCoverage.Degraded || processErr != nil
 		notEvaluated = len(scanData.ScanCoverage.NotEvaluatedControls)
 		totalControls = len(scanData.Report.SummaryDetails.Controls)
 

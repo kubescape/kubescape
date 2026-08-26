@@ -30,10 +30,11 @@ const (
 	CycloneDXFormat    string = "cyclonedx-json"
 	SPDXFormat         string = "spdx-json"
 	PolicyReportFormat string = "policyreport"
+	ExceptionsFormat   string = "exceptions"
 )
 
 // AllFormats lists every output format kubescape can emit.
-var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat, PolicyReportFormat}
+var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat, PolicyReportFormat, ExceptionsFormat}
 
 // ImageFormats lists formats whose printers support image-scan data. CSV is
 // deliberately excluded: CsvPrinter.ActionPrint requires opaSessionObj and
@@ -42,7 +43,7 @@ var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, Prometheu
 //
 // CycloneDXFormat and SPDXFormat are the inverse: they encode the SBOM that
 // only exists on image scans, so they are image-scan-only (see ValidatePrinter).
-var ImageFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CycloneDXFormat, SPDXFormat}
+var ImageFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat}
 
 const (
 	JsonOutputExt         = ".json"
@@ -58,6 +59,7 @@ const (
 	CycloneDXOutputExt    = ".cdx.json"
 	SPDXOutputExt         = ".spdx.json"
 	PolicyReportOutputExt = ".yaml"
+	ExceptionsOutputExt   = ".exceptions.json"
 )
 
 // HasOutputExt reports whether outputFile already ends with ext, compared
@@ -126,6 +128,7 @@ var FormatOutputExt = map[string]string{
 	CycloneDXFormat:    CycloneDXOutputExt,
 	SPDXFormat:         SPDXOutputExt,
 	PolicyReportFormat: PolicyReportOutputExt,
+	ExceptionsFormat:   ExceptionsOutputExt,
 }
 
 type IPrinter interface {

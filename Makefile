@@ -16,7 +16,7 @@ test:
 # it stays reproducible instead of hand-maintained. Bump CEL_LIBRARY_VERSION to
 # vendor a newer bundle.
 CEL_VAPDATA_DIR := core/pkg/opaprocessor/cel/vapdata
-CEL_LIBRARY_VERSION := v0.13
+CEL_LIBRARY_VERSION := v0.14
 CEL_LIBRARY_BASE_URL := https://github.com/kubescape/cel-admission-library/releases/download/$(CEL_LIBRARY_VERSION)
 CEL_VAP_FILES := \
 	kubescape-validating-admission-policies.yaml \
@@ -33,8 +33,8 @@ CEL_VAP_FILES := \
 # `make sync-vap-digests`, check the values against the upstream release, then
 # paste them below in the same commit as the version bump.
 CEL_VAP_DIGESTS := \
-	kubescape-validating-admission-policies.yaml=848f99c52370b768383e7bec4c6799dca1745d9684ad665ba8be1ea99908f5ac \
-	basic-control-configuration.yaml=e309eac48242573cb9814c62367a675f09c06f9288d8fb1f7bdd421db82e51c9 \
+	kubescape-validating-admission-policies.yaml=fac9c82f348da6b68a2a57b13c788227cd61238a7d310b6f94417359641d152c \
+	basic-control-configuration.yaml=7fc2194b4a646ba110fbf43b51f7c0eb605f5ae4af1ba9fb66339834a98ca284 \
 	policy-configuration-definition.yaml=f1e1d0bda1e82ef880223a429fc5ecf99c957b5069b1ec759a9b65ab8620c7ef
 
 # sha256sum on GNU coreutils, shasum on macOS; both print "<digest>  <file>".

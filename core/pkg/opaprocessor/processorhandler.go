@@ -36,6 +36,8 @@ import (
 	"github.com/open-policy-agent/opa/v1/rego"
 	opaprint "github.com/open-policy-agent/opa/v1/topdown/print"
 	"go.opentelemetry.io/otel"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	metav1unstructured "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/tools/record"
 )
 
@@ -236,9 +238,11 @@ func (opap *OPAProcessor) SetIncrementalCache(cache *scancache.Store) {
 // --skip-controls and --include-controls filters. Both the eager and the
 // streaming entry point build AllPolicies from it, so the same cluster is
 // scanned against the same control set whichever path a scan takes.
-func (opap *OPAProcessor) effectiveExcludedRules() map[string]bool {
+// It returns a hard error when the filter leaves nothing to scan, preventing
+// a 0-control, exit-0 result that would silently pass a CI gate.
+func (opap *OPAProcessor) effectiveExcludedRules() (map[string]bool, error) {
 	if opap.SkipControls == "" && opap.IncludeControls == "" {
-		return opap.ExcludedRules
+		return opap.ExcludedRules, nil
 	}
 	return buildControlExcludedRules(opap.ExcludedRules, opap.Policies, split(opap.SkipControls), split(opap.IncludeControls))
 }
@@ -246,7 +250,11 @@ func (opap *OPAProcessor) effectiveExcludedRules() map[string]bool {
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
 	scanningScope := cautils.GetScanningScope(opap.Metadata.ContextMetadata)
 
-	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.effectiveExcludedRules(), scanningScope)
+	excludedRules, err := opap.effectiveExcludedRules()
+	if err != nil {
+		return err
+	}
+	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, excludedRules, scanningScope)
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
@@ -259,7 +267,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	// rebuild ScanCoverage so controls that timed out during evaluation
 	// (recorded in TimedOutControls by markControlTimedOut) are reflected in
 	// NotEvaluatedControls alongside any collection-phase failures
-	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations)
+	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests)
 	opap.ScanCoverage.ComputeCoverageScore(len(opap.Report.SummaryDetails.Controls))
 
 	// edit results
@@ -300,7 +308,11 @@ func (opap *OPAProcessor) ProcessWithStreaming(ctx context.Context, batchChan <-
 	opap.loggerStartScanning()
 	defer opap.loggerDoneScanning()
 
-	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.effectiveExcludedRules(), cautils.GetScanningScope(opap.Metadata.ContextMetadata))
+	excludedRules, err := opap.effectiveExcludedRules()
+	if err != nil {
+		return err
+	}
+	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, excludedRules, cautils.GetScanningScope(opap.Metadata.ContextMetadata))
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
 	scopeControlIDs, wholeClusterControlIDs := splitWholeClusterControls(opap.AllPolicies, sortedControlIDs(opap.AllPolicies))
@@ -450,7 +462,7 @@ done:
 	}
 
 	// Rebuild scan coverage
-	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations)
+	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations, opap.SkippedManifests)
 	opap.ScanCoverage.ComputeCoverageScore(len(opap.Report.SummaryDetails.Controls))
 
 	// Update results
@@ -1139,7 +1151,7 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		opap.mu.Unlock()
 	}
 
-	ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData, controlID)
+	ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, enumeratedData, ruleData, ruleRegoDependenciesData, controlID)
 	if err != nil {
 		opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
 		return resources, fmt.Errorf("rego eval failed for namespace %q: %w", scope.name, err)
@@ -1251,8 +1263,12 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 //
 // This runs once per rule-scope evaluation (not once per resource), so its
 // O(len(ResourceToControlsMap)) cost is paid a small, bounded number of times
-// per scan rather than once per resource.
+// per scan rather than once per resource. It runs on processScope's worker
+// goroutines concurrently with markResourcesSkipped/seedCELSkips, which write
+// InfoMap under mu, so the read must hold mu as well.
 func (opap *OPAProcessor) hasUnreachableDependency(controlID string) bool {
+	opap.mu.Lock()
+	defer opap.mu.Unlock()
 	for gvr, controlIDs := range opap.ResourceToControlsMap {
 		if !slices.Contains(controlIDs, controlID) {
 			continue
@@ -1469,6 +1485,29 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 		return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 	}
 
+	vap, err := cel.LoadVAP(controlID)
+	if err != nil {
+		return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
+	}
+
+	bindings := opap.celBindingsFor(vap.PolicyName)
+	var paramRef *admissionregistrationv1.ParamRef
+	switch len(bindings) {
+	case 0:
+		// no live binding: fall back to the bundled ControlConfiguration
+	case 1:
+		if celBindingHasMatchResources(bindings[0]) {
+			return nil, celOutcome{}, fmt.Errorf("rule: '%s', binding for policy %q declares spec.matchResources, which the offline engine does not evaluate yet; refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName)
+		}
+		if vap.TakesParams() && celBindingSelectsParams(bindings[0]) {
+			return nil, celOutcome{}, fmt.Errorf("rule: '%s', binding for policy %q selects its params with spec.paramRef.selector, which the offline engine does not resolve yet; refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName)
+		}
+		paramRef = celParamRefForBinding(bindings[0])
+	default:
+		return nil, celOutcome{}, fmt.Errorf("rule: '%s', policy %q is matched by %d live bindings; the offline engine does not yet select per-binding paramRefs, so refusing it to preserve scan/admission parity", rule.Name, vap.PolicyName, len(bindings))
+	}
+	findParam := opap.celParamObjectFinder()
+
 	var responses []reporthandling.RuleResponse
 	outcome := celOutcome{excluded: make(map[string]struct{})}
 	for _, obj := range k8sObjects {
@@ -1476,12 +1515,39 @@ func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.
 			return nil, celOutcome{}, err
 		}
 
+		// Skip objects the policy's matchConstraints do not cover before doing any
+		// work that could fail for an object the policy never applies to.
+		if !vap.AppliesTo(obj) {
+			resID := celResourceID(obj)
+			outcome.excluded[resID] = struct{}{}
+			continue
+		}
+
+		// Resolve the params for this object: a binding's paramRef may point to a
+		// namespaced or cluster-scoped object the scan collected. If the object is
+		// missing and the binding says Allow, the policy does not apply; otherwise
+		// it denies the object, exactly as admission does.
+		params, err := cel.ResolveParamObject(vap, paramRef, celResourceNamespace(obj), findParam)
+		if err != nil {
+			if errors.Is(err, cel.ErrParamNotFound) {
+				resID := celResourceID(obj)
+				if paramRef != nil && paramRef.ParameterNotFoundAction != nil && string(*paramRef.ParameterNotFoundAction) == "Allow" {
+					outcome.excluded[resID] = struct{}{}
+					continue
+				}
+				// parameterNotFoundAction is Deny (or unset, which defaults to Deny).
+				responses = append(responses, celErrorRuleResponse(rule, obj, err))
+				continue
+			}
+			return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
+		}
+
 		// namespaceObject is the resource's Namespace object when the scan
 		// collected it, and nil otherwise — the evaluator then binds null, so a
 		// policy reading namespaceObject.* sees an absent namespace (and a
 		// selection into it eval-errors and skips, never passes). File scans and
 		// scans whose frameworks never matched Namespaces stay on that safe path.
-		eval, err := evaluator.EvaluateControl(ctx, controlID, obj, opap.celNamespaceObjectFor(obj))
+		eval, err := evaluator.EvaluateVAP(ctx, vap, obj, opap.celNamespaceObjectFor(obj), params)
 		if err != nil {
 			return nil, celOutcome{}, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 		}
@@ -1687,6 +1753,107 @@ func celResourceID(obj map[string]any) string {
 		return meta.GetID()
 	}
 	return "<unknown>"
+}
+
+// celResourceNamespace returns the object's metadata.namespace, or "" when it
+// is cluster-scoped or not a recognizable envelope. It is used to resolve a
+// binding's paramRef whose own namespace is empty (admission uses the object's
+// namespace in that case).
+func celResourceNamespace(obj map[string]any) string {
+	if meta := objectsenvelopes.NewObject(obj); meta != nil {
+		return meta.GetNamespace()
+	}
+	return ""
+}
+
+// celBindingsFor returns all live ValidatingAdmissionPolicyBindings that name
+// the policy. The caller decides how to handle multiple or scoped bindings.
+func (opap *OPAProcessor) celBindingsFor(policyName string) []metav1unstructured.Unstructured {
+	if opap.OPASessionObj == nil {
+		return nil
+	}
+	var matches []metav1unstructured.Unstructured
+	for _, b := range opap.VAPBindings {
+		if b.Object == nil {
+			continue
+		}
+		pn, _, _ := metav1unstructured.NestedString(b.Object, "spec", "policyName")
+		if pn == policyName {
+			matches = append(matches, b)
+		}
+	}
+	return matches
+}
+
+// celBindingHasMatchResources reports whether a binding narrows the objects it
+// governs. The offline engine cannot evaluate that scoping yet, so a binding
+// that carries matchResources cannot safely supply its paramRef.
+func celBindingHasMatchResources(binding metav1unstructured.Unstructured) bool {
+	if binding.Object == nil {
+		return false
+	}
+	spec, ok := binding.Object["spec"].(map[string]any)
+	if !ok {
+		return false
+	}
+	mr, ok := spec["matchResources"].(map[string]any)
+	return ok && len(mr) > 0
+}
+
+// celBindingSelectsParams reports whether the binding picks its params with
+// spec.paramRef.selector rather than naming one. celParamRefForBinding reads
+// only the name, so such a binding used to arrive as no paramRef at all and the
+// policy was evaluated against the bundled defaults instead of the objects the
+// binding selects. An empty selector is still a selection (it matches every
+// object of the paramKind), so presence is what counts, not length.
+func celBindingSelectsParams(binding metav1unstructured.Unstructured) bool {
+	if binding.Object == nil {
+		return false
+	}
+	_, found, err := metav1unstructured.NestedMap(binding.Object, "spec", "paramRef", "selector")
+	return err == nil && found
+}
+
+// celParamRefForBinding extracts the binding's spec.paramRef, if any. Missing
+// or empty paramRefs are returned as nil so ResolveParamObject falls back to
+// the bundled ControlConfiguration.
+func celParamRefForBinding(binding metav1unstructured.Unstructured) *admissionregistrationv1.ParamRef {
+	if binding.Object == nil {
+		return nil
+	}
+	name, _, _ := metav1unstructured.NestedString(binding.Object, "spec", "paramRef", "name")
+	if name == "" {
+		return nil
+	}
+	ns, _, _ := metav1unstructured.NestedString(binding.Object, "spec", "paramRef", "namespace")
+	action, _, _ := metav1unstructured.NestedString(binding.Object, "spec", "paramRef", "parameterNotFoundAction")
+	ref := &admissionregistrationv1.ParamRef{
+		Name:      name,
+		Namespace: ns,
+	}
+	if action != "" {
+		act := admissionregistrationv1.ParameterNotFoundActionType(action)
+		ref.ParameterNotFoundAction = &act
+	}
+	return ref
+}
+
+// celParamObjectFinder builds an index of all scanned objects by
+// apiVersion/kind/namespace/name and returns a lookup that ResolveParamObject
+// can use to find a binding's parameter object in the offline input.
+func (opap *OPAProcessor) celParamObjectFinder() func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
+	if opap.OPASessionObj == nil {
+		return func(apiVersion, kind, namespace, name string) (map[string]any, bool) { return nil, false }
+	}
+	idx := make(map[string]map[string]any, len(opap.AllResources))
+	for _, res := range opap.AllResources {
+		key := res.GetApiVersion() + "/" + res.GetKind() + "/" + res.GetNamespace() + "/" + res.GetName()
+		idx[key] = res.GetObject()
+	}
+	return func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
+		obj, ok := idx[apiVersion+"/"+kind+"/"+namespace+"/"+name]
+		return obj, ok
+	}
 }
 
 // opaRegisterOnce guards rego.RegisterBuiltin1/2 below. Those calls mutate

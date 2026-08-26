@@ -109,9 +109,10 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 }
 
 func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata, paths *[]string) {
+	if resource == nil {
+		return
+	}
 	wl := workloadinterface.NewWorkloadObj(resource.GetObject())
-	namesByKind := containerNamesByKind(wl)
-
 	for i := range *paths {
 		match := specContainerRegex.FindStringSubmatch((*paths)[i])
 		if len(match) != 3 {
@@ -121,40 +122,29 @@ func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata,
 		if err != nil {
 			continue
 		}
-		names := namesByKind[match[1]]
-		if index >= len(names) {
+		var containerName string
+		switch match[1] {
+		case "containers":
+			containers, _ := wl.GetContainers()
+			if index < len(containers) {
+				containerName = containers[index].Name
+			}
+		case "initContainers":
+			containers, _ := wl.GetInitContainers()
+			if index < len(containers) {
+				containerName = containers[index].Name
+			}
+		case "ephemeralContainers":
+			containers, _ := wl.GetEphemeralContainers()
+			if index < len(containers) {
+				containerName = containers[index].Name
+			}
+		}
+		if containerName == "" {
 			continue
 		}
-		(*paths)[i] += " (" + names[index] + ")"
+		(*paths)[i] = (*paths)[i] + " (" + containerName + ")"
 	}
-}
-
-func containerNamesByKind(wl *workloadinterface.Workload) map[string][]string {
-	namesByKind := make(map[string][]string, 3)
-
-	if cs, err := wl.GetContainers(); err == nil {
-		names := make([]string, len(cs))
-		for i := range cs {
-			names[i] = cs[i].Name
-		}
-		namesByKind["containers"] = names
-	}
-	if cs, err := wl.GetInitContainers(); err == nil {
-		names := make([]string, len(cs))
-		for i := range cs {
-			names[i] = cs[i].Name
-		}
-		namesByKind["initContainers"] = names
-	}
-	if cs, err := wl.GetEphemeralContainers(); err == nil {
-		names := make([]string, len(cs))
-		for i := range cs {
-			names[i] = cs[i].Name
-		}
-		namesByKind["ephemeralContainers"] = names
-	}
-
-	return namesByKind
 }
 
 func generateResourceHeader(short bool) table.Row {

@@ -429,6 +429,6 @@ func TestGetResources_DiscoveryFailureReachesScanCoverage(t *testing.T) {
 	assert.Equal(t, "discovery", sessionObj.PartialGVRFailures[0].Selector)
 	assert.Contains(t, sessionObj.PartialGVRFailures[0].Error, "provider unavailable")
 
-	coverage := cautils.BuildScanCoverage(sessionObj.InfoMap, sessionObj.ResourceToControlsMap, nil, sessionObj.PartialGVRFailures, nil)
+	coverage := cautils.BuildScanCoverage(sessionObj.InfoMap, sessionObj.ResourceToControlsMap, nil, sessionObj.PartialGVRFailures, nil, nil)
 	assert.Len(t, coverage.PartialGVRPulls, 1)
 }

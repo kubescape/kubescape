@@ -235,7 +235,7 @@ func imageTestsSuites(imageScanData []cautils.ImageScanData) *JUnitTestSuites {
 
 	suites := make([]JUnitTestSuite, 0, len(imageScanData))
 	for i := range imageScanData {
-		image := imageScanData[i].Image
+		image := imageScanData[i].Target()
 		cves := extractCVEs(imageScanData[i].Matches, image)
 		suite := JUnitTestSuite{
 			ID:        i,
@@ -246,7 +246,10 @@ func imageTestsSuites(imageScanData []cautils.ImageScanData) *JUnitTestSuites {
 			TestCases: imageTestCases(cves, imageScanData[i].Platform),
 		}
 		if imageScanData[i].Platform != "" {
-			suite.Properties = []JUnitProperty{{Name: "platform", Value: imageScanData[i].Platform}}
+			suite.Properties = []JUnitProperty{
+				{Name: "image", Value: imageScanData[i].Image},
+				{Name: "platform", Value: imageScanData[i].Platform},
+			}
 		}
 		suites = append(suites, suite)
 	}

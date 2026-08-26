@@ -111,7 +111,7 @@ func TestProcess_ControlTimeout(t *testing.T) {
 	assert.Empty(t, opap.ResourcesResult, "timed-out control must not contribute resources to ResourcesResult")
 
 	// mirrors the rebuild step performed by ProcessRulesListener after Process returns
-	coverage := cautils.BuildScanCoverage(opaSessionObj.InfoMap, opaSessionObj.ResourceToControlsMap, opap.TimedOutControls, opaSessionObj.PartialGVRFailures, opaSessionObj.PolicyDegradations)
+	coverage := cautils.BuildScanCoverage(opaSessionObj.InfoMap, opaSessionObj.ResourceToControlsMap, opap.TimedOutControls, opaSessionObj.PartialGVRFailures, opaSessionObj.PolicyDegradations, nil)
 	require.Len(t, coverage.NotEvaluatedControls, 1)
 	notEvaluated := coverage.NotEvaluatedControls[0]
 	assert.Equal(t, controlID, notEvaluated.ControlID)

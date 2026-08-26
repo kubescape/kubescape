@@ -149,7 +149,7 @@ func TestDiscoveryResolverReportsPartialDiscoveryFailures(t *testing.T) {
 	require.Len(t, resolved, 1)
 	assert.Equal(t, "agents.x-k8s.io/v1alpha1/sandboxes", resolved[0].groupVersionResourceTriplet)
 
-	coverage := cautils.BuildScanCoverage(nil, nil, nil, failures, nil)
+	coverage := cautils.BuildScanCoverage(nil, nil, nil, failures, nil, nil)
 	coverage.ComputeCoverageScore(1)
 	assert.Len(t, coverage.PartialGVRPulls, 2)
 	assert.True(t, coverage.Degraded)

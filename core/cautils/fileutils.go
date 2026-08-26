@@ -18,13 +18,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/edsrzf/mmap-go"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils/helmprovenance"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
-	"github.com/edsrzf/mmap-go"
 	"github.com/valyala/fastjson"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -770,6 +770,11 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 		}
 
 		w, e := ReadFile(f, getFileFormat(filePaths[i]))
+		m := mmap.MMap(f)
+		if errUnmap := m.Unmap(); errUnmap != nil {
+			logger.L().Warning("failed to unmap file", helpers.String("path", filePaths[i]), helpers.Error(errUnmap))
+		}
+
 		if e != nil {
 			// Only chart-owned templates/ files reach this loader unrendered —
 			// excludeHelmTemplateFiles drops the templates of every chart whose
@@ -1084,7 +1089,7 @@ func convertFastjsonToMap(v *fastjson.Value) map[string]any {
 	if v == nil || v.Type() != fastjson.TypeObject {
 		return nil
 	}
-	
+
 	m := make(map[string]any)
 	v.GetObject().Visit(func(key []byte, val *fastjson.Value) {
 		m[string(key)] = convertFastjsonValue(val)
@@ -1120,24 +1125,7 @@ func convertFastjsonValue(v *fastjson.Value) any {
 	}
 }
 
-func convertJsonToWorkload(jsonObj any, workloads *[]workloadinterface.IMetadata) error {
 
-	switch x := jsonObj.(type) {
-	case map[string]any:
-		objects, err := manifestObjectToWorkloads(x)
-		*workloads = append(*workloads, objects...)
-		return err
-	case []any:
-		var itemErrs []error
-		for i := range x {
-			if err := convertJsonToWorkload(x[i], workloads); err != nil {
-				itemErrs = append(itemErrs, fmt.Errorf("array item %d: %w", i, err))
-			}
-		}
-		return errors.Join(itemErrs...)
-	}
-	return nil
-}
 
 // manifestObjectToWorkloads normalizes Kubernetes list envelopes before object
 // envelopes are created. Both YAML and JSON readers use it so the accepted

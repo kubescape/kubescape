@@ -21,7 +21,7 @@ func Transpile(body *ast.Body) (string, error) {
 			if !ok {
 				return "", fmt.Errorf("unsupported Rego expression: every expression could not be parsed")
 			}
-			
+
 			bodyStr := every.Body.String()
 			if strings.Contains(bodyStr, "container") && strings.Contains(bodyStr, "image") {
 				predicates = append(predicates, "object.spec.containers.all(c, c.image != '')")
