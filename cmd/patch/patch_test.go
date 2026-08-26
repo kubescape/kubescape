@@ -300,6 +300,41 @@ func Test_validateImagePatchInfo_DefaultsTagAndPatchedTag(t *testing.T) {
 	assert.Equal(t, "nginx", patchInfo.ImageName)
 }
 
+// A digest-pinned reference combined with an explicit --tag must not error:
+// the patched-tag defaulting branch never runs, so capturing the source tag
+// has to be best-effort rather than a hard type-assertion failure.
+func Test_validateImagePatchInfo_DigestRefWithExplicitTag(t *testing.T) {
+	patchInfo := &metav1.PatchInfo{
+		Image:           "nginx@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		PatchedImageTag: "patched",
+		OutputMode:      "docker",
+	}
+
+	err := validateImagePatchInfo(patchInfo)
+
+	assert.NoError(t, err)
+	assert.Empty(t, patchInfo.ImageTag,
+		"a digest-pinned reference carries no tag; it must not be fabricated")
+	assert.Equal(t, "patched", patchInfo.PatchedImageTag)
+}
+
+// An explicit --tag must not leave ImageTag empty: the intermediate report
+// filename derives from fields that must stay well-formed regardless of flags.
+func Test_validateImagePatchInfo_ExplicitTagStillCapturesSourceTag(t *testing.T) {
+	patchInfo := &metav1.PatchInfo{
+		Image:           "nginx:1.22",
+		PatchedImageTag: "my-patched",
+		OutputMode:      "docker",
+	}
+
+	err := validateImagePatchInfo(patchInfo)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "1.22", patchInfo.ImageTag,
+		"the source tag must be captured even when --tag is provided")
+	assert.Equal(t, "my-patched", patchInfo.PatchedImageTag)
+}
+
 func Test_validateImagePatchInfo_DigestOnlyReturnsError(t *testing.T) {
 	patchInfo := &metav1.PatchInfo{
 		Image:      "nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
