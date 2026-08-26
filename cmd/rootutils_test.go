@@ -6,7 +6,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/iconlogger"
 	"github.com/kubescape/go-logger/zaplogger"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
@@ -34,7 +34,7 @@ func TestInitLoggerLevel_KSLoggerPrecedence(t *testing.T) {
 		rootInfo.LoggerName = zaplogger.LoggerName
 
 		initLogger()
-		initLoggerLevel(cmd)
+		assert.NoError(t, initLoggerLevel(cmd))
 
 		assert.Equal(t, "debug", rootInfo.Logger)
 	})
@@ -53,7 +53,7 @@ func TestInitLoggerLevel_KSLoggerPrecedence(t *testing.T) {
 		rootInfo.LoggerName = zaplogger.LoggerName
 
 		initLogger()
-		initLoggerLevel(cmd)
+		assert.NoError(t, initLoggerLevel(cmd))
 
 		assert.Equal(t, helpers.WarningLevel.String(), rootInfo.Logger)
 	})
@@ -72,7 +72,7 @@ func TestInitLoggerLevel_KSLoggerPrecedence(t *testing.T) {
 		rootInfo.LoggerName = zaplogger.LoggerName
 
 		initLogger()
-		initLoggerLevel(cmd)
+		assert.NoError(t, initLoggerLevel(cmd))
 
 		assert.Equal(t, helpers.InfoLevel.String(), rootInfo.Logger)
 	})
@@ -96,7 +96,7 @@ func TestInitLoggerLevel_KSLoggerPrecedence(t *testing.T) {
 
 		rootInfo.LoggerName = zaplogger.LoggerName
 		initLogger()
-		initLoggerLevel(versionCmd)
+		assert.NoError(t, initLoggerLevel(versionCmd))
 
 		assert.Equal(t, helpers.InfoLevel.String(), rootInfo.Logger)
 	})

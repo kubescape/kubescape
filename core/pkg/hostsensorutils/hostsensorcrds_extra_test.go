@@ -10,9 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
+
+	"github.com/kubescape/k8s-interface/k8sinterface"
 )
 
 func TestConvertCRDToEnvelope(t *testing.T) {
@@ -114,20 +115,16 @@ func TestHasCloudProviderInfo(t *testing.T) {
 }
 
 func TestListCRDResources(t *testing.T) {
-	item := &unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": hostDataGroup + "/" + hostDataVersion,
-			"kind":       "OsReleaseFile",
-			"metadata": map[string]any{
-				"name": "node-1",
-			},
-		},
-	}
+	item := newCRDItem("OsReleaseFile", "node-1", nil)
 	hsh := &HostSensorHandler{
-		dynamicClient: fake.NewSimpleDynamicClient(runtime.NewScheme(), item),
+		dynamicClient: newCRDDynamicClient(t, item),
 	}
 
-	got, err := hsh.listCRDResources(context.Background(), "osreleasefiles", k8shostsensor.OsReleaseFile.String())
+	var got []unstructured.Unstructured
+	err := hsh.listCRDResources(context.Background(), "osreleasefiles", k8shostsensor.OsReleaseFile.String(), func(items []unstructured.Unstructured) error {
+		got = append(got, items...)
+		return nil
+	})
 
 	require.NoError(t, err)
 	require.Len(t, got, 1)
@@ -135,6 +132,19 @@ func TestListCRDResources(t *testing.T) {
 }
 
 func TestHostSensorHandlerLifecycleEdges(t *testing.T) {
+	sharedConfig := &rest.Config{
+		Host: "https://cluster.example.test",
+		ContentConfig: rest.ContentConfig{
+			AcceptContentTypes: "application/json",
+			ContentType:        "application/json",
+		},
+	}
+	originalConfig := k8sinterface.K8SConfig
+	k8sinterface.K8SConfig = sharedConfig
+	t.Cleanup(func() {
+		k8sinterface.K8SConfig = originalConfig
+	})
+
 	handler := &HostSensorHandler{}
 
 	assert.NoError(t, handler.TearDown())
@@ -142,6 +152,14 @@ func TestHostSensorHandlerLifecycleEdges(t *testing.T) {
 	got, err := NewHostSensorHandler(nil, "")
 	require.Nil(t, got)
 	require.ErrorContains(t, err, "nil k8s interface received")
+
+	k8sObj := &k8sinterface.KubernetesApi{
+		KubernetesClient: fake.NewSimpleClientset(),
+		Context:          context.Background(),
+	}
+	got2, err2 := NewHostSensorHandler(k8sObj, "")
+	require.Nil(t, got2)
+	require.ErrorContains(t, err2, "failed to get nodes list: no nodes to scan")
 }
 
 func mustJSON(t *testing.T, value map[string]any) string {
@@ -154,12 +172,7 @@ func mustJSON(t *testing.T, value map[string]any) string {
 
 func TestInitAllowsEmptyCRDList(t *testing.T) {
 	hsh := &HostSensorHandler{
-		dynamicClient: fake.NewSimpleDynamicClientWithCustomListKinds(
-			runtime.NewScheme(),
-			map[schema.GroupVersionResource]string{
-				{Group: hostDataGroup, Version: hostDataVersion, Resource: "osreleasefiles"}: "OsReleaseFileList",
-			},
-		),
+		dynamicClient: newCRDDynamicClient(t),
 	}
 
 	err := hsh.Init(context.Background())

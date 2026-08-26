@@ -53,9 +53,9 @@ func stubBindings(obj, namespaceObject map[string]any) map[string]any {
 // Known gaps (issue #2001), present-but-zero so selection never errors:
 //   - userInfo carries no identity (offline we don't know the requester), so
 //     checks depending on the requesting user are a documented limitation.
-//   - resource/requestResource carry the group and version but an empty
-//     resource (plural) name: resolving the GVR plural offline needs a
-//     RESTMapper we don't have, so it stays the zero value.
+//   - subResource/requestSubResource are always empty: the scan does not
+//     evaluate subresources (the same reason matchesResource declines a
+//     "resource/subresource" rule).
 func stubRequest(obj map[string]any) map[string]any {
 	name, _, _ := unstructured.NestedString(obj, "metadata", "name")
 	namespace, _, _ := unstructured.NestedString(obj, "metadata", "namespace")
@@ -67,7 +67,7 @@ func stubRequest(obj map[string]any) map[string]any {
 	// share group/version. requestKind/requestResource equal kind/resource
 	// when no API conversion is involved, which is always the case offline.
 	gvk := map[string]any{"group": group, "version": version, "kind": kind}
-	gvr := map[string]any{"group": group, "version": version, "resource": ""}
+	gvr := map[string]any{"group": group, "version": version, "resource": resourcePlural(obj)}
 
 	return map[string]any{
 		"uid":                "",
@@ -94,6 +94,25 @@ func stubRequest(obj map[string]any) map[string]any {
 		"dryRun":  false,
 		"options": map[string]any{},
 	}
+}
+
+// resourcePlural is the plural resource name for request.resource, taken from
+// the same objectGVR resolution appliesTo scopes with. Sharing it is the
+// point: a policy that narrows by resource can do it through matchConstraints
+// or by reading request.resource.resource, and the two must agree.
+//
+// Leaving it empty (the old behavior) was a silent parity break rather than a
+// loud one, because request is cel.DynType: a guard like
+// `request.resource.resource != 'pods' || ...` does not error offline, it
+// short-circuits to true and records a pass the cluster never made. Empty is
+// kept only for an object with no determinable kind, which objectGVR reports
+// and appliesTo already treats as "evaluate and let it error".
+func resourcePlural(obj map[string]any) string {
+	gvr, _, ok := objectGVR(obj)
+	if !ok {
+		return ""
+	}
+	return gvr.Resource
 }
 
 // stubNamespaceObject resolves the value bound to "namespaceObject".

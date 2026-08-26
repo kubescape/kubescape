@@ -2,11 +2,15 @@ package cautils
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/discovery"
@@ -22,96 +26,169 @@ type FakeCachedDiscoveryClient struct {
 	Invalidations      int
 }
 
-func Test_splitHostAndBasePath(t *testing.T) {
+func Test_splitServerURL(t *testing.T) {
 	testCases := []struct {
 		name         string
 		host         string
+		wantScheme   string
 		wantHost     string
 		wantBasePath string
 		wantErr      bool
 	}{
 		{
-			name:     "https scheme is stripped",
-			host:     "https://1.2.3.4:6443",
-			wantHost: "1.2.3.4:6443",
+			name:       "https scheme is preserved",
+			host:       "https://1.2.3.4:6443",
+			wantScheme: "https",
+			wantHost:   "1.2.3.4:6443",
 		},
 		{
-			name:     "http scheme is stripped",
-			host:     "http://1.2.3.4:6443",
-			wantHost: "1.2.3.4:6443",
+			name:       "http scheme is preserved",
+			host:       "http://1.2.3.4:6443",
+			wantScheme: "http",
+			wantHost:   "1.2.3.4:6443",
 		},
 		{
-			name:     "host without scheme is returned unchanged",
-			host:     "1.2.3.4:6443",
-			wantHost: "1.2.3.4:6443",
+			name:       "host without scheme defaults to https",
+			host:       "1.2.3.4:6443",
+			wantScheme: "https",
+			wantHost:   "1.2.3.4:6443",
 		},
 		{
-			name:     "empty host is returned unchanged",
-			host:     "",
-			wantHost: "",
+			name:         "host without scheme preserves base path",
+			host:         "proxy.example.com/k8s",
+			wantScheme:   "https",
+			wantHost:     "proxy.example.com",
+			wantBasePath: "/k8s",
 		},
 		{
-			name:     "hostname starting with 'h' is preserved after https scheme",
-			host:     "https://hello-cluster.example.com:6443",
-			wantHost: "hello-cluster.example.com:6443",
+			name:       "empty host defaults to https",
+			host:       "",
+			wantScheme: "https",
+			wantHost:   "",
 		},
 		{
-			name:     "hostname starting with 't' is preserved after https scheme",
-			host:     "https://test.example.com:6443",
-			wantHost: "test.example.com:6443",
+			name:       "hostname starting with 'h' is preserved after https scheme",
+			host:       "https://hello-cluster.example.com:6443",
+			wantScheme: "https",
+			wantHost:   "hello-cluster.example.com:6443",
 		},
 		{
-			name:     "hostname starting with 'p' is preserved after https scheme",
-			host:     "https://prod.example.com",
-			wantHost: "prod.example.com",
+			name:       "hostname starting with 't' is preserved after https scheme",
+			host:       "https://test.example.com:6443",
+			wantScheme: "https",
+			wantHost:   "test.example.com:6443",
 		},
 		{
-			name:     "hostname starting with 's' is preserved after https scheme",
-			host:     "https://staging.example.com",
-			wantHost: "staging.example.com",
+			name:       "hostname starting with 'p' is preserved after https scheme",
+			host:       "https://prod.example.com",
+			wantScheme: "https",
+			wantHost:   "prod.example.com",
 		},
 		{
-			name:     "kubernetes.docker.internal is preserved",
-			host:     "https://kubernetes.docker.internal:6443",
-			wantHost: "kubernetes.docker.internal:6443",
+			name:       "hostname starting with 's' is preserved after https scheme",
+			host:       "https://staging.example.com",
+			wantScheme: "https",
+			wantHost:   "staging.example.com",
+		},
+		{
+			name:       "kubernetes.docker.internal is preserved",
+			host:       "https://kubernetes.docker.internal:6443",
+			wantScheme: "https",
+			wantHost:   "kubernetes.docker.internal:6443",
 		},
 		{
 			name:         "host with base path preserves path",
 			host:         "https://proxy.example.com/k8s",
+			wantScheme:   "https",
+			wantHost:     "proxy.example.com",
+			wantBasePath: "/k8s",
+		},
+		{
+			name:         "http host with base path preserves both",
+			host:         "http://proxy.example.com/k8s",
+			wantScheme:   "http",
 			wantHost:     "proxy.example.com",
 			wantBasePath: "/k8s",
 		},
 		{
 			name:         "host with port and base path preserves both",
 			host:         "https://proxy.example.com:6443/k8s",
+			wantScheme:   "https",
 			wantHost:     "proxy.example.com:6443",
 			wantBasePath: "/k8s",
 		},
 		{
 			name:         "trailing slash on base path is trimmed",
 			host:         "https://proxy.example.com/k8s/",
+			wantScheme:   "https",
 			wantHost:     "proxy.example.com",
 			wantBasePath: "/k8s",
 		},
 		{
 			name:         "multi-segment base path is preserved",
 			host:         "https://proxy.example.com/api/v1/k8s",
+			wantScheme:   "https",
 			wantHost:     "proxy.example.com",
 			wantBasePath: "/api/v1/k8s",
+		},
+		{
+			name:    "malformed URL is rejected",
+			host:    "https://proxy.example.com/%zz",
+			wantErr: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotHost, gotBasePath, err := splitHostAndBasePath(tc.host)
+			gotScheme, gotHost, gotBasePath, err := splitServerURL(tc.host)
 			if tc.wantErr {
 				assert.Error(t, err)
 				return
 			}
 			assert.NoError(t, err)
+			assert.Equal(t, tc.wantScheme, gotScheme)
 			assert.Equal(t, tc.wantHost, gotHost)
 			assert.Equal(t, tc.wantBasePath, gotBasePath)
 		})
+	}
+}
+
+func TestCreatePortForwarder_HTTPServerReceivesPortForwardRequest(t *testing.T) {
+	type receivedRequest struct {
+		method string
+		path   string
+	}
+
+	var requestCount atomic.Int32
+	requests := make(chan receivedRequest, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		select {
+		case requests <- receivedRequest{method: r.Method, path: r.URL.Path}:
+		default:
+		}
+		http.Error(w, "test server does not implement SPDY", http.StatusBadRequest)
+	}))
+	t.Cleanup(server.Close)
+
+	k8sClient := &k8sinterface.KubernetesApi{
+		K8SConfig: &rest.Config{Host: server.URL + "/proxy"},
+	}
+	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "operator"}}
+	connector, err := CreatePortForwarder(k8sClient, pod, "1234", "kubescape")
+	require.NoError(t, err)
+
+	// The fake server deliberately rejects the SPDY upgrade. Reaching it proves
+	// that the dialer used the explicit HTTP scheme from the kubeconfig.
+	require.Error(t, connector.StartPortForwarder())
+	require.Equal(t, int32(1), requestCount.Load())
+
+	select {
+	case got := <-requests:
+		assert.Equal(t, http.MethodPost, got.method)
+		assert.Equal(t, "/proxy/api/v1/namespaces/kubescape/pods/operator/portforward", got.path)
+	default:
+		t.Fatal("port-forward request did not reach the kubeconfig HTTP endpoint")
 	}
 }
 
@@ -226,9 +303,12 @@ func Test_GetPortForwardLocalhost(t *testing.T) {
 		})
 	}
 }
+
+// TestStopPortForwarder_Idempotent verifies that repeated or concurrent calls to StopPortForwarder
+// safely close the stop channel and never panic or block.
 func TestStopPortForwarder_Idempotent(t *testing.T) {
 	p := &portForward{
-		stopChan: make(chan struct{}, 1),
+		stopChan: make(chan struct{}),
 	}
 
 	done := make(chan struct{})
@@ -244,4 +324,18 @@ func TestStopPortForwarder_Idempotent(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("StopPortForwarder blocked on repeated stop")
 	}
+
+	// Verify the channel was closed so all readers receive the stop broadcast
+	select {
+	case _, ok := <-p.stopChan:
+		assert.False(t, ok, "stopChan must be closed")
+	default:
+		t.Fatal("stopChan was not closed by StopPortForwarder")
+	}
+
+	// Assert repeated calls do not panic
+	assert.NotPanics(t, func() {
+		p.StopPortForwarder()
+		p.StopPortForwarder()
+	})
 }

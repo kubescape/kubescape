@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kubescape/kubescape/v3/core/meta"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/meta"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -50,6 +50,30 @@ func stringKeysToSlice(m map[string]func(*metav1.SetConfig, string)) []string {
 	return l
 }
 
+// normalizeConfigKey standardizes a key by stripping hyphens/underscores and converting to lowercase.
+func normalizeConfigKey(key string) string {
+	key = strings.ToLower(key)
+	key = strings.ReplaceAll(key, "-", "")
+	key = strings.ReplaceAll(key, "_", "")
+	return key
+}
+
+func findConfigSetter(key string) (func(*metav1.SetConfig, string), bool) {
+	if setter, ok := supportConfigSet[key]; ok {
+		return setter, true
+	}
+	normalized := normalizeConfigKey(key)
+	if normalized == "account" {
+		normalized = "accountid"
+	}
+	for canonicalKey, setter := range supportConfigSet {
+		if normalizeConfigKey(canonicalKey) == normalized {
+			return setter, true
+		}
+	}
+	return nil, false
+}
+
 func parseSetArgs(args []string) (*metav1.SetConfig, error) {
 	supported := strings.Join(stringKeysToSlice(supportConfigSet), "/")
 
@@ -72,13 +96,14 @@ func parseSetArgs(args []string) (*metav1.SetConfig, error) {
 		if key == "" {
 			return nil, fmt.Errorf("invalid arguments: key cannot be empty")
 		}
+		//nolint:gosec // len(args) is checked in switch
 		value = args[1]
 	default:
 		return nil, fmt.Errorf("too many arguments: expected KEY=VALUE or KEY VALUE; supported keys: %s", supported)
 	}
 
 	setConfig := &metav1.SetConfig{}
-	if setConfigFunc, ok := supportConfigSet[key]; ok {
+	if setConfigFunc, ok := findConfigSetter(key); ok {
 		setConfigFunc(setConfig, value)
 		return setConfig, nil
 	}

@@ -14,19 +14,7 @@ import (
 
 func resetMetricsForTest(t *testing.T) {
 	t.Helper()
-
-	savedKubernetesResourcesCount := kubernetesResourcesCount
-	savedWorkerNodesCount := workerNodesCount
-
-	initOnce = sync.Once{}
-	kubernetesResourcesCount = nil
-	workerNodesCount = nil
-
-	t.Cleanup(func() {
-		initOnce = sync.Once{}
-		kubernetesResourcesCount = savedKubernetesResourcesCount
-		workerNodesCount = savedWorkerNodesCount
-	})
+	ResetForTest(t)
 }
 
 func setMeterProviderForTest(t *testing.T, provider *sdkmetric.MeterProvider) {
@@ -54,7 +42,7 @@ func TestInit(t *testing.T) {
 	require.NotNil(t, workerNodesCount)
 }
 
-func TestInitRegistersCountersAndUpdatesValues(t *testing.T) {
+func TestUpdatesReportLatestValues(t *testing.T) {
 	resetMetricsForTest(t)
 	reader := sdkmetric.NewManualReader()
 	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
@@ -62,12 +50,76 @@ func TestInitRegistersCountersAndUpdatesValues(t *testing.T) {
 
 	Init()
 	UpdateKubernetesResourcesCount(context.Background(), 3)
-	UpdateKubernetesResourcesCount(context.Background(), 4)
 	UpdateWorkerNodesCount(context.Background(), 2)
 
 	got := collectMetricSums(t, reader)
+	assert.Equal(t, int64(3), got["kubescape_kubernetes_resources_count"])
+	assert.Equal(t, int64(2), got["kubescape_worker_nodes_count"])
 
-	assert.Equal(t, int64(7), got["kubescape_kubernetes_resources_count"])
+	UpdateKubernetesResourcesCount(context.Background(), 4)
+	UpdateWorkerNodesCount(context.Background(), 1)
+
+	got = collectMetricSums(t, reader)
+
+	assert.Equal(t, int64(4), got["kubescape_kubernetes_resources_count"])
+	assert.Equal(t, int64(1), got["kubescape_worker_nodes_count"])
+}
+
+func TestUpdatesRemainConsistentConcurrently(t *testing.T) {
+	resetMetricsForTest(t)
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	setMeterProviderForTest(t, provider)
+	Init()
+
+	var wg sync.WaitGroup
+	for value := int64(1); value <= 32; value++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			UpdateKubernetesResourcesCount(context.Background(), value)
+			UpdateWorkerNodesCount(context.Background(), value)
+		}()
+	}
+	wg.Wait()
+
+	// Make the final observations deterministic after the concurrent updates.
+	UpdateKubernetesResourcesCount(context.Background(), 5)
+	UpdateWorkerNodesCount(context.Background(), 2)
+
+	got := collectMetricSums(t, reader)
+	assert.Equal(t, int64(5), got["kubescape_kubernetes_resources_count"])
+	assert.Equal(t, int64(2), got["kubescape_worker_nodes_count"])
+}
+
+func TestInitAndUpdatesRemainConsistentConcurrently(t *testing.T) {
+	resetMetricsForTest(t)
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	setMeterProviderForTest(t, provider)
+
+	started := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		close(started)
+		for value := int64(1); value <= 256; value++ {
+			UpdateKubernetesResourcesCount(context.Background(), value)
+			UpdateWorkerNodesCount(context.Background(), value)
+		}
+		close(done)
+	}()
+
+	<-started
+	Init()
+	<-done
+
+	// Updates racing with initialization may be no-ops. A final observation
+	// after Init must still establish the exact exported values.
+	UpdateKubernetesResourcesCount(context.Background(), 5)
+	UpdateWorkerNodesCount(context.Background(), 2)
+
+	got := collectMetricSums(t, reader)
+	assert.Equal(t, int64(5), got["kubescape_kubernetes_resources_count"])
 	assert.Equal(t, int64(2), got["kubescape_worker_nodes_count"])
 }
 
@@ -90,13 +142,24 @@ func TestInitOnlyRegistersOnce(t *testing.T) {
 	assert.Empty(t, collectMetricSums(t, secondReader))
 }
 
-func TestUpdateBeforeInitDoesNotPanic(t *testing.T) {
+func TestUpdatesBeforeInitAreNoOps(t *testing.T) {
 	resetMetricsForTest(t)
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	setMeterProviderForTest(t, provider)
 
 	assert.NotPanics(t, func() {
-		UpdateKubernetesResourcesCount(context.Background(), 1)
-		UpdateWorkerNodesCount(context.Background(), 1)
+		UpdateKubernetesResourcesCount(context.Background(), 100)
+		UpdateWorkerNodesCount(context.Background(), 100)
 	})
+
+	Init()
+	UpdateKubernetesResourcesCount(context.Background(), 3)
+	UpdateWorkerNodesCount(context.Background(), 2)
+
+	got := collectMetricSums(t, reader)
+	assert.Equal(t, int64(3), got["kubescape_kubernetes_resources_count"])
+	assert.Equal(t, int64(2), got["kubescape_worker_nodes_count"])
 }
 
 func TestUpdateKubernetesResourcesCount_NilCounter(t *testing.T) {

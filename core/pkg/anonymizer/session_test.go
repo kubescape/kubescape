@@ -1,14 +1,14 @@
 package anonymizer
 
 import (
-	"testing"
-
 	"errors"
+	"strings"
+	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -76,23 +76,52 @@ func TestResolveMappedID(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			mapping := NewMapping()
-			result := resolveMappedID(mapping, test.idMapping, test.original, "ref")
+			result, err := resolveMappedID(NewMappingTransformer(), test.idMapping, test.original, "ref")
+			require.NoError(t, err)
 			test.validate(t, result)
 		})
 	}
 }
 
-func TestAnonymizeSession_NilSession(t *testing.T) {
-	mapping := NewMapping()
+func TestResolveMappedIDEncryptionFallbackIsReversible(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
 
+	original := "apps/v1/production/Deployment/payments-api"
+	idMapping := map[string]string{}
+	transformed, err := resolveMappedID(
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
+		idMapping,
+		original,
+		"ref",
+	)
+	require.NoError(t, err)
+	assert.Contains(t, transformed, "ENC[AES256_GCM,")
+	assert.NotContains(t, transformed, "ref-")
+
+	restored, err := reportcrypto.DecryptString(transformed, dek)
+	require.NoError(t, err)
+	assert.Equal(t, original, restored)
+
+	repeated, err := resolveMappedID(NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)), idMapping, original, "ref")
+	require.NoError(t, err)
+	assert.Equal(t, transformed, repeated)
+}
+
+func TestResolveMappedIDReturnsFallbackTransformationError(t *testing.T) {
+	_, err := resolveMappedID(&failingTransformer{}, map[string]string{}, "unknown-id", "ref")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "transform failed")
+}
+
+func TestTransformSession_NilSession(t *testing.T) {
 	require.NoError(
 		t,
-		anonymizeSession(nil, mapping, NewMappingTransformer()),
+		transformSession(nil, NewMapping(), NewMappingTransformer()),
 	)
 }
 
-func TestAnonymizeSession_NamesAndNamespacesReplaced(t *testing.T) {
+func TestTransformSession_NamesAndNamespacesReplaced(t *testing.T) {
 	pod := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
@@ -112,9 +141,7 @@ func TestAnonymizeSession_NamesAndNamespacesReplaced(t *testing.T) {
 		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
 	}
 
-	mapping := NewMapping()
-
-	err := anonymizeSession(session, mapping, NewMappingTransformer())
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
 	require.NoError(t, err)
 
 	for _, resource := range session.AllResources {
@@ -125,7 +152,62 @@ func TestAnonymizeSession_NamesAndNamespacesReplaced(t *testing.T) {
 	}
 }
 
-func TestAnonymizeSession_IDConsistencyAcrossMaps(t *testing.T) {
+// TestTransformSession_CollidingNamesKeepDistinctResources covers what a
+// pseudonym collision costs at session level, which is more than a confusing
+// report: transformSession rebuilds AllResources and ResourcesResult keyed by
+// the *transformed* ID, so two resources whose names hash to the same
+// pseudonym overwrite each other and one disappears from the output
+// entirely - a scanned, failing workload that the report never mentions.
+//
+// collidingNameA and collidingNameB (mapping_test.go) collide in the first 32
+// bits of their SHA-256 digests, so this test fails whenever the pseudonym
+// suffix is truncated that short.
+func TestTransformSession_CollidingNamesKeepDistinctResources(t *testing.T) {
+	newPod := func(name string) workloadinterface.IMetadata {
+		return workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"name":      name,
+				"namespace": "default",
+			},
+		})
+	}
+
+	podA := newPod(collidingNameA)
+	podB := newPod(collidingNameB)
+
+	session := &cautils.OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{
+			podA.GetID(): podA,
+			podB.GetID(): podB,
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			podA.GetID(): {ResourceID: podA.GetID()},
+			podB.GetID(): {ResourceID: podB.GetID()},
+		},
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+	}
+
+	require.NoError(t, transformSession(session, NewMapping(), NewMappingTransformer()))
+
+	assert.Len(t, session.AllResources, 2,
+		"both pods were scanned, so both must still be present after anonymization")
+	assert.Len(t, session.ResourcesResult, 2,
+		"each pod must keep its own result entry after anonymization")
+
+	names := make(map[string]struct{}, len(session.AllResources))
+	for _, resource := range session.AllResources {
+		assert.NotContains(t, resource.GetName(), "payments-api",
+			"the real name must not survive anonymization")
+		names[resource.GetName()] = struct{}{}
+	}
+	assert.Len(t, names, 2, "the two pods must carry distinct pseudonyms")
+}
+
+func TestTransformSession_IDConsistencyAcrossMaps(t *testing.T) {
 	pod := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
@@ -203,8 +285,7 @@ func TestAnonymizeSession_IDConsistencyAcrossMaps(t *testing.T) {
 		},
 	}
 
-	mapping := NewMapping()
-	err := anonymizeSession(session, mapping, NewMappingTransformer())
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
 	require.NoError(t, err)
 
 	var newID string
@@ -327,7 +408,7 @@ func TestAnonymizeSession_IDConsistencyAcrossMaps(t *testing.T) {
 	assert.True(t, ok)
 }
 
-func TestAnonymizeSession_LabelHandling(t *testing.T) {
+func TestTransformSession_LabelHandling(t *testing.T) {
 	tests := []struct {
 		name         string
 		labelsToCopy []string
@@ -378,8 +459,7 @@ func TestAnonymizeSession_LabelHandling(t *testing.T) {
 				LabelsToCopy:         test.labelsToCopy,
 			}
 
-			mapping := NewMapping()
-			err := anonymizeSession(session, mapping, NewMappingTransformer())
+			err := transformSession(session, NewMapping(), NewMappingTransformer())
 			require.NoError(t, err)
 
 			for _, resource := range session.AllResources {
@@ -408,16 +488,16 @@ func TestAnonymizeResourceLabels_Guards(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			mapping := NewMapping()
 
 			assert.NotPanics(t, func() {
-				anonymizeResourceLabels(test.resource, []string{"team"}, mapping)
+				err := transformResourceLabels(test.resource, []string{"team"}, NewMappingTransformer())
+				require.NoError(t, err)
 			})
 		})
 	}
 }
 
-func TestAnonymizeSession_Annotations(t *testing.T) {
+func TestTransformSession_Annotations(t *testing.T) {
 	tests := []struct {
 		name     string
 		resource map[string]any
@@ -562,10 +642,8 @@ func TestAnonymizeSession_Annotations(t *testing.T) {
 				ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
 			}
 
-			mapping := NewMapping()
-
 			assert.NotPanics(t, func() {
-				err := anonymizeSession(session, mapping, NewMappingTransformer())
+				err := transformSession(session, NewMapping(), NewMappingTransformer())
 				require.NoError(t, err)
 			})
 
@@ -576,7 +654,7 @@ func TestAnonymizeSession_Annotations(t *testing.T) {
 	}
 }
 
-func TestAnonymizeSession_RepoContextMetadata(t *testing.T) {
+func TestTransformSession_RepoContextMetadata(t *testing.T) {
 	repoContext := &reporthandlingv2.RepoContextMetadata{
 		Provider:      "github",
 		Repo:          "kubescape",
@@ -633,8 +711,7 @@ func TestAnonymizeSession_RepoContextMetadata(t *testing.T) {
 		},
 	}
 
-	mapping := NewMapping()
-	err := anonymizeSession(session, mapping, NewMappingTransformer())
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
 	require.NoError(t, err)
 
 	for _, repo := range []*reporthandlingv2.RepoContextMetadata{
@@ -739,7 +816,7 @@ func TestTransformRepoContextMetadata_EncryptionTransformer(
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	repo := &reporthandlingv2.RepoContextMetadata{
 		Provider:      "github",
@@ -876,7 +953,7 @@ func TestTransformResourceSource_EncryptionTransformer(
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	source := &reporthandling.Source{
 		Path: "/workspace/private/app.yaml",
@@ -925,7 +1002,7 @@ func TestTransformResourceSource_Error(
 	assert.Equal(t, "/workspace/private/app.yaml", source.Path)
 }
 
-func TestAnonymizeSession_ResourceSourceEncryption(
+func TestTransformSession_ResourceSourceEncryption(
 	t *testing.T,
 ) {
 	dek, err := reportcrypto.GenerateDEK()
@@ -965,10 +1042,10 @@ func TestAnonymizeSession_ResourceSourceEncryption(
 		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
 	}
 
-	err = anonymizeSession(
+	err = transformSession(
 		session,
 		NewMapping(),
-		NewEncryptionTransformer(dek),
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
 	)
 	require.NoError(t, err)
 
@@ -1006,7 +1083,7 @@ func TestTransformResourceMetadata_EncryptionTransformer(
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	resource := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
@@ -1090,4 +1167,198 @@ func TestTransformResourceMetadata_Error(
 		"production",
 		resource.GetNamespace(),
 	)
+}
+
+func TestTransformResourceLabels_EncryptionTransformer(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"labels": map[string]any{
+				"team": "payments",
+				"env":  "production",
+			},
+		},
+	})
+
+	err = transformResourceLabels(
+		resource,
+		[]string{"team", "env"},
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
+	)
+	require.NoError(t, err)
+
+	labels := resource.GetLabels()
+
+	assert.Contains(t, labels["team"], "ENC[AES256_GCM,")
+	assert.Contains(t, labels["env"], "ENC[AES256_GCM,")
+
+	team, err := reportcrypto.DecryptString(labels["team"], dek)
+	require.NoError(t, err)
+
+	env, err := reportcrypto.DecryptString(labels["env"], dek)
+	require.NoError(t, err)
+
+	assert.Equal(t, "payments", team)
+	assert.Equal(t, "production", env)
+}
+
+func TestTransformResourceAnnotations_EncryptionTransformer(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"annotations": map[string]any{
+				"vault.hashicorp.com/path": "secret/prod/payment",
+				"example.com/token":        "my-secret-token",
+			},
+		},
+	})
+
+	err = transformResourceAnnotations(
+		resource,
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
+	)
+	require.NoError(t, err)
+
+	metadata := resource.GetObject()["metadata"].(map[string]any)
+	annotations := metadata["annotations"].(map[string]any)
+
+	value1 := annotations["vault.hashicorp.com/path"].(string)
+	value2 := annotations["example.com/token"].(string)
+
+	assert.Contains(t, value1, "ENC[AES256_GCM,")
+	assert.Contains(t, value2, "ENC[AES256_GCM,")
+
+	decrypted1, err := reportcrypto.DecryptString(value1, dek)
+	require.NoError(t, err)
+
+	decrypted2, err := reportcrypto.DecryptString(value2, dek)
+	require.NoError(t, err)
+
+	assert.Equal(t, "secret/prod/payment", decrypted1)
+	assert.Equal(t, "my-secret-token", decrypted2)
+}
+
+func TestTransformResourceObjectSourcePath_EncryptionTransformer(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"sourcePath": "/workspace/manifests/payment.yaml:42",
+	})
+
+	err = transformResourceObjectSourcePath(
+		resource,
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
+	)
+	require.NoError(t, err)
+
+	sourcePath := resource.GetObject()["sourcePath"].(string)
+
+	assert.Contains(t, sourcePath, "ENC[AES256_GCM,")
+	assert.True(t, len(sourcePath) > 3)
+	assert.Equal(t, ":42", sourcePath[len(sourcePath)-3:])
+
+	encryptedPath := sourcePath[:len(sourcePath)-3]
+
+	decrypted, err := reportcrypto.DecryptString(encryptedPath, dek)
+	require.NoError(t, err)
+
+	assert.Equal(t, "/workspace/manifests/payment.yaml", decrypted)
+}
+
+func TestTransformSourcePath_EncryptionTransformer(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
+
+	transformed, err := transformSourcePath(
+		"/workspace/manifests/payment.yaml:42",
+		transformer,
+	)
+	require.NoError(t, err)
+
+	lastColon := strings.LastIndex(transformed, ":")
+	require.NotEqual(t, -1, lastColon)
+
+	encryptedPath := transformed[:lastColon]
+	linePart := transformed[lastColon:]
+
+	assert.Contains(t, encryptedPath, "ENC[AES256_GCM,")
+	assert.Equal(t, ":42", linePart)
+
+	decryptedPath, err := reportcrypto.DecryptString(
+		encryptedPath,
+		dek,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		"/workspace/manifests/payment.yaml",
+		decryptedPath,
+	)
+}
+
+func TestTransformSourcePath_WindowsDriveLetterNoLineSuffix(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
+
+	// A bare Windows path has no trailing ":<index>" suffix, so its only
+	// colon is the drive letter's. That colon must not be mistaken for a
+	// line-number separator, or everything past "C" leaks in cleartext.
+	transformed, err := transformSourcePath(
+		`C:\Users\alice\manifests\payment.yaml`,
+		transformer,
+	)
+	require.NoError(t, err)
+
+	assert.NotContains(t, transformed, `Users\alice`)
+	assert.Contains(t, transformed, "ENC[AES256_GCM,")
+
+	decryptedPath, err := reportcrypto.DecryptString(transformed, dek)
+	require.NoError(t, err)
+
+	assert.Equal(t, `C:\Users\alice\manifests\payment.yaml`, decryptedPath)
+}
+
+func TestTransformSourcePath_WindowsDriveLetterWithLineSuffix(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
+
+	transformed, err := transformSourcePath(
+		`C:\Users\alice\manifests\payment.yaml:7`,
+		transformer,
+	)
+	require.NoError(t, err)
+
+	assert.NotContains(t, transformed, `Users\alice`)
+
+	lastColon := strings.LastIndex(transformed, ":")
+	require.NotEqual(t, -1, lastColon)
+
+	encryptedPath := transformed[:lastColon]
+	linePart := transformed[lastColon:]
+
+	assert.Contains(t, encryptedPath, "ENC[AES256_GCM,")
+	assert.Equal(t, ":7", linePart)
+
+	decryptedPath, err := reportcrypto.DecryptString(encryptedPath, dek)
+	require.NoError(t, err)
+
+	assert.Equal(t, `C:\Users\alice\manifests\payment.yaml`, decryptedPath)
 }

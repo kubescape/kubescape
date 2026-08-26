@@ -1,12 +1,19 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"os"
 	"os/exec"
+	"strings"
 	"testing"
 
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/moby/buildkit/client"
+	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -289,4 +296,119 @@ VERSION_ID=2023
 			assert.Equal(t, tt.expected, actual)
 		})
 	}
+}
+
+// TestRunWithCopaLoggerMuted guards against a regression where Patch() left
+// os.Stdout/os.Stderr nil through the printer setup that follows copaPatch().
+// GetUIPrinter calls os.Stdout.Name(), which has no nil-receiver guard and
+// panics, so runWithCopaLoggerMuted must restore the streams before it
+// returns, on both the success and error paths.
+func TestRunWithCopaLoggerMuted(t *testing.T) {
+	sout, serr := os.Stdout, os.Stderr
+	defer func() { os.Stdout, os.Stderr = sout, serr }()
+
+	t.Run("success", func(t *testing.T) {
+		err := runWithCopaLoggerMuted(false, func() error { return nil })
+		require.NoError(t, err)
+		require.NotNil(t, os.Stdout)
+		require.NotNil(t, os.Stderr)
+
+		scanInfo := &cautils.ScanInfo{}
+		scanInfo.SetScanType(cautils.ScanTypeImage)
+		assert.NotPanics(t, func() {
+			_ = GetUIPrinter(context.Background(), scanInfo, "")
+		})
+	})
+
+	t.Run("error", func(t *testing.T) {
+		wantErr := errors.New("install failed")
+		err := runWithCopaLoggerMuted(false, func() error { return wantErr })
+		require.ErrorIs(t, err, wantErr)
+		require.NotNil(t, os.Stdout)
+		require.NotNil(t, os.Stderr)
+	})
+
+	t.Run("debug bypasses muting", func(t *testing.T) {
+		err := runWithCopaLoggerMuted(true, func() error { return nil })
+		require.NoError(t, err)
+		require.NotNil(t, os.Stdout)
+		require.NotNil(t, os.Stderr)
+	})
+}
+
+// TestRunWithCopaLoggerMuted_RestoresActualPriorLogrusWriter guards against a
+// regression where the logrus writer was restored to a value assumed to
+// equal os.Stderr, rather than to whatever logrus was actually configured
+// with beforehand. If something in the process had pointed logrus at a file,
+// buffer, or hook writer before Patch() ran, that destination would be
+// silently replaced with os.Stderr after a single "kubescape patch" call.
+func TestRunWithCopaLoggerMuted_RestoresActualPriorLogrusWriter(t *testing.T) {
+	prevOut := log.StandardLogger().Out
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	var customWriter bytes.Buffer
+	log.SetOutput(&customWriter)
+
+	var duringCallWriter io.Writer
+	err := runWithCopaLoggerMuted(false, func() error {
+		duringCallWriter = log.StandardLogger().Out
+		log.Error("this must not reach customWriter or os.Stderr")
+		return nil
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, io.Discard, duringCallWriter, "logrus output must be discarded while fn runs")
+	assert.Empty(t, customWriter.String(), "logrus output during fn must not leak to the pre-existing writer")
+	assert.Same(t, &customWriter, log.StandardLogger().Out, "logrus writer must be restored to what it actually was, not assumed to be os.Stderr")
+}
+
+// TestPatchIntermediateFileCleanup verifies that intermediate scan files
+// created for copacetic are closed and deleted via deferred cleanup on both error and success paths.
+func TestPatchIntermediateFileCleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+
+	imageName := "test-image"
+	imageTag := "1.0"
+	fileName := fmt.Sprintf("%s:%s.json", imageName, imageTag)
+	fileName = strings.ReplaceAll(fileName, "/", "-")
+
+	// Simulate the file creation and deferred cleanup pattern used in Patch()
+	cleanupFn := func(simulateFailure bool) error {
+		f, createErr := os.Create(fileName)
+		if createErr != nil {
+			return createErr
+		}
+		defer func() {
+			if remErr := os.Remove(fileName); remErr != nil && !errors.Is(remErr, os.ErrNotExist) {
+				t.Errorf("failed to remove intermediate file: %v", remErr)
+			}
+		}()
+
+		_, writeErr := f.WriteString("{\"test\": \"data\"}")
+		require.NoError(t, writeErr)
+		require.NoError(t, f.Close(), "file must close without error before downstream reading/cleanup")
+
+		if simulateFailure {
+			return errors.New("simulated downstream copa failure")
+		}
+		return nil
+	}
+
+	t.Run("cleanup on success", func(t *testing.T) {
+		err := cleanupFn(false)
+		assert.NoError(t, err)
+		_, statErr := os.Stat(fileName)
+		assert.True(t, os.IsNotExist(statErr), "intermediate file must be cleaned up on success")
+	})
+
+	t.Run("cleanup on error", func(t *testing.T) {
+		err := cleanupFn(true)
+		assert.Error(t, err)
+		_, statErr := os.Stat(fileName)
+		assert.True(t, os.IsNotExist(statErr), "intermediate file must be cleaned up even if downstream error occurs")
+	})
 }

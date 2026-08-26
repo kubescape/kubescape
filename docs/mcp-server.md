@@ -155,6 +155,115 @@ Get detailed configuration scan results for a specific workload, including faile
 | `namespace` | string | No | Namespace of the manifest (default: `"kubescape"`) |
 | `manifest_name` | string | Yes | Name of the configuration manifest |
 
+### Live Scanning Tools
+
+#### `run_framework_security_scan`
+
+Run an on-demand, live Framework security scan (e.g. nsa, mitre) and return the failed resources along with the compliance score. Check the `degraded` flag in the response to ensure the scan fully completed (e.g. no control timeouts). Note that `compliance_score` is optional and may be omitted if the scan produces no framework summary. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `framework_name` | string | Yes | Name of the framework to scan (e.g. nsa, mitre, cis-v1.23-t1.0.1) |
+| `namespace` | string | No | Namespace to scope the Framework scan (optional, defaults to cluster-wide if omitted) |
+
+**Example Response:**
+```json
+{
+  "compliance_score": 0,
+  "framework_name": "nsa",
+  "degraded": true,
+  "not_evaluated_controls": 8,
+  "total_controls": 24,
+  "total_failed": 5,
+  "returned_failed": 5,
+  "truncated": false,
+  "failed_resources": [{}, {}, {}, {}, {}]
+}
+```
+
+#### `run_rbac_security_scan`
+
+Run an on-demand, live RBAC security scan (evaluating RBAC-related controls) and return the failed resources. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `namespace` | string | No | Namespace to scope the RBAC scan (optional, defaults to cluster-wide if omitted) |
+
+**Example Response:**
+```json
+{
+  "degraded": false,
+  "not_evaluated_controls": 0,
+  "total_controls": 2,
+  "total_failed": 1,
+  "returned_failed": 1,
+  "truncated": false,
+  "failed_resources": [{}]
+}
+```
+
+#### `run_network_security_scan`
+
+Run an on-demand, live Network security scan (evaluating network-related controls) and return the failed resources. The `failed_resources` array is truncated at 100 entries; check `truncated`, `total_failed`, and `returned_failed` to understand if the list is partial.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `namespace` | string | No | Namespace to scope the Network scan (optional, defaults to cluster-wide if omitted) |
+
+**Example Response:**
+```json
+{
+  "degraded": false,
+  "not_evaluated_controls": 0,
+  "total_controls": 1,
+  "total_failed": 0,
+  "returned_failed": 0,
+  "truncated": false,
+  "failed_resources": []
+}
+```
+
+#### `scan_container_image`
+
+Run an on-demand container image vulnerability scan and return structured JSON containing deduplicated vulnerabilities, severity counts, and optional match details.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `image_name` | string | Yes | Name of the remote container image to scan (e.g. `"nginx:alpine"`) |
+| `username` | string | No | Username for registry authentication (optional) |
+| `password` | string | No | Password for registry authentication (optional) |
+| `include_matches` | boolean | No | Include detailed match location and package info for each vulnerability (optional, default: `false`) |
+| `severity` | string | No | Filter vulnerabilities by minimum severity (e.g. `"Low"`, `"Medium"`, `"High"`, `"Critical"`) |
+
+**Example Response:**
+```json
+{
+  "image": "nginx:alpine",
+  "total_vulnerabilities": 1,
+  "severities": {
+    "Critical": 1
+  },
+  "vulnerabilities": [
+    {
+      "id": "CVE-2023-12345",
+      "severity": "Critical",
+      "package": {
+        "name": "libssl",
+        "version": "1.1.1"
+      }
+    }
+  ]
+}
+```
+
 ## Resource Templates
 
 The MCP server also exposes resource templates for direct access to data:
@@ -250,6 +359,9 @@ kubescape version
 - It provides read-only access to vulnerability and configuration data
 - No cluster modifications are made through the MCP server
 - Consider running with a service account that has limited permissions in production
+- **Credential Handling**: The `scan_container_image` tool accepts optional registry credentials (`username` and `password`). Be aware that parameters supplied to MCP tools may be retained in client conversation logs or model contexts depending on your client environment.
+- **Image Reference Validation**: The `scan_container_image` tool validates image names as remote image references and rejects local file paths and scheme prefixes (such as `dir:`, `file:`, `sbom:`) to prevent unauthorized local filesystem access.
+- **Air-Gapped Environments**: In air-gapped environments, set the `KS_GRYPE_LISTING_URL` environment variable to point to your internal Grype vulnerability database mirror listing URL.
 
 ## Related Documentation
 

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
@@ -57,4 +57,13 @@ func TestGetFrameworkCmdWithNonExistentFramework(t *testing.T) {
 	expectedErrorMessage := "bad argument: accound ID must be a valid UUID"
 	assert.Error(t, err)
 	assert.Equal(t, expectedErrorMessage, err.Error())
+}
+
+func TestGetFrameworkCmd_RunERejectsStdinMixedWithOtherInputs(t *testing.T) {
+	scanInfo := cautils.ScanInfo{}
+	cmd := getFrameworkCmd(&mocks.MockIKubescape{}, &scanInfo)
+
+	err := cmd.RunE(cmd, []string{"nsa", "-", "manifests/app.yaml"})
+
+	assert.EqualError(t, err, "usage: stdin input '-' cannot be combined with other input paths")
 }

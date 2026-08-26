@@ -42,8 +42,10 @@ func TestGetScanParamsFromRequest(t *testing.T) {
 		assert.True(t, req.scanQueryParams.KeepResults)
 		assert.True(t, req.scanQueryParams.ReturnResults)
 		assert.True(t, req.scanInfo.HostSensorEnabled.GetBool())
-		assert.True(t, req.scanInfo.Submit)
-		assert.Equal(t, "aaaaaaaaaa", req.scanInfo.AccountID)
+		assert.True(t, req.scanInfo.Submit.GetBool())
+		// A client-supplied Account must never override the server's own
+		// configured identity (see TestToScanInfo_IgnoresClientSuppliedIdentity).
+		assert.Empty(t, req.scanInfo.AccountID)
 	}
 
 	{
@@ -72,8 +74,10 @@ func TestGetScanParamsFromRequest(t *testing.T) {
 		assert.False(t, req.scanQueryParams.KeepResults)
 		assert.False(t, req.scanQueryParams.ReturnResults)
 		assert.False(t, req.scanInfo.HostSensorEnabled.GetBool())
-		assert.False(t, req.scanInfo.Submit)
-		assert.Equal(t, "aaaaaaaaaa", req.scanInfo.AccountID)
+		assert.False(t, req.scanInfo.Submit.GetBool())
+		// A client-supplied Account must never override the server's own
+		// configured identity (see TestToScanInfo_IgnoresClientSuppliedIdentity).
+		assert.Empty(t, req.scanInfo.AccountID)
 	}
 }
 

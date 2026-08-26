@@ -1,25 +1,23 @@
 header:
   schema-version: 1.0.0
-  last-updated: '2023-10-12'
-  last-reviewed: '2023-10-12'
-  expiration-date: '2024-10-12T01:00:00.000Z'
+  last-updated: '2026-08-16'
+  last-updated-by: 1PoPTRoN
+  last-reviewed: '2026-08-16'
+  expiration-date: '2027-02-16T00:00:00.000Z'
   project-url: https://github.com/kubescape/kubescape/
-  project-release: 1.0.0
+  project-release: v4.0.12
 project-lifecycle:
   status: active
   bug-fixes-only: false
   core-maintainers:
   - github:amirmalka
-  - github:amitschendel
   - github:bezbran
-  - github:craigbox
-  - github:dwertent
   - github:matthyx
   - github:rotemamsa
   - github:slashben
 contribution-policy:
   accepts-pull-requests: true
-  accepts-automated-pull-requests: false
+  accepts-automated-pull-requests: true
   code-of-conduct: https://github.com/kubescape/kubescape/blob/master/CODE_OF_CONDUCT.md
 dependencies:
   third-party-packages: true
@@ -42,9 +40,14 @@ security-testing:
   integration:
     ad-hoc: false
     ci: true
-    before-release: true
+    before-release: false
   comment: |
-    Dependabot is enabled for this repo.
+    Dependabot is configured in .github/dependabot.yaml and guarded by the
+    tests in internal/ghworkflows. Its pull requests run the full PR suite
+    (00-pr-scanner.yaml) and are accepted and merged, hence
+    accepts-automated-pull-requests: true and ci: true. before-release stays
+    false until a release-time gate requires fresh dependencies or their CI
+    results: 02-release.yaml runs none today.
 security-contacts:
 - type: email
   value: cncf-kubescape-maintainers@lists.cncf.io

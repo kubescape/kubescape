@@ -3,7 +3,7 @@ package score
 import (
 	"testing"
 
-	cautils "github.com/kubescape/kubescape/v3/core/cautils"
+	cautils "github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
 )
 

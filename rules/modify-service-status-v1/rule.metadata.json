@@ -1,0 +1,29 @@
+{
+  "name": "modify-service-status-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Lateral Movement::ARP poisoning and IP spoofing",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        "rbac.authorization.k8s.io"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "RoleBinding",
+        "ClusterRoleBinding",
+        "Role",
+        "ClusterRole"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can modify the services/status subresource, letting them set status.loadBalancer.ingress.ip to an address they control and intercept traffic sent to the service (CVE-2020-8554)",
+  "remediation": "Remove update and patch on services/status from the role, and grant them only to the controllers that reconcile load balancer state, such as the cloud controller manager or a bare metal load balancer like MetalLB. Avoid wildcard resources and */status entries in roles bound to workloads or users.",
+  "ruleQuery": "armo_builtins"
+}

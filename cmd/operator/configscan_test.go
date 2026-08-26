@@ -3,8 +3,8 @@ package operator
 import (
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
@@ -16,7 +16,7 @@ func TestGetOperatorScanConfigCmd(t *testing.T) {
 		Namespace: "namespace",
 	}
 
-	cmd := getOperatorScanConfigCmd(mockKubescape, operatorInfo)
+	cmd := getOperatorScanConfigCmd(mockKubescape, &operatorInfo)
 
 	// Verify the command name and short description
 	assert.Equal(t, "configurations", cmd.Use)

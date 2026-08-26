@@ -5,8 +5,8 @@ import (
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -67,12 +67,7 @@ func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary) tab
 
 	rows[0] = utils.GetStatusIcon(controlSummary.GetStatus().Status())
 
-	name := controlSummary.GetName()
-	if len(name) > 50 {
-		rows[1] = name[:50] + "..." //nolint:gosec // Safe: rows has length 3, accessing index 1
-	} else {
-		rows[1] = name //nolint:gosec // Safe: rows has length 3, accessing index 1
-	}
+	rows[1] = utils.TruncateName(controlSummary.GetName(), utils.MaxControlNameLen)
 
 	rows[2] = getDocsForControl(controlSummary)
 

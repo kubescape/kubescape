@@ -3,13 +3,16 @@ package printer
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -201,6 +204,131 @@ func TestCalculateMove_InvalidString(t *testing.T) {
 	assert.False(t, success)
 }
 
+// Lines containing multi-byte characters must be measured in runes, not bytes,
+// or the computed position drifts past the line's actual length.
+func TestCalculateMove_MultiByteRunes(t *testing.T) {
+	str := "10"
+	file := []string{"héllo world", "line 2", "line 3"}
+	endColumn := 5
+	endLine := 1
+
+	newLine, newColumn, success := calculateMove(str, file, endColumn, endLine)
+
+	assert.True(t, success)
+	assert.Equal(t, 2, newLine)
+	assert.Equal(t, 3, newColumn)
+}
+
+// The end line is 1-indexed, so values below 1 are as out of range as values past the end of the file and both return false.
+func TestCalculateMove_EndLineOutOfRange(t *testing.T) {
+	file := []string{"line 1", "line 2", "line 3"}
+
+	tc := []struct {
+		name      string
+		file      []string
+		endLine   int
+		endColumn int
+	}{
+		{"zero end line, as left behind by a failed move", file, 0, 0},
+		{"negative end line", file, -1, 1},
+		{"end line one past the last line", file, 4, 1},
+		{"any end line into an empty file", []string{}, 1, 1},
+	}
+
+	for _, testCase := range tc {
+		t.Run(testCase.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				newLine, newColumn, success := calculateMove("5", testCase.file, testCase.endColumn, testCase.endLine)
+
+				assert.False(t, success)
+				assert.Equal(t, 0, newLine)
+				assert.Equal(t, 0, newColumn)
+			})
+		})
+	}
+}
+
+// A move that claims more characters than the file holds walks past the last line and returns false.
+func TestCalculateMove_WalkPastLastLine(t *testing.T) {
+	file := []string{"line 1", "line 2", "line 3"}
+
+	assert.NotPanics(t, func() {
+		newLine, newColumn, success := calculateMove("50", file, 1, 3)
+
+		assert.False(t, success)
+		assert.Equal(t, 0, newLine)
+		assert.Equal(t, 0, newColumn)
+	})
+}
+
+// A move that fails mid-delta leaves the position untouched, so later fixes keep 1-indexed regions instead of landing on line 0.
+func TestCollectDiffs_FailedMoveKeepsRegionOneIndexed(t *testing.T) {
+	// the equality run claims more content than the file holds, so the first move fails
+	diffs := []diffmatchpatch.Diff{
+		{Type: diffmatchpatch.DiffEqual, Text: strings.Repeat("a", 44)},
+		{Type: diffmatchpatch.DiffInsert, Text: "x"},
+	}
+
+	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+	result := run.CreateResultForRule("0")
+
+	assert.NotPanics(t, func() {
+		collectDiffs(diffmatchpatch.New(), diffs, result, "", "short")
+	})
+
+	require.Len(t, result.Fixes, 1)
+	replacements := result.Fixes[0].ArtifactChanges[0].Replacements
+	require.Len(t, replacements, 1)
+
+	region := replacements[0].DeletedRegion
+	assert.Equal(t, 1, *region.StartLine)
+	assert.Equal(t, 1, *region.StartColumn)
+	assert.Equal(t, 1, *region.EndLine)
+	assert.Equal(t, 1, *region.EndColumn)
+}
+
+// An empty diff set yields a single empty delta segment and collects no fixes.
+func TestCollectDiffs_EmptyDelta(t *testing.T) {
+	dmp := diffmatchpatch.New()
+	diffs := dmp.DiffMain("", "", false)
+	require.Empty(t, diffs)
+
+	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+	result := run.CreateResultForRule("0")
+
+	assert.NotPanics(t, func() {
+		collectDiffs(dmp, diffs, result, "", "")
+	})
+
+	assert.Empty(t, result.Fixes)
+}
+
+// The region lookahead reports the last segment and an equality run as closing, and tolerates an empty neighbor.
+func TestClosesFixRegion(t *testing.T) {
+	tc := []struct {
+		name     string
+		delta    []string
+		index    int
+		expected bool
+	}{
+		{"last segment closes the region", []string{"+abc", "=5"}, 1, true},
+		{"next segment resumes unchanged content", []string{"+abc", "=5"}, 0, true},
+		{"next segment continues the edit", []string{"+abc", "-5"}, 0, false},
+		{"trailing empty segment leaves no operation to resume", []string{"+abc", ""}, 0, true},
+		{"empty segments skipped before an equality run", []string{"+abc", "", "", "=5"}, 0, true},
+		{"empty segments skipped before a further edit", []string{"+abc", "", "-5"}, 0, false},
+		{"index past the end of the delta", []string{"+abc"}, 5, true},
+	}
+
+	for _, testCase := range tc {
+		t.Run(testCase.name, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				assert.Equal(t, testCase.expected, closesFixRegion(testCase.delta, testCase.index))
+			})
+		})
+	}
+}
+
 // Adds a new fix to the result with the given filepath, start and end positions, and text.
 func TestAddFix_AddsNewFixToResult(t *testing.T) {
 	result := sarif.Result{}
@@ -256,6 +384,29 @@ func TestAddRule_SetsSecuritySeverity(t *testing.T) {
 		"security-severity must mirror the control score factor")
 }
 
+func TestAddResult_AnnotatesInitAndEphemeralContainerNames(t *testing.T) {
+	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+	control := &reportsummary.ControlSummary{
+		ControlID:   "C-0057",
+		Name:        "Privileged container",
+		Description: "Privileged containers should be avoided",
+		ScoreFactor: 8.0,
+	}
+
+	sp := NewSARIFPrinter()
+	sp.addRule(run, control)
+
+	ac := makeControlWithPaths(privilegedInitAndEphemeralPaths(), nil)
+	ac.ControlID = "C-0057"
+
+	result := sp.addResult(run, control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, privilegedInitAndEphemeralPod(), nil)
+	require.NotNil(t, result.Message)
+	require.NotNil(t, result.Message.Text)
+	for _, path := range privilegedInitAndEphemeralNamedPaths() {
+		assert.Contains(t, *result.Message.Text, path)
+	}
+}
+
 func TestPrintConfigurationScan_MissingControl(t *testing.T) {
 	resourceID := "apps/v1/Deployment/default/my-deployment"
 
@@ -294,6 +445,87 @@ func TestPrintConfigurationScan_MissingControl(t *testing.T) {
 		err := sp.printConfigurationScan(context.Background(), session)
 		assert.NoError(t, err)
 	})
+}
+
+// TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath verifies that a resource
+// with no relative path is dropped even when a base path is available: the SARIF
+// location is written from the relative path alone, so such a result would carry an
+// empty artifact location, which GitHub Code Scanning rejects on upload.
+func TestPrintConfigurationScan_SkipsResourcesWithoutRelativePath(t *testing.T) {
+	const controlID = "C-0057"
+	resourceID := "apps/v1/Deployment/default/demo"
+
+	tests := []struct {
+		name           string
+		resourceSource reporthandling.Source
+	}{
+		{name: "no anchor at all", resourceSource: reporthandling.Source{}},
+		{name: "resource path set", resourceSource: reporthandling.Source{Path: t.TempDir()}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			session := cautils.NewOPASessionObjMock()
+			session.Metadata = &reporthandlingv2.Metadata{
+				ScanMetadata: reporthandlingv2.ScanMetadata{
+					ScanningTarget: reporthandlingv2.Directory,
+				},
+				ContextMetadata: reporthandlingv2.ContextMetadata{
+					DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{
+						BasePath: t.TempDir(),
+					},
+				},
+			}
+			session.ResourcesResult[resourceID] = resourcesresults.Result{
+				ResourceID: resourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: controlID,
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+					},
+				},
+			}
+			session.ResourceSource = map[string]reporthandling.Source{resourceID: tt.resourceSource}
+			session.Report = &reporthandlingv2.PostureReport{
+				SummaryDetails: reportsummary.SummaryDetails{
+					Controls: reportsummary.ControlSummaries{
+						controlID: reportsummary.ControlSummary{
+							ControlID:   controlID,
+							Name:        "Privileged container",
+							Description: "Do not run privileged containers",
+							ScoreFactor: 8.0,
+						},
+					},
+				},
+			}
+
+			// the base path is non-empty, so only the missing relative path can skip this finding
+			require.NotEmpty(t, getBasePathFromMetadata(*session))
+
+			tmp, err := os.CreateTemp("", "sarif-norelpath-*.sarif")
+			require.NoError(t, err)
+			defer func() {
+				assert.NoError(t, os.Remove(tmp.Name()))
+			}()
+
+			sp := NewSARIFPrinter()
+			sp.writer = tmp
+			require.NoError(t, sp.printConfigurationScan(context.Background(), session))
+			require.NoError(t, tmp.Close())
+
+			raw, err := os.ReadFile(tmp.Name())
+			require.NoError(t, err)
+
+			var report struct {
+				Runs []struct {
+					Results []json.RawMessage `json:"results"`
+				} `json:"runs"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &report))
+			require.Len(t, report.Runs, 1)
+			assert.Empty(t, report.Runs[0].Results, "a result with no file location must not be emitted")
+		})
+	}
 }
 
 // TestPrintConfigurationScan_PopulatesInvocations is the regression test for
@@ -386,6 +618,54 @@ func TestPrintConfigurationScan_InvocationStartTimeUsesReportGenerationTime(t *t
 		"startTimeUtc must reuse ReportGenerationTime, got %s want %s", inv.StartTimeUTC, preset)
 }
 
+// TestGetDocIndex_PathContainingColon guards against a regression where
+// getDocIndex parsed LocalWorkload.GetPath() ("<file path>:<document
+// index>") with strings.Split(path, ":")[1] instead of splitting on the last
+// colon. That silently picked the wrong segment whenever the file path
+// itself contained more than one colon (e.g. a Windows path like
+// "C:\repo\deploy.yaml:0"), so strconv.Atoi failed on a non-numeric segment
+// and getDocIndex reported "no document index" even though one exists. This
+// must match how fixhandler.getFilePathAndIndex parses the same convention
+// (splitting on the last colon).
+func TestGetDocIndex_PathContainingColon(t *testing.T) {
+	resourceID := "apps/v1/Deployment/default/demo"
+	obj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "demo"},
+		"spec":       map[string]interface{}{},
+	}
+
+	tests := []struct {
+		name      string
+		path      string
+		wantIndex int
+		wantOk    bool
+	}{
+		{name: "plain relative path, no colon in file path", path: "deploy.yaml:0", wantIndex: 0, wantOk: true},
+		{name: "nested relative path", path: "charts/app/deploy.yaml:2", wantIndex: 2, wantOk: true},
+		{name: "file path itself contains a colon", path: `C:\repo\deploy.yaml:3`, wantIndex: 3, wantOk: true},
+		{name: "no colon at all", path: "deploy.yaml", wantIndex: 0, wantOk: false},
+		{name: "trailing colon with non-numeric suffix", path: "deploy.yaml:abc", wantIndex: 0, wantOk: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lw := localworkload.NewLocalWorkload(obj)
+			lw.SetPath(tt.path)
+
+			session := cautils.NewOPASessionObjMock()
+			session.AllResources[resourceID] = lw
+
+			gotIndex, gotOk := getDocIndex(session, resourceID)
+			assert.Equal(t, tt.wantOk, gotOk)
+			if tt.wantOk {
+				assert.Equal(t, tt.wantIndex, gotIndex)
+			}
+		})
+	}
+}
+
 func TestGetBasePathFromMetadata(t *testing.T) {
 	tempDir := t.TempDir()
 	absFilePath := filepath.Join(tempDir, "deploy.yaml")
@@ -410,6 +690,22 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 				},
 			},
 			want: tempDir,
+		},
+		{
+			name: "GitLocal without repository metadata",
+			session: cautils.OPASessionObj{
+				Metadata: &reporthandlingv2.Metadata{
+					ScanMetadata: reporthandlingv2.ScanMetadata{
+						ScanningTarget: reporthandlingv2.GitLocal,
+					},
+				},
+			},
+			want: "",
+		},
+		{
+			name:    "missing metadata",
+			session: cautils.OPASessionObj{},
+			want:    "",
 		},
 		{
 			name: "Directory",
@@ -470,6 +766,42 @@ func TestGetBasePathFromMetadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, getBasePathFromMetadata(tt.session))
+		})
+	}
+}
+
+// TestEffectiveBasePath verifies that a resource's own Source.Path wins over the
+// scan-wide base path, because it is the root its RelativePath was computed from,
+// while the scan-wide path covers only the first input pattern of a multi-input scan.
+func TestEffectiveBasePath(t *testing.T) {
+	tests := []struct {
+		name           string
+		resourceSource reporthandling.Source
+		basePath       string
+		want           string
+	}{
+		{
+			name:           "resource path wins over the scan-wide base path",
+			resourceSource: reporthandling.Source{Path: "/repo", RelativePath: "workloads/deploy.yaml"},
+			basePath:       "/repo/workloads",
+			want:           "/repo",
+		},
+		{
+			name:           "sources without a path fall back to the scan-wide base path",
+			resourceSource: reporthandling.Source{RelativePath: "deploy.yaml"},
+			basePath:       "/repo",
+			want:           "/repo",
+		},
+		{
+			name:           "no anchor at all",
+			resourceSource: reporthandling.Source{RelativePath: "deploy.yaml"},
+			want:           "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, effectiveBasePath(tt.resourceSource, tt.basePath))
 		})
 	}
 }
@@ -605,4 +937,228 @@ spec:
 		"SARIF must resolve the privileged field to line %d, got startLines=%v", privilegedLine, startLines)
 	assert.NotEqual(t, []int{1}, startLines,
 		"all findings must not collapse to line 1 for absolute-path file scans")
+}
+
+// TestPrintConfigurationScan_FailedPathGetsRelatedLocation is a regression test for evidence
+// locations: a control's FailedPath previously had no location of its own in SARIF output - only
+// the (possibly different) FixPath got the primary Locations entry. This asserts the FailedPath
+// now resolves to its own relatedLocations entry, pointing at the actual line the failing field
+// lives on, independent of where the fix would apply.
+func TestPrintConfigurationScan_FailedPathGetsRelatedLocation(t *testing.T) {
+	const (
+		imageLine      = 12
+		privilegedLine = 13
+	)
+
+	manifestDir := t.TempDir()
+	manifestPath := filepath.Join(manifestDir, "deploy.yaml")
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata: {name: demo, namespace: default}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: demo}}
+  template:
+    metadata: {labels: {app: demo}}
+    spec:
+      containers:
+      - name: app
+        image: nginx:1.23
+        securityContext: {privileged: true}
+`
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifest), 0600))
+
+	resourceID := "apps/v1/Deployment/default/demo"
+	obj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "demo",
+			"namespace": "default",
+		},
+		"spec": map[string]interface{}{},
+	}
+	lw := localworkload.NewLocalWorkload(obj)
+	lw.SetPath("deploy.yaml:0")
+
+	controlID := "C-0001"
+	// FixPath targets a different field (image) than FailedPath (privileged), so their
+	// resolved locations diverge - the test would pass by coincidence if they matched.
+	ac := resourcesresults.ResourceAssociatedControl{
+		ControlID: controlID,
+		Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+			{
+				Name:   "privileged-container",
+				Status: apis.StatusFailed,
+				Paths: []armotypes.PosturePaths{
+					{
+						FailedPath: "spec.template.spec.containers[0].securityContext.privileged",
+						FixPath: armotypes.FixPath{
+							Path:  "spec.template.spec.containers[0].image",
+							Value: "nginx:1.25",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	session := cautils.NewOPASessionObjMock()
+	session.Metadata = &reporthandlingv2.Metadata{
+		ScanMetadata: reporthandlingv2.ScanMetadata{
+			ScanningTarget: reporthandlingv2.File,
+		},
+		ContextMetadata: reporthandlingv2.ContextMetadata{
+			FileContextMetadata: &reporthandlingv2.FileContextMetadata{
+				FilePath: manifestPath,
+			},
+		},
+	}
+	session.ResourcesResult[resourceID] = resourcesresults.Result{
+		ResourceID:         resourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{ac},
+	}
+	session.ResourceSource = map[string]reporthandling.Source{
+		resourceID: {
+			Path:         manifestDir,
+			RelativePath: "deploy.yaml",
+			FileType:     reporthandling.SourceTypeYaml,
+		},
+	}
+	session.AllResources[resourceID] = lw
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{
+				controlID: reportsummary.ControlSummary{
+					ControlID:   controlID,
+					Name:        "Privileged container",
+					Description: "Do not run privileged containers",
+					Remediation: "Set privileged to false",
+					ScoreFactor: 8.0,
+				},
+			},
+		},
+	}
+
+	tmp, err := os.CreateTemp("", "sarif-related-location-*.sarif")
+	require.NoError(t, err)
+	defer func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	}()
+
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origWD) }()
+	otherWD := t.TempDir()
+	require.NoError(t, os.Chdir(otherWD))
+
+	sp := NewSARIFPrinter()
+	sp.writer = tmp
+	require.NoError(t, sp.printConfigurationScan(context.Background(), session))
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 1)
+	require.Len(t, report.Runs[0].Results, 1)
+
+	result := report.Runs[0].Results[0]
+
+	// Primary location follows the fix path (image), as before this change.
+	require.NotEmpty(t, result.Locations)
+	require.NotNil(t, result.Locations[0].PhysicalLocation.Region)
+	assert.Equal(t, imageLine, *result.Locations[0].PhysicalLocation.Region.StartLine,
+		"primary location should still resolve to the FixPath's line")
+
+	// The FailedPath now gets its own relatedLocations entry, at its own line.
+	require.Len(t, result.RelatedLocations, 1)
+	relatedLoc := result.RelatedLocations[0]
+	require.NotNil(t, relatedLoc.PhysicalLocation)
+	require.NotNil(t, relatedLoc.PhysicalLocation.Region)
+	assert.Equal(t, privilegedLine, *relatedLoc.PhysicalLocation.Region.StartLine,
+		"relatedLocations must resolve the FailedPath to its own line, distinct from the fix location")
+	require.NotNil(t, relatedLoc.Message)
+	assert.Equal(t, "spec.template.spec.containers[0].securityContext.privileged", *relatedLoc.Message.Text)
+}
+
+// TestPrintImageScan_WriterIsNonSeekablePipe is a regression test for image
+// SARIF output hanging when the destination is a pipe (e.g. stdout in a Unix
+// pipeline). printImageScan used to render the report to sp.writer, then
+// reopen sp.writer.Name() to patch the driver name and write it back. For a
+// pipe there is nothing meaningful to reopen by name, so the fix renders and
+// patches the report in memory and writes it to sp.writer exactly once. This
+// test uses a real os.Pipe() as the writer, with a concurrent reader (playing
+// the role of a downstream consumer like `tee` or `jq`), and asserts
+// ActionPrint returns promptly with a correctly patched report.
+func TestPrintImageScan_WriterIsNonSeekablePipe(t *testing.T) {
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+
+	sp := NewSARIFPrinter()
+	sp.writer = w
+
+	imageScanData := buildSeverityExceptionImageScanData()
+
+	printDone := make(chan error, 1)
+	go func() {
+		printDone <- sp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{imageScanData})
+	}()
+
+	readDone := make(chan []byte, 1)
+	go func() {
+		data, _ := io.ReadAll(r)
+		readDone <- data
+	}()
+
+	select {
+	case err := <-printDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("ActionPrint did not return within 5s: image SARIF output is hanging on a pipe writer")
+	}
+
+	require.NoError(t, w.Close())
+
+	var raw []byte
+	select {
+	case raw = <-readDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out reading the piped SARIF output")
+	}
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 1)
+	assert.Equal(t, "Kubescape", report.Runs[0].Tool.Driver.Name, "driver name must still be patched when writing to a pipe")
+}
+
+func TestPrintImageScan_MultipleImagesAggregatesRuns(t *testing.T) {
+	tmp, err := os.CreateTemp("", "sarif-multiimage-*.sarif")
+	require.NoError(t, err)
+	defer func() { _ = os.Remove(tmp.Name()) }()
+
+	sp := NewSARIFPrinter()
+	sp.writer = tmp
+
+	scan1 := buildSeverityExceptionImageScanData()
+	scan2 := buildSeverityExceptionImageScanData()
+
+	err = sp.ActionPrint(context.Background(), nil, []cautils.ImageScanData{scan1, scan2})
+	require.NoError(t, err)
+	require.NoError(t, tmp.Close())
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 2, "SARIF report must contain a run for each scanned image")
+	for i, run := range report.Runs {
+		require.NotNil(t, run.Tool.Driver)
+		assert.Equal(t, "Kubescape", run.Tool.Driver.Name, "driver name must be Kubescape for run %d", i)
+	}
 }

@@ -5,7 +5,8 @@ import (
 	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -27,6 +28,9 @@ const (
 	metricsResource  metricsName = "resource"
 	metricsResources metricsName = "resources"
 	metricsFramework metricsName = "framework"
+	metricsImage     metricsName = "image"
+	metricsCVE       metricsName = "cve"
+	metricsFixable   metricsName = "fixable"
 )
 
 // ============================================ CLUSTER ============================================================
@@ -104,7 +108,10 @@ func (mcrs *mControlComplianceScore) metrics() []string {
 
 	m := []string{}
 	// overall
-	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mcrs.prefix(), metricsScore), mcrs.labels(), mcrs.complianceScore))
+	// GetComplianceScore returns -1 when a control has no calculated score.
+	if mcrs.complianceScore >= 0 {
+		m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mcrs.prefix(), metricsScore), mcrs.labels(), mcrs.complianceScore))
+	}
 
 	// resources
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mcrs.prefix(), metricsCount, metricsResources, metricsFailed), mcrs.labels(), mcrs.resourcesCountFailed))
@@ -114,9 +121,9 @@ func (mcrs *mControlComplianceScore) metrics() []string {
 	return m
 }
 func (mcrs *mControlComplianceScore) labels() string {
-	r := fmt.Sprintf("name=\"%s\"", mcrs.controlName) + ","
-	r += fmt.Sprintf("severity=\"%s\"", mcrs.severity) + ","
-	r += fmt.Sprintf("link=\"%s\"", mcrs.link)
+	r := fmt.Sprintf("name=\"%s\"", escapePrometheusLabelValue(mcrs.controlName)) + ","
+	r += fmt.Sprintf("severity=\"%s\"", escapePrometheusLabelValue(mcrs.severity)) + ","
+	r += fmt.Sprintf("link=\"%s\"", escapePrometheusLabelValue(mcrs.link))
 	return r
 }
 func (mcrs *mControlComplianceScore) prefix() string {
@@ -159,7 +166,7 @@ func (mfrs *mFrameworkComplianceScore) metrics() []string {
 	return m
 }
 func (mfrs *mFrameworkComplianceScore) labels() string {
-	r := fmt.Sprintf("name=\"%s\"", mfrs.frameworkName)
+	r := fmt.Sprintf("name=\"%s\"", escapePrometheusLabelValue(mfrs.frameworkName))
 	return r
 }
 func (mfrs *mFrameworkComplianceScore) prefix() string {
@@ -184,17 +191,52 @@ func (mrc *mResources) metrics() []string {
 }
 
 func (mrc *mResources) labels() string {
-	r := fmt.Sprintf("apiVersion=\"%s\"", mrc.apiVersion) + ","
-	r += fmt.Sprintf("kind=\"%s\"", mrc.kind) + ","
-	r += fmt.Sprintf("namespace=\"%s\"", mrc.namespace) + ","
-	r += fmt.Sprintf("name=\"%s\"", mrc.name)
+	r := fmt.Sprintf("apiVersion=\"%s\"", escapePrometheusLabelValue(mrc.apiVersion)) + ","
+	r += fmt.Sprintf("kind=\"%s\"", escapePrometheusLabelValue(mrc.kind)) + ","
+	r += fmt.Sprintf("namespace=\"%s\"", escapePrometheusLabelValue(mrc.namespace)) + ","
+	r += fmt.Sprintf("name=\"%s\"", escapePrometheusLabelValue(mrc.name))
 	return r
 }
 func (mrc *mResources) prefix() string {
 	return fmt.Sprintf("%s_%s", ksMetrics, metricsResource)
 }
 
+// ============================================ IMAGE VULNERABILITY =================================================
+func (miv *mImageVulnerability) metrics() []string {
+	/*
+		#### Image vulnerability metrics (image scan only, #2782)
+		kubescape_image_count_cve{image="<image>",platform="<optional-platform>",severity="<severity>"} <counter>
+		kubescape_image_count_cve_fixable{image="<image>",platform="<optional-platform>",severity="<severity>"} <counter>
+	*/
+
+	m := []string{}
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s", miv.prefix(), metricsCount, metricsCVE), miv.labels(), miv.cveCount))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", miv.prefix(), metricsCount, metricsCVE, metricsFixable), miv.labels(), miv.fixableCVECount))
+	return m
+}
+
+func (miv *mImageVulnerability) labels() string {
+	r := fmt.Sprintf("image=\"%s\"", escapePrometheusLabelValue(miv.image)) + ","
+	if miv.platform != "" {
+		r += fmt.Sprintf("platform=\"%s\"", escapePrometheusLabelValue(miv.platform)) + ","
+	}
+	r += fmt.Sprintf("severity=\"%s\"", escapePrometheusLabelValue(miv.severity))
+	return r
+}
+
+func (miv *mImageVulnerability) prefix() string {
+	return fmt.Sprintf("%s_%s", ksMetrics, metricsImage)
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+func escapePrometheusLabelValue(value string) string {
+	return strings.NewReplacer(
+		`\`, `\\`,
+		"\n", `\n`,
+		`"`, `\"`,
+	).Replace(value)
+}
 
 func toMetricHeader(name, help string) string {
 	return fmt.Sprintf("# HELP %s %s\n# TYPE %s gauge", name, help, name)
@@ -204,23 +246,42 @@ func toRowInMetrics(name string, row string, value int) string {
 	return fmt.Sprintf("%s{%s} %d", name, row, value)
 
 }
+
+// emitMetricFamily renders lines as one group per metric family: the HELP/TYPE
+// header followed by every sample of that family. Grouping is required because
+// each item contributes one line to several families (a resource emits a failed
+// and a skipped counter), so writing the lines in the order they were collected
+// interleaves the families once there is more than one item. The text exposition
+// format requires a family's samples to be contiguous.
+//
+// Families keep the order in which they were first seen, so the metric layout
+// still follows the order the caller collected the lines in.
 func emitMetricFamily(lines []string) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	emitted := map[string]bool{}
-	var r strings.Builder
+	// keyed by family, not by sample: a scan emits a fixed handful of families and a
+	// line per item within each, so both stay small next to len(lines).
+	var order []string
+	samples := map[string][]string{}
 	for _, line := range lines {
 		// extract metric name (everything before '{')
 		name := line
 		if before, _, ok := strings.Cut(line, "{"); ok {
 			name = before
 		}
-		if !emitted[name] {
-			r.WriteString(toMetricHeader(name, name) + "\n")
-			emitted[name] = true
+		if _, seen := samples[name]; !seen {
+			order = append(order, name)
 		}
-		r.WriteString(line + "\n")
+		samples[name] = append(samples[name], line)
+	}
+
+	var r strings.Builder
+	for _, name := range order {
+		r.WriteString(toMetricHeader(name, name) + "\n")
+		for _, line := range samples[name] {
+			r.WriteString(line + "\n")
+		}
 	}
 	return r.String()
 }
@@ -228,8 +289,14 @@ func emitMetricFamily(lines []string) string {
 func (m *Metrics) String() string {
 	// collect all metric lines first, then emit headers once per family
 	var all []string
-	all = append(all, m.rs.metrics()...)
-	all = append(all, m.coverage.metrics()...)
+	// Posture-scan metric families (compliance score, coverage) only apply
+	// when this Metrics was built from a posture scan; an image scan never
+	// populates m.rs/m.coverage, so emitting them here would push out a
+	// misleading all-zero compliance score alongside real CVE metrics (#2782).
+	if !m.isImageScan {
+		all = append(all, m.rs.metrics()...)
+		all = append(all, m.coverage.metrics()...)
+	}
 	for i := range m.listFrameworks {
 		all = append(all, m.listFrameworks[i].metrics()...)
 	}
@@ -238,6 +305,9 @@ func (m *Metrics) String() string {
 	}
 	for i := range m.listResources {
 		all = append(all, m.listResources[i].metrics()...)
+	}
+	for i := range m.listImages {
+		all = append(all, m.listImages[i].metrics()...)
 	}
 	return emitMetricFamily(all)
 }
@@ -288,12 +358,22 @@ type mResources struct {
 	controlsCountFailed  int
 	controlsCountSkipped int
 }
+type mImageVulnerability struct {
+	image           string
+	platform        string
+	severity        string
+	cveCount        int
+	fixableCVECount int
+}
+
 type Metrics struct {
+	isImageScan    bool
 	rs             mComplianceScore
 	coverage       mScanCoverage
 	listFrameworks []mFrameworkComplianceScore
 	listControls   []mControlComplianceScore
 	listResources  []mResources
+	listImages     []mImageVulnerability
 }
 
 func (mrs *mComplianceScore) set(resources reportsummary.ICounters, controls reportsummary.ICounters) {
@@ -321,12 +401,13 @@ func (mcrs *mControlComplianceScore) set(resources reportsummary.ICounters) {
 }
 func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetails) {
 	m.rs.set(summaryDetails.NumberOfResources(), summaryDetails.NumberOfControls())
-	m.rs.complianceScore = cautils.Float32ToInt(summaryDetails.GetScore())
+	// GetScore() returns the risk score; the metric is the compliance score.
+	m.rs.complianceScore = cautils.ComplianceScoreToInt(summaryDetails.ComplianceScore)
 
 	for _, fw := range summaryDetails.ListFrameworks() {
 		mfrs := mFrameworkComplianceScore{
 			frameworkName:   fw.GetName(),
-			complianceScore: cautils.Float32ToInt(fw.GetComplianceScore()),
+			complianceScore: cautils.ComplianceScoreToInt(fw.GetComplianceScore()),
 		}
 		mfrs.set(fw.NumberOfResources(), fw.NumberOfControls())
 		m.listFrameworks = append(m.listFrameworks, mfrs)
@@ -336,7 +417,7 @@ func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetai
 		mcrs := mControlComplianceScore{
 			controlName:     control.GetName(),
 			controlID:       control.GetID(),
-			complianceScore: cautils.Float32ToInt(control.GetScore()),
+			complianceScore: cautils.ComplianceScoreToInt(control.GetComplianceScore()),
 			link:            cautils.GetControlLink(control.GetID()),
 			severity:        apis.ControlSeverityToString(control.GetScoreFactor()),
 			remediation:     control.GetRemediation(),
@@ -393,4 +474,25 @@ func (m *Metrics) setResourcesCounters(
 		m.listResources = append(m.listResources, mrc)
 	}
 
+}
+
+// setImageVulnerabilities builds per-image, per-severity CVE counters for an image scan (#2782)
+func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData) {
+	for i := range imageScanData {
+		target := imageScanData[i].Target()
+		cves := extractCVEs(imageScanData[i].Matches, target)
+
+		severityToSummary := map[string]*imageprinter.SeveritySummary{}
+		setSeverityToSummaryMap(cves, severityToSummary)
+
+		for severity, summary := range severityToSummary {
+			m.listImages = append(m.listImages, mImageVulnerability{
+				image:           imageScanData[i].Image,
+				platform:        imageScanData[i].Platform,
+				severity:        severity,
+				cveCount:        summary.NumberOfCVEs,
+				fixableCVECount: summary.NumberOfFixableCVEs,
+			})
+		}
+	}
 }

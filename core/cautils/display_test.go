@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStartSpinner(t *testing.T) {
@@ -428,6 +429,32 @@ func TestStarDisplay(t *testing.T) {
 			assert.Equal(t, tt.want, string(got))
 		})
 	}
+}
+
+// TestProgressHandler_StopFinishesBarWhenFewerStepsThanEstimated guards
+// against a regression where Stop() was a no-op. A caller that estimates
+// allSteps in advance (e.g. OPAProcessor.ProcessWithStreaming sizing it from
+// a namespace count that includes namespaces holding no scannable resources,
+// which therefore never get a corresponding ProgressJob call) can legitimately
+// finish having added fewer steps than allSteps. Without Stop completing the
+// bar, that run left it visibly stuck below 100% with no further updates.
+func TestProgressHandler_StopFinishesBarWhenFewerStepsThanEstimated(t *testing.T) {
+	p := NewProgressHandler("")
+	p.Start(10)
+	p.ProgressJob(3, "partial work")
+
+	require.Less(t, p.pb.State().CurrentPercent, 1.0, "sanity check: fewer steps were added than allSteps")
+
+	p.Stop()
+
+	assert.Equal(t, 1.0, p.pb.State().CurrentPercent)
+}
+
+// TestProgressHandler_StopIsNilSafe guards against a panic if Stop is ever
+// called without a preceding Start (pb still nil).
+func TestProgressHandler_StopIsNilSafe(t *testing.T) {
+	p := NewProgressHandler("")
+	assert.NotPanics(t, p.Stop)
 }
 
 // Returns a new instance of ProgressHandler with the given title.

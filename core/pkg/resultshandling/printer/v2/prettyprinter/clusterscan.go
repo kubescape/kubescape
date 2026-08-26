@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/configurationprinter"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/configurationprinter"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -73,8 +73,8 @@ func (cp *ClusterPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling
 		ns := wl.GetNamespace()
 		name := wl.GetName()
 		kind := wl.GetKind()
-		cautils.SimpleDisplay(cp.writer, fmt.Sprintf("%d. namespace: %s, name: %s, kind: %s\n", i+1, ns, name, kind))
-		cautils.SimpleDisplay(cp.writer, fmt.Sprintf("   '%s'\n", getCallToActionString(cp.getWorkloadScanCommand(ns, kind, name))))
+		cautils.SimpleDisplay(cp.writer, "%d. namespace: %s, name: %s, kind: %s\n", i+1, ns, name, kind)
+		cautils.SimpleDisplay(cp.writer, "   '%s'\n", getCallToActionString(cp.getWorkloadScanCommand(ns, kind, name)))
 	}
 
 	cautils.SimpleDisplay(cp.writer, "\n")

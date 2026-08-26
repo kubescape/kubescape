@@ -1,0 +1,29 @@
+{
+  "name": "assign-serviceaccount-to-pod-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Privilege Escalation::Assign service account to a controlled pod",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        "rbac.authorization.k8s.io"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "RoleBinding",
+        "ClusterRoleBinding",
+        "Role",
+        "ClusterRole"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can create pods, or create/update/patch pod controllers such as Deployments, DaemonSets and Jobs, in privileged namespaces, letting them attach a service account of their choosing to a pod they control and indirectly inherit its permissions",
+  "remediation": "Avoid granting create on pods or write access to pod controllers in kube-system and other privileged namespaces. Where a subject must manage workloads, confine it to an unprivileged namespace that contains no admin-equivalent service accounts.",
+  "ruleQuery": "armo_builtins"
+}

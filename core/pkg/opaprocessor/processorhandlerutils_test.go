@@ -1,19 +1,73 @@
 package opaprocessor
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/exceptions"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 )
+
+func TestGetKubernetesObjectsDeduplicatesResourceAliases(t *testing.T) {
+	workload := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "agents.x-k8s.io/v1alpha1",
+		"kind":       "Sandbox",
+		"metadata": map[string]any{
+			"name":      "agent-sandbox",
+			"namespace": "default",
+		},
+	})
+	resourceID := workload.GetID()
+	resources := cautils.K8SResources{
+		"agents.x-k8s.io/v1alpha1/sandbox":   {resourceID},
+		"agents.x-k8s.io/v1alpha1/sandboxes": {resourceID},
+	}
+	allResources := map[string]workloadinterface.IMetadata{resourceID: workload}
+	match := []reporthandling.RuleMatchObjects{{
+		APIGroups:   []string{"agents.x-k8s.io"},
+		APIVersions: []string{"v1alpha1"},
+		Resources:   []string{"Sandbox", "sandboxes"},
+	}}
+
+	objects := getKubernetesObjects(newResourceGroupIndex(resources, allResources), match)
+	assert.Equal(t, 1, len(objects))
+}
+
+func TestGetKubernetesObjectsMatchesFutureAPIVersionWithWildcards(t *testing.T) {
+	workload := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "autoscaling/v99",
+		"kind":       "HorizontalPodAutoscaler",
+		"metadata": map[string]any{
+			"name":      "future-hpa",
+			"namespace": "default",
+		},
+	})
+	resourceID := workload.GetID()
+	resources := cautils.K8SResources{
+		"autoscaling/v99/horizontalpodautoscaler": {resourceID},
+	}
+	allResources := map[string]workloadinterface.IMetadata{resourceID: workload}
+	match := []reporthandling.RuleMatchObjects{{
+		APIGroups:   []string{"*"},
+		APIVersions: []string{"*"},
+		Resources:   []string{"HorizontalPodAutoscaler"},
+	}}
+
+	objects := getKubernetesObjects(newResourceGroupIndex(resources, allResources), match)
+	require.Len(t, objects, 1)
+	assert.Same(t, workload, objects[0])
+}
 
 func TestRemoveData(t *testing.T) {
 	type args struct {
@@ -42,9 +96,15 @@ func TestRemoveData(t *testing.T) {
 			},
 		},
 		{
-			name: "remove configMap data",
+			name: "remove secret stringData",
 			args: args{
-				w: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "example-configmap", "namespace": "default", "annotations": {"kubectl.kubernetes.io/last-applied-configuration": "{}"}}, "data": {"exampleKey": "exampleValue"}}`,
+				w: `{"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "example-secret", "namespace": "default"}, "type": "Opaque", "stringData": {"token": "supersecret", "apiKey": "abc123"}}`,
+			},
+		},
+		{
+			name: "remove configMap data and binaryData",
+			args: args{
+				w: `{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "example-configmap", "namespace": "default", "annotations": {"kubectl.kubernetes.io/last-applied-configuration": "{}"}}, "data": {"exampleKey": "exampleValue"}, "binaryData": {"example.bin": "dGVzdA=="}}`,
 			},
 		},
 	}
@@ -69,6 +129,22 @@ func TestRemoveData(t *testing.T) {
 				assert.True(t, ok)
 				for key := range data {
 					assert.Equal(t, "XXXXXX", data[key])
+				}
+			}
+
+			if sd, ok := workloadinterface.InspectMap(workload.GetObject(), "stringData"); ok {
+				stringData, ok := sd.(map[string]any)
+				assert.True(t, ok)
+				for key := range stringData {
+					assert.Equalf(t, "XXXXXX", stringData[key], "stringData[%q] was not redacted", key)
+				}
+			}
+
+			if bd, ok := workloadinterface.InspectMap(workload.GetObject(), "binaryData"); ok {
+				binaryData, ok := bd.(map[string]any)
+				assert.True(t, ok)
+				for key := range binaryData {
+					assert.Equalf(t, "XXXXXX", binaryData[key], "binaryData[%q] was not redacted", key)
 				}
 			}
 
@@ -97,6 +173,47 @@ func TestRemoveData(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRemoveSecretData(t *testing.T) {
+	t.Run("stringData values are redacted", func(t *testing.T) {
+		raw := `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s","namespace":"default"},"type":"Opaque","stringData":{"token":"supersecret","apiKey":"abc123"}}`
+		obj, err := workloadinterface.NewWorkload([]byte(raw))
+		assert.NoError(t, err)
+		removeData(obj)
+		sd, ok := workloadinterface.InspectMap(obj.GetObject(), "stringData")
+		assert.True(t, ok, "stringData key must still be present after redaction")
+		stringData, ok := sd.(map[string]any)
+		assert.True(t, ok)
+		assert.Equal(t, "XXXXXX", stringData["token"])
+		assert.Equal(t, "XXXXXX", stringData["apiKey"])
+	})
+
+	t.Run("data and stringData are both redacted", func(t *testing.T) {
+		raw := `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s","namespace":"default"},"type":"Opaque","data":{"user":"dXNlcg=="},"stringData":{"pass":"cleartext"}}`
+		obj, err := workloadinterface.NewWorkload([]byte(raw))
+		assert.NoError(t, err)
+		removeData(obj)
+		d, ok := workloadinterface.InspectMap(obj.GetObject(), "data")
+		assert.True(t, ok)
+		data, ok := d.(map[string]any)
+		assert.True(t, ok)
+		assert.Equal(t, "XXXXXX", data["user"])
+		sd, ok := workloadinterface.InspectMap(obj.GetObject(), "stringData")
+		assert.True(t, ok)
+		stringData, ok := sd.(map[string]any)
+		assert.True(t, ok)
+		assert.Equal(t, "XXXXXX", stringData["pass"])
+	})
+
+	t.Run("absent stringData does not panic", func(t *testing.T) {
+		raw := `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"s","namespace":"default"},"type":"Opaque","data":{"key":"dmFsdWU="}}`
+		obj, err := workloadinterface.NewWorkload([]byte(raw))
+		assert.NoError(t, err)
+		assert.NotPanics(t, func() { removeData(obj) })
+		_, ok := workloadinterface.InspectMap(obj.GetObject(), "stringData")
+		assert.False(t, ok, "stringData must not appear when it was not present originally")
+	})
 }
 
 func TestRemoveContainersData(t *testing.T) {
@@ -834,110 +951,6 @@ func TestMapControlToInfo(t *testing.T) {
 	}, got)
 }
 
-func TestIsLargeCluster(t *testing.T) {
-	orig := largeClusterSize
-	t.Cleanup(func() { largeClusterSize = orig })
-	t.Setenv("LARGE_CLUSTER_SIZE", "2500")
-
-	tests := []struct {
-		name        string
-		clusterSize int
-		want        bool
-	}{
-		{
-			name:        "zero nodes — not large",
-			clusterSize: 0,
-			want:        false,
-		},
-		{
-			name:        "below threshold — not large",
-			clusterSize: 100,
-			want:        false,
-		},
-		{
-			name:        "at threshold — not large (exclusive)",
-			clusterSize: 2500,
-			want:        false,
-		},
-		{
-			name:        "above threshold — large",
-			clusterSize: 2501,
-			want:        true,
-		},
-		{
-			name:        "well above threshold — large",
-			clusterSize: 10000,
-			want:        true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			largeClusterSize = -1
-			assert.Equal(t, tt.want, isLargeCluster(tt.clusterSize))
-		})
-	}
-}
-
-func TestGetNamespaceName(t *testing.T) {
-	orig := largeClusterSize
-	t.Cleanup(func() { largeClusterSize = orig })
-	t.Setenv("LARGE_CLUSTER_SIZE", "2500")
-
-	podJSON := `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"mypod","namespace":"mynamespace"}}`
-	namespaceJSON := `{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"mynamespace"}}`
-	nodeJSON := `{"apiVersion":"v1","kind":"Node","metadata":{"name":"mynode"}}`
-
-	pod, err := workloadinterface.NewWorkload([]byte(podJSON))
-	require.NoError(t, err)
-	require.NotNil(t, pod)
-
-	ns, err := workloadinterface.NewWorkload([]byte(namespaceJSON))
-	require.NoError(t, err)
-	require.NotNil(t, ns)
-
-	node, err := workloadinterface.NewWorkload([]byte(nodeJSON))
-	require.NoError(t, err)
-	require.NotNil(t, node)
-
-	tests := []struct {
-		name        string
-		obj         workloadinterface.IMetadata
-		clusterSize int
-		want        string
-	}{
-		{
-			name:        "small cluster — always clusterScope",
-			obj:         pod,
-			clusterSize: 10,
-			want:        clusterScope,
-		},
-		{
-			name:        "large cluster — namespaced resource returns namespace",
-			obj:         pod,
-			clusterSize: 3000,
-			want:        "mynamespace",
-		},
-		{
-			name:        "large cluster — Namespace kind returns its name",
-			obj:         ns,
-			clusterSize: 3000,
-			want:        "mynamespace",
-		},
-		{
-			name:        "large cluster — cluster-scoped resource returns clusterScope",
-			obj:         node,
-			clusterSize: 3000,
-			want:        clusterScope,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			largeClusterSize = -1
-			assert.Equal(t, tt.want, getNamespaceName(tt.obj, tt.clusterSize))
-		})
-	}
-}
-
 func TestFilterExpiredExceptions(t *testing.T) {
 	past := time.Now().Add(-24 * time.Hour)
 	future := time.Now().Add(24 * time.Hour)
@@ -1019,4 +1032,372 @@ func TestFilterExpiredExceptions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func makeTestWorkload(t *testing.T, raw string) workloadinterface.IMetadata {
+	t.Helper()
+	workload, err := workloadinterface.NewWorkload([]byte(raw))
+	require.NoError(t, err)
+	require.NotNil(t, workload)
+	return workload
+}
+
+func TestParseControlList(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  []string
+	}{
+		{"empty string", "", []string{}},
+		{"single id", "C-0016", []string{"C-0016"}},
+		{"comma separated with spaces", "C-0016, C-0017 , C-0018", []string{"C-0016", "C-0017", "C-0018"}},
+		{"extra commas", ",C-0016,,C-0017,", []string{"C-0016", "C-0017"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, parseControlList(tt.value))
+		})
+	}
+}
+
+func TestInlineExceptionFromResource(t *testing.T) {
+	workload := makeTestWorkload(t, `{
+		"apiVersion": "v1",
+		"kind": "Pod",
+		"metadata": {
+			"name": "nginx",
+			"namespace": "default",
+			"annotations": {
+				"kubescape.io/skip-controls": "C-0016, C-0017",
+				"kubescape.io/skip-reason":   "accepted by security team",
+				"kubescape.io/skip-expiry":   "2026-12-31T23:59:59Z"
+			}
+		},
+		"spec": {"containers": [{"name": "nginx", "image": "nginx"}]}
+	}`)
+
+	got := inlineExceptionFromResource(workload, "test-cluster")
+	require.Len(t, got, 1)
+
+	ex := got[0]
+	assert.Equal(t, "postureExceptionPolicy", ex.PolicyType)
+	assert.Equal(t, "inline-"+workload.GetID(), ex.Name)
+	require.Len(t, ex.PosturePolicies, 2)
+	assert.Equal(t, "C-0016", ex.PosturePolicies[0].ControlID)
+	assert.Equal(t, "C-0017", ex.PosturePolicies[1].ControlID)
+
+	require.NotNil(t, ex.Reason)
+	assert.Equal(t, "accepted by security team", *ex.Reason)
+
+	require.NotNil(t, ex.ExpirationDate)
+	expected, _ := time.Parse(time.RFC3339, "2026-12-31T23:59:59Z")
+	assert.Equal(t, expected.UTC(), ex.ExpirationDate.UTC())
+
+	require.Len(t, ex.Resources, 1)
+	attrs := ex.Resources[0].Attributes
+	assert.Equal(t, "nginx", attrs["name"])
+	assert.Equal(t, "Pod", attrs["kind"])
+	assert.Equal(t, "default", attrs["namespace"])
+	assert.Equal(t, workload.GetID(), attrs["resourceID"])
+}
+
+func TestInlineExceptionFromResource_NoSkipAnnotation(t *testing.T) {
+	workload := makeTestWorkload(t, `{
+		"apiVersion": "v1",
+		"kind": "Pod",
+		"metadata": {"name": "nginx", "namespace": "default"},
+		"spec": {"containers": [{"name": "nginx", "image": "nginx"}]}
+	}`)
+
+	assert.Empty(t, inlineExceptionFromResource(workload, "test-cluster"))
+}
+
+func TestInlineExceptionFromResource_MalformedExpiry(t *testing.T) {
+	workload := makeTestWorkload(t, `{
+		"apiVersion": "v1",
+		"kind": "Pod",
+		"metadata": {
+			"name": "nginx",
+			"namespace": "default",
+			"annotations": {
+				"kubescape.io/skip-controls": "C-0001",
+				"kubescape.io/skip-expiry":   "2026-12-31"
+			}
+		}
+	}`)
+
+	assert.Empty(t, inlineExceptionFromResource(workload, "test-cluster"))
+}
+
+func TestGatherInlineExceptions(t *testing.T) {
+	withSkip := makeTestWorkload(t, `{
+		"apiVersion": "v1",
+		"kind": "Pod",
+		"metadata": {
+			"name": "nginx",
+			"namespace": "default",
+			"annotations": {"kubescape.io/skip-controls": "C-0001"}
+		}
+	}`)
+	withoutSkip := makeTestWorkload(t, `{
+		"apiVersion": "v1",
+		"kind": "Pod",
+		"metadata": {"name": "redis", "namespace": "default"}
+	}`)
+
+	opap := &OPAProcessor{
+		OPASessionObj: &cautils.OPASessionObj{
+			AllResources: map[string]workloadinterface.IMetadata{
+				withSkip.GetID():    withSkip,
+				withoutSkip.GetID(): withoutSkip,
+			},
+		},
+		clusterName: "test-cluster",
+	}
+
+	got := opap.gatherInlineExceptions()
+	require.Len(t, got, 1)
+	assert.Equal(t, "C-0001", got[0].PosturePolicies[0].ControlID)
+}
+
+// Regression for issue-3368: a scope-less exception (no Resources) is documented
+// and implemented as "applies everywhere" for manual controls (see
+// matchingControlExceptions above and #1994), but the vendored opa-utils
+// exceptions.Processor.GetResourceExceptions iterates ruleException.Resources per
+// candidate, so an empty Resources list is zero iterations and therefore never a
+// match for resource-backed findings. resourceScopedExceptions closes that gap by
+// giving each scope-less exception a resource-specific designator right before it
+// reaches that matching code.
+func TestResourceScopedExceptions(t *testing.T) {
+	scoped := armotypes.PostureExceptionPolicy{
+		PortalBase: armotypes.PortalBase{Name: "already-scoped"},
+		Resources: []identifiers.PortalDesignator{
+			{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{"namespace": "default"}},
+		},
+	}
+	scopeLess := armotypes.PostureExceptionPolicy{
+		PortalBase: armotypes.PortalBase{Name: "scope-less"},
+	}
+
+	t.Run("nil input returned as is", func(t *testing.T) {
+		got := resourceScopedExceptions(nil, "res-1")
+		assert.Nil(t, got)
+	})
+
+	t.Run("all exceptions already scoped are returned unchanged", func(t *testing.T) {
+		in := []armotypes.PostureExceptionPolicy{scoped}
+		got := resourceScopedExceptions(in, "res-1")
+		assert.Equal(t, in, got)
+	})
+
+	t.Run("scope-less exception gets a resourceID designator", func(t *testing.T) {
+		got := resourceScopedExceptions([]armotypes.PostureExceptionPolicy{scopeLess}, "res-1")
+		require.Len(t, got, 1)
+		require.Len(t, got[0].Resources, 1)
+		assert.Equal(t, identifiers.DesignatorAttributes, got[0].Resources[0].DesignatorType)
+		assert.Equal(t, "res-1", got[0].Resources[0].Attributes[identifiers.AttributeResourceID])
+		// the original slice element must not be mutated
+		assert.Empty(t, scopeLess.Resources)
+	})
+
+	t.Run("mixed scoped and scope-less: only the scope-less one is touched", func(t *testing.T) {
+		got := resourceScopedExceptions([]armotypes.PostureExceptionPolicy{scoped, scopeLess}, "res-2")
+		require.Len(t, got, 2)
+		assert.Equal(t, scoped, got[0])
+		require.Len(t, got[1].Resources, 1)
+		assert.Equal(t, "res-2", got[1].Resources[0].Attributes[identifiers.AttributeResourceID])
+	})
+}
+
+// End-to-end regression for issue-3368: runs the real updateResults path against a
+// resource-backed failing control with a scope-less exception targeting it, and
+// checks that the exception actually suppresses the finding - not just that
+// resourceScopedExceptions produces the right shape in isolation.
+func TestUpdateResults_ScopeLessExceptionSuppressesResourceBackedFinding(t *testing.T) {
+	resource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "nginx",
+			"namespace": "default",
+		},
+	})
+
+	newFailingResult := func() resourcesresults.Result {
+		return resourcesresults.Result{
+			ResourceID: resource.GetID(),
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0001",
+					Name:      "control-1",
+					Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+					ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+						{Name: "rule-a", Status: apis.StatusFailed},
+					},
+				},
+			},
+		}
+	}
+
+	newSession := func(result resourcesresults.Result, scopeLessException armotypes.PostureExceptionPolicy) *cautils.OPASessionObj {
+		session := cautils.NewOPASessionObjMock()
+		session.AllResources[resource.GetID()] = resource
+		session.ResourcesResult[resource.GetID()] = result
+		session.Exceptions = []armotypes.PostureExceptionPolicy{scopeLessException}
+		session.AllPolicies = &cautils.Policies{
+			Controls: map[string]reporthandling.Control{
+				"C-0001": {ControlID: "C-0001"},
+			},
+		}
+		session.Report.SummaryDetails.Controls = reportsummary.ControlSummaries{
+			"C-0001": {ControlID: "C-0001"},
+		}
+		return session
+	}
+
+	t.Run("scope-less exception suppresses the matching resource-backed finding", func(t *testing.T) {
+		scopeLessException := armotypes.PostureExceptionPolicy{
+			PortalBase: armotypes.PortalBase{Name: "scope-less-exception"},
+			PosturePolicies: []armotypes.PosturePolicy{
+				{ControlID: "C-0001"},
+			},
+			// Resources deliberately left empty/nil - this is the documented
+			// "applies everywhere" shape from #1994.
+		}
+
+		opap := &OPAProcessor{OPASessionObj: newSession(newFailingResult(), scopeLessException)}
+		opap.updateResults(context.Background())
+
+		result := opap.ResourcesResult[resource.GetID()]
+		require.Len(t, result.AssociatedControls, 1)
+		ctrl := result.AssociatedControls[0]
+		assert.True(t, ctrl.GetStatus(nil).IsPassed(),
+			"a scope-less exception must suppress a resource-backed finding the same way it already does for manual controls")
+		assert.Equal(t, apis.SubStatusException, ctrl.GetStatus(nil).GetSubStatus())
+	})
+
+	t.Run("scope-less exception for a different control does not suppress this one", func(t *testing.T) {
+		unrelatedException := armotypes.PostureExceptionPolicy{
+			PortalBase: armotypes.PortalBase{Name: "scope-less-unrelated"},
+			PosturePolicies: []armotypes.PosturePolicy{
+				{ControlID: "C-9999"},
+			},
+		}
+
+		opap := &OPAProcessor{OPASessionObj: newSession(newFailingResult(), unrelatedException)}
+		opap.updateResults(context.Background())
+
+		result := opap.ResourcesResult[resource.GetID()]
+		require.Len(t, result.AssociatedControls, 1)
+		assert.True(t, result.AssociatedControls[0].GetStatus(nil).IsFailed(),
+			"an exception for an unrelated control must not suppress this finding")
+	})
+}
+
+func TestBuildControlExcludedRules(t *testing.T) {
+	framework := []reporthandling.Framework{{
+		Controls: []reporthandling.Control{
+			{ControlID: "C-0001", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-a"}}}},
+			{ControlID: "C-0002", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-b"}}}},
+			{ControlID: "C-0003", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-c"}}}},
+		},
+	}}
+
+	tests := []struct {
+		name          string
+		base          map[string]bool
+		skip          []string
+		include       []string
+		excludedRules []string
+		notExcluded   []string
+	}{
+		{
+			name:          "no filters",
+			base:          map[string]bool{"rule-a": false},
+			excludedRules: nil,
+			notExcluded:   []string{"rule-a", "rule-b", "rule-c"},
+		},
+		{
+			name:          "skip one control",
+			skip:          []string{"C-0002"},
+			excludedRules: []string{"rule-b"},
+			notExcluded:   []string{"rule-a", "rule-c"},
+		},
+		{
+			name:          "include only two controls",
+			include:       []string{"C-0001", "C-0002"},
+			excludedRules: []string{"rule-c"},
+			notExcluded:   []string{"rule-a", "rule-b"},
+		},
+		{
+			name:          "include two and skip one of them",
+			include:       []string{"C-0001", "C-0002"},
+			skip:          []string{"C-0002"},
+			excludedRules: []string{"rule-b", "rule-c"},
+			notExcluded:   []string{"rule-a"},
+		},
+		{
+			name:          "unknown control ids are ignored",
+			skip:          []string{"C-9999"},
+			excludedRules: nil,
+			notExcluded:   []string{"rule-a", "rule-b", "rule-c"},
+		},
+		{
+			name:          "include matches regardless of case",
+			include:       []string{"c-0002"},
+			excludedRules: []string{"rule-a", "rule-c"},
+			notExcluded:   []string{"rule-b"},
+		},
+		{
+			name:          "skip matches regardless of case",
+			skip:          []string{"c-0002"},
+			excludedRules: []string{"rule-b"},
+			notExcluded:   []string{"rule-a", "rule-c"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildControlExcludedRules(tt.base, framework, tt.skip, tt.include)
+			require.NoError(t, err)
+			for _, rule := range tt.excludedRules {
+				assert.True(t, got[rule], "expected rule %q to be excluded", rule)
+			}
+			for _, rule := range tt.notExcluded {
+				assert.False(t, got[rule], "expected rule %q not to be excluded", rule)
+			}
+		})
+	}
+}
+
+func TestBuildControlExcludedRules_IncludeNoMatchReturnsError(t *testing.T) {
+	framework := []reporthandling.Framework{{
+		Controls: []reporthandling.Control{
+			{ControlID: "C-0001", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-a"}}}},
+			{ControlID: "C-0002", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-b"}}}},
+		},
+	}}
+
+	_, err := buildControlExcludedRules(nil, framework, nil, []string{"C-9999"})
+	require.ErrorIs(t, err, errIncludeControlsNoMatch)
+
+	_, err = buildControlExcludedRules(nil, framework, nil, []string{"c-9999"})
+	require.ErrorIs(t, err, errIncludeControlsNoMatch)
+
+	_, err = buildControlExcludedRules(nil, framework, nil, []string{"C-9999", "C-8888"})
+	require.ErrorIs(t, err, errIncludeControlsNoMatch)
+
+	// Mixed: one valid + one invalid should NOT error, invalid is warned but valid keeps scan alive
+	got, err := buildControlExcludedRules(nil, framework, nil, []string{"C-0001", "C-9999"})
+	require.NoError(t, err)
+	assert.True(t, got["rule-b"], "rule-b should be excluded (not included)")
+	assert.False(t, got["rule-a"], "rule-a should not be excluded")
+
+	// Include valid then skip same => leaves zero controls => noControlsAfterFilter
+	_, err = buildControlExcludedRules(nil, framework, []string{"C-0001"}, []string{"C-0001"})
+	require.ErrorIs(t, err, errNoControlsAfterFilter)
+
+	// Skip all controls via skip alone => leaves zero
+	_, err = buildControlExcludedRules(nil, framework, []string{"C-0001", "C-0002"}, nil)
+	require.ErrorIs(t, err, errNoControlsAfterFilter)
 }

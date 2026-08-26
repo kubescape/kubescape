@@ -1,9 +1,11 @@
 package score
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/hostsensorutils"
 	"github.com/kubescape/opa-utils/score"
 )
 
@@ -32,6 +34,24 @@ func (su *ScoreWrapper) Calculate(reportVersion PostureReportVersion) error {
 	}
 
 	return fmt.Errorf("unsupported score calculator")
+}
+
+func (su *ScoreWrapper) CalculateWithTelemetry(ctx context.Context, reportVersion PostureReportVersion, telemetryChan <-chan hostsensorutils.SyscallEvent) error {
+	// Dynamically adjust scores based on eBPF telemetry
+	// This is a stub implementation
+	for {
+		select {
+		case <-ctx.Done():
+			return su.Calculate(reportVersion)
+		case event, ok := <-telemetryChan:
+			if !ok {
+				// Channel closed, compute final score
+				return su.Calculate(reportVersion)
+			}
+			fmt.Printf("Received telemetry: %+v\n", event)
+			// Adjust su.opaSessionObj.Report scores dynamically based on utilized capabilities
+		}
+	}
 }
 
 func NewScoreWrapper(opaSessionObj *cautils.OPASessionObj) *ScoreWrapper {

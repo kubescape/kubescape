@@ -3,9 +3,9 @@ package mocks
 import (
 	"context"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 )
 
 type MockIKubescape struct{}
@@ -16,16 +16,20 @@ func (m *MockIKubescape) Context() context.Context {
 
 func (m *MockIKubescape) SetContext(_ context.Context) {}
 
-func (m *MockIKubescape) Scan(_ *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
+func (m *MockIKubescape) Scan(_ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	return nil, nil
 }
 
-func (m *MockIKubescape) List(_ *metav1.ListPolicies) error {
-	return nil
+func (m *MockIKubescape) ScanContext(_ context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return nil, nil
 }
 
-func (m *MockIKubescape) Download(_ *metav1.DownloadInfo) error {
-	return nil
+func (m *MockIKubescape) List(_ *metav1.ListPolicies) (*metav1.ListResult, error) {
+	return &metav1.ListResult{}, nil
+}
+
+func (m *MockIKubescape) Download(_ *metav1.DownloadInfo) (*metav1.DownloadResult, error) {
+	return &metav1.DownloadResult{}, nil
 }
 
 func (m *MockIKubescape) SetCachedConfig(_ *metav1.SetConfig) error {
@@ -53,5 +57,9 @@ func (m *MockIKubescape) Patch(_ *metav1.PatchInfo, _ *cautils.ScanInfo) (bool, 
 }
 
 func (m *MockIKubescape) ScanImage(_ *metav1.ImageScanInfo, _ *cautils.ScanInfo) (bool, error) {
+	return false, nil
+}
+
+func (m *MockIKubescape) ScanImageContext(_ context.Context, _ *metav1.ImageScanInfo, _ *cautils.ScanInfo) (bool, error) {
 	return false, nil
 }

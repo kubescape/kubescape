@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: secret-creator-crb
+subjects:
+- kind: ServiceAccount
+  name: creator-sa
+  namespace: apps
+roleRef:
+  kind: ClusterRole
+  name: secret-creator
+  apiGroup: rbac.authorization.k8s.io
