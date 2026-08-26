@@ -22,6 +22,12 @@ var (
 	
   # List all supported controls names with ids
   %[1]s list controls
+
+  # Show the configurable inputs a scan evaluates controls against
+  %[1]s list controls-config
+
+  # Show the inputs a scan would use with a local controls-config override
+  %[1]s list controls-config --controls-config ./controls-inputs.json
   
   Control documentation:
   https://kubescape.io/docs/controls/
@@ -33,7 +39,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 
 	listCmd := &cobra.Command{
 		Use:     "list <policy> [flags]",
-		Short:   "List frameworks/controls will list the supported frameworks and controls",
+		Short:   "List the supported frameworks, controls and control configuration",
 		Long:    ``,
 		Example: listExample,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -68,6 +74,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 	listCmd.PersistentFlags().StringVarP(&listPolicies.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
 	listCmd.PersistentFlags().StringVarP(&listPolicies.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
 	listCmd.PersistentFlags().StringVarP(&listPolicies.Format, "format", "f", "pretty-print", "output format. supported: 'pretty-print'/'json'/'yaml'/'csv'")
+	listCmd.PersistentFlags().StringVar(&listPolicies.ControlsInputs, "controls-config", "", "Path to a controls-config file, to show the inputs a scan would use with it. Only applies to 'controls-config'")
 
 	// Deprecated flags
 	var dummyID bool

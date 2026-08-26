@@ -493,7 +493,7 @@ func TestListSupportActionsNotEmpty(t *testing.T) {
 
 func TestListSupportActionsReturnsSupportedActions(t *testing.T) {
 	got := ListSupportActions()
-	want := []string{"controls", "exceptions", "frameworks"}
+	want := []string{"controls", "controls-config", "exceptions", "frameworks"}
 	sort.Strings(got)
 
 	assert.Equal(t, want, got)
