@@ -729,3 +729,101 @@ func TestAddContainerNameToAssistedRemediation_OutOfBounds(t *testing.T) {
 		})
 	}
 }
+
+func TestAddContainerNameToAssistedRemediation_EdgeCases(t *testing.T) {
+	podWithContainerTypes := workloadinterface.NewWorkloadObj(map[string]any{
+		"kind": "Pod",
+		"spec": map[string]any{
+			"containers": []any{
+				map[string]any{"name": "app", "image": "app:latest"},
+			},
+			"initContainers": []any{
+				map[string]any{"name": "init", "image": "init:latest"},
+			},
+			"ephemeralContainers": []any{
+				map[string]any{"name": "debug", "image": "debug:latest"},
+			},
+		},
+	})
+
+	tests := []struct {
+		name          string
+		resource      workloadinterface.IMetadata
+		paths         []string
+		expectedPaths []string
+	}{
+		{
+			name:          "negative container index is unchanged",
+			resource:      podWithContainerTypes,
+			paths:         []string{"spec.containers[-1].securityContext.runAsNonRoot"},
+			expectedPaths: []string{"spec.containers[-1].securityContext.runAsNonRoot"},
+		},
+		{
+			name:          "non-numeric container index is unchanged",
+			resource:      podWithContainerTypes,
+			paths:         []string{"spec.containers[abc].securityContext.runAsNonRoot"},
+			expectedPaths: []string{"spec.containers[abc].securityContext.runAsNonRoot"},
+		},
+		{
+			name:          "missing containers field is unchanged",
+			resource:      workloadinterface.NewWorkloadObj(map[string]any{"kind": "Pod", "spec": map[string]any{}}),
+			paths:         []string{"spec.containers[0].securityContext.runAsNonRoot"},
+			expectedPaths: []string{"spec.containers[0].securityContext.runAsNonRoot"},
+		},
+		{
+			name:          "init container path appends name",
+			resource:      podWithContainerTypes,
+			paths:         []string{"spec.initContainers[0].securityContext.runAsNonRoot"},
+			expectedPaths: []string{"spec.initContainers[0].securityContext.runAsNonRoot (init)"},
+		},
+		{
+			name:          "ephemeral container path appends name",
+			resource:      podWithContainerTypes,
+			paths:         []string{"spec.ephemeralContainers[0].securityContext.runAsNonRoot"},
+			expectedPaths: []string{"spec.ephemeralContainers[0].securityContext.runAsNonRoot (debug)"},
+		},
+		{
+			name:          "out of bounds init container index is unchanged",
+			resource:      podWithContainerTypes,
+			paths:         []string{"spec.initContainers[5].securityContext.runAsNonRoot"},
+			expectedPaths: []string{"spec.initContainers[5].securityContext.runAsNonRoot"},
+		},
+		{
+			name:          "out of bounds ephemeral container index is unchanged",
+			resource:      podWithContainerTypes,
+			paths:         []string{"spec.ephemeralContainers[5].securityContext.runAsNonRoot"},
+			expectedPaths: []string{"spec.ephemeralContainers[5].securityContext.runAsNonRoot"},
+		},
+		{
+			name:          "nil resource does not panic",
+			resource:      nil,
+			paths:         []string{"spec.containers[0].securityContext.runAsNonRoot"},
+			expectedPaths: []string{"spec.containers[0].securityContext.runAsNonRoot"},
+		},
+		{
+			name: "nested template container path appends name",
+			resource: workloadinterface.NewWorkloadObj(map[string]any{
+				"kind": "Deployment",
+				"spec": map[string]any{
+					"template": map[string]any{
+						"spec": map[string]any{
+							"containers": []any{
+								map[string]any{"name": "web", "image": "web:latest"},
+							},
+						},
+					},
+				},
+			}),
+			paths:         []string{"spec.template.spec.containers[0].securityContext.runAsNonRoot"},
+			expectedPaths: []string{"spec.template.spec.containers[0].securityContext.runAsNonRoot (web)"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			paths := tt.paths
+			addContainerNameToAssistedRemediation(tt.resource, &paths)
+			assert.Equal(t, tt.expectedPaths, paths)
+		})
+	}
+}
