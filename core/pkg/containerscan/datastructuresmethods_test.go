@@ -129,7 +129,7 @@ func TestScanResultReportValidate(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "report with empty but non-nil layers should return true",
+			name: "report with empty layers should return false",
 			in: ScanResultReport{
 				CustomerGUID: "aaa",
 				ImgHash:      "bbb",
@@ -137,7 +137,20 @@ func TestScanResultReportValidate(t *testing.T) {
 				Timestamp:    1,
 				Layers:       LayersList{},
 			},
-			expected: true,
+			expected: false,
+		},
+		{
+			name: "report with empty layer hash should return false",
+			in: ScanResultReport{
+				CustomerGUID: "aaa",
+				ImgHash:      "bbb",
+				ImgTag:       "ccc",
+				Timestamp:    1,
+				Layers: LayersList{
+					{LayerHash: ""},
+				},
+			},
+			expected: false,
 		},
 		{
 			name: "report with duplicate layer hashes should return false",

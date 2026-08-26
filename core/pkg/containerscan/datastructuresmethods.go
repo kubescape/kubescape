@@ -42,7 +42,7 @@ func (scanresult *ScanResultReport) Validate() bool {
 		return false
 	}
 
-	if scanresult.Layers == nil {
+	if len(scanresult.Layers) == 0 {
 		return false
 	}
 
