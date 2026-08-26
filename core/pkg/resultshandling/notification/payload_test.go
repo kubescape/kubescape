@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -54,7 +55,7 @@ func TestMarshalPayloadBuildsDeterministicSlackBlockKit(t *testing.T) {
 		Controls: reportsummary.ControlSummaries{
 			"C-CRITICAL": failedControl("C-CRITICAL", "Critical <control>", 9.5, 1),
 			"C-HIGH-C":   failedControl("C-HIGH-C", "High with most failures", 8, 4),
-			"C-HIGH-B":   failedControl("C-HIGH-B", "High & beta", 8, 2),
+			"C-HIGH-B":   failedControl("C-HIGH-B", "High @channel & beta", 8, 2),
 			"C-HIGH-A":   failedControl("C-HIGH-A", "High alpha", 7, 2),
 			"C-MEDIUM":   failedControl("C-MEDIUM", "Medium", 5, 10),
 			"C-LOW":      failedControl("C-LOW", "Low control", 2, 20),
@@ -84,16 +85,17 @@ func TestMarshalPayloadBuildsDeterministicSlackBlockKit(t *testing.T) {
 		Text: &slackText{Type: "plain_text", Text: "Kubescape scan results"},
 	}, got.Blocks[0])
 	assert.Equal(t, []slackText{
-		{Type: "mrkdwn", Text: "*Controls*\n7 failed / 9 total\n1 passed · 1 skipped"},
-		{Type: "mrkdwn", Text: "*Compliance score*\n73.2%"},
+		{Type: "mrkdwn", Text: "*Controls*\n7 failed / 9 total\n1 passed · 1 skipped", Verbatim: true},
+		{Type: "mrkdwn", Text: "*Compliance score*\n73.2%", Verbatim: true},
 	}, got.Blocks[1].Fields)
 	require.NotNil(t, got.Blocks[2].Text)
 	assert.Equal(t, "mrkdwn", got.Blocks[2].Text.Type)
+	assert.True(t, got.Blocks[2].Text.Verbatim)
 	assert.Equal(t, "*Top failing controls*\n"+
 		"• *Critical* · `C-CRITICAL` — Critical &lt;control&gt;\n"+
 		"• *High* · `C-HIGH-C` — High with most failures\n"+
 		"• *High* · `C-HIGH-A` — High alpha\n"+
-		"• *High* · `C-HIGH-B` — High &amp; beta\n"+
+		"• *High* · `C-HIGH-B` — High @channel &amp; beta\n"+
 		"• *Medium* · `C-MEDIUM` — Medium\n"+
 		"• *Low* · `C-LOW` — Low control\n"+
 		"• *Unknown* · `C-UNKNOWN` — Unknown control", got.Blocks[2].Text.Text)
@@ -115,6 +117,32 @@ func TestMarshalPayloadLimitsSlackMessageToTopTenFailingControls(t *testing.T) {
 	assert.Equal(t, maxSlackFailingControls, strings.Count(got.Blocks[2].Text.Text, "\n• "))
 	assert.Contains(t, got.Blocks[2].Text.Text, "C-09")
 	assert.NotContains(t, got.Blocks[2].Text.Text, "C-10")
+}
+
+func TestMarshalPayloadBoundsLongSlackControlNames(t *testing.T) {
+	controls := make(reportsummary.ControlSummaries, maxSlackFailingControls)
+	for i := 0; i < maxSlackFailingControls; i++ {
+		id := fmt.Sprintf("C-%02d-%s", i, strings.Repeat("<", 500))
+		controls[id] = failedControl(id, strings.Repeat("@channel <&>", 500), 7, 1)
+	}
+
+	raw, err := MarshalPayload("https://hooks.slack.com/services/T000/B000/secret", &reportsummary.SummaryDetails{Controls: controls})
+	require.NoError(t, err)
+	var got slackPayload
+	require.NoError(t, json.Unmarshal(raw, &got))
+	require.Len(t, got.Blocks, 3)
+	require.NotNil(t, got.Blocks[2].Text)
+	assert.True(t, got.Blocks[2].Text.Verbatim)
+	assert.LessOrEqual(t, utf8.RuneCountInString(got.Blocks[2].Text.Text), maxSlackSectionTextLength)
+	assert.Equal(t, maxSlackFailingControls, strings.Count(got.Blocks[2].Text.Text, "\n• "))
+	assert.Contains(t, got.Blocks[2].Text.Text, "@channel")
+	assert.NotContains(t, got.Blocks[2].Text.Text, "&am…")
+	assert.NotContains(t, got.Blocks[2].Text.Text, "&l…")
+}
+
+func TestEscapeAndTruncateSlackTextKeepsEntitiesIntact(t *testing.T) {
+	assert.Equal(t, "&amp;…", escapeAndTruncateSlackText("&&", 6))
+	assert.Equal(t, "&lt;…", escapeAndTruncateSlackText("<<", 5))
 }
 
 func TestMarshalPayloadSlackOmitsFailingSectionWhenAllControlsPass(t *testing.T) {

@@ -5,12 +5,20 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
-const maxSlackFailingControls = 10
+const (
+	maxSlackFailingControls     = 10
+	maxSlackSectionTextLength   = 3000
+	maxSlackControlIDTextLength = 80
+	slackTopControlsHeading     = "*Top failing controls*"
+)
+
+var slackTextEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
 type slackPayload struct {
 	Text   string       `json:"text"`
@@ -24,8 +32,9 @@ type slackBlock struct {
 }
 
 type slackText struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	Type     string `json:"type"`
+	Text     string `json:"text"`
+	Verbatim bool   `json:"verbatim,omitempty"`
 }
 
 // IsSlackEndpoint reports whether endpoint is an official Slack or GovSlack
@@ -76,34 +85,21 @@ func newSlackPayload(summary *reportsummary.SummaryDetails) slackPayload {
 			{
 				Type: "section",
 				Fields: []slackText{
-					{Type: "mrkdwn", Text: fmt.Sprintf("*Controls*\n%d failed / %d total\n%d passed · %d skipped", controls.failed, controls.total, controls.passed, controls.skipped)},
-					{Type: "mrkdwn", Text: fmt.Sprintf("*Compliance score*\n%.1f%%", summary.ComplianceScore)},
+					{Type: "mrkdwn", Text: fmt.Sprintf("*Controls*\n%d failed / %d total\n%d passed · %d skipped", controls.failed, controls.total, controls.passed, controls.skipped), Verbatim: true},
+					{Type: "mrkdwn", Text: fmt.Sprintf("*Compliance score*\n%.1f%%", summary.ComplianceScore), Verbatim: true},
 				},
 			},
 		},
 	}
 	if len(controls.topFailing) > 0 {
 		lines := make([]string, 0, len(controls.topFailing)+1)
-		lines = append(lines, "*Top failing controls*")
+		lines = append(lines, slackTopControlsHeading)
 		for _, control := range controls.topFailing {
-			id := control.ControlID
-			if id == "" {
-				id = "unknown"
-			}
-			name := control.Name
-			if name == "" {
-				name = "Unnamed control"
-			}
-			lines = append(lines, fmt.Sprintf(
-				"• *%s* · `%s` — %s",
-				escapeSlackText(apis.ControlSeverityToString(control.ScoreFactor)),
-				escapeSlackText(id),
-				escapeSlackText(name),
-			))
+			lines = append(lines, slackControlLine(control))
 		}
 		payload.Blocks = append(payload.Blocks, slackBlock{
 			Type: "section",
-			Text: &slackText{Type: "mrkdwn", Text: strings.Join(lines, "\n")},
+			Text: &slackText{Type: "mrkdwn", Text: strings.Join(lines, "\n"), Verbatim: true},
 		})
 	}
 	return payload
@@ -155,5 +151,60 @@ func summarizeControls(controls reportsummary.ControlSummaries) controlSummary {
 }
 
 func escapeSlackText(value string) string {
-	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(value)
+	return slackTextEscaper.Replace(value)
+}
+
+func slackControlLine(control reportsummary.ControlSummary) string {
+	id := control.ControlID
+	if id == "" {
+		id = "unknown"
+	}
+	name := control.Name
+	if name == "" {
+		name = "Unnamed control"
+	}
+
+	severity := escapeSlackText(apis.ControlSeverityToString(control.ScoreFactor))
+	prefix := fmt.Sprintf("• *%s* · `", severity)
+	separator := "` — "
+	lineLength := maxSlackControlLineLength()
+	idBudget := min(maxSlackControlIDTextLength, lineLength-utf8.RuneCountInString(prefix+separator)-1)
+	renderedID := escapeAndTruncateSlackText(id, idBudget)
+	nameBudget := lineLength - utf8.RuneCountInString(prefix+renderedID+separator)
+	renderedName := escapeAndTruncateSlackText(name, nameBudget)
+	return prefix + renderedID + separator + renderedName
+}
+
+func maxSlackControlLineLength() int {
+	// Reserve one newline for each possible entry. Bounding every line to the
+	// remaining equal share guarantees the complete section stays within Slack's
+	// 3,000-character section text limit even when all ten entries are present.
+	return (maxSlackSectionTextLength - utf8.RuneCountInString(slackTopControlsHeading) - maxSlackFailingControls) / maxSlackFailingControls
+}
+
+func escapeAndTruncateSlackText(value string, maxLength int) string {
+	if maxLength <= 0 {
+		return ""
+	}
+	escaped := escapeSlackText(value)
+	if utf8.RuneCountInString(escaped) <= maxLength {
+		return escaped
+	}
+	if maxLength == 1 {
+		return "…"
+	}
+
+	var result strings.Builder
+	used := 0
+	for _, r := range value {
+		piece := escapeSlackText(string(r))
+		pieceLength := utf8.RuneCountInString(piece)
+		if used+pieceLength > maxLength-1 {
+			break
+		}
+		result.WriteString(piece)
+		used += pieceLength
+	}
+	result.WriteRune('…')
+	return result.String()
 }

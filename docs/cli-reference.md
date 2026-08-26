@@ -87,10 +87,10 @@ Slack messages contain the compliance score, passed/failed/skipped control count
   "blocks": [
     {"type": "header", "text": {"type": "plain_text", "text": "Kubescape scan results"}},
     {"type": "section", "fields": [
-      {"type": "mrkdwn", "text": "*Controls*\n2 failed / 8 total\n5 passed · 1 skipped"},
-      {"type": "mrkdwn", "text": "*Compliance score*\n73.2%"}
+      {"type": "mrkdwn", "text": "*Controls*\n2 failed / 8 total\n5 passed · 1 skipped", "verbatim": true},
+      {"type": "mrkdwn", "text": "*Compliance score*\n73.2%", "verbatim": true}
     ]},
-    {"type": "section", "text": {"type": "mrkdwn", "text": "*Top failing controls*\n• *Critical* · `C-0001` — Privileged container"}}
+    {"type": "section", "text": {"type": "mrkdwn", "text": "*Top failing controls*\n• *Critical* · `C-0001` — Privileged container", "verbatim": true}}
   ]
 }
 ```
