@@ -871,8 +871,11 @@ func bindingCoversResource(rules []admissionv1.NamedRuleWithOperations, resource
 // ClusterRoleBinding in the cluster. Three shipped controls mix the two
 // (C-0225, C-0262, C-0280).
 //
-// A warning rather than a refusal: the namespaced half of the binding is exactly
-// what was asked for, and --resource-rule can drop the rest.
+// A warning rather than a refusal while some of the surface is still narrowed:
+// that half of the binding is exactly what was asked for, and --resource-rule
+// can drop the rest. A --namespace that narrows nothing at all is refused, the
+// way --label is when it selects nothing — the emitted binding is then no
+// narrower than one carrying neither flag, and nothing else would say so.
 func checkNamespaceSelectorScope(namespaces, resourceRules []string, controlID, policyName string) error {
 	if len(namespaces) == 0 {
 		return nil
@@ -892,6 +895,10 @@ func checkNamespaceSelectorScope(namespaces, resourceRules []string, controlID, 
 	reach := resolveNamespaceSelectorReach(constraints.ResourceRules, bindingRules)
 	if len(reach.alwaysMatched) == 0 {
 		return nil
+	}
+	if !reach.narrowable {
+		return fmt.Errorf("--namespace narrows nothing on %s: every resource the binding covers is cluster-scoped (%s), and a namespaceSelector never exempts a cluster-scoped request; omit --namespace, or point --resource-rule at a namespaced resource the policy matches",
+			describeBoundPolicy(controlID, policyName), strings.Join(reach.alwaysMatched, ", "))
 	}
 	logger.L().Warning("--namespace does not narrow the cluster-scoped resources this policy matches; the apiserver never exempts a cluster-scoped request from a binding's namespaceSelector, so the binding enforces on them cluster-wide",
 		helpers.String("policy", policyName),
