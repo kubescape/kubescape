@@ -8,7 +8,9 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/anonymizer"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // TestUpdateResults_ThenAnonymizerApply_AnonymizesReferenceBackedEnvVarName
@@ -69,8 +71,8 @@ func TestUpdateResults_ThenAnonymizerApply_AnonymizesReferenceBackedEnvVarName(t
 	require.Nil(t, containers[0].Env[0].ValueFrom, "scrub must still clear the reference")
 	require.Equal(t, "XXXXXX", containers[0].Env[1].Value)
 
-	require.Len(t, opap.EnvVarSecretRefs[resourceID], 1, "removeData must record exactly the one reference-backed env var name")
-	_, recorded := opap.EnvVarSecretRefs[resourceID]["DB_PASSWORD"]
+	require.Len(t, opap.EnvVarSecretRefs[resourceID], 1, "removeData must record exactly the one container that had a reference-backed env var")
+	_, recorded := opap.EnvVarSecretRefs[resourceID]["app"]["DB_PASSWORD"]
 	require.True(t, recorded)
 
 	rh := &resultshandling.ResultsHandler{ScanData: session}
@@ -100,4 +102,76 @@ func TestUpdateResults_ThenAnonymizerApply_AnonymizesReferenceBackedEnvVarName(t
 	// secret reference and its value/name do not look sensitive, so neither
 	// should change.
 	require.Equal(t, "LOG_LEVEL", anonContainers[0].Env[1].Name, "an ordinary env var's name must not be anonymized")
+}
+
+// TestUpdateResults_ThenAnonymizerApply_DoesNotLeakAcrossContainers is the
+// full through-the-seam version of the cross-container collision matthyx and
+// CodeRabbit flagged on PR #3579: two containers in the same pod share an
+// env var name, TOKEN, but only one of them is reference-backed. The other
+// container's ordinary TOKEN must survive anonymizer.Apply completely
+// unchanged, even though EnvVarSecretRefs has an entry for "TOKEN" somewhere
+// in this resource.
+func TestUpdateResults_ThenAnonymizerApply_DoesNotLeakAcrossContainers(t *testing.T) {
+	raw := `{
+		"apiVersion": "v1",
+		"kind": "Pod",
+		"metadata": {"name": "app", "namespace": "prod"},
+		"spec": {
+			"containers": [
+				{
+					"name": "has-ref",
+					"env": [
+						{"name": "TOKEN", "valueFrom": {"secretKeyRef": {"name": "creds", "key": "token"}}}
+					]
+				},
+				{
+					"name": "ordinary",
+					"env": [
+						{"name": "TOKEN", "value": "not-a-secret-just-a-literal"}
+					]
+				}
+			]
+		}
+	}`
+
+	workload, err := workloadinterface.NewWorkload([]byte(raw))
+	require.NoError(t, err)
+	resourceID := workload.GetID()
+
+	session := cautils.NewOPASessionObjMock()
+	session.AllResources[resourceID] = workload
+
+	opap := &OPAProcessor{OPASessionObj: session}
+	opap.updateResults(context.Background())
+
+	rh := &resultshandling.ResultsHandler{ScanData: session}
+	require.NoError(t, anonymizer.Apply(rh))
+
+	require.Len(t, rh.ScanData.AllResources, 1)
+	var anonymized *workloadinterface.Workload
+	for _, resource := range rh.ScanData.AllResources {
+		anonymized = workloadinterface.NewWorkloadObj(resource.GetObject())
+	}
+	require.NotNil(t, anonymized)
+
+	anonContainers, err := anonymized.GetContainers()
+	require.NoError(t, err)
+	require.Len(t, anonContainers, 2)
+
+	var hasRefContainer, ordinaryContainer *corev1.Container
+	for i := range anonContainers {
+		switch {
+		// Container names are themselves anonymized, so identify each
+		// container by its (untouched) image-free structure instead: the
+		// one whose env var name changed is the reference-backed one.
+		case anonContainers[i].Env[0].Name != "TOKEN":
+			hasRefContainer = &anonContainers[i]
+		default:
+			ordinaryContainer = &anonContainers[i]
+		}
+	}
+
+	require.NotNil(t, hasRefContainer, "expected exactly one container with its TOKEN env var name anonymized")
+	require.NotNil(t, ordinaryContainer, "expected exactly one container with TOKEN left untouched")
+	assert.Equal(t, "TOKEN", ordinaryContainer.Env[0].Name, "the ordinary container's TOKEN must not be anonymized just because a different container's TOKEN is reference-backed")
 }

@@ -178,7 +178,8 @@ func TestRemoveData(t *testing.T) {
 // TestRemoveData_ReturnsReferenceBackedEnvVarNamesOnly guards the contract
 // removeData/removePodData/removeContainersData now carry for kubescape#3567:
 // the only signal that survives the scrub for a reference-backed env var is
-// its name, never the reference target or a plain env var's name.
+// its name, never the reference target or a plain env var's name, and it is
+// scoped per container name rather than merged across the whole pod.
 func TestRemoveData_ReturnsReferenceBackedEnvVarNamesOnly(t *testing.T) {
 	raw := `{
 		"apiVersion": "v1",
@@ -204,15 +205,61 @@ func TestRemoveData_ReturnsReferenceBackedEnvVarNamesOnly(t *testing.T) {
 	obj, err := workloadinterface.NewWorkload([]byte(raw))
 	require.NoError(t, err)
 
-	refNames := removeData(obj)
+	refsByContainer := removeData(obj)
 
-	require.Len(t, refNames, 2, "must record exactly the reference-backed names across containers and init containers, nothing else")
-	_, hasDBPassword := refNames["DB_PASSWORD"]
-	_, hasInitToken := refNames["INIT_TOKEN"]
+	require.Len(t, refsByContainer, 2, "must record exactly the two containers that had a reference-backed env var")
+	require.Contains(t, refsByContainer, "c1")
+	require.Contains(t, refsByContainer, "init")
+
+	_, hasDBPassword := refsByContainer["c1"]["DB_PASSWORD"]
 	assert.True(t, hasDBPassword)
-	assert.True(t, hasInitToken)
-	_, hasLogLevel := refNames["LOG_LEVEL"]
+	_, hasLogLevel := refsByContainer["c1"]["LOG_LEVEL"]
 	assert.False(t, hasLogLevel, "an ordinary env var's name must not be recorded")
+	assert.Len(t, refsByContainer["c1"], 1)
+
+	_, hasInitToken := refsByContainer["init"]["INIT_TOKEN"]
+	assert.True(t, hasInitToken)
+}
+
+// TestRemoveData_SameEnvVarNameAcrossContainersStaysContainerScoped is the
+// direct regression test for the cross-container collision matthyx and
+// CodeRabbit flagged on PR #3579: an ordinary env var in one container must
+// not be recorded just because a different container in the same pod has a
+// reference-backed env var with the same name.
+func TestRemoveData_SameEnvVarNameAcrossContainersStaysContainerScoped(t *testing.T) {
+	raw := `{
+		"apiVersion": "v1",
+		"kind": "Pod",
+		"metadata": {"name": "app", "namespace": "default"},
+		"spec": {
+			"containers": [
+				{
+					"name": "has-ref",
+					"env": [
+						{"name": "TOKEN", "valueFrom": {"secretKeyRef": {"name": "creds", "key": "token"}}}
+					]
+				},
+				{
+					"name": "ordinary",
+					"env": [
+						{"name": "TOKEN", "value": "not-a-secret-just-a-literal"}
+					]
+				}
+			]
+		}
+	}`
+
+	obj, err := workloadinterface.NewWorkload([]byte(raw))
+	require.NoError(t, err)
+
+	refsByContainer := removeData(obj)
+
+	require.Contains(t, refsByContainer, "has-ref")
+	_, recorded := refsByContainer["has-ref"]["TOKEN"]
+	assert.True(t, recorded, "the reference-backed container's TOKEN must be recorded")
+
+	_, ordinaryRecorded := refsByContainer["ordinary"]
+	assert.False(t, ordinaryRecorded, "the ordinary container must have no entry at all: its TOKEN was never reference-backed")
 }
 
 // TestRemoveData_SecretAndConfigMapReturnNil documents that removeData's new

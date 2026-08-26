@@ -15,7 +15,14 @@ import (
 // reversible encryption, or decryption using different Transformer
 // implementations.
 
-func transformContainerMetadata(resource workloadinterface.IMetadata, knownRefNames map[string]struct{}, transformer Transformer) error {
+// knownRefNames maps a container's name to the names of that container's
+// env vars that had a ValueFrom reference before removeData cleared it (see
+// removeData's doc comment in processorhandlerutils.go). It is keyed by
+// container name, not merged across the pod, because two containers in the
+// same pod can share an env var name where only one of them is
+// reference-backed — anonymizing the other would anonymize an ordinary env
+// var, which the anonymizer must never do.
+func transformContainerMetadata(resource workloadinterface.IMetadata, knownRefNames map[string]map[string]struct{}, transformer Transformer) error {
 
 	if resource == nil {
 		return nil
@@ -35,10 +42,15 @@ func transformContainerMetadata(resource workloadinterface.IMetadata, knownRefNa
 	return nil
 }
 
-func transformTypedContainerList(containers []corev1.Container, knownRefNames map[string]struct{}, transformer Transformer) error {
+func transformTypedContainerList(containers []corev1.Container, knownRefNames map[string]map[string]struct{}, transformer Transformer) error {
 	var err error
 
 	for i := range containers {
+		// Captured before the name itself is transformed below, so the
+		// lookup uses the real container name the scrub pass recorded
+		// against, not its anonymized replacement.
+		containerRefNames := knownRefNames[containers[i].Name]
+
 		if containers[i].Name != "" {
 			containers[i].Name, err = transformValue(transformer, "ctr", containers[i].Name)
 			if err != nil {
@@ -53,7 +65,7 @@ func transformTypedContainerList(containers []corev1.Container, knownRefNames ma
 			}
 		}
 
-		if err := transformTypedEnv(containers[i].Env, knownRefNames, transformer); err != nil {
+		if err := transformTypedEnv(containers[i].Env, containerRefNames, transformer); err != nil {
 			return err
 		}
 
@@ -65,10 +77,12 @@ func transformTypedContainerList(containers []corev1.Container, knownRefNames ma
 	return nil
 }
 
-func transformTypedEphemeralContainerList(containers []corev1.EphemeralContainer, knownRefNames map[string]struct{}, transformer Transformer) error {
+func transformTypedEphemeralContainerList(containers []corev1.EphemeralContainer, knownRefNames map[string]map[string]struct{}, transformer Transformer) error {
 	var err error
 
 	for i := range containers {
+		containerRefNames := knownRefNames[containers[i].Name]
+
 		if containers[i].Name != "" {
 			containers[i].Name, err = transformValue(transformer, "ctr", containers[i].Name)
 			if err != nil {
@@ -83,7 +97,7 @@ func transformTypedEphemeralContainerList(containers []corev1.EphemeralContainer
 			}
 		}
 
-		if err := transformTypedEnv(containers[i].Env, knownRefNames, transformer); err != nil {
+		if err := transformTypedEnv(containers[i].Env, containerRefNames, transformer); err != nil {
 			return err
 		}
 
@@ -102,7 +116,7 @@ func transformTypedEphemeralContainerList(containers []corev1.EphemeralContainer
 // into generic maps or as fully unstructured manifests depending on the scan
 // source, so traversal stays representation-agnostic and delegates
 // shape-specific transformations to dedicated helpers.
-func transformPodSpecs(node any, knownRefNames map[string]struct{}, transformer Transformer) error {
+func transformPodSpecs(node any, knownRefNames map[string]map[string]struct{}, transformer Transformer) error {
 
 	switch v := node.(type) {
 	case map[string]any:
@@ -182,9 +196,14 @@ func transformPodSpecs(node any, knownRefNames map[string]struct{}, transformer 
 // Different Transformer implementations can provide pseudonymization,
 // encryption, or decryption while sharing the same traversal logic.
 
-func transformContainerFields(container map[string]any, knownRefNames map[string]struct{}, transformer Transformer) error {
+func transformContainerFields(container map[string]any, knownRefNames map[string]map[string]struct{}, transformer Transformer) error {
 
 	var err error
+
+	// Looked up before the name field is overwritten below, same reason as
+	// the typed path in transformTypedContainerList.
+	containerName, _ := container["name"].(string)
+	containerRefNames := knownRefNames[containerName]
 
 	if name, ok := container["name"].(string); ok && name != "" {
 		name, err = transformValue(transformer, "ctr", name)
@@ -204,7 +223,7 @@ func transformContainerFields(container map[string]any, knownRefNames map[string
 		container["image"] = image
 	}
 
-	if err := transformUnstructuredEnv(container, knownRefNames, transformer); err != nil {
+	if err := transformUnstructuredEnv(container, containerRefNames, transformer); err != nil {
 		return err
 	}
 
@@ -222,7 +241,7 @@ func transformContainerFields(container map[string]any, knownRefNames map[string
 // referenced Kubernetes resources are transformed while preserving the
 // original workload structure.
 
-func transformContainerList(obj map[string]any, key string, knownRefNames map[string]struct{}, transformer Transformer) error {
+func transformContainerList(obj map[string]any, key string, knownRefNames map[string]map[string]struct{}, transformer Transformer) error {
 
 	rawContainers, ok := obj[key]
 	if !ok || rawContainers == nil {
@@ -259,7 +278,7 @@ func transformContainerList(obj map[string]any, key string, knownRefNames map[st
 // Container identifiers, image references, environment variables, and
 // referenced Kubernetes resources are transformed while preserving the
 // original workload structure.
-func transformEphemeralContainerList(obj map[string]any, key string, knownRefNames map[string]struct{}, transformer Transformer) error {
+func transformEphemeralContainerList(obj map[string]any, key string, knownRefNames map[string]map[string]struct{}, transformer Transformer) error {
 
 	rawContainers, ok := obj[key]
 	if !ok || rawContainers == nil {
