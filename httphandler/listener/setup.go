@@ -11,14 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v4/core/metrics"
 	"github.com/kubescape/kubescape/v4/httphandler/docs"
 	handlerequestsv1 "github.com/kubescape/kubescape/v4/httphandler/handlerequests/v1"
-	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const (
@@ -69,12 +68,12 @@ func SetupHTTPListener() error {
 	// Setup the OpenAPI UI handler
 	openApiHandler := docs.NewOpenAPIUIHandler()
 
-	rtr := mux.NewRouter()
+	rtr := http.NewServeMux()
 
 	// Health probes are intentionally unauthenticated — kubelet needs them without credentials.
-	rtr.HandleFunc(livePath, httpHandler.Live)
-	rtr.HandleFunc(readyPath, httpHandler.Ready)
-	rtr.PathPrefix(docs.OpenAPIV2Prefix).Methods("GET").Handler(openApiHandler)
+	rtr.HandleFunc("GET "+livePath, httpHandler.Live)
+	rtr.HandleFunc("GET "+readyPath, httpHandler.Ready)
+	rtr.Handle("GET "+docs.OpenAPIV2Prefix, openApiHandler)
 
 	// -------------------------------------------------------------------------
 	// Trust boundary for /v1/* (scan trigger + results):
@@ -97,21 +96,25 @@ func SetupHTTPListener() error {
 	// 429 + Retry-After and a 1 MiB body cap (KS_SCAN_REQUEST_MAX_BYTES).
 	// External L7 rate limiting should be done at the Ingress if needed.
 	// -------------------------------------------------------------------------
-	otelMiddleware := otelmux.Middleware("kubescape-svc")
-	v1SubRouter := rtr.PathPrefix(v1PathPrefix).Subrouter()
-	v1SubRouter.Use(otelMiddleware)
 	if tok := getAuthToken(); tok != "" {
 		logger.L().Info("API token authentication enabled for /v1/* endpoints", helpers.String("env", authTokenEnv))
 	} else {
 		logger.L().Warning("API token not configured — /v1/* endpoints are unauthenticated; ensure the service is not exposed beyond the cluster", helpers.String("env", authTokenEnv))
 	}
-	v1SubRouter.Use(bearerAuthMiddleware)
-	v1SubRouter.HandleFunc(v1PrometheusMetricsPath, httpHandler.Metrics) // deprecated
-	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.Scan).Methods(http.MethodPost)
-	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.CancelScan).Methods(http.MethodDelete)
-	v1SubRouter.HandleFunc(v1StatusPath, httpHandler.Status)
-	v1SubRouter.HandleFunc(v1ResultsPath, httpHandler.GetResults).Methods(http.MethodGet)
-	v1SubRouter.HandleFunc(v1ResultsPath, httpHandler.DeleteResults).Methods(http.MethodDelete)
+
+	v1Handler := func(handlerFunc http.HandlerFunc) http.Handler {
+		var h http.Handler = handlerFunc
+		h = bearerAuthMiddleware(h)
+		h = otelhttp.NewHandler(h, "kubescape-svc")
+		return h
+	}
+
+	rtr.Handle("GET "+v1PathPrefix+v1PrometheusMetricsPath, v1Handler(httpHandler.Metrics)) // deprecated
+	rtr.Handle("POST "+v1PathPrefix+v1ScanPath, v1Handler(httpHandler.Scan))
+	rtr.Handle("DELETE "+v1PathPrefix+v1ScanPath, v1Handler(httpHandler.CancelScan))
+	rtr.Handle("GET "+v1PathPrefix+v1StatusPath, v1Handler(httpHandler.Status))
+	rtr.Handle("GET "+v1PathPrefix+v1ResultsPath, v1Handler(httpHandler.GetResults))
+	rtr.Handle("DELETE "+v1PathPrefix+v1ResultsPath, v1Handler(httpHandler.DeleteResults))
 
 	// OpenTelemetry metrics initialization
 	metrics.Init()
