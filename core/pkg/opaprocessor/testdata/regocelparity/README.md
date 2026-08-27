@@ -21,9 +21,9 @@ the bundle ships, which is the same split a real scan has, so configuration that
 has drifted between the two libraries shows up as a disagreement rather than
 being papered over.
 
-Then per rule, mirroring regolibrary so a refresh is a plain copy:
+Then per rule, mirroring regolibrary so a refresh is close to a plain copy:
 
-```
+```text
 rules/<rule-name>/rule.metadata.json    the rule minus its Rego source
 rules/<rule-name>/raw.rego              becomes PolicyRule.Rule
 rules/<rule-name>/filter.rego           becomes PolicyRule.ResourceEnumerator (only some rules have one)
@@ -42,6 +42,24 @@ rules/<rule-name>/test/<case>/input.yaml  same thing for cases regolibrary wrote
   therefore fail where regolibrary's own test expects a pass. Both engines still
   see the configuration they would see in a scan, which is the question the
   harness is asking.
+
+## What is changed, and why
+
+Two mechanical edits to the fixtures. Both are worth raising in regolibrary so a
+later refresh does not undo them.
+
+- **Removed API versions bumped to the served one.** Seven CronJob fixtures were
+  on `batch/v1beta1` and one CSIStorageCapacity on `storage.k8s.io/v1beta1`. A
+  VAP's `matchConstraints` name concrete versions where regolibrary's rule match
+  uses `apiVersions: ["*"]`, so on the old version the fixture reached the Rego
+  side and not the CEL side, and the case compared nothing at all. On `batch/v1`
+  and `storage.k8s.io/v1` they compare, and they agree.
+- **One renamed Service.** In
+  `ensure-https-loadbalancers-encrypted-with-tls-aws/test/failed_multiple_loadbalancers`
+  both fixtures were `Service/api` with no namespace, so they shared a resource
+  ID and the second overwrote the first, leaving a case named for multiple load
+  balancers testing one. The second is now `api-tls`. The harness refuses a case
+  whose fixtures share an ID, so this cannot come back quietly.
 
 ## Refreshing
 

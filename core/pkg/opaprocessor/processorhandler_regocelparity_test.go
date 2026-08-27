@@ -39,7 +39,8 @@ import (
 // than assess them.
 //
 // The fixtures are regolibrary's own rule tests, vendored under
-// testdata/regocelparity — see the README there for what is copied and why.
+// testdata/regocelparity — see the README there for what is copied, what is
+// changed and why.
 //
 // Each side is configured the way a scan configures it, which means from
 // different files: the Rego rules read the postureControlInputs regolibrary
@@ -85,6 +86,13 @@ type regoCELControl struct {
 	// actually disagree somewhere: an entry that has gone stale is a worse
 	// outcome than one that was never written.
 	divergence string
+	// expect is the exact set of disagreements this control produces, one line
+	// per resource in the form "<case> <resourceID>: rego=<verdict>
+	// cel=<verdict>". Required whenever divergence is set. Pinning the set
+	// rather than just asserting that something disagreed means a gap that gets
+	// fixed upstream and a new disagreement that appears for an unrelated reason
+	// both fail here, instead of one hiding behind the other.
+	expect []string
 	// gap marks a divergence that is a defect rather than a decision — the CEL
 	// side is meant to match the Rego and does not yet. The fix belongs in
 	// cel-admission-library and never here, so an entry stands until a pin bump
@@ -111,23 +119,42 @@ var regoCELParityControls = []regoCELControl{
 			"file path (is_not_file_path), it matches sensitiveValues case-insensitively via (?i), and " +
 			"the bundle's ControlConfiguration is missing four of the sensitiveValues regexes regolibrary " +
 			"ships (AKIA, AIza, ghp_, xox)",
+		expect: []string{
+			"rule-credentials-configmap/env-value-akia-key /v1//ConfigMap/akia-key-configmap: rego=failed cel=passed",
+			"rule-credentials-in-env-var/deployment-env-with-filepath-value apps/v1/default/Deployment/test-metallb: rego=passed cel=failed",
+			"rule-credentials-in-env-var/env-value-akia-key /v1//Pod/akia-key-pod: rego=failed cel=passed",
+			"rule-credentials-in-env-var/env-value-lowercase-bearer /v1//Pod/lowercase-bearer-pod: rego=failed cel=passed",
+		},
 	},
 	{
 		controlID:  "C-0013",
 		rules:      []string{"non-root-containers"},
 		gap:        true,
 		divergence: "the CEL policy also requires allowPrivilegeEscalation=false, which non-root-containers does not check; a container that is non-root but silent on escalation passes the Rego and fails the policy",
+		expect: []string{
+			"non-root-containers/deployment-pass apps/v1//Deployment/nginx-deployment: rego=passed cel=failed",
+		},
 	},
-	{controlID: "C-0193", rules: psaBaselineRules, divergence: psaNamespaceSubject},
-	{controlID: "C-0194", rules: psaBaselineRules, divergence: psaNamespaceSubject},
-	{controlID: "C-0195", rules: psaBaselineRules, divergence: psaNamespaceSubject},
-	{controlID: "C-0197", rules: []string{
-		"pod-security-admission-restricted-applied-1",
-		"pod-security-admission-restricted-applied-2",
-	}, divergence: psaNamespaceSubject},
-	{controlID: "C-0202", rules: psaBaselineRules, divergence: psaNamespaceSubject},
-	{controlID: "C-0203", rules: psaBaselineRules, divergence: psaNamespaceSubject},
-	{controlID: "C-0204", rules: psaBaselineRules, divergence: psaNamespaceSubject},
+	{controlID: "C-0193", rules: psaBaselineRules, divergence: psaNamespaceSubject, expect: psaBaselineExpect},
+	{controlID: "C-0194", rules: psaBaselineRules, divergence: psaNamespaceSubject, expect: psaBaselineExpect},
+	{controlID: "C-0195", rules: psaBaselineRules, divergence: psaNamespaceSubject, expect: psaBaselineExpect},
+	{
+		controlID: "C-0197",
+		rules: []string{
+			"pod-security-admission-restricted-applied-1",
+			"pod-security-admission-restricted-applied-2",
+		},
+		divergence: psaNamespaceSubject,
+		expect: []string{
+			"pod-security-admission-restricted-applied-1/test /v1//Namespace/my-baseline-namespace: rego=failed cel=not evaluated",
+			"pod-security-admission-restricted-applied-1/test2 /v1//Namespace/my-namespace: rego=failed cel=not evaluated",
+			"pod-security-admission-restricted-applied-2/test /v1//Namespace/my-baseline-namespace: rego=failed cel=not evaluated",
+			"pod-security-admission-restricted-applied-2/test2 /v1//Namespace/my-namespace: rego=failed cel=not evaluated",
+		},
+	},
+	{controlID: "C-0202", rules: psaBaselineRules, divergence: psaNamespaceSubject, expect: psaBaselineExpect},
+	{controlID: "C-0203", rules: psaBaselineRules, divergence: psaNamespaceSubject, expect: psaBaselineExpect},
+	{controlID: "C-0204", rules: psaBaselineRules, divergence: psaNamespaceSubject, expect: psaBaselineExpect},
 	{controlID: "C-0207", rules: []string{"rule-secrets-in-env-var"}},
 	{
 		controlID: "C-0212",
@@ -135,6 +162,10 @@ var regoCELParityControls = []regoCELControl{
 		divergence: "the Rego exempts the kubernetes Service and Endpoints the apiserver creates in the " +
 			"default namespace, which CIS 5.7.4 excludes (regolibrary#644); the CEL policy has no such " +
 			"exemption, so it fails two resources every cluster has",
+		expect: []string{
+			"endpoints-in-default-namespace/kubernetes-default-allowed /v1/default/Endpoints/kubernetes: rego=passed cel=failed",
+			"service-in-default-namespace/kubernetes-default-allowed /v1/default/Service/kubernetes: rego=passed cel=failed",
+		},
 		rules: []string{
 			// One control fanning out to seventeen rules, one per kind that must not
 			// live in the default namespace. Its verdict is the OR over all of them.
@@ -178,15 +209,14 @@ var psaBaselineRules = []string{
 	"pod-security-admission-baseline-applied-2",
 }
 
-// retiredAPIVersions are API versions Kubernetes has removed. Some regolibrary
-// fixtures are still written against them, and a VAP's matchConstraints name
-// concrete versions rather than regolibrary's apiVersions: ["*"], so those
-// fixtures reach one engine and not the other. That is the fixture being old,
-// not the control disagreeing, so the objects are left in the input (a rule that
-// correlates resources still sees them) and only left out of the comparison.
-var retiredAPIVersions = map[string]string{
-	"batch/v1beta1":          "CronJob v1beta1, removed in Kubernetes 1.25",
-	"storage.k8s.io/v1beta1": "CSIStorageCapacity v1beta1, removed in Kubernetes 1.27",
+// psaBaselineExpect is what those six produce: every Namespace fixture fails the
+// Rego and reaches no CEL verdict at all, because the policies match workloads
+// and the fixtures hold nothing but Namespaces.
+var psaBaselineExpect = []string{
+	"pod-security-admission-baseline-applied-1/test /v1//Namespace/my-namespace: rego=failed cel=not evaluated",
+	"pod-security-admission-baseline-applied-1/test2 /v1//Namespace/my-namespace: rego=failed cel=not evaluated",
+	"pod-security-admission-baseline-applied-2/test /v1//Namespace/my-namespace: rego=failed cel=not evaluated",
+	"pod-security-admission-baseline-applied-2/test2 /v1//Namespace/my-namespace: rego=failed cel=not evaluated",
 }
 
 // parityVerdict is a per-resource outcome, as one engine reported it. It is the
@@ -204,9 +234,6 @@ const parityNotEvaluated parityVerdict = "not evaluated"
 type parityCase struct {
 	name    string
 	objects []map[string]any
-	// retired holds the IDs of objects on a removed API version, keyed to the
-	// reason, so the comparison can leave them out.
-	retired map[string]string
 }
 
 func TestRegoCELParity(t *testing.T) {
@@ -227,22 +254,23 @@ func TestRegoCELParity(t *testing.T) {
 					cel := celVerdicts(t, control, rules, testCase, settings)
 					evaluated += len(cel)
 
-					diff := compareVerdicts(rego, cel, testCase.retired)
+					diff := compareVerdicts(rego, cel)
 					disagreements = append(disagreements, prefixEach(testCase.name, diff)...)
 					if control.divergence == "" && len(diff) > 0 {
-						t.Errorf("%s: Rego and CEL disagree:\n%s", control.controlID, strings.Join(diff, "\n"))
+						t.Errorf("%s: Rego and CEL disagree:\n  %s", control.controlID, strings.Join(diff, "\n  "))
 					}
 				})
 			}
 
 			if control.divergence != "" {
-				resolved := "so the entry can go"
-				if control.gap {
-					resolved = "so the gap is closed and the entry can go"
-				}
-				require.NotEmpty(t, disagreements,
-					"%s agreed with Rego on every fixture, %s. It was listed as diverging: %s",
-					control.controlID, resolved, control.divergence)
+				require.NotEmpty(t, control.expect,
+					"%s declares a divergence but records no expected disagreements", control.controlID)
+				sort.Strings(disagreements)
+				require.Equal(t, control.expect, disagreements,
+					"%s no longer diverges the way it is recorded to (%s). Fewer lines than expected means the "+
+						"divergence is resolved and its entry should go; more or different lines mean something "+
+						"else has changed and needs its own explanation.",
+					control.controlID, control.divergence)
 				return
 			}
 
@@ -354,9 +382,8 @@ func mergeVerdicts(into map[string]parityVerdict, results map[string]*resourcesr
 	}
 }
 
-// compareVerdicts returns one line per resource the two engines disagree on,
-// skipping the ones on a removed API version.
-func compareVerdicts(rego, cel map[string]parityVerdict, retired map[string]string) []string {
+// compareVerdicts returns one line per resource the two engines disagree on.
+func compareVerdicts(rego, cel map[string]parityVerdict) []string {
 	resourceIDs := make([]string, 0, len(rego)+len(cel))
 	seen := make(map[string]struct{}, len(rego)+len(cel))
 	for _, side := range []map[string]parityVerdict{rego, cel} {
@@ -372,12 +399,9 @@ func compareVerdicts(rego, cel map[string]parityVerdict, retired map[string]stri
 
 	var diff []string
 	for _, resourceID := range resourceIDs {
-		if _, skip := retired[resourceID]; skip {
-			continue
-		}
 		regoVerdict, celVerdict := verdictOr(rego, resourceID), verdictOr(cel, resourceID)
 		if regoVerdict != celVerdict {
-			diff = append(diff, fmt.Sprintf("  %s: rego=%s cel=%s", resourceID, regoVerdict, celVerdict))
+			diff = append(diff, fmt.Sprintf("%s: rego=%s cel=%s", resourceID, regoVerdict, celVerdict))
 		}
 	}
 	return diff
@@ -393,7 +417,7 @@ func verdictOr(verdicts map[string]parityVerdict, resourceID string) parityVerdi
 func prefixEach(prefix string, lines []string) []string {
 	prefixed := make([]string, 0, len(lines))
 	for _, line := range lines {
-		prefixed = append(prefixed, prefix+line)
+		prefixed = append(prefixed, prefix+" "+line)
 	}
 	return prefixed
 }
@@ -413,6 +437,11 @@ func newParityScanner(t *testing.T, objects []map[string]any, settings map[strin
 	for _, object := range objects {
 		workload := workloadinterface.NewWorkloadObj(object)
 		require.NotNil(t, workload, "fixture is not a Kubernetes object: %v", object)
+		// AllResources is keyed by ID, so two fixtures in one case that agree on
+		// kind, namespace and name would silently collapse into one and the case
+		// would quietly test half of what it claims to.
+		require.NotContains(t, sessionObj.AllResources, workload.GetID(),
+			"two fixtures in this case share a resource ID, rename one of them")
 		sessionObj.AllResources[workload.GetID()] = workload
 
 		key := resourceGroupKey(t, object)
@@ -505,30 +534,10 @@ func parityCases(t *testing.T, ruleNames []string) []parityCase {
 			cases = append(cases, parityCase{
 				name:    ruleName + "/" + entry.Name(),
 				objects: objects,
-				retired: retiredObjects(t, objects),
 			})
 		}
 	}
 	return cases
-}
-
-// retiredObjects picks out the fixtures written against an API version
-// Kubernetes has removed, by the ID the scan would give them.
-func retiredObjects(t *testing.T, objects []map[string]any) map[string]string {
-	t.Helper()
-
-	retired := make(map[string]string)
-	for _, object := range objects {
-		apiVersion, _ := object["apiVersion"].(string)
-		reason, ok := retiredAPIVersions[apiVersion]
-		if !ok {
-			continue
-		}
-		workload := workloadinterface.NewWorkloadObj(object)
-		require.NotNil(t, workload, "fixture is not a Kubernetes object: %v", object)
-		retired[workload.GetID()] = reason
-	}
-	return retired
 }
 
 func readCaseObjects(t *testing.T, caseDir string) []map[string]any {
