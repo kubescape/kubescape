@@ -667,8 +667,8 @@ func TestResourceTable_DoesNotExposeSensitiveData(t *testing.T) {
 				},
 			},
 			paths: []armotypes.PosturePaths{
-				{FailedPath: "data.password"},
-				{FailedPath: "data.username"},
+				{ReviewPath: "data.password"},
+				{ReviewPath: "data.username"},
 			},
 			sensitive:   []string{"PLACEHOLDER_BASE64_001", "PLACEHOLDER_BASE64_002"},
 			showSecrets: false,
@@ -708,7 +708,7 @@ func TestResourceTable_DoesNotExposeSensitiveData(t *testing.T) {
 				},
 			},
 			paths: []armotypes.PosturePaths{
-				{FailedPath: "spec.containers[0].env[0].value"},
+				{ReviewPath: "spec.containers[0].env[0].value"},
 			},
 			sensitive:   []string{"PLACEHOLDER_VALUE_003"},
 			showSecrets: false,
@@ -729,8 +729,8 @@ func TestResourceTable_DoesNotExposeSensitiveData(t *testing.T) {
 				},
 			},
 			paths: []armotypes.PosturePaths{
-				{FailedPath: "data.password"},
-				{FailedPath: "data.username"},
+				{ReviewPath: "data.password"},
+				{ReviewPath: "data.username"},
 			},
 			sensitive:   []string{"PLACEHOLDER_BASE64_001", "PLACEHOLDER_BASE64_002"},
 			showSecrets: true,
