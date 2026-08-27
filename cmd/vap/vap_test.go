@@ -1508,6 +1508,35 @@ func TestResourceSelectorReach(t *testing.T) {
 	}
 }
 
+// TestResourceScope pins the resource's own API scope, which is what a
+// constraint's scope field is compared against. It reads a Namespace the way the
+// apiserver's rules matcher does — cluster-scoped — where a namespaceSelector
+// still narrows one by its own labels.
+func TestResourceScope(t *testing.T) {
+	cluster, namespaced := admissionv1.ClusterScope, admissionv1.NamespacedScope
+
+	tests := []struct {
+		name     string
+		groups   []string
+		resource string
+		want     *admissionv1.ScopeType
+	}{
+		{name: "a built-in namespaced resource", groups: []string{""}, resource: "pods", want: &namespaced},
+		{name: "a built-in cluster-scoped resource", groups: []string{"rbac.authorization.k8s.io"}, resource: "clusterroles", want: &cluster},
+		{name: "a namespace is cluster-scoped to the rules matcher", groups: []string{""}, resource: "namespaces", want: &cluster},
+		{name: "a subresource lives where its parent does", groups: []string{""}, resource: "pods/exec", want: &namespaced},
+		{name: "a built-in plural in another group is another resource", groups: []string{"custom.io"}, resource: "roles", want: nil},
+		{name: "a custom resource is not in the table", groups: []string{"agents.x-k8s.io"}, resource: "sandboxes", want: nil},
+		{name: "a wildcard names no one resource", groups: []string{"*"}, resource: "*", want: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, resourceScope(tt.groups, tt.resource))
+		})
+	}
+}
+
 // TestResolveNamespaceSelectorReach covers the surface the emitted binding
 // actually carries: the policy's matchConstraints, less whatever the caller's
 // own --resource-rule set drops.
@@ -1627,6 +1656,76 @@ func TestResolveNamespaceSelectorReach(t *testing.T) {
 
 		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint("apps", "v1", "deployments")}, bindingResourceRules(parsed))
 		assert.Empty(t, reach.alwaysMatched)
+		assert.True(t, reach.narrowable)
+	})
+
+	// A constraint's scope field also decides what it does not cover: a rule
+	// declaring one scope never matches a request of the other, so a resource on
+	// the wrong side of it is outside the surface rather than part of it.
+	scoped := func(scope admissionv1.ScopeType, rule admissionv1.NamedRuleWithOperations) admissionv1.NamedRuleWithOperations {
+		rule.Scope = &scope
+		return rule
+	}
+
+	t.Run("a declared cluster scope drops the namespaced resource beside it", func(t *testing.T) {
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{
+			scoped(admissionv1.ClusterScope, constraint(rbac, "v1", "rolebindings", "clusterrolebindings")),
+		}, nil)
+		assert.Equal(t, []string{rbac + "/v1/clusterrolebindings"}, reach.alwaysMatched)
+		assert.False(t, reach.narrowable)
+	})
+
+	// Refusing this named a namespaced resource as the cluster-scoped reason for
+	// the refusal. The constraint matches no deployment at all, so the binding
+	// covers nothing and there is nothing to report either way.
+	t.Run("a declared cluster scope drops what a rule narrows a wildcard to", func(t *testing.T) {
+		parsed, err := parseResourceRules([]string{"apps/v1/deployments"})
+		require.NoError(t, err)
+
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{
+			scoped(admissionv1.ClusterScope, constraint("*", "*", "*")),
+		}, bindingResourceRules(parsed))
+		assert.Empty(t, reach.alwaysMatched)
+		assert.False(t, reach.narrowable)
+	})
+
+	t.Run("a declared namespaced scope drops a cluster-scoped rule", func(t *testing.T) {
+		parsed, err := parseResourceRules([]string{rbac + "/v1/clusterroles"})
+		require.NoError(t, err)
+
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{
+			scoped(admissionv1.NamespacedScope, constraint("*", "*", "*")),
+		}, bindingResourceRules(parsed))
+		assert.Empty(t, reach.alwaysMatched)
+		assert.False(t, reach.narrowable)
+	})
+
+	// The table is contradicted only where it can speak. A declared scope stays
+	// the answer for the custom resources it exists to answer for.
+	t.Run("a declared scope still answers for a custom resource", func(t *testing.T) {
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{
+			scoped(admissionv1.ClusterScope, constraint("agents.x-k8s.io", "v1beta1", "sandboxes")),
+		}, nil)
+		assert.Equal(t, []string{"agents.x-k8s.io/v1beta1/sandboxes"}, reach.alwaysMatched)
+		assert.False(t, reach.narrowable)
+	})
+
+	// The asymmetry, from the other side: a Namespace is cluster-scoped to the
+	// rules matcher, so a cluster-scoped constraint covers it — and the selector
+	// still narrows it by its own labels.
+	t.Run("a declared cluster scope still covers narrowable namespaces", func(t *testing.T) {
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{
+			scoped(admissionv1.ClusterScope, constraint("", "v1", "namespaces")),
+		}, nil)
+		assert.Empty(t, reach.alwaysMatched)
+		assert.True(t, reach.narrowable)
+	})
+
+	t.Run("a scope of all scopes drops nothing", func(t *testing.T) {
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{
+			scoped(admissionv1.AllScopes, constraint(rbac, "v1", "rolebindings", "clusterrolebindings")),
+		}, nil)
+		assert.Equal(t, []string{rbac + "/v1/clusterrolebindings"}, reach.alwaysMatched)
 		assert.True(t, reach.narrowable)
 	})
 }

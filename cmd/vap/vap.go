@@ -809,14 +809,38 @@ func resourceSelectorReach(scope *admissionv1.ScopeType, groups []string, resour
 	if resource == "*" {
 		return reachAlwaysMatches // the rule sweeps cluster-scoped resources too
 	}
+	switch known := resourceScope(groups, resource); {
+	case known == nil:
+		return reachUnknown
+	case *known == admissionv1.NamespacedScope:
+		return reachNarrows
+	default:
+		return reachAlwaysMatches
+	}
+}
+
+// resourceScope is where a resource lives according to the built-in resource
+// table, nil where the table cannot speak for it — a custom resource, or a
+// built-in plural named at a group the table does not serve it from.
+//
+// Unlike resourceSelectorReach this is the resource's API scope, not what a
+// namespaceSelector does to it: a Namespace is cluster-scoped here even though a
+// selector still narrows it by its own labels. The two matchers read the same
+// resource differently, so what asks about the rules matcher asks here.
+func resourceScope(groups []string, resource string) *admissionv1.ScopeType {
+	resource, _ = splitSubresource(strings.ToLower(strings.TrimSpace(resource)))
+	if resource == "" || resource == "*" {
+		return nil
+	}
 	gvr, err := k8sinterface.GetGroupVersionResource(resource)
 	if err != nil || gvr.Resource == "" || !valuesOverlap(groups, []string{gvr.Group}) {
-		return reachUnknown
+		return nil
 	}
+	scope := admissionv1.ClusterScope
 	if k8sinterface.IsNamespaceScope(&gvr) {
-		return reachNarrows
+		scope = admissionv1.NamespacedScope
 	}
-	return reachAlwaysMatches
+	return &scope
 }
 
 // namespaceSelectorReach splits the surface an emitted binding covers by what
@@ -889,16 +913,23 @@ func resolveNamespaceSelectorReach(constraints, bindingRules []admissionv1.Named
 // names nothing for the binding to reach past, and nothing for a message about
 // it to echo.
 func bindingCoverage(constraint *admissionv1.NamedRuleWithOperations, resource string, bindingRules []admissionv1.NamedRuleWithOperations) []coveredResource {
-	if len(bindingRules) == 0 {
-		return []coveredResource{{groups: constraint.APIGroups, versions: constraint.APIVersions, resource: resource}}
-	}
 	var covered []coveredResource
+	keep := func(candidate coveredResource) {
+		if scopeExcludes(constraint.Scope, candidate.groups, candidate.resource) {
+			return
+		}
+		covered = append(covered, candidate)
+	}
+	if len(bindingRules) == 0 {
+		keep(coveredResource{groups: constraint.APIGroups, versions: constraint.APIVersions, resource: resource})
+		return covered
+	}
 	for i := range bindingRules {
 		for _, bound := range bindingRules[i].Resources {
 			if !resourcesOverlap([]string{resource}, []string{bound}) {
 				continue
 			}
-			covered = append(covered, coveredResource{
+			keep(coveredResource{
 				groups:   narrowWildcards(constraint.APIGroups, bindingRules[i].APIGroups),
 				versions: narrowWildcards(constraint.APIVersions, bindingRules[i].APIVersions),
 				resource: narrowResource(resource, bound),
@@ -906,6 +937,30 @@ func bindingCoverage(constraint *admissionv1.NamedRuleWithOperations, resource s
 		}
 	}
 	return covered
+}
+
+// scopeExcludes reports whether a constraint's own scope field rules out a
+// resource that would otherwise be in the surface it covers.
+//
+// A rule declaring Namespaced never matches a cluster-scoped request and one
+// declaring Cluster never matches a namespaced request, so a resource on the
+// wrong side of it is not covered at all: nothing there for a selector to reach,
+// and nothing for a message about one to name. Without this a policy declaring
+// scope Cluster over "*", narrowed to apps/v1/deployments, is refused for
+// covering only cluster-scoped resources and names a namespaced one as the
+// reason.
+//
+// Only the built-in table is contradicted, and only where it can speak: a
+// declared scope stays the answer for the custom resources it exists to speak
+// for. The table's answer here is the resource's API scope, so scope Cluster
+// over namespaces is no conflict — the rules matcher counts a Namespace as
+// cluster-scoped, whatever a namespaceSelector then does with it.
+func scopeExcludes(declared *admissionv1.ScopeType, groups []string, resource string) bool {
+	if declared == nil || *declared == admissionv1.AllScopes {
+		return false
+	}
+	known := resourceScope(groups, resource)
+	return known != nil && *known != *declared
 }
 
 // narrowResource is the more specific of a policy resource and a binding
