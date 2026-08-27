@@ -231,6 +231,77 @@ func TestContractAndCLIGateFloorsResolveMonotonically(t *testing.T) {
 	}
 }
 
+func TestScanContractCapturesResolvedProvenance(t *testing.T) {
+	scanInfo, _, err := executeCapturedScan(t, `
+      policy:
+        frameworks: [nsa]
+        controlsVersion: v2.0.307
+      scope:
+        includeNamespaces: [contract-ns]
+      evaluation:
+        scanTimeout: 2m
+      failure:
+        severityAtLeast: high
+        complianceBelow: 80
+        coverageBelow: 90
+        degradedPolicyInput: allow
+      output:
+        formats: [json]
+        omitRawResources: true`,
+		".",
+		"--controls-version", "v2.0.400",
+		"--include-namespaces", "runner-ns",
+		"--severity-threshold", "medium",
+		"--compliance-threshold", "95",
+		"--fail-coverage-below", "92",
+		"--fail-on-degraded-config",
+		"--format", "sarif",
+		"--omit-raw-resources=false")
+
+	require.ErrorIs(t, err, errContractScanReached)
+	require.NotNil(t, scanInfo)
+	provenance := scanInfo.ScanContract
+	require.NotNil(t, provenance)
+	assert.Equal(t, "config.kubescape.io/v1alpha1", provenance.APIVersion)
+	assert.Equal(t, "application-test", provenance.Name)
+	assert.Equal(t, "ci", provenance.Contract)
+	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, provenance.ContractDigest)
+	assert.Equal(t, "external", provenance.Source)
+	assert.Equal(t, []string{"policy", "scope", "evaluation", "failure", "output"}, provenance.AllowedSections)
+
+	require.NotNil(t, provenance.Effective)
+	require.NotNil(t, provenance.Effective.Scope)
+	assert.Equal(t, []string{"runner-ns"}, provenance.Effective.Scope.IncludeNamespaces)
+	require.NotNil(t, provenance.Effective.Output)
+	assert.Equal(t, []string{"sarif"}, provenance.Effective.Output.Formats)
+	require.NotNil(t, provenance.GateResolution)
+	assert.Equal(t, "high", *provenance.GateResolution.SeverityAtLeast.Contract)
+	assert.Equal(t, "medium", *provenance.GateResolution.SeverityAtLeast.RunnerFloor)
+	assert.Equal(t, "medium", *provenance.GateResolution.SeverityAtLeast.Effective)
+	assert.Equal(t, 80.0, *provenance.GateResolution.ComplianceBelow.Contract)
+	assert.Equal(t, 95.0, *provenance.GateResolution.ComplianceBelow.Effective)
+	assert.Equal(t, false, *provenance.GateResolution.DegradedPolicyInput.Contract)
+	assert.True(t, *provenance.GateResolution.DegradedPolicyInput.Effective)
+
+	require.NotNil(t, provenance.OrdinaryCLIOverrides)
+	require.NotNil(t, provenance.OrdinaryCLIOverrides.Policy)
+	assert.Equal(t, "v2.0.400", *provenance.OrdinaryCLIOverrides.Policy.ControlsVersion)
+	require.NotNil(t, provenance.OrdinaryCLIOverrides.Scope)
+	assert.Equal(t, []string{"runner-ns"}, *provenance.OrdinaryCLIOverrides.Scope.IncludeNamespaces)
+	require.NotNil(t, provenance.OrdinaryCLIOverrides.Output)
+	assert.Equal(t, []string{"sarif"}, *provenance.OrdinaryCLIOverrides.Output.Formats)
+	assert.False(t, *provenance.OrdinaryCLIOverrides.Output.OmitRawResources)
+}
+
+func TestSafeScanContractSource(t *testing.T) {
+	assert.Equal(t, ".kubescape/scan-contract.yaml", safeScanContractSource(".kubescape/scan-contract.yaml"))
+	assert.Equal(t, "external", safeScanContractSource("../scan-contract.yaml"))
+	assert.Equal(t, "external", safeScanContractSource(filepath.Join(t.TempDir(), "scan-contract.yaml")))
+	workingDirectory, err := os.Getwd()
+	require.NoError(t, err)
+	assert.Equal(t, "scan-contract.yaml", safeScanContractSource(filepath.Join(workingDirectory, "scan-contract.yaml")))
+}
+
 func TestContractDoesNotMaskInvalidExplicitCLIGates(t *testing.T) {
 	tests := []struct {
 		name    string
