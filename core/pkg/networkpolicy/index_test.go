@@ -89,7 +89,7 @@ func TestPolicyTypesFor_Defaulting(t *testing.T) {
 }
 
 func TestIsIsolated_NoPolicySelectsPod(t *testing.T) {
-	idx := NewIndex(nil, nil)
+	idx, _ := NewIndex(nil, nil)
 	pod := Endpoint{Namespace: "ns", Name: "app", Labels: map[string]string{"app": "web"}}
 
 	if idx.IsIsolated(pod, Ingress) {
@@ -102,7 +102,7 @@ func TestIsIsolated_NoPolicySelectsPod(t *testing.T) {
 
 func TestIsIsolated_PolicyInAnotherNamespaceDoesNotIsolate(t *testing.T) {
 	p := policy("other-ns", "deny-all", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}, nil, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{p}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{p}, nil)
 	pod := Endpoint{Namespace: "ns", Name: "app", Labels: map[string]string{"app": "web"}}
 
 	if idx.IsIsolated(pod, Ingress) {
@@ -112,7 +112,7 @@ func TestIsIsolated_PolicyInAnotherNamespaceDoesNotIsolate(t *testing.T) {
 
 func TestIsIsolated_EmptyPodSelectorSelectsWholeNamespace(t *testing.T) {
 	p := policy("ns", "deny-all", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}, nil, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{p}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{p}, nil)
 	pod := Endpoint{Namespace: "ns", Name: "app", Labels: map[string]string{"anything": "goes"}}
 
 	if !idx.IsIsolated(pod, Ingress) {
@@ -126,7 +126,7 @@ func TestIsIsolated_MalformedPodSelectorSkipsThatPolicyOnly(t *testing.T) {
 		MatchExpressions: []metav1.LabelSelectorRequirement{{Key: "x", Operator: "NotARealOperator"}},
 	}, []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}, nil, nil)
 
-	idx := NewIndex([]*networkingv1.NetworkPolicy{good, bad}, nil)
+	idx, errs := NewIndex([]*networkingv1.NetworkPolicy{good, bad}, nil)
 	pod := Endpoint{Namespace: "ns", Name: "app"}
 
 	if !idx.IsIsolated(pod, Ingress) {
@@ -134,6 +134,9 @@ func TestIsIsolated_MalformedPodSelectorSkipsThatPolicyOnly(t *testing.T) {
 	}
 	if idx.IsIsolated(pod, Egress) {
 		t.Error("the malformed policy must be skipped, not treated as isolating for egress")
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected exactly one error for the malformed podSelector, got %d: %v", len(errs), errs)
 	}
 }
 

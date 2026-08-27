@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/pkg/networkpolicy"
@@ -60,12 +61,18 @@ func createNetworkReachabilityTools(ksServer *KubescapeMcpserver) {
 		var port *networkpolicy.PortSpec
 		if raw, ok := args["port"]; ok {
 			f, ok := raw.(float64)
-			if !ok || f <= 0 || f != float64(int64(f)) {
-				return mcp.NewToolResultError("port must be a positive integer"), nil
+			if !ok || f <= 0 || f > 65535 || f != float64(int64(f)) {
+				return mcp.NewToolResultError("port must be a positive integer between 1 and 65535"), nil
 			}
 			proto := corev1.ProtocolTCP
 			if rawProto, ok := args["protocol"].(string); ok && rawProto != "" {
-				proto = corev1.Protocol(rawProto)
+				normalized := corev1.Protocol(strings.ToUpper(rawProto))
+				switch normalized {
+				case corev1.ProtocolTCP, corev1.ProtocolUDP, corev1.ProtocolSCTP:
+					proto = normalized
+				default:
+					return mcp.NewToolResultError(fmt.Sprintf("protocol must be one of TCP, UDP, SCTP (got %q)", rawProto)), nil
+				}
 			}
 			port = &networkpolicy.PortSpec{Protocol: proto, Port: int32(f)}
 		}
@@ -105,7 +112,8 @@ func createNetworkReachabilityTools(ksServer *KubescapeMcpserver) {
 
 		policies, namespaces, decodeErrs := networkpolicy.FromResources(resources)
 
-		idx := networkpolicy.NewIndex(policies, namespaces)
+		idx, indexErrs := networkpolicy.NewIndex(policies, namespaces)
+		decodeErrs = append(decodeErrs, indexErrs...)
 
 		src := networkpolicy.EndpointFromResource(workloadinterface.NewWorkloadObj(srcPodObj.Object))
 		dst := networkpolicy.EndpointFromResource(workloadinterface.NewWorkloadObj(dstPodObj.Object))
@@ -137,6 +145,16 @@ func createNetworkReachabilityTools(ksServer *KubescapeMcpserver) {
 				msgs[i] = e.Error()
 			}
 			result["decode_warnings"] = msgs
+			// A dropped NetworkPolicy (decode failure, or an unparseable
+			// podSelector) could have been the one restricting or allowing
+			// this exact connection, in either direction -- so a confident
+			// allowed/denied computed without it is not trustworthy. This
+			// package's own three-valued design exists precisely to avoid
+			// reporting a confident-but-wrong answer; a dropped policy is
+			// such a case, so the top-level verdict is downgraded here even
+			// though the underlying egress/ingress computation itself
+			// still reports whatever it could determine.
+			result["verdict"] = networkpolicy.Unknown.String()
 		}
 
 		resBytes, err := json.Marshal(result)

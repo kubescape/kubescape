@@ -171,9 +171,12 @@ func portVerdict(ports []networkingv1.NetworkPolicyPort, query *PortSpec) (Verdi
 		return Allowed, "rule has no port restriction"
 	}
 	if query == nil {
-		// Caller did not ask about a specific port; a rule that restricts
-		// ports at all cannot be confirmed to cover "any port."
-		return Unknown, "rule restricts ports, but no specific port was queried"
+		// No specific port was queried: per PortSpec's own doc and this
+		// tool's documented behavior, that means "is this connection
+		// possible at all, regardless of port" -- so a rule's port
+		// restriction is irrelevant to the question actually being asked,
+		// not an obstacle to answering it.
+		return Allowed, "no specific port was queried; rule's port restriction does not apply"
 	}
 
 	sawUnknown := false

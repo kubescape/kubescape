@@ -9,7 +9,7 @@ import (
 )
 
 func TestReaches_NoPoliciesAtAll_AllowsEverything(t *testing.T) {
-	idx := NewIndex(nil, nil)
+	idx, _ := NewIndex(nil, nil)
 	src := Endpoint{Namespace: "ns", Name: "client"}
 	dst := Endpoint{Namespace: "ns", Name: "server"}
 
@@ -24,7 +24,7 @@ func TestReaches_NoPoliciesAtAll_AllowsEverything(t *testing.T) {
 
 func TestReaches_DefaultDenyIngress_BlocksEverySource(t *testing.T) {
 	denyAll := policy("ns", "deny-all-ingress", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}, nil, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{denyAll}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{denyAll}, nil)
 
 	src := Endpoint{Namespace: "ns", Name: "client", Labels: map[string]string{"app": "client"}}
 	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
@@ -48,7 +48,7 @@ func TestReaches_IngressRuleAllowsSpecificPodSelector(t *testing.T) {
 				},
 			},
 		}, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{allowFromClient}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allowFromClient}, nil)
 
 	allowedClient := Endpoint{Namespace: "ns", Name: "client", Labels: map[string]string{"app": "client"}}
 	otherClient := Endpoint{Namespace: "ns", Name: "other", Labels: map[string]string{"app": "other"}}
@@ -68,7 +68,7 @@ func TestReaches_PodSelectorPeerIsSameNamespaceOnly(t *testing.T) {
 		[]networkingv1.NetworkPolicyIngressRule{
 			{From: []networkingv1.NetworkPolicyPeer{{PodSelector: podSelectorPtr(selector("app", "client"))}}},
 		}, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
 
 	sameNsClient := Endpoint{Namespace: "ns", Name: "client", Labels: map[string]string{"app": "client"}}
 	otherNsClient := Endpoint{Namespace: "other-ns", Name: "client", Labels: map[string]string{"app": "client"}}
@@ -88,7 +88,7 @@ func TestReaches_NamespaceSelectorPeerAllowsAnyNamespaceMatchingLabels(t *testin
 		[]networkingv1.NetworkPolicyIngressRule{
 			{From: []networkingv1.NetworkPolicyPeer{{NamespaceSelector: namespaceSelectorPtr(selector("env", "prod"))}}},
 		}, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{allow}, []NamespaceInfo{
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, []NamespaceInfo{
 		{Name: "prod-ns", Labels: map[string]string{"env": "prod"}},
 		{Name: "dev-ns", Labels: map[string]string{"env": "dev"}},
 	})
@@ -114,7 +114,7 @@ func TestReaches_CombinedNamespaceAndPodSelectorIsAND(t *testing.T) {
 				PodSelector:       podSelectorPtr(selector("app", "client")),
 			}}},
 		}, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{allow}, []NamespaceInfo{
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, []NamespaceInfo{
 		{Name: "prod-ns", Labels: map[string]string{"env": "prod"}},
 	})
 
@@ -139,7 +139,7 @@ func TestReaches_MultiplePeerEntriesAreOR(t *testing.T) {
 				{PodSelector: podSelectorPtr(selector("app", "b"))},
 			}},
 		}, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
 	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
 
 	for _, label := range []string{"a", "b"} {
@@ -161,7 +161,7 @@ func TestReaches_MultiplePoliciesOnSamePodAreOR(t *testing.T) {
 	fromB := policy("ns", "allow-b", selector("app", "server"),
 		[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
 		[]networkingv1.NetworkPolicyIngressRule{{From: []networkingv1.NetworkPolicyPeer{{PodSelector: podSelectorPtr(selector("app", "b"))}}}}, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{fromA, fromB}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{fromA, fromB}, nil)
 	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
 
 	srcA := Endpoint{Namespace: "ns", Name: "a", Labels: map[string]string{"app": "a"}}
@@ -184,7 +184,7 @@ func TestReaches_EgressOnlyPolicyDoesNotIsolateIngress(t *testing.T) {
 		[]networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
 		nil,
 		[]networkingv1.NetworkPolicyEgressRule{{To: []networkingv1.NetworkPolicyPeer{{PodSelector: podSelectorPtr(selector("app", "external"))}}}})
-	idx := NewIndex([]*networkingv1.NetworkPolicy{egressOnly}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{egressOnly}, nil)
 
 	src := Endpoint{Namespace: "ns", Name: "anyone", Labels: map[string]string{"app": "anyone"}}
 	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
@@ -212,7 +212,7 @@ func TestReaches_RequiresBothEgressAndIngressToAllow(t *testing.T) {
 		[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
 		[]networkingv1.NetworkPolicyIngressRule{{From: []networkingv1.NetworkPolicyPeer{{PodSelector: podSelectorPtr(selector("app", "allowed-src"))}}}},
 		nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{srcEgress, dstIngress}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{srcEgress, dstIngress}, nil)
 
 	client := Endpoint{Namespace: "ns", Name: "client", Labels: map[string]string{"app": "client"}}
 	server := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
@@ -238,7 +238,7 @@ func TestReaches_RequiresBothEgressAndIngressToAllow(t *testing.T) {
 		[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
 		[]networkingv1.NetworkPolicyIngressRule{{From: []networkingv1.NetworkPolicyPeer{{PodSelector: podSelectorPtr(selector("app", "client"))}}}},
 		nil)
-	idx2 := NewIndex([]*networkingv1.NetworkPolicy{srcEgress2, dstIngress2}, nil)
+	idx2, _ := NewIndex([]*networkingv1.NetworkPolicy{srcEgress2, dstIngress2}, nil)
 	v2, _, _ := idx2.Reaches(client, server, nil)
 	if v2 != Allowed {
 		t.Errorf("verdict = %v, want Allowed once both sides agree", v2)
@@ -249,7 +249,7 @@ func TestReaches_PortMatching(t *testing.T) {
 	allow := policy("ns", "allow-port-80", selector("app", "server"),
 		[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
 		[]networkingv1.NetworkPolicyIngressRule{{Ports: tcpPort(80)}}, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
 	src := Endpoint{Namespace: "ns", Name: "client"}
 	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
 
@@ -268,7 +268,7 @@ func TestReaches_PortRangeWithEndPort(t *testing.T) {
 	allow := policy("ns", "allow-range", selector("app", "server"),
 		[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
 		[]networkingv1.NetworkPolicyIngressRule{{Ports: []networkingv1.NetworkPolicyPort{{Port: &port, EndPort: &hi}}}}, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
 	src := Endpoint{Namespace: "ns", Name: "client"}
 	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
 
@@ -284,7 +284,7 @@ func TestReaches_NamedPortIsUnknown(t *testing.T) {
 	allow := policy("ns", "allow-named-port", selector("app", "server"),
 		[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
 		[]networkingv1.NetworkPolicyIngressRule{{Ports: namedPort("https")}}, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
 	src := Endpoint{Namespace: "ns", Name: "client"}
 	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
 
@@ -306,7 +306,7 @@ func TestReaches_IPBlockWithExcept(t *testing.T) {
 				Except: []string{"10.0.0.128/25"},
 			}}}},
 		}, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
 	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
 
 	inRange := Endpoint{Namespace: "ns", Name: "client", IP: "10.0.0.50"}
@@ -330,7 +330,7 @@ func TestReaches_IPBlockWithoutKnownIPIsUnknown(t *testing.T) {
 		[]networkingv1.NetworkPolicyIngressRule{
 			{From: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "10.0.0.0/24"}}}},
 		}, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
 	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
 	src := Endpoint{Namespace: "ns", Name: "client"} // no IP set
 
@@ -351,7 +351,7 @@ func TestReaches_NamespaceSelectorWithUncollectedNamespaceIsUnknown(t *testing.T
 		}, nil)
 	// Deliberately no NamespaceInfo at all: the scan never collected the
 	// Namespace object for "unknown-ns".
-	idx := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
 	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
 	src := Endpoint{Namespace: "unknown-ns", Name: "client"}
 
@@ -370,7 +370,7 @@ func TestReaches_EmptyNamespaceSelectorMatchesEverythingEvenIfUncollected(t *tes
 		[]networkingv1.NetworkPolicyIngressRule{
 			{From: []networkingv1.NetworkPolicyPeer{{NamespaceSelector: &metav1.LabelSelector{}}}},
 		}, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil) // no namespaces collected at all
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil) // no namespaces collected at all
 	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
 	src := Endpoint{Namespace: "any-uncollected-ns", Name: "client"}
 
@@ -389,7 +389,7 @@ func TestReaches_EmptyFromListMatchesNoOne(t *testing.T) {
 	allow := policy("ns", "allow-empty-from", selector("app", "server"),
 		[]networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
 		[]networkingv1.NetworkPolicyIngressRule{{From: []networkingv1.NetworkPolicyPeer{}}}, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
 	src := Endpoint{Namespace: "ns", Name: "anyone"}
 	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
 
@@ -405,7 +405,7 @@ func TestReaches_MultipleRulesOnOnePolicyAreOR(t *testing.T) {
 			{From: []networkingv1.NetworkPolicyPeer{{PodSelector: podSelectorPtr(selector("app", "a"))}}},
 			{From: []networkingv1.NetworkPolicyPeer{{PodSelector: podSelectorPtr(selector("app", "b"))}}},
 		}, nil)
-	idx := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{allow}, nil)
 	dst := Endpoint{Namespace: "ns", Name: "server", Labels: map[string]string{"app": "server"}}
 
 	a := Endpoint{Namespace: "ns", Name: "a", Labels: map[string]string{"app": "a"}}

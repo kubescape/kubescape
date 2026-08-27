@@ -11,6 +11,8 @@
 package networkpolicy
 
 import (
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -70,16 +72,21 @@ type compiledPolicy struct {
 	policy      *networkingv1.NetworkPolicy
 	podSelector labels.Selector
 	hasIngress  bool // Ingress is in policyTypes (explicit, or defaulted)
-	hasEgress   bool // Egress is in policyTypes (explicit only; never defaulted)
+	hasEgress   bool // Egress is in policyTypes (explicit, or defaulted from having egress rules when policyTypes is unset)
 }
 
 // NewIndex builds an Index from a cluster's (or a scan's) collected
 // NetworkPolicy objects and namespace metadata. A policy with an
 // unparseable podSelector is skipped rather than making the whole Index
 // fail to build: one malformed object should not blind every query about
-// every other namespace.
-func NewIndex(policies []*networkingv1.NetworkPolicy, namespaces []NamespaceInfo) *Index {
-	idx := &Index{
+// every other namespace. Its error is appended to errs -- mirroring
+// FromResources' decodeErrs -- so a caller can surface it (e.g. in a
+// decode_warnings field) rather than have it disappear silently; dropping a
+// policy this way can turn a real Denied into a false Allowed, so callers of
+// a security-sensitive query should treat a non-empty errs as reason to
+// distrust an Allowed verdict.
+func NewIndex(policies []*networkingv1.NetworkPolicy, namespaces []NamespaceInfo) (idx *Index, errs []error) {
+	idx = &Index{
 		byNamespace: make(map[string][]*compiledPolicy),
 		namespaces:  make(map[string]NamespaceInfo, len(namespaces)),
 	}
@@ -94,6 +101,7 @@ func NewIndex(policies []*networkingv1.NetworkPolicy, namespaces []NamespaceInfo
 		}
 		sel, err := metav1.LabelSelectorAsSelector(&p.Spec.PodSelector)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("NetworkPolicy %s/%s: unparseable podSelector, skipped: %w", p.Namespace, p.Name, err))
 			continue
 		}
 
@@ -107,7 +115,7 @@ func NewIndex(policies []*networkingv1.NetworkPolicy, namespaces []NamespaceInfo
 		})
 	}
 
-	return idx
+	return idx, errs
 }
 
 // policyTypesFor reproduces the Kubernetes API's own defaulting for

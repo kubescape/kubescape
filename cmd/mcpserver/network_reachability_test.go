@@ -188,3 +188,90 @@ func TestAnalyzeNetworkReachability_NoPoliciesAllowsByDefault(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
 	require.Equal(t, "allowed", parsed["verdict"])
 }
+
+func TestAnalyzeNetworkReachability_LowercaseProtocolIsNormalized(t *testing.T) {
+	allowPort80 := unstructuredNetworkPolicy("prod", "allow-port-80", map[string]any{
+		"podSelector": map[string]any{"matchLabels": map[string]any{"app": "server"}},
+		"policyTypes": []any{"Ingress"},
+		"ingress": []any{
+			map[string]any{
+				"ports": []any{
+					map[string]any{"protocol": "TCP", "port": int64(80)},
+				},
+			},
+		},
+	})
+	server := unstructuredPod("prod", "server", map[string]any{"app": "server"})
+	client := unstructuredPod("prod", "client", map[string]any{"app": "client"})
+
+	ksServer := newReachabilityTestServer(allowPort80, server, client)
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_network_reachability", map[string]any{
+		"source_namespace":      "prod",
+		"source_pod":            "client",
+		"destination_namespace": "prod",
+		"destination_pod":       "server",
+		"port":                  float64(80),
+		"protocol":              "tcp",
+	}))
+	require.False(t, result.IsError)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+	require.Equal(t, "allowed", parsed["verdict"], "a lowercase protocol must be normalized, not silently fail every port match")
+}
+
+func TestAnalyzeNetworkReachability_InvalidProtocolReturnsError(t *testing.T) {
+	ksServer := newReachabilityTestServer()
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_network_reachability", map[string]any{
+		"source_namespace":      "prod",
+		"source_pod":            "client",
+		"destination_namespace": "prod",
+		"destination_pod":       "server",
+		"port":                  float64(80),
+		"protocol":              "ICMP",
+	}))
+	require.True(t, result.IsError)
+}
+
+func TestAnalyzeNetworkReachability_PortAboveRangeReturnsError(t *testing.T) {
+	ksServer := newReachabilityTestServer()
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_network_reachability", map[string]any{
+		"source_namespace":      "prod",
+		"source_pod":            "client",
+		"destination_namespace": "prod",
+		"destination_pod":       "server",
+		"port":                  float64(70000),
+	}))
+	require.True(t, result.IsError)
+}
+
+func TestAnalyzeNetworkReachability_MalformedPodSelectorDowngradesVerdictToUnknown(t *testing.T) {
+	bad := unstructuredNetworkPolicy("prod", "broken", map[string]any{
+		"podSelector": map[string]any{
+			"matchExpressions": []any{
+				map[string]any{"key": "x", "operator": "NotARealOperator"},
+			},
+		},
+		"policyTypes": []any{"Ingress"},
+	})
+	server := unstructuredPod("prod", "server", map[string]any{"app": "server"})
+	client := unstructuredPod("prod", "client", map[string]any{"app": "client"})
+
+	ksServer := newReachabilityTestServer(bad, server, client)
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_network_reachability", map[string]any{
+		"source_namespace":      "prod",
+		"source_pod":            "client",
+		"destination_namespace": "prod",
+		"destination_pod":       "server",
+	}))
+	require.False(t, result.IsError)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+	require.Equal(t, "unknown", parsed["verdict"], "a dropped, unparseable policy must downgrade the verdict, not silently report a confident allowed")
+	require.NotEmpty(t, parsed["decode_warnings"])
+}
