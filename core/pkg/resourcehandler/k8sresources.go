@@ -364,13 +364,18 @@ func streamingKubernetesResourceCount(resident *cautils.ResourceBatch, namespace
 // resulting in O(L × N) API-server LIST calls on large clusters.
 //
 // What this bounds is the evaluation input, not the collection peak: every GVR
-// is pulled and partitioned before the first batch is sent, so the whole
-// cluster is resident in this function at that point. The consumer
+// is traversed and partitioned before the first batch is sent, so the whole
+// cluster is still resident in this function at that point. The consumer
 // (OPAProcessor.ProcessWithStreaming) evaluates one namespace batch at a time,
 // so only the resident batch plus one namespace batch are in the evaluation
-// input at any moment. Bounding the collection peak itself would require paged
-// LISTs (metav1.ListOptions{Limit, Continue}) per GVR — a larger change than
-// this one.
+// input at any moment.
+//
+// Objects are partitioned as the pager yields them, so the collector no longer
+// materializes a whole-GVR slice on top of the batches that retain the objects
+// anyway. What still grows with the cluster is the batches themselves: every
+// namespace partition is held on the Go heap until its turn to be emitted.
+// Bounding that needs a partition store the collector can spill to, which is a
+// larger change than this one.
 func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo, ksResourceMap cautils.ExternalResources, batchChan chan<- *cautils.ResourceBatch, resolver resourceResolver) error {
 	resident := cautils.NewResourceBatch(cautils.ClusterScope)
 	namespaceBatches := make(map[string]*cautils.ResourceBatch)
@@ -384,37 +389,50 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 
-		result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, scanInfo.LabelSelector, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced)
+		// Partition each object as the pager yields it, so the collector never
+		// holds a whole-GVR []unstructured.Unstructured — nor the two
+		// same-length slices the map/meta conversion built from it — on top of
+		// the batches that retain the objects anyway. The partition is the only
+		// thing that keeps an object alive past the callback, and it keeps
+		// obj.Object rather than the pointer into the pager's page.
+		var firstResourceID string
+		collectedFromGVR := false
+		selectorErrs := k8sHandler.pullSingleResourceInto(ctx, &gvr, scanInfo.LabelSelector, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced, func(obj *unstructured.Unstructured) error {
+			metaObj := objectsenvelopes.NewObject(obj.Object)
+			if metaObj == nil {
+				// Same drop as ConvertMapListToMeta: an object no envelope
+				// recognizes is not a scannable resource.
+				return nil
+			}
+			if !collectedFromGVR {
+				firstResourceID = metaObj.GetID()
+				collectedFromGVR = true
+			}
+
+			scope := streamingResourceScope(metaObj, qr.Namespaced)
+			batch := resident
+			if scope != cautils.ClusterScope {
+				existing, ok := namespaceBatches[scope]
+				if !ok {
+					existing = cautils.NewResourceBatch(scope)
+					namespaceBatches[scope] = existing
+				}
+				batch = existing
+			}
+			batch.K8SResources[qr.GroupVersionResourceTriplet] = append(batch.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
+			batch.AllResources[metaObj.GetID()] = metaObj
+			return nil
+		})
 		for k, v := range classifySelectorFailures(qr.GroupVersionResourceTriplet, selectorErrs) {
 			failedQueries[k] = v
 		}
-		if len(result) == 0 && len(selectorErrs) > 0 {
-			continue
-		}
 
-		metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
-		if len(metaObjs) > 0 {
+		if collectedFromGVR {
 			// recordFailedQueryStatuses only distinguishes an empty GVR from a
 			// non-empty one. Keep one representative ID instead of duplicating
 			// every ID already retained in the streaming batches.
-			collectedK8sResources[qr.GroupVersionResourceTriplet] = []string{metaObjs[0].GetID()}
+			collectedK8sResources[qr.GroupVersionResourceTriplet] = []string{firstResourceID}
 			collectedAnyResource = true
-		}
-
-		for _, metaObj := range metaObjs {
-			scope := streamingResourceScope(metaObj, qr.Namespaced)
-			if scope == cautils.ClusterScope {
-				resident.K8SResources[qr.GroupVersionResourceTriplet] = append(resident.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
-				resident.AllResources[metaObj.GetID()] = metaObj
-			} else {
-				batch, ok := namespaceBatches[scope]
-				if !ok {
-					batch = cautils.NewResourceBatch(scope)
-					namespaceBatches[scope] = batch
-				}
-				batch.K8SResources[qr.GroupVersionResourceTriplet] = append(batch.K8SResources[qr.GroupVersionResourceTriplet], metaObj.GetID())
-				batch.AllResources[metaObj.GetID()] = metaObj
-			}
 		}
 	}
 
@@ -1021,8 +1039,47 @@ func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResourc
 	return partials
 }
 
+// resourceSink receives every object a paginated LIST traversal yields, in
+// page order, before any per-GVR slice is built. The pointer handed to a sink
+// aims into the page the pager is currently holding and is only valid for the
+// duration of the call: a sink that needs to keep an object must keep
+// obj.Object (which the page's backing array does not own) or a copy, never
+// obj itself. Returning an error abandons the traversal of the selector being
+// walked; see pullSingleResourceInto.
+type resourceSink func(obj *unstructured.Unstructured) error
+
+// pullSingleResource walks every field-selector query for a resource and
+// returns the objects that survive parent filtering, together with the
+// per-selector failures. It is the eager collector's entry point; the
+// streaming collector uses pullSingleResourceInto so it never materializes
+// this slice.
 func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, resource *schema.GroupVersionResource, labelSelector string, fields string, fieldSelector IFieldSelector, namespaced *bool) ([]unstructured.Unstructured, []selectorFailure) {
 	var resourceList []unstructured.Unstructured
+	selectorErrs := k8sHandler.pullSingleResourceInto(ctx, resource, labelSelector, fields, fieldSelector, namespaced, func(obj *unstructured.Unstructured) error {
+		resourceList = append(resourceList, *obj)
+		return nil
+	})
+	return resourceList, selectorErrs
+}
+
+// pullSingleResourceInto is the collection core shared by both collectors: it
+// runs one paginated LIST traversal per field selector and hands each object
+// that survives parent filtering to sink as it arrives.
+//
+// The traversal contract the callers depend on is unchanged from when this
+// function accumulated a slice itself:
+//
+//   - client-go's pager.EachListItem does not retry an expired continuation
+//     token (only pager.List falls back to a full re-list), so a selector's
+//     objects are always one API-server snapshot and a sink never sees the
+//     same page twice.
+//   - A selector that fails part-way keeps the objects it already yielded and
+//     records a selectorFailure, which the callers surface as partial coverage
+//     rather than as a missing GVR. Remaining selectors are still walked.
+//   - A sink error stops the current selector the same way a LIST error does,
+//     so a caller whose per-object work can fail reports it as that selector's
+//     failure.
+func (k8sHandler *K8sResourceHandler) pullSingleResourceInto(ctx context.Context, resource *schema.GroupVersionResource, labelSelector string, fields string, fieldSelector IFieldSelector, namespaced *bool, sink resourceSink) []selectorFailure {
 	var selectorErrs []selectorFailure
 
 	fieldSelectors := fieldSelector.GetNamespacesSelectors(resource, namespaced)
@@ -1044,7 +1101,7 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, re
 
 		clientResource := k8sHandler.k8s.DynamicClient.Resource(*resource)
 
-		lenBefore := len(resourceList)
+		collected := 0
 
 		if err := pager.New(func(pCtx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 			return clientResource.List(pCtx, opts)
@@ -1065,7 +1122,10 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, re
 				return nil
 			}
 
-			resourceList = append(resourceList, *obj.(*unstructured.Unstructured))
+			if err := sink(uObject); err != nil {
+				return err
+			}
+			collected++
 			return nil
 
 		}); err != nil {
@@ -1085,11 +1145,11 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, re
 			helpers.String("resource", resource.String()),
 			helpers.String("fieldSelector", listOptions.FieldSelector),
 			helpers.String("labelSelector", listOptions.LabelSelector),
-			helpers.Int("count", len(resourceList)-lenBefore),
+			helpers.Int("count", collected),
 		)
 	}
 
-	return resourceList, selectorErrs
+	return selectorErrs
 }
 func ConvertMapListToMeta(resourceMap []map[string]any) []workloadinterface.IMetadata {
 	var workloads []workloadinterface.IMetadata
