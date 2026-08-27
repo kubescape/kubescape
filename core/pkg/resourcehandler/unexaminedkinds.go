@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"k8s.io/apimachinery/pkg/version"
 )
 
 // examinedResourceKey is one side of the unexamined-kinds diff. The query set is
@@ -39,14 +40,17 @@ func queriedResourceKeys(queryable QueryableResources) map[examinedResourceKey]s
 }
 
 // computeUnexaminedKinds returns the listable resource kinds discovery
-// reported that queryable does not include, sorted by GVR triplet. discovered
-// only ever contains real API-server-served kinds (see collectDiscoveredResources),
-// so Kubescape's own virtual/external resources (host sensor, cloud, RBAC)
-// never appear here and need no filtering.
+// reported that queryable does not include, one entry per kind, sorted by GVR
+// triplet. discovered only ever contains real API-server-served kinds (see
+// collectDiscoveredResources), so Kubescape's own virtual/external resources
+// (host sensor, cloud, RBAC) never appear here and need no filtering.
+//
+// A kind served at several versions is one coverage gap, not one per version,
+// so it is reported at the version an apiserver itself would prefer.
 func computeUnexaminedKinds(discovered []discoveredAPIResource, queryable QueryableResources) []cautils.UnexaminedKind {
 	queried := queriedResourceKeys(queryable)
 
-	var unexamined []cautils.UnexaminedKind
+	gaps := make(map[examinedResourceKey]discoveredAPIResource, len(discovered))
 	for _, candidate := range discovered {
 		if !candidate.listable {
 			continue
@@ -55,6 +59,14 @@ func computeUnexaminedKinds(discovered []discoveredAPIResource, queryable Querya
 		if _, examined := queried[key]; examined {
 			continue
 		}
+		if reported, seen := gaps[key]; seen && !outranksVersion(candidate.gvr.Version, reported.gvr.Version) {
+			continue
+		}
+		gaps[key] = candidate
+	}
+
+	var unexamined []cautils.UnexaminedKind
+	for _, candidate := range gaps {
 		unexamined = append(unexamined, cautils.UnexaminedKind{
 			GroupVersionResource: k8sinterface.GroupVersionResourceToString(&candidate.gvr),
 			Kind:                 candidate.kind,
@@ -64,4 +76,13 @@ func computeUnexaminedKinds(discovered []discoveredAPIResource, queryable Querya
 		return unexamined[i].GroupVersionResource < unexamined[j].GroupVersionResource
 	})
 	return unexamined
+}
+
+// outranksVersion reports whether candidate is the version an apiserver would
+// prefer over reported, using its own ordering: GA over beta over alpha, then
+// by number. The comparison is total even for versions that ordering cannot
+// parse, so which of a resource's versions gets reported never depends on the
+// order discovery listed them in.
+func outranksVersion(candidate, reported string) bool {
+	return version.CompareKubeAwareVersionStrings(candidate, reported) > 0
 }
