@@ -1222,6 +1222,8 @@ github.com/kubescape/kubescape/v3 v3.0.4 h1:gZ5d8QMxLYZQ6Yz9wRvGcDQlBUIV+v/Y/41g
 github.com/kubescape/kubescape/v3 v3.0.4/go.mod h1:upPCVTCRT3+LuZ1bawGtjreRmr/Xa+LT0fHtPzlylRU=
 github.com/kubescape/opa-utils v0.0.309 h1:jc756tYiPPsFgaG5PmVuuHAwnb8R8N9wxbrFJ0ZnN9U=
 github.com/kubescape/opa-utils v0.0.309/go.mod h1:dWNcjmiTwGYlNmclXvDvgH7UlLdpDvmEc9T7ACTqLo0=
+github.com/kubescape/opa-utils v0.0.312 h1:zCT3LbtvhOwxhVXRWHAdZv7F0JvnAiWSEMd0LAWK/Ho=
+github.com/kubescape/opa-utils v0.0.312/go.mod h1:dWNcjmiTwGYlNmclXvDvgH7UlLdpDvmEc9T7ACTqLo0=
 github.com/kubescape/rbac-utils v0.0.21 h1:iRaGX8WKBd94dg31vpX10LHWoQZ/QKO5AMLzQf3kEkc=
 github.com/kubescape/rbac-utils v0.0.21/go.mod h1:t57AhSrjuNGQ+mpZWQM/hBzrCOeKBDHegFoVo4tbikQ=
 github.com/kubescape/regolibrary v1.0.317-0.20240320124840-1d84ac7186ea h1:hLUe+1bdhiBD7xM/jliQozVd1NLYn1afQLxl5trQdPk=
