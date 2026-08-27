@@ -6,6 +6,12 @@ type ListPolicies struct {
 	AccountID      string
 	AccessKey      string
 	ControlsInputs string
+	ControlFilters ControlListFilters
+}
+
+type ControlListFilters struct {
+	Framework string
+	Search    string
 }
 
 type ListResponse struct {

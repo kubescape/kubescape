@@ -158,7 +158,7 @@ func listControls(ctx context.Context, listPolicies *metav1.ListPolicies) ([]met
 	for _, pipe := range pipes {
 		entries = append(entries, parseControlEntry(pipe))
 	}
-	return entries, nil
+	return filterControlEntries(entries, listPolicies.ControlFilters), nil
 }
 
 // parseControlEntry converts a pipe-delimited "id|name|fw1, fw2" string into a ControlListEntry.
@@ -192,6 +192,52 @@ func parseControlEntry(pipe string) metav1.ControlListEntry {
 		}
 	}
 	return entry
+}
+
+func filterControlEntries(entries []metav1.ControlListEntry, filters metav1.ControlListFilters) []metav1.ControlListEntry {
+	framework := strings.TrimSpace(filters.Framework)
+	search := strings.TrimSpace(filters.Search)
+	if framework == "" && search == "" {
+		return entries
+	}
+
+	filtered := make([]metav1.ControlListEntry, 0, len(entries))
+	for _, entry := range entries {
+		if framework != "" && !controlEntryHasFramework(entry, framework) {
+			continue
+		}
+		if search != "" && !controlEntryMatchesSearch(entry, search) {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
+}
+
+func controlEntryHasFramework(entry metav1.ControlListEntry, framework string) bool {
+	framework = strings.TrimSpace(framework)
+	for _, candidate := range entry.Frameworks {
+		if strings.EqualFold(strings.TrimSpace(candidate), framework) {
+			return true
+		}
+	}
+	return false
+}
+
+func controlEntryMatchesSearch(entry metav1.ControlListEntry, search string) bool {
+	search = strings.ToLower(search)
+	if strings.Contains(strings.ToLower(entry.ID), search) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(entry.Name), search) {
+		return true
+	}
+	for _, framework := range entry.Frameworks {
+		if strings.Contains(strings.ToLower(framework), search) {
+			return true
+		}
+	}
+	return false
 }
 
 func listExceptions(ctx context.Context, listPolicies *metav1.ListPolicies) ([]string, error) {

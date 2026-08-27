@@ -23,6 +23,9 @@ var (
   # List all supported controls names with ids
   %[1]s list controls
 
+  # List controls in a framework, optionally narrowed by text
+  %[1]s list controls --framework NSA --search container
+
   # Show the configurable inputs a scan evaluates controls against
   %[1]s list controls-config
 
@@ -60,6 +63,9 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 			}
 
 			listPolicies.Target = args[0]
+			if err := validateControlListFilters(listPolicies.Target, listPolicies.ControlFilters); err != nil {
+				return err
+			}
 
 			result, err := ks.List(&listPolicies)
 			if err != nil {
@@ -75,6 +81,8 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 	listCmd.PersistentFlags().StringVarP(&listPolicies.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
 	listCmd.PersistentFlags().StringVarP(&listPolicies.Format, "format", "f", "pretty-print", "output format. supported: 'pretty-print'/'json'/'yaml'/'csv'")
 	listCmd.PersistentFlags().StringVar(&listPolicies.ControlsInputs, "controls-config", "", "Path to a controls-config file, to show the inputs a scan would use with it. Only applies to 'controls-config'")
+	listCmd.PersistentFlags().StringVar(&listPolicies.ControlFilters.Framework, "framework", "", "Only applies to 'controls'. Return controls that belong to this framework")
+	listCmd.PersistentFlags().StringVar(&listPolicies.ControlFilters.Search, "search", "", "Only applies to 'controls'. Case-insensitive match against control ID, name, or framework")
 
 	// Deprecated flags
 	var dummyID bool
@@ -90,4 +98,14 @@ func flagValidationList(listPolicies *v1.ListPolicies) error {
 
 	// Validate the user's credentials
 	return cautils.ValidateAccountID(listPolicies.AccountID)
+}
+
+func validateControlListFilters(target string, filters v1.ControlListFilters) error {
+	if strings.TrimSpace(filters.Framework) == "" && strings.TrimSpace(filters.Search) == "" {
+		return nil
+	}
+	if target != "controls" {
+		return fmt.Errorf("--framework and --search can only be used with 'list controls'")
+	}
+	return nil
 }
