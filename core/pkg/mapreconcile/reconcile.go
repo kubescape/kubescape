@@ -37,11 +37,15 @@ const (
 )
 
 // mapVersions lists the served versions of the MutatingAdmissionPolicy API in
-// preference order. Only v1alpha1 exists as of Kubernetes 1.35 (the type was
-// introduced in 1.32 and has not graduated), but resolveVersion is written the
-// same way vapreconcile's is so a later v1beta1/v1 needs only a new entry
-// here, not a rewrite of the probing logic.
-var mapVersions = []string{"v1alpha1"}
+// preference order, mirroring vapVersions: newest first. The type was
+// introduced as v1alpha1 in Kubernetes 1.32; live verification against a
+// cluster that has since graduated it straight to v1 (skipping v1beta1
+// entirely, unlike ValidatingAdmissionPolicy's path) confirmed a
+// single-version list is not future-proof, so every version the API has ever
+// been served under is probed here rather than assuming v1alpha1 forever. The
+// vendored v1alpha1 Go types still decode a v1-served object correctly: only
+// the GVR used to list it differs between versions, not the JSON shape.
+var mapVersions = []string{"v1", "v1beta1", "v1alpha1"}
 
 // ErrUnsupported reports a cluster that serves no version of the
 // MutatingAdmissionPolicy API, so there is nothing to reconcile.

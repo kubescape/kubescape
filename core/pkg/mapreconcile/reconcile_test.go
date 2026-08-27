@@ -78,11 +78,27 @@ func unstructuredMAPBinding(name, policyName string) *unstructured.Unstructured 
 	}}
 }
 
-func TestResolveVersion_ServedVersion(t *testing.T) {
-	version, err := resolveVersion(discoveryServing("v1alpha1"))
+func TestResolveVersion_PrefersNewestServedVersion(t *testing.T) {
+	version, err := resolveVersion(discoveryServing("v1", "v1beta1", "v1alpha1"))
 
 	require.NoError(t, err)
-	assert.Equal(t, "v1alpha1", version)
+	assert.Equal(t, "v1", version)
+}
+
+// A live cluster (kind v1.36.1) was found during manual verification to
+// serve MutatingAdmissionPolicy directly under v1, skipping v1beta1
+// entirely -- unlike ValidatingAdmissionPolicy's v1alpha1 -> v1beta1 -> v1
+// path. A single hardcoded version was not future-proof against that; this
+// covers every version this package now probes for, individually.
+func TestResolveVersion_FallsBackToOlderVersions(t *testing.T) {
+	for _, served := range []string{"v1beta1", "v1alpha1"} {
+		t.Run(served, func(t *testing.T) {
+			version, err := resolveVersion(discoveryServing(served))
+
+			require.NoError(t, err)
+			assert.Equal(t, served, version)
+		})
+	}
 }
 
 func TestResolveVersion_UnservedGroupIsUnsupported(t *testing.T) {
@@ -94,7 +110,7 @@ func TestResolveVersion_UnservedGroupIsUnsupported(t *testing.T) {
 func TestResolveVersion_GroupWithoutBindingsIsUnsupported(t *testing.T) {
 	client := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
 	client.Resources = []*metav1.APIResourceList{{
-		GroupVersion: mapGroup + "/v1alpha1",
+		GroupVersion: mapGroup + "/v1",
 		APIResources: []metav1.APIResource{{Name: mapResource, Kind: "MutatingAdmissionPolicy"}},
 	}}
 
@@ -107,7 +123,7 @@ func TestResolveVersion_WithoutDiscoveryClient(t *testing.T) {
 	version, err := resolveVersion(nil)
 
 	require.NoError(t, err)
-	assert.Equal(t, "v1alpha1", version)
+	assert.Equal(t, "v1", version)
 }
 
 func TestCollect_ReadsFromServedVersion(t *testing.T) {
