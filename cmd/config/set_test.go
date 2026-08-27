@@ -177,3 +177,19 @@ func TestParseSetArgs_CloudReportURL_InvalidScheme(t *testing.T) {
 	assert.ErrorContains(t, err, "invalid cloudReportURL")
 	assert.ErrorContains(t, err, "URL scheme must be http or https")
 }
+
+func TestParseSetArgs_CloudAPIURL_EmptyHost(t *testing.T) {
+	args := []string{"cloudAPIURL=http://"}
+	setConfig, err := parseSetArgs(args)
+	assert.Nil(t, setConfig)
+	assert.ErrorContains(t, err, "invalid cloudAPIURL")
+	assert.ErrorContains(t, err, "URL host must not be empty")
+}
+
+func TestParseSetArgs_CloudReportURL_EmptyHost(t *testing.T) {
+	args := []string{"cloudReportURL=https://"}
+	setConfig, err := parseSetArgs(args)
+	assert.Nil(t, setConfig)
+	assert.ErrorContains(t, err, "invalid cloudReportURL")
+	assert.ErrorContains(t, err, "URL host must not be empty")
+}

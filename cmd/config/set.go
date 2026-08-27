@@ -57,6 +57,9 @@ func validateURL(u string) error {
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return fmt.Errorf("URL scheme must be http or https")
 	}
+	if parsed.Host == "" {
+		return fmt.Errorf("URL host must not be empty")
+	}
 	return nil
 }
 
