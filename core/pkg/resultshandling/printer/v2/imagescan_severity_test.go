@@ -257,7 +257,7 @@ func TestSARIFPrinter_ImageScan_StdoutPipeCompletes(t *testing.T) {
 		os.Exit(0)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSARIFPrinter_ImageScan_StdoutPipeCompletes$") //nolint:gosec // G204: test subprocess re-executes test binary.

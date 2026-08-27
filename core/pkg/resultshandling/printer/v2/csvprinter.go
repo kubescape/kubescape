@@ -186,8 +186,8 @@ func csvControlPaths(result resourcesresults.Result, controlID string) (failedPa
 		for j := range result.AssociatedControls[i].ResourceAssociatedRules {
 			for k := range result.AssociatedControls[i].ResourceAssociatedRules[j].Paths {
 				p := result.AssociatedControls[i].ResourceAssociatedRules[j].Paths[k]
-				if p.FailedPath != "" {
-					failed = append(failed, p.FailedPath)
+				if p.ReviewPath != "" {
+					failed = append(failed, p.ReviewPath)
 				}
 				if p.FixPath.Path != "" {
 					if p.FixPath.Value != "" {

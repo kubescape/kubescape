@@ -19,7 +19,7 @@ func printableChange() ControlChange {
 		BaseStatus:         "failed",
 		HeadStatus:         "failed",
 		RuleName:           "require-security-context",
-		EvidenceType:       evidenceTypeFailedPath,
+		EvidenceType:       evidenceTypeReviewPath,
 		Path:               "spec.template.spec.containers[0].securityContext.privileged",
 		EvidenceResourceID: "apps/v1/default/Pod/api-abc",
 	}
@@ -54,7 +54,7 @@ func TestPrintPretty_PrintsEvidenceAndAllBuckets(t *testing.T) {
 	assert.Contains(t, actual, "+ [High] Require a security context (C-1000)")
 	assert.Contains(t, actual, "Resource: apps/v1/default/Deployment/api")
 	assert.Contains(t, actual, "Rule: require-security-context")
-	assert.Contains(t, actual, "Evidence: failedPath spec.template.spec.containers[0].securityContext.privileged")
+	assert.Contains(t, actual, "Evidence: reviewPath spec.template.spec.containers[0].securityContext.privileged")
 	assert.Contains(t, actual, "Evidence resource: apps/v1/default/Pod/api-abc")
 	assert.Contains(t, actual, "Reason: head scan coverage was degraded")
 	assert.Contains(t, actual, "Summary: 1 new, 1 resolved, 1 unchanged, 1 incomparable")
@@ -137,7 +137,7 @@ func TestPrintJSON_PreservesEvidenceSchema(t *testing.T) {
 	item, ok := newItems[0].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "require-security-context", item["ruleName"])
-	assert.Equal(t, "failedPath", item["evidenceType"])
+	assert.Equal(t, "reviewPath", item["evidenceType"])
 	assert.Equal(t, "spec.template.spec.containers[0].securityContext.privileged", item["path"])
 	assert.Equal(t, "apps/v1/default/Pod/api-abc", item["evidenceResourceID"])
 }
@@ -177,7 +177,7 @@ func TestPrintYAML_PreservesNewBucketsAndEvidence(t *testing.T) {
 	actual := output.String()
 
 	assert.Contains(t, actual, "ruleName: require-security-context")
-	assert.Contains(t, actual, "evidenceType: failedPath")
+	assert.Contains(t, actual, "evidenceType: reviewPath")
 	assert.Contains(t, actual, "path: spec.template.spec.containers[0].securityContext.privileged")
 	assert.Contains(t, actual, "incomparable:")
 	assert.Contains(t, actual, "reason: not evaluated")

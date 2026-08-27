@@ -114,7 +114,6 @@ func Test_getControlsMapFromResult(t *testing.T) {
 						Paths: []armotypes.PosturePaths{
 							{
 								ResourceID: "resource-1",
-								FailedPath: "failed-path",
 							},
 						},
 						Exception: []armotypes.PostureExceptionPolicy{

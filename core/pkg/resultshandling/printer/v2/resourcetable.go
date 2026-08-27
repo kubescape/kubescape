@@ -179,20 +179,6 @@ func (a Matrix) Less(i, j int) bool {
 	return true
 }
 
-// TODO - deprecate once all controls support review/delete paths
-func failedPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
-	var paths []string
-
-	for j := range control.ResourceAssociatedRules {
-		for k := range control.ResourceAssociatedRules[j].Paths {
-			if p := control.ResourceAssociatedRules[j].Paths[k].FailedPath; p != "" {
-				paths = append(paths, p)
-			}
-		}
-	}
-	return paths
-}
-
 func fixPathsToString(control *resourcesresults.ResourceAssociatedControl, onlyPath bool) []string {
 	var paths []string
 
@@ -239,28 +225,23 @@ func reviewPathsToString(control *resourcesresults.ResourceAssociatedControl) []
 
 func AssistedRemediationPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
 	paths := append(fixPathsToString(control, false), append(deletePathsToString(control), reviewPathsToString(control)...)...)
-	// TODO - deprecate failedPaths once all controls support review/delete paths
-	paths = appendFailedPathsIfNotInPaths(paths, failedPathsToString(control))
-	return paths
+	return deduplicatePaths(paths)
 }
 
-func appendFailedPathsIfNotInPaths(paths []string, failedPaths []string) []string {
-	// Create a set to efficiently check if a failed path already exists in the paths slice.
-	// Keys are deduplicated on the bare path so a plain delete/fix/review path still matches
-	// its enriched " (current: <value>)" counterpart in failedPaths.
-	pathSet := make(map[string]struct{})
-	for _, path := range paths {
-		pathSet[dedupPathKey(path)] = struct{}{}
+func deduplicatePaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
 	}
-
-	// Append failed paths if they are not already present
-	for _, failedPath := range failedPaths {
-		if _, ok := pathSet[dedupPathKey(failedPath)]; !ok {
-			paths = append(paths, failedPath)
+	seen := make(map[string]bool)
+	deduped := make([]string, 0, len(paths))
+	for _, path := range paths {
+		key := dedupPathKey(path)
+		if !seen[key] {
+			seen[key] = true
+			deduped = append(deduped, path)
 		}
 	}
-
-	return paths
+	return deduped
 }
 
 // dedupPathKey strips the " (current: <value>)" suffix appended by evidence enrichment so a
