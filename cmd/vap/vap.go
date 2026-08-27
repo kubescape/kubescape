@@ -792,6 +792,10 @@ const namespacesResource = "namespaces"
 // A resource neither source knows stays unknown rather than guessed: a wrong
 // guess either suppresses a warning the caller needs or raises one they cannot
 // act on.
+//
+// What the scope field keeps out of the covered surface in the first place is
+// scopedGroups' business, upstream of this. A resource reaching here is one the
+// rule does match, and the only question left is what a selector does to it.
 func resourceSelectorReach(scope *admissionv1.ScopeType, groups []string, resource string) selectorReach {
 	// A subresource lives wherever its parent does.
 	resource, _ = splitSubresource(strings.ToLower(strings.TrimSpace(resource)))
@@ -827,6 +831,10 @@ func resourceSelectorReach(scope *admissionv1.ScopeType, groups []string, resour
 // namespaceSelector does to it: a Namespace is cluster-scoped here even though a
 // selector still narrows it by its own labels. The two matchers read the same
 // resource differently, so what asks about the rules matcher asks here.
+//
+// A wildcard group accepts the table's answer, the way the rest of this file
+// reads one. A caller that must not take a wildcard for the built-in group asks
+// a group at a time instead.
 func resourceScope(groups []string, resource string) *admissionv1.ScopeType {
 	resource, _ = splitSubresource(strings.ToLower(strings.TrimSpace(resource)))
 	if resource == "" || resource == "*" {
@@ -915,7 +923,8 @@ func resolveNamespaceSelectorReach(constraints, bindingRules []admissionv1.Named
 func bindingCoverage(constraint *admissionv1.NamedRuleWithOperations, resource string, bindingRules []admissionv1.NamedRuleWithOperations) []coveredResource {
 	var covered []coveredResource
 	keep := func(candidate coveredResource) {
-		if scopeExcludes(constraint.Scope, candidate.groups, candidate.resource) {
+		candidate.groups = scopedGroups(constraint.Scope, candidate.groups, candidate.resource)
+		if len(candidate.groups) == 0 {
 			return
 		}
 		covered = append(covered, candidate)
@@ -939,28 +948,50 @@ func bindingCoverage(constraint *admissionv1.NamedRuleWithOperations, resource s
 	return covered
 }
 
-// scopeExcludes reports whether a constraint's own scope field rules out a
-// resource that would otherwise be in the surface it covers.
+// scopedGroups drops the groups a constraint's own scope field rules the
+// resource out at, and reports the ones left. None left means the constraint
+// matches no request for that resource at all, so the emitted binding does not
+// cover it: nothing there for a selector to reach, and nothing for a message
+// about one to name. Without this a policy declaring scope Cluster over "*",
+// narrowed to apps/v1/deployments, is refused for covering only cluster-scoped
+// resources and names a namespaced one as the reason.
 //
 // A rule declaring Namespaced never matches a cluster-scoped request and one
-// declaring Cluster never matches a namespaced request, so a resource on the
-// wrong side of it is not covered at all: nothing there for a selector to reach,
-// and nothing for a message about one to name. Without this a policy declaring
-// scope Cluster over "*", narrowed to apps/v1/deployments, is refused for
-// covering only cluster-scoped resources and names a namespaced one as the
-// reason.
+// declaring Cluster never matches a namespaced request: the rules matcher reads
+// the scope field before it reads anything else. Every other value rules nothing
+// out — "*" by definition, and one this version does not know because a scope it
+// cannot read is no grounds for going quiet about a resource.
 //
-// Only the built-in table is contradicted, and only where it can speak: a
-// declared scope stays the answer for the custom resources it exists to speak
-// for. The table's answer here is the resource's API scope, so scope Cluster
-// over namespaces is no conflict — the rules matcher counts a Namespace as
-// cluster-scoped, whatever a namespaceSelector then does with it.
-func scopeExcludes(declared *admissionv1.ScopeType, groups []string, resource string) bool {
-	if declared == nil || *declared == admissionv1.AllScopes {
-		return false
+// The scope is contradicted a group at a time, and only by a built-in table that
+// can speak for that group. A wildcard group is one it cannot: a rule covering
+// every group covers the ones the table has no answer for too, and there the
+// declared scope is the only word on the resource. So scope Cluster over
+// "*"/roles keeps covering the cluster-scoped roles some group of its own
+// defines, and only naming the group the table serves roles from gives that up.
+//
+// Where that reading of a wildcard parts ways with the one resourceSelectorReach
+// takes, both err the same way: toward naming a resource rather than going quiet
+// about one.
+//
+// The table's answer here is the resource's own API scope, so scope Cluster over
+// namespaces is no conflict — the rules matcher counts a Namespace as
+// cluster-scoped, whatever a namespaceSelector then does with it — and scope
+// Namespaced over namespaces covers nothing, which is the same rule read from
+// the other side.
+func scopedGroups(declared *admissionv1.ScopeType, groups []string, resource string) []string {
+	if declared == nil || (*declared != admissionv1.ClusterScope && *declared != admissionv1.NamespacedScope) {
+		return groups
 	}
-	known := resourceScope(groups, resource)
-	return known != nil && *known != *declared
+	scoped := make([]string, 0, len(groups))
+	for _, group := range groups {
+		if group != "*" {
+			if known := resourceScope([]string{group}, resource); known != nil && *known != *declared {
+				continue
+			}
+		}
+		scoped = append(scoped, group)
+	}
+	return scoped
 }
 
 // narrowResource is the more specific of a policy resource and a binding

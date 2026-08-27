@@ -1728,6 +1728,48 @@ func TestResolveNamespaceSelectorReach(t *testing.T) {
 		assert.Equal(t, []string{rbac + "/v1/clusterrolebindings"}, reach.alwaysMatched)
 		assert.True(t, reach.narrowable)
 	})
+
+	// A scope this version cannot read is no grounds for going quiet: an
+	// unreadable one has to leave the surface exactly as no scope at all does.
+	t.Run("an unreadable scope drops nothing", func(t *testing.T) {
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{
+			scoped(admissionv1.ScopeType("Sideways"), constraint(rbac, "v1", "rolebindings", "clusterrolebindings")),
+		}, nil)
+		assert.Equal(t, []string{rbac + "/v1/clusterrolebindings"}, reach.alwaysMatched)
+		assert.True(t, reach.narrowable)
+	})
+
+	// The scope is contradicted a group at a time. A wildcard group covers the
+	// groups the table cannot speak for as well, so the built-in namespaced
+	// "roles" is no proof a scope Cluster rule over it covers nothing — whatever
+	// cluster-scoped roles a group of its own defines, it still covers.
+	t.Run("a wildcard group survives a conflicting built-in", func(t *testing.T) {
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{
+			scoped(admissionv1.ClusterScope, constraint("*", "v1", "roles")),
+		}, nil)
+		assert.Equal(t, []string{"*/v1/roles"}, reach.alwaysMatched)
+		assert.False(t, reach.narrowable)
+	})
+
+	t.Run("only the group the table speaks for is dropped", func(t *testing.T) {
+		rule := scoped(admissionv1.ClusterScope, constraint(rbac, "v1", "roles"))
+		rule.APIGroups = []string{rbac, "foo.io"}
+
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{rule}, nil)
+		assert.Equal(t, []string{"foo.io/v1/roles"}, reach.alwaysMatched, "the rbac roles a cluster-scoped rule never matches is not part of the surface")
+		assert.False(t, reach.narrowable)
+	})
+
+	// The namespaces asymmetry from the third side: the rules matcher excludes
+	// namespaces from Namespaced scope outright, so such a rule covers nothing
+	// and the selector's reach over a Namespace never comes up.
+	t.Run("a declared namespaced scope covers no namespaces", func(t *testing.T) {
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{
+			scoped(admissionv1.NamespacedScope, constraint("", "v1", "namespaces")),
+		}, nil)
+		assert.Empty(t, reach.alwaysMatched)
+		assert.False(t, reach.narrowable)
+	})
 }
 
 // TestCheckNamespaceSelectorScope covers --namespace against the policies the
