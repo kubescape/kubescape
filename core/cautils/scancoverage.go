@@ -58,6 +58,11 @@ type ScanCoverage struct {
 
 // UnexaminedKind is a listable resource kind the cluster serves that no rule
 // in the scanned policy set matched, so it was never collected or evaluated.
+//
+// One entry per kind, not per served version: a rule naming any one version of
+// a kind reaches all of its objects, so a kind is listed only when no rule
+// named it at any version, and GroupVersionResource then carries the version
+// the API server ranks highest.
 type UnexaminedKind struct {
 	GroupVersionResource string `json:"groupVersionResource"`
 	Kind                 string `json:"kind"`
