@@ -79,6 +79,139 @@ func DecryptRepoContextMetadata(
 	return decryptRepoContextMetadata(metadata, dek)
 }
 
+// decryptDirectoryContextMetadata and decryptFileContextMetadata restore the
+// scan location the anonymizer encrypted.
+func decryptDirectoryContextMetadata(metadata *reporthandlingv2.Metadata, dek *ReportKey) error {
+	if metadata == nil {
+		return fmt.Errorf("metadata is nil")
+	}
+
+	directoryMetadata := metadata.ContextMetadata.DirectoryContextMetadata
+	if directoryMetadata == nil {
+		return nil
+	}
+
+	var err error
+
+	if directoryMetadata.BasePath != "" {
+		directoryMetadata.BasePath, err = decryptIfEncrypted(directoryMetadata.BasePath, dek)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt basePath: %w", err)
+		}
+	}
+
+	if directoryMetadata.HostName != "" {
+		directoryMetadata.HostName, err = decryptIfEncrypted(directoryMetadata.HostName, dek)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt hostName: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func decryptFileContextMetadata(metadata *reporthandlingv2.Metadata, dek *ReportKey) error {
+	if metadata == nil {
+		return fmt.Errorf("metadata is nil")
+	}
+
+	fileMetadata := metadata.ContextMetadata.FileContextMetadata
+	if fileMetadata == nil {
+		return nil
+	}
+
+	var err error
+
+	if fileMetadata.FilePath != "" {
+		fileMetadata.FilePath, err = decryptIfEncrypted(fileMetadata.FilePath, dek)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt filePath: %w", err)
+		}
+	}
+
+	if fileMetadata.HostName != "" {
+		fileMetadata.HostName, err = decryptIfEncrypted(fileMetadata.HostName, dek)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt hostName: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// decryptClusterMetadata restores the cluster identity encrypted by the
+// anonymizer, in both places a report carries it: the target metadata and the
+// deprecated top-level copy. Namespace counts are re-keyed into a fresh map
+// because the keys themselves are ciphertext.
+func decryptClusterMetadata(metadata *reporthandlingv2.Metadata, dek *ReportKey) error {
+	if metadata == nil {
+		return fmt.Errorf("metadata is nil")
+	}
+
+	for _, clusterMetadata := range []*reporthandlingv2.ClusterMetadata{
+		metadata.ContextMetadata.ClusterContextMetadata,
+		&metadata.ClusterMetadata,
+	} {
+		if clusterMetadata == nil {
+			continue
+		}
+
+		if err := decryptClusterMetadataFields(clusterMetadata, dek); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func decryptClusterMetadataFields(clusterMetadata *reporthandlingv2.ClusterMetadata, dek *ReportKey) error {
+	var err error
+
+	if clusterMetadata.ContextName != "" {
+		clusterMetadata.ContextName, err = decryptIfEncrypted(clusterMetadata.ContextName, dek)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt contextName: %w", err)
+		}
+	}
+
+	if cloudMetadata := clusterMetadata.CloudMetadata; cloudMetadata != nil {
+		for name, field := range map[string]*string{
+			"fullName":   &cloudMetadata.FullName,
+			"shortName":  &cloudMetadata.ShortName,
+			"prefixName": &cloudMetadata.PrefixName,
+		} {
+			if *field == "" {
+				continue
+			}
+
+			if *field, err = decryptIfEncrypted(*field, dek); err != nil {
+				return fmt.Errorf("failed to decrypt %s: %w", name, err)
+			}
+		}
+	}
+
+	if clusterMetadata.MapNamespaceToNumberOfResources == nil {
+		return nil
+	}
+
+	namespaceCounts := make(map[string]int, len(clusterMetadata.MapNamespaceToNumberOfResources))
+
+	for namespace, count := range clusterMetadata.MapNamespaceToNumberOfResources {
+		if namespace != "" {
+			namespace, err = decryptIfEncrypted(namespace, dek)
+			if err != nil {
+				return fmt.Errorf("failed to decrypt namespace: %w", err)
+			}
+		}
+
+		namespaceCounts[namespace] += count
+	}
+
+	clusterMetadata.MapNamespaceToNumberOfResources = namespaceCounts
+
+	return nil
+}
+
 // decryptRepoContextMetadata performs the repository metadata portion
 // of report decryption with an already unwrapped data-encryption key. Keeping
 // this internal avoids unwrapping the same key twice during whole-report

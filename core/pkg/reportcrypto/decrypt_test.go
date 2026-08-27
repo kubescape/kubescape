@@ -771,3 +771,191 @@ func TestDecryptResourceAnnotations_PreservesPlaintextValue(t *testing.T) {
 	annotations := metadata["annotations"].(map[string]any)
 	assert.Equal(t, lastApplied, annotations["kubectl.kubernetes.io/last-applied-configuration"])
 }
+
+func TestDecryptDirectoryContextMetadata_RoundTrip(t *testing.T) {
+	const (
+		basePath = "/home/devjijo/work/internal-platform"
+		hostName = "build-agent-07.corp.internal"
+	)
+
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	masterKey, err := GenerateDEK()
+	require.NoError(t, err)
+
+	wrappedDEK, err := WrapDEK(dek, masterKey)
+	require.NoError(t, err)
+
+	reportKey, err := UnwrapReportKey(wrappedDEK, masterKey)
+	require.NoError(t, err)
+
+	encryptedBasePath, err := EncryptString(basePath, dek)
+	require.NoError(t, err)
+
+	encryptedHostName, err := EncryptString(hostName, dek)
+	require.NoError(t, err)
+
+	metadata := &reporthandlingv2.Metadata{
+		ContextMetadata: reporthandlingv2.ContextMetadata{
+			DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{
+				BasePath: encryptedBasePath,
+				HostName: encryptedHostName,
+			},
+		},
+	}
+
+	require.NoError(t, decryptDirectoryContextMetadata(metadata, reportKey))
+
+	directory := metadata.ContextMetadata.DirectoryContextMetadata
+	assert.Equal(t, basePath, directory.BasePath)
+	assert.Equal(t, hostName, directory.HostName)
+}
+
+func TestDecryptFileContextMetadata_RoundTrip(t *testing.T) {
+	const (
+		filePath = "/home/devjijo/work/internal-platform/deploy.yaml"
+		hostName = "build-agent-07.corp.internal"
+	)
+
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	masterKey, err := GenerateDEK()
+	require.NoError(t, err)
+
+	wrappedDEK, err := WrapDEK(dek, masterKey)
+	require.NoError(t, err)
+
+	reportKey, err := UnwrapReportKey(wrappedDEK, masterKey)
+	require.NoError(t, err)
+
+	encryptedFilePath, err := EncryptString(filePath, dek)
+	require.NoError(t, err)
+
+	encryptedHostName, err := EncryptString(hostName, dek)
+	require.NoError(t, err)
+
+	metadata := &reporthandlingv2.Metadata{
+		ContextMetadata: reporthandlingv2.ContextMetadata{
+			FileContextMetadata: &reporthandlingv2.FileContextMetadata{
+				FilePath: encryptedFilePath,
+				HostName: encryptedHostName,
+			},
+		},
+	}
+
+	require.NoError(t, decryptFileContextMetadata(metadata, reportKey))
+
+	file := metadata.ContextMetadata.FileContextMetadata
+	assert.Equal(t, filePath, file.FilePath)
+	assert.Equal(t, hostName, file.HostName)
+}
+
+func TestDecryptDirectoryContextMetadata_NoDirectoryMetadata(t *testing.T) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	masterKey, err := GenerateDEK()
+	require.NoError(t, err)
+
+	wrappedDEK, err := WrapDEK(dek, masterKey)
+	require.NoError(t, err)
+
+	reportKey, err := UnwrapReportKey(wrappedDEK, masterKey)
+	require.NoError(t, err)
+
+	assert.NoError(t, decryptDirectoryContextMetadata(&reporthandlingv2.Metadata{}, reportKey))
+}
+
+func TestDecryptClusterMetadata_RoundTrip(t *testing.T) {
+	const (
+		contextName = "gke_acme-prod-1234_us-central1_payments"
+		prefixName  = "gke_acme-prod-1234_us-central1"
+		shortName   = "payments"
+		namespace   = "acme-payments"
+	)
+
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	masterKey, err := GenerateDEK()
+	require.NoError(t, err)
+
+	wrappedDEK, err := WrapDEK(dek, masterKey)
+	require.NoError(t, err)
+
+	reportKey, err := UnwrapReportKey(wrappedDEK, masterKey)
+	require.NoError(t, err)
+
+	encrypt := func(value string) string {
+		encrypted, encryptErr := EncryptString(value, dek)
+		require.NoError(t, encryptErr)
+		return encrypted
+	}
+
+	clusterMetadata := func() reporthandlingv2.ClusterMetadata {
+		return reporthandlingv2.ClusterMetadata{
+			ContextName:         encrypt(contextName),
+			CloudProvider:       "gke",
+			NumberOfWorkerNodes: 12,
+			CloudMetadata: &reporthandlingv2.CloudMetadata{
+				CloudProvider: "gke",
+				FullName:      encrypt(contextName),
+				ShortName:     encrypt(shortName),
+				PrefixName:    encrypt(prefixName),
+			},
+			MapNamespaceToNumberOfResources: map[string]int{
+				encrypt(namespace): 17,
+				"":                 3,
+			},
+		}
+	}
+
+	contextCluster := clusterMetadata()
+	metadata := &reporthandlingv2.Metadata{
+		ContextMetadata: reporthandlingv2.ContextMetadata{ClusterContextMetadata: &contextCluster},
+		ClusterMetadata: clusterMetadata(),
+	}
+
+	require.NoError(t, decryptClusterMetadata(metadata, reportKey))
+
+	for _, cluster := range []*reporthandlingv2.ClusterMetadata{
+		metadata.ContextMetadata.ClusterContextMetadata,
+		&metadata.ClusterMetadata,
+	} {
+		require.Equal(t, contextName, cluster.ContextName)
+		require.Equal(t, contextName, cluster.CloudMetadata.FullName)
+		require.Equal(t, shortName, cluster.CloudMetadata.ShortName)
+		require.Equal(t, prefixName, cluster.CloudMetadata.PrefixName)
+		require.Equal(t, "gke", cluster.CloudProvider)
+		require.Equal(t, 12, cluster.NumberOfWorkerNodes)
+		require.Equal(
+			t,
+			map[string]int{namespace: 17, "": 3},
+			cluster.MapNamespaceToNumberOfResources,
+		)
+	}
+}
+
+func TestDecryptClusterMetadata_NoClusterMetadata(t *testing.T) {
+	dek, err := GenerateDEK()
+	require.NoError(t, err)
+
+	masterKey, err := GenerateDEK()
+	require.NoError(t, err)
+
+	wrappedDEK, err := WrapDEK(dek, masterKey)
+	require.NoError(t, err)
+
+	reportKey, err := UnwrapReportKey(wrappedDEK, masterKey)
+	require.NoError(t, err)
+
+	metadata := &reporthandlingv2.Metadata{}
+
+	require.NoError(t, decryptClusterMetadata(metadata, reportKey))
+	require.Nil(t, metadata.ContextMetadata.ClusterContextMetadata)
+	require.Nil(t, metadata.ClusterMetadata.MapNamespaceToNumberOfResources)
+
+	require.Error(t, decryptClusterMetadata(nil, reportKey))
+}
