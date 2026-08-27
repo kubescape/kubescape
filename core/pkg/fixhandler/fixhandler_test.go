@@ -3,6 +3,7 @@ package fixhandler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1413,4 +1414,76 @@ func singleResourceReport(t *testing.T, sourcePath, relPath string) *reporthandl
 			}},
 		}},
 	}
+}
+
+// fakeWriteStringCloser lets writeAndClose's Close-time failure be simulated
+// deterministically. A real file's Close() essentially never fails for a
+// well-formed local write, and the scenario this guards - a filesystem
+// (typically NFS) that accepts a Write into its buffer and only reports the
+// real failure (e.g. out of space) when the file is closed - can't be
+// arranged portably against a real *os.File in a unit test.
+type fakeWriteStringCloser struct {
+	writeErr error
+	closeErr error
+	closed   bool
+}
+
+func (f *fakeWriteStringCloser) WriteString(s string) (int, error) {
+	if f.writeErr != nil {
+		return 0, f.writeErr
+	}
+	return len(s), nil
+}
+
+func (f *fakeWriteStringCloser) Close() error {
+	f.closed = true
+	return f.closeErr
+}
+
+func TestWriteAndClose_PropagatesCloseError(t *testing.T) {
+	// Regression: writeFixesToFile previously closed the file via `defer
+	// file.Close()`, discarding any error Close returned. A write can appear
+	// to succeed while the filesystem only reports a real failure at Close
+	// time, so silently dropping that error would report the fix as written
+	// when the file on disk was never actually flushed.
+	f := &fakeWriteStringCloser{closeErr: errors.New("no space left on device")}
+
+	err := writeAndClose(f, "fixed: true\n")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no space left on device")
+	assert.True(t, f.closed, "Close must still be called even though it fails")
+}
+
+func TestWriteAndClose_PropagatesWriteError(t *testing.T) {
+	f := &fakeWriteStringCloser{writeErr: errors.New("disk full")}
+
+	err := writeAndClose(f, "fixed: true\n")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "disk full")
+	assert.True(t, f.closed, "Close must still be attempted (best-effort) after a write error")
+}
+
+func TestWriteAndClose_Success(t *testing.T) {
+	f := &fakeWriteStringCloser{}
+
+	err := writeAndClose(f, "fixed: true\n")
+
+	require.NoError(t, err)
+	assert.True(t, f.closed)
+}
+
+func TestWriteFixesToFile_PropagatesCloseError(t *testing.T) {
+	// End-to-end regression against the real function callers actually use:
+	// a genuine *os.File satisfies writeStringCloser, so the fix must not
+	// have narrowed the interface in a way that only compiles for the fake.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fixed.yaml")
+
+	require.NoError(t, writeFixesToFile(path, "fixed: true\n"))
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "fixed: true\n", string(got))
 }

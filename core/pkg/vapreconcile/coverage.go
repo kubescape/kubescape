@@ -13,12 +13,27 @@ import (
 )
 
 // ResourceInfo is the minimal identity a coverage check needs for one
-// scanned resource: which namespace it lives in (empty for cluster-scoped)
-// and its own labels, for objectSelector matching.
+// scanned resource: what it is, which namespace it lives in (empty for
+// cluster-scoped) and its own labels, for objectSelector matching.
 type ResourceInfo struct {
 	ResourceID string
+	APIVersion string
+	Kind       string
 	Namespace  string
 	Labels     map[string]string
+}
+
+// The core/v1 Namespace identity, which a namespaceSelector reads
+// differently from every other kind (see bindingScope.matches).
+const (
+	namespaceAPIVersion = "v1"
+	namespaceKind       = "Namespace"
+)
+
+// isNamespace reports whether the resource is a Namespace object. It carries
+// no metadata.namespace of its own, so scope has to be decided on the kind.
+func (r ResourceInfo) isNamespace() bool {
+	return r.APIVersion == namespaceAPIVersion && r.Kind == namespaceKind
 }
 
 // ResourceCoverage reports whether one specific resource that failed a
@@ -103,20 +118,39 @@ type bindingScope struct {
 	objectSelector    labels.Selector
 }
 
-// matches reports whether a resource falls within this binding's scope.
+// matches reports whether a resource falls within this binding's scope. It
+// takes the whole ResourceInfo because the two selectors read different parts
+// of it, and the apiserver's own namespace matcher also branches on what the
+// resource is, not just on where it lives.
+//
 // namespaceLabelsKnown is false when the resource's Namespace object was not
 // collected by the scan (out of scope, or the scan predates namespace
 // collection): a namespaceSelector then cannot be evaluated, so the binding
 // is treated as not matching rather than optimistically matching --
 // silently over-crediting a binding's coverage would defeat the point of
 // this check.
-func (s *bindingScope) matches(resourceNamespace string, resourceLabels, namespaceLabels map[string]string, namespaceLabelsKnown bool) (bool, string) {
-	if !s.objectSelector.Empty() && !s.objectSelector.Matches(labels.Set(resourceLabels)) {
+func (s *bindingScope) matches(res ResourceInfo, namespaceLabels map[string]string, namespaceLabelsKnown bool) (bool, string) {
+	if !s.objectSelector.Empty() && !s.objectSelector.Matches(labels.Set(res.Labels)) {
 		return false, "objectSelector does not match the resource's labels"
 	}
 	if !s.namespaceSelector.Empty() {
-		if resourceNamespace == "" {
-			return false, "namespaceSelector is set but the resource is cluster-scoped"
+		if res.isNamespace() {
+			// The namespace a Namespace is "in" is itself, so the selector is
+			// read against the object's own labels. Falling through to the
+			// cluster-scoped arm below covered it unconditionally, which
+			// overstated the reach of a binding that excludes it.
+			if !s.namespaceSelector.Matches(labels.Set(res.Labels)) {
+				return false, "namespaceSelector does not match the namespace's own labels"
+			}
+			return true, ""
+		}
+		if res.Namespace == "" {
+			// A cluster-scoped resource has no namespace whose labels the
+			// selector could be read against, and the apiserver does not
+			// exempt it for that: its namespace matcher returns "matches"
+			// before it ever parses the selector. Reporting it uncovered
+			// understated the reach of every binding scoped by namespace.
+			return true, ""
 		}
 		if !namespaceLabelsKnown {
 			return false, "namespaceSelector is set but the resource's Namespace object was not collected by the scan"
@@ -284,7 +318,7 @@ func BuildCoverage(
 			policyLoop:
 				for _, scopes := range scopesByPolicy {
 					for _, scope := range scopes {
-						ok, whyNot := scope.matches(res.Namespace, res.Labels, nsLabels, known)
+						ok, whyNot := scope.matches(res, nsLabels, known)
 						if ok {
 							covered = true
 							break policyLoop
@@ -326,6 +360,8 @@ func CollectFailingResourcesByControl(
 		}
 		info := ResourceInfo{
 			ResourceID: resourceID,
+			APIVersion: resource.GetApiVersion(),
+			Kind:       resource.GetKind(),
 			Namespace:  resource.GetNamespace(),
 			Labels:     resourceLabels(resource),
 		}
@@ -347,7 +383,7 @@ func CollectFailingResourcesByControl(
 func CollectNamespaceLabels(allResources map[string]workloadinterface.IMetadata) map[string]map[string]string {
 	nsLabels := make(map[string]map[string]string)
 	for _, resource := range allResources {
-		if resource == nil || resource.GetApiVersion() != "v1" || resource.GetKind() != "Namespace" {
+		if resource == nil || resource.GetApiVersion() != namespaceAPIVersion || resource.GetKind() != namespaceKind {
 			continue
 		}
 		name := resource.GetName()

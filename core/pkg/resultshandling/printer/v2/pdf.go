@@ -101,7 +101,7 @@ func (pp *PdfPrinter) generateImagePdf(imageScanData []cautils.ImageScanData) ([
 	var images []string
 	for i := range imageScanData {
 		target := imageScanData[i].Target()
-		allCVEs = append(allCVEs, extractCVEs(imageScanData[i].Matches, target)...)
+		allCVEs = append(allCVEs, extractCVEs(imageScanData[i].Matches, target, imageScanData[i].VexStatuses)...)
 		images = append(images, target)
 	}
 

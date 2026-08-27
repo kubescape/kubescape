@@ -49,7 +49,7 @@ func (e *Evaluator) EvaluateVAP(ctx context.Context, vap *VAP, obj, namespaceObj
 	if !matched {
 		return ControlEvaluation{Applicable: false}, nil
 	}
-	results, err := e.EvaluateOnObject(ctx, obj, namespaceObject, params, vap.Variables, vap.Validations)
+	results, err := e.EvaluateOnObject(ctx, obj, namespaceObject, params, vap.Variables, vap.Validations, &vap.failurePolicy)
 	if err != nil {
 		return ControlEvaluation{}, err
 	}

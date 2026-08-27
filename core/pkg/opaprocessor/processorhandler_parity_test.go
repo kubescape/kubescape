@@ -190,14 +190,13 @@ func referenceProcess(t *testing.T, opap *OPAProcessor, policies *cautils.Polici
 	return results
 }
 
-// normalize makes two result sets comparable. Control and rule ordering is an
-// artefact of map iteration; path ordering reflects the order Rego yielded a
-// rule's findings, which is a set and therefore not ordered either.
+// normalize makes two result sets comparable. Control ordering is guaranteed
+// deterministic by the processor (sortAssociatedControls), but rule ordering
+// reflects the order scopes first saw each rule and path ordering reflects the
+// order Rego yielded a rule's findings — both are sets, so they are sorted here
+// before comparison.
 func normalize(results map[string]resourcesresults.Result) map[string]resourcesresults.Result {
 	for resourceID, result := range results {
-		sort.Slice(result.AssociatedControls, func(i, j int) bool {
-			return result.AssociatedControls[i].ControlID < result.AssociatedControls[j].ControlID
-		})
 		for i := range result.AssociatedControls {
 			rules := result.AssociatedControls[i].ResourceAssociatedRules
 			sort.Slice(rules, func(a, b int) bool { return rules[a].Name < rules[b].Name })

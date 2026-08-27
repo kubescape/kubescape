@@ -28,6 +28,7 @@ func renderTable(writer io.Writer, headers table.Row, columnAlignments []table.C
 
 func generateRows(summary ImageScanSummary) []table.Row {
 	rows := make([]table.Row, 0, len(summary.CVEs))
+	hasVEX := summaryHasVEX(summary)
 
 	// sort CVEs by severity (descending) and then by CVE ID (ascending)
 	sort.Slice(summary.CVEs, func(i, j int) bool {
@@ -38,7 +39,11 @@ func generateRows(summary ImageScanSummary) []table.Row {
 	})
 
 	for _, cve := range summary.CVEs {
-		rows = append(rows, generateRow(cve))
+		row := generateRow(cve)
+		if hasVEX {
+			row = append(row, cve.VexStatus, cve.VexJustification)
+		}
+		rows = append(rows, row)
 	}
 
 	return rows
@@ -65,7 +70,20 @@ func generateRow(cve CVE) table.Row {
 	return row
 }
 
+func summaryHasVEX(summary ImageScanSummary) bool {
+	for _, cve := range summary.CVEs {
+		if cve.VexStatus != "" || cve.VexJustification != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func getImageScanningHeaders() table.Row {
+	return getImageScanningHeadersWithVEX(false)
+}
+
+func getImageScanningHeadersWithVEX(hasVEX bool) table.Row {
 	headers := make(table.Row, 6)
 	headers[imageColumnSeverity] = "Severity"
 	headers[imageColumnName] = "Vulnerability"
@@ -73,11 +91,18 @@ func getImageScanningHeaders() table.Row {
 	headers[imageColumnVersion] = "Version"
 	headers[imageColumnFixedIn] = "Fixed in"
 	headers[imageColumnImage] = "Image"
+	if hasVEX {
+		headers = append(headers, "VEX Status", "VEX Justification")
+	}
 	return headers
 }
 
 func getImageScanningColumnsAlignments() []table.ColumnConfig {
-	return []table.ColumnConfig{
+	return getImageScanningColumnsAlignmentsWithVEX(false)
+}
+
+func getImageScanningColumnsAlignmentsWithVEX(hasVEX bool) []table.ColumnConfig {
+	columns := []table.ColumnConfig{
 		{Number: 1, Align: text.AlignCenter},
 		{Number: 2, Align: text.AlignLeft},
 		{Number: 3, Align: text.AlignLeft},
@@ -85,4 +110,11 @@ func getImageScanningColumnsAlignments() []table.ColumnConfig {
 		{Number: 5, Align: text.AlignLeft},
 		{Number: 6, Align: text.AlignLeft},
 	}
+	if hasVEX {
+		columns = append(columns,
+			table.ColumnConfig{Number: 7, Align: text.AlignLeft},
+			table.ColumnConfig{Number: 8, Align: text.AlignLeft},
+		)
+	}
+	return columns
 }

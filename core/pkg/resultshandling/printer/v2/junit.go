@@ -236,7 +236,7 @@ func imageTestsSuites(imageScanData []cautils.ImageScanData) *JUnitTestSuites {
 	suites := make([]JUnitTestSuite, 0, len(imageScanData))
 	for i := range imageScanData {
 		image := imageScanData[i].Target()
-		cves := extractCVEs(imageScanData[i].Matches, image)
+		cves := extractCVEs(imageScanData[i].Matches, image, imageScanData[i].VexStatuses)
 		suite := JUnitTestSuite{
 			ID:        i,
 			Name:      image,
@@ -275,6 +275,12 @@ func imageTestCases(cves []imageprinter.CVE, platform string) []JUnitTestCase {
 
 		contents := fmt.Sprintf("CVE: %s\nPackage: %s\nVersion: %s\nSeverity: %s\n%s",
 			cve.ID, cve.Package, cve.Version, cve.Severity, fixMsg)
+		if cve.VexStatus != "" {
+			contents += "\nVEX Status: " + cve.VexStatus
+		}
+		if cve.VexJustification != "" {
+			contents += "\nVEX Justification: " + cve.VexJustification
+		}
 		if platform != "" {
 			contents += "\nPlatform: " + platform
 		}

@@ -50,6 +50,17 @@ type ScanCoverage struct {
 	// required type was found in the cluster), not because anything was
 	// actually checked. Populated by DetectVacuousFrameworks.
 	VacuousFrameworks []string `json:"vacuousFrameworks,omitempty"`
+	// UnexaminedKinds lists resource kinds the API server serves that no
+	// control in the selected policy set queried, so a cluster's real coverage
+	// gap is visible even when every selected control evaluated cleanly.
+	UnexaminedKinds []UnexaminedKind `json:"unexaminedKinds,omitempty"`
+}
+
+// UnexaminedKind is a listable resource kind the cluster serves that no rule
+// in the scanned policy set matched, so it was never collected or evaluated.
+type UnexaminedKind struct {
+	GroupVersionResource string `json:"groupVersionResource"`
+	Kind                 string `json:"kind"`
 }
 
 // Fixed penalties (in percentage points) applied to the coverage score for

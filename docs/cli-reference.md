@@ -52,7 +52,7 @@ kubescape scan [target] [flags]
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
 | `--label-selector <selector>` | Filter collected resources by Kubernetes label selector. Accepts any expression `kubectl -l` supports, e.g. `app=nginx,env!=dev` or `env in (prod,staging)`. Syntax is validated before scanning begins; filtering is applied during live cluster collection and ignored when scanning local files. | - |
 | `--keep-local` | Don't report results to backend | `false` |
-| `--notify <url>` | POST the posture scan's JSON summary to a trusted generic webhook URL. Repeat the flag for multiple endpoints. Delivery is best-effort and does not affect scan exit status. Not supported by `scan image`. | - |
+| `--notify <url>` | POST the posture scan summary to a webhook URL. Slack incoming webhooks receive Block Kit; other destinations receive generic JSON. Repeat for multiple endpoints. Delivery is best-effort and does not affect scan exit status. Not supported by `scan image`. | - |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
 | `--otel-endpoint <endpoint>` | Export scan traces and metrics to an OTLP collector — see [OpenTelemetry export](#opentelemetry-export). Accepts `host:port` (plaintext) or a `http(s)://` URL. | `OTEL_EXPORTER_OTLP_ENDPOINT` |
@@ -68,18 +68,48 @@ kubescape scan [target] [flags]
 | `-v, --verbose` | Display all resources, not just failed ones | `false` |
 | `--view <type>` | View type: `security`, `control`, `resource` | `security` |
 
-### Generic webhook notifications
+### Webhook notifications
 
-Use `--notify` to POST the existing JSON `summaryDetails` object after a posture scan:
+Use `--notify` to send a compact summary after a posture scan. Official Slack and GovSlack incoming webhook URLs receive a Block Kit message; every other URL receives the existing JSON `summaryDetails` object:
 
 ```bash
+export SLACK_WEBHOOK_URL='https://hooks.slack.com/services/T00000000/B00000000/SECRET'
+kubescape scan manifests/ --notify "$SLACK_WEBHOOK_URL"
 kubescape scan manifests/ --notify https://hooks.example.com/kubescape
 kubescape scan manifests/ --notify https://ops.example.com/kubescape --notify https://audit.example.com/kubescape
 ```
 
 Each destination gets one synchronous request with `Content-Type: application/json`; Kubescape allows up to five seconds per destination and does not follow redirects. Failures are logged as warnings and never override the scan's own exit status. The payload follows `--min-severity` and `--max-severity` output filtering. `--severity-threshold` continues to affect only the exit status.
 
-The summary may contain resource identifiers in control summaries. Use `--hide` where appropriate and send only to trusted webhook endpoints. Slack Block Kit and Microsoft Teams Adaptive Card formatting are not included in this generic phase.
+Slack messages contain the compliance score, passed/failed/skipped control counts, and up to ten failing controls ordered by severity, failed resource count, and control ID. The top-level `text` field provides a notification and accessibility fallback. For example:
+
+```json
+{
+  "text": "Kubescape scan completed: 73.2% compliance; 2 of 8 controls failed.",
+  "blocks": [
+    {"type": "header", "text": {"type": "plain_text", "text": "Kubescape scan results"}},
+    {"type": "section", "fields": [
+      {"type": "mrkdwn", "text": "*Controls*\n2 failed / 8 total\n5 passed · 1 skipped", "verbatim": true},
+      {"type": "mrkdwn", "text": "*Compliance score*\n73.2%", "verbatim": true}
+    ]},
+    {"type": "section", "text": {"type": "mrkdwn", "text": "*Top failing controls*\n• *Critical* · `C-0001` — Privileged container", "verbatim": true}}
+  ]
+}
+```
+
+Generic destinations continue to receive only the scan summary. An abridged example is:
+
+```json
+{
+  "status": "failed",
+  "frameworks": [],
+  "ResourceCounters": {"passedResources": 5, "failedResources": 2, "skippedResources": 1, "excludedResources": 0},
+  "score": 73.2,
+  "complianceScore": 73.2
+}
+```
+
+The summary and Slack control names may contain identifiers from the scan. Use `--hide` where appropriate and send only to trusted webhook endpoints. A Slack webhook URL is itself a secret; keep it out of source control and prefer passing it through an environment variable. Microsoft Teams Adaptive Card formatting is not currently included.
 
 ### Generating an exceptions baseline
 
@@ -712,7 +742,7 @@ kubescape decrypt encrypted-report.json > decrypted-report.json
 ---
 ## kubescape list
 
-List available frameworks and controls.
+List available frameworks, controls and control configuration.
 
 ### Synopsis
 
@@ -726,6 +756,8 @@ kubescape list <type> [flags]
 |------|-------------|
 | `frameworks` | List available security frameworks |
 | `controls` | List available security controls |
+| `controls-config` | Show the configurable inputs controls are evaluated against — see [control configuration](#control-configuration) |
+| `exceptions` | List available exception policies |
 
 ### Flags
 
@@ -733,7 +765,37 @@ kubescape list <type> [flags]
 |------|-------------|---------|
 | `--account <id>` | Account ID for custom frameworks | - |
 | `--access-key <key>` | Access key | - |
+| `--controls-config <path>` | Show the inputs a scan would use with this controls-config file. Only applies to `controls-config` | downloaded |
 | `--format <format>` | Output format: `pretty-print`, `json`, `yaml`, `csv` | `pretty-print` |
+
+### Control configuration
+
+Several controls are tunable: an allowlist of image repositories, the capabilities
+considered insecure, CPU and memory bounds. A scan resolves those inputs from the
+same sources it resolves policies from, but nothing printed them, so there was no
+way to see what a control was actually evaluated against or to confirm that a
+`--controls-config` override took effect.
+
+```bash
+# what the next scan will use
+kubescape list controls-config
+
+# what it would use with a local override
+kubescape list controls-config --controls-config ./controls-inputs.json --format json
+```
+
+Each row pairs a configuration key with the controls that read it:
+
+| Column | Meaning |
+|--------|---------|
+| `name` | The key as it appears in a controls-config file |
+| `title` | The label the controls declare it by |
+| `values` | The value in effect, empty when unset |
+| `controls` | The control IDs that read it |
+
+An input with no value is not an error — it is why a configurable control falls
+back to the default written into its rule. A value no control reads is usually a
+setting left behind by an older controls-config file.
 
 ### Examples
 

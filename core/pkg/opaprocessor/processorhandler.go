@@ -275,6 +275,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 
 	opap.markNotEvaluatedControlsSkipped()
 	opap.ScanCoverage.VacuousFrameworks = cautils.DetectVacuousFrameworks(opap.Report.SummaryDetails.Frameworks)
+	opap.ScanCoverage.UnexaminedKinds = opap.UnexaminedKinds
 
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
@@ -469,6 +470,7 @@ done:
 	opap.updateResults(ctx)
 	opap.markNotEvaluatedControlsSkipped()
 	opap.ScanCoverage.VacuousFrameworks = cautils.DetectVacuousFrameworks(opap.Report.SummaryDetails.Frameworks)
+	opap.ScanCoverage.UnexaminedKinds = opap.UnexaminedKinds
 
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
@@ -565,6 +567,12 @@ func (opap *OPAProcessor) processScope(ctx context.Context, policies *cautils.Po
 	}
 	wg.Wait()
 
+	// Workers complete in scheduling order, so each resource's controls were
+	// appended in arbitrary sequence. Sort once, after all scopes and the
+	// whole-cluster pass have finished, so identical scans produce identically
+	// ordered results for every downstream consumer.
+	sortAssociatedControls(opap.ResourcesResult)
+
 	return errors.Join(processErrs...)
 }
 
@@ -619,6 +627,10 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 			processErrs = append(processErrs, err)
 		}
 	}
+
+	// Same deterministic-layout guarantee as the streaming path: sort only
+	// after every scope and the whole-cluster pass have finished appending.
+	sortAssociatedControls(opap.ResourcesResult)
 
 	return errors.Join(processErrs...)
 }
@@ -772,6 +784,20 @@ func policyControlSortKey(item policyControl) string {
 		return item.control.ControlID
 	}
 	return item.key
+}
+
+// sortAssociatedControls orders each resource's controls by ControlID so
+// identical scans produce identically ordered reports. processScope dispatches
+// controls in sorted order, but its workers append verdicts in completion
+// order; this restores a stable layout once evaluation has finished.
+func sortAssociatedControls(resourcesResult map[string]resourcesresults.Result) {
+	for id := range resourcesResult {
+		result := resourcesResult[id]
+		slices.SortFunc(result.AssociatedControls, func(a, b resourcesresults.ResourceAssociatedControl) int {
+			return strings.Compare(a.ControlID, b.ControlID)
+		})
+		resourcesResult[id] = result
+	}
 }
 
 // controlRequiresWholeClusterInput reports whether a control joins objects
