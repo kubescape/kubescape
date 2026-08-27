@@ -1262,9 +1262,10 @@ func (opap *OPAProcessor) markControlTimedOut(control *reporthandling.Control, t
 	opap.TimedOutControls[control.ControlID] = fmt.Sprintf("control evaluation timed out after %s", timeout)
 }
 
-// appendPaths appends the failedPaths, fixPaths and fixCommand to the paths slice with the resourceID
+// appendPaths appends failedPaths, deletePaths, reviewPaths, fixPaths and fixCommand to the paths slice with the resourceID.
 func appendPaths(paths []armotypes.PosturePaths, assistedRemediation reporthandling.AssistedRemediation, resourceID string) []armotypes.PosturePaths {
-	// TODO - deprecate failedPaths after all controls support reviewPaths and deletePaths
+	// Deprecated: FailedPaths is retained for backward compatibility with rules
+	// that have not yet migrated to ReviewPaths/DeletePaths.
 	for _, failedPath := range assistedRemediation.FailedPaths {
 		paths = append(paths, armotypes.PosturePaths{ResourceID: resourceID, FailedPath: failedPath})
 	}

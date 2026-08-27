@@ -189,7 +189,8 @@ func (a Matrix) Less(i, j int) bool {
 	return true
 }
 
-// TODO - deprecate once all controls support review/delete paths
+// Deprecated: failedPathsToString is retained for backward compatibility with rules
+// that have not yet migrated to reviewPaths/deletePaths.
 func failedPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
 	var paths []string
 
@@ -249,7 +250,7 @@ func reviewPathsToString(control *resourcesresults.ResourceAssociatedControl) []
 
 func AssistedRemediationPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
 	paths := append(fixPathsToString(control, false), append(deletePathsToString(control), reviewPathsToString(control)...)...)
-	// TODO - deprecate failedPaths once all controls support review/delete paths
+	// Retained for backward compatibility: fall back to failedPaths only when not already represented by fixPaths, deletePaths, or reviewPaths.
 	paths = appendFailedPathsIfNotInPaths(paths, failedPathsToString(control))
 	return paths
 }

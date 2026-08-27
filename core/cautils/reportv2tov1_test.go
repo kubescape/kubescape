@@ -129,3 +129,82 @@ func TestReportV2ToV1_DoesNotMutateAllResources(t *testing.T) {
 	require.Len(t, alertObjects, 1)
 	assert.NotContains(t, alertObjects[0], "spec")
 }
+
+func TestReportV2ToV1_PreservesAllRemediationPathTypes(t *testing.T) {
+	resourceID := "apps/v1/ns/Deployment/remediation-test"
+	controlID := "C-002"
+
+	controlSummary := reportsummary.ControlSummary{
+		ControlID:   controlID,
+		Name:        "control remediation",
+		ScoreFactor: 3,
+		Description: "test description",
+		Remediation: "test remediation",
+	}
+	controlSummary.Append(helpersv1.NewStatus(apis.StatusFailed), resourceID)
+
+	session := &OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{
+			resourceID: workloadinterface.NewWorkloadObj(map[string]any{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata":   map[string]any{"name": "remediation-test", "namespace": "ns"},
+				"spec":       map[string]any{"privileged": true},
+			}),
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			resourceID: {
+				ResourceID: resourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: controlID,
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+							{
+								Name:   "rule-remediation",
+								Status: apis.StatusFailed,
+								Paths: []armotypes.PosturePaths{
+									{
+										FailedPath: "spec.containers[0].securityContext.privileged",
+										DeletePath: "spec.containers[0].securityContext.privileged",
+										ReviewPath: "spec.containers[0].securityContext",
+										FixPath:    armotypes.FixPath{Path: "spec.containers[0].securityContext.allowPrivilegeEscalation", Value: "false"},
+										FixCommand: "kubectl patch deployment remediation-test",
+									},
+									{
+										FixCommand: "kubectl label deployment remediation-test env=prod",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: reportsummary.ControlSummaries{controlID: controlSummary},
+			},
+		},
+	}
+
+	got := ReportV2ToV1(session)
+
+	require.NotNil(t, got)
+	require.Len(t, got.FrameworkReports, 1)
+	require.Len(t, got.FrameworkReports[0].ControlReports, 1)
+
+	cr := got.FrameworkReports[0].ControlReports[0]
+	assert.Equal(t, "test description", cr.Description)
+	assert.Equal(t, "test remediation", cr.Remediation)
+	assert.Equal(t, controlID, cr.ControlID)
+
+	require.Len(t, cr.RuleReports, 1)
+	require.Len(t, cr.RuleReports[0].RuleResponses, 1)
+
+	resp := cr.RuleReports[0].RuleResponses[0]
+	assert.Equal(t, []string{"spec.containers[0].securityContext.privileged"}, resp.FailedPaths)
+	assert.Equal(t, []string{"spec.containers[0].securityContext.privileged"}, resp.DeletePaths)
+	assert.Equal(t, []string{"spec.containers[0].securityContext"}, resp.ReviewPaths)
+	assert.Equal(t, []armotypes.FixPath{{Path: "spec.containers[0].securityContext.allowPrivilegeEscalation", Value: "false"}}, resp.FixPaths)
+	assert.Equal(t, "kubectl patch deployment remediation-test\nkubectl label deployment remediation-test env=prod", resp.FixCommand)
+}

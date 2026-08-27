@@ -91,12 +91,40 @@ func TestAssistedRemediationPathsToString(t *testing.T) {
 		},
 	}
 
+	control3 := &resourcesresults.ResourceAssociatedControl{
+		ControlID: "control-3",
+		Name:      "Control 3 - Mixed Migrated and Legacy Paths",
+		Status:    apis.StatusInfo{},
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+			{
+				Name:      "Rule 3",
+				Status:    "failed",
+				SubStatus: "skipped",
+				Paths: []armotypes.PosturePaths{
+					{
+						FixPath:    armotypes.FixPath{Path: "spec.replicas", Value: "3"},
+						DeletePath: "spec.containers[0].securityContext.privileged",
+						ReviewPath: "spec.containers[0].securityContext",
+						FailedPath: "spec.containers[0].securityContext.privileged",
+					},
+					{
+						FailedPath: "spec.hostNetwork",
+					},
+				},
+			},
+		},
+	}
+
 	actualPaths := AssistedRemediationPathsToString(control1)
 	expectedPaths := []string{"some-path1", "random-path1"}
 	assert.Equal(t, expectedPaths, actualPaths)
 
 	actualPaths = AssistedRemediationPathsToString(control2)
 	expectedPaths = []string{"some-path2", "random-path2"}
+	assert.Equal(t, expectedPaths, actualPaths)
+
+	actualPaths = AssistedRemediationPathsToString(control3)
+	expectedPaths = []string{"spec.replicas=3", "spec.containers[0].securityContext.privileged", "spec.containers[0].securityContext", "spec.hostNetwork"}
 	assert.Equal(t, expectedPaths, actualPaths)
 }
 
