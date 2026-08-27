@@ -156,6 +156,25 @@ func TestDigestPreservesExplicitEmptyValues(t *testing.T) {
 	assert.NotEqual(t, omitted.ContractDigest, explicit.ContractDigest)
 }
 
+func TestDigestEffectiveRunUsesSeparateStableDomain(t *testing.T) {
+	first, err := DigestEffectiveRun(struct {
+		Effective map[string]any `json:"effective"`
+	}{Effective: map[string]any{"coverageBelow": 95, "severityAtLeast": "high"}})
+	require.NoError(t, err)
+	second, err := DigestEffectiveRun(struct {
+		Effective map[string]any `json:"effective"`
+	}{Effective: map[string]any{"severityAtLeast": "high", "coverageBelow": 95}})
+	require.NoError(t, err)
+	changed, err := DigestEffectiveRun(struct {
+		Effective map[string]any `json:"effective"`
+	}{Effective: map[string]any{"coverageBelow": 90, "severityAtLeast": "high"}})
+	require.NoError(t, err)
+
+	assert.Equal(t, first, second)
+	assert.NotEqual(t, first, changed)
+	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, first)
+}
+
 func TestLoadRejectsInvalidContractValues(t *testing.T) {
 	tests := []struct {
 		name        string
