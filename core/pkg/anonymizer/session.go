@@ -158,11 +158,39 @@ func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Tr
 		if err := transformRepoContextMetadata(session.Metadata.ContextMetadata.RepoContextMetadata, transformer); err != nil {
 			return err
 		}
+		if err := transformDirectoryContextMetadata(session.Metadata.ContextMetadata.DirectoryContextMetadata, transformer); err != nil {
+			return err
+		}
+		if err := transformFileContextMetadata(session.Metadata.ContextMetadata.FileContextMetadata, transformer); err != nil {
+			return err
+		}
+		if err := transformClusterMetadata(session.Metadata.ContextMetadata.ClusterContextMetadata, transformer); err != nil {
+			return err
+		}
+		if err := transformClusterMetadata(&session.Metadata.ClusterMetadata, transformer); err != nil {
+			return err
+		}
 	}
 
 	if session.Report != nil {
 
 		if err := transformRepoContextMetadata(session.Report.Metadata.ContextMetadata.RepoContextMetadata, transformer); err != nil {
+			return err
+		}
+
+		if err := transformDirectoryContextMetadata(session.Report.Metadata.ContextMetadata.DirectoryContextMetadata, transformer); err != nil {
+			return err
+		}
+
+		if err := transformFileContextMetadata(session.Report.Metadata.ContextMetadata.FileContextMetadata, transformer); err != nil {
+			return err
+		}
+
+		if err := transformClusterMetadata(session.Report.Metadata.ContextMetadata.ClusterContextMetadata, transformer); err != nil {
+			return err
+		}
+
+		if err := transformClusterMetadata(&session.Report.Metadata.ClusterMetadata, transformer); err != nil {
 			return err
 		}
 
@@ -525,6 +553,129 @@ func transformRepoContextMetadata(repo *reporthandlingv2.RepoContextMetadata, tr
 	}
 
 	*repo = repoCopy
+
+	return nil
+}
+
+// transformClusterMetadata hides which cluster a report came from. The context
+// name is the entry the user selected in their kubeconfig, and the cloud names
+// are parsed straight out of it: for a GKE cluster "gke_project_zone_name" the
+// prefix is "gke_project_zone", so PrefixName and FullName carry the project
+// and, on EKS, the account ID out of the ARN. The provider and worker count
+// stay in cleartext - they describe the shape of the environment rather than
+// name it, and are what a shared report is usually read for.
+//
+// Namespace keys use the "ns" prefix so that under --hide they come out
+// string-identical to the namespaces transformResourceMetadata writes onto the
+// resources themselves; the per-namespace counts are only worth keeping if they
+// still join. Under --encrypt the two sides are separate ciphertexts, as every
+// repeated value in a report is, and the join reappears once both are
+// decrypted.
+func transformClusterMetadata(cluster *reporthandlingv2.ClusterMetadata, transformer Transformer) error {
+	if cluster == nil {
+		return nil
+	}
+
+	clusterCopy := *cluster
+
+	var err error
+
+	clusterCopy.ContextName, err = transformValue(transformer, "cluster", clusterCopy.ContextName)
+	if err != nil {
+		return err
+	}
+
+	if clusterCopy.CloudMetadata != nil {
+		cloudCopy := *clusterCopy.CloudMetadata
+
+		cloudCopy.FullName, err = transformValue(transformer, "cluster", cloudCopy.FullName)
+		if err != nil {
+			return err
+		}
+
+		cloudCopy.ShortName, err = transformValue(transformer, "cluster", cloudCopy.ShortName)
+		if err != nil {
+			return err
+		}
+
+		cloudCopy.PrefixName, err = transformValue(transformer, "cluster", cloudCopy.PrefixName)
+		if err != nil {
+			return err
+		}
+
+		clusterCopy.CloudMetadata = &cloudCopy
+	}
+
+	if clusterCopy.MapNamespaceToNumberOfResources != nil {
+		namespaceCounts := make(map[string]int, len(clusterCopy.MapNamespaceToNumberOfResources))
+
+		for namespace, count := range clusterCopy.MapNamespaceToNumberOfResources {
+			namespace, err = transformValue(transformer, "ns", namespace)
+			if err != nil {
+				return err
+			}
+
+			namespaceCounts[namespace] += count
+		}
+
+		clusterCopy.MapNamespaceToNumberOfResources = namespaceCounts
+	}
+
+	*cluster = clusterCopy
+
+	return nil
+}
+
+// transformDirectoryContextMetadata and transformFileContextMetadata hide where
+// the scan ran: the absolute path the user pointed at, which on most machines
+// carries their account name, and the machine itself. A directory scan records
+// the one, a single-file scan the other, and both survive into a report whose
+// whole purpose is to be shareable. The host uses a shared prefix so the same
+// machine reads as the same pseudonym either way.
+func transformDirectoryContextMetadata(directory *reporthandlingv2.DirectoryContextMetadata, transformer Transformer) error {
+	if directory == nil {
+		return nil
+	}
+
+	directoryCopy := *directory
+
+	var err error
+
+	directoryCopy.BasePath, err = transformValue(transformer, "dir", directoryCopy.BasePath)
+	if err != nil {
+		return err
+	}
+
+	directoryCopy.HostName, err = transformValue(transformer, "host", directoryCopy.HostName)
+	if err != nil {
+		return err
+	}
+
+	*directory = directoryCopy
+
+	return nil
+}
+
+func transformFileContextMetadata(file *reporthandlingv2.FileContextMetadata, transformer Transformer) error {
+	if file == nil {
+		return nil
+	}
+
+	fileCopy := *file
+
+	var err error
+
+	fileCopy.FilePath, err = transformValue(transformer, "file", fileCopy.FilePath)
+	if err != nil {
+		return err
+	}
+
+	fileCopy.HostName, err = transformValue(transformer, "host", fileCopy.HostName)
+	if err != nil {
+		return err
+	}
+
+	*file = fileCopy
 
 	return nil
 }

@@ -117,6 +117,18 @@ func (d *reportDecryptor) decryptMetadata() error {
 		return fmt.Errorf("failed to decrypt report metadata: %w", err)
 	}
 
+	if err := decryptDirectoryContextMetadata(&metadata, d.dek); err != nil {
+		return fmt.Errorf("failed to decrypt report metadata: %w", err)
+	}
+
+	if err := decryptFileContextMetadata(&metadata, d.dek); err != nil {
+		return fmt.Errorf("failed to decrypt report metadata: %w", err)
+	}
+
+	if err := decryptClusterMetadata(&metadata, d.dek); err != nil {
+		return fmt.Errorf("failed to decrypt report metadata: %w", err)
+	}
+
 	// Marshal the known metadata shape, then recursively merge it into the
 	// original raw object. This updates decrypted values while retaining fields
 	// from future report schemas, including unknown fields inside lastCommit.
