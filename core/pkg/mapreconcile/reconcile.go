@@ -56,14 +56,24 @@ var ErrUnsupported = errors.New("cluster does not serve MutatingAdmissionPolicy 
 // as a hard failure by callers.
 var ErrForbidden = errors.New("not permitted to list MutatingAdmissionPolicy resources")
 
+// ErrDiscoveryRequired reports that resolveVersion was given no discovery
+// client to confirm which version a cluster actually serves. Unlike
+// vapreconcile (whose VAP version has graduated the same v1alpha1 -> v1beta1
+// -> v1 path on every cluster observed), live verification against a real
+// cluster found MutatingAdmissionPolicy version support varies: one cluster
+// served it directly under v1 with v1beta1 never having existed at all.
+// Guessing mapVersions[0] without confirmation risks a wrong (and possibly
+// failing) version against an older cluster, so an absent discovery client is
+// treated as a real error here rather than a silent assumption.
+var ErrDiscoveryRequired = errors.New("a discovery client is required to determine which MutatingAdmissionPolicy version a cluster serves")
+
 // resolveVersion returns the first MutatingAdmissionPolicy version the
-// cluster both advertises and serves both resources for. Without a discovery
-// client the newest (only) version is assumed. A discovery error on one
-// version does not stop the remaining ones from being probed, mirroring
+// cluster both advertises and serves both resources for. A discovery error on
+// one version does not stop the remaining ones from being probed, mirroring
 // vapreconcile.resolveVersion.
 func resolveVersion(client discovery.DiscoveryInterface) (string, error) {
 	if client == nil {
-		return mapVersions[0], nil
+		return "", ErrDiscoveryRequired
 	}
 
 	var probeErr error

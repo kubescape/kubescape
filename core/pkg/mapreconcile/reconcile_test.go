@@ -119,11 +119,10 @@ func TestResolveVersion_GroupWithoutBindingsIsUnsupported(t *testing.T) {
 	assert.ErrorIs(t, err, ErrUnsupported)
 }
 
-func TestResolveVersion_WithoutDiscoveryClient(t *testing.T) {
-	version, err := resolveVersion(nil)
+func TestResolveVersion_WithoutDiscoveryClientReturnsError(t *testing.T) {
+	_, err := resolveVersion(nil)
 
-	require.NoError(t, err)
-	assert.Equal(t, "v1", version)
+	assert.ErrorIs(t, err, ErrDiscoveryRequired, "a version must never be guessed without confirming what the cluster actually serves")
 }
 
 func TestCollect_ReadsFromServedVersion(t *testing.T) {

@@ -14,16 +14,27 @@ type ObjectInfo struct {
 	Group     string
 	Version   string
 	Resource  string // plural resource name, e.g. "pods"
+	Name      string // the object's own name, matched against a rule's ResourceNames
 	Namespace string // empty for a cluster-scoped object
 	Labels    map[string]string
 	Operation admissionregistrationv1alpha1.OperationType
 
-	// ClusterScoped marks obj as a cluster-scoped resource other than
-	// Namespace itself. Per MatchResources' own doc comment, a
-	// namespaceSelector "never skips the policy" for such an object -- it is
-	// not merely unresolvable, it is defined to be irrelevant -- so this
-	// takes priority over NamespaceLabelsKnown below.
+	// ClusterScoped marks obj as a cluster-scoped resource. A Namespace
+	// object is itself cluster-scoped ("Namespace API objects are
+	// cluster-scoped", per Rule.Scope's own doc comment) and must still set
+	// this true for Rule.Scope matching -- IsNamespaceObject below is what
+	// distinguishes it from every other cluster-scoped kind for
+	// namespaceSelector purposes specifically.
 	ClusterScoped bool
+
+	// IsNamespaceObject marks obj as a Namespace object itself. Per
+	// MatchResources' own doc comment, a namespaceSelector is evaluated
+	// against a Namespace object's *own* labels (there is no separate
+	// containing namespace to look up), whereas for every other
+	// cluster-scoped kind it never skips the policy at all. Getting this
+	// wrong in either direction is a real false-positive/negative for a
+	// security-analysis tool, not just an edge case.
+	IsNamespaceObject bool
 
 	// NamespaceLabels is the labels of ObjectInfo's own namespace object,
 	// needed for namespaceSelector matching. NamespaceLabelsKnown
@@ -53,7 +64,46 @@ func ruleMatches(rule admissionregistrationv1alpha1.NamedRuleWithOperations, obj
 	if !stringRuleMatches(rule.Resources, obj.Resource) {
 		return false
 	}
+	if !resourceNamesMatch(rule.ResourceNames, obj.Name) {
+		return false
+	}
+	if !scopeMatches(rule.Scope, obj) {
+		return false
+	}
 	return true
+}
+
+// resourceNamesMatch reports whether obj's name is covered by a rule's
+// ResourceNames. An empty list is documented as "an optional white list...
+// An empty set means that everything is allowed", so it does not restrict
+// matching at all.
+func resourceNamesMatch(names []string, objName string) bool {
+	if len(names) == 0 {
+		return true
+	}
+	for _, n := range names {
+		if n == objName {
+			return true
+		}
+	}
+	return false
+}
+
+// scopeMatches reports whether obj's scope satisfies a rule's Scope. A nil
+// Scope defaults to AllScopes, per Rule.Scope's own doc comment ("Default is
+// '*'").
+func scopeMatches(scope *admissionregistrationv1alpha1.ScopeType, obj ObjectInfo) bool {
+	if scope == nil {
+		return true
+	}
+	switch *scope {
+	case admissionregistrationv1alpha1.ClusterScope:
+		return obj.ClusterScoped
+	case admissionregistrationv1alpha1.NamespacedScope:
+		return !obj.ClusterScoped
+	default: // AllScopes, or any value this package does not recognize
+		return true
+	}
 }
 
 func operationMatches(ops []admissionregistrationv1alpha1.OperationType, op admissionregistrationv1alpha1.OperationType) bool {
@@ -161,12 +211,27 @@ func compileMatchResources(mr *admissionregistrationv1alpha1.MatchResources) (*c
 // rather than a confident non-match: the object may still be covered via a
 // version this rule never named.
 func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determinable bool) {
-	if c.namespaceSelector != nil && !c.namespaceSelector.Empty() && !obj.ClusterScoped {
-		if !obj.NamespaceLabelsKnown {
-			return false, false
-		}
-		if !c.namespaceSelector.Matches(labels.Set(obj.NamespaceLabels)) {
-			return false, true
+	if c.namespaceSelector != nil && !c.namespaceSelector.Empty() {
+		switch {
+		case obj.IsNamespaceObject:
+			// There is no separate containing namespace to look up: the
+			// selector is evaluated against the Namespace object's own
+			// labels, which the caller always has (they are obj.Labels,
+			// not a lookup that can be "unknown").
+			if !c.namespaceSelector.Matches(labels.Set(obj.Labels)) {
+				return false, true
+			}
+		case !obj.ClusterScoped:
+			if !obj.NamespaceLabelsKnown {
+				return false, false
+			}
+			if !c.namespaceSelector.Matches(labels.Set(obj.NamespaceLabels)) {
+				return false, true
+			}
+		default:
+			// A cluster-scoped object other than Namespace itself: a
+			// namespaceSelector never skips the policy for it, per
+			// MatchResources' own doc comment.
 		}
 	}
 

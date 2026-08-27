@@ -71,6 +71,40 @@ func TestRuleMatches_EmptyRuleNeverMatches(t *testing.T) {
 	assert.False(t, ruleMatches(admissionregistrationv1alpha1.NamedRuleWithOperations{}, obj(nil)))
 }
 
+func TestRuleMatches_ResourceNamesRestrictsToNamedObjects(t *testing.T) {
+	r := pods(admissionregistrationv1alpha1.Create)
+	r.ResourceNames = []string{"allowed-one", "allowed-two"}
+
+	assert.False(t, ruleMatches(r, obj(func(o *ObjectInfo) { o.Name = "someone-else" })), "a name outside ResourceNames must not match")
+	assert.True(t, ruleMatches(r, obj(func(o *ObjectInfo) { o.Name = "allowed-two" })), "a name inside ResourceNames must match")
+}
+
+func TestRuleMatches_EmptyResourceNamesDoesNotRestrict(t *testing.T) {
+	r := pods(admissionregistrationv1alpha1.Create)
+	assert.True(t, ruleMatches(r, obj(func(o *ObjectInfo) { o.Name = "anything" })), "an empty ResourceNames allows every name")
+}
+
+func TestRuleMatches_ScopeRestrictsToDeclaredScope(t *testing.T) {
+	clusterScope := admissionregistrationv1alpha1.ClusterScope
+	namespacedScope := admissionregistrationv1alpha1.NamespacedScope
+
+	clusterOnly := pods(admissionregistrationv1alpha1.Create)
+	clusterOnly.Scope = &clusterScope
+	assert.False(t, ruleMatches(clusterOnly, obj(func(o *ObjectInfo) { o.ClusterScoped = false })), "Cluster scope must not match a namespaced object")
+	assert.True(t, ruleMatches(clusterOnly, obj(func(o *ObjectInfo) { o.ClusterScoped = true })), "Cluster scope must match a cluster-scoped object")
+
+	namespacedOnly := pods(admissionregistrationv1alpha1.Create)
+	namespacedOnly.Scope = &namespacedScope
+	assert.True(t, ruleMatches(namespacedOnly, obj(func(o *ObjectInfo) { o.ClusterScoped = false })), "Namespaced scope must match a namespaced object")
+	assert.False(t, ruleMatches(namespacedOnly, obj(func(o *ObjectInfo) { o.ClusterScoped = true })), "Namespaced scope must not match a cluster-scoped object")
+}
+
+func TestRuleMatches_NilScopeDefaultsToAllScopes(t *testing.T) {
+	r := pods(admissionregistrationv1alpha1.Create)
+	assert.True(t, ruleMatches(r, obj(func(o *ObjectInfo) { o.ClusterScoped = true })))
+	assert.True(t, ruleMatches(r, obj(func(o *ObjectInfo) { o.ClusterScoped = false })))
+}
+
 func TestCompileMatchResources_NilMatchesEverything(t *testing.T) {
 	c, err := compileMatchResources(nil)
 	require.NoError(t, err)
@@ -139,6 +173,32 @@ func TestCompileMatchResources_NamespaceSelectorRequiresKnownLabels(t *testing.T
 	matched, determinable := c.matches(obj(func(o *ObjectInfo) {
 		o.NamespaceLabelsKnown = true
 		o.NamespaceLabels = map[string]string{"env": "prod"}
+	}))
+	assert.True(t, matched)
+	assert.True(t, determinable)
+}
+
+func TestCompileMatchResources_NamespaceObjectMatchesSelectorAgainstOwnLabels(t *testing.T) {
+	c, err := compileMatchResources(&admissionregistrationv1alpha1.MatchResources{
+		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"env": "prod"}},
+	})
+	require.NoError(t, err)
+
+	// A Namespace object is itself cluster-scoped, but unlike any other
+	// cluster-scoped kind, a namespaceSelector is evaluated against its own
+	// labels -- not bypassed -- per MatchResources' own doc comment.
+	excluded, determinable := c.matches(obj(func(o *ObjectInfo) {
+		o.ClusterScoped = true
+		o.IsNamespaceObject = true
+		o.Labels = map[string]string{"env": "dev"}
+	}))
+	assert.False(t, excluded, "a namespaceSelector must be able to exclude a Namespace object by its own labels")
+	assert.True(t, determinable)
+
+	matched, determinable := c.matches(obj(func(o *ObjectInfo) {
+		o.ClusterScoped = true
+		o.IsNamespaceObject = true
+		o.Labels = map[string]string{"env": "prod"}
 	}))
 	assert.True(t, matched)
 	assert.True(t, determinable)

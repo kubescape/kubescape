@@ -202,6 +202,103 @@ func TestAnalyzeMutatingAdmissionPolicyImpact_MissingRequiredArgumentsReturnErro
 	require.True(t, result.IsError)
 }
 
+func TestAnalyzeMutatingAdmissionPolicyImpact_MissingNamespaceReturnsErrorBeforeAnyClusterCall(t *testing.T) {
+	// No discovery/dynamic resources are registered for the API at all, so if
+	// the namespace-required check ran after Collect(), this would fail with
+	// a "cluster does not serve" or list error instead of the intended
+	// argument-validation error.
+	ksServer := newMutatingPolicyTestServer(t)
+	ksServer.k8sClient.DiscoveryClient = &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", map[string]any{
+		"name":        "server",
+		"api_version": "v1",
+		"resource":    "pods",
+		// namespace omitted, cluster_scoped omitted (false)
+	}))
+	require.True(t, result.IsError)
+}
+
+func TestAnalyzeMutatingAdmissionPolicyImpact_NamespaceObjectMatchesSelectorAgainstOwnLabels(t *testing.T) {
+	policy := unstructuredMutatingPolicy("add-label-to-prod-namespaces", map[string]any{
+		"resourceRules": []any{
+			map[string]any{
+				"apiGroups":   []any{""},
+				"apiVersions": []any{"v1"},
+				"resources":   []any{"namespaces"},
+				"operations":  []any{"*"},
+			},
+		},
+		"namespaceSelector": map[string]any{"matchLabels": map[string]any{"env": "prod"}},
+	},
+		map[string]any{"patchType": "JSONPatch", "jsonPatch": map[string]any{"expression": `[JSONPatch{op: "add", path: "/metadata/labels/x", value: "y"}]`}},
+	)
+	binding := unstructuredMutatingPolicyBinding("b", "add-label-to-prod-namespaces")
+
+	nsGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}
+	prodNS := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]any{
+			"name":   "prod",
+			"labels": map[string]any{"env": "prod"},
+		},
+	}}
+	devNS := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]any{
+			"name":   "dev",
+			"labels": map[string]any{"env": "dev"},
+		},
+	}}
+
+	listKinds := map[schema.GroupVersionResource]string{
+		mutatingAdmissionPolicyGVR:        "MutatingAdmissionPolicyList",
+		mutatingAdmissionPolicyBindingGVR: "MutatingAdmissionPolicyBindingList",
+		nsGVR:                             "NamespaceList",
+	}
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, policy, binding, prodNS, devNS)
+	discovery := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	discovery.Resources = []*metav1.APIResourceList{{
+		GroupVersion: "admissionregistration.k8s.io/v1alpha1",
+		APIResources: []metav1.APIResource{
+			{Name: "mutatingadmissionpolicies", Kind: "MutatingAdmissionPolicy"},
+			{Name: "mutatingadmissionpolicybindings", Kind: "MutatingAdmissionPolicyBinding"},
+		},
+	}}
+	ksServer := &KubescapeMcpserver{
+		s:         server.NewMCPServer("kubescape-test", "test", server.WithToolCapabilities(false), server.WithRecovery()),
+		k8sClient: &k8sinterface.KubernetesApi{DynamicClient: dyn, DiscoveryClient: discovery},
+	}
+	createMutatingAdmissionPolicyTools(ksServer)
+
+	// The prod namespace's own labels satisfy the selector: it must match.
+	prodResult := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", map[string]any{
+		"name":           "prod",
+		"api_version":    "v1",
+		"resource":       "namespaces",
+		"cluster_scoped": true,
+	}))
+	require.False(t, prodResult.IsError)
+	var prodParsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, prodResult)), &prodParsed))
+	require.Len(t, prodParsed["matches"].([]any), 1, "the prod namespace's own labels satisfy the selector and must match")
+
+	// The dev namespace's own labels do not satisfy the selector: it must be
+	// excluded, not treated as "cluster-scoped, selector doesn't apply".
+	devResult := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", map[string]any{
+		"name":           "dev",
+		"api_version":    "v1",
+		"resource":       "namespaces",
+		"cluster_scoped": true,
+	}))
+	require.False(t, devResult.IsError)
+	var devParsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, devResult)), &devParsed))
+	require.Empty(t, devParsed["matches"], "the dev namespace's own labels must exclude it, not bypass the selector as a cluster-scoped object")
+}
+
 func TestAnalyzeMutatingAdmissionPolicyImpact_InvalidOperationReturnsError(t *testing.T) {
 	ksServer := newMutatingPolicyTestServer(t)
 

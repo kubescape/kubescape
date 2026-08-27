@@ -16,8 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-var namespaceGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "namespaces"}
-
 var mutatingAdmissionPolicyOperations = map[string]admissionregistrationv1alpha1.OperationType{
 	"CREATE":  admissionregistrationv1alpha1.Create,
 	"UPDATE":  admissionregistrationv1alpha1.Update,
@@ -67,6 +65,19 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 		namespace, _ := args["namespace"].(string)
 		clusterScoped, _ := args["cluster_scoped"].(bool)
 
+		// A Namespace object is itself cluster-scoped ("Namespace API
+		// objects are cluster-scoped", per Rule.Scope's own doc comment)
+		// regardless of what the caller passed for cluster_scoped, and its
+		// namespaceSelector matching is special (see mapreconcile.ObjectInfo
+		// .IsNamespaceObject) -- so this is derived from the real API shape,
+		// not trusted from the argument.
+		isNamespaceResource := apiGroup == "" && resource == "namespaces"
+		effectiveClusterScoped := clusterScoped || isNamespaceResource
+
+		if !effectiveClusterScoped && namespace == "" {
+			return mcp.NewToolResultError("namespace is required unless cluster_scoped is true"), nil
+		}
+
 		operation := admissionregistrationv1alpha1.Create
 		if rawOp, ok := args["operation"].(string); ok && rawOp != "" {
 			normalized := strings.ToUpper(rawOp)
@@ -90,17 +101,13 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to collect MutatingAdmissionPolicy resources: %v", err)), nil
 		}
 
-		if !clusterScoped && namespace == "" {
-			return mcp.NewToolResultError("namespace is required unless cluster_scoped is true"), nil
-		}
-
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 		dynClient := k8sClient.DynamicClient
 
 		resourceInterface := dynClient.Resource(gvr)
 		var obj *unstructured.Unstructured
 		var getErr error
-		if clusterScoped {
+		if effectiveClusterScoped {
 			obj, getErr = resourceInterface.Get(ctx, name, metav1.GetOptions{})
 		} else {
 			obj, getErr = resourceInterface.Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
@@ -110,16 +117,18 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 		}
 
 		info := mapreconcile.ObjectInfo{
-			Group:         apiGroup,
-			Version:       apiVersion,
-			Resource:      resource,
-			Namespace:     namespace,
-			Labels:        obj.GetLabels(),
-			Operation:     operation,
-			ClusterScoped: clusterScoped,
+			Group:             apiGroup,
+			Version:           apiVersion,
+			Resource:          resource,
+			Name:              name,
+			Namespace:         namespace,
+			Labels:            obj.GetLabels(),
+			Operation:         operation,
+			ClusterScoped:     effectiveClusterScoped,
+			IsNamespaceObject: isNamespaceResource,
 		}
 
-		if !clusterScoped {
+		if !effectiveClusterScoped {
 			nsObj, nsErr := dynClient.Resource(namespaceGVR).Get(ctx, namespace, metav1.GetOptions{})
 			if nsErr == nil {
 				info.NamespaceLabels = nsObj.GetLabels()
