@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // --- helpers --------------------------------------------------------------
@@ -370,12 +371,12 @@ func TestPrepareResourcesToFix_UnresolvableResourceID(t *testing.T) {
 	}
 }
 
-func TestPrepareResourcesToFix_NonYamlSource(t *testing.T) {
+func TestPrepareResourcesToFix_UnsupportedSource(t *testing.T) {
 	dir := t.TempDir()
-	manifest := writeManifest(t, dir, "deploy.json", "{}")
+	manifest := writeManifest(t, dir, "deploy.yaml", "{}")
 	rel, _ := filepath.Rel(dir, manifest)
 	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
-	res.Source.FileType = reporthandling.SourceTypeJson
+	res.Source.FileType = reporthandling.SourceTypeHelmChart
 
 	results := []resourcesresults.Result{
 		{
@@ -391,7 +392,7 @@ func TestPrepareResourcesToFix_NonYamlSource(t *testing.T) {
 	h := newHandlerForResources(dir, results, nil, false)
 	_ = h.PrepareResourcesToFix(context.Background())
 	if assert.Len(t, h.UnfixedControls(), 1) {
-		assert.Contains(t, h.UnfixedControls()[0].Reason, "not a YAML")
+		assert.Contains(t, h.UnfixedControls()[0].Reason, "not a YAML or JSON")
 	}
 }
 
@@ -1065,4 +1066,152 @@ func TestNewFixHandler_AcceptsValidReport(t *testing.T) {
 	h, err := NewFixHandler(&metav1.FixInfo{ReportFile: reportFile})
 	assert.NoError(t, err)
 	assert.NotNil(t, h)
+}
+
+// TestPrepareResourcesToFix_JsonSource covers the format the scan reads and
+// reports fix paths for, but the fix engine used to refuse: the resource is
+// prepared for fixing rather than listed as unfixed.
+func TestPrepareResourcesToFix_JsonSource(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.json", `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"demo"},"spec":{"privileged":true}}`)
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Pod", "demo", 0)
+	res.Source.FileType = reporthandling.SourceTypeJson
+
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0057", "Privileged",
+					failedRuleWithFix("spec.privileged", "false"),
+				),
+			},
+		},
+	}
+
+	h := newHandlerForResources(dir, results, nil, false)
+	toFix := h.PrepareResourcesToFix(context.Background())
+
+	require.Len(t, toFix, 1)
+	assert.Equal(t, manifest, toFix[0].FilePath)
+	assert.Empty(t, h.UnfixedControls())
+}
+
+// TestPrepareResourcesToFix_JsonFileWithSeveralResources covers a JSON manifest
+// that wraps its resources, kind: List being the common case. A JSON file is a
+// single document, so every fix path in it resolves against the wrapper rather
+// than the resource it belongs to.
+func TestPrepareResourcesToFix_JsonFileWithSeveralResources(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "list.json", `{"apiVersion":"v1","kind":"List","items":[]}`)
+	rel, _ := filepath.Rel(dir, manifest)
+
+	results := make([]resourcesresults.Result, 0, 2)
+	for i, name := range []string{"api", "web"} {
+		res := buildResource(t, dir, rel, "Pod", name, i)
+		res.Source.FileType = reporthandling.SourceTypeJson
+		results = append(results, resourcesresults.Result{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0057", "Privileged", failedRuleWithFix("spec.privileged", "false")),
+			},
+		})
+	}
+
+	h := newHandlerForResources(dir, results, nil, false)
+	toFix := h.PrepareResourcesToFix(context.Background())
+
+	assert.Empty(t, toFix, "a wrapped JSON manifest must not be rewritten")
+	require.NotEmpty(t, h.UnfixedControls())
+	assert.Contains(t, h.UnfixedControls()[0].Reason, "several resources in one document")
+}
+
+// TestPrepareResourcesToFix_MultiDocumentYamlIsUnaffected keeps the guard from
+// over-reaching: each YAML document is a resource in its own right.
+func TestPrepareResourcesToFix_MultiDocumentYamlIsUnaffected(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "multi.yaml", "kind: Pod\n---\nkind: Pod\n")
+	rel, _ := filepath.Rel(dir, manifest)
+
+	results := make([]resourcesresults.Result, 0, 2)
+	for i, name := range []string{"api", "web"} {
+		res := buildResource(t, dir, rel, "Pod", name, i)
+		res.Source.FileType = reporthandling.SourceTypeYaml
+		results = append(results, resourcesresults.Result{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0057", "Privileged", failedRuleWithFix("spec.privileged", "false")),
+			},
+		})
+	}
+
+	h := newHandlerForResources(dir, results, nil, false)
+
+	assert.Len(t, h.PrepareResourcesToFix(context.Background()), 2)
+}
+
+// TestPrepareResourcesToFix_YamlListIsNotRewritten covers the same wrapper in
+// YAML. One document, several resources: their fix paths resolve against the
+// List rather than the workloads, so the file is left alone.
+func TestPrepareResourcesToFix_YamlListIsNotRewritten(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "list.yaml", "apiVersion: v1\nkind: List\nitems:\n  - kind: Pod\n  - kind: Pod\n")
+	rel, _ := filepath.Rel(dir, manifest)
+
+	results := make([]resourcesresults.Result, 0, 2)
+	for i, name := range []string{"api", "web"} {
+		res := buildResource(t, dir, rel, "Pod", name, i)
+		res.Source.FileType = reporthandling.SourceTypeYaml
+		results = append(results, resourcesresults.Result{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0057", "Privileged", failedRuleWithFix("spec.privileged", "false")),
+			},
+		})
+	}
+
+	h := newHandlerForResources(dir, results, nil, false)
+	toFix := h.PrepareResourcesToFix(context.Background())
+
+	assert.Empty(t, toFix)
+	require.NotEmpty(t, h.UnfixedControls())
+	assert.Contains(t, h.UnfixedControls()[0].Reason, "several resources in one document")
+}
+
+// TestPrepareResourcesToFix_ListWithOneFixableChild covers a wrapper whose other
+// members produced no fixes. Counting only the fixable resources would see one
+// resource, miss the wrapper and write its fix paths to the List.
+func TestPrepareResourcesToFix_ListWithOneFixableChild(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "list.json", `{"apiVersion":"v1","kind":"List","items":[]}`)
+	rel, _ := filepath.Rel(dir, manifest)
+
+	failing := buildResource(t, dir, rel, "Pod", "bad", 0)
+	failing.Source.FileType = reporthandling.SourceTypeJson
+	passing := buildResource(t, dir, rel, "ConfigMap", "cfg", 1)
+	passing.Source.FileType = reporthandling.SourceTypeJson
+
+	h := newHandlerForResources(dir, []resourcesresults.Result{
+		{
+			ResourceID:  failing.GetID(),
+			RawResource: failing,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0057", "Privileged", failedRuleWithFix("spec.privileged", "false")),
+			},
+		},
+	}, nil, false)
+	h.reportObj.Resources = append(h.reportObj.Resources, *failing, *passing)
+
+	toFix := h.PrepareResourcesToFix(context.Background())
+
+	assert.Empty(t, toFix, "the wrapper must be detected from every scanned resource, not only the fixable ones")
+	assert.Zero(t, h.FixedControlsCount(), "a withdrawn resource must give back its fixed tally")
+	require.NotEmpty(t, h.UnfixedControls())
+	assert.Equal(t, "C-0057", h.UnfixedControls()[0].ControlID)
+	assert.Equal(t, "Privileged", h.UnfixedControls()[0].ControlName)
+	assert.Contains(t, h.UnfixedControls()[0].Reason, "several resources in one document")
 }

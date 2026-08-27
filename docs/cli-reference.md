@@ -518,6 +518,22 @@ Auto-fix misconfigurations in Kubernetes manifest files.
 kubescape fix <report-file> [flags]
 ```
 
+### Supported manifest formats
+
+YAML and JSON manifests are both fixed in place, in the format they were written
+in. A YAML file keeps its comments and layout, since only the changed lines are
+rewritten; a JSON file is re-encoded at the indentation it already used, JSON
+having no comments to preserve.
+
+A manifest that wraps several resources in one document, `kind: List` being the
+usual case, is left alone in either format: the fix paths would resolve against
+the wrapper rather than the resources they belong to. Multi-document YAML is
+fixed normally, each document there being a resource in its own right.
+
+Helm charts are reported as suggestions rather than edited, because a rendered
+resource's fix path does not map reliably back to a template line. Resources
+from any other source are listed as unfixed with the reason.
+
 ### Flags
 
 | Flag | Description | Default |
