@@ -85,7 +85,7 @@ func MockDevelopmentWithHostpath() workloadinterface.IMetadata {
 func MockExceptionAllKinds(policy *armotypes.PosturePolicy) *armotypes.PostureExceptionPolicy {
 	return &armotypes.PostureExceptionPolicy{
 		PosturePolicies: []armotypes.PosturePolicy{*policy},
-		Actions:         []armotypes.PostureExceptionPolicyActions{armotypes.AlertOnly},
+		Actions:         []armotypes.PostureExceptionPolicyActions{armotypes.Disable},
 		Resources: []identifiers.PortalDesignator{
 			{
 				DesignatorType: identifiers.DesignatorAttributes,
