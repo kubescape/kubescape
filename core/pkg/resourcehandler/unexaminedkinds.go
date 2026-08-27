@@ -11,9 +11,15 @@ import (
 // keyed by formatted triplets and discovery hands back a GroupVersionResource,
 // so both are parsed into this before being compared, rather than one side
 // being re-formatted into the other's spelling.
+//
+// The served version is deliberately not part of it. Every version a group
+// serves a resource at is a view of the same stored objects, so a LIST at one
+// of them returns the whole set and examines the kind outright. Keying on the
+// version reported a second served version as a coverage gap that does not
+// exist, which any multi-version CRD and several built-in groups (autoscaling,
+// admissionregistration.k8s.io) hit on an ordinary cluster.
 type examinedResourceKey struct {
 	group    string
-	version  string
 	resource string
 }
 
@@ -23,11 +29,11 @@ type examinedResourceKey struct {
 func queriedResourceKeys(queryable QueryableResources) map[examinedResourceKey]struct{} {
 	queried := make(map[examinedResourceKey]struct{}, len(queryable))
 	for triplet := range queryable {
-		group, version, resource := k8sinterface.StringToResourceGroup(triplet)
+		group, _, resource := k8sinterface.StringToResourceGroup(triplet)
 		if resource == "" {
 			continue
 		}
-		queried[examinedResourceKey{group: group, version: version, resource: resource}] = struct{}{}
+		queried[examinedResourceKey{group: group, resource: resource}] = struct{}{}
 	}
 	return queried
 }
@@ -45,12 +51,8 @@ func computeUnexaminedKinds(discovered []discoveredAPIResource, queryable Querya
 		if !candidate.listable {
 			continue
 		}
-		identity := examinedResourceKey{
-			group:    candidate.gvr.Group,
-			version:  candidate.gvr.Version,
-			resource: candidate.gvr.Resource,
-		}
-		if _, examined := queried[identity]; examined {
+		key := examinedResourceKey{group: candidate.gvr.Group, resource: candidate.gvr.Resource}
+		if _, examined := queried[key]; examined {
 			continue
 		}
 		unexamined = append(unexamined, cautils.UnexaminedKind{
