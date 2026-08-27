@@ -310,14 +310,22 @@ func heapDelta(from, to uint64) float64 {
 	return float64(to-from) / (1 << 20)
 }
 
+// writeHeapProfile dumps a heap profile into the directory named by
+// collectorHeapProfileDirEnv, if it is set.
+//
+// gosec's G703 taint analysis flags the env-derived directory reaching a
+// filesystem write. The two writes are suppressed rather than guarded: the
+// directory is opt-in tooling that whoever runs the benchmark sets on their own
+// machine, in a _test.go file that no build or release binary links, so there is
+// no untrusted input for path validation to defend against.
 func writeHeapProfile(b *testing.B, label string) {
 	dir := os.Getenv(collectorHeapProfileDirEnv)
 	if dir == "" {
 		return
 	}
-	require.NoError(b, os.MkdirAll(dir, 0o700))
+	require.NoError(b, os.MkdirAll(dir, 0o700)) //nolint:gosec // G703: developer-set debug output directory, never attacker input
 	path := filepath.Join(dir, "collector-peak-"+label+".pprof")
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // G703: developer-set debug output directory, never attacker input
 	require.NoError(b, err)
 	defer file.Close()
 	require.NoError(b, pprof.Lookup("heap").WriteTo(file, 0))
