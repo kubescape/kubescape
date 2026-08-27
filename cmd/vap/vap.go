@@ -831,35 +831,38 @@ type namespaceSelectorReach struct {
 	narrowable bool
 }
 
+// coveredResource is one resource the emitted binding covers, at the groups and
+// versions it covers it at.
+type coveredResource struct {
+	groups   []string
+	versions []string
+	resource string
+}
+
 // resolveNamespaceSelectorReach walks the surface the emitted binding covers —
 // the policy's matchConstraints, intersected with the binding's own resource
 // rules when the caller gave any — and reports what its namespaceSelector does
 // to it.
-//
-// The intersection is by resource name alone, the way classifyResourceRule
-// compares one: matchPolicy Equivalent lets a binding rule bridge a group or
-// version gap, but never turns one resource into another.
 func resolveNamespaceSelectorReach(constraints, bindingRules []admissionv1.NamedRuleWithOperations) namespaceSelectorReach {
 	var reach namespaceSelectorReach
 	seen := make(map[string]struct{})
 	for i := range constraints {
 		constraint := &constraints[i]
 		for _, resource := range constraint.Resources {
-			if !bindingCoversResource(bindingRules, resource) {
-				continue
-			}
-			if resourceSelectorReach(constraint.Scope, constraint.APIGroups, resource) != reachAlwaysMatches {
-				reach.narrowable = true
-				continue
-			}
-			for _, group := range constraint.APIGroups {
-				for _, version := range constraint.APIVersions {
-					entry := strings.Join([]string{group, version, resource}, "/")
-					if _, duplicate := seen[entry]; duplicate {
-						continue
+			for _, covered := range bindingCoverage(constraint, resource, bindingRules) {
+				if resourceSelectorReach(constraint.Scope, covered.groups, covered.resource) != reachAlwaysMatches {
+					reach.narrowable = true
+					continue
+				}
+				for _, group := range covered.groups {
+					for _, version := range covered.versions {
+						entry := strings.Join([]string{group, version, covered.resource}, "/")
+						if _, duplicate := seen[entry]; duplicate {
+							continue
+						}
+						seen[entry] = struct{}{}
+						reach.alwaysMatched = append(reach.alwaysMatched, entry)
 					}
-					seen[entry] = struct{}{}
-					reach.alwaysMatched = append(reach.alwaysMatched, entry)
 				}
 			}
 		}
@@ -867,19 +870,79 @@ func resolveNamespaceSelectorReach(constraints, bindingRules []admissionv1.Named
 	return reach
 }
 
-// bindingCoversResource reports whether the binding's own resource rules keep
-// one of the policy's resources in scope. No rules is the default: the binding
-// covers everything the policy matches.
-func bindingCoversResource(rules []admissionv1.NamedRuleWithOperations, resource string) bool {
-	if len(rules) == 0 {
-		return true
+// bindingCoverage resolves what one resource of a policy constraint still
+// covers once the binding's own resource rules are applied, as nothing where
+// they drop it entirely. No rules is the default: the binding covers the
+// constraint as it stands.
+//
+// A request has to match the policy and the binding both, so what the emitted
+// binding acts on is their intersection — and it is the intersection, not the
+// constraint, whose scope decides what the selector can narrow. A policy
+// constraining "*" bound with --resource-rule apps/v1/deployments acts on
+// deployments alone, which a namespaceSelector narrows, however wide the
+// constraint reads on its own.
+//
+// The intersection is by resource name alone, the way classifyResourceRule
+// compares one: matchPolicy Equivalent lets a binding rule bridge a group or
+// version gap, but never turns one resource into another. So group and version
+// stay as the policy states them, except where it states a wildcard — that
+// names nothing for the binding to reach past, and nothing for a message about
+// it to echo.
+func bindingCoverage(constraint *admissionv1.NamedRuleWithOperations, resource string, bindingRules []admissionv1.NamedRuleWithOperations) []coveredResource {
+	if len(bindingRules) == 0 {
+		return []coveredResource{{groups: constraint.APIGroups, versions: constraint.APIVersions, resource: resource}}
 	}
-	for i := range rules {
-		if resourcesOverlap(rules[i].Resources, []string{resource}) {
-			return true
+	var covered []coveredResource
+	for i := range bindingRules {
+		for _, bound := range bindingRules[i].Resources {
+			if !resourcesOverlap([]string{resource}, []string{bound}) {
+				continue
+			}
+			covered = append(covered, coveredResource{
+				groups:   narrowWildcards(constraint.APIGroups, bindingRules[i].APIGroups),
+				versions: narrowWildcards(constraint.APIVersions, bindingRules[i].APIVersions),
+				resource: narrowResource(resource, bound),
+			})
 		}
 	}
-	return false
+	return covered
+}
+
+// narrowResource is the more specific of a policy resource and a binding
+// resource that overlaps it, resource name and subresource each taken from
+// whichever side names one.
+func narrowResource(resource, bound string) string {
+	name, subresource := splitSubresource(resource)
+	boundName, boundSubresource := splitSubresource(bound)
+	name, subresource = narrowWildcard(name, boundName), narrowWildcard(subresource, boundSubresource)
+	if subresource == "" {
+		return name
+	}
+	return name + "/" + subresource
+}
+
+// narrowWildcards replaces a wildcard the policy states with the values the
+// binding narrows it to. Anything the policy names stays as it named it.
+func narrowWildcards(values, bound []string) []string {
+	if len(bound) == 0 {
+		return values
+	}
+	narrowed := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != "*" {
+			narrowed = append(narrowed, value)
+			continue
+		}
+		narrowed = append(narrowed, bound...)
+	}
+	return narrowed
+}
+
+func narrowWildcard(value, bound string) string {
+	if value == "*" {
+		return bound
+	}
+	return value
 }
 
 // checkNamespaceSelectorScope reports on a --namespace the apiserver will not

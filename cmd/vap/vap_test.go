@@ -1562,6 +1562,73 @@ func TestResolveNamespaceSelectorReach(t *testing.T) {
 		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{rule, rule}, nil)
 		assert.Equal(t, []string{rbac + "/v1/clusterroles", rbac + "/v1beta1/clusterroles"}, reach.alwaysMatched)
 	})
+
+	// A wildcard constraint sweeps cluster-scoped resources only as far as the
+	// binding lets it. What the selector has to reach is the intersection, so a
+	// binding narrowed to a namespaced resource is narrowable however wide the
+	// constraint reads on its own — reading the reach off "*" instead refuses a
+	// binding that is exactly what --namespace is for.
+	t.Run("a resource rule narrows a wildcard constraint", func(t *testing.T) {
+		parsed, err := parseResourceRules([]string{"apps/v1/deployments"})
+		require.NoError(t, err)
+
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint("*", "*", "*")}, bindingResourceRules(parsed))
+		assert.Empty(t, reach.alwaysMatched)
+		assert.True(t, reach.narrowable)
+	})
+
+	t.Run("a wildcard constraint narrowed to a cluster-scoped resource names it", func(t *testing.T) {
+		parsed, err := parseResourceRules([]string{rbac + "/v1/clusterroles"})
+		require.NoError(t, err)
+
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint("*", "*", "*")}, bindingResourceRules(parsed))
+		assert.Equal(t, []string{rbac + "/v1/clusterroles"}, reach.alwaysMatched)
+		assert.False(t, reach.narrowable)
+	})
+
+	t.Run("only the rules covering a resource narrow it", func(t *testing.T) {
+		parsed, err := parseResourceRules([]string{"apps/v1/deployments", rbac + "/v1/clusterroles"})
+		require.NoError(t, err)
+
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint("*", "*", "*")}, bindingResourceRules(parsed))
+		assert.Equal(t, []string{rbac + "/v1/clusterroles"}, reach.alwaysMatched)
+		assert.True(t, reach.narrowable)
+	})
+
+	t.Run("an unnarrowed wildcard constraint keeps its whole reach", func(t *testing.T) {
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint("*", "*", "*")}, nil)
+		assert.Equal(t, []string{"*/*/*"}, reach.alwaysMatched)
+		assert.False(t, reach.narrowable)
+	})
+
+	t.Run("a wildcard resource rule narrows nothing off a wildcard constraint", func(t *testing.T) {
+		parsed, err := parseResourceRules([]string{"*/*/*"})
+		require.NoError(t, err)
+
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint("*", "*", "*")}, bindingResourceRules(parsed))
+		assert.Equal(t, []string{"*/*/*"}, reach.alwaysMatched)
+		assert.False(t, reach.narrowable)
+	})
+
+	t.Run("a subresource rule narrows a wildcard constraint to its parent's scope", func(t *testing.T) {
+		parsed, err := parseResourceRules([]string{"/v1/pods/exec"})
+		require.NoError(t, err)
+
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint("*", "*", "*/*")}, bindingResourceRules(parsed))
+		assert.Empty(t, reach.alwaysMatched)
+		assert.True(t, reach.narrowable)
+	})
+
+	// Only a wildcard gives way: a rule at another group covers the resource the
+	// constraint names, at the group the constraint names it at.
+	t.Run("a named constraint group outranks the rule's", func(t *testing.T) {
+		parsed, err := parseResourceRules([]string{"extensions/v1beta1/deployments"})
+		require.NoError(t, err)
+
+		reach := resolveNamespaceSelectorReach([]admissionv1.NamedRuleWithOperations{constraint("apps", "v1", "deployments")}, bindingResourceRules(parsed))
+		assert.Empty(t, reach.alwaysMatched)
+		assert.True(t, reach.narrowable)
+	})
 }
 
 // TestCheckNamespaceSelectorScope covers --namespace against the policies the
