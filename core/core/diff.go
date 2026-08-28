@@ -33,6 +33,18 @@ func (ks *Kubescape) Diff(diffInfo *metav1.DiffInfo) (newFailures int, err error
 	}
 
 	switch diffInfo.Format {
+	case diff.SummaryJSONFormat:
+		if err := diff.PrintSummaryJSON(w, cs, diffInfo.SeverityThreshold); err != nil {
+			return 0, fmt.Errorf("writing summary JSON diff: %w", err)
+		}
+	case diff.SummaryYAMLFormat:
+		if err := diff.PrintSummaryYAML(w, cs, diffInfo.SeverityThreshold); err != nil {
+			return 0, fmt.Errorf("writing summary YAML diff: %w", err)
+		}
+	case diff.SummaryCSVFormat:
+		if err := diff.PrintSummaryCSV(w, cs, diffInfo.SeverityThreshold); err != nil {
+			return 0, fmt.Errorf("writing summary CSV diff: %w", err)
+		}
 	case printer.JsonFormat:
 		if err := diff.PrintJSON(w, cs); err != nil {
 			return 0, fmt.Errorf("writing JSON diff: %w", err)
@@ -80,6 +92,23 @@ func diffOutputPath(format, outputFile string) string {
 	}
 	if format == printer.PrettyFormat {
 		return outputFile
+	}
+	switch format {
+	case diff.SummaryJSONFormat:
+		if printer.HasOutputExt(outputFile, printer.JsonOutputExt) {
+			return outputFile
+		}
+		return outputFile + printer.JsonOutputExt
+	case diff.SummaryYAMLFormat:
+		if printer.HasOutputExt(outputFile, printer.YamlOutputExt) || printer.HasOutputExt(outputFile, ".yml") {
+			return outputFile
+		}
+		return outputFile + printer.YamlOutputExt
+	case diff.SummaryCSVFormat:
+		if printer.HasOutputExt(outputFile, printer.CsvOutputExt) {
+			return outputFile
+		}
+		return outputFile + printer.CsvOutputExt
 	}
 	ext, ok := printer.FormatOutputExt[format]
 	if !ok || ext == "" {

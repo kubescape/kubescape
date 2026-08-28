@@ -30,6 +30,9 @@ func TestGetDiffCmd_FormatValidation(t *testing.T) {
 		wantError bool
 	}{
 		{"default pretty-printer", "pretty-printer", false},
+		{"summary-json", "summary-json", false},
+		{"summary-yaml", "summary-yaml", false},
+		{"summary-csv", "summary-csv", false},
 		{"json", "json", false},
 		{"yaml", "yaml", false},
 		{"sarif", "sarif", false},
@@ -134,7 +137,7 @@ func TestGetDiffCmd_HelpExplainsEvidenceComparison(t *testing.T) {
 	assert.Contains(t, help, "failed rules and paths are compared")
 	assert.Contains(t, help, "--granularity control")
 	assert.Contains(t, help, `--format string`)
-	assert.Contains(t, help, `"pretty-printer", "json", "yaml", "sarif", "junit", "gitlab-sast", "markdown"`)
+	assert.Contains(t, help, `"pretty-printer", "summary-json", "summary-yaml", "summary-csv", "json", "yaml", "sarif", "junit", "gitlab-sast", "markdown"`)
 }
 
 func TestGetDiffCmd_FailOnNewAndSeverity(t *testing.T) {

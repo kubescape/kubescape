@@ -34,6 +34,12 @@ var diffCmdExamples = fmt.Sprintf(`
 
   # Output diff as JSON
   %[1]s diff base.json head.json --format json --output diff.json
+
+  # Output aggregate diff counts for dashboards and CI annotations
+  %[1]s diff base.json head.json --format summary-json --output diff-summary.json
+
+  # Output aggregate diff counts as CSV for spreadsheet-friendly artifacts
+  %[1]s diff base.json head.json --format summary-csv --output diff-summary.csv
 `, cautils.ExecName())
 
 func GetDiffCmd(ks meta.IKubescape) *cobra.Command {
@@ -97,6 +103,9 @@ func severityLabel(s string) string {
 func diffFormats() []string {
 	return []string{
 		printer.PrettyFormat,
+		resultsdiff.SummaryJSONFormat,
+		resultsdiff.SummaryYAMLFormat,
+		resultsdiff.SummaryCSVFormat,
 		printer.JsonFormat,
 		printer.YamlFormat,
 		printer.SARIFFormat,
