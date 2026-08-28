@@ -39,6 +39,7 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 		mcp.WithString("api_group", mcp.Description("API group of the resource (omit or empty for the core group, e.g. Pod/ConfigMap)")),
 		mcp.WithString("api_version", mcp.Required(), mcp.Description("API version of the resource, e.g. v1")),
 		mcp.WithString("resource", mcp.Required(), mcp.Description("Plural resource name, e.g. pods, deployments")),
+		mcp.WithString("subresource", mcp.Description("Subresource the request targets, e.g. status or scale (omit for the resource itself). A policy scoped to the resource does not cover its subresources, and the reverse, so this changes which policies match")),
 		mcp.WithString("operation", mcp.Description("Admission operation to check: CREATE, UPDATE, or CONNECT (default CREATE)")),
 		mcp.WithBoolean("cluster_scoped", mcp.Description("Set true for a cluster-scoped resource (namespace is ignored, and any namespaceSelector is treated as non-restricting, matching the Kubernetes API's own documented behavior)")),
 	)
@@ -64,6 +65,17 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 		apiGroup, _ := args["api_group"].(string)
 		namespace, _ := args["namespace"].(string)
 		clusterScoped, _ := args["cluster_scoped"].(bool)
+
+		// A subresource is one path segment: "status", not "pods/status". A
+		// caller repeating the parent would otherwise match no rule at all and
+		// read as "nothing mutates this".
+		subresource, subresourceErr := optionalStringArg(args, "subresource")
+		if subresourceErr != nil {
+			return mcp.NewToolResultError(subresourceErr.Error()), nil
+		}
+		if strings.Contains(subresource, "/") {
+			return mcp.NewToolResultError(fmt.Sprintf("subresource must name one subresource without the parent resource (got %q, want e.g. %q)", subresource, "status")), nil
+		}
 
 		// A Namespace object is itself cluster-scoped ("Namespace API
 		// objects are cluster-scoped", per Rule.Scope's own doc comment)
@@ -120,6 +132,7 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 			Group:             apiGroup,
 			Version:           apiVersion,
 			Resource:          resource,
+			Subresource:       subresource,
 			Name:              name,
 			Namespace:         namespace,
 			Labels:            obj.GetLabels(),
@@ -160,6 +173,23 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 		}
 		return mcp.NewToolResultText(string(resBytes)), nil
 	})
+}
+
+// optionalStringArg reads one optional string tool argument. The server runs
+// without input schema validation, so a wrong type arrives here untouched and
+// asserting it away would coerce it to "". For an argument that narrows a
+// query that silently widens the answer instead of refusing it, so a present
+// non-string is an error. An explicit null counts as absent.
+func optionalStringArg(args map[string]any, key string) (string, error) {
+	raw, present := args[key]
+	if !present || raw == nil {
+		return "", nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("%s must be a string (got %T)", key, raw)
+	}
+	return value, nil
 }
 
 func buildMatchSummaries(matches []mapreconcile.MatchedPolicy) []map[string]any {
