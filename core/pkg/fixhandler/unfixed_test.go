@@ -579,15 +579,42 @@ func TestYamlPathCovers(t *testing.T) {
 	}
 }
 
-func TestPlannedPathsFromExpressions_DedupesAndSkipsEmpty(t *testing.T) {
+// plannedPathsFromExpressions must NOT dedup by Path alone: two entries can
+// legitimately share a Path with different Values (see
+// TestPlannedPathsFromExpressions_PreservesBothValuesAtSameConflictingPath),
+// so this only pins that an identical (Path, Value) pair surviving twice is
+// harmless, and that a genuinely empty Path is skipped.
+func TestPlannedPathsFromExpressions_KeepsDuplicatesAndSkipsEmpty(t *testing.T) {
 	exprs := map[string]armotypes.FixPath{
 		"e1": {Path: "spec.a", Value: "1"},
 		"e2": {Path: "spec.b", Value: "2"},
-		"e3": {Path: "spec.a", Value: "1"}, // duplicate path under different expression key
+		"e3": {Path: "spec.a", Value: "1"}, // identical (path, value) under a different expression key
 		"e4": {Path: "", Value: ""},        // empty — must be skipped
 	}
 	got := plannedPathsFromExpressions(exprs)
-	assert.ElementsMatch(t, []plannedFix{{Path: "spec.a", Value: "1"}, {Path: "spec.b", Value: "2"}}, got)
+	assert.ElementsMatch(t, []plannedFix{
+		{Path: "spec.a", Value: "1"},
+		{Path: "spec.b", Value: "2"},
+		{Path: "spec.a", Value: "1"},
+	}, got)
+}
+
+// TestPlannedPathsFromExpressions_PreservesBothValuesAtSameConflictingPath is
+// the direct regression test for the bug this fixes: a Path-only dedup
+// silently discarded whichever of two DIFFERENT Values at the same Path the
+// (unordered) map iteration visited second. Both must survive so
+// controlIsCoveredByPlannedPaths can still find whichever one actually
+// matches a given failed check's expected value.
+func TestPlannedPathsFromExpressions_PreservesBothValuesAtSameConflictingPath(t *testing.T) {
+	exprs := map[string]armotypes.FixPath{
+		"expr-all":      {Path: "spec.a", Value: `["ALL"]`},
+		"expr-sysadmin": {Path: "spec.a", Value: `["SYS_ADMIN"]`},
+	}
+	got := plannedPathsFromExpressions(exprs)
+	assert.ElementsMatch(t, []plannedFix{
+		{Path: "spec.a", Value: `["ALL"]`},
+		{Path: "spec.a", Value: `["SYS_ADMIN"]`},
+	}, got, "both conflicting values at the same path must survive, not just whichever the map iteration visited first")
 }
 
 func TestPlannedPathsFromExpressions_EmptyInput(t *testing.T) {
@@ -669,6 +696,43 @@ func TestPrepareResourcesToFix_DoesNotPromoteControlWhenCoveringFixWritesADiffer
 	if assert.Len(t, h.UnfixedControls(), 1, "C-DROP-SPECIFIC must not be promoted: the covering fix writes a different value than its check expected") {
 		assert.Equal(t, "C-DROP-SPECIFIC", h.UnfixedControls()[0].ControlID)
 	}
+}
+
+// End-to-end regression test for the dedup-drops-a-conflicting-value bug:
+// two controls each own a concrete FixPath at the identical location with
+// DIFFERENT values (C-A writes "1", C-B writes "2"). C-THIRD has only a
+// FailedPath expecting "2" and no FixPath of its own. C-THIRD must still be
+// promoted, because C-B's planned value genuinely matches -- this must not
+// depend on which of C-A/C-B's entries an internal dedup step happened to
+// keep.
+func TestPrepareResourcesToFix_PromotesControlWhenAnyOfSeveralConflictingPlannedValuesMatches(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-A", "owns fix writing 1",
+					failedRuleWithFix("spec.template.spec.containers[0].securityContext.runAsUser", "1"),
+				),
+				failedControl("C-B", "owns fix writing 2",
+					failedRuleWithFix("spec.template.spec.containers[0].securityContext.runAsUser", "2"),
+				),
+				failedControl("C-THIRD", "expects 2, no fix of its own",
+					failedRuleNoFixAtPath("spec.template.spec.containers[0].securityContext.runAsUser=2"),
+				),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+	_ = h.PrepareResourcesToFix(context.Background())
+
+	assert.Equal(t, 3, h.FixedControlsCount(), "C-A, C-B genuinely fixed, and C-THIRD promoted because C-B's value matches what it expected")
+	assert.Empty(t, h.UnfixedControls())
 }
 
 func TestYamlValuesEqual(t *testing.T) {

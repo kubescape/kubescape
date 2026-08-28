@@ -935,10 +935,6 @@ func (h *FixHandler) getFileYamlExpressions(resourcesToFix []ResourceFixInfo) ma
 	return fileYamlExpressions
 }
 
-// plannedPathsFromExpressions returns the distinct, non-empty FixPath.Path
-// values from a YamlExpressions map. Used by the unfixed-control reconciliation
-// pass to test whether a control's failed paths are covered by some planned
-// edit.
 // plannedFix is one planned YAML edit's location and the value it writes
 // there, kept together so a caller can tell not just that a planned edit
 // touches a given path, but whether it writes the value another control's
@@ -948,17 +944,29 @@ type plannedFix struct {
 	Value string
 }
 
+// plannedPathsFromExpressions returns every non-empty (Path, Value) pair
+// from a YamlExpressions map, used by the unfixed-control reconciliation
+// pass to test whether a control's failed paths are covered by some planned
+// edit. exprs' own keys (the yaml expression strings) are already unique,
+// so no further dedup is applied here: two entries can legitimately share a
+// Path with different Values (two controls each owning their own concrete
+// FixPath at the same location), and collapsing those to one by Path alone
+// would silently discard whichever Value the map's (unordered) iteration
+// happened to visit second -- now that Value is load-bearing for
+// controlIsCoveredByPlannedPaths' coverage decision, that would reintroduce
+// the exact class of bug this reconciliation pass exists to avoid, just
+// nondeterministically. controlIsCoveredByPlannedPaths' own inner loop
+// already checks every entry and only accepts an actual match, so keeping
+// duplicates is harmless.
 func plannedPathsFromExpressions(exprs map[string]armotypes.FixPath) []plannedFix {
 	if len(exprs) == 0 {
 		return nil
 	}
-	seen := make(map[string]bool, len(exprs))
 	out := make([]plannedFix, 0, len(exprs))
 	for _, fp := range exprs {
-		if fp.Path == "" || seen[fp.Path] {
+		if fp.Path == "" {
 			continue
 		}
-		seen[fp.Path] = true
 		out = append(out, plannedFix{Path: fp.Path, Value: fp.Value})
 	}
 	return out
