@@ -69,7 +69,10 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 		// A subresource is one path segment: "status", not "pods/status". A
 		// caller repeating the parent would otherwise match no rule at all and
 		// read as "nothing mutates this".
-		subresource, _ := args["subresource"].(string)
+		subresource, subresourceErr := optionalStringArg(args, "subresource")
+		if subresourceErr != nil {
+			return mcp.NewToolResultError(subresourceErr.Error()), nil
+		}
 		if strings.Contains(subresource, "/") {
 			return mcp.NewToolResultError(fmt.Sprintf("subresource must name one subresource without the parent resource (got %q, want e.g. %q)", subresource, "status")), nil
 		}
@@ -170,6 +173,23 @@ func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 		}
 		return mcp.NewToolResultText(string(resBytes)), nil
 	})
+}
+
+// optionalStringArg reads one optional string tool argument. The server runs
+// without input schema validation, so a wrong type arrives here untouched and
+// asserting it away would coerce it to "". For an argument that narrows a
+// query that silently widens the answer instead of refusing it, so a present
+// non-string is an error. An explicit null counts as absent.
+func optionalStringArg(args map[string]any, key string) (string, error) {
+	raw, present := args[key]
+	if !present || raw == nil {
+		return "", nil
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("%s must be a string (got %T)", key, raw)
+	}
+	return value, nil
 }
 
 func buildMatchSummaries(matches []mapreconcile.MatchedPolicy) []map[string]any {
