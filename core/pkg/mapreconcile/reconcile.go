@@ -11,6 +11,10 @@
 // apiserver-grade CEL/ApplyConfiguration machinery admission control itself
 // uses; reporting the match and the expression verbatim is honest about that
 // boundary rather than guessing at an evaluated result.
+//
+// A policy's spec.matchConditions are CEL too, and are reported the same way:
+// a gated policy is a match that *might* apply rather than one that does (see
+// MatchedPolicy.Determinable), with the conditions carried alongside it.
 package mapreconcile
 
 import (

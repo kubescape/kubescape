@@ -116,6 +116,10 @@ func NewIndex(policies []admissionregistrationv1alpha1.MutatingAdmissionPolicy, 
 // mutates anything -- MutatingAdmissionPolicy, like ValidatingAdmissionPolicy,
 // takes effect only once bound -- so it is silently excluded rather than
 // reported as an unbound near-miss.
+//
+// A pair is reported with Determinable false where something the apiserver
+// resolves at admission cannot be resolved here, spec.matchConditions
+// included; see MatchedPolicy.Determinable.
 func (idx *Index) Matches(obj ObjectInfo) []MatchedPolicy {
 	var out []MatchedPolicy
 	for _, cp := range idx.policies {
@@ -141,6 +145,15 @@ func (idx *Index) Matches(obj ObjectInfo) []MatchedPolicy {
 			if determinable && !matched {
 				continue
 			}
+
+			// spec.matchConditions is a CEL gate the apiserver applies to a
+			// request matchConstraints have already admitted, and this package
+			// evaluates no CEL. A gated policy may still be skipped at
+			// admission, so its match is reported as "might apply" rather than
+			// confirmed. The gate is read only here, after the confident
+			// non-match above: matchConditions only narrow, so they can never
+			// turn a non-match into a match.
+			determinable = determinable && len(cp.matchConditions) == 0
 
 			out = append(out, MatchedPolicy{
 				PolicyName:      cp.policy.Name,
