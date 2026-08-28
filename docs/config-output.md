@@ -90,12 +90,13 @@ Example output:
 ## Command reference
 
 ```bash
-kubescape config view [--output text|json|yaml] [--include-empty]
+kubescape config view [--format text|json|yaml] [--include-empty]
 ```
 
 ### Flags
 
-- `-o, --output`: select the rendering format
+- `-f, --format`: select the rendering format (`text`, `json`, `yaml`)
+- `-o, --output`: alias for `--format`
 - `-e, --include-empty`: include empty values in the rendered payload
 
 ## Integration notes

@@ -912,10 +912,10 @@ Manage Kubescape configuration.
 kubescape config view
 
 # View configuration as JSON
-kubescape config view -o json
+kubescape config view --format json
 
 # View configuration as YAML
-kubescape config view -o yaml
+kubescape config view -f yaml
 
 # Set account ID
 kubescape config set accountID <account-id>
