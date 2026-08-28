@@ -1502,3 +1502,169 @@ func TestBuildControlExcludedRules_IncludeNoMatchReturnsError(t *testing.T) {
 	_, err = buildControlExcludedRules(nil, framework, []string{"C-0001", "C-0002"}, nil)
 	require.ErrorIs(t, err, errNoControlsAfterFilter)
 }
+
+// TestBuildControlExcludedRules_MatchesCISSectionNumber guards the identifier
+// parity between --skip-controls/--include-controls and --exclude-controls.
+// CIS controls carry their section number in Control_ID (JSON "id", e.g.
+// "CIS-3.1.1") rather than in ControlID; matching only on ControlID made
+// --skip-controls CIS-3.1.1 a silent no-op while --exclude-controls CIS-3.1.1
+// worked, and made a mixed --include-controls list silently drop the section
+// -numbered entry without erroring.
+func TestBuildControlExcludedRules_MatchesCISSectionNumber(t *testing.T) {
+	framework := []reporthandling.Framework{{
+		Controls: []reporthandling.Control{
+			{ControlID: "C-0286", Control_ID: "CIS-3.1.1", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-a"}}}},
+			{ControlID: "C-0287", Control_ID: "CIS-3.1.2", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-b"}}}},
+			{ControlID: "C-0003", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-c"}}}},
+		},
+	}}
+
+	tests := []struct {
+		name          string
+		skip          []string
+		include       []string
+		excludedRules []string
+		notExcluded   []string
+	}{
+		{
+			name:          "skip by CIS section number",
+			skip:          []string{"CIS-3.1.1"},
+			excludedRules: []string{"rule-a"},
+			notExcluded:   []string{"rule-b", "rule-c"},
+		},
+		{
+			name:          "skip by CIS section number regardless of case",
+			skip:          []string{"cis-3.1.1"},
+			excludedRules: []string{"rule-a"},
+			notExcluded:   []string{"rule-b", "rule-c"},
+		},
+		{
+			name:          "include by CIS section number",
+			include:       []string{"CIS-3.1.1"},
+			excludedRules: []string{"rule-b", "rule-c"},
+			notExcluded:   []string{"rule-a"},
+		},
+		{
+			name:          "control ID still matches when a section number is present",
+			skip:          []string{"C-0286"},
+			excludedRules: []string{"rule-a"},
+			notExcluded:   []string{"rule-b", "rule-c"},
+		},
+		{
+			name:          "mixed include list keeps the section-numbered control",
+			include:       []string{"C-0287", "CIS-3.1.1"},
+			excludedRules: []string{"rule-c"},
+			notExcluded:   []string{"rule-a", "rule-b"},
+		},
+		{
+			name:          "naming a control by both its forms at once excludes it exactly once",
+			skip:          []string{"C-0286", "CIS-3.1.1"},
+			excludedRules: []string{"rule-a"},
+			notExcluded:   []string{"rule-b", "rule-c"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildControlExcludedRules(nil, framework, tt.skip, tt.include)
+			require.NoError(t, err)
+			for _, rule := range tt.excludedRules {
+				assert.True(t, got[rule], "expected rule %q to be excluded", rule)
+			}
+			for _, rule := range tt.notExcluded {
+				assert.False(t, got[rule], "expected rule %q not to be excluded", rule)
+			}
+		})
+	}
+}
+
+// TestBuildControlExcludedRules_CISSectionIsAKnownID checks that a section
+// number counts as a known identifier, so --include-controls CIS-3.1.1 alone
+// is not mistaken for a typo and rejected by errIncludeControlsNoMatch.
+func TestBuildControlExcludedRules_CISSectionIsAKnownID(t *testing.T) {
+	framework := []reporthandling.Framework{{
+		Controls: []reporthandling.Control{
+			{ControlID: "C-0286", Control_ID: "CIS-3.1.1", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-a"}}}},
+			{ControlID: "C-0287", Control_ID: "CIS-3.1.2", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-b"}}}},
+		},
+	}}
+
+	got, err := buildControlExcludedRules(nil, framework, nil, []string{"CIS-3.1.1"})
+	require.NoError(t, err)
+	assert.False(t, got["rule-a"])
+
+	// A genuinely unknown section number must still be a hard error.
+	_, err = buildControlExcludedRules(nil, framework, nil, []string{"CIS-9.9.9"})
+	require.ErrorIs(t, err, errIncludeControlsNoMatch)
+}
+
+func TestControlIdentifiers(t *testing.T) {
+	tests := []struct {
+		name    string
+		control reporthandling.Control
+		want    []string
+	}{
+		{
+			name:    "control ID only",
+			control: reporthandling.Control{ControlID: "C-0001"},
+			want:    []string{"c-0001"},
+		},
+		{
+			name:    "control ID and section number",
+			control: reporthandling.Control{ControlID: "C-0286", Control_ID: "CIS-3.1.1"},
+			want:    []string{"c-0286", "cis-3.1.1"},
+		},
+		{
+			name:    "surrounding whitespace is trimmed",
+			control: reporthandling.Control{ControlID: "  C-0286 ", Control_ID: " CIS-3.1.1"},
+			want:    []string{"c-0286", "cis-3.1.1"},
+		},
+		{
+			name:    "identical identifiers are not duplicated",
+			control: reporthandling.Control{ControlID: "C-0001", Control_ID: "c-0001"},
+			want:    []string{"c-0001"},
+		},
+		{
+			name:    "section number only",
+			control: reporthandling.Control{Control_ID: "CIS-3.1.1"},
+			want:    []string{"cis-3.1.1"},
+		},
+		{
+			name:    "no identifiers",
+			control: reporthandling.Control{},
+			want:    []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, controlIdentifiers(&tt.control))
+		})
+	}
+}
+
+// TestBuildControlExcludedRules_IdentifierFormsAreInterchangeable asserts the
+// two ways of naming one control produce byte-identical exclusion maps. The
+// table case above cannot catch a one-sided regression: naming a control by
+// both forms at once still passes when only ControlID is honoured, because the
+// ControlID half carries the match on its own.
+func TestBuildControlExcludedRules_IdentifierFormsAreInterchangeable(t *testing.T) {
+	framework := []reporthandling.Framework{{
+		Controls: []reporthandling.Control{
+			{ControlID: "C-0286", Control_ID: "CIS-3.1.1", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-a"}}}},
+			{ControlID: "C-0287", Control_ID: "CIS-3.1.2", Rules: []reporthandling.PolicyRule{{PortalBase: armotypes.PortalBase{Name: "rule-b"}}}},
+		},
+	}}
+
+	byControlID, err := buildControlExcludedRules(nil, framework, []string{"C-0286"}, nil)
+	require.NoError(t, err)
+	bySectionNumber, err := buildControlExcludedRules(nil, framework, []string{"CIS-3.1.1"}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, byControlID, bySectionNumber, "--skip-controls must treat a control's ID and its section number as the same control")
+
+	includeByControlID, err := buildControlExcludedRules(nil, framework, nil, []string{"C-0286"})
+	require.NoError(t, err)
+	includeBySectionNumber, err := buildControlExcludedRules(nil, framework, nil, []string{"CIS-3.1.1"})
+	require.NoError(t, err)
+	assert.Equal(t, includeByControlID, includeBySectionNumber, "--include-controls must treat a control's ID and its section number as the same control")
+}

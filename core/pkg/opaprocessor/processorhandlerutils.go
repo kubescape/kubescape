@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -770,14 +771,46 @@ var errIncludeControlsNoMatch = errors.New("--include-controls matched no known 
 // errAllControlsExcluded guard for --exclude-controls.
 var errNoControlsAfterFilter = errors.New("--include-controls/--skip-controls left no controls to scan")
 
+// controlIdentifiers returns the normalized identifiers a control can be named
+// by on the command line: its Kubescape control ID (ControlID, e.g. "C-0286")
+// and, where the control carries one, its framework section number (Control_ID,
+// e.g. "CIS-3.1.1"). Both are lowercased so lookups are case-insensitive.
+// This is the same identifier pair policyhandler.markControlMatches uses, so
+// --skip-controls and --include-controls accept exactly what --exclude-controls
+// accepts.
+func controlIdentifiers(control *reporthandling.Control) []string {
+	identifiers := make([]string, 0, 2)
+	for _, identifier := range [2]string{control.ControlID, control.Control_ID} {
+		token := strings.ToLower(strings.TrimSpace(identifier))
+		if token == "" || slices.Contains(identifiers, token) {
+			continue
+		}
+		identifiers = append(identifiers, token)
+	}
+	return identifiers
+}
+
+// controlMatchesAny reports whether any identifier the control can be named by
+// appears in set. set is expected to hold normalized (lowercased, trimmed)
+// tokens.
+func controlMatchesAny(control *reporthandling.Control, set map[string]struct{}) bool {
+	for _, identifier := range controlIdentifiers(control) {
+		if _, ok := set[identifier]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // buildControlExcludedRules merges the existing rule-exclusion map with any
 // --skip-controls or --include-controls filters. The resulting map marks
 // individual rule names with `true` so that convertFrameworksToPolicies drops
 // them. Include is a whitelist; skip is a blacklist and wins over include.
 //
-// Matching is case-insensitive, mirroring --exclude-controls (see
-// policyhandler/controlfilter.go's normalizeExclusions/matchIdentifier):
-// without this, a lowercase control ID silently matches nothing, and since
+// Matching is case-insensitive and accepts either identifier a control can be
+// named by, mirroring --exclude-controls (see policyhandler/controlfilter.go's
+// normalizeExclusions/markControlMatches): without this, a lowercase control ID
+// or a CIS section number silently matches nothing, and since
 // --include-controls treats "not in the include set" as "exclude", a single
 // mistyped case produces a silently empty scan instead of the requested
 // control.
@@ -810,7 +843,9 @@ func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling
 	knownIDs := make(map[string]struct{})
 	for _, fw := range frameworks {
 		for i := range fw.Controls {
-			knownIDs[strings.ToLower(fw.Controls[i].ControlID)] = struct{}{}
+			for _, identifier := range controlIdentifiers(&fw.Controls[i]) {
+				knownIDs[identifier] = struct{}{}
+			}
 		}
 	}
 
@@ -840,7 +875,7 @@ func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling
 	if len(includeSet) > 0 {
 		for _, fw := range frameworks {
 			for i := range fw.Controls {
-				if _, keep := includeSet[strings.ToLower(fw.Controls[i].ControlID)]; keep {
+				if controlMatchesAny(&fw.Controls[i], includeSet) {
 					continue
 				}
 				for r := range fw.Controls[i].Rules {
@@ -852,7 +887,7 @@ func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling
 
 	for _, fw := range frameworks {
 		for i := range fw.Controls {
-			if _, skip := skipSet[strings.ToLower(fw.Controls[i].ControlID)]; !skip {
+			if !controlMatchesAny(&fw.Controls[i], skipSet) {
 				continue
 			}
 			for r := range fw.Controls[i].Rules {
