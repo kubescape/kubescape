@@ -3,10 +3,6 @@ package policytest
 import (
 	"context"
 	"fmt"
-
-	"github.com/kubescape/kubescape/v4/core/cautils"
-	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor"
-	"github.com/kubescape/opa-utils/resources"
 )
 
 // CaseResult is the outcome of running one test case.
@@ -33,23 +29,15 @@ func RunRule(ctx context.Context, rule RuleUnderTest) []CaseResult {
 func runCase(ctx context.Context, rule RuleUnderTest, c Case) CaseResult {
 	result := CaseResult{RuleName: rule.Name, CaseName: c.Name}
 
-	resourcesToScan, err := LoadCaseInput(c.Dir)
-	if err != nil {
-		result.Err = fmt.Errorf("load input: %w", err)
-		return result
-	}
 	expected, err := LoadCaseExpected(c.Dir)
 	if err != nil {
 		result.Err = fmt.Errorf("load expected: %w", err)
 		return result
 	}
 
-	sessionObj := cautils.NewOPASessionObjMock()
-	proc := opaprocessor.NewOPAProcessor(sessionObj, &resources.RegoDependenciesData{}, "", "", "", false, nil)
-
-	got, err := proc.EvaluateRule(ctx, &rule.Rule, resourcesToScan, rule.Name)
+	got, err := EvaluateCase(ctx, rule, c)
 	if err != nil {
-		result.Err = fmt.Errorf("evaluate rule: %w", err)
+		result.Err = err
 		return result
 	}
 
