@@ -2,6 +2,7 @@ package resultshandling
 
 import (
 	"testing"
+	"time"
 
 	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/vulnerability"
@@ -118,6 +119,66 @@ func TestBuildImageOutcomesCountsSeverityAndFixability(t *testing.T) {
 	assert.Equal(t, map[string]int64{"Critical": 1, "Low": 1}, outcomes[0].FixableBySeverity)
 }
 
+func TestBuildImageOutcomesCarriesVulnDBBuilt(t *testing.T) {
+	built := time.Date(2026, 8, 26, 9, 30, 0, 0, time.UTC)
+	imageScanData := []cautils.ImageScanData{
+		{
+			Image:       "nginx:1.25",
+			VulnDBBuilt: &built,
+			Matches:     newMatches(t, newMatch("CVE-1", "Critical", vulnerability.FixStateFixed)),
+		},
+	}
+
+	outcomes := buildImageOutcomes(imageScanData, false)
+
+	require.Len(t, outcomes, 1)
+	assert.True(t, outcomes[0].HasVulnDBBuilt)
+	assert.Equal(t, built, outcomes[0].VulnDBBuilt)
+}
+
+func TestBuildImageOutcomesOmitsUnknownVulnDBBuilt(t *testing.T) {
+	outcomes := buildImageOutcomes([]cautils.ImageScanData{{
+		Image:   "nginx:1.25",
+		Matches: newMatches(t, newMatch("CVE-1", "Critical", vulnerability.FixStateFixed)),
+	}}, false)
+
+	require.Len(t, outcomes, 1)
+	assert.False(t, outcomes[0].HasVulnDBBuilt)
+	assert.True(t, outcomes[0].VulnDBBuilt.IsZero())
+}
+
+func TestSetOldestVulnDBBuilt(t *testing.T) {
+	base := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	older := base.Add(-2 * time.Hour)
+	newer := base.Add(-time.Hour)
+	zero := time.Time{}
+
+	tests := []struct {
+		name  string
+		input []*time.Time
+		want  time.Time
+		set   bool
+	}{
+		{name: "nil input ignored", input: []*time.Time{nil}},
+		{name: "zero input ignored", input: []*time.Time{&zero}},
+		{name: "single timestamp selected", input: []*time.Time{&newer}, want: newer, set: true},
+		{name: "older timestamp wins", input: []*time.Time{&newer, &older}, want: older, set: true},
+		{name: "zero does not replace existing timestamp", input: []*time.Time{&older, &zero}, want: older, set: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outcome := telemetry.ImageOutcome{}
+			for _, built := range tt.input {
+				setOldestVulnDBBuilt(&outcome, built)
+			}
+
+			assert.Equal(t, tt.set, outcome.HasVulnDBBuilt)
+			assert.Equal(t, tt.want, outcome.VulnDBBuilt)
+		})
+	}
+}
+
 func TestBuildImageOutcomesEmptyInput(t *testing.T) {
 	assert.Nil(t, buildImageOutcomes(nil, false))
 	assert.Nil(t, buildImageOutcomes([]cautils.ImageScanData{}, false))
@@ -167,14 +228,18 @@ func newMatches(t *testing.T, matches ...match.Match) match.Matches {
 }
 
 func TestBuildImageOutcomesRedactedCollapsesImageNames(t *testing.T) {
+	older := time.Date(2026, 8, 25, 8, 0, 0, 0, time.UTC)
+	newer := time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC)
 	imageScanData := []cautils.ImageScanData{
 		{
-			Image:   "registry.internal.example.com/team/api:v1.2",
-			Matches: newMatches(t, newMatch("CVE-1", "Critical", vulnerability.FixStateFixed)),
+			Image:       "registry.internal.example.com/team/api:v1.2",
+			VulnDBBuilt: &newer,
+			Matches:     newMatches(t, newMatch("CVE-1", "Critical", vulnerability.FixStateFixed)),
 		},
 		{
-			Image:   "registry.internal.example.com/team/web:v3",
-			Matches: newMatches(t, newMatch("CVE-2", "Low", vulnerability.FixStateNotFixed)),
+			Image:       "registry.internal.example.com/team/web:v3",
+			VulnDBBuilt: &older,
+			Matches:     newMatches(t, newMatch("CVE-2", "Low", vulnerability.FixStateNotFixed)),
 		},
 	}
 
@@ -184,6 +249,8 @@ func TestBuildImageOutcomesRedactedCollapsesImageNames(t *testing.T) {
 	// the collector as metric attributes either.
 	require.Len(t, outcomes, 1)
 	assert.Empty(t, outcomes[0].Image)
+	assert.True(t, outcomes[0].HasVulnDBBuilt)
+	assert.Equal(t, older, outcomes[0].VulnDBBuilt)
 	assert.Equal(t, map[string]int64{"Critical": 1, "Low": 1}, outcomes[0].BySeverity)
 	assert.Equal(t, map[string]int64{"Critical": 1}, outcomes[0].FixableBySeverity)
 }
