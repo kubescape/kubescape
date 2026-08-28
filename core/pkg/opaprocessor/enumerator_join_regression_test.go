@@ -480,3 +480,149 @@ hasSSHPorts(service) {
 	port.targetPort == 2222
 }
 `
+
+// TestNonEnumeratorRuleWithExternalObjectFailureIsReported guards the
+// maintainer-flagged regression: a rule with no ResourceEnumerator at all
+// that reports its failure through a synthesized AlertObject.ExternalObjects
+// (its own identity, not any literal input resource's), the shape
+// audit-policy-content (CIS 3.2.2) uses. enumeratedIDs must never restrict
+// reporting for such a rule - it only applies to rules that declare a
+// ResourceEnumerator.
+func TestNonEnumeratorRuleWithExternalObjectFailureIsReported(t *testing.T) {
+	node := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Node",
+		"metadata":   map[string]any{"name": "control-plane"},
+	})
+
+	sess := cautils.NewOPASessionObjMock()
+	sess.K8SResources = cautils.K8SResources{"/v1/nodes": {node.GetID()}}
+	sess.AllResources[node.GetID()] = node
+
+	opap := NewOPAProcessor(sess, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	rule := &reporthandling.PolicyRule{
+		Rule: `package armo_builtins
+deny[msga] {
+	node := input[_]
+	node.kind == "Node"
+	vector := {"name": "audit-policy", "namespace": "", "kind": "AuditPolicy", "relatedObjects": node}
+	msga := {
+		"alertMessage": "audit policy content is invalid",
+		"packagename": "armo_builtins",
+		"alertScore": 5,
+		"failedPaths": [],
+		"alertObject": {
+			"k8sApiObjects": [],
+			"externalObjects": vector
+		}
+	}
+}
+`,
+		RuleLanguage: reporthandling.RegoLanguage,
+		Match: []reporthandling.RuleMatchObjects{
+			{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Node"}},
+		},
+	}
+	rule.Name = "audit-policy-content"
+
+	got, err := opap.processRule(context.Background(), rule, nil, evaluationScope{}, &reporthandling.Control{})
+	require.NoError(t, err)
+
+	// The rule matches Node, so the real Node also appears in the results -
+	// passed, since the deny block never names the Node itself as failed.
+	// What matters here is that the synthesized ExternalObjects failure is
+	// not filtered out.
+	var sawFailure bool
+	for id, result := range got {
+		t.Logf("id=%q status=%q", id, result.GetStatus(nil).Status())
+		if result.GetStatus(nil).Status() == apis.StatusFailed {
+			sawFailure = true
+		}
+	}
+	require.True(t, sawFailure, "the synthesized ExternalObjects failure must be reported")
+}
+
+// TestEnumeratorMixedKubernetesAndVectorFailuresBothReported covers
+// CodeRabbit's finding: an enumerator that resolves to real K8sApiObjects for
+// one resource and a RegoResponseVectorObject for another (mixed output) must
+// not let the K8sApiObjects-derived scope swallow the vector failure. The
+// enumerator selects both a Pod (real object, enters enumeratedIDs) and
+// reports a Service exposure through ExternalObjects (a vector, whose ID by
+// construction is never in enumeratedIDs) - both must still be reportable.
+func TestEnumeratorMixedKubernetesAndVectorFailuresBothReported(t *testing.T) {
+	pod := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": "insecure-pod", "namespace": "prod"},
+		"spec":       map[string]any{"hostNetwork": true},
+	})
+	service := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Service",
+		"metadata":   map[string]any{"name": "exposed-svc", "namespace": "prod"},
+	})
+
+	sess := cautils.NewOPASessionObjMock()
+	sess.K8SResources = cautils.K8SResources{
+		"/v1/pods":     {pod.GetID()},
+		"/v1/services": {service.GetID()},
+	}
+	sess.AllResources[pod.GetID()] = pod
+	sess.AllResources[service.GetID()] = service
+
+	opap := NewOPAProcessor(sess, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+	rule := enumeratorRule(
+		"mixed-enumerator",
+		`package armo_builtins
+deny[msga] {
+	obj := input[_]
+	obj.kind == "Pod"
+	obj.spec.hostNetwork == true
+	msga := {"alertMessage": "hostNetwork pod", "packagename": "armo_builtins", "alertScore": 5, "failedPaths": [], "alertObject": {"k8sApiObjects": [obj]}}
+}
+deny[msga] {
+	obj := input[_]
+	obj.kind == "Service"
+	vector := {"name": obj.metadata.name, "namespace": obj.metadata.namespace, "kind": obj.kind, "relatedObjects": obj}
+	msga := {"alertMessage": "exposed service", "packagename": "armo_builtins", "alertScore": 5, "failedPaths": [], "alertObject": {"k8sApiObjects": [], "externalObjects": vector}}
+}
+`,
+		`package armo_builtins
+deny[msga] {
+	obj := input[_]
+	obj.kind == "Pod"
+	obj.spec.hostNetwork == true
+	msga := {"alertMessage": "hostNetwork pod", "packagename": "armo_builtins", "alertScore": 5, "failedPaths": [], "alertObject": {"k8sApiObjects": [obj]}}
+}
+deny[msga] {
+	obj := input[_]
+	obj.kind == "Service"
+	vector := {"name": obj.metadata.name, "namespace": obj.metadata.namespace, "kind": obj.kind, "relatedObjects": obj}
+	msga := {"alertMessage": "exposed service", "packagename": "armo_builtins", "alertScore": 5, "failedPaths": [], "alertObject": {"k8sApiObjects": [], "externalObjects": vector}}
+}
+`,
+		[]reporthandling.RuleMatchObjects{
+			{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Pod"}},
+			{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Service"}},
+		},
+	)
+
+	got, err := opap.processRule(context.Background(), rule, nil, evaluationScope{}, &reporthandling.Control{})
+	require.NoError(t, err)
+
+	podResult, ok := got[pod.GetID()]
+	require.True(t, ok, "the real Pod failure must be reported")
+	require.Equal(t, apis.StatusFailed, podResult.GetStatus(nil).Status())
+
+	var sawVectorFailure bool
+	for id, result := range got {
+		if id == pod.GetID() {
+			continue
+		}
+		t.Logf("vector-reported entry id=%q status=%q", id, result.GetStatus(nil).Status())
+		if result.GetStatus(nil).Status() == apis.StatusFailed {
+			sawVectorFailure = true
+		}
+	}
+	require.True(t, sawVectorFailure, "the vector-reported Service exposure must also be reported")
+}
