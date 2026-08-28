@@ -61,6 +61,9 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			if len(scanInfo.NotifyURLs) > 0 {
 				return fmt.Errorf("--notify is not supported for image-only scans yet")
 			}
+			if err := shared.ValidateImageScanAnonymization(scanInfo); err != nil {
+				return err
+			}
 			if err := shared.ValidateImageScanInfo(scanInfo); err != nil {
 				return err
 			}
