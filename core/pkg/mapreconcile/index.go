@@ -13,6 +13,14 @@ type MutationSummary struct {
 	Expression string
 }
 
+// MatchConditionSummary is one entry from a policy's spec.matchConditions,
+// reported verbatim for the same reason a Mutation is: it is a CEL expression
+// this package does not evaluate.
+type MatchConditionSummary struct {
+	Name       string
+	Expression string
+}
+
 // MatchedPolicy is one MutatingAdmissionPolicy (bound by one binding) whose
 // matchConstraints and matchResources together cover a queried object.
 type MatchedPolicy struct {
@@ -31,6 +39,11 @@ type MatchedPolicy struct {
 	// denied at admission depending on FailurePolicy -- the match reported
 	// here is necessary but not sufficient in that case.
 	HasParams bool
+	// MatchConditions is the policy's own spec.matchConditions, the CEL gate
+	// the apiserver applies to a request matchConstraints already admitted.
+	// Reported so a caller can see what still has to hold for the mutation to
+	// run.
+	MatchConditions []MatchConditionSummary
 	// Determinable is false when this policy's match could not be confirmed
 	// from the data available (see compiledMatchResources.matches): the
 	// caller should treat MatchedPolicy as "might apply," not "does apply."
@@ -42,6 +55,7 @@ type MatchedPolicy struct {
 type compiledPolicy struct {
 	policy          admissionregistrationv1alpha1.MutatingAdmissionPolicy
 	matchConstraint *compiledMatchResources
+	matchConditions []MatchConditionSummary
 	bindings        []compiledBinding
 }
 
@@ -78,7 +92,7 @@ func NewIndex(policies []admissionregistrationv1alpha1.MutatingAdmissionPolicy, 
 			continue
 		}
 
-		cp := &compiledPolicy{policy: p, matchConstraint: mc}
+		cp := &compiledPolicy{policy: p, matchConstraint: mc, matchConditions: matchConditionSummaries(p.Spec.MatchConditions)}
 		for _, b := range bindingsByPolicy[p.Name] {
 			var cmr *compiledMatchResources
 			if b.Spec.MatchResources != nil {
@@ -129,12 +143,13 @@ func (idx *Index) Matches(obj ObjectInfo) []MatchedPolicy {
 			}
 
 			out = append(out, MatchedPolicy{
-				PolicyName:    cp.policy.Name,
-				BindingName:   cb.binding.Name,
-				Mutations:     mutationSummaries(cp.policy.Spec.Mutations),
-				FailurePolicy: failurePolicyOrDefault(cp.policy.Spec.FailurePolicy),
-				HasParams:     cp.policy.Spec.ParamKind != nil,
-				Determinable:  determinable,
+				PolicyName:      cp.policy.Name,
+				BindingName:     cb.binding.Name,
+				Mutations:       mutationSummaries(cp.policy.Spec.Mutations),
+				FailurePolicy:   failurePolicyOrDefault(cp.policy.Spec.FailurePolicy),
+				MatchConditions: cp.matchConditions,
+				HasParams:       cp.policy.Spec.ParamKind != nil,
+				Determinable:    determinable,
 			})
 		}
 	}
@@ -156,6 +171,19 @@ func mutationSummaries(mutations []admissionregistrationv1alpha1.Mutation) []Mut
 			}
 		}
 		out = append(out, s)
+	}
+	return out
+}
+
+// matchConditionSummaries copies a policy's matchConditions into the reported
+// shape. A policy declaring none returns nil, so "gated" stays a length check.
+func matchConditionSummaries(conditions []admissionregistrationv1alpha1.MatchCondition) []MatchConditionSummary {
+	if len(conditions) == 0 {
+		return nil
+	}
+	out := make([]MatchConditionSummary, 0, len(conditions))
+	for _, c := range conditions {
+		out = append(out, MatchConditionSummary{Name: c.Name, Expression: c.Expression})
 	}
 	return out
 }
