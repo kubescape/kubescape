@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"go.opentelemetry.io/otel"
 )
 
@@ -25,6 +26,16 @@ type cachedPoliciesEntry struct {
 	frameworks  []reporthandling.Framework
 }
 
+type cachedExceptionsEntry struct {
+	exceptions  []armotypes.PostureExceptionPolicy
+	runnerInput reporthandlingv2.ScanContractRunnerInput
+}
+
+type cachedControlInputsEntry struct {
+	controlInputs map[string][]string
+	runnerInput   reporthandlingv2.ScanContractRunnerInput
+}
+
 type policyArtifactPersistence interface {
 	ShouldPersistPolicyArtifacts() bool
 }
@@ -33,8 +44,8 @@ type policyArtifactPersistence interface {
 type PolicyHandler struct {
 	clusterName         string
 	cachedPolicies      *TimedCache[cachedPoliciesEntry]
-	cachedExceptions    *TimedCache[[]armotypes.PostureExceptionPolicy]
-	cachedControlInputs *TimedCache[map[string][]string]
+	cachedExceptions    *TimedCache[cachedExceptionsEntry]
+	cachedControlInputs *TimedCache[cachedControlInputsEntry]
 }
 
 // NewPolicyHandler returns the shared, cluster-isolated *PolicyHandler for
@@ -68,8 +79,8 @@ func NewRequestScopedPolicyHandler(clusterName string) *PolicyHandler {
 	return &PolicyHandler{
 		clusterName:         clusterName,
 		cachedPolicies:      NewTimedCache[cachedPoliciesEntry](cacheTtl),
-		cachedExceptions:    NewTimedCache[[]armotypes.PostureExceptionPolicy](cacheTtl),
-		cachedControlInputs: NewTimedCache[map[string][]string](cacheTtl),
+		cachedExceptions:    NewTimedCache[cachedExceptionsEntry](cacheTtl),
+		cachedControlInputs: NewTimedCache[cachedControlInputsEntry](cacheTtl),
 	}
 }
 
@@ -88,11 +99,10 @@ func (policyHandler *PolicyHandler) Close() {
 
 func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (*cautils.OPASessionObj, error) {
 	// get policies, exceptions and controls inputs
-	policies, exceptions, controlInputs, degradations, err := policyHandler.getPolicies(ctx, policyIdentifier, getters)
+	policies, exceptions, controlInputs, degradations, err := policyHandler.getPolicies(ctx, policyIdentifier, scanInfo, getters)
 	if err != nil {
 		return cautils.NewOPASessionObj(ctx, nil, nil, scanInfo, policyIdentifier), err
 	}
-	cautils.RecordScanContractRunnerInputs(scanInfo, getters)
 	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo, policyIdentifier)
 
 	// load user-authored custom rules, if any
@@ -130,7 +140,7 @@ func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyI
 	return opaSessionObj, nil
 }
 
-func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, getters *cautils.Getters) (policies []reporthandling.Framework, exceptions []armotypes.PostureExceptionPolicy, controlInputs map[string][]string, degradations []cautils.PolicyDegradation, err error) {
+func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (policies []reporthandling.Framework, exceptions []armotypes.PostureExceptionPolicy, controlInputs map[string][]string, degradations []cautils.PolicyDegradation, err error) {
 	ctx, span := otel.Tracer("").Start(ctx, "policyHandler.getPolicies")
 	defer span.End()
 
@@ -149,7 +159,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	logger.L().Start("Loading exceptions...")
 
 	// get exceptions
-	if exceptions, err = policyHandler.getExceptions(ctx, getters); err != nil {
+	if exceptions, err = policyHandler.getExceptions(ctx, scanInfo, getters); err != nil {
 		logger.L().Ctx(ctx).StopError("Failed to load exceptions", helpers.Error(err))
 		degradations = append(degradations, cautils.PolicyDegradation{Component: "exceptions", Reason: err.Error()})
 		exceptions = []armotypes.PostureExceptionPolicy{}
@@ -160,7 +170,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	logger.L().Start("Loading account configurations...")
 
 	// get account configuration
-	if controlInputs, err = policyHandler.getControlInputs(ctx, getters); err != nil {
+	if controlInputs, err = policyHandler.getControlInputs(ctx, scanInfo, getters); err != nil {
 		logger.L().Ctx(ctx).StopError("Failed to load account configurations", helpers.Error(err))
 		degradations = append(degradations, cautils.PolicyDegradation{Component: "controlInputs", Reason: err.Error()})
 
@@ -287,24 +297,27 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 	return frameworks, nil
 }
 
-func (policyHandler *PolicyHandler) getExceptions(ctx context.Context, getters *cautils.Getters) ([]armotypes.PostureExceptionPolicy, error) {
+func (policyHandler *PolicyHandler) getExceptions(ctx context.Context, scanInfo *cautils.ScanInfo, getters *cautils.Getters) ([]armotypes.PostureExceptionPolicy, error) {
 	if cachedExceptions, exist := policyHandler.cachedExceptions.Get(); exist {
 		logger.L().Info("Using cached exceptions")
-		return cachedExceptions, nil
+		cautils.RecordCachedScanContractRunnerInput(scanInfo, cachedExceptions.runnerInput)
+		return cachedExceptions.exceptions, nil
 	}
 
 	exceptions, err := getters.ExceptionsGetter.GetExceptions(ctx, policyHandler.clusterName)
 	if err == nil {
-		policyHandler.cachedExceptions.Set(exceptions)
+		runnerInput, _ := cautils.RecordScanContractRunnerInput(scanInfo, "exceptions", getters.ExceptionsGetter)
+		policyHandler.cachedExceptions.Set(cachedExceptionsEntry{exceptions: exceptions, runnerInput: runnerInput})
 	}
 
 	return exceptions, err
 }
 
-func (policyHandler *PolicyHandler) getControlInputs(ctx context.Context, getters *cautils.Getters) (map[string][]string, error) {
+func (policyHandler *PolicyHandler) getControlInputs(ctx context.Context, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (map[string][]string, error) {
 	if cachedControlInputs, exist := policyHandler.cachedControlInputs.Get(); exist {
 		logger.L().Info("Using cached control inputs")
-		return cachedControlInputs, nil
+		cautils.RecordCachedScanContractRunnerInput(scanInfo, cachedControlInputs.runnerInput)
+		return cachedControlInputs.controlInputs, nil
 	}
 
 	controlInputs, err := getters.ControlsInputsGetter.GetControlsInputs(ctx, policyHandler.clusterName)
@@ -315,6 +328,7 @@ func (policyHandler *PolicyHandler) getControlInputs(ctx context.Context, getter
 		return nil, fmt.Errorf("no control configuration inputs available")
 	}
 
-	policyHandler.cachedControlInputs.Set(controlInputs)
+	runnerInput, _ := cautils.RecordScanContractRunnerInput(scanInfo, "controlsConfig", getters.ControlsInputsGetter)
+	policyHandler.cachedControlInputs.Set(cachedControlInputsEntry{controlInputs: controlInputs, runnerInput: runnerInput})
 	return controlInputs, nil
 }

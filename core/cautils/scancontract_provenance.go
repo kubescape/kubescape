@@ -3,6 +3,7 @@ package cautils
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -99,25 +100,10 @@ func cloneEffectiveSettings(settings *reporthandlingv2.ScanContractEffectiveSett
 	return &clone
 }
 
-// RecordScanContractRunnerInputs records only the local runner files whose
-// exact bytes were successfully consumed by the policy getters. It never
-// rereads a path for hashing, avoiding a hash-then-load race.
-func RecordScanContractRunnerInputs(scanInfo *ScanInfo, getters *Getters) {
-	if scanInfo == nil || scanInfo.ScanContract == nil || getters == nil {
-		return
-	}
-
-	inputs := make([]reporthandlingv2.ScanContractRunnerInput, 0, 2)
-	if input, ok := consumedRunnerInput("controlsConfig", getters.ControlsInputsGetter); ok {
-		inputs = append(inputs, input)
-	}
-	if input, ok := consumedRunnerInput("exceptions", getters.ExceptionsGetter); ok {
-		inputs = append(inputs, input)
-	}
-	scanInfo.ScanContract.RunnerInputs = inputs
-}
-
-func consumedRunnerInput(role string, source any) (reporthandlingv2.ScanContractRunnerInput, bool) {
+// CaptureScanContractRunnerInput captures provenance for the exact local
+// runner bytes that a getter consumed. It never rereads a path for hashing,
+// avoiding a hash-then-load race.
+func CaptureScanContractRunnerInput(role string, source any) (reporthandlingv2.ScanContractRunnerInput, bool) {
 	digester, ok := source.(getter.ConsumedFileDigester)
 	if !ok {
 		return reporthandlingv2.ScanContractRunnerInput{}, false
@@ -131,6 +117,35 @@ func consumedRunnerInput(role string, source any) (reporthandlingv2.ScanContract
 		Source: safeContractRunnerInputSource(path),
 		Digest: digest,
 	}, true
+}
+
+// RecordScanContractRunnerInput adds or replaces the input for a role. Cache
+// users can replay a previously captured input with RecordCachedScanContractRunnerInput.
+func RecordScanContractRunnerInput(scanInfo *ScanInfo, role string, source any) (reporthandlingv2.ScanContractRunnerInput, bool) {
+	input, ok := CaptureScanContractRunnerInput(role, source)
+	if !ok {
+		return reporthandlingv2.ScanContractRunnerInput{}, false
+	}
+	RecordCachedScanContractRunnerInput(scanInfo, input)
+	return input, true
+}
+
+// RecordCachedScanContractRunnerInput replays provenance captured when a
+// cached policy input was first read. The stored value is already path-safe.
+func RecordCachedScanContractRunnerInput(scanInfo *ScanInfo, input reporthandlingv2.ScanContractRunnerInput) {
+	if scanInfo == nil || scanInfo.ScanContract == nil || input.Role == "" || input.Digest == "" {
+		return
+	}
+	for i := range scanInfo.ScanContract.RunnerInputs {
+		if scanInfo.ScanContract.RunnerInputs[i].Role == input.Role {
+			scanInfo.ScanContract.RunnerInputs[i] = input
+			return
+		}
+	}
+	scanInfo.ScanContract.RunnerInputs = append(scanInfo.ScanContract.RunnerInputs, input)
+	sort.Slice(scanInfo.ScanContract.RunnerInputs, func(i, j int) bool {
+		return scanInfo.ScanContract.RunnerInputs[i].Role < scanInfo.ScanContract.RunnerInputs[j].Role
+	})
 }
 
 func safeContractRunnerInputSource(path string) string {

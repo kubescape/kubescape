@@ -144,10 +144,10 @@ func TestScanContractProvenanceRecordsConsumedRunnerInputs(t *testing.T) {
 		DigestSchema:   "kubescape-scan-contract:v1",
 		ContractDigest: "sha256:contract",
 	}}
-	RecordScanContractRunnerInputs(scanInfo, &Getters{
-		ControlsInputsGetter: controls,
-		ExceptionsGetter:     getter.NewMergedExceptionsGetter(exceptions, nil),
-	})
+	_, ok := RecordScanContractRunnerInput(scanInfo, "controlsConfig", controls)
+	require.True(t, ok)
+	_, ok = RecordScanContractRunnerInput(scanInfo, "exceptions", getter.NewMergedExceptionsGetter(exceptions, nil))
+	require.True(t, ok)
 
 	metadata := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
 	provenance := metadata.ScanMetadata.ScanContract
