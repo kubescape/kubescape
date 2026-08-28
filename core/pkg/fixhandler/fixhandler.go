@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"gopkg.in/op/go-logging.v1"
+	"gopkg.in/yaml.v3"
 )
 
 const UserValuePrefix = "YOUR_"
@@ -937,18 +939,27 @@ func (h *FixHandler) getFileYamlExpressions(resourcesToFix []ResourceFixInfo) ma
 // values from a YamlExpressions map. Used by the unfixed-control reconciliation
 // pass to test whether a control's failed paths are covered by some planned
 // edit.
-func plannedPathsFromExpressions(exprs map[string]armotypes.FixPath) []string {
+// plannedFix is one planned YAML edit's location and the value it writes
+// there, kept together so a caller can tell not just that a planned edit
+// touches a given path, but whether it writes the value another control's
+// check actually expected to find (see controlIsCoveredByPlannedPaths).
+type plannedFix struct {
+	Path  string
+	Value string
+}
+
+func plannedPathsFromExpressions(exprs map[string]armotypes.FixPath) []plannedFix {
 	if len(exprs) == 0 {
 		return nil
 	}
 	seen := make(map[string]bool, len(exprs))
-	out := make([]string, 0, len(exprs))
+	out := make([]plannedFix, 0, len(exprs))
 	for _, fp := range exprs {
 		if fp.Path == "" || seen[fp.Path] {
 			continue
 		}
 		seen[fp.Path] = true
-		out = append(out, fp.Path)
+		out = append(out, plannedFix{Path: fp.Path, Value: fp.Value})
 	}
 	return out
 }
@@ -962,6 +973,37 @@ func normalizeFailedPath(p string) string {
 		return before
 	}
 	return p
+}
+
+// expectedValueSuffix extracts the "<expected>" part of a raw path value
+// like "spec.…runAsNonRoot=true" -- the same suffix normalizeFailedPath
+// discards. ok is false when p carries no "=" at all, meaning the check
+// recorded no specific expected value to compare against.
+func expectedValueSuffix(p string) (value string, ok bool) {
+	_, after, found := strings.Cut(p, "=")
+	if !found {
+		return "", false
+	}
+	return after, true
+}
+
+// yamlValuesEqual reports whether two raw fix-value strings represent the
+// same YAML value, tolerating formatting differences (quoting, spacing,
+// key order) a literal string comparison would wrongly treat as different.
+// Either string failing to parse falls back to a literal comparison rather
+// than silently treating an unparsable value as a match -- callers only
+// reach here to decide whether to REFUSE a promotion, so being unable to
+// parse a value must not accidentally make two different-looking strings
+// compare equal.
+func yamlValuesEqual(a, b string) bool {
+	var av, bv any
+	if err := yaml.Unmarshal([]byte(a), &av); err != nil {
+		return a == b
+	}
+	if err := yaml.Unmarshal([]byte(b), &bv); err != nil {
+		return a == b
+	}
+	return reflect.DeepEqual(av, bv)
 }
 
 // yamlPathCovers reports whether setting `planned` necessarily satisfies a
@@ -985,25 +1027,28 @@ func yamlPathCovers(planned, failed string) bool {
 	return next == '.' || next == '['
 }
 
-// actionableLocation returns the YAML location a path entry describes,
+// actionableLocation returns the normalized YAML location a path entry
+// describes, and the raw string it was derived from (which may still carry
+// an "=<expected>" suffix normalizeFailedPath stripped from location),
 // regardless of which remediation field it was stored in. PosturePaths
 // entries carry exactly one of FailedPath / DeletePath / ReviewPath / FixPath
 // in practice (see appendPaths in opa-utils), so taking the first non-empty
-// one yields the location the check was actually pointing at.
-func actionableLocation(p armotypes.PosturePaths) string {
+// one yields the location the check was actually pointing at. Callers that
+// need the value the check expected use raw with expectedValueSuffix.
+func actionableLocation(p armotypes.PosturePaths) (location, raw string) {
 	if p.FailedPath != "" {
-		return normalizeFailedPath(p.FailedPath)
+		return normalizeFailedPath(p.FailedPath), p.FailedPath
 	}
 	if p.DeletePath != "" {
-		return normalizeFailedPath(p.DeletePath)
+		return normalizeFailedPath(p.DeletePath), p.DeletePath
 	}
 	if p.ReviewPath != "" {
-		return normalizeFailedPath(p.ReviewPath)
+		return normalizeFailedPath(p.ReviewPath), p.ReviewPath
 	}
 	if p.FixPath.Path != "" {
-		return p.FixPath.Path
+		return p.FixPath.Path, p.FixPath.Path
 	}
-	return ""
+	return "", ""
 }
 
 // controlIsCoveredByPlannedPaths reports whether every actionable path entry
@@ -1013,24 +1058,44 @@ func actionableLocation(p armotypes.PosturePaths) string {
 // just because an unrelated FailedPath happens to overlap with a planned
 // edit. A control whose rules carry no actionable locations at all is not
 // promoted either (nothing concrete to match against).
-func controlIsCoveredByPlannedPaths(ac *resourcesresults.ResourceAssociatedControl, plannedPaths []string) bool {
+//
+// An exact path match (not merely an ancestor) is further required to write
+// the same value the failed check expected, when that check recorded one
+// (a FailedPath's "=<expected>" suffix): path overlap alone does not prove
+// a different control's fix actually satisfies this check, only that it
+// touches the same field. Two controls checking the same field for two
+// different concrete values (e.g. one wants capabilities.drop == ["ALL"],
+// another wants it == ["SYS_ADMIN","NET_ADMIN"]) must not promote each
+// other. An ancestor match (the planned edit replaces a whole subtree the
+// failed path lives inside) still counts as covered without a value check:
+// verifying a specific leaf's resulting value inside an arbitrarily
+// structured subtree write is not attempted here.
+func controlIsCoveredByPlannedPaths(ac *resourcesresults.ResourceAssociatedControl, plannedPaths []plannedFix) bool {
 	sawActionablePath := false
 	for _, rule := range ac.ResourceAssociatedRules {
 		if !rule.GetStatus(nil).IsFailed() {
 			continue
 		}
 		for _, p := range rule.Paths {
-			loc := actionableLocation(p)
+			loc, raw := actionableLocation(p)
 			if loc == "" {
 				continue
 			}
 			sawActionablePath = true
+			expected, hasExpected := expectedValueSuffix(raw)
 			covered := false
 			for _, planned := range plannedPaths {
-				if yamlPathCovers(planned, loc) {
-					covered = true
-					break
+				if !yamlPathCovers(planned.Path, loc) {
+					continue
 				}
+				if planned.Path == loc && hasExpected && !yamlValuesEqual(planned.Value, expected) {
+					// Same field, but this planned fix writes a value the
+					// failed check did not expect: overlap alone does not
+					// prove the check would now pass.
+					continue
+				}
+				covered = true
+				break
 			}
 			if !covered {
 				return false
