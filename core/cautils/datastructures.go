@@ -97,7 +97,7 @@ type OPASessionObj struct {
 	ResourcesResult       map[string]resourcesresults.Result            // resources scan results, map[<resource ID>]<resource result>
 	ResourceSource        map[string]reporthandling.Source              // resources sources, map[<resource ID>]<resource result>
 	ResourcesPrioritized  map[string]prioritization.PrioritizedResource // resources prioritization information, map[<resource ID>]<prioritized resource>
-	ResourceAttackTracks  map[string]v1alpha1.IAttackTrack              // resources attack tracks, map[<resource ID>]<attack track>
+	ResourceAttackTracks  map[string][]v1alpha1.IAttackTrack            // resources attack tracks, map[<resource ID>][]<attack track> -- a resource can be implicated by more than one attack track at once, each contributing to its score
 	AttackTracks          map[string]v1alpha1.IAttackTrack
 	Report                *reporthandlingv2.PostureReport // scan results v2 - Remove
 	RegoInputData         RegoInputData                   // input passed to rego for scanning. map[<control name>][<input arguments>]

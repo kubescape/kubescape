@@ -144,13 +144,13 @@ func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Tr
 	}
 	session.ResourcesPrioritized = newResourcesPrioritized
 
-	newResourceAttackTracks := make(map[string]v1alpha1.IAttackTrack, len(session.ResourceAttackTracks))
-	for oldID, attackTrack := range session.ResourceAttackTracks {
+	newResourceAttackTracks := make(map[string][]v1alpha1.IAttackTrack, len(session.ResourceAttackTracks))
+	for oldID, attackTracks := range session.ResourceAttackTracks {
 		newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
 		if err != nil {
 			return err
 		}
-		newResourceAttackTracks[newID] = attackTrack
+		newResourceAttackTracks[newID] = attackTracks
 	}
 	session.ResourceAttackTracks = newResourceAttackTracks
 

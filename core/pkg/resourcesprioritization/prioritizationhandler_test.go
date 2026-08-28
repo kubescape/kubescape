@@ -52,6 +52,15 @@ func (mock *AttackTracksGetterMock) GetAttackTracks() ([]v1alpha1.AttackTrack, e
 }
 
 func ControlMock(id string, baseScore float32, tags, categories []string) reporthandling.Control {
+	return ControlMockForAttackTrack(id, baseScore, tags, "TestAttackTrack", categories)
+}
+
+// ControlMockForAttackTrack is ControlMock with the attack track name
+// parameterized, so a test can build a control that maps into a DIFFERENT
+// attack track than the hardcoded "TestAttackTrack" every other mock control
+// uses -- needed to exercise a resource matching more than one attack track
+// at once (see TestResourcesPrioritizationHandler_PrioritizeResources_MultipleAttackTracks).
+func ControlMockForAttackTrack(id string, baseScore float32, tags []string, attackTrack string, categories []string) reporthandling.Control {
 	return reporthandling.Control{
 		ControlID: id,
 		BaseScore: baseScore,
@@ -60,7 +69,7 @@ func ControlMock(id string, baseScore float32, tags, categories []string) report
 				"controlTypeTags": tags,
 				"attackTracks": []reporthandling.AttackTrackCategories{
 					{
-						AttackTrack: "TestAttackTrack",
+						AttackTrack: attackTrack,
 						Categories:  categories,
 					},
 				},
@@ -216,6 +225,60 @@ func TestResourcesPrioritizationHandler_PrioritizeResources(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestResourcesPrioritizationHandler_PrioritizeResources_MultipleAttackTracks
+// is the direct regression test for the bug this fixes: a resource whose
+// failed controls span TWO different attack tracks ("TestAttackTrack" and
+// "TestAttackTrack_2") must have both attack tracks recorded in
+// ResourceAttackTracks, not just whichever one handler.attackTracks happened
+// to visit last. The resource's score already correctly aggregated
+// contributions from every matching attack track before this fix -- only the
+// map used to build the printed --print-attack-tree output silently dropped
+// all but one.
+func TestResourcesPrioritizationHandler_PrioritizeResources_MultipleAttackTracks(t *testing.T) {
+	allPoliciesControls := map[string]reporthandling.Control{
+		// Maps into "TestAttackTrack" category "D", same as the other tests.
+		"C-001": ControlMock("C-001", 3, []string{"security"}, []string{"D"}),
+		// Maps into "TestAttackTrack_2", whose only step is named "Z".
+		"C-100": ControlMockForAttackTrack("C-100", 5, []string{"security"}, "TestAttackTrack_2", []string{"Z"}),
+	}
+	results := map[string]resourcesresults.Result{
+		"resource1": {
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				ResourceAssociatedControlMock("C-001", apis.StatusFailed),
+				ResourceAssociatedControlMock("C-100", apis.StatusFailed),
+			},
+		},
+	}
+	controls := map[string]reportsummary.ControlSummary{
+		"C-001": {ControlID: "C-001", ScoreFactor: 3},
+		"C-100": {ControlID: "C-100", ScoreFactor: 5},
+	}
+	resources := map[string]workloadinterface.IMetadata{
+		"resource1": DeploymentWorkloadMock(1),
+	}
+
+	// buildResourcesMap: true is required to populate ResourceAttackTracks at
+	// all -- every other test in this file passes false and never touches
+	// this map.
+	handler, err := NewResourcesPrioritizationHandler(context.Background(), &AttackTracksGetterMock{}, true)
+	assert.NoError(t, err)
+
+	sessionObj := OPASessionObjMock(allPoliciesControls, results, controls, resources)
+	err = handler.PrioritizeResources(sessionObj)
+	assert.NoError(t, err)
+
+	tracks, ok := sessionObj.ResourceAttackTracks["resource1"]
+	if !assert.True(t, ok, "resource1 must have an entry in ResourceAttackTracks") {
+		return
+	}
+	if !assert.Len(t, tracks, 2, "resource1 matched two distinct attack tracks and both must be recorded, not just the last one visited") {
+		return
+	}
+
+	names := []string{tracks[0].GetName(), tracks[1].GetName()}
+	assert.ElementsMatch(t, []string{"TestAttackTrack", "TestAttackTrack_2"}, names)
 }
 
 func RolloutWorkloadMock(replicas int) workloadinterface.IMetadata {
