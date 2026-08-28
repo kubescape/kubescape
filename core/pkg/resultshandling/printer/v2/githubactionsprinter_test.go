@@ -2,6 +2,7 @@ package printer
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,7 +150,8 @@ func TestGitHubActionsPrinter_GoldenAnnotation(t *testing.T) {
 	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
 	require.NotEmpty(t, lines)
 	assert.Equal(t,
-		"::error file=deploy.yaml,line=13,title=C-0057 Privileged container::High severity finding on apps/v1/Deployment/default/demo. Remediation: https://hub.armosec.io/docs/c-0057",
+		fmt.Sprintf("::error file=deploy.yaml,line=%d,title=C-0057 Privileged container::High severity finding on apps/v1/Deployment/default/demo. Remediation: https://hub.armosec.io/docs/c-0057",
+			privilegedLine),
 		lines[0], "the first line must be the exact workflow command")
 	assert.Contains(t, output, "1 of 1 High/Critical finding(s) annotated")
 }

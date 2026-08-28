@@ -484,6 +484,7 @@ kubescape scan image <image>:<tag> [flags]
 | Flag | Description |
 |------|-------------|
 | `--exceptions <path>` | Path to exceptions file |
+| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `markdown`, `cyclonedx-json`, `spdx-json` |
 | `-p, --password <pass>` | Registry password |
 | `--platform <platform>` | OCI platform to scan, for example `linux/amd64`, `linux/arm64/v8`, or `windows/amd64` |
 | `-u, --username <user>` | Registry username |
