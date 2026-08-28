@@ -409,6 +409,9 @@ func matchConstraintsForResources(group, version string, resources ...string) ma
 	}
 }
 
+// matchedPolicyNames pulls the matched policy names out of a tool result, so a
+// test can assert on which policies matched without restating the whole
+// response shape.
 func matchedPolicyNames(t *testing.T, result *mcp.CallToolResult) []string {
 	t.Helper()
 
@@ -507,4 +510,59 @@ func TestAnalyzeMutatingAdmissionPolicyImpact_SubresourceWithParentIsRejected(t 
 	args["subresource"] = "pods/status"
 	rejected := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", args))
 	require.True(t, rejected.IsError)
+}
+
+// TestAnalyzeMutatingAdmissionPolicyImpact_NonStringSubresourceIsRejected goes
+// through the registered tools/call path, which is where a wrongly typed
+// argument actually arrives: the server runs without input schema validation,
+// so a number here used to assert away to "" and answer for the bare pod.
+func TestAnalyzeMutatingAdmissionPolicyImpact_NonStringSubresourceIsRejected(t *testing.T) {
+	policy := unstructuredMutatingPolicy("mutate-pods", allPodsMatchConstraints(),
+		map[string]any{"patchType": "JSONPatch", "jsonPatch": map[string]any{"expression": `[JSONPatch{op: "add", path: "/metadata/labels/x", value: "y"}]`}},
+	)
+	binding := unstructuredMutatingPolicyBinding("mutate-pods-binding", "mutate-pods")
+	pod := unstructuredTestPod("prod", "server", map[string]any{"app": "server"})
+
+	ksServer := newMutatingPolicyTestServer(t, policy, binding, pod)
+
+	for _, subresource := range []any{float64(7), true, map[string]any{"name": "status"}, []any{"status"}} {
+		result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", map[string]any{
+			"namespace":   "prod",
+			"name":        "server",
+			"api_version": "v1",
+			"resource":    "pods",
+			"subresource": subresource,
+		}))
+		require.True(t, result.IsError, "a %T subresource must be refused, not read as the resource itself", subresource)
+	}
+}
+
+// TestAnalyzeMutatingAdmissionPolicyImpact_OmittedAndNullSubresourceMeanTheResource
+// keeps the type check from turning the ordinary no-subresource query into an
+// error. An explicit JSON null is how a client may render an unset optional
+// argument, so it has to mean the same as leaving it out.
+func TestAnalyzeMutatingAdmissionPolicyImpact_OmittedAndNullSubresourceMeanTheResource(t *testing.T) {
+	policy := unstructuredMutatingPolicy("mutate-pods", allPodsMatchConstraints(),
+		map[string]any{"patchType": "JSONPatch", "jsonPatch": map[string]any{"expression": `[JSONPatch{op: "add", path: "/metadata/labels/x", value: "y"}]`}},
+	)
+	binding := unstructuredMutatingPolicyBinding("mutate-pods-binding", "mutate-pods")
+	pod := unstructuredTestPod("prod", "server", map[string]any{"app": "server"})
+
+	ksServer := newMutatingPolicyTestServer(t, policy, binding, pod)
+
+	args := map[string]any{
+		"namespace":   "prod",
+		"name":        "server",
+		"api_version": "v1",
+		"resource":    "pods",
+	}
+
+	omitted := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", args))
+	require.False(t, omitted.IsError)
+	require.Equal(t, []string{"mutate-pods"}, matchedPolicyNames(t, omitted))
+
+	args["subresource"] = nil
+	null := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", args))
+	require.False(t, null.IsError)
+	require.Equal(t, []string{"mutate-pods"}, matchedPolicyNames(t, null))
 }
