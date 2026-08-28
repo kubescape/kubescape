@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -386,4 +387,124 @@ func TestAnalyzeMutatingAdmissionPolicyImpact_ClusterScopedResourceIgnoresNamesp
 	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
 	matches := parsed["matches"].([]any)
 	require.Len(t, matches, 1, "namespaceSelector must not skip a cluster-scoped resource even with no namespace given")
+}
+
+// matchConstraintsForResources is allPodsMatchConstraints for an arbitrary
+// group/version/resources triple, so a test can scope a policy with the
+// subresource form a resources entry may carry.
+func matchConstraintsForResources(group, version string, resources ...string) map[string]any {
+	named := make([]any, 0, len(resources))
+	for _, resource := range resources {
+		named = append(named, resource)
+	}
+	return map[string]any{
+		"resourceRules": []any{
+			map[string]any{
+				"apiGroups":   []any{group},
+				"apiVersions": []any{version},
+				"resources":   named,
+				"operations":  []any{"*"},
+			},
+		},
+	}
+}
+
+func matchedPolicyNames(t *testing.T, result *mcp.CallToolResult) []string {
+	t.Helper()
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+	require.True(t, parsed["supported"].(bool))
+
+	matches, _ := parsed["matches"].([]any)
+	names := make([]string, 0, len(matches))
+	for _, m := range matches {
+		names = append(names, m.(map[string]any)["policy_name"].(string))
+	}
+	return names
+}
+
+// TestAnalyzeMutatingAdmissionPolicyImpact_PolicyScopedToEveryResourceIsReported
+// covers a policy scoped with "*/*", the documented way to name every resource
+// and subresource. Reporting no match for it would hide a policy that mutates
+// the whole cluster.
+func TestAnalyzeMutatingAdmissionPolicyImpact_PolicyScopedToEveryResourceIsReported(t *testing.T) {
+	policy := unstructuredMutatingPolicy("mutate-everything", matchConstraintsForResources("*", "*", "*/*"),
+		map[string]any{"patchType": "JSONPatch", "jsonPatch": map[string]any{"expression": `[JSONPatch{op: "add", path: "/metadata/labels/x", value: "y"}]`}},
+	)
+	binding := unstructuredMutatingPolicyBinding("mutate-everything-binding", "mutate-everything")
+	pod := unstructuredTestPod("prod", "server", map[string]any{"app": "server"})
+
+	ksServer := newMutatingPolicyTestServer(t, policy, binding, pod)
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", map[string]any{
+		"namespace":   "prod",
+		"name":        "server",
+		"api_version": "v1",
+		"resource":    "pods",
+	}))
+	require.False(t, result.IsError)
+	require.Equal(t, []string{"mutate-everything"}, matchedPolicyNames(t, result))
+}
+
+// TestAnalyzeMutatingAdmissionPolicyImpact_SubresourceIsMatchedSeparately walks
+// both directions of the parent/subresource split through the tool: a policy
+// scoped to pods leaves pods/status alone, and one scoped to pods/status leaves
+// the pod alone.
+func TestAnalyzeMutatingAdmissionPolicyImpact_SubresourceIsMatchedSeparately(t *testing.T) {
+	mutation := map[string]any{"patchType": "JSONPatch", "jsonPatch": map[string]any{"expression": `[JSONPatch{op: "add", path: "/metadata/labels/x", value: "y"}]`}}
+
+	podPolicy := unstructuredMutatingPolicy("mutate-pods", allPodsMatchConstraints(), mutation)
+	podBinding := unstructuredMutatingPolicyBinding("mutate-pods-binding", "mutate-pods")
+	statusPolicy := unstructuredMutatingPolicy("mutate-pod-status", matchConstraintsForResources("", "v1", "pods/status"), mutation)
+	statusBinding := unstructuredMutatingPolicyBinding("mutate-pod-status-binding", "mutate-pod-status")
+	pod := unstructuredTestPod("prod", "server", map[string]any{"app": "server"})
+
+	ksServer := newMutatingPolicyTestServer(t, podPolicy, podBinding, statusPolicy, statusBinding, pod)
+
+	args := map[string]any{
+		"namespace":   "prod",
+		"name":        "server",
+		"api_version": "v1",
+		"resource":    "pods",
+	}
+
+	bare := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", args))
+	require.False(t, bare.IsError)
+	require.Equal(t, []string{"mutate-pods"}, matchedPolicyNames(t, bare))
+
+	args["subresource"] = "status"
+	status := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", args))
+	require.False(t, status.IsError)
+	require.Equal(t, []string{"mutate-pod-status"}, matchedPolicyNames(t, status))
+}
+
+// TestAnalyzeMutatingAdmissionPolicyImpact_SubresourceWithParentIsRejected keeps
+// a caller from writing the parent twice, which would silently match nothing.
+// The cluster is stocked so the same call without the bad subresource succeeds,
+// leaving the argument check as the only thing the error can come from.
+func TestAnalyzeMutatingAdmissionPolicyImpact_SubresourceWithParentIsRejected(t *testing.T) {
+	policy := unstructuredMutatingPolicy("mutate-pod-status", matchConstraintsForResources("", "v1", "pods/status"),
+		map[string]any{"patchType": "JSONPatch", "jsonPatch": map[string]any{"expression": `[JSONPatch{op: "add", path: "/metadata/labels/x", value: "y"}]`}},
+	)
+	binding := unstructuredMutatingPolicyBinding("mutate-pod-status-binding", "mutate-pod-status")
+	pod := unstructuredTestPod("prod", "server", map[string]any{"app": "server"})
+
+	ksServer := newMutatingPolicyTestServer(t, policy, binding, pod)
+
+	args := map[string]any{
+		"namespace":   "prod",
+		"name":        "server",
+		"api_version": "v1",
+		"resource":    "pods",
+		"subresource": "status",
+	}
+
+	accepted := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", args))
+	require.False(t, accepted.IsError)
+	require.Equal(t, []string{"mutate-pod-status"}, matchedPolicyNames(t, accepted))
+
+	args["subresource"] = "pods/status"
+	rejected := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", args))
+	require.True(t, rejected.IsError)
 }
