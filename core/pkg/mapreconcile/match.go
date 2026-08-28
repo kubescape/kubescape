@@ -1,6 +1,8 @@
 package mapreconcile
 
 import (
+	"strings"
+
 	admissionregistrationv1alpha1 "k8s.io/api/admissionregistration/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -18,6 +20,11 @@ type ObjectInfo struct {
 	Namespace string // empty for a cluster-scoped object
 	Labels    map[string]string
 	Operation admissionregistrationv1alpha1.OperationType
+
+	// Subresource is the subresource the request targets, e.g. "scale" for a
+	// deployments/scale update. Empty means the resource itself, which is what
+	// a rule's bare "pods" entry covers and its "pods/exec" entry does not.
+	Subresource string
 
 	// ClusterScoped marks obj as a cluster-scoped resource. A Namespace
 	// object is itself cluster-scoped ("Namespace API objects are
@@ -61,7 +68,7 @@ func ruleMatches(rule admissionregistrationv1alpha1.NamedRuleWithOperations, obj
 	if !stringRuleMatches(rule.APIVersions, obj.Version) {
 		return false
 	}
-	if !stringRuleMatches(rule.Resources, obj.Resource) {
+	if !resourceRuleMatches(rule.Resources, obj) {
 		return false
 	}
 	if !resourceNamesMatch(rule.ResourceNames, obj.Name) {
@@ -116,9 +123,9 @@ func operationMatches(ops []admissionregistrationv1alpha1.OperationType, op admi
 }
 
 // stringRuleMatches reports whether candidate is covered by values, where
-// values comes from a Rule's APIGroups/APIVersions/Resources: "*" (alone, or
+// values comes from a Rule's APIGroups or APIVersions: "*" (alone, or
 // alongside other entries) matches anything, otherwise candidate must appear
-// verbatim.
+// verbatim. Resources go through resourceRuleMatches instead.
 func stringRuleMatches(values []string, candidate string) bool {
 	for _, v := range values {
 		if wildcardOrEqual(v, candidate) {
@@ -132,6 +139,33 @@ func stringRuleMatches(values []string, candidate string) bool {
 // rule side may carry "*": an object's own API coordinates are always concrete.
 func wildcardOrEqual(value, candidate string) bool {
 	return value == "*" || value == candidate
+}
+
+// resourceRuleMatches is stringRuleMatches for a Rule's Resources, which carry
+// a subresource half the other rule fields do not: "pods" is the resource
+// itself, "pods/*" every subresource of pods, "*/scale" every scale
+// subresource, and "*/*" both. Each half is matched on its own, the way the
+// apiserver's own rule matcher splits them, so a bare "*" never reaches a
+// subresource request while "pods/*" does reach the bare pod.
+func resourceRuleMatches(values []string, obj ObjectInfo) bool {
+	for _, v := range values {
+		resource, subresource := splitSubresource(v)
+		if wildcardOrEqual(resource, obj.Resource) && wildcardOrEqual(subresource, obj.Subresource) {
+			return true
+		}
+	}
+	return false
+}
+
+// splitSubresource splits one Resources entry into its resource and
+// subresource halves. An entry with no "/" names a bare resource, so its
+// subresource half is empty.
+func splitSubresource(value string) (string, string) {
+	resource, subresource, found := strings.Cut(value, "/")
+	if !found {
+		return value, ""
+	}
+	return resource, subresource
 }
 
 // resourceRulesVerdict OR-combines every rule in rules against obj. An empty
@@ -268,13 +302,15 @@ func (c *compiledMatchResources) matches(obj ObjectInfo) (matched bool, determin
 // HorizontalPodAutoscalers) that this package is not given. A rule that does
 // not even name this resource (e.g. "configmaps" when obj is a "pods") is
 // never ambiguous: two unrelated resource kinds are never equivalent under
-// any matchPolicy.
+// any matchPolicy. Neither are a resource and its subresource, so the rule has
+// to cover obj's subresource half too before the group/version question is
+// worth asking.
 func resourceRulesAmbiguousUnderEquivalence(rules []admissionregistrationv1alpha1.NamedRuleWithOperations, obj ObjectInfo) bool {
 	for _, rule := range rules {
 		if !operationMatches(rule.Operations, obj.Operation) {
 			continue
 		}
-		if !stringRuleMatches(rule.Resources, obj.Resource) {
+		if !resourceRuleMatches(rule.Resources, obj) {
 			continue
 		}
 		if !stringRuleMatches(rule.APIGroups, obj.Group) || !stringRuleMatches(rule.APIVersions, obj.Version) {
