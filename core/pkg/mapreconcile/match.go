@@ -121,11 +121,17 @@ func operationMatches(ops []admissionregistrationv1alpha1.OperationType, op admi
 // verbatim.
 func stringRuleMatches(values []string, candidate string) bool {
 	for _, v := range values {
-		if v == "*" || v == candidate {
+		if wildcardOrEqual(v, candidate) {
 			return true
 		}
 	}
 	return false
+}
+
+// wildcardOrEqual reports whether one rule value covers candidate. Only the
+// rule side may carry "*": an object's own API coordinates are always concrete.
+func wildcardOrEqual(value, candidate string) bool {
+	return value == "*" || value == candidate
 }
 
 // resourceRulesVerdict OR-combines every rule in rules against obj. An empty
