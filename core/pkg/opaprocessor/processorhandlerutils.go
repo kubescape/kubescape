@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/exceptions"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -737,6 +738,24 @@ func ruleData(rule *reporthandling.PolicyRule) string {
 
 func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
 	return rule.ResourceEnumerator
+}
+
+// inEnumeratedScope reports whether a failed resource may be reported, given
+// the enumerator's reporting-scope restriction built in processRuleOnScope. A
+// nil scope means unrestricted. A RegoResponseVectorObject is never checked
+// against it: its GetID is a composite of its own fields, not the underlying
+// resource's ID, so it can never legitimately match an enumeratedIDs entry
+// (which only ever holds real, stable-ID objects) - restricting it would just
+// drop every vector-reported failure, enumerator or not.
+func inEnumeratedScope(enumeratedIDs map[string]struct{}, failedResource workloadinterface.IMetadata, id string) bool {
+	if enumeratedIDs == nil {
+		return true
+	}
+	if objectsenvelopes.GetObjectType(failedResource.GetObject()) == objectsenvelopes.TypeRegoResponseVectorObject {
+		return true
+	}
+	_, inScope := enumeratedIDs[id]
+	return inScope
 }
 
 // errIncludeControlsNoMatch is returned when --include-controls is set but

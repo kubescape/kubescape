@@ -1155,6 +1155,42 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 
 	inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
 
+	// enumeratedIDs scopes which failed resources get reported, without
+	// scoping what the rule evaluates against below (that stays
+	// inputRawResources, the full aggregated input, so a rule that joins
+	// across kinds still sees every kind it matched). It only applies to
+	// rules that actually declare a ResourceEnumerator: for every other rule,
+	// enumerateData returns inputRawResources unchanged, which is not a
+	// selection to scope reporting by, and a rule that reports through its
+	// own synthesized ExternalObjects (e.g. audit-policy-content) has an
+	// identity that was never going to appear in that unchanged set anyway.
+	//
+	// When a rule does declare one, enumeratedIDs is built only from its
+	// real, stable-ID objects (K8sApiObjects), never from a
+	// RegoResponseVectorObject: a vector's GetID is a composite of its own
+	// fields, not the underlying resource's ID, so it can never match the ID
+	// a k8sApiObjects-reporting rule fails with, and an enumerator that
+	// reports purely through ExternalObjects (e.g. C-0042, C-0053) is meant
+	// to leave reporting unrestricted, not restricted to nothing.
+	// An enumerator that matched nothing at all yields an empty, non-nil set
+	// so nothing gets reported.
+	var enumeratedIDs map[string]struct{}
+	if ruleEnumeratorData(rule) != "" {
+		if len(enumeratedData) == 0 {
+			enumeratedIDs = map[string]struct{}{}
+		} else {
+			for _, r := range inputResources {
+				if objectsenvelopes.GetObjectType(r.GetObject()) == objectsenvelopes.TypeRegoResponseVectorObject {
+					continue
+				}
+				if enumeratedIDs == nil {
+					enumeratedIDs = make(map[string]struct{}, len(inputResources))
+				}
+				enumeratedIDs[r.GetID()] = struct{}{}
+			}
+		}
+	}
+
 	var addedResources []workloadinterface.IMetadata
 	for _, inputResource := range inputResources {
 		if opap.skipNamespace(inputResource.GetNamespace()) {
@@ -1175,7 +1211,7 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		opap.mu.Unlock()
 	}
 
-	ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, enumeratedData, ruleData, ruleRegoDependenciesData, controlID)
+	ruleResponses, celOut, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData, controlID)
 	if err != nil {
 		opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
 		return resources, fmt.Errorf("rego eval failed for namespace %q: %w", scope.name, err)
@@ -1202,6 +1238,9 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 				continue
 			}
 			id := failedResource.GetID()
+			if !inEnumeratedScope(enumeratedIDs, failedResource, id) {
+				continue
+			}
 			failedIDs[id] = struct{}{}
 			if _, exists := resources[id]; exists {
 				continue
@@ -1242,6 +1281,9 @@ func (opap *OPAProcessor) processRuleOnScope(ctx context.Context, rule *reportha
 		failedResources := objectsenvelopes.ListMapToMeta(ruleResponse.GetFailedResources())
 		for _, failedResource := range failedResources {
 			if opap.skipNamespace(failedResource.GetNamespace()) {
+				continue
+			}
+			if !inEnumeratedScope(enumeratedIDs, failedResource, failedResource.GetID()) {
 				continue
 			}
 			var ruleResult *resourcesresults.ResourceAssociatedRule
