@@ -190,6 +190,31 @@ kubescape policy test ./myrules
 kubescape scan ./manifests --custom-rules ./myrules
 ```
 
+`kubescape policy init` writes that layout for you, including a flagged and a
+clean test case whose `expected.json` already matches the generated rule, so the
+new rule passes `policy test` before you start editing it:
+
+```bash
+kubescape policy init ./myrules/no-privileged-containers
+kubescape policy init ./myrules/no-privileged-pods --kind Pod
+```
+
+`--kind` selects the workload the generated rule matches (`CronJob`,
+`DaemonSet`, `Deployment`, `Job`, `Pod`, `StatefulSet`; default `Deployment`),
+and `--description`, `--remediation` and `--force` set the metadata text and
+allow overwriting an existing rule directory.
+
+Once you change the rule, `--update` rewrites each case's `expected.json` from
+the rule's current output instead of comparing against it, which saves
+hand-writing the matched object into the fixture:
+
+```bash
+kubescape policy test ./myrules --update
+```
+
+Review the resulting diff before committing it: `--update` records whatever the
+rule currently produces, so it will happily bless a regression.
+
 Pass either the parent directory or a single rule directory. The metadata
 supplies the rule's name, description, remediation and `match` selectors, so the
 rule is only evaluated against the kinds it targets.

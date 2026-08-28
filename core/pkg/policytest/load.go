@@ -42,13 +42,13 @@ func LoadCaseInput(dir string) ([]workloadinterface.IMetadata, error) {
 // LoadCaseExpected reads dir/expected.json as the RuleResponse list the rule
 // must produce for this case's input.
 func LoadCaseExpected(dir string) ([]reporthandling.RuleResponse, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, "expected.json"))
+	raw, err := os.ReadFile(filepath.Join(dir, expectedFileName))
 	if err != nil {
-		return nil, fmt.Errorf("read expected.json: %w", err)
+		return nil, fmt.Errorf("read %s: %w", expectedFileName, err)
 	}
 	var expected []reporthandling.RuleResponse
 	if err := json.Unmarshal(raw, &expected); err != nil {
-		return nil, fmt.Errorf("parse expected.json: %w", err)
+		return nil, fmt.Errorf("parse %s: %w", expectedFileName, err)
 	}
 	return expected, nil
 }
