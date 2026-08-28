@@ -294,6 +294,19 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr: nil,
 		},
 		{
+			name:      "github-actions format for cluster scan should return error",
+			scanType:  cautils.ScanTypeCluster,
+			format:    printer.GitHubActionsFormat,
+			expectErr: errors.New("format \"github-actions\" is only supported when scanning local files"),
+		},
+		{
+			name:        "github-actions format for local dir scan should not return error",
+			scanType:    cautils.ScanTypeCluster,
+			scanContext: cautils.ContextDir,
+			format:      printer.GitHubActionsFormat,
+			expectErr:   nil,
+		},
+		{
 			name:      "html format for cluster scan should not return error",
 			scanType:  cautils.ScanTypeCluster,
 			format:    printer.HtmlFormat,
@@ -858,6 +871,7 @@ func TestClosePrinter_AllV2PrintersImplementErrorCloser(t *testing.T) {
 		{"spdx", printerv2.NewSPDXPrinter()},
 		{"cyclonedx", printerv2.NewCycloneDXPrinter()},
 		{"gitlabsast", printerv2.NewGitLabSASTPrinter()},
+		{"githubactions", printerv2.NewGitHubActionsPrinter()},
 		{"csv", printerv2.NewCsvPrinter()},
 		{"exceptions", printerv2.NewExceptionsPrinter()},
 		{"pretty", printerv2.NewPrettyPrinter(false, "1.0", false, cautils.ControlViewType, cautils.ScanTypeCluster, nil, "", false, false)},

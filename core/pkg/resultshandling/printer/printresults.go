@@ -16,25 +16,26 @@ import (
 var INDENT = "   "
 
 const (
-	PrettyFormat       string = "pretty-printer"
-	JsonFormat         string = "json"
-	JunitResultFormat  string = "junit"
-	PrometheusFormat   string = "prometheus"
-	PdfFormat          string = "pdf"
-	HtmlFormat         string = "html"
-	SARIFFormat        string = "sarif"
-	GitLabSASTFormat   string = "gitlab-sast"
-	YamlFormat         string = "yaml"
-	CsvFormat          string = "csv"
-	MarkdownFormat     string = "markdown"
-	CycloneDXFormat    string = "cyclonedx-json"
-	SPDXFormat         string = "spdx-json"
-	PolicyReportFormat string = "policyreport"
-	ExceptionsFormat   string = "exceptions"
+	PrettyFormat        string = "pretty-printer"
+	JsonFormat          string = "json"
+	JunitResultFormat   string = "junit"
+	PrometheusFormat    string = "prometheus"
+	PdfFormat           string = "pdf"
+	HtmlFormat          string = "html"
+	SARIFFormat         string = "sarif"
+	GitLabSASTFormat    string = "gitlab-sast"
+	GitHubActionsFormat string = "github-actions"
+	YamlFormat          string = "yaml"
+	CsvFormat           string = "csv"
+	MarkdownFormat      string = "markdown"
+	CycloneDXFormat     string = "cyclonedx-json"
+	SPDXFormat          string = "spdx-json"
+	PolicyReportFormat  string = "policyreport"
+	ExceptionsFormat    string = "exceptions"
 )
 
 // AllFormats lists every output format kubescape can emit.
-var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat, PolicyReportFormat, ExceptionsFormat}
+var AllFormats = []string{PrettyFormat, JsonFormat, JunitResultFormat, PrometheusFormat, PdfFormat, HtmlFormat, SARIFFormat, GitLabSASTFormat, GitHubActionsFormat, YamlFormat, CsvFormat, MarkdownFormat, CycloneDXFormat, SPDXFormat, PolicyReportFormat, ExceptionsFormat}
 
 // ImageFormats lists formats whose printers support image-scan data. CSV is
 // deliberately excluded: CsvPrinter.ActionPrint requires opaSessionObj and
@@ -60,6 +61,7 @@ const (
 	SPDXOutputExt         = ".spdx.json"
 	PolicyReportOutputExt = ".yaml"
 	ExceptionsOutputExt   = ".exceptions.json"
+	GitHubActionsOutExt   = ".txt"
 )
 
 // HasOutputExt reports whether outputFile already ends with ext, compared
@@ -114,21 +116,22 @@ func ResolveDefaultOutputFile(format, defaultBaseName string) string {
 // than re-deriving it, so a format can never resolve to a path its printer
 // does not write. Every entry in AllFormats is covered.
 var FormatOutputExt = map[string]string{
-	PrettyFormat:       PrettyOutputExt,
-	JsonFormat:         JsonOutputExt,
-	JunitResultFormat:  JunitOutputExt,
-	PrometheusFormat:   PrometheusOutputExt,
-	PdfFormat:          PdfOutputExt,
-	HtmlFormat:         HtmlOutputExt,
-	SARIFFormat:        SARIFOutputExt,
-	GitLabSASTFormat:   JsonOutputExt,
-	YamlFormat:         YamlOutputExt,
-	CsvFormat:          CsvOutputExt,
-	MarkdownFormat:     MarkdownOutputExt,
-	CycloneDXFormat:    CycloneDXOutputExt,
-	SPDXFormat:         SPDXOutputExt,
-	PolicyReportFormat: PolicyReportOutputExt,
-	ExceptionsFormat:   ExceptionsOutputExt,
+	PrettyFormat:        PrettyOutputExt,
+	JsonFormat:          JsonOutputExt,
+	JunitResultFormat:   JunitOutputExt,
+	PrometheusFormat:    PrometheusOutputExt,
+	PdfFormat:           PdfOutputExt,
+	HtmlFormat:          HtmlOutputExt,
+	SARIFFormat:         SARIFOutputExt,
+	GitLabSASTFormat:    JsonOutputExt,
+	YamlFormat:          YamlOutputExt,
+	CsvFormat:           CsvOutputExt,
+	MarkdownFormat:      MarkdownOutputExt,
+	CycloneDXFormat:     CycloneDXOutputExt,
+	SPDXFormat:          SPDXOutputExt,
+	PolicyReportFormat:  PolicyReportOutputExt,
+	ExceptionsFormat:    ExceptionsOutputExt,
+	GitHubActionsFormat: GitHubActionsOutExt,
 }
 
 type IPrinter interface {

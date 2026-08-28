@@ -46,7 +46,7 @@ kubescape scan [target] [flags]
 | `--exceptions <path>` | Path to exceptions file | - |
 | `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
-| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `csv`, `markdown`, `policyreport`, `exceptions` — see [generating an exceptions baseline](#generating-an-exceptions-baseline) | `pretty-printer` |
+| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `github-actions`, `yaml`, `csv`, `markdown`, `policyreport`, `exceptions` — see [generating an exceptions baseline](#generating-an-exceptions-baseline). `github-actions` emits failed High/Critical controls as `::error` workflow commands for inline PR annotations; local file scans only, capped at GitHub's 10-annotations-per-step limit | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
 | `--host-scan` | Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use `--host-scan=false` to disable host data collection. See the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for a managed alternative. | auto-detect |
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
@@ -509,6 +509,7 @@ kubescape scan image <image>:<tag> [flags]
 | Flag | Description |
 |------|-------------|
 | `--exceptions <path>` | Path to exceptions file |
+| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `markdown`, `cyclonedx-json`, `spdx-json` |
 | `-p, --password <pass>` | Registry password |
 | `--platform <platform>` | OCI platform to scan, for example `linux/amd64`, `linux/arm64/v8`, or `windows/amd64` |
 | `-u, --username <user>` | Registry username |
