@@ -161,6 +161,13 @@ func transformPodSpecs(node any, knownRefNames map[string]map[string]struct{}, t
 			return err
 		}
 
+		if err := transformVolumes(
+			v,
+			transformer,
+		); err != nil {
+			return err
+		}
+
 		for _, child := range v {
 			if err := transformPodSpecs(
 				child,
@@ -721,5 +728,164 @@ func transformServiceAccountName(obj map[string]any, transformer Transformer) er
 		obj[key] = name
 	}
 
+	return nil
+}
+
+// transformVolumes applies the supplied Transformer to Secret/ConfigMap/PVC
+// names referenced by a pod's volumes, across both typed and unstructured
+// workload representations.
+//
+// A Secret/ConfigMap name referenced only here (not via envFrom or
+// imagePullSecrets) previously stayed in cleartext even with --hide/--encrypt
+// enabled. Per Mapping.GetOrCreate's doc comment (mapping.go), that is worse
+// than a field-local leak: because a pseudonym's suffix is derived from the
+// raw value alone, one cleartext occurrence anywhere in the report
+// de-anonymizes every pseudonym sharing that value's suffix, not just the
+// field it leaked from.
+func transformVolumes(obj map[string]any, transformer Transformer) error {
+	rawVolumes, ok := obj["volumes"]
+	if !ok || rawVolumes == nil {
+		return nil
+	}
+
+	switch volumes := rawVolumes.(type) {
+	case []corev1.Volume:
+		if err := transformTypedVolumes(volumes, transformer); err != nil {
+			return err
+		}
+	case []any:
+		for _, item := range volumes {
+			volume, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if err := transformUnstructuredVolume(volume, transformer); err != nil {
+				return err
+			}
+		}
+		obj["volumes"] = volumes
+	}
+
+	return nil
+}
+
+// transformTypedVolumes covers every volume source that names a Secret,
+// ConfigMap, or PersistentVolumeClaim: the direct secret/configMap volume
+// sources, a projected volume's secret/configMap sources, a CSI volume's
+// nodePublishSecretRef, and a PVC volume's claimName.
+func transformTypedVolumes(volumes []corev1.Volume, transformer Transformer) error {
+	var err error
+
+	for i := range volumes {
+		v := &volumes[i]
+
+		if v.Secret != nil && v.Secret.SecretName != "" {
+			v.Secret.SecretName, err = transformValue(transformer, "ref", v.Secret.SecretName)
+			if err != nil {
+				return err
+			}
+		}
+		if v.ConfigMap != nil && v.ConfigMap.Name != "" {
+			v.ConfigMap.Name, err = transformValue(transformer, "ref", v.ConfigMap.Name)
+			if err != nil {
+				return err
+			}
+		}
+		if v.PersistentVolumeClaim != nil && v.PersistentVolumeClaim.ClaimName != "" {
+			v.PersistentVolumeClaim.ClaimName, err = transformValue(transformer, "ref", v.PersistentVolumeClaim.ClaimName)
+			if err != nil {
+				return err
+			}
+		}
+		if v.CSI != nil && v.CSI.NodePublishSecretRef != nil && v.CSI.NodePublishSecretRef.Name != "" {
+			v.CSI.NodePublishSecretRef.Name, err = transformValue(transformer, "ref", v.CSI.NodePublishSecretRef.Name)
+			if err != nil {
+				return err
+			}
+		}
+		if v.Projected != nil {
+			for j := range v.Projected.Sources {
+				src := &v.Projected.Sources[j]
+				if src.Secret != nil && src.Secret.Name != "" {
+					src.Secret.Name, err = transformValue(transformer, "ref", src.Secret.Name)
+					if err != nil {
+						return err
+					}
+				}
+				if src.ConfigMap != nil && src.ConfigMap.Name != "" {
+					src.ConfigMap.Name, err = transformValue(transformer, "ref", src.ConfigMap.Name)
+					if err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// transformUnstructuredVolume mirrors transformTypedVolumes for one volume
+// represented as a map[string]any.
+func transformUnstructuredVolume(volume map[string]any, transformer Transformer) error {
+	if secret, ok := volume["secret"].(map[string]any); ok {
+		if err := transformUnstructuredNamedField(secret, "secretName", transformer); err != nil {
+			return err
+		}
+	}
+
+	if err := transformUnstructuredReference(volume, "configMap", transformer); err != nil {
+		return err
+	}
+
+	if pvc, ok := volume["persistentVolumeClaim"].(map[string]any); ok {
+		if err := transformUnstructuredNamedField(pvc, "claimName", transformer); err != nil {
+			return err
+		}
+	}
+
+	if csi, ok := volume["csi"].(map[string]any); ok {
+		if err := transformUnstructuredReference(csi, "nodePublishSecretRef", transformer); err != nil {
+			return err
+		}
+	}
+
+	if projected, ok := volume["projected"].(map[string]any); ok {
+		if sources, ok := projected["sources"].([]any); ok {
+			for _, item := range sources {
+				source, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				if err := transformUnstructuredReference(source, "secret", transformer); err != nil {
+					return err
+				}
+				if err := transformUnstructuredReference(source, "configMap", transformer); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// transformUnstructuredNamedField applies the supplied Transformer to one
+// string field on an unstructured object. Unlike transformUnstructuredReference
+// (which always reads the "name" field of a reference object), the
+// volume-level Secret/PersistentVolumeClaim sources this covers use their own
+// field name (secretName/claimName) directly on the volume source itself.
+func transformUnstructuredNamedField(obj map[string]any, field string, transformer Transformer) error {
+	value, ok := obj[field].(string)
+	if !ok || value == "" {
+		return nil
+	}
+
+	transformed, err := transformValue(transformer, "ref", value)
+	if err != nil {
+		return err
+	}
+
+	obj[field] = transformed
 	return nil
 }

@@ -1163,3 +1163,156 @@ func TestTransformPodSpecs_TypedContainersFromScanPipeline(t *testing.T) {
 	assert.NotContains(t, containers[0].Image, "registry.internal.corp")
 	assert.NotContains(t, initContainers[0].Image, "registry.internal.corp")
 }
+
+func TestTransformVolumes_TypedSecretConfigMapPVCCSIProjected(t *testing.T) {
+	obj := map[string]any{
+		"volumes": []corev1.Volume{
+			{
+				Name: "creds",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{SecretName: "db-creds"},
+				},
+			},
+			{
+				Name: "config",
+				VolumeSource: corev1.VolumeSource{
+					ConfigMap: &corev1.ConfigMapVolumeSource{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "app-config"},
+					},
+				},
+			},
+			{
+				Name: "data",
+				VolumeSource: corev1.VolumeSource{
+					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: "data-pvc"},
+				},
+			},
+			{
+				Name: "csi-secret",
+				VolumeSource: corev1.VolumeSource{
+					CSI: &corev1.CSIVolumeSource{
+						Driver:               "csi.example.com",
+						NodePublishSecretRef: &corev1.LocalObjectReference{Name: "csi-creds"},
+					},
+				},
+			},
+			{
+				Name: "projected",
+				VolumeSource: corev1.VolumeSource{
+					Projected: &corev1.ProjectedVolumeSource{
+						Sources: []corev1.VolumeProjection{
+							{Secret: &corev1.SecretProjection{LocalObjectReference: corev1.LocalObjectReference{Name: "proj-secret"}}},
+							{ConfigMap: &corev1.ConfigMapProjection{LocalObjectReference: corev1.LocalObjectReference{Name: "proj-config"}}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	assert.NoError(t, transformVolumes(obj, NewMappingTransformer()))
+
+	volumes := obj["volumes"].([]corev1.Volume)
+	assert.NotEqual(t, "db-creds", volumes[0].Secret.SecretName)
+	assert.NotEqual(t, "app-config", volumes[1].ConfigMap.Name)
+	assert.NotEqual(t, "data-pvc", volumes[2].PersistentVolumeClaim.ClaimName)
+	assert.NotEqual(t, "csi-creds", volumes[3].CSI.NodePublishSecretRef.Name)
+	assert.NotEqual(t, "proj-secret", volumes[4].Projected.Sources[0].Secret.Name)
+	assert.NotEqual(t, "proj-config", volumes[4].Projected.Sources[1].ConfigMap.Name)
+}
+
+func TestTransformVolumes_UnstructuredSecretConfigMapPVCCSIProjected(t *testing.T) {
+	obj := map[string]any{
+		"volumes": []any{
+			map[string]any{
+				"name":   "creds",
+				"secret": map[string]any{"secretName": "db-creds"},
+			},
+			map[string]any{
+				"name":      "config",
+				"configMap": map[string]any{"name": "app-config"},
+			},
+			map[string]any{
+				"name":                  "data",
+				"persistentVolumeClaim": map[string]any{"claimName": "data-pvc"},
+			},
+			map[string]any{
+				"name": "csi-secret",
+				"csi": map[string]any{
+					"driver":               "csi.example.com",
+					"nodePublishSecretRef": map[string]any{"name": "csi-creds"},
+				},
+			},
+			map[string]any{
+				"name": "projected",
+				"projected": map[string]any{
+					"sources": []any{
+						map[string]any{"secret": map[string]any{"name": "proj-secret"}},
+						map[string]any{"configMap": map[string]any{"name": "proj-config"}},
+					},
+				},
+			},
+		},
+	}
+
+	assert.NoError(t, transformVolumes(obj, NewMappingTransformer()))
+
+	volumes := obj["volumes"].([]any)
+	v0 := volumes[0].(map[string]any)
+	assert.NotEqual(t, "db-creds", v0["secret"].(map[string]any)["secretName"])
+
+	v1 := volumes[1].(map[string]any)
+	assert.NotEqual(t, "app-config", v1["configMap"].(map[string]any)["name"])
+
+	v2 := volumes[2].(map[string]any)
+	assert.NotEqual(t, "data-pvc", v2["persistentVolumeClaim"].(map[string]any)["claimName"])
+
+	v3 := volumes[3].(map[string]any)
+	assert.NotEqual(t, "csi-creds", v3["csi"].(map[string]any)["nodePublishSecretRef"].(map[string]any)["name"])
+
+	v4 := volumes[4].(map[string]any)
+	sources := v4["projected"].(map[string]any)["sources"].([]any)
+	assert.NotEqual(t, "proj-secret", sources[0].(map[string]any)["secret"].(map[string]any)["name"])
+	assert.NotEqual(t, "proj-config", sources[1].(map[string]any)["configMap"].(map[string]any)["name"])
+}
+
+func TestTransformVolumes_MissingOrEmptyIsSafe(t *testing.T) {
+	assert.NoError(t, transformVolumes(map[string]any{}, NewMappingTransformer()))
+	assert.NoError(t, transformVolumes(map[string]any{"volumes": nil}, NewMappingTransformer()))
+	assert.NoError(t, transformVolumes(map[string]any{"volumes": []any{"not-a-map"}}, NewMappingTransformer()))
+}
+
+// TestTransformPodSpecs_VolumeSecretNameMatchesEnvFromRefPseudonym is the
+// direct regression test for the leak this fixes: a Secret referenced both
+// via a volume and via envFrom must be pseudonymized to the SAME value in
+// both places (Mapping.GetOrCreate's cross-prefix suffix sharing), and
+// neither occurrence may leave it in cleartext.
+func TestTransformPodSpecs_VolumeSecretNameMatchesEnvFromRefPseudonym(t *testing.T) {
+	obj := map[string]any{
+		"spec": map[string]any{
+			"volumes": []any{
+				map[string]any{
+					"name":   "creds-volume",
+					"secret": map[string]any{"secretName": "db-creds"},
+				},
+			},
+			"containers": []any{
+				map[string]any{
+					"name": "app",
+					"envFrom": []any{
+						map[string]any{"secretRef": map[string]any{"name": "db-creds"}},
+					},
+				},
+			},
+		},
+	}
+
+	assert.NoError(t, transformPodSpecs(obj, nil, NewMappingTransformer()))
+
+	spec := obj["spec"].(map[string]any)
+	volumeSecretName := spec["volumes"].([]any)[0].(map[string]any)["secret"].(map[string]any)["secretName"]
+	containerSecretName := spec["containers"].([]any)[0].(map[string]any)["envFrom"].([]any)[0].(map[string]any)["secretRef"].(map[string]any)["name"]
+
+	assert.NotEqual(t, "db-creds", volumeSecretName, "the volume's secretName must not stay in cleartext")
+	assert.Equal(t, containerSecretName, volumeSecretName, "the same Secret name referenced two ways must produce the same pseudonym")
+}
