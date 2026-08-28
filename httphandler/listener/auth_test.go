@@ -5,20 +5,21 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func newTestV1Router(next http.Handler) *mux.Router {
-	r := mux.NewRouter()
-	sub := r.PathPrefix(v1PathPrefix).Subrouter()
-	sub.Use(bearerAuthMiddleware)
-	sub.Handle(v1ScanPath, next).Methods(http.MethodPost)
-	sub.Handle(v1ScanPath, next).Methods(http.MethodDelete)
-	sub.Handle(v1ResultsPath, next).Methods(http.MethodGet)
-	sub.Handle(v1ResultsPath, next).Methods(http.MethodDelete)
-	sub.Handle(v1StatusPath, next).Methods(http.MethodGet)
+func newTestV1Router(next http.Handler) *http.ServeMux {
+	r := http.NewServeMux()
+	
+	v1Handler := bearerAuthMiddleware(next)
+
+	r.Handle("POST "+v1PathPrefix+v1ScanPath, v1Handler)
+	r.Handle("DELETE "+v1PathPrefix+v1ScanPath, v1Handler)
+	r.Handle("GET "+v1PathPrefix+v1ResultsPath, v1Handler)
+	r.Handle("DELETE "+v1PathPrefix+v1ResultsPath, v1Handler)
+	r.Handle("GET "+v1PathPrefix+v1StatusPath, v1Handler)
+	
 	return r
 }
 
@@ -107,12 +108,12 @@ func TestBearerAuthMiddleware_UnauthenticatedBlocks(t *testing.T) {
 func TestHealthProbesOnProductionRouter(t *testing.T) {
 	t.Setenv(authTokenEnv, "s3cr3t")
 	// Build a router the same way SetupHTTPListener does: health on root, v1 with middleware.
-	rtr := mux.NewRouter()
-	rtr.HandleFunc(livePath, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	rtr.HandleFunc(readyPath, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	v1 := rtr.PathPrefix(v1PathPrefix).Subrouter()
-	v1.Use(bearerAuthMiddleware)
-	v1.HandleFunc(v1ScanPath, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }).Methods(http.MethodPost)
+	rtr := http.NewServeMux()
+	rtr.HandleFunc("GET "+livePath, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	rtr.HandleFunc("GET "+readyPath, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	
+	v1Handler := bearerAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	rtr.Handle("POST "+v1PathPrefix+v1ScanPath, v1Handler)
 
 	// Health without token => 200 even though v1 needs it
 	for _, path := range []string{livePath, readyPath} {
