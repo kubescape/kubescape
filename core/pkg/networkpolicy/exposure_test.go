@@ -108,6 +108,47 @@ func TestIngressExposure_NonEmptyNamespaceSelectorIsRestricted(t *testing.T) {
 	}
 }
 
+// TestIngressExposure_RestrictedResultStillNamesMatchedPolicy is the direct
+// regression test for the bug this fixes: ExposureRestricted is also
+// ExposureLevel's zero value, so a naive "level > best.Level" comparison
+// starting from a zero-valued best never fires for the common case (a
+// well-scoped policy), leaving MatchedPolicy empty even though a specific
+// policy caused the classification.
+func TestIngressExposure_RestrictedResultStillNamesMatchedPolicy(t *testing.T) {
+	p := policy("ns", "allow-client", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+		[]networkingv1.NetworkPolicyIngressRule{ingressRule(podSelectorPeer("app", "client"))}, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{p}, nil)
+	ep := Endpoint{Namespace: "ns", Name: "app", Labels: map[string]string{"app": "web"}}
+
+	exposure := idx.IngressExposure(ep)
+
+	if exposure.Level != ExposureRestricted {
+		t.Fatalf("Level = %v, want ExposureRestricted", exposure.Level)
+	}
+	if exposure.MatchedPolicy != "ns/allow-client" {
+		t.Errorf("MatchedPolicy = %q, want \"ns/allow-client\": the responsible policy must be named even when the result is Restricted", exposure.MatchedPolicy)
+	}
+}
+
+// TestIngressExposure_PolicyWithNoIngressRulesStillNamesMatchedPolicy covers
+// the related edge case the same bug produced: a policy that isolates the
+// endpoint (Ingress is in policyTypes) but declares zero ingress rules at
+// all never enters the rule loop, so it needs its own explicit attribution.
+func TestIngressExposure_PolicyWithNoIngressRulesStillNamesMatchedPolicy(t *testing.T) {
+	p := policy("ns", "deny-all-no-rules", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}, nil, nil)
+	idx, _ := NewIndex([]*networkingv1.NetworkPolicy{p}, nil)
+	ep := Endpoint{Namespace: "ns", Name: "app", Labels: map[string]string{"app": "web"}}
+
+	exposure := idx.IngressExposure(ep)
+
+	if exposure.Level != ExposureRestricted {
+		t.Fatalf("Level = %v, want ExposureRestricted", exposure.Level)
+	}
+	if exposure.MatchedPolicy != "ns/deny-all-no-rules" {
+		t.Errorf("MatchedPolicy = %q, want \"ns/deny-all-no-rules\"", exposure.MatchedPolicy)
+	}
+}
+
 func TestIngressExposure_WidestAcrossMultipleRulesWins(t *testing.T) {
 	p := policy("ns", "mixed", metav1.LabelSelector{}, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
 		[]networkingv1.NetworkPolicyIngressRule{

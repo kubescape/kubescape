@@ -80,19 +80,37 @@ func (idx *Index) IngressExposure(ep Endpoint) Exposure {
 		return Exposure{Level: ExposureOpen, Reason: "no NetworkPolicy selects this endpoint for ingress; default allow"}
 	}
 
-	best := Exposure{Level: ExposureRestricted, Reason: "every ingress rule that matches restricts its peers"}
+	// haveBest tracks whether best has ever been assigned from a real
+	// matching policy, since ExposureRestricted is also ExposureLevel's zero
+	// value: a plain "level > best.Level" comparison starting from a
+	// zero-valued best would never fire for the common case where the
+	// widest level found really is Restricted, leaving MatchedPolicy empty
+	// even though a specific policy is responsible for it.
+	var best Exposure
+	haveBest := false
 	for _, cp := range idx.byNamespace[ep.Namespace] {
 		if !cp.hasIngress || !cp.podSelector.Matches(labels.Set(ep.Labels)) {
 			continue
 		}
+		policyName := fmt.Sprintf("%s/%s", cp.policy.Namespace, cp.policy.Name)
+
+		if len(cp.policy.Spec.Ingress) == 0 {
+			// hasIngress is true (Ingress is in this policy's policyTypes)
+			// but it declares no ingress rules at all: it isolates the
+			// endpoint and admits nothing. Still a real, attributable
+			// policy -- record it unless a wider level already applies.
+			if !haveBest {
+				best = Exposure{Level: ExposureRestricted, Reason: "isolated by a policy with no ingress rules; admits nothing", MatchedPolicy: policyName}
+				haveBest = true
+			}
+			continue
+		}
+
 		for _, rule := range cp.policy.Spec.Ingress {
 			level, reason := classifyPeers(rule.From)
-			if level > best.Level {
-				best = Exposure{
-					Level:         level,
-					Reason:        reason,
-					MatchedPolicy: fmt.Sprintf("%s/%s", cp.policy.Namespace, cp.policy.Name),
-				}
+			if !haveBest || level > best.Level {
+				best = Exposure{Level: level, Reason: reason, MatchedPolicy: policyName}
+				haveBest = true
 				if best.Level == ExposureOpen {
 					return best
 				}
