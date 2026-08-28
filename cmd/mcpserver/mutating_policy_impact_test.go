@@ -566,3 +566,81 @@ func TestAnalyzeMutatingAdmissionPolicyImpact_OmittedAndNullSubresourceMeanTheRe
 	require.False(t, null.IsError)
 	require.Equal(t, []string{"mutate-pods"}, matchedPolicyNames(t, null))
 }
+
+// withMatchConditions puts a spec.matchConditions gate on a policy fixture.
+func withMatchConditions(policy *unstructured.Unstructured, conditions ...map[string]any) *unstructured.Unstructured {
+	raw := make([]any, len(conditions))
+	for i, condition := range conditions {
+		raw[i] = condition
+	}
+	policy.Object["spec"].(map[string]any)["matchConditions"] = raw
+	return policy
+}
+
+func addLabelMutation() map[string]any {
+	return map[string]any{
+		"patchType": "JSONPatch",
+		"jsonPatch": map[string]any{"expression": `[JSONPatch{op: "add", path: "/metadata/labels/x", value: "y"}]`},
+	}
+}
+
+func matchesFromToolResult(t *testing.T, ksServer *KubescapeMcpserver, args map[string]any) []any {
+	t.Helper()
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_mutating_admission_policy_impact", args))
+	require.False(t, result.IsError)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+	require.True(t, parsed["supported"].(bool))
+	return parsed["matches"].([]any)
+}
+
+func podImpactArgs() map[string]any {
+	return map[string]any{
+		"namespace":   "prod",
+		"name":        "server",
+		"api_version": "v1",
+		"resource":    "pods",
+	}
+}
+
+// TestAnalyzeMutatingAdmissionPolicyImpact_MatchConditionsLeaveTheMatchIndeterminate
+// covers the gate over the tools/call path: the apiserver still evaluates the
+// policy's own matchConditions before mutating, so the tool must report the
+// match as one that might apply and name what gates it.
+func TestAnalyzeMutatingAdmissionPolicyImpact_MatchConditionsLeaveTheMatchIndeterminate(t *testing.T) {
+	policy := withMatchConditions(
+		unstructuredMutatingPolicy("add-label", allPodsMatchConstraints(), addLabelMutation()),
+		map[string]any{"name": "only-opted-in", "expression": `object.metadata.?labels["mutate"].orValue("no") == "yes"`},
+	)
+	binding := unstructuredMutatingPolicyBinding("add-label-binding", "add-label")
+	pod := unstructuredTestPod("prod", "server", nil)
+
+	matches := matchesFromToolResult(t, newMutatingPolicyTestServer(t, policy, binding, pod), podImpactArgs())
+	require.Len(t, matches, 1)
+
+	match := matches[0].(map[string]any)
+	require.False(t, match["determinable"].(bool))
+
+	conditions, reported := match["match_conditions"].([]any)
+	require.True(t, reported, "the gate must be reported alongside the match")
+	require.Len(t, conditions, 1)
+	require.Equal(t, "only-opted-in", conditions[0].(map[string]any)["name"])
+	require.Contains(t, conditions[0].(map[string]any)["expression"], `labels["mutate"]`)
+}
+
+// TestAnalyzeMutatingAdmissionPolicyImpact_UngatedPolicyStaysDeterminable is the
+// contrast: a policy declaring no matchConditions still reports a confirmed
+// match, with an empty gate list rather than a missing field.
+func TestAnalyzeMutatingAdmissionPolicyImpact_UngatedPolicyStaysDeterminable(t *testing.T) {
+	policy := unstructuredMutatingPolicy("add-label", allPodsMatchConstraints(), addLabelMutation())
+	binding := unstructuredMutatingPolicyBinding("add-label-binding", "add-label")
+	pod := unstructuredTestPod("prod", "server", nil)
+
+	matches := matchesFromToolResult(t, newMutatingPolicyTestServer(t, policy, binding, pod), podImpactArgs())
+	require.Len(t, matches, 1)
+
+	match := matches[0].(map[string]any)
+	require.True(t, match["determinable"].(bool))
+	require.Empty(t, match["match_conditions"])
+}
