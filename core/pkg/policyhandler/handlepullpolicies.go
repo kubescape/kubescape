@@ -87,13 +87,13 @@ func (policyHandler *PolicyHandler) Close() {
 }
 
 func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, getters *cautils.Getters) (*cautils.OPASessionObj, error) {
-	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo, policyIdentifier)
-
 	// get policies, exceptions and controls inputs
 	policies, exceptions, controlInputs, degradations, err := policyHandler.getPolicies(ctx, policyIdentifier, getters)
 	if err != nil {
-		return opaSessionObj, err
+		return cautils.NewOPASessionObj(ctx, nil, nil, scanInfo, policyIdentifier), err
 	}
+	cautils.RecordScanContractRunnerInputs(scanInfo, getters)
+	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo, policyIdentifier)
 
 	// load user-authored custom rules, if any
 	if scanInfo.CustomRules != "" {

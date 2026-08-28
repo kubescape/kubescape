@@ -15,6 +15,7 @@ import (
 	giturl "github.com/kubescape/go-git-url"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/internal/testutils"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -126,10 +127,40 @@ func TestScanContractProvenanceUsesFinalPolicySelection(t *testing.T) {
 	assert.Equal(t, []string{"C-0001"}, provenance.Effective.Policy.Controls)
 	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, provenance.EffectiveRunDigest)
 	assert.Equal(t, []string{"mitre"}, scanInfo.ScanContract.Effective.Policy.Frameworks, "report finalization must not mutate the reusable scan input")
+}
 
-	scanInfo.ControlsInputs = "runner-controls.json"
-	metadata = scanInfoToScanMetadata(context.Background(), scanInfo, nil)
-	assert.Empty(t, metadata.ScanMetadata.ScanContract.EffectiveRunDigest, "a later getter owns runner-file bytes, so no incomplete digest is emitted")
+func TestScanContractProvenanceRecordsConsumedRunnerInputs(t *testing.T) {
+	controls := getter.NewLoadPolicy([]string{filepath.Join(testutils.CurrentDir(), "getter", "testdata", "controls-inputs.json")})
+	_, err := controls.GetControlsInputs(context.Background(), "")
+	require.NoError(t, err)
+
+	exceptions := getter.NewLoadPolicy([]string{filepath.Join(testutils.CurrentDir(), "getter", "testdata", "exceptions.json")})
+	_, err = exceptions.GetExceptions(context.Background(), "")
+	require.NoError(t, err)
+
+	scanInfo := &ScanInfo{ScanContract: &reporthandlingv2.ScanContractMetadata{
+		APIVersion:     "config.kubescape.io/v1alpha1",
+		Contract:       "ci",
+		DigestSchema:   "kubescape-scan-contract:v1",
+		ContractDigest: "sha256:contract",
+	}}
+	RecordScanContractRunnerInputs(scanInfo, &Getters{
+		ControlsInputsGetter: controls,
+		ExceptionsGetter:     getter.NewMergedExceptionsGetter(exceptions, nil),
+	})
+
+	metadata := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
+	provenance := metadata.ScanMetadata.ScanContract
+	require.NotNil(t, provenance)
+	require.Len(t, provenance.RunnerInputs, 2)
+	assert.Equal(t, "controlsConfig", provenance.RunnerInputs[0].Role)
+	assert.Equal(t, "exceptions", provenance.RunnerInputs[1].Role)
+	for _, input := range provenance.RunnerInputs {
+		assert.NotEmpty(t, input.Source)
+		assert.False(t, filepath.IsAbs(input.Source))
+		assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, input.Digest)
+	}
+	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, provenance.EffectiveRunDigest)
 }
 
 func TestResolveClusterContextNameRejectsInvalidSelection(t *testing.T) {
