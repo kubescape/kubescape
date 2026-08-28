@@ -59,9 +59,11 @@ func TestMatchConditionsHold(t *testing.T) {
 		},
 		{
 			// The second condition selects a field that is absent, which errors
-			// when evaluated. A clean not-matched verdict therefore proves the
-			// first false condition short-circuited it, as the apiserver does.
-			name: "a false condition short-circuits the ones after it",
+			// when evaluated. It is still evaluated -- see
+			// TestMatchConditionsHoldEvaluatesEveryConditionEvenAfterFalse for why
+			// that matters -- but a false condition outranks an error however they
+			// are ordered, so the verdict is a clean not-matched either way.
+			name: "a false condition outranks a later condition that errors",
 			conditions: []MatchCondition{
 				cond("is-kube-system", "object.metadata.namespace == 'kube-system'"),
 				cond("would-error", "object.spec.nodeName == 'node-1'"),
@@ -235,6 +237,33 @@ func TestMatchConditionsHoldCancellation(t *testing.T) {
 	require.Error(t, err)
 	assert.False(t, matched)
 	assert.False(t, IsExpressionError(err), "a cancelled scan is not a verdict failurePolicy governs")
+}
+
+// TestMatchConditionsHoldEvaluatesEveryConditionEvenAfterFalse is the direct
+// regression test for the divergence from the apiserver's real matcher: a
+// false condition must not stop the gate from evaluating (and charging the
+// shared budget for) the conditions after it, because the apiserver's own
+// ForInput evaluates every condition unconditionally before Match ever picks
+// a verdict from the results. A condition expensive enough to exhaust the
+// budget on its own, placed after an already-false condition, must still
+// exhaust it and produce the terminal budget error -- not a clean,
+// budget-untouched not-matched skip.
+func TestMatchConditionsHoldEvaluatesEveryConditionEvenAfterFalse(t *testing.T) {
+	// A single "object.metadata.namespace == '...'" condition costs 4 units
+	// (measured directly against this evaluator). A budget of 5 leaves the
+	// first condition just enough to succeed (remaining: 1), with too little
+	// left for the identical second condition to also complete.
+	e, err := NewEvaluator(WithCostBudget(5))
+	require.NoError(t, err)
+
+	isFalse := cond("is-kube-system", "object.metadata.namespace == 'kube-system'")
+	wouldExhaust := cond("is-prod", "object.metadata.namespace == 'prod'")
+
+	matched, err := e.matchConditionsHold(context.Background(), []MatchCondition{isFalse, wouldExhaust}, gatedPod(), nil, nil)
+
+	require.Error(t, err, "the second condition must still be evaluated and exhaust the budget, matching the apiserver's ForInput")
+	assert.False(t, matched)
+	assert.False(t, IsExpressionError(err), "budget exhaustion is terminal, not a retained expression error a false could outrank")
 }
 
 // TestMatchConditionsHoldOwnBudget proves the gate does not spend the budget the

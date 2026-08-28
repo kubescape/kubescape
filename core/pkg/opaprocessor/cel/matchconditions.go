@@ -22,23 +22,34 @@ type MatchCondition struct {
 // skipped and none of its validations run, so offline we must do the same:
 // running a gated policy's validations emits violations admission never raises.
 //
+// Every condition is evaluated, even after one has already come back false.
+// The apiserver's matcher (webhook/matchconditions matcher.go, which the VAP
+// path reuses) works in two separate phases: ForInput first evaluates every
+// compiled condition unconditionally against one shared cost budget
+// (admission/plugin/cel/condition.go), and only once that finishes does
+// Match walk the completed results to pick a verdict, returning not-matched
+// at the first false it finds there. Stopping the evaluation loop itself the
+// moment a false is seen -- which this function used to do -- looks
+// equivalent (the two-condition, no-budget-pressure case indeed produces the
+// same verdict either way) but is not: it also stops charging the shared
+// budget for whatever conditions come after the false one. A false condition
+// followed by an expensive one that would have exhausted the budget is
+// exactly the case where the two diverge -- the apiserver still exhausts the
+// budget and denies the request under failurePolicy Fail, while stopping
+// early here would report a clean not-matched skip instead.
+//
 // A false condition outranks a condition that errored, whatever order the two
-// appear in. The apiserver's matcher evaluates every condition, collects the
-// errors, and still returns not-matched the moment it sees a false one; only a
-// gate of trues and errors reaches failurePolicy (webhook/matchconditions
-// matcher.go, which the VAP path reuses). So an error is retained rather than
-// returned, and a later false discards it. Returning on the first error instead
-// would deny an object under failurePolicy Fail that admission simply skips.
+// appear in: the apiserver's Match checks every result for EvalResult==False
+// before it even looks at the collected errors, so a false anywhere in the
+// gate produces not-matched regardless of what else errored. Only a gate of
+// trues and errors, with no false at all, reaches failurePolicy. So an error
+// is retained rather than returned immediately, and a false seen anywhere
+// (before or after it) discards it at the end.
 //
-// A false condition still short-circuits the conditions after it. Evaluating
-// them could only add errors that the false already outranks, and the gate's
-// budget is discarded either way, so the outcome is identical to the
-// apiserver's for less work.
-//
-// Cancellation and an exhausted budget are the exceptions: they are terminal,
-// because no later condition can still produce the false that would outrank
-// them. A compile error is not terminal, since the conditions after it are
-// unaffected and one of them may yet be false.
+// Cancellation and an exhausted budget are still terminal mid-loop: nothing
+// evaluated under an exhausted budget can be trusted, including a false that
+// might otherwise have outranked it, so both stop the loop outright rather
+// than being retained like a compile/eval error.
 //
 // The error return is the unknown case. Whether it denies the object or skips
 // the policy depends on failurePolicy, so the caller decides (see
@@ -69,9 +80,10 @@ func (e *Evaluator) matchConditionsHold(ctx context.Context, conditions []MatchC
 	budget := newCostBudget(e.matchConditionsBudgetLimit())
 	activation := e.activationFor(ctx, obj, nil, params, variables, budget)
 
-	// The first error we can still recover from, held until a false outranks it
-	// or the gate runs out of conditions.
+	// The first error we can still recover from, held until the loop ends
+	// (whereupon a false condition seen anywhere outranks it).
 	var retained error
+	sawFalse := false
 
 	for _, condition := range conditions {
 		// cel-go only notices a cancelled context every InterruptCheckFrequency
@@ -100,10 +112,13 @@ func (e *Evaluator) matchConditionsHold(ctx context.Context, conditions []MatchC
 			continue
 		}
 		if !matched {
-			return false, nil
+			sawFalse = true
 		}
 	}
 
+	if sawFalse {
+		return false, nil
+	}
 	if retained != nil {
 		return false, retained
 	}
