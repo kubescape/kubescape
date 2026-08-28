@@ -13,6 +13,11 @@ import (
 // the RCE tally with false positives on almost every vulnerability description.
 var rceAcronymRe = regexp.MustCompile(`(?i)\brce\b`)
 
+// vulnKey identifies a vulnerability uniquely inside a layer for duplicate detection.
+type vulnKey struct {
+	Name, RelatedPackageName, PackageVersion string
+}
+
 // GetPackagesNames retrieves the names of all the packages stored in the Packages field of the ScanResultLayer object and returns them as a slice of strings.
 func (layer *ScanResultLayer) GetPackagesNames() []string {
 	pkgsNames := []string{}
@@ -37,40 +42,32 @@ func (scanresult *ScanResultReport) Validate() bool {
 		return false
 	}
 
-	if scanresult.Layers == nil {
+	if len(scanresult.Layers) == 0 {
 		return false
 	}
 
-	type vulnerabilityKey struct {
-		Name               string
-		RelatedPackageName string
-		PackageVersion     string
-	}
-	layerHashes := make(map[string]bool)
-
-	for _, layer := range scanresult.Layers {
-		if layer.LayerHash != "" {
-			if layerHashes[layer.LayerHash] {
-				return false
-			}
-			layerHashes[layer.LayerHash] = true
+	seenHashes := make(map[string]struct{}, len(scanresult.Layers))
+	for i := range scanresult.Layers {
+		layer := &scanresult.Layers[i]
+		if layer.LayerHash == "" {
+			return false
 		}
+		if _, exists := seenHashes[layer.LayerHash]; exists {
+			return false
+		}
+		seenHashes[layer.LayerHash] = struct{}{}
 
-		vulnKeys := make(map[vulnerabilityKey]bool)
-
-		for _, vul := range layer.Vulnerabilities {
-			if vul.Name == "" {
+		seenVulns := make(map[vulnKey]struct{}, len(layer.Vulnerabilities))
+		for j := range layer.Vulnerabilities {
+			v := &layer.Vulnerabilities[j]
+			if v.Name == "" {
 				return false
 			}
-			key := vulnerabilityKey{
-				Name:               vul.Name,
-				RelatedPackageName: vul.RelatedPackageName,
-				PackageVersion:     vul.PackageVersion,
-			}
-			if vulnKeys[key] {
+			key := vulnKey{v.Name, v.RelatedPackageName, v.PackageVersion}
+			if _, exists := seenVulns[key]; exists {
 				return false
 			}
-			vulnKeys[key] = true
+			seenVulns[key] = struct{}{}
 		}
 	}
 
@@ -79,6 +76,10 @@ func (scanresult *ScanResultReport) Validate() bool {
 
 // IsRCE checks if a vulnerability description contains any keywords related to remote code execution (RCE) or arbitrary code injection.
 func (v *Vulnerability) IsRCE() bool {
+	if v == nil {
+		return false
+	}
+
 	desc := strings.ToLower(v.Description)
 
 	isRCE := rceAcronymRe.MatchString(v.Description)

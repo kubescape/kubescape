@@ -135,6 +135,72 @@ func TestGetUpdateCmd_ReportsAvailableUpdate(t *testing.T) {
 	assert.Contains(t, string(out), "Version v3.1.0 is available.")
 }
 
+func TestGetUpdateCmd_UnsupportedFormat(t *testing.T) {
+	withVersionCheckHandler(t, versioncheck.NewVersionCheckHandlerMock())
+	withVersionGlobals(t, "v3.0.0", "")
+
+	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+	require.NotNil(t, cmd)
+
+	err := cmd.Flags().Set("format", "yaml")
+	require.NoError(t, err)
+
+	err = cmd.RunE(cmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported format \"yaml\"")
+}
+
+func TestGetUpdateCmd_JSON_ReportsAvailableUpdate(t *testing.T) {
+	withVersionCheckHandler(t, &stubVersionCheckHandler{latest: "v3.1.0"})
+	withVersionGlobals(t, "v3.0.0", "")
+
+	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+	require.NotNil(t, cmd)
+
+	err := cmd.Flags().Set("format", "json")
+	require.NoError(t, err)
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	origStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = origStdout })
+
+	assert.NoError(t, cmd.RunE(cmd, []string{}))
+	require.NoError(t, w.Close())
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+
+	assert.Equal(t, "v3.1.0", versioncheck.LatestReleaseVersion)
+	assert.Contains(t, string(out), `"latestVersion":"v3.1.0"`)
+	assert.Contains(t, string(out), `"installationLink":"https://kubescape.io/docs/install-cli/"`)
+}
+
+func TestGetUpdateCmd_JSON_NothingToUpdate(t *testing.T) {
+	withVersionCheckHandler(t, &stubVersionCheckHandler{latest: "v3.0.0"})
+	withVersionGlobals(t, "v3.0.0", "")
+
+	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+	require.NotNil(t, cmd)
+
+	err := cmd.Flags().Set("format", "json")
+	require.NoError(t, err)
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	origStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = origStdout })
+
+	assert.NoError(t, cmd.RunE(cmd, []string{}))
+	require.NoError(t, w.Close())
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+
+	assert.Equal(t, "v3.0.0", versioncheck.LatestReleaseVersion)
+	assert.Contains(t, string(out), `"message":"Nothing to update: you are running the latest version"`)
+}
+
 func TestUpdateCommandDoesNotHonorSkipUpdateCheckEnv(t *testing.T) {
 	// KS_SKIP_UPDATE_CHECK must not turn the update command into a no-op.
 	// NewIVersionCheckHandler would return VersionCheckHandlerMock here; the

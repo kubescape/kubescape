@@ -480,7 +480,7 @@ func (m *Metrics) setResourcesCounters(
 func (m *Metrics) setImageVulnerabilities(imageScanData []cautils.ImageScanData) {
 	for i := range imageScanData {
 		target := imageScanData[i].Target()
-		cves := extractCVEs(imageScanData[i].Matches, target)
+		cves := extractCVEs(imageScanData[i].Matches, target, imageScanData[i].VexStatuses)
 
 		severityToSummary := map[string]*imageprinter.SeveritySummary{}
 		setSeverityToSummaryMap(cves, severityToSummary)

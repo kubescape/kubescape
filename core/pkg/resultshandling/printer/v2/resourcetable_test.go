@@ -1,52 +1,18 @@
 package printer
 
 import (
+	"os"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 )
-
-func TestAppendFailedPathsIfNotInPaths(t *testing.T) {
-	tests := []struct {
-		paths         []string
-		failedPaths   []string
-		expectedPaths []string
-	}{
-		{
-			paths:         []string{"path1", "path2"},
-			failedPaths:   []string{"path3", "path1"},
-			expectedPaths: []string{"path1", "path2", "path3"},
-		},
-		{
-			paths:         []string{},
-			failedPaths:   []string{"path1", "path2"},
-			expectedPaths: []string{"path1", "path2"},
-		},
-		{
-			paths:         []string{"path1", "path2"},
-			failedPaths:   []string{},
-			expectedPaths: []string{"path1", "path2"},
-		},
-		{
-			// a bare delete/fix/review path must still be recognized as covering its
-			// enriched " (current: <value>)" counterpart in failedPaths
-			paths:         []string{"spec.hostNetwork"},
-			failedPaths:   []string{"spec.hostNetwork (current: true)"},
-			expectedPaths: []string{"spec.hostNetwork"},
-		},
-	}
-
-	for _, testcase := range tests {
-		updatedPaths := appendFailedPathsIfNotInPaths(testcase.paths, testcase.failedPaths)
-		assert.Equal(t, updatedPaths, testcase.expectedPaths)
-	}
-}
 
 func TestAssistedRemediationPathsToString(t *testing.T) {
 	control1 := &resourcesresults.ResourceAssociatedControl{
@@ -60,10 +26,10 @@ func TestAssistedRemediationPathsToString(t *testing.T) {
 				SubStatus: "skipped",
 				Paths: []armotypes.PosturePaths{
 					{
-						FailedPath: "some-path1",
+						ReviewPath: "some-path1",
 					},
 					{
-						FailedPath: "random-path1",
+						ReviewPath: "random-path1",
 					},
 				},
 			},
@@ -81,10 +47,10 @@ func TestAssistedRemediationPathsToString(t *testing.T) {
 				SubStatus: "passed",
 				Paths: []armotypes.PosturePaths{
 					{
-						FailedPath: "some-path2",
+						ReviewPath: "some-path2",
 					},
 					{
-						FailedPath: "random-path2",
+						ReviewPath: "random-path2",
 					},
 				},
 			},
@@ -126,13 +92,13 @@ func TestAssistedRemediationPathsToString_EdgeCases(t *testing.T) {
 			expected: nil,
 		},
 		{
-			name: "duplicate paths across FailedPath and ReviewPath are deduplicated",
+			name: "duplicate paths across DeletePath and ReviewPath are deduplicated",
 			control: &resourcesresults.ResourceAssociatedControl{
 				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
 					{
 						Paths: []armotypes.PosturePaths{
+							{DeletePath: "shared-path"},
 							{ReviewPath: "shared-path"},
-							{FailedPath: "shared-path"},
 						},
 					},
 				},
@@ -146,17 +112,17 @@ func TestAssistedRemediationPathsToString_EdgeCases(t *testing.T) {
 					{
 						Paths: []armotypes.PosturePaths{
 							{},
-							{FailedPath: "valid-failed"},
+							{ReviewPath: "valid-failed"},
 							{FixPath: armotypes.FixPath{Path: "", Value: "value"}},
 							{ReviewPath: "valid-review"},
 						},
 					},
 				},
 			},
-			expected: []string{"valid-review", "valid-failed"},
+			expected: []string{"valid-failed", "valid-review"},
 		},
 		{
-			name: "all four path types present simultaneously",
+			name: "all three path types present simultaneously",
 			control: &resourcesresults.ResourceAssociatedControl{
 				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
 					{
@@ -164,12 +130,11 @@ func TestAssistedRemediationPathsToString_EdgeCases(t *testing.T) {
 							{FixPath: armotypes.FixPath{Path: "fix-path", Value: "fix-value"}},
 							{DeletePath: "delete-path"},
 							{ReviewPath: "review-path"},
-							{FailedPath: "failed-path"},
 						},
 					},
 				},
 			},
-			expected: []string{"fix-path=fix-value", "delete-path", "review-path", "failed-path"},
+			expected: []string{"fix-path=fix-value", "delete-path", "review-path"},
 		},
 		{
 			name: "nil and missing Paths slices",
@@ -371,62 +336,6 @@ func TestFixPathsToString(t *testing.T) {
 	assert.Equal(t, expectedPath, actualPaths)
 }
 
-func TestFailedPathsToString(t *testing.T) {
-	// Create a test case with empty ResourceAssociatedRules
-	emptyControl := &resourcesresults.ResourceAssociatedControl{
-		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{},
-	}
-
-	// Create a test case with one ResourceAssociatedRule and one ReviewPath
-	singleRuleControl := &resourcesresults.ResourceAssociatedControl{
-		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
-			{
-				Name:      "Rule 1",
-				Status:    "success",
-				SubStatus: "passed",
-				Paths: []armotypes.PosturePaths{
-					{
-						FailedPath: "failed-path1",
-					},
-				},
-			},
-		},
-	}
-
-	// Create a test case with multiple ResourceAssociatedRules and multiple ReviewPaths
-	multipleRulesControl := &resourcesresults.ResourceAssociatedControl{
-		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
-			{
-				Name:      "Rule 2",
-				Status:    "success",
-				SubStatus: "passed",
-				Paths: []armotypes.PosturePaths{
-					{
-						FailedPath: "failed-path2",
-					},
-					{
-						FailedPath: "failed-path3",
-					},
-				},
-			},
-		},
-	}
-
-	// Test case 1: Empty ResourceAssociatedRules
-	actualPaths := failedPathsToString(emptyControl)
-	assert.Nil(t, actualPaths)
-
-	// Test case 2: Single ResourceAssociatedRule and one ReviewPath
-	actualPaths = failedPathsToString(singleRuleControl)
-	expectedPath := []string{"failed-path1"}
-	assert.Equal(t, expectedPath, actualPaths)
-
-	// Test case 3: Multiple ResourceAssociatedRules and multiple ReviewPaths
-	actualPaths = failedPathsToString(multipleRulesControl)
-	expectedPath = []string{"failed-path2", "failed-path3"}
-	assert.Equal(t, expectedPath, actualPaths)
-}
-
 func TestShortFormatResource(t *testing.T) {
 	// Create a test case with an empty resourceRows slice
 	emptyResourceRows := []table.Row{}
@@ -510,10 +419,10 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 
 							Paths: []armotypes.PosturePaths{
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
 								},
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsGroup=1000",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsGroup=1000",
 								},
 							},
 						},
@@ -530,10 +439,10 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 							SubStatus: "configuration",
 							Paths: []armotypes.PosturePaths{
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
 								},
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
 								},
 							},
 						},
@@ -570,10 +479,10 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 
 							Paths: []armotypes.PosturePaths{
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
 								},
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
 								},
 							},
 						},
@@ -590,10 +499,10 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 							SubStatus: "configuration",
 							Paths: []armotypes.PosturePaths{
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
 								},
 								{
-									FailedPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
+									ReviewPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
 								},
 							},
 						},
@@ -730,6 +639,157 @@ func TestAddContainerNameToAssistedRemediation_OutOfBounds(t *testing.T) {
 	}
 }
 
+// TestResourceTable_DoesNotExposeSensitiveData is a regression test ensuring
+// that the verbose per-resource table never emits raw Secret data or container
+// environment values that may hold sensitive information.
+func TestResourceTable_DoesNotExposeSensitiveData(t *testing.T) {
+	tests := []struct {
+		name        string
+		resourceID  string
+		resourceObj map[string]any
+		paths       []armotypes.PosturePaths
+		sensitive   []string
+		showSecrets bool
+	}{
+		{
+			name:       "Secret data is not rendered",
+			resourceID: "/v1/default/Secret/example-secret",
+			resourceObj: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Secret",
+				"metadata": map[string]any{
+					"name":      "example-secret",
+					"namespace": "default",
+				},
+				"data": map[string]any{
+					"password": "PLACEHOLDER_BASE64_001",
+					"username": "PLACEHOLDER_BASE64_002",
+				},
+			},
+			paths: []armotypes.PosturePaths{
+				{ReviewPath: "data.password"},
+				{ReviewPath: "data.username"},
+			},
+			sensitive:   []string{"PLACEHOLDER_BASE64_001", "PLACEHOLDER_BASE64_002"},
+			showSecrets: false,
+		},
+		{
+			name:       "Pod env value is not rendered",
+			resourceID: "/v1/default/Pod/example-pod",
+			resourceObj: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]any{
+					"name":      "example-pod",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							"name":  "app",
+							"image": "app:latest",
+							"env": []any{
+								map[string]any{
+									"name":  "DB_PASSWORD",
+									"value": "PLACEHOLDER_VALUE_003",
+								},
+								map[string]any{
+									"name": "SECRET_REF",
+									"valueFrom": map[string]any{
+										"secretKeyRef": map[string]any{
+											"name": "PLACEHOLDER_REF_NAME",
+											"key":  "password",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			paths: []armotypes.PosturePaths{
+				{ReviewPath: "spec.containers[0].env[0].value"},
+			},
+			sensitive:   []string{"PLACEHOLDER_VALUE_003"},
+			showSecrets: false,
+		},
+		{
+			name:       "Secret data is rendered with --show-secrets",
+			resourceID: "/v1/default/Secret/example-secret",
+			resourceObj: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Secret",
+				"metadata": map[string]any{
+					"name":      "example-secret",
+					"namespace": "default",
+				},
+				"data": map[string]any{
+					"password": "PLACEHOLDER_BASE64_001",
+					"username": "PLACEHOLDER_BASE64_002",
+				},
+			},
+			paths: []armotypes.PosturePaths{
+				{ReviewPath: "data.password"},
+				{ReviewPath: "data.username"},
+			},
+			sensitive:   []string{"PLACEHOLDER_BASE64_001", "PLACEHOLDER_BASE64_002"},
+			showSecrets: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, err := os.CreateTemp(t.TempDir(), "resource-table-*.txt")
+			assert.NoError(t, err)
+
+			pp := &PrettyPrinter{writer: f, showEvidence: true, showSecrets: tt.showSecrets}
+			resource := workloadinterface.NewWorkloadObj(tt.resourceObj)
+
+			session := cautils.NewOPASessionObjMock()
+			session.AllResources[tt.resourceID] = resource
+			session.ResourcesResult[tt.resourceID] = resourcesresults.Result{
+				ResourceID: tt.resourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{
+						ControlID: "C-0001",
+						Name:      "Sensitive data exposure",
+						Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+						ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+							{
+								Name:   "rule-1",
+								Status: "failed",
+								Paths:  tt.paths,
+							},
+						},
+					},
+				},
+			}
+			session.Report.SummaryDetails = reportsummary.SummaryDetails{
+				Controls: reportsummary.ControlSummaries{
+					"C-0001": {
+						ControlID:   "C-0001",
+						Name:        "Sensitive data exposure",
+						ScoreFactor: 8.0,
+					},
+				},
+			}
+
+			pp.resourceTable(session)
+
+			assert.NoError(t, f.Close())
+			out, err := os.ReadFile(f.Name())
+			assert.NoError(t, err)
+
+			for _, s := range tt.sensitive {
+				if tt.showSecrets {
+					assert.Contains(t, string(out), s, "sensitive value %q must appear when --show-secrets is set", s)
+				} else {
+					assert.NotContains(t, string(out), s, "sensitive value %q must not appear in resource table output", s)
+				}
+			}
+		})
+	}
+}
 func TestAddContainerNameToAssistedRemediation_EdgeCases(t *testing.T) {
 	podWithContainerTypes := workloadinterface.NewWorkloadObj(map[string]any{
 		"kind": "Pod",

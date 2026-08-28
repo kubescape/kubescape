@@ -168,6 +168,13 @@ func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 	}
 	patchInfo.Image = named.String()
 
+	// Capture the source tag whenever the reference has one, independent of
+	// the patched-tag defaulting below. A digest-pinned reference carries no
+	// tag; that must not be treated as an error here.
+	if taggedName, ok := named.(reference.Tagged); ok {
+		patchInfo.ImageTag = taggedName.Tag()
+	}
+
 	// If no patched image tag is provided, default to '<image-tag>-patched'
 	if patchInfo.PatchedImageTag == "" {
 

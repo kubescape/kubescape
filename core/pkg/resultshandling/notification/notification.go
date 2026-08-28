@@ -1,4 +1,4 @@
-// Package notification delivers generic scan summary webhooks.
+// Package notification delivers scan summaries to supported webhook targets.
 package notification
 
 import (

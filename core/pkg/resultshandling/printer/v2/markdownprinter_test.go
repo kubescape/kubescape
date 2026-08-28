@@ -513,7 +513,8 @@ func TestMarkdownPrinter_ActionPrint_ImageScanGolden(t *testing.T) {
 	out := mdRunImageActionPrint(t, mdImageScanDataFixture())
 	want, err := os.ReadFile(filepath.Join("testdata", "markdown_image_scan.md"))
 	require.NoError(t, err)
-	assert.Equal(t, string(want), out)
+	wantStr := strings.ReplaceAll(string(want), "\r\n", "\n")
+	assert.Equal(t, wantStr, out)
 }
 
 func mdImageScanDataFixture() []cautils.ImageScanData {

@@ -406,7 +406,6 @@ func TestProcessRule(t *testing.T) {
 					Status:                "failed",
 					SubStatus:             "",
 					Paths: []armotypes.PosturePaths{
-						{ResourceID: "/v1/default/Service/fake-service-1", FailedPath: "spec.type"},
 						{ResourceID: "/v1/default/Service/fake-service-1", ReviewPath: "spec.type"},
 					},
 					Exception: nil,
@@ -469,9 +468,7 @@ func TestProcessRule(t *testing.T) {
 					Status:                "failed",
 					SubStatus:             "",
 					Paths: []armotypes.PosturePaths{
-						{ResourceID: "networking.k8s.io/v1/default/Ingress/my-ingress1", FailedPath: "spec.rules[0].http.paths[0].backend.service.name"},
 						{ResourceID: "networking.k8s.io/v1/default/Ingress/my-ingress1", ReviewPath: "spec.rules[0].http.paths[0].backend.service.name"},
-						{ResourceID: "networking.k8s.io/v1/default/Ingress/my-ingress2", FailedPath: "spec.rules[0].http.paths[0].backend.service.name"},
 						{ResourceID: "networking.k8s.io/v1/default/Ingress/my-ingress2", ReviewPath: "spec.rules[0].http.paths[0].backend.service.name"},
 					},
 					Exception: nil,
@@ -578,7 +575,7 @@ func TestAppendPaths(t *testing.T) {
 		{
 			name: "All types of paths",
 			assistedRemediation: reporthandling.AssistedRemediation{
-				FailedPaths: []string{"path2"},
+
 				DeletePaths: []string{"path4", "path5"},
 				ReviewPaths: []string{"path6", "path7"},
 				FixPaths: []armotypes.FixPath{
@@ -588,7 +585,7 @@ func TestAppendPaths(t *testing.T) {
 			},
 			resourceID: "2",
 			expected: []armotypes.PosturePaths{
-				{ResourceID: "2", FailedPath: "path2"},
+
 				{ResourceID: "2", DeletePath: "path4"},
 				{ResourceID: "2", DeletePath: "path5"},
 				{ResourceID: "2", ReviewPath: "path6"},

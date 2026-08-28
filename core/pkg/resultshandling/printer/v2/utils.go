@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -301,6 +302,14 @@ func finalizeResults(results []resourcesresults.Result, resourcesResult map[stri
 	for index, resourceID := range resourceIDs {
 		results[index] = resourcesResult[resourceID]
 
+		// Deterministic per-resource layout: AssociatedControls arrive in
+		// whatever order concurrent evaluation appended them (or however a
+		// session built outside the processor assembled them), so sort by
+		// ControlID before the report leaves this function.
+		slices.SortFunc(results[index].AssociatedControls, func(a, b resourcesresults.ResourceAssociatedControl) int {
+			return strings.Compare(a.ControlID, b.ControlID)
+		})
+
 		// Add prioritization information to the result
 		if v, exist := prioritizedResources[resourceID]; exist {
 			results[index].PrioritizedResource = &v
@@ -411,7 +420,7 @@ func setPkgNameToScoreMap(matches match.Matches, pkgScores map[string]*imageprin
 	}
 }
 
-func extractCVEs(matches match.Matches, image string) []imageprinter.CVE {
+func extractCVEs(matches match.Matches, image string, vexStatuses map[string]cautils.VexStatus) []imageprinter.CVE {
 	var CVEs []imageprinter.CVE
 	for _, m := range matches.Sorted() {
 		cve := imageprinter.CVE{
@@ -422,6 +431,10 @@ func extractCVEs(matches match.Matches, image string) []imageprinter.CVE {
 			FixVersions: m.Vulnerability.Fix.Versions,
 			FixedState:  m.Vulnerability.Fix.State.String(),
 			Image:       image,
+		}
+		if vexStatus, ok := vexStatuses[cve.ID]; ok {
+			cve.VexStatus = vexStatus.Status
+			cve.VexJustification = vexStatus.Justification
 		}
 		CVEs = append(CVEs, cve)
 	}
@@ -465,7 +478,7 @@ func buildImageScanSummaryWithTarget(imageScanData []cautils.ImageScanData, incl
 			imageScanSummary.VulnDBBuilt = imageScanData[i].VulnDBBuilt
 		}
 
-		cves := extractCVEs(imageScanData[i].Matches, image)
+		cves := extractCVEs(imageScanData[i].Matches, image, imageScanData[i].VexStatuses)
 		imageScanSummary.CVEs = append(imageScanSummary.CVEs, cves...)
 
 		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)

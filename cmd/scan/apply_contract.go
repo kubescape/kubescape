@@ -12,6 +12,7 @@ import (
 	contractv1alpha1 "github.com/kubescape/kubescape/v4/core/pkg/scancontract/v1alpha1"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -45,7 +46,8 @@ func loadAndApplyScanContract(cmd *cobra.Command, scanInfo *cautils.ScanInfo, pa
 	}
 
 	applyContractOrdinarySettings(cmd, scanInfo, selected.Contract)
-	applyContractGateFloors(cmd, scanInfo, selected.Contract)
+	gateResolution := applyContractGateFloors(cmd, scanInfo, selected.Contract)
+	scanInfo.ScanContract = newScanContractMetadata(cmd, selected, path, scanInfo, gateResolution)
 	return selected, nil
 }
 
@@ -125,43 +127,71 @@ func applyContractOrdinarySettings(cmd *cobra.Command, scanInfo *cautils.ScanInf
 	}
 }
 
-func applyContractGateFloors(cmd *cobra.Command, scanInfo *cautils.ScanInfo, contract contractv1alpha1.Contract) {
+func applyContractGateFloors(cmd *cobra.Command, scanInfo *cautils.ScanInfo, contract contractv1alpha1.Contract) *reporthandlingv2.ScanContractGateResolution {
 	if contract.Failure == nil {
-		return
+		return nil
 	}
+	resolution := &reporthandlingv2.ScanContractGateResolution{}
 
 	if contract.Failure.SeverityAtLeast != nil {
 		contractValue := *contract.Failure.SeverityAtLeast
+		resolution.SeverityAtLeast.Contract = stringPointer(contractValue)
 		if commandFlagChanged(cmd, "severity-threshold") {
+			runnerFloor := scanInfo.FailThresholdSeverity
+			resolution.SeverityAtLeast.RunnerFloor = stringPointer(runnerFloor)
 			effective, floorWon := stricterSeverity(contractValue, scanInfo.FailThresholdSeverity)
 			scanInfo.FailThresholdSeverity = effective
 			logIgnoredWeakerGate("severityAtLeast", floorWon)
 		} else {
 			scanInfo.FailThresholdSeverity = contractValue
 		}
+		resolution.SeverityAtLeast.Effective = stringPointer(scanInfo.FailThresholdSeverity)
 	}
 	if contract.Failure.ComplianceBelow != nil {
 		contractValue := float32(*contract.Failure.ComplianceBelow)
+		contractProvenanceValue := *contract.Failure.ComplianceBelow
+		resolution.ComplianceBelow.Contract = float64Pointer(contractProvenanceValue)
+		if commandFlagChanged(cmd, "compliance-threshold") {
+			runnerFloor := float64(scanInfo.ComplianceThreshold)
+			resolution.ComplianceBelow.RunnerFloor = float64Pointer(runnerFloor)
+		}
 		floorWon := commandFlagChanged(cmd, "compliance-threshold") && scanInfo.ComplianceThreshold > contractValue
 		if contractValue > scanInfo.ComplianceThreshold {
 			scanInfo.ComplianceThreshold = contractValue
 		}
 		logIgnoredWeakerGate("complianceBelow", floorWon)
+		effective := float64(scanInfo.ComplianceThreshold)
+		resolution.ComplianceBelow.Effective = float64Pointer(effective)
 	}
 	if contract.Failure.CoverageBelow != nil {
 		contractValue := float32(*contract.Failure.CoverageBelow)
+		contractProvenanceValue := *contract.Failure.CoverageBelow
+		resolution.CoverageBelow.Contract = float64Pointer(contractProvenanceValue)
+		if commandFlagChanged(cmd, "fail-coverage-below") {
+			runnerFloor := float64(scanInfo.FailCoverageThreshold)
+			resolution.CoverageBelow.RunnerFloor = float64Pointer(runnerFloor)
+		}
 		floorWon := commandFlagChanged(cmd, "fail-coverage-below") && scanInfo.FailCoverageThreshold > contractValue
 		if contractValue > scanInfo.FailCoverageThreshold {
 			scanInfo.FailCoverageThreshold = contractValue
 		}
 		logIgnoredWeakerGate("coverageBelow", floorWon)
+		effective := float64(scanInfo.FailCoverageThreshold)
+		resolution.CoverageBelow.Effective = float64Pointer(effective)
 	}
 	if contract.Failure.DegradedPolicyInput != nil {
 		contractFails := *contract.Failure.DegradedPolicyInput == contractv1alpha1.DegradedPolicyInputFail
+		resolution.DegradedPolicyInput.Contract = boolPointer(contractFails)
+		if commandFlagChanged(cmd, "fail-on-degraded-config") {
+			runnerFloor := scanInfo.FailOnDegradedConfig
+			resolution.DegradedPolicyInput.RunnerFloor = boolPointer(runnerFloor)
+		}
 		floorWon := commandFlagChanged(cmd, "fail-on-degraded-config") && scanInfo.FailOnDegradedConfig && !contractFails
 		scanInfo.FailOnDegradedConfig = scanInfo.FailOnDegradedConfig || contractFails
 		logIgnoredWeakerGate("degradedPolicyInput", floorWon)
+		resolution.DegradedPolicyInput.Effective = boolPointer(scanInfo.FailOnDegradedConfig)
 	}
+	return resolution
 }
 
 func commandFlagChanged(cmd *cobra.Command, name string) bool {

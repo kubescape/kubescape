@@ -156,7 +156,7 @@ func TestPrintSARIF_ResultPropertiesSurviveJSONRoundTrip(t *testing.T) {
 	assert.Equal(t, "absent", properties["baseStatus"])
 	assert.Equal(t, "failed", properties["headStatus"])
 	assert.Equal(t, "rule-c-roundtrip", properties["ruleName"])
-	assert.Equal(t, "failedPath", properties["evidenceType"])
+	assert.Equal(t, "reviewPath", properties["evidenceType"])
 	assert.Equal(t, "spec.template.spec.containers[0].securityContext.privileged", properties["evidencePath"])
 	assert.Equal(t, "apps/v1/default/Pod/roundtrip", properties["evidenceResourceID"])
 	assert.Equal(t, "base report did not include this control", properties["incomparableReason"])
@@ -301,7 +301,7 @@ func TestMarkdownEscape_NormalizesEmptyAndWhitespace(t *testing.T) {
 }
 
 func TestJUnitCaseName_UsesOnlyNonEmptyParts(t *testing.T) {
-	assert.Equal(t, "Control C-1 / resource / rule=rule-c-1 type=failedPath path=spec.template.spec.containers[0].securityContext.privileged", junitCaseName(ciChange("C-1", "resource", "High")))
+	assert.Equal(t, "Control C-1 / resource / rule=rule-c-1 type=reviewPath path=spec.template.spec.containers[0].securityContext.privileged", junitCaseName(ciChange("C-1", "resource", "High")))
 	assert.Equal(t, "resource", junitCaseName(ControlChange{ResourceID: "resource"}))
 	assert.Equal(t, "", junitCaseName(ControlChange{}))
 }

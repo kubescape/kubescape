@@ -68,7 +68,7 @@ deny contains msga if {
         "packagename":  "armo_builtins",
         "alertScore":   5,
         "fixPaths":     [],
-        "failedPaths":  failPath,
+        "reviewPaths":  failPath,
         "alertObject":  {"k8sApiObjects": [cr]},
     }
 }
@@ -100,8 +100,8 @@ deny contains msga if {
 
 	failed := map[string]bool{}
 	for _, p := range crResult.Paths {
-		if p.FailedPath != "" {
-			failed[p.FailedPath] = true
+		if p.ReviewPath != "" {
+			failed[p.ReviewPath] = true
 		}
 	}
 	assert.True(t, failed["metadata.annotations.bound-by-ns-a"],

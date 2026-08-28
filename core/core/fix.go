@@ -50,6 +50,9 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 
 	if len(resourcesToFix) == 0 && len(helmSuggestions) == 0 {
 		logger.L().Info(noResourcesToFix)
+		// Without this a report whose resources were all skipped reads as a
+		// clean bill of health rather than a set of findings nothing handled.
+		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
 		return nil
 	}
 

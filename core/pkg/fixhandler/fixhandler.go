@@ -236,6 +236,31 @@ func (h *FixHandler) resourceBasePath(resourceObj *reporthandling.Resource) stri
 	return sourcePath
 }
 
+// countResourcesPerFile tallies every resource the scan read from each manifest,
+// keyed by the file the report recorded it against.
+func (h *FixHandler) countResourcesPerFile(resources map[string]*reporthandling.Resource) map[string]int {
+	perFile := make(map[string]int, len(resources))
+	for _, resource := range resources {
+		if key := h.resourceFileKey(resource); key != "" {
+			perFile[key]++
+		}
+	}
+	return perFile
+}
+
+// resourceFileKey is the manifest a resource was read from, without the
+// document index the report appends to it.
+func (h *FixHandler) resourceFileKey(resource *reporthandling.Resource) string {
+	if resource == nil {
+		return ""
+	}
+	filePath, _, err := h.getFilePathAndIndex(h.getPathFromRawResource(resource.GetObject()))
+	if err != nil {
+		return ""
+	}
+	return filePath
+}
+
 func (h *FixHandler) buildResourcesMap() map[string]*reporthandling.Resource {
 	resourceIdToRawResource := make(map[string]*reporthandling.Resource)
 	for i := range h.reportObj.Resources {
@@ -276,6 +301,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 	resourceIdToResource := h.buildResourcesMap()
 
 	resourcesToFix := make([]ResourceFixInfo, 0)
+	resourcesPerFile := h.countResourcesPerFile(resourceIdToResource)
 	h.unfixedControls = h.unfixedControls[:0]
 	h.fixedControlsCount = 0
 
@@ -327,8 +353,8 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		skipReason := ""
 		if resourcePath == "" {
 			skipReason = "skipped: resource has no local file path"
-		} else if resourceObj.Source == nil || resourceObj.Source.FileType != reporthandling.SourceTypeYaml {
-			skipReason = "skipped: source is not a YAML file"
+		} else if resourceObj.Source == nil || !isFixableSourceType(resourceObj.Source.FileType) {
+			skipReason = "skipped: source is not a YAML or JSON file"
 		}
 
 		var absolutePath string
@@ -383,6 +409,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 		rfi := ResourceFixInfo{
 			FilePath:        absolutePath,
+			fileKey:         h.resourceFileKey(resourceObj),
 			Resource:        resourceObj,
 			YamlExpressions: make(map[string]armotypes.FixPath, 0),
 			DocumentIndex:   documentIndex,
@@ -405,9 +432,18 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 			added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(documentIndex, ac, h.fixInfo.SkipUserValues)
 
+			rfi.failedControls = append(rfi.failedControls, UnfixedControl{
+				ControlID:    ac.GetID(),
+				ControlName:  ac.GetName(),
+				ResourceName: resourceObj.GetName(),
+				ResourceKind: resourceObj.GetKind(),
+				FilePath:     sanitizeForLog(absolutePath),
+			})
+
 			// Fully auto-remediated: every failed path produced an expression.
 			if added > 0 && len(skipped) == 0 {
 				h.fixedControlsCount++
+				rfi.fixedCount++
 				continue
 			}
 
@@ -444,6 +480,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		for _, pu := range tentativeUnfixed {
 			if len(plannedPaths) > 0 && controlIsCoveredByPlannedPaths(pu.ac, plannedPaths) {
 				h.fixedControlsCount++
+				rfi.fixedCount++
 				continue
 			}
 			h.unfixedControls = append(h.unfixedControls, pu.entry)
@@ -497,7 +534,52 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		}
 	}
 
-	return resourcesToFix
+	return h.dropWrappedResources(ctx, resourcesToFix, resourcesPerFile)
+}
+
+// dropWrappedResources removes resources whose fix paths would not resolve
+// against the document they were read from. A fix path is relative to its own
+// resource, but the expression is evaluated at the document root, so the two
+// only agree when the document is the resource. A manifest that wraps several
+// resources in one document, kind: List being the usual case, breaks that: the
+// paths are written to the wrapper and the file gains a spec block belonging to
+// none of them.
+//
+// A file yielding fewer documents than the resources read from it is wrapped.
+// The count comes from every resource the scan recorded, not from the failing
+// ones: a List whose other members passed is still a List.  Genuine
+// multi-document YAML has one document per resource and is untouched.
+func (h *FixHandler) dropWrappedResources(ctx context.Context, resourcesToFix []ResourceFixInfo, resourcesPerFile map[string]int) []ResourceFixInfo {
+	wrapped := make(map[string]bool, len(resourcesPerFile))
+	for i := range resourcesToFix {
+		filePath := resourcesToFix[i].FilePath
+		resources := resourcesPerFile[resourcesToFix[i].fileKey]
+		if _, checked := wrapped[filePath]; checked || resources < 2 {
+			continue
+		}
+		documents, err := countDocuments(ctx, filePath)
+		if err != nil {
+			// Leave it to the apply step, which reports the parse error itself.
+			continue
+		}
+		wrapped[filePath] = documents < resources
+	}
+
+	kept := make([]ResourceFixInfo, 0, len(resourcesToFix))
+	for i := range resourcesToFix {
+		rfi := resourcesToFix[i]
+		if !wrapped[rfi.FilePath] {
+			kept = append(kept, rfi)
+			continue
+		}
+
+		h.fixedControlsCount -= rfi.fixedCount
+		for _, unfixed := range rfi.failedControls {
+			unfixed.Reason = "skipped: the file declares several resources in one document"
+			h.unfixedControls = append(h.unfixedControls, unfixed)
+		}
+	}
+	return kept
 }
 
 // PrepareHelmSuggestions collects fix guidance for resources whose Source is a
@@ -706,13 +788,14 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 		}
 
 		fixedYamlString, err := editor.ApplyFixes(fileAsString, fixes)
+		fixedContent, err := applyFixToFileContent(ctx, filepath, fileAsString, yamlExpression)
 
 		if err != nil {
 			errors = append(errors, fmt.Errorf("failed to fix file %s: %w", filepath, err))
 			continue
 		}
 
-		if err := writeFixesToFile(filepath, fixedYamlString); err != nil {
+		if err := writeFixesToFile(filepath, fixedContent); err != nil {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Failed to write fixes to file %s, %v", filepath, err.Error()))
 			errors = append(errors, err)
 			continue
@@ -788,6 +871,60 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 func (h *FixHandler) getFileFixes(resourcesToFix []ResourceFixInfo) map[string][]DocumentFix {
 	fileFixes := make(map[string][]DocumentFix)
 	for _, resourceToFix := range resourcesToFix {
+func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string) (fixedString string, err error) {
+	yamlAsString = sanitizeYaml(yamlAsString)
+	newline := determineNewlineSeparator(yamlAsString)
+
+	yamlLines := strings.Split(yamlAsString, newline)
+
+	originalRootNodes, err := decodeDocumentRoots(yamlAsString)
+
+	if err != nil {
+		return "", err
+	}
+
+	fixedRootNodes, err := getFixedNodes(ctx, yamlAsString, yamlExpression)
+
+	if err != nil {
+		return "", err
+	}
+
+	fixInfo, err := getFixInfo(ctx, originalRootNodes, fixedRootNodes)
+	if err != nil {
+		return "", err
+	}
+
+	fixedYamlLines := getFixedYamlLines(yamlLines, fixInfo, newline)
+
+	fixedString = getStringFromSlice(fixedYamlLines, newline)
+	fixedString = revertSanitizeYaml(fixedString)
+
+	return fixedString, nil
+}
+
+// isFixableSourceType reports whether the scan parsed a file the fix engine can
+// rewrite. Helm-rendered resources carry their own type and are handled by
+// PrepareHelmSuggestions instead.
+func isFixableSourceType(fileType string) bool {
+	return fileType == reporthandling.SourceTypeYaml || fileType == reporthandling.SourceTypeJson
+}
+
+// applyFixToFileContent rewrites one file, keeping it in the format it was
+// written in. Emitting YAML into a .json manifest would break every tool that
+// reads it back.
+func applyFixToFileContent(ctx context.Context, filePath, content, yamlExpression string) (string, error) {
+	if isJSONSource(filePath) {
+		return applyFixToJSONContent(ctx, content, yamlExpression)
+	}
+	return ApplyFixToContent(ctx, content, yamlExpression)
+}
+
+func (h *FixHandler) getFileYamlExpressions(resourcesToFix []ResourceFixInfo) map[string]string {
+	fileYamlExpressions := make(map[string]string, 0)
+	for _, toPin := range resourcesToFix {
+		resourceToFix := toPin
+
+		singleExpression := reduceYamlExpressions(&resourceToFix)
 		resourceFilePath := resourceToFix.FilePath
 
 		for _, fixPath := range resourceToFix.YamlExpressions {
@@ -1045,10 +1182,36 @@ func writeFixesToFile(path, content string) error {
 	if err != nil {
 		return fmt.Errorf("error writing fixes to file: %w", err)
 	}
-	defer file.Close()
 
+	return writeAndClose(file, content)
+}
+
+// writeStringCloser is the subset of *os.File that writeAndClose needs to
+// write the fixed manifest and close the file, checking both errors. It
+// exists so a fake can simulate a Close-time failure deterministically in
+// tests: reproducing that with a real file would require an actually faulty
+// filesystem (e.g. NFS, which can accept a Write into its client-side buffer
+// and only report ENOSPC when the buffer is flushed at Close), which isn't
+// something a portable unit test can arrange.
+type writeStringCloser interface {
+	WriteString(s string) (int, error)
+	Close() error
+}
+
+// writeAndClose writes content and closes file, checking both errors instead
+// of closing via defer. A write can appear to succeed while the underlying
+// filesystem only reports a real failure (e.g. out of space) when the file is
+// closed and its buffered data is finally flushed - discarding that error, as
+// a deferred Close() would, reports success for a fix that was silently never
+// written to disk.
+func writeAndClose(file writeStringCloser, content string) error {
 	if _, err := file.WriteString(content); err != nil {
+		_ = file.Close() // best-effort; the write error is already being reported
 		return fmt.Errorf("error writing fixes to file: %w", err)
+	}
+
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("error writing fixes to file: failed to flush: %w", err)
 	}
 
 	return nil

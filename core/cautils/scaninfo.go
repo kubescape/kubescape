@@ -114,23 +114,24 @@ type PolicyIdentifier struct {
 }
 
 type ScanInfo struct {
-	UseExceptions             string      // Load file with exceptions configuration
-	AuditExceptions           bool        // Include exception usage audit in supported scan outputs
-	HonorInlineExceptions     BoolPtrFlag // Honor kubescape.io/skip-* annotations as inline exception policies
-	CustomRules               string      // Path to a directory of custom *.rego rules
-	ControlsInputs            string      // Load file with inputs for controls
-	AttackTracks              string      // Load file with attack tracks
-	UseFrom                   []string    // Load framework from local file (instead of download). Use when running offline
-	UseDefault                bool        // Load framework from cached file (instead of download). Use when running offline
-	UseArtifactsFrom          string      // Load artifacts from local path. Use when running offline
-	ControlsVersion           string      // Pin the regolibrary release used to download policies (e.g. "v2.0.301"). Empty uses the latest release
-	VerboseMode               bool        // Display all the input resources and not only failed resources
-	Hide                      bool        // Hide sensitive identifiers (names, namespaces, images) in results
+	UseExceptions             string                                 // Load file with exceptions configuration
+	AuditExceptions           bool                                   // Include exception usage audit in supported scan outputs
+	HonorInlineExceptions     BoolPtrFlag                            // Honor kubescape.io/skip-* annotations as inline exception policies
+	CustomRules               string                                 // Path to a directory of custom *.rego rules
+	ControlsInputs            string                                 // Load file with inputs for controls
+	AttackTracks              string                                 // Load file with attack tracks
+	UseFrom                   []string                               // Load framework from local file (instead of download). Use when running offline
+	UseDefault                bool                                   // Load framework from cached file (instead of download). Use when running offline
+	UseArtifactsFrom          string                                 // Load artifacts from local path. Use when running offline
+	ControlsVersion           string                                 // Pin the regolibrary release used to download policies (e.g. "v2.0.301"). Empty uses the latest release
+	ScanContract              *reporthandlingv2.ScanContractMetadata // Selected repository scan contract provenance, populated only when --scan-contract is used
+	VerboseMode               bool                                   // Display all the input resources and not only failed resources
+	Hide                      bool                                   // Hide sensitive identifiers (names, namespaces, images) in results
 	EncryptionEnabled         bool
 	View                      string                       //
 	Format                    string                       // Format results (table, json, junit ...)
 	Output                    string                       // Store results in an output file, Output file name
-	NotifyURLs                []string                     // Generic webhook destinations that receive the posture summary JSON
+	NotifyURLs                []string                     // Webhook destinations that receive a formatted posture summary
 	FormatVersion             string                       // Output object can be different between versions, this is for testing and backward compatibility
 	CustomClusterName         string                       // Set the custom name of the cluster
 	ExcludedNamespaces        string                       // used for host scanner namespace
@@ -420,6 +421,7 @@ func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo, policyIdent
 	metadata.ScanMetadata.HostScanner = scanInfo.HostSensorEnabled.GetBool()
 	metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
 	metadata.ScanMetadata.ControlsInputs = scanInfo.ControlsInputs
+	metadata.ScanMetadata.ScanContract = finalizeScanContractMetadata(scanInfo, policyIdentifiers)
 
 	switch scanInfo.GetScanningContext() {
 	case ContextCluster:

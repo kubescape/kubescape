@@ -98,6 +98,40 @@ func TestSetContextMetadata(t *testing.T) {
 	})
 }
 
+func TestScanContractProvenanceUsesFinalPolicySelection(t *testing.T) {
+	scanInfo := &ScanInfo{
+		ScanContract: &reporthandlingv2.ScanContractMetadata{
+			APIVersion:      "config.kubescape.io/v1alpha1",
+			Contract:        "ci",
+			DigestSchema:    "kubescape-scan-contract:v1",
+			ContractDigest:  "sha256:contract",
+			AllowedSections: []string{"policy"},
+			Effective: &reporthandlingv2.ScanContractEffectiveSettings{
+				Policy: &reporthandlingv2.ScanContractPolicy{
+					Frameworks: []string{"mitre"},
+				},
+			},
+		},
+	}
+
+	metadata := scanInfoToScanMetadata(context.Background(), scanInfo, []PolicyIdentifier{
+		{Identifier: "nsa", Kind: apisv1.KindFramework},
+		{Identifier: "C-0001", Kind: apisv1.KindControl},
+	})
+	provenance := metadata.ScanMetadata.ScanContract
+	require.NotNil(t, provenance)
+	require.NotNil(t, provenance.Effective)
+	require.NotNil(t, provenance.Effective.Policy)
+	assert.Equal(t, []string{"nsa"}, provenance.Effective.Policy.Frameworks)
+	assert.Equal(t, []string{"C-0001"}, provenance.Effective.Policy.Controls)
+	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, provenance.EffectiveRunDigest)
+	assert.Equal(t, []string{"mitre"}, scanInfo.ScanContract.Effective.Policy.Frameworks, "report finalization must not mutate the reusable scan input")
+
+	scanInfo.ControlsInputs = "runner-controls.json"
+	metadata = scanInfoToScanMetadata(context.Background(), scanInfo, nil)
+	assert.Empty(t, metadata.ScanMetadata.ScanContract.EffectiveRunDigest, "a later getter owns runner-file bytes, so no incomplete digest is emitted")
+}
+
 func TestResolveClusterContextNameRejectsInvalidSelection(t *testing.T) {
 	t.Run("missing override", func(t *testing.T) {
 		scanInfo := &ScanInfo{}

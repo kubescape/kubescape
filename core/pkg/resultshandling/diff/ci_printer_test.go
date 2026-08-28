@@ -22,7 +22,7 @@ func ciChange(controlID, resourceID, severity string) ControlChange {
 		BaseStatus:         "passed",
 		HeadStatus:         "failed",
 		RuleName:           "rule-" + strings.ToLower(controlID),
-		EvidenceType:       evidenceTypeFailedPath,
+		EvidenceType:       evidenceTypeReviewPath,
 		Path:               "spec.template.spec.containers[0].securityContext.privileged",
 		EvidenceResourceID: resourceID + "/pod",
 	}
@@ -115,7 +115,7 @@ func TestRegressionSetAll_UsesStableTieBreakers(t *testing.T) {
 		{ResourceID: "resource-a", ControlID: "C-2", Severity: "High", RuleName: "rule-b", EvidenceType: "rule", Path: "b", Reason: "b"},
 		{ResourceID: "resource-a", ControlID: "C-1", Severity: "High", RuleName: "rule-b", EvidenceType: "rule", Path: "b", Reason: "b"},
 		{ResourceID: "resource-a", ControlID: "C-1", Severity: "High", RuleName: "rule-a", EvidenceType: "rule", Path: "b", Reason: "b"},
-		{ResourceID: "resource-a", ControlID: "C-1", Severity: "High", RuleName: "rule-a", EvidenceType: "failedPath", Path: "a", Reason: "a"},
+		{ResourceID: "resource-a", ControlID: "C-1", Severity: "High", RuleName: "rule-a", EvidenceType: "reviewPath", Path: "a", Reason: "a"},
 	}
 
 	findings := Regressions(&ChangeSet{New: changes}, "").all()
@@ -124,7 +124,7 @@ func TestRegressionSetAll_UsesStableTieBreakers(t *testing.T) {
 	assert.Equal(t, "resource-a", findings[0].Change.ResourceID)
 	assert.Equal(t, "C-1", findings[0].Change.ControlID)
 	assert.Equal(t, "rule-a", findings[0].Change.RuleName)
-	assert.Equal(t, "failedPath", findings[0].Change.EvidenceType)
+	assert.Equal(t, "reviewPath", findings[0].Change.EvidenceType)
 	assert.Equal(t, "a", findings[0].Change.Path)
 	assert.Equal(t, "resource-b", findings[len(findings)-1].Change.ResourceID)
 }
@@ -375,7 +375,7 @@ func TestFindingDetails_IncludesUsefulFieldsAndOmitsEmptyFields(t *testing.T) {
 	assert.Contains(t, details, "Base status: passed")
 	assert.Contains(t, details, "Head status: failed")
 	assert.Contains(t, details, "Rule: rule-c-high")
-	assert.Contains(t, details, "Evidence: rule=rule-c-high type=failedPath path=spec.template.spec.containers[0].securityContext.privileged")
+	assert.Contains(t, details, "Evidence: rule=rule-c-high type=reviewPath path=spec.template.spec.containers[0].securityContext.privileged")
 	assert.Contains(t, details, "Evidence resource: resource/pod")
 	assert.NotContains(t, details, "Reason:")
 
@@ -404,9 +404,9 @@ func TestFindingTitle_HandlesUnnamedControls(t *testing.T) {
 }
 
 func TestEvidenceLabel(t *testing.T) {
-	assert.Equal(t, "rule=rule-a type=failedPath path=spec.containers[0].image", evidenceLabel(ControlChange{
+	assert.Equal(t, "rule=rule-a type=reviewPath path=spec.containers[0].image", evidenceLabel(ControlChange{
 		RuleName:     "rule-a",
-		EvidenceType: evidenceTypeFailedPath,
+		EvidenceType: evidenceTypeReviewPath,
 		Path:         "spec.containers[0].image",
 	}))
 	assert.Equal(t, "rule=rule-a", evidenceLabel(ControlChange{

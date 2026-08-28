@@ -285,7 +285,7 @@ func controlViewAssistedRemediationSession() *cautils.OPASessionObj {
 				Name:      "Applications credentials in configuration files",
 				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
 				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
-					{Paths: []armotypes.PosturePaths{{FailedPath: controlViewEnvVarPath}}},
+					{Paths: []armotypes.PosturePaths{{ReviewPath: controlViewEnvVarPath}}},
 				},
 			},
 		},
@@ -322,8 +322,8 @@ func controlViewEnvValueSession() *cautils.OPASessionObj {
 	}
 	result := session.ResourcesResult[resourceID]
 	result.AssociatedControls[0].ResourceAssociatedRules[0].Paths = []armotypes.PosturePaths{
-		{FailedPath: controlViewEnvVarPath},
-		{FailedPath: controlViewEnvValuePath},
+		{ReviewPath: controlViewEnvVarPath},
+		{ReviewPath: controlViewEnvValuePath},
 	}
 	session.ResourcesResult[resourceID] = result
 	return session
@@ -378,7 +378,7 @@ func controlViewMixedStatusSession() *cautils.OPASessionObj {
 			Name:      "Applications credentials in configuration files",
 			Status:    apis.StatusInfo{InnerStatus: status},
 			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
-				{Paths: []armotypes.PosturePaths{{FailedPath: path}}},
+				{Paths: []armotypes.PosturePaths{{ReviewPath: path}}},
 			},
 		}
 	}

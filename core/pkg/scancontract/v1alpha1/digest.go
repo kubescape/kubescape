@@ -9,6 +9,11 @@ import (
 	jsoncanonicalizer "github.com/cyberphone/json-canonicalization/go/src/webpki.org/jsoncanonicalizer"
 )
 
+// EffectiveRunDigestSchema identifies the canonical envelope used for the
+// resolved scan inputs. It is intentionally distinct from DigestSchema, which
+// covers only the selected repository contract.
+const EffectiveRunDigestSchema = "kubescape-effective-run:v1"
+
 type digestInput struct {
 	APIVersion              string   `json:"apiVersion"`
 	Kind                    string   `json:"kind"`
@@ -35,7 +40,27 @@ func Digest(selected *SelectedContract) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("canonicalize selected contract for digest: %w", err)
 	}
-	hashInput := append([]byte(DigestSchema+"\x00"), canonical...)
+	return digestCanonical(DigestSchema, canonical), nil
+}
+
+// DigestEffectiveRun produces a stable digest for the post-resolution scan
+// inputs. Callers provide a typed, JSON-serializable envelope so this package
+// can own the canonicalization and domain separation without depending on a
+// particular report schema.
+func DigestEffectiveRun(input any) (string, error) {
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return "", fmt.Errorf("marshal effective scan contract run for digest: %w", err)
+	}
+	canonical, err := jsoncanonicalizer.Transform(raw)
+	if err != nil {
+		return "", fmt.Errorf("canonicalize effective scan contract run: %w", err)
+	}
+	return digestCanonical(EffectiveRunDigestSchema, canonical), nil
+}
+
+func digestCanonical(schema string, canonical []byte) string {
+	hashInput := append([]byte(schema+"\x00"), canonical...)
 	sum := sha256.Sum256(hashInput)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	return "sha256:" + hex.EncodeToString(sum[:])
 }

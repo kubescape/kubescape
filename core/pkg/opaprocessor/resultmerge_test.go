@@ -11,7 +11,7 @@ import (
 )
 
 func failedPath(path string) armotypes.PosturePaths {
-	return armotypes.PosturePaths{FailedPath: path}
+	return armotypes.PosturePaths{ReviewPath: path}
 }
 
 func TestMergeAssociatedRule_StatusPrecedence(t *testing.T) {

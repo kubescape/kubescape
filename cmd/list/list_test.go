@@ -19,7 +19,7 @@ func TestGetListCmd(t *testing.T) {
 
 	// Verify the command name and short description
 	assert.Equal(t, "list <policy> [flags]", listCmd.Use)
-	assert.Equal(t, "List frameworks/controls will list the supported frameworks and controls", listCmd.Short)
+	assert.Equal(t, "List the supported frameworks, controls and control configuration", listCmd.Short)
 	assert.Equal(t, "", listCmd.Long)
 	assert.Equal(t, listExample, listCmd.Example)
 	supported := strings.Join(core.ListSupportActions(), ",")

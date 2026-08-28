@@ -17,6 +17,7 @@ import (
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -323,6 +324,26 @@ func TestJunitActionPrintImageScanKeepsMultiArchSuitesDistinct(t *testing.T) {
 	assert.Contains(t, string(raw), `name="image" value="registry.example.com/app:v1"`)
 	assert.Contains(t, string(raw), `name="platform" value="linux/amd64"`)
 	assert.Contains(t, string(raw), `name="platform" value="linux/arm64"`)
+}
+
+func TestImageTestCasesIncludesVEXDetails(t *testing.T) {
+	cases := imageTestCases([]imageprinter.CVE{
+		{
+			ID:               "CVE-2026-1234",
+			Severity:         "High",
+			Package:          "openssl",
+			Version:          "1.0.0",
+			FixedState:       "not-fixed",
+			Image:            "registry.example.com/app:v1",
+			VexStatus:        "not_affected",
+			VexJustification: "component_not_present",
+		},
+	}, "")
+
+	require.Len(t, cases, 1)
+	require.NotNil(t, cases[0].Failure)
+	assert.Contains(t, cases[0].Failure.Contents, "VEX Status: not_affected")
+	assert.Contains(t, cases[0].Failure.Contents, "VEX Justification: component_not_present")
 }
 
 func TestListTestSuites(t *testing.T) {
@@ -723,7 +744,8 @@ func TestJunitGoldenFile(t *testing.T) {
 
 	want, err := os.ReadFile(goldenPath)
 	require.NoError(t, err, "golden fixture missing — run `go test -update-golden`")
-	assert.Equal(t, string(want), string(got), "marshalled JUnit output diverged from testdata/junit_golden.xml")
+	wantStr := strings.ReplaceAll(string(want), "\r\n", "\n")
+	assert.Equal(t, wantStr, string(got), "marshalled JUnit output diverged from testdata/junit_golden.xml")
 
 	// Also round-trip the golden file through encoding/xml and re-check the
 	// invariants on the *stored* fixture so a hand-edited golden that breaks

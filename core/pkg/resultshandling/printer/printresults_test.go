@@ -267,7 +267,7 @@ func TestResolveOutputFile(t *testing.T) {
 			format:       JsonFormat,
 			outputFile:   "  reports/scan  ",
 			defaultBase:  "report",
-			wantFile:     filepath.Join("reports", "scan.json"),
+			wantFile:     "reports/scan.json",
 			wantExplicit: true,
 		},
 		{

@@ -55,8 +55,8 @@ func TestFindingsForControl_ControlGranularity(t *testing.T) {
 	control := failedControlWithRules(
 		"C-001",
 		"Control",
-		failedRule("host-network", evidencePath{FailedPath: "$.spec.hostNetwork"}),
-		failedRule("host-pid", evidencePath{FailedPath: "$.spec.hostPID"}),
+		failedRule("host-network", evidencePath{}),
+		failedRule("host-pid", evidencePath{}),
 	)
 
 	findings := findingsForControl(controlKey, control, "High", GranularityControl)
@@ -78,20 +78,17 @@ func TestFindingsForControl_ExtractsFailedAndReviewPaths(t *testing.T) {
 		"Workload configuration",
 		failedRule("container-security", evidencePath{
 			ResourceID: "/v1/default/Pod/demo",
-			FailedPath: "$.spec.containers[0].securityContext.privileged",
 			ReviewPath: "$.spec.containers[0].securityContext.capabilities",
 		}),
 	)
 
 	findings := findingsForControl(controlKey, control, "Critical", GranularityEvidence)
 
-	require.Len(t, findings, 2)
-	assert.Equal(t, evidenceTypeFailedPath, findings[0].fingerprint.evidenceType)
-	assert.Equal(t, "spec.containers[0].securityContext.privileged", findings[0].fingerprint.path)
+	require.Len(t, findings, 1)
+	assert.Equal(t, evidenceTypeReviewPath, findings[0].fingerprint.evidenceType)
+	assert.Equal(t, "spec.containers[0].securityContext.capabilities", findings[0].fingerprint.path)
 	assert.Equal(t, "container-security", findings[0].fingerprint.ruleName)
 	assert.Equal(t, "/v1/default/Pod/demo", findings[0].fingerprint.evidenceResourceID)
-	assert.Equal(t, evidenceTypeReviewPath, findings[1].fingerprint.evidenceType)
-	assert.Equal(t, "spec.containers[0].securityContext.capabilities", findings[1].fingerprint.path)
 }
 
 func TestFindingsForControl_ExtractsAllPosturePathEvidence(t *testing.T) {
@@ -101,7 +98,6 @@ func TestFindingsForControl_ExtractsAllPosturePathEvidence(t *testing.T) {
 		"Workload configuration",
 		failedRule("container-security", evidencePath{
 			ResourceID: "/v1/default/Pod/demo",
-			FailedPath: "$.spec.containers[0].securityContext.privileged",
 			ReviewPath: "$.spec.containers[0].securityContext.capabilities",
 			DeletePath: "$.spec.hostNetwork",
 			FixPath:    fixPath{Path: "$.spec.securityContext.runAsNonRoot", Value: []byte("true")},
@@ -111,9 +107,8 @@ func TestFindingsForControl_ExtractsAllPosturePathEvidence(t *testing.T) {
 
 	findings := findingsForControl(controlKey, control, "Critical", GranularityEvidence)
 
-	require.Len(t, findings, 5)
+	require.Len(t, findings, 4)
 	assert.ElementsMatch(t, []findingFingerprint{
-		{resourceID: "/v1/default/Pod/demo", controlID: "C-010", ruleName: "container-security", evidenceType: evidenceTypeFailedPath, path: "spec.containers[0].securityContext.privileged", evidenceResourceID: "/v1/default/Pod/demo"},
 		{resourceID: "/v1/default/Pod/demo", controlID: "C-010", ruleName: "container-security", evidenceType: evidenceTypeReviewPath, path: "spec.containers[0].securityContext.capabilities", evidenceResourceID: "/v1/default/Pod/demo"},
 		{resourceID: "/v1/default/Pod/demo", controlID: "C-010", ruleName: "container-security", evidenceType: evidenceTypeDeletePath, path: "spec.hostNetwork", evidenceResourceID: "/v1/default/Pod/demo"},
 		{resourceID: "/v1/default/Pod/demo", controlID: "C-010", ruleName: "container-security", evidenceType: evidenceTypeFixPath, path: "spec.securityContext.runAsNonRoot", evidenceResourceID: "/v1/default/Pod/demo"},
@@ -123,7 +118,6 @@ func TestFindingsForControl_ExtractsAllPosturePathEvidence(t *testing.T) {
 		findings[1].fingerprint,
 		findings[2].fingerprint,
 		findings[3].fingerprint,
-		findings[4].fingerprint,
 	})
 }
 
@@ -153,7 +147,7 @@ func TestFindingsForControl_EmptyPathsUseRuleFingerprint(t *testing.T) {
 		"Control",
 		failedRule("empty-paths",
 			evidencePath{},
-			evidencePath{FailedPath: "   ", ReviewPath: "$"},
+			evidencePath{ReviewPath: "$"},
 		),
 	)
 
@@ -171,7 +165,7 @@ func TestFindingsForControl_IgnoresNonFailedRules(t *testing.T) {
 		rules = append(rules, ruleEntry{
 			Name:   "rule-" + status,
 			Status: status,
-			Paths:  []evidencePath{{FailedPath: "$.spec." + status}},
+			Paths:  []evidencePath{{ReviewPath: "$.spec." + status}},
 		})
 	}
 	controlKey := key{resourceID: "resource", controlID: "C-005"}
@@ -188,9 +182,9 @@ func TestFindingsForControl_MixedRuleStatuses(t *testing.T) {
 	control := failedControlWithRules(
 		"C-006",
 		"Control",
-		passedRule("passing", evidencePath{FailedPath: "$.ignored"}),
-		failedRule("failing", evidencePath{FailedPath: "$.included"}),
-		ruleEntry{Name: "skipped", Status: "skipped", Paths: []evidencePath{{FailedPath: "$.alsoIgnored"}}},
+		passedRule("passing", evidencePath{}),
+		failedRule("failing", evidencePath{ReviewPath: "included"}),
+		ruleEntry{Name: "skipped", Status: "skipped", Paths: []evidencePath{{}}},
 	)
 
 	findings := findingsForControl(controlKey, control, "High", GranularityEvidence)
@@ -206,9 +200,9 @@ func TestFindingsForControl_DeduplicatesIdenticalEvidence(t *testing.T) {
 		"C-007",
 		"Control",
 		failedRule("duplicate",
-			evidencePath{ResourceID: "resource", FailedPath: "$.spec.hostPID"},
-			evidencePath{ResourceID: "resource", FailedPath: ".spec.hostPID"},
-			evidencePath{ResourceID: "resource", FailedPath: " spec.hostPID "},
+			evidencePath{ResourceID: "resource", ReviewPath: "spec.hostPID"},
+			evidencePath{ResourceID: "resource", ReviewPath: "spec.hostPID"},
+			evidencePath{ResourceID: "resource", ReviewPath: "spec.hostPID"},
 		),
 	)
 
@@ -223,20 +217,20 @@ func TestFindingsForControl_DoesNotMergeDistinctEvidence(t *testing.T) {
 	control := failedControlWithRules(
 		"C-008",
 		"Control",
-		failedRule("rule-a", evidencePath{ResourceID: "child-a", FailedPath: "$.spec.hostPID"}),
-		failedRule("rule-b", evidencePath{ResourceID: "child-a", FailedPath: "$.spec.hostPID"}),
-		failedRule("rule-a", evidencePath{ResourceID: "child-b", FailedPath: "$.spec.hostPID"}),
-		failedRule("rule-a", evidencePath{ResourceID: "child-a", ReviewPath: "$.spec.hostPID"}),
+		failedRule("rule-a", evidencePath{ResourceID: "child-a", ReviewPath: "spec.hostPID"}),
+		failedRule("rule-b", evidencePath{ResourceID: "child-a", ReviewPath: "spec.hostPID"}),
+		failedRule("rule-a", evidencePath{ResourceID: "child-b", ReviewPath: "spec.hostPID"}),
+		failedRule("rule-a", evidencePath{ResourceID: "child-a", ReviewPath: "$.spec.hostIPC"}),
 	)
 
 	findings := findingsForControl(controlKey, control, "High", GranularityEvidence)
 
 	require.Len(t, findings, 4)
 	assert.ElementsMatch(t, []findingFingerprint{
-		{resourceID: "resource", controlID: "C-008", ruleName: "rule-a", evidenceType: evidenceTypeFailedPath, path: "spec.hostPID", evidenceResourceID: "child-a"},
-		{resourceID: "resource", controlID: "C-008", ruleName: "rule-a", evidenceType: evidenceTypeFailedPath, path: "spec.hostPID", evidenceResourceID: "child-b"},
 		{resourceID: "resource", controlID: "C-008", ruleName: "rule-a", evidenceType: evidenceTypeReviewPath, path: "spec.hostPID", evidenceResourceID: "child-a"},
-		{resourceID: "resource", controlID: "C-008", ruleName: "rule-b", evidenceType: evidenceTypeFailedPath, path: "spec.hostPID", evidenceResourceID: "child-a"},
+		{resourceID: "resource", controlID: "C-008", ruleName: "rule-a", evidenceType: evidenceTypeReviewPath, path: "spec.hostIPC", evidenceResourceID: "child-a"},
+		{resourceID: "resource", controlID: "C-008", ruleName: "rule-a", evidenceType: evidenceTypeReviewPath, path: "spec.hostPID", evidenceResourceID: "child-b"},
+		{resourceID: "resource", controlID: "C-008", ruleName: "rule-b", evidenceType: evidenceTypeReviewPath, path: "spec.hostPID", evidenceResourceID: "child-a"},
 	}, []findingFingerprint{
 		findings[0].fingerprint,
 		findings[1].fingerprint,
@@ -251,7 +245,7 @@ func TestFindingChangeCopiesEvidenceFields(t *testing.T) {
 			resourceID:         "resource",
 			controlID:          "C-009",
 			ruleName:           "rule",
-			evidenceType:       evidenceTypeFailedPath,
+			evidenceType:       evidenceTypeReviewPath,
 			path:               "spec.hostIPC",
 			evidenceResourceID: "related-resource",
 		},
@@ -268,7 +262,7 @@ func TestFindingChangeCopiesEvidenceFields(t *testing.T) {
 	assert.Equal(t, "failed", change.BaseStatus)
 	assert.Equal(t, "failed", change.HeadStatus)
 	assert.Equal(t, "rule", change.RuleName)
-	assert.Equal(t, evidenceTypeFailedPath, change.EvidenceType)
+	assert.Equal(t, evidenceTypeReviewPath, change.EvidenceType)
 	assert.Equal(t, "spec.hostIPC", change.Path)
 	assert.Equal(t, "related-resource", change.EvidenceResourceID)
 	assert.Equal(t, "comparison reason", change.Reason)
@@ -277,7 +271,7 @@ func TestFindingChangeCopiesEvidenceFields(t *testing.T) {
 func TestEvidenceDetailMismatch(t *testing.T) {
 	aggregate := []finding{{fingerprint: findingFingerprint{evidenceType: evidenceTypeControl}}}
 	detailed := []finding{{fingerprint: findingFingerprint{evidenceType: evidenceTypeRule}}}
-	paths := []finding{{fingerprint: findingFingerprint{evidenceType: evidenceTypeFailedPath}}}
+	paths := []finding{{fingerprint: findingFingerprint{evidenceType: evidenceTypeReviewPath}}}
 
 	assert.False(t, evidenceDetailMismatch(aggregate, aggregate))
 	assert.False(t, evidenceDetailMismatch(detailed, detailed))
@@ -292,7 +286,7 @@ func TestDeduplicateFindingsUsesFullFingerprint(t *testing.T) {
 			resourceID:         "resource",
 			controlID:          "control",
 			ruleName:           "rule",
-			evidenceType:       evidenceTypeFailedPath,
+			evidenceType:       evidenceTypeReviewPath,
 			path:               "path",
 			evidenceResourceID: "evidence-resource",
 		},

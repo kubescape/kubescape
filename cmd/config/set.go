@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 
@@ -29,14 +30,40 @@ func getSetCmd(ks meta.IKubescape) *cobra.Command {
 	return configSetCmd
 }
 
-var supportConfigSet = map[string]func(*metav1.SetConfig, string){
-	"accessKey":      func(s *metav1.SetConfig, accessKey string) { s.AccessKey = accessKey },
-	"accountID":      func(s *metav1.SetConfig, account string) { s.Account = account },
-	"cloudAPIURL":    func(s *metav1.SetConfig, cloudAPIURL string) { s.CloudAPIURL = cloudAPIURL },
-	"cloudReportURL": func(s *metav1.SetConfig, cloudReportURL string) { s.CloudReportURL = cloudReportURL },
+var supportConfigSet = map[string]func(*metav1.SetConfig, string) error{
+	"accessKey": func(s *metav1.SetConfig, accessKey string) error { s.AccessKey = accessKey; return nil },
+	"accountID": func(s *metav1.SetConfig, account string) error { s.Account = account; return nil },
+	"cloudAPIURL": func(s *metav1.SetConfig, cloudAPIURL string) error {
+		if err := validateURL(cloudAPIURL); err != nil {
+			return fmt.Errorf("invalid cloudAPIURL: %w", err)
+		}
+		s.CloudAPIURL = cloudAPIURL
+		return nil
+	},
+	"cloudReportURL": func(s *metav1.SetConfig, cloudReportURL string) error {
+		if err := validateURL(cloudReportURL); err != nil {
+			return fmt.Errorf("invalid cloudReportURL: %w", err)
+		}
+		s.CloudReportURL = cloudReportURL
+		return nil
+	},
 }
 
-func stringKeysToSlice(m map[string]func(*metav1.SetConfig, string)) []string {
+func validateURL(u string) error {
+	parsed, err := url.ParseRequestURI(u)
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("URL scheme must be http or https")
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("URL host must not be empty")
+	}
+	return nil
+}
+
+func stringKeysToSlice(m map[string]func(*metav1.SetConfig, string) error) []string {
 	keys := []string{}
 	for key := range m {
 		keys = append(keys, key)
@@ -58,7 +85,7 @@ func normalizeConfigKey(key string) string {
 	return key
 }
 
-func findConfigSetter(key string) (func(*metav1.SetConfig, string), bool) {
+func findConfigSetter(key string) (func(*metav1.SetConfig, string) error, bool) {
 	if setter, ok := supportConfigSet[key]; ok {
 		return setter, true
 	}
@@ -104,7 +131,9 @@ func parseSetArgs(args []string) (*metav1.SetConfig, error) {
 
 	setConfig := &metav1.SetConfig{}
 	if setConfigFunc, ok := findConfigSetter(key); ok {
-		setConfigFunc(setConfig, value)
+		if err := setConfigFunc(setConfig, value); err != nil {
+			return nil, err
+		}
 		return setConfig, nil
 	}
 	return setConfig, fmt.Errorf("key %q unknown; supported: %s", key, supported)

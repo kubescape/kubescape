@@ -18,13 +18,15 @@ type SeveritySummary struct {
 }
 
 type CVE struct {
-	Severity    string
-	ID          string
-	Package     string
-	Version     string
-	FixVersions []string
-	FixedState  string
-	Image       string
+	Severity         string
+	ID               string
+	Package          string
+	Version          string
+	FixVersions      []string
+	FixedState       string
+	Image            string
+	VexStatus        string
+	VexJustification string
 }
 
 type PackageScore struct {

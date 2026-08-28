@@ -676,3 +676,73 @@ func TestGetWorkloadCmd_RejectsLabelSelector(t *testing.T) {
 
 	assert.ErrorContains(t, err, "--label-selector is not supported for workload scans")
 }
+
+type scoredWorkloadKubescape struct {
+	mocks.MockIKubescape
+	complianceScore float32
+}
+
+func (m *scoredWorkloadKubescape) Scan(scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	rh := resultshandling.NewResultsHandler(nil, []printer.IPrinter{&fakePrinter{}}, &fakePrinter{})
+	sessionObj := cautils.NewOPASessionObjMock()
+	sessionObj.Report.SummaryDetails.ComplianceScore = m.complianceScore
+	rh.SetData(sessionObj)
+	return rh, nil
+}
+
+func (m *scoredWorkloadKubescape) ScanContext(_ context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return m.Scan(scanInfo, policyIdentifiers)
+}
+
+func TestGetWorkloadCmd_EnforcesComplianceThreshold(t *testing.T) {
+	tests := []struct {
+		name            string
+		complianceScore float32
+		threshold       float32
+		wantErr         string
+	}{
+		{
+			name:            "score below threshold returns error",
+			complianceScore: 50.0,
+			threshold:       80.0,
+			wantErr:         "scan compliance-score is below permitted threshold: 50.00 (compliance-threshold: 80.00)",
+		},
+		{
+			name:            "score equal to threshold passes",
+			complianceScore: 80.0,
+			threshold:       80.0,
+			wantErr:         "",
+		},
+		{
+			name:            "score above threshold passes",
+			complianceScore: 90.0,
+			threshold:       80.0,
+			wantErr:         "",
+		},
+		{
+			name:            "zero threshold disables enforcement",
+			complianceScore: 30.0,
+			threshold:       0,
+			wantErr:         "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := cautils.ScanInfo{ComplianceThreshold: tt.threshold}
+			mock := &scoredWorkloadKubescape{complianceScore: tt.complianceScore}
+			cmd := getWorkloadCmd(mock, &scanInfo)
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetArgs([]string{"Deployment/nginx"})
+
+			err := cmd.Execute()
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
