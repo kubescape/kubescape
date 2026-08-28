@@ -399,12 +399,364 @@ func TestAddResult_AnnotatesInitAndEphemeralContainerNames(t *testing.T) {
 	ac := makeControlWithPaths(privilegedInitAndEphemeralPaths(), nil)
 	ac.ControlID = "C-0057"
 
-	result := sp.addResult(run, control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, privilegedInitAndEphemeralPod(), nil)
+	result := sp.addResult(run, control, "pod.yaml", locationresolver.Location{Line: 1, Column: 1}, ac, "apps/v1/Deployment/default/demo", privilegedInitAndEphemeralPod(), nil)
 	require.NotNil(t, result.Message)
 	require.NotNil(t, result.Message.Text)
 	for _, path := range privilegedInitAndEphemeralNamedPaths() {
 		assert.Contains(t, *result.Message.Text, path)
 	}
+	require.NotNil(t, result.PartialFingerprints)
+	assert.NotEmpty(t, result.PartialFingerprints["kubescapeFindingFingerprint"])
+}
+
+func TestSARIFFindingFingerprintStableAcrossEvidenceOrdering(t *testing.T) {
+	left := fingerprintControlWithRules(
+		fingerprintRule("rule-b", "spec.template.spec.containers[1].image", "spec.template.spec.containers[1].securityContext.privileged"),
+		fingerprintRule("rule-a", "spec.template.spec.containers[0].image", "spec.template.spec.containers[0].securityContext.privileged"),
+	)
+	right := fingerprintControlWithRules(
+		fingerprintRule("rule-a", "spec.template.spec.containers[0].image", "spec.template.spec.containers[0].securityContext.privileged"),
+		fingerprintRule("rule-b", "spec.template.spec.containers[1].image", "spec.template.spec.containers[1].securityContext.privileged"),
+	)
+
+	leftFingerprint := sarifFindingFingerprint("C-0057", "apps/v1/Deployment/default/demo", "deploy.yaml", locationresolver.Location{Line: 12, Column: 9}, &left)
+	rightFingerprint := sarifFindingFingerprint("C-0057", "apps/v1/Deployment/default/demo", "deploy.yaml", locationresolver.Location{Line: 12, Column: 9}, &right)
+
+	assert.Equal(t, leftFingerprint, rightFingerprint)
+}
+
+func TestSARIFFindingFingerprintChangesWithIdentity(t *testing.T) {
+	base := fingerprintControlWithRules(
+		fingerprintRule("rule-a", "spec.template.spec.containers[0].image", "spec.template.spec.containers[0].securityContext.privileged"),
+	)
+	baseFingerprint := sarifFindingFingerprint("C-0057", "apps/v1/Deployment/default/demo", "deploy.yaml", locationresolver.Location{Line: 12, Column: 9}, &base)
+
+	tests := []struct {
+		name        string
+		controlID   string
+		resourceID  string
+		path        string
+		location    locationresolver.Location
+		association resourcesresults.ResourceAssociatedControl
+	}{
+		{
+			name:        "control id changes",
+			controlID:   "C-9999",
+			resourceID:  "apps/v1/Deployment/default/demo",
+			path:        "deploy.yaml",
+			location:    locationresolver.Location{Line: 12, Column: 9},
+			association: base,
+		},
+		{
+			name:        "resource id changes",
+			controlID:   "C-0057",
+			resourceID:  "apps/v1/Deployment/default/other",
+			path:        "deploy.yaml",
+			location:    locationresolver.Location{Line: 12, Column: 9},
+			association: base,
+		},
+		{
+			name:        "artifact path changes",
+			controlID:   "C-0057",
+			resourceID:  "apps/v1/Deployment/default/demo",
+			path:        "nested/deploy.yaml",
+			location:    locationresolver.Location{Line: 12, Column: 9},
+			association: base,
+		},
+		{
+			name:        "primary location changes",
+			controlID:   "C-0057",
+			resourceID:  "apps/v1/Deployment/default/demo",
+			path:        "deploy.yaml",
+			location:    locationresolver.Location{Line: 13, Column: 9},
+			association: base,
+		},
+		{
+			name:       "evidence path changes",
+			controlID:  "C-0057",
+			resourceID: "apps/v1/Deployment/default/demo",
+			path:       "deploy.yaml",
+			location:   locationresolver.Location{Line: 12, Column: 9},
+			association: fingerprintControlWithRules(
+				fingerprintRule("rule-a", "spec.template.spec.containers[0].image", "spec.template.spec.containers[1].securityContext.privileged"),
+			),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := sarifFindingFingerprint(test.controlID, test.resourceID, test.path, test.location, &test.association)
+			assert.NotEqual(t, baseFingerprint, got)
+		})
+	}
+}
+
+func TestSARIFFindingFingerprintStableAcrossRemediationChanges(t *testing.T) {
+	left := fingerprintControlWithRules(
+		resourcesresults.ResourceAssociatedRule{
+			Name:   "rule-a",
+			Status: apis.StatusFailed,
+			Paths: []armotypes.PosturePaths{
+				{
+					ReviewPath: "spec.template.spec.containers[0].securityContext.privileged",
+					FailedPath: "spec.template.spec.containers[0].securityContext.privileged",
+					FixCommand: "kubectl patch deployment demo --type json",
+					FixPath: armotypes.FixPath{
+						Path:  "spec.template.spec.containers[0].securityContext.privileged",
+						Value: "false",
+					},
+				},
+			},
+		},
+	)
+	right := fingerprintControlWithRules(
+		resourcesresults.ResourceAssociatedRule{
+			Name:   "rule-a",
+			Status: apis.StatusFailed,
+			Paths: []armotypes.PosturePaths{
+				{
+					ReviewPath: "spec.template.spec.containers[0].securityContext.privileged",
+					FailedPath: "spec.template.spec.containers[0].securityContext.privileged",
+					FixCommand: "kubectl edit deployment demo",
+					FixPath: armotypes.FixPath{
+						Path:  "spec.template.spec.initContainers[0].securityContext.privileged",
+						Value: "null",
+					},
+				},
+			},
+		},
+	)
+
+	leftFingerprint := sarifFindingFingerprint("C-0057", "apps/v1/Deployment/default/demo", "deploy.yaml", locationresolver.Location{Line: 12, Column: 9}, &left)
+	rightFingerprint := sarifFindingFingerprint("C-0057", "apps/v1/Deployment/default/demo", "deploy.yaml", locationresolver.Location{Line: 12, Column: 9}, &right)
+
+	assert.Equal(t, leftFingerprint, rightFingerprint)
+}
+
+func TestSARIFEvidenceIdentityNormalizesAndDeduplicates(t *testing.T) {
+	ac := fingerprintControlWithRules(
+		resourcesresults.ResourceAssociatedRule{
+			Name:   " rule-a ",
+			Status: apis.StatusFailed,
+			RelatedResourcesIDs: []string{
+				"apps/v1/Deployment/default/demo",
+				" apps/v1/Deployment/default/demo ",
+			},
+			Paths: []armotypes.PosturePaths{
+				{
+					ReviewPath: " spec.template.spec.containers[0].image ",
+					FailedPath: "spec.template.spec.containers[0].image",
+					DeletePath: " spec.template.spec.containers[0].env[0] ",
+					FixCommand: "kubectl patch deployment demo",
+					FixPath: armotypes.FixPath{
+						Path:  "spec.template.spec.containers[0].image",
+						Value: "nginx:1.25",
+					},
+				},
+				{
+					ReviewPath: "spec.template.spec.containers[0].image",
+					FailedPath: "spec.template.spec.containers[0].image",
+					DeletePath: "spec.template.spec.containers[0].env[0]",
+					FixCommand: " kubectl patch deployment demo ",
+					FixPath: armotypes.FixPath{
+						Path:  " spec.template.spec.containers[0].image ",
+						Value: "nginx:1.25",
+					},
+				},
+			},
+		},
+	)
+
+	got := sarifEvidenceIdentity(&ac)
+
+	require.Len(t, got, 1)
+	assert.Equal(t, "rule-a", got[0].RuleName)
+	assert.Equal(t, []string{"spec.template.spec.containers[0].image"}, got[0].ReviewPaths)
+	assert.Equal(t, []string{"spec.template.spec.containers[0].image"}, got[0].FailedPaths)
+	assert.Equal(t, []string{"spec.template.spec.containers[0].env[0]"}, got[0].DeletePaths)
+	assert.Equal(t, []string{"apps/v1/Deployment/default/demo"}, got[0].RelatedResourcesIDs)
+}
+
+func TestSARIFEvidenceIdentityIgnoresPassingRules(t *testing.T) {
+	ac := fingerprintControlWithRules(
+		resourcesresults.ResourceAssociatedRule{
+			Name:   "passing",
+			Status: apis.StatusPassed,
+			Paths:  []armotypes.PosturePaths{{ReviewPath: "spec.template.spec.containers[0].image"}},
+		},
+		fingerprintRule("failed", "spec.template.spec.containers[0].image", "spec.template.spec.containers[0].securityContext.privileged"),
+	)
+
+	got := sarifEvidenceIdentity(&ac)
+
+	require.Len(t, got, 1)
+	assert.Equal(t, "failed", got[0].RuleName)
+}
+
+func TestNormalizeSARIFIdentityPartUsesSlashPaths(t *testing.T) {
+	assert.Equal(t, "dir/file.yaml", normalizeSARIFIdentityPart(" dir\\file.yaml "))
+}
+
+func TestAddImageSARIFFingerprintsAddsMissingFingerprint(t *testing.T) {
+	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+	result := imageSARIFResult("CVE-2026-0001-libssl", "error", "libssl has a critical vulnerability",
+		imageSARIFLocation("pkg/catalog.json", 14, 3),
+	)
+	run.Results = []*sarif.Result{result, nil}
+
+	addImageSARIFFingerprints(run)
+
+	require.NotNil(t, result.PartialFingerprints)
+	assert.NotEmpty(t, result.PartialFingerprints["kubescapeImageFindingFingerprint"])
+}
+
+func TestAddImageSARIFFingerprintsPreservesExistingFingerprint(t *testing.T) {
+	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+	result := imageSARIFResult("CVE-2026-0001-libssl", "error", "libssl has a critical vulnerability",
+		imageSARIFLocation("pkg/catalog.json", 14, 3),
+	)
+	result.PartialFingerprints = map[string]interface{}{"upstream": "fingerprint"}
+	run.Results = []*sarif.Result{result}
+
+	addImageSARIFFingerprints(run)
+
+	assert.Equal(t, map[string]interface{}{"upstream": "fingerprint"}, result.PartialFingerprints)
+}
+
+func TestImageSARIFFindingFingerprintStableAcrossLocationOrdering(t *testing.T) {
+	left := imageSARIFResult("CVE-2026-0001-libssl", "error", "libssl has a critical vulnerability",
+		imageSARIFLocation("pkg/catalog.json", 14, 3),
+		imageSARIFLocation("pkg/manifest.json", 20, 5),
+	)
+	right := imageSARIFResult("CVE-2026-0001-libssl", "error", "libssl has a critical vulnerability",
+		imageSARIFLocation("pkg/manifest.json", 20, 5),
+		imageSARIFLocation("pkg/catalog.json", 14, 3),
+	)
+	left.AnalysisTarget = sarif.NewSimpleArtifactLocation("registry.example.com/team/app:1.0.0")
+	right.AnalysisTarget = sarif.NewSimpleArtifactLocation("registry.example.com/team/app:1.0.0")
+
+	assert.Equal(t, imageSARIFFindingFingerprint(left), imageSARIFFindingFingerprint(right))
+}
+
+func TestImageSARIFFindingFingerprintChangesWithIdentity(t *testing.T) {
+	base := imageSARIFResult("CVE-2026-0001-libssl", "error", "libssl has a critical vulnerability",
+		imageSARIFLocation("pkg/catalog.json", 14, 3),
+	)
+	base.AnalysisTarget = sarif.NewSimpleArtifactLocation("registry.example.com/team/app:1.0.0")
+	baseFingerprint := imageSARIFFindingFingerprint(base)
+
+	tests := []struct {
+		name   string
+		result *sarif.Result
+	}{
+		{
+			name: "rule id changes",
+			result: imageSARIFResult("CVE-2026-0002-libssl", "error", "libssl has a critical vulnerability",
+				imageSARIFLocation("pkg/catalog.json", 14, 3),
+			),
+		},
+		{
+			name: "level changes",
+			result: imageSARIFResult("CVE-2026-0001-libssl", "warning", "libssl has a critical vulnerability",
+				imageSARIFLocation("pkg/catalog.json", 14, 3),
+			),
+		},
+		{
+			name: "message changes",
+			result: imageSARIFResult("CVE-2026-0001-libssl", "error", "libssl vulnerability is fixed upstream",
+				imageSARIFLocation("pkg/catalog.json", 14, 3),
+			),
+		},
+		{
+			name: "location uri changes",
+			result: imageSARIFResult("CVE-2026-0001-libssl", "error", "libssl has a critical vulnerability",
+				imageSARIFLocation("pkg/other.json", 14, 3),
+			),
+		},
+		{
+			name: "location region changes",
+			result: imageSARIFResult("CVE-2026-0001-libssl", "error", "libssl has a critical vulnerability",
+				imageSARIFLocation("pkg/catalog.json", 18, 3),
+			),
+		},
+		{
+			name: "analysis target changes",
+			result: imageSARIFResult("CVE-2026-0001-libssl", "error", "libssl has a critical vulnerability",
+				imageSARIFLocation("pkg/catalog.json", 14, 3),
+			),
+		},
+	}
+	tests[len(tests)-1].result.AnalysisTarget = sarif.NewSimpleArtifactLocation("registry.example.com/team/app:2.0.0")
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if test.result.AnalysisTarget == nil {
+				test.result.AnalysisTarget = sarif.NewSimpleArtifactLocation("registry.example.com/team/app:1.0.0")
+			}
+			assert.NotEqual(t, baseFingerprint, imageSARIFFindingFingerprint(test.result))
+		})
+	}
+}
+
+func TestSARIFLocationIdentitiesSkipEmptyLocations(t *testing.T) {
+	got := sarifLocationIdentities([]*sarif.Location{
+		nil,
+		sarif.NewLocation(),
+		imageSARIFLocation("pkg/catalog.json", 14, 3),
+	})
+
+	require.Len(t, got, 1)
+	assert.Equal(t, sarifLocationIdentity{
+		URI:         "pkg/catalog.json",
+		StartLine:   14,
+		StartColumn: 3,
+	}, got[0])
+}
+
+func TestSARIFMessageTextFallbacks(t *testing.T) {
+	assert.Equal(t, "plain text", sarifMessageText(*sarif.NewTextMessage(" plain text ")))
+	assert.Equal(t, "markdown text", sarifMessageText(*sarif.NewMarkdownMessage(" markdown text ")))
+	assert.Equal(t, "message-id", sarifMessageText(*sarif.NewMessage().WithID(" message-id ")))
+	assert.Equal(t, "arg-a\x00arg-b", sarifMessageText(*sarif.NewMessage().WithArguments([]string{"arg-a", "arg-b"})))
+}
+
+func fingerprintControlWithRules(rules ...resourcesresults.ResourceAssociatedRule) resourcesresults.ResourceAssociatedControl {
+	return resourcesresults.ResourceAssociatedControl{
+		ControlID:               "C-0057",
+		Status:                  apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		ResourceAssociatedRules: rules,
+	}
+}
+
+func fingerprintRule(name, fixPath, reviewPath string) resourcesresults.ResourceAssociatedRule {
+	return resourcesresults.ResourceAssociatedRule{
+		Name:   name,
+		Status: apis.StatusFailed,
+		Paths: []armotypes.PosturePaths{
+			{
+				ReviewPath: reviewPath,
+				FixPath: armotypes.FixPath{
+					Path:  fixPath,
+					Value: "false",
+				},
+			},
+		},
+	}
+}
+
+func imageSARIFResult(ruleID, level, message string, locations ...*sarif.Location) *sarif.Result {
+	return sarif.NewRuleResult(ruleID).
+		WithLevel(level).
+		WithMessage(sarif.NewTextMessage(message)).
+		WithLocations(locations)
+}
+
+func imageSARIFLocation(uri string, line, column int) *sarif.Location {
+	return sarif.NewLocationWithPhysicalLocation(
+		sarif.NewPhysicalLocation().
+			WithArtifactLocation(sarif.NewSimpleArtifactLocation(uri)).
+			WithRegion(sarif.NewRegion().WithStartLine(line).WithStartColumn(column)),
+	)
 }
 
 func TestPrintConfigurationScan_MissingControl(t *testing.T) {
