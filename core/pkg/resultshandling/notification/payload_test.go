@@ -102,8 +102,8 @@ func TestMarshalPayloadBuildsDeterministicSlackBlockKit(t *testing.T) {
 }
 
 func TestMarshalPayloadLimitsSlackMessageToTopTenFailingControls(t *testing.T) {
-	controls := make(reportsummary.ControlSummaries, maxSlackFailingControls+1)
-	for i := 0; i <= maxSlackFailingControls; i++ {
+	controls := make(reportsummary.ControlSummaries, maxFailingControls+1)
+	for i := 0; i <= maxFailingControls; i++ {
 		id := fmt.Sprintf("C-%02d", i)
 		controls[id] = failedControl(id, "Failed control", 7, 1)
 	}
@@ -114,14 +114,14 @@ func TestMarshalPayloadLimitsSlackMessageToTopTenFailingControls(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &got))
 	require.Len(t, got.Blocks, 3)
 	require.NotNil(t, got.Blocks[2].Text)
-	assert.Equal(t, maxSlackFailingControls, strings.Count(got.Blocks[2].Text.Text, "\n• "))
+	assert.Equal(t, maxFailingControls, strings.Count(got.Blocks[2].Text.Text, "\n• "))
 	assert.Contains(t, got.Blocks[2].Text.Text, "C-09")
 	assert.NotContains(t, got.Blocks[2].Text.Text, "C-10")
 }
 
 func TestMarshalPayloadBoundsLongSlackControlNames(t *testing.T) {
-	controls := make(reportsummary.ControlSummaries, maxSlackFailingControls)
-	for i := 0; i < maxSlackFailingControls; i++ {
+	controls := make(reportsummary.ControlSummaries, maxFailingControls)
+	for i := 0; i < maxFailingControls; i++ {
 		id := fmt.Sprintf("C-%02d-%s", i, strings.Repeat("<", 500))
 		controls[id] = failedControl(id, strings.Repeat("@channel <&>", 500), 7, 1)
 	}
@@ -134,7 +134,7 @@ func TestMarshalPayloadBoundsLongSlackControlNames(t *testing.T) {
 	require.NotNil(t, got.Blocks[2].Text)
 	assert.True(t, got.Blocks[2].Text.Verbatim)
 	assert.LessOrEqual(t, utf8.RuneCountInString(got.Blocks[2].Text.Text), maxSlackSectionTextLength)
-	assert.Equal(t, maxSlackFailingControls, strings.Count(got.Blocks[2].Text.Text, "\n• "))
+	assert.Equal(t, maxFailingControls, strings.Count(got.Blocks[2].Text.Text, "\n• "))
 	assert.Contains(t, got.Blocks[2].Text.Text, "@channel")
 	assert.NotContains(t, got.Blocks[2].Text.Text, "&am…")
 	assert.NotContains(t, got.Blocks[2].Text.Text, "&l…")
