@@ -73,11 +73,88 @@ func TestGetViewCmd_Args(t *testing.T) {
 	err = downloadCmd.Args(&cobra.Command{}, []string{"control", "C-0001"})
 	assert.Nil(t, err)
 
+	err = downloadCmd.Args(&cobra.Command{}, []string{"controls", "C-0001"})
+	assert.Nil(t, err)
+
+	err = downloadCmd.Args(&cobra.Command{}, []string{"frameworks", "nsa"})
+	assert.Nil(t, err)
+
+	err = downloadCmd.Args(&cobra.Command{}, []string{"controls-config"})
+	assert.Nil(t, err)
+
+	err = downloadCmd.Args(&cobra.Command{}, []string{"exception"})
+	assert.Nil(t, err)
+
+	err = downloadCmd.Args(&cobra.Command{}, []string{"artifact"})
+	assert.Nil(t, err)
+
+	err = downloadCmd.Args(&cobra.Command{}, []string{"attack-track"})
+	assert.Nil(t, err)
+
 	err = downloadCmd.Args(&cobra.Command{}, []string{"control", "C-0001", "C-0002"})
 	assert.Nil(t, err)
 
 	err = downloadCmd.RunE(&cobra.Command{}, []string{"control", "C-0001", "C-0002"})
 	assert.Nil(t, err)
+}
+
+func TestNormalizeDownloadTarget(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"control", core.TargetControl},
+		{"controls", core.TargetControl},
+		{"framework", core.TargetFramework},
+		{"frameworks", core.TargetFramework},
+		{"controls-inputs", core.TargetControlsInputs},
+		{"controls-input", core.TargetControlsInputs},
+		{"control-inputs", core.TargetControlsInputs},
+		{"control-input", core.TargetControlsInputs},
+		{"controls-config", core.TargetControlsInputs},
+		{"control-config", core.TargetControlsInputs},
+		{"exceptions", core.TargetExceptions},
+		{"exception", core.TargetExceptions},
+		{"artifacts", core.TargetArtifacts},
+		{"artifact", core.TargetArtifacts},
+		{"attack-tracks", core.TargetAttackTracks},
+		{"attack-track", core.TargetAttackTracks},
+		{"unknown", "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.want, normalizeDownloadTarget(tt.input))
+		})
+	}
+}
+
+// TestDownloadCmd_TargetNormalization verifies that plural and alias targets
+// are normalized to their canonical values before calling Kubescape.Download.
+func TestDownloadCmd_TargetNormalization(t *testing.T) {
+	tests := []struct {
+		args       []string
+		wantTarget string
+		wantID     string
+	}{
+		{args: []string{"controls", "C-0001"}, wantTarget: core.TargetControl, wantID: "C-0001"},
+		{args: []string{"frameworks", "nsa"}, wantTarget: core.TargetFramework, wantID: "nsa"},
+		{args: []string{"controls-config"}, wantTarget: core.TargetControlsInputs, wantID: ""},
+		{args: []string{"exception"}, wantTarget: core.TargetExceptions, wantID: ""},
+		{args: []string{"artifact"}, wantTarget: core.TargetArtifacts, wantID: ""},
+		{args: []string{"attack-track"}, wantTarget: core.TargetAttackTracks, wantID: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(strings.Join(tt.args, "_"), func(t *testing.T) {
+			ks := &recordingDownloadKS{}
+			cmd := GetDownloadCmd(ks)
+			require.NoError(t, cmd.RunE(cmd, tt.args))
+			require.NotNil(t, ks.captured)
+			assert.Equal(t, tt.wantTarget, ks.captured.Target)
+			assert.Equal(t, tt.wantID, ks.captured.Identifier)
+		})
+	}
 }
 
 // TestDownloadCmd_JSONOutputPathPreSplit pins the CLI half of the
