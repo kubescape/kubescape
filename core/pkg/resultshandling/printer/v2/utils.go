@@ -42,8 +42,13 @@ type ResourceAssociatedControlWithSeverity struct {
 // consumer parsing them sees no difference; Evidence is a new, separate
 // field a consumer opts into reading.
 type PathValue struct {
-	Path  string `json:"path"`
-	Value string `json:"value,omitempty"`
+	Path string `json:"path"`
+	// Value is not omitempty: anyToString never returns a Go empty string on
+	// a successful resolution (an empty JSON string field renders as the
+	// literal "" two-character value), but omitempty would silently drop a
+	// genuinely empty resolved value if that ever changes, serializing an
+	// evidence item with only path and no indication a value exists.
+	Value string `json:"value"`
 }
 
 // failedPathValues resolves each of control's FailedPaths against

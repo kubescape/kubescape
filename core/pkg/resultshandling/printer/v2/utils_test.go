@@ -1253,3 +1253,18 @@ func TestFilterBySeverity_EmptyMinSeverityNoOp(t *testing.T) {
 	FilterBySeverity(report, "")
 	assert.Len(t, report.SummaryDetails.Controls, 1)
 }
+
+// TestPathValue_EmptyValueIsSerialized guards against Value carrying
+// omitempty: a genuinely empty resolved value must still serialize as
+// "value":"", not vanish from the evidence item entirely.
+func TestPathValue_EmptyValueIsSerialized(t *testing.T) {
+	encoded, err := json.Marshal(PathValue{Path: "spec.foo", Value: ""})
+	require.NoError(t, err)
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &decoded))
+
+	value, ok := decoded["value"]
+	require.True(t, ok, "value field must be present even when empty")
+	assert.Equal(t, "", value)
+}
