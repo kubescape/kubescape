@@ -23,6 +23,9 @@ import (
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"k8s.io/apimachinery/pkg/version"
 )
 
@@ -892,4 +895,194 @@ func TestGetAllWorkloadImagesReturnsGetterErrorsAndPreservesOtherClasses(t *test
 			assert.Contains(t, containerErrors[0].Error(), "namespace: image-scan-test")
 		})
 	}
+}
+
+func setupSpanRecorder(t *testing.T) *tracetest.InMemoryExporter {
+	t.Helper()
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	prevTP := otel.GetTracerProvider()
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+		otel.SetTracerProvider(prevTP)
+	})
+	return exporter
+}
+
+func TestScanContext_SpanLifecycle_OPAError(t *testing.T) {
+	exporter := setupSpanRecorder(t)
+	scanInfo, policyIdentifiers, _ := buildBrokenRuleScanInfo(t)
+	ks := NewKubescape(context.Background())
+
+	results, err := ks.ScanContext(context.Background(), scanInfo, policyIdentifiers)
+	require.Error(t, err)
+	require.NotNil(t, results)
+
+	spans := exporter.GetSpans()
+	spanNames := make(map[string]tracetest.SpanStub)
+	for _, span := range spans {
+		spanNames[span.Name] = span
+		assert.False(t, span.EndTime.IsZero(), "span %q was not ended", span.Name)
+	}
+
+	assert.Contains(t, spanNames, "initialization")
+	assert.Contains(t, spanNames, "policies")
+	assert.Contains(t, spanNames, "resources")
+	assert.Contains(t, spanNames, "opa testing")
+
+	initSpan := spanNames["initialization"]
+	policiesSpan := spanNames["policies"]
+	assert.True(t, !initSpan.EndTime.After(policiesSpan.StartTime) || initSpan.EndTime.Equal(policiesSpan.StartTime) || policiesSpan.StartTime.After(initSpan.StartTime),
+		"initialization must finish early in the scan")
+}
+
+// TestScanContext_SpanLifecycle_StreamingError is the direct regression test
+// for M-05: "scan.go leaks the spanInit when streaming errors". It forces the
+// streaming branch (EnableStreaming=true) and causes
+// collectAndProcessResourcesWithStreaming to return an error via a broken Rego
+// rule. Before the fix, both spanInit and spanResources were leaked on this
+// path.
+func TestScanContext_SpanLifecycle_StreamingError(t *testing.T) {
+	exporter := setupSpanRecorder(t)
+	scanInfo, policyIdentifiers, _ := buildBrokenRuleScanInfo(t)
+	scanInfo.EnableStreaming = true
+	ks := NewKubescape(context.Background())
+
+	results, err := ks.ScanContext(context.Background(), scanInfo, policyIdentifiers)
+	require.Error(t, err, "streaming with a broken rule must return an error")
+	require.NotNil(t, results)
+
+	spans := exporter.GetSpans()
+
+	spanNames := make(map[string]tracetest.SpanStub)
+	resourcesSpanCount := 0
+	for _, span := range spans {
+		spanNames[span.Name] = span
+		assert.False(t, span.EndTime.IsZero(), "span %q was not ended (leaked)", span.Name)
+		if span.Name == "resources" {
+			resourcesSpanCount++
+		}
+	}
+
+	assert.Contains(t, spanNames, "resources", "streaming branch must create a resources span")
+	assert.Equal(t, 1, resourcesSpanCount, "resources span must appear exactly once")
+	assert.Contains(t, spanNames, "initialization")
+	assert.False(t, spanNames["initialization"].EndTime.IsZero(), "initialization span must be ended even on streaming error")
+	assert.Contains(t, spanNames, "policies")
+	assert.False(t, spanNames["policies"].EndTime.IsZero(), "policies span must be ended even on streaming error")
+}
+
+func TestScanContext_SpanLifecycle_PolicyError(t *testing.T) {
+	exporter := setupSpanRecorder(t)
+	missingPolicy := "missing-" + filepath.Base(t.TempDir())
+	scanInfo := &cautils.ScanInfo{
+		InputPatterns: []string{"../cautils/testdata/mixed_extensions/pod.yaml"},
+		UseFrom:       []string{filepath.Join(t.TempDir(), missingPolicy+".json")},
+		Local:         true,
+		FrameworkScan: true,
+		ScanType:      cautils.ScanTypeFramework,
+	}
+	scanInfo.Submit.SetBool(false)
+
+	_, err := NewKubescape(context.Background()).ScanContext(context.Background(), scanInfo, cautils.BuildPolicyIdentifiers([]string{missingPolicy}, apisv1.KindFramework))
+	require.Error(t, err)
+
+	spans := exporter.GetSpans()
+	spanNames := make(map[string]tracetest.SpanStub)
+	for _, span := range spans {
+		spanNames[span.Name] = span
+		assert.False(t, span.EndTime.IsZero(), "span %q was not ended", span.Name)
+	}
+
+	assert.Contains(t, spanNames, "initialization")
+	assert.Contains(t, spanNames, "policies")
+}
+
+func buildValidRuleScanInfo(t *testing.T) (*cautils.ScanInfo, []cautils.PolicyIdentifier) {
+	t.Helper()
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "pod.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name: valid-pod
+  namespace: default
+`), 0o600))
+
+	rule := reporthandling.PolicyRule{
+		Rule: `package armo_builtins
+
+deny[msga] {
+	false
+	msga := {}
+}
+`,
+		RuleLanguage: reporthandling.RegoLanguage,
+		Match: []reporthandling.RuleMatchObjects{{
+			APIGroups:   []string{""},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"Pod"},
+		}},
+	}
+	rule.Name = "valid-rule"
+	control := reporthandling.Control{ControlID: "C-VALID", BaseScore: 5, Rules: []reporthandling.PolicyRule{rule}}
+	control.Name = "valid-control"
+	framework := reporthandling.Framework{Controls: []reporthandling.Control{control}}
+	framework.Name = "valid-framework"
+	frameworkBytes, err := json.Marshal(framework)
+	require.NoError(t, err)
+	frameworkPath := filepath.Join(dir, "framework.json")
+	require.NoError(t, os.WriteFile(frameworkPath, frameworkBytes, 0o600))
+	controlsInputsPath := filepath.Join(dir, "controls-inputs.json")
+	require.NoError(t, os.WriteFile(controlsInputsPath, []byte(`{"probe":["value"]}`), 0o600))
+	exceptionsPath := filepath.Join(dir, "exceptions.json")
+	require.NoError(t, os.WriteFile(exceptionsPath, []byte(`[]`), 0o600))
+	attackTracksPath := filepath.Join(dir, "attack-tracks.json")
+	require.NoError(t, os.WriteFile(attackTracksPath, []byte(`[]`), 0o600))
+
+	scanInfo := &cautils.ScanInfo{
+		UseFrom:          []string{frameworkPath},
+		ControlsInputs:   controlsInputsPath,
+		UseExceptions:    exceptionsPath,
+		AttackTracks:     attackTracksPath,
+		InputPatterns:    []string{manifestPath},
+		Local:            true,
+		FrameworkScan:    true,
+		ScanType:         cautils.ScanTypeFramework,
+		OmitRawResources: true,
+	}
+	scanInfo.Submit.SetBool(false)
+
+	policyIdentifiers := []cautils.PolicyIdentifier{{
+		Identifier: framework.Name,
+		Kind:       apisv1.KindFramework,
+	}}
+	return scanInfo, policyIdentifiers
+}
+
+func TestScanContext_SpanLifecycle_Success(t *testing.T) {
+	exporter := setupSpanRecorder(t)
+	scanInfo, policyIdentifiers := buildValidRuleScanInfo(t)
+	ks := NewKubescape(context.Background())
+
+	results, err := ks.ScanContext(context.Background(), scanInfo, policyIdentifiers)
+	require.NoError(t, err)
+	require.NotNil(t, results)
+
+	spans := exporter.GetSpans()
+	spanNames := make(map[string]tracetest.SpanStub)
+	for _, span := range spans {
+		spanNames[span.Name] = span
+		assert.False(t, span.EndTime.IsZero(), "span %q was not ended", span.Name)
+	}
+
+	assert.Contains(t, spanNames, "initialization")
+	assert.Contains(t, spanNames, "policies")
+	assert.Contains(t, spanNames, "resources")
+	assert.Contains(t, spanNames, "opa testing")
+
+	initSpan := spanNames["initialization"]
+	resourcesSpan := spanNames["resources"]
+	assert.True(t, !initSpan.EndTime.After(resourcesSpan.StartTime), "initialization must finish before resource collection starts")
 }
