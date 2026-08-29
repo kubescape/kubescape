@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/pkg/policyhandler"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/kubescape/opa-utils/resources"
 )
@@ -54,6 +55,12 @@ type scanRequest struct {
 	// customGetters replaces the policy getters wholesale. Nil means derive them
 	// from the server's own policy getter.
 	customGetters *cautils.Getters
+	// scanObject, when non-nil, narrows the scan to one named workload. Both
+	// resource handlers resolve it themselves — K8sResourceHandler through
+	// cluster discovery, FileResourceHandler by matching the loaded manifests —
+	// so it needs no plumbing beyond reaching ScanInfo. A nil value leaves every
+	// other scan path unchanged.
+	scanObject *objectsenvelopes.ScanObject
 }
 
 func runControlScan(ctx context.Context, ksServer *KubescapeMcpserver, namespace string, controlIDs []string, label string) ([]byte, error) {
@@ -201,6 +208,7 @@ func buildScanInfo(req scanRequest) *cautils.ScanInfo {
 		IncludeNamespaces: namespace,
 		ScanTimeout:       timeout,
 		InputPatterns:     req.inputPatterns,
+		ScanObject:        req.scanObject,
 	}
 }
 
