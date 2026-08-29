@@ -45,7 +45,7 @@ rules/<rule-name>/test/<case>/input.yaml  same thing for cases regolibrary wrote
 
 ## What is changed, and why
 
-Two mechanical edits to the fixtures. Both are worth raising in regolibrary so a
+Three mechanical edits to the fixtures. All are worth raising in regolibrary so a
 later refresh does not undo them.
 
 - **Removed API versions bumped to the served one.** Seven CronJob fixtures were
@@ -60,6 +60,11 @@ later refresh does not undo them.
   ID and the second overwrote the first, leaving a case named for multiple load
   balancers testing one. The second is now `api-tls`. The harness refuses a case
   whose fixtures share an ID, so this cannot come back quietly.
+- **One tab replaced with spaces**, in `role-in-default-namespace/test/role`. The
+  reader the harness uses (`sigs.k8s.io/yaml`, over `go.yaml.in/yaml/v2`) accepts
+  a tab used as separation before a comment, so the fixture parsed and the case
+  ran either way. Stricter readers reject it, which makes the fixture a hazard
+  for anything else that picks it up, so it is spaces now.
 
 ## Refreshing
 

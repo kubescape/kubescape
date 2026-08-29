@@ -5,4 +5,4 @@ metadata:
 rules:
 - apiGroups: ["*"]
   resources: ["pods", "pods/portforward"] # we look for this resource or *
-  verbs: ["update", "patch", "create"]	  # we look for these verbs or *
+  verbs: ["update", "patch", "create"]    # we look for these verbs or *
