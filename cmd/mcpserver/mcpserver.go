@@ -71,6 +71,22 @@ func mcpScanNamespace(arguments map[string]any) (string, error) {
 	return namespace, nil
 }
 
+// mcpStringArg reads an optional string tool argument and trims it. An argument
+// that is present but not a string is reported rather than ignored: silently
+// falling back to the empty string would widen a scan the caller meant to
+// narrow, the same reasoning behind mcpScanNamespace's type check.
+func mcpStringArg(arguments map[string]any, name string) (string, *mcp.CallToolResult) {
+	raw, ok := arguments[name]
+	if !ok {
+		return "", nil
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return "", mcp.NewToolResultError(fmt.Sprintf("%s argument must be a string", name))
+	}
+	return strings.TrimSpace(s), nil
+}
+
 // jsonMarshal is a package-level var so tests can inject marshal failures.
 var jsonMarshal = json.Marshal
 
@@ -1281,6 +1297,39 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 			return mcp.NewToolResultError(fmt.Sprintf("failed to run control scan: %v", err)), nil
 		}
 		return mcp.NewToolResultText(string(v.([]byte))), nil
+	case "scan_workload":
+		workload, toolErr := mcpStringArg(arguments, "workload")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		if workload == "" {
+			return mcp.NewToolResultError("workload argument is required and cannot be empty"), nil
+		}
+		namespace, err := mcpScanNamespace(arguments)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		path, toolErr := mcpStringArg(arguments, "path")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		framework, toolErr := mcpStringArg(arguments, "framework")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		// Every component here is caller-supplied, so each is escaped: an
+		// unescaped separator in one argument could otherwise collide with a
+		// different request's key and serve it that scan's results.
+		key := fmt.Sprintf("workload_scan:%s:%s:%s:%s",
+			url.QueryEscape(workload), url.QueryEscape(namespace),
+			url.QueryEscape(path), url.QueryEscape(framework))
+		v, err := ksServer.doScanChan(ctx, key, func(scanCtx context.Context) (interface{}, error) {
+			return workloadScanFn(ksServer, scanCtx, workload, namespace, path, framework)
+		})
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to run workload scan: %v", err)), nil
+		}
+		return mcp.NewToolResultText(string(v.([]byte))), nil
 	case "list_frameworks":
 		result, err := ksServer.ListFrameworks(ctx)
 		if err != nil {
@@ -1336,6 +1385,7 @@ func mcpServerEntrypoint(transport string, port int) error {
 	createIaCControlScanningTool(ksServer)
 	createRemediationTools(ksServer)
 	createControlScanningTools(ksServer)
+	createWorkloadScanningTools(ksServer)
 	createPolicyListingTools(ksServer)
 	createAdvancedTools(ksServer)
 

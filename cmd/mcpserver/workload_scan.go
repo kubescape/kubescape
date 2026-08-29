@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 
+	"github.com/mark3labs/mcp-go/mcp"
+
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -90,4 +92,25 @@ func (ksServer *KubescapeMcpserver) RunWorkloadScan(ctx context.Context, workloa
 // mapping without running a scan, matching rbacScanFn and its siblings.
 var workloadScanFn = func(s *KubescapeMcpserver, ctx context.Context, workload, namespace, path, frameworkName string) ([]byte, error) {
 	return s.RunWorkloadScan(ctx, workload, namespace, path, frameworkName)
+}
+
+func createWorkloadScanningTools(ksServer *KubescapeMcpserver) {
+	runWorkloadScanTool := mcp.NewTool(
+		"scan_workload",
+		mcp.WithDescription("Scan a single named Kubernetes workload (e.g. one Deployment) for misconfigurations and return its failed controls. Prefer this over scan_controls or run_framework_security_scan when you already know which workload you care about: only the rules that apply to that resource's kind are evaluated, so it is much cheaper and returns far fewer results. Scans the live cluster by default, or local manifests when path is given."),
+		mcp.WithString("workload",
+			mcp.Required(),
+			mcp.Description("Workload identifier as <kind>[.<version>[.<group>]]/<name>, optionally namespace-qualified: \"Deployment/nginx\", \"default/Deployment/nginx\", or \"Deployment.v1.apps/nginx\". A non-built-in kind (CRD) must include its version and group."),
+		),
+		mcp.WithString("namespace",
+			mcp.Description("Namespace of the workload (optional). Overrides a namespace embedded in the workload identifier. Omit to search all namespaces."),
+		),
+		mcp.WithString("path",
+			mcp.Description("Optional path to local YAML manifests. When set, the workload is resolved from those files instead of the live cluster."),
+		),
+		mcp.WithString("framework",
+			mcp.Description("Framework to scan against (optional, defaults to the full workload control set)."),
+		),
+	)
+	ksServer.s.AddTool(runWorkloadScanTool, ksServer.toolHandler(runWorkloadScanTool.Name))
 }

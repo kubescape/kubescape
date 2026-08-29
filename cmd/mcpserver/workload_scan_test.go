@@ -2,12 +2,14 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -195,4 +197,188 @@ func TestRunWorkloadScan_InvalidIdentifierDoesNotScan(t *testing.T) {
 	_, err := ksServer.RunWorkloadScan(context.Background(), "nginx", "", "testdata/deployment.yaml", "nsa")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, cautils.ErrInvalidWorkloadIdentifier))
+}
+
+// --- tool dispatch --------------------------------------------------------
+
+// stubWorkloadScan replaces the scan seam with a recorder so CallTool argument
+// mapping can be asserted without running a scan, and restores it afterwards.
+// It returns a pointer to the recorded arguments.
+func stubWorkloadScan(t *testing.T) *struct{ workload, namespace, path, framework string } {
+	t.Helper()
+	got := &struct{ workload, namespace, path, framework string }{}
+	orig := workloadScanFn
+	t.Cleanup(func() { workloadScanFn = orig })
+	workloadScanFn = func(_ *KubescapeMcpserver, _ context.Context, workload, namespace, path, framework string) ([]byte, error) {
+		got.workload, got.namespace, got.path, got.framework = workload, namespace, path, framework
+		return []byte(`{"total_failed":0}`), nil
+	}
+	return got
+}
+
+func newWorkloadToolServer(t *testing.T) *KubescapeMcpserver {
+	t.Helper()
+	ksServer := &KubescapeMcpserver{s: server.NewMCPServer("kubescape-test", "test")}
+	require.NotPanics(t, func() { createWorkloadScanningTools(ksServer) })
+	return ksServer
+}
+
+func TestCallTool_ScanWorkload_ArgumentErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		arguments map[string]any
+		wantErr   string
+	}{
+		{
+			name:      "missing workload",
+			arguments: map[string]any{},
+			wantErr:   "workload argument is required",
+		},
+		{
+			name:      "blank workload",
+			arguments: map[string]any{"workload": "   "},
+			wantErr:   "workload argument is required",
+		},
+		{
+			name:      "non-string workload",
+			arguments: map[string]any{"workload": 42},
+			wantErr:   "workload argument must be a string",
+		},
+		{
+			name:      "non-string namespace",
+			arguments: map[string]any{"workload": "Deployment/nginx", "namespace": 7},
+			wantErr:   "namespace argument must be a string",
+		},
+		{
+			name:      "non-string path",
+			arguments: map[string]any{"workload": "Deployment/nginx", "path": true},
+			wantErr:   "path argument must be a string",
+		},
+		{
+			name:      "non-string framework",
+			arguments: map[string]any{"workload": "Deployment/nginx", "framework": []any{"nsa"}},
+			wantErr:   "framework argument must be a string",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stubWorkloadScan(t)
+			ksServer := newWorkloadToolServer(t)
+
+			res, err := ksServer.CallTool(context.Background(), "scan_workload", tt.arguments)
+			require.NoError(t, err, "argument problems are reported as tool errors, not Go errors")
+			require.NotNil(t, res)
+			assert.True(t, res.IsError, "expected a tool error result")
+			assert.Contains(t, toolResultText(t, res), tt.wantErr)
+		})
+	}
+}
+
+func TestCallTool_ScanWorkload_ForwardsArguments(t *testing.T) {
+	tests := []struct {
+		name          string
+		arguments     map[string]any
+		wantWorkload  string
+		wantNamespace string
+		wantPath      string
+		wantFramework string
+	}{
+		{
+			name:         "workload only",
+			arguments:    map[string]any{"workload": "Deployment/nginx"},
+			wantWorkload: "Deployment/nginx",
+		},
+		{
+			name:          "wildcard namespace is normalized to cluster-wide",
+			arguments:     map[string]any{"workload": "Deployment/nginx", "namespace": "*"},
+			wantWorkload:  "Deployment/nginx",
+			wantNamespace: "",
+		},
+		{
+			name:          "all arguments forwarded and trimmed",
+			arguments:     map[string]any{"workload": "  Deployment/nginx  ", "namespace": "default", "path": "  ./manifests  ", "framework": " nsa "},
+			wantWorkload:  "Deployment/nginx",
+			wantNamespace: "default",
+			wantPath:      "./manifests",
+			wantFramework: "nsa",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stubWorkloadScan(t)
+			ksServer := newWorkloadToolServer(t)
+
+			res, err := ksServer.CallTool(context.Background(), "scan_workload", tt.arguments)
+			require.NoError(t, err)
+			require.NotNil(t, res)
+			assert.False(t, res.IsError, "unexpected tool error: %s", toolResultText(t, res))
+
+			assert.Equal(t, tt.wantWorkload, got.workload)
+			assert.Equal(t, tt.wantNamespace, got.namespace)
+			assert.Equal(t, tt.wantPath, got.path)
+			assert.Equal(t, tt.wantFramework, got.framework)
+		})
+	}
+}
+
+// TestCallTool_ScanWorkload_ScanFailureIsToolError asserts a failing scan comes
+// back as a tool error the agent can read, not a transport-level Go error.
+func TestCallTool_ScanWorkload_ScanFailureIsToolError(t *testing.T) {
+	orig := workloadScanFn
+	t.Cleanup(func() { workloadScanFn = orig })
+	workloadScanFn = func(_ *KubescapeMcpserver, _ context.Context, _, _, _, _ string) ([]byte, error) {
+		return nil, errors.New("resource nginx was not found")
+	}
+	ksServer := newWorkloadToolServer(t)
+
+	res, err := ksServer.CallTool(context.Background(), "scan_workload", map[string]any{"workload": "Deployment/nginx"})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.True(t, res.IsError)
+	text := toolResultText(t, res)
+	assert.Contains(t, text, "failed to run workload scan")
+	assert.Contains(t, text, "was not found", "the underlying reason must survive to the caller")
+}
+
+func TestCreateWorkloadScanningTools_RegistersScanWorkload(t *testing.T) {
+	ksServer := newWorkloadToolServer(t)
+
+	message, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/list",
+	})
+	require.NoError(t, err)
+	raw, err := json.Marshal(ksServer.s.HandleMessage(context.Background(), message))
+	require.NoError(t, err)
+
+	var listed struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				InputSchema struct {
+					Properties map[string]any `json:"properties"`
+					Required   []string       `json:"required"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &listed))
+
+	var found bool
+	for _, tool := range listed.Result.Tools {
+		if tool.Name != "scan_workload" {
+			continue
+		}
+		found = true
+		for _, prop := range []string{"workload", "namespace", "path", "framework"} {
+			assert.Contains(t, tool.InputSchema.Properties, prop)
+		}
+		assert.Contains(t, tool.InputSchema.Required, "workload")
+		assert.NotContains(t, tool.InputSchema.Required, "namespace",
+			"namespace must stay optional so an agent can search all namespaces")
+	}
+	assert.True(t, found, "scan_workload was not registered")
 }

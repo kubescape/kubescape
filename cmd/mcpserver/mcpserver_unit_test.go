@@ -181,6 +181,7 @@ func TestMCPToolAndResourceRegistration(t *testing.T) {
 		createRBACScanningTools(ksServer)
 		createNetworkScanningTools(ksServer)
 		createFrameworkScanningTools(ksServer)
+		createWorkloadScanningTools(ksServer)
 	})
 	assert.NotNil(t, GetMCPServerCmd())
 }
