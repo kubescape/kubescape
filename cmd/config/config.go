@@ -10,8 +10,11 @@ import (
 
 var (
 	configExample = fmt.Sprintf(`
-  # View cached configurations 
+  # View cached configurations
   %[1]s config view
+
+  # Validate cached configurations
+  %[1]s config validate
 
   # Delete cached configurations
   %[1]s config delete
@@ -39,6 +42,7 @@ func GetConfigCmd(ks meta.IKubescape) *cobra.Command {
 
 	configCmd.AddCommand(getDeleteCmd(ks))
 	configCmd.AddCommand(getSetCmd(ks))
+	configCmd.AddCommand(getValidateCmd(ks))
 	configCmd.AddCommand(getViewCmd(ks))
 
 	return configCmd
