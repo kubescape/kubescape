@@ -236,7 +236,10 @@ func TestBuildScanInfo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scanInfo := buildScanInfo(tt.namespace, tt.wantComplianceScore, nil)
+			scanInfo := buildScanInfo(scanRequest{
+				namespace:           tt.namespace,
+				wantComplianceScore: tt.wantComplianceScore,
+			})
 			assert.Equal(t, tt.expectedNamespace, scanInfo.IncludeNamespaces, "IncludeNamespaces should match")
 			assert.Equal(t, tt.expectedTimeout, scanInfo.ScanTimeout, "ScanTimeout should match")
 		})
