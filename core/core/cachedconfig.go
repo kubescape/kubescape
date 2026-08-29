@@ -45,36 +45,30 @@ func (ks *Kubescape) ViewCachedConfig(viewConfig *metav1.ViewConfig) error {
 
 	if viewConfig.Key != "" {
 		normalizedKey := getNormalizedKey(viewConfig.Key)
-		var val string
-		var found bool
+		var foundField *cautils.ConfigOutputField
 
-		switch normalizedKey {
-		case "accountid":
-			val = configObj.AccountID
-			found = true
-		case "clustername":
-			val = configObj.ClusterName
-			found = true
-		case "cloudreporturl":
-			val = configObj.CloudReportURL
-			found = true
-		case "cloudapiurl":
-			val = configObj.CloudAPIURL
-			found = true
-		case "accesskey":
-			val = configObj.AccessKey
-			found = true
+		for _, field := range cautils.ConfigOutputFields(configObj) {
+			if strings.ToLower(field.Name) == normalizedKey {
+				// Make a copy so we can take its address safely if needed, or just assign it
+				f := field
+				foundField = &f
+				break
+			}
 		}
 
-		if !found {
+		if foundField == nil {
 			return fmt.Errorf("key %q is not supported", viewConfig.Key)
 		}
-		if val == "" {
+		if foundField.Value == "" {
 			return fmt.Errorf("key %q is not set", viewConfig.Key)
 		}
 
 		if viewConfig.Writer != nil {
-			_, err := fmt.Fprint(viewConfig.Writer, val+"\n")
+			formatted, err := cautils.FormatConfigFieldOutput(*foundField, viewConfig.OutputFormat)
+			if err != nil {
+				return err
+			}
+			_, err = viewConfig.Writer.Write(formatted)
 			return err
 		}
 		return nil
