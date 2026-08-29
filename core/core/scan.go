@@ -558,38 +558,15 @@ func collectImageScanTargets(scanType cautils.ScanTypes, scanData *cautils.OPASe
 
 	if scanType == cautils.ScanTypeWorkload {
 		wl := workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject())
-		for _, image := range getAllWorkloadImages(wl) {
-			imagesToScan.Add(image)
-			if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, image); ok {
-				found := false
-				for _, c := range imageToCreds[image] {
-					if c == creds {
-						found = true
-						break
-					}
-				}
-				if !found {
-					imageToCreds[image] = append(imageToCreds[image], creds)
-				}
-			}
+		if err := collectWorkloadImages(ctx, k8sApi, wl, imagesToScan, imageToCreds); err != nil {
+			logger.L().Ctx(ctx).Error("failed to get containers", helpers.Error(err))
 		}
 	} else {
 		for _, workload := range scanData.AllResources {
 			wl := workloadinterface.NewWorkloadObj(workload.GetObject())
-			for _, image := range getAllWorkloadImages(wl) {
-				imagesToScan.Add(image)
-				if creds, ok := resolveRegistryCredentials(ctx, k8sApi, wl, image); ok {
-					found := false
-					for _, c := range imageToCreds[image] {
-						if c == creds {
-							found = true
-							break
-						}
-					}
-					if !found {
-						imageToCreds[image] = append(imageToCreds[image], creds)
-					}
-				}
+			if err := collectWorkloadImages(ctx, k8sApi, wl, imagesToScan, imageToCreds); err != nil {
+				logger.L().Ctx(ctx).Error(fmt.Sprintf("failed to get containers for kind: %s, name: %s, namespace: %s", workload.GetKind(), workload.GetName(), workload.GetNamespace()), helpers.Error(err))
+				continue
 			}
 		}
 	}
@@ -699,30 +676,4 @@ func collectAndProcessResourcesWithStreaming(ctx context.Context, resourceHandle
 	}
 
 	return nil
-}
-
-func getAllWorkloadImages(wl *workloadinterface.Workload) []string {
-	var images []string
-	if containers, err := wl.GetContainers(); err == nil {
-		for _, c := range containers {
-			if c.Image != "" {
-				images = append(images, c.Image)
-			}
-		}
-	}
-	if initContainers, err := wl.GetInitContainers(); err == nil {
-		for _, c := range initContainers {
-			if c.Image != "" {
-				images = append(images, c.Image)
-			}
-		}
-	}
-	if ephemeralContainers, err := wl.GetEphemeralContainers(); err == nil {
-		for _, c := range ephemeralContainers {
-			if c.Image != "" {
-				images = append(images, c.Image)
-			}
-		}
-	}
-	return images
 }

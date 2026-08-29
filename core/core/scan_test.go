@@ -537,40 +537,82 @@ func TestCollectAndProcessResourcesWithStreaming_CancelsProducerContext(t *testi
 	assert.Equal(t, context.Canceled, mockHandler.passedCtx.Err(), "derived producer context must be canceled when function returns")
 }
 
-func TestGetAllWorkloadImages(t *testing.T) {
-	podData := map[string]interface{}{
+func TestCollectWorkloadImages_IncludesInitAndEphemeralContainers(t *testing.T) {
+	wl := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
-		"metadata": map[string]interface{}{
-			"name": "test-pod",
+		"metadata":   map[string]any{"name": "all-container-types"},
+		"spec": map[string]any{
+			"containers": []any{map[string]any{
+				"name": "app", "image": "alpine:3.20",
+			}},
+			"initContainers": []any{map[string]any{
+				"name": "setup", "image": "busybox:1.36",
+			}},
+			"ephemeralContainers": []any{map[string]any{
+				"name": "debugger", "image": "ubuntu:24.04",
+			}},
 		},
-		"spec": map[string]interface{}{
-			"containers": []interface{}{
-				map[string]interface{}{
-					"name":  "main-app",
-					"image": "app:v1",
-				},
-			},
-			"initContainers": []interface{}{
-				map[string]interface{}{
-					"name":  "init-setup",
-					"image": "init:v1",
-				},
-			},
-			"ephemeralContainers": []interface{}{
-				map[string]interface{}{
-					"name":  "debug-tool",
-					"image": "debug:v1",
-				},
-			},
+	})
+
+	imagesToScan := mapset.NewSet[string]()
+	imageToCreds := make(map[string][]imagescan.RegistryCredentials)
+
+	err := collectWorkloadImages(context.Background(), nil, wl, imagesToScan, imageToCreds)
+
+	require.NoError(t, err)
+	assert.True(t, imagesToScan.Contains("alpine:3.20"), "regular container image must be scheduled")
+	assert.True(t, imagesToScan.Contains("busybox:1.36"), "init container image must be scheduled")
+	assert.True(t, imagesToScan.Contains("ubuntu:24.04"), "ephemeral container image must be scheduled")
+	assert.Equal(t, 3, imagesToScan.Cardinality())
+}
+
+func allContainerTypesWorkload(name string) map[string]any {
+	return map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": name},
+		"spec": map[string]any{
+			"containers": []any{map[string]any{
+				"name": "app", "image": "alpine:3.20",
+			}},
+			"initContainers": []any{map[string]any{
+				"name": "setup", "image": "busybox:1.36",
+			}},
+			"ephemeralContainers": []any{map[string]any{
+				"name": "debugger", "image": "ubuntu:24.04",
+			}},
 		},
 	}
+}
 
-	wl := workloadinterface.NewWorkloadObj(podData)
-	images := getAllWorkloadImages(wl)
+// TestCollectImageScanTargets_IncludesInitAndEphemeralContainers is the
+// regression test for the actual wiring bug: collectWorkloadImages handling
+// init and ephemeral containers is not enough on its own if the entry point,
+// collectImageScanTargets (the function scanImages calls), never invokes it.
+// This drives collectImageScanTargets itself for both the single-workload and
+// the all-resources scan paths.
+func TestCollectImageScanTargets_IncludesInitAndEphemeralContainers(t *testing.T) {
+	t.Run("ScanTypeWorkload", func(t *testing.T) {
+		scanData := cautils.NewOPASessionObjMock()
+		scanData.SingleResourceScan = workloadinterface.NewWorkloadObj(allContainerTypesWorkload("single"))
 
-	assert.Contains(t, images, "app:v1")
-	assert.Contains(t, images, "init:v1")
-	assert.Contains(t, images, "debug:v1")
-	assert.Len(t, images, 3)
+		imagesToScan, _ := collectImageScanTargets(cautils.ScanTypeWorkload, scanData, context.Background(), cautils.ContextFile, nil)
+
+		assert.True(t, imagesToScan.Contains("alpine:3.20"), "regular container image must be scheduled")
+		assert.True(t, imagesToScan.Contains("busybox:1.36"), "init container image must be scheduled")
+		assert.True(t, imagesToScan.Contains("ubuntu:24.04"), "ephemeral container image must be scheduled")
+	})
+
+	t.Run("AllResources", func(t *testing.T) {
+		scanData := cautils.NewOPASessionObjMock()
+		wl := workloadinterface.NewWorkloadObj(allContainerTypesWorkload("all-resources"))
+		scanData.AllResources[wl.GetID()] = wl
+
+		imagesToScan, _ := collectImageScanTargets(cautils.ScanTypeCluster, scanData, context.Background(), cautils.ContextFile, nil)
+
+		assert.True(t, imagesToScan.Contains("alpine:3.20"), "regular container image must be scheduled")
+		assert.True(t, imagesToScan.Contains("busybox:1.36"), "init container image must be scheduled")
+		assert.True(t, imagesToScan.Contains("ubuntu:24.04"), "ephemeral container image must be scheduled")
+	})
 }
