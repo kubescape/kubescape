@@ -55,6 +55,7 @@ func normalizeDownloadTarget(target string) string {
 	}
 }
 
+// GetDownloadCmd returns the Cobra command for downloading Kubescape policies, frameworks, controls, and artifacts.
 func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 	var downloadInfo = v1.DownloadInfo{}
 

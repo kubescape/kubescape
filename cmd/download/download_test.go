@@ -26,6 +26,7 @@ func (r *recordingDownloadKS) Download(info *v1.DownloadInfo) (*v1.DownloadResul
 	return &v1.DownloadResult{}, nil
 }
 
+// TestGetViewCmd verifies the download command metadata and default properties.
 func TestGetViewCmd(t *testing.T) {
 	// Create a mock Kubescape interface
 	mockKubescape := &mocks.MockIKubescape{}
@@ -40,6 +41,7 @@ func TestGetViewCmd(t *testing.T) {
 	assert.Equal(t, downloadExample, configCmd.Example)
 }
 
+// TestGetViewCmd_Args tests command argument validation with valid, invalid, plural, and alias target names.
 func TestGetViewCmd_Args(t *testing.T) {
 	// Create a mock Kubescape interface
 	mockKubescape := &mocks.MockIKubescape{}
@@ -98,6 +100,7 @@ func TestGetViewCmd_Args(t *testing.T) {
 	assert.Nil(t, err)
 }
 
+// TestNormalizeDownloadTarget tests normalization of target aliases and plurals to canonical targets.
 func TestNormalizeDownloadTarget(t *testing.T) {
 	tests := []struct {
 		input string
