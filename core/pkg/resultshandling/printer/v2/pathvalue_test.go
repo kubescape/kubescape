@@ -308,6 +308,15 @@ func TestIsSensitivePath(t *testing.T) {
 		{name: "clientSecret is caught", kind: "OAuthClient", path: "spec.clientSecret", want: true},
 		{name: "ordinary field name is unaffected", kind: "Deployment", path: "spec.replicas", want: false},
 		{name: "keyword is not a false positive for key/apikey", kind: "Deployment", path: "spec.keyword", want: false},
+		// Regression: automountServiceAccountToken is a boolean toggle, not a
+		// token value - "Token" is a genuine word in it, so it previously
+		// matched the "token" pattern as a plain substring.
+		{name: "automountServiceAccountToken boolean is not a token value", kind: "Pod", path: "spec.automountServiceAccountToken", want: false},
+		{name: "automountServiceAccountToken is unaffected by case/separators", kind: "Pod", path: "spec.automount_service_account_token", want: false},
+		{name: "serviceAccountToken projected volume source is not a token value", kind: "Pod", path: "spec.volumes[0].projected.sources[0].serviceAccountToken", want: false},
+		{name: "secretName is a reference to a Secret object, not its value", kind: "Pod", path: "spec.volumes[0].secret.secretName", want: false},
+		{name: "a field that is actually named token is still caught", kind: "MyCustomResource", path: "spec.auth.token", want: true},
+		{name: "a field that is actually named secret is still caught", kind: "OAuthClient", path: "spec.clientSecret", want: true},
 	}
 
 	for _, tc := range cases {

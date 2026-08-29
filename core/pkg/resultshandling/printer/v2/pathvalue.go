@@ -141,6 +141,32 @@ var secretFieldPatterns = []string{
 	"connectionstring",
 }
 
+// safeFieldNames lists normalized (lowercased, separator-stripped)
+// Kubernetes API field names that would otherwise match a secretFieldPatterns
+// substring but do not themselves hold a credential value:
+//   - automountServiceAccountToken and serviceAccountToken are a boolean
+//     toggle (PodSpec) and a projected-volume source's configuration block
+//     (ServiceAccountTokenProjection) respectively, not token content.
+//   - secretName references a Secret object by name (SecretVolumeSource); the
+//     value that object holds - not this field - is sensitive, and that
+//     object is already redacted separately by kind ("Secret").
+//
+// A word-boundary-aware match (splitting the field name at camelCase/
+// snake_case/kebab-case boundaries and requiring a whole-word match) was
+// considered instead of this list, but it would not actually distinguish any
+// of these: "Token" and "Secret" are complete, genuine words in each of
+// them, not substring artifacts spanning two unrelated words - the same
+// property that makes them look credential-shaped by name is what a
+// word-based check would also key on. Excluding them by exact normalized
+// name is the more honest fix for what is fundamentally a semantic
+// distinction (a field naming or describing a credential vs. a field that
+// holds one), not a tokenization one.
+var safeFieldNames = map[string]struct{}{
+	"automountserviceaccounttoken": {},
+	"serviceaccounttoken":          {},
+	"secretname":                   {},
+}
+
 // hasSecretShapedFieldName reports whether path's final segment looks like
 // a credential field name (e.g. "apiKey", "db_password", "clientSecret"),
 // independent of resource kind. Separators are stripped before matching so
@@ -160,6 +186,9 @@ func hasSecretShapedFieldName(path string) bool {
 	name := strings.ToLower(segments[len(segments)-1].key)
 	for _, sep := range []string{"_", "-", ".", " "} {
 		name = strings.ReplaceAll(name, sep, "")
+	}
+	if _, safe := safeFieldNames[name]; safe {
+		return false
 	}
 	for _, pattern := range secretFieldPatterns {
 		if strings.Contains(name, pattern) {
