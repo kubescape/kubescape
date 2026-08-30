@@ -26,10 +26,8 @@ import (
 // rule that fires only on other operations does not match here either. The one
 // selector NOT evaluated is namespaceSelector — its input is the namespace's
 // labels, which the scan cannot guarantee to have — so a policy narrowing with
-// it is refused at load instead (see requireSupported). matchPolicy is
-// genuinely irrelevant offline: Equivalent matching only widens a rule across
-// API conversions, and a scan never converts — the object is matched at the
-// exact group/version it was scanned at.
+// it is refused at load instead (see requireSupported). matchPolicy decides how
+// strictly a rule's apiVersions are read, see matchesAPIVersion.
 func (v *VAP) AppliesTo(obj map[string]any) bool {
 	if v.matchConstraints == nil || len(v.matchConstraints.ResourceRules) == 0 {
 		return true // no scoping info: evaluate (a malformed-policy edge)
@@ -203,8 +201,20 @@ func effectiveMatchPolicy(mr *admissionregistrationv1.MatchResources) admissionr
 }
 
 // matchesAPIVersion reports whether the rule's apiVersions admit the object's
-// version.
-func matchesAPIVersion(allowed []string, version string, _ admissionregistrationv1.MatchPolicyType) bool {
+// version. Exact matchPolicy requires the rule to name it. Equivalent (the API
+// default, which every bundle policy leaves unset) does not: the apiserver
+// converts a request into whichever version the rule names, so naming one
+// version of a group's resource covers every other version it is served at.
+// Offline there is no discovery to say which those are, so the version is
+// dropped from the comparison instead of resolved.
+//
+// The group is not widened with it. Equivalence can cross groups on a cluster,
+// but only its registry knows which pairs, and two same-named resources in
+// unrelated groups are separate storage.
+func matchesAPIVersion(allowed []string, version string, matchPolicy admissionregistrationv1.MatchPolicyType) bool {
+	if matchPolicy != admissionregistrationv1.Exact {
+		return true
+	}
 	return matchesValue(allowed, version)
 }
 

@@ -48,7 +48,7 @@ func TestVAPAppliesTo(t *testing.T) {
 		{"cronjob matches batch/cronjobs", "batch/v1", "CronJob", true},
 		{"configmap is out of scope", "v1", "ConfigMap", false},
 		{"deployment in wrong group is out of scope", "v1", "Deployment", false},
-		{"pod in wrong version is out of scope", "v2", "Pod", false},
+		{"pod at another version of its group is in scope", "v2", "Pod", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
