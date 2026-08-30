@@ -493,3 +493,58 @@ func TestVAPAppliesToKindPluralCandidates(t *testing.T) {
 		})
 	}
 }
+
+// withMatchPolicy returns constraints carrying an explicit matchPolicy, for the
+// cases that must not read the API default.
+func withMatchPolicy(policy admissionregistrationv1.MatchPolicyType, rules ...admissionregistrationv1.NamedRuleWithOperations) *VAP {
+	return &VAP{matchConstraints: &admissionregistrationv1.MatchResources{
+		MatchPolicy:   &policy,
+		ResourceRules: rules,
+	}}
+}
+
+// TestVAPAppliesToEquivalentMatchPolicy pins the version half of rule matching.
+// A group serving a resource at several versions returns the same objects at
+// each of them, and the collector keeps whichever one the API server ranks
+// highest (see resourcehandler.preferServedVersion), so requiring the rule to
+// name that exact version dropped the object from a policy admission does apply
+// under the default Equivalent matchPolicy.
+func TestVAPAppliesToEquivalentMatchPolicy(t *testing.T) {
+	sandboxes := rule([]string{"agents.x-k8s.io"}, []string{"v1alpha1"}, []string{"sandboxes"})
+
+	cases := []struct {
+		name       string
+		apiVersion string
+		kind       string
+		want       bool
+	}{
+		{"the version the rule names", "agents.x-k8s.io/v1alpha1", "Sandbox", true},
+		{"a newer version of the same resource", "agents.x-k8s.io/v1beta1", "Sandbox", true},
+		{"another group is still out of scope", "other.io/v1alpha1", "Sandbox", false},
+		{"another resource is still out of scope", "agents.x-k8s.io/v1beta1", "SandboxTemplate", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, vapWithConstraints(sandboxes).AppliesTo(obj(tc.apiVersion, tc.kind)))
+			assert.Equal(t, tc.want, withMatchPolicy(admissionregistrationv1.Equivalent, sandboxes).AppliesTo(obj(tc.apiVersion, tc.kind)),
+				"an explicit Equivalent must read the same as the default")
+		})
+	}
+
+	t.Run("Exact matchPolicy still requires the rule to name the version", func(t *testing.T) {
+		v := withMatchPolicy(admissionregistrationv1.Exact, sandboxes)
+		assert.True(t, v.AppliesTo(obj("agents.x-k8s.io/v1alpha1", "Sandbox")))
+		assert.False(t, v.AppliesTo(obj("agents.x-k8s.io/v1beta1", "Sandbox")))
+	})
+
+	// Exclusions go through the same matcher at admission, so an exclusion
+	// naming one version exempts the resource at every other one too.
+	t.Run("an exclusion naming another version still exempts the object", func(t *testing.T) {
+		v := &VAP{matchConstraints: &admissionregistrationv1.MatchResources{
+			ResourceRules:        []admissionregistrationv1.NamedRuleWithOperations{rule([]string{"*"}, []string{"*"}, []string{"*"})},
+			ExcludeResourceRules: []admissionregistrationv1.NamedRuleWithOperations{sandboxes},
+		}}
+		assert.False(t, v.AppliesTo(obj("agents.x-k8s.io/v1beta1", "Sandbox")))
+		assert.True(t, v.AppliesTo(obj("agents.x-k8s.io/v1beta1", "SandboxTemplate")))
+	})
+}
