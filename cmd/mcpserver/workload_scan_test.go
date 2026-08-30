@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
@@ -114,6 +115,48 @@ func TestBuildWorkloadScanRequest_Frameworks(t *testing.T) {
 		require.Len(t, req.policyIdentifiers, 1)
 		assert.Equal(t, "nsa", req.policyIdentifiers[0].Identifier)
 	})
+}
+
+// TestBuildScanInfo_WorkloadTimeout pins the budget a single-workload scan
+// gets. The namespace-derived budgets do not apply: a workload scan's cost is
+// the control set it loads, not the resources a namespace would exclude, and
+// the 10s a namespaced scan would otherwise receive is under the measured cost
+// of loading the default workload control set.
+func TestBuildScanInfo_WorkloadTimeout(t *testing.T) {
+	for _, namespace := range []string{"", "*", "default"} {
+		t.Run("namespace="+namespace, func(t *testing.T) {
+			req, err := buildWorkloadScanRequest("Deployment/nginx", namespace, "", "")
+			require.NoError(t, err)
+			scanInfo := buildScanInfo(req)
+			assert.Equal(t, workloadScanTimeout, scanInfo.ScanTimeout,
+				"a workload scan's budget must not be derived from its namespace")
+			require.NotNil(t, scanInfo.ScanObject)
+			assert.Equal(t, "nginx", scanInfo.ScanObject.GetName(),
+				"the scan object must reach ScanInfo, which is what drives single-resource collection")
+		})
+	}
+}
+
+// TestBuildScanInfo_NonWorkloadTimeoutsUnchanged guards the existing scans
+// against the workload branch leaking into them.
+func TestBuildScanInfo_NonWorkloadTimeoutsUnchanged(t *testing.T) {
+	tests := []struct {
+		namespace           string
+		wantComplianceScore bool
+		want                time.Duration
+	}{
+		{namespace: "default", want: 10 * time.Second},
+		{namespace: "default", wantComplianceScore: true, want: 30 * time.Second},
+		{namespace: "", want: 60 * time.Second},
+		{namespace: "*", want: 60 * time.Second},
+		{namespace: "", wantComplianceScore: true, want: 120 * time.Second},
+	}
+	for _, tt := range tests {
+		scanInfo := buildScanInfo(scanRequest{namespace: tt.namespace, wantComplianceScore: tt.wantComplianceScore})
+		assert.Equal(t, tt.want, scanInfo.ScanTimeout,
+			"namespace=%q complianceScore=%v", tt.namespace, tt.wantComplianceScore)
+		assert.Nil(t, scanInfo.ScanObject)
+	}
 }
 
 func TestBuildWorkloadScanRequest_HandlerSelection(t *testing.T) {

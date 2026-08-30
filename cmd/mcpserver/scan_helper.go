@@ -187,13 +187,29 @@ func runScan(ctx context.Context, ksServer *KubescapeMcpserver, req scanRequest)
 	return responseJSON, nil
 }
 
+// workloadScanTimeout is the budget for a single-workload scan.
+//
+// The namespace-derived budgets below assume the scan's cost tracks how many
+// resources it collects, which is what a namespace narrows. A single-workload
+// scan inverts that: it collects one resource, and its cost is dominated by
+// loading the workload control set — work that is the same size whether or not
+// a namespace was given. Measured end to end against one Deployment on a warm
+// policy cache, that load and evaluation takes ~15s, so the 10s a namespaced
+// scan would otherwise get is not survivable, and picking a budget from the
+// namespace is meaningless here. This matches what a cluster-wide framework
+// scan already gets for comparable policy work.
+const workloadScanTimeout = 120 * time.Second
+
 func buildScanInfo(req scanRequest) *cautils.ScanInfo {
 	namespace := req.namespace
 	timeout := 10 * time.Second
-	if req.wantComplianceScore {
+	switch {
+	case req.scanObject != nil:
+		timeout = workloadScanTimeout
+	case req.wantComplianceScore:
 		timeout = 30 * time.Second
 	}
-	if namespace == "" || namespace == "*" {
+	if req.scanObject == nil && (namespace == "" || namespace == "*") {
 		if req.wantComplianceScore {
 			timeout = 120 * time.Second
 		} else {
