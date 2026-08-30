@@ -15,4 +15,5 @@ type ViewConfig struct {
 	Key          string
 }
 type DeleteConfig struct {
+	Keys []string
 }

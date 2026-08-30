@@ -93,7 +93,30 @@ func (ks *Kubescape) ViewCachedConfig(viewConfig *metav1.ViewConfig) error {
 }
 
 func (ks *Kubescape) DeleteCachedConfig(deleteConfig *metav1.DeleteConfig) error {
-
 	tenant := cautils.GetTenantConfig(ks.Context(), "", "", "", "", nil) // change k8sinterface
-	return tenant.DeleteCachedConfig(ks.Context())
+	
+	if len(deleteConfig.Keys) == 0 {
+		return tenant.DeleteCachedConfig(ks.Context())
+	}
+
+	configObj := tenant.GetConfigObj()
+	for _, key := range deleteConfig.Keys {
+		normalizedKey := getNormalizedKey(key)
+		switch normalizedKey {
+		case "accountid":
+			configObj.AccountID = ""
+		case "clustername":
+			configObj.ClusterName = ""
+		case "cloudreporturl":
+			configObj.CloudReportURL = ""
+		case "cloudapiurl":
+			configObj.CloudAPIURL = ""
+		case "accesskey":
+			configObj.AccessKey = ""
+		default:
+			return fmt.Errorf("unknown key: %s", key)
+		}
+	}
+	
+	return tenant.UpdateCachedConfig()
 }
