@@ -245,7 +245,7 @@ A workload that is owned by another resource — a Pod belonging to a ReplicaSet
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `workload` | string | Yes | Workload identifier as `<kind>[.<version>[.<group>]]/<name>`, optionally namespace-qualified: `"Deployment/nginx"`, `"default/Deployment/nginx"`, or `"Deployment.v1.apps/nginx"` |
-| `namespace` | string | No | Namespace of the workload. Overrides a namespace embedded in the identifier. Omit to search all namespaces |
+| `namespace` | string | No | Namespace of the workload. Overrides a namespace embedded in the identifier; pass `"*"` to override it and search every namespace. Omit to use the identifier's namespace, or to search every namespace when the identifier has none |
 | `path` | string | No | Path to local YAML manifests. When set, the workload is resolved from those files instead of the live cluster |
 | `framework` | string | No | Framework to scan against (optional, defaults to the full workload control set) |
 

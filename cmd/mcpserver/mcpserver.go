@@ -75,9 +75,14 @@ func mcpScanNamespace(arguments map[string]any) (string, error) {
 // that is present but not a string is reported rather than ignored: silently
 // falling back to the empty string would widen a scan the caller meant to
 // narrow, the same reasoning behind mcpScanNamespace's type check.
+//
+// A JSON null is treated as absent, not as a type error. Clients routinely send
+// null for an optional parameter they are not setting, and refusing the whole
+// call because an unset argument was spelled null rather than omitted would be
+// hostile to exactly the callers these optional arguments exist for.
 func mcpStringArg(arguments map[string]any, name string) (string, *mcp.CallToolResult) {
 	raw, ok := arguments[name]
-	if !ok {
+	if !ok || raw == nil {
 		return "", nil
 	}
 	s, ok := raw.(string)
@@ -1305,9 +1310,13 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		if workload == "" {
 			return mcp.NewToolResultError("workload argument is required and cannot be empty"), nil
 		}
-		namespace, err := mcpScanNamespace(arguments)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+		// Read namespace with mcpStringArg rather than mcpScanNamespace: this
+		// tool has a second source of namespace (the workload identifier), so it
+		// has to tell an omitted argument from an explicit "*". mcpScanNamespace
+		// collapses the two. buildWorkloadScanRequest resolves the precedence.
+		namespace, toolErr := mcpStringArg(arguments, "namespace")
+		if toolErr != nil {
+			return toolErr, nil
 		}
 		path, toolErr := mcpStringArg(arguments, "path")
 		if toolErr != nil {

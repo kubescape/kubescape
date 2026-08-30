@@ -36,10 +36,26 @@ func buildWorkloadScanRequest(workload, namespace, path, frameworkName string) (
 		return scanRequest{}, err
 	}
 
-	// An explicit namespace argument wins over one embedded in the identifier,
-	// matching the CLI's precedence (cmd/scan/workload.go).
-	if namespace == "" {
+	// Namespace resolution has three cases, and "" cannot be made to stand for
+	// two of them:
+	//
+	//	""   not supplied      — fall back to the namespace in the identifier
+	//	"*"  cluster-wide      — override the identifier, search every namespace
+	//	ns   explicit          — override the identifier
+	//
+	// An explicit namespace winning over the identifier's matches the CLI
+	// (cmd/scan/workload.go). The "*" case is why the dispatch reads this
+	// argument with mcpStringArg rather than mcpScanNamespace: that helper folds
+	// "*" into "" before it reaches here, which would make an explicitly
+	// cluster-wide request indistinguishable from an omitted one and silently
+	// pin the scan to the identifier's namespace. Trimming here as well as at
+	// the dispatch keeps the exported entry point honest, since both handlers
+	// compare namespaces exactly and a stray space resolves nothing.
+	switch namespace = strings.TrimSpace(namespace); namespace {
+	case "":
 		namespace = identNamespace
+	case "*":
+		namespace = ""
 	}
 
 	scanObject := &objectsenvelopes.ScanObject{}
@@ -103,7 +119,7 @@ func createWorkloadScanningTools(ksServer *KubescapeMcpserver) {
 			mcp.Description("Workload identifier as <kind>[.<version>[.<group>]]/<name>, optionally namespace-qualified: \"Deployment/nginx\", \"default/Deployment/nginx\", or \"Deployment.v1.apps/nginx\". A non-built-in kind (CRD) must include its version and group."),
 		),
 		mcp.WithString("namespace",
-			mcp.Description("Namespace of the workload (optional). Overrides a namespace embedded in the workload identifier. Omit to search all namespaces."),
+			mcp.Description("Namespace of the workload (optional). Overrides a namespace embedded in the workload identifier; pass \"*\" to override it and search every namespace. Omit to use the identifier's namespace, or to search every namespace when the identifier has none."),
 		),
 		mcp.WithString("path",
 			mcp.Description("Optional path to local YAML manifests. When set, the workload is resolved from those files instead of the live cluster."),

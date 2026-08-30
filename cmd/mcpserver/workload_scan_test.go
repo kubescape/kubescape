@@ -98,6 +98,74 @@ func TestBuildWorkloadScanRequest_ScanObject(t *testing.T) {
 	}
 }
 
+// TestBuildWorkloadScanRequest_NamespacePrecedence pins the three-way namespace
+// rule. The wildcard cases are the ones worth reading: "*" means "search every
+// namespace" and must beat a namespace embedded in the identifier, which is
+// impossible to express if "*" has already been folded into "" (the empty
+// string means the argument was omitted).
+func TestBuildWorkloadScanRequest_NamespacePrecedence(t *testing.T) {
+	tests := []struct {
+		name      string
+		workload  string
+		namespace string
+		want      string
+	}{
+		{
+			name:     "omitted, identifier has none",
+			workload: "Deployment/nginx",
+			want:     "",
+		},
+		{
+			name:     "omitted, identifier supplies one",
+			workload: "default/Deployment/nginx",
+			want:     "default",
+		},
+		{
+			name:      "explicit overrides the identifier",
+			workload:  "a/Deployment/nginx",
+			namespace: "b",
+			want:      "b",
+		},
+		{
+			name:      "wildcard overrides the identifier and searches everywhere",
+			workload:  "default/Deployment/nginx",
+			namespace: "*",
+			want:      "",
+		},
+		{
+			name:      "wildcard with no identifier namespace stays cluster-wide",
+			workload:  "Deployment/nginx",
+			namespace: "*",
+			want:      "",
+		},
+		{
+			// Both resolution paths compare namespaces exactly, so an untrimmed
+			// value resolves nothing at all.
+			name:      "explicit namespace is trimmed",
+			workload:  "Deployment/nginx",
+			namespace: "  default  ",
+			want:      "default",
+		},
+		{
+			name:      "whitespace-only namespace reads as omitted",
+			workload:  "default/Deployment/nginx",
+			namespace: "   ",
+			want:      "default",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := buildWorkloadScanRequest(tt.workload, tt.namespace, "", "")
+			require.NoError(t, err)
+			require.NotNil(t, req.scanObject)
+			assert.Equal(t, tt.want, req.scanObject.GetNamespace(),
+				"the scan object's namespace is what both resource handlers match on")
+			assert.Equal(t, tt.want, req.namespace)
+		})
+	}
+}
+
 func TestBuildWorkloadScanRequest_Frameworks(t *testing.T) {
 	t.Run("defaults to the workload control set", func(t *testing.T) {
 		req, err := buildWorkloadScanRequest("Deployment/nginx", "", "", "")
@@ -123,9 +191,17 @@ func TestBuildWorkloadScanRequest_Frameworks(t *testing.T) {
 // the 10s a namespaced scan would otherwise receive is under the measured cost
 // of loading the default workload control set.
 func TestBuildScanInfo_WorkloadTimeout(t *testing.T) {
-	for _, namespace := range []string{"", "*", "default"} {
-		t.Run("namespace="+namespace, func(t *testing.T) {
-			req, err := buildWorkloadScanRequest("Deployment/nginx", namespace, "", "")
+	tests := []struct {
+		namespace     string
+		wantNamespace string
+	}{
+		{namespace: "", wantNamespace: ""},
+		{namespace: "*", wantNamespace: ""},
+		{namespace: "default", wantNamespace: "default"},
+	}
+	for _, tt := range tests {
+		t.Run("namespace="+tt.namespace, func(t *testing.T) {
+			req, err := buildWorkloadScanRequest("Deployment/nginx", tt.namespace, "", "")
 			require.NoError(t, err)
 			scanInfo := buildScanInfo(req)
 			assert.Equal(t, workloadScanTimeout, scanInfo.ScanTimeout,
@@ -133,8 +209,38 @@ func TestBuildScanInfo_WorkloadTimeout(t *testing.T) {
 			require.NotNil(t, scanInfo.ScanObject)
 			assert.Equal(t, "nginx", scanInfo.ScanObject.GetName(),
 				"the scan object must reach ScanInfo, which is what drives single-resource collection")
+			// Asserted here too because an earlier version of this test fed "*"
+			// while checking only the timeout, and so did not notice that the
+			// wildcard was reaching the scan object verbatim.
+			assert.Equal(t, tt.wantNamespace, scanInfo.ScanObject.GetNamespace())
 		})
 	}
+}
+
+func TestMCPStringArg(t *testing.T) {
+	t.Run("absent", func(t *testing.T) {
+		got, toolErr := mcpStringArg(map[string]any{}, "path")
+		assert.Nil(t, toolErr)
+		assert.Equal(t, "", got)
+	})
+
+	t.Run("null is absent, not a type error", func(t *testing.T) {
+		got, toolErr := mcpStringArg(map[string]any{"path": nil}, "path")
+		assert.Nil(t, toolErr, "a null optional argument must not refuse the call")
+		assert.Equal(t, "", got)
+	})
+
+	t.Run("trimmed", func(t *testing.T) {
+		got, toolErr := mcpStringArg(map[string]any{"path": "  ./x  "}, "path")
+		assert.Nil(t, toolErr)
+		assert.Equal(t, "./x", got)
+	})
+
+	t.Run("wrong type is reported", func(t *testing.T) {
+		_, toolErr := mcpStringArg(map[string]any{"path": 42}, "path")
+		require.NotNil(t, toolErr)
+		assert.Contains(t, toolResultText(t, toolErr), "path argument must be a string")
+	})
 }
 
 // TestBuildScanInfo_NonWorkloadTimeoutsUnchanged guards the existing scans
@@ -333,18 +439,30 @@ func TestCallTool_ScanWorkload_ForwardsArguments(t *testing.T) {
 			wantWorkload: "Deployment/nginx",
 		},
 		{
-			name:          "wildcard namespace is normalized to cluster-wide",
+			// "*" is forwarded verbatim, not folded into "": the wildcard has to
+			// stay distinguishable from an omitted argument until
+			// buildWorkloadScanRequest can weigh it against the identifier's
+			// namespace. The resolution itself is asserted in
+			// TestBuildWorkloadScanRequest_NamespacePrecedence.
+			name:          "wildcard namespace survives dispatch",
 			arguments:     map[string]any{"workload": "Deployment/nginx", "namespace": "*"},
 			wantWorkload:  "Deployment/nginx",
-			wantNamespace: "",
+			wantNamespace: "*",
 		},
 		{
 			name:          "all arguments forwarded and trimmed",
-			arguments:     map[string]any{"workload": "  Deployment/nginx  ", "namespace": "default", "path": "  ./manifests  ", "framework": " nsa "},
+			arguments:     map[string]any{"workload": "  Deployment/nginx  ", "namespace": "  default  ", "path": "  ./manifests  ", "framework": " nsa "},
 			wantWorkload:  "Deployment/nginx",
 			wantNamespace: "default",
 			wantPath:      "./manifests",
 			wantFramework: "nsa",
+		},
+		{
+			// Clients commonly send null for an optional parameter they are not
+			// setting; that must read as absent rather than refusing the call.
+			name:         "null optional arguments are treated as absent",
+			arguments:    map[string]any{"workload": "Deployment/nginx", "namespace": nil, "path": nil, "framework": nil},
+			wantWorkload: "Deployment/nginx",
 		},
 	}
 
