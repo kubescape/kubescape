@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -14,12 +15,29 @@ import (
 
 const customControlPrefix = "custom-"
 
+// A control's base score is what every severity consumer reads: the report's
+// severity column, --min-severity/--max-severity and the --severity-threshold
+// gate. A control that declares none scores 0, which opa-utils buckets as
+// "Unknown" severity, and the threshold gate fails closed on unknown severity -
+// so a custom rule without a base score would fail every --severity-threshold
+// run regardless of what it checks. Default to the middle of the 1-10 range
+// ("Medium"), and let a rule state its own severity in its Rego source.
+const (
+	baseScoreAnnotation        = "@baseScore"
+	defaultCustomRuleBaseScore = 5.0
+	minCustomRuleBaseScore     = 1.0
+	maxCustomRuleBaseScore     = 10.0
+)
+
 // LoadCustomRules builds a synthetic framework from user-authored rules under
 // path. Two layouts are accepted and may be mixed in one directory:
 //
 //   - a rule directory holding raw.rego next to rule.metadata.json, the layout
 //     used by this repository's rules/ tree and by `kubescape policy test`
 //   - a bare .rego file, whose rule is matched against every resource kind
+//
+// Either layout may declare the rule's severity with a "# @baseScore <1-10>"
+// comment in its Rego source; without one the rule is Medium.
 //
 // An empty path is not an error and returns a nil framework.
 func LoadCustomRules(path string) (*reporthandling.Framework, error) {
@@ -48,7 +66,11 @@ func LoadCustomRules(path string) (*reporthandling.Framework, error) {
 	if rule, ok, err := ruledir.Load(path); err != nil {
 		return nil, err
 	} else if ok {
-		return customFramework([]reporthandling.Control{controlFromRuleDir(rule)}), nil
+		control, err := controlFromRuleDir(rule)
+		if err != nil {
+			return nil, err
+		}
+		return customFramework([]reporthandling.Control{control}), nil
 	}
 
 	ruleDirs, err := ruledir.Discover(path)
@@ -58,7 +80,11 @@ func LoadCustomRules(path string) (*reporthandling.Framework, error) {
 
 	controls := make([]reporthandling.Control, 0, len(ruleDirs))
 	for _, rule := range ruleDirs {
-		controls = append(controls, controlFromRuleDir(rule))
+		control, err := controlFromRuleDir(rule)
+		if err != nil {
+			return nil, err
+		}
+		controls = append(controls, control)
 	}
 
 	files, err := regoFilesIn(path)
@@ -124,7 +150,7 @@ func regoFilesIn(dir string) ([]string, error) {
 
 // controlFromRuleDir keeps the rule's declared match selectors, so it is only
 // evaluated against the kinds it targets instead of every collected resource.
-func controlFromRuleDir(rule ruledir.Rule) reporthandling.Control {
+func controlFromRuleDir(rule ruledir.Rule) (reporthandling.Control, error) {
 	policy := rule.Rule
 	if policy.Name == "" {
 		policy.Name = rule.Name
@@ -136,21 +162,32 @@ func controlFromRuleDir(rule ruledir.Rule) reporthandling.Control {
 		policy.RuleLanguage = reporthandling.RegoLanguage
 	}
 
+	baseScore, err := baseScoreFromRego(policy.Rule)
+	if err != nil {
+		return reporthandling.Control{}, fmt.Errorf("custom rule %q: %w", filepath.Join(rule.Dir, ruledir.RegoFileName), err)
+	}
+
 	return reporthandling.Control{
 		ControlID:   customControlPrefix + rule.Name,
 		Description: policy.Description,
 		Remediation: policy.Remediation,
 		Rules:       []reporthandling.PolicyRule{policy},
+		BaseScore:   baseScore,
 		PortalBase: armotypes.PortalBase{
 			Name: customControlPrefix + rule.Name,
 		},
-	}
+	}, nil
 }
 
 func controlFromRegoFile(file string) (reporthandling.Control, error) {
 	raw, err := os.ReadFile(file)
 	if err != nil {
 		return reporthandling.Control{}, fmt.Errorf("read custom rule %q: %w", file, err)
+	}
+
+	baseScore, err := baseScoreFromRego(string(raw))
+	if err != nil {
+		return reporthandling.Control{}, fmt.Errorf("custom rule %q: %w", file, err)
 	}
 
 	name := strings.TrimSuffix(filepath.Base(file), ".rego")
@@ -171,10 +208,44 @@ func controlFromRegoFile(file string) (reporthandling.Control, error) {
 		ControlID:   controlID,
 		Description: description,
 		Rules:       []reporthandling.PolicyRule{rule},
+		BaseScore:   baseScore,
 		PortalBase: armotypes.PortalBase{
 			Name: controlID,
 		},
 	}, nil
+}
+
+// baseScoreFromRego reads the "# @baseScore <n>" annotation a rule may use to
+// declare its own severity, and falls back to defaultCustomRuleBaseScore. A
+// malformed or out-of-range value is an error rather than a fallback: silently
+// defaulting would report a severity the rule did not ask for, and a typo in a
+// CI-gating rule would go unnoticed.
+func baseScoreFromRego(source string) (float32, error) {
+	for _, line := range strings.Split(source, "\n") {
+		comment, isComment := strings.CutPrefix(strings.TrimSpace(line), "#")
+		if !isComment {
+			continue
+		}
+
+		fields := strings.Fields(comment)
+		if len(fields) == 0 || fields[0] != baseScoreAnnotation {
+			continue
+		}
+
+		if len(fields) != 2 {
+			return 0, fmt.Errorf("%s takes a single value, got %q", baseScoreAnnotation, strings.TrimSpace(comment))
+		}
+		// The range is tested positively so that NaN, which ParseFloat accepts,
+		// is rejected rather than passing both bounds comparisons.
+		baseScore, err := strconv.ParseFloat(fields[1], 32)
+		if inRange := baseScore >= minCustomRuleBaseScore && baseScore <= maxCustomRuleBaseScore; err != nil || !inRange {
+			return 0, fmt.Errorf("invalid %s %q: expected a number between %g and %g",
+				baseScoreAnnotation, fields[1], minCustomRuleBaseScore, maxCustomRuleBaseScore)
+		}
+		return float32(baseScore), nil
+	}
+
+	return defaultCustomRuleBaseScore, nil
 }
 
 // matchAllKinds is the fallback for a rule that declares no selectors. Users
