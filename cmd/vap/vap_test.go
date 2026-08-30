@@ -1004,11 +1004,13 @@ func TestGetVapHelperCmd(t *testing.T) {
 	cmd := GetVapHelperCmd()
 	require.NotNil(t, cmd)
 	assert.Equal(t, "vap", cmd.Use)
-	assert.Len(t, cmd.Commands(), 2)
-
-	subCmdNames := []string{cmd.Commands()[0].Use, cmd.Commands()[1].Use}
+	subCmdNames := make([]string, 0, len(cmd.Commands()))
+	for _, sub := range cmd.Commands() {
+		subCmdNames = append(subCmdNames, sub.Use)
+	}
 	assert.Contains(t, subCmdNames, "deploy-library")
 	assert.Contains(t, subCmdNames, "create-policy-binding")
+	assert.Contains(t, subCmdNames, "list-policies")
 }
 
 func TestLabelSelectorRegexEdgeCases(t *testing.T) {

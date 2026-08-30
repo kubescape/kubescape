@@ -961,6 +961,35 @@ Manage Kubernetes Validating Admission Policies.
 
 ### Subcommands
 
+#### list-policies
+
+List the ValidatingAdmissionPolicies in the library embedded in this binary,
+alongside the Kubescape control each one implements. Use it to find the values
+`create-policy-binding` accepts: control IDs for `--control`, policy names for
+`--policy`.
+
+```bash
+kubescape vap list-policies
+kubescape vap list-policies --controls-only --format json
+```
+
+**Flags:**
+
+| Flag | Description | Default |
+|---|---|---|
+| `-f`, `--format` | Output format: `pretty-print`, `json`, `yaml` or `csv`. | `pretty-print` |
+| `--controls-only` | Keep only the entries with a control ID, hiding the cluster-scoped helpers. | `false` |
+| `-o`, `--output` | Write the output to a file instead of stdout. | - |
+
+The `Params` column reports whether a policy reads a parameter object, which is
+what `create-policy-binding --parameter-reference` supplies. The two duplicate
+markers are independent and say which flag will be refused: a policy name shown
+as `(duplicate name)` is claimed more than once, so `--policy` cannot resolve
+it, while a control ID shown as `(duplicate)` is claimed by more than one
+policy, so `--control` cannot. A name claimed twice by policies carrying
+distinct control IDs is listed once per control, because each of those controls
+still binds.
+
 #### deploy-library
 
 Deploy the Kubescape CEL admission policy library.
