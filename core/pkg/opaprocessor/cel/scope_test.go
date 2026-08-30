@@ -1,6 +1,7 @@
 package cel
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -547,4 +548,47 @@ func TestVAPAppliesToEquivalentMatchPolicy(t *testing.T) {
 		assert.False(t, v.AppliesTo(obj("agents.x-k8s.io/v1beta1", "Sandbox")))
 		assert.True(t, v.AppliesTo(obj("agents.x-k8s.io/v1beta1", "SandboxTemplate")))
 	})
+}
+
+// siblingVersion is a version no bundle rule names, standing in for the older
+// or newer version of a group a real manifest may still be written at.
+const siblingVersion = "v1beta1"
+
+// TestVAPAppliesToCoversEveryBundleKindAtAnotherVersion is
+// TestVAPAppliesToCoversEveryBundleKind asked at a version the rule does not
+// name. Every bundle policy leaves matchPolicy at its Equivalent default, so
+// admission converts such a request and applies the policy; a `make sync-vap`
+// that lands a policy pinning Exact would fail here rather than at scan time.
+func TestVAPAppliesToCoversEveryBundleKindAtAnotherVersion(t *testing.T) {
+	catalog, err := getVAPCatalog()
+	require.NoError(t, err)
+
+	for name, vap := range catalog.byName {
+		if vap.matchConstraints == nil {
+			continue
+		}
+		for _, rr := range vap.matchConstraints.ResourceRules {
+			if slices.Contains(rr.APIVersions, siblingVersion) || slices.Contains(rr.APIVersions, "*") {
+				continue // the rule names it outright, so it proves nothing here
+			}
+			for _, group := range defaultIfEmpty(rr.APIGroups, "") {
+				if group == "*" {
+					group = ""
+				}
+				apiVersion := siblingVersion
+				if group != "" {
+					apiVersion = group + "/" + siblingVersion
+				}
+				for _, res := range rr.Resources {
+					if res == "*" || strings.Contains(res, "/") {
+						continue
+					}
+					kind, ok := canonicalKinds[res]
+					require.Truef(t, ok, "policy %q constrains resource %q with no canonical Kind in the test", name, res)
+					assert.Truef(t, vap.AppliesTo(obj(apiVersion, kind)),
+						"policy %q constrains %q but appliesTo rejects a %s %s; matchPolicy is Equivalent, so admission would convert and apply it", name, res, apiVersion, kind)
+				}
+			}
+		}
+	}
 }
