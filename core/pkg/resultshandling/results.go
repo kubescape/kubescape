@@ -140,7 +140,11 @@ func (rh *ResultsHandler) WriteJson(w io.Writer) error {
 func (rh *ResultsHandler) ToJson() ([]byte, error) {
 	var buf bytes.Buffer
 	err := rh.WriteJson(&buf)
-	return buf.Bytes(), err
+	res := buf.Bytes()
+		if len(res) > 0 && res[len(res)-1] == '\n' {
+		res = res[:len(res)-1]
+	}
+	return res, err
 }
 
 // GetResults returns the results
