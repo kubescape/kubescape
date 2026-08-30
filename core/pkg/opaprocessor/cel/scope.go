@@ -40,10 +40,11 @@ func (v *VAP) AppliesTo(obj map[string]any) bool {
 	}
 	name, _, _ := unstructured.NestedString(obj, "metadata", "name")
 	target := scopedObject{gvr: gvr, resources: resources, name: name, namespaced: isNamespaced(obj)}
+	matchPolicy := effectiveMatchPolicy(v.matchConstraints)
 
 	included := false
 	for i := range v.matchConstraints.ResourceRules {
-		if resourceRuleMatches(&v.matchConstraints.ResourceRules[i], target) {
+		if resourceRuleMatches(&v.matchConstraints.ResourceRules[i], target, matchPolicy) {
 			included = true
 			break
 		}
@@ -52,7 +53,7 @@ func (v *VAP) AppliesTo(obj map[string]any) bool {
 		return false
 	}
 	for i := range v.matchConstraints.ExcludeResourceRules {
-		if resourceRuleMatches(&v.matchConstraints.ExcludeResourceRules[i], target) {
+		if resourceRuleMatches(&v.matchConstraints.ExcludeResourceRules[i], target, matchPolicy) {
 			return false
 		}
 	}
@@ -182,13 +183,29 @@ type scopedObject struct {
 	namespaced bool
 }
 
-func resourceRuleMatches(rule *admissionregistrationv1.NamedRuleWithOperations, target scopedObject) bool {
+func resourceRuleMatches(rule *admissionregistrationv1.NamedRuleWithOperations, target scopedObject, matchPolicy admissionregistrationv1.MatchPolicyType) bool {
 	return matchesOperation(rule.Operations) &&
 		matchesScope(rule.Scope, target.namespaced) &&
 		matchesValue(rule.APIGroups, target.gvr.Group) &&
-		matchesValue(rule.APIVersions, target.gvr.Version) &&
+		matchesAPIVersion(rule.APIVersions, target.gvr.Version, matchPolicy) &&
 		matchesResource(rule.Resources, target.resources) &&
 		matchesName(rule.ResourceNames, target.name)
+}
+
+// effectiveMatchPolicy resolves matchConstraints.matchPolicy, which the API
+// defaults to Equivalent when it is unset - as every policy in the bundle
+// leaves it.
+func effectiveMatchPolicy(mr *admissionregistrationv1.MatchResources) admissionregistrationv1.MatchPolicyType {
+	if mr == nil || mr.MatchPolicy == nil {
+		return admissionregistrationv1.Equivalent
+	}
+	return *mr.MatchPolicy
+}
+
+// matchesAPIVersion reports whether the rule's apiVersions admit the object's
+// version.
+func matchesAPIVersion(allowed []string, version string, _ admissionregistrationv1.MatchPolicyType) bool {
+	return matchesValue(allowed, version)
 }
 
 // matchesScope reports whether the rule's scope admits the object. nil and "*"
