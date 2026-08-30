@@ -27,11 +27,11 @@ func TestViewCachedConfig_KeyedLookup(t *testing.T) {
 	require.NoError(t, ks.SetCachedConfig(setConfig))
 
 	tests := []struct {
-		name       string
-		key        string
-		format     string
-		want       string
-		wantErr    string
+		name    string
+		key     string
+		format  string
+		want    string
+		wantErr string
 	}{
 		{
 			name:   "Found key",
@@ -59,9 +59,9 @@ func TestViewCachedConfig_KeyedLookup(t *testing.T) {
 		},
 		{
 			name:    "Unset key",
-			key:     "clusterName",
+			key:     "cloudReportURL",
 			format:  "",
-			wantErr: `key "clusterName" is not set`,
+			wantErr: `key "cloudReportURL" is not set`,
 		},
 		{
 			name:   "Format JSON",

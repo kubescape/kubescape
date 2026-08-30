@@ -15,7 +15,7 @@ func TestGetDeleteCmd(t *testing.T) {
 	configCmd := getDeleteCmd(mockKubescape)
 
 	// Verify the command name and short description
-	assert.Equal(t, "delete", configCmd.Use)
+	assert.Equal(t, "delete [KEY...]", configCmd.Use)
 	assert.Equal(t, "Delete cached configurations", configCmd.Short)
 	assert.Equal(t, "", configCmd.Long)
 }
