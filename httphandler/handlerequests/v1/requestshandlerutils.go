@@ -254,11 +254,12 @@ func persistCanonicalResult(result *resultshandling.ResultsHandler, scanID strin
 	if err != nil {
 		return fmt.Errorf("failed to persist canonical scan results: invalid scan ID: %w", err)
 	}
-	data, err := result.ToJson()
+	f, err := os.Create(filepath.Join(OutputDir, parsedUUID.String()))
 	if err != nil {
-		return fmt.Errorf("failed to marshal canonical scan results: %w", err)
+		return fmt.Errorf("failed to create canonical scan results file: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(OutputDir, parsedUUID.String()), data, 0o600); err != nil {
+	defer f.Close()
+	if err := result.WriteJson(f); err != nil {
 		return fmt.Errorf("failed to persist canonical scan results: %w", err)
 	}
 	return nil

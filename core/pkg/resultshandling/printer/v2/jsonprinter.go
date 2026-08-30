@@ -98,13 +98,7 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScan
 	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverage(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources, &opaSessionObj.ScanCoverage)
 	reportWithSeverity.ExceptionAudit = opaSessionObj.ExceptionAudit
 
-	r, err := json.Marshal(reportWithSeverity)
-	if err != nil {
-		return err
-	}
-	_, err = jp.writer.Write(r)
-
-	return err
+	return json.NewEncoder(jp.writer).Encode(reportWithSeverity)
 }
 
 func convertToPackageScores(packageScores map[string]*imageprinter.PackageScore) map[string]*reportsummary.PackageSummary {

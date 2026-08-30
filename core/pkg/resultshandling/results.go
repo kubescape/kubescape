@@ -1,9 +1,11 @@
 package resultshandling
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"fmt"
 	"slices"
 
@@ -81,8 +83,8 @@ func (rh *ResultsHandler) GetReporter() reporter.IReport {
 	return rh.ReporterObj
 }
 
-// ToJson returns the results in the JSON format
-func (rh *ResultsHandler) ToJson() ([]byte, error) {
+// WriteJson streams the results in JSON format directly to the given writer
+func (rh *ResultsHandler) WriteJson(w io.Writer) error {
 	finalizedReport := printerv2.FinalizeResults(rh.ScanData)
 	enrichedReport := printerv2.ConvertToPostureReportWithSeverityLabelsAndCoverage(
 		finalizedReport,
@@ -131,7 +133,14 @@ func (rh *ResultsHandler) ToJson() ([]byte, error) {
 		ExceptionAudit: rh.ScanData.ExceptionAudit,
 	}
 
-	return json.Marshal(&output)
+	return json.NewEncoder(w).Encode(&output)
+}
+
+// ToJson returns the results in the JSON format
+func (rh *ResultsHandler) ToJson() ([]byte, error) {
+	var buf bytes.Buffer
+	err := rh.WriteJson(&buf)
+	return buf.Bytes(), err
 }
 
 // GetResults returns the results
