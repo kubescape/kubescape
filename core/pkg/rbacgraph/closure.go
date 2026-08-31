@@ -24,8 +24,9 @@ type EscalationResult struct {
 	// identity in Reached. Also truncated once ClusterAdmin is confirmed.
 	EffectiveRules []ScopedRule
 	// ClusterAdmin is true when EffectiveRules includes a cluster-wide
-	// */*/* rule, or an Unbounded finding covers the whole cluster
-	// (Scope == ""), however it was actually reached. Once true, the BFS
+	// */*/* rule, an Unbounded finding covers the whole cluster
+	// (Scope == ""), or a superuser group (system:masters) was reached via
+	// impersonation -- however it was actually reached. Once true, the BFS
 	// stops expanding further: cluster-admin-equivalent power already
 	// implies every other identity and permission is reachable, so
 	// continuing would only enumerate implied consequences (e.g. every
@@ -33,7 +34,18 @@ type EscalationResult struct {
 	// assign-serviceaccount to any of them) rather than surface anything
 	// new -- Reached/EffectiveRules reflect whatever had already been
 	// discovered at the point this became true, not a complete picture.
+	// This early stop is always sound: the verdict it produces is never
+	// wrong, only arrived at before every consequence was enumerated.
 	ClusterAdmin bool
+	// Truncated is true when the search hit maxEscalationHops with
+	// ClusterAdmin still false and work still queued -- meaning this
+	// result may be an incomplete negative, not a confirmed one. This is
+	// the failure mode that actually matters: unlike the ClusterAdmin
+	// early-stop (always a sound true), running out of budget without
+	// reaching a verdict means a real escalation path may exist beyond
+	// what was explored. Distinguish this from a genuine "nothing found"
+	// before treating ClusterAdmin == false as a clean bill of health.
+	Truncated bool
 }
 
 // UnboundedFinding records that Subject holds an unrestricted escalation
@@ -45,11 +57,15 @@ type UnboundedFinding struct {
 	Edge    EscalationEdge
 }
 
-// maxEscalationHops bounds the BFS worklist: a safety net against a
-// pathological input, not a limit expected to matter on any real cluster --
-// real clusters hold far fewer distinct RBAC identities and Role/ClusterRole
-// objects than this.
-const maxEscalationHops = 200
+// maxEscalationHops bounds the BFS worklist: subjects dequeued and
+// processed, not raw hop-count. Deliberately generous -- a single
+// cluster-wide "create pods" grant alone enqueues every ServiceAccount in
+// the cluster (routine on any cluster with hundreds of Service Accounts
+// across an ingress/operator stack), so a tight bound here risks exactly
+// the false-negative failure mode this package exists to avoid: a result
+// that looks like a clean negative because the search ran out of budget,
+// not because there was nothing to find. See EscalationResult.Truncated.
+var maxEscalationHops = 20000 // var, not const: tests override this to exercise Truncated without building a 20000-object fixture.
 
 // AnalyzeEscalation computes every privilege-escalation technique reachable
 // from start via breadth-first search: assuming another concrete identity
@@ -62,9 +78,11 @@ const maxEscalationHops = 200
 // Reprocessing a subject happens only when a bind/escalate edge actually
 // grants something new (tracked per-subject, keyed by the edge's Detail
 // string, which is unique per distinct Role/ClusterRole+scope grant), so
-// this always terminates even though maxEscalationHops bounds it too. The
-// search stops early once cluster-admin-equivalent power is confirmed
-// reachable -- see EscalationResult.ClusterAdmin.
+// this always terminates even though maxEscalationHops bounds it too.
+// Reaching a hardcoded superuser identity (system:masters) via
+// impersonation, or confirming cluster-admin-equivalent power any other
+// way, stops the search early -- see EscalationResult.ClusterAdmin and
+// EscalationResult.Truncated for what that does and doesn't mean.
 func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 	subjectRules := map[Subject][]ScopedRule{start: idx.DirectRules(start)}
 	grantedSeen := map[Subject]map[string]bool{start: {}}
@@ -73,10 +91,15 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 	visited := map[Subject]bool{start: true}
 	var order []Subject
 	var unbounded []UnboundedFinding
-	clusterAdmin := IsClusterAdminEquivalent(subjectRules[start])
+	clusterAdmin := IsClusterAdminEquivalent(subjectRules[start]) || superuserGroups[start.Name] && start.Kind == KindGroup
 
 	worklist := []Subject{start}
-	for i := 0; i < maxEscalationHops && len(worklist) > 0 && !clusterAdmin; i++ {
+	truncated := false
+	for i := 0; len(worklist) > 0 && !clusterAdmin; i++ {
+		if i >= maxEscalationHops {
+			truncated = true
+			break
+		}
 		s := worklist[0]
 		worklist = worklist[1:]
 
@@ -86,6 +109,15 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 			switch {
 			case e.ToSubject != nil:
 				t := *e.ToSubject
+				if t.Kind == KindGroup && superuserGroups[t.Name] {
+					clusterAdmin = true
+					pathTo[t] = append(append([]EscalationEdge{}, pathTo[s]...), e)
+					if !visited[t] {
+						visited[t] = true
+						order = append(order, t)
+					}
+					break
+				}
 				if visited[t] {
 					continue
 				}
@@ -135,6 +167,9 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 	if !clusterAdmin {
 		clusterAdmin = IsClusterAdminEquivalent(allRules)
 	}
+	if clusterAdmin {
+		truncated = false
+	}
 
 	return EscalationResult{
 		Start:          start,
@@ -142,5 +177,6 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 		Unbounded:      unbounded,
 		EffectiveRules: allRules,
 		ClusterAdmin:   clusterAdmin,
+		Truncated:      truncated,
 	}
 }

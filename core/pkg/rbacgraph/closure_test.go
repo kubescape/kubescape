@@ -332,3 +332,262 @@ func TestAnalyzeEscalation_SelfReferentialCreatePodsDoesNotSelfLoop(t *testing.T
 		t.Errorf("Reached = %+v, want empty: the only ServiceAccount in scope is the subject itself", result.Reached)
 	}
 }
+
+func groupSubject(name string) rbacv1.Subject {
+	return rbacv1.Subject{Kind: "Group", Name: name}
+}
+
+// --- matthyx's review findings on PR #3681 ---
+
+func TestDirectRules_ImplicitServiceAccountsGroupGrantsEveryServiceAccount(t *testing.T) {
+	cr := clusterRole("privileged", rule([]string{"*"}, []string{"*"}, []string{"*"}, nil))
+	crb := clusterRoleBinding("crb", "privileged", groupSubject("system:serviceaccounts"))
+	idx := NewIndex(nil, []rbacv1.ClusterRole{cr}, nil, []rbacv1.ClusterRoleBinding{crb}, nil)
+
+	rules := idx.DirectRules(sa("any-ns", "any-name"))
+	if len(rules) != 1 {
+		t.Fatalf("rules = %+v, want the privileged ClusterRole's rule: every ServiceAccount is implicitly a member of system:serviceaccounts", rules)
+	}
+}
+
+func TestDirectRules_ImplicitNamespacedServiceAccountsGroupIsNamespaceScoped(t *testing.T) {
+	cr := clusterRole("privileged", rule([]string{"*"}, []string{"*"}, []string{"*"}, nil))
+	crb := clusterRoleBinding("crb", "privileged", groupSubject("system:serviceaccounts:prod"))
+	idx := NewIndex(nil, []rbacv1.ClusterRole{cr}, nil, []rbacv1.ClusterRoleBinding{crb}, nil)
+
+	if rules := idx.DirectRules(sa("prod", "app")); len(rules) != 1 {
+		t.Errorf("rules = %+v, want one rule: prod/app is a member of system:serviceaccounts:prod", rules)
+	}
+	if rules := idx.DirectRules(sa("other", "app")); len(rules) != 0 {
+		t.Errorf("rules = %+v, want empty: other/app is not a member of system:serviceaccounts:prod", rules)
+	}
+}
+
+func TestDirectRules_ImplicitAuthenticatedGroupGrantsServiceAccountsAndUsers(t *testing.T) {
+	cr := clusterRole("privileged", rule([]string{"*"}, []string{"*"}, []string{"*"}, nil))
+	crb := clusterRoleBinding("crb", "privileged", groupSubject("system:authenticated"))
+	idx := NewIndex(nil, []rbacv1.ClusterRole{cr}, nil, []rbacv1.ClusterRoleBinding{crb}, nil)
+
+	if rules := idx.DirectRules(sa("ns", "app")); len(rules) != 1 {
+		t.Errorf("rules = %+v, want one rule: every ServiceAccount is a member of system:authenticated", rules)
+	}
+	if rules := idx.DirectRules(Subject{Kind: KindUser, Name: "alice"}); len(rules) != 1 {
+		t.Errorf("rules = %+v, want one rule: every authenticated User is a member of system:authenticated", rules)
+	}
+}
+
+func TestAnalyzeEscalation_UnrestrictedNamespacedImpersonateEnumeratesTargets(t *testing.T) {
+	// A namespace-scoped (RoleBinding-granted) unrestricted impersonate on
+	// serviceaccounts must still enumerate the concrete SAs it can reach --
+	// not just report Unbounded and stop, which would silently miss a
+	// known SA bound to cluster-admin in the same namespace.
+	admin := clusterRole("cluster-admin-ish", rule([]string{"*"}, []string{"*"}, []string{"*"}, nil))
+	impersonator := role("prod", "impersonator", rule([]string{""}, []string{"serviceaccounts"}, []string{"impersonate"}, nil))
+	idx := NewIndex(
+		[]rbacv1.Role{impersonator},
+		[]rbacv1.ClusterRole{admin},
+		[]rbacv1.RoleBinding{roleBinding("prod", "rb", "Role", "impersonator", saSubject("prod", "attacker"))},
+		[]rbacv1.ClusterRoleBinding{clusterRoleBinding("crb", "cluster-admin-ish", saSubject("prod", "victim"))},
+		[]corev1.ServiceAccount{saObj("prod", "attacker"), saObj("prod", "victim")},
+	)
+
+	result := idx.AnalyzeEscalation(sa("prod", "attacker"))
+	if !result.ClusterAdmin {
+		t.Error("ClusterAdmin = false, want true: unrestricted namespaced impersonate must still enumerate and reach prod/victim, who is cluster-admin")
+	}
+}
+
+func TestAnalyzeEscalation_ClusterWideBindOnRolesReachesAnyNamespace(t *testing.T) {
+	// bind on "roles" granted cluster-wide (via ClusterRoleBinding) is the
+	// MORE powerful case (any Role in any namespace), not an edge case to
+	// skip.
+	target := role("prod", "secret-reader", rule([]string{""}, []string{"secrets"}, []string{"get"}, nil))
+	binder := clusterRole("binder", rule([]string{"rbac.authorization.k8s.io"}, []string{"roles"}, []string{"bind"}, nil))
+	creator := clusterRole("rb-creator", rule([]string{"rbac.authorization.k8s.io"}, []string{"rolebindings"}, []string{"create"}, nil))
+	idx := NewIndex(
+		[]rbacv1.Role{target},
+		[]rbacv1.ClusterRole{binder, creator},
+		nil,
+		[]rbacv1.ClusterRoleBinding{
+			clusterRoleBinding("crb1", "binder", saSubject("ns", "attacker")),
+			clusterRoleBinding("crb2", "rb-creator", saSubject("ns", "attacker")),
+		},
+		nil,
+	)
+
+	result := idx.AnalyzeEscalation(sa("ns", "attacker"))
+	found := false
+	for _, sr := range result.EffectiveRules {
+		if sr.Namespace == "prod" && ruleGrants(sr.Rule, "", "secrets", "get") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("EffectiveRules = %+v, want secret-reader's rules adopted: cluster-wide bind+create-rolebindings reaches Roles in any namespace", result.EffectiveRules)
+	}
+}
+
+func TestAnalyzeEscalation_ClusterWideCreateRoleBindingsCoversEveryNamespace(t *testing.T) {
+	// The other half of the same gap: bind is namespace-scoped, but create
+	// rolebindings is granted cluster-wide -- must still combine.
+	target := clusterRole("cluster-admin-ish", rule([]string{"*"}, []string{"*"}, []string{"*"}, nil))
+	binder := role("prod", "binder", rule([]string{"rbac.authorization.k8s.io"}, []string{"clusterroles"}, []string{"bind"}, []string{"cluster-admin-ish"}))
+	creator := clusterRole("rb-creator", rule([]string{"rbac.authorization.k8s.io"}, []string{"rolebindings"}, []string{"create"}, nil))
+	idx := NewIndex(
+		[]rbacv1.Role{binder},
+		[]rbacv1.ClusterRole{target, creator},
+		[]rbacv1.RoleBinding{roleBinding("prod", "rb", "Role", "binder", saSubject("prod", "attacker"))},
+		[]rbacv1.ClusterRoleBinding{clusterRoleBinding("crb", "rb-creator", saSubject("prod", "attacker"))},
+		nil,
+	)
+
+	result := idx.AnalyzeEscalation(sa("prod", "attacker"))
+	found := false
+	for _, sr := range result.EffectiveRules {
+		if sr.Namespace == "prod" && ruleGrants(sr.Rule, "*", "*", "*") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("want cluster-admin-ish's rules adopted within prod: the namespace-scoped bind grant must combine with the cluster-wide create-rolebindings grant, not require both to share the same scope")
+	}
+}
+
+func TestAnalyzeEscalation_ImpersonateSystemMastersIsImmediateClusterAdmin(t *testing.T) {
+	// system:masters is hardcoded as an omnipotent superuser by the
+	// authorizer itself -- no RBAC object ever binds it, so the BFS would
+	// otherwise dead-end there and report ClusterAdmin: false.
+	cr := clusterRole("impersonator", rule([]string{""}, []string{"groups"}, []string{"impersonate"}, []string{"system:masters"}))
+	idx := NewIndex(nil, []rbacv1.ClusterRole{cr}, nil, []rbacv1.ClusterRoleBinding{clusterRoleBinding("crb", "impersonator", saSubject("ns", "attacker"))}, nil)
+
+	result := idx.AnalyzeEscalation(sa("ns", "attacker"))
+	if !result.ClusterAdmin {
+		t.Error("ClusterAdmin = false, want true: impersonating system:masters is an unconditional cluster-admin win")
+	}
+}
+
+func TestAnalyzeEscalation_NamespaceScopedUserImpersonateIsNotHonored(t *testing.T) {
+	// Kubernetes does not honor a namespace-scoped (RoleBinding-granted)
+	// grant of impersonate on the non-namespaced "users" resource type --
+	// only a cluster-wide (ClusterRoleBinding) grant is meaningful.
+	r := role("ns", "impersonator", rule([]string{""}, []string{"users"}, []string{"impersonate"}, []string{"alice"}))
+	idx := NewIndex([]rbacv1.Role{r}, nil, []rbacv1.RoleBinding{roleBinding("ns", "rb", "Role", "impersonator", saSubject("ns", "attacker"))}, nil, nil)
+
+	result := idx.AnalyzeEscalation(sa("ns", "attacker"))
+	if len(result.Reached) != 0 {
+		t.Errorf("Reached = %+v, want empty: a namespace-scoped grant cannot authorize impersonating a User", result.Reached)
+	}
+}
+
+func TestAnalyzeEscalation_CreateRestrictedByResourceNameGrantsNothing(t *testing.T) {
+	// Kubernetes cannot restrict a top-level "create" by resourceNames (the
+	// object doesn't exist yet, so there's no name to match against) -- a
+	// rule with resourceNames on create authorizes nothing for create, not
+	// "every object of that type."
+	cr := clusterRole("scoped-creator", rule([]string{""}, []string{"pods"}, []string{"create"}, []string{"some-specific-name"}))
+	idx := NewIndex(
+		nil, []rbacv1.ClusterRole{cr}, nil,
+		[]rbacv1.ClusterRoleBinding{clusterRoleBinding("crb", "scoped-creator", saSubject("ns", "attacker"))},
+		[]corev1.ServiceAccount{saObj("ns", "attacker"), saObj("ns", "victim")},
+	)
+
+	result := idx.AnalyzeEscalation(sa("ns", "attacker"))
+	if len(result.Reached) != 0 {
+		t.Errorf("Reached = %+v, want empty: resourceNames-restricted create authorizes nothing", result.Reached)
+	}
+}
+
+func TestAnalyzeEscalation_EscalateAndUpdateOnDifferentRolesDoNotCombine(t *testing.T) {
+	// escalate restricted to role-a and update restricted to role-b are two
+	// unrelated grants -- neither authorizes rewriting the other's target,
+	// so they must not combine into an Unbounded finding.
+	roleA := role("ns", "role-a", rule([]string{""}, []string{"pods"}, []string{"get"}, nil))
+	roleB := role("ns", "role-b", rule([]string{""}, []string{"pods"}, []string{"get"}, nil))
+	escalator := role("ns", "escalator", rule([]string{"rbac.authorization.k8s.io"}, []string{"roles"}, []string{"escalate"}, []string{"role-a"}))
+	mutator := role("ns", "mutator", rule([]string{"rbac.authorization.k8s.io"}, []string{"roles"}, []string{"update"}, []string{"role-b"}))
+	idx := NewIndex(
+		[]rbacv1.Role{roleA, roleB, escalator, mutator},
+		nil,
+		[]rbacv1.RoleBinding{
+			roleBinding("ns", "rb1", "Role", "escalator", saSubject("ns", "attacker")),
+			roleBinding("ns", "rb2", "Role", "mutator", saSubject("ns", "attacker")),
+		},
+		nil, nil,
+	)
+
+	result := idx.AnalyzeEscalation(sa("ns", "attacker"))
+	if result.ClusterAdmin || len(result.Unbounded) != 0 {
+		t.Errorf("want no escalation: escalate on role-a and update on role-b don't authorize rewriting either role, got ClusterAdmin=%v Unbounded=%+v", result.ClusterAdmin, result.Unbounded)
+	}
+}
+
+func TestAnalyzeEscalation_EscalateAndUpdateOnSameNamedRoleDoesEscalate(t *testing.T) {
+	// The positive counterpart: when both grants target the SAME role by
+	// name, it is exploitable.
+	roleA := role("ns", "role-a", rule([]string{""}, []string{"pods"}, []string{"get"}, nil))
+	escalator := role("ns", "escalator", rule([]string{"rbac.authorization.k8s.io"}, []string{"roles"}, []string{"escalate"}, []string{"role-a"}))
+	mutator := role("ns", "mutator", rule([]string{"rbac.authorization.k8s.io"}, []string{"roles"}, []string{"update"}, []string{"role-a"}))
+	idx := NewIndex(
+		[]rbacv1.Role{roleA, escalator, mutator},
+		nil,
+		[]rbacv1.RoleBinding{
+			roleBinding("ns", "rb1", "Role", "escalator", saSubject("ns", "attacker")),
+			roleBinding("ns", "rb2", "Role", "mutator", saSubject("ns", "attacker")),
+		},
+		nil, nil,
+	)
+
+	result := idx.AnalyzeEscalation(sa("ns", "attacker"))
+	if len(result.Unbounded) == 0 {
+		t.Error("Unbounded = empty, want a finding: escalate and update both target role-a")
+	}
+}
+
+func TestAnalyzeEscalation_TruncatedFlagSetWhenBudgetExhausted(t *testing.T) {
+	orig := maxEscalationHops
+	maxEscalationHops = 1
+	defer func() { maxEscalationHops = orig }()
+
+	// Two hops needed (attacker -> middle -> cluster-admin via bind), but the
+	// budget only allows processing the start subject itself.
+	admin := clusterRole("cluster-admin-ish", rule([]string{"*"}, []string{"*"}, []string{"*"}, nil))
+	binder := clusterRole("binder", rule([]string{"rbac.authorization.k8s.io"}, []string{"clusterroles"}, []string{"bind"}, []string{"cluster-admin-ish"}))
+	crbCreator := clusterRole("crb-creator", rule([]string{"rbac.authorization.k8s.io"}, []string{"clusterrolebindings"}, []string{"create"}, nil))
+	impersonator := clusterRole("impersonator", rule([]string{""}, []string{"serviceaccounts"}, []string{"impersonate"}, []string{"middle"}))
+	idx := NewIndex(
+		nil,
+		[]rbacv1.ClusterRole{admin, binder, crbCreator, impersonator},
+		nil,
+		[]rbacv1.ClusterRoleBinding{
+			clusterRoleBinding("crb-impersonator", "impersonator", saSubject("ns", "attacker")),
+			clusterRoleBinding("crb-binder", "binder", saSubject("ns", "middle")),
+			clusterRoleBinding("crb-creator", "crb-creator", saSubject("ns", "middle")),
+		},
+		[]corev1.ServiceAccount{saObj("ns", "attacker"), saObj("ns", "middle")},
+	)
+
+	result := idx.AnalyzeEscalation(sa("ns", "attacker"))
+	if !result.Truncated {
+		t.Error("Truncated = false, want true: the search ran out of budget before confirming ClusterAdmin one way or the other")
+	}
+	if result.ClusterAdmin {
+		t.Error("ClusterAdmin = true, but Truncated should mean this specific run didn't confirm it -- test setup contradiction")
+	}
+}
+
+func TestAnalyzeEscalation_NotTruncatedWhenClusterAdminConfirmedBeforeBudgetExhausted(t *testing.T) {
+	orig := maxEscalationHops
+	maxEscalationHops = 1
+	defer func() { maxEscalationHops = orig }()
+
+	cr := clusterRole("cluster-admin-ish", rule([]string{"*"}, []string{"*"}, []string{"*"}, nil))
+	idx := NewIndex(nil, []rbacv1.ClusterRole{cr}, nil, []rbacv1.ClusterRoleBinding{clusterRoleBinding("crb", "cluster-admin-ish", saSubject("ns", "attacker"))}, nil)
+
+	result := idx.AnalyzeEscalation(sa("ns", "attacker"))
+	if result.Truncated {
+		t.Error("Truncated = true, want false: ClusterAdmin was confirmed directly from the start subject's own rules, before the budget mattered")
+	}
+	if !result.ClusterAdmin {
+		t.Error("ClusterAdmin = false, want true")
+	}
+}

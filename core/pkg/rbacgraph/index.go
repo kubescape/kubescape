@@ -90,6 +90,18 @@ func (idx *Index) DirectRules(subject Subject) []ScopedRule {
 	return out
 }
 
+// bindingNamesSubject reports whether any of subjects actually authorizes
+// subject -- either by naming it directly, or via one of Kubernetes'
+// implicit groups every identity of that kind automatically belongs to:
+// every ServiceAccount is a member of system:serviceaccounts,
+// system:serviceaccounts:<its namespace>, and system:authenticated; every
+// User is a member of system:authenticated. A RoleBinding/ClusterRoleBinding
+// naming one of these groups as its subject grants its rules to every
+// matching identity, not just to a literally-named Group object (there
+// usually isn't one -- these are authenticator-assigned, not RBAC objects).
+// Missing this is a real, well-known misconfiguration source: binding a
+// privileged ClusterRole to system:serviceaccounts grants it to every
+// ServiceAccount in the cluster.
 func bindingNamesSubject(subjects []rbacv1.Subject, subject Subject) bool {
 	for _, s := range subjects {
 		switch subject.Kind {
@@ -97,8 +109,16 @@ func bindingNamesSubject(subjects []rbacv1.Subject, subject Subject) bool {
 			if s.Kind == "ServiceAccount" && s.Name == subject.Name && s.Namespace == subject.Namespace {
 				return true
 			}
+			if s.Kind == "Group" && (s.Name == "system:serviceaccounts" ||
+				s.Name == "system:serviceaccounts:"+subject.Namespace ||
+				s.Name == "system:authenticated") {
+				return true
+			}
 		case KindUser:
 			if s.Kind == "User" && s.Name == subject.Name {
+				return true
+			}
+			if s.Kind == "Group" && s.Name == "system:authenticated" {
 				return true
 			}
 		case KindGroup:

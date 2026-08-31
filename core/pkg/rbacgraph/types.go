@@ -44,6 +44,25 @@
 //     subresource (the TokenRequest API) mints a live token for the named
 //     ServiceAccount directly, no pod required.
 //
+// Two further things are modeled outside the five primitives above, both
+// because a security-facing tool erring toward under-reporting reachable
+// power is the more dangerous failure mode:
+//
+//   - Kubernetes' implicit groups: every ServiceAccount is automatically a
+//     member of system:serviceaccounts, system:serviceaccounts:<its
+//     namespace>, and system:authenticated; every User is a member of
+//     system:authenticated. A RoleBinding/ClusterRoleBinding naming one of
+//     these as its subject grants its rules to every matching identity,
+//     not just to a literally-named Group object -- these are
+//     authenticator-assigned, not RBAC objects, and binding a privileged
+//     ClusterRole to one of them is a well-known real-world
+//     misconfiguration.
+//   - system:masters: hardcoded by the authorizer as an omnipotent
+//     superuser group, bound to no RBAC object at all. Reaching it via
+//     impersonation is an immediate, unconditional cluster-admin win --
+//     the graph traversal would otherwise dead-end there and report a
+//     false negative, since nothing binds it for DirectRules to find.
+//
 // # Trust model
 //
 // Like this repo's other reachability engines, this is a static model
@@ -54,13 +73,23 @@
 // only ever narrow an edge this package reports, never widen one, so a
 // reported path is a genuine upper bound on what RBAC alone allows.
 //
+// This package also respects two real RBAC authorization mechanics that
+// are easy to get backwards: a top-level "create" (the object doesn't
+// exist yet) cannot be restricted by resourceNames -- a create rule
+// carrying resourceNames authorizes nothing, not everything; and
+// Users/Groups are non-namespaced identities, so a namespace-scoped
+// Role/RoleBinding cannot meaningfully grant impersonate rights over them
+// (only a cluster-scoped ClusterRole/ClusterRoleBinding can) -- unlike
+// impersonating a ServiceAccount, which is itself a namespaced resource
+// type a Role can constrain.
+//
 // # Non-goals (initial scope)
 //
-// Arbitrary User/Group impersonation or a "get/list secrets" edge toward
-// legacy long-lived ServiceAccount token Secrets are not modeled as
-// enumerable edges -- an unrestricted (wildcard resourceNames) impersonate
-// of users/groups is reported as an Unbounded finding instead, since there
-// is no cluster object to enumerate target identities from.
+// Arbitrary User/Group impersonation (an unrestricted, wildcard-
+// resourceNames grant) is reported as an Unbounded finding rather than
+// enumerable edges, since there is no cluster object to enumerate target
+// identities from. A "get/list secrets" edge toward legacy long-lived
+// ServiceAccount token Secrets is not modeled at all.
 package rbacgraph
 
 import (

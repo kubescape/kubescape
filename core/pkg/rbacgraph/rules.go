@@ -30,3 +30,35 @@ func namedResources(rule rbacv1.PolicyRule) (names []string, restricted bool) {
 	}
 	return rule.ResourceNames, true
 }
+
+// ruleGrantsUnnamedCreate reports whether rule grants an unrestricted
+// "create" on the given apiGroup/resource. A create request has no object
+// name for the authorizer to match against -- the object doesn't exist
+// yet -- so RBAC's own ResourceNameMatches always returns false for a
+// create verb when a rule carries a non-empty resourceNames list: such a
+// rule authorizes nothing for create, not "every object of that type."
+// Only used for top-level collection creates (pods, rolebindings,
+// clusterrolebindings); a subresource create on an already-named parent
+// object (e.g. serviceaccounts/token) does have a real object name to
+// match against and should use ruleGrants directly instead.
+func ruleGrantsUnnamedCreate(rule rbacv1.PolicyRule, apiGroup, resource string) bool {
+	return ruleGrants(rule, apiGroup, resource, "create") && len(rule.ResourceNames) == 0
+}
+
+func setToSlice(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	return out
+}
+
+func intersectSets(a, b map[string]bool) []string {
+	var out []string
+	for k := range a {
+		if b[k] {
+			out = append(out, k)
+		}
+	}
+	return out
+}

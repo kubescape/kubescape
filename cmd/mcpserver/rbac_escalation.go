@@ -93,6 +93,9 @@ func createRBACEscalationTools(ksServer *KubescapeMcpserver) {
 			"reached":                  buildReachedSummaries(result.Reached),
 			"unbounded_findings":       buildUnboundedSummaries(result.Unbounded),
 		}
+		if result.Truncated {
+			out["truncated"] = "the search hit its safety bound before confirming cluster_admin_equivalent one way or the other -- this result may be an incomplete negative, not a confirmed one"
+		}
 		if len(decodeErrs) > 0 {
 			msgs := make([]string, len(decodeErrs))
 			for i, e := range decodeErrs {
