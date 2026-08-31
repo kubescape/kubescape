@@ -352,7 +352,36 @@ func TestPrepareResourcesToFix_ClusterUnfixedLocation(t *testing.T) {
 
 	unfixed := h.UnfixedControls()
 	require.NotEmpty(t, unfixed)
-	assert.Equal(t, "cluster", unfixed[0].FilePath)
+	assert.Equal(t, clusterResourceLocation, unfixed[0].FilePath)
+}
+
+// TestPrepareResourcesToFix_SkippedClusterLocation covers the other branch, and
+// it is the one that matters most: skips are the common cluster case (Secrets,
+// ConfigMaps, owned pods, env-bearing workloads), so an empty location here
+// would make most of this command's output read as if the fixer lost track of
+// the resources.
+func TestPrepareResourcesToFix_SkippedClusterLocation(t *testing.T) {
+	res := clusterResource("Deployment", "local-path-provisioner")
+	containers := res.Object.(map[string]any)["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)
+	containers[0].(map[string]any)["env"] = []any{
+		map[string]any{"name": "CONFIG_MOUNT_PATH", "value": "XXXXXX"},
+	}
+
+	results := []resourcesresults.Result{
+		clusterResultFor(res, failedControl("C-0057", "Privileged container",
+			failedRuleWithFix("spec.template.spec.containers[0].securityContext.privileged", "false"),
+		)),
+	}
+	h := newClusterHandler(results, []reporthandling.Resource{*res})
+
+	toFix := h.PrepareResourcesToFix(context.Background())
+	assert.Empty(t, toFix, "an env-bearing workload must be declined")
+
+	unfixed := h.UnfixedControls()
+	require.NotEmpty(t, unfixed)
+	assert.Equal(t, clusterResourceLocation, unfixed[0].FilePath,
+		"a skipped cluster resource must not render as <unknown>")
+	assert.Contains(t, unfixed[0].Reason, "redact container environment variables")
 }
 
 // --- regression guard -----------------------------------------------------

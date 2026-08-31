@@ -426,6 +426,11 @@ func redactedContentReason(obj map[string]any) string {
 	return ""
 }
 
+// clusterResourceLocation stands in for the file path a cluster resource does
+// not have, in both the skip entries and the unfixed-control listing, so the
+// two cannot describe the same resource differently.
+const clusterResourceLocation = "cluster"
+
 // hasOwnerReferences reports whether a Kubernetes object is managed by another
 // resource.
 func hasOwnerReferences(obj map[string]any) bool {
@@ -443,11 +448,20 @@ func hasOwnerReferences(obj map[string]any) bool {
 func (h *FixHandler) resolveClusterResourceSource(resourceObj *reporthandling.Resource) resourceSource {
 	obj := resourceObj.GetObject()
 
+	// A cluster resource has no path, but the skip entries still have to say
+	// where it came from: left empty they render as "<unknown>", which reads as
+	// the fixer having lost track of the resource rather than the resource
+	// simply having no file. Skips are the common case here — Secrets,
+	// ConfigMaps, owned pods and env-bearing workloads are all declined — so
+	// most of this command's output would otherwise look like a defect.
+	src := resourceSource{reportedPath: clusterResourceLocation}
+
 	// A RegoResponseVector is a rule's finding over several related objects
 	// (RBAC bindings, cloud configuration), not one addressable resource, so
 	// there is no single manifest to emit for it.
 	if objectsenvelopes.IsTypeRegoResponseVector(obj) {
-		return resourceSource{skipReason: "skipped: not a single patchable workload"}
+		src.skipReason = "skipped: not a single patchable workload"
+		return src
 	}
 
 	// Without both of these the rendered YAML is not a manifest anything could
@@ -455,7 +469,8 @@ func (h *FixHandler) resolveClusterResourceSource(resourceObj *reporthandling.Re
 	apiVersion, _ := obj["apiVersion"].(string)
 	kind, _ := obj["kind"].(string)
 	if apiVersion == "" || kind == "" {
-		return resourceSource{skipReason: "skipped: resource is not a complete Kubernetes object"}
+		src.skipReason = "skipped: resource is not a complete Kubernetes object"
+		return src
 	}
 
 	// A resource owned by another cannot be patched where it stands, so emitting
@@ -473,17 +488,20 @@ func (h *FixHandler) resolveClusterResourceSource(resourceObj *reporthandling.Re
 	// k8sinterface.WorkloadHasParent, which returns false for a Pod that plainly
 	// has an owner and so would not catch this.
 	if hasOwnerReferences(obj) {
-		return resourceSource{skipReason: "skipped: managed by another resource; fix its owner instead"}
+		src.skipReason = "skipped: managed by another resource; fix its owner instead"
+		return src
 	}
 
 	// Last, because it is the most expensive check and the least likely to fire.
 	if reason := redactedContentReason(obj); reason != "" {
-		return resourceSource{skipReason: reason}
+		src.skipReason = reason
+		return src
 	}
 
 	// documentIndex stays 0: a rendered resource is always a single document,
 	// which is what the select(di==0) in the fix expressions addresses.
-	return resourceSource{inMemory: true}
+	src.inMemory = true
+	return src
 }
 
 // resolveResourceSource decides where a resource's YAML lives, or why it cannot
@@ -622,7 +640,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		// simply having no file.
 		location := sanitizeForLog(src.filePath)
 		if src.inMemory {
-			location = "cluster"
+			location = clusterResourceLocation
 		}
 
 		rfi := ResourceFixInfo{

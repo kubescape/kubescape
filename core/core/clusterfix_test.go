@@ -136,6 +136,50 @@ func TestPrintClusterFixes_ClusterScopedLabel(t *testing.T) {
 	assert.Contains(t, buf.String(), "# ClusterRole/admin")
 }
 
+// TestPrintClusterFixes_LabelCannotInjectDocuments covers the report being
+// untrusted input: a newline in a resource name would close the comment the
+// label sits in and let the remainder become further YAML documents in a stream
+// the user is about to pipe into kubectl.
+func TestPrintClusterFixes_LabelCannotInjectDocuments(t *testing.T) {
+	for _, name := range []string{
+		"nginx\n---\nkind: Evil",
+		"nginx\r---\rkind: Evil",
+		"nginx\r\n---\r\nkind: Evil",
+	} {
+		var buf bytes.Buffer
+		require.NoError(t, printClusterFixes(&buf, []fixhandler.RenderedFix{
+			renderedFix("default", "Deployment", name, "kind: Deployment\n"),
+		}))
+
+		decoder := yaml.NewDecoder(strings.NewReader(buf.String()))
+		var docs []map[string]any
+		for {
+			var doc map[string]any
+			if err := decoder.Decode(&doc); err != nil {
+				break
+			}
+			docs = append(docs, doc)
+		}
+		require.Len(t, docs, 1, "a crafted name must not add documents: %q", buf.String())
+		assert.Equal(t, "Deployment", docs[0]["kind"])
+
+		// The injected text may survive inside the comment — that is harmless.
+		// What must not happen is it escaping onto a line of its own, so every
+		// line carrying it has to still be the comment.
+		separators := 0
+		for _, line := range strings.Split(buf.String(), "\n") {
+			if line == "---" {
+				separators++
+			}
+			if strings.Contains(line, "Evil") {
+				assert.Truef(t, strings.HasPrefix(line, "#"),
+					"injected text escaped the comment onto its own line: %q", line)
+			}
+		}
+		assert.Equal(t, 1, separators, "a crafted name must not introduce a second document separator")
+	}
+}
+
 // --- output directory -----------------------------------------------------
 
 func TestWriteClusterFixes_WritesOneFilePerResource(t *testing.T) {
@@ -155,6 +199,52 @@ func TestWriteClusterFixes_WritesOneFilePerResource(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(dir, "default_Deployment_nginx.yaml"))
 	require.NoError(t, err)
 	assert.Equal(t, "kind: Deployment\n", string(content))
+}
+
+// TestWriteClusterFixes_DisambiguatesCollidingNames guards against silently
+// dropping a manifest: the base name omits the API group and version, and
+// sanitizing folds separators into dashes, so two distinct resources can reduce
+// to one filename and the second would overwrite the first.
+func TestWriteClusterFixes_DisambiguatesCollidingNames(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "fixes")
+
+	// "a/b" and "a-b" both sanitize to "a-b".
+	written, err := writeClusterFixes(dir, []fixhandler.RenderedFix{
+		renderedFix("default", "Deployment", "a/b", "kind: Deployment\nmetadata:\n  name: first\n"),
+		renderedFix("default", "Deployment", "a-b", "kind: Deployment\nmetadata:\n  name: second\n"),
+	}, false)
+	require.NoError(t, err)
+	require.Len(t, written, 2)
+
+	assert.NotEqual(t, written[0], written[1], "colliding names must resolve to distinct files")
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	assert.Len(t, entries, 2, "both manifests must survive")
+
+	// Naming must be stable across runs, or every run churns the output dir.
+	again, err := writeClusterFixes(filepath.Join(t.TempDir(), "again"), []fixhandler.RenderedFix{
+		renderedFix("default", "Deployment", "a/b", "kind: Deployment\n"),
+		renderedFix("default", "Deployment", "a-b", "kind: Deployment\n"),
+	}, false)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Base(written[0]), filepath.Base(again[0]))
+	assert.Equal(t, filepath.Base(written[1]), filepath.Base(again[1]))
+}
+
+// TestWriteClusterFixes_KeepsPlainNamesWhenUnique keeps the common case
+// readable: disambiguation only kicks in on an actual collision.
+func TestWriteClusterFixes_KeepsPlainNamesWhenUnique(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "fixes")
+
+	written, err := writeClusterFixes(dir, []fixhandler.RenderedFix{
+		renderedFix("default", "Deployment", "nginx", "kind: Deployment\n"),
+		renderedFix("kube-system", "DaemonSet", "kube-proxy", "kind: DaemonSet\n"),
+	}, false)
+	require.NoError(t, err)
+
+	assert.Equal(t, "default_Deployment_nginx.yaml", filepath.Base(written[0]))
+	assert.Equal(t, "kube-system_DaemonSet_kube-proxy.yaml", filepath.Base(written[1]))
 }
 
 func TestWriteClusterFixes_RefusesNonEmptyDirectory(t *testing.T) {

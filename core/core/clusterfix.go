@@ -1,6 +1,8 @@
 package core
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -57,12 +59,57 @@ func clusterFixFileName(resource *reporthandling.Resource) string {
 	return strings.Join(parts, "_") + ".yaml"
 }
 
+// labelControlChars matches anything that would not survive being placed in a
+// single-line YAML comment.
+var labelControlChars = regexp.MustCompile(`[\x00-\x1f\x7f]+`)
+
+// sanitizeLabelComponent strips control characters from one identifier.
+//
+// The identity fields come from the report, which `kubescape fix` treats as
+// untrusted input — validateReportStructure checks a report's shape, never its
+// resource names. A name carrying a newline would close the comment this label
+// sits in and let the rest of the name become further YAML documents in a
+// stream the user is about to pipe into kubectl.
+func sanitizeLabelComponent(s string) string {
+	return labelControlChars.ReplaceAllString(s, "-")
+}
+
+// clusterFixFileNames names every manifest in one batch, disambiguating any
+// that would otherwise land on the same file.
+//
+// The base name drops the resource's API group and version, and sanitizing it
+// folds separators into dashes, so two distinct resources can produce one
+// filename — "a/b" and "a-b" being the plain case. Writing both would silently
+// leave the user with one manifest while reporting two. Where that happens,
+// every colliding name gains a short digest of the resource ID: deterministic,
+// and applied to all of them so no single resource is arbitrarily privileged.
+func clusterFixFileNames(rendered []fixhandler.RenderedFix) []string {
+	names := make([]string, len(rendered))
+	counts := make(map[string]int, len(rendered))
+	for i, fix := range rendered {
+		names[i] = clusterFixFileName(fix.Resource)
+		counts[names[i]]++
+	}
+
+	for i, fix := range rendered {
+		if counts[names[i]] < 2 {
+			continue
+		}
+		digest := sha256.Sum256([]byte(fix.Resource.GetID()))
+		base := strings.TrimSuffix(names[i], ".yaml")
+		names[i] = fmt.Sprintf("%s_%s.yaml", base, hex.EncodeToString(digest[:4]))
+	}
+	return names
+}
+
 // clusterResourceLabel identifies a resource in a one-line YAML comment.
 func clusterResourceLabel(resource *reporthandling.Resource) string {
-	if namespace := resource.GetNamespace(); namespace != "" {
-		return fmt.Sprintf("%s/%s/%s", namespace, resource.GetKind(), resource.GetName())
+	kind := sanitizeLabelComponent(resource.GetKind())
+	name := sanitizeLabelComponent(resource.GetName())
+	if namespace := sanitizeLabelComponent(resource.GetNamespace()); namespace != "" {
+		return fmt.Sprintf("%s/%s/%s", namespace, kind, name)
 	}
-	return fmt.Sprintf("%s/%s", resource.GetKind(), resource.GetName())
+	return fmt.Sprintf("%s/%s", kind, name)
 }
 
 // printClusterFixes writes the manifests as one YAML document stream, so the
@@ -105,9 +152,10 @@ func writeClusterFixes(dir string, rendered []fixhandler.RenderedFix, noConfirm 
 	}
 
 	cleanDir := filepath.Clean(dir)
+	names := clusterFixFileNames(rendered)
 	written := make([]string, 0, len(rendered))
-	for _, fix := range rendered {
-		path := filepath.Join(cleanDir, clusterFixFileName(fix.Resource))
+	for i, fix := range rendered {
+		path := filepath.Join(cleanDir, names[i])
 
 		// Defence in depth behind sanitizeFileNameComponent: the resource name
 		// comes from the report, and a manifest must never be written outside
