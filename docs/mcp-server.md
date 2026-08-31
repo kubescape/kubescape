@@ -229,6 +229,39 @@ Run an on-demand, live Network security scan (evaluating network-related control
 }
 ```
 
+#### `scan_workload`
+
+Scan a single named Kubernetes workload for misconfigurations and return its failed controls. Prefer this over `scan_controls` or `run_framework_security_scan` once you know which workload you care about: only the rules whose match criteria cover that resource's kind are evaluated, and the queries they need are scoped to the workload's namespace, so the scan is much cheaper and the response much smaller than a namespace-wide one.
+
+By default the workload is fetched from the live cluster. Pass `path` to resolve it from local manifests instead. The two modes differ in how the workload is located:
+
+* **Live cluster** — the kind is resolved through Kubernetes discovery, so a bare kind such as `Deployment/nginx` is enough for built-in types. A custom resource must spell out its version and group (`Widget.v1.example.com/my-widget`), because discovery cannot disambiguate it otherwise. Scanning a `Secret` is refused.
+* **Local manifests** — resources are matched on kind and name (plus namespace and apiVersion when given) with no cluster involved, so no discovery and no CRD resolution. If more than one manifest matches, the scan reports the ambiguity rather than picking one; add a namespace to disambiguate.
+
+A workload that is owned by another resource — a Pod belonging to a ReplicaSet, say — is rejected. Scan the owner instead.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `workload` | string | Yes | Workload identifier as `<kind>[.<version>[.<group>]]/<name>`, optionally namespace-qualified: `"Deployment/nginx"`, `"default/Deployment/nginx"`, or `"Deployment.v1.apps/nginx"` |
+| `namespace` | string | No | Namespace of the workload. Overrides a namespace embedded in the identifier; pass `"*"` to override it and search every namespace. Omit to use the identifier's namespace, or to search every namespace when the identifier has none |
+| `path` | string | No | Path to local YAML manifests. When set, the workload is resolved from those files instead of the live cluster |
+| `framework` | string | No | Framework to scan against (optional, defaults to the full workload control set) |
+
+**Example Response:**
+```json
+{
+  "degraded": false,
+  "not_evaluated_controls": 0,
+  "total_controls": 16,
+  "total_failed": 1,
+  "returned_failed": 1,
+  "truncated": false,
+  "failed_resources": [{}]
+}
+```
+
 #### `scan_container_image`
 
 Run an on-demand container image vulnerability scan and return structured JSON containing deduplicated vulnerabilities, severity counts, and optional match details.
