@@ -1389,6 +1389,7 @@ func mcpServerEntrypoint(transport string, port int) error {
 	createNetworkReachabilityTools(ksServer)
 	createMutatingAdmissionPolicyTools(ksServer)
 	createVulnerabilityExposureTools(ksServer)
+	createServiceExposureTools(ksServer)
 	createFrameworkScanningTools(ksServer)
 	createIaCScanningTools(ksServer)
 	createIaCControlScanningTool(ksServer)
