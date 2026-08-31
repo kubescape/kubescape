@@ -52,7 +52,7 @@ kubescape scan [target] [flags]
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
 | `--label-selector <selector>` | Filter collected resources by Kubernetes label selector. Accepts any expression `kubectl -l` supports, e.g. `app=nginx,env!=dev` or `env in (prod,staging)`. Syntax is validated before scanning begins; filtering is applied during live cluster collection and ignored when scanning local files. | - |
 | `--keep-local` | Don't report results to backend | `false` |
-| `--notify <url>` | POST the posture scan summary to a webhook URL. Slack incoming webhooks receive Block Kit; other destinations receive generic JSON. Repeat for multiple endpoints. Delivery is best-effort and does not affect scan exit status. Not supported by `scan image`. | - |
+| `--notify <url>` | POST the posture scan summary to a webhook URL. Slack incoming webhooks receive Block Kit, Microsoft Teams webhooks an Adaptive Card, and other destinations generic JSON. Repeat for multiple endpoints. Delivery is best-effort and does not affect scan exit status. Not supported by `scan image`. | - |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
 | `--otel-endpoint <endpoint>` | Export scan traces and metrics to an OTLP collector — see [OpenTelemetry export](#opentelemetry-export). Accepts `host:port` (plaintext) or a `http(s)://` URL. | `OTEL_EXPORTER_OTLP_ENDPOINT` |
@@ -70,11 +70,14 @@ kubescape scan [target] [flags]
 
 ### Webhook notifications
 
-Use `--notify` to send a compact summary after a posture scan. Official Slack and GovSlack incoming webhook URLs receive a Block Kit message; every other URL receives the existing JSON `summaryDetails` object:
+Use `--notify` to send a compact summary after a posture scan. Official Slack and GovSlack incoming webhook URLs receive a Block Kit message, Microsoft Teams incoming webhooks (`*.webhook.office.com`, `outlook.office.com`, `outlook.office365.com`) receive an Adaptive Card, and every other URL receives the existing JSON `summaryDetails` object:
 
 ```bash
 export SLACK_WEBHOOK_URL='https://hooks.slack.com/services/T00000000/B00000000/SECRET'
 kubescape scan manifests/ --notify "$SLACK_WEBHOOK_URL"
+
+export TEAMS_WEBHOOK_URL='https://contoso.webhook.office.com/webhookb2/00000000-0000-0000-0000-000000000000@.../IncomingWebhook/.../...'
+kubescape scan manifests/ --notify "$TEAMS_WEBHOOK_URL"
 kubescape scan manifests/ --notify https://hooks.example.com/kubescape
 kubescape scan manifests/ --notify https://ops.example.com/kubescape --notify https://audit.example.com/kubescape
 ```
@@ -97,6 +100,36 @@ Slack messages contain the compliance score, passed/failed/skipped control count
 }
 ```
 
+Teams messages carry the same content as an Adaptive Card wrapped in the incoming-webhook envelope, with the counts in a `FactSet` and the failing controls keyed by control ID. For example:
+
+```json
+{
+  "type": "message",
+  "attachments": [{
+    "contentType": "application/vnd.microsoft.card.adaptive",
+    "contentUrl": null,
+    "content": {
+      "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+      "type": "AdaptiveCard",
+      "version": "1.4",
+      "body": [
+        {"type": "TextBlock", "text": "Kubescape scan results", "size": "Large", "weight": "Bolder", "wrap": true},
+        {"type": "FactSet", "facts": [
+          {"title": "Compliance score", "value": "73.2%"},
+          {"title": "Controls failed", "value": "2 of 8"},
+          {"title": "Passed", "value": "5"},
+          {"title": "Skipped", "value": "1"}
+        ]},
+        {"type": "TextBlock", "text": "Top failing controls", "weight": "Bolder", "wrap": true},
+        {"type": "FactSet", "facts": [
+          {"title": "C-0001", "value": "Critical — Privileged container"}
+        ]}
+      ]
+    }
+  }]
+}
+```
+
 Generic destinations continue to receive only the scan summary. An abridged example is:
 
 ```json
@@ -109,7 +142,7 @@ Generic destinations continue to receive only the scan summary. An abridged exam
 }
 ```
 
-The summary and Slack control names may contain identifiers from the scan. Use `--hide` where appropriate and send only to trusted webhook endpoints. A Slack webhook URL is itself a secret; keep it out of source control and prefer passing it through an environment variable. Microsoft Teams Adaptive Card formatting is not currently included.
+The summary and control names may contain identifiers from the scan. Use `--hide` where appropriate and send only to trusted webhook endpoints. Slack and Teams webhook URLs are secrets; keep them out of source control and prefer passing them through environment variables.
 
 ### Generating an exceptions baseline
 

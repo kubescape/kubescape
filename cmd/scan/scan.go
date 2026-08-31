@@ -228,7 +228,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.LabelSelector, "label-selector", "", "Filter collected Kubernetes resources by label selector. Accepts any selector that kubectl -l supports, e.g: --label-selector app=nginx,env!=dev")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to configured backend.")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
-	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.NotifyURLs, "notify", nil, "POST the scan summary to this webhook URL; Slack incoming webhooks use Block Kit; repeat for multiple destinations")
+	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.NotifyURLs, "notify", nil, "POST the scan summary to this webhook URL; Slack incoming webhooks use Block Kit and Microsoft Teams webhooks an Adaptive Card; repeat for multiple destinations")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.VerboseMode, "verbose", "v", false, "Display all of the input resources and not only failed resources")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ShowEvidence, "show-evidence", "E", false, "Show evidence paths with current field values for each failed control (pretty-printer only)")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.ShowSecrets, "show-secrets", false, "Show secret field values in evidence output. By default secret values are redacted. Only effective with --show-evidence")
