@@ -157,7 +157,12 @@ func httpRouteReferencesService(route *httpRoute, ref ServiceRef) bool {
 // given) is conservatively treated as admitting it: this package errs
 // toward reporting a possible exposure rather than silently hiding one, the
 // same choice core/pkg/mapreconcile makes for its own indeterminate
-// matches.
+// matches. A parentRef naming a Gateway this Index has no record of at all
+// is the most indeterminate case there is -- the Gateway may simply live
+// outside what was collected (a cross-namespace reference, or a caller
+// without RBAC to list it elsewhere) rather than not exist -- so it gets the
+// same conservative treatment rather than being silently treated as a
+// non-match.
 func (idx *Index) routeAttachesToAGateway(route *httpRoute) bool {
 	for _, ref := range route.ParentRefs {
 		ns := route.Namespace
@@ -166,7 +171,7 @@ func (idx *Index) routeAttachesToAGateway(route *httpRoute) bool {
 		}
 		gw, ok := idx.gateways[ServiceRef{Namespace: ns, Name: ref.Name}]
 		if !ok {
-			continue
+			return true
 		}
 		for _, l := range gw.Listeners {
 			admits, determinable := idx.gatewayAdmitsRouteNamespace(l, route.Namespace, gw.Namespace)

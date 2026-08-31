@@ -96,7 +96,14 @@ func createServiceExposureTools(ksServer *KubescapeMcpserver) {
 				gatewayResources[w.GetID()] = w
 			}
 		}
-		gwList, gwErr := dynClient.Resource(gatewayGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
+		// Gateways are listed cluster-wide, not scoped to namespace: the
+		// dominant real-world topology puts the Gateway in an infra
+		// namespace (e.g. istio-system) with an HTTPRoute in an app
+		// namespace referencing it cross-namespace via parentRefs, and
+		// AllowedRoutes deciding whether that attachment is admitted.
+		// Scoping this list to namespace would make every such Gateway
+		// invisible to idx.routeAttachesToAGateway.
+		gwList, gwErr := dynClient.Resource(gatewayGVR).List(ctx, metav1.ListOptions{})
 		if gwErr != nil && !isMissingAPIErr(gwErr) {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to list Gateway objects: %v", gwErr)), nil
 		}

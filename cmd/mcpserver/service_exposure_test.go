@@ -234,3 +234,54 @@ func TestAnalyzeServiceExposure_HTTPRouteThroughGatewayExposesService(t *testing
 	require.Len(t, paths, 1)
 	require.Equal(t, "HTTPRoute", paths[0].(map[string]any)["kind"])
 }
+
+// TestAnalyzeServiceExposure_CrossNamespaceGatewayWithAllowedRoutesFromAllExposesService
+// exercises the dominant real-world Gateway API topology: the Gateway lives
+// in an infra namespace (e.g. istio-system) with allowedRoutes.namespaces.from
+// set to All, while the HTTPRoute and the Service it exposes live in an
+// application namespace and reference the Gateway cross-namespace via
+// parentRefs[].namespace. Querying analyze_service_exposure scoped to the
+// app namespace must still find that Gateway -- it must not be listed only
+// from the queried namespace.
+func TestAnalyzeServiceExposure_CrossNamespaceGatewayWithAllowedRoutesFromAllExposesService(t *testing.T) {
+	svc := unstructuredService("prod", "app", "ClusterIP")
+	route := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "gateway.networking.k8s.io/v1",
+		"kind":       "HTTPRoute",
+		"metadata":   map[string]any{"name": "route", "namespace": "prod"},
+		"spec": map[string]any{
+			"parentRefs": []any{map[string]any{"name": "gw", "namespace": "infra"}},
+			"rules":      []any{map[string]any{"backendRefs": []any{map[string]any{"name": "app"}}}},
+		},
+	}}
+	gw := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "gateway.networking.k8s.io/v1",
+		"kind":       "Gateway",
+		"metadata":   map[string]any{"name": "gw", "namespace": "infra"},
+		"spec": map[string]any{"listeners": []any{map[string]any{
+			"name":          "http",
+			"allowedRoutes": map[string]any{"namespaces": map[string]any{"from": "All"}},
+		}}},
+	}}
+	ksServer := newServiceExposureTestServer(t, svc, route)
+
+	// See TestAnalyzeServiceExposure_HTTPRouteThroughGatewayExposesService for
+	// why the Gateway is added via an explicit Create against the real GVR
+	// rather than passed to the constructor.
+	dyn := ksServer.k8sClient.DynamicClient
+	_, err := dyn.Resource(gatewayGVR).Namespace("infra").Create(context.Background(), gw, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_service_exposure", map[string]any{
+		"namespace":    "prod",
+		"service_name": "app",
+	}))
+	require.False(t, result.IsError)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+	services := parsed["services"].(map[string]any)
+	paths := services["app"].([]any)
+	require.Len(t, paths, 1, "the cross-namespace Gateway in infra must be found even though the query is scoped to prod")
+	require.Equal(t, "HTTPRoute", paths[0].(map[string]any)["kind"])
+}

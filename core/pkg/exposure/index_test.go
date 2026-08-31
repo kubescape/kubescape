@@ -108,16 +108,20 @@ func TestServiceExposure_IngressInAnotherNamespaceDoesNotApply(t *testing.T) {
 	}
 }
 
-func TestServiceExposure_HTTPRouteWithoutGatewayIsNotExposed(t *testing.T) {
+func TestServiceExposure_HTTPRouteWithUncollectedGatewayStillReportsPath(t *testing.T) {
 	route := httpRoute{
 		Namespace:  "ns",
 		Name:       "route",
 		ParentRefs: []parentRef{{Name: "missing-gw"}},
 		Rules:      []httpRouteRule{{BackendRefs: []backendRef{{Name: "app"}}}},
 	}
+	// No Gateway named missing-gw was collected. This is the most
+	// indeterminate case there is -- the Gateway could simply live outside
+	// what was collected rather than not exist -- so it must be treated as a
+	// possible exposure, not silently dropped.
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []httpRoute{route}, nil, nil)
-	if paths := idx.ServiceExposure(ref("ns", "app")); len(paths) != 0 {
-		t.Errorf("paths = %v, want empty: no Gateway named gw was collected", paths)
+	if paths := idx.ServiceExposure(ref("ns", "app")); len(paths) != 1 {
+		t.Errorf("paths = %v, want one path: an uncollected Gateway must be treated as a possible exposure", paths)
 	}
 }
 
