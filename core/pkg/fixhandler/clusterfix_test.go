@@ -179,6 +179,63 @@ func TestResolveResourceSource_Cluster(t *testing.T) {
 		assert.Contains(t, src.skipReason, "not a single patchable workload")
 	})
 
+	t.Run("an owned workload is skipped", func(t *testing.T) {
+		// A static control-plane pod: owned by the Node, rendered by the kubelet
+		// from a file on that node. The API server rejects nearly every spec
+		// change to an existing Pod, so an emitted manifest could not be applied
+		// — verified against a real kind cluster, where kubectl refused it with
+		// "pod updates may not change fields other than spec.containers[*].image".
+		res := clusterResource("Pod", "etcd-kind-control-plane")
+		res.Object.(map[string]any)["metadata"].(map[string]any)["ownerReferences"] = []any{
+			map[string]any{"apiVersion": "v1", "kind": "Node", "name": "kind-control-plane", "controller": true},
+		}
+
+		src := h.resolveResourceSource(context.Background(), res)
+		assert.False(t, src.inMemory)
+		assert.Contains(t, src.skipReason, "fix its owner instead")
+	})
+
+	t.Run("a workload with container env is skipped", func(t *testing.T) {
+		// The scan replaces every env value with "XXXXXX" and drops valueFrom,
+		// so a rendered manifest would overwrite the user's real configuration.
+		// Observed on a real cluster: local-path-provisioner's CONFIG_MOUNT_PATH
+		// ("/etc/config/") and POD_NAMESPACE (a fieldRef) both came back as
+		// "XXXXXX", and the resulting manifest applied *cleanly* — silently
+		// destroying both.
+		res := clusterResource("Deployment", "local-path-provisioner")
+		containers := res.Object.(map[string]any)["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)["containers"].([]any)
+		containers[0].(map[string]any)["env"] = []any{
+			map[string]any{"name": "CONFIG_MOUNT_PATH", "value": "XXXXXX"},
+		}
+
+		src := h.resolveResourceSource(context.Background(), res)
+		assert.False(t, src.inMemory)
+		assert.Contains(t, src.skipReason, "redact container environment variables")
+	})
+
+	t.Run("a Secret is skipped", func(t *testing.T) {
+		res := &reporthandling.Resource{
+			ResourceID: "/v1/default/Secret/creds",
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Secret",
+				"metadata":   map[string]any{"name": "creds", "namespace": "default"},
+				"data":       map[string]any{"password": "XXXXXX"},
+			},
+		}
+		src := h.resolveResourceSource(context.Background(), res)
+		assert.False(t, src.inMemory)
+		assert.Contains(t, src.skipReason, "redact this resource's data")
+	})
+
+	t.Run("a workload without env is still patchable", func(t *testing.T) {
+		// The counterpart: nothing in this resource is redacted, so its
+		// recorded copy is faithful and safe to render.
+		src := h.resolveResourceSource(context.Background(), clusterResource("Deployment", "nginx"))
+		assert.True(t, src.inMemory)
+		assert.Empty(t, src.skipReason)
+	})
+
 	t.Run("an incomplete object is skipped", func(t *testing.T) {
 		res := &reporthandling.Resource{
 			ResourceID: "broken",

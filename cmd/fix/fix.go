@@ -40,6 +40,12 @@ var fixCmdExamples = fmt.Sprintf(`
   The manifests reflect the cluster as it was scanned, not a live read: a
   resource that changed since the scan should be re-scanned before applying.
 
+  Resources whose scan record is redacted are declined rather than emitted,
+  since a manifest built from one would overwrite your real configuration:
+  workloads with container environment variables, plus Secrets and ConfigMaps.
+  Owner-managed resources are declined too — fix the owner instead. Each is
+  listed with its reason. Fixing manifest files is unaffected.
+
 `, cautils.ExecName())
 
 func GetFixCmd(ks meta.IKubescape) *cobra.Command {

@@ -18,6 +18,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
@@ -362,6 +363,80 @@ type resourceSource struct {
 	skipReason string
 }
 
+// redactedContentReason reports why a resource's recorded copy is not a
+// faithful one, or "" when it is.
+//
+// A scan report is built for reporting, not for round-tripping. Before results
+// are aggregated, updateResults calls removeData over every resource
+// (opaprocessor/processorhandlerutils.go), which for a workload replaces every
+// container env value with "XXXXXX" and drops valueFrom/envFrom, and for a
+// Secret or ConfigMap redacts data/stringData. Rendering a manifest from such a
+// copy would hand the user YAML that overwrites their real configuration with
+// the redaction placeholder — verified against a real cluster, where the two
+// DaemonSets carrying env vars came back with "value": "XXXXXX".
+//
+// The file scan path is unaffected because it patches the manifest on disk and
+// only reads the report to decide which edits to make. The cluster path has no
+// file, so it has to decline these instead.
+//
+// Everything else removeData strips — the last-applied annotation,
+// managedFields and status — this package removes deliberately anyway, so a
+// resource that passes this check is byte-faithful in every field that matters.
+//
+// Known gap: a container using only envFrom is undetectable here, because
+// envFrom is deleted outright rather than replaced with a marker. Such a
+// manifest is incomplete rather than wrong, and `kubectl apply` on a resource
+// with no last-applied annotation does not delete fields the config omits, so
+// the live envFrom survives.
+func redactedContentReason(obj map[string]any) string {
+	switch kind, _ := obj["kind"].(string); kind {
+	case "Secret", "ConfigMap":
+		return "skipped: scan reports redact this resource's data, so a rendered manifest would not be faithful"
+	}
+
+	workload := workloadinterface.NewWorkloadObj(obj)
+	if workload == nil {
+		return ""
+	}
+
+	const envRedacted = "skipped: scan reports redact container environment variables, so a rendered manifest would overwrite them"
+
+	if containers, err := workload.GetContainers(); err == nil {
+		for i := range containers {
+			if len(containers[i].Env) > 0 || len(containers[i].EnvFrom) > 0 {
+				return envRedacted
+			}
+		}
+	}
+	if initContainers, err := workload.GetInitContainers(); err == nil {
+		for i := range initContainers {
+			if len(initContainers[i].Env) > 0 || len(initContainers[i].EnvFrom) > 0 {
+				return envRedacted
+			}
+		}
+	}
+	if ephemeral, err := workload.GetEphemeralContainers(); err == nil {
+		for i := range ephemeral {
+			if len(ephemeral[i].Env) > 0 || len(ephemeral[i].EnvFrom) > 0 {
+				return envRedacted
+			}
+		}
+	}
+
+	return ""
+}
+
+// hasOwnerReferences reports whether a Kubernetes object is managed by another
+// resource.
+func hasOwnerReferences(obj map[string]any) bool {
+	metadata, ok := obj["metadata"].(map[string]any)
+	if !ok {
+		return false
+	}
+	owners, ok := metadata["ownerReferences"].([]any)
+	return ok && len(owners) > 0
+}
+
 // resolveClusterResourceSource handles a resource from a live-cluster scan.
 // There is no manifest to locate, so the only question is whether the recorded
 // object is something a manifest can be rendered from.
@@ -381,6 +456,29 @@ func (h *FixHandler) resolveClusterResourceSource(resourceObj *reporthandling.Re
 	kind, _ := obj["kind"].(string)
 	if apiVersion == "" || kind == "" {
 		return resourceSource{skipReason: "skipped: resource is not a complete Kubernetes object"}
+	}
+
+	// A resource owned by another cannot be patched where it stands, so emitting
+	// a manifest for it would hand the user something that does not apply. The
+	// owner recreates it from its own template, and for a Pod the API server
+	// rejects nearly every spec change outright:
+	//
+	//	pod updates may not change fields other than `spec.containers[*].image` ...
+	//
+	// Static control-plane pods are the sharpest case — owned by the Node and
+	// rendered by the kubelet from files on it. Verified against a real kind
+	// cluster, where kubectl refused exactly these four.
+	//
+	// This checks ownerReferences directly rather than using
+	// k8sinterface.WorkloadHasParent, which returns false for a Pod that plainly
+	// has an owner and so would not catch this.
+	if hasOwnerReferences(obj) {
+		return resourceSource{skipReason: "skipped: managed by another resource; fix its owner instead"}
+	}
+
+	// Last, because it is the most expensive check and the least likely to fire.
+	if reason := redactedContentReason(obj); reason != "" {
+		return resourceSource{skipReason: reason}
 	}
 
 	// documentIndex stays 0: a rendered resource is always a single document,

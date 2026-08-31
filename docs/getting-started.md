@@ -429,6 +429,11 @@ kubescape scan --format json --output cluster.json
 kubescape fix cluster.json | kubectl apply -f -
 ```
 
+Scan reports redact container environment variables and Secret/ConfigMap data,
+so resources carrying those are declined rather than emitted with placeholder
+values — each is listed with its reason. See the
+[CLI reference](cli-reference.md#cluster-scans) for the full list.
+
 > **Warning**  
 > When fixing manifest files, the fix command modifies them in-place. Always
 > review changes or use `--dry-run` first. Fixing a cluster scan never writes to

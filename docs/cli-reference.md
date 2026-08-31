@@ -643,9 +643,38 @@ Two details worth knowing:
   `kubectl.kubernetes.io/last-applied-configuration` annotation) are stripped,
   since a manifest carrying them will not apply cleanly.
 
-RBAC and cloud findings are skipped: they describe a relationship across several
-related objects rather than one addressable resource, so there is no single
-manifest to emit. They are listed as unfixed with that reason.
+#### What is skipped, and why
+
+A cluster fix is only offered where the emitted manifest would be both correct
+and applyable. Everything else is listed as unfixed with its reason, so nothing
+disappears silently:
+
+- **Resources whose scan record is redacted.** A scan report is built for
+  reporting, not for round-tripping: before results are aggregated Kubescape
+  replaces every container environment value with `XXXXXX` and drops
+  `valueFrom`/`envFrom`, and redacts `data`/`stringData` on Secrets and
+  ConfigMaps. A manifest rendered from such a record would overwrite your real
+  configuration with the placeholder, so workloads with container environment
+  variables, along with Secrets and ConfigMaps, are declined.
+
+  This is the main limitation of cluster fixes today, and it is why a cluster
+  with many findings may yield few manifests. Fixing a manifest file is
+  unaffected — that path patches the file on disk and only reads the report to
+  decide which edits to make.
+
+- **Resources owned by another.** A Pod belonging to a ReplicaSet, or a static
+  control-plane Pod owned by its Node, cannot be patched where it stands: the
+  API server rejects nearly every change to an existing Pod's spec, and the
+  owner would recreate it from its own template regardless. Fix the owner.
+
+- **RBAC and cloud findings.** These describe a relationship across several
+  related objects rather than one addressable resource, so there is no single
+  manifest to emit.
+
+One known gap: a container that uses only `envFrom` cannot be detected, because
+`envFrom` is removed outright rather than replaced with a marker. The manifest
+is then incomplete rather than wrong, and `kubectl apply` does not delete fields
+a config omits, so the live `envFrom` survives.
 
 ### Flags
 
