@@ -24,10 +24,7 @@ var (
   # Download the NSA framework. Run '%[1]s list frameworks' for all frameworks names
   %[1]s download framework nsa
 
-  # Download the "C-0001" control. Run '%[1]s list controls --id' for all controls ids
-  %[1]s download control "C-0001"
-
-  # Download the "C-0001" control. Run '%[1]s list controls --id' for all controls ids
+  # Download the "C-0001" control. Run '%[1]s list controls' for all controls ids
   %[1]s download control C-0001
 
   # Download the configured exceptions
@@ -38,6 +35,27 @@ var (
 `, cautils.ExecName())
 )
 
+// normalizeDownloadTarget maps plurals and common aliases to canonical download targets.
+func normalizeDownloadTarget(target string) string {
+	switch strings.ToLower(target) {
+	case "controls", "control":
+		return core.TargetControl
+	case "frameworks", "framework":
+		return core.TargetFramework
+	case "controls-inputs", "controls-input", "control-inputs", "control-input", "controls-config", "control-config":
+		return core.TargetControlsInputs
+	case "exceptions", "exception":
+		return core.TargetExceptions
+	case "artifacts", "artifact":
+		return core.TargetArtifacts
+	case "attack-tracks", "attack-track", "attacktracks", "attacktrack":
+		return core.TargetAttackTracks
+	default:
+		return target
+	}
+}
+
+// GetDownloadCmd returns the Cobra command for downloading Kubescape policies, frameworks, controls, and artifacts.
 func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 	var downloadInfo = v1.DownloadInfo{}
 
@@ -51,7 +69,8 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 			if len(args) < 1 {
 				return fmt.Errorf("policy type required, supported: %v", supported)
 			}
-			if !slices.Contains(core.DownloadSupportCommands(), args[0]) {
+			target := normalizeDownloadTarget(args[0])
+			if !slices.Contains(core.DownloadSupportCommands(), target) {
 				return fmt.Errorf("invalid parameter '%s'. Supported parameters: %s", args[0], supported)
 			}
 			return nil
@@ -66,10 +85,10 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 				downloadInfo.Path, downloadInfo.FileName = filepath.Split(downloadInfo.Path)
 			}
 
-			downloadInfo.Target = args[0]
+			downloadInfo.Target = normalizeDownloadTarget(args[0])
 			if len(args) >= 2 {
-				if args[1] == "" && (args[0] == "framework" || args[0] == "control") {
-					return fmt.Errorf("name cannot be empty for %s download", args[0])
+				if args[1] == "" && (downloadInfo.Target == "framework" || downloadInfo.Target == "control") {
+					return fmt.Errorf("name cannot be empty for %s download", downloadInfo.Target)
 				}
 				downloadInfo.Identifier = args[1]
 			}
