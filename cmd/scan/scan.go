@@ -232,7 +232,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.VerboseMode, "verbose", "v", false, "Display all of the input resources and not only failed resources")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ShowEvidence, "show-evidence", "E", false, "Show evidence paths with current field values for each failed control (pretty-printer only)")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.ShowSecrets, "show-secrets", false, "Show secret field values in evidence output. By default secret values are redacted. Only effective with --show-evidence")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.View, "view", string(cautils.SecurityViewType), fmt.Sprintf("View results based on the %s/%s/%s. default is --view=%s", cautils.ResourceViewType, cautils.ControlViewType, cautils.SecurityViewType, cautils.SecurityViewType))
+	scanCmd.PersistentFlags().StringVar(&scanInfo.View, "view", string(cautils.SecurityViewType), fmt.Sprintf("View results based on the %s/%s/%s/%s. default is --view=%s", cautils.ResourceViewType, cautils.ControlViewType, cautils.SecurityViewType, cautils.NamespaceViewType, cautils.SecurityViewType))
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.UseDefault, "use-default", false, "Load local policy object from default path. If not used will download latest")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.UseFrom, "use-from", nil, "Load local policy object from specified path. If not used will download latest")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FormatVersion, "format-version", "v2", "Output object can be different between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")

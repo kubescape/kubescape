@@ -127,6 +127,7 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScan
 	// extract specified labels from workloads, and attach scan coverage gaps.
 	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverage(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources, &opaSessionObj.ScanCoverage)
 	reportWithSeverity.ExceptionAudit = opaSessionObj.ExceptionAudit
+	reportWithSeverity.NamespaceSummaries = opaSessionObj.NamespaceSummaries
 
 	r, err := json.Marshal(reportWithSeverity)
 	if err != nil {

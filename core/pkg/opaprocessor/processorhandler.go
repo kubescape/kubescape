@@ -276,6 +276,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	opap.markNotEvaluatedControlsSkipped()
 	opap.ScanCoverage.VacuousFrameworks = cautils.DetectVacuousFrameworks(opap.Report.SummaryDetails.Frameworks)
 	opap.ScanCoverage.UnexaminedKinds = opap.UnexaminedKinds
+	opap.NamespaceSummaries = cautils.BuildNamespaceSummaries(opap.Report.SummaryDetails.Controls, opap.AllResources)
 
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
@@ -471,6 +472,7 @@ done:
 	opap.markNotEvaluatedControlsSkipped()
 	opap.ScanCoverage.VacuousFrameworks = cautils.DetectVacuousFrameworks(opap.Report.SummaryDetails.Frameworks)
 	opap.ScanCoverage.UnexaminedKinds = opap.UnexaminedKinds
+	opap.NamespaceSummaries = cautils.BuildNamespaceSummaries(opap.Report.SummaryDetails.Controls, opap.AllResources)
 
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {

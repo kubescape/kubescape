@@ -101,6 +101,8 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 			if pp.verboseMode {
 				pp.resourceTable(opaSessionObj)
 			}
+		case cautils.NamespaceViewType:
+			printNamespaceSummaries(pp.writer, opaSessionObj.NamespaceSummaries)
 		}
 
 		pp.printOverview(opaSessionObj, pp.verboseMode)
