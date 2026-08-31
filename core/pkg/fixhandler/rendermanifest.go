@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kubescape/opa-utils/reporthandling"
 	"gopkg.in/yaml.v3"
 )
 
@@ -133,4 +134,53 @@ func RenderFixedManifest(ctx context.Context, obj map[string]any, yamlExpression
 	}
 
 	return fixed, nil
+}
+
+// RenderedFix is one patched manifest together with the resource it came from,
+// so a caller can name the resource without re-parsing the YAML.
+type RenderedFix struct {
+	Resource *reporthandling.Resource
+	Manifest string
+}
+
+// RenderFixes patches every in-memory resource in resourcesToFix and returns
+// the results. It writes nothing — where the manifests go is the caller's
+// decision.
+//
+// This is the in-memory counterpart to ApplyChanges. Resources backed by a file
+// are ignored here and vice versa, so the two can be called on the same slice
+// without either acting twice on a resource.
+//
+// A resource that fails to render does not stop the rest: one unpatchable
+// object should not cost the user every other fix in the report.
+func (h *FixHandler) RenderFixes(ctx context.Context, resourcesToFix []ResourceFixInfo) ([]RenderedFix, []error) {
+	rendered := make([]RenderedFix, 0, len(resourcesToFix))
+	errs := make([]error, 0)
+
+	for i := range resourcesToFix {
+		rfi := resourcesToFix[i]
+		if !rfi.inMemory {
+			continue
+		}
+		if rfi.Resource == nil {
+			continue
+		}
+
+		// Not getFileYamlExpressions: that groups by file path, which is the
+		// one thing these resources do not have.
+		expression := reduceYamlExpressions(&rfi)
+		if expression == "" {
+			continue
+		}
+
+		manifest, err := RenderFixedManifest(ctx, rfi.Resource.GetObject(), expression)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to render fix for %s: %w", rfi.Resource.GetID(), err))
+			continue
+		}
+
+		rendered = append(rendered, RenderedFix{Resource: rfi.Resource, Manifest: manifest})
+	}
+
+	return rendered, errs
 }
