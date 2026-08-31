@@ -281,3 +281,86 @@ func TestMatches_SubresourceRequestNotCoveredByBareResourceRule(t *testing.T) {
 	assert.Empty(t, idx.Matches(obj(func(o *ObjectInfo) { o.Subresource = "status" })))
 	assert.Len(t, idx.Matches(obj(nil)), 1)
 }
+
+func gatedPolicy(name string, matchConstraints *admissionregistrationv1alpha1.MatchResources, conditions ...admissionregistrationv1alpha1.MatchCondition) admissionregistrationv1alpha1.MutatingAdmissionPolicy {
+	p := policy(name, matchConstraints, jsonPatchMutation(`[JSONPatch{op: "add", path: "/metadata/labels/x", value: "y"}]`))
+	p.Spec.MatchConditions = conditions
+	return p
+}
+
+func optedInCondition() admissionregistrationv1alpha1.MatchCondition {
+	return admissionregistrationv1alpha1.MatchCondition{
+		Name:       "only-opted-in",
+		Expression: `object.metadata.?labels["mutate"].orValue("no") == "yes"`,
+	}
+}
+
+// TestMatches_PolicyGatedByMatchConditionsIsNotConfirmed is the headline case:
+// matchConditions filter a request matchConstraints have already admitted, so
+// a gated policy may be skipped at admission and its match cannot be reported
+// as confirmed.
+func TestMatches_PolicyGatedByMatchConditionsIsNotConfirmed(t *testing.T) {
+	p := gatedPolicy("add-label", allPods(), optedInCondition())
+	b := binding("add-label-binding", "add-label", nil)
+	idx, errs := NewIndex([]admissionregistrationv1alpha1.MutatingAdmissionPolicy{p}, []admissionregistrationv1alpha1.MutatingAdmissionPolicyBinding{b})
+	require.Empty(t, errs)
+
+	matches := idx.Matches(obj(nil))
+	require.Len(t, matches, 1, "a gated policy is still a possible match")
+	assert.False(t, matches[0].Determinable, "a matchCondition this package cannot evaluate must leave the match indeterminate")
+}
+
+// TestMatches_MatchConditionsAreCarriedOnTheMatch pins that the gate is
+// reported alongside the match, so a caller can say what still has to hold.
+func TestMatches_MatchConditionsAreCarriedOnTheMatch(t *testing.T) {
+	p := gatedPolicy("add-label", allPods(), optedInCondition())
+	b := binding("add-label-binding", "add-label", nil)
+	idx, errs := NewIndex([]admissionregistrationv1alpha1.MutatingAdmissionPolicy{p}, []admissionregistrationv1alpha1.MutatingAdmissionPolicyBinding{b})
+	require.Empty(t, errs)
+
+	matches := idx.Matches(obj(nil))
+	require.Len(t, matches, 1)
+	require.Len(t, matches[0].MatchConditions, 1)
+	assert.Equal(t, "only-opted-in", matches[0].MatchConditions[0].Name)
+	assert.Contains(t, matches[0].MatchConditions[0].Expression, `labels["mutate"]`)
+}
+
+// TestMatches_PolicyWithoutMatchConditionsStaysConfirmed keeps the gate from
+// widening past the policies that declare one.
+func TestMatches_PolicyWithoutMatchConditionsStaysConfirmed(t *testing.T) {
+	p := gatedPolicy("add-label", allPods())
+	b := binding("add-label-binding", "add-label", nil)
+	idx, errs := NewIndex([]admissionregistrationv1alpha1.MutatingAdmissionPolicy{p}, []admissionregistrationv1alpha1.MutatingAdmissionPolicyBinding{b})
+	require.Empty(t, errs)
+
+	matches := idx.Matches(obj(nil))
+	require.Len(t, matches, 1)
+	assert.True(t, matches[0].Determinable)
+	assert.Empty(t, matches[0].MatchConditions)
+}
+
+// TestMatches_MatchConditionsNeverTurnANonMatchIntoAMatch is the regression
+// pin, and passes both before and after the fix on purpose: matchConditions
+// only narrow, so the gate has to be read after a confident non-match, never
+// instead of one.
+func TestMatches_MatchConditionsNeverTurnANonMatchIntoAMatch(t *testing.T) {
+	configmapsOnly := &admissionregistrationv1alpha1.MatchResources{
+		ResourceRules: []admissionregistrationv1alpha1.NamedRuleWithOperations{
+			rule([]string{""}, []string{"v1"}, []string{"configmaps"}, admissionregistrationv1alpha1.OperationAll),
+		},
+	}
+	outOfScope := gatedPolicy("configmap-only", configmapsOnly, optedInCondition())
+	excluded := gatedPolicy("add-label", allPods(), optedInCondition())
+	narrowing := binding("only-opted-in", "add-label", &admissionregistrationv1alpha1.MatchResources{
+		ObjectSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"mutate": "yes"}},
+	})
+
+	idx, errs := NewIndex(
+		[]admissionregistrationv1alpha1.MutatingAdmissionPolicy{outOfScope, excluded},
+		[]admissionregistrationv1alpha1.MutatingAdmissionPolicyBinding{binding("b", "configmap-only", nil), narrowing},
+	)
+	require.Empty(t, errs)
+
+	assert.Empty(t, idx.Matches(obj(func(o *ObjectInfo) { o.Labels = map[string]string{"mutate": "no"} })),
+		"a gated policy the matchConstraints or the binding exclude is still no match at all")
+}

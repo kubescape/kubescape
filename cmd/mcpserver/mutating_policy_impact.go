@@ -33,7 +33,7 @@ var mutatingAdmissionPolicyOperations = map[string]admissionregistrationv1alpha1
 func createMutatingAdmissionPolicyTools(ksServer *KubescapeMcpserver) {
 	tool := mcp.NewTool(
 		"analyze_mutating_admission_policy_impact",
-		mcp.WithDescription("Determine which of the cluster's live MutatingAdmissionPolicy objects would mutate a specific resource on a given operation (default CREATE), and what each one's raw CEL mutation expression is. This surfaces implicit mutation that happens at admission time and never appears in the manifest a user applied -- it reports that a policy's mutation would run and what its expression is, it does not evaluate the expression to compute the resulting object."),
+		mcp.WithDescription("Determine which of the cluster's live MutatingAdmissionPolicy objects would mutate a specific resource on a given operation (default CREATE), and what each one's raw CEL mutation expression is. This surfaces implicit mutation that happens at admission time and never appears in the manifest a user applied -- it reports that a policy's mutation would run and what its expression is, it does not evaluate the expression to compute the resulting object. A match with determinable false is one that might apply rather than one that does: match_conditions lists the CEL gates the apiserver still evaluates on the request."),
 		mcp.WithString("namespace", mcp.Description("Namespace of the resource (omit for a cluster-scoped resource)")),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Name of the resource")),
 		mcp.WithString("api_group", mcp.Description("API group of the resource (omit or empty for the core group, e.g. Pod/ConfigMap)")),
@@ -202,13 +202,21 @@ func buildMatchSummaries(matches []mapreconcile.MatchedPolicy) []map[string]any 
 				"expression": mut.Expression,
 			})
 		}
+		conditions := make([]map[string]any, 0, len(m.MatchConditions))
+		for _, cond := range m.MatchConditions {
+			conditions = append(conditions, map[string]any{
+				"name":       cond.Name,
+				"expression": cond.Expression,
+			})
+		}
 		out = append(out, map[string]any{
-			"policy_name":    m.PolicyName,
-			"binding_name":   m.BindingName,
-			"mutations":      mutations,
-			"failure_policy": string(m.FailurePolicy),
-			"has_params":     m.HasParams,
-			"determinable":   m.Determinable,
+			"policy_name":      m.PolicyName,
+			"binding_name":     m.BindingName,
+			"mutations":        mutations,
+			"failure_policy":   string(m.FailurePolicy),
+			"has_params":       m.HasParams,
+			"match_conditions": conditions,
+			"determinable":     m.Determinable,
 		})
 	}
 	return out
