@@ -25,11 +25,15 @@ import (
 )
 
 type staticFieldSelector struct {
-	selectors []string
+	selectors  []string
+	namespaces []string
 }
 
 func (s *staticFieldSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource, namespaced *bool) []string {
 	return s.selectors
+}
+func (s *staticFieldSelector) GetNamespaceScopedQueries(*schema.GroupVersionResource, *bool) []string {
+	return s.namespaces
 }
 func (s *staticFieldSelector) GetClusterScope(resource *schema.GroupVersionResource) bool {
 	return false

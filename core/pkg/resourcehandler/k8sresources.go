@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/version"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/pager"
 )
 
@@ -1082,7 +1083,15 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, re
 func (k8sHandler *K8sResourceHandler) pullSingleResourceInto(ctx context.Context, resource *schema.GroupVersionResource, labelSelector string, fields string, fieldSelector IFieldSelector, namespaced *bool, sink resourceSink) []selectorFailure {
 	var selectorErrs []selectorFailure
 
-	fieldSelectors := fieldSelector.GetNamespacesSelectors(resource, namespaced)
+	// A namespaced query addresses the namespace's own endpoint, which already
+	// restricts the result set, so it carries no metadata.namespace selector of
+	// its own. When there are none, collection stays cluster-scoped and narrows
+	// by field selector as before.
+	queryNamespaces := fieldSelector.GetNamespaceScopedQueries(resource, namespaced)
+	fieldSelectors := make([]string, len(queryNamespaces))
+	if len(queryNamespaces) == 0 {
+		fieldSelectors = fieldSelector.GetNamespacesSelectors(resource, namespaced)
+	}
 
 	for i := range fieldSelectors {
 		listOptions := metav1.ListOptions{}
@@ -1099,7 +1108,10 @@ func (k8sHandler *K8sResourceHandler) pullSingleResourceInto(ctx context.Context
 			listOptions.FieldSelector = ""
 		}
 
-		clientResource := k8sHandler.k8s.DynamicClient.Resource(*resource)
+		var clientResource dynamic.ResourceInterface = k8sHandler.k8s.DynamicClient.Resource(*resource)
+		if len(queryNamespaces) > 0 {
+			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource).Namespace(queryNamespaces[i])
+		}
 
 		collected := 0
 
