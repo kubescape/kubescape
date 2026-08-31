@@ -249,17 +249,23 @@ func shouldPersistCanonicalResult(ctx context.Context, scanInfo *cautils.ScanInf
 	return true
 }
 
-func persistCanonicalResult(result *resultshandling.ResultsHandler, scanID string) error {
-	parsedUUID, err := uuid.Parse(scanID)
-	if err != nil {
-		return fmt.Errorf("failed to persist canonical scan results: invalid scan ID: %w", err)
+func persistCanonicalResult(result *resultshandling.ResultsHandler, scanID string) (err error) {
+	parsedUUID, parseErr := uuid.Parse(scanID)
+	if parseErr != nil {
+		return fmt.Errorf("failed to persist canonical scan results: invalid scan ID: %w", parseErr)
 	}
-	data, err := result.ToJson()
-	if err != nil {
-		return fmt.Errorf("failed to marshal canonical scan results: %w", err)
+	f, createErr := os.OpenFile(filepath.Join(OutputDir, parsedUUID.String()), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if createErr != nil {
+		return fmt.Errorf("failed to create canonical scan results file: %w", createErr)
 	}
-	if err := os.WriteFile(filepath.Join(OutputDir, parsedUUID.String()), data, 0o600); err != nil {
-		return fmt.Errorf("failed to persist canonical scan results: %w", err)
+	defer func() {
+		closeErr := f.Close()
+		if err == nil && closeErr != nil {
+			err = fmt.Errorf("failed to close canonical scan results file: %w", closeErr)
+		}
+	}()
+	if writeErr := result.WriteJson(f); writeErr != nil {
+		return fmt.Errorf("failed to persist canonical scan results: %w", writeErr)
 	}
 	return nil
 }
