@@ -365,16 +365,23 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 	return ks.ScanImageContext(ks.Context(), imgScanInfo, scanInfo)
 }
 
-// ScanImageContext scans imgScanInfo.Image bound to the given ctx for its
-// complete execution, rather than re-reading ks.Context() at each stage as
-// ScanImage's predecessor did (matching Kubescape.Scan's own ScanContext
-// migration, #3237). Callers that need a deadline or cancellation should
-// derive ctx themselves and pass it in directly, instead of calling
+// ScanImageContext scans every image in imgScanInfo.Images bound to the given
+// ctx for its complete execution, rather than re-reading ks.Context() at each
+// stage as ScanImage's predecessor did (matching Kubescape.Scan's own
+// ScanContext migration, #3237). Callers that need a deadline or cancellation
+// should derive ctx themselves and pass it in directly, instead of calling
 // ks.SetContext beforehand: mutating the shared *Kubescape's context is not
 // safe if the instance is reused or another operation could run
-// concurrently against it.
+// concurrently against it. The images share one vulnerability database load
+// and the worker pool the cluster scan already uses, so an image that fails
+// never hides the results of the ones that succeeded.
 func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (bool, error) {
-	logger.L().Start(fmt.Sprintf("Scanning image %s...", imgScanInfo.Image))
+	images := imgScanInfo.Images
+	if len(images) == 0 {
+		return false, fmt.Errorf("no image provided to scan")
+	}
+
+	logger.L().Start(imageScanStartMessage(images))
 
 	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, scanInfo.SkipDBUpdate)
 	if err != nil {
@@ -388,6 +395,50 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 	}
 	defer svc.Close()
 
+	var exceptionPolicies []VulnerabilitiesIgnorePolicy
+	if imgScanInfo.Exceptions != "" {
+		exceptionPolicies, err = GetImageExceptionsFromFile(imgScanInfo.Exceptions)
+		if err != nil {
+			logger.L().StopError(fmt.Sprintf("Failed to load exceptions from file: %s", imgScanInfo.Exceptions))
+			return false, err
+		}
+	}
+
+	jobs := buildImageScanJobs(imgScanInfo, scanInfo, exceptionPolicies)
+
+	resultsHandler := resultshandling.NewResultsHandler(nil, nil, nil)
+	scanErr := scanImageJobs(ctx, svc, scanInfo.ImageScanConcurrency, jobs, resultsHandler)
+	scanErr = unwrapSingleImageError(scanErr)
+	if len(resultsHandler.ImageScanData) == 0 {
+		logger.L().StopError(imageScanFailureMessage(images))
+		return false, scanErr
+	}
+	logger.L().StopSuccess(imageScanSuccessMessage(images, resultsHandler.ImageScanData))
+
+	scanInfo.SetScanType(cautils.ScanTypeImage)
+
+	// Printers open their output files on construction, so they are built only
+	// once at least one image has produced results.
+	outputPrinters, err := GetOutputPrinters(scanInfo, ctx, "")
+	if err != nil {
+		return false, errors.Join(scanErr, err)
+	}
+	resultsHandler.PrinterObjs = outputPrinters
+	resultsHandler.UiPrinter = GetUIPrinter(ctx, scanInfo, "")
+
+	threshold := imagescan.ParseSeverity(scanInfo.FailThresholdSeverity)
+	exceedsSeverityThreshold := false
+	for i := range resultsHandler.ImageScanData {
+		if svc.ExceedsSeverityThreshold(threshold, resultsHandler.ImageScanData[i].Matches, scanInfo.OnlyFixable) {
+			exceedsSeverityThreshold = true
+			break
+		}
+	}
+
+	return exceedsSeverityThreshold, errors.Join(scanErr, resultsHandler.HandleResults(ctx, scanInfo))
+}
+
+func buildImageScanJobs(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo, exceptionPolicies []VulnerabilitiesIgnorePolicy) []ImageScanJob {
 	creds := imagescan.RegistryCredentials{
 		Authority: imgScanInfo.Authority,
 		Username:  imgScanInfo.Username,
@@ -395,43 +446,75 @@ func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1
 		Token:     imgScanInfo.Token,
 	}
 
-	var vulnerabilityExceptions []string
-	var severityExceptions []string
-	if imgScanInfo.Exceptions != "" {
-		exceptionPolicies, err := GetImageExceptionsFromFile(imgScanInfo.Exceptions)
-		if err != nil {
-			logger.L().StopError(fmt.Sprintf("Failed to load exceptions from file: %s", imgScanInfo.Exceptions))
-			return false, err
+	jobs := make([]ImageScanJob, 0, len(imgScanInfo.Images))
+	for _, image := range imgScanInfo.Images {
+		// Resolving exceptions parses the image as a registry reference, which
+		// archive and directory references are not, so it stays behind the
+		// check for configured policies.
+		var vulnerabilityExceptions, severityExceptions []string
+		if len(exceptionPolicies) > 0 {
+			vulnerabilityExceptions, severityExceptions = getUniqueVulnerabilitiesAndSeverities(exceptionPolicies, image)
 		}
-
-		vulnerabilityExceptions, severityExceptions = getUniqueVulnerabilitiesAndSeverities(exceptionPolicies, imgScanInfo.Image)
+		jobs = append(jobs, ImageScanJob{
+			Image:                   image,
+			Platform:                imgScanInfo.Platform,
+			RegistryCredentials:     []imagescan.RegistryCredentials{creds},
+			VulnerabilityExceptions: vulnerabilityExceptions,
+			SeverityExceptions:      severityExceptions,
+			RegistryMapping:         scanInfo.RegistryMapping,
+		})
 	}
+	return jobs
+}
 
-	imageScanData, err := scanWithRegistryMapping(
-		ctx, svc, imgScanInfo.Image, []imagescan.RegistryCredentials{creds},
-		scanInfo.RegistryMapping, vulnerabilityExceptions, severityExceptions, imgScanInfo.Platform,
-	)
-	if err != nil {
-		logger.L().StopError(fmt.Sprintf("Failed to scan image %s: %s", imgScanInfo.Image, err))
-		return false, err
+func imageScanStartMessage(images []string) string {
+	if len(images) == 1 {
+		return fmt.Sprintf("Scanning image %s...", images[0])
 	}
+	return fmt.Sprintf("Scanning %s...", countedNoun(len(images), "image"))
+}
 
-	logger.L().StopSuccess(fmt.Sprintf("Successfully scanned image: %s", imgScanInfo.Image))
-
-	scanInfo.SetScanType(cautils.ScanTypeImage)
-
-	outputPrinters, err := GetOutputPrinters(scanInfo, ctx, "")
-	if err != nil {
-		return false, err
+// unwrapSingleImageError reports the cause directly when an aggregate holds a
+// single image failure, so scanning one image keeps the plain error it
+// reported before the command grew multi-image support.
+func unwrapSingleImageError(err error) error {
+	var aggregated *ScanErrorAggregator
+	if !errors.As(err, &aggregated) {
+		return err
 	}
+	failure, ok := aggregated.SingleError()
+	if !ok {
+		return err
+	}
+	return fmt.Errorf("failed to scan image %s: %w", failure.Image, failure.Err)
+}
 
-	uiPrinter := GetUIPrinter(ctx, scanInfo, "")
+// imageScanFailureMessage carries no cause: scanImageJobs has already logged
+// every per-image error, and the failure itself is returned to the caller to
+// be reported once more.
+func imageScanFailureMessage(images []string) string {
+	if len(images) == 1 {
+		return fmt.Sprintf("Failed to scan image %s", images[0])
+	}
+	return fmt.Sprintf("Failed to scan %s", countedNoun(len(images), "image"))
+}
 
-	resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
+func imageScanSuccessMessage(images []string, scanned []cautils.ImageScanData) string {
+	switch {
+	case len(images) == 1:
+		return fmt.Sprintf("Successfully scanned image: %s", images[0])
+	case len(scanned) < len(images):
+		return fmt.Sprintf("Successfully scanned %d of %s", len(scanned), countedNoun(len(images), "image"))
+	default:
+		return fmt.Sprintf("Successfully scanned %s", countedNoun(len(images), "image"))
+	}
+}
 
-	resultsHandler.ImageScanData = []cautils.ImageScanData{*imageScanData}
-
-	return svc.ExceedsSeverityThreshold(imagescan.ParseSeverity(scanInfo.FailThresholdSeverity), imageScanData.Matches, scanInfo.OnlyFixable), resultsHandler.HandleResults(ctx, scanInfo)
+func countedNoun(n int, singular string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, singular)
+	}
+	return fmt.Sprintf("%d %ss", n, singular)
 }
 
 // ScanErrorCategory defines distinct vulnerability scan failure categories.
@@ -521,6 +604,17 @@ func (a *ScanErrorAggregator) Summary() map[ScanErrorCategory]int {
 	return summary
 }
 
+// SingleError returns the only collected failure when exactly one was recorded,
+// letting callers that scanned a single image report its cause directly.
+func (a *ScanErrorAggregator) SingleError() (CategorizedScanError, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.Errors) != 1 {
+		return CategorizedScanError{}, false
+	}
+	return a.Errors[0], true
+}
+
 // HasErrors indicates whether any scan errors occurred.
 func (a *ScanErrorAggregator) HasErrors() bool {
 	a.mu.Lock()
@@ -574,6 +668,15 @@ func imageScanTarget(image, platform string) string {
 	return cautils.ImageScanTarget(image, platform)
 }
 
+const defaultImageScanConcurrency = 5
+
+func imageScanWorkers(concurrency int) int {
+	if concurrency <= 0 {
+		return defaultImageScanConcurrency
+	}
+	return concurrency
+}
+
 // ImageScanOrchestrator coordinates concurrent image scan execution across a worker pool.
 type ImageScanOrchestrator struct {
 	concurrency     int
@@ -583,11 +686,8 @@ type ImageScanOrchestrator struct {
 
 // NewImageScanOrchestrator instantiates an orchestrator with a worker pool size.
 func NewImageScanOrchestrator(svc imageScanService, concurrency int) *ImageScanOrchestrator {
-	if concurrency <= 0 {
-		concurrency = 5
-	}
 	return &ImageScanOrchestrator{
-		concurrency:     concurrency,
+		concurrency:     imageScanWorkers(concurrency),
 		svc:             svc,
 		errorAggregator: NewScanErrorAggregator(),
 	}

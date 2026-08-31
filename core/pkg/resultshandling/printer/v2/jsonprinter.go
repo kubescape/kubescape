@@ -1,9 +1,11 @@
 package printer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/anchore/clio"
@@ -59,12 +61,7 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 	if opaSessionObj != nil {
 		err = printConfigurationsScanning(opaSessionObj, imageScanData, jp)
 	} else if len(imageScanData) > 0 {
-		model, err2 := models.NewDocument(clio.Identification{}, imageScanData[0].Packages, imageScanData[0].Context,
-			imageScanData[0].Matches, imageScanData[0].IgnoredMatches, imageScanData[0].VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
-		if err2 != nil {
-			return fmt.Errorf("failed to create document: %w", err2)
-		}
-		err = grypejson.NewPresenter(models.PresenterConfig{Document: model, SBOM: imageScanData[0].SBOM}).Present(jp.writer)
+		err = printImageScanning(imageScanData, jp)
 	} else {
 		err = fmt.Errorf("no data provided")
 	}
@@ -76,6 +73,39 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 
 	printer.LogOutputFile(jp.writer.Name())
 	return nil
+}
+
+// printImageScanning keeps grype's bare document shape for a single image and
+// wraps several in an array, as the CycloneDX and SPDX printers already do.
+func printImageScanning(imageScanData []cautils.ImageScanData, jp *JsonPrinter) error {
+	if len(imageScanData) == 1 {
+		return presentImageScan(imageScanData[0], jp.writer)
+	}
+
+	documents := make([]json.RawMessage, 0, len(imageScanData))
+	for i := range imageScanData {
+		var buf bytes.Buffer
+		if err := presentImageScan(imageScanData[i], &buf); err != nil {
+			return err
+		}
+		documents = append(documents, json.RawMessage(bytes.TrimSpace(buf.Bytes())))
+	}
+
+	encoded, err := json.MarshalIndent(documents, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal multi-image json output: %w", err)
+	}
+	_, err = jp.writer.Write(append(encoded, '\n'))
+	return err
+}
+
+func presentImageScan(imageScanData cautils.ImageScanData, w io.Writer) error {
+	model, err := models.NewDocument(clio.Identification{}, imageScanData.Packages, imageScanData.Context,
+		imageScanData.Matches, imageScanData.IgnoredMatches, imageScanData.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
+	if err != nil {
+		return fmt.Errorf("failed to create document: %w", err)
+	}
+	return grypejson.NewPresenter(models.PresenterConfig{Document: model, SBOM: imageScanData.SBOM}).Present(w)
 }
 
 func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData, jp *JsonPrinter) error {

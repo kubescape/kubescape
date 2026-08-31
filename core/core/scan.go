@@ -600,7 +600,7 @@ func scanImageJobsWithDiscoveryErrors(ctx context.Context, svc imageScanService,
 }
 
 func scanImageJobs(ctx context.Context, svc imageScanService, concurrency int, jobs []ImageScanJob, resultsHandling *resultshandling.ResultsHandler) error {
-	logger.L().Info(fmt.Sprintf("Scanning %d images concurrently with %d workers...", len(jobs), concurrency))
+	logger.L().Info(fmt.Sprintf("Scanning %s with %s...", countedNoun(len(jobs), "image"), countedNoun(imageScanWorkers(concurrency), "worker")))
 	orchestrator := NewImageScanOrchestrator(svc, concurrency)
 	results := orchestrator.ScanImages(ctx, jobs)
 	sort.Slice(results, func(i, j int) bool {
