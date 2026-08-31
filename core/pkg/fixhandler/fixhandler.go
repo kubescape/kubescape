@@ -224,6 +224,13 @@ func (h *FixHandler) isClusterReport() bool {
 	return isClusterReport(h.reportObj)
 }
 
+// IsClusterReport reports whether the loaded report came from a live-cluster
+// scan, so the caller knows to render manifests with RenderFixes rather than
+// rewrite files with ApplyChanges.
+func (h *FixHandler) IsClusterReport() bool {
+	return h.isClusterReport()
+}
+
 func getLocalPath(report *reporthandlingv2.PostureReport) string {
 	if report == nil {
 		return ""
@@ -511,6 +518,15 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			continue
 		}
 
+		// Where an unfixed control gets reported as living. A cluster resource
+		// has no path, and leaving it empty renders as "<unknown>", which reads
+		// like the fixer lost track of the resource rather than the resource
+		// simply having no file.
+		location := sanitizeForLog(src.filePath)
+		if src.inMemory {
+			location = "cluster"
+		}
+
 		rfi := ResourceFixInfo{
 			FilePath:        src.filePath,
 			fileKey:         h.resourceFileKey(resourceObj),
@@ -542,7 +558,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				ControlName:  ac.GetName(),
 				ResourceName: resourceObj.GetName(),
 				ResourceKind: resourceObj.GetKind(),
-				FilePath:     sanitizeForLog(src.filePath),
+				FilePath:     location,
 			})
 
 			// Fully auto-remediated: every failed path produced an expression.
@@ -569,7 +585,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 					ControlName:  ac.GetName(),
 					ResourceName: resourceObj.GetName(),
 					ResourceKind: resourceObj.GetKind(),
-					FilePath:     sanitizeForLog(src.filePath),
+					FilePath:     location,
 					Reason:       reason,
 				},
 				ac: ac,
@@ -867,7 +883,16 @@ func (h *FixHandler) PrintExpectedChanges(resourcesToFix []ResourceFixInfo) {
 	sb.WriteString("The following changes will be applied:\n")
 
 	for _, resourceFixInfo := range resourcesToFix {
-		fmt.Fprintf(&sb, "File: %s\n", resourceFixInfo.FilePath)
+		// A cluster resource has no file. Printing an empty "File:" line reads
+		// as a bug, so name where the resource actually came from instead.
+		switch {
+		case resourceFixInfo.inMemory && resourceFixInfo.Resource.GetNamespace() != "":
+			fmt.Fprintf(&sb, "Source: cluster, namespace %s\n", resourceFixInfo.Resource.GetNamespace())
+		case resourceFixInfo.inMemory:
+			sb.WriteString("Source: cluster\n")
+		default:
+			fmt.Fprintf(&sb, "File: %s\n", resourceFixInfo.FilePath)
+		}
 		fmt.Fprintf(&sb, "Resource: %s\n", resourceFixInfo.Resource.GetName())
 		fmt.Fprintf(&sb, "Kind: %s\n", resourceFixInfo.Resource.GetKind())
 		sb.WriteString("Changes:\n")

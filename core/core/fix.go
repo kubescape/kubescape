@@ -75,6 +75,15 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		return nil
 	}
 
+	// A cluster scan has no manifests to rewrite, so its fixes are rendered
+	// from the scanned objects and emitted for the user to apply. This sits
+	// after the dry-run check (which is identical either way) and before the
+	// confirmation prompt, which exists to guard in-place edits that this path
+	// never makes.
+	if handler.IsClusterReport() {
+		return ks.emitClusterFixes(handler, resourcesToFix, fixInfo)
+	}
+
 	if !fixInfo.NoConfirm && !userConfirmed() {
 		logger.L().Info(noChangesApplied)
 		handler.PrintUnfixedControls(fixhandler.PhasePlanned)

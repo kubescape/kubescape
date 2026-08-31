@@ -280,6 +280,24 @@ func TestApplyChanges_SkipsInMemoryResources(t *testing.T) {
 	assert.Empty(t, errs)
 }
 
+// TestPrepareResourcesToFix_ClusterUnfixedLocation pins the location shown for
+// a cluster resource that has no automatic fix. Left empty it renders as
+// "<unknown>", which reads as the fixer having lost the resource rather than
+// the resource simply having no file.
+func TestPrepareResourcesToFix_ClusterUnfixedLocation(t *testing.T) {
+	res := clusterResource("Deployment", "nginx")
+	results := []resourcesresults.Result{
+		clusterResultFor(res, failedControl("C-0041", "HostNetwork access", failedRuleNoFix())),
+	}
+	h := newClusterHandler(results, []reporthandling.Resource{*res})
+
+	h.PrepareResourcesToFix(context.Background())
+
+	unfixed := h.UnfixedControls()
+	require.NotEmpty(t, unfixed)
+	assert.Equal(t, "cluster", unfixed[0].FilePath)
+}
+
 // --- regression guard -----------------------------------------------------
 
 // TestPrepareResourcesToFix_FileScanUnchanged pins that the cluster branch did

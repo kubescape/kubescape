@@ -13,4 +13,9 @@ type FixInfo struct {
 	// as-is, as it always has been.
 	BasePath             string
 	ContainerProfilePath string // Path to an optional ContainerProfile JSON file
+	// OutputDir applies only to cluster scan reports, which have no manifests
+	// to rewrite. When set, one patched manifest per resource is written there;
+	// when empty, the manifests are printed to stdout. It is ignored for
+	// file-based reports, which are fixed in place.
+	OutputDir string
 }
