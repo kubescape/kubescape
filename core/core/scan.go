@@ -469,13 +469,13 @@ func (ks *Kubescape) ScanContext(ctx context.Context, scanInfo *cautils.ScanInfo
 			if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 				return fmt.Errorf("%w", err)
 			}
-			if isPrioritizationScanType(scanInfo.ScanType) {
-				scanData.SetTopWorkloads()
-			}
 			return nil
 		}()
 		if err != nil {
 			return resultsHandling, err
+		}
+		if isPrioritizationScanType(scanInfo.ScanType) {
+			scanData.SetTopWorkloads()
 		}
 	}
 
