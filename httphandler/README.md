@@ -305,6 +305,7 @@ Configure the HTTP handler using environment variables:
 | `KS_SCAN_REQUEST_MAX_BYTES` | Maximum size in bytes of a `POST /v1/scan` request body | `1048576` |
 | `KS_PPROF_ENABLED` | Enable the pprof debug server (off by default; binds to loopback only) | `true`, `false` |
 | `KS_PPROF_ADDR` | Address the pprof debug server binds to when enabled | `127.0.0.1:6060` |
+| `KS_API_TOKEN` | Bearer token for `/v1/*` API authentication (optional, off by default). When set, every `/v1/scan`, `/v1/results` and `/v1/status` request must present `Authorization: Bearer <token>` or it gets `401`. Health probes `/livez`/`/readyz` and OpenAPI docs stay open. If you expose `:8080` beyond the cluster, set this to a random value and serve over TLS (`KS_CERT_FILE`/`KS_KEY_FILE`) or a TLS-terminating ingress. | `openssl rand -hex 32` |
 
 ---
 

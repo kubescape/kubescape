@@ -77,7 +77,7 @@ func TestWrapDEKInvalidMasterKey(t *testing.T) {
 
 	wrappedDEK, err := WrapDEK(
 		dek,
-		[]byte("invalid-master-key"),
+		[]byte("too-short"),
 	)
 
 	assert.Error(t, err)
@@ -113,7 +113,7 @@ func TestUnwrapDEKInvalidMasterKey(t *testing.T) {
 
 	unwrappedDEK, err := UnwrapDEK(
 		wrappedDEK,
-		[]byte("invalid-master-key"),
+		[]byte("too-short"),
 	)
 
 	assert.Error(t, err)

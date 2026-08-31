@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"gopkg.in/yaml.v3"
@@ -31,6 +31,13 @@ type ResourceFixInfo struct {
 	Resource        *reporthandling.Resource
 	FilePath        string
 	DocumentIndex   int
+
+	// failedControls and fixedCount let a resource be withdrawn after its
+	// controls have already been tallied: the entries are re-reported as
+	// unfixed and the count of fully fixed controls is given back.
+	failedControls []UnfixedControl
+	fixedCount     int
+	fileKey        string
 }
 
 // HelmFixSuggestion describes a fix for a Helm-rendered resource. We do not

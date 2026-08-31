@@ -1,11 +1,23 @@
 package vapreconcile
 
 import (
+	"context"
+	"errors"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	discoveryfake "k8s.io/client-go/discovery/fake"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func makeVAP(name, controlID string) unstructured.Unstructured {
@@ -36,6 +48,125 @@ func toInterfaceSlice(ss []string) []any {
 		out[i] = s
 	}
 	return out
+}
+
+// discoveryServing returns a discovery client advertising the VAP API on every
+// given version, plus the webhook resources every supported cluster serves.
+func discoveryServing(versions ...string) *discoveryfake.FakeDiscovery {
+	client := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	for _, version := range versions {
+		client.Resources = append(client.Resources, &metav1.APIResourceList{
+			GroupVersion: vapGroup + "/" + version,
+			APIResources: []metav1.APIResource{
+				{Name: "validatingwebhookconfigurations", Kind: "ValidatingWebhookConfiguration"},
+				{Name: vapResource, Kind: "ValidatingAdmissionPolicy"},
+				{Name: vapBindingResource, Kind: "ValidatingAdmissionPolicyBinding"},
+			},
+		})
+	}
+	return client
+}
+
+// dynamicServing returns a dynamic client holding the given objects under the
+// VAP resources of one version.
+func dynamicServing(version string, objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
+	listKinds := map[schema.GroupVersionResource]string{
+		{Group: vapGroup, Version: version, Resource: vapResource}:        "ValidatingAdmissionPolicyList",
+		{Group: vapGroup, Version: version, Resource: vapBindingResource}: "ValidatingAdmissionPolicyBindingList",
+	}
+	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, objects...)
+}
+
+func servedVAP(version, name, controlID string) *unstructured.Unstructured {
+	vap := makeVAP(name, controlID)
+	vap.SetAPIVersion(vapGroup + "/" + version)
+	vap.SetKind("ValidatingAdmissionPolicy")
+	return &vap
+}
+
+func TestResolveVersion_PrefersNewestServedVersion(t *testing.T) {
+	version, err := resolveVersion(discoveryServing("v1", "v1beta1", "v1alpha1"))
+
+	require.NoError(t, err)
+	assert.Equal(t, "v1", version)
+}
+
+func TestResolveVersion_FallsBackToOlderVersions(t *testing.T) {
+	for _, served := range []string{"v1beta1", "v1alpha1"} {
+		t.Run(served, func(t *testing.T) {
+			version, err := resolveVersion(discoveryServing(served))
+
+			require.NoError(t, err)
+			assert.Equal(t, served, version)
+		})
+	}
+}
+
+func TestResolveVersion_GroupWithoutPolicyResources(t *testing.T) {
+	// pre-1.26 clusters serve the group for webhook configurations only
+	client := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	client.Resources = []*metav1.APIResourceList{{
+		GroupVersion: vapGroup + "/v1",
+		APIResources: []metav1.APIResource{
+			{Name: "validatingwebhookconfigurations", Kind: "ValidatingWebhookConfiguration"},
+		},
+	}}
+
+	_, err := resolveVersion(client)
+
+	assert.ErrorIs(t, err, ErrUnsupported)
+}
+
+func TestResolveVersion_BindingsNotServed(t *testing.T) {
+	client := &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}}
+	client.Resources = []*metav1.APIResourceList{{
+		GroupVersion: vapGroup + "/v1",
+		APIResources: []metav1.APIResource{{Name: vapResource, Kind: "ValidatingAdmissionPolicy"}},
+	}}
+
+	_, err := resolveVersion(client)
+
+	assert.ErrorIs(t, err, ErrUnsupported)
+}
+
+func TestResolveVersion_NoGroupAtAll(t *testing.T) {
+	_, err := resolveVersion(&discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}})
+
+	assert.ErrorIs(t, err, ErrUnsupported)
+}
+
+func TestResolveVersion_WithoutDiscoveryClient(t *testing.T) {
+	version, err := resolveVersion(nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "v1", version)
+}
+
+func TestCollect_ReadsFromServedVersion(t *testing.T) {
+	k8s := &k8sinterface.KubernetesApi{
+		DiscoveryClient: discoveryServing("v1beta1"),
+		DynamicClient:   dynamicServing("v1beta1", servedVAP("v1beta1", "kubescape-c-0041", "C-0041")),
+	}
+
+	policies, bindings, err := Collect(context.Background(), k8s)
+
+	require.NoError(t, err)
+	require.Len(t, policies, 1)
+	assert.Equal(t, "kubescape-c-0041", policies[0].GetName())
+	assert.Empty(t, bindings)
+}
+
+func TestCollect_UnsupportedClusterIsNotAFailure(t *testing.T) {
+	k8s := &k8sinterface.KubernetesApi{
+		DiscoveryClient: &discoveryfake.FakeDiscovery{Fake: &k8stesting.Fake{}},
+		DynamicClient:   dynamicServing("v1"),
+	}
+
+	policies, bindings, err := Collect(context.Background(), k8s)
+
+	assert.ErrorIs(t, err, ErrUnsupported)
+	assert.Nil(t, policies)
+	assert.Nil(t, bindings)
 }
 
 func TestBuildIndex_BoundDeny(t *testing.T) {
@@ -174,4 +305,144 @@ func TestEnrichSummary_NoMatchingControl(t *testing.T) {
 		EnrichSummary(controls, index)
 	})
 	assert.Nil(t, controls["C-0041"].VAPEnforcement)
+}
+
+// erroringDiscovery answers one group version with an error instead of a
+// resource list, standing in for a cluster whose discovery for that version is
+// unreachable.
+type erroringDiscovery struct {
+	*discoveryfake.FakeDiscovery
+	failing string
+	err     error
+}
+
+func (d *erroringDiscovery) ServerResourcesForGroupVersion(groupVersion string) (*metav1.APIResourceList, error) {
+	if groupVersion == d.failing {
+		return nil, d.err
+	}
+	return d.FakeDiscovery.ServerResourcesForGroupVersion(groupVersion)
+}
+
+func TestResolveVersion_DiscoveryErrorDoesNotHideOlderVersion(t *testing.T) {
+	client := &erroringDiscovery{
+		FakeDiscovery: discoveryServing("v1beta1"),
+		failing:       vapGroup + "/v1",
+		err:           apierrors.NewServiceUnavailable("discovery is down"),
+	}
+
+	version, err := resolveVersion(client)
+
+	require.NoError(t, err)
+	assert.Equal(t, "v1beta1", version)
+}
+
+func TestResolveVersion_DiscoveryErrorSurfacesWhenNoVersionServes(t *testing.T) {
+	client := &erroringDiscovery{
+		FakeDiscovery: discoveryServing(),
+		failing:       vapGroup + "/v1",
+		err:           apierrors.NewServiceUnavailable("discovery is down"),
+	}
+
+	_, err := resolveVersion(client)
+
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrUnsupported)
+	assert.Contains(t, err.Error(), vapGroup+"/v1")
+}
+
+func TestCollect_DeniedListingIsNotAFailure(t *testing.T) {
+	dynamicClient := dynamicServing("v1", servedVAP("v1", "kubescape-c-0041", "C-0041"))
+	dynamicClient.PrependReactor("list", vapResource, func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: vapGroup, Resource: vapResource}, "", errors.New("no list access"))
+	})
+	k8s := &k8sinterface.KubernetesApi{
+		DiscoveryClient: discoveryServing("v1"),
+		DynamicClient:   dynamicClient,
+	}
+
+	policies, bindings, err := Collect(context.Background(), k8s)
+
+	assert.ErrorIs(t, err, ErrForbidden)
+	assert.Nil(t, policies)
+	assert.Nil(t, bindings)
+}
+
+func TestBuildIndex_DuplicateControlNamesTheBoundPolicy(t *testing.T) {
+	// the bound policy is listed first and sorts last, so neither listing order
+	// nor name order on its own picks the policy that actually enforces
+	policies := []unstructured.Unstructured{
+		makeVAP("team-c-0016-privilege-escalation", "C-0016"),
+		makeVAP("kubescape-c-0016-allow-privilege-escalation", "C-0016"),
+	}
+	bindings := []unstructured.Unstructured{
+		makeVAPB("c0016-binding", "team-c-0016-privilege-escalation", []string{"Deny"}),
+	}
+
+	index := BuildIndex(policies, bindings)
+
+	require.Contains(t, index, "C-0016")
+	assert.Equal(t, "team-c-0016-privilege-escalation", index["C-0016"].PolicyName)
+	assert.True(t, index["C-0016"].Bound)
+	assert.Equal(t, []string{"Deny"}, index["C-0016"].Actions)
+}
+
+func TestBuildIndex_DuplicateControlWithoutAnyBinding(t *testing.T) {
+	// nothing is bound, so the reported policy must not depend on listing order
+	policies := []unstructured.Unstructured{
+		makeVAP("kubescape-c-0016-allow-privilege-escalation", "C-0016"),
+		makeVAP("team-c-0016-privilege-escalation", "C-0016"),
+	}
+
+	index := BuildIndex(policies, nil)
+
+	assert.False(t, index["C-0016"].Bound)
+	assert.Equal(t, "kubescape-c-0016-allow-privilege-escalation", index["C-0016"].PolicyName)
+	assert.Nil(t, index["C-0016"].Actions)
+}
+
+func TestBuildIndex_DuplicateControlMergesActionsAcrossPolicies(t *testing.T) {
+	policies := []unstructured.Unstructured{
+		makeVAP("kubescape-c-0016-allow-privilege-escalation", "C-0016"),
+		makeVAP("team-c-0016-privilege-escalation", "C-0016"),
+	}
+	bindings := []unstructured.Unstructured{
+		makeVAPB("library-binding", "kubescape-c-0016-allow-privilege-escalation", []string{"Audit"}),
+		makeVAPB("team-binding", "team-c-0016-privilege-escalation", []string{"Deny", "Audit"}),
+	}
+
+	index := BuildIndex(policies, bindings)
+
+	assert.True(t, index["C-0016"].Bound)
+	assert.Equal(t, "kubescape-c-0016-allow-privilege-escalation", index["C-0016"].PolicyName)
+	assert.ElementsMatch(t, []string{"Audit", "Deny"}, index["C-0016"].Actions)
+}
+
+func TestBuildIndex_BindingWithoutActionsStillBinds(t *testing.T) {
+	policies := []unstructured.Unstructured{
+		makeVAP("kubescape-c-0041-deny-host-network", "C-0041"),
+	}
+	bindings := []unstructured.Unstructured{
+		makeVAPB("c0041-binding", "kubescape-c-0041-deny-host-network", nil),
+	}
+
+	index := BuildIndex(policies, bindings)
+
+	assert.True(t, index["C-0041"].Bound)
+	assert.Empty(t, index["C-0041"].Actions)
+}
+
+func TestBuildIndex_PolicyListedTwiceIsOnePolicy(t *testing.T) {
+	policies := []unstructured.Unstructured{
+		makeVAP("kubescape-c-0041-deny-host-network", "C-0041"),
+		makeVAP("kubescape-c-0041-deny-host-network", "C-0041"),
+	}
+	bindings := []unstructured.Unstructured{
+		makeVAPB("c0041-binding", "kubescape-c-0041-deny-host-network", []string{"Deny"}),
+	}
+
+	index := BuildIndex(policies, bindings)
+
+	assert.Len(t, index, 1)
+	assert.True(t, index["C-0041"].Bound)
+	assert.Equal(t, []string{"Deny"}, index["C-0041"].Actions)
 }

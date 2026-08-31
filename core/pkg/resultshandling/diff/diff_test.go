@@ -3,6 +3,7 @@ package diff
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type failingWriter struct {
+	err error
+}
+
+func (w failingWriter) Write([]byte) (int, error) {
+	return 0, w.err
+}
 
 func writeTempReport(t *testing.T, r scanReport) string {
 	t.Helper()
@@ -316,6 +325,47 @@ func TestFilterBySeverity_BelowThresholdReturnsEmpty(t *testing.T) {
 	assert.Empty(t, result)
 }
 
+// Regression for issue-3405: a change whose severity could not be resolved
+// (empty, or "Unknown" - what apis.ControlSeverityToString returns for a
+// control with a zero/missing baseScore, see buildSeverityMap) must not be
+// silently dropped by a severity threshold. Dropping it would be the exact
+// "false-green output" ChangeSet's own doc comment says Incomparable findings
+// exist to prevent, and contradicts the fail-closed policy
+// countFailedResourcesWithUnbucketedSeverity already applies to the plain
+// scan gate for the identical case.
+func TestFilterBySeverity_UnresolvableSeverityFailsClosed(t *testing.T) {
+	changes := []ControlChange{
+		{ControlID: "C-KNOWN-LOW", Severity: "Low"},
+		{ControlID: "C-UNKNOWN", Severity: "Unknown"},
+		{ControlID: "C-EMPTY", Severity: ""},
+	}
+
+	result := FilterBySeverity(changes, "critical")
+
+	var gotIDs []string
+	for _, c := range result {
+		gotIDs = append(gotIDs, c.ControlID)
+	}
+	assert.ElementsMatch(t, []string{"C-UNKNOWN", "C-EMPTY"}, gotIDs,
+		"unresolvable-severity findings must fail closed (kept) even under the highest threshold, while a known Low finding is correctly filtered out")
+}
+
+// End-to-end regression for issue-3405: an Incomparable finding with
+// unresolvable severity must still count toward Regressions' output - and
+// therefore toward the real kubescape diff --fail-on-new exit code, which
+// core/core/diff.go computes from exactly this filtered set - instead of
+// disappearing once --severity-threshold is set.
+func TestRegressions_IncomparableUnknownSeverityNotDroppedByThreshold(t *testing.T) {
+	cs := &ChangeSet{
+		Incomparable: []ControlChange{
+			{ResourceID: "res-1", ControlID: "C-9999", Severity: "Unknown", BaseStatus: "failed", HeadStatus: "failed", Reason: "scan coverage changed"},
+		},
+	}
+
+	assert.Len(t, Regressions(cs, "").Incomparable, 1)
+	assert.Len(t, Regressions(cs, "medium").Incomparable, 1, "an Incomparable finding with unresolvable severity must still gate the build under a threshold")
+}
+
 func TestFilterBySeverity_CIGate(t *testing.T) {
 	sum := summaryDetails{Controls: map[string]controlSummary{
 		"C-HIGH":     {ScoreFactor: 7.0},
@@ -369,6 +419,30 @@ func TestPrintYAML(t *testing.T) {
 	assert.Contains(t, yamlStr, "resourceID: path-123/api/v1/Pod/demo")
 	assert.Contains(t, yamlStr, "controlID: C-0057")
 	assert.Contains(t, yamlStr, "controlName: Privileged container")
+}
+
+func TestPrintPretty_ReturnsWriteError(t *testing.T) {
+	wantErr := errors.New("write failed")
+	err := PrintPretty(failingWriter{err: wantErr}, &ChangeSet{
+		New: []ControlChange{{ControlID: "C-001"}},
+	})
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestPrintPretty_WritesExpectedOutput(t *testing.T) {
+	cs := &ChangeSet{
+		New: []ControlChange{{
+			ResourceID:  "resource",
+			ControlID:   "C-001",
+			ControlName: "Control",
+			Severity:    "High",
+		}},
+	}
+
+	var buf bytes.Buffer
+	require.NoError(t, PrintPretty(&buf, cs))
+	assert.Contains(t, buf.String(), "New failures")
+	assert.Contains(t, buf.String(), "Summary: 1 new, 0 resolved, 0 unchanged")
 }
 
 func TestCompute_OutputOrderIsDeterministic(t *testing.T) {

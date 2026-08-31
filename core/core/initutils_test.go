@@ -2,16 +2,18 @@ package core
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/pkg/hostsensorutils"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -135,11 +137,59 @@ func TestGetExceptionsGetter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := getExceptionsGetter(tt.args.ctx, tt.args.useExceptions, tt.args.accountID, tt.args.downloadReleasedPolicy, false)
+			got, _, err := getExceptionsGetter(tt.args.ctx, tt.args.useExceptions, tt.args.accountID, tt.args.downloadReleasedPolicy, false)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.want, reflect.TypeOf(got).String())
 		})
 	}
+}
+
+type releasedExceptionsGetterStub struct {
+	fallback bool
+	err      error
+}
+
+func (s *releasedExceptionsGetterStub) SetRegoObjectsWithFallback() (bool, error) {
+	return s.fallback, s.err
+}
+
+func (s *releasedExceptionsGetterStub) GetExceptions(context.Context, string) ([]armotypes.PostureExceptionPolicy, error) {
+	return nil, nil
+}
+
+func TestGetReleasedExceptionsGetterReportsCacheFallback(t *testing.T) {
+	t.Run("fresh release", func(t *testing.T) {
+		got, fromCache, err := getReleasedExceptionsGetter(context.Background(), &releasedExceptionsGetterStub{})
+		require.NoError(t, err)
+		assert.False(t, fromCache)
+		assert.Equal(t, "*getter.MergedExceptionsGetter", reflect.TypeOf(got).String())
+	})
+
+	t.Run("local cache fallback", func(t *testing.T) {
+		originalStore := getter.DefaultLocalStore
+		getter.DefaultLocalStore = t.TempDir()
+		t.Cleanup(func() { getter.DefaultLocalStore = originalStore })
+
+		want := []armotypes.PostureExceptionPolicy{{PortalBase: armotypes.PortalBase{Name: "cached-exception"}}}
+		require.NoError(t, getter.SaveInFile(want, getter.GetDefaultPath(cautils.LocalExceptionsFilename)))
+
+		got, fromCache, err := getReleasedExceptionsGetter(context.Background(), &releasedExceptionsGetterStub{fallback: true})
+		require.NoError(t, err)
+		assert.True(t, fromCache)
+		assert.Equal(t, "*getter.MergedExceptionsGetter", reflect.TypeOf(got).String())
+
+		loaded, err := got.GetExceptions(context.Background(), "cluster")
+		require.NoError(t, err)
+		assert.Equal(t, want, loaded)
+	})
+
+	t.Run("hard error", func(t *testing.T) {
+		wantErr := errors.New("release unavailable")
+		got, fromCache, err := getReleasedExceptionsGetter(context.Background(), &releasedExceptionsGetterStub{err: wantErr})
+		require.ErrorIs(t, err, wantErr)
+		assert.False(t, fromCache)
+		assert.Nil(t, got)
+	})
 }
 
 func TestGettersAirGappedUseCache(t *testing.T) {
@@ -155,8 +205,9 @@ func TestGettersAirGappedUseCache(t *testing.T) {
 			attackTracksGetter, err := getAttackTracksGetter(ctx, "", accountID, nil, true)
 			assert.NoError(t, err)
 			assert.Equal(t, "*getter.LoadPolicy", reflect.TypeOf(attackTracksGetter).String())
-			exceptionsGetter, err := getExceptionsGetter(ctx, "", accountID, nil, true)
+			exceptionsGetter, fromCache, err := getExceptionsGetter(ctx, "", accountID, nil, true)
 			assert.NoError(t, err)
+			assert.False(t, fromCache)
 			assert.Equal(t, "*getter.MergedExceptionsGetter", reflect.TypeOf(exceptionsGetter).String())
 		})
 	}
@@ -778,8 +829,9 @@ func TestPinnedVersionGettersReturnHardError(t *testing.T) {
 	})
 
 	t.Run("getExceptionsGetter", func(t *testing.T) {
-		g, err := getExceptionsGetter(ctx, "", "", newPinned(), false)
+		g, fromCache, err := getExceptionsGetter(ctx, "", "", newPinned(), false)
 		require.Error(t, err)
+		require.False(t, fromCache)
 		require.Nil(t, g)
 	})
 

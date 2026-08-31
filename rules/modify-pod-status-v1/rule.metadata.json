@@ -1,0 +1,29 @@
+{
+  "name": "modify-pod-status-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Lateral Movement::ARP poisoning and IP spoofing",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        "rbac.authorization.k8s.io"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "RoleBinding",
+        "ClusterRoleBinding",
+        "Role",
+        "ClusterRole"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can modify the pods/status subresource, letting them relabel a pod until it matches a service's selector so the service routes traffic to it, intercepting connections to services in the pod's namespace",
+  "remediation": "Remove update and patch on pods/status from the role, and grant them only to the components that reconcile pod state, such as the kubelet and the workload controllers. Avoid wildcard resources and */status entries in roles bound to workloads or users.",
+  "ruleQuery": "armo_builtins"
+}

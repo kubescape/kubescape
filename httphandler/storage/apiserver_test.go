@@ -114,7 +114,6 @@ func Test_getControlsMapFromResult(t *testing.T) {
 						Paths: []armotypes.PosturePaths{
 							{
 								ResourceID: "resource-1",
-								FailedPath: "failed-path",
 							},
 						},
 						Exception: []armotypes.PostureExceptionPolicy{
@@ -160,6 +159,74 @@ func TestGetControlsMapFromResult_MissingControl(t *testing.T) {
 		assert.Contains(t, actual, "C-MISSING")
 		assert.Equal(t, v1beta1.ControlSeverity{}, actual["C-MISSING"].Severity)
 	})
+}
+
+func TestGetControlsMapFromResult_RecoversMissingAssociationsFromSummary(t *testing.T) {
+	const resourceID = "v1/default/Pod/test-pod"
+
+	failedControl := reportsummary.ControlSummary{
+		ControlID:   "C-001",
+		Name:        "Control 1",
+		ScoreFactor: 7,
+	}
+	failedControl.Append(&apis.StatusInfo{InnerStatus: apis.StatusFailed}, resourceID)
+
+	otherControl := reportsummary.ControlSummary{
+		ControlID:   "C-002",
+		Name:        "Control 2",
+		ScoreFactor: 4,
+	}
+	otherControl.Append(&apis.StatusInfo{InnerStatus: apis.StatusPassed}, "v1/default/Pod/other-pod")
+
+	actual := getControlsMapFromResult(context.Background(), &resourcesresults.Result{
+		ResourceID: resourceID,
+	}, reportsummary.ControlSummaries{
+		"C-001": failedControl,
+		"C-002": otherControl,
+	})
+
+	if assert.Len(t, actual, 1) {
+		control := actual["C-001"]
+		assert.Equal(t, "C-001", control.ControlID)
+		assert.Equal(t, "Control 1", control.Name)
+		assert.Equal(t, string(apis.StatusFailed), control.Status.Status)
+		assert.Equal(t, "High", control.Severity.Severity)
+		assert.Equal(t, float32(7), control.Severity.ScoreFactor)
+		assert.Empty(t, control.Rules)
+	}
+}
+
+func TestGetControlsMapFromResult_PrefersDetailedAssociationOverSummaryFallback(t *testing.T) {
+	const resourceID = "v1/default/Pod/test-pod"
+
+	controlSummary := reportsummary.ControlSummary{
+		ControlID:   "C-001",
+		Name:        "Summary name",
+		ScoreFactor: 7,
+	}
+	controlSummary.Append(&apis.StatusInfo{InnerStatus: apis.StatusFailed}, resourceID)
+
+	actual := getControlsMapFromResult(context.Background(), &resourcesresults.Result{
+		ResourceID: resourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{{
+			ControlID: "C-001",
+			Name:      "Detailed name",
+			Status:    apis.StatusInfo{InnerStatus: apis.StatusPassed},
+			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{
+				Name:   "detailed-rule",
+				Status: apis.StatusPassed,
+			}},
+		}},
+	}, reportsummary.ControlSummaries{"C-001": controlSummary})
+
+	if assert.Contains(t, actual, "C-001") {
+		control := actual["C-001"]
+		assert.Equal(t, "Detailed name", control.Name)
+		assert.Equal(t, string(apis.StatusPassed), control.Status.Status)
+		if assert.Len(t, control.Rules, 1) {
+			assert.Equal(t, "detailed-rule", control.Rules[0].Name)
+		}
+	}
 }
 
 type FakeMetadata struct {
@@ -625,6 +692,86 @@ func TestStorePostureReportResults_NonRecoverableError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestStorePostureReportResults_PersistsControlsFromSummaryWhenAssociationsAreMissing(t *testing.T) {
+	const resourceID = "v1/default/Pod/test-pod"
+
+	controlSummary := reportsummary.ControlSummary{
+		ControlID:   "C-001",
+		Name:        "Control 1",
+		ScoreFactor: 7,
+	}
+	controlSummary.Append(&apis.StatusInfo{InnerStatus: apis.StatusFailed}, resourceID)
+
+	report := &v2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{"C-001": controlSummary},
+		},
+		Resources: []reporthandling.Resource{{
+			ResourceID: resourceID,
+			Object: map[string]any{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]any{
+					"name":      "test-pod",
+					"namespace": "default",
+				},
+			},
+		}},
+		// This is the inconsistent shape reported in #3494: the aggregate
+		// summary contains the failed resource, while the per-resource control
+		// slice consumed by in-cluster storage is empty.
+		Results: []resourcesresults.Result{{ResourceID: resourceID}},
+	}
+
+	tests := []struct {
+		name     string
+		existing []runtime.Object
+	}{
+		{name: "creates a populated summary"},
+		{
+			name: "replaces an existing false-clean summary",
+			existing: []runtime.Object{&v1beta1.WorkloadConfigurationScanSummary{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-test-pod", Namespace: "default"},
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewSimpleClientset(tt.existing...)
+			store := &APIServerStore{
+				StorageClient: client.SpdxV1beta1(),
+				namespace:     "kubescape",
+			}
+			ctx := context.Background()
+			assert.NoError(t, store.StorePostureReportResults(ctx, report))
+
+			summaries, err := store.StorageClient.WorkloadConfigurationScanSummaries("default").List(ctx, metav1.ListOptions{})
+			if assert.NoError(t, err) && assert.Len(t, summaries.Items, 1) {
+				summary := summaries.Items[0]
+				if assert.Len(t, summary.Spec.Controls, 1) && assert.Contains(t, summary.Spec.Controls, "C-001") {
+					control := summary.Spec.Controls["C-001"]
+					assert.Equal(t, "C-001", control.ControlID)
+					assert.Equal(t, string(apis.StatusFailed), control.Status.Status)
+					assert.Equal(t, "High", control.Severity.Severity)
+					assert.Equal(t, float32(7), control.Severity.ScoreFactor)
+				}
+				assert.Equal(t, int64(1), summary.Spec.Severities.High)
+				assert.Zero(t, summary.Spec.Severities.Critical)
+				assert.Zero(t, summary.Spec.Severities.Medium)
+				assert.Zero(t, summary.Spec.Severities.Low)
+				assert.Zero(t, summary.Spec.Severities.Unknown)
+			}
+
+			// Detail objects remain opt-in through continuousPostureScan. Recovering
+			// summary payloads must not change that storage-volume contract.
+			details, err := store.StorageClient.WorkloadConfigurationScans("default").List(ctx, metav1.ListOptions{})
+			assert.NoError(t, err)
+			assert.Empty(t, details.Items)
+		})
+	}
+}
+
 func TestMergeMaps(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -786,4 +933,242 @@ func TestStorePostureReportResults_SkipsSameCategoryRBACObjects(t *testing.T) {
 	assert.NoError(t, listErr)
 	assert.Len(t, summaries.Items, 1)
 	assert.Equal(t, "pod-test-pod", summaries.Items[0].Name)
+}
+
+func TestMergeWorkloadConfigurationScanSpec(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing v1beta1.WorkloadConfigurationScanSpec
+		new      v1beta1.WorkloadConfigurationScanSpec
+		expected map[string]v1beta1.ScannedControl
+	}{
+		{
+			name:     "new control added",
+			existing: v1beta1.WorkloadConfigurationScanSpec{},
+			new: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControl{
+				"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+			},
+		},
+		{
+			name: "existing failed wins over new passed, rules replaced by new scan",
+			existing: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "old"}, Rules: []v1beta1.ScannedControlRule{{Name: "rule-1"}}},
+				},
+			},
+			new: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "new"}, Rules: []v1beta1.ScannedControlRule{{Name: "rule-2"}}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControl{
+				"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "new"}, Rules: []v1beta1.ScannedControlRule{{Name: "rule-2"}}},
+			},
+		},
+		{
+			name: "tied status takes latest non-empty info",
+			existing: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "old"}},
+				},
+			},
+			new: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "new"}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControl{
+				"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "new"}},
+			},
+		},
+		{
+			name: "tied status falls back to existing info when new is empty",
+			existing: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "old"}},
+				},
+			},
+			new: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControl{
+				"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "old"}},
+			},
+		},
+		{
+			name: "new failed wins over existing passed",
+			existing: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "old"}},
+				},
+			},
+			new: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "new"}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControl{
+				"C-001": {ControlID: "C-001", Name: "Control 1", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "new"}},
+			},
+		},
+		{
+			name: "stale controls removed",
+			existing: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+					"C-002": {ControlID: "C-002", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+				},
+			},
+			new: v1beta1.WorkloadConfigurationScanSpec{
+				Controls: map[string]v1beta1.ScannedControl{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControl{
+				"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeWorkloadConfigurationScanSpec(tt.existing, tt.new)
+			assert.Equal(t, tt.expected, got.Controls)
+		})
+	}
+
+	// Regression guard: repeated merges (simulating continuous-scan cycles) must not
+	// duplicate rule entries. See reviewer feedback on unbounded Rules growth.
+	t.Run("repeated merges do not duplicate rules", func(t *testing.T) {
+		newScan := v1beta1.WorkloadConfigurationScanSpec{
+			Controls: map[string]v1beta1.ScannedControl{
+				"C-001": {
+					ControlID: "C-001",
+					Name:      "Control 1",
+					Status:    v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed)},
+					Rules:     []v1beta1.ScannedControlRule{{Name: "rule-1"}},
+				},
+			},
+		}
+		spec := v1beta1.WorkloadConfigurationScanSpec{}
+		for i := 0; i < 10; i++ {
+			spec = mergeWorkloadConfigurationScanSpec(spec, newScan)
+		}
+		assert.Len(t, spec.Controls["C-001"].Rules, 1)
+	})
+}
+
+func TestMergeWorkloadConfigurationScanSummarySpec(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing v1beta1.WorkloadConfigurationScanSummarySpec
+		new      v1beta1.WorkloadConfigurationScanSummarySpec
+		expected map[string]v1beta1.ScannedControlSummary
+	}{
+		{
+			name:     "new control added",
+			existing: v1beta1.WorkloadConfigurationScanSummarySpec{},
+			new: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControlSummary{
+				"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+			},
+		},
+		{
+			name: "existing failed wins over new passed",
+			existing: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "old"}},
+				},
+			},
+			new: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "new"}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControlSummary{
+				"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "new"}},
+			},
+		},
+		{
+			name: "tied status takes latest non-empty info",
+			existing: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "old"}},
+				},
+			},
+			new: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "new"}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControlSummary{
+				"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "new"}},
+			},
+		},
+		{
+			name: "tied status falls back to existing info when new is empty",
+			existing: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "old"}},
+				},
+			},
+			new: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControlSummary{
+				"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "old"}},
+			},
+		},
+		{
+			name: "new failed wins over existing passed",
+			existing: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed), Info: "old"}},
+				},
+			},
+			new: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "new"}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControlSummary{
+				"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusFailed), Info: "new"}},
+			},
+		},
+		{
+			name: "stale controls removed",
+			existing: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+					"C-002": {ControlID: "C-002", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+				},
+			},
+			new: v1beta1.WorkloadConfigurationScanSummarySpec{
+				Controls: map[string]v1beta1.ScannedControlSummary{
+					"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+				},
+			},
+			expected: map[string]v1beta1.ScannedControlSummary{
+				"C-001": {ControlID: "C-001", Status: v1beta1.ScannedControlStatus{Status: string(apis.StatusPassed)}},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeWorkloadConfigurationScanSummarySpec(tt.existing, tt.new)
+			assert.Equal(t, tt.expected, got.Controls)
+		})
+	}
 }

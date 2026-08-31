@@ -14,7 +14,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/internal/testutils"
+	"github.com/kubescape/kubescape/v4/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"

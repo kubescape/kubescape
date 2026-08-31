@@ -9,13 +9,14 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // --- helpers --------------------------------------------------------------
@@ -370,12 +371,12 @@ func TestPrepareResourcesToFix_UnresolvableResourceID(t *testing.T) {
 	}
 }
 
-func TestPrepareResourcesToFix_NonYamlSource(t *testing.T) {
+func TestPrepareResourcesToFix_UnsupportedSource(t *testing.T) {
 	dir := t.TempDir()
-	manifest := writeManifest(t, dir, "deploy.json", "{}")
+	manifest := writeManifest(t, dir, "deploy.yaml", "{}")
 	rel, _ := filepath.Rel(dir, manifest)
 	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
-	res.Source.FileType = reporthandling.SourceTypeJson
+	res.Source.FileType = reporthandling.SourceTypeHelmChart
 
 	results := []resourcesresults.Result{
 		{
@@ -391,7 +392,7 @@ func TestPrepareResourcesToFix_NonYamlSource(t *testing.T) {
 	h := newHandlerForResources(dir, results, nil, false)
 	_ = h.PrepareResourcesToFix(context.Background())
 	if assert.Len(t, h.UnfixedControls(), 1) {
-		assert.Contains(t, h.UnfixedControls()[0].Reason, "not a YAML")
+		assert.Contains(t, h.UnfixedControls()[0].Reason, "not a YAML or JSON")
 	}
 }
 
@@ -578,15 +579,42 @@ func TestYamlPathCovers(t *testing.T) {
 	}
 }
 
-func TestPlannedPathsFromExpressions_DedupesAndSkipsEmpty(t *testing.T) {
+// plannedPathsFromExpressions must NOT dedup by Path alone: two entries can
+// legitimately share a Path with different Values (see
+// TestPlannedPathsFromExpressions_PreservesBothValuesAtSameConflictingPath),
+// so this only pins that an identical (Path, Value) pair surviving twice is
+// harmless, and that a genuinely empty Path is skipped.
+func TestPlannedPathsFromExpressions_KeepsDuplicatesAndSkipsEmpty(t *testing.T) {
 	exprs := map[string]armotypes.FixPath{
 		"e1": {Path: "spec.a", Value: "1"},
 		"e2": {Path: "spec.b", Value: "2"},
-		"e3": {Path: "spec.a", Value: "1"}, // duplicate path under different expression key
+		"e3": {Path: "spec.a", Value: "1"}, // identical (path, value) under a different expression key
 		"e4": {Path: "", Value: ""},        // empty — must be skipped
 	}
 	got := plannedPathsFromExpressions(exprs)
-	assert.ElementsMatch(t, []string{"spec.a", "spec.b"}, got)
+	assert.ElementsMatch(t, []plannedFix{
+		{Path: "spec.a", Value: "1"},
+		{Path: "spec.b", Value: "2"},
+		{Path: "spec.a", Value: "1"},
+	}, got)
+}
+
+// TestPlannedPathsFromExpressions_PreservesBothValuesAtSameConflictingPath is
+// the direct regression test for the bug this fixes: a Path-only dedup
+// silently discarded whichever of two DIFFERENT Values at the same Path the
+// (unordered) map iteration visited second. Both must survive so
+// controlIsCoveredByPlannedPaths can still find whichever one actually
+// matches a given failed check's expected value.
+func TestPlannedPathsFromExpressions_PreservesBothValuesAtSameConflictingPath(t *testing.T) {
+	exprs := map[string]armotypes.FixPath{
+		"expr-all":      {Path: "spec.a", Value: `["ALL"]`},
+		"expr-sysadmin": {Path: "spec.a", Value: `["SYS_ADMIN"]`},
+	}
+	got := plannedPathsFromExpressions(exprs)
+	assert.ElementsMatch(t, []plannedFix{
+		{Path: "spec.a", Value: `["ALL"]`},
+		{Path: "spec.a", Value: `["SYS_ADMIN"]`},
+	}, got, "both conflicting values at the same path must survive, not just whichever the map iteration visited first")
 }
 
 func TestPlannedPathsFromExpressions_EmptyInput(t *testing.T) {
@@ -632,6 +660,107 @@ func TestPrepareResourcesToFix_PromotesCrossControlCoveredControl(t *testing.T) 
 	if assert.Len(t, h.UnfixedControls(), 1, "only C-0041 must remain unfixed") {
 		assert.Equal(t, "C-0041", h.UnfixedControls()[0].ControlID)
 	}
+}
+
+// The value-conflict bug this fixes: C-DROP-ALL owns a FixPath that sets
+// capabilities.drop to ["ALL"]. C-DROP-SPECIFIC fails on the exact same
+// field but expects a DIFFERENT value (["SYS_ADMIN","NET_ADMIN"], encoded in
+// its FailedPath's "=<expected>" suffix) and has no FixPath of its own.
+// Before this fix, path overlap alone promoted C-DROP-SPECIFIC to fixed even
+// though the file now contains a value its own check never expected --
+// reporting "fixed" for a control a rescan would still show failing.
+func TestPrepareResourcesToFix_DoesNotPromoteControlWhenCoveringFixWritesADifferentValue(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-DROP-ALL", "drop all capabilities",
+					failedRuleWithFix("spec.template.spec.containers[0].securityContext.capabilities.drop", `["ALL"]`),
+				),
+				failedControl("C-DROP-SPECIFIC", "drop only SYS_ADMIN and NET_ADMIN",
+					failedRuleNoFixAtPath(`spec.template.spec.containers[0].securityContext.capabilities.drop=["SYS_ADMIN","NET_ADMIN"]`),
+				),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+	_ = h.PrepareResourcesToFix(context.Background())
+
+	assert.Equal(t, 1, h.FixedControlsCount(), "only C-DROP-ALL is genuinely fixed")
+	if assert.Len(t, h.UnfixedControls(), 1, "C-DROP-SPECIFIC must not be promoted: the covering fix writes a different value than its check expected") {
+		assert.Equal(t, "C-DROP-SPECIFIC", h.UnfixedControls()[0].ControlID)
+	}
+}
+
+// End-to-end regression test for the dedup-drops-a-conflicting-value bug:
+// two controls each own a concrete FixPath at the identical location with
+// DIFFERENT values (C-A writes "1", C-B writes "2"). C-THIRD has only a
+// FailedPath expecting "2" and no FixPath of its own. C-THIRD must still be
+// promoted, because C-B's planned value genuinely matches -- this must not
+// depend on which of C-A/C-B's entries an internal dedup step happened to
+// keep.
+func TestPrepareResourcesToFix_PromotesControlWhenAnyOfSeveralConflictingPlannedValuesMatches(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-A", "owns fix writing 1",
+					failedRuleWithFix("spec.template.spec.containers[0].securityContext.runAsUser", "1"),
+				),
+				failedControl("C-B", "owns fix writing 2",
+					failedRuleWithFix("spec.template.spec.containers[0].securityContext.runAsUser", "2"),
+				),
+				failedControl("C-THIRD", "expects 2, no fix of its own",
+					failedRuleNoFixAtPath("spec.template.spec.containers[0].securityContext.runAsUser=2"),
+				),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+	_ = h.PrepareResourcesToFix(context.Background())
+
+	assert.Equal(t, 3, h.FixedControlsCount(), "C-A, C-B genuinely fixed, and C-THIRD promoted because C-B's value matches what it expected")
+	assert.Empty(t, h.UnfixedControls())
+}
+
+func TestYamlValuesEqual(t *testing.T) {
+	cases := []struct {
+		name  string
+		a, b  string
+		equal bool
+	}{
+		{"identical scalars", "true", "true", true},
+		{"identical lists, different spacing", `["ALL"]`, `[ "ALL" ]`, true},
+		{"different lists", `["ALL"]`, `["SYS_ADMIN","NET_ADMIN"]`, false},
+		{"same list, different order", `["A","B"]`, `["B","A"]`, false},
+		{"unparsable falls back to literal equality", "not: [valid: yaml:", "not: [valid: yaml:", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.equal, yamlValuesEqual(tc.a, tc.b))
+		})
+	}
+}
+
+func TestExpectedValueSuffix(t *testing.T) {
+	value, ok := expectedValueSuffix(`spec.a=["ALL"]`)
+	assert.True(t, ok)
+	assert.Equal(t, `["ALL"]`, value)
+
+	_, ok = expectedValueSuffix("spec.a")
+	assert.False(t, ok, "a path with no '=' carries no expected value to compare against")
 }
 
 // Parent-path coverage: planned edit sets `securityContext = {...}`, failed
@@ -1065,4 +1194,152 @@ func TestNewFixHandler_AcceptsValidReport(t *testing.T) {
 	h, err := NewFixHandler(&metav1.FixInfo{ReportFile: reportFile})
 	assert.NoError(t, err)
 	assert.NotNil(t, h)
+}
+
+// TestPrepareResourcesToFix_JsonSource covers the format the scan reads and
+// reports fix paths for, but the fix engine used to refuse: the resource is
+// prepared for fixing rather than listed as unfixed.
+func TestPrepareResourcesToFix_JsonSource(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.json", `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"demo"},"spec":{"privileged":true}}`)
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Pod", "demo", 0)
+	res.Source.FileType = reporthandling.SourceTypeJson
+
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0057", "Privileged",
+					failedRuleWithFix("spec.privileged", "false"),
+				),
+			},
+		},
+	}
+
+	h := newHandlerForResources(dir, results, nil, false)
+	toFix := h.PrepareResourcesToFix(context.Background())
+
+	require.Len(t, toFix, 1)
+	assert.Equal(t, manifest, toFix[0].FilePath)
+	assert.Empty(t, h.UnfixedControls())
+}
+
+// TestPrepareResourcesToFix_JsonFileWithSeveralResources covers a JSON manifest
+// that wraps its resources, kind: List being the common case. A JSON file is a
+// single document, so every fix path in it resolves against the wrapper rather
+// than the resource it belongs to.
+func TestPrepareResourcesToFix_JsonFileWithSeveralResources(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "list.json", `{"apiVersion":"v1","kind":"List","items":[]}`)
+	rel, _ := filepath.Rel(dir, manifest)
+
+	results := make([]resourcesresults.Result, 0, 2)
+	for i, name := range []string{"api", "web"} {
+		res := buildResource(t, dir, rel, "Pod", name, i)
+		res.Source.FileType = reporthandling.SourceTypeJson
+		results = append(results, resourcesresults.Result{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0057", "Privileged", failedRuleWithFix("spec.privileged", "false")),
+			},
+		})
+	}
+
+	h := newHandlerForResources(dir, results, nil, false)
+	toFix := h.PrepareResourcesToFix(context.Background())
+
+	assert.Empty(t, toFix, "a wrapped JSON manifest must not be rewritten")
+	require.NotEmpty(t, h.UnfixedControls())
+	assert.Contains(t, h.UnfixedControls()[0].Reason, "several resources in one document")
+}
+
+// TestPrepareResourcesToFix_MultiDocumentYamlIsUnaffected keeps the guard from
+// over-reaching: each YAML document is a resource in its own right.
+func TestPrepareResourcesToFix_MultiDocumentYamlIsUnaffected(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "multi.yaml", "kind: Pod\n---\nkind: Pod\n")
+	rel, _ := filepath.Rel(dir, manifest)
+
+	results := make([]resourcesresults.Result, 0, 2)
+	for i, name := range []string{"api", "web"} {
+		res := buildResource(t, dir, rel, "Pod", name, i)
+		res.Source.FileType = reporthandling.SourceTypeYaml
+		results = append(results, resourcesresults.Result{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0057", "Privileged", failedRuleWithFix("spec.privileged", "false")),
+			},
+		})
+	}
+
+	h := newHandlerForResources(dir, results, nil, false)
+
+	assert.Len(t, h.PrepareResourcesToFix(context.Background()), 2)
+}
+
+// TestPrepareResourcesToFix_YamlListIsNotRewritten covers the same wrapper in
+// YAML. One document, several resources: their fix paths resolve against the
+// List rather than the workloads, so the file is left alone.
+func TestPrepareResourcesToFix_YamlListIsNotRewritten(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "list.yaml", "apiVersion: v1\nkind: List\nitems:\n  - kind: Pod\n  - kind: Pod\n")
+	rel, _ := filepath.Rel(dir, manifest)
+
+	results := make([]resourcesresults.Result, 0, 2)
+	for i, name := range []string{"api", "web"} {
+		res := buildResource(t, dir, rel, "Pod", name, i)
+		res.Source.FileType = reporthandling.SourceTypeYaml
+		results = append(results, resourcesresults.Result{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0057", "Privileged", failedRuleWithFix("spec.privileged", "false")),
+			},
+		})
+	}
+
+	h := newHandlerForResources(dir, results, nil, false)
+	toFix := h.PrepareResourcesToFix(context.Background())
+
+	assert.Empty(t, toFix)
+	require.NotEmpty(t, h.UnfixedControls())
+	assert.Contains(t, h.UnfixedControls()[0].Reason, "several resources in one document")
+}
+
+// TestPrepareResourcesToFix_ListWithOneFixableChild covers a wrapper whose other
+// members produced no fixes. Counting only the fixable resources would see one
+// resource, miss the wrapper and write its fix paths to the List.
+func TestPrepareResourcesToFix_ListWithOneFixableChild(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "list.json", `{"apiVersion":"v1","kind":"List","items":[]}`)
+	rel, _ := filepath.Rel(dir, manifest)
+
+	failing := buildResource(t, dir, rel, "Pod", "bad", 0)
+	failing.Source.FileType = reporthandling.SourceTypeJson
+	passing := buildResource(t, dir, rel, "ConfigMap", "cfg", 1)
+	passing.Source.FileType = reporthandling.SourceTypeJson
+
+	h := newHandlerForResources(dir, []resourcesresults.Result{
+		{
+			ResourceID:  failing.GetID(),
+			RawResource: failing,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0057", "Privileged", failedRuleWithFix("spec.privileged", "false")),
+			},
+		},
+	}, nil, false)
+	h.reportObj.Resources = append(h.reportObj.Resources, *failing, *passing)
+
+	toFix := h.PrepareResourcesToFix(context.Background())
+
+	assert.Empty(t, toFix, "the wrapper must be detected from every scanned resource, not only the fixable ones")
+	assert.Zero(t, h.FixedControlsCount(), "a withdrawn resource must give back its fixed tally")
+	require.NotEmpty(t, h.UnfixedControls())
+	assert.Equal(t, "C-0057", h.UnfixedControls()[0].ControlID)
+	assert.Equal(t, "Privileged", h.UnfixedControls()[0].ControlName)
+	assert.Contains(t, h.UnfixedControls()[0].Reason, "several resources in one document")
 }

@@ -13,8 +13,8 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/iconlogger"
 	"github.com/kubescape/go-logger/zaplogger"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )

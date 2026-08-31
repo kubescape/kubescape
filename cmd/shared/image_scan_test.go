@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -76,6 +76,31 @@ func TestValidateImageScanInfo(t *testing.T) {
 			nil,
 		},
 		{
+			"Canonical image platform is valid",
+			&cautils.ScanInfo{ImagePlatform: "linux/amd64"},
+			nil,
+		},
+		{
+			"Architecture-only image platform is valid",
+			&cautils.ScanInfo{ImagePlatform: "arm64"},
+			nil,
+		},
+		{
+			"Image platform variant is valid",
+			&cautils.ScanInfo{ImagePlatform: "linux/arm/v7"},
+			nil,
+		},
+		{
+			"Invalid image platform is rejected",
+			&cautils.ScanInfo{ImagePlatform: "linux/toaster"},
+			assert.AnError,
+		},
+		{
+			"Operating system without architecture is rejected",
+			&cautils.ScanInfo{ImagePlatform: "linux"},
+			assert.AnError,
+		},
+		{
 			"NaN fail threshold should be invalid",
 			&cautils.ScanInfo{FailThreshold: float32(math.NaN())},
 			ErrBadThreshold,
@@ -100,10 +125,46 @@ func TestValidateImageScanInfo(t *testing.T) {
 
 				got := ValidateImageScanInfo(tc.ScanInfo)
 
-				assert.Equal(t, want, got)
+				if want == assert.AnError {
+					assert.Error(t, got)
+				} else {
+					assert.Equal(t, want, got)
+				}
 			},
 		)
 	}
+}
+
+func TestValidateImageScanInfoNormalizesPlatform(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", input: "", want: ""},
+		{name: "architecture alias", input: "x86_64", want: "linux/amd64"},
+		{name: "ARM alias", input: "aarch64", want: "linux/arm64"},
+		{name: "surrounding whitespace", input: " linux/arm64 ", want: "linux/arm64"},
+		{name: "ARM variant", input: "linux/arm/v7", want: "linux/arm/v7"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{ImagePlatform: tt.input}
+			assert.NoError(t, ValidateImageScanInfo(scanInfo))
+			assert.Equal(t, tt.want, scanInfo.ImagePlatform)
+		})
+	}
+}
+
+func TestValidateImageScanInfoLeavesInvalidPlatformForDiagnostics(t *testing.T) {
+	scanInfo := &cautils.ScanInfo{ImagePlatform: "linux/not-a-real-architecture"}
+
+	err := ValidateImageScanInfo(scanInfo)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), `invalid image platform "linux/not-a-real-architecture"`)
+	assert.Equal(t, "linux/not-a-real-architecture", scanInfo.ImagePlatform)
 }
 
 func TestValidateImageCredentials(t *testing.T) {
@@ -210,4 +271,60 @@ func TestValidateRegistryCredentials_EnvVarBug(t *testing.T) {
 
 	// Should return conflict error because both token and username are present
 	assert.Equal(t, ErrRegistryAuthConflict, err)
+}
+
+// TestValidateImageScanAnonymization guards a silent data leak: --hide and
+// --encrypt are registered on the parent scan command, so `scan image`
+// inherits them, but the anonymizer only ever runs over a posture session.
+// On the image path the flags were accepted and did nothing while the image
+// reference, its SBOM and the package file inventory were written out.
+func TestValidateImageScanAnonymization(t *testing.T) {
+	tests := []struct {
+		name     string
+		scanInfo *cautils.ScanInfo
+		wantErr  bool
+	}{
+		{
+			name:     "nil scan info",
+			scanInfo: nil,
+		},
+		{
+			name:     "neither flag set",
+			scanInfo: &cautils.ScanInfo{},
+		},
+		{
+			name:     "hide is rejected",
+			scanInfo: &cautils.ScanInfo{Hide: true},
+			wantErr:  true,
+		},
+		{
+			name:     "encrypt is rejected",
+			scanInfo: &cautils.ScanInfo{EncryptionEnabled: true},
+			wantErr:  true,
+		},
+		{
+			name:     "both flags rejected",
+			scanInfo: &cautils.ScanInfo{Hide: true, EncryptionEnabled: true},
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateImageScanAnonymization(tt.scanInfo)
+			if !tt.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorIs(t, err, ErrImageScanAnonymization)
+		})
+	}
+}
+
+// TestValidateImageScanInfoAllowsAnonymization pins the boundary: the
+// combined `scan framework --scan-images` path shares ValidateImageScanInfo
+// and does support both flags, so the rejection must not leak into it.
+func TestValidateImageScanInfoAllowsAnonymization(t *testing.T) {
+	assert.NoError(t, ValidateImageScanInfo(&cautils.ScanInfo{Hide: true}))
+	assert.NoError(t, ValidateImageScanInfo(&cautils.ScanInfo{EncryptionEnabled: true}))
 }

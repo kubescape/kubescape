@@ -1,0 +1,14 @@
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: kubescape
+  namespace: default
+addressType: IPv4
+ports:
+  - name: http
+    protocol: TCP
+    port: 80
+endpoints:
+  - addresses: ["10.1.2.3"]
+    conditions:
+      ready: true

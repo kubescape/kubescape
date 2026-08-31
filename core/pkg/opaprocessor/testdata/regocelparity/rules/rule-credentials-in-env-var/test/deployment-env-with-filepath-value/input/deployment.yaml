@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: default
+  name: test-metallb
+  labels:
+    app: metallb-speaker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metallb-speaker
+  template:
+    metadata:
+      labels:
+        app: metallb-speaker
+    spec:
+      containers:
+        - name: speaker
+          env:
+            - name: METALLB_ML_SECRET_KEY_PATH
+              value: /etc/ml_secret_key
+            - name: SOME_TOKEN_PATH
+              value: /var/run/secrets/token
+          image: quay.io/metallb/speaker:v0.13.7
+          volumeMounts:
+            - mountPath: /etc/ml_secret_key
+              name: memberlist
+              readOnly: true
+      volumes:
+        - name: memberlist
+          secret:
+            defaultMode: 420
+            secretName: memberlist

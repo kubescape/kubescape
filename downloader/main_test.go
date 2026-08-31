@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/cenkalti/backoff/v4"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 )
 
 func init() {

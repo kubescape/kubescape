@@ -331,7 +331,11 @@ func appendUniquePath(path string, seen map[string]struct{}, paths *[]string) {
 type helmChartDirectoryLister func(string) ([]string, []error)
 
 func appendOwnedHelmChartTree(ctx context.Context, directory string, seen map[string]struct{}, directories *[]string) {
-	appendOwnedHelmChartTreeWithLister(ctx, directory, seen, directories, listHelmChartDirs)
+	// Unfiltered on purpose: an excluded chart leaves discovery, not the record of
+	// what the build owns.
+	appendOwnedHelmChartTreeWithLister(ctx, directory, seen, directories, func(path string) ([]string, []error) {
+		return listHelmChartDirs(path, nil)
+	})
 }
 
 func appendOwnedHelmChartTreeWithLister(ctx context.Context, directory string, seen map[string]struct{}, directories *[]string, discover helmChartDirectoryLister) {

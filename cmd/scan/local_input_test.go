@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/mocks"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -38,6 +38,10 @@ func (m *scanInputCaptureKubescape) Scan(scanInfo *cautils.ScanInfo, policyIdent
 
 func (m *scanInputCaptureKubescape) Context() context.Context {
 	return context.Background()
+}
+
+func (m *scanInputCaptureKubescape) ScanContext(_ context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return m.Scan(scanInfo, policyIdentifiers)
 }
 
 func TestPrepareScanLocalInput(t *testing.T) {

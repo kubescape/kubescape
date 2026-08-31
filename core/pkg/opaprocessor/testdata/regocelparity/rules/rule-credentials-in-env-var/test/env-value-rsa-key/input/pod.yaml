@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: rsa-key-pod
+spec:
+  containers:
+  - name: app
+    env:
+    - name: SIGNING_KEY
+      value: |
+        -----BEGIN RSA PRIVATE KEY-----
+        MIIEvQIBADANBgkqhkiG9w0BAQEFAASC
+        -----END RSA PRIVATE KEY-----
+    image: nginx:1.25

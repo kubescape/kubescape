@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 )
@@ -621,10 +621,18 @@ func TestSetMapNamespaceToNumOfResources(t *testing.T) {
 }
 
 func TestCloudResourceRequired(t *testing.T) {
+	// Assert on the behavior of mapKSResourceToApiGroup to verify the mapping
+	assert.ElementsMatch(t, []string{"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"}, mapKSResourceToApiGroup(ClusterDescribe))
+	assert.ElementsMatch(t, []string{"container.googleapis.com/v1", "eks.amazonaws.com/v1"}, mapKSResourceToApiGroup(DescribeRepositories))
+	assert.ElementsMatch(t, []string{"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"}, mapKSResourceToApiGroup(ListEntitiesForPolicies))
+
+	// Test the cloudResourceRequired helper function
 	cloudResources := []string{"container.googleapis.com/v1/ClusterDescribe",
 		"eks.amazonaws.com/v1/DescribeRepositories",
+		"container.googleapis.com/v1/DescribeRepositories",
 		"eks.amazonaws.com/v1/ListEntitiesForPolicies",
 		"eks.amazonaws.com/v1/ClusterDescribe",
+		"container.googleapis.com/v1/ListEntitiesForPolicies",
 		"management.azure.com/v1/ListEntitiesForPolicies"}
 
 	assert.True(t, cloudResourceRequired(cloudResources, ClusterDescribe))

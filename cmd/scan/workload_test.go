@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/mocks"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -38,6 +38,10 @@ func (m *workloadScanCaptureKubescape) Scan(scanInfo *cautils.ScanInfo, _ []caut
 	results := resultshandling.NewResultsHandler(nil, nil, noOpWorkloadPrinter{})
 	results.SetData(&cautils.OPASessionObj{Report: &reporthandlingv2.PostureReport{}})
 	return results, nil
+}
+
+func (m *workloadScanCaptureKubescape) ScanContext(_ context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return m.Scan(scanInfo, policyIdentifiers)
 }
 
 func TestSetWorkloadScanInfo(t *testing.T) {
@@ -398,151 +402,6 @@ func TestGetWorkloadCmd_RunE_ForwardsPositionalLocalInputs(t *testing.T) {
 	assert.Equal(t, "nginx", ks.scanInfo.ScanObject.GetName())
 }
 
-func Test_parseWorkloadIdentifierString_Invalid(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-	}{
-		{
-			name:  "empty identifier",
-			input: "",
-		},
-		{
-			name:  "too many segments",
-			input: "cluster/default/Deployment/nginx",
-		},
-		{
-			name:  "empty segment",
-			input: "default//nginx",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, _, _, _, err := parseWorkloadIdentifierString(tt.input)
-			assert.Error(t, err)
-		})
-	}
-}
-
-func Test_parseWorkloadIdentifierString_Valid(t *testing.T) {
-	t.Run("valid identifier", func(t *testing.T) {
-		namespace, kind, name, apiVersion, err := parseWorkloadIdentifierString("default/Deployment/nginx-deployment")
-		assert.NoError(t, err)
-		assert.Equal(t, "default", namespace)
-		assert.Equal(t, "Deployment", kind)
-		assert.Equal(t, "nginx-deployment", name)
-		assert.Equal(t, "", apiVersion)
-	})
-}
-
-func Test_parseWorkloadIdentifierString_Values(t *testing.T) {
-	testCases := []struct {
-		Description    string
-		Input          string
-		WantNamespace  string
-		WantKind       string
-		WantName       string
-		WantApiVersion string
-		WantErr        bool
-	}{
-		{
-			Description:    "valid kind and name",
-			Input:          "Deployment/nginx",
-			WantNamespace:  "",
-			WantKind:       "Deployment",
-			WantName:       "nginx",
-			WantApiVersion: "",
-			WantErr:        false,
-		},
-		{
-			Description:    "valid namespace kind and name",
-			Input:          "default/Deployment/nginx",
-			WantNamespace:  "default",
-			WantKind:       "Deployment",
-			WantName:       "nginx",
-			WantApiVersion: "",
-			WantErr:        false,
-		},
-		{
-			Description:    "valid kind.version and name",
-			Input:          "Pod.v1/nginx",
-			WantNamespace:  "",
-			WantKind:       "Pod",
-			WantName:       "nginx",
-			WantApiVersion: "v1",
-			WantErr:        false,
-		},
-		{
-			Description:    "valid kind.version.group and name",
-			Input:          "Deployment.v1.apps/nginx",
-			WantNamespace:  "",
-			WantKind:       "Deployment",
-			WantName:       "nginx",
-			WantApiVersion: "apps/v1",
-			WantErr:        false,
-		},
-		{
-			Description:    "valid namespace kind.version.group and name",
-			Input:          "default/Deployment.v1.apps/nginx",
-			WantNamespace:  "default",
-			WantKind:       "Deployment",
-			WantName:       "nginx",
-			WantApiVersion: "apps/v1",
-			WantErr:        false,
-		},
-		{
-			Description:    "valid multi-label group",
-			Input:          "Ingress.v1.networking.k8s.io/name",
-			WantNamespace:  "",
-			WantKind:       "Ingress",
-			WantName:       "name",
-			WantApiVersion: "networking.k8s.io/v1",
-			WantErr:        false,
-		},
-		{
-			Description: "invalid empty dotted component",
-			Input:       "Deployment..apps/nginx",
-			WantErr:     true,
-		},
-		{
-			Description: "invalid empty trailing component",
-			Input:       "Deployment./nginx",
-			WantErr:     true,
-		},
-		{
-			Description: "invalid missing apiVersion",
-			Input:       "Deployment.apps/nginx",
-			WantErr:     true,
-		},
-		{
-			Description: "invalid apiVersion segment",
-			Input:       "Deployment.bogus/nginx",
-			WantErr:     true,
-		},
-		{
-			Description: "too many segments",
-			Input:       "cluster/default/Deployment/nginx",
-			WantErr:     true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.Description, func(t *testing.T) {
-			namespace, kind, name, apiVersion, err := parseWorkloadIdentifierString(tc.Input)
-			if tc.WantErr {
-				assert.Error(t, err)
-				return
-			}
-			assert.NoError(t, err)
-			assert.Equal(t, tc.WantNamespace, namespace)
-			assert.Equal(t, tc.WantKind, kind)
-			assert.Equal(t, tc.WantName, name)
-			assert.Equal(t, tc.WantApiVersion, apiVersion)
-		})
-	}
-}
-
 type fakePrinter struct{}
 
 func (p *fakePrinter) PrintNextSteps() {}
@@ -562,6 +421,10 @@ func (m *recordingKubescape) Scan(scanInfo *cautils.ScanInfo, _ []cautils.Policy
 	rh := resultshandling.NewResultsHandler(nil, []printer.IPrinter{&fakePrinter{}}, &fakePrinter{})
 	rh.SetData(cautils.NewOPASessionObjMock())
 	return rh, nil
+}
+
+func (m *recordingKubescape) ScanContext(_ context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return m.Scan(scanInfo, policyIdentifiers)
 }
 
 func TestGetWorkloadCmd_ApiVersion(t *testing.T) {
@@ -603,6 +466,59 @@ func TestGetWorkloadCmd_ApiVersion(t *testing.T) {
 	}
 }
 
+func TestGetWorkloadCmd_ValidatesImageOptionsAfterEnablingImageScan(t *testing.T) {
+	tests := []struct {
+		name     string
+		scanInfo cautils.ScanInfo
+		wantErr  string
+	}{
+		{
+			name: "invalid platform is rejected before scan",
+			scanInfo: cautils.ScanInfo{
+				ImagePlatform: "win/arm/v7",
+			},
+			wantErr: "invalid image platform",
+		},
+		{
+			name: "unscoped token is rejected before scan",
+			scanInfo: cautils.ScanInfo{
+				RegistryToken: "token",
+			},
+			wantErr: "registry authority",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := tt.scanInfo
+			mock := &recordingKubescape{}
+			cmd := getWorkloadCmd(mock, &scanInfo)
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetArgs([]string{"Deployment/nginx"})
+
+			err := cmd.Execute()
+
+			require.ErrorContains(t, err, tt.wantErr)
+			assert.True(t, scanInfo.ScanImages, "workload setup must enable image scanning before validation")
+			assert.Nil(t, mock.captured, "Kubescape.Scan must not run after invalid image options")
+		})
+	}
+}
+
+func TestGetWorkloadCmd_NormalizesImagePlatformBeforeScan(t *testing.T) {
+	scanInfo := cautils.ScanInfo{ImagePlatform: "aarch64"}
+	mock := &recordingKubescape{}
+	cmd := getWorkloadCmd(mock, &scanInfo)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"Deployment/nginx"})
+
+	require.NoError(t, cmd.Execute())
+	require.NotNil(t, mock.captured)
+	assert.Equal(t, "linux/arm64", mock.captured.ImagePlatform)
+}
+
 func TestGetWorkloadCmd_RejectsLabelSelector(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	scanInfo := cautils.ScanInfo{}
@@ -614,4 +530,74 @@ func TestGetWorkloadCmd_RejectsLabelSelector(t *testing.T) {
 	err := cmd.RunE(cmd, []string{"Deployment/my-deploy"})
 
 	assert.ErrorContains(t, err, "--label-selector is not supported for workload scans")
+}
+
+type scoredWorkloadKubescape struct {
+	mocks.MockIKubescape
+	complianceScore float32
+}
+
+func (m *scoredWorkloadKubescape) Scan(scanInfo *cautils.ScanInfo, _ []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	rh := resultshandling.NewResultsHandler(nil, []printer.IPrinter{&fakePrinter{}}, &fakePrinter{})
+	sessionObj := cautils.NewOPASessionObjMock()
+	sessionObj.Report.SummaryDetails.ComplianceScore = m.complianceScore
+	rh.SetData(sessionObj)
+	return rh, nil
+}
+
+func (m *scoredWorkloadKubescape) ScanContext(_ context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return m.Scan(scanInfo, policyIdentifiers)
+}
+
+func TestGetWorkloadCmd_EnforcesComplianceThreshold(t *testing.T) {
+	tests := []struct {
+		name            string
+		complianceScore float32
+		threshold       float32
+		wantErr         string
+	}{
+		{
+			name:            "score below threshold returns error",
+			complianceScore: 50.0,
+			threshold:       80.0,
+			wantErr:         "scan compliance-score is below permitted threshold: 50.00 (compliance-threshold: 80.00)",
+		},
+		{
+			name:            "score equal to threshold passes",
+			complianceScore: 80.0,
+			threshold:       80.0,
+			wantErr:         "",
+		},
+		{
+			name:            "score above threshold passes",
+			complianceScore: 90.0,
+			threshold:       80.0,
+			wantErr:         "",
+		},
+		{
+			name:            "zero threshold disables enforcement",
+			complianceScore: 30.0,
+			threshold:       0,
+			wantErr:         "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := cautils.ScanInfo{ComplianceThreshold: tt.threshold}
+			mock := &scoredWorkloadKubescape{complianceScore: tt.complianceScore}
+			cmd := getWorkloadCmd(mock, &scanInfo)
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetArgs([]string{"Deployment/nginx"})
+
+			err := cmd.Execute()
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }

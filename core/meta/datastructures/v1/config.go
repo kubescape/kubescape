@@ -13,5 +13,11 @@ type ViewConfig struct {
 	OutputFormat string
 	IncludeEmpty bool
 }
+type ValidateConfig struct {
+	Writer    io.Writer
+	Format    string
+	Profile   string
+	IncludeOK bool
+}
 type DeleteConfig struct {
 }

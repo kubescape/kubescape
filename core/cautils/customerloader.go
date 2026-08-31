@@ -16,7 +16,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,15 +60,7 @@ type ConfigObj struct {
 
 // Config - convert ConfigObj to config file
 func (co *ConfigObj) Config() []byte {
-
-	// remove cluster name before saving to file
-	clusterName := co.ClusterName
-	co.ClusterName = ""
-
-	b, err := json.MarshalIndent(co, "", "  ") // #nosec G117 -- config persists the cloud access key by design; secret handled as a credential
-
-	co.ClusterName = clusterName
-
+	b, err := marshalConfigObj(co)
 	if err == nil {
 		return b
 	}
@@ -370,14 +362,13 @@ var configMarshal = func(v any) ([]byte, error) {
 	return json.MarshalIndent(v, "", "  ") //nolint:gosec,nolintlint // G117: AccessKey is intentionally persisted to the local config file
 }
 
-// marshalConfigObj serializes co for persistence, stripping ClusterName
-// (runtime-only, must not be saved) before marshaling and restoring it after.
+// marshalConfigObj serializes co for persistence, stripping ClusterName from a
+// snapshot because it is runtime-only and must not be saved. Serializing the
+// snapshot keeps the shared runtime config unchanged for concurrent readers.
 func marshalConfigObj(co *ConfigObj) ([]byte, error) {
-	clusterName := co.ClusterName
-	co.ClusterName = ""
-	b, err := configMarshal(co)
-	co.ClusterName = clusterName
-	return b, err
+	snapshot := *co
+	snapshot.ClusterName = ""
+	return configMarshal(&snapshot)
 }
 
 func updateConfigFile(configObj *ConfigObj) error {

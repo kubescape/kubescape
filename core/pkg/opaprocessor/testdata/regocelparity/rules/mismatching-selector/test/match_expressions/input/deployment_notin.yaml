@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mismatching-selector-notin
+spec:
+  selector:
+    matchExpressions:
+    - key: tier
+      operator: NotIn
+      values:
+      - frontend
+  template:
+    metadata:
+      labels:
+        tier: frontend
+    spec:
+      containers:
+      - name: app
+        image: nginx

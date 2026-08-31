@@ -1,0 +1,29 @@
+{
+  "name": "approve-csr-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Privilege Escalation::Approve CertificateSigningRequests",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        "rbac.authorization.k8s.io"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "RoleBinding",
+        "ClusterRoleBinding",
+        "Role",
+        "ClusterRole"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can create CertificateSigningRequests and approve them, through update or patch on the approval subresource together with approve on signers, letting them mint arbitrary client certificates including ones that authenticate as cluster-admin",
+  "remediation": "Do not grant create on certificatesigningrequests together with update/patch on certificatesigningrequests/approval and approve on signers to the same subject. Split CSR creation from CSR approval across separate, tightly scoped identities, and avoid cluster-wide wildcards on the certificates.k8s.io API group.",
+  "ruleQuery": "armo_builtins"
+}

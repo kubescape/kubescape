@@ -3,8 +3,8 @@ package operator
 import (
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
@@ -32,8 +32,16 @@ func TestGetOperatorRemediateCmd(t *testing.T) {
 	assert.Error(t, err)
 
 	// expected flags are registered
-	for _, name := range []string{"namespace", "kind", "target-namespace", "name", "reason", "finding-ref", "confirm"} {
+	for _, name := range []string{"namespace", "kind", "target-namespace", "name", "control", "min-severity", "reason", "finding-ref", "confirm"} {
 		assert.NotNil(t, cmd.PersistentFlags().Lookup(name), "flag --%s should be registered", name)
+	}
+
+	// the findings-driven flags default to empty, so a plain invocation is never
+	// silently a cluster-wide selector run
+	for _, name := range []string{"control", "min-severity"} {
+		value, err := cmd.PersistentFlags().GetString(name)
+		assert.NoError(t, err)
+		assert.Empty(t, value, "flag --%s should default to empty", name)
 	}
 
 	// confirm defaults to false (dry-run is the default; --confirm is the only apply switch)

@@ -1,13 +1,13 @@
 package config
 
 import (
-	"github.com/kubescape/kubescape/v3/core/meta"
-	v1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/meta"
+	v1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 
 func getDeleteCmd(ks meta.IKubescape) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "delete",
 		Short: "Delete cached configurations",
 		Long:  ``,
@@ -15,4 +15,6 @@ func getDeleteCmd(ks meta.IKubescape) *cobra.Command {
 			return ks.DeleteCachedConfig(&v1.DeleteConfig{})
 		},
 	}
+	cmd.AddCommand(getDeleteCacheCmd())
+	return cmd
 }

@@ -11,8 +11,8 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/core"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/core"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 )
 
 type Downloader interface {

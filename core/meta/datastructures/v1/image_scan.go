@@ -6,6 +6,7 @@ type ImageScanInfo struct {
 	Password           string
 	Token              string
 	Image              string
+	Platform           string
 	Exceptions         string
 	UseDefaultMatchers bool
 }

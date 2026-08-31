@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
-	"github.com/kubescape/kubescape/v3/core/pkg/policyhandler"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor"
+	"github.com/kubescape/kubescape/v4/core/pkg/policyhandler"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/resources"
 )

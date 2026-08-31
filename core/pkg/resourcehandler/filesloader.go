@@ -12,7 +12,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"k8s.io/apimachinery/pkg/version"
 )
@@ -44,9 +44,14 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 		helmValueOpts := helmValueOptionsFromScanInfo(scanInfo)
 		if scanInfo.ChartPath != "" && scanInfo.FilePath != "" {
+			// A chart-and-file input names one workload, leaving nothing to narrow.
 			workloadIDToSource, workloads, err = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath, helmValueOpts)
 		} else {
-			workloadIDToSource, workloads, skipped, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path], helmValueOpts)
+			pathFilter, filterErr := pathFilterFromScanInfo(ctx, scanInfo.InputPatterns[path], scanInfo)
+			if filterErr != nil {
+				return nil, allResources, nil, nil, filterErr
+			}
+			workloadIDToSource, workloads, skipped, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path], helmValueOpts, pathFilter)
 		}
 		sessionObj.SkippedManifests = append(sessionObj.SkippedManifests, skipped...)
 		if err != nil {
@@ -102,6 +107,10 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	logger.L().StopSuccess("Done accessing local objects")
 	// save input resource in resource maps
 	addSingleResourceToResourceMaps(k8sResources, allResources, sessionObj.SingleResourceScan, offlineResolver)
+
+	if err := applyKindFilter(k8sResources, allResources, scanInfo, sessionObj.SingleResourceScan); err != nil {
+		return nil, nil, nil, nil, err
+	}
 
 	return k8sResources, allResources, externalResources, excludedRulesMap, nil
 }
@@ -191,6 +200,27 @@ func helmValueOptionsFromScanInfo(scanInfo *cautils.ScanInfo) cautils.HelmValueO
 		ReleaseName:      scanInfo.HelmReleaseName,
 		ReleaseNamespace: scanInfo.HelmReleaseNamespace,
 	}
+}
+
+// pathFilterFromScanInfo compiles the exclusions that apply to a single scan input, from the
+// ignore file at its root and from --exclude-path. It returns nil when nothing is excluded.
+func pathFilterFromScanInfo(ctx context.Context, input string, scanInfo *cautils.ScanInfo) (*cautils.PathFilter, error) {
+	if scanInfo == nil {
+		return nil, nil
+	}
+
+	filter, err := cautils.NewScanPathFilter(input, scanInfo.ExcludePaths, !scanInfo.NoIgnoreFile)
+	if err != nil {
+		return nil, err
+	}
+	if filter != nil {
+		logger.L().Ctx(ctx).Info("Path exclusions in effect",
+			helpers.String("root", filter.Root()),
+			helpers.Int("patterns", len(filter.Patterns())))
+		logger.L().Debug("Path exclusion patterns", helpers.Interface("patterns", filter.Patterns()))
+	}
+
+	return filter, nil
 }
 
 func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath string, helmValueOpts cautils.HelmValueOptions) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
@@ -304,7 +334,7 @@ func excludeFilesUnderDirectories(sourceToWorkloads map[string][]workloadinterfa
 // getResourcesFromPath loads every scannable resource under path, from plain
 // manifests, helm charts and kustomize directories, and maps each workload to the
 // source file it came from.
-func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions) (map[string]reporthandling.Source, []workloadinterface.IMetadata, []cautils.SkippedManifest, error) {
+func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions, pathFilter *cautils.PathFilter) (map[string]reporthandling.Source, []workloadinterface.IMetadata, []cautils.SkippedManifest, error) {
 	workloadIDToSource := make(map[string]reporthandling.Source)
 	var workloads []workloadinterface.IMetadata
 	var allSkips []cautils.SkippedManifest
@@ -327,14 +357,14 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	// A broad directory input may contain Kustomize configurations below its root.
 	// Render them first so the generic Helm and plain-manifest passes can respect
 	// only the configurations whose builds actually succeeded.
-	kustomizeResult, err := cautils.LoadResourcesFromKustomizeDirectories(ctx, path)
+	kustomizeResult, err := cautils.LoadResourcesFromKustomizeDirectoriesFiltered(ctx, path, pathFilter)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	// Charts owned by a successful Kustomize build must not also be rendered as
 	// standalone Helm releases. Unreferenced charts remain in generic discovery.
-	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmChartsExcludingDirectories(ctx, path, helmValueOpts, kustomizeResult.OwnedHelmChartDirectories)
+	helmSourceToWorkloads, helmSourceToChart, renderedCharts, err := cautils.LoadResourcesFromHelmChartsFiltered(ctx, path, helmValueOpts, kustomizeResult.OwnedHelmChartDirectories, pathFilter)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -344,13 +374,13 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 	// generic Helm renderer left them alone. CRDs are filtered separately according
 	// to includeCRDs, so an omitted CRD remains available to the raw-file pass.
 	coveredChartDirectories := append(append([]string{}, renderedCharts...), kustomizeResult.OwnedHelmChartDirectories...)
-	sourceToWorkloads, fileSkips, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot, coveredChartDirectories)
+	sourceToWorkloads, fileSkips, err := cautils.LoadResourcesFromFilesFiltered(ctx, path, repoRoot, coveredChartDirectories, pathFilter)
 	allSkips = append(allSkips, fileSkips...)
 	filesErr := err
 	if err != nil && !errors.Is(err, cautils.ErrNoManifestFiles) {
 		return nil, nil, allSkips, err
 	}
-	terraformSourceToWorkloads, err := cautils.LoadResourcesFromTerraform(ctx, path)
+	terraformSourceToWorkloads, err := cautils.LoadResourcesFromTerraformFiltered(ctx, path, pathFilter)
 	if err != nil {
 		return nil, nil, allSkips, err
 	}

@@ -7,10 +7,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -219,10 +220,16 @@ func TestCancelScan_EmptyID_CancelsLatest(t *testing.T) {
 func TestCancelScan_SkipsCancelledQueuedRequest_UnblocksWaitingCaller(t *testing.T) {
 	withTempOutputDirs(t)
 
+	secondID := "22222222-3333-4444-5555-666666666666"
 	firstStarted := make(chan struct{})
+	secondCalled := make(chan struct{})
+	var once sync.Once
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
-		close(firstStarted)
+	scanImpl = func(ctx context.Context, _ *cautils.ScanInfo, _ []cautils.PolicyIdentifier, scanID string, _ bool) (*reporthandlingv2.PostureReport, error) {
+		once.Do(func() { close(firstStarted) })
+		if scanID == secondID {
+			close(secondCalled)
+		}
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
@@ -244,7 +251,6 @@ func TestCancelScan_SkipsCancelledQueuedRequest_UnblocksWaitingCaller(t *testing
 	}
 	firstID := h.state.getLatestID()
 
-	secondID := "22222222-3333-4444-5555-666666666666"
 	secondCtx, secondCancel := context.WithCancel(context.Background())
 	secondResp := make(chan *utilsmetav1.Response, 1)
 
@@ -288,6 +294,12 @@ func TestCancelScan_SkipsCancelledQueuedRequest_UnblocksWaitingCaller(t *testing
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("queued scan caller blocked forever after cancellation")
+	}
+
+	select {
+	case <-secondCalled:
+		t.Errorf("scanImpl was called for cancelled queued scan %q; want it to be skipped", secondID)
+	default:
 	}
 
 	if h.state.isBusy(secondID) {

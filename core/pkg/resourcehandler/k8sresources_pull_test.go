@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/hostsensorutils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -98,6 +99,44 @@ func TestPullResources_PartialFailureSurface(t *testing.T) {
 	assert.ErrorContains(t, fq.err, "simulated API failure")
 }
 
+// A namespace filter naming no namespace must not silence collection. The
+// selector emitted no query for it, so pullSingleResource never listed the
+// resource and left no selectorFailure behind, which reads downstream as a GVR
+// that was collected and came back empty rather than one that was skipped.
+func TestPullResources_NamespaceFilterNamingNoNamespaceStillCollects(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+
+	for _, value := range []string{" ", ",", ", ,"} {
+		t.Run(value, func(t *testing.T) {
+			var selectors []string
+			mockClient := &mockDynamicClient{
+				listFunc: func(_ context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+					selectors = append(selectors, opts.FieldSelector)
+					return &unstructured.UnstructuredList{Items: []unstructured.Unstructured{{
+						Object: map[string]any{
+							"apiVersion": "v1",
+							"kind":       "Pod",
+							"metadata":   map[string]any{"name": "test-pod", "namespace": "default"},
+						},
+					}}}, nil
+				},
+			}
+
+			handler := &K8sResourceHandler{k8s: &k8sinterface.KubernetesApi{DynamicClient: mockClient}}
+			queryableResources := QueryableResources{
+				"//v1/pods": QueryableResource{GroupVersionResourceTriplet: "//v1/pods"},
+			}
+
+			k8sResources, allResources, failedQueries := handler.pullResources(context.Background(), queryableResources, NewIncludeSelector(value), "")
+
+			assert.Equal(t, []string{""}, selectors, "expected one unfiltered LIST")
+			assert.Len(t, allResources, 1)
+			assert.Len(t, k8sResources["//v1/pods"], 1)
+			assert.Empty(t, failedQueries)
+		})
+	}
+}
+
 func TestGetResources_SurfacesMissingGVRFailuresInInfoMap(t *testing.T) {
 	k8sinterface.InitializeMapResourcesMock()
 	handler := getResourceHandlerMock()
@@ -135,7 +174,7 @@ func TestGetResources_SurfacesMissingGVRFailuresInInfoMap(t *testing.T) {
 	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
 	assert.NoError(t, err)
 
-	info, ok := sessionObj.InfoMap["core/v1/secrets"]
+	info, ok := sessionObj.InfoMap["/v1/secrets"]
 	assert.True(t, ok, "expected missing secrets GVR to be surfaced in InfoMap")
 	assert.Contains(t, info.InnerInfo, "simulated API failure")
 }
@@ -219,6 +258,12 @@ func (s *stubHostSensor) Init(_ context.Context) error { return nil }
 func (s *stubHostSensor) TearDown() error              { return nil }
 func (s *stubHostSensor) CollectResources(_ context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
 	return nil, s.infoMap, nil
+}
+
+func (s *stubHostSensor) StreamTelemetry(_ context.Context) (<-chan hostsensorutils.SyscallEvent, error) {
+	events := make(chan hostsensorutils.SyscallEvent)
+	close(events)
+	return events, nil
 }
 
 // TestGetResources_HostSensorInfoMapMerged is a regression test for the bug

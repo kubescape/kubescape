@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,10 +21,10 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/locationresolver"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/fixhandler"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -79,15 +80,7 @@ func (sp *SARIFPrinter) Score(score float32) {
 }
 
 func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) error {
-	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = sarifOutputFile
-		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != printer.SARIFOutputExt {
-			outputFile = outputFile + printer.SARIFOutputExt
-		}
-	}
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.SARIFFormat, outputFile, sarifOutputFile)
 	if explicitOutput {
 		var err error
 		sp.writer, err = printer.GetWriterNoFallback(outputFile)
@@ -117,15 +110,19 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 		})
 }
 
-// addResult adds a result of checking a rule to the scan run based on the given control summary
-func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) *sarif.Result {
+// addResult adds a result of checking a rule to the scan run based on the given control summary.
+// reviewPathLocations, when non-empty, adds one relatedLocation per resolved ReviewPath so each
+// field that actually caused the failure gets its own precise location in the manifest, distinct
+// from the single primary location (which points at the fix, not necessarily at every failed field).
+func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resourceID string, resource workloadinterface.IMetadata, reviewPathLocations map[string]locationresolver.Location) *sarif.Result {
 	msg := ctl.GetDescription()
 	if resource != nil {
 		if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
+			addContainerNameToAssistedRemediation(resource, &paths)
 			msg += "\n\nAffected fields:\n" + strings.Join(paths, "\n")
 		}
 	}
-	return scanRun.CreateResultForRule(ctl.GetID()).
+	result := scanRun.CreateResultForRule(ctl.GetID()).
 		WithMessage(sarif.NewTextMessage(msg)).
 		WithLocations([]*sarif.Location{
 			sarif.NewLocationWithPhysicalLocation(
@@ -137,38 +134,389 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 				),
 			),
 		})
+	result.WithPartialFingerPrints(map[string]interface{}{
+		"kubescapeFindingFingerprint": sarifFindingFingerprint(ctl.GetID(), resourceID, filepath, location, ac),
+	})
+
+	// Sort for deterministic output - map iteration order is randomized and this feeds
+	// directly into the written SARIF file.
+	paths := make([]string, 0, len(reviewPathLocations))
+	for p := range reviewPathLocations {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	for _, p := range paths {
+		loc := reviewPathLocations[p]
+		result.AddRelatedLocation(
+			sarif.NewLocation().
+				WithMessage(sarif.NewTextMessage(p)).
+				WithPhysicalLocation(
+					sarif.NewPhysicalLocation().
+						WithArtifactLocation(
+							sarif.NewSimpleArtifactLocation(filepath),
+						).WithRegion(
+						sarif.NewRegion().WithStartLine(loc.Line).WithStartColumn(loc.Column),
+					),
+				),
+		)
+	}
+
+	return result
 }
 
-func (sp *SARIFPrinter) printImageScan(scanResults cautils.ImageScanData) error {
-	model, err := models.NewDocument(clio.Identification{}, scanResults.Packages, scanResults.Context,
-		scanResults.Matches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
+func sarifFindingFingerprint(controlID, resourceID, relPath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl) string {
+	identity := sarifFindingIdentity{
+		ControlID:  controlID,
+		ResourceID: resourceID,
+		Path:       normalizeSARIFIdentityPart(relPath),
+		Line:       location.Line,
+		Column:     location.Column,
+	}
+	if ac != nil {
+		identity.Evidence = sarifEvidenceIdentity(ac)
+	}
+	encoded, _ := json.Marshal(identity)
+	sum := sha256.Sum256(encoded)
+	return fmt.Sprintf("%x", sum)
+}
+
+type sarifFindingIdentity struct {
+	ControlID  string                  `json:"controlID"`
+	ResourceID string                  `json:"resourceID"`
+	Path       string                  `json:"path"`
+	Line       int                     `json:"line"`
+	Column     int                     `json:"column"`
+	Evidence   []sarifEvidenceFragment `json:"evidence,omitempty"`
+}
+
+type sarifEvidenceFragment struct {
+	RuleName            string   `json:"ruleName"`
+	ReviewPaths         []string `json:"reviewPaths,omitempty"`
+	FailedPaths         []string `json:"failedPaths,omitempty"`
+	DeletePaths         []string `json:"deletePaths,omitempty"`
+	RelatedResourcesIDs []string `json:"relatedResourcesIDs,omitempty"`
+}
+
+func sarifEvidenceIdentity(ac *resourcesresults.ResourceAssociatedControl) []sarifEvidenceFragment {
+	if ac == nil {
+		return nil
+	}
+	fragments := make([]sarifEvidenceFragment, 0, len(ac.ResourceAssociatedRules))
+	for _, rule := range ac.ResourceAssociatedRules {
+		if !rule.GetStatus(nil).IsFailed() {
+			continue
+		}
+		fragment := sarifEvidenceFragment{
+			RuleName:            normalizeSARIFIdentityPart(rule.Name),
+			RelatedResourcesIDs: normalizedSortedStrings(rule.RelatedResourcesIDs),
+		}
+		for _, path := range rule.Paths {
+			fragment.ReviewPaths = appendNormalizedIdentityPart(fragment.ReviewPaths, path.ReviewPath)
+			fragment.FailedPaths = appendNormalizedIdentityPart(fragment.FailedPaths, path.FailedPath)
+			fragment.DeletePaths = appendNormalizedIdentityPart(fragment.DeletePaths, path.DeletePath)
+		}
+		fragment.sortAndCompact()
+		fragments = append(fragments, fragment)
+	}
+	sort.SliceStable(fragments, func(i, j int) bool {
+		left, _ := json.Marshal(fragments[i])
+		right, _ := json.Marshal(fragments[j])
+		return string(left) < string(right)
+	})
+	return fragments
+}
+
+func (f *sarifEvidenceFragment) sortAndCompact() {
+	f.ReviewPaths = compactSortedStrings(f.ReviewPaths)
+	f.FailedPaths = compactSortedStrings(f.FailedPaths)
+	f.DeletePaths = compactSortedStrings(f.DeletePaths)
+	f.RelatedResourcesIDs = compactSortedStrings(f.RelatedResourcesIDs)
+}
+
+func appendNormalizedIdentityPart(values []string, value string) []string {
+	value = normalizeSARIFIdentityPart(value)
+	if value == "" {
+		return values
+	}
+	return append(values, value)
+}
+
+func normalizedSortedStrings(values []string) []string {
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		normalized = appendNormalizedIdentityPart(normalized, value)
+	}
+	return compactSortedStrings(normalized)
+}
+
+func compactSortedStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	sort.Strings(values)
+	compacted := values[:0]
+	for _, value := range values {
+		if len(compacted) == 0 || compacted[len(compacted)-1] != value {
+			compacted = append(compacted, value)
+		}
+	}
+	return compacted
+}
+
+func normalizeSARIFIdentityPart(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "\\", "/")
+	return filepath.ToSlash(value)
+}
+
+func addImageSARIFFingerprints(run *sarif.Run) {
+	if run == nil {
+		return
+	}
+	for _, result := range run.Results {
+		if result == nil || len(result.PartialFingerprints) > 0 {
+			continue
+		}
+		result.WithPartialFingerPrints(map[string]interface{}{
+			"kubescapeImageFindingFingerprint": imageSARIFFindingFingerprint(result),
+		})
+	}
+}
+
+func imageSARIFFindingFingerprint(result *sarif.Result) string {
+	if result == nil {
+		sum := sha256.Sum256([]byte("{}"))
+		return fmt.Sprintf("%x", sum)
+	}
+	identity := imageSARIFFindingIdentity{
+		RuleID:         stringPointerValue(result.RuleID),
+		Level:          stringPointerValue(result.Level),
+		Message:        sarifMessageText(result.Message),
+		AnalysisTarget: sarifArtifactURI(result.AnalysisTarget),
+		Locations:      sarifLocationIdentities(result.Locations),
+	}
+	encoded, _ := json.Marshal(identity)
+	sum := sha256.Sum256(encoded)
+	return fmt.Sprintf("%x", sum)
+}
+
+type imageSARIFFindingIdentity struct {
+	RuleID         string                  `json:"ruleID"`
+	Level          string                  `json:"level,omitempty"`
+	Message        string                  `json:"message,omitempty"`
+	AnalysisTarget string                  `json:"analysisTarget,omitempty"`
+	Locations      []sarifLocationIdentity `json:"locations,omitempty"`
+}
+
+type sarifLocationIdentity struct {
+	URI         string `json:"uri,omitempty"`
+	URIBaseID   string `json:"uriBaseID,omitempty"`
+	StartLine   int    `json:"startLine,omitempty"`
+	StartColumn int    `json:"startColumn,omitempty"`
+	EndLine     int    `json:"endLine,omitempty"`
+	EndColumn   int    `json:"endColumn,omitempty"`
+}
+
+func sarifLocationIdentities(locations []*sarif.Location) []sarifLocationIdentity {
+	if len(locations) == 0 {
+		return nil
+	}
+	identities := make([]sarifLocationIdentity, 0, len(locations))
+	for _, location := range locations {
+		identity, ok := sarifLocationIdentityFromLocation(location)
+		if !ok {
+			continue
+		}
+		identities = append(identities, identity)
+	}
+	sort.SliceStable(identities, func(i, j int) bool {
+		left, _ := json.Marshal(identities[i])
+		right, _ := json.Marshal(identities[j])
+		return string(left) < string(right)
+	})
+	return identities
+}
+
+func sarifLocationIdentityFromLocation(location *sarif.Location) (sarifLocationIdentity, bool) {
+	if location == nil || location.PhysicalLocation == nil {
+		return sarifLocationIdentity{}, false
+	}
+	physical := location.PhysicalLocation
+	identity := sarifLocationIdentity{
+		URI:       sarifArtifactURI(physical.ArtifactLocation),
+		URIBaseID: sarifArtifactBaseID(physical.ArtifactLocation),
+	}
+	if physical.Region != nil {
+		identity.StartLine = intPointerValue(physical.Region.StartLine)
+		identity.StartColumn = intPointerValue(physical.Region.StartColumn)
+		identity.EndLine = intPointerValue(physical.Region.EndLine)
+		identity.EndColumn = intPointerValue(physical.Region.EndColumn)
+	}
+	return identity, identity != (sarifLocationIdentity{})
+}
+
+func sarifArtifactURI(location *sarif.ArtifactLocation) string {
+	if location == nil {
+		return ""
+	}
+	return normalizeSARIFIdentityPart(stringPointerValue(location.URI))
+}
+
+func sarifArtifactBaseID(location *sarif.ArtifactLocation) string {
+	if location == nil {
+		return ""
+	}
+	return normalizeSARIFIdentityPart(stringPointerValue(location.URIBaseId))
+}
+
+func sarifMessageText(message sarif.Message) string {
+	if message.Text != nil {
+		return strings.TrimSpace(*message.Text)
+	}
+	if message.Markdown != nil {
+		return strings.TrimSpace(*message.Markdown)
+	}
+	if message.ID != nil {
+		return strings.TrimSpace(*message.ID)
+	}
+	return strings.TrimSpace(strings.Join(message.Arguments, "\x00"))
+}
+
+func stringPointerValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func intPointerValue(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+// resolveReviewPathLocations resolves each of ac's ReviewPaths to its location in the source
+// manifest, using the same locationResolver already built for the fix location. Unlike
+// resolveFixLocation, which returns one location for the highest-priority remediation path, this
+// resolves every ReviewPath independently so each field that actually caused the failure can get
+// its own precise location instead of all sharing the fix location. A path that doesn't resolve
+// (unknown docIndex, or ResolveLocation finding nothing) is omitted rather than defaulted to line
+// 1 - a relatedLocation with a fabricated line number would be worse than no relatedLocation at all.
+func resolveReviewPathLocations(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) map[string]locationresolver.Location {
+	if locationResolver == nil {
+		return nil
+	}
+	docIndex, ok := getDocIndex(opaSessionObj, resourceID)
+	if !ok {
+		return nil
+	}
+
+	var locations map[string]locationresolver.Location
+	for i := range ac.ResourceAssociatedRules {
+		if !ac.ResourceAssociatedRules[i].GetStatus(nil).IsFailed() {
+			continue
+		}
+		for _, p := range ac.ResourceAssociatedRules[i].Paths {
+			if p.ReviewPath == "" {
+				continue
+			}
+			if _, seen := locations[p.ReviewPath]; seen {
+				continue
+			}
+			location, err := locationResolver.ResolveLocation(p.ReviewPath, docIndex)
+			if err != nil || location.Line == 0 {
+				continue
+			}
+			if locations == nil {
+				locations = make(map[string]locationresolver.Location)
+			}
+			locations[p.ReviewPath] = location
+		}
+	}
+	return locations
+}
+
+func (sp *SARIFPrinter) printImageScan(scanResults []cautils.ImageScanData) error {
+	combinedReport, err := sarif.New(sarif.Version210)
 	if err != nil {
-		return fmt.Errorf("failed to create document: %w", err)
-	}
-
-	// Render into an in-memory buffer rather than sp.writer directly: when no
-	// --output file is given, sp.writer is os.Stdout, and reopening it by
-	// name below to patch the driver name would deadlock if stdout is a pipe
-	// (this process still holds the write end open, so a second reader on
-	// the same pipe never sees EOF). Rendering and patching in memory, then
-	// writing to sp.writer exactly once, avoids that entirely.
-	var rendered bytes.Buffer
-	pres := grypesarif.NewPresenter(models.PresenterConfig{Document: model, SBOM: scanResults.SBOM})
-	if err := pres.Present(&rendered); err != nil {
 		return err
 	}
 
-	var sarifReport sarif.Report
-	if err := json.Unmarshal(rendered.Bytes(), &sarifReport); err != nil {
-		return err
+	for _, scan := range scanResults {
+		model, err := models.NewDocument(clio.Identification{}, scan.Packages, scan.Context,
+			scan.Matches, scan.IgnoredMatches, scan.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
+		if err != nil {
+			return fmt.Errorf("failed to create document: %w", err)
+		}
+
+		// Render into an in-memory buffer rather than sp.writer directly: when no
+		// --output file is given, sp.writer is os.Stdout, and reopening it by
+		// name below to patch the driver name would deadlock if stdout is a pipe
+		// (this process still holds the write end open, so a second reader on
+		// the same pipe never sees EOF). Rendering and patching in memory, then
+		// writing to sp.writer exactly once, avoids that entirely.
+		var rendered bytes.Buffer
+		pres := grypesarif.NewPresenter(models.PresenterConfig{Document: model, SBOM: scan.SBOM})
+		if err := pres.Present(&rendered); err != nil {
+			return err
+		}
+
+		var sarifReport sarif.Report
+		if err := json.Unmarshal(rendered.Bytes(), &sarifReport); err != nil {
+			return err
+		}
+
+		// Inject VEX Statuses
+		if len(scan.VexStatuses) > 0 {
+			logger.L().Info("Injecting VEX statuses into SARIF output")
+			for _, run := range sarifReport.Runs {
+				for _, result := range run.Results {
+					if result.RuleID != nil {
+						// Grype formats RuleIDs as <vuln-id>-<package-name>
+						for vulnID, status := range scan.VexStatuses {
+							if *result.RuleID == vulnID || strings.HasPrefix(*result.RuleID, vulnID+"-") {
+								if status.Status == "not_affected" || status.Status == "fixed" {
+									result.WithLevel("note")
+									if result.Message.Text != nil {
+										msg := fmt.Sprintf("%s\nVEX Status: %s. Justification: %s", *result.Message.Text, status.Status, status.Justification)
+										result.Message.Text = &msg
+									}
+								}
+								break
+							}
+						}
+					}
+				}
+
+				if run.Tool.Driver != nil {
+					for _, rule := range run.Tool.Driver.Rules {
+						for vulnID, status := range scan.VexStatuses {
+							if rule.ID == vulnID || strings.HasPrefix(rule.ID, vulnID+"-") {
+								if status.Status == "not_affected" || status.Status == "fixed" {
+									if rule.Properties != nil {
+										rule.Properties["security-severity"] = "0.0"
+									}
+								}
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Patch driver name to Kubescape and aggregate runs
+		for _, run := range sarifReport.Runs {
+			if run.Tool.Driver != nil {
+				run.Tool.Driver.Name = "Kubescape"
+			}
+			addImageSARIFFingerprints(run)
+			combinedReport.AddRun(run)
+		}
 	}
 
-	// Patch driver name to Kubescape
-	for i := range sarifReport.Runs {
-		sarifReport.Runs[i].Tool.Driver.Name = "Kubescape"
-	}
-
-	updatedSarifReport, err := json.MarshalIndent(sarifReport, "", "  ")
+	updatedSarifReport, err := json.MarshalIndent(combinedReport, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -191,7 +539,7 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 		}
 
 		// image scan
-		if err := sp.printImageScan(imageScanData[0]); err != nil {
+		if err := sp.printImageScan(imageScanData); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
 			return fmt.Errorf("failed to write results in sarif format: %w", err)
 		}
@@ -259,9 +607,10 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 					continue
 				}
 				location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
+				reviewPathLocations := resolveReviewPathLocations(opaSessionObj, locationResolver, &ac, resource.resourceID)
 				sp.addRule(run, ctl)
 				rsrc := opaSessionObj.AllResources[resource.resourceID]
-				r := sp.addResult(run, ctl, resource.relPath, location, &ac, rsrc)
+				r := sp.addResult(run, ctl, resource.relPath, location, &ac, resource.resourceID, rsrc, reviewPathLocations)
 				collectFixes(ctx, cache, r, ac, opaSessionObj, resource.resourceID, resource.relPath, resource.absPath)
 			}
 		}
@@ -559,8 +908,10 @@ func hashArtifactChange(artifactChange *sarif.ArtifactChange) [32]byte {
 	return sha256.Sum256(acJson)
 }
 
-func (p *SARIFPrinter) CloseWriter() {
+// CloseWriter closes the SARIF output writer, returning any error from flushing or closing.
+func (p *SARIFPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
+		return p.writer.Close()
 	}
+	return nil
 }

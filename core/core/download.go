@@ -11,9 +11,9 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 )
 
 const (
@@ -81,7 +81,7 @@ func DownloadSupportCommands() []string {
 func (ks *Kubescape) Download(downloadInfo *metav1.DownloadInfo) (*metav1.DownloadResult, error) {
 	setPathAndFilename(downloadInfo)
 	if err := os.MkdirAll(downloadInfo.Path, downloadDirPerm); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create download directory %q: %w", downloadInfo.Path, err)
 	}
 	files, err := downloadArtifact(ks.Context(), downloadInfo, downloadFunc)
 	if err != nil {
@@ -110,6 +110,8 @@ func setPathAndFilename(downloadInfo *metav1.DownloadInfo) {
 	if downloadInfo.FileName != "" {
 		if downloadInfo.Path == "" {
 			downloadInfo.Path = "."
+		} else {
+			downloadInfo.Path = filepath.Clean(downloadInfo.Path)
 		}
 		return
 	}
@@ -139,6 +141,8 @@ func setPathAndFilename(downloadInfo *metav1.DownloadInfo) {
 	if strings.Contains(file, ".json") {
 		downloadInfo.Path = filepath.Clean(dir)
 		downloadInfo.FileName = file
+	} else {
+		downloadInfo.Path = filepath.Clean(downloadInfo.Path)
 	}
 }
 
@@ -199,7 +203,7 @@ func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo
 
 func downloadExceptions(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]string, error) {
 	tenant := tenantConfigFunc(ctx, downloadInfo.AccountID, downloadInfo.AccessKey, "", "", kubernetesAPIFunc())
-	exceptionsGetter, err := exceptionsGetterFunc(ctx, "", tenant.GetAccountID(), nil, false)
+	exceptionsGetter, _, err := exceptionsGetterFunc(ctx, "", tenant.GetAccountID(), nil, false)
 	if err != nil {
 		return nil, err
 	}
@@ -316,8 +320,37 @@ func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) ([]
 	}
 
 	if downloadInfo.Identifier == "" {
-		// TODO - support
-		return nil, fmt.Errorf("missing control ID")
+		// if control ID not specified - download all controls
+		controls, err := g.ListControls()
+		if err != nil {
+			return nil, err
+		}
+		var files []string
+		for _, listEntry := range controls {
+			controlID := strings.Split(listEntry, "|")[0]
+			control, err := g.GetControl(controlID)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("failed to download control", helpers.String("ID", controlID), helpers.Error(err))
+				continue
+			}
+			if control == nil {
+				logger.L().Ctx(ctx).Warning("failed to download control - received empty objects", helpers.String("ID", controlID))
+				continue
+			}
+			filename, err := getter.PolicyCacheFilename(controlID)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("skipping control with invalid ID", helpers.String("ID", controlID), helpers.Error(err))
+				continue
+			}
+			downloadTo := filepath.Join(downloadInfo.Path, filename)
+			err = getter.SaveInFile(control, downloadTo)
+			if err != nil {
+				return nil, err
+			}
+			logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("ID", controlID), helpers.String("path", downloadTo))
+			files = append(files, downloadTo)
+		}
+		return files, nil
 	}
 	if downloadInfo.FileName == "" {
 		filename, err := getter.PolicyCacheFilename(downloadInfo.Identifier)

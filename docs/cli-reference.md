@@ -40,25 +40,242 @@ kubescape scan [target] [flags]
 | `--access-key <key>` | Kubescape SaaS access key | from cache |
 | `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, and `--view resource\|control` — see [score thresholds](#score-thresholds). | `0` |
 | `--controls-config <path>` | Path to controls configuration file | - |
+| `--custom-rules <path>` | Path to user-authored custom rules — see [custom rules](#custom-rules) | - |
 | `-e, --exclude-namespaces <ns>` | Namespaces to exclude (comma-separated) | - |
 | `--encrypt` | Encrypt sensitive report metadata using the master key provided through the `KUBESCAPE_MASTER_KEY` environment variable. Requires `--format json` for reports that will later be decrypted with `kubescape decrypt`. If both `--encrypt` and `--hide` are specified, `--encrypt` takes precedence. | `false` |
 | `--exceptions <path>` | Path to exceptions file | - |
+| `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
-| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `csv` | `pretty-printer` |
+| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `github-actions`, `yaml`, `csv`, `markdown`, `policyreport`, `exceptions` — see [generating an exceptions baseline](#generating-an-exceptions-baseline). `github-actions` emits failed High/Critical controls as `::error` workflow commands for inline PR annotations; local file scans only, capped at GitHub's 10-annotations-per-step limit | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
 | `--host-scan` | Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use `--host-scan=false` to disable host data collection. See the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for a managed alternative. | auto-detect |
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
 | `--label-selector <selector>` | Filter collected resources by Kubernetes label selector. Accepts any expression `kubectl -l` supports, e.g. `app=nginx,env!=dev` or `env in (prod,staging)`. Syntax is validated before scanning begins; filtering is applied during live cluster collection and ignored when scanning local files. | - |
 | `--keep-local` | Don't report results to backend | `false` |
+| `--notify <url>` | POST the posture scan summary to a webhook URL. Slack incoming webhooks receive Block Kit, Microsoft Teams webhooks an Adaptive Card, and other destinations generic JSON. Repeat for multiple endpoints. Delivery is best-effort and does not affect scan exit status. Not supported by `scan image`. | - |
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
+| `--otel-endpoint <endpoint>` | Export scan traces and metrics to an OTLP collector — see [OpenTelemetry export](#opentelemetry-export). Accepts `host:port` (plaintext) or a `http(s)://` URL. | `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | `--scan-images` | Also scan container images for vulnerabilities | `false` |
-| `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical` | - |
+| `--image-platform <platform>` | OCI platform for workload image scans, such as `linux/amd64`. Overrides platform inferred from Nodes and hard scheduling constraints | inferred |
+| `--min-severity <sev>` | Only show controls at or above this severity: `low`, `medium`, `high`, `critical`. Output-only — exit codes are computed on the full unfiltered report | - |
+| `--max-severity <sev>` | Only show controls at or below this severity. Output-only — exit codes are computed on the full unfiltered report | - |
+| `--severity-threshold <sev>` | Fail if findings at or above severity: `low`, `medium`, `high`, `critical`. Failed controls with unknown severity (missing base score) are treated as exceeding any threshold | - |
+| `--skip-db-update` | Do not update the vulnerability database before scanning images; uses the locally cached database. Fails if the local database is missing or unusable (run once without this flag to download it). | `false` |
 | `--submit` | Submit results to Kubescape SaaS | `false` |
 | `--use-artifacts-from <path>` | Load artifacts from local directory (offline mode) | - |
 | `--use-from <path>` | Load specific policy from path | - |
 | `-v, --verbose` | Display all resources, not just failed ones | `false` |
 | `--view <type>` | View type: `security`, `control`, `resource` | `security` |
+
+### Webhook notifications
+
+Use `--notify` to send a compact summary after a posture scan. Official Slack and GovSlack incoming webhook URLs receive a Block Kit message, Microsoft Teams incoming webhooks (`*.webhook.office.com`, `outlook.office.com`, `outlook.office365.com`) receive an Adaptive Card, and every other URL receives the existing JSON `summaryDetails` object:
+
+```bash
+export SLACK_WEBHOOK_URL='https://hooks.slack.com/services/T00000000/B00000000/SECRET'
+kubescape scan manifests/ --notify "$SLACK_WEBHOOK_URL"
+
+export TEAMS_WEBHOOK_URL='https://contoso.webhook.office.com/webhookb2/00000000-0000-0000-0000-000000000000@.../IncomingWebhook/.../...'
+kubescape scan manifests/ --notify "$TEAMS_WEBHOOK_URL"
+kubescape scan manifests/ --notify https://hooks.example.com/kubescape
+kubescape scan manifests/ --notify https://ops.example.com/kubescape --notify https://audit.example.com/kubescape
+```
+
+Each destination gets one synchronous request with `Content-Type: application/json`; Kubescape allows up to five seconds per destination and does not follow redirects. Failures are logged as warnings and never override the scan's own exit status. The payload follows `--min-severity` and `--max-severity` output filtering. `--severity-threshold` continues to affect only the exit status.
+
+Slack messages contain the compliance score, passed/failed/skipped control counts, and up to ten failing controls ordered by severity, failed resource count, and control ID. The top-level `text` field provides a notification and accessibility fallback. For example:
+
+```json
+{
+  "text": "Kubescape scan completed: 73.2% compliance; 2 of 8 controls failed.",
+  "blocks": [
+    {"type": "header", "text": {"type": "plain_text", "text": "Kubescape scan results"}},
+    {"type": "section", "fields": [
+      {"type": "mrkdwn", "text": "*Controls*\n2 failed / 8 total\n5 passed · 1 skipped", "verbatim": true},
+      {"type": "mrkdwn", "text": "*Compliance score*\n73.2%", "verbatim": true}
+    ]},
+    {"type": "section", "text": {"type": "mrkdwn", "text": "*Top failing controls*\n• *Critical* · `C-0001` — Privileged container", "verbatim": true}}
+  ]
+}
+```
+
+Teams messages carry the same content as an Adaptive Card wrapped in the incoming-webhook envelope, with the counts in a `FactSet` and the failing controls keyed by control ID. For example:
+
+```json
+{
+  "type": "message",
+  "attachments": [{
+    "contentType": "application/vnd.microsoft.card.adaptive",
+    "contentUrl": null,
+    "content": {
+      "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+      "type": "AdaptiveCard",
+      "version": "1.4",
+      "body": [
+        {"type": "TextBlock", "text": "Kubescape scan results", "size": "Large", "weight": "Bolder", "wrap": true},
+        {"type": "FactSet", "facts": [
+          {"title": "Compliance score", "value": "73.2%"},
+          {"title": "Controls failed", "value": "2 of 8"},
+          {"title": "Passed", "value": "5"},
+          {"title": "Skipped", "value": "1"}
+        ]},
+        {"type": "TextBlock", "text": "Top failing controls", "weight": "Bolder", "wrap": true},
+        {"type": "FactSet", "facts": [
+          {"title": "C-0001", "value": "Critical — Privileged container"}
+        ]}
+      ]
+    }
+  }]
+}
+```
+
+Generic destinations continue to receive only the scan summary. An abridged example is:
+
+```json
+{
+  "status": "failed",
+  "frameworks": [],
+  "ResourceCounters": {"passedResources": 5, "failedResources": 2, "skippedResources": 1, "excludedResources": 0},
+  "score": 73.2,
+  "complianceScore": 73.2
+}
+```
+
+The summary and control names may contain identifiers from the scan. Use `--hide` where appropriate and send only to trusted webhook endpoints. Slack and Teams webhook URLs are secrets; keep them out of source control and prefer passing them through environment variables.
+
+### Generating an exceptions baseline
+
+`--exceptions` consumes a posture exception file, but there was no way to
+produce one from a scan. The `exceptions` output format writes the current
+failures as exception policies, so an existing posture can be accepted as a
+baseline and only new findings fail afterwards.
+
+```bash
+# capture today's failures
+kubescape scan . --format exceptions --output baseline
+
+# review and trim the file, then scan against it
+kubescape scan . --exceptions baseline.exceptions.json
+```
+
+The file holds one policy per failed control, listing the resources that failed
+it by `kind`, `namespace` and `name`, in the same shape as the samples under
+[examples/exceptions](../examples/exceptions). Designators carry no `cluster`
+attribute, so the same file applies wherever those workloads run. Policies use
+the `alertOnly` action.
+
+It is a normal output format, so it composes with the others and honours
+`--output`, writing `scan-result.json` and `scan-result.exceptions.json`:
+
+```bash
+kubescape scan . --format json,exceptions --output scan-result
+```
+
+Like every other format, the file reflects the report the printers were given,
+so `--min-severity` narrows the baseline to the findings it left in view.
+
+Kubescape matches control IDs and designator attributes as regular expressions,
+so generated values are escaped and match only what the scan reported: a name
+such as `web-1.2.3` is written `web-1\.2\.3` rather than a pattern that would
+also cover `web-1x2y3`.
+
+Every designator pins the namespace axis. A resource that reported no namespace
+— a cluster-scoped object, or a manifest that omits `metadata.namespace` — is
+written as `"namespace": "^$"`, matching the object as scanned rather than the
+same kind and name in any namespace. A `Namespace` object is pinned by its own
+name, which is how Kubescape matches that axis for the kind. Delete the line to
+widen the policy.
+
+Resources read from files also carry `"path"`, the manifest they came from, so a
+repository that declares the same object in more than one place — a kustomize
+base and its overlay — keeps a separate entry per file. Cluster scans have no
+path and omit the attribute.
+
+Everything in the file is meant to be reviewed before use: accepting a whole
+scan unedited silences every current finding. Narrow a policy by deleting
+resources from it, or widen one by replacing an escaped `name` with a regular
+expression of your own.
+
+Exceptions are posture-only and the format is rejected for `scan image`.
+
+### Custom rules
+
+`--custom-rules` loads user-authored rules alongside the downloaded framework.
+Two on-disk layouts are accepted, and they can be mixed in one directory.
+
+A **rule directory** holds `raw.rego` next to `rule.metadata.json`. This is the
+layout of this repository's `rules/` tree and the one `kubescape policy test`
+reads, so a rule can be tested and then scanned without being reshaped:
+
+```
+myrules/
+  no-privileged-containers/
+    raw.rego
+    rule.metadata.json
+  no-host-network/
+    raw.rego
+    rule.metadata.json
+```
+
+```bash
+kubescape policy test ./myrules
+kubescape scan ./manifests --custom-rules ./myrules
+```
+
+`kubescape policy init` writes that layout for you, including a flagged and a
+clean test case whose `expected.json` already matches the generated rule, so the
+new rule passes `policy test` before you start editing it:
+
+```bash
+kubescape policy init ./myrules/no-privileged-containers
+kubescape policy init ./myrules/no-privileged-pods --kind Pod
+```
+
+`--kind` selects the workload the generated rule matches (`CronJob`,
+`DaemonSet`, `Deployment`, `Job`, `Pod`, `StatefulSet`; default `Deployment`),
+and `--description`, `--remediation` and `--force` set the metadata text and
+allow overwriting an existing rule directory.
+
+Once you change the rule, `--update` rewrites each case's `expected.json` from
+the rule's current output instead of comparing against it, which saves
+hand-writing the matched object into the fixture:
+
+```bash
+kubescape policy test ./myrules --update
+```
+
+Review the resulting diff before committing it: `--update` records whatever the
+rule currently produces, so it will happily bless a regression.
+
+Pass either the parent directory or a single rule directory. The metadata
+supplies the rule's name, description, remediation and `match` selectors, so the
+rule is only evaluated against the kinds it targets.
+
+A **bare `.rego` file** is also accepted, for a rule with no metadata:
+
+```bash
+kubescape scan ./manifests --custom-rules ./myrules/no-root.rego
+```
+
+A bare rule is matched against every resource kind, so it must filter input
+itself. Prefer a rule directory when the rule targets specific kinds.
+
+Every custom rule becomes a control named `custom-<rule>` in the report.
+
+
+### Exception Audit
+
+Use `--audit-exceptions --format json` to include an `exceptionAudit` object in scan output. The audit contains:
+
+| Field | Description |
+|-------|-------------|
+| `summary` | Counts for total, active, expired, matched, unused, and invalid-control exceptions |
+| `items` | One entry per loaded exception, including name, status, match count, control IDs, invalid controls, and matched resources when present |
+| `generated` | Indicates that the audit was requested and generated |
+
+Item `status` values are `matched`, `unused`, `expired`, and `invalid-control`.
+
 ### Examples
 
 ```bash
@@ -149,6 +366,73 @@ threshold — for example, a single silent failed GVR pull yields a score of 97.
 > controls. Pipelines that tuned `--fail-coverage-below` against that narrower
 > meaning may now fail on scans that previously passed. Re-check your threshold
 > if you rely on this flag in CI.
+
+### OpenTelemetry export
+
+`--otel-endpoint` sends the scan's traces and metrics to any OTLP collector.
+Kubescape already instruments its scan pipeline; the flag is what installs the
+exporter that makes those spans and metrics leave the process. When neither the
+flag nor `OTEL_EXPORTER_OTLP_ENDPOINT` is set, no telemetry SDK is initialised
+and the scan behaves exactly as before.
+
+```bash
+# Export to a collector listening on the standard gRPC port
+kubescape scan --otel-endpoint localhost:4317
+
+# The standard environment variable works too
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+kubescape scan
+```
+
+A bare `host:port` is sent in plaintext. Use an `https://` URL, or set
+`OTEL_EXPORTER_OTLP_INSECURE=false`, to require TLS. `OTEL_EXPORTER_OTLP_PROTOCOL`
+selects `grpc` (default) or `http/protobuf`, and `OTEL_SERVICE_NAME` overrides
+the reported service name (`kubescape`).
+
+Export failures never change the scan's results or its exit code: they are
+logged as a warning and the final flush is bounded, so an unreachable collector
+cannot hang a pipeline.
+
+**Spans.** One `kubescape.scan` root span per run, with the pipeline's phases
+nested beneath it:
+
+| Span | Phase |
+|------|-------|
+| `kubescape.scan` | Root span for the whole command |
+| `initialization` | Setup, policy download and resource collection |
+| `policies` / `policyHandler.getPolicies` | Loading frameworks and controls |
+| `resources` / `resourcehandler.CollectResources` | Resource collection |
+| `opa testing` / `OPAProcessor.Process` | Control evaluation |
+| `prioritization` | Attack-path prioritization |
+| `reporting` | Printing results and submission |
+
+**Metrics.** Recorded once per scan, alongside the existing `--format prometheus`
+output:
+
+| Metric | Type | Attributes |
+|--------|------|------------|
+| `kubescape_scan_duration_seconds` | histogram | `kubescape.scan.target` |
+| `kubescape_scan_compliance_score` | gauge | `kubescape.scan.target` |
+| `kubescape_scan_controls_evaluated_total` | counter | `kubescape.scan.target` |
+| `kubescape_scan_controls_total` | counter | `kubescape.scan.target`, `kubescape.control.status`, `kubescape.severity` |
+| `kubescape_scan_resources_total` | counter | `kubescape.scan.target`, `k8s.resource.kind` |
+| `kubescape_scan_image_vulnerabilities_total` | counter | `kubescape.image`, `kubescape.severity`, `kubescape.vulnerability.fixable` |
+| `kubescape_scan_image_vulnerability_db_age_seconds` | gauge | `kubescape.image` |
+
+`kubescape.vulnerability.fixable` partitions each severity, so summing over it
+gives that severity's total rather than double-counting the fixable findings.
+
+Counts describe the full scan. Narrowing the output with `--min-severity` or
+`--max-severity` does not change them, matching how the exit-code thresholds are
+evaluated.
+
+`kubescape.image` carries one value per scanned image, so a cluster with many
+distinct images produces a correspondingly wide series. With `--hide` or
+`--encrypt` the image name is dropped and the per-image counts are collapsed
+into a single unnamed series, and the host attributes are left off the exported
+resource — a run that anonymizes its report does not describe the same things
+to the collector in the clear.
 
 ---
 
@@ -258,7 +542,9 @@ kubescape scan image <image>:<tag> [flags]
 | Flag | Description |
 |------|-------------|
 | `--exceptions <path>` | Path to exceptions file |
+| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `markdown`, `cyclonedx-json`, `spdx-json` |
 | `-p, --password <pass>` | Registry password |
+| `--platform <platform>` | OCI platform to scan, for example `linux/amd64`, `linux/arm64/v8`, or `windows/amd64` |
 | `-u, --username <user>` | Registry username |
 | `--use-default-matchers` | Use default vulnerability matchers | `true` |
 
@@ -273,7 +559,12 @@ kubescape scan image nginx:1.21 -v
 
 # Scan private registry image
 kubescape scan image myregistry.io/myimage:tag -u myuser -p mypass
+
+# Scan the amd64 variant even when Kubescape runs on an ARM machine
+kubescape scan image nginx:1.27 --platform linux/amd64
 ```
+
+See [multi-architecture image scanning](multi-architecture-image-scanning.md) for workload inference, heterogeneous clusters, and CI examples.
 
 ---
 
@@ -286,6 +577,22 @@ Auto-fix misconfigurations in Kubernetes manifest files.
 ```bash
 kubescape fix <report-file> [flags]
 ```
+
+### Supported manifest formats
+
+YAML and JSON manifests are both fixed in place, in the format they were written
+in. A YAML file keeps its comments and layout, since only the changed lines are
+rewritten; a JSON file is re-encoded at the indentation it already used, JSON
+having no comments to preserve.
+
+A manifest that wraps several resources in one document, `kind: List` being the
+usual case, is left alone in either format: the fix paths would resolve against
+the wrapper rather than the resources they belong to. Multi-document YAML is
+fixed normally, each document there being a resource in its own right.
+
+Helm charts are reported as suggestions rather than edited, because a rendered
+resource's fix path does not map reliably back to a template line. Resources
+from any other source are listed as unfixed with the reason.
 
 ### Flags
 
@@ -470,11 +777,18 @@ kubescape decrypt <report-file>
 
 ### Description
 
-Decrypts report metadata that was protected with
-`kubescape scan --encrypt`.
+Decrypts a JSON report that was protected with `kubescape scan --encrypt`.
+The command restores encrypted repository metadata, Kubernetes resource
+metadata, source paths, container fields, copied resource labels, raw resource
+copies in results, and recoverable resource ID references. If ciphertext or an
+irreversible legacy resource ID remains, decryption fails instead of returning
+a partially restored report.
 
-Only metadata encrypted by `kubescape scan --encrypt` is restored.
+Only fields encrypted by `kubescape scan --encrypt` are restored.
 Metadata pseudonymized with `--hide` cannot be recovered by `kubescape decrypt`.
+Older encrypted reports may contain `ref-<hash>` resource IDs that were written
+with a one-way mapping. Those IDs cannot be recovered, so the command reports
+an error rather than silently treating the report as fully decrypted.
 
 ### Flags
 
@@ -497,14 +811,14 @@ kubescape decrypt encrypted-report.json
 kubescape decrypt encrypted-report.json > decrypted-report.json
 ```
 
-> `kubescape decrypt` restores metadata encrypted by
+> `kubescape decrypt` restores report fields encrypted by
 > `kubescape scan --encrypt`. It does not reverse
 > deterministic pseudonymization produced by `--hide`.
 
 ---
 ## kubescape list
 
-List available frameworks and controls.
+List available frameworks, controls and control configuration.
 
 ### Synopsis
 
@@ -518,6 +832,8 @@ kubescape list <type> [flags]
 |------|-------------|
 | `frameworks` | List available security frameworks |
 | `controls` | List available security controls |
+| `controls-config` | Show the configurable inputs controls are evaluated against — see [control configuration](#control-configuration) |
+| `exceptions` | List available exception policies |
 
 ### Flags
 
@@ -525,7 +841,37 @@ kubescape list <type> [flags]
 |------|-------------|---------|
 | `--account <id>` | Account ID for custom frameworks | - |
 | `--access-key <key>` | Access key | - |
+| `--controls-config <path>` | Show the inputs a scan would use with this controls-config file. Only applies to `controls-config` | downloaded |
 | `--format <format>` | Output format: `pretty-print`, `json`, `yaml`, `csv` | `pretty-print` |
+
+### Control configuration
+
+Several controls are tunable: an allowlist of image repositories, the capabilities
+considered insecure, CPU and memory bounds. A scan resolves those inputs from the
+same sources it resolves policies from, but nothing printed them, so there was no
+way to see what a control was actually evaluated against or to confirm that a
+`--controls-config` override took effect.
+
+```bash
+# what the next scan will use
+kubescape list controls-config
+
+# what it would use with a local override
+kubescape list controls-config --controls-config ./controls-inputs.json --format json
+```
+
+Each row pairs a configuration key with the controls that read it:
+
+| Column | Meaning |
+|--------|---------|
+| `name` | The key as it appears in a controls-config file |
+| `title` | The label the controls declare it by |
+| `values` | The value in effect, empty when unset |
+| `controls` | The control IDs that read it |
+
+An input with no value is not an error — it is why a configurable control falls
+back to the default written into its rule. A value no control reads is usually a
+setting left behind by an older controls-config file.
 
 ### Examples
 
@@ -599,10 +945,10 @@ Manage Kubescape configuration.
 kubescape config view
 
 # View configuration as JSON
-kubescape config view -o json
+kubescape config view --format json
 
 # View configuration as YAML
-kubescape config view -o yaml
+kubescape config view -f yaml
 
 # Set account ID
 kubescape config set accountID <account-id>
@@ -739,14 +1085,14 @@ Display version information.
 ### Synopsis
 
 ```bash
-kubescape version [--format text|json]
+kubescape version [--format text|json|yaml]
 ```
 
 ### Flags
 
 | Flag | Short | Default | Description |
 |---|---|---|---|
-| `--format` | `-f` | `text` | Output format. Supported: `text`, `json` |
+| `--format` | `-f` | `text` | Output format. Supported: `text`, `json`, `yaml` |
 
 ### Examples
 
@@ -757,6 +1103,12 @@ kubescape version
 # Machine-readable JSON output (safe to pipe to jq)
 kubescape version --format json
 # {"version":"v3.x.x","commit":"abc123","date":"2024-01-15"}
+
+# Machine-readable YAML output
+kubescape version --format yaml
+# commit: abc123
+# date: "2024-01-15"
+# version: v3.x.x
 ```
 
 ---

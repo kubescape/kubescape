@@ -342,7 +342,8 @@ func TestCancelledVariableIsNotAnExpressionError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	res := e.evaluateValidation(ctx, validations[0], e.activationFor(ctx, obj, nil, nil, variables, nil), nil)
+	budget := newCostBudget(e.budgetLimit())
+	res := e.evaluateValidation(ctx, validations[0], e.activationFor(ctx, obj, nil, nil, variables, budget), budget, nil)
 	require.Error(t, res.Err)
 	assert.False(t, IsExpressionError(res.Err),
 		"a cancelled variable evaluation must not become a deny")

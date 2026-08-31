@@ -4,7 +4,9 @@
 
 This implementation addresses the API-server load issue described in A1 of `issues.md` and Phase 5 of `docs/optimization-plan.md`. The solution introduces resource streaming so the OPA evaluation never holds the whole cluster as its input: resources are partitioned by scope and the processor evaluates the resident (cluster-scoped) batch plus one namespace batch at a time, while the collection phase replaces the previous O(L × N) per-GVR-per-namespace LIST calls with a single LIST per GVR (O(L)).
 
-Note what streaming does *not* do: it does not reduce total retained memory. The collector still pulls every GVR and holds the full cluster until the first batch is sent, and the processor retains all resources in `AllResources` for downstream stages (exceptions, printers, image scanning). Streaming bounds the *evaluation input* and the number of API-server calls, not the process high-water mark.
+Note what streaming does *not* do: it does not reduce total retained memory. The collector traverses every GVR and holds the full cluster until the first batch is sent, and the processor retains all resources in `AllResources` for downstream stages (exceptions, printers, image scanning). Streaming bounds the *evaluation input* and the number of API-server calls, not the process high-water mark.
+
+Collection is paginated end to end: each GVR is walked once with `pager.EachListItem`, and objects are partitioned into their batch as the pager yields them rather than accumulated into a per-GVR slice first. What is still unbounded is the set of namespace batches, which is held on the heap until each batch is emitted.
 
 ## Problem Statement
 
@@ -101,7 +103,9 @@ The implementation reduces peak evaluation memory by:
 - Keeping only cluster-scoped resources (~10-20% of total) plus a single namespace batch in the evaluation input at any time
 - Processing controls scope-by-scope (resident + one namespace at a time)
 
-The collection peak is not reduced: all resources are pulled and partitioned before the first batch is sent, and the processor retains resources in `AllResources` for downstream stages. The real win over the previous approach is the API-server load — one LIST per GVR instead of one per GVR per namespace — and a bounded evaluation input.
+The collection peak is not reduced: all resources are traversed and partitioned before the first batch is sent, and the processor retains resources in `AllResources` for downstream stages. The real win over the previous approach is the API-server load — one paginated LIST traversal per GVR instead of one per GVR per namespace — and a bounded evaluation input.
+
+Within collection, the only whole-cluster containers left are the batches themselves. Neither the pager's pages nor any per-GVR slice adds to the peak: `pullSingleResourceInto` hands each object straight to the collector, which stores it in its namespace or resident batch and drops the pager's copy.
 
 ### Related-Object Resolution
 

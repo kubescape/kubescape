@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: audit-pod
+  labels:
+    app: audit-pod
+spec:
+  containers:
+  - name: test-container
+    env :
+      - name : random
+        value : "Hello from the environment"
+      - name: some-name
+        value: my_key_value
+    image: hashicorp/http-echo:0.2.3
+    securityContext:
+      allowPrivilegeEscalation: true
+  - name : test-container2
+    env :
+      - name : random
+        value : "Hello from the environment"
+      - name: AWS_TOKEN_FILE
+        value: hunter2
+      - name: DB_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: database-secret
+            key: password
+      - name: CONFIG_PASSWORD
+        valueFrom:
+          configMapKeyRef:
+            name: database-config
+            key: password
+      - name: my_password
+        value: my/secret/file/path
+    image : hashicorp/http-echo:0.2.3

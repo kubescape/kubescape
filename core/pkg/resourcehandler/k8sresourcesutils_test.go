@@ -5,7 +5,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
@@ -239,4 +239,43 @@ func TestInsertControls(t *testing.T) {
 			assert.Contains(t, ids, "C-0002")
 		}
 	})
+}
+
+func TestGetFieldSelectorFromScanInfo(t *testing.T) {
+	tests := []struct {
+		name     string
+		include  string
+		exclude  string
+		expected IFieldSelector
+	}{
+		{name: "no filters", expected: &EmptySelector{}},
+		{name: "include narrows", include: "default", expected: &IncludeSelector{namespace: "default"}},
+		{name: "exclude narrows", exclude: "kube-system", expected: &ExcludeSelector{namespace: "kube-system"}},
+		{name: "include wins over exclude", include: "default", exclude: "kube-system", expected: &IncludeSelector{namespace: "default"}},
+		// A value built from separators and whitespace names no namespace, so it
+		// must not be honored: countNamespaces and the report metadata both read
+		// it as "no narrowing", and an include selector built from one used to
+		// leave every namespaced resource unqueried.
+		{name: "blank include", include: " ", expected: &EmptySelector{}},
+		{name: "separator-only include", include: ",", expected: &EmptySelector{}},
+		{name: "separator-only exclude", exclude: ", ,", expected: &EmptySelector{}},
+		{name: "blank include falls through to a real exclude", include: ",", exclude: "kube-system", expected: &ExcludeSelector{namespace: "kube-system"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{IncludeNamespaces: tt.include, ExcludedNamespaces: tt.exclude}
+			assert.Equal(t, tt.expected, getFieldSelectorFromScanInfo(scanInfo))
+		})
+	}
+}
+
+func TestSplitNamespaces(t *testing.T) {
+	assert.Nil(t, splitNamespaces(""))
+	assert.Nil(t, splitNamespaces(" "))
+	assert.Nil(t, splitNamespaces(",,"))
+	assert.Equal(t, []string{"default"}, splitNamespaces("default,"))
+	assert.Equal(t, []string{"default", "prod"}, splitNamespaces(" default , prod "))
+	assert.Equal(t, []string{"default"}, splitNamespaces("default,default"))
+	assert.Equal(t, []string{"a", "b"}, splitNamespaces("a,b,a,b"))
 }

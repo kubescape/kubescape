@@ -90,12 +90,13 @@ Example output:
 ## Command reference
 
 ```bash
-kubescape config view [--output text|json|yaml] [--include-empty]
+kubescape config view [--format text|json|yaml] [--include-empty]
 ```
 
 ### Flags
 
-- `-o, --output`: select the rendering format
+- `-f, --format`: select the rendering format (`text`, `json`, `yaml`)
+- `-o, --output`: alias for `--format`
 - `-e, --include-empty`: include empty values in the rendered payload
 
 ## Integration notes
@@ -116,6 +117,12 @@ The rendered fields use stable lower camel case names:
 - `cloudReportURL`
 - `cloudAPIURL`
 - `accessKey`
+
+`accessKey` is a credential, so it is rendered masked in every format: only its
+last four characters are shown, prefixed with `****` (a key of eight characters
+or fewer is masked in full). The command is meant for CI logs and shared
+terminals, so it never prints the key itself; read the cached configuration file
+directly if you need the full value.
 
 By default, fields with empty values are not rendered. This keeps terminal
 output short and avoids noisy structured payloads in scripts that only need
