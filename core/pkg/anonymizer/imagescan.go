@@ -31,11 +31,13 @@ import (
 // JSON. A partial scrub of that graph would produce a report the user believes
 // is anonymized and is not, which is worse than the leak it replaces.
 //
-// Nothing is lost by that on this path: every printer that emits the Anchore
-// graph (json, yaml, cyclonedx-json, spdx-json) does so only when
-// opaSessionObj is nil, which is the standalone `scan image` path. The
-// anonymizer never runs there, so cmd/scan/image.go rejects --hide/--encrypt
-// up front instead (shared.ValidateImageScanAnonymization).
+// Nothing is lost by that on this path: the printers that emit the Anchore
+// graph are gated so an anonymized run never reaches one. json and yaml emit it
+// only when opaSessionObj is nil, the standalone `scan image` path, which
+// cmd/scan/image.go rejects for --hide/--encrypt up front
+// (shared.ValidateImageScanAnonymization). cyclonedx-json and spdx-json also
+// emit it for a posture scan carrying --scan-images, which validateSBOMOutput
+// (core/core/scan.go) rejects for the same reason.
 func transformImageScanData(imageScanData []cautils.ImageScanData, transformer Transformer) error {
 	var err error
 

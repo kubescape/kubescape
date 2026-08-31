@@ -434,16 +434,16 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr: nil,
 		},
 		{
-			name:      "cyclonedx-json format for cluster scan should return error",
+			name:      "cyclonedx-json format for cluster scan should not return error",
 			scanType:  cautils.ScanTypeCluster,
 			format:    printer.CycloneDXFormat,
-			expectErr: errors.New("format \"cyclonedx-json\" is only supported for image scanning"),
+			expectErr: nil,
 		},
 		{
-			name:      "spdx-json format for cluster scan should return error",
+			name:      "spdx-json format for cluster scan should not return error",
 			scanType:  cautils.ScanTypeCluster,
 			format:    printer.SPDXFormat,
-			expectErr: errors.New("format \"spdx-json\" is only supported for image scanning"),
+			expectErr: nil,
 		},
 		{
 			name:      "markdown format for cluster scan should not return error",
