@@ -598,7 +598,9 @@ See [multi-architecture image scanning](multi-architecture-image-scanning.md) fo
 
 ## kubescape fix
 
-Auto-fix misconfigurations in Kubernetes manifest files.
+Auto-fix misconfigurations found by a scan. Manifest files are fixed in place;
+a cluster scan has no files to rewrite, so its fixes are printed for you to
+review and apply.
 
 ### Synopsis
 
@@ -622,6 +624,29 @@ Helm charts are reported as suggestions rather than edited, because a rendered
 resource's fix path does not map reliably back to a template line. Resources
 from any other source are listed as unfixed with the reason.
 
+### Cluster scans
+
+A cluster scan records live objects, not manifests, so there is no file to
+rewrite. The scanned object is patched in memory and the resulting manifest is
+printed to stdout as a `---` separated document stream, which pipes straight
+into `kubectl apply -f -`. Progress and summary output goes to stderr, so the
+pipe carries manifests only.
+
+Nothing is ever written to the cluster. Applying is your decision.
+
+Two details worth knowing:
+
+- The manifests reflect the cluster **as it was scanned**, not a live read. A
+  resource that changed since the scan should be re-scanned before applying.
+- Server-managed fields (`status`, `metadata.managedFields`, `resourceVersion`,
+  `uid`, `generation`, `creationTimestamp`, and the
+  `kubectl.kubernetes.io/last-applied-configuration` annotation) are stripped,
+  since a manifest carrying them will not apply cleanly.
+
+RBAC and cloud findings are skipped: they describe a relationship across several
+related objects rather than one addressable resource, so there is no single
+manifest to emit. They are listed as unfixed with that reason.
+
 ### Flags
 
 | Flag | Description | Default |
@@ -629,6 +654,7 @@ from any other source are listed as unfixed with the reason.
 | `--dry-run` | Preview changes without applying | `false` |
 | `--no-confirm` | Apply without confirmation | `false` |
 | `--skip-user-values` | Skip changes requiring user values | `true` |
+| `--output-dir` | Cluster scans only: write one patched manifest per resource here instead of printing them | *(print to stdout)* |
 
 ### Examples
 
@@ -646,11 +672,32 @@ kubescape fix results.json --dry-run
 kubescape fix results.json --no-confirm
 ```
 
+Fixing a cluster scan:
+
+```bash
+# Scan the cluster
+kubescape scan --format json --output cluster.json
+
+# Print the patched manifests
+kubescape fix cluster.json
+
+# Review, then apply
+kubescape fix cluster.json | kubectl apply -f -
+
+# For a cluster with many findings, write one manifest per resource
+kubescape fix cluster.json --output-dir ./fixes
+kubectl apply -f ./fixes
+```
+
 > **Note:** The confirmation prompt requires a real interactive terminal. If
 > stdin isn't a TTY — `kubescape fix results.json < /dev/null`, a piped
 > answer like `echo y | kubescape fix results.json`, or any CI/script
 > context — the prompt is skipped and no changes are applied. Use
 > `--no-confirm` to apply fixes in non-interactive contexts.
+>
+> The prompt does not apply to cluster scans: that path edits nothing in place,
+> so there is nothing to confirm. With `--output-dir`, a non-empty directory is
+> refused unless you pass `--no-confirm`.
 
 ---
 
