@@ -247,9 +247,9 @@ deny[msga] { ... }
 The base score is bucketed the same way as a built-in control — `1-3` low,
 `4-6` medium, `7-8` high, `9-10` critical — so it drives the report's severity
 column, `--min-severity`/`--max-severity` and `--severity-threshold`. A value
-outside `1-10`, or one that is not a number, fails the scan rather than
-defaulting, because a rule whose severity cannot be determined is treated as
-exceeding every `--severity-threshold`.
+outside `1-10`, a malformed value, or duplicate annotations in the same file
+fail the scan rather than defaulting, because a rule whose severity cannot be
+determined is treated as exceeding every `--severity-threshold`.
 
 
 ### Exception Audit

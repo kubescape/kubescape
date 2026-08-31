@@ -221,6 +221,11 @@ func controlFromRegoFile(file string) (reporthandling.Control, error) {
 // defaulting would report a severity the rule did not ask for, and a typo in a
 // CI-gating rule would go unnoticed.
 func baseScoreFromRego(source string) (float32, error) {
+	var (
+		found bool
+		score float32 = defaultCustomRuleBaseScore
+	)
+
 	for _, line := range strings.Split(source, "\n") {
 		comment, isComment := strings.CutPrefix(strings.TrimSpace(line), "#")
 		if !isComment {
@@ -230,6 +235,10 @@ func baseScoreFromRego(source string) (float32, error) {
 		fields := strings.Fields(comment)
 		if len(fields) == 0 || fields[0] != baseScoreAnnotation {
 			continue
+		}
+
+		if found {
+			return 0, fmt.Errorf("duplicate %s annotation found", baseScoreAnnotation)
 		}
 
 		if len(fields) != 2 {
@@ -242,10 +251,11 @@ func baseScoreFromRego(source string) (float32, error) {
 			return 0, fmt.Errorf("invalid %s %q: expected a number between %g and %g",
 				baseScoreAnnotation, fields[1], minCustomRuleBaseScore, maxCustomRuleBaseScore)
 		}
-		return float32(baseScore), nil
+		score = float32(baseScore)
+		found = true
 	}
 
-	return defaultCustomRuleBaseScore, nil
+	return score, nil
 }
 
 // matchAllKinds is the fallback for a rule that declares no selectors. Users

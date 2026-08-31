@@ -286,6 +286,7 @@ func TestLoadCustomRules_InvalidBaseScoreAnnotationIsRejected(t *testing.T) {
 		{"not a number ParseFloat would accept", "# @baseScore NaN"},
 		{"no value", "# @baseScore"},
 		{"more than one value", "# @baseScore 5 7"},
+		{"duplicate annotations", "# @baseScore 9\n# @baseScore 1"},
 	}
 
 	for _, tc := range testCases {
