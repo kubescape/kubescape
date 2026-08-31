@@ -18,9 +18,10 @@ runs:
   steps:
     - run: |
         if [[ -z "$ORIGINAL_TAG" ]]; then
-          echo "The value of ORIGINAL_TAG is $ORIGINAL_TAG"
           echo "Setting the value of ORIGINAL_TAG to $REF_NAME"
           echo "ORIGINAL_TAG=$REF_NAME" >> "$GITHUB_ENV"
+        else
+          echo "The value of ORIGINAL_TAG is $ORIGINAL_TAG"
         fi
       env:
         ORIGINAL_TAG: ${{ inputs.ORIGINAL_TAG }}
@@ -35,7 +36,7 @@ runs:
             exit 1
         fi
       env:
-        ORIGINAL_TAG: ${{ inputs.ORIGINAL_TAG }}
+        ORIGINAL_TAG: ${{ inputs.ORIGINAL_TAG || github.ref_name }}
         SUB_STRING: ${{ inputs.SUB_STRING }}
       shell: bash
 
@@ -47,5 +48,5 @@ runs:
           echo "New tag: $NEW_TAG"
           echo "NEW_TAG=$NEW_TAG" >> "$GITHUB_OUTPUT"
       env:
-        ORIGINAL_TAG: ${{ inputs.ORIGINAL_TAG }}
+        ORIGINAL_TAG: ${{ inputs.ORIGINAL_TAG || github.ref_name }}
       shell: bash
