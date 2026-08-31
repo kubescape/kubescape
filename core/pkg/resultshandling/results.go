@@ -5,8 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"fmt"
+	"io"
 	"slices"
 
 	"github.com/kubescape/go-logger"
@@ -141,7 +141,7 @@ func (rh *ResultsHandler) ToJson() ([]byte, error) {
 	var buf bytes.Buffer
 	err := rh.WriteJson(&buf)
 	res := buf.Bytes()
-		if len(res) > 0 && res[len(res)-1] == '\n' {
+	if len(res) > 0 && res[len(res)-1] == '\n' {
 		res = res[:len(res)-1]
 	}
 	return res, err

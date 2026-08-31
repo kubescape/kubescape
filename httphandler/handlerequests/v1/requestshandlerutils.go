@@ -254,7 +254,7 @@ func persistCanonicalResult(result *resultshandling.ResultsHandler, scanID strin
 	if parseErr != nil {
 		return fmt.Errorf("failed to persist canonical scan results: invalid scan ID: %w", parseErr)
 	}
-	f, createErr := os.Create(filepath.Join(OutputDir, parsedUUID.String()))
+	f, createErr := os.OpenFile(filepath.Join(OutputDir, parsedUUID.String()), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if createErr != nil {
 		return fmt.Errorf("failed to create canonical scan results file: %w", createErr)
 	}
