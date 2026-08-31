@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: kubernetes
+  namespace: default
+subsets:
+  - addresses:
+      - ip: 10.0.0.1
+    ports:
+      - name: https
+        port: 6443
+        protocol: TCP

@@ -1,0 +1,26 @@
+{
+    "name": "detect-nginx-ingress-controller-eol",
+    "attributes": {
+      "hostSensorRule": false,
+      "imageScanRelated": false
+    },
+    "ruleLanguage": "Rego",
+    "match": [
+        {
+          "apiGroups": [
+            "apps"
+          ],
+          "apiVersions": [
+            "v1"
+          ],
+          "resources": [
+            "Deployment",
+            "DaemonSet",
+            "StatefulSet"
+          ]
+        }
+    ],
+    "description": "Detects nginx ingress controller in Deployments, DaemonSets, and StatefulSets that will reach End of Life in March 2026",
+    "remediation": "Migrate to a supported ingress controller such as ingress-nginx (community fork), HAProxy Ingress, Traefik, or cloud-native solutions (AWS ALB, GKE Ingress, Azure Application Gateway)",
+    "ruleQuery": "armo_builtins"
+}

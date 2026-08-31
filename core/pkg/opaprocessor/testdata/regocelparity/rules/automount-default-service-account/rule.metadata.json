@@ -1,0 +1,24 @@
+{
+    "name": "automount-default-service-account",
+    "attributes": {
+    },
+    "ruleLanguage": "Rego",
+    "match": [
+      {
+        "apiGroups": [
+          ""
+        ],
+        "apiVersions": [
+          "v1"
+        ],
+        "resources": [
+            "ServiceAccount"
+        ]
+      }
+    ],
+    "ruleDependencies": [
+    ],
+    "description": "fails if default service account mounts service account token by default",
+    "remediation": "Make sure that the automountServiceAccountToken field on the default service account spec is set to false",
+    "ruleQuery": "armo_builtins"
+}

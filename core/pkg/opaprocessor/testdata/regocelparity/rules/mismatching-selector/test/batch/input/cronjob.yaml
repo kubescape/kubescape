@@ -1,0 +1,22 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mismatching-selector-cronjob
+spec:
+  schedule: "*/5 * * * *"
+  jobTemplate:
+    spec:
+      selector:
+        matchLabels:
+          app: api
+          tier: backend
+      template:
+        metadata:
+          labels:
+            app: api
+            tier: frontend
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: app
+            image: nginx
