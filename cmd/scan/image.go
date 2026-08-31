@@ -15,10 +15,16 @@ import (
 // TODO(vladklokun): document image scanning on the Kubescape Docs Hub?
 var (
 	imageExample = fmt.Sprintf(`
-  Scan an image for vulnerabilities. 
+  Scan one or more images for vulnerabilities. 
 
   # Scan the 'nginx' image
   %[1]s scan image "nginx"
+
+  # Scan several images in a single run, sharing one vulnerability database load
+  %[1]s scan image "nginx:1.27" "redis:7" "postgres:16"
+
+  # Scan several images with four concurrent workers
+  %[1]s scan image "nginx:1.27" "redis:7" --image-scan-concurrency 4
 
   # Scan the 'nginx' image and see the full report 
   %[1]s scan image "nginx" -v
@@ -35,21 +41,18 @@ var (
 // getImageCmd returns the scan image command
 func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "image <image>:<tag> [flags]",
-		Short:   "Scan an image for vulnerabilities",
+		Use:     "image <image>:<tag> [<image>:<tag>...] [flags]",
+		Short:   "Scan one or more images for vulnerabilities",
 		Example: imageExample,
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) != 1 {
-				return fmt.Errorf("the command takes exactly one image name as an argument")
-			}
-			return nil
+			return validateImageArgs(args)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
 			defer cancel()
 
-			if len(args) != 1 {
-				return fmt.Errorf("the command takes exactly one image name as an argument")
+			if err := validateImageArgs(args); err != nil {
+				return err
 			}
 
 			if err := shared.ValidateCommonScanFlags(cmd, scanInfo, shared.ImageScanFormats); err != nil {
@@ -77,16 +80,9 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 				return err
 			}
 
-			imageName := args[0]
-			if strings.HasSuffix(imageName, ".tar") && !strings.HasPrefix(imageName, "docker-archive:") && !strings.HasPrefix(imageName, "oci-archive:") {
-				if _, err := os.Stat(imageName); err == nil {
-					imageName = "docker-archive:" + imageName
-				}
-			}
-
 			imgScanInfo := &metav1.ImageScanInfo{
 				Authority:          credentials.Authority,
-				Image:              imageName,
+				Images:             normalizeImageArgs(args),
 				Platform:           scanInfo.ImagePlatform,
 				Username:           credentials.Username,
 				Password:           credentials.Password,
@@ -113,4 +109,40 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 	cmd.PersistentFlags().StringVar(&scanInfo.ImagePlatform, "platform", "", "OCI platform to scan, for example linux/amd64 or linux/arm64/v8")
 
 	return cmd
+}
+
+func validateImageArgs(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("the command takes at least one image name as an argument")
+	}
+	for _, arg := range args {
+		if strings.TrimSpace(arg) == "" {
+			return fmt.Errorf("image name cannot be empty")
+		}
+	}
+	return nil
+}
+
+func normalizeImageArgs(args []string) []string {
+	images := make([]string, 0, len(args))
+	seen := make(map[string]struct{}, len(args))
+	for _, arg := range args {
+		image := localArchiveReference(strings.TrimSpace(arg))
+		if _, duplicate := seen[image]; duplicate {
+			continue
+		}
+		seen[image] = struct{}{}
+		images = append(images, image)
+	}
+	return images
+}
+
+func localArchiveReference(image string) string {
+	if !strings.HasSuffix(image, ".tar") || strings.HasPrefix(image, "docker-archive:") || strings.HasPrefix(image, "oci-archive:") {
+		return image
+	}
+	if _, err := os.Stat(image); err != nil {
+		return image
+	}
+	return "docker-archive:" + image
 }

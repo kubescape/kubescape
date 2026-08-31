@@ -529,30 +529,58 @@ kubescape scan workload Deployment/nginx --chart-path ./chart --file-path ./char
 
 ## kubescape scan image
 
-Scan a container image for vulnerabilities.
+Scan one or more container images for vulnerabilities.
 
 ### Synopsis
 
 ```bash
-kubescape scan image <image>:<tag> [flags]
+kubescape scan image <image>:<tag> [<image>:<tag>...] [flags]
 ```
 
 ### Flags
 
 | Flag | Description |
 |------|-------------|
-| `--exceptions <path>` | Path to exceptions file |
+| `--exceptions <path>` | Path to exceptions file. Targets are matched per image, so one file can carry rules for every image in the run |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `yaml`, `markdown`, `cyclonedx-json`, `spdx-json` |
+| `--image-scan-concurrency <n>` | Number of images scanned in parallel (default `1`) |
 | `-p, --password <pass>` | Registry password |
-| `--platform <platform>` | OCI platform to scan, for example `linux/amd64`, `linux/arm64/v8`, or `windows/amd64` |
+| `--platform <platform>` | OCI platform to scan, for example `linux/amd64`, `linux/arm64/v8`, or `windows/amd64`. Applies to every image in the run |
 | `-u, --username <user>` | Registry username |
 | `--use-default-matchers` | Use default vulnerability matchers | `true` |
+
+### Scanning several images at once
+
+Passing several images scans them in a single run: the vulnerability database is
+loaded and updated once instead of once per image, and every image lands in one
+report. Repeated arguments are scanned once.
+
+Credentials, `--platform` and `--exceptions` apply to the whole run, so images
+that need different registry credentials still need separate invocations.
+
+An image that cannot be scanned — an unreachable registry, a bad reference — does
+not abort the run: the remaining images are still scanned and reported, the
+failures are summarized at the end, and the command exits non-zero. The severity
+threshold is evaluated across all images, so `--severity-threshold` fails the run
+when any single image crosses it.
+
+Output formats behave as follows for a multi-image run: `json`, `cyclonedx-json`
+and `spdx-json` emit a JSON array with one document per image (a single image
+keeps the bare document shape), while the table, HTML, PDF, markdown, SARIF,
+GitLab SAST, JUnit and Prometheus outputs report every image in one document.
 
 ### Examples
 
 ```bash
 # Scan public image
 kubescape scan image nginx:1.21
+
+# Scan several images in one run
+kubescape scan image nginx:1.27 redis:7 postgres:16
+
+# Scan several images four at a time and write one SARIF report
+kubescape scan image nginx:1.27 redis:7 postgres:16 \
+  --image-scan-concurrency 4 --format sarif --output images.sarif
 
 # Scan with verbose output
 kubescape scan image nginx:1.21 -v
