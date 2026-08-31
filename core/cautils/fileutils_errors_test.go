@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -146,9 +147,11 @@ func TestListHelmChartDirsReportsMetadataIOErrorsAndKeepsValidCharts(t *testing.
 	brokenChart := filepath.Join(dir, "z-broken")
 	require.NoError(t, os.Mkdir(brokenChart, 0o700))
 	chartFile := filepath.Join(brokenChart, "Chart.yaml")
-	require.NoError(t, os.Symlink("Chart.yaml", chartFile))
+	if err := os.Symlink("Chart.yaml", chartFile); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
 
-	charts, errs := listHelmChartDirs(dir)
+	charts, errs := listHelmChartDirs(dir, nil)
 
 	assert.Contains(t, charts, validChart)
 	require.NotEmpty(t, errs)
@@ -325,4 +328,107 @@ func TestLoadResourcesFromFiles_IgnoresChartMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, workloads, filepath.Join(dir, "valid.yaml"))
 	assert.Empty(t, skips, "Chart.yaml, Chart.lock and values.yaml must not be reported as skipped manifests")
+}
+
+// A manifest that merely contains Go-template syntax must not have its parse
+// failure silenced: "{{" in the content is not evidence that a file is a Helm
+// template, only its location below a chart's templates/ directory is.
+const corruptManifestWithTemplateSyntax = `apiVersion: v1
+kind: Pod
+metadata:
+  name: corrupt
+  annotations:
+    owner: "{{ .Values.owner }}"
+spec: [unterminated
+`
+
+func TestLoadResourcesFromFilesReportsCorruptManifestContainingTemplateSyntax(t *testing.T) {
+	dir := t.TempDir()
+	corrupt := writeManifestFixture(t, dir, "corrupt.yaml", corruptManifestWithTemplateSyntax)
+
+	workloads, skips, err := LoadResourcesFromFiles(context.Background(), corrupt, dir, nil)
+
+	require.Error(t, err)
+	assert.Empty(t, workloads)
+	require.Len(t, skips, 1)
+	assert.Equal(t, corrupt, skips[0].Path)
+	assert.Contains(t, skips[0].Reason, "parse error")
+	assert.Contains(t, err.Error(), strconv.Quote(corrupt))
+	assert.Contains(t, err.Error(), "failed to parse")
+}
+
+func TestLoadResourcesFromFilesKeepsValidResourcesWhenCorruptManifestContainsTemplateSyntax(t *testing.T) {
+	dir := t.TempDir()
+	valid := writeManifestFixture(t, dir, "valid.yaml", validPodManifest)
+	corrupt := writeManifestFixture(t, dir, "corrupt.yaml", corruptManifestWithTemplateSyntax)
+
+	workloads, skips, err := LoadResourcesFromFiles(context.Background(), dir, dir, nil)
+
+	require.NoError(t, err)
+	require.Contains(t, workloads, valid)
+	assert.Len(t, workloads[valid], 1)
+	assert.NotContains(t, workloads, corrupt)
+	require.Len(t, skips, 1)
+	assert.Equal(t, corrupt, skips[0].Path)
+	assert.Contains(t, skips[0].Reason, "parse error")
+}
+
+// A "templates" directory whose parent holds no Chart.yaml is not a Helm
+// chart, so a parse failure below it is plain manifest corruption.
+func TestLoadResourcesFromFilesTreatsTemplateSyntaxOutsideChartsAsCorruption(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "templates"), 0o700))
+	corrupt := writeManifestFixture(t, dir, filepath.Join("templates", "corrupt.yaml"), corruptManifestWithTemplateSyntax)
+
+	workloads, skips, err := LoadResourcesFromFiles(context.Background(), corrupt, dir, nil)
+
+	require.Error(t, err)
+	assert.Empty(t, workloads)
+	require.Len(t, skips, 1)
+	assert.Equal(t, corrupt, skips[0].Path)
+	assert.Contains(t, skips[0].Reason, "parse error")
+}
+
+// The plain-file fallback for a chart whose render failed must keep its drops
+// visible: templated templates are recorded as unrendered Helm templates,
+// while static siblings are still scanned.
+func TestLoadResourcesFromFilesRecordsUnrenderedChartTemplatesAsSkips(t *testing.T) {
+	testDir := helmChartLayoutPath()
+
+	workloads, skips, err := LoadResourcesFromFiles(context.Background(), testDir, testDir, nil)
+
+	require.NoError(t, err)
+	staticTemplate := filepath.Join(testDir, "mychart", "templates", "serviceaccount.yaml")
+	require.Contains(t, workloads, staticTemplate, "static templates must still be scanned when their chart did not render")
+
+	require.Len(t, skips, 2)
+	for _, skip := range skips {
+		assert.True(t, strings.HasPrefix(skip.Reason, "unrendered Helm template"), "unexpected skip reason %q", skip.Reason)
+		assert.Contains(t, skip.Path, filepath.Join("templates"), "templated files outside templates/ must not be classified as unrendered")
+	}
+}
+
+func TestIsUnrenderedHelmTemplate(t *testing.T) {
+	dir := t.TempDir()
+	chart := filepath.Join(dir, "mychart")
+	require.NoError(t, os.MkdirAll(filepath.Join(chart, "templates", "sub"), 0o700))
+	writeManifestFixture(t, chart, "Chart.yaml", "apiVersion: v2\nname: mychart\nversion: 0.1.0\n")
+
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"chart template", filepath.Join(chart, "templates", "deployment.yaml"), true},
+		{"nested chart template", filepath.Join(chart, "templates", "sub", "role.yaml"), true},
+		{"templates directory without Chart.yaml", filepath.Join(dir, "templates", "deployment.yaml"), false},
+		{"sibling sharing the templates prefix", filepath.Join(chart, "templates-docs", "deployment.yaml"), false},
+		{"chart file outside templates", filepath.Join(chart, "values.yaml"), false},
+		{"chart root itself", chart, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, isUnrenderedHelmTemplate(tc.path))
+		})
+	}
 }

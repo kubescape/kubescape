@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -46,7 +46,7 @@ deny[msga] {
         "packagename":  "armo_builtins",
         "alertScore":   5,
         "fixPaths":     [],
-        "failedPaths":  [sprintf("metadata.annotations.bound-by-%s", [pod.metadata.namespace])],
+        "reviewPaths":  [sprintf("metadata.annotations.bound-by-%s", [pod.metadata.namespace])],
         "alertObject":  {"k8sApiObjects": [cr]},
     }
 }
@@ -162,7 +162,7 @@ func referenceProcess(t *testing.T, opap *OPAProcessor, policies *cautils.Polici
 
 		associated := make(map[string]resourcesresults.ResourceAssociatedControl)
 		for i := range control.Rules {
-			ruleResults, err := opap.processRule(context.Background(), &control.Rules[i], control.FixedInput, evaluationScope{}, control.ControlID)
+			ruleResults, err := opap.processRule(context.Background(), &control.Rules[i], control.FixedInput, evaluationScope{}, &control)
 			require.NoError(t, err)
 
 			for resourceID, ruleResult := range ruleResults {
@@ -190,14 +190,13 @@ func referenceProcess(t *testing.T, opap *OPAProcessor, policies *cautils.Polici
 	return results
 }
 
-// normalize makes two result sets comparable. Control and rule ordering is an
-// artefact of map iteration; path ordering reflects the order Rego yielded a
-// rule's findings, which is a set and therefore not ordered either.
+// normalize makes two result sets comparable. Control ordering is guaranteed
+// deterministic by the processor (sortAssociatedControls), but rule ordering
+// reflects the order scopes first saw each rule and path ordering reflects the
+// order Rego yielded a rule's findings — both are sets, so they are sorted here
+// before comparison.
 func normalize(results map[string]resourcesresults.Result) map[string]resourcesresults.Result {
 	for resourceID, result := range results {
-		sort.Slice(result.AssociatedControls, func(i, j int) bool {
-			return result.AssociatedControls[i].ControlID < result.AssociatedControls[j].ControlID
-		})
 		for i := range result.AssociatedControls {
 			rules := result.AssociatedControls[i].ResourceAssociatedRules
 			sort.Slice(rules, func(a, b int) bool { return rules[a].Name < rules[b].Name })
@@ -288,7 +287,7 @@ func TestProcess_ResidentVerdictsMergeAcrossScopes(t *testing.T) {
 
 	paths := map[string]bool{}
 	for _, path := range crossScope[0].ResourceAssociatedRules[0].Paths {
-		paths[path.FailedPath] = true
+		paths[path.ReviewPath] = true
 	}
 	assert.True(t, paths["metadata.annotations.bound-by-ns-a"], "ns-a verdict lost, got %v", paths)
 	assert.True(t, paths["metadata.annotations.bound-by-ns-b"], "ns-b verdict lost, got %v", paths)
@@ -306,7 +305,7 @@ deny[msga] {
         "packagename":  "armo_builtins",
         "alertScore":   1,
         "fixPaths":     [],
-        "failedPaths":  ["metadata.name"],
+        "reviewPaths":  ["metadata.name"],
         "alertObject":  {"k8sApiObjects": [cr]},
     }
 }
@@ -366,7 +365,7 @@ deny[msga] {
         "packagename":  "armo_builtins",
         "alertScore":   1,
         "fixPaths":     [],
-        "failedPaths":  [],
+        "reviewPaths":  [],
         "alertObject":  {"k8sApiObjects": [pods[_]]},
     }
 }

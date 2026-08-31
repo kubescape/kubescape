@@ -7,8 +7,8 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/pkg/imagescan"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -265,10 +265,11 @@ func TestCollectImageScanTargetsScopesPullSecretsToLiveCluster(t *testing.T) {
 				context.Background(),
 				tt.scanningContext,
 				k8sAPI,
+				"",
 			)
 
 			assert.Empty(t, containerErrors)
-			assert.True(t, images.Contains(image))
+			assert.True(t, images.Contains(ImageScanTarget{Image: image}))
 			if tt.expectSecretRead {
 				require.Len(t, client.Actions(), 1)
 				assert.Equal(t, "get", client.Actions()[0].GetVerb())

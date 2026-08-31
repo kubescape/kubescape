@@ -211,3 +211,127 @@ func TestFormatOutputExtCoversAllFormats(t *testing.T) {
 		assert.NotEmpty(t, ext, "format %q maps to an empty extension", format)
 	}
 }
+
+func TestHasOutputExt(t *testing.T) {
+	tests := []struct {
+		name       string
+		outputFile string
+		ext        string
+		want       bool
+	}{
+		{"exact lowercase match", "report.json", ".json", true},
+		{"uppercase extension matches lowercase ext", "Report.JSON", ".json", true},
+		{"mixed case extension matches", "Report.Json", ".json", true},
+		{"different extension does not match", "report.yaml", ".json", false},
+		{"no extension does not match", "report", ".json", false},
+		{"empty outputFile does not match", "", ".json", false},
+		{"compound lowercase match", "report.cdx.json", ".cdx.json", true},
+		{"compound uppercase match", "Report.CDX.JSON", ".cdx.json", true},
+		{"compound partial match", "report.cdx.json", ".json", true},
+		{"compound different extension", "report.spdx.json", ".cdx.json", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, HasOutputExt(tt.outputFile, tt.ext))
+		})
+	}
+}
+
+func TestResolveOutputFile(t *testing.T) {
+	tests := []struct {
+		name         string
+		format       string
+		outputFile   string
+		defaultBase  string
+		wantFile     string
+		wantExplicit bool
+	}{
+		{
+			name:         "empty output remains implicit",
+			format:       JsonFormat,
+			outputFile:   "",
+			defaultBase:  "report",
+			wantFile:     "",
+			wantExplicit: false,
+		},
+		{
+			name:         "whitespace explicit output uses default base",
+			format:       JsonFormat,
+			outputFile:   "   ",
+			defaultBase:  "report",
+			wantFile:     "report.json",
+			wantExplicit: true,
+		},
+		{
+			name:         "trims explicit output before appending extension",
+			format:       JsonFormat,
+			outputFile:   "  reports/scan  ",
+			defaultBase:  "report",
+			wantFile:     "reports/scan.json",
+			wantExplicit: true,
+		},
+		{
+			name:         "keeps existing extension case-insensitively",
+			format:       JsonFormat,
+			outputFile:   "Report.JSON",
+			defaultBase:  "report",
+			wantFile:     "Report.JSON",
+			wantExplicit: true,
+		},
+		{
+			name:         "keeps yaml extension",
+			format:       YamlFormat,
+			outputFile:   "report.yaml",
+			defaultBase:  "report",
+			wantFile:     "report.yaml",
+			wantExplicit: true,
+		},
+		{
+			name:         "keeps yml extension",
+			format:       YamlFormat,
+			outputFile:   "report.yml",
+			defaultBase:  "report",
+			wantFile:     "report.yml",
+			wantExplicit: true,
+		},
+		{
+			name:         "appends compound cyclonedx extension",
+			format:       CycloneDXFormat,
+			outputFile:   "sbom",
+			defaultBase:  "report",
+			wantFile:     "sbom.cdx.json",
+			wantExplicit: true,
+		},
+		{
+			name:         "keeps compound spdx extension case-insensitively",
+			format:       SPDXFormat,
+			outputFile:   "Report.SPDX.JSON",
+			defaultBase:  "report",
+			wantFile:     "Report.SPDX.JSON",
+			wantExplicit: true,
+		},
+		{
+			name:         "unknown format only trims and marks explicit",
+			format:       "custom",
+			outputFile:   "  report.custom  ",
+			defaultBase:  "report",
+			wantFile:     "report.custom",
+			wantExplicit: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotFile, gotExplicit := ResolveOutputFile(tt.format, tt.outputFile, tt.defaultBase)
+			assert.Equal(t, tt.wantFile, gotFile)
+			assert.Equal(t, tt.wantExplicit, gotExplicit)
+		})
+	}
+}
+
+func TestResolveDefaultOutputFile(t *testing.T) {
+	assert.Equal(t, "report.html", ResolveDefaultOutputFile(HtmlFormat, "report"))
+	assert.Equal(t, "report.pdf", ResolveDefaultOutputFile(PdfFormat, "report"))
+	assert.Equal(t, "report.md", ResolveDefaultOutputFile(MarkdownFormat, "report"))
+	assert.Equal(t, "report.yaml", ResolveDefaultOutputFile(PolicyReportFormat, "report"))
+}

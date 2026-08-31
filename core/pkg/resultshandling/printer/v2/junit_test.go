@@ -16,7 +16,8 @@ import (
 	"github.com/anchore/grype/grype/match"
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -159,8 +160,9 @@ func TestJunitActionPrintCombinedScanIncludesPostureAndImages(t *testing.T) {
 			Matches: match.NewMatches(imageMatch("CVE-COMBINED", "High")),
 		},
 		{
-			Image:   "combined:second",
-			Matches: match.NewMatches(imageMatch("CVE-COMBINED-SECOND", "Critical")),
+			Image:    "combined:second",
+			Platform: "linux/arm64",
+			Matches:  match.NewMatches(imageMatch("CVE-COMBINED-SECOND", "Critical")),
 		},
 	}
 
@@ -177,11 +179,18 @@ func TestJunitActionPrintCombinedScanIncludesPostureAndImages(t *testing.T) {
 	require.NoError(t, xml.Unmarshal(raw, &got))
 	require.Len(t, got.Suites, 3)
 	assert.Equal(t, "Kubescape Scanning", got.Name)
-	assert.Equal(t, []string{"kubescape", "combined:first", "combined:second"}, []string{
+	assert.Equal(t, []string{"kubescape", "combined:first", "combined:second [linux/arm64]"}, []string{
 		got.Suites[0].Name,
 		got.Suites[1].Name,
 		got.Suites[2].Name,
 	})
+	require.Len(t, got.Suites[2].Properties, 2)
+	assert.Equal(t, JUnitProperty{Name: "image", Value: "combined:second"}, got.Suites[2].Properties[0])
+	assert.Equal(t, JUnitProperty{Name: "platform", Value: "linux/arm64"}, got.Suites[2].Properties[1])
+	require.Len(t, got.Suites[2].TestCases, 1)
+	assert.Equal(t, "combined:second [linux/arm64]", got.Suites[2].TestCases[0].Classname)
+	require.NotNil(t, got.Suites[2].TestCases[0].Failure)
+	assert.Contains(t, got.Suites[2].TestCases[0].Failure.Contents, "Platform: linux/arm64")
 	assert.Equal(t, []int{0, 1, 2}, []int{got.Suites[0].ID, got.Suites[1].ID, got.Suites[2].ID})
 	assert.Equal(t, 1, got.Suites[0].Tests)
 	assert.Equal(t, 1, got.Suites[0].Failures)
@@ -191,6 +200,150 @@ func TestJunitActionPrintCombinedScanIncludesPostureAndImages(t *testing.T) {
 	assert.Contains(t, string(raw), "Combined posture control")
 	assert.Contains(t, string(raw), "CVE-COMBINED")
 	assert.Contains(t, string(raw), "CVE-COMBINED-SECOND")
+}
+
+func TestImageTestsSuitesUsesPlatformAwareTargets(t *testing.T) {
+	imageMatch := func(id, severity, packageName string) match.Match {
+		return match.Match{
+			Vulnerability: vulnerability.Vulnerability{
+				Reference: vulnerability.Reference{ID: id, Namespace: "nvd"},
+				Metadata:  &vulnerability.Metadata{ID: id, Severity: severity},
+				Fix: vulnerability.Fix{
+					Versions: []string{"2.0.0"},
+					State:    vulnerability.FixStateFixed,
+				},
+			},
+			Package: grypepkg.Package{
+				ID:      grypepkg.ID(packageName),
+				Name:    packageName,
+				Version: "1.0.0",
+			},
+		}
+	}
+
+	imageScanData := []cautils.ImageScanData{
+		{
+			Image:    "registry.example.com/app:v1",
+			Platform: "linux/amd64",
+			Matches:  match.NewMatches(imageMatch("CVE-PLATFORM-AMD64", "High", "openssl")),
+		},
+		{
+			Image:    "registry.example.com/app:v1",
+			Platform: "linux/arm64",
+			Matches:  match.NewMatches(imageMatch("CVE-PLATFORM-ARM64", "Critical", "glibc")),
+		},
+		{
+			Image:   "registry.example.com/sidecar:v1",
+			Matches: match.NewMatches(imageMatch("CVE-SIDECAR", "Low", "busybox")),
+		},
+	}
+
+	got := imageTestsSuites(imageScanData)
+
+	require.Len(t, got.Suites, 3)
+	assert.Equal(t, "Kubescape Image Scanning", got.Name)
+	assert.Equal(t, 3, got.Tests)
+	assert.Equal(t, 3, got.Failures)
+	assert.Zero(t, got.Errors)
+
+	assert.Equal(t, []string{
+		"registry.example.com/app:v1 [linux/amd64]",
+		"registry.example.com/app:v1 [linux/arm64]",
+		"registry.example.com/sidecar:v1",
+	}, []string{
+		got.Suites[0].Name,
+		got.Suites[1].Name,
+		got.Suites[2].Name,
+	})
+	assert.Equal(t, []int{0, 1, 2}, []int{got.Suites[0].ID, got.Suites[1].ID, got.Suites[2].ID})
+
+	require.Len(t, got.Suites[0].Properties, 2)
+	assert.Equal(t, JUnitProperty{Name: "image", Value: "registry.example.com/app:v1"}, got.Suites[0].Properties[0])
+	assert.Equal(t, JUnitProperty{Name: "platform", Value: "linux/amd64"}, got.Suites[0].Properties[1])
+	require.Len(t, got.Suites[1].Properties, 2)
+	assert.Equal(t, JUnitProperty{Name: "image", Value: "registry.example.com/app:v1"}, got.Suites[1].Properties[0])
+	assert.Equal(t, JUnitProperty{Name: "platform", Value: "linux/arm64"}, got.Suites[1].Properties[1])
+	assert.Empty(t, got.Suites[2].Properties)
+
+	for i, suite := range got.Suites {
+		require.Len(t, suite.TestCases, 1, "suite %d", i)
+		assert.Equal(t, suite.Name, suite.TestCases[0].Classname)
+		require.NotNil(t, suite.TestCases[0].Failure)
+	}
+	assert.Contains(t, got.Suites[0].TestCases[0].Failure.Contents, "Platform: linux/amd64")
+	assert.Contains(t, got.Suites[1].TestCases[0].Failure.Contents, "Platform: linux/arm64")
+	assert.NotContains(t, got.Suites[2].TestCases[0].Failure.Contents, "Platform:")
+}
+
+func TestJunitActionPrintImageScanKeepsMultiArchSuitesDistinct(t *testing.T) {
+	imageMatch := func(id, packageName string) match.Match {
+		return match.Match{
+			Vulnerability: vulnerability.Vulnerability{
+				Reference: vulnerability.Reference{ID: id, Namespace: "nvd"},
+				Metadata:  &vulnerability.Metadata{ID: id, Severity: "High"},
+			},
+			Package: grypepkg.Package{
+				ID:      grypepkg.ID(packageName),
+				Name:    packageName,
+				Version: "1.0.0",
+			},
+		}
+	}
+
+	imageScanData := []cautils.ImageScanData{
+		{
+			Image:    "registry.example.com/app:v1",
+			Platform: "linux/amd64",
+			Matches:  match.NewMatches(imageMatch("CVE-A", "openssl")),
+		},
+		{
+			Image:    "registry.example.com/app:v1",
+			Platform: "linux/arm64",
+			Matches:  match.NewMatches(imageMatch("CVE-B", "glibc")),
+		},
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "images.xml")
+	jp := NewJunitPrinter(false)
+	require.NoError(t, jp.SetWriter(context.Background(), outputPath))
+	require.NoError(t, jp.ActionPrint(context.Background(), nil, imageScanData))
+	require.NoError(t, jp.writer.Close())
+
+	raw, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+
+	var got JUnitTestSuites
+	require.NoError(t, xml.Unmarshal(raw, &got))
+	require.Len(t, got.Suites, 2)
+	assert.Equal(t, "Kubescape Image Scanning", got.Name)
+	assert.Equal(t, 2, got.Tests)
+	assert.Equal(t, 2, got.Failures)
+	assert.Equal(t, "registry.example.com/app:v1 [linux/amd64]", got.Suites[0].Name)
+	assert.Equal(t, "registry.example.com/app:v1 [linux/arm64]", got.Suites[1].Name)
+	assert.NotEqual(t, got.Suites[0].Name, got.Suites[1].Name)
+	assert.Contains(t, string(raw), `name="image" value="registry.example.com/app:v1"`)
+	assert.Contains(t, string(raw), `name="platform" value="linux/amd64"`)
+	assert.Contains(t, string(raw), `name="platform" value="linux/arm64"`)
+}
+
+func TestImageTestCasesIncludesVEXDetails(t *testing.T) {
+	cases := imageTestCases([]imageprinter.CVE{
+		{
+			ID:               "CVE-2026-1234",
+			Severity:         "High",
+			Package:          "openssl",
+			Version:          "1.0.0",
+			FixedState:       "not-fixed",
+			Image:            "registry.example.com/app:v1",
+			VexStatus:        "not_affected",
+			VexJustification: "component_not_present",
+		},
+	}, "")
+
+	require.Len(t, cases, 1)
+	require.NotNil(t, cases[0].Failure)
+	assert.Contains(t, cases[0].Failure.Contents, "VEX Status: not_affected")
+	assert.Contains(t, cases[0].Failure.Contents, "VEX Justification: component_not_present")
 }
 
 func TestListTestSuites(t *testing.T) {
@@ -591,7 +744,8 @@ func TestJunitGoldenFile(t *testing.T) {
 
 	want, err := os.ReadFile(goldenPath)
 	require.NoError(t, err, "golden fixture missing — run `go test -update-golden`")
-	assert.Equal(t, string(want), string(got), "marshalled JUnit output diverged from testdata/junit_golden.xml")
+	wantStr := strings.ReplaceAll(string(want), "\r\n", "\n")
+	assert.Equal(t, wantStr, string(got), "marshalled JUnit output diverged from testdata/junit_golden.xml")
 
 	// Also round-trip the golden file through encoding/xml and re-check the
 	// invariants on the *stored* fixture so a hand-edited golden that breaks

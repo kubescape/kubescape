@@ -10,10 +10,10 @@ import (
 
 	"github.com/distribution/reference"
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v3/cmd/shared"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/meta"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/cmd/shared"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/meta"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/project-copacetic/copacetic/pkg/buildkit"
 	"github.com/spf13/cobra"
 )
@@ -167,6 +167,13 @@ func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 		named = reference.TagNameOnly(named)
 	}
 	patchInfo.Image = named.String()
+
+	// Capture the source tag whenever the reference has one, independent of
+	// the patched-tag defaulting below. A digest-pinned reference carries no
+	// tag; that must not be treated as an error here.
+	if taggedName, ok := named.(reference.Tagged); ok {
+		patchInfo.ImageTag = taggedName.Tag()
+	}
 
 	// If no patched image tag is provided, default to '<image-tag>-patched'
 	if patchInfo.PatchedImageTag == "" {

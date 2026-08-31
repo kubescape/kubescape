@@ -2,12 +2,13 @@ package getter
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/internal/testutils"
+	"github.com/kubescape/kubescape/v4/internal/testutils"
 	"github.com/stretchr/testify/require"
 )
 
@@ -330,6 +331,14 @@ func TestLoadPolicy(t *testing.T) {
 			inputs, err := p.GetControlsInputs(context.TODO(), cluster)
 			require.NoError(t, err)
 			require.EqualValues(t, expected, inputs)
+
+			contents, err := os.ReadFile(fixture)
+			require.NoError(t, err)
+			digest := sha256.Sum256(contents)
+			path, gotDigest, ok := p.ConsumedFileDigest()
+			require.True(t, ok)
+			require.Equal(t, fixture, path)
+			require.Equal(t, fmt.Sprintf("sha256:%x", digest), gotDigest)
 		})
 
 		t.Run("edge case: corrupted json", func(t *testing.T) {

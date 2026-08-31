@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/resources"
@@ -68,7 +68,7 @@ deny contains msga if {
         "packagename":  "armo_builtins",
         "alertScore":   5,
         "fixPaths":     [],
-        "failedPaths":  failPath,
+        "reviewPaths":  failPath,
         "alertObject":  {"k8sApiObjects": [cr]},
     }
 }
@@ -89,7 +89,7 @@ deny contains msga if {
 	}
 	rule.Name = "cluster-role-path-accumulation"
 
-	got, err := opap.processRule(context.Background(), rule, nil, evaluationScope{}, "")
+	got, err := opap.processRule(context.Background(), rule, nil, evaluationScope{}, &reporthandling.Control{})
 	assert.NoError(t, err)
 
 	crResult, ok := got[clusterRole.GetID()]
@@ -100,8 +100,8 @@ deny contains msga if {
 
 	failed := map[string]bool{}
 	for _, p := range crResult.Paths {
-		if p.FailedPath != "" {
-			failed[p.FailedPath] = true
+		if p.ReviewPath != "" {
+			failed[p.ReviewPath] = true
 		}
 	}
 	assert.True(t, failed["metadata.annotations.bound-by-ns-a"],
@@ -188,7 +188,7 @@ func TestProcessRule_NamespaceBucketingStableAcrossAggregatorGrowth(t *testing.T
 	aggregatorRule.Name = "subject-role-rolebinding-aggregator"
 	aggregatorRule.Attributes = map[string]interface{}{"resourcesAggregator": "subject-role-rolebinding"}
 
-	_, err := opap.processRule(context.Background(), aggregatorRule, nil, evaluationScope{}, "")
+	_, err := opap.processRule(context.Background(), aggregatorRule, nil, evaluationScope{}, &reporthandling.Control{})
 	assert.NoError(t, err)
 
 	assert.True(t, cautils.IsLargeCluster(len(opap.AllResources)),
@@ -223,7 +223,7 @@ deny[msga] {
 	}
 	podRule.Name = "pods-evaluated-together"
 
-	got, err := opap.processRule(context.Background(), podRule, nil, evaluationScope{}, "")
+	got, err := opap.processRule(context.Background(), podRule, nil, evaluationScope{}, &reporthandling.Control{})
 	assert.NoError(t, err)
 
 	podAResult, ok := got[podA.GetID()]

@@ -5,11 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 )
 
@@ -322,6 +326,100 @@ func TestCallTool_RunFrameworkScan(t *testing.T) {
 	}
 }
 
+func TestCallTool_NamespaceStarMapsToClusterWide(t *testing.T) {
+	origRBAC, origNetwork, origFramework := rbacScanFn, networkScanFn, frameworkScanFn
+	t.Cleanup(func() {
+		rbacScanFn = origRBAC
+		networkScanFn = origNetwork
+		frameworkScanFn = origFramework
+	})
+
+	type scanCall struct {
+		tool      string
+		namespace string
+	}
+	var calls []scanCall
+	rbacScanFn = func(_ *KubescapeMcpserver, _ context.Context, namespace string) ([]byte, error) {
+		calls = append(calls, scanCall{tool: "rbac", namespace: namespace})
+		return []byte(`{"ok":true}`), nil
+	}
+	networkScanFn = func(_ *KubescapeMcpserver, _ context.Context, namespace string) ([]byte, error) {
+		calls = append(calls, scanCall{tool: "network", namespace: namespace})
+		return []byte(`{"ok":true}`), nil
+	}
+	frameworkScanFn = func(_ *KubescapeMcpserver, _ context.Context, namespace, _ string) ([]byte, error) {
+		calls = append(calls, scanCall{tool: "framework", namespace: namespace})
+		return []byte(`{"ok":true}`), nil
+	}
+
+	ksServer := &KubescapeMcpserver{}
+	tests := []struct {
+		name      string
+		tool      string
+		arguments map[string]any
+		wantTool  string
+		wantNS    string
+	}{
+		{
+			name:      "rbac star is cluster-wide",
+			tool:      "run_rbac_security_scan",
+			arguments: map[string]any{"namespace": "*"},
+			wantTool:  "rbac",
+			wantNS:    "",
+		},
+		{
+			name:      "network star is cluster-wide",
+			tool:      "run_network_security_scan",
+			arguments: map[string]any{"namespace": "*"},
+			wantTool:  "network",
+			wantNS:    "",
+		},
+		{
+			name:      "framework star is cluster-wide",
+			tool:      "run_framework_security_scan",
+			arguments: map[string]any{"namespace": "*", "framework_name": "nsa"},
+			wantTool:  "framework",
+			wantNS:    "",
+		},
+		{
+			name:      "named namespace is preserved",
+			tool:      "run_rbac_security_scan",
+			arguments: map[string]any{"namespace": "kube-system"},
+			wantTool:  "rbac",
+			wantNS:    "kube-system",
+		},
+		{
+			name:      "omitted namespace is cluster-wide",
+			tool:      "run_network_security_scan",
+			arguments: map[string]any{},
+			wantTool:  "network",
+			wantNS:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls = nil
+			res, err := ksServer.CallTool(context.Background(), tt.tool, tt.arguments)
+			if err != nil {
+				t.Fatalf("unexpected error from CallTool itself: %v", err)
+			}
+			if res.IsError {
+				t.Fatalf("unexpected tool error: %s", res.Content[0].(mcp.TextContent).Text)
+			}
+			if len(calls) != 1 {
+				t.Fatalf("expected 1 scan call, got %d: %+v", len(calls), calls)
+			}
+			if calls[0].tool != tt.wantTool {
+				t.Errorf("scan tool = %q, want %q", calls[0].tool, tt.wantTool)
+			}
+			if calls[0].namespace != tt.wantNS {
+				t.Errorf("scan namespace = %q, want %q (empty means cluster-wide)", calls[0].namespace, tt.wantNS)
+			}
+		})
+	}
+}
+
 func TestGetKsClient_RetriesAfterTransientFailure(t *testing.T) {
 	sentinelErr := fmt.Errorf("transient init failure")
 	calls := 0
@@ -391,6 +489,50 @@ func TestGetKsClient_DefaultInitializerIsUsedAndCached(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("expected default initializer to run once, got %d calls", calls)
 	}
+}
+
+// TestGetPolicyGetter_ConcurrentCallsDoNotRace is a regression test for
+// #3444: getPolicyGetter's check-then-set on policyGetter was unguarded,
+// unlike its ksClient/k8sClient/scanSem/scanCtxs siblings on the same
+// struct, and go test -race flagged concurrent calls immediately before the
+// fix.
+func TestGetPolicyGetter_ConcurrentCallsDoNotRace(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+	var wg sync.WaitGroup
+	wg.Add(8)
+	for i := 0; i < 8; i++ {
+		go func() {
+			defer wg.Done()
+			_ = ksServer.getPolicyGetter()
+		}()
+	}
+	wg.Wait()
+}
+
+func TestGetPolicyGetter_LazilyConstructsOnceAndCaches(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+
+	first := ksServer.getPolicyGetter()
+	require.NotNil(t, first)
+	second := ksServer.getPolicyGetter()
+
+	assert.Same(t, first, second, "getPolicyGetter must return the same instance across calls instead of constructing a new one each time")
+}
+
+// TestGetPolicyGetter_DoesNotDiscardPreInitializedInstance is a regression
+// test for the fix's own correctness: mcpServerEntrypoint pre-populates
+// policyGetter directly in the struct literal and warms it via
+// SetRegoObjectsWithFallback before any tool call can reach getPolicyGetter.
+// A sync.Once-based fix (instead of the mutex this uses) would not know
+// that initialization already happened, and would discard the warmed
+// instance on the first call.
+func TestGetPolicyGetter_DoesNotDiscardPreInitializedInstance(t *testing.T) {
+	preInitialized := getter.NewDownloadReleasedPolicy()
+	ksServer := &KubescapeMcpserver{policyGetter: preInitialized}
+
+	got := ksServer.getPolicyGetter()
+
+	assert.Same(t, preInitialized, got, "getPolicyGetter must not replace an already-initialized policyGetter")
 }
 
 func TestGetK8sClient_NotConnectedReturnsError(t *testing.T) {
@@ -508,4 +650,98 @@ func TestGetK8sClient_RetriesAfterTransientLoadFailure(t *testing.T) {
 	if !latch {
 		t.Fatal("expected the connectivity latch to be cleared to true on successful retry")
 	}
+}
+
+func TestCallTool_ScanControls(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+
+	tests := []struct {
+		name          string
+		arguments     map[string]any
+		wantErrString string
+	}{
+		{
+			name:          "missing control_ids",
+			arguments:     map[string]any{},
+			wantErrString: "control_ids argument is required",
+		},
+		{
+			name:          "control_ids wrong type",
+			arguments:     map[string]any{"control_ids": 42},
+			wantErrString: "control_ids must be a comma-separated string or array",
+		},
+		{
+			name:          "control_ids empty string",
+			arguments:     map[string]any{"control_ids": "  ,  "},
+			wantErrString: "control_ids must contain at least one control ID",
+		},
+		{
+			name:          "control_ids empty array",
+			arguments:     map[string]any{"control_ids": []interface{}{}},
+			wantErrString: "control_ids must contain at least one control ID",
+		},
+		{
+			name:          "namespace not a string",
+			arguments:     map[string]any{"control_ids": "C-0012", "namespace": 99},
+			wantErrString: "namespace argument must be a string",
+		},
+		{
+			name:          "control_ids mixed array rejects non-string element",
+			arguments:     map[string]any{"control_ids": []interface{}{"C-0012", 42}},
+			wantErrString: "control_ids array elements must be strings",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ksServer.CallTool(t.Context(), "scan_controls", tt.arguments)
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatalf("expected tool error for %q, got success", tt.name)
+			}
+			text := result.Content[0].(mcp.TextContent).Text
+			if tt.wantErrString != "" && !containsSubstring(text, tt.wantErrString) {
+				t.Errorf("error %q does not contain %q", text, tt.wantErrString)
+			}
+		})
+	}
+}
+
+func TestCallTool_ScanControls_ArrayInput(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+	result, err := ksServer.CallTool(t.Context(), "scan_controls", map[string]any{
+		"control_ids": []interface{}{"C-0012", "C-0017"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if result.IsError {
+		text := result.Content[0].(mcp.TextContent).Text
+		if containsSubstring(text, "control_ids") {
+			t.Errorf("array input should pass argument validation but got control_ids error: %s", text)
+		}
+	}
+}
+
+func TestCallTool_ListingTools_UnknownToolFallthrough(t *testing.T) {
+
+	ksServer := &KubescapeMcpserver{}
+	_, err := ksServer.CallTool(t.Context(), "not_a_real_tool", map[string]any{})
+	if err == nil {
+		t.Fatal("expected Go error for unknown tool name")
+	}
+}
+
+func containsSubstring(s, sub string) bool {
+	if len(sub) == 0 {
+		return true
+	}
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

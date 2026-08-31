@@ -16,7 +16,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 )
 
@@ -24,6 +24,10 @@ import (
 // across scans. Unset (the default) disables the cache entirely, since host
 // sensor data is live node state that a scan is expected to reflect.
 const HostSensorCacheTtlEnvVar = "HOSTSENSOR_CACHE_TTL"
+
+// maxHostSensorCachePayloadBytes bounds decompressed cache reads to prevent
+// memory exhaustion / decompression bombs from corrupted or oversized cache files.
+const maxHostSensorCachePayloadBytes = 50 * 1024 * 1024 // 50 MB
 
 var DefaultCacheDir string
 
@@ -111,7 +115,7 @@ func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDat
 	}
 	defer gr.Close()
 
-	data, err := io.ReadAll(gr)
+	data, err := io.ReadAll(io.LimitReader(gr, maxHostSensorCachePayloadBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +123,13 @@ func loadFromCache(clusterName, resourceName string) ([]hostsensor.HostSensorDat
 	var envelopes []hostsensor.HostSensorDataEnvelope
 	if err := json.Unmarshal(data, &envelopes); err != nil {
 		return nil, err
+	}
+
+	if len(envelopes) == 0 {
+		// An empty entry carries no node data, only the absence of it. Serving it
+		// keeps a node-agent outage reported as "didn't report any <resource>"
+		// until the TTL runs out, long after the agent is back.
+		return nil, os.ErrNotExist
 	}
 
 	logger.L().Debug("Loaded host sensor envelopes from cache", helpers.String("resource", resourceName), helpers.Int("count", len(envelopes)))
@@ -134,6 +145,13 @@ func saveToCacheWithRename(clusterName, resourceName string, envelopes []hostsen
 		// An unresolved API server host is a shared cache key across every
 		// caller in that state; loadFromCache always refuses to read it back,
 		// so writing it is dead I/O and unnecessary disk data at rest.
+		return nil
+	}
+
+	if len(envelopes) == 0 {
+		// Nothing collected means the node-agent had nothing to report yet, not
+		// that the cluster has no node data. Persisting it would pin that outage
+		// for the whole TTL, and loadFromCache refuses to serve it back anyway.
 		return nil
 	}
 

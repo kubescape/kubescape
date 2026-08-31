@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-BASE_DIR=~/.kubescape
+BASE_DIR="${HOME}/.kubescape"
 KUBESCAPE_EXEC=kubescape
 
 # Function to determine OS and architecture
@@ -74,9 +74,27 @@ sha256_of() {
 #
 # This binds the binary to the manifest, not to the project's signing identity:
 # both are fetched from the same release over the same channel, so it does not
-# defend against a compromised release or GitHub account. Use the cosign
-# signature or build provenance attestation for that. It does close the case
+# defend against a compromised release or GitHub account. It does close the case
 # where only the binary object is substituted or corrupted in transit.
+#
+# Two stronger checks defend against a compromised release, and both are
+# deliberately left manual: each needs a tool that is not present on a stock
+# machine, so running them here would either hard-fail every install or degrade
+# to a check that reports success without having verified anything.
+#
+#   1. Signing identity - cosign signature over the same manifest this function
+#      uses, keyless, so the certificate names the workflow that produced it:
+#
+#        cosign verify-blob checksums.sha256 \
+#          --signature checksums.sha256.sig \
+#          --certificate checksums.sha256.pem \
+#          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#          --certificate-identity-regexp '^https://github\.com/kubescape/kubescape/\.github/workflows/02-release\.yaml@refs/tags/'
+#
+#   2. Build provenance - SLSA attestation over the binary itself, stored in
+#      GitHub's attestation index rather than as a release asset:
+#
+#        gh attestation verify kubescape --repo kubescape/kubescape
 #
 # Fail closed. A missing manifest or a missing entry means something is wrong
 # with the release, not that verification can be skipped.
@@ -132,9 +150,9 @@ fi
 # Remove 'v' prefix if present for the filename
 VERSION_NUM="${VERSION#v}"
 
-mkdir -p $BASE_DIR
+mkdir -p "$BASE_DIR"
 
-OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
+OUTPUT="$BASE_DIR/$KUBESCAPE_EXEC"
 # New URL pattern: kubescape_{version}_{os}_{arch}
 ASSET="kubescape_${VERSION_NUM}_${osName}_${arch}"
 RELEASE_URL="https://github.com/kubescape/kubescape/releases/download/${VERSION}"
@@ -166,31 +184,25 @@ fi
 echo -e "\033[32mChecksum verified."
 
 # Determine install directory
-install_dir=/usr/local/bin
-[ "$(id -u)" -ne 0 ] && install_dir=$BASE_DIR/bin && export PATH=$PATH:$BASE_DIR/bin
+install_dir="/usr/local/bin"
+[ "$(id -u)" -ne 0 ] && install_dir="$BASE_DIR/bin" && export PATH="$PATH:$BASE_DIR/bin"
 
 # Create install dir if it does not exist
-mkdir -p $install_dir
+mkdir -p "$install_dir"
 
-chmod +x $OUTPUT
+chmod +x "$OUTPUT"
 
-# Remove old installations
+# Remove old installations — restricted to the two canonical locations only.
+# Previous versions iterated over every directory in $PATH and called `rm -f`
+# with sudo, which could delete an unrelated `kubescape` binary system-wide.
 SUDO=""
-[ "$(id -u)" -ne 0 ] && [ -n "$(which sudo)" ] && [ -f /usr/local/bin/$KUBESCAPE_EXEC ] && SUDO=sudo
+[ "$(id -u)" -ne 0 ] && [ -n "$(command -v sudo)" ] && [ -f "/usr/local/bin/$KUBESCAPE_EXEC" ] && SUDO=sudo
 
 remove_old_install "/usr/local/bin/$KUBESCAPE_EXEC"
 remove_old_install "$BASE_DIR/bin/$KUBESCAPE_EXEC"
 
-# Remove any old installations in user's PATH
-IFS=':' read -ra ADDR <<< "$PATH"
-for pdir in "${ADDR[@]}"; do
-  if [ "$pdir/$KUBESCAPE_EXEC" != "$OUTPUT" ]; then
-    remove_old_install "$pdir/$KUBESCAPE_EXEC"
-  fi
-done
-
 # Move the new executable to the install directory
-mv $OUTPUT $install_dir/$KUBESCAPE_EXEC
+mv "$OUTPUT" "$install_dir/$KUBESCAPE_EXEC"
 
 echo -e "\033[32mFinished Installation."
 

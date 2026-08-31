@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: node-maintainer-crb
+subjects:
+- kind: ServiceAccount
+  name: node-agent
+  namespace: ops
+roleRef:
+  kind: ClusterRole
+  name: node-maintainer
+  apiGroup: rbac.authorization.k8s.io

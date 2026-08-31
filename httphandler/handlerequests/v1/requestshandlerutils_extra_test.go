@@ -1,9 +1,11 @@
 package v1
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
@@ -40,12 +42,28 @@ func TestEnvHelpers(t *testing.T) {
 }
 
 func TestResponseToBytes(t *testing.T) {
-	got := responseToBytes(&utilsmetav1.Response{
-		Type:     "done",
-		Response: "ok",
+	t.Run("valid response marshals successfully", func(t *testing.T) {
+		got := responseToBytes(&utilsmetav1.Response{
+			Type:     "done",
+			Response: "ok",
+		})
+
+		assert.JSONEq(t, `{"id":"","type":"done","response":"ok"}`, string(got))
 	})
 
-	assert.JSONEq(t, `{"id":"","type":"done","response":"ok"}`, string(got))
+	t.Run("marshal error returns fallback JSON", func(t *testing.T) {
+		// A channel cannot be marshaled to JSON, triggering the error path.
+		got := responseToBytes(&utilsmetav1.Response{
+			Response: make(chan int),
+		})
+
+		assert.NotEmpty(t, got)
+
+		var decoded utilsmetav1.Response
+		err := json.Unmarshal(got, &decoded)
+		assert.NoError(t, err)
+		assert.Contains(t, decoded.Response, "failed to marshal response")
+	})
 }
 
 func TestWriteScanErrorToFile(t *testing.T) {
@@ -69,6 +87,9 @@ func TestWriteScanErrorToFile(t *testing.T) {
 // exercise the MkdirAll call - t.TempDir() itself always exists, so this
 // nests one level under it.
 func TestWriteScanErrorToFile_CreatesDirectoryWithRestrictivePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping directory permission test on Windows")
+	}
 	nested := filepath.Join(t.TempDir(), "failed")
 	oldFailedOutputDir := FailedOutputDir
 	FailedOutputDir = nested

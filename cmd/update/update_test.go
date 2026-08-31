@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/meta"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/meta"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,6 +29,9 @@ func (s *stubKubescape) SetContext(ctx context.Context) {
 func (s *stubKubescape) Scan(*cautils.ScanInfo, []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
 	return nil, nil
 }
+func (s *stubKubescape) ScanContext(context.Context, *cautils.ScanInfo, []cautils.PolicyIdentifier) (*resultshandling.ResultsHandler, error) {
+	return nil, nil
+}
 func (s *stubKubescape) List(*metav1.ListPolicies) (*metav1.ListResult, error) {
 	return nil, nil
 }
@@ -37,6 +40,9 @@ func (s *stubKubescape) Download(*metav1.DownloadInfo) (*metav1.DownloadResult, 
 }
 func (s *stubKubescape) SetCachedConfig(*metav1.SetConfig) error   { return nil }
 func (s *stubKubescape) ViewCachedConfig(*metav1.ViewConfig) error { return nil }
+func (s *stubKubescape) ValidateCachedConfig(*metav1.ValidateConfig) error {
+	return nil
+}
 func (s *stubKubescape) DeleteCachedConfig(*metav1.DeleteConfig) error {
 	return nil
 }
@@ -48,6 +54,9 @@ func (s *stubKubescape) Patch(*metav1.PatchInfo, *cautils.ScanInfo) (bool, error
 	return false, nil
 }
 func (s *stubKubescape) ScanImage(*metav1.ImageScanInfo, *cautils.ScanInfo) (bool, error) {
+	return false, nil
+}
+func (s *stubKubescape) ScanImageContext(context.Context, *metav1.ImageScanInfo, *cautils.ScanInfo) (bool, error) {
 	return false, nil
 }
 
@@ -127,6 +136,72 @@ func TestGetUpdateCmd_ReportsAvailableUpdate(t *testing.T) {
 
 	assert.Equal(t, "v3.1.0", versioncheck.LatestReleaseVersion)
 	assert.Contains(t, string(out), "Version v3.1.0 is available.")
+}
+
+func TestGetUpdateCmd_UnsupportedFormat(t *testing.T) {
+	withVersionCheckHandler(t, versioncheck.NewVersionCheckHandlerMock())
+	withVersionGlobals(t, "v3.0.0", "")
+
+	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+	require.NotNil(t, cmd)
+
+	err := cmd.Flags().Set("format", "yaml")
+	require.NoError(t, err)
+
+	err = cmd.RunE(cmd, []string{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported format \"yaml\"")
+}
+
+func TestGetUpdateCmd_JSON_ReportsAvailableUpdate(t *testing.T) {
+	withVersionCheckHandler(t, &stubVersionCheckHandler{latest: "v3.1.0"})
+	withVersionGlobals(t, "v3.0.0", "")
+
+	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+	require.NotNil(t, cmd)
+
+	err := cmd.Flags().Set("format", "json")
+	require.NoError(t, err)
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	origStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = origStdout })
+
+	assert.NoError(t, cmd.RunE(cmd, []string{}))
+	require.NoError(t, w.Close())
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+
+	assert.Equal(t, "v3.1.0", versioncheck.LatestReleaseVersion)
+	assert.Contains(t, string(out), `"latestVersion":"v3.1.0"`)
+	assert.Contains(t, string(out), `"installationLink":"https://kubescape.io/docs/install-cli/"`)
+}
+
+func TestGetUpdateCmd_JSON_NothingToUpdate(t *testing.T) {
+	withVersionCheckHandler(t, &stubVersionCheckHandler{latest: "v3.0.0"})
+	withVersionGlobals(t, "v3.0.0", "")
+
+	cmd := GetUpdateCmd(&stubKubescape{ctx: context.Background()})
+	require.NotNil(t, cmd)
+
+	err := cmd.Flags().Set("format", "json")
+	require.NoError(t, err)
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	origStdout := os.Stdout
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = origStdout })
+
+	assert.NoError(t, cmd.RunE(cmd, []string{}))
+	require.NoError(t, w.Close())
+	out, err := io.ReadAll(r)
+	require.NoError(t, err)
+
+	assert.Equal(t, "v3.0.0", versioncheck.LatestReleaseVersion)
+	assert.Contains(t, string(out), `"message":"Nothing to update: you are running the latest version"`)
 }
 
 func TestUpdateCommandDoesNotHonorSkipUpdateCheckEnv(t *testing.T) {

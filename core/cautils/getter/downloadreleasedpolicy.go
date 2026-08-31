@@ -49,7 +49,22 @@ func NewDownloadReleasedPolicyWithVersion(version string) *DownloadReleasedPolic
 // IsVersionPinned reports whether this getter targets a specific, user-selected
 // regolibrary release tag rather than the latest release.
 func (drp *DownloadReleasedPolicy) IsVersionPinned() bool {
+	if drp == nil {
+		return false
+	}
 	return drp.version != ""
+}
+
+// ShouldPersistPolicyArtifacts reports whether policies fetched by this getter
+// may be published to Kubescape's shared, unversioned disk fallback. A pinned
+// release must not replace that fallback because the flat cache path does not
+// record release provenance; doing so would let a later unpinned fallback
+// silently evaluate the pinned release.
+func (drp *DownloadReleasedPolicy) ShouldPersistPolicyArtifacts() bool {
+	if drp == nil {
+		return false
+	}
+	return !drp.IsVersionPinned()
 }
 
 // SetRegoObjectsWithFallback downloads the policy objects and reports whether

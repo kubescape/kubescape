@@ -10,6 +10,31 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type doneObservedContext struct {
+	context.Context
+	once     sync.Once
+	observed chan struct{}
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
+
+func receiveWithin[T any](t *testing.T, ch <-chan T, event string) T {
+	t.Helper()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case value := <-ch:
+		return value
+	case <-timer.C:
+		t.Fatalf("timed out waiting for %s", event)
+		var zero T
+		return zero
+	}
+}
+
 func TestDoScanChan_Deduplication(t *testing.T) {
 	ksServer := &KubescapeMcpserver{}
 	var runCount int
@@ -81,6 +106,72 @@ func TestDoScanChan_Cancellation(t *testing.T) {
 
 	// The background scan should still be running and finish cleanly
 	<-scanFinished
+}
+
+func TestDoScanChan_NewCallerDoesNotInheritCanceledGeneration(t *testing.T) {
+	ksServer := &KubescapeMcpserver{}
+
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	oldStarted := make(chan struct{})
+	oldCanceled := make(chan struct{})
+	releaseOld := make(chan struct{})
+	oldReturned := make(chan struct{})
+	firstDone := make(chan error, 1)
+	var releaseOldOnce sync.Once
+	releaseOldScan := func() {
+		releaseOldOnce.Do(func() { close(releaseOld) })
+	}
+	t.Cleanup(cancelFirst)
+	t.Cleanup(releaseOldScan)
+
+	go func() {
+		_, err := ksServer.doScanChan(firstCtx, "reused_key", func(scanCtx context.Context) (interface{}, error) {
+			close(oldStarted)
+			<-scanCtx.Done()
+			close(oldCanceled)
+			<-releaseOld
+			close(oldReturned)
+			return nil, scanCtx.Err()
+		})
+		firstDone <- err
+	}()
+
+	receiveWithin(t, oldStarted, "old scan to start")
+	cancelFirst()
+	assert.ErrorIs(t, receiveWithin(t, firstDone, "first caller to return"), context.Canceled)
+	receiveWithin(t, oldCanceled, "old scan to observe cancellation")
+
+	enteredSelect := make(chan struct{})
+	freshCtx := &doneObservedContext{
+		Context:  context.Background(),
+		observed: enteredSelect,
+	}
+	freshStarted := make(chan struct{})
+	freshDone := make(chan error, 1)
+	var freshResult interface{}
+	go func() {
+		var err error
+		freshResult, err = ksServer.doScanChan(freshCtx, "reused_key", func(context.Context) (interface{}, error) {
+			close(freshStarted)
+			return "fresh result", nil
+		})
+		freshDone <- err
+	}()
+
+	// Done is evaluated only after DoChan has either joined the old call or
+	// registered a new generation. Keep the old call alive until that point so
+	// this test exercises the singleflight cleanup window deterministically.
+	receiveWithin(t, enteredSelect, "fresh caller to register with singleflight")
+	releaseOldScan()
+
+	assert.NoError(t, receiveWithin(t, freshDone, "fresh caller to return"))
+	assert.Equal(t, "fresh result", freshResult)
+	select {
+	case <-freshStarted:
+	default:
+		t.Error("fresh scan function was not called")
+	}
+	receiveWithin(t, oldReturned, "old scan function to return")
 }
 
 func TestDoScanChan_ConcurrencyLimit(t *testing.T) {

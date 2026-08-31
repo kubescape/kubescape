@@ -9,8 +9,8 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -19,9 +19,36 @@ import (
 )
 
 func TestNewJsonPrinter(t *testing.T) {
-	pp := NewJsonPrinter("")
+	pp := NewJsonPrinter()
 	assert.NotNil(t, pp)
-	assert.Empty(t, pp)
+}
+
+// TestSetWriter_Json_CaseInsensitiveExtension guards against the extension
+// check regressing to a case-sensitive comparison: an outputFile whose
+// extension already matches --output's target extension in a different case
+// (e.g. "Report.JSON") must not have the extension appended a second time.
+func TestSetWriter_Json_CaseInsensitiveExtension(t *testing.T) {
+	tests := []struct {
+		name       string
+		outputFile string
+	}{
+		{"lowercase extension", "report.json"},
+		{"uppercase extension", "Report.JSON"},
+		{"mixed case extension", "Report.Json"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			target := tmpDir + string(os.PathSeparator) + tt.outputFile
+
+			jp := NewJsonPrinter()
+			require.NoError(t, jp.SetWriter(context.TODO(), target))
+			require.NotNil(t, jp.writer)
+			defer jp.writer.Close()
+
+			assert.Equal(t, target, jp.writer.Name(), "extension should not be appended a second time")
+		})
+	}
 }
 
 func TestScore_Json(t *testing.T) {
@@ -67,7 +94,7 @@ func TestScore_Json(t *testing.T) {
 		},
 	}
 
-	jp := NewJsonPrinter("")
+	jp := NewJsonPrinter()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -145,6 +172,15 @@ func TestActionPrintOmitsExceptionAuditWhenNil(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestActionPrintIncludesSessionIDAsReportGUID(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.SessionID = "scan-6f012842"
+
+	got := jsonPrinterOutput(t, session)
+
+	assert.Equal(t, "scan-6f012842", got["reportGUID"])
+}
+
 func jsonPrinterOutput(t *testing.T, session *cautils.OPASessionObj) map[string]any {
 	t.Helper()
 
@@ -154,7 +190,7 @@ func jsonPrinterOutput(t *testing.T, session *cautils.OPASessionObj) map[string]
 		_ = os.Remove(tmpJson.Name())
 	}()
 
-	jp := NewJsonPrinter("")
+	jp := NewJsonPrinter()
 	jp.writer = tmpJson
 	require.NoError(t, jp.ActionPrint(context.Background(), session, nil))
 	require.NoError(t, tmpJson.Close())

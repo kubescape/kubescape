@@ -7,11 +7,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jwalton/gchalk"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -197,15 +198,32 @@ func printTopComponents(writer *os.File, summary imageprinter.ImageScanSummary) 
 			output += fmt.Sprintf(" %d %s,", topPkg.MapSeverityToCVEsNumber[sortedCVEs[j]], utils.GetColorForVulnerabilitySeverity(sortedCVEs[j])(sortedCVEs[j]))
 		}
 
-		output = output[:len(output)-1]
+		// Only the per-severity loop above appends a trailing comma to strip.
+		// With no recorded severities it never runs, so output still ends in
+		// the seed string's own trailing "-" - stripping unconditionally would
+		// eat that dash instead of a comma.
+		if len(sortedCVEs) > 0 {
+			output = output[:len(output)-1]
+		}
 
-		cautils.StarDisplay(writer, output+"\n")
+		cautils.StarDisplay(writer, "%s\n", output)
 	}
 
 	cautils.SimpleDisplay(writer, "\n")
 }
 
 func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSummary, verboseMode bool) {
+	if summary.VulnDBBuilt != nil {
+		age := time.Since(*summary.VulnDBBuilt)
+		days := int(age.Hours() / 24)
+		info := summary.VulnDBBuilt.UTC().Format("2006-01-02")
+		if days < 1 {
+			cautils.InfoDisplay(writer, fmt.Sprintf("Vulnerability DB built: %s\n", info))
+		} else {
+			cautils.InfoDisplay(writer, fmt.Sprintf("Vulnerability DB built: %s (%d days ago)\n", info, days))
+		}
+	}
+
 	mapSeverityTSummary := getSeverityToSummaryMap(summary, verboseMode)
 
 	// sort keys by severity

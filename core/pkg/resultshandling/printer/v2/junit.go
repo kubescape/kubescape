@@ -5,7 +5,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -13,9 +12,9 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/shared"
@@ -100,15 +99,7 @@ func NewJunitPrinter(verbose bool) *JunitPrinter {
 }
 
 func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) error {
-	explicitOutput := outputFile != ""
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = junitOutputFile
-		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != printer.JunitOutputExt {
-			outputFile = outputFile + printer.JunitOutputExt
-		}
-	}
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JunitResultFormat, outputFile, junitOutputFile)
 	if explicitOutput {
 		var err error
 		jp.writer, err = printer.GetWriterNoFallback(outputFile)
@@ -244,15 +235,23 @@ func imageTestsSuites(imageScanData []cautils.ImageScanData) *JUnitTestSuites {
 
 	suites := make([]JUnitTestSuite, 0, len(imageScanData))
 	for i := range imageScanData {
-		cves := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
-		suites = append(suites, JUnitTestSuite{
+		image := imageScanData[i].Target()
+		cves := extractCVEs(imageScanData[i].Matches, image, imageScanData[i].VexStatuses)
+		suite := JUnitTestSuite{
 			ID:        i,
-			Name:      imageScanData[i].Image,
+			Name:      image,
 			Tests:     len(cves),
 			Failures:  len(cves),
 			Timestamp: timestamp,
-			TestCases: imageTestCases(cves),
-		})
+			TestCases: imageTestCases(cves, imageScanData[i].Platform),
+		}
+		if imageScanData[i].Platform != "" {
+			suite.Properties = []JUnitProperty{
+				{Name: "image", Value: imageScanData[i].Image},
+				{Name: "platform", Value: imageScanData[i].Platform},
+			}
+		}
+		suites = append(suites, suite)
 	}
 
 	tests, failures, errs := aggregateSuiteCounts(suites)
@@ -266,7 +265,7 @@ func imageTestsSuites(imageScanData []cautils.ImageScanData) *JUnitTestSuites {
 }
 
 // imageTestCases converts a set of CVEs into failed JUnit test cases, one per CVE.
-func imageTestCases(cves []imageprinter.CVE) []JUnitTestCase {
+func imageTestCases(cves []imageprinter.CVE, platform string) []JUnitTestCase {
 	testCases := make([]JUnitTestCase, 0, len(cves))
 	for _, cve := range cves {
 		fixMsg := "no fix available"
@@ -274,14 +273,24 @@ func imageTestCases(cves []imageprinter.CVE) []JUnitTestCase {
 			fixMsg = fmt.Sprintf("fixed in: %s", strings.Join(cve.FixVersions, ", "))
 		}
 
+		contents := fmt.Sprintf("CVE: %s\nPackage: %s\nVersion: %s\nSeverity: %s\n%s",
+			cve.ID, cve.Package, cve.Version, cve.Severity, fixMsg)
+		if cve.VexStatus != "" {
+			contents += "\nVEX Status: " + cve.VexStatus
+		}
+		if cve.VexJustification != "" {
+			contents += "\nVEX Justification: " + cve.VexJustification
+		}
+		if platform != "" {
+			contents += "\nPlatform: " + platform
+		}
 		testCases = append(testCases, JUnitTestCase{
 			Classname: cve.Image,
 			Name:      fmt.Sprintf("%s (%s)", cve.ID, cve.Package),
 			Failure: &JUnitFailure{
-				Type:    "Vulnerability",
-				Message: fmt.Sprintf("%s severity vulnerability found in package %s", cve.Severity, cve.Package),
-				Contents: fmt.Sprintf("CVE: %s\nPackage: %s\nVersion: %s\nSeverity: %s\n%s",
-					cve.ID, cve.Package, cve.Version, cve.Severity, fixMsg),
+				Type:     "Vulnerability",
+				Message:  fmt.Sprintf("%s severity vulnerability found in package %s", cve.Severity, cve.Package),
+				Contents: contents,
 			},
 		})
 	}
@@ -391,8 +400,10 @@ func properties(complianceScore float32) []JUnitProperty {
 	}
 }
 
-func (p *JunitPrinter) CloseWriter() {
+// CloseWriter closes the JUnit output writer, returning any error from flushing or closing.
+func (p *JunitPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close() // #nosec G104 -- closing the output writer; the error is not actionable from a void CloseWriter
+		return p.writer.Close()
 	}
+	return nil
 }

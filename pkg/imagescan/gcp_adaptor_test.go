@@ -18,18 +18,21 @@ import (
 )
 
 type mockGCPClient struct {
-	occurrences []*grafeaspb.Occurrence
-	mockErr     error
-	lastReq     *grafeaspb.ListOccurrencesRequest
+	occurrences  []*grafeaspb.Occurrence
+	mockErr      error
+	lastReq      *grafeaspb.ListOccurrencesRequest
+	lastIterator *mockGrafeasIterator
 }
 
 func (m *mockGCPClient) ListOccurrences(ctx context.Context, req *grafeaspb.ListOccurrencesRequest, opts ...interface{}) GrafeasIterator {
 	m.lastReq = req
-	return &mockGrafeasIterator{
+	it := &mockGrafeasIterator{
 		occurrences: m.occurrences,
 		err:         m.mockErr,
 		index:       0,
 	}
+	m.lastIterator = it
+	return it
 }
 
 type mockGrafeasIterator struct {
@@ -122,6 +125,43 @@ func TestGCPAdaptor_GetImagesScanStatus(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGCPAdaptor_GetImagesScanStatus_Bounded guards against an unbounded
+// ListOccurrences loop: a registry that keeps returning non-terminal (e.g.
+// PENDING) discovery occurrences must not make GetImagesScanStatus walk the
+// entire response. Mirrors the maxVulns cap GetImagesVulnerabilities already
+// enforces in this file.
+func TestGCPAdaptor_GetImagesScanStatus_Bounded(t *testing.T) {
+	mockOccurrences := make([]*grafeaspb.Occurrence, 0, 5000)
+	for i := 0; i < 5000; i++ {
+		mockOccurrences = append(mockOccurrences, &grafeaspb.Occurrence{
+			Details: &grafeaspb.Occurrence_Discovery{
+				Discovery: &grafeaspb.DiscoveryOccurrence{
+					AnalysisStatus: grafeaspb.DiscoveryOccurrence_PENDING, // never terminal
+				},
+			},
+		})
+	}
+
+	client := &mockGCPClient{occurrences: mockOccurrences}
+	adaptor := NewGCPAdaptor()
+	adaptor.client = client
+
+	images := []ContainerImageIdentifier{
+		{Registry: "us-docker.pkg.dev", Repository: "my-project/my-repo/my-image", Hash: "sha256:1234"},
+	}
+
+	statuses, err := adaptor.GetImagesScanStatus(context.Background(), images)
+	require.NoError(t, err)
+	require.Len(t, statuses, 1)
+	assert.False(t, statuses[0].IsScanAvailable)
+
+	// The mock only reports iterator.Done once every occurrence is consumed,
+	// so an index short of len(mockOccurrences) proves the loop stopped on
+	// its own cap rather than draining the whole (simulated) response.
+	require.NotNil(t, client.lastIterator)
+	assert.Less(t, client.lastIterator.index, len(mockOccurrences), "GetImagesScanStatus consumed the entire unbounded response instead of stopping at a cap")
 }
 
 func TestGCPAdaptor_GetImagesVulnerabilities(t *testing.T) {

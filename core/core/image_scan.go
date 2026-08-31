@@ -13,13 +13,14 @@ import (
 	"sync"
 	"syscall"
 
+	stereoscopeimage "github.com/anchore/stereoscope/pkg/image"
 	"github.com/distribution/reference"
 
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	ksmetav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
-	"github.com/kubescape/kubescape/v3/pkg/imagescan"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 )
 
 // Data structure to represent attributes
@@ -290,6 +291,29 @@ type imageScanService interface {
 	Scan(context.Context, string, imagescan.RegistryCredentials, []string, []string) (*cautils.ImageScanData, error)
 }
 
+type platformImageScanService interface {
+	ScanWithOptions(context.Context, string, imagescan.RegistryCredentials, []string, []string, imagescan.ScanOptions) (*cautils.ImageScanData, error)
+}
+
+func scanImageForPlatform(
+	ctx context.Context,
+	svc imageScanService,
+	img string,
+	creds imagescan.RegistryCredentials,
+	vulnExceptions, sevExceptions []string,
+	platform string,
+) (*cautils.ImageScanData, error) {
+	if platform == "" {
+		return svc.Scan(ctx, img, creds, vulnExceptions, sevExceptions)
+	}
+
+	platformSvc, ok := svc.(platformImageScanService)
+	if !ok {
+		return nil, fmt.Errorf("image scanner does not support target platform %q", platform)
+	}
+	return platformSvc.ScanWithOptions(ctx, img, creds, vulnExceptions, sevExceptions, imagescan.ScanOptions{Platform: platform})
+}
+
 func scanWithRegistryMapping(
 	ctx context.Context,
 	svc imageScanService,
@@ -297,6 +321,7 @@ func scanWithRegistryMapping(
 	credsList []imagescan.RegistryCredentials,
 	registryMapping map[string]string,
 	vulnExceptions, sevExceptions []string,
+	platform string,
 ) (*cautils.ImageScanData, error) {
 	if len(credsList) == 0 {
 		credsList = []imagescan.RegistryCredentials{{}}
@@ -306,7 +331,7 @@ func scanWithRegistryMapping(
 	var scanData *cautils.ImageScanData
 
 	for _, creds := range credsList {
-		scanData, lastErr = svc.Scan(ctx, img, creds, vulnExceptions, sevExceptions)
+		scanData, lastErr = scanImageForPlatform(ctx, svc, img, creds, vulnExceptions, sevExceptions, platform)
 		if lastErr == nil {
 			return scanData, nil
 		}
@@ -317,7 +342,7 @@ func scanWithRegistryMapping(
 			mappedImage, matched, mapErr := applyRegistryMapping(img, registryMapping)
 			if mapErr == nil && matched {
 				logger.L().Info(fmt.Sprintf("Scanning mapped image %s (original: %s)...", mappedImage, img))
-				scanData, fallbackErr := svc.Scan(ctx, mappedImage, creds, vulnExceptions, sevExceptions)
+				scanData, fallbackErr := scanImageForPlatform(ctx, svc, mappedImage, creds, vulnExceptions, sevExceptions, platform)
 				if fallbackErr == nil {
 					return scanData, nil
 				}
@@ -331,15 +356,32 @@ func scanWithRegistryMapping(
 	return nil, lastErr
 }
 
+// ScanImage scans imgScanInfo.Image using ks.Context() as the operation's
+// context. It is a compatibility wrapper around ScanImageContext for callers
+// that have not migrated to passing their own context explicitly; see
+// ScanImageContext's documentation for why that matters when a *Kubescape
+// instance is reused or scan operations can overlap.
 func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (bool, error) {
+	return ks.ScanImageContext(ks.Context(), imgScanInfo, scanInfo)
+}
+
+// ScanImageContext scans imgScanInfo.Image bound to the given ctx for its
+// complete execution, rather than re-reading ks.Context() at each stage as
+// ScanImage's predecessor did (matching Kubescape.Scan's own ScanContext
+// migration, #3237). Callers that need a deadline or cancellation should
+// derive ctx themselves and pass it in directly, instead of calling
+// ks.SetContext beforehand: mutating the shared *Kubescape's context is not
+// safe if the instance is reused or another operation could run
+// concurrently against it.
+func (ks *Kubescape) ScanImageContext(ctx context.Context, imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (bool, error) {
 	logger.L().Start(fmt.Sprintf("Scanning image %s...", imgScanInfo.Image))
 
-	distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL)
+	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, scanInfo.SkipDBUpdate)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Invalid Grype database URL '%s': %v", scanInfo.ListingURL, err))
 		return false, err
 	}
-	svc, err := imagescan.NewScanServiceWithMatchers(distCfg, installCfg, imgScanInfo.UseDefaultMatchers)
+	svc, err := imagescan.NewScanServiceWithMatchersAndSources(distCfg, installCfg, imgScanInfo.UseDefaultMatchers, nil, shouldUpdate)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to initialize image scanner: %s", err))
 		return false, err
@@ -366,8 +408,8 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 	}
 
 	imageScanData, err := scanWithRegistryMapping(
-		ks.Context(), svc, imgScanInfo.Image, []imagescan.RegistryCredentials{creds},
-		scanInfo.RegistryMapping, vulnerabilityExceptions, severityExceptions,
+		ctx, svc, imgScanInfo.Image, []imagescan.RegistryCredentials{creds},
+		scanInfo.RegistryMapping, vulnerabilityExceptions, severityExceptions, imgScanInfo.Platform,
 	)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to scan image %s: %s", imgScanInfo.Image, err))
@@ -378,18 +420,18 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 
 	scanInfo.SetScanType(cautils.ScanTypeImage)
 
-	outputPrinters, err := GetOutputPrinters(scanInfo, ks.Context(), "")
+	outputPrinters, err := GetOutputPrinters(scanInfo, ctx, "")
 	if err != nil {
 		return false, err
 	}
 
-	uiPrinter := GetUIPrinter(ks.Context(), scanInfo, "")
+	uiPrinter := GetUIPrinter(ctx, scanInfo, "")
 
 	resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
 
 	resultsHandler.ImageScanData = []cautils.ImageScanData{*imageScanData}
 
-	return svc.ExceedsSeverityThreshold(imagescan.ParseSeverity(scanInfo.FailThresholdSeverity), imageScanData.Matches, scanInfo.OnlyFixable), resultsHandler.HandleResults(ks.Context(), scanInfo)
+	return svc.ExceedsSeverityThreshold(imagescan.ParseSeverity(scanInfo.FailThresholdSeverity), imageScanData.Matches, scanInfo.OnlyFixable), resultsHandler.HandleResults(ctx, scanInfo)
 }
 
 // ScanErrorCategory defines distinct vulnerability scan failure categories.
@@ -511,6 +553,8 @@ func (a *ScanErrorAggregator) Error() string {
 // ImageScanJob represents an item of work for the concurrent scanner.
 type ImageScanJob struct {
 	Image                   string
+	Platform                string
+	SkipUnavailablePlatform bool
 	RegistryCredentials     []imagescan.RegistryCredentials
 	VulnerabilityExceptions []string
 	SeverityExceptions      []string
@@ -519,9 +563,15 @@ type ImageScanJob struct {
 
 // ImageScanResult conveys the scan output and categorized errors from a worker.
 type ImageScanResult struct {
-	Image    string
-	ScanData *cautils.ImageScanData
-	Error    error
+	Image      string
+	Platform   string
+	ScanData   *cautils.ImageScanData
+	Error      error
+	SkipReason error
+}
+
+func imageScanTarget(image, platform string) string {
+	return cautils.ImageScanTarget(image, platform)
 }
 
 // ImageScanOrchestrator coordinates concurrent image scan execution across a worker pool.
@@ -568,15 +618,17 @@ func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScan
 		go func() {
 			defer wg.Done()
 			for job := range jobChan {
+				target := imageScanTarget(job.Image, job.Platform)
 				select {
 				case <-ctx.Done():
 					cancelErr := fmt.Errorf("scan canceled: %w", ctx.Err())
 					if o.errorAggregator != nil {
-						o.errorAggregator.Add(job.Image, cancelErr)
+						o.errorAggregator.Add(target, cancelErr)
 					}
 					resultChan <- ImageScanResult{
-						Image: job.Image,
-						Error: cancelErr,
+						Image:    job.Image,
+						Platform: job.Platform,
+						Error:    cancelErr,
 					}
 					continue
 				default:
@@ -584,15 +636,25 @@ func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScan
 
 				scanData, err := scanWithRegistryMapping(
 					ctx, o.svc, job.Image, job.RegistryCredentials,
-					job.RegistryMapping, job.VulnerabilityExceptions, job.SeverityExceptions,
+					job.RegistryMapping, job.VulnerabilityExceptions, job.SeverityExceptions, job.Platform,
 				)
+				if scanData != nil && scanData.Platform == "" {
+					scanData.Platform = job.Platform
+				}
+				if err != nil && job.SkipUnavailablePlatform && isUnavailablePlatformError(err) {
+					resultChan <- ImageScanResult{
+						Image: job.Image, Platform: job.Platform, SkipReason: err,
+					}
+					continue
+				}
 				if err != nil {
 					if o.errorAggregator != nil {
-						o.errorAggregator.Add(job.Image, err)
+						o.errorAggregator.Add(target, err)
 					}
 				}
 				resultChan <- ImageScanResult{
 					Image:    job.Image,
+					Platform: job.Platform,
 					ScanData: scanData,
 					Error:    err,
 				}
@@ -608,6 +670,20 @@ func (o *ImageScanOrchestrator) ScanImages(ctx context.Context, jobs []ImageScan
 		results = append(results, res)
 	}
 	return results
+}
+
+func isUnavailablePlatformError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var platformMismatch *stereoscopeimage.ErrPlatformMismatch
+	if errors.As(err, &platformMismatch) {
+		return true
+	}
+
+	message := strings.ToLower(err.Error())
+	return (strings.Contains(message, "no child with platform ") && strings.Contains(message, " in index ")) ||
+		strings.Contains(message, "no manifest found in manifest list for platform ")
 }
 
 // GetErrorAggregator returns the orchestrator's scan error aggregator.

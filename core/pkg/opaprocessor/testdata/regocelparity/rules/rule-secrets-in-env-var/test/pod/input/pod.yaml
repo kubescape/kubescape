@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: audit-pod
+  labels:
+    app: audit-pod
+spec:
+  containers:
+  - name: test-container
+    env :
+      - name : azure_batch_key
+        value : "Hello from the environment"
+    image: hashicorp/http-echo:0.2.3
+    securityContext:
+      allowPrivilegeEscalation: true
+  - name : test-container2
+    env :
+        - name : random
+          valueFrom:
+            secretKeyRef:
+              name: mysecret
+              key: password
+    image : hashicorp/http-echo:0.2.3

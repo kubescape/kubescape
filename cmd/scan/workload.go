@@ -1,15 +1,12 @@
 package scan
 
 import (
-	"errors"
 	"fmt"
 	"io"
-	"regexp"
-	"strings"
 
-	"github.com/kubescape/kubescape/v3/cmd/shared"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/meta"
+	"github.com/kubescape/kubescape/v4/cmd/shared"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/meta"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/spf13/cobra"
@@ -41,8 +38,20 @@ var (
 
 
 `, cautils.ExecName())
+)
 
-	ErrInvalidWorkloadIdentifier = errors.New("invalid workload identifier, expected <kind>[.<version>[.<group>]]/<name>")
+// The workload identifier grammar is shared with the MCP server, which cannot
+// import cmd/scan without pulling in cobra and the whole command tree, so it
+// lives in core/cautils/workloadidentifier.go. These aliases keep the call
+// sites below unchanged.
+//
+// ErrInvalidWorkloadIdentifier is aliased rather than redeclared on purpose:
+// callers compare against it by identity, which a second errors.New carrying
+// the same message would not satisfy.
+var (
+	ErrInvalidWorkloadIdentifier  = cautils.ErrInvalidWorkloadIdentifier
+	parseWorkloadIdentifierString = cautils.ParseWorkloadIdentifierString
+	validateWorkloadIdentifier    = cautils.ValidateWorkloadIdentifier
 )
 
 // controlCmd represents the control command
@@ -57,7 +66,8 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			return validateWorkloadArgs(args, scanInfo)
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			defer applyTimeout(scanInfo, ks)()
+			ctx, cancel := deriveTimeoutContext(scanInfo, ks)
+			defer cancel()
 
 			if err := validateWorkloadArgs(args, scanInfo); err != nil {
 				return err
@@ -91,17 +101,24 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			}
 
 			policyIdentifiers := setWorkloadScanInfo(scanInfo, kind, name, apiVersion)
+			if err := validateCombinedImageScanFlags(scanInfo); err != nil {
+				return err
+			}
 
-			results, err := ks.Scan(scanInfo, policyIdentifiers)
+			results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 			if err != nil {
 				return err
 			}
 
-			if err = results.HandleResults(ks.Context(), scanInfo); err != nil {
+			if err = results.HandleResults(ctx, scanInfo); err != nil {
 				return err
 			}
 
-			if err := enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo); err != nil {
+			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
+				return fmt.Errorf("scan compliance-score is below permitted threshold: %.2f (compliance-threshold: %.2f)", results.GetComplianceScore(), scanInfo.ComplianceThreshold)
+			}
+
+			if err := enforceSeverityThresholds(&results.GetData().Report.SummaryDetails, scanInfo); err != nil {
 				return err
 			}
 			if scanInfo.ScanImages {
@@ -116,7 +133,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				return err
 			}
 
-			return nil
+			return enforceBaselineDrift(ctx, results, scanInfo)
 		},
 	}
 
@@ -177,63 +194,4 @@ func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string, a
 	}
 
 	return policyIdentifiers
-}
-
-func validateWorkloadIdentifier(workloadIdentifier string) error {
-	_, _, _, _, err := parseWorkloadIdentifierString(workloadIdentifier)
-	return err
-}
-
-func parseWorkloadIdentifierString(workloadIdentifier string) (namespace, kind, name, apiVersion string, err error) {
-	// workloadIdentifier is in the form of kind/name or namespace/kind/name
-	// example: default/Deployment/nginx-deployment
-	x := strings.Split(workloadIdentifier, "/")
-	if len(x) == 2 {
-		if x[0] == "" || x[1] == "" {
-			return "", "", "", "", ErrInvalidWorkloadIdentifier
-		}
-		parsedKind, parsedApiVersion, err := parseKindAndApiVersion(x[0])
-		if err != nil {
-			return "", "", "", "", err
-		}
-		return "", parsedKind, x[1], parsedApiVersion, nil
-	}
-	if len(x) == 3 {
-		if x[0] == "" || x[1] == "" || x[2] == "" {
-			return "", "", "", "", ErrInvalidWorkloadIdentifier
-		}
-		parsedKind, parsedApiVersion, err := parseKindAndApiVersion(x[1])
-		if err != nil {
-			return "", "", "", "", err
-		}
-		return x[0], parsedKind, x[2], parsedApiVersion, nil
-	}
-
-	return "", "", "", "", ErrInvalidWorkloadIdentifier
-}
-
-var apiVersionPattern = regexp.MustCompile(`^v\d+((alpha|beta)\d+)?$`)
-
-func parseKindAndApiVersion(kindStr string) (kind, apiVersion string, err error) {
-	parts := strings.Split(kindStr, ".")
-	if len(parts) == 1 {
-		return kindStr, "", nil
-	}
-
-	// Reject empty components
-	for _, part := range parts {
-		if part == "" {
-			return "", "", fmt.Errorf("%w: empty component in %q", ErrInvalidWorkloadIdentifier, kindStr)
-		}
-	}
-
-	if !apiVersionPattern.MatchString(parts[1]) {
-		return "", "", fmt.Errorf("%w: %q is not a valid API version in %q", ErrInvalidWorkloadIdentifier, parts[1], kindStr)
-	}
-
-	if len(parts) >= 3 {
-		group := strings.Join(parts[2:], ".")
-		return parts[0], group + "/" + parts[1], nil // kind.version.group -> group/version
-	}
-	return parts[0], parts[1], nil // kind.version -> version
 }

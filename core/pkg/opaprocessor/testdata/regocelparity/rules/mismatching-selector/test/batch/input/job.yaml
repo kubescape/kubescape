@@ -1,0 +1,19 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mismatching-selector-job
+spec:
+  selector:
+    matchLabels:
+      app: api
+      tier: backend
+  template:
+    metadata:
+      labels:
+        app: api
+        tier: frontend
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: app
+        image: nginx

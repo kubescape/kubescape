@@ -2,6 +2,9 @@ package opaprocessor
 
 import (
 	"context"
+	"errors"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -9,10 +12,12 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/exceptions"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -38,10 +43,21 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 
 	// remove data from all objects
 	for i := range opap.AllResources {
-		removeData(opap.AllResources[i])
+		if refsByContainer := removeData(opap.AllResources[i]); len(refsByContainer) > 0 {
+			if opap.EnvVarSecretRefs == nil {
+				opap.EnvVarSecretRefs = make(map[string]map[string]map[string]struct{})
+			}
+			opap.EnvVarSecretRefs[i] = refsByContainer
+		}
 	}
 
 	processor := exceptions.NewProcessor()
+
+	// synthesise inline exceptions from resource annotations before filtering
+	// (only when the caller has opted in; disabled by default for cluster scans)
+	if opap.HonorInlineExceptions {
+		opap.Exceptions = append(opap.Exceptions, opap.gatherInlineExceptions()...)
+	}
 	loadedExceptions := append([]armotypes.PostureExceptionPolicy(nil), opap.Exceptions...)
 
 	// filter expired exceptions before applying them
@@ -55,7 +71,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 		if resource, ok := opap.AllResources[i]; ok {
 			t.SetExceptions(
 				resource,
-				opap.Exceptions,
+				resourceScopedExceptions(opap.Exceptions, i),
 				opap.clusterName,
 				opap.AllPolicies.Controls, // update status depending on action required
 				resourcesresults.WithExceptionsProcessor(processor),
@@ -71,7 +87,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	}
 
 	// manual controls have no resource results, so exceptions must be applied directly on the summary.
-	applyExceptionsToManualControls(&opap.Report.SummaryDetails, opap.Exceptions, opap.clusterName, processor)
+	manualControlMatches := applyExceptionsToManualControls(&opap.Report.SummaryDetails, opap.Exceptions, opap.clusterName, processor)
 
 	// set result summary
 	// map control to error
@@ -79,43 +95,62 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
 
 	if opap.AuditExceptions {
-		opap.ExceptionAudit = buildExceptionAudit(loadedExceptions, opap.Exceptions, opap.ResourcesResult, opap.AllResources, opap.AllPolicies, processor)
+		opap.ExceptionAudit = buildExceptionAudit(loadedExceptions, opap.Exceptions, opap.ResourcesResult, opap.AllResources, opap.AllPolicies, processor, manualControlMatches)
 	}
+}
+
+// manualControlExceptionMatch records that exception matched controlID via the
+// manual-control exception path, so buildExceptionAudit can count it as a match the
+// same way it already counts a resource-backed one - manual controls never appear in
+// opap.ResourcesResult, so without this the audit reports such an exception as unused
+// even while it is actively suppressing the control.
+type manualControlExceptionMatch struct {
+	exception armotypes.PostureExceptionPolicy
+	controlID string
 }
 
 // applyExceptionsToManualControls marks manual controls as passed+w/exceptions when
 // an explicit exception exists for them. Updates both the top-level and per-framework
 // control maps since manual controls produce no resource results for the normal exception loop.
+// Returns the exceptions that matched a manual control, for exception-audit bookkeeping.
 func applyExceptionsToManualControls(
 	summaryDetails *reportsummary.SummaryDetails,
 	exceptionPolicies []armotypes.PostureExceptionPolicy,
 	clusterName string,
 	processor *exceptions.Processor,
-) {
+) []manualControlExceptionMatch {
 	if len(exceptionPolicies) == 0 {
-		return
+		return nil
 	}
 
-	applyExceptionsToControlSummaries(summaryDetails.Controls, exceptionPolicies, clusterName, processor)
+	matches := applyExceptionsToControlSummaries(summaryDetails.Controls, exceptionPolicies, clusterName, processor)
 
 	for i := range summaryDetails.Frameworks {
+		// Top-level and per-framework Controls mirror the same controlIDs, so the
+		// matches collected from the top-level pass above already cover this one;
+		// collecting them again here would only duplicate audit bookkeeping.
 		applyExceptionsToControlSummaries(summaryDetails.Frameworks[i].Controls, exceptionPolicies, clusterName, processor)
 	}
+
+	return matches
 }
 
 // applyExceptionsToControlSummaries updates manual controls in a single ControlSummaries map.
+// Returns the exceptions that matched, for exception-audit bookkeeping.
 func applyExceptionsToControlSummaries(
 	controlSummaries reportsummary.ControlSummaries,
 	exceptionPolicies []armotypes.PostureExceptionPolicy,
 	clusterName string,
 	processor *exceptions.Processor,
-) {
+) []manualControlExceptionMatch {
+	var matches []manualControlExceptionMatch
 	for controlID, ctrl := range controlSummaries {
 		if ctrl.GetSubStatus() != apis.SubStatusManualReview {
 			continue
 		}
 
-		if !hasExplicitControlException(exceptionPolicies, controlID, clusterName, processor) {
+		matchingExceptions := matchingControlExceptions(exceptionPolicies, controlID, clusterName, processor)
+		if len(matchingExceptions) == 0 {
 			continue
 		}
 
@@ -124,7 +159,12 @@ func applyExceptionsToControlSummaries(
 			SubStatus:   apis.SubStatusException,
 		})
 		controlSummaries[controlID] = ctrl
+
+		for _, exception := range matchingExceptions {
+			matches = append(matches, manualControlExceptionMatch{exception: exception, controlID: controlID})
+		}
 	}
+	return matches
 }
 
 // requiresResourceMatch reports whether the designator has constraints
@@ -158,9 +198,184 @@ func filterExpiredExceptions(exceptions []armotypes.PostureExceptionPolicy) []ar
 	return valid
 }
 
-// hasExplicitControlException reports whether an exception policy targets controlID
-// with a cluster-or-global-only designator matching clusterName.
-func hasExplicitControlException(exceptionPolicies []armotypes.PostureExceptionPolicy, controlID, clusterName string, processor *exceptions.Processor) bool {
+const (
+	skipControlsAnnotation = "kubescape.io/skip-controls"
+	skipReasonAnnotation   = "kubescape.io/skip-reason"
+	skipExpiryAnnotation   = "kubescape.io/skip-expiry"
+)
+
+// getAnnotation returns the value of a Kubernetes annotation from a workload
+// metadata object. It prefers the typed accessor when available, and falls back
+// to a manual map inspection for non-workload implementations of IMetadata.
+func getAnnotation(obj workloadinterface.IMetadata, key string) (string, bool) {
+	if w, ok := obj.(interface {
+		GetAnnotation(string) (string, bool)
+	}); ok {
+		return w.GetAnnotation(key)
+	}
+
+	if val, ok := workloadinterface.InspectMap(obj.GetObject(), "metadata", "annotations"); ok {
+		if m, ok := val.(map[string]interface{}); ok {
+			if v, ok := m[key]; ok {
+				if s, ok := v.(string); ok {
+					return s, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+// parseControlList splits a comma-separated control ID list and trims whitespace.
+func parseControlList(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// inlineExceptionFromResource synthesises a PostureExceptionPolicy from the
+// kubescape.io/skip-* annotations on a single resource.
+func inlineExceptionFromResource(obj workloadinterface.IMetadata, clusterName string) []armotypes.PostureExceptionPolicy {
+	raw, ok := getAnnotation(obj, skipControlsAnnotation)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+
+	controls := parseControlList(raw)
+	if len(controls) == 0 {
+		return nil
+	}
+
+	reason, _ := getAnnotation(obj, skipReasonAnnotation)
+	expiry, _ := getAnnotation(obj, skipExpiryAnnotation)
+
+	var expirationDate *time.Time
+	if expiry != "" {
+		t, err := time.Parse(time.RFC3339, expiry)
+		if err != nil {
+			logger.L().Warning("ignoring kubescape.io/skip-expiry annotation: malformed timestamp; inline exception will not be created",
+				helpers.String("resourceID", obj.GetID()),
+				helpers.String("expiry", expiry),
+				helpers.Error(err))
+			return nil
+		}
+		expirationDate = &t
+	}
+
+	policies := make([]armotypes.PosturePolicy, 0, len(controls))
+	for _, c := range controls {
+		policies = append(policies, armotypes.PosturePolicy{ControlID: c})
+	}
+
+	// The exceptions processor matches designator attributes as anchored
+	// regular expressions. These values are the resource's own literal
+	// identity, so they must be quoted: a name containing a regex
+	// metacharacter (a dot is legal in an RFC 1123 subdomain) would otherwise
+	// also suppress the annotated control on sibling resources whose names
+	// differ only where that metacharacter sits.
+	attrs := map[string]string{}
+	if name := obj.GetName(); name != "" {
+		attrs["name"] = regexp.QuoteMeta(name)
+	}
+	if kind := obj.GetKind(); kind != "" {
+		attrs["kind"] = regexp.QuoteMeta(kind)
+	}
+	if ns := obj.GetNamespace(); ns != "" {
+		attrs["namespace"] = regexp.QuoteMeta(ns)
+	}
+	if id := obj.GetID(); id != "" {
+		attrs["resourceID"] = regexp.QuoteMeta(id)
+	}
+
+	var reasonPtr *string
+	if reason != "" {
+		reasonPtr = &reason
+	}
+
+	return []armotypes.PostureExceptionPolicy{{
+		PortalBase: armotypes.PortalBase{
+			Name: "inline-" + obj.GetID(),
+		},
+		PolicyType:      "postureExceptionPolicy",
+		PosturePolicies: policies,
+		Resources: []identifiers.PortalDesignator{{
+			DesignatorType: identifiers.DesignatorAttributes,
+			Attributes:     attrs,
+		}},
+		Reason:         reasonPtr,
+		ExpirationDate: expirationDate,
+		Actions:        []armotypes.PostureExceptionPolicyActions{armotypes.Disable},
+	}}
+}
+
+// gatherInlineExceptions scans all collected resources and returns exception
+// policies synthesised from their kubescape.io/skip-* annotations.
+func (opap *OPAProcessor) gatherInlineExceptions() []armotypes.PostureExceptionPolicy {
+	var exceptions []armotypes.PostureExceptionPolicy
+	for _, resource := range opap.AllResources {
+		if resource == nil {
+			continue
+		}
+		exceptions = append(exceptions, inlineExceptionFromResource(resource, opap.clusterName)...)
+	}
+	return exceptions
+}
+
+// resourceScopedExceptions returns exceptionPolicies with every scope-less exception
+// (Resources unset) given a designator naming resourceID, so the vendored opa-utils
+// exceptions.Processor evaluates it the same way it evaluates any other resource-backed
+// exception. Without this, a scope-less exception silently matches zero resources for
+// resource-backed findings: exceptions.Processor.getResourceExceptions iterates
+// ruleException.Resources per candidate, so an empty Resources list is zero iterations
+// and therefore never a match - the opposite of the "no resources = no scope constraint,
+// matches any cluster" convention matchingControlExceptions already implements for manual
+// controls below, and that a scope-less exception is documented to mean (see #1994).
+//
+// Only exceptions with an empty Resources list are touched; anything already scoped is
+// returned unchanged. Since a scope-less exception currently matches nothing at all for
+// resource-backed findings, this can only add a match where there was none - it cannot
+// change the outcome of any exception that already resolves correctly today.
+func resourceScopedExceptions(exceptionPolicies []armotypes.PostureExceptionPolicy, resourceID string) []armotypes.PostureExceptionPolicy {
+	needsScoping := false
+	for i := range exceptionPolicies {
+		if len(exceptionPolicies[i].Resources) == 0 {
+			needsScoping = true
+			break
+		}
+	}
+	if !needsScoping {
+		return exceptionPolicies
+	}
+
+	scoped := make([]armotypes.PostureExceptionPolicy, len(exceptionPolicies))
+	for i, policy := range exceptionPolicies {
+		if len(policy.Resources) != 0 {
+			scoped[i] = policy
+			continue
+		}
+		policy.Resources = []identifiers.PortalDesignator{
+			{
+				DesignatorType: identifiers.DesignatorAttributes,
+				Attributes:     map[string]string{identifiers.AttributeResourceID: resourceID},
+			},
+		}
+		scoped[i] = policy
+	}
+	return scoped
+}
+
+// matchingControlExceptions returns the exception policies that explicitly target
+// controlID with a cluster-or-global-only designator matching clusterName. An exception
+// object is returned at most once even if more than one of its PosturePolicies matches.
+func matchingControlExceptions(exceptionPolicies []armotypes.PostureExceptionPolicy, controlID, clusterName string, processor *exceptions.Processor) []armotypes.PostureExceptionPolicy {
+	var matches []armotypes.PostureExceptionPolicy
+policyLoop:
 	for _, policy := range exceptionPolicies {
 		for _, pp := range policy.PosturePolicies {
 			if !processor.RegexCompareControlID(pp.ControlID, controlID) {
@@ -168,19 +383,21 @@ func hasExplicitControlException(exceptionPolicies []armotypes.PostureExceptionP
 			}
 			// no resources = no scope constraint, matches any cluster
 			if len(policy.Resources) == 0 {
-				return true
+				matches = append(matches, policy)
+				continue policyLoop
 			}
 			for _, resource := range policy.Resources {
 				if requiresResourceMatch(resource) {
 					continue
 				}
 				if processor.MatchesCluster(&resource, clusterName) {
-					return true
+					matches = append(matches, policy)
+					continue policyLoop
 				}
 			}
 		}
 	}
-	return false
+	return matches
 }
 
 func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[string]apis.StatusInfo, controlSummary reportsummary.ControlSummaries) map[string]apis.StatusInfo {
@@ -303,9 +520,10 @@ func getKubernetesObjects(index resourceGroupIndex, match []reporthandling.RuleM
 	var emitted []bool
 
 	for m := range match {
-		for _, groups := range match[m].APIGroups {
-			for _, version := range match[m].APIVersions {
-				for _, resource := range match[m].Resources {
+		mt := &match[m]
+		for _, groups := range mt.APIGroups {
+			for _, version := range mt.APIVersions {
+				for _, resource := range mt.Resources {
 					for g := range index.groups {
 						group := &index.groups[g]
 						if !matchesKubernetesObjectValue(groups, group.group) || !matchesKubernetesObjectValue(version, group.version) {
@@ -350,18 +568,31 @@ func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 	return modules, nil
 }
 
-func removeData(obj workloadinterface.IMetadata) {
+// removeData strips sensitive data from obj before it reaches results
+// handling. For a Pod-shaped workload, it also returns, per container name,
+// the names of that container's env vars that had a ValueFrom reference
+// (SecretKeyRef, ConfigMapKeyRef, FieldRef, or ResourceFieldRef) before that
+// reference was cleared — never the reference target itself, never the
+// value, only the env var's own name. The anonymizer needs that name to keep
+// anonymizing reference-backed env var names under --hide/--encrypt after
+// this function has already cleared the reference it would otherwise
+// inspect. Keyed by container name rather than merged across the whole pod,
+// since a name shared by an ordinary env var in one container and a
+// reference-backed one in another must not anonymize the ordinary one.
+func removeData(obj workloadinterface.IMetadata) map[string]map[string]struct{} {
 	if !k8sinterface.IsTypeWorkload(obj.GetObject()) {
-		return // remove data only from kubernetes objects
+		return nil // remove data only from kubernetes objects
 	}
 	workload := workloadinterface.NewWorkloadObj(obj.GetObject())
 	switch workload.GetKind() {
 	case "Secret":
 		removeSecretData(workload)
+		return nil
 	case "ConfigMap":
 		removeConfigMapData(workload)
+		return nil
 	default:
-		removePodData(workload)
+		return removePodData(workload)
 	}
 }
 
@@ -401,50 +632,105 @@ func removeSecretData(workload workloadinterface.IWorkload) {
 	overrideStringData(workload)
 }
 
-func removePodData(workload workloadinterface.IWorkload) {
+func removePodData(workload workloadinterface.IWorkload) map[string]map[string]struct{} {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "status")
 
+	var refsByContainer map[string]map[string]struct{}
+	addRefsByContainer := func(byContainer map[string]map[string]struct{}) {
+		if len(byContainer) == 0 {
+			return
+		}
+		if refsByContainer == nil {
+			refsByContainer = make(map[string]map[string]struct{}, len(byContainer))
+		}
+		// Container names are unique across containers/initContainers/
+		// ephemeralContainers within one pod (enforced by the API server),
+		// so a name collision here would mean two container lists disagree
+		// about who owns that name -- not something to silently merge.
+		for name, refs := range byContainer {
+			refsByContainer[name] = refs
+		}
+	}
+
 	// containers
 	if containers, err := workload.GetContainers(); err == nil && len(containers) > 0 {
-		removeContainersData(containers)
+		addRefsByContainer(removeContainersData(containers))
 		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "containers", containers)
 	}
 
 	// init containers
 
 	if initContainers, err := workload.GetInitContainers(); err == nil && len(initContainers) > 0 {
-		removeContainersData(initContainers)
+		addRefsByContainer(removeContainersData(initContainers))
 		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "initContainers", initContainers)
 	}
 
 	// ephemeral containers
 	if ephemeralContainers, err := workload.GetEphemeralContainers(); err == nil && len(ephemeralContainers) > 0 {
-		removeEphemeralContainersData(ephemeralContainers)
+		addRefsByContainer(removeEphemeralContainersData(ephemeralContainers))
 		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "ephemeralContainers", ephemeralContainers)
 	}
+
+	return refsByContainer
 }
 
-func removeContainersData(containers []corev1.Container) {
+// removeContainersData clears each env var's value and reference, returning,
+// per container name, the names of that container's env vars that had a
+// reference before it was cleared (see removeData's doc comment for why
+// only the name is kept, and why this is scoped per container).
+func removeContainersData(containers []corev1.Container) map[string]map[string]struct{} {
+	var refsByContainer map[string]map[string]struct{}
 	for i := range containers {
 		container := &containers[i]
+		var refs map[string]struct{}
 		for j := range container.Env {
+			if container.Env[j].ValueFrom != nil {
+				if refs == nil {
+					refs = make(map[string]struct{})
+				}
+				refs[container.Env[j].Name] = struct{}{}
+			}
 			container.Env[j].Value = "XXXXXX"
 			container.Env[j].ValueFrom = nil
 		}
 		container.EnvFrom = nil
+		if len(refs) > 0 {
+			if refsByContainer == nil {
+				refsByContainer = make(map[string]map[string]struct{})
+			}
+			refsByContainer[container.Name] = refs
+		}
 	}
+	return refsByContainer
 }
-func removeEphemeralContainersData(containers []corev1.EphemeralContainer) {
+
+// removeEphemeralContainersData mirrors removeContainersData for ephemeral containers.
+func removeEphemeralContainersData(containers []corev1.EphemeralContainer) map[string]map[string]struct{} {
+	var refsByContainer map[string]map[string]struct{}
 	for i := range containers {
 		container := &containers[i]
+		var refs map[string]struct{}
 		for j := range container.Env {
+			if container.Env[j].ValueFrom != nil {
+				if refs == nil {
+					refs = make(map[string]struct{})
+				}
+				refs[container.Env[j].Name] = struct{}{}
+			}
 			container.Env[j].Value = "XXXXXX"
 			container.Env[j].ValueFrom = nil
 		}
 		container.EnvFrom = nil
+		if len(refs) > 0 {
+			if refsByContainer == nil {
+				refsByContainer = make(map[string]map[string]struct{})
+			}
+			refsByContainer[container.Name] = refs
+		}
 	}
+	return refsByContainer
 }
 
 func ruleData(rule *reporthandling.PolicyRule) string {
@@ -453,4 +739,188 @@ func ruleData(rule *reporthandling.PolicyRule) string {
 
 func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
 	return rule.ResourceEnumerator
+}
+
+// inEnumeratedScope reports whether a failed resource may be reported, given
+// the enumerator's reporting-scope restriction built in processRuleOnScope. A
+// nil scope means unrestricted. A RegoResponseVectorObject is never checked
+// against it: its GetID is a composite of its own fields, not the underlying
+// resource's ID, so it can never legitimately match an enumeratedIDs entry
+// (which only ever holds real, stable-ID objects) - restricting it would just
+// drop every vector-reported failure, enumerator or not.
+func inEnumeratedScope(enumeratedIDs map[string]struct{}, failedResource workloadinterface.IMetadata, id string) bool {
+	if enumeratedIDs == nil {
+		return true
+	}
+	if objectsenvelopes.GetObjectType(failedResource.GetObject()) == objectsenvelopes.TypeRegoResponseVectorObject {
+		return true
+	}
+	_, inScope := enumeratedIDs[id]
+	return inScope
+}
+
+// errIncludeControlsNoMatch is returned when --include-controls is set but
+// none of the requested IDs exist in the loaded frameworks. Returning a hard
+// error (instead of silently excluding every control and yielding 0 results
+// with exit 0) preserves CI-gate integrity: a typo like --include-controls
+// C-9999 must fail the scan, not pass it.
+var errIncludeControlsNoMatch = errors.New("--include-controls matched no known control")
+
+// errNoControlsAfterFilter is returned when --include-controls/--skip-controls
+// together filter out every control, mirroring policyhandler.excludeControls'
+// errAllControlsExcluded guard for --exclude-controls.
+var errNoControlsAfterFilter = errors.New("--include-controls/--skip-controls left no controls to scan")
+
+// controlIdentifiers returns the normalized identifiers a control can be named
+// by on the command line: its Kubescape control ID (ControlID, e.g. "C-0286")
+// and, where the control carries one, its framework section number (Control_ID,
+// e.g. "CIS-3.1.1"). Both are lowercased so lookups are case-insensitive.
+// This is the same identifier pair policyhandler.markControlMatches uses, so
+// --skip-controls and --include-controls accept exactly what --exclude-controls
+// accepts.
+func controlIdentifiers(control *reporthandling.Control) []string {
+	identifiers := make([]string, 0, 2)
+	for _, identifier := range [2]string{control.ControlID, control.Control_ID} {
+		token := strings.ToLower(strings.TrimSpace(identifier))
+		if token == "" || slices.Contains(identifiers, token) {
+			continue
+		}
+		identifiers = append(identifiers, token)
+	}
+	return identifiers
+}
+
+// controlMatchesAny reports whether any identifier the control can be named by
+// appears in set. set is expected to hold normalized (lowercased, trimmed)
+// tokens.
+func controlMatchesAny(control *reporthandling.Control, set map[string]struct{}) bool {
+	for _, identifier := range controlIdentifiers(control) {
+		if _, ok := set[identifier]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// buildControlExcludedRules merges the existing rule-exclusion map with any
+// --skip-controls or --include-controls filters. The resulting map marks
+// individual rule names with `true` so that convertFrameworksToPolicies drops
+// them. Include is a whitelist; skip is a blacklist and wins over include.
+//
+// Matching is case-insensitive and accepts either identifier a control can be
+// named by, mirroring --exclude-controls (see policyhandler/controlfilter.go's
+// normalizeExclusions/markControlMatches): without this, a lowercase control ID
+// or a CIS section number silently matches nothing, and since
+// --include-controls treats "not in the include set" as "exclude", a single
+// mistyped case produces a silently empty scan instead of the requested
+// control.
+func buildControlExcludedRules(base map[string]bool, frameworks []reporthandling.Framework, skip, include []string) (map[string]bool, error) {
+	excludedRules := make(map[string]bool, len(base)+4)
+	for k, v := range base {
+		excludedRules[k] = v
+	}
+
+	if len(skip) == 0 && len(include) == 0 {
+		return excludedRules, nil
+	}
+
+	skipSet := make(map[string]struct{}, len(skip))
+	for _, id := range skip {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id != "" {
+			skipSet[id] = struct{}{}
+		}
+	}
+
+	includeSet := make(map[string]struct{}, len(include))
+	for _, id := range include {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id != "" {
+			includeSet[id] = struct{}{}
+		}
+	}
+
+	knownIDs := make(map[string]struct{})
+	for _, fw := range frameworks {
+		for i := range fw.Controls {
+			for _, identifier := range controlIdentifiers(&fw.Controls[i]) {
+				knownIDs[identifier] = struct{}{}
+			}
+		}
+	}
+
+	for id := range skipSet {
+		if _, ok := knownIDs[id]; !ok {
+			logger.L().Warning("skip control not found in loaded policies", helpers.String("control", id))
+		}
+	}
+	// include-controls is a whitelist: if the caller asked for specific
+	// controls but none of them exist, failing open with 0 controls and
+	// exit 0 breaks CI gates. Treat "no include matched" as a hard error,
+	// mirroring policyhandler.excludeControls' errAllControlsExcluded.
+	if len(includeSet) > 0 {
+		matchedInclude := 0
+		for id := range includeSet {
+			if _, ok := knownIDs[id]; ok {
+				matchedInclude++
+			} else {
+				logger.L().Warning("include control not found in loaded policies", helpers.String("control", id))
+			}
+		}
+		if matchedInclude == 0 {
+			return nil, errIncludeControlsNoMatch
+		}
+	}
+
+	if len(includeSet) > 0 {
+		for _, fw := range frameworks {
+			for i := range fw.Controls {
+				if controlMatchesAny(&fw.Controls[i], includeSet) {
+					continue
+				}
+				for r := range fw.Controls[i].Rules {
+					excludedRules[fw.Controls[i].Rules[r].Name] = true
+				}
+			}
+		}
+	}
+
+	for _, fw := range frameworks {
+		for i := range fw.Controls {
+			if !controlMatchesAny(&fw.Controls[i], skipSet) {
+				continue
+			}
+			for r := range fw.Controls[i].Rules {
+				excludedRules[fw.Controls[i].Rules[r].Name] = true
+			}
+		}
+	}
+
+	// Guard against a filter that leaves nothing to scan. This can happen
+	// when --include-controls names only controls that are then removed by
+	// --skip-controls, or when --skip-controls alone excludes every loaded
+	// control. Mirroring excludeControls' remaining==0 check prevents a
+	// 0-control, 0-failure, exit-0 scan that silently passes a CI gate.
+	if countRemainingControls(frameworks, excludedRules) == 0 {
+		return nil, errNoControlsAfterFilter
+	}
+
+	return excludedRules, nil
+}
+
+// countRemainingControls returns the number of controls that still have at
+// least one rule not marked excluded.
+func countRemainingControls(frameworks []reporthandling.Framework, excludedRules map[string]bool) int {
+	count := 0
+	for _, fw := range frameworks {
+		for i := range fw.Controls {
+			for r := range fw.Controls[i].Rules {
+				if !excludedRules[fw.Controls[i].Rules[r].Name] {
+					count++
+					break
+				}
+			}
+		}
+	}
+	return count
 }

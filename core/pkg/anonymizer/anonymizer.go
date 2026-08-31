@@ -1,8 +1,8 @@
 package anonymizer
 
 import (
-	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
@@ -18,12 +18,15 @@ func applyWithTransformer(
 	resultsHandler *resultshandling.ResultsHandler,
 	transformer Transformer,
 ) error {
-	if resultsHandler == nil || resultsHandler.ScanData == nil {
+	if resultsHandler == nil {
 		return nil
 	}
 
 	mapping := NewMapping()
 
+	// transformSession guards a nil session itself. The nil-ScanData check
+	// used to sit on this function instead, where it also skipped everything
+	// below it.
 	if err := transformSession(
 		resultsHandler.ScanData,
 		mapping,
@@ -32,7 +35,14 @@ func applyWithTransformer(
 		return err
 	}
 
-	return nil
+	// Image results hang off the handler rather than off the session, so
+	// transformSession never saw them. They are transformed with the same
+	// Transformer, and therefore the same mapping, because the pseudonyms
+	// have to agree with the ones just written onto the workloads.
+	return transformImageScanData(
+		resultsHandler.ImageScanData,
+		transformer,
+	)
 }
 
 // ApplyEncrypted anonymizes a scan session while encrypting
@@ -47,8 +57,16 @@ func ApplyEncrypted(
 	masterKey []byte,
 ) error {
 
-	wrappedDEK, err := reportcrypto.WrapDEK(
-		dek,
+	// The binding is generated here, once, and shared by the wrapped DEK and
+	// every field this transformer seals. That is what ties the report's
+	// ciphertexts to this report rather than leaving them interchangeable.
+	key, err := reportcrypto.NewReportKey(dek)
+	if err != nil {
+		return err
+	}
+
+	wrappedDEK, err := reportcrypto.WrapReportKey(
+		key,
 		masterKey,
 	)
 	if err != nil {
@@ -57,7 +75,7 @@ func ApplyEncrypted(
 
 	if err := applyWithTransformer(
 		resultsHandler,
-		NewEncryptionTransformer(dek),
+		NewEncryptionTransformer(key),
 	); err != nil {
 		return err
 	}
@@ -65,7 +83,7 @@ func ApplyEncrypted(
 	encryptionMetadata := &reporthandlingv2.EncryptionMetadata{
 		Version:      "v1",
 		DEKAlgorithm: "AES256_GCM",
-		KEKAlgorithm: "AES256_GCM",
+		KEKAlgorithm: reportcrypto.KEKAlgorithm,
 		EncryptedDEK: wrappedDEK,
 	}
 

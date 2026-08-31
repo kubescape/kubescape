@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/adrg/xdg"
 
@@ -13,6 +14,7 @@ import (
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/stereoscope/pkg/image"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -127,6 +129,47 @@ func matchIDs(matches match.Matches) []string {
 	return ids
 }
 
+func TestApplyDBFreshness(t *testing.T) {
+	builtAt := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
+
+	tests := []struct {
+		name    string
+		status  *vulnerability.ProviderStatus
+		wantSet bool
+	}{
+		{
+			name:    "nil status leaves field unset",
+			status:  nil,
+			wantSet: false,
+		},
+		{
+			name:    "zero Built leaves field unset",
+			status:  &vulnerability.ProviderStatus{},
+			wantSet: false,
+		},
+		{
+			name: "Built is surfaced",
+			status: &vulnerability.ProviderStatus{
+				Built: builtAt,
+			},
+			wantSet: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pb := &cautils.ImageScanData{}
+			applyDBFreshness(pb, tt.status)
+			if tt.wantSet {
+				require.NotNil(t, pb.VulnDBBuilt)
+				assert.Equal(t, builtAt, *pb.VulnDBBuilt)
+			} else {
+				assert.Nil(t, pb.VulnDBBuilt)
+			}
+		})
+	}
+}
+
 func TestParseSeverity(t *testing.T) {
 	tests := []struct {
 		name string
@@ -222,7 +265,7 @@ func TestGetProviderConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			providerConfig := getProviderConfig(tt.creds, nil)
+			providerConfig := getProviderConfig(tt.creds, nil, ScanOptions{})
 			assert.NotNil(t, providerConfig)
 			assert.Equal(t, true, providerConfig.GenerateMissingCPEs)
 			assert.Equal(t, tt.wantCreds, providerConfig.RegistryOptions.Credentials)
@@ -269,7 +312,7 @@ func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
 		t.Skip("skipping integration test; set KUBESCAPE_INTEGRATION_TESTS=1 to run")
 	}
 	// Test the actual NewScanServiceWithMatchers function
-	distCfg, installCfg, _, _ := NewDefaultDBConfig("")
+	distCfg, installCfg, _, _ := NewDefaultDBConfig("", false)
 
 	// Test with default matchers enabled
 	svcWithDefault, err := NewScanServiceWithMatchers(distCfg, installCfg, true)
@@ -443,18 +486,26 @@ func TestValidateDBLoad(t *testing.T) {
 
 func TestNewDefaultDBConfig(t *testing.T) {
 	tests := []struct {
-		name       string
-		grypeURL   string
-		wantURL    string
-		wantErr    string
-		wantDir    string
-		wantUpdate bool
+		name         string
+		grypeURL     string
+		skipDBUpdate bool
+		wantURL      string
+		wantErr      string
+		wantDir      string
+		wantUpdate   bool
 	}{
 		{
 			name:       "default config uses bundled database URL",
 			wantURL:    defaultGrypeListingURL,
 			wantDir:    filepath.Join(xdg.CacheHome, defaultDBDirName),
 			wantUpdate: true,
+		},
+		{
+			name:         "skip database update sets shouldUpdate to false",
+			skipDBUpdate: true,
+			wantURL:      defaultGrypeListingURL,
+			wantDir:      filepath.Join(xdg.CacheHome, defaultDBDirName),
+			wantUpdate:   false,
 		},
 		{
 			name:       "custom http URL overrides default",
@@ -477,7 +528,7 @@ func TestNewDefaultDBConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			distCfg, installCfg, shouldUpdate, err := NewDefaultDBConfig(tt.grypeURL)
+			distCfg, installCfg, shouldUpdate, err := NewDefaultDBConfig(tt.grypeURL, tt.skipDBUpdate)
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				assert.EqualError(t, err, tt.wantErr)
@@ -538,7 +589,7 @@ func TestNewDefaultDBConfig_SanitizationHarden(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			distCfg, _, _, err := NewDefaultDBConfig(tt.inputURL)
+			distCfg, _, _, err := NewDefaultDBConfig(tt.inputURL, false)
 
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("NewDefaultDBConfig() error = %v, wantErr %v", err, tt.wantErr)
@@ -613,10 +664,23 @@ func TestNewScanServiceIntegration(t *testing.T) {
 	if testing.Short() || os.Getenv("KUBESCAPE_INTEGRATION_TESTS") != "1" {
 		t.Skip("skipping integration test; set KUBESCAPE_INTEGRATION_TESTS=1 to run")
 	}
-	distCfg, installCfg, _, _ := NewDefaultDBConfig("")
+	distCfg, installCfg, _, _ := NewDefaultDBConfig("", false)
 
 	svc, err := NewScanService(distCfg, installCfg)
 	require.NoError(t, err)
 	defer svc.Close()
 	assert.True(t, svc.useDefaultMatchers)
+}
+
+func TestWrapDBLoadError(t *testing.T) {
+	baseErr := errors.New("failed to load vulnerability db: boom")
+	t.Run("update enabled returns original error", func(t *testing.T) {
+		assert.Equal(t, baseErr, wrapDBLoadError(baseErr, true))
+	})
+	t.Run("skip update adds actionable hint", func(t *testing.T) {
+		got := wrapDBLoadError(baseErr, false)
+		assert.ErrorIs(t, got, baseErr)
+		assert.ErrorContains(t, got, "local vulnerability database could not be used")
+		assert.ErrorContains(t, got, "--skip-db-update")
+	})
 }

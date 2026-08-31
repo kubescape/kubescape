@@ -33,10 +33,6 @@ def scan_frameworks(kubescape_exec: str):
     return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", "framework", "nsa,mitre", all_files])
 
 
-def scan_all(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", all_files])
-
-
 def scan_all_format_sarif(kubescape_exec: str):
     return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", all_files, "--format", "sarif", "--output", "results"])
 
@@ -62,16 +58,26 @@ def scan_all_format_pdf(kubescape_exec: str):
 
 
 def scan_from_stdin(kubescape_exec: str):
-    return smoke_utils.run_command(command=["cat", single_file, "|", kubescape_exec, "--keep-local", "scan", "framework", "nsa", "-"])
+    import subprocess
+    with open(single_file, 'r') as f:
+        try:
+            output = subprocess.check_output([kubescape_exec, "scan", "framework", "nsa", "-", "--keep-local"], stdin=f, stderr=subprocess.STDOUT)
+            return f"{output}"
+        except subprocess.CalledProcessError as e:
+            print(f">>>>> Failed Command: {e.cmd}")
+            print(f">>>>>>> Output: {e.output}")
+            print(f">>>>>>> Stderr: {e.stderr}")
+            print(f">>>>>>> Stdout: {e.stdout}")
+            print(f">>>>>>> Exit status: {e.returncode}")
+            return f"{e}"
+        except Exception as e:
+            return f"{e}"
 
 
 def run(kubescape_exec: str):
     print("Testing E2E on yaml files")
-
-    # TODO - fix support
-    # print("Testing scan all yaml files")
-    # msg = scan_all(kubescape_exec=kubescape_exec)
-    # smoke_utils.assertion(msg)
+    msg = scan_all(kubescape_exec=kubescape_exec)
+    smoke_utils.assertion(msg)
 
     print("Testing scan control id")
     msg = scan_control_id(kubescape_exec=kubescape_exec)
@@ -88,10 +94,6 @@ def run(kubescape_exec: str):
 
     print("Testing scan frameworks")
     msg = scan_frameworks(kubescape_exec=kubescape_exec)
-    smoke_utils.assertion(msg)
-
-    print("Testing scan all")
-    msg = scan_all(kubescape_exec=kubescape_exec)
     smoke_utils.assertion(msg)
 
 
@@ -121,10 +123,25 @@ def run(kubescape_exec: str):
     msg = scan_all_format_pdf(kubescape_exec=kubescape_exec)
     smoke_utils.assertion(msg)
 
-    # TODO - fix test
-    # print("Testing scan from stdin")
-    # msg = scan_from_stdin(kubescape_exec=kubescape_exec)
-    # smoke_utils.assertion(msg)
+    print("Testing scan from stdin")
+    msg = scan_from_stdin(kubescape_exec=kubescape_exec)
+    smoke_utils.assertion(msg)
+
+    print("Testing compliance threshold")
+    msg = smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", "--compliance-threshold", "60", "framework", "nsa", all_files])
+    smoke_utils.assertion(msg)
+
+    print("Testing known supported frameworks")
+    msg = smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", "framework", "nsa,mitre", all_files])
+    smoke_utils.assertion(msg)
+
+    print("Testing framework list")
+    msg = smoke_utils.run_command(command=[kubescape_exec, "list", "frameworks"])
+    smoke_utils.assertion(msg)
+
+    print("Testing controls list")
+    msg = smoke_utils.run_command(command=[kubescape_exec, "list", "controls"])
+    smoke_utils.assertion(msg)
 
     print("Done E2E yaml files")
 

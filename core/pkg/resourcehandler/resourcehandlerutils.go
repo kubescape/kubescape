@@ -8,7 +8,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -142,6 +142,11 @@ func filterRuleMatchesForResource(resourceKind string, matchObjects []reporthand
 
 	ruleApplies := false
 	for resource := range resourceMap {
+		// A wildcard resource matches any scanned resource kind.
+		if resource == "*" {
+			ruleApplies = true
+			break
+		}
 		if matchesInputResource(resource) {
 			ruleApplies = true
 			break
@@ -214,6 +219,7 @@ func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMa
 					queryableResource := QueryableResource{
 						GroupVersionResourceTriplet: resolved.groupVersionResourceTriplet,
 						Namespaced:                  resolved.namespaced,
+						Kind:                        resolved.kind,
 					}
 					queryableResource.AddFieldSelector(globalFieldSelector)
 

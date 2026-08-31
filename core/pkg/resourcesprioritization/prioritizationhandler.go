@@ -9,15 +9,15 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 )
 
 type ResourcesPrioritizationHandler struct {
-	resourceToAttackTracks map[string]v1alpha1.IAttackTrack
+	resourceToAttackTracks map[string][]v1alpha1.IAttackTrack
 	attackTracks           []v1alpha1.IAttackTrack
 	supportedKinds         []string
 	podTemplateFallback    bool
@@ -42,7 +42,7 @@ func DefaultSupportedKinds() []string {
 func NewResourcesPrioritizationHandler(ctx context.Context, attackTracksGetter getter.IAttackTracksGetter, buildResourcesMap bool) (*ResourcesPrioritizationHandler, error) {
 	handler := &ResourcesPrioritizationHandler{
 		attackTracks:           make([]v1alpha1.IAttackTrack, 0),
-		resourceToAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		resourceToAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 		podTemplateFallback:    true,
 		buildResourcesMap:      buildResourcesMap,
 	}
@@ -147,8 +147,20 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 
 					// only build the map if the user requested it
 					if handler.buildResourcesMap {
-						// Store the attack track for returning to the caller
-						handler.resourceToAttackTracks[resourceId] = handler.copyAttackTrack(attackTrack, &controlsLookup)
+						// Store the attack track for returning to the caller. A
+						// resource can be implicated by more than one attack
+						// track at once (e.g. both an external-exposure track
+						// and a credential-access track can each have their own
+						// failed controls on the same resource) -- each one
+						// contributes its own vectors to the resource's score
+						// below, so each one is appended here too, rather than
+						// overwriting whichever attack track this loop visits
+						// last and silently dropping the others from the
+						// printed attack-tree output.
+						handler.resourceToAttackTracks[resourceId] = append(
+							handler.resourceToAttackTracks[resourceId],
+							handler.copyAttackTrack(attackTrack, &controlsLookup),
+						)
 					}
 
 					// Calculate all the paths for the attack track

@@ -565,6 +565,8 @@ var pathlessPolicies = map[string]string{
 	"kubescape-c-0012-deny-resources-with-sensitive-information-in-environment-variables": "one of its two validations " +
 		"iterates the ConfigMap data/binaryData maps by key, same as C-0076: a map key is not a field path. The " +
 		"other validation (container env vars) still derives normally",
+	"kubescape-c-0234-deny-workloads-without-external-secret-storage": "denies on the absence of a CSI volume " +
+		"rather than the presence of a bad one, so the failing term is a missing collection with no element to blame",
 }
 
 func TestEveryBundleValidationYieldsAPath(t *testing.T) {
@@ -652,21 +654,27 @@ var bundleFixValues = []string{
 	"spec.automountServiceAccountToken=false",
 	"spec.containers[].securityContext.allowPrivilegeEscalation=false",
 	"spec.containers[].securityContext.readOnlyRootFilesystem=true",
+	"spec.ephemeralContainers[].securityContext.allowPrivilegeEscalation=false",
 	"spec.hostIPC=false",
 	"spec.hostNetwork=false",
 	"spec.hostPID=false",
+	"spec.initContainers[].securityContext.allowPrivilegeEscalation=false",
 	"spec.jobTemplate.spec.template.spec.automountServiceAccountToken=false",
 	"spec.jobTemplate.spec.template.spec.containers[].securityContext.allowPrivilegeEscalation=false",
 	"spec.jobTemplate.spec.template.spec.containers[].securityContext.readOnlyRootFilesystem=true",
+	"spec.jobTemplate.spec.template.spec.ephemeralContainers[].securityContext.allowPrivilegeEscalation=false",
 	"spec.jobTemplate.spec.template.spec.hostIPC=false",
 	"spec.jobTemplate.spec.template.spec.hostNetwork=false",
 	"spec.jobTemplate.spec.template.spec.hostPID=false",
+	"spec.jobTemplate.spec.template.spec.initContainers[].securityContext.allowPrivilegeEscalation=false",
 	"spec.template.spec.automountServiceAccountToken=false",
 	"spec.template.spec.containers[].securityContext.allowPrivilegeEscalation=false",
 	"spec.template.spec.containers[].securityContext.readOnlyRootFilesystem=true",
+	"spec.template.spec.ephemeralContainers[].securityContext.allowPrivilegeEscalation=false",
 	"spec.template.spec.hostIPC=false",
 	"spec.template.spec.hostNetwork=false",
 	"spec.template.spec.hostPID=false",
+	"spec.template.spec.initContainers[].securityContext.allowPrivilegeEscalation=false",
 }
 
 func TestEveryBundleFixValueIsExpected(t *testing.T) {

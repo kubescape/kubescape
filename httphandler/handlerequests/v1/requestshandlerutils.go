@@ -22,13 +22,13 @@ import (
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-	"github.com/kubescape/kubescape/v3/core/core"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/httphandler/config"
-	"github.com/kubescape/kubescape/v3/httphandler/storage"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/core"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/httphandler/config"
+	"github.com/kubescape/kubescape/v4/httphandler/storage"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -135,45 +135,50 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	}
 }
 
-// executeScan execute the scan request passed in the channel
-func (handler *HTTPHandler) watchForScan() {
+// watchForScan dequeues scan requests and executes them, honoring
+// cancellation that happened while a request was still queued.
+func (handler *HTTPHandler) watchForScan(ctx context.Context) {
 	for {
-		scanReq := <-handler.scanRequestChan
-		if scanReq.isUserScan {
-			handler.state.setRunningUserScanID(scanReq.scanID)
-		}
-		if handler.state.isCancelled(scanReq.scanID) {
-			logger.L().Info("skipping cancelled scan", helpers.String("scanID", scanReq.scanID))
-			if scanReq.resp != nil {
-				select {
-				case scanReq.resp <- &utilsmetav1.Response{
-					ID:       scanReq.scanID,
-					Type:     utilsapisv1.ErrorScanResponseType,
-					Response: fmt.Sprintf("scan '%s' was cancelled", scanReq.scanID),
-				}:
-				default:
-				}
+		select {
+		case scanReq := <-handler.scanRequestChan:
+			logger.L().Info("triggering scan", helpers.String("scanID", scanReq.scanID))
+			if scanReq.isUserScan {
+				handler.state.setRunningUserScanID(scanReq.scanID)
 			}
-			if scanReq.callbackURL != "" {
-				payload := scanCallbackPayload{ID: scanReq.scanID, Status: callbackStatusFailed, Error: "scan cancelled"}
-				cbCtx := context.WithoutCancel(scanReq.ctx)
-				go func() {
-					defer func() {
-						if r := recover(); r != nil {
-							logger.L().Ctx(cbCtx).Error("scan completion callback panicked", helpers.String("ID", scanReq.scanID), helpers.Error(fmt.Errorf("%v", r)))
+			if handler.state.isCancelled(scanReq.scanID) {
+				logger.L().Info("skipping cancelled scan", helpers.String("scanID", scanReq.scanID))
+				if scanReq.resp != nil {
+					select {
+					case scanReq.resp <- &utilsmetav1.Response{
+						ID:       scanReq.scanID,
+						Type:     utilsapisv1.ErrorScanResponseType,
+						Response: fmt.Sprintf("scan '%s' was cancelled", scanReq.scanID),
+					}:
+					default:
+					}
+				}
+				if scanReq.callbackURL != "" {
+					payload := scanCallbackPayload{ID: scanReq.scanID, Status: callbackStatusFailed, Error: "scan cancelled"}
+					cbCtx := context.WithoutCancel(scanReq.ctx)
+					go func() {
+						defer func() {
+							if r := recover(); r != nil {
+								logger.L().Ctx(cbCtx).Error("scan completion callback panicked", helpers.String("ID", scanReq.scanID), helpers.Error(fmt.Errorf("%v", r)))
+							}
+						}()
+						if cbErr := postScanCallback(cbCtx, scanReq.callbackURL, payload); cbErr != nil {
+							logger.L().Ctx(cbCtx).Error("failed to deliver scan completion callback", helpers.String("ID", scanReq.scanID), helpers.Error(cbErr))
 						}
 					}()
-					if cbErr := postScanCallback(cbCtx, scanReq.callbackURL, payload); cbErr != nil {
-						logger.L().Ctx(cbCtx).Error("failed to deliver scan completion callback", helpers.String("ID", scanReq.scanID), helpers.Error(cbErr))
-					}
-				}()
+				}
+				handler.state.releaseCancel(scanReq.scanID)
+				handler.state.setNotBusy(scanReq.scanID)
+				continue
 			}
-			handler.state.releaseCancel(scanReq.scanID)
-			handler.state.setNotBusy(scanReq.scanID)
-			continue
+			handler.executeScan(scanReq)
+		case <-ctx.Done():
+			return
 		}
-		logger.L().Info("triggering scan", helpers.String("scanID", scanReq.scanID))
-		handler.executeScan(scanReq)
 	}
 }
 func scan(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdentifiers []cautils.PolicyIdentifier, scanID string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {
@@ -450,7 +455,11 @@ func writeScanErrorToFile(err error, scanID string) (e error) {
 
 // responseToBytes convert response object to bytes
 func responseToBytes(res *utilsmetav1.Response) []byte {
-	b, _ := json.Marshal(res)
+	b, err := json.Marshal(res)
+	if err != nil {
+		logger.L().Error("failed to marshal response", helpers.Error(err))
+		return []byte(`{"response":"internal error: failed to marshal response","type":"error"}`)
+	}
 	return b
 }
 

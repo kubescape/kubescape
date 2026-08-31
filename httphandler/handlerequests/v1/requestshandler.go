@@ -5,13 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/schema"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 )
@@ -42,38 +43,53 @@ type HTTPHandler struct {
 	offline             bool
 	state               *serverState
 	scanRequestChan     chan *scanRequestParams
+	cancelWatch         context.CancelFunc
 	maxRequestBodyBytes int64
 }
 
 func NewHTTPHandler(offline bool) *HTTPHandler {
-	return newHTTPHandler(offline, configuredPositiveInt(scanQueueCapacityEnv, defaultScanQueueCapacity), int64(configuredPositiveInt(scanRequestMaxBytesEnv, int(defaultMaxScanRequestBodyBytes))))
+	queueCapacity := configuredPositiveInt(scanQueueCapacityEnv, defaultScanQueueCapacity)
+	maxRequestBody := configuredPositiveInt64(scanRequestMaxBytesEnv, defaultMaxScanRequestBodyBytes)
+	return newHTTPHandler(offline, queueCapacity, maxRequestBody)
+}
+
+// Shutdown stops the background scan watcher goroutine. It should be called
+// when the HTTP handler is no longer needed (e.g. on server shutdown).
+func (handler *HTTPHandler) Shutdown() {
+	if handler.cancelWatch != nil {
+		handler.cancelWatch()
+	}
 }
 
 func newHTTPHandler(offline bool, queueCapacity int, maxRequestBodyBytes int64) *HTTPHandler {
+	ctx, cancel := context.WithCancel(context.Background())
 	handler := &HTTPHandler{
 		offline:             offline,
 		state:               newServerState(),
 		scanRequestChan:     make(chan *scanRequestParams, queueCapacity),
+		cancelWatch:         cancel,
 		maxRequestBodyBytes: maxRequestBodyBytes,
 	}
-	go handler.watchForScan()
+	go handler.watchForScan(ctx)
 	return handler
 }
 
-func configuredPositiveInt(name string, fallback int) int {
-	raw := envToString(name, "")
-	if raw == "" {
-		return fallback
+func configuredPositiveInt(name string, defaultValue int) int {
+	if raw, ok := os.LookupEnv(name); ok {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			return v
+		}
 	}
-	value, err := strconv.Atoi(raw)
-	if err != nil || value <= 0 {
-		logger.L().Warning("invalid positive integer configuration; using default",
-			helpers.String("environmentVariable", name),
-			helpers.String("value", raw),
-			helpers.Int("default", fallback))
-		return fallback
+	return defaultValue
+}
+
+func configuredPositiveInt64(name string, defaultValue int64) int64 {
+	if raw, ok := os.LookupEnv(name); ok {
+		if v, err := strconv.ParseInt(raw, 10, 64); err == nil && v > 0 {
+			return v
+		}
 	}
-	return value
+	return defaultValue
 }
 
 // ============================================== STATUS ========================================================
@@ -433,5 +449,4 @@ func (handler *HTTPHandler) writeErrorWithStatus(w http.ResponseWriter, err erro
 	response.Response = err.Error()
 	response.Type = utilsapisv1.ErrorScanResponseType
 	w.Write(responseToBytes(&response))
-	handler.state.setNotBusy(scanID)
 }

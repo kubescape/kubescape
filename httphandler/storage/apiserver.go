@@ -69,6 +69,8 @@ func NewAPIServerStorage(clusterName string, namespace string, ksClient spdxv1be
 }
 
 func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.PostureReport) error {
+	recoveredResources := 0
+	recoveredControls := 0
 	for i := range pr.Results {
 		workloadScan, err := a.BuildWorkloadConfigurationScan(ctx, pr, &pr.Results[i])
 		if err != nil {
@@ -77,6 +79,10 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 				continue
 			}
 			return err
+		}
+		if len(pr.Results[i].AssociatedControls) == 0 && len(workloadScan.Spec.Controls) > 0 {
+			recoveredResources++
+			recoveredControls += len(workloadScan.Spec.Controls)
 		}
 
 		if a.continuousPostureScan {
@@ -88,6 +94,10 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 		if _, err := a.StoreWorkloadConfigurationScanResultSummary(ctx, workloadScan); err != nil {
 			return err
 		}
+	}
+	if recoveredResources > 0 {
+		logger.L().Ctx(ctx).Warning("recovered missing per-resource controls from aggregate posture summary",
+			helpers.Int("resources", recoveredResources), helpers.Int("controls", recoveredControls))
 	}
 	return nil
 }
@@ -107,6 +117,43 @@ func getControlsMapFromResult(ctx context.Context, result *resourcesresults.Resu
 			Rules:     parseScannedControlRules(&control),
 		}
 
+	}
+	if len(m) > 0 {
+		return m
+	}
+
+	// A posture report carries the resource/control relationship twice: in each
+	// Result.AssociatedControls entry and in ControlSummary.ResourceIDs. The
+	// former contains the richer rule-level evidence and remains the preferred
+	// source. When that entire per-resource list is missing, recover its
+	// relationships from the latter so an internally inconsistent report cannot
+	// be persisted as a false-clean WorkloadConfigurationScanSummary. The same
+	// summary resource lists drive the control table printed before in-cluster
+	// persistence. They retain
+	// only the per-resource status, so rule evidence, substatus, and status info
+	// remain empty for a recovered relationship.
+	for summaryKey, controlSummary := range controlSummaries {
+		status, associated := controlSummary.ResourceIDs.All()[result.ResourceID]
+		if !associated {
+			continue
+		}
+
+		controlID := controlSummary.GetID()
+		if controlID == "" {
+			controlID = summaryKey
+		}
+		if _, exists := m[controlID]; exists {
+			continue
+		}
+
+		m[controlID] = v1beta1.ScannedControl{
+			ControlID: controlID,
+			Name:      controlSummary.GetName(),
+			Severity:  parseControlSeverity(&controlSummary),
+			Status: v1beta1.ScannedControlStatus{
+				Status: string(status),
+			},
+		}
 	}
 	return m
 }
@@ -554,7 +601,6 @@ func parseScannedControlRules(control *resourcesresults.ResourceAssociatedContro
 		paths := make([]v1beta1.RulePath, len(rule.Paths))
 		for j, path := range rule.Paths {
 			paths[j] = v1beta1.RulePath{
-				FailedPath:   path.FailedPath,
 				FixPath:      path.FixPath.Path,
 				FixPathValue: path.FixPath.Value,
 				FixCommand:   path.FixCommand,

@@ -8,7 +8,7 @@ import (
 
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v3/cmd"
+	"github.com/kubescape/kubescape/v4/cmd"
 )
 
 // GoReleaser will fill these at build time

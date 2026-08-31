@@ -11,6 +11,8 @@ const (
 	imageColumnVersion   = iota
 	imageColumnFixedIn   = iota
 	imageColumnImage     = iota
+	imageColumnVexStatus = iota
+	imageColumnVexReason = iota
 )
 
 type TableWriter struct {
@@ -28,5 +30,6 @@ func (tw *TableWriter) PrintImageScanningTable(writer io.Writer, summary ImageSc
 		return
 	}
 
-	renderTable(writer, getImageScanningHeaders(), getImageScanningColumnsAlignments(), rows)
+	hasVEX := summaryHasVEX(summary)
+	renderTable(writer, getImageScanningHeadersWithVEX(hasVEX), getImageScanningColumnsAlignmentsWithVEX(hasVEX), rows)
 }

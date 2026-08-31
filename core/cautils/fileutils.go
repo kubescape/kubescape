@@ -7,17 +7,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils/helmprovenance"
+	"github.com/kubescape/kubescape/v4/core/cautils/helmprovenance"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"gopkg.in/yaml.v3"
@@ -33,6 +37,9 @@ var (
 	// ErrNoManifestFiles lets resource orchestrators defer this specific error
 	// while another supported loader examines the same input.
 	ErrNoManifestFiles = errors.New("no YAML or JSON manifest files found")
+
+	// ErrFileTooLarge is returned when a manifest file exceeds the configured per-file size limit.
+	ErrFileTooLarge = errors.New("file too large")
 )
 
 type FileFormat string
@@ -40,6 +47,16 @@ type FileFormat string
 const (
 	YAML_FILE_FORMAT FileFormat = "yaml"
 	JSON_FILE_FORMAT FileFormat = "json"
+
+	// DefaultMaxFileSize is the default per-file read cap for the file-scan path.
+	// 32 MiB is large enough for any legitimate manifest (the largest chart in the
+	// wild is <5 MiB) but stops a single attacker-supplied multi-GB YAML from OOMing
+	// a CI runner. Override via KUBESCAPE_MAX_FILE_SIZE env var (bytes).
+	DefaultMaxFileSize int64 = 32 << 20 // 32 MiB
+
+	// MaxFileSizeEnvVar is the env var that overrides DefaultMaxFileSize.
+	// Value is parsed as decimal bytes (e.g. "33554432" or "67108864" for 64 MiB).
+	MaxFileSizeEnvVar = "KUBESCAPE_MAX_FILE_SIZE"
 )
 
 type Chart struct {
@@ -59,7 +76,7 @@ type Chart struct {
 // --set-file path, etc.) the error is returned to the caller. We deliberately do not silently
 // fall back to chart defaults — scanning the wrong manifests is worse than failing fast.
 func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
-	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, nil)
+	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, nil, nil)
 }
 
 // LoadResourcesFromHelmChartsExcludingDirectories behaves like LoadResourcesFromHelmCharts,
@@ -67,11 +84,17 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 // The caller is responsible for including those directories in its plain-file exclusions once
 // that renderer succeeds.
 func LoadResourcesFromHelmChartsExcludingDirectories(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
-	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, excludedChartDirectories)
+	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, excludedChartDirectories, nil)
 }
 
-func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
-	helmDirectories, discoveryErrs := listHelmChartDirs(basePath)
+// LoadResourcesFromHelmChartsFiltered behaves like LoadResourcesFromHelmChartsExcludingDirectories,
+// and never renders a chart filter excludes.
+func LoadResourcesFromHelmChartsFiltered(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string, filter *PathFilter) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
+	return loadResourcesFromHelmCharts(ctx, basePath, valueOpts, excludedChartDirectories, filter)
+}
+
+func loadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions, excludedChartDirectories []string, filter *PathFilter) (map[string][]workloadinterface.IMetadata, map[string]Chart, []string, error) {
+	helmDirectories, discoveryErrs := listHelmChartDirs(basePath, filter)
 	for _, err := range discoveryErrs {
 		logger.L().Ctx(ctx).Warning("Skipping path while discovering Helm charts", helpers.Error(err))
 	}
@@ -180,8 +203,8 @@ func pathDepth(path string) int {
 
 // listHelmChartDirs scans a given path (recursively) and returns the directories holding a helm chart.
 // Subcharts are picked up by the same walk, since each carries its own Chart.yaml.
-func listHelmChartDirs(basePath string) ([]string, []error) {
-	directories, errs := listDirs(basePath)
+func listHelmChartDirs(basePath string, filter *PathFilter) ([]string, []error) {
+	directories, errs := listDirs(basePath, filter)
 	helmDirectories := make([]string, 0)
 	for _, dir := range directories {
 		chartFile := filepath.Join(dir, "Chart.yaml")
@@ -207,8 +230,8 @@ func listHelmChartDirs(basePath string) ([]string, []error) {
 // Kustomize configuration (a kustomization.yaml/kustomization.yml/Kustomization file). Each
 // carries its own Kustomization file, so an overlay nested below basePath is found on its own
 // even when basePath itself is not a Kustomize directory.
-func listKustomizeDirs(basePath string) ([]string, []error) {
-	directories, errs := listDirs(basePath)
+func listKustomizeDirs(basePath string, filter *PathFilter) ([]string, []error) {
+	directories, errs := listDirs(basePath, filter)
 	kustomizeDirectories := make([]string, 0)
 	for _, dir := range directories {
 		if isKustomizeDirectory(dir) {
@@ -216,6 +239,21 @@ func listKustomizeDirs(basePath string) ([]string, []error) {
 		}
 	}
 	return kustomizeDirectories, errs
+}
+
+// listTerraformDirs scans a given path (recursively) and returns the directories holding
+// Terraform (.tf) files. A module nested below basePath (e.g. modules/<name>/) is found on
+// its own the same way an overlay nested below a Kustomize root is, even when basePath itself
+// has no .tf files directly in it.
+func listTerraformDirs(basePath string, filter *PathFilter) ([]string, []error) {
+	directories, errs := listDirs(basePath, filter)
+	terraformDirectories := make([]string, 0)
+	for _, dir := range directories {
+		if isTerraformDirectory(dir) {
+			terraformDirectories = append(terraformDirectories, dir)
+		}
+	}
+	return terraformDirectories, errs
 }
 
 // excludeHelmTemplateFiles drops the files living under the templates/ directory of a helm chart.
@@ -476,7 +514,13 @@ func (result KustomizeRenderResult) OwnsPlainFile(path string) bool {
 // as best-effort misses; an explicitly selected Kustomize input remains a hard
 // error, preserving its existing behavior.
 func LoadResourcesFromKustomizeDirectories(ctx context.Context, basePath string) (KustomizeRenderResult, error) {
-	kustomizeInputs, discoveryErrs := listKustomizeInputs(basePath)
+	return LoadResourcesFromKustomizeDirectoriesFiltered(ctx, basePath, nil)
+}
+
+// LoadResourcesFromKustomizeDirectoriesFiltered behaves like LoadResourcesFromKustomizeDirectories,
+// leaving out the configurations filter excludes.
+func LoadResourcesFromKustomizeDirectoriesFiltered(ctx context.Context, basePath string, filter *PathFilter) (KustomizeRenderResult, error) {
+	kustomizeInputs, discoveryErrs := listKustomizeInputs(basePath, filter)
 	explicitKustomizeInput := IsKustomizeFile(basePath) || isKustomizeDirectory(basePath)
 	for _, err := range discoveryErrs {
 		logger.L().Ctx(ctx).Warning("Skipping path while discovering Kustomize configurations", helpers.Error(err))
@@ -537,8 +581,11 @@ func appendUniquePaths(destination *[]string, seen map[string]struct{}, paths ..
 // listKustomizeInputs preserves exact selection for a Kustomize file or
 // directory. For a broader input it discovers child configurations recursively,
 // matching repository-wide Helm and manifest discovery.
-func listKustomizeInputs(basePath string) ([]string, []error) {
+func listKustomizeInputs(basePath string, filter *PathFilter) ([]string, []error) {
 	if IsKustomizeFile(basePath) || isKustomizeDirectory(basePath) {
+		if filter.Excluded(basePath, isKustomizeDirectory(basePath)) {
+			return nil, nil
+		}
 		return []string{basePath}, nil
 	}
 	// A concrete non-Kustomize file is an exact scan target. listDirs interprets
@@ -548,7 +595,7 @@ func listKustomizeInputs(basePath string) ([]string, []error) {
 		return nil, nil
 	}
 
-	directories, errs := listDirs(basePath)
+	directories, errs := listDirs(basePath, filter)
 	kustomizeDirectories := make([]string, 0)
 	for _, directory := range directories {
 		if isKustomizeDirectory(directory) {
@@ -566,7 +613,7 @@ func LoadResourcesFromNestedKustomizeDirectories(ctx context.Context, basePath s
 		return nil, nil
 	}
 
-	kustomizeDirs, discoveryErrs := listKustomizeDirs(basePath)
+	kustomizeDirs, discoveryErrs := listKustomizeDirs(basePath, nil)
 	for _, err := range discoveryErrs {
 		logger.L().Ctx(ctx).Warning("Skipping path while discovering Kustomize directories", helpers.Error(err))
 	}
@@ -587,32 +634,73 @@ func LoadResourcesFromNestedKustomizeDirectories(ctx context.Context, basePath s
 	return sourceToWorkloads, renderedDirs
 }
 
+// LoadResourcesFromTerraform loads Kubernetes resources embedded in Terraform files under
+// basePath. Unlike the Helm and Kustomize loaders, an explicit .tf file is scanned on its own
+// (Terraform files are not self-contained the way a chart or kustomization is), but a directory
+// input is discovered recursively: every directory under basePath that contains .tf files is
+// scanned, so a module nested below the scan root (e.g. modules/<name>/) is not silently skipped.
 func LoadResourcesFromTerraform(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, error) {
-	if !isTerraformDirectory(basePath) && !IsTerraformFile(basePath) {
+	return LoadResourcesFromTerraformFiltered(ctx, basePath, nil)
+}
+
+// LoadResourcesFromTerraformFiltered behaves like LoadResourcesFromTerraform, leaving out
+// the files and directories filter excludes.
+func LoadResourcesFromTerraformFiltered(ctx context.Context, basePath string, filter *PathFilter) (map[string][]workloadinterface.IMetadata, error) {
+	if IsTerraformFile(basePath) {
+		if filter.Excluded(basePath, false) {
+			return nil, nil
+		}
+		dir := filepath.Dir(basePath)
+		td := NewTerraformDirectory(dir)
+		wls, errs := td.GetWorkloads(dir)
+		if len(errs) > 0 {
+			return wls, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
+		}
+		return wls, nil
+	}
+
+	dirs, discoveryErrs := listTerraformDirs(basePath, filter)
+	for _, err := range discoveryErrs {
+		logger.L().Ctx(ctx).Warning("Skipping path while discovering Terraform directories", helpers.Error(err))
+	}
+	if len(dirs) == 0 {
 		return nil, nil
 	}
-	dir := basePath
-	if IsTerraformFile(basePath) {
-		dir = filepath.Dir(basePath)
+
+	explicitTerraformDir := isTerraformDirectory(basePath)
+
+	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
+	for _, dir := range dirs {
+		td := NewTerraformDirectory(dir)
+		wls, dirErrs := td.GetWorkloads(dir)
+		if len(dirErrs) > 0 {
+			if explicitTerraformDir && dir == basePath {
+				return sourceToWorkloads, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(dirErrs...))
+			}
+			logger.L().Ctx(ctx).Warning("Skipping nested Terraform configuration that failed to render", helpers.String("path", dir), helpers.Error(errors.Join(dirErrs...)))
+			continue
+		}
+		maps.Copy(sourceToWorkloads, wls)
 	}
-	td := NewTerraformDirectory(dir)
-	wls, errs := td.GetWorkloads(dir)
-	if len(errs) > 0 {
-		return wls, fmt.Errorf("failed to render Terraform resources from %q: %w", dir, errors.Join(errs...))
-	}
-	return wls, nil
+	return sourceToWorkloads, nil
 }
 
 // LoadResourcesFromFiles globs input for plain YAML/JSON manifests and loads them. renderedCharts
 // are the chart directories LoadResourcesFromHelmCharts already rendered; their templates are left
 // to that render and skipped here. Pass nil to scan everything (e.g. when no charts were rendered).
 func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, renderedCharts []string) (map[string][]workloadinterface.IMetadata, []SkippedManifest, error) {
+	return LoadResourcesFromFilesFiltered(ctx, input, rootPath, renderedCharts, nil)
+}
+
+// LoadResourcesFromFilesFiltered behaves like LoadResourcesFromFiles, leaving out the
+// manifests filter excludes.
+func LoadResourcesFromFilesFiltered(ctx context.Context, input, rootPath string, renderedCharts []string, filter *PathFilter) (map[string][]workloadinterface.IMetadata, []SkippedManifest, error) {
 	// skip the plain-YAML glob for a kustomize directory; the kustomize render handles it
 	if isKustomizeDirectory(input) {
 		return nil, nil, nil
 	}
 
-	files, errs := listFiles(input)
+	files, errs := listFiles(input, filter)
 	if len(errs) > 0 {
 		discoveryErr := fmt.Errorf("failed to discover all manifest files for %q: %w", input, errors.Join(errs...))
 		if len(files) == 0 {
@@ -621,6 +709,9 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string, rendere
 		logger.L().Ctx(ctx).Warning("Continuing with manifest files found before a discovery error", helpers.Error(discoveryErr))
 	}
 	if len(files) == 0 {
+		if filter != nil {
+			return nil, nil, fmt.Errorf("%w for input %q; path exclusions are in effect", ErrNoManifestFiles, input)
+		}
 		return nil, nil, fmt.Errorf("%w for input %q", ErrNoManifestFiles, input)
 	}
 
@@ -657,6 +748,17 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 	for i := range filePaths {
 		f, err := loadFile(filePaths[i])
 		if err != nil {
+			// Oversized files are recorded as skipped manifests rather than aborting the
+			// entire scan - a single attacker-supplied huge file in a repo must not
+			// deny service to the rest of the manifests.
+			if errors.Is(err, ErrFileTooLarge) {
+				skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: err.Error()})
+				// Still append to errs so LoadResourcesFromFilesFiltered's best-effort
+				// vs hard-failure logic is preserved: directory scans warn, single-file
+				// inputs return the error to the caller.
+				errs = append(errs, err)
+				continue
+			}
 			errs = append(errs, err)
 			skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "read error: " + err.Error()})
 			continue
@@ -667,11 +769,15 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 
 		w, e := ReadFile(f, getFileFormat(filePaths[i]))
 		if e != nil {
-			// Raw Helm templates are a best-effort fallback when chart rendering
-			// fails. Go-template actions are not valid YAML, so keep scanning any
-			// static templates without treating templated siblings as corrupt
-			// standalone manifests.
-			if !bytes.Contains(f, []byte("{{")) {
+			// Only chart-owned templates/ files reach this loader unrendered —
+			// excludeHelmTemplateFiles drops the templates of every chart whose
+			// render succeeded — and their Go-template actions are not valid
+			// YAML, so record the drop without treating it as manifest
+			// corruption. Any other parse failure is always reported: "{{" in a
+			// comment, label value or string is not evidence of a template.
+			if isUnrenderedHelmTemplate(filePaths[i]) {
+				skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "unrendered Helm template: " + e.Error()})
+			} else {
 				errs = append(errs, fmt.Errorf("failed to parse %q: %w", filePaths[i], e))
 				skips = append(skips, SkippedManifest{Path: filePaths[i], Reason: "parse error: " + e.Error()})
 			}
@@ -697,8 +803,78 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 	return workloads, skips, errs
 }
 
+// isUnrenderedHelmTemplate reports whether path lives below the templates/
+// directory of a Helm chart, detected with the same chart-directory check
+// chart discovery uses. excludeHelmTemplateFiles removes the templates of
+// every chart whose render succeeded, so a chart-owned file parsed here
+// belongs to a chart whose render failed; its Go-template actions are
+// expected to be unparseable as plain YAML.
+func isUnrenderedHelmTemplate(path string) bool {
+	dir := filepath.Dir(path)
+	for {
+		if filepath.Base(dir) == "templates" {
+			if isChart, err := IsHelmDirectory(filepath.Dir(dir)); err == nil && isChart {
+				return true
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
+}
+
+// getMaxFileSize returns the configured per-file size limit in bytes.
+// It reads MaxFileSizeEnvVar as decimal bytes when set, otherwise defaults to
+// DefaultMaxFileSize. Non-positive, unparsable, or math.MaxInt64 values fall
+// back to the default so the scan stays bounded and limit+1 does not overflow.
+func getMaxFileSize() int64 {
+	if v, ok := os.LookupEnv(MaxFileSizeEnvVar); ok {
+		trimmed := strings.TrimSpace(v)
+		if trimmed != "" {
+			if parsed, err := strconv.ParseInt(trimmed, 10, 64); err == nil && parsed > 0 && parsed != math.MaxInt64 {
+				return parsed
+			}
+			logger.L().Warning("invalid KUBESCAPE_MAX_FILE_SIZE, using default", helpers.String("value", v), helpers.Int("default", int(DefaultMaxFileSize)))
+		}
+	}
+	return DefaultMaxFileSize
+}
+
 func loadFile(filePath string) ([]byte, error) {
-	return os.ReadFile(filepath.Clean(filePath))
+	cleaned := filepath.Clean(filePath)
+	f, err := os.Open(cleaned)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	limit := getMaxFileSize()
+
+	// Fast-path: if Stat succeeds and size is known to exceed limit, fail
+	// without allocating. This also covers sparse files that report a large
+	// logical size.
+	if fi, statErr := f.Stat(); statErr == nil && fi.Size() > limit {
+		return nil, fmt.Errorf("%w: %q size %d exceeds limit %d bytes", ErrFileTooLarge, filePath, fi.Size(), limit)
+	}
+
+	// Use LimitReader at limit+1 so we can detect an oversized file even when
+	// Stat is unavailable (e.g. /proc, pipes) or reports 0.
+	// Guard against overflow when limit == MaxInt64 (rejected above, but keep
+	// defense-in-depth).
+	limitPlusOne := limit
+	if limit != math.MaxInt64 {
+		limitPlusOne = limit + 1
+	}
+	data, err := io.ReadAll(io.LimitReader(f, limitPlusOne))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %q size exceeds limit %d bytes", ErrFileTooLarge, filePath, limit)
+	}
+	return data, nil
 }
 func ReadFile(fileContent []byte, fileFormat FileFormat) ([]workloadinterface.IMetadata, error) {
 
@@ -713,16 +889,16 @@ func ReadFile(fileContent []byte, fileFormat FileFormat) ([]workloadinterface.IM
 }
 
 // listFiles returns the list of absolute paths, full file path and list of errors. The list of abs paths and full path have the same length
-func listFiles(pattern string) ([]string, []error) {
-	return listFilesOrDirectories(pattern, false)
+func listFiles(pattern string, filter *PathFilter) ([]string, []error) {
+	return listFilesOrDirectories(pattern, false, filter)
 }
 
 // listDirs returns the list of absolute paths, full directories path and list of errors. The list of abs paths and full path have the same length
-func listDirs(pattern string) ([]string, []error) {
-	return listFilesOrDirectories(pattern, true)
+func listDirs(pattern string, filter *PathFilter) ([]string, []error) {
+	return listFilesOrDirectories(pattern, true, filter)
 }
 
-func listFilesOrDirectories(pattern string, onlyDirectories bool) ([]string, []error) {
+func listFilesOrDirectories(pattern string, onlyDirectories bool, filter *PathFilter) ([]string, []error) {
 	var paths []string
 	errs := []error{}
 
@@ -732,7 +908,14 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool) ([]string, []e
 	}
 
 	if !onlyDirectories && isFile(pattern) {
-		paths = append(paths, pattern)
+		if !filter.Excluded(pattern, false) {
+			paths = append(paths, pattern)
+		}
+		return paths, errs
+	}
+	// A concrete path is an exact scan target. Do not reinterpret a missing
+	// file as a recursive basename pattern and silently scan a nested namesake.
+	if !isDir(pattern) && !hasGlobMeta(pattern) {
 		return paths, errs
 	}
 
@@ -746,13 +929,22 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool) ([]string, []e
 		shouldMatch = "*"
 	}
 
-	f, err := glob(root, shouldMatch, onlyDirectories)
+	f, err := glob(root, shouldMatch, onlyDirectories, filter)
 	paths = append(paths, f...)
 	if err != nil {
 		errs = append(errs, err)
 	}
 
 	return paths, errs
+}
+
+// hasGlobMeta mirrors the set of magic characters recognized by filepath.Match.
+func hasGlobMeta(path string) bool {
+	magicChars := `*?[`
+	if runtime.GOOS != "windows" {
+		magicChars = `*?[\`
+	}
+	return strings.ContainsAny(path, magicChars)
 }
 
 func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err error) {
@@ -763,8 +955,17 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 		}
 	}()
 
+	docs, splitErr := splitYAMLDocuments(yamlFile)
+
 	var parseErrs []error
-	for i, doc := range splitYAMLDocuments(yamlFile) {
+	if splitErr != nil {
+		// The scanner stopped before reaching the end of input. Any documents
+		// already split out are still reported below, but the caller must be
+		// told the file was not read in full rather than silently receiving
+		// what looks like a complete document list.
+		parseErrs = append(parseErrs, splitErr)
+	}
+	for i, doc := range docs {
 		var t any
 		if unmarshalErr := yaml.Unmarshal(doc, &t); unmarshalErr != nil {
 			parseErrs = append(parseErrs, fmt.Errorf("document %d: %w", i+1, unmarshalErr))
@@ -789,12 +990,20 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, err 
 	return yamlObjs, errors.Join(parseErrs...)
 }
 
-func splitYAMLDocuments(data []byte) [][]byte {
+func splitYAMLDocuments(data []byte) ([][]byte, error) {
+	return scanYAMLDocuments(bytes.NewReader(data), len(data)+1)
+}
+
+// scanYAMLDocuments is the reader-based core of splitYAMLDocuments, split out
+// so a scan failure mid-stream can be exercised directly in tests: with a
+// bytes.Reader the underlying Read never fails, so there is no way to observe
+// this error path through splitYAMLDocuments alone.
+func scanYAMLDocuments(r io.Reader, bufMax int) ([][]byte, error) {
 	var docs [][]byte
 	var current bytes.Buffer
 
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, bufio.MaxScanTokenSize), len(data)+1)
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, bufio.MaxScanTokenSize), bufMax)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if isYAMLDocumentSeparator(line) {
@@ -808,12 +1017,18 @@ func splitYAMLDocuments(data []byte) [][]byte {
 		current.WriteByte('\n')
 	}
 	if err := scanner.Err(); err != nil {
-		logger.L().Warning(fmt.Sprintf("error scanning YAML input: %v", err))
+		// The scan stopped before reaching the end of input, so any bytes
+		// still buffered in current belong to a document that was never
+		// fully read; discard them rather than treat a truncated document as
+		// complete. Documents already appended to docs were each terminated
+		// by a real "---" separator and remain valid, but the caller must
+		// still be told the read did not finish.
+		return docs, fmt.Errorf("scanning YAML input: %w", err)
 	}
 	if doc := bytes.TrimSpace(current.Bytes()); len(doc) > 0 {
 		docs = append(docs, append([]byte{}, doc...))
 	}
-	return docs
+	return docs, nil
 }
 
 func isYAMLDocumentSeparator(line []byte) bool {
@@ -842,6 +1057,18 @@ func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err
 	decoder.UseNumber()
 	if err := decoder.Decode(&jsonObj); err != nil {
 		return workloads, err
+	}
+
+	// A manifest file must contain exactly one top-level JSON value. Decoder.Decode
+	// intentionally stops after the first value, so without this EOF check a file
+	// containing a valid manifest followed by another value or malformed trailing
+	// data is accepted and the unscanned suffix is silently ignored.
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return workloads, errors.New("multiple top-level JSON values are not supported; use a JSON array or Kubernetes List")
+		}
+		return workloads, fmt.Errorf("invalid trailing JSON data: %w", err)
 	}
 
 	if convertErr := convertJsonToWorkload(jsonObj, &workloads); convertErr != nil {
@@ -1121,12 +1348,19 @@ func IsJson(filePath string) bool {
 	return slices.Contains(JSON_PREFIX, strings.ToLower(strings.TrimPrefix(filepath.Ext(filePath), ".")))
 }
 
-func glob(root, pattern string, onlyDirectories bool) ([]string, error) {
+func glob(root, pattern string, onlyDirectories bool, filter *PathFilter) ([]string, error) {
 	var matches []string
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+
+		if filter.Excluded(path, info.IsDir()) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 
 		// listing only directories

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -17,7 +17,7 @@ import (
 // transformSession applies the supplied Transformer to sensitive resource
 // identifiers and metadata while preserving referential integrity across
 // the full OPA session.
-func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transformer Transformer) error {
+func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Transformer) error {
 	if session == nil {
 		return nil
 	}
@@ -46,8 +46,11 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 
 		// Container-related metadata is transformed separately to preserve the
 		// existing typed/unstructured traversal behavior while supporting
-		// multiple transformation strategies.
-		if err := transformContainerMetadata(resource, transformer); err != nil {
+		// multiple transformation strategies. session.EnvVarSecretRefs[oldID]
+		// is nil for a resource whose removeData pass found no reference-backed
+		// env vars; transformTypedEnv/transformUnstructuredEnv treat that the
+		// same as "no additional names to anonymize", which is correct.
+		if err := transformContainerMetadata(resource, session.EnvVarSecretRefs[oldID], transformer); err != nil {
 			return err
 		}
 
@@ -65,7 +68,10 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 
 	newResourcesResult := make(map[string]resourcesresults.Result, len(session.ResourcesResult))
 	for oldID, result := range session.ResourcesResult {
-		newID := resolveMappedID(mapping, idMapping, oldID, "ref")
+		newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
+		if err != nil {
+			return err
+		}
 		result.ResourceID = newID
 
 		if result.PrioritizedResource != nil {
@@ -77,21 +83,29 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 				rule := &result.AssociatedControls[controlIndex].ResourceAssociatedRules[ruleIndex]
 
 				for pathIndex := range rule.Paths {
-					rule.Paths[pathIndex].ResourceID = resolveMappedID(
-						mapping,
+					mappedID, err := resolveMappedID(
+						transformer,
 						idMapping,
 						rule.Paths[pathIndex].ResourceID,
 						"ref",
 					)
+					if err != nil {
+						return err
+					}
+					rule.Paths[pathIndex].ResourceID = mappedID
 				}
 
 				for relatedIndex := range rule.RelatedResourcesIDs {
-					rule.RelatedResourcesIDs[relatedIndex] = resolveMappedID(
-						mapping,
+					mappedID, err := resolveMappedID(
+						transformer,
 						idMapping,
 						rule.RelatedResourcesIDs[relatedIndex],
 						"ref",
 					)
+					if err != nil {
+						return err
+					}
+					rule.RelatedResourcesIDs[relatedIndex] = mappedID
 				}
 			}
 		}
@@ -103,7 +117,10 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 	newResourceSource := make(map[string]reporthandling.Source, len(session.ResourceSource))
 
 	for oldID, source := range session.ResourceSource {
-		newID := resolveMappedID(mapping, idMapping, oldID, "ref")
+		newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
+		if err != nil {
+			return err
+		}
 
 		if err := transformResourceSource(
 			&source,
@@ -118,16 +135,22 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 
 	newResourcesPrioritized := make(map[string]prioritization.PrioritizedResource, len(session.ResourcesPrioritized))
 	for oldID, prioritized := range session.ResourcesPrioritized {
-		newID := resolveMappedID(mapping, idMapping, oldID, "ref")
+		newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
+		if err != nil {
+			return err
+		}
 		prioritized.ResourceID = newID
 		newResourcesPrioritized[newID] = prioritized
 	}
 	session.ResourcesPrioritized = newResourcesPrioritized
 
-	newResourceAttackTracks := make(map[string]v1alpha1.IAttackTrack, len(session.ResourceAttackTracks))
-	for oldID, attackTrack := range session.ResourceAttackTracks {
-		newID := resolveMappedID(mapping, idMapping, oldID, "ref")
-		newResourceAttackTracks[newID] = attackTrack
+	newResourceAttackTracks := make(map[string][]v1alpha1.IAttackTrack, len(session.ResourceAttackTracks))
+	for oldID, attackTracks := range session.ResourceAttackTracks {
+		newID, err := resolveMappedID(transformer, idMapping, oldID, "ref")
+		if err != nil {
+			return err
+		}
+		newResourceAttackTracks[newID] = attackTracks
 	}
 	session.ResourceAttackTracks = newResourceAttackTracks
 
@@ -135,11 +158,39 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 		if err := transformRepoContextMetadata(session.Metadata.ContextMetadata.RepoContextMetadata, transformer); err != nil {
 			return err
 		}
+		if err := transformDirectoryContextMetadata(session.Metadata.ContextMetadata.DirectoryContextMetadata, transformer); err != nil {
+			return err
+		}
+		if err := transformFileContextMetadata(session.Metadata.ContextMetadata.FileContextMetadata, transformer); err != nil {
+			return err
+		}
+		if err := transformClusterMetadata(session.Metadata.ContextMetadata.ClusterContextMetadata, transformer); err != nil {
+			return err
+		}
+		if err := transformClusterMetadata(&session.Metadata.ClusterMetadata, transformer); err != nil {
+			return err
+		}
 	}
 
 	if session.Report != nil {
 
 		if err := transformRepoContextMetadata(session.Report.Metadata.ContextMetadata.RepoContextMetadata, transformer); err != nil {
+			return err
+		}
+
+		if err := transformDirectoryContextMetadata(session.Report.Metadata.ContextMetadata.DirectoryContextMetadata, transformer); err != nil {
+			return err
+		}
+
+		if err := transformFileContextMetadata(session.Report.Metadata.ContextMetadata.FileContextMetadata, transformer); err != nil {
+			return err
+		}
+
+		if err := transformClusterMetadata(session.Report.Metadata.ContextMetadata.ClusterContextMetadata, transformer); err != nil {
+			return err
+		}
+
+		if err := transformClusterMetadata(&session.Report.Metadata.ClusterMetadata, transformer); err != nil {
 			return err
 		}
 
@@ -156,12 +207,15 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 			remappedResourceIDs.Clear()
 
 			for oldID, status := range originalResourceIDs {
-				newID := resolveMappedID(
-					mapping,
+				newID, err := resolveMappedID(
+					transformer,
 					idMapping,
 					oldID,
 					"ref",
 				)
+				if err != nil {
+					return err
+				}
 
 				remappedResourceIDs.Append(
 					status,
@@ -178,15 +232,24 @@ func transformSession(session *cautils.OPASessionObj, mapping *Mapping, transfor
 
 // resolveMappedID preserves referential integrity when IDs are rewritten during
 // anonymization, ensuring cross-references remain valid.
-func resolveMappedID(mapping *Mapping, idMapping map[string]string, originalID, prefix string) string {
+func resolveMappedID(transformer Transformer, idMapping map[string]string, originalID, prefix string) (string, error) {
 
 	// Exact match (most common case)
 	if mappedID, ok := idMapping[originalID]; ok {
-		return mappedID
+		return mappedID, nil
 	}
 
-	// Fallback for IDs that are not backed by a resource object.
-	return mapping.GetOrCreate(prefix, originalID)
+	// IDs that are not backed by a resource object still need the active
+	// transformation. In encrypted reports this keeps the fallback reversible;
+	// in hidden reports the mapping transformer retains deterministic aliases.
+	// Cache the fallback so every reference to the same missing resource uses
+	// one value even when the transformer uses randomized encryption.
+	mappedID, err := transformer.Transform(prefix, originalID)
+	if err != nil {
+		return "", err
+	}
+	idMapping[originalID] = mappedID
+	return mappedID, nil
 }
 
 // transformResourceLabels applies the supplied Transformer to labels
@@ -292,7 +355,7 @@ func transformResourceObjectSourcePath(resource workloadinterface.IMetadata, tra
 // src-xxxx:12).
 func transformSourcePath(sourcePath string, transformer Transformer) (string, error) {
 
-	lastColon := strings.LastIndex(sourcePath, ":")
+	lastColon := lastSourcePathColon(sourcePath)
 	if lastColon == -1 {
 		return transformValue(transformer, "src", sourcePath)
 	}
@@ -310,6 +373,30 @@ func transformSourcePath(sourcePath string, transformer Transformer) (string, er
 	}
 
 	return transformedPath + linePart, nil
+}
+
+// lastSourcePathColon returns the index of the colon separating a
+// sourcePath's file path from its trailing document-index suffix (for
+// example the ":12" in "src-xxxx:12"), or -1 if there is none. A leading
+// Windows drive letter (for example "C:\...") is skipped so it is never
+// mistaken for that separator, which would otherwise leave everything past
+// the drive letter untransformed.
+func lastSourcePathColon(sourcePath string) int {
+	searchFrom := 0
+	if len(sourcePath) >= 2 && sourcePath[1] == ':' && isASCIILetter(sourcePath[0]) {
+		searchFrom = 2
+	}
+
+	idx := strings.LastIndex(sourcePath[searchFrom:], ":")
+	if idx == -1 {
+		return -1
+	}
+
+	return idx + searchFrom
+}
+
+func isASCIILetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 // transformAnnotationNodes recursively traverses unstructured resource
@@ -466,6 +553,129 @@ func transformRepoContextMetadata(repo *reporthandlingv2.RepoContextMetadata, tr
 	}
 
 	*repo = repoCopy
+
+	return nil
+}
+
+// transformClusterMetadata hides which cluster a report came from. The context
+// name is the entry the user selected in their kubeconfig, and the cloud names
+// are parsed straight out of it: for a GKE cluster "gke_project_zone_name" the
+// prefix is "gke_project_zone", so PrefixName and FullName carry the project
+// and, on EKS, the account ID out of the ARN. The provider and worker count
+// stay in cleartext - they describe the shape of the environment rather than
+// name it, and are what a shared report is usually read for.
+//
+// Namespace keys use the "ns" prefix so that under --hide they come out
+// string-identical to the namespaces transformResourceMetadata writes onto the
+// resources themselves; the per-namespace counts are only worth keeping if they
+// still join. Under --encrypt the two sides are separate ciphertexts, as every
+// repeated value in a report is, and the join reappears once both are
+// decrypted.
+func transformClusterMetadata(cluster *reporthandlingv2.ClusterMetadata, transformer Transformer) error {
+	if cluster == nil {
+		return nil
+	}
+
+	clusterCopy := *cluster
+
+	var err error
+
+	clusterCopy.ContextName, err = transformValue(transformer, "cluster", clusterCopy.ContextName)
+	if err != nil {
+		return err
+	}
+
+	if clusterCopy.CloudMetadata != nil {
+		cloudCopy := *clusterCopy.CloudMetadata
+
+		cloudCopy.FullName, err = transformValue(transformer, "cluster", cloudCopy.FullName)
+		if err != nil {
+			return err
+		}
+
+		cloudCopy.ShortName, err = transformValue(transformer, "cluster", cloudCopy.ShortName)
+		if err != nil {
+			return err
+		}
+
+		cloudCopy.PrefixName, err = transformValue(transformer, "cluster", cloudCopy.PrefixName)
+		if err != nil {
+			return err
+		}
+
+		clusterCopy.CloudMetadata = &cloudCopy
+	}
+
+	if clusterCopy.MapNamespaceToNumberOfResources != nil {
+		namespaceCounts := make(map[string]int, len(clusterCopy.MapNamespaceToNumberOfResources))
+
+		for namespace, count := range clusterCopy.MapNamespaceToNumberOfResources {
+			namespace, err = transformValue(transformer, "ns", namespace)
+			if err != nil {
+				return err
+			}
+
+			namespaceCounts[namespace] += count
+		}
+
+		clusterCopy.MapNamespaceToNumberOfResources = namespaceCounts
+	}
+
+	*cluster = clusterCopy
+
+	return nil
+}
+
+// transformDirectoryContextMetadata and transformFileContextMetadata hide where
+// the scan ran: the absolute path the user pointed at, which on most machines
+// carries their account name, and the machine itself. A directory scan records
+// the one, a single-file scan the other, and both survive into a report whose
+// whole purpose is to be shareable. The host uses a shared prefix so the same
+// machine reads as the same pseudonym either way.
+func transformDirectoryContextMetadata(directory *reporthandlingv2.DirectoryContextMetadata, transformer Transformer) error {
+	if directory == nil {
+		return nil
+	}
+
+	directoryCopy := *directory
+
+	var err error
+
+	directoryCopy.BasePath, err = transformValue(transformer, "dir", directoryCopy.BasePath)
+	if err != nil {
+		return err
+	}
+
+	directoryCopy.HostName, err = transformValue(transformer, "host", directoryCopy.HostName)
+	if err != nil {
+		return err
+	}
+
+	*directory = directoryCopy
+
+	return nil
+}
+
+func transformFileContextMetadata(file *reporthandlingv2.FileContextMetadata, transformer Transformer) error {
+	if file == nil {
+		return nil
+	}
+
+	fileCopy := *file
+
+	var err error
+
+	fileCopy.FilePath, err = transformValue(transformer, "file", fileCopy.FilePath)
+	if err != nil {
+		return err
+	}
+
+	fileCopy.HostName, err = transformValue(transformer, "host", fileCopy.HostName)
+	if err != nil {
+		return err
+	}
+
+	*file = fileCopy
 
 	return nil
 }

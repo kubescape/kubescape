@@ -20,29 +20,29 @@ import (
 //
 // Matching covers everything on matchConstraints whose input the scanned
 // object itself carries: the resource rules (apiGroups/apiVersions/resources,
-// each rule's operations and resourceNames, honoring "*" and
+// each rule's operations, scope and resourceNames, honoring "*" and
 // excludeResourceRules) and the objectSelector, which matches the object's own
 // labels. The scan models every resource as a fresh CREATE (see stub.go), so a
 // rule that fires only on other operations does not match here either. The one
 // selector NOT evaluated is namespaceSelector — its input is the namespace's
 // labels, which the scan cannot guarantee to have — so a policy narrowing with
-// it is refused at load instead (see requireSupported). matchPolicy is
-// genuinely irrelevant offline: Equivalent matching only widens a rule across
-// API conversions, and a scan never converts — the object is matched at the
-// exact group/version it was scanned at.
-func (v *VAP) appliesTo(obj map[string]any) bool {
+// it is refused at load instead (see requireSupported). matchPolicy decides how
+// strictly a rule's apiVersions are read, see matchesAPIVersion.
+func (v *VAP) AppliesTo(obj map[string]any) bool {
 	if v.matchConstraints == nil || len(v.matchConstraints.ResourceRules) == 0 {
 		return true // no scoping info: evaluate (a malformed-policy edge)
 	}
-	gvr, ok := objectGVR(obj)
+	gvr, resources, ok := objectGVR(obj)
 	if !ok {
 		return true // kind undeterminable; let evaluation proceed (it will error and skip)
 	}
 	name, _, _ := unstructured.NestedString(obj, "metadata", "name")
+	target := scopedObject{gvr: gvr, resources: resources, name: name, namespaced: isNamespaced(obj)}
+	matchPolicy := effectiveMatchPolicy(v.matchConstraints)
 
 	included := false
 	for i := range v.matchConstraints.ResourceRules {
-		if resourceRuleMatches(&v.matchConstraints.ResourceRules[i], gvr, name) {
+		if resourceRuleMatches(&v.matchConstraints.ResourceRules[i], target, matchPolicy) {
 			included = true
 			break
 		}
@@ -51,7 +51,7 @@ func (v *VAP) appliesTo(obj map[string]any) bool {
 		return false
 	}
 	for i := range v.matchConstraints.ExcludeResourceRules {
-		if resourceRuleMatches(&v.matchConstraints.ExcludeResourceRules[i], gvr, name) {
+		if resourceRuleMatches(&v.matchConstraints.ExcludeResourceRules[i], target, matchPolicy) {
 			return false
 		}
 	}
@@ -93,24 +93,69 @@ func objectSelectorMatches(selector *metav1.LabelSelector, obj map[string]any) b
 const resourcePluralAnnotation = "kubescape.io/resource-plural"
 
 // objectGVR resolves an object's GroupVersionResource from its apiVersion and
-// kind. Offline there is no discovery or RESTMapper, so the plural comes from
-// the resource-plural annotation when the object carries one, and otherwise
-// from apimachinery's kind->resource guess (lower-case and pluralize).
-func objectGVR(obj map[string]any) (schema.GroupVersionResource, bool) {
+// kind, along with every resource name that kind may be registered under (see
+// resourceNames). The GVR carries the first of them, the one a live cluster is
+// most likely to serve.
+func objectGVR(obj map[string]any) (schema.GroupVersionResource, []string, bool) {
 	apiVersion, _ := obj["apiVersion"].(string)
 	kind, _ := obj["kind"].(string)
 	if apiVersion == "" || kind == "" {
-		return schema.GroupVersionResource{}, false
+		return schema.GroupVersionResource{}, nil, false
 	}
 	gv, err := schema.ParseGroupVersion(apiVersion)
 	if err != nil {
-		return schema.GroupVersionResource{}, false
+		return schema.GroupVersionResource{}, nil, false
 	}
+	names := resourceNames(obj, gv, kind)
+	return gv.WithResource(names[0]), names, true
+}
+
+// resourceNames returns the resource names a kind may be registered under, most
+// likely first. Offline there is no discovery or RESTMapper, and a CRD picks its
+// own spec.names.plural, so the spelling cannot be known: apimachinery's guess
+// misses every sibilant kind (Sandbox -> "sandboxs") and every vowel+"y" kind
+// (Gateway -> "gatewaies"), which an exact compare would drop silently. Keeping
+// both spellings lets a rule match either one, and the annotation stays
+// authoritative when an object declares the plural outright.
+func resourceNames(obj map[string]any, gv schema.GroupVersion, kind string) []string {
 	if plural, ok := annotatedPlural(obj); ok {
-		return gv.WithResource(plural), true
+		return []string{plural}
 	}
-	gvr, _ := meta.UnsafeGuessKindToResource(gv.WithKind(kind))
-	return gvr, true
+	guessed, singular := meta.UnsafeGuessKindToResource(gv.WithKind(kind))
+	if guessed.Resource == singular.Resource {
+		return []string{guessed.Resource} // kind is already plural (Endpoints)
+	}
+	names := []string{pluralize(singular.Resource)}
+	if guessed.Resource != names[0] {
+		names = append(names, guessed.Resource)
+	}
+	return names
+}
+
+// pluralize applies the English rules a CRD author (and controller-gen) follows:
+// a sibilant ending takes "es", a consonant before a final "y" takes "ies", and
+// everything else takes "s".
+func pluralize(singular string) string {
+	switch {
+	case hasAnySuffix(singular, "s", "x", "z", "ch", "sh"):
+		return singular + "es"
+	case strings.HasSuffix(singular, "y") && len(singular) > 1 && !isVowel(singular[len(singular)-2]):
+		return singular[:len(singular)-1] + "ies"
+	}
+	return singular + "s"
+}
+
+func hasAnySuffix(s string, suffixes ...string) bool {
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(s, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func isVowel(c byte) bool {
+	return strings.IndexByte("aeiou", c) >= 0
 }
 
 // annotatedPlural reads the resource-plural hint off the object. A missing,
@@ -124,12 +169,70 @@ func annotatedPlural(obj map[string]any) (string, bool) {
 	return plural, plural != ""
 }
 
-func resourceRuleMatches(rule *admissionregistrationv1.NamedRuleWithOperations, gvr schema.GroupVersionResource, name string) bool {
+// scopedObject is what appliesTo reads off the scanned object once and matches
+// every resource rule against, so adding a rule field to honor costs one field
+// here rather than another parameter on every call.
+type scopedObject struct {
+	gvr schema.GroupVersionResource
+	// resources are the names the object's kind may be registered under, any of
+	// which a rule may name (see resourceNames).
+	resources  []string
+	name       string
+	namespaced bool
+}
+
+func resourceRuleMatches(rule *admissionregistrationv1.NamedRuleWithOperations, target scopedObject, matchPolicy admissionregistrationv1.MatchPolicyType) bool {
 	return matchesOperation(rule.Operations) &&
-		matchesValue(rule.APIGroups, gvr.Group) &&
-		matchesValue(rule.APIVersions, gvr.Version) &&
-		matchesResource(rule.Resources, gvr.Resource) &&
-		matchesName(rule.ResourceNames, name)
+		matchesScope(rule.Scope, target.namespaced) &&
+		matchesValue(rule.APIGroups, target.gvr.Group) &&
+		matchesAPIVersion(rule.APIVersions, target.gvr.Version, matchPolicy) &&
+		matchesResource(rule.Resources, target.resources) &&
+		matchesName(rule.ResourceNames, target.name)
+}
+
+// effectiveMatchPolicy resolves matchConstraints.matchPolicy, which the API
+// defaults to Equivalent when it is unset - as every policy in the bundle
+// leaves it.
+func effectiveMatchPolicy(mr *admissionregistrationv1.MatchResources) admissionregistrationv1.MatchPolicyType {
+	if mr == nil || mr.MatchPolicy == nil {
+		return admissionregistrationv1.Equivalent
+	}
+	return *mr.MatchPolicy
+}
+
+// matchesAPIVersion reports whether the rule's apiVersions admit the object's
+// version. Exact matchPolicy requires the rule to name it. Equivalent (the API
+// default, which every bundle policy leaves unset) does not: the apiserver
+// converts a request into whichever version the rule names, so naming one
+// version of a group's resource covers every other version it is served at.
+// Offline there is no discovery to say which those are, so the version is
+// dropped from the comparison instead of resolved.
+//
+// The group is not widened with it. Equivalence can cross groups on a cluster,
+// but only its registry knows which pairs, and two same-named resources in
+// unrelated groups are separate storage.
+func matchesAPIVersion(allowed []string, version string, matchPolicy admissionregistrationv1.MatchPolicyType) bool {
+	if matchPolicy != admissionregistrationv1.Exact {
+		return true
+	}
+	return matchesValue(allowed, version)
+}
+
+// matchesScope reports whether the rule's scope admits the object. nil and "*"
+// are the API default and admit everything.
+//
+// Only a Cluster rule narrows anything offline: an object carrying a namespace
+// is proven namespaced, and admission would not hand it to that rule. The
+// reverse is not provable — the apiserver defaults metadata.namespace before
+// admission, so an absent one does not make the object cluster-scoped — which
+// is why a Namespaced rule matches regardless, the same widening appliesTo
+// applies to an undeterminable kind. Exclude rules get this symmetrically: a
+// Cluster-scoped exclusion does not exempt an object we know is namespaced.
+func matchesScope(scope *admissionregistrationv1.ScopeType, namespaced bool) bool {
+	if scope == nil || *scope != admissionregistrationv1.ClusterScope {
+		return true
+	}
+	return !namespaced
 }
 
 // matchesName reports whether the rule's resourceNames admit the object's
@@ -182,27 +285,24 @@ func matchesValue(allowed []string, want string) bool {
 }
 
 // matchesResource is matchesValue for resources, also accepting the "*/*"
-// subresource wildcard. A "resource/subresource" entry never matches a bare
+// subresource wildcard. It matches when the rule names any of the object's
+// candidate resource names. A "resource/subresource" entry never matches a bare
 // resource, which is correct: the scan does not evaluate subresources.
 //
-// A rule resource differing from the object's only in separators still matches:
-// a CRD may register "worker-pools" for kind WorkerPool, which the guess renders
+// A rule resource differing from a candidate only in separators still matches: a
+// CRD may register "worker-pools" for kind WorkerPool, which pluralizing renders
 // "workerpools". Dropping that object would be silent — the policy evaluates
 // against nothing and the control reads as clean. A plural further from the
-// guess than that still needs the resource-plural annotation.
-func matchesResource(allowed []string, want string) bool {
+// candidates than that still needs the resource-plural annotation.
+func matchesResource(allowed, wants []string) bool {
 	for _, a := range allowed {
-		if a == "*" || a == "*/*" || a == want {
+		if a == "*" || a == "*/*" {
 			return true
 		}
-	}
-	if want == "" {
-		return false
-	}
-	normalized := normalizePlural(want)
-	for _, a := range allowed {
-		if normalizePlural(a) == normalized {
-			return true
+		for _, want := range wants {
+			if want != "" && normalizePlural(a) == normalizePlural(want) {
+				return true
+			}
 		}
 	}
 	return false

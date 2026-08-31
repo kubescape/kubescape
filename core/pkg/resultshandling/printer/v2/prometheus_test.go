@@ -11,8 +11,8 @@ import (
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -211,7 +211,8 @@ func TestImagePrometheusFormat_OmitsPostureMetrics(t *testing.T) {
 	// real CVE metrics.
 	imageData := []cautils.ImageScanData{
 		{
-			Image: "test-image:latest",
+			Image:    "test-image:latest",
+			Platform: "linux/arm64",
 			Matches: match.NewMatches(match.Match{
 				Package: grypepkg.Package{ID: "pkg-1", Name: "openssl", Version: "3.0.0"},
 				Vulnerability: vulnerability.Vulnerability{
@@ -228,13 +229,19 @@ func TestImagePrometheusFormat_OmitsPostureMetrics(t *testing.T) {
 
 	// Image metrics must be present.
 	assert.Contains(t, output, "kubescape_image_count_cve")
-	assert.Contains(t, output, `image="test-image:latest"`)
+	assert.Contains(t, output, `image="test-image:latest",platform="linux/arm64",severity="High"`)
+	assert.NotContains(t, output, `image="test-image:latest [linux/arm64]"`)
 
 	// Posture metric families must be completely absent, not just zeroed.
 	assert.NotContains(t, output, "kubescape_cluster_complianceScore")
 	assert.NotContains(t, output, "kubescape_cluster_count_resources")
 	assert.NotContains(t, output, "kubescape_cluster_count_control")
 	assert.NotContains(t, output, "kubescape_cluster_coverage_score")
+
+	imageData[0].Platform = ""
+	legacyOutput := pp.generateImagePrometheusFormat(imageData).String()
+	assert.Contains(t, legacyOutput, `image="test-image:latest",severity="High"`)
+	assert.NotContains(t, legacyOutput, `platform=`)
 }
 
 func TestPostureScanFormat_StillEmitsPostureMetrics(t *testing.T) {

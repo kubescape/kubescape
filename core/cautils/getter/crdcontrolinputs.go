@@ -43,9 +43,17 @@ func NewCRDControlInputs() (*CRDControlInputs, error) {
 		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
 
-	return &CRDControlInputs{
-		client: dynamicClient,
-	}, nil
+	return NewCRDControlInputsWithClient(dynamicClient)
+}
+
+// NewCRDControlInputsWithClient creates a control-input getter from the dynamic
+// client already selected for the scan target.
+func NewCRDControlInputsWithClient(dynamicClient dynamic.Interface) (*CRDControlInputs, error) {
+	if dynamicClient == nil {
+		return nil, fmt.Errorf("kubernetes dynamic client is nil")
+	}
+
+	return &CRDControlInputs{client: dynamicClient}, nil
 }
 
 // GetControlsInputs retrieves control inputs from the ControlInput CRD.

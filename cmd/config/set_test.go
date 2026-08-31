@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/core/mocks"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
@@ -49,7 +49,7 @@ func TestGetSetCmd_SetCachedConfigReturnsError(t *testing.T) {
 
 // Should return a slice of keys when given a non-empty map
 func TestStringKeysToSlice(t *testing.T) {
-	m := map[string]func(*metav1.SetConfig, string){
+	m := map[string]func(*metav1.SetConfig, string) error{
 		"key1": nil,
 		"key2": nil,
 		"key3": nil,
@@ -92,8 +92,104 @@ func TestParseSetArgs_InvalidKey(t *testing.T) {
 	assert.EqualError(t, err, `key "invalidKey" unknown; supported: accessKey/accountID/cloudAPIURL/cloudReportURL`)
 }
 
+func TestParseSetArgs_CaseInsensitiveAndKebabCase(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		wantField string
+		wantVal   string
+	}{
+		{name: "accountId camelCase", args: []string{"accountId=val-acc"}, wantField: "account", wantVal: "val-acc"},
+		{name: "accountid lowercase", args: []string{"accountid=val-acc"}, wantField: "account", wantVal: "val-acc"},
+		{name: "account-id kebab-case", args: []string{"account-id=val-acc"}, wantField: "account", wantVal: "val-acc"},
+		{name: "account_id snake-case", args: []string{"account_id", "val-acc"}, wantField: "account", wantVal: "val-acc"},
+		{name: "account alias", args: []string{"account=val-acc"}, wantField: "account", wantVal: "val-acc"},
+		{name: "ACCOUNT_ID uppercase", args: []string{"ACCOUNT_ID=val-acc"}, wantField: "account", wantVal: "val-acc"},
+
+		{name: "accesskey lowercase", args: []string{"accesskey=val-key"}, wantField: "accessKey", wantVal: "val-key"},
+		{name: "access-key kebab-case", args: []string{"access-key=val-key"}, wantField: "accessKey", wantVal: "val-key"},
+		{name: "access_key snake-case", args: []string{"access_key", "val-key"}, wantField: "accessKey", wantVal: "val-key"},
+		{name: "ACCESS_KEY uppercase", args: []string{"ACCESS_KEY=val-key"}, wantField: "accessKey", wantVal: "val-key"},
+
+		{name: "cloudApiUrl mixedCase", args: []string{"cloudApiUrl=https://api.example.com"}, wantField: "cloudAPIURL", wantVal: "https://api.example.com"},
+		{name: "cloud-api-url kebab-case", args: []string{"cloud-api-url=https://api.example.com"}, wantField: "cloudAPIURL", wantVal: "https://api.example.com"},
+		{name: "cloud_api_url snake-case", args: []string{"cloud_api_url", "https://api.example.com"}, wantField: "cloudAPIURL", wantVal: "https://api.example.com"},
+
+		{name: "cloudReportUrl mixedCase", args: []string{"cloudReportUrl=https://report.example.com"}, wantField: "cloudReportURL", wantVal: "https://report.example.com"},
+		{name: "cloud-report-url kebab-case", args: []string{"cloud-report-url=https://report.example.com"}, wantField: "cloudReportURL", wantVal: "https://report.example.com"},
+		{name: "cloud_report_url snake-case", args: []string{"cloud_report_url", "https://report.example.com"}, wantField: "cloudReportURL", wantVal: "https://report.example.com"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setConfig, err := parseSetArgs(tt.args)
+			assert.NoError(t, err)
+			assert.NotNil(t, setConfig)
+
+			switch tt.wantField {
+			case "account":
+				assert.Equal(t, tt.wantVal, setConfig.Account)
+			case "accessKey":
+				assert.Equal(t, tt.wantVal, setConfig.AccessKey)
+			case "cloudAPIURL":
+				assert.Equal(t, tt.wantVal, setConfig.CloudAPIURL)
+			case "cloudReportURL":
+				assert.Equal(t, tt.wantVal, setConfig.CloudReportURL)
+			}
+		})
+	}
+}
+
 func TestParseSetArgs_TooManyArgs(t *testing.T) {
 	_, err := parseSetArgs([]string{"accountID", "v", "extra"})
 	assert.ErrorContains(t, err, "too many arguments")
 	assert.ErrorContains(t, err, "supported keys:")
+}
+
+func TestParseSetArgs_CloudAPIURL_Invalid(t *testing.T) {
+	args := []string{"cloudAPIURL=hello-world"}
+	setConfig, err := parseSetArgs(args)
+	assert.Nil(t, setConfig)
+	assert.ErrorContains(t, err, "invalid cloudAPIURL")
+	assert.ErrorContains(t, err, "invalid URI for request")
+}
+
+func TestParseSetArgs_CloudAPIURL_InvalidScheme(t *testing.T) {
+	args := []string{"cloudAPIURL=ftp://example.com"}
+	setConfig, err := parseSetArgs(args)
+	assert.Nil(t, setConfig)
+	assert.ErrorContains(t, err, "invalid cloudAPIURL")
+	assert.ErrorContains(t, err, "URL scheme must be http or https")
+}
+
+func TestParseSetArgs_CloudReportURL_Invalid(t *testing.T) {
+	args := []string{"cloudReportURL=hello-world"}
+	setConfig, err := parseSetArgs(args)
+	assert.Nil(t, setConfig)
+	assert.ErrorContains(t, err, "invalid cloudReportURL")
+	assert.ErrorContains(t, err, "invalid URI for request")
+}
+
+func TestParseSetArgs_CloudReportURL_InvalidScheme(t *testing.T) {
+	args := []string{"cloudReportURL=ftp://example.com"}
+	setConfig, err := parseSetArgs(args)
+	assert.Nil(t, setConfig)
+	assert.ErrorContains(t, err, "invalid cloudReportURL")
+	assert.ErrorContains(t, err, "URL scheme must be http or https")
+}
+
+func TestParseSetArgs_CloudAPIURL_EmptyHost(t *testing.T) {
+	args := []string{"cloudAPIURL=http://"}
+	setConfig, err := parseSetArgs(args)
+	assert.Nil(t, setConfig)
+	assert.ErrorContains(t, err, "invalid cloudAPIURL")
+	assert.ErrorContains(t, err, "URL host must not be empty")
+}
+
+func TestParseSetArgs_CloudReportURL_EmptyHost(t *testing.T) {
+	args := []string{"cloudReportURL=https://"}
+	setConfig, err := parseSetArgs(args)
+	assert.Nil(t, setConfig)
+	assert.ErrorContains(t, err, "invalid cloudReportURL")
+	assert.ErrorContains(t, err, "URL host must not be empty")
 }

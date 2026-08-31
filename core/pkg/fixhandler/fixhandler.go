@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -17,8 +18,8 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -27,6 +28,7 @@ import (
 	storagev1beta1 "github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"gopkg.in/op/go-logging.v1"
+	"gopkg.in/yaml.v3"
 )
 
 const UserValuePrefix = "YOUR_"
@@ -236,6 +238,31 @@ func (h *FixHandler) resourceBasePath(resourceObj *reporthandling.Resource) stri
 	return sourcePath
 }
 
+// countResourcesPerFile tallies every resource the scan read from each manifest,
+// keyed by the file the report recorded it against.
+func (h *FixHandler) countResourcesPerFile(resources map[string]*reporthandling.Resource) map[string]int {
+	perFile := make(map[string]int, len(resources))
+	for _, resource := range resources {
+		if key := h.resourceFileKey(resource); key != "" {
+			perFile[key]++
+		}
+	}
+	return perFile
+}
+
+// resourceFileKey is the manifest a resource was read from, without the
+// document index the report appends to it.
+func (h *FixHandler) resourceFileKey(resource *reporthandling.Resource) string {
+	if resource == nil {
+		return ""
+	}
+	filePath, _, err := h.getFilePathAndIndex(h.getPathFromRawResource(resource.GetObject()))
+	if err != nil {
+		return ""
+	}
+	return filePath
+}
+
 func (h *FixHandler) buildResourcesMap() map[string]*reporthandling.Resource {
 	resourceIdToRawResource := make(map[string]*reporthandling.Resource)
 	for i := range h.reportObj.Resources {
@@ -276,6 +303,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 	resourceIdToResource := h.buildResourcesMap()
 
 	resourcesToFix := make([]ResourceFixInfo, 0)
+	resourcesPerFile := h.countResourcesPerFile(resourceIdToResource)
 	h.unfixedControls = h.unfixedControls[:0]
 	h.fixedControlsCount = 0
 
@@ -287,10 +315,10 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			if err := json.Unmarshal(profileData, &cp); err == nil {
 				containerProfile = &cp
 			} else {
-				logger.L().Ctx(ctx).Warning("Failed to unmarshal container profile: " + err.Error())
+				logger.L().Ctx(ctx).Warning("Failed to unmarshal container profile: " + sanitizeForLog(err.Error()))
 			}
 		} else {
-			logger.L().Ctx(ctx).Warning("Failed to read container profile: " + err.Error())
+			logger.L().Ctx(ctx).Warning("Failed to read container profile: " + sanitizeForLog(err.Error()))
 		}
 	}
 
@@ -327,8 +355,8 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		skipReason := ""
 		if resourcePath == "" {
 			skipReason = "skipped: resource has no local file path"
-		} else if resourceObj.Source == nil || resourceObj.Source.FileType != reporthandling.SourceTypeYaml {
-			skipReason = "skipped: source is not a YAML file"
+		} else if resourceObj.Source == nil || !isFixableSourceType(resourceObj.Source.FileType) {
+			skipReason = "skipped: source is not a YAML or JSON file"
 		}
 
 		var absolutePath string
@@ -383,6 +411,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 		rfi := ResourceFixInfo{
 			FilePath:        absolutePath,
+			fileKey:         h.resourceFileKey(resourceObj),
 			Resource:        resourceObj,
 			YamlExpressions: make(map[string]armotypes.FixPath, 0),
 			DocumentIndex:   documentIndex,
@@ -405,9 +434,18 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 			added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(documentIndex, ac, h.fixInfo.SkipUserValues)
 
+			rfi.failedControls = append(rfi.failedControls, UnfixedControl{
+				ControlID:    ac.GetID(),
+				ControlName:  ac.GetName(),
+				ResourceName: resourceObj.GetName(),
+				ResourceKind: resourceObj.GetKind(),
+				FilePath:     sanitizeForLog(absolutePath),
+			})
+
 			// Fully auto-remediated: every failed path produced an expression.
 			if added > 0 && len(skipped) == 0 {
 				h.fixedControlsCount++
+				rfi.fixedCount++
 				continue
 			}
 
@@ -444,6 +482,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		for _, pu := range tentativeUnfixed {
 			if len(plannedPaths) > 0 && controlIsCoveredByPlannedPaths(pu.ac, plannedPaths) {
 				h.fixedControlsCount++
+				rfi.fixedCount++
 				continue
 			}
 			h.unfixedControls = append(h.unfixedControls, pu.entry)
@@ -454,6 +493,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			if resourceObj != nil && resourceObj.GetObject() != nil {
 				rawManifest, _ = json.Marshal(resourceObj.GetObject())
 			}
+
 			var workloadKind string
 			var containerName string
 
@@ -463,24 +503,31 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 			// Verify resourceObj matches containerProfile's workload labels
 			labels := containerProfile.GetLabels()
+			profileMatches := true
 			if labels != nil {
 				containerName = labels["kubescape.io/workload-container-name"]
 				profileKind := labels["kubescape.io/workload-kind"]
 				profileName := labels["kubescape.io/workload-name"]
+				profileNamespace := labels["kubescape.io/workload-namespace"]
 
 				if resourceObj != nil {
 					if profileKind != "" && !strings.EqualFold(profileKind, resourceObj.GetKind()) {
-						continue // Kind mismatch, skip drift detection for this resource
+						profileMatches = false // Kind mismatch, skip drift detection for this resource
 					}
 					if profileName != "" && profileName != resourceObj.GetName() {
-						continue // Name mismatch, skip drift detection for this resource
+						profileMatches = false // Name mismatch, skip drift detection for this resource
+					}
+					if profileNamespace != "" && profileNamespace != resourceObj.GetNamespace() {
+						profileMatches = false // Namespace mismatch, skip drift detection for this resource
 					}
 				}
 			}
 
-			fixes := DetectProfileDrift(rawManifest, containerProfile, workloadKind, containerName, rfi.DocumentIndex)
-			for _, fix := range fixes {
-				rfi.YamlExpressions[fix.YamlExpression] = armotypes.FixPath{Path: fix.YamlExpression, Value: ""}
+			if profileMatches {
+				fixes := DetectProfileDrift(rawManifest, containerProfile, workloadKind, containerName, rfi.DocumentIndex)
+				for _, fix := range fixes {
+					rfi.YamlExpressions[fix.YamlExpression] = armotypes.FixPath{Path: fix.YamlExpression, Value: ""}
+				}
 			}
 		}
 
@@ -489,7 +536,52 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		}
 	}
 
-	return resourcesToFix
+	return h.dropWrappedResources(ctx, resourcesToFix, resourcesPerFile)
+}
+
+// dropWrappedResources removes resources whose fix paths would not resolve
+// against the document they were read from. A fix path is relative to its own
+// resource, but the expression is evaluated at the document root, so the two
+// only agree when the document is the resource. A manifest that wraps several
+// resources in one document, kind: List being the usual case, breaks that: the
+// paths are written to the wrapper and the file gains a spec block belonging to
+// none of them.
+//
+// A file yielding fewer documents than the resources read from it is wrapped.
+// The count comes from every resource the scan recorded, not from the failing
+// ones: a List whose other members passed is still a List.  Genuine
+// multi-document YAML has one document per resource and is untouched.
+func (h *FixHandler) dropWrappedResources(ctx context.Context, resourcesToFix []ResourceFixInfo, resourcesPerFile map[string]int) []ResourceFixInfo {
+	wrapped := make(map[string]bool, len(resourcesPerFile))
+	for i := range resourcesToFix {
+		filePath := resourcesToFix[i].FilePath
+		resources := resourcesPerFile[resourcesToFix[i].fileKey]
+		if _, checked := wrapped[filePath]; checked || resources < 2 {
+			continue
+		}
+		documents, err := countDocuments(ctx, filePath)
+		if err != nil {
+			// Leave it to the apply step, which reports the parse error itself.
+			continue
+		}
+		wrapped[filePath] = documents < resources
+	}
+
+	kept := make([]ResourceFixInfo, 0, len(resourcesToFix))
+	for i := range resourcesToFix {
+		rfi := resourcesToFix[i]
+		if !wrapped[rfi.FilePath] {
+			kept = append(kept, rfi)
+			continue
+		}
+
+		h.fixedControlsCount -= rfi.fixedCount
+		for _, unfixed := range rfi.failedControls {
+			unfixed.Reason = "skipped: the file declares several resources in one document"
+			h.unfixedControls = append(h.unfixedControls, unfixed)
+		}
+	}
+	return kept
 }
 
 // PrepareHelmSuggestions collects fix guidance for resources whose Source is a
@@ -696,14 +788,14 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 			continue
 		}
 
-		fixedYamlString, err := ApplyFixToContent(ctx, fileAsString, yamlExpression)
+		fixedContent, err := applyFixToFileContent(ctx, filepath, fileAsString, yamlExpression)
 
 		if err != nil {
 			errors = append(errors, fmt.Errorf("failed to fix file %s: %w ", filepath, err))
 			continue
 		}
 
-		if err := writeFixesToFile(filepath, fixedYamlString); err != nil {
+		if err := writeFixesToFile(filepath, fixedContent); err != nil {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Failed to write fixes to file %s, %v", filepath, err.Error()))
 			errors = append(errors, err)
 			continue
@@ -807,6 +899,23 @@ func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string)
 	return fixedString, nil
 }
 
+// isFixableSourceType reports whether the scan parsed a file the fix engine can
+// rewrite. Helm-rendered resources carry their own type and are handled by
+// PrepareHelmSuggestions instead.
+func isFixableSourceType(fileType string) bool {
+	return fileType == reporthandling.SourceTypeYaml || fileType == reporthandling.SourceTypeJson
+}
+
+// applyFixToFileContent rewrites one file, keeping it in the format it was
+// written in. Emitting YAML into a .json manifest would break every tool that
+// reads it back.
+func applyFixToFileContent(ctx context.Context, filePath, content, yamlExpression string) (string, error) {
+	if isJSONSource(filePath) {
+		return applyFixToJSONContent(ctx, content, yamlExpression)
+	}
+	return ApplyFixToContent(ctx, content, yamlExpression)
+}
+
 func (h *FixHandler) getFileYamlExpressions(resourcesToFix []ResourceFixInfo) map[string]string {
 	fileYamlExpressions := make(map[string]string, 0)
 	for _, toPin := range resourcesToFix {
@@ -826,22 +935,39 @@ func (h *FixHandler) getFileYamlExpressions(resourcesToFix []ResourceFixInfo) ma
 	return fileYamlExpressions
 }
 
-// plannedPathsFromExpressions returns the distinct, non-empty FixPath.Path
-// values from a YamlExpressions map. Used by the unfixed-control reconciliation
+// plannedFix is one planned YAML edit's location and the value it writes
+// there, kept together so a caller can tell not just that a planned edit
+// touches a given path, but whether it writes the value another control's
+// check actually expected to find (see controlIsCoveredByPlannedPaths).
+type plannedFix struct {
+	Path  string
+	Value string
+}
+
+// plannedPathsFromExpressions returns every non-empty (Path, Value) pair
+// from a YamlExpressions map, used by the unfixed-control reconciliation
 // pass to test whether a control's failed paths are covered by some planned
-// edit.
-func plannedPathsFromExpressions(exprs map[string]armotypes.FixPath) []string {
+// edit. exprs' own keys (the yaml expression strings) are already unique,
+// so no further dedup is applied here: two entries can legitimately share a
+// Path with different Values (two controls each owning their own concrete
+// FixPath at the same location), and collapsing those to one by Path alone
+// would silently discard whichever Value the map's (unordered) iteration
+// happened to visit second -- now that Value is load-bearing for
+// controlIsCoveredByPlannedPaths' coverage decision, that would reintroduce
+// the exact class of bug this reconciliation pass exists to avoid, just
+// nondeterministically. controlIsCoveredByPlannedPaths' own inner loop
+// already checks every entry and only accepts an actual match, so keeping
+// duplicates is harmless.
+func plannedPathsFromExpressions(exprs map[string]armotypes.FixPath) []plannedFix {
 	if len(exprs) == 0 {
 		return nil
 	}
-	seen := make(map[string]bool, len(exprs))
-	out := make([]string, 0, len(exprs))
+	out := make([]plannedFix, 0, len(exprs))
 	for _, fp := range exprs {
-		if fp.Path == "" || seen[fp.Path] {
+		if fp.Path == "" {
 			continue
 		}
-		seen[fp.Path] = true
-		out = append(out, fp.Path)
+		out = append(out, plannedFix{Path: fp.Path, Value: fp.Value})
 	}
 	return out
 }
@@ -855,6 +981,37 @@ func normalizeFailedPath(p string) string {
 		return before
 	}
 	return p
+}
+
+// expectedValueSuffix extracts the "<expected>" part of a raw path value
+// like "spec.…runAsNonRoot=true" -- the same suffix normalizeFailedPath
+// discards. ok is false when p carries no "=" at all, meaning the check
+// recorded no specific expected value to compare against.
+func expectedValueSuffix(p string) (value string, ok bool) {
+	_, after, found := strings.Cut(p, "=")
+	if !found {
+		return "", false
+	}
+	return after, true
+}
+
+// yamlValuesEqual reports whether two raw fix-value strings represent the
+// same YAML value, tolerating formatting differences (quoting, spacing,
+// key order) a literal string comparison would wrongly treat as different.
+// Either string failing to parse falls back to a literal comparison rather
+// than silently treating an unparsable value as a match -- callers only
+// reach here to decide whether to REFUSE a promotion, so being unable to
+// parse a value must not accidentally make two different-looking strings
+// compare equal.
+func yamlValuesEqual(a, b string) bool {
+	var av, bv any
+	if err := yaml.Unmarshal([]byte(a), &av); err != nil {
+		return a == b
+	}
+	if err := yaml.Unmarshal([]byte(b), &bv); err != nil {
+		return a == b
+	}
+	return reflect.DeepEqual(av, bv)
 }
 
 // yamlPathCovers reports whether setting `planned` necessarily satisfies a
@@ -878,25 +1035,28 @@ func yamlPathCovers(planned, failed string) bool {
 	return next == '.' || next == '['
 }
 
-// actionableLocation returns the YAML location a path entry describes,
+// actionableLocation returns the normalized YAML location a path entry
+// describes, and the raw string it was derived from (which may still carry
+// an "=<expected>" suffix normalizeFailedPath stripped from location),
 // regardless of which remediation field it was stored in. PosturePaths
 // entries carry exactly one of FailedPath / DeletePath / ReviewPath / FixPath
 // in practice (see appendPaths in opa-utils), so taking the first non-empty
-// one yields the location the check was actually pointing at.
-func actionableLocation(p armotypes.PosturePaths) string {
+// one yields the location the check was actually pointing at. Callers that
+// need the value the check expected use raw with expectedValueSuffix.
+func actionableLocation(p armotypes.PosturePaths) (location, raw string) {
 	if p.FailedPath != "" {
-		return normalizeFailedPath(p.FailedPath)
+		return normalizeFailedPath(p.FailedPath), p.FailedPath
 	}
 	if p.DeletePath != "" {
-		return normalizeFailedPath(p.DeletePath)
+		return normalizeFailedPath(p.DeletePath), p.DeletePath
 	}
 	if p.ReviewPath != "" {
-		return normalizeFailedPath(p.ReviewPath)
+		return normalizeFailedPath(p.ReviewPath), p.ReviewPath
 	}
 	if p.FixPath.Path != "" {
-		return p.FixPath.Path
+		return p.FixPath.Path, p.FixPath.Path
 	}
-	return ""
+	return "", ""
 }
 
 // controlIsCoveredByPlannedPaths reports whether every actionable path entry
@@ -906,24 +1066,44 @@ func actionableLocation(p armotypes.PosturePaths) string {
 // just because an unrelated FailedPath happens to overlap with a planned
 // edit. A control whose rules carry no actionable locations at all is not
 // promoted either (nothing concrete to match against).
-func controlIsCoveredByPlannedPaths(ac *resourcesresults.ResourceAssociatedControl, plannedPaths []string) bool {
+//
+// An exact path match (not merely an ancestor) is further required to write
+// the same value the failed check expected, when that check recorded one
+// (a FailedPath's "=<expected>" suffix): path overlap alone does not prove
+// a different control's fix actually satisfies this check, only that it
+// touches the same field. Two controls checking the same field for two
+// different concrete values (e.g. one wants capabilities.drop == ["ALL"],
+// another wants it == ["SYS_ADMIN","NET_ADMIN"]) must not promote each
+// other. An ancestor match (the planned edit replaces a whole subtree the
+// failed path lives inside) still counts as covered without a value check:
+// verifying a specific leaf's resulting value inside an arbitrarily
+// structured subtree write is not attempted here.
+func controlIsCoveredByPlannedPaths(ac *resourcesresults.ResourceAssociatedControl, plannedPaths []plannedFix) bool {
 	sawActionablePath := false
 	for _, rule := range ac.ResourceAssociatedRules {
 		if !rule.GetStatus(nil).IsFailed() {
 			continue
 		}
 		for _, p := range rule.Paths {
-			loc := actionableLocation(p)
+			loc, raw := actionableLocation(p)
 			if loc == "" {
 				continue
 			}
 			sawActionablePath = true
+			expected, hasExpected := expectedValueSuffix(raw)
 			covered := false
 			for _, planned := range plannedPaths {
-				if yamlPathCovers(planned, loc) {
-					covered = true
-					break
+				if !yamlPathCovers(planned.Path, loc) {
+					continue
 				}
+				if planned.Path == loc && hasExpected && !yamlValuesEqual(planned.Value, expected) {
+					// Same field, but this planned fix writes a value the
+					// failed check did not expect: overlap alone does not
+					// prove the check would now pass.
+					continue
+				}
+				covered = true
+				break
 			}
 			if !covered {
 				return false
@@ -1070,10 +1250,36 @@ func writeFixesToFile(path, content string) error {
 	if err != nil {
 		return fmt.Errorf("error writing fixes to file: %w", err)
 	}
-	defer file.Close()
 
+	return writeAndClose(file, content)
+}
+
+// writeStringCloser is the subset of *os.File that writeAndClose needs to
+// write the fixed manifest and close the file, checking both errors. It
+// exists so a fake can simulate a Close-time failure deterministically in
+// tests: reproducing that with a real file would require an actually faulty
+// filesystem (e.g. NFS, which can accept a Write into its client-side buffer
+// and only report ENOSPC when the buffer is flushed at Close), which isn't
+// something a portable unit test can arrange.
+type writeStringCloser interface {
+	WriteString(s string) (int, error)
+	Close() error
+}
+
+// writeAndClose writes content and closes file, checking both errors instead
+// of closing via defer. A write can appear to succeed while the underlying
+// filesystem only reports a real failure (e.g. out of space) when the file is
+// closed and its buffered data is finally flushed - discarding that error, as
+// a deferred Close() would, reports success for a fix that was silently never
+// written to disk.
+func writeAndClose(file writeStringCloser, content string) error {
 	if _, err := file.WriteString(content); err != nil {
+		_ = file.Close() // best-effort; the write error is already being reported
 		return fmt.Errorf("error writing fixes to file: %w", err)
+	}
+
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("error writing fixes to file: failed to flush: %w", err)
 	}
 
 	return nil

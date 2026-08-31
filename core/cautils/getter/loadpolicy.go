@@ -2,12 +2,14 @@ package getter
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
@@ -47,7 +49,10 @@ func getCacheDir() string {
 
 // LoadPolicy loads policies from a local repository.
 type LoadPolicy struct {
-	filePaths []string
+	filePaths       []string
+	consumedInputMu sync.Mutex
+	consumedPath    string
+	consumedDigest  string
 }
 
 // NewLoadPolicy builds a LoadPolicy.
@@ -55,6 +60,12 @@ func NewLoadPolicy(filePaths []string) *LoadPolicy {
 	return &LoadPolicy{
 		filePaths: filePaths,
 	}
+}
+
+// ShouldPersistPolicyArtifacts prevents explicit local inputs from being
+// republished into Kubescape's shared disk fallback.
+func (lp *LoadPolicy) ShouldPersistPolicyArtifacts() bool {
+	return false
 }
 
 // GetControl returns a control from the policy file.
@@ -264,6 +275,9 @@ func (lp *LoadPolicy) GetExceptions(_ context.Context, _ /* clusterName */ strin
 
 	exception := make([]armotypes.PostureExceptionPolicy, 0, 300)
 	err = json.Unmarshal(buf, &exception)
+	if err == nil {
+		lp.recordConsumedFile(filePath, buf)
+	}
 
 	return exception, err
 }
@@ -295,8 +309,31 @@ func (lp *LoadPolicy) GetControlsInputs(_ context.Context, _ /* clusterName */ s
 
 		return nil, formattedError
 	}
+	if len(controlInputs) > 0 {
+		lp.recordConsumedFile(filePath, buf)
+	}
 
 	return controlInputs, nil
+}
+
+// ConsumedFileDigest returns the digest of the exact local input bytes that
+// this getter successfully used. The path is kept internal until a caller
+// applies its own safe-reporting policy.
+func (lp *LoadPolicy) ConsumedFileDigest() (path, digest string, ok bool) {
+	lp.consumedInputMu.Lock()
+	defer lp.consumedInputMu.Unlock()
+	if lp.consumedDigest == "" {
+		return "", "", false
+	}
+	return lp.consumedPath, lp.consumedDigest, true
+}
+
+func (lp *LoadPolicy) recordConsumedFile(path string, contents []byte) {
+	digest := sha256.Sum256(contents)
+	lp.consumedInputMu.Lock()
+	defer lp.consumedInputMu.Unlock()
+	lp.consumedPath = path
+	lp.consumedDigest = fmt.Sprintf("sha256:%x", digest)
 }
 
 // GetAttackTracks yields the attack tracks from a config file.

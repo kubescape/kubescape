@@ -11,7 +11,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -22,9 +22,27 @@ type resolvedResource struct {
 	groupVersionResourceTriplet string
 	comparisonTriplets          []string
 	namespaced                  *bool
+	// kind is the Kind the resource is served as, empty when the resolver had no
+	// authoritative source for it — only discovery and a file scan's manifests
+	// know it, and a guess would be worse than reporting it unknown.
+	kind string
 }
 
 type resourceResolver func(group, version, resource string) []resolvedResource
+
+// coreAPIGroupAlias is how a policy rule may spell the core API group. Every
+// other identity in a scan carries it as the empty string, so the two have to
+// be reconciled before a rule is compared against anything.
+const coreAPIGroupAlias = "core"
+
+// normalizeAPIGroup resolves a rule's API group to the spelling discovery, the
+// resource triplets and the API server all use.
+func normalizeAPIGroup(group string) string {
+	if group == coreAPIGroupAlias {
+		return ""
+	}
+	return group
+}
 
 type offlineManifestResource struct {
 	group      string
@@ -84,7 +102,7 @@ func newOfflineManifestResourceResolver(mappedResources map[string][]workloadint
 
 		var resolved []resolvedResource
 		for _, manifestResource := range resources {
-			if !matchesOfflineManifestValue(group, manifestResource.group) ||
+			if !matchesOfflineManifestValue(normalizeAPIGroup(group), manifestResource.group) ||
 				!matchesOfflineManifestValue(version, manifestResource.version) ||
 				!matchesOfflineManifestResource(resource, manifestResource.kind) {
 				continue
@@ -113,6 +131,7 @@ func newOfflineManifestResourceResolver(mappedResources map[string][]workloadint
 				groupVersionResourceTriplet: primary,
 				comparisonTriplets:          comparisons,
 				namespaced:                  &namespaced,
+				kind:                        manifestResource.kind,
 			})
 		}
 		return resolved
@@ -120,10 +139,7 @@ func newOfflineManifestResourceResolver(mappedResources map[string][]workloadint
 }
 
 func matchesOfflineManifestValue(policyValue, manifestValue string) bool {
-	if policyValue == "*" || policyValue == manifestValue {
-		return true
-	}
-	return policyValue == "core" && manifestValue == ""
+	return policyValue == "*" || policyValue == manifestValue
 }
 
 func matchesOfflineManifestResource(policyResource, manifestKind string) bool {
@@ -143,6 +159,9 @@ func defaultResourceResolver(group, version, resource string) []resolvedResource
 	if version == "" || resource == "" {
 		return nil
 	}
+	// Resolve the alias before the triplet is built: "core/v1/pods" names an
+	// API group no cluster serves, so the query it produces can only fail.
+	group = normalizeAPIGroup(group)
 	_, builtInErr := k8sinterface.GetGroupVersionResource(resource)
 	isUnknown := builtInErr != nil && len(mapKSResourceToApiGroup(resource)) == 0
 	if isUnknown && (group == "" || group == "*" || version == "*" || resource == "*") {
@@ -171,6 +190,7 @@ type discoveredAPIResource struct {
 	gvr        schema.GroupVersionResource
 	kind       string
 	namespaced bool
+	listable   bool
 }
 
 // newDiscoveryResourceResolver uses the API server's declared Kind, plural
@@ -178,6 +198,15 @@ type discoveredAPIResource struct {
 // built-in and Kubescape virtual resources retain the existing k8s-interface
 // behavior; unknown CRDs are not guessed into live queries.
 func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resourceResolver, []cautils.PartialGVRPull) {
+	resolver, discoveryFailures, _ := newDiscoveryResourceResolverWithKinds(client)
+	return resolver, discoveryFailures
+}
+
+// newDiscoveryResourceResolverWithKinds is newDiscoveryResourceResolver plus
+// the full set of listable kinds discovery reported, so a caller can compare
+// what the cluster serves against what the policy set actually queried (see
+// computeUnexaminedKinds).
+func newDiscoveryResourceResolverWithKinds(client discovery.DiscoveryInterface) (resourceResolver, []cautils.PartialGVRPull, []discoveredAPIResource) {
 	var discovered []discoveredAPIResource
 	var discoveryFailures []cautils.PartialGVRPull
 	if client != nil {
@@ -189,8 +218,17 @@ func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resource
 		discovered = collectDiscoveredResources(resourceLists)
 	}
 
-	warned := map[string]struct{}{}
-	var warnedMu sync.Mutex
+	logged := map[string]struct{}{}
+	var loggedMu sync.Mutex
+	logOnce := func(key string, emit func()) {
+		loggedMu.Lock()
+		defer loggedMu.Unlock()
+		if _, ok := logged[key]; ok {
+			return
+		}
+		logged[key] = struct{}{}
+		emit()
+	}
 
 	return func(group, version, resource string) []resolvedResource {
 		if version == "" || resource == "" {
@@ -198,16 +236,26 @@ func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resource
 		}
 
 		var resolved []resolvedResource
+		var skippedUnlistable []string
 		for _, candidate := range discovered {
-			if !matchesDiscoveryValue(group, candidate.gvr.Group) ||
+			if !matchesDiscoveryValue(normalizeAPIGroup(group), candidate.gvr.Group) ||
 				!matchesDiscoveryValue(version, candidate.gvr.Version) ||
 				!matchesDiscoveryResource(resource, candidate) {
+				continue
+			}
+			if !candidate.listable {
+				// Collection is a cluster-wide LIST, so a resource the API
+				// server does not serve "list" for can only fail. Skipping it
+				// keeps create-only endpoints such as tokenreviews out of
+				// wildcard fan-out.
+				skippedUnlistable = append(skippedUnlistable, k8sinterface.GroupVersionResourceToString(&candidate.gvr))
 				continue
 			}
 			namespaced := candidate.namespaced
 			resolved = append(resolved, resolvedResource{
 				groupVersionResourceTriplet: k8sinterface.GroupVersionResourceToString(&candidate.gvr),
 				namespaced:                  &namespaced,
+				kind:                        candidate.kind,
 			})
 		}
 		if len(resolved) > 0 {
@@ -217,6 +265,29 @@ func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resource
 			return resolved
 		}
 
+		if len(skippedUnlistable) > 0 {
+			// Discovery answered for this resource, so the built-in fallbacks
+			// below must not resurrect the GVR it declared unlistable.
+			sort.Strings(skippedUnlistable)
+			logOnce("unlistable:"+k8sinterface.JoinResourceTriplets(group, version, resource), func() {
+				details := []helpers.IDetails{
+					helpers.String("apiGroup", group),
+					helpers.String("apiVersion", version),
+					helpers.String("resource", resource),
+					helpers.String("skipped", strings.Join(skippedUnlistable, ",")),
+				}
+				// A policy that names the resource outright loses its only
+				// input, which is worth a warning. A wildcard match sweeping
+				// past create-only endpoints is expected, so keep it quiet.
+				if isExplicitPolicyMatch(group, version, resource) {
+					logger.L().Warning("resource does not support list in Kubernetes discovery; skipping live query", details...)
+					return
+				}
+				logger.L().Debug("resource does not support list in Kubernetes discovery; skipping live query", details...)
+			})
+			return nil
+		}
+
 		if len(mapKSResourceToApiGroup(resource)) > 0 {
 			return defaultResourceResolver(group, version, resource)
 		}
@@ -224,18 +295,14 @@ func newDiscoveryResourceResolver(client discovery.DiscoveryInterface) (resource
 			return defaultResourceResolver(group, version, resource)
 		}
 
-		key := k8sinterface.JoinResourceTriplets(group, version, resource)
-		warnedMu.Lock()
-		if _, ok := warned[key]; !ok {
+		logOnce("undiscovered:"+k8sinterface.JoinResourceTriplets(group, version, resource), func() {
 			logger.L().Warning("resource was not found in Kubernetes discovery; skipping live query",
 				helpers.String("apiGroup", group),
 				helpers.String("apiVersion", version),
 				helpers.String("resource", resource))
-			warned[key] = struct{}{}
-		}
-		warnedMu.Unlock()
+		})
 		return nil
-	}, discoveryFailures
+	}, discoveryFailures, discovered
 }
 
 func getDiscoveryFailures(err error) []cautils.PartialGVRPull {
@@ -340,7 +407,7 @@ func matchingDiscoveryFailureGroupVersion(failure cautils.PartialGVRPull, group,
 	if err != nil {
 		return schema.GroupVersion{}, false
 	}
-	groupMatches := group == "*" || group == groupVersion.Group || (group == "core" && groupVersion.Group == "")
+	groupMatches := group == "*" || normalizeAPIGroup(group) == groupVersion.Group
 	versionMatches := version == "*" || version == groupVersion.Version
 	return groupVersion, groupMatches && versionMatches
 }
@@ -348,10 +415,7 @@ func matchingDiscoveryFailureGroupVersion(failure cautils.PartialGVRPull, group,
 func resolvesGroupVersion(resolved []resolvedResource, groupVersion schema.GroupVersion) bool {
 	for _, candidate := range resolved {
 		group, version, _ := k8sinterface.StringToResourceGroup(candidate.groupVersionResourceTriplet)
-		if group == "core" {
-			group = ""
-		}
-		if group == groupVersion.Group && version == groupVersion.Version {
+		if normalizeAPIGroup(group) == groupVersion.Group && version == groupVersion.Version {
 			return true
 		}
 	}
@@ -376,10 +440,27 @@ func collectDiscoveredResources(resourceLists []*metav1.APIResourceList) []disco
 				gvr:        groupVersion.WithResource(apiResource.Name),
 				kind:       apiResource.Kind,
 				namespaced: apiResource.Namespaced,
+				listable:   discoveryDeclaresList(apiResource),
 			})
 		}
 	}
 	return discovered
+}
+
+// isExplicitPolicyMatch reports whether a rule match names a single resource
+// identity rather than relying on wildcard expansion.
+func isExplicitPolicyMatch(group, version, resource string) bool {
+	return group != "*" && version != "*" && resource != "*"
+}
+
+// discoveryDeclaresList reports whether the API server advertises "list" for a
+// resource. An empty verb set means discovery did not report the verbs, so the
+// resource stays eligible rather than being dropped on missing data.
+func discoveryDeclaresList(apiResource metav1.APIResource) bool {
+	if len(apiResource.Verbs) == 0 {
+		return true
+	}
+	return slices.Contains([]string(apiResource.Verbs), "list")
 }
 
 func matchesDiscoveryValue(policyValue, discoveredValue string) bool {

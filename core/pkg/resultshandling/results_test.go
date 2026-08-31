@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,15 +18,17 @@ import (
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 type DummyReporter struct{}
@@ -133,6 +138,39 @@ func TestResultsHandlerHandleResultsImageScanNilScanData(t *testing.T) {
 	assert.Equal(t, 0, outputPrinter.ScoreCalls)
 }
 
+func TestResultsHandlerNotifyIsBestEffortAndDeliversOnlySummary(t *testing.T) {
+	var received []byte
+	success := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		var err error
+		received, err = io.ReadAll(r.Body)
+		require.NoError(t, err)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer success.Close()
+
+	failure := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer failure.Close()
+
+	scanData := cautils.NewOPASessionObjMock()
+	want, err := json.Marshal(scanData.Report.SummaryDetails)
+	require.NoError(t, err)
+	handler := NewResultsHandler(nil, nil, &SpyPrinter{})
+	handler.SetData(scanData)
+
+	require.NoError(t, handler.HandleResults(context.Background(), &cautils.ScanInfo{
+		NotifyURLs: []string{failure.URL + "/first?token=secret", success.URL + "/second?token=secret"},
+	}))
+	assert.JSONEq(t, string(want), string(received))
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(received, &payload))
+	assert.NotContains(t, payload, "results")
+	assert.NotContains(t, payload, "rawResources")
+}
+
 func TestResultsHandlerHandleResultsReturnsPrinterErrors(t *testing.T) {
 	uiErr := errors.New("ui print failed")
 	outputErr := errors.New("output print failed")
@@ -188,7 +226,7 @@ func TestCombinedJSONAndYAMLOutputDoesNotMutateSubmittedSession(t *testing.T) {
 		extension string
 		printer   func() printer.IPrinter
 	}{
-		{name: "json", extension: ".json", printer: func() printer.IPrinter { return printerv2.NewJsonPrinter("") }},
+		{name: "json", extension: ".json", printer: func() printer.IPrinter { return printerv2.NewJsonPrinter() }},
 		{name: "yaml", extension: ".yaml", printer: func() printer.IPrinter { return printerv2.NewYamlPrinter() }},
 	}
 
@@ -254,6 +292,19 @@ func TestValidatePrinter(t *testing.T) {
 			scanType:  cautils.ScanTypeCluster,
 			format:    printer.PrettyFormat,
 			expectErr: nil,
+		},
+		{
+			name:      "github-actions format for cluster scan should return error",
+			scanType:  cautils.ScanTypeCluster,
+			format:    printer.GitHubActionsFormat,
+			expectErr: errors.New("format \"github-actions\" is only supported when scanning local files"),
+		},
+		{
+			name:        "github-actions format for local dir scan should not return error",
+			scanType:    cautils.ScanTypeCluster,
+			scanContext: cautils.ContextDir,
+			format:      printer.GitHubActionsFormat,
+			expectErr:   nil,
 		},
 		{
 			name:      "html format for cluster scan should not return error",
@@ -401,10 +452,10 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr: nil,
 		},
 		{
-			name:      "markdown format for image scan should return error",
+			name:      "markdown format for image scan should not return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.MarkdownFormat,
-			expectErr: errors.New("format \"markdown\" is not supported for image scanning"),
+			expectErr: nil,
 		},
 	}
 
@@ -608,6 +659,35 @@ func TestToJson(t *testing.T) {
 	// verify it is valid JSON
 	var out map[string]any
 	assert.NoError(t, json.Unmarshal(data, &out))
+	assert.NotContains(t, out, "exceptionAudit")
+}
+
+func TestToJsonIncludesExceptionAuditWhenSet(t *testing.T) {
+	rh := makeResultsHandler(75.0, 50.0)
+	rh.ScanData.ExceptionAudit = &cautils.ExceptionAudit{
+		Generated: true,
+		Summary: cautils.ExceptionAuditSummary{
+			Total:   1,
+			Active:  1,
+			Matched: 1,
+		},
+		Items: []cautils.ExceptionAuditItem{{
+			Name:       "matched-exception",
+			Status:     "matched",
+			MatchCount: 1,
+			ControlIDs: []string{"C-0001"},
+		}},
+	}
+
+	data, err := rh.ToJson()
+	require.NoError(t, err)
+
+	var out struct {
+		ExceptionAudit *cautils.ExceptionAudit `json:"exceptionAudit"`
+	}
+	require.NoError(t, json.Unmarshal(data, &out))
+	require.NotNil(t, out.ExceptionAudit)
+	assert.Equal(t, rh.ScanData.ExceptionAudit, out.ExceptionAudit)
 }
 
 // requireJSONSubset verifies that every value in the legacy JSON remains at
@@ -771,4 +851,410 @@ func TestValidatePrinter_ImageFormatsInvariant(t *testing.T) {
 			assert.Error(t, err)
 		})
 	}
+}
+
+// TestClosePrinter_AllV2PrintersImplementErrorCloser tests that all v2 report printers implement
+// the CloseWriter() error interface and properly surface errors on already-closed writers.
+func TestClosePrinter_AllV2PrintersImplementErrorCloser(t *testing.T) {
+	printers := []struct {
+		name    string
+		printer printer.IPrinter
+	}{
+		{"json", printerv2.NewJsonPrinter()},
+		{"sarif", printerv2.NewSARIFPrinter()},
+		{"html", printerv2.NewHtmlPrinter()},
+		{"yaml", printerv2.NewYamlPrinter()},
+		{"junit", printerv2.NewJunitPrinter(false)},
+		{"markdown", printerv2.NewMarkdownPrinter()},
+		{"pdf", printerv2.NewPdfPrinter()},
+		{"prometheus", printerv2.NewPrometheusPrinter(false)},
+		{"spdx", printerv2.NewSPDXPrinter()},
+		{"cyclonedx", printerv2.NewCycloneDXPrinter()},
+		{"gitlabsast", printerv2.NewGitLabSASTPrinter()},
+		{"githubactions", printerv2.NewGitHubActionsPrinter()},
+		{"csv", printerv2.NewCsvPrinter()},
+		{"exceptions", printerv2.NewExceptionsPrinter()},
+		{"pretty", printerv2.NewPrettyPrinter(false, "1.0", false, cautils.ControlViewType, cautils.ScanTypeCluster, nil, "", false, false)},
+		{"silent", &printerv2.SilentPrinter{}},
+	}
+
+	type errorCloser interface {
+		CloseWriter() error
+	}
+
+	for _, tt := range printers {
+		t.Run(tt.name, func(t *testing.T) {
+			closer, ok := tt.printer.(errorCloser)
+			require.True(t, ok, "printer %T must implement CloseWriter() error", tt.printer)
+
+			// When writer is nil/stdout, CloseWriter() must succeed
+			err := closer.CloseWriter()
+			assert.NoError(t, err)
+
+			if tt.name == "silent" {
+				return
+			}
+
+			// When writer points to an explicit file, SetWriter and CloseWriter must work cleanly
+			tmp, tmpErr := os.CreateTemp(t.TempDir(), "close_test*")
+			require.NoError(t, tmpErr)
+			targetName := tmp.Name()
+			_ = tmp.Close()
+
+			setErr := tt.printer.SetWriter(context.Background(), targetName)
+			require.NoError(t, setErr)
+
+			// 1. Initial close on active writer must succeed
+			closeErr := ClosePrinter(tt.printer)
+			assert.NoError(t, closeErr)
+
+			// 2. Subsequent close on already-closed writer must surface the underlying error
+			secondCloseErr := ClosePrinter(tt.printer)
+			assert.Error(t, secondCloseErr, "ClosePrinter must surface error on already-closed writer for %s", tt.name)
+		})
+	}
+}
+
+// mockFailingClosePrinter is a mock IPrinter implementation whose CloseWriter method returns a simulated error.
+type mockFailingClosePrinter struct {
+	printer.IPrinter
+}
+
+// CloseWriter returns a simulated error during writer closure.
+func (m *mockFailingClosePrinter) CloseWriter() error {
+	return errors.New("simulated close flush failure")
+}
+
+// ActionPrint is a no-op implementation of IPrinter.ActionPrint for testing.
+func (m *mockFailingClosePrinter) ActionPrint(_ context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
+	return nil
+}
+
+// Score is a no-op implementation of IPrinter.Score for testing.
+func (m *mockFailingClosePrinter) Score(_ float32) {}
+
+// PrintNextSteps is a no-op implementation of IPrinter.PrintNextSteps for testing.
+func (m *mockFailingClosePrinter) PrintNextSteps() {}
+
+// TestHandleResults_PropagatesPrinterCloseErrors verifies that ResultsHandler.HandleResults
+// joins and propagates close errors returned by UI and output printers.
+func TestHandleResults_PropagatesPrinterCloseErrors(t *testing.T) {
+	rh := &ResultsHandler{
+		UiPrinter:   &mockFailingClosePrinter{},
+		PrinterObjs: []printer.IPrinter{&mockFailingClosePrinter{}},
+	}
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ui printer close: simulated close flush failure")
+	assert.Contains(t, err.Error(), "output printer *resultshandling.mockFailingClosePrinter close: simulated close flush failure")
+}
+
+// TestHandleResults_RestoresReportAfterSeverityFilter verifies that after
+// HandleResults returns, both SummaryDetails.Controls and every
+// Results[i].AssociatedControls are restored to their unfiltered state.
+// Without this guarantee, httphandler persistence and operator storage that
+// read rh.ScanData after the call would receive an internally inconsistent
+// PostureReport: full summary counts beside severity-filtered per-resource lists.
+func TestHandleResults_RestoresReportAfterSeverityFilter(t *testing.T) {
+	sessionObj := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: map[string]reportsummary.ControlSummary{
+					"C-low":    {ControlID: "C-low", ScoreFactor: 1},
+					"C-high":   {ControlID: "C-high", ScoreFactor: 7},
+					"C-medium": {ControlID: "C-medium", ScoreFactor: 4},
+				},
+			},
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			"resource-1": {
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{ControlID: "C-low"},
+					{ControlID: "C-high"},
+				},
+			},
+		},
+	}
+
+	rh := &ResultsHandler{
+		ScanData:  sessionObj,
+		UiPrinter: &SpyPrinter{},
+	}
+
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{
+		MinSeverity: "high",
+	})
+	require.NoError(t, err)
+
+	// Both Controls and AssociatedControls must be fully restored so that
+	// any caller reading rh.ScanData after HandleResults sees a consistent report.
+	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 3, "Controls must be unfiltered after HandleResults")
+	assert.Len(t, rh.ScanData.ResourcesResult["resource-1"].AssociatedControls, 2, "AssociatedControls must be unfiltered after HandleResults")
+}
+
+// TestHandleResults_ComputesVAPCoverage verifies the vapreconcile.BuildCoverage
+// wiring added alongside the existing BuildIndex/EnrichSummary call: a
+// control bound to a policy whose only binding is scoped to a namespace the
+// failing resource is not in must come out Bound but not FullyCovered.
+func TestHandleResults_ComputesVAPCoverage(t *testing.T) {
+	vap := unstructured.Unstructured{}
+	vap.SetName("policy-a")
+	vap.SetLabels(map[string]string{"controlId": "C-scoped"})
+
+	binding := unstructured.Unstructured{
+		Object: map[string]any{
+			"spec": map[string]any{
+				"policyName": "policy-a",
+				"matchResources": map[string]any{
+					"namespaceSelector": map[string]any{
+						"matchLabels": map[string]any{"env": "prod"},
+					},
+				},
+			},
+		},
+	}
+	binding.SetName("binding-a")
+
+	failingResource := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]any{
+			"name":      "app",
+			"namespace": "dev",
+		},
+	})
+	devNamespace := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Namespace",
+		"metadata": map[string]any{
+			"name":   "dev",
+			"labels": map[string]any{"env": "dev"},
+		},
+	})
+	resourceID := failingResource.GetID()
+
+	sessionObj := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: map[string]reportsummary.ControlSummary{
+					"C-scoped": {ControlID: "C-scoped", ScoreFactor: 7},
+				},
+			},
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			resourceID: {
+				ResourceID: resourceID,
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{ControlID: "C-scoped", Status: apis.StatusInfo{InnerStatus: apis.StatusFailed}},
+				},
+			},
+		},
+		AllResources: map[string]workloadinterface.IMetadata{
+			resourceID:           failingResource,
+			devNamespace.GetID(): devNamespace,
+		},
+		VAPPolicies: []unstructured.Unstructured{vap},
+		VAPBindings: []unstructured.Unstructured{binding},
+	}
+
+	rh := &ResultsHandler{
+		ScanData:  sessionObj,
+		UiPrinter: &SpyPrinter{},
+	}
+
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{})
+	require.NoError(t, err)
+
+	require.Contains(t, rh.ScanData.VAPCoverage, "C-scoped")
+	coverage := rh.ScanData.VAPCoverage["C-scoped"]
+	assert.True(t, coverage.Bound, "the binding names the control's policy, so it must be Bound")
+	assert.False(t, coverage.FullyCovered(), "the binding's namespaceSelector only matches env=prod, so the dev-namespace failure must not be covered")
+	require.Len(t, coverage.Resources, 1)
+	assert.False(t, coverage.Resources[0].Covered)
+	assert.Contains(t, coverage.Resources[0].Reason, "namespaceSelector")
+
+	// The existing coarse signal must still be populated exactly as before.
+	require.NotNil(t, rh.ScanData.Report.SummaryDetails.Controls["C-scoped"].VAPEnforcement)
+	assert.True(t, rh.ScanData.Report.SummaryDetails.Controls["C-scoped"].VAPEnforcement.Bound)
+}
+
+func makeFilteredSession() *cautils.OPASessionObj {
+	return &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: map[string]reportsummary.ControlSummary{
+					"C-low":  {ControlID: "C-low", ScoreFactor: 1},
+					"C-high": {ControlID: "C-high", ScoreFactor: 7},
+				},
+			},
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			"resource-1": {
+				AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+					{ControlID: "C-low"},
+					{ControlID: "C-high"},
+				},
+			},
+		},
+	}
+}
+
+// TestHandleResults_RestoresReportOnPrinterError verifies that the deferred
+// restoreReport fires even when a printer close fails and HandleResults returns
+// an error, so rh.ScanData.Report is never left permanently filtered.
+func TestHandleResults_RestoresReportOnPrinterError(t *testing.T) {
+	sessionObj := makeFilteredSession()
+
+	rh := &ResultsHandler{
+		ScanData:    sessionObj,
+		UiPrinter:   &mockFailingClosePrinter{},
+		PrinterObjs: []printer.IPrinter{&mockFailingClosePrinter{}},
+	}
+
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{MinSeverity: "high"})
+	require.Error(t, err)
+
+	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 2,
+		"Controls must be restored after printer error")
+	assert.Len(t, rh.ScanData.ResourcesResult["resource-1"].AssociatedControls, 2,
+		"AssociatedControls must be restored after printer error")
+}
+
+type failingReporter struct{}
+
+func (r *failingReporter) Submit(_ context.Context, _ *cautils.OPASessionObj) error {
+	return errors.New("simulated submit failure")
+}
+func (r *failingReporter) SetTenantConfig(_ cautils.ITenantConfig) {}
+func (r *failingReporter) DisplayMessage()                         {}
+func (r *failingReporter) GetURL() string                          { return "" }
+
+// TestHandleResults_RestoresReportOnSubmitError verifies that the deferred
+// restoreReport fires even when ReporterObj.Submit fails and HandleResults
+// returns an error, so rh.ScanData.Report is never left permanently filtered.
+func TestHandleResults_RestoresReportOnSubmitError(t *testing.T) {
+	sessionObj := makeFilteredSession()
+	submit := true
+
+	rh := &ResultsHandler{
+		ScanData:    sessionObj,
+		UiPrinter:   &SpyPrinter{},
+		ReporterObj: &failingReporter{},
+	}
+
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{
+		MinSeverity: "high",
+		Submit:      cautils.NewBoolPtr(&submit),
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "simulated submit failure")
+
+	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 2,
+		"Controls must be restored after submit error")
+	assert.Len(t, rh.ScanData.ResourcesResult["resource-1"].AssociatedControls, 2,
+		"AssociatedControls must be restored after submit error")
+}
+
+// capturingScorePrinter records the summary values it observes while printing,
+// so tests can assert printers see the severity-filtered (recomputed) report.
+type capturingScorePrinter struct {
+	score         float32
+	controlsCount reportsummary.SeverityCounters
+}
+
+func (c *capturingScorePrinter) SetWriter(_ context.Context, _ string) error { return nil }
+func (c *capturingScorePrinter) PrintNextSteps()                             {}
+func (c *capturingScorePrinter) ActionPrint(_ context.Context, data *cautils.OPASessionObj, _ []cautils.ImageScanData) error {
+	if data != nil && data.Report != nil {
+		c.score = data.Report.SummaryDetails.ComplianceScore
+		c.controlsCount = data.Report.SummaryDetails.ControlsSeverityCounters
+	}
+	return nil
+}
+func (c *capturingScorePrinter) Score(score float32) { c.score = score }
+
+// TestHandleResults_PrintsFilteredScoreAndRestoresUnfiltered verifies that a
+// severity filter makes printers (including p.Score(rh.GetComplianceScore()))
+// see the recomputed score over the retained controls, while the post-call
+// GetComplianceScore()/GetRiskScore() used by the exit gate return the
+// original unfiltered values. Restoring the recomputed fields is what keeps
+// --compliance-threshold semantics unchanged when --min-severity is set.
+func TestHandleResults_PrintsFilteredScoreAndRestoresUnfiltered(t *testing.T) {
+	compLow := float32(100)
+	compHigh := float32(20)
+	compCritical := float32(10)
+	sessionObj := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: reportsummary.ControlSummaries{
+					"C-low":      {ControlID: "C-low", ScoreFactor: 1, ComplianceScore: &compLow},
+					"C-high":     {ControlID: "C-high", ScoreFactor: 7, ComplianceScore: &compHigh, StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusFailed}},
+					"C-critical": {ControlID: "C-critical", ScoreFactor: 9, ComplianceScore: &compCritical, StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusFailed}},
+				},
+				ComplianceScore:          43.33, // stale full-set values, restored after HandleResults
+				Score:                    44.44,
+				ControlsSeverityCounters: reportsummary.SeverityCounters{HighSeverityCounter: 9, CriticalSeverityCounter: 1},
+			},
+		},
+	}
+
+	capture := &capturingScorePrinter{}
+	rh := &ResultsHandler{
+		ScanData:    sessionObj,
+		UiPrinter:   &SpyPrinter{},
+		PrinterObjs: []printer.IPrinter{capture},
+	}
+
+	require.NoError(t, rh.HandleResults(context.Background(), &cautils.ScanInfo{MinSeverity: "high"}))
+
+	// Printers ran inside the filtered window: score and counters must reflect
+	// only the retained (high/critical) controls.
+	assert.Equal(t, float32(15), capture.score, "printed score must be recomputed over retained controls")
+	assert.Equal(t, reportsummary.SeverityCounters{HighSeverityCounter: 1, CriticalSeverityCounter: 1}, capture.controlsCount,
+		"printed severity counters must be recomputed over retained controls")
+
+	// After HandleResults returns, the report is restored so the exit gate sees
+	// the true unfiltered score.
+	assert.Equal(t, float32(43.33), rh.GetComplianceScore(), "exit gate must see the unfiltered compliance score")
+	assert.Equal(t, float32(44.44), rh.GetRiskScore(), "exit gate must see the unfiltered risk score")
+	assert.Equal(t, reportsummary.SeverityCounters{HighSeverityCounter: 9, CriticalSeverityCounter: 1}, rh.ScanData.Report.SummaryDetails.ControlsSeverityCounters,
+		"severity counters must be restored after HandleResults")
+	assert.Len(t, rh.ScanData.Report.SummaryDetails.Controls, 3, "Controls must be unfiltered after HandleResults")
+}
+
+func TestResultsHandlerHandleResultsRestoresFrameworkControls(t *testing.T) {
+	scanData := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Controls: map[string]reportsummary.ControlSummary{
+					"C-1": {ControlID: "C-1", ScoreFactor: 2},
+					"C-2": {ControlID: "C-2", ScoreFactor: 9},
+				},
+				StatusCounters: reportsummary.StatusCounters{FailedResources: 3},
+				Status:         apis.StatusFailed,
+				Frameworks: []reportsummary.FrameworkSummary{{
+					Name: "NSA",
+					Controls: map[string]reportsummary.ControlSummary{
+						"C-1": {ControlID: "C-1", ScoreFactor: 2},
+						"C-2": {ControlID: "C-2", ScoreFactor: 9},
+					},
+					StatusCounters: reportsummary.StatusCounters{FailedResources: 3},
+					Status:         apis.StatusFailed,
+				}},
+			},
+		},
+	}
+
+	spy := &SpyPrinter{}
+	rh := NewResultsHandler(&DummyReporter{}, nil, spy)
+	rh.SetData(scanData)
+
+	require.NoError(t, rh.HandleResults(context.Background(), &cautils.ScanInfo{MinSeverity: "high"}))
+
+	assert.Len(t, scanData.Report.SummaryDetails.Controls, 2)
+	assert.Len(t, scanData.Report.SummaryDetails.Frameworks[0].Controls, 2)
+	assert.Equal(t, 3, scanData.Report.SummaryDetails.StatusCounters.Failed())
+	assert.Equal(t, apis.StatusFailed, scanData.Report.SummaryDetails.Status)
+	assert.Equal(t, 3, scanData.Report.SummaryDetails.Frameworks[0].StatusCounters.Failed())
+	assert.Equal(t, apis.StatusFailed, scanData.Report.SummaryDetails.Frameworks[0].Status)
 }

@@ -6,12 +6,15 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor/cel"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/spf13/cobra"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,6 +38,12 @@ var vapHelperCmdExamples = fmt.Sprintf(`
   %[1]s vap create-policy-binding --name my-policy-binding --control C-0016 --namespace=my-namespace | kubectl apply -f -
   # Create a policy binding by ValidatingAdmissionPolicy name
   %[1]s vap create-policy-binding --name my-policy-binding --policy kubescape-c-0016-allow-privilege-escalation --namespace=my-namespace | kubectl apply -f -
+  # Roll a control out in report-only mode before switching it to Deny
+  %[1]s vap create-policy-binding --name my-policy-binding --control C-0016 --action Audit --action Warn | kubectl apply -f -
+  # Narrow a policy binding to specific resources, including custom ones
+  %[1]s vap create-policy-binding --name my-policy-binding --control C-0016 --resource-rule apps/v1/deployments --resource-rule /v1/pods | kubectl apply -f -
+  # Bind a control that reads params, pointing it at the object it takes
+  %[1]s vap create-policy-binding --name my-policy-binding --control C-0009 --parameter-reference basic-control-configuration | kubectl apply -f -
 `, cautils.ExecName())
 
 func GetVapHelperCmd() *cobra.Command {
@@ -88,7 +97,8 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 	var controlID string
 	var namespaceArr []string
 	var labelArr []string
-	var action string
+	var actionArr []string
+	var resourceRuleArr []string
 	var parameterReference string
 	var outputFile string
 
@@ -105,53 +115,30 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// A policy that declares a paramKind needs a ParamRef on its binding
-			// to be functional, so refuse to emit a silently broken binding. The
-			// check covers both flags: --control reads the paramKind off the
-			// control's policy, --policy off the named policy (a name outside
-			// the embedded bundle is left unchecked — we know nothing about it).
 			normalizedControlID := strings.ToUpper(strings.TrimSpace(controlID))
-			if parameterReference == "" {
-				if normalizedControlID != "" {
-					paramKind, err := cel.ParamKindForControl(normalizedControlID)
-					if err != nil {
-						return err
-					}
-					if paramKind != nil {
-						return fmt.Errorf("control %s requires --parameter-reference because its CEL policy uses params", normalizedControlID)
-					}
-				} else {
-					paramKind, found, err := cel.ParamKindForPolicy(resolvedPolicyName)
-					if err != nil {
-						return err
-					}
-					if found && paramKind != nil {
-						return fmt.Errorf("policy %s requires --parameter-reference because it uses params", resolvedPolicyName)
-					}
-				}
+			if err := checkParameterReference(parameterReference, normalizedControlID, resolvedPolicyName); err != nil {
+				return err
 			}
 			if err := isValidK8sObjectName(resolvedPolicyName); err != nil {
 				return fmt.Errorf("invalid policy name %s: %w", resolvedPolicyName, err)
+			}
+			if err := checkResourceRulesInPolicyScope(resourceRuleArr, normalizedControlID, resolvedPolicyName); err != nil {
+				return err
 			}
 			for _, namespace := range namespaceArr {
 				if err := isValidNamespace(namespace); err != nil {
 					return fmt.Errorf("invalid namespace %s: %w", namespace, err)
 				}
 			}
-			for _, label := range labelArr {
-				parsed, err := labels.Parse(label)
-				if err != nil {
-					return fmt.Errorf("invalid label selector: %s", label)
-				}
-				requirements, _ := parsed.Requirements()
-				for _, r := range requirements {
-					if r.Operator() != selection.Equals {
-						return fmt.Errorf("only '=' equality label selectors are supported: %s", label)
-					}
-				}
+			if err := checkNamespaceSelectorScope(namespaceArr, resourceRuleArr, normalizedControlID, resolvedPolicyName); err != nil {
+				return err
 			}
-			if action != "Deny" && action != "Audit" && action != "Warn" {
-				return fmt.Errorf("invalid action: %s", action)
+			if _, err := parseObjectSelectorLabels(labelArr); err != nil {
+				return err
+			}
+			actions, err := parseValidationActions(actionArr)
+			if err != nil {
+				return err
 			}
 			if parameterReference != "" {
 				if err := isValidK8sObjectName(parameterReference); err != nil {
@@ -159,7 +146,7 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 				}
 			}
 
-			content, err := createPolicyBinding(policyBindingName, resolvedPolicyName, action, parameterReference, namespaceArr, labelArr)
+			content, err := createPolicyBinding(policyBindingName, resolvedPolicyName, actions, parameterReference, namespaceArr, labelArr, resourceRuleArr)
 			if err != nil {
 				return err
 			}
@@ -171,10 +158,11 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 	_ = createPolicyBindingCmd.MarkFlagRequired("name") // #nosec G104 -- flag is defined on this command; MarkFlagRequired only errors for an unknown flag
 	createPolicyBindingCmd.Flags().StringVarP(&policyName, "policy", "p", "", "Name of the ValidatingAdmissionPolicy to bind resources to")
 	createPolicyBindingCmd.Flags().StringVarP(&controlID, "control", "c", "", "Kubescape control ID to bind resources to")
-	createPolicyBindingCmd.Flags().StringSliceVar(&namespaceArr, "namespace", []string{}, "Resource namespace selector")
+	createPolicyBindingCmd.Flags().StringSliceVar(&namespaceArr, "namespace", []string{}, "Resource namespace selector. Narrows only the namespaced resources the policy matches: the apiserver never exempts a cluster-scoped one from a binding's namespaceSelector, so use --resource-rule to drop those")
 	createPolicyBindingCmd.Flags().StringSliceVar(&labelArr, "label", []string{}, "Resource label selector")
-	createPolicyBindingCmd.Flags().StringVarP(&action, "action", "a", "Deny", "Action to take when policy fails")
-	createPolicyBindingCmd.Flags().StringVarP(&parameterReference, "parameter-reference", "r", "", "Parameter reference object name")
+	createPolicyBindingCmd.Flags().StringSliceVarP(&actionArr, "action", "a", []string{string(admissionv1.Deny)}, "Action to take when policy fails, repeatable (Deny, Warn, Audit). Deny and Warn cannot be combined")
+	createPolicyBindingCmd.Flags().StringSliceVar(&resourceRuleArr, "resource-rule", []string{}, "Restrict the binding to a group/version/resource the policy already matches, repeatable (e.g. apps/v1/deployments, /v1/pods). Omit to bind everything the policy matches")
+	createPolicyBindingCmd.Flags().StringVarP(&parameterReference, "parameter-reference", "r", "", "Name of the object the policy reads as params. Required for a policy declaring a paramKind, and rejected for one that declares none")
 	createPolicyBindingCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file instead of stdout")
 
 	return createPolicyBindingCmd
@@ -231,11 +219,39 @@ var libraryReleaseFiles = []string{
 	"kubescape-validating-admission-policies.yaml",
 }
 
+// releaseTagPattern is the shape a cel-admission-library release tag may take.
+// It is deliberately an allowlist: the tag is interpolated into the release
+// URL, so any character that carries meaning in a URL path has to stay out.
+// Requiring an alphanumeric first character also rules out "." and ".." on its
+// own. Real tags ("v0.11") and the usual semver decorations ("v1.2.3-rc1",
+// "v1.2.3+build.5") all satisfy it.
+var releaseTagPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
+
+// validateReleaseTag rejects a tag that would change the shape of the release
+// URL rather than just name a release within it. Without this the tag can walk
+// out of the kubescape release path entirely ("../../../../owner/repo/..."):
+// Go's HTTP client forwards the "../" segments verbatim and GitHub resolves
+// them server-side, so the library is served from an unrelated repository while
+// the log line still names the requested kubescape release. A "?" or "#" is the
+// same class of bug without an attacker - it truncates the URL, so every file
+// in libraryReleaseFiles resolves to the same object and the concatenated
+// output is silently wrong.
+func validateReleaseTag(tag string) error {
+	if !releaseTagPattern.MatchString(tag) {
+		return fmt.Errorf("invalid release tag %q: expected a release tag such as v0.11", tag)
+	}
+	return nil
+}
+
 // downloadLibrary fetches the library files from one pinned release tag and
 // concatenates them into a single multi-document YAML stream. The tag is
 // always explicit — downloading whatever "latest" points at would reintroduce
 // the skew deployLibrary's embedded default exists to prevent.
 func downloadLibrary(tag string, timeout time.Duration) (string, error) {
+	if err := validateReleaseTag(tag); err != nil {
+		return "", err
+	}
+
 	logger.L().Info(fmt.Sprintf("Downloading the Kubescape CEL admission policy library release %s", tag))
 
 	parts := make([]string, 0, len(libraryReleaseFiles))
@@ -303,8 +319,768 @@ func isValidNamespace(name string) error {
 	return nil
 }
 
+// supportedValidationActions are the enforcement actions the admission API
+// accepts on a binding, matched case-sensitively as the API spells them.
+var supportedValidationActions = []admissionv1.ValidationAction{
+	admissionv1.Deny,
+	admissionv1.Warn,
+	admissionv1.Audit,
+}
+
+// parseValidationActions turns the --action values into the binding's
+// validationActions set. The field is a set on the API, so a binding can carry
+// more than one action — the usual rollout is Audit plus Warn first and Deny
+// once the findings are clean, which a single-valued flag could not express.
+//
+// The two combinations the apiserver rejects are refused here rather than at
+// apply time: a repeated action (the field is a listType=set) and Deny with
+// Warn, which the API forbids because it would report the same failure twice.
+// Order is preserved so the emitted YAML reads back the way it was asked for.
+func parseValidationActions(values []string) ([]admissionv1.ValidationAction, error) {
+	if len(values) == 0 {
+		return nil, fmt.Errorf("at least one --action is required")
+	}
+	actions := make([]admissionv1.ValidationAction, 0, len(values))
+	seen := make(map[admissionv1.ValidationAction]struct{}, len(values))
+	for _, value := range values {
+		action := admissionv1.ValidationAction(strings.TrimSpace(value))
+		if !isSupportedValidationAction(action) {
+			return nil, fmt.Errorf("invalid action: %s", value)
+		}
+		if _, dup := seen[action]; dup {
+			return nil, fmt.Errorf("duplicate action: %s", action)
+		}
+		seen[action] = struct{}{}
+		actions = append(actions, action)
+	}
+	if _, deny := seen[admissionv1.Deny]; deny {
+		if _, warn := seen[admissionv1.Warn]; warn {
+			return nil, fmt.Errorf("actions Deny and Warn cannot be combined")
+		}
+	}
+	return actions, nil
+}
+
+func isSupportedValidationAction(action admissionv1.ValidationAction) bool {
+	for _, supported := range supportedValidationActions {
+		if action == supported {
+			return true
+		}
+	}
+	return false
+}
+
+// parseObjectSelectorLabels turns the --label values into the matchLabels of
+// the binding's objectSelector. The flag validation and the emitted binding
+// both read the labels through here, so what the command accepts and what it
+// writes cannot drift apart.
+//
+// Only equality selectors are accepted: matchLabels is an equality map, so an
+// Exists or In requirement has nowhere to go on the binding. "=" and "==" are
+// distinct operators in apimachinery but mean the same thing, so both pass.
+//
+// Naming one key twice with different values is refused rather than resolved.
+// matchLabels is ANDed, so no object can carry both, and letting the last one
+// win emitted a binding that enforced the policy on a set the caller never
+// asked for. Repeating a key with the same value is the same requirement twice,
+// so it is accepted.
+//
+// A --label that ends up selecting nothing is refused. labels.Parse reads a
+// blank value as the empty selector, which contributes no requirement, so a
+// flag made only of those emitted an objectSelector that matches every object
+// the policy matches — the opposite of the narrowing that was asked for, and
+// silent.
+func parseObjectSelectorLabels(values []string) (map[string]string, error) {
+	matchLabels := make(map[string]string, len(values))
+	for _, value := range values {
+		// The flag is comma-split, so a trailing or doubled comma leaves a blank
+		// entry behind. It carries no requirement of its own; the check after
+		// the loop catches the case where nothing else carried one either.
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		parsed, err := labels.Parse(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid label selector: %s", value)
+		}
+		requirements, _ := parsed.Requirements()
+		for _, requirement := range requirements {
+			if requirement.Operator() != selection.Equals && requirement.Operator() != selection.DoubleEquals {
+				return nil, fmt.Errorf("only equality label selectors ('=' or '==') are supported: %s", value)
+			}
+			// An equality requirement carries exactly one value; anything else
+			// is refused rather than skipped, so no label can go missing from
+			// the selector without the command saying so.
+			selected := requirement.Values().List()
+			if len(selected) != 1 {
+				return nil, fmt.Errorf("label selector %s must name exactly one value", value)
+			}
+			if existing, seen := matchLabels[requirement.Key()]; seen && existing != selected[0] {
+				return nil, fmt.Errorf("conflicting values for label %q: %q and %q; a binding requires both at once, so it would match nothing", requirement.Key(), existing, selected[0])
+			}
+			matchLabels[requirement.Key()] = selected[0]
+		}
+	}
+	if len(values) > 0 && len(matchLabels) == 0 {
+		return nil, fmt.Errorf("--label %q selects nothing; omit the flag to bind everything the policy matches", strings.Join(values, ","))
+	}
+	return matchLabels, nil
+}
+
+// resourceRuleParts is the group/version/resource form of --resource-rule. The
+// resource keeps any subresource, so "apps/v1/deployments/scale" still splits
+// into three.
+const resourceRuleParts = 3
+
+// parseResourceRule turns a "group/version/resource" value into a rule for the
+// binding's matchResources. The core group is the empty first segment
+// ("/v1/pods") and "*" is accepted in any segment.
+//
+// Operations stay at "*" because a binding intersects with the policy's
+// matchConstraints, which already declares the operations the policy cares
+// about; narrowing them here could only drop matches the policy intends.
+func parseResourceRule(rule string) (admissionv1.NamedRuleWithOperations, error) {
+	parts := strings.SplitN(strings.TrimSpace(rule), "/", resourceRuleParts)
+	if len(parts) != resourceRuleParts {
+		return admissionv1.NamedRuleWithOperations{}, fmt.Errorf("invalid resource rule %q: expected group/version/resource, e.g. apps/v1/deployments or /v1/pods for the core group", rule)
+	}
+	group, version, resource := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
+	if version == "" || resource == "" {
+		return admissionv1.NamedRuleWithOperations{}, fmt.Errorf("invalid resource rule %q: version and resource are required", rule)
+	}
+	// The group is the one segment allowed to be empty: that is how the core
+	// group is spelled, both here and on the resulting rule.
+	if group != "" {
+		if err := validateRuleSegment("api group", group, validation.IsDNS1123Subdomain); err != nil {
+			return admissionv1.NamedRuleWithOperations{}, err
+		}
+	}
+	if err := validateRuleSegment("api version", version, validation.IsDNS1123Label); err != nil {
+		return admissionv1.NamedRuleWithOperations{}, err
+	}
+	// A resource may carry a subresource ("deployments/scale"); each side is a
+	// plain name on its own.
+	for _, segment := range strings.Split(resource, "/") {
+		if err := validateRuleSegment("resource", segment, validation.IsDNS1123Label); err != nil {
+			return admissionv1.NamedRuleWithOperations{}, err
+		}
+	}
+	return admissionv1.NamedRuleWithOperations{
+		RuleWithOperations: admissionv1.RuleWithOperations{
+			Operations: []admissionv1.OperationType{admissionv1.OperationAll},
+			Rule: admissionv1.Rule{
+				APIGroups:   []string{group},
+				APIVersions: []string{version},
+				Resources:   []string{resource},
+			},
+		},
+	}, nil
+}
+
+// parsedResourceRule is one --resource-rule as both the value the caller typed
+// and the binding rule it parses to. The two travel together so a message about
+// a rule can echo it the way it was typed without walking a second slice
+// alongside this one.
+type parsedResourceRule struct {
+	raw  string
+	rule admissionv1.NamedRuleWithOperations
+}
+
+// parseResourceRules turns the whole --resource-rule set into the binding rules
+// it becomes. Both the checks that reason about the emitted binding's surface
+// and the binding itself read the flag through here, so what the command
+// validates and what it writes cannot drift apart.
+//
+// An empty flag stays nil rather than an empty slice: matchResources.resourceRules
+// is omitted from the emitted YAML when the caller did not narrow anything.
+func parseResourceRules(rules []string) ([]parsedResourceRule, error) {
+	if len(rules) == 0 {
+		return nil, nil
+	}
+	parsed := make([]parsedResourceRule, 0, len(rules))
+	for _, raw := range rules {
+		rule, err := parseResourceRule(raw)
+		if err != nil {
+			return nil, err
+		}
+		parsed = append(parsed, parsedResourceRule{raw: strings.TrimSpace(raw), rule: rule})
+	}
+	return parsed, nil
+}
+
+// bindingResourceRules drops the typed form, for the callers that want only the
+// rules the binding carries. A nil set stays nil, so an unnarrowed binding still
+// omits matchResources.resourceRules.
+func bindingResourceRules(parsed []parsedResourceRule) []admissionv1.NamedRuleWithOperations {
+	if len(parsed) == 0 {
+		return nil
+	}
+	rules := make([]admissionv1.NamedRuleWithOperations, 0, len(parsed))
+	for _, entry := range parsed {
+		rules = append(rules, entry.rule)
+	}
+	return rules
+}
+
+// validateRuleSegment checks one segment of a resource rule, accepting the "*"
+// wildcard the admission API allows in any of them.
+func validateRuleSegment(kind string, value string, validate func(string) []string) error {
+	if value == "*" {
+		return nil
+	}
+	if errs := validate(value); len(errs) > 0 {
+		return fmt.Errorf("invalid %s %q: %s", kind, value, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// checkParameterReference refuses a --parameter-reference that does not agree
+// with the bound policy's spec.paramKind. A policy declaring one needs a ParamRef
+// on its binding to be functional, so emitting a binding without one is silently
+// broken.
+//
+// The refusal names the paramKind because the library no longer takes only one:
+// most policies want the ControlConfiguration it ships, but C-0281 wants an
+// ate.dev WorkerPool. "uses params" alone sent the caller to the wrong object,
+// which the apiserver accepts and then resolves to nothing.
+//
+// The reverse is refused too. A policy declaring no paramKind has the apiserver
+// ignore the binding's ParamRef outright and evaluate the rules without params,
+// so a caller who narrowed a control by pointing at a configuration object got a
+// binding enforcing the library defaults instead, with nothing saying so.
+func checkParameterReference(parameterReference, controlID, policyName string) error {
+	paramKind, known, err := policyParamKind(controlID, policyName)
+	if err != nil {
+		return err
+	}
+	if !known {
+		return nil
+	}
+	switch {
+	case parameterReference == "" && paramKind != nil:
+		return fmt.Errorf("%s requires --parameter-reference naming an object of kind %s %s, which its CEL policy takes as params",
+			describeBoundPolicy(controlID, policyName), paramKind.APIVersion, paramKind.Kind)
+	case parameterReference != "" && paramKind == nil:
+		return fmt.Errorf("%s takes no --parameter-reference: its CEL policy declares no paramKind, so the apiserver would ignore the binding's paramRef and evaluate the rules without params",
+			describeBoundPolicy(controlID, policyName))
+	}
+	return nil
+}
+
+// describeBoundPolicy names the binding's target the way the caller asked for it,
+// so a refusal echoes the flag that was typed rather than a resolved name they
+// never mentioned.
+func describeBoundPolicy(controlID, policyName string) string {
+	if controlID != "" {
+		return "control " + controlID
+	}
+	return "policy " + policyName
+}
+
+// policyParamKind resolves the bound policy's spec.paramKind, nil when it takes
+// no params. The lookup mirrors policyMatchConstraints: --control reads it off
+// the control's policy, --policy off the named one.
+//
+// known reports whether the policy is in the embedded bundle at all. A name from
+// outside it (--policy pointing at a custom policy) tells us nothing about the
+// params it takes, so both directions of the check have to stay off it rather
+// than read the absent paramKind as "takes none". A control that is absent is an
+// error from the lookup instead, so a resolved control is always known.
+func policyParamKind(controlID, policyName string) (paramKind *admissionv1.ParamKind, known bool, err error) {
+	if controlID != "" {
+		paramKind, err := cel.ParamKindForControl(controlID)
+		if err != nil {
+			return nil, false, err
+		}
+		return paramKind, true, nil
+	}
+	return cel.ParamKindForPolicy(policyName)
+}
+
+// checkResourceRulesInPolicyScope refuses a --resource-rule the bound policy can
+// never match. The apiserver intersects a binding's matchResources with the
+// policy's matchConstraints, so a rule outside them applies cleanly and enforces
+// nothing.
+//
+// The lookup mirrors the paramKind check: --control reads the constraints off
+// the control's policy, --policy off the named one. A policy we know nothing
+// about — a name outside the embedded bundle, or one declaring no resource
+// rules — is left unchecked rather than blocked.
+func checkResourceRulesInPolicyScope(rules []string, controlID, policyName string) error {
+	if len(rules) == 0 {
+		return nil
+	}
+	constraints, err := policyMatchConstraints(controlID, policyName)
+	if err != nil {
+		return err
+	}
+	if constraints == nil || len(constraints.ResourceRules) == 0 {
+		return nil
+	}
+	parsed, err := parseResourceRules(rules)
+	if err != nil {
+		return err
+	}
+	for _, entry := range parsed {
+		switch classifyResourceRule(entry.rule, constraints.ResourceRules) {
+		case ruleOutsidePolicy:
+			return fmt.Errorf("resource rule %q is outside the matchConstraints of policy %s, so the binding would match nothing; the policy matches %s",
+				entry.raw, policyName, describeResourceRules(constraints.ResourceRules))
+		case ruleConvertsToPolicy:
+			logger.L().Warning("resource rule names another API group or version than the policy constrains; the binding matches only if the cluster serves them as equivalent forms of one resource",
+				helpers.String("rule", entry.raw),
+				helpers.String("policy", policyName),
+				helpers.String("policyMatches", describeResourceRules(constraints.ResourceRules)))
+		}
+	}
+	return nil
+}
+
+// policyMatchConstraints resolves the bound policy's matchConstraints, nil when
+// there are none to check a rule against.
+func policyMatchConstraints(controlID, policyName string) (*admissionv1.MatchResources, error) {
+	if controlID != "" {
+		return cel.MatchConstraintsForControl(controlID)
+	}
+	constraints, found, err := cel.MatchConstraintsForPolicy(policyName)
+	if err != nil || !found {
+		return nil, err
+	}
+	return constraints, nil
+}
+
+// resourceRuleScope is what this command can conclude offline about one
+// --resource-rule, given the policy it is being bound to.
+type resourceRuleScope int
+
+const (
+	// ruleOutsidePolicy: the policy constrains no resource the rule names, which
+	// no API conversion can bridge. The binding would match nothing.
+	ruleOutsidePolicy resourceRuleScope = iota
+	// ruleConvertsToPolicy: the policy constrains the resource, but at another
+	// API group or version. Whether those are equivalent forms of one resource
+	// is a cluster fact, so this is reported rather than refused.
+	ruleConvertsToPolicy
+	// ruleMatchesPolicy: the rule names a resource the policy constrains, at the
+	// same group and version.
+	ruleMatchesPolicy
+)
+
+// classifyResourceRule compares a binding rule against the policy's resource
+// rules. Only a resource mismatch is conclusive offline.
+//
+// A group or version mismatch is not, because matchResources defaults to
+// matchPolicy Equivalent and this command never sets it: the emitted binding
+// matches a request for the resource even when it arrives via another group or
+// version, so a rule naming apps/v1beta1/deployments still intersects a policy
+// constraining apps/v1/deployments. Which forms are equivalent is something only
+// the cluster knows, so the two cannot be told apart from a typo here. The
+// policy's own matchPolicy does not change this — the binding side alone is
+// enough to bridge the gap. A resource name, by contrast, is stable across
+// equivalent forms, and conversion never turns a subresource into a resource.
+//
+// excludeResourceRules are not consulted: they carve out part of a surface
+// rather than define it. Operations and scope are not compared either, since a
+// parsed --resource-rule always carries "*" for both.
+func classifyResourceRule(rule admissionv1.NamedRuleWithOperations, constraints []admissionv1.NamedRuleWithOperations) resourceRuleScope {
+	scope := ruleOutsidePolicy
+	for i := range constraints {
+		constraint := &constraints[i]
+		if !resourcesOverlap(rule.Resources, constraint.Resources) {
+			continue
+		}
+		if valuesOverlap(rule.APIGroups, constraint.APIGroups) &&
+			valuesOverlap(rule.APIVersions, constraint.APIVersions) {
+			return ruleMatchesPolicy
+		}
+		scope = ruleConvertsToPolicy
+	}
+	return scope
+}
+
+func valuesOverlap(a, b []string) bool {
+	for _, want := range a {
+		for _, have := range b {
+			if valueMatches(want, have) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// resourcesOverlap is valuesOverlap for resources, honoring the subresource form
+// the admission API uses: "pods" and "pods/exec" are separate surfaces, "*"
+// covers every resource but no subresource, and "*/*" covers both.
+func resourcesOverlap(a, b []string) bool {
+	for _, want := range a {
+		wantResource, wantSubresource := splitSubresource(want)
+		for _, have := range b {
+			haveResource, haveSubresource := splitSubresource(have)
+			if valueMatches(wantResource, haveResource) && valueMatches(wantSubresource, haveSubresource) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func splitSubresource(resource string) (string, string) {
+	if name, subresource, found := strings.Cut(resource, "/"); found {
+		return name, subresource
+	}
+	return resource, ""
+}
+
+func valueMatches(a, b string) bool {
+	return a == "*" || b == "*" || a == b
+}
+
+// describeResourceRules renders a policy's resource rules in the
+// group/version/resource form --resource-rule takes, so the refusal names what
+// the flag would have to say instead.
+func describeResourceRules(rules []admissionv1.NamedRuleWithOperations) string {
+	seen := make(map[string]struct{})
+	described := make([]string, 0, len(rules))
+	for i := range rules {
+		for _, group := range rules[i].APIGroups {
+			for _, version := range rules[i].APIVersions {
+				for _, resource := range rules[i].Resources {
+					entry := strings.Join([]string{group, version, resource}, "/")
+					if _, duplicate := seen[entry]; duplicate {
+						continue
+					}
+					seen[entry] = struct{}{}
+					described = append(described, entry)
+				}
+			}
+		}
+	}
+	return strings.Join(described, ", ")
+}
+
+// selectorReach is what a binding's namespaceSelector does to one resource its
+// policy constrains.
+type selectorReach int
+
+const (
+	// reachUnknown: a custom resource whose rule declares no scope. Where it
+	// lives is a cluster fact, so nothing is concluded from it.
+	reachUnknown selectorReach = iota
+	// reachNarrows: the selector decides whether the resource is in scope.
+	reachNarrows
+	// reachAlwaysMatches: the apiserver admits the resource before it ever
+	// parses the selector, so the selector cannot narrow it.
+	reachAlwaysMatches
+)
+
+// namespacesResource is the one resource carrying no namespace of its own that
+// a namespaceSelector still narrows: the apiserver reads the selector against a
+// Namespace's own labels rather than exempting it as cluster-scoped.
+const namespacesResource = "namespaces"
+
+// resourceSelectorReach resolves what a namespaceSelector does to one resource a
+// policy rule names.
+//
+// The rule's own scope field wins over the built-in resource table: it is the
+// only source that can speak for a custom resource, and an author who set it has
+// stated the answer. The table answers for the rest, but only where the rule
+// names the resource at the group that table serves it from — pairing a custom
+// group with a built-in plural ("custom.io" + "roles") names a different
+// resource that happens to share a name.
+//
+// A resource neither source knows stays unknown rather than guessed: a wrong
+// guess either suppresses a warning the caller needs or raises one they cannot
+// act on.
+//
+// What the scope field keeps out of the covered surface in the first place is
+// scopedGroups' business, upstream of this. A resource reaching here is one the
+// rule does match, and the only question left is what a selector does to it.
+func resourceSelectorReach(scope *admissionv1.ScopeType, groups []string, resource string) selectorReach {
+	// A subresource lives wherever its parent does.
+	resource, _ = splitSubresource(strings.ToLower(strings.TrimSpace(resource)))
+	if resource == namespacesResource && valuesOverlap(groups, []string{""}) {
+		return reachNarrows
+	}
+	if scope != nil {
+		switch *scope {
+		case admissionv1.ClusterScope:
+			return reachAlwaysMatches
+		case admissionv1.NamespacedScope:
+			return reachNarrows
+		}
+	}
+	if resource == "*" {
+		return reachAlwaysMatches // the rule sweeps cluster-scoped resources too
+	}
+	switch known := resourceScope(groups, resource); {
+	case known == nil:
+		return reachUnknown
+	case *known == admissionv1.NamespacedScope:
+		return reachNarrows
+	default:
+		return reachAlwaysMatches
+	}
+}
+
+// resourceScope is where a resource lives according to the built-in resource
+// table, nil where the table cannot speak for it — a custom resource, or a
+// built-in plural named at a group the table does not serve it from.
+//
+// Unlike resourceSelectorReach this is the resource's API scope, not what a
+// namespaceSelector does to it: a Namespace is cluster-scoped here even though a
+// selector still narrows it by its own labels. The two matchers read the same
+// resource differently, so what asks about the rules matcher asks here.
+//
+// A wildcard group accepts the table's answer, the way the rest of this file
+// reads one. A caller that must not take a wildcard for the built-in group asks
+// a group at a time instead.
+func resourceScope(groups []string, resource string) *admissionv1.ScopeType {
+	resource, _ = splitSubresource(strings.ToLower(strings.TrimSpace(resource)))
+	if resource == "" || resource == "*" {
+		return nil
+	}
+	gvr, err := k8sinterface.GetGroupVersionResource(resource)
+	if err != nil || gvr.Resource == "" || !valuesOverlap(groups, []string{gvr.Group}) {
+		return nil
+	}
+	scope := admissionv1.ClusterScope
+	if k8sinterface.IsNamespaceScope(&gvr) {
+		scope = admissionv1.NamespacedScope
+	}
+	return &scope
+}
+
+// namespaceSelectorReach splits the surface an emitted binding covers by what
+// its namespaceSelector does to each part.
+type namespaceSelectorReach struct {
+	// alwaysMatched are the resources the selector cannot narrow, in the
+	// group/version/resource form --resource-rule takes.
+	alwaysMatched []string
+	// narrowable reports whether the selector reaches anything at all. A
+	// resource of unknown scope counts, so this is false only where nothing the
+	// binding covers could be narrowed.
+	narrowable bool
+}
+
+// coveredResource is one resource the emitted binding covers, at the groups and
+// versions it covers it at.
+type coveredResource struct {
+	groups   []string
+	versions []string
+	resource string
+}
+
+// resolveNamespaceSelectorReach walks the surface the emitted binding covers —
+// the policy's matchConstraints, intersected with the binding's own resource
+// rules when the caller gave any — and reports what its namespaceSelector does
+// to it.
+func resolveNamespaceSelectorReach(constraints, bindingRules []admissionv1.NamedRuleWithOperations) namespaceSelectorReach {
+	var reach namespaceSelectorReach
+	seen := make(map[string]struct{})
+	for i := range constraints {
+		constraint := &constraints[i]
+		for _, resource := range constraint.Resources {
+			for _, covered := range bindingCoverage(constraint, resource, bindingRules) {
+				if resourceSelectorReach(constraint.Scope, covered.groups, covered.resource) != reachAlwaysMatches {
+					reach.narrowable = true
+					continue
+				}
+				for _, group := range covered.groups {
+					for _, version := range covered.versions {
+						entry := strings.Join([]string{group, version, covered.resource}, "/")
+						if _, duplicate := seen[entry]; duplicate {
+							continue
+						}
+						seen[entry] = struct{}{}
+						reach.alwaysMatched = append(reach.alwaysMatched, entry)
+					}
+				}
+			}
+		}
+	}
+	return reach
+}
+
+// bindingCoverage resolves what one resource of a policy constraint still
+// covers once the binding's own resource rules are applied, as nothing where
+// they drop it entirely. No rules is the default: the binding covers the
+// constraint as it stands.
+//
+// A request has to match the policy and the binding both, so what the emitted
+// binding acts on is their intersection — and it is the intersection, not the
+// constraint, whose scope decides what the selector can narrow. A policy
+// constraining "*" bound with --resource-rule apps/v1/deployments acts on
+// deployments alone, which a namespaceSelector narrows, however wide the
+// constraint reads on its own.
+//
+// The intersection is by resource name alone, the way classifyResourceRule
+// compares one: matchPolicy Equivalent lets a binding rule bridge a group or
+// version gap, but never turns one resource into another. So group and version
+// stay as the policy states them, except where it states a wildcard — that
+// names nothing for the binding to reach past, and nothing for a message about
+// it to echo.
+func bindingCoverage(constraint *admissionv1.NamedRuleWithOperations, resource string, bindingRules []admissionv1.NamedRuleWithOperations) []coveredResource {
+	var covered []coveredResource
+	keep := func(candidate coveredResource) {
+		candidate.groups = scopedGroups(constraint.Scope, candidate.groups, candidate.resource)
+		if len(candidate.groups) == 0 {
+			return
+		}
+		covered = append(covered, candidate)
+	}
+	if len(bindingRules) == 0 {
+		keep(coveredResource{groups: constraint.APIGroups, versions: constraint.APIVersions, resource: resource})
+		return covered
+	}
+	for i := range bindingRules {
+		for _, bound := range bindingRules[i].Resources {
+			if !resourcesOverlap([]string{resource}, []string{bound}) {
+				continue
+			}
+			keep(coveredResource{
+				groups:   narrowWildcards(constraint.APIGroups, bindingRules[i].APIGroups),
+				versions: narrowWildcards(constraint.APIVersions, bindingRules[i].APIVersions),
+				resource: narrowResource(resource, bound),
+			})
+		}
+	}
+	return covered
+}
+
+// scopedGroups drops the groups a constraint's own scope field rules the
+// resource out at, and reports the ones left. None left means the constraint
+// matches no request for that resource at all, so the emitted binding does not
+// cover it: nothing there for a selector to reach, and nothing for a message
+// about one to name. Without this a policy declaring scope Cluster over "*",
+// narrowed to apps/v1/deployments, is refused for covering only cluster-scoped
+// resources and names a namespaced one as the reason.
+//
+// A rule declaring Namespaced never matches a cluster-scoped request and one
+// declaring Cluster never matches a namespaced request: the rules matcher reads
+// the scope field before it reads anything else. Every other value rules nothing
+// out — "*" by definition, and one this version does not know because a scope it
+// cannot read is no grounds for going quiet about a resource.
+//
+// The scope is contradicted a group at a time, and only by a built-in table that
+// can speak for that group. A wildcard group is one it cannot: a rule covering
+// every group covers the ones the table has no answer for too, and there the
+// declared scope is the only word on the resource. So scope Cluster over
+// "*"/roles keeps covering the cluster-scoped roles some group of its own
+// defines, and only naming the group the table serves roles from gives that up.
+//
+// Where that reading of a wildcard parts ways with the one resourceSelectorReach
+// takes, both err the same way: toward naming a resource rather than going quiet
+// about one.
+//
+// The table's answer here is the resource's own API scope, so scope Cluster over
+// namespaces is no conflict — the rules matcher counts a Namespace as
+// cluster-scoped, whatever a namespaceSelector then does with it — and scope
+// Namespaced over namespaces covers nothing, which is the same rule read from
+// the other side.
+func scopedGroups(declared *admissionv1.ScopeType, groups []string, resource string) []string {
+	if declared == nil || (*declared != admissionv1.ClusterScope && *declared != admissionv1.NamespacedScope) {
+		return groups
+	}
+	scoped := make([]string, 0, len(groups))
+	for _, group := range groups {
+		if group != "*" {
+			if known := resourceScope([]string{group}, resource); known != nil && *known != *declared {
+				continue
+			}
+		}
+		scoped = append(scoped, group)
+	}
+	return scoped
+}
+
+// narrowResource is the more specific of a policy resource and a binding
+// resource that overlaps it, resource name and subresource each taken from
+// whichever side names one.
+func narrowResource(resource, bound string) string {
+	name, subresource := splitSubresource(resource)
+	boundName, boundSubresource := splitSubresource(bound)
+	name, subresource = narrowWildcard(name, boundName), narrowWildcard(subresource, boundSubresource)
+	if subresource == "" {
+		return name
+	}
+	return name + "/" + subresource
+}
+
+// narrowWildcards replaces a wildcard the policy states with the values the
+// binding narrows it to. Anything the policy names stays as it named it.
+func narrowWildcards(values, bound []string) []string {
+	if len(bound) == 0 {
+		return values
+	}
+	narrowed := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != "*" {
+			narrowed = append(narrowed, value)
+			continue
+		}
+		narrowed = append(narrowed, bound...)
+	}
+	return narrowed
+}
+
+func narrowWildcard(value, bound string) string {
+	if value == "*" {
+		return bound
+	}
+	return value
+}
+
+// checkNamespaceSelectorScope reports on a --namespace the apiserver will not
+// apply the way the flag reads.
+//
+// --namespace emits a namespaceSelector, and the apiserver's namespace matcher
+// returns "matched" for a cluster-scoped request before it ever parses the
+// selector (webhook/predicates/namespace matcher.go, which the VAP binding path
+// reuses). So the flag narrows the namespaced resources a policy constrains and
+// leaves its cluster-scoped ones enforced cluster-wide, silently: with the
+// default Deny action, a rollout meant for one namespace denies every
+// ClusterRoleBinding in the cluster. Three shipped controls mix the two
+// (C-0225, C-0262, C-0280).
+//
+// A warning rather than a refusal while some of the surface is still narrowed:
+// that half of the binding is exactly what was asked for, and --resource-rule
+// can drop the rest. A --namespace that narrows nothing at all is refused, the
+// way --label is when it selects nothing — the emitted binding is then no
+// narrower than one carrying neither flag, and nothing else would say so.
+func checkNamespaceSelectorScope(namespaces, resourceRules []string, controlID, policyName string) error {
+	if len(namespaces) == 0 {
+		return nil
+	}
+	constraints, err := policyMatchConstraints(controlID, policyName)
+	if err != nil {
+		return err
+	}
+	if constraints == nil || len(constraints.ResourceRules) == 0 {
+		return nil
+	}
+	bindingRules, err := parseResourceRules(resourceRules)
+	if err != nil {
+		return err
+	}
+
+	reach := resolveNamespaceSelectorReach(constraints.ResourceRules, bindingResourceRules(bindingRules))
+	if len(reach.alwaysMatched) == 0 {
+		return nil
+	}
+	if !reach.narrowable {
+		return fmt.Errorf("--namespace narrows nothing on %s: every resource the binding covers is cluster-scoped (%s), and a namespaceSelector never exempts a cluster-scoped request; omit --namespace, or point --resource-rule at a namespaced resource the policy matches",
+			describeBoundPolicy(controlID, policyName), strings.Join(reach.alwaysMatched, ", "))
+	}
+	logger.L().Warning("--namespace does not narrow the cluster-scoped resources this policy matches; the apiserver never exempts a cluster-scoped request from a binding's namespaceSelector, so the binding enforces on them cluster-wide",
+		helpers.String("policy", policyName),
+		helpers.String("clusterScoped", strings.Join(reach.alwaysMatched, ", ")),
+		helpers.String("hint", "drop them from the binding with --resource-rule"))
+	return nil
+}
+
 // Create a policy binding
-func createPolicyBinding(bindingName string, policyName string, action string, paramRefName string, namespaceArr []string, labelMatch []string) (string, error) {
+func createPolicyBinding(bindingName string, policyName string, actions []admissionv1.ValidationAction, paramRefName string, namespaceArr []string, labelMatch []string, resourceRuleArr []string) (string, error) {
 	// Create a policy binding struct
 	policyBinding := &admissionv1.ValidatingAdmissionPolicyBinding{}
 	policyBinding.APIVersion = "admissionregistration.k8s.io/v1"
@@ -324,24 +1100,23 @@ func createPolicyBinding(bindingName string, policyName string, action string, p
 		}
 	}
 
-	if len(labelMatch) > 0 {
-		policyBinding.Spec.MatchResources.ObjectSelector = &metav1.LabelSelector{}
-		policyBinding.Spec.MatchResources.ObjectSelector.MatchLabels = make(map[string]string)
-		for _, label := range labelMatch {
-			parsed, err := labels.Parse(label)
-			if err != nil {
-				continue
-			}
-			requirements, _ := parsed.Requirements()
-			for _, r := range requirements {
-				if len(r.Values().List()) > 0 {
-					policyBinding.Spec.MatchResources.ObjectSelector.MatchLabels[r.Key()] = r.Values().List()[0]
-				}
-			}
-		}
+	matchLabels, err := parseObjectSelectorLabels(labelMatch)
+	if err != nil {
+		return "", err
+	}
+	if len(matchLabels) > 0 {
+		policyBinding.Spec.MatchResources.ObjectSelector = &metav1.LabelSelector{MatchLabels: matchLabels}
 	}
 
-	policyBinding.Spec.ValidationActions = []admissionv1.ValidationAction{admissionv1.ValidationAction(action)}
+	// Left empty, matchResources binds everything the policy matches, so a rule
+	// is only emitted when the caller asked to narrow it.
+	resourceRules, err := parseResourceRules(resourceRuleArr)
+	if err != nil {
+		return "", err
+	}
+	policyBinding.Spec.MatchResources.ResourceRules = bindingResourceRules(resourceRules)
+
+	policyBinding.Spec.ValidationActions = actions
 	paramAction := admissionv1.DenyAction
 	if paramRefName != "" {
 		policyBinding.Spec.ParamRef = &admissionv1.ParamRef{

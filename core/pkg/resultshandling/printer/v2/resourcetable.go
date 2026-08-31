@@ -9,14 +9,14 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
-var specContainerRegex = regexp.MustCompile(`spec\.containers\[(\d+)]`)
+var specContainerRegex = regexp.MustCompile(`spec\.(containers|initContainers|ephemeralContainers)\[(\d+)]`)
 
 const (
 	resourceColumnSeverity = iota
@@ -58,7 +58,11 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		summaryTable.Style().Format.Header = text.FormatDefault
 		summaryTable.Style().Box = table.StyleBoxRounded
 
-		resourceRows := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource)
+		var sourcePath string
+		if src, ok := opaSessionObj.ResourceSource[resourceID]; ok {
+			sourcePath = src.RelativePath
+		}
+		resourceRows := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource, prettyPrinter.showEvidence, prettyPrinter.showSecrets, sourcePath)
 
 		short := utils.CheckShortTerminalWidth(resourceRows, generateResourceHeader(false))
 		if short {
@@ -73,7 +77,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 
 }
 
-func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata) []table.Row {
+func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata, showEvidence bool, showSecrets bool, sourcePath string) []table.Row {
 	var rows []table.Row
 
 	for i := range controls {
@@ -84,9 +88,14 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		}
 
 		row[resourceColumnURL] = cautils.GetControlLink(controls[i].GetID())
-		paths := AssistedRemediationPathsWithCurrentValues(&controls[i], resource)
-		addContainerNameToAssistedRemediation(resource, &paths)
-		row[resourceColumnPath] = strings.Join(paths, "\n")
+		if showEvidence {
+			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&controls[i], resource, showSecrets)
+			addContainerNameToAssistedRemediation(resource, &paths)
+			if sourcePath != "" {
+				paths = append([]string{"@ " + sourcePath}, paths...)
+			}
+			row[resourceColumnPath] = strings.Join(paths, "\n")
+		}
 		row[resourceColumnName] = controls[i].GetName()
 
 		if c := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, controls[i].GetID()); c != nil {
@@ -100,25 +109,41 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 }
 
 func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata, paths *[]string) {
-	wl := workloadinterface.NewWorkloadObj(resource.GetObject())
-	containers, err := wl.GetContainers()
-	if err != nil {
+	if resource == nil {
 		return
 	}
-
+	wl := workloadinterface.NewWorkloadObj(resource.GetObject())
 	for i := range *paths {
 		match := specContainerRegex.FindStringSubmatch((*paths)[i])
-		if len(match) != 2 {
+		if len(match) != 3 {
 			continue
 		}
-		index, err := strconv.Atoi(match[1])
+		index, err := strconv.Atoi(match[2])
 		if err != nil {
 			continue
 		}
-		if index >= len(containers) {
+		var containerName string
+		switch match[1] {
+		case "containers":
+			containers, _ := wl.GetContainers()
+			if index < len(containers) {
+				containerName = containers[index].Name
+			}
+		case "initContainers":
+			containers, _ := wl.GetInitContainers()
+			if index < len(containers) {
+				containerName = containers[index].Name
+			}
+		case "ephemeralContainers":
+			containers, _ := wl.GetEphemeralContainers()
+			if index < len(containers) {
+				containerName = containers[index].Name
+			}
+		}
+		if containerName == "" {
 			continue
 		}
-		(*paths)[i] += " (" + containers[index].Name + ")"
+		(*paths)[i] = (*paths)[i] + " (" + containerName + ")"
 	}
 }
 
@@ -152,20 +177,6 @@ func (a Matrix) Less(i, j int) bool {
 		}
 	}
 	return true
-}
-
-// TODO - deprecate once all controls support review/delete paths
-func failedPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
-	var paths []string
-
-	for j := range control.ResourceAssociatedRules {
-		for k := range control.ResourceAssociatedRules[j].Paths {
-			if p := control.ResourceAssociatedRules[j].Paths[k].FailedPath; p != "" {
-				paths = append(paths, p)
-			}
-		}
-	}
-	return paths
 }
 
 func fixPathsToString(control *resourcesresults.ResourceAssociatedControl, onlyPath bool) []string {
@@ -214,24 +225,31 @@ func reviewPathsToString(control *resourcesresults.ResourceAssociatedControl) []
 
 func AssistedRemediationPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
 	paths := append(fixPathsToString(control, false), append(deletePathsToString(control), reviewPathsToString(control)...)...)
-	// TODO - deprecate failedPaths once all controls support review/delete paths
-	paths = appendFailedPathsIfNotInPaths(paths, failedPathsToString(control))
-	return paths
+	return deduplicatePaths(paths)
 }
 
-func appendFailedPathsIfNotInPaths(paths []string, failedPaths []string) []string {
-	// Create a set to efficiently check if a failed path already exists in the paths slice
-	pathSet := make(map[string]struct{})
-	for _, path := range paths {
-		pathSet[path] = struct{}{}
+func deduplicatePaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
 	}
-
-	// Append failed paths if they are not already present
-	for _, failedPath := range failedPaths {
-		if _, ok := pathSet[failedPath]; !ok {
-			paths = append(paths, failedPath)
+	seen := make(map[string]bool)
+	deduped := make([]string, 0, len(paths))
+	for _, path := range paths {
+		key := dedupPathKey(path)
+		if !seen[key] {
+			seen[key] = true
+			deduped = append(deduped, path)
 		}
 	}
+	return deduped
+}
 
-	return paths
+// dedupPathKey strips the " (current: <value>)" suffix appended by evidence enrichment so a
+// bare path (as emitted by fix/delete/review paths) and its enriched failed-path counterpart
+// are recognized as referring to the same field.
+func dedupPathKey(path string) string {
+	if idx := strings.Index(path, " (current: "); idx >= 0 {
+		return path[:idx]
+	}
+	return path
 }

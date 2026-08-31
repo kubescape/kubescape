@@ -5,15 +5,16 @@ package update
 //          kubescape update
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
-	"github.com/kubescape/kubescape/v3/core/meta"
+	"github.com/kubescape/kubescape/v4/core/meta"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/spf13/cobra"
 )
 
@@ -26,6 +27,12 @@ var updateCmdExamples = fmt.Sprintf(`
   %[1]s update
 `, cautils.ExecName())
 
+type UpdateInfo struct {
+	LatestVersion    string `json:"latestVersion,omitempty"`
+	InstallationLink string `json:"installationLink,omitempty"`
+	Message          string `json:"message,omitempty"`
+}
+
 // newVersionCheckHandler is the seam used by GetUpdateCmd so unit tests can
 // substitute a mock without changing runtime behaviour. The update command
 // intentionally does NOT use versioncheck.NewIVersionCheckHandler: that
@@ -37,15 +44,40 @@ var newVersionCheckHandler = func() versioncheck.IVersionCheckHandler {
 }
 
 func GetUpdateCmd(ks meta.IKubescape) *cobra.Command {
+	var updateFormat string
 	updateCmd := &cobra.Command{
 		Use:     "update",
 		Short:   "Update to latest release version",
 		Long:    ``,
 		Example: updateCmdExamples,
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if updateFormat != "text" && updateFormat != "json" {
+				return fmt.Errorf("unsupported format %q, supported: text, json", updateFormat)
+			}
+
 			v := newVersionCheckHandler()
 			versionCheckRequest := versioncheck.NewVersionCheckRequest("", versioncheck.BuildNumber, "", "", "update", nil)
 			if err := v.CheckLatestVersion(ks.Context(), versionCheckRequest); err != nil {
+				return err
+			}
+
+			if updateFormat == "json" {
+				info := UpdateInfo{}
+				if versioncheck.BuildNumber == "" || strings.Contains(versioncheck.BuildNumber, "rc") {
+					info.Message = "Nothing to update: you are running the development version"
+				} else if versioncheck.LatestReleaseVersion == "" {
+					info.Message = "Failed to check for updates"
+				} else if versioncheck.BuildNumber == versioncheck.LatestReleaseVersion {
+					info.Message = "Nothing to update: you are running the latest version"
+				} else {
+					info.LatestVersion = versioncheck.LatestReleaseVersion
+					info.InstallationLink = installationLink
+				}
+				b, err := json.Marshal(info)
+				if err != nil {
+					return fmt.Errorf("failed to marshal update info: %w", err)
+				}
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), string(b))
 				return err
 			}
 
@@ -65,5 +97,6 @@ func GetUpdateCmd(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 	}
+	updateCmd.Flags().StringVarP(&updateFormat, "format", "f", "text", "Output format. Supported formats: text, json")
 	return updateCmd
 }

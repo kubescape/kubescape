@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: named-secret-creator-rb
+  namespace: build
+subjects:
+- kind: ServiceAccount
+  name: build-sa
+  namespace: build
+roleRef:
+  kind: Role
+  name: named-secret-creator
+  apiGroup: rbac.authorization.k8s.io

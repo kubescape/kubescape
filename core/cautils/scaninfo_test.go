@@ -14,7 +14,8 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	giturl "github.com/kubescape/go-git-url"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/internal/testutils"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -96,6 +97,70 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.Nil(t, ctx.HelmContextMetadata)
 		assertRepoContextMetadata(t, ctx.RepoContextMetadata, remoteURL, dir)
 	})
+}
+
+func TestScanContractProvenanceUsesFinalPolicySelection(t *testing.T) {
+	scanInfo := &ScanInfo{
+		ScanContract: &reporthandlingv2.ScanContractMetadata{
+			APIVersion:      "config.kubescape.io/v1alpha1",
+			Contract:        "ci",
+			DigestSchema:    "kubescape-scan-contract:v1",
+			ContractDigest:  "sha256:contract",
+			AllowedSections: []string{"policy"},
+			Effective: &reporthandlingv2.ScanContractEffectiveSettings{
+				Policy: &reporthandlingv2.ScanContractPolicy{
+					Frameworks: []string{"mitre"},
+				},
+			},
+		},
+	}
+
+	metadata := scanInfoToScanMetadata(context.Background(), scanInfo, []PolicyIdentifier{
+		{Identifier: "nsa", Kind: apisv1.KindFramework},
+		{Identifier: "C-0001", Kind: apisv1.KindControl},
+	})
+	provenance := metadata.ScanMetadata.ScanContract
+	require.NotNil(t, provenance)
+	require.NotNil(t, provenance.Effective)
+	require.NotNil(t, provenance.Effective.Policy)
+	assert.Equal(t, []string{"nsa"}, provenance.Effective.Policy.Frameworks)
+	assert.Equal(t, []string{"C-0001"}, provenance.Effective.Policy.Controls)
+	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, provenance.EffectiveRunDigest)
+	assert.Equal(t, []string{"mitre"}, scanInfo.ScanContract.Effective.Policy.Frameworks, "report finalization must not mutate the reusable scan input")
+}
+
+func TestScanContractProvenanceRecordsConsumedRunnerInputs(t *testing.T) {
+	controls := getter.NewLoadPolicy([]string{filepath.Join(testutils.CurrentDir(), "getter", "testdata", "controls-inputs.json")})
+	_, err := controls.GetControlsInputs(context.Background(), "")
+	require.NoError(t, err)
+
+	exceptions := getter.NewLoadPolicy([]string{filepath.Join(testutils.CurrentDir(), "getter", "testdata", "exceptions.json")})
+	_, err = exceptions.GetExceptions(context.Background(), "")
+	require.NoError(t, err)
+
+	scanInfo := &ScanInfo{ScanContract: &reporthandlingv2.ScanContractMetadata{
+		APIVersion:     "config.kubescape.io/v1alpha1",
+		Contract:       "ci",
+		DigestSchema:   "kubescape-scan-contract:v1",
+		ContractDigest: "sha256:contract",
+	}}
+	_, ok := RecordScanContractRunnerInput(scanInfo, "controlsConfig", controls)
+	require.True(t, ok)
+	_, ok = RecordScanContractRunnerInput(scanInfo, "exceptions", getter.NewMergedExceptionsGetter(exceptions, nil))
+	require.True(t, ok)
+
+	metadata := scanInfoToScanMetadata(context.Background(), scanInfo, nil)
+	provenance := metadata.ScanMetadata.ScanContract
+	require.NotNil(t, provenance)
+	require.Len(t, provenance.RunnerInputs, 2)
+	assert.Equal(t, "controlsConfig", provenance.RunnerInputs[0].Role)
+	assert.Equal(t, "exceptions", provenance.RunnerInputs[1].Role)
+	for _, input := range provenance.RunnerInputs {
+		assert.NotEmpty(t, input.Source)
+		assert.False(t, filepath.IsAbs(input.Source))
+		assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, input.Digest)
+	}
+	assert.Regexp(t, `^sha256:[0-9a-f]{64}$`, provenance.EffectiveRunDigest)
 }
 
 func TestResolveClusterContextNameRejectsInvalidSelection(t *testing.T) {
