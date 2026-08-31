@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // GVRCheck is the preflight result for a single resource type the scan needs to list.
@@ -65,14 +66,14 @@ var ErrPreflightNotSupported = errors.New("dry-run RBAC preflight is only suppor
 // Preflight resolves the resource types the given policies require and
 // checks, via SelfSubjectAccessReview, whether the current credentials can
 // list each one, without collecting any resources. Kubescape lists every
-// resource type with a single cluster-wide LIST (namespace filtering happens
-// against the returned items, not via a namespaced list call), so a
-// cluster-wide "list" access review is the same check the real collection
-// would need to pass, regardless of --include-namespaces/--exclude-namespaces.
+// resource type at the scope collection will address it: namespaced when
+// --include-namespaces names the namespaces a namespaced resource is collected
+// from, cluster-wide otherwise. That is the same check the real collection
+// would need to pass.
 //
-// --include-kinds/--exclude-kinds are honored, unlike the namespace filters:
-// they decide which resource types get listed at all, so reviewing access to an
-// excluded kind would fail the dry-run over a listing that never happens.
+// --include-kinds/--exclude-kinds are honored too: they decide which resource
+// types get listed at all, so reviewing access to an excluded kind would fail
+// the dry-run over a listing that never happens.
 func (k8sHandler *K8sResourceHandler) Preflight(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*PreflightResult, error) {
 	resolver, discoveryFailures := newDiscoveryResourceResolver(k8sHandler.k8s.DiscoveryClient)
 
@@ -81,6 +82,8 @@ func (k8sHandler *K8sResourceHandler) Preflight(ctx context.Context, sessionObj 
 	queryableResources, _ := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope, resolver)
 	filterQueryableResourcesByKind(queryableResources, scanInfo)
 	setKSResourceMap(sessionObj.Policies, resourceToControl, resolver)
+
+	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
 
 	result := &PreflightResult{DiscoveryFailures: discoveryFailures}
 	seen := make(map[string]struct{}, len(queryableResources))
@@ -96,36 +99,58 @@ func (k8sHandler *K8sResourceHandler) Preflight(ctx context.Context, sessionObj 
 		}
 		seen[qr.GroupVersionResourceTriplet] = struct{}{}
 
-		result.Checks = append(result.Checks, k8sHandler.checkListAccess(ctx, qr.GroupVersionResourceTriplet, resourceToControl[qr.GroupVersionResourceTriplet]))
+		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
+		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
+		namespaces := globalFieldSelectors.GetNamespaceScopedQueries(&gvr, qr.Namespaced)
+
+		result.Checks = append(result.Checks, k8sHandler.checkListAccess(ctx, qr.GroupVersionResourceTriplet, namespaces, resourceToControl[qr.GroupVersionResourceTriplet]))
 	}
 
 	sort.Slice(result.Checks, func(i, j int) bool { return result.Checks[i].GVR < result.Checks[j].GVR })
 	return result, nil
 }
 
-func (k8sHandler *K8sResourceHandler) checkListAccess(ctx context.Context, gvrTriplet string, affectedControls []string) GVRCheck {
+// checkListAccess reviews "list" access to gvrTriplet. namespaces are the
+// namespaces collection will address the resource in; an empty slice reviews
+// cluster scope. Every namespace must be allowed for the check to pass, since
+// collection queries all of them, and the first one that is not decides the
+// reported outcome.
+func (k8sHandler *K8sResourceHandler) checkListAccess(ctx context.Context, gvrTriplet string, namespaces []string, affectedControls []string) GVRCheck {
 	group, version, resource := k8sinterface.StringToResourceGroup(gvrTriplet)
+
+	scopes := namespaces
+	if len(scopes) == 0 {
+		scopes = []string{""}
+	}
+
 	check := GVRCheck{GVR: gvrTriplet, AffectedControls: affectedControls}
-
-	ssar := &authorizationv1.SelfSubjectAccessReview{
-		Spec: authorizationv1.SelfSubjectAccessReviewSpec{
-			ResourceAttributes: &authorizationv1.ResourceAttributes{
-				Verb:     "list",
-				Group:    group,
-				Version:  version,
-				Resource: resource,
+	for _, namespace := range scopes {
+		ssar := &authorizationv1.SelfSubjectAccessReview{
+			Spec: authorizationv1.SelfSubjectAccessReviewSpec{
+				ResourceAttributes: &authorizationv1.ResourceAttributes{
+					Verb:      "list",
+					Group:     group,
+					Version:   version,
+					Resource:  resource,
+					Namespace: namespace,
+				},
 			},
-		},
+		}
+
+		check = GVRCheck{GVR: gvrTriplet, AffectedControls: affectedControls}
+		resp, err := k8sHandler.k8s.KubernetesClient.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, ssar, metav1.CreateOptions{})
+		if err != nil {
+			check.Errored = true
+			check.Reason = err.Error()
+			return check
+		}
+
+		applyAccessReviewStatus(&check, resp.Status)
+		if !check.Allowed {
+			return check
+		}
 	}
 
-	resp, err := k8sHandler.k8s.KubernetesClient.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, ssar, metav1.CreateOptions{})
-	if err != nil {
-		check.Errored = true
-		check.Reason = err.Error()
-		return check
-	}
-
-	applyAccessReviewStatus(&check, resp.Status)
 	return check
 }
 

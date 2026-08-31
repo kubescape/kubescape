@@ -447,6 +447,7 @@ func TestK8sResourceHandlerUsesDiscoveredGVRsAndNamespaceScope(t *testing.T) {
 
 	var actualQueries []string
 	seenSelectors := map[schema.GroupVersionResource]string{}
+	seenNamespaces := map[schema.GroupVersionResource]string{}
 	for _, action := range dynamicClient.Actions() {
 		if action.GetVerb() == "list" {
 			gvr := action.GetResource()
@@ -454,6 +455,7 @@ func TestK8sResourceHandlerUsesDiscoveredGVRsAndNamespaceScope(t *testing.T) {
 			listAction, ok := action.(k8stesting.ListAction)
 			require.True(t, ok)
 			seenSelectors[gvr] = listAction.GetListRestrictions().Fields.String()
+			seenNamespaces[gvr] = action.GetNamespace()
 		}
 	}
 	var expectedQueries []string
@@ -464,7 +466,10 @@ func TestK8sResourceHandlerUsesDiscoveredGVRsAndNamespaceScope(t *testing.T) {
 	sort.Strings(expectedQueries)
 	assert.Equal(t, expectedQueries, actualQueries)
 	for _, gvr := range expectedGVRs {
-		assert.Equal(t, "metadata.namespace=agents", seenSelectors[gvr])
+		// These CRDs are namespaced, so the included namespace scopes the query
+		// through the namespaced endpoint rather than a field selector.
+		assert.Equal(t, "agents", seenNamespaces[gvr])
+		assert.Empty(t, seenSelectors[gvr])
 		assert.Contains(t, resources, k8sinterface.GroupVersionResourceToString(&gvr))
 	}
 }
