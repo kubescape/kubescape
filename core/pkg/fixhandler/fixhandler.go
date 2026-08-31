@@ -295,6 +295,79 @@ func (h *FixHandler) getPathFromRawResource(obj map[string]any) string {
 	return ""
 }
 
+// resourceSource is where a resource's YAML can be read from and written back
+// to. It is resolved once per resource, ahead of any expression building, so
+// that a resource the fixer cannot touch is identified before any work is done
+// on it.
+type resourceSource struct {
+	// filePath is the manifest to patch, already resolved against the
+	// resource's own base path and containment-checked. Empty when skipReason
+	// is set.
+	filePath string
+	// documentIndex is the resource's position within a multi-document file.
+	documentIndex int
+	// reportedPath is the raw path the report recorded for this resource. It is
+	// kept separately from filePath because the user-facing skip entry needs it
+	// even on the paths where resolution never produced a filePath.
+	reportedPath string
+	// skipReason, when non-empty, means this resource cannot be fixed. The
+	// caller re-reports the resource's failed controls as unfixed rather than
+	// dropping them.
+	skipReason string
+}
+
+// resolveResourceSource decides where a resource's YAML lives, or why it cannot
+// be reached. Today that is always a local manifest recorded by the scan.
+func (h *FixHandler) resolveResourceSource(ctx context.Context, resourceObj *reporthandling.Resource) resourceSource {
+	src := resourceSource{
+		reportedPath: h.getPathFromRawResource(resourceObj.GetObject()),
+	}
+
+	// Determine an upfront reason if we already know this resource is not
+	// fixable, so we can still surface its failed controls as "unfixed".
+	if src.reportedPath == "" {
+		src.skipReason = "skipped: resource has no local file path"
+		return src
+	}
+	if resourceObj.Source == nil || !isFixableSourceType(resourceObj.Source.FileType) {
+		src.skipReason = "skipped: source is not a YAML or JSON file"
+		return src
+	}
+
+	relativePath, idx, err := h.getFilePathAndIndex(src.reportedPath)
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("Skipping invalid resource path: " + sanitizeForLog(src.reportedPath))
+		src.skipReason = "skipped: invalid resource path"
+		return src
+	}
+
+	// the resource's own root, not the report-wide one: a single-file
+	// scan records the file rather than its root, and a multi-input
+	// scan records only the first input. relativePath is report input
+	// and is the field that can carry "..", so the file this package
+	// writes to must still land inside the root it resolved against.
+	basePath := h.resourceBasePath(resourceObj)
+	candidatePath := filepath.Join(basePath, relativePath)
+	if _, err := os.Stat(candidatePath); err != nil {
+		// Checked before containment so EvalSymlinks (inside
+		// isPathContained) has something to resolve, and so a
+		// missing file is reported as such rather than as
+		// "escapes scanned directory".
+		logger.L().Ctx(ctx).Warning("Skipping missing file: " + sanitizeForLog(candidatePath))
+		src.skipReason = "skipped: file not found"
+		return src
+	}
+	if !isPathContained(basePath, candidatePath) {
+		logger.L().Ctx(ctx).Warning("Skipping resource path that escapes the scanned directory: " + sanitizeForLog(src.reportedPath))
+		src.skipReason = "skipped: resource path escapes scanned directory"
+		return src
+	}
+
+	src.filePath = candidatePath
+	src.documentIndex = idx
+	return src
+}
+
 // PrepareResourcesToFix returns the YAML-source resources that the existing
 // yq-based pipeline can patch. Helm-rendered resources are split off into
 // PrepareHelmSuggestions because their fix paths reference rendered output
@@ -348,50 +421,9 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			}
 			continue
 		}
-		resourcePath := h.getPathFromRawResource(resourceObj.GetObject())
+		src := h.resolveResourceSource(ctx, resourceObj)
 
-		// Determine an upfront reason if we already know this resource is not
-		// fixable, so we can still surface its failed controls as "unfixed".
-		skipReason := ""
-		if resourcePath == "" {
-			skipReason = "skipped: resource has no local file path"
-		} else if resourceObj.Source == nil || !isFixableSourceType(resourceObj.Source.FileType) {
-			skipReason = "skipped: source is not a YAML or JSON file"
-		}
-
-		var absolutePath string
-		var documentIndex int
-		if skipReason == "" {
-			relativePath, idx, err := h.getFilePathAndIndex(resourcePath)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("Skipping invalid resource path: " + sanitizeForLog(resourcePath))
-				skipReason = "skipped: invalid resource path"
-			} else {
-				// the resource's own root, not the report-wide one: a single-file
-				// scan records the file rather than its root, and a multi-input
-				// scan records only the first input. relativePath is report input
-				// and is the field that can carry "..", so the file this package
-				// writes to must still land inside the root it resolved against.
-				basePath := h.resourceBasePath(resourceObj)
-				candidatePath := filepath.Join(basePath, relativePath)
-				if _, err := os.Stat(candidatePath); err != nil {
-					// Checked before containment so EvalSymlinks (inside
-					// isPathContained) has something to resolve, and so a
-					// missing file is reported as such rather than as
-					// "escapes scanned directory".
-					logger.L().Ctx(ctx).Warning("Skipping missing file: " + sanitizeForLog(candidatePath))
-					skipReason = "skipped: file not found"
-				} else if !isPathContained(basePath, candidatePath) {
-					logger.L().Ctx(ctx).Warning("Skipping resource path that escapes the scanned directory: " + sanitizeForLog(resourcePath))
-					skipReason = "skipped: resource path escapes scanned directory"
-				} else {
-					absolutePath = candidatePath
-					documentIndex = idx
-				}
-			}
-		}
-
-		if skipReason != "" {
+		if src.skipReason != "" {
 			for i := range result.AssociatedControls {
 				ac := &result.AssociatedControls[i]
 				if !ac.GetStatus(nil).IsFailed() {
@@ -402,19 +434,19 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 					ControlName:  ac.GetName(),
 					ResourceName: resourceObj.GetName(),
 					ResourceKind: resourceObj.GetKind(),
-					FilePath:     sanitizeForLog(resourcePath),
-					Reason:       skipReason,
+					FilePath:     sanitizeForLog(src.reportedPath),
+					Reason:       src.skipReason,
 				})
 			}
 			continue
 		}
 
 		rfi := ResourceFixInfo{
-			FilePath:        absolutePath,
+			FilePath:        src.filePath,
 			fileKey:         h.resourceFileKey(resourceObj),
 			Resource:        resourceObj,
 			YamlExpressions: make(map[string]armotypes.FixPath, 0),
-			DocumentIndex:   documentIndex,
+			DocumentIndex:   src.documentIndex,
 		}
 
 		// Tentative unfixed entries for this resource. We collect them locally
@@ -432,14 +464,14 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				continue
 			}
 
-			added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(documentIndex, ac, h.fixInfo.SkipUserValues)
+			added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(src.documentIndex, ac, h.fixInfo.SkipUserValues)
 
 			rfi.failedControls = append(rfi.failedControls, UnfixedControl{
 				ControlID:    ac.GetID(),
 				ControlName:  ac.GetName(),
 				ResourceName: resourceObj.GetName(),
 				ResourceKind: resourceObj.GetKind(),
-				FilePath:     sanitizeForLog(absolutePath),
+				FilePath:     sanitizeForLog(src.filePath),
 			})
 
 			// Fully auto-remediated: every failed path produced an expression.
@@ -466,7 +498,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 					ControlName:  ac.GetName(),
 					ResourceName: resourceObj.GetName(),
 					ResourceKind: resourceObj.GetKind(),
-					FilePath:     sanitizeForLog(absolutePath),
+					FilePath:     sanitizeForLog(src.filePath),
 					Reason:       reason,
 				},
 				ac: ac,
