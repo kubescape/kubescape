@@ -21,7 +21,7 @@ func TestGetConfigCmd(t *testing.T) {
 	assert.Equal(t, configExample, configCmd.Example)
 
 	// Verify that the subcommands are added correctly
-	assert.Equal(t, 3, len(configCmd.Commands()))
+	assert.Equal(t, 4, len(configCmd.Commands()))
 
 	for _, subcmd := range configCmd.Commands() {
 		switch subcmd.Name() {
@@ -33,6 +33,9 @@ func TestGetConfigCmd(t *testing.T) {
 			// Verify that the set subcommand is added correctly
 			assert.Equal(t, "set", subcmd.Use)
 			assert.Equal(t, "Set configurations, supported: "+strings.Join(stringKeysToSlice(supportConfigSet), "/"), subcmd.Short)
+		case "validate":
+			assert.Equal(t, "validate", subcmd.Use)
+			assert.Equal(t, "Validate cached configurations", subcmd.Short)
 		case "view":
 			// Verify that the view subcommand is added correctly
 			assert.Equal(t, "view", subcmd.Use)
