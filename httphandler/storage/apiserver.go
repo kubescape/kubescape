@@ -69,6 +69,8 @@ func NewAPIServerStorage(clusterName string, namespace string, ksClient spdxv1be
 }
 
 func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.PostureReport) error {
+	recoveredResources := 0
+	recoveredControls := 0
 	for i := range pr.Results {
 		workloadScan, err := a.BuildWorkloadConfigurationScan(ctx, pr, &pr.Results[i])
 		if err != nil {
@@ -77,6 +79,10 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 				continue
 			}
 			return err
+		}
+		if len(pr.Results[i].AssociatedControls) == 0 && len(workloadScan.Spec.Controls) > 0 {
+			recoveredResources++
+			recoveredControls += len(workloadScan.Spec.Controls)
 		}
 
 		if a.continuousPostureScan {
@@ -88,6 +94,10 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 		if _, err := a.StoreWorkloadConfigurationScanResultSummary(ctx, workloadScan); err != nil {
 			return err
 		}
+	}
+	if recoveredResources > 0 {
+		logger.L().Ctx(ctx).Warning("recovered missing per-resource controls from aggregate posture summary",
+			helpers.Int("resources", recoveredResources), helpers.Int("controls", recoveredControls))
 	}
 	return nil
 }
@@ -107,6 +117,43 @@ func getControlsMapFromResult(ctx context.Context, result *resourcesresults.Resu
 			Rules:     parseScannedControlRules(&control),
 		}
 
+	}
+	if len(m) > 0 {
+		return m
+	}
+
+	// A posture report carries the resource/control relationship twice: in each
+	// Result.AssociatedControls entry and in ControlSummary.ResourceIDs. The
+	// former contains the richer rule-level evidence and remains the preferred
+	// source. When that entire per-resource list is missing, recover its
+	// relationships from the latter so an internally inconsistent report cannot
+	// be persisted as a false-clean WorkloadConfigurationScanSummary. The same
+	// summary resource lists drive the control table printed before in-cluster
+	// persistence. They retain
+	// only the per-resource status, so rule evidence, substatus, and status info
+	// remain empty for a recovered relationship.
+	for summaryKey, controlSummary := range controlSummaries {
+		status, associated := controlSummary.ResourceIDs.All()[result.ResourceID]
+		if !associated {
+			continue
+		}
+
+		controlID := controlSummary.GetID()
+		if controlID == "" {
+			controlID = summaryKey
+		}
+		if _, exists := m[controlID]; exists {
+			continue
+		}
+
+		m[controlID] = v1beta1.ScannedControl{
+			ControlID: controlID,
+			Name:      controlSummary.GetName(),
+			Severity:  parseControlSeverity(&controlSummary),
+			Status: v1beta1.ScannedControlStatus{
+				Status: string(status),
+			},
+		}
 	}
 	return m
 }
@@ -228,19 +275,56 @@ func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurati
 	if existingSpec.Controls == nil {
 		existingSpec.Controls = make(map[string]v1beta1.ScannedControl)
 	}
-	for ctrlID := range newSpec.Controls {
-		newCtrl := newSpec.Controls[ctrlID]
-		_, found := existingSpec.Controls[ctrlID]
+	for ctrlID, newCtrl := range newSpec.Controls {
+		existingCtrl, found := existingSpec.Controls[ctrlID]
 		if !found {
 			existingSpec.Controls[ctrlID] = newCtrl
 			continue
 		}
 
-		// TODOs:
-		// 1. Decide what to do with existing controls (compare statuses, what is the merge strategy)
-		// 2. Do we need to merge the rules?
-		// 3. Do we need to remove non-existing controls?
-		existingSpec.Controls[ctrlID] = newCtrl
+		existingStatus := apis.ScanningStatus(existingCtrl.Status.Status)
+		existingSubStatus := apis.ScanningSubStatus(existingCtrl.Status.SubStatus)
+		newStatus := apis.ScanningStatus(newCtrl.Status.Status)
+		newSubStatus := apis.ScanningSubStatus(newCtrl.Status.SubStatus)
+		mergedStatus, mergedSubStatus := apis.CompareStatusAndSubStatus(existingStatus, newStatus, existingSubStatus, newSubStatus)
+
+		info := newCtrl.Status.Info
+		if info == "" {
+			info = existingCtrl.Status.Info
+		}
+
+		severity := newCtrl.Severity
+		if severity.Severity == "" {
+			severity = existingCtrl.Severity
+		}
+
+		name := newCtrl.Name
+		if name == "" {
+			name = existingCtrl.Name
+		}
+
+		controlID := existingCtrl.ControlID
+		if controlID == "" {
+			controlID = newCtrl.ControlID
+		}
+
+		existingSpec.Controls[ctrlID] = v1beta1.ScannedControl{
+			ControlID: controlID,
+			Name:      name,
+			Severity:  severity,
+			Status: v1beta1.ScannedControlStatus{
+				Status:    string(mergedStatus),
+				SubStatus: string(mergedSubStatus),
+				Info:      info,
+			},
+			Rules: newCtrl.Rules,
+		}
+	}
+
+	for ctrlID := range existingSpec.Controls {
+		if _, ok := newSpec.Controls[ctrlID]; !ok {
+			delete(existingSpec.Controls, ctrlID)
+		}
 	}
 
 	existingSpec.RelatedObjects = newSpec.RelatedObjects
@@ -251,19 +335,49 @@ func mergeWorkloadConfigurationScanSummarySpec(existingSpec v1beta1.WorkloadConf
 	if existingSpec.Controls == nil {
 		existingSpec.Controls = make(map[string]v1beta1.ScannedControlSummary)
 	}
-	for ctrlID := range newSpec.Controls {
-		newCtrl := newSpec.Controls[ctrlID]
-		_, found := existingSpec.Controls[ctrlID]
+	for ctrlID, newCtrl := range newSpec.Controls {
+		existingCtrl, found := existingSpec.Controls[ctrlID]
 		if !found {
 			existingSpec.Controls[ctrlID] = newCtrl
 			continue
 		}
 
-		// TODOs:
-		// 1. Decide what to do with existing controls (compare statuses, what is the merge strategy)
-		// 2. Do we need to merge the rules?
-		// 3. Do we need to remove non-existing controls?
-		existingSpec.Controls[ctrlID] = newCtrl
+		existingStatus := apis.ScanningStatus(existingCtrl.Status.Status)
+		existingSubStatus := apis.ScanningSubStatus(existingCtrl.Status.SubStatus)
+		newStatus := apis.ScanningStatus(newCtrl.Status.Status)
+		newSubStatus := apis.ScanningSubStatus(newCtrl.Status.SubStatus)
+		mergedStatus, mergedSubStatus := apis.CompareStatusAndSubStatus(existingStatus, newStatus, existingSubStatus, newSubStatus)
+
+		info := newCtrl.Status.Info
+		if info == "" {
+			info = existingCtrl.Status.Info
+		}
+
+		severity := newCtrl.Severity
+		if severity.Severity == "" {
+			severity = existingCtrl.Severity
+		}
+
+		controlID := existingCtrl.ControlID
+		if controlID == "" {
+			controlID = newCtrl.ControlID
+		}
+
+		existingSpec.Controls[ctrlID] = v1beta1.ScannedControlSummary{
+			ControlID: controlID,
+			Severity:  severity,
+			Status: v1beta1.ScannedControlStatus{
+				Status:    string(mergedStatus),
+				SubStatus: string(mergedSubStatus),
+				Info:      info,
+			},
+		}
+	}
+
+	for ctrlID := range existingSpec.Controls {
+		if _, ok := newSpec.Controls[ctrlID]; !ok {
+			delete(existingSpec.Controls, ctrlID)
+		}
 	}
 
 	existingSpec.Severities = calculateSeveritiesSummaryFromControls(existingSpec.Controls)
@@ -487,7 +601,6 @@ func parseScannedControlRules(control *resourcesresults.ResourceAssociatedContro
 		paths := make([]v1beta1.RulePath, len(rule.Paths))
 		for j, path := range rule.Paths {
 			paths[j] = v1beta1.RulePath{
-				FailedPath:   path.FailedPath,
 				FixPath:      path.FixPath.Path,
 				FixPathValue: path.FixPath.Value,
 				FixCommand:   path.FixCommand,
@@ -553,8 +666,15 @@ func parseWorkloadScanRelatedObjectList(relatedObjects []workloadinterface.IMeta
 	return r
 }
 
-// mergeMaps merges new into existing, overwriting existing keys with new values
+// mergeMaps merges new into existing, overwriting existing keys with new values.
+// Both parameters are safe to pass as nil.
 func mergeMaps(existing, new map[string]string) map[string]string {
+	if new == nil {
+		if existing == nil {
+			return make(map[string]string)
+		}
+		return existing
+	}
 	if existing == nil {
 		existing = make(map[string]string)
 	}

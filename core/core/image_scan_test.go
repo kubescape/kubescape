@@ -1,14 +1,18 @@
 package core
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"sort"
 	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGetImageExceptionsFromFile(t *testing.T) {
@@ -101,6 +105,51 @@ func TestGetImageExceptionsFromFile(t *testing.T) {
 			policies, err := GetImageExceptionsFromFile(tt.filePath)
 			assert.Equal(t, tt.expectedPolicies, policies)
 			assert.Equal(t, tt.expectedErr, err)
+		})
+	}
+}
+
+func TestGetImageExceptionsFromFileRejectsInvalidTargetRegex(t *testing.T) {
+	tests := []struct {
+		name string
+		set  func(*Attributes)
+	}{
+		{name: "registry", set: func(a *Attributes) { a.Registry = "[" }},
+		{name: "organization", set: func(a *Attributes) { a.Organization = "[" }},
+		{name: "imageName", set: func(a *Attributes) { a.ImageName = "[" }},
+		{name: "imageTag", set: func(a *Attributes) { a.ImageTag = "[" }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			attributes := Attributes{
+				Registry:     ".*",
+				Organization: ".*",
+				ImageName:    ".*",
+				ImageTag:     ".*",
+			}
+			tt.set(&attributes)
+
+			policies := []VulnerabilitiesIgnorePolicy{
+				{
+					Metadata: Metadata{Name: "invalid-pattern"},
+					Kind:     "VulnerabilitiesIgnorePolicy",
+					Targets: []Target{
+						{DesignatorType: "Attributes", Attributes: attributes},
+					},
+				},
+			}
+			data, err := json.Marshal(policies)
+			require.NoError(t, err)
+
+			path := filepath.Join(t.TempDir(), "exceptions.json")
+			require.NoError(t, os.WriteFile(path, data, 0o600))
+
+			got, err := GetImageExceptionsFromFile(path)
+			require.Error(t, err)
+			assert.Nil(t, got)
+			assert.ErrorContains(t, err, `policy "invalid-pattern" target 0 field `+tt.name)
+			assert.ErrorContains(t, err, "invalid regular expression")
 		})
 	}
 }

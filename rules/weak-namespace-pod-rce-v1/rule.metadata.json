@@ -1,0 +1,29 @@
+{
+  "name": "weak-namespace-pod-rce-v1",
+  "attributes": {
+    "m$K8sThreatMatrix": "Lateral Movement::Code execution on pods in unprivileged namespaces",
+    "resourcesAggregator": "subject-role-rolebinding",
+    "useFromKubescapeVersion": "v4.0.11"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        "rbac.authorization.k8s.io"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "RoleBinding",
+        "ClusterRoleBinding",
+        "Role",
+        "ClusterRole"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines which subjects can update or patch pods, or create pods/exec, in unprivileged namespaces, which lets them run code on pods that already exist in those namespaces",
+  "remediation": "Grant update/patch on pods and create on pods/exec only to subjects that genuinely need to debug workloads. Scope such rules with resourceNames where possible, and remove them from long-lived service accounts once debugging is complete.",
+  "ruleQuery": "armo_builtins"
+}

@@ -5,7 +5,8 @@ import (
 	"sort"
 
 	"github.com/jwalton/gchalk"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -25,14 +26,11 @@ type TableRow struct {
 func generateTableRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) *TableRow {
 	tableRow := &TableRow{
 		ref:             controlSummary.GetID(),
-		name:            controlSummary.GetName(),
+		name:            utils.TruncateName(controlSummary.GetName(), controlNameMaxLength),
 		counterFailed:   fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed()),
 		counterAll:      fmt.Sprintf("%d", controlSummary.NumberOfResources().All()),
 		severity:        apis.ControlSeverityToString(controlSummary.GetScoreFactor()),
 		complianceScore: getComplianceScoreColumn(controlSummary, infoToPrintInfo),
-	}
-	if len(controlSummary.GetName()) > controlNameMaxLength {
-		tableRow.name = controlSummary.GetName()[:controlNameMaxLength] + "..."
 	}
 
 	return tableRow
@@ -83,6 +81,10 @@ func getSortedControlsIDs(controls reportsummary.ControlSummaries) [][]string {
 	for k := range controls {
 		c := controls[k]
 		i := apis.ControlSeverityToInt(c.GetScoreFactor())
+		if i < 0 || i >= len(controlIDs) {
+			i = 0
+		}
+		//nolint:gosec // range is bounded above
 		controlIDs[i] = append(controlIDs[i], c.GetID())
 	}
 	for i := range controlIDs {

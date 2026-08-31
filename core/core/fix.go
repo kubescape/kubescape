@@ -9,8 +9,8 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/fixhandler"
 	"github.com/mattn/go-isatty"
 )
 
@@ -50,6 +50,9 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 
 	if len(resourcesToFix) == 0 && len(helmSuggestions) == 0 {
 		logger.L().Info(noResourcesToFix)
+		// Without this a report whose resources were all skipped reads as a
+		// clean bill of health rather than a set of findings nothing handled.
+		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
 		return nil
 	}
 

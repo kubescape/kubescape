@@ -8,25 +8,26 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/cmd/completion"
-	"github.com/kubescape/kubescape/v3/cmd/config"
-	"github.com/kubescape/kubescape/v3/cmd/decrypt"
-	"github.com/kubescape/kubescape/v3/cmd/diff"
-	"github.com/kubescape/kubescape/v3/cmd/download"
-	"github.com/kubescape/kubescape/v3/cmd/fix"
-	"github.com/kubescape/kubescape/v3/cmd/list"
-	"github.com/kubescape/kubescape/v3/cmd/mcpserver"
-	"github.com/kubescape/kubescape/v3/cmd/operator"
-	"github.com/kubescape/kubescape/v3/cmd/patch"
-	"github.com/kubescape/kubescape/v3/cmd/prerequisites"
-	"github.com/kubescape/kubescape/v3/cmd/scan"
-	"github.com/kubescape/kubescape/v3/cmd/update"
-	"github.com/kubescape/kubescape/v3/cmd/vap"
-	"github.com/kubescape/kubescape/v3/cmd/version"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-	"github.com/kubescape/kubescape/v3/core/core"
-	"github.com/kubescape/kubescape/v3/core/meta"
+	"github.com/kubescape/kubescape/v4/cmd/completion"
+	"github.com/kubescape/kubescape/v4/cmd/config"
+	"github.com/kubescape/kubescape/v4/cmd/decrypt"
+	"github.com/kubescape/kubescape/v4/cmd/diff"
+	"github.com/kubescape/kubescape/v4/cmd/download"
+	"github.com/kubescape/kubescape/v4/cmd/fix"
+	"github.com/kubescape/kubescape/v4/cmd/list"
+	"github.com/kubescape/kubescape/v4/cmd/mcpserver"
+	"github.com/kubescape/kubescape/v4/cmd/operator"
+	"github.com/kubescape/kubescape/v4/cmd/patch"
+	"github.com/kubescape/kubescape/v4/cmd/policy"
+	"github.com/kubescape/kubescape/v4/cmd/prerequisites"
+	"github.com/kubescape/kubescape/v4/cmd/scan"
+	"github.com/kubescape/kubescape/v4/cmd/update"
+	"github.com/kubescape/kubescape/v4/cmd/vap"
+	"github.com/kubescape/kubescape/v4/cmd/version"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/core"
+	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/spf13/cobra"
 )
 
@@ -100,7 +101,7 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 	_ = rootCmd.PersistentFlags().MarkHidden("env")
 
 	rootCmd.PersistentFlags().StringVar(&rootInfo.LoggerName, "logger-name", "", fmt.Sprintf("Logger name. Supported: %s [$KS_LOGGER_NAME]", strings.Join(logger.ListLoggersNames(), "/")))
-	rootCmd.PersistentFlags().MarkHidden("logger-name")
+	_ = rootCmd.PersistentFlags().MarkHidden("logger-name") // #nosec G104 -- flag is defined on this command; MarkHidden only errors for an unknown flag
 
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.Logger, "logger", "l", helpers.InfoLevel.String(), fmt.Sprintf("Logger level. Supported: %s [$KS_LOGGER]", strings.Join(helpers.SupportedLevels(), "/")))
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
@@ -119,6 +120,7 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 	rootCmd.AddCommand(diff.GetDiffCmd(ks))
 	rootCmd.AddCommand(patch.GetPatchCmd(ks))
 	rootCmd.AddCommand(vap.GetVapHelperCmd())
+	rootCmd.AddCommand(policy.GetPolicyCmd())
 	rootCmd.AddCommand(operator.GetOperatorCmd(ks))
 	rootCmd.AddCommand(prerequisites.GetPreReqCmd(ks))
 	rootCmd.AddCommand(mcpserver.GetMCPServerCmd())

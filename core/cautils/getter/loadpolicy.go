@@ -2,12 +2,14 @@ package getter
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
@@ -47,7 +49,10 @@ func getCacheDir() string {
 
 // LoadPolicy loads policies from a local repository.
 type LoadPolicy struct {
-	filePaths []string
+	filePaths       []string
+	consumedInputMu sync.Mutex
+	consumedPath    string
+	consumedDigest  string
 }
 
 // NewLoadPolicy builds a LoadPolicy.
@@ -57,6 +62,12 @@ func NewLoadPolicy(filePaths []string) *LoadPolicy {
 	}
 }
 
+// ShouldPersistPolicyArtifacts prevents explicit local inputs from being
+// republished into Kubescape's shared disk fallback.
+func (lp *LoadPolicy) ShouldPersistPolicyArtifacts() bool {
+	return false
+}
+
 // GetControl returns a control from the policy file.
 func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, error) {
 	if controlID == "" {
@@ -64,7 +75,7 @@ func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, err
 	}
 
 	for _, filePath := range lp.filePaths {
-		buf, err := os.ReadFile(filePath)
+		buf, err := os.ReadFile(filepath.Clean(filePath))
 		if err != nil {
 			continue
 		}
@@ -100,7 +111,7 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framew
 	}
 
 	for _, filePath := range lp.filePaths {
-		buf, err := os.ReadFile(filePath)
+		buf, err := os.ReadFile(filepath.Clean(filePath))
 		if err != nil {
 			logger.L().Debug("skipping unreadable policy file", helpers.String("path", filePath), helpers.Error(err))
 			continue
@@ -126,7 +137,7 @@ func (lp *LoadPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
 	seenFws := make(map[string]struct{})
 
 	for _, f := range lp.filePaths {
-		buf, err := os.ReadFile(f)
+		buf, err := os.ReadFile(filepath.Clean(f))
 		if err != nil {
 			logger.L().Debug("skipping unreadable policy file", helpers.String("path", f), helpers.Error(err))
 			continue
@@ -156,7 +167,7 @@ func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
 	frameworkNames := make([]string, 0, 10)
 
 	for _, f := range lp.filePaths {
-		buf, err := os.ReadFile(f)
+		buf, err := os.ReadFile(filepath.Clean(f))
 		if err != nil {
 			logger.L().Debug("skipping unreadable policy file", helpers.String("path", f), helpers.Error(err))
 			continue
@@ -189,7 +200,7 @@ func (lp *LoadPolicy) ListControls() ([]string, error) {
 	var orderedIDs []string
 
 	for _, filePath := range lp.filePaths {
-		buf, err := os.ReadFile(filePath)
+		buf, err := os.ReadFile(filepath.Clean(filePath))
 		if err != nil {
 			continue
 		}
@@ -257,13 +268,16 @@ func (lp *LoadPolicy) GetExceptions(_ context.Context, _ /* clusterName */ strin
 	// NOTE: this assumes that the first path contains a valid exceptions descriptor
 	filePath := lp.filePath()
 
-	buf, err := os.ReadFile(filePath)
+	buf, err := os.ReadFile(filepath.Clean(filePath))
 	if err != nil {
 		return nil, err
 	}
 
 	exception := make([]armotypes.PostureExceptionPolicy, 0, 300)
 	err = json.Unmarshal(buf, &exception)
+	if err == nil {
+		lp.recordConsumedFile(filePath, buf)
+	}
 
 	return exception, err
 }
@@ -276,7 +290,7 @@ func (lp *LoadPolicy) GetControlsInputs(_ context.Context, _ /* clusterName */ s
 	filePath := lp.filePath()
 	fileName := filepath.Base(filePath)
 
-	buf, err := os.ReadFile(filePath)
+	buf, err := os.ReadFile(filepath.Clean(filePath))
 	if err != nil {
 		formattedError := fmt.Errorf(
 			`error opening %s file, "controls-config" will be downloaded from ARMO management portal`,
@@ -295,15 +309,38 @@ func (lp *LoadPolicy) GetControlsInputs(_ context.Context, _ /* clusterName */ s
 
 		return nil, formattedError
 	}
+	if len(controlInputs) > 0 {
+		lp.recordConsumedFile(filePath, buf)
+	}
 
 	return controlInputs, nil
+}
+
+// ConsumedFileDigest returns the digest of the exact local input bytes that
+// this getter successfully used. The path is kept internal until a caller
+// applies its own safe-reporting policy.
+func (lp *LoadPolicy) ConsumedFileDigest() (path, digest string, ok bool) {
+	lp.consumedInputMu.Lock()
+	defer lp.consumedInputMu.Unlock()
+	if lp.consumedDigest == "" {
+		return "", "", false
+	}
+	return lp.consumedPath, lp.consumedDigest, true
+}
+
+func (lp *LoadPolicy) recordConsumedFile(path string, contents []byte) {
+	digest := sha256.Sum256(contents)
+	lp.consumedInputMu.Lock()
+	defer lp.consumedInputMu.Unlock()
+	lp.consumedPath = path
+	lp.consumedDigest = fmt.Sprintf("sha256:%x", digest)
 }
 
 // GetAttackTracks yields the attack tracks from a config file.
 func (lp *LoadPolicy) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
 	attackTracks := make([]v1alpha1.AttackTrack, 0, 20)
 
-	buf, err := os.ReadFile(lp.filePath())
+	buf, err := os.ReadFile(filepath.Clean(lp.filePath()))
 	if err != nil {
 		return nil, err
 	}

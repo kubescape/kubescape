@@ -61,10 +61,10 @@ func TestParamKindForPolicy(t *testing.T) {
 }
 
 // TestCatalogBypassesRequireSupported proves the metadata helpers answer for a
-// matchConditions-gated policy loadVAP refuses: deploying/binding such a policy
-// is valid (live admission evaluates the gate), so metadata questions about it
-// must not be blocked. Exercised via parseVAPBundle + lookup on an in-memory
-// bundle, since the vendored bundle ships no gated policies today.
+// policy loadVAP refuses: deploying/binding a namespaceSelector-narrowed policy
+// is valid (live admission has the namespace labels the scan lacks), so metadata
+// questions about it must not be blocked. Exercised via parseVAPBundle + lookup
+// on an in-memory bundle, since the vendored bundle ships no such policy today.
 func TestCatalogBypassesRequireSupported(t *testing.T) {
 	bundle := `apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -73,9 +73,15 @@ metadata:
   labels:
     controlId: C-1001
 spec:
-  matchConditions:
-  - name: only-kube-system
-    expression: "object.metadata.namespace == 'kube-system'"
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        env: prod
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: ["v1"]
+      operations: ["CREATE"]
+      resources: ["pods"]
   validations:
   - expression: "false"
 `
@@ -84,10 +90,49 @@ spec:
 
 	vap := catalog.byControl["C-1001"]
 	require.NotNil(t, vap)
-	require.Error(t, vap.requireSupported(), "the offline eval path refuses the gated policy")
+	require.Error(t, vap.requireSupported(), "the offline eval path refuses the narrowed policy")
 
 	// The name index still carries it, so name-keyed metadata stays answerable.
 	named := catalog.byName["kubescape-c-1001-gated"]
 	require.NotNil(t, named)
 	assert.Equal(t, "C-1001", named.ControlID)
+}
+
+// TestMatchConstraintsForControl checks the constraints come off the embedded
+// policy, since cmd/vap refuses a --resource-rule that falls outside them.
+func TestMatchConstraintsForControl(t *testing.T) {
+	constraints, err := MatchConstraintsForControl("C-0016")
+	require.NoError(t, err)
+	require.NotNil(t, constraints)
+
+	var resources []string
+	for _, rule := range constraints.ResourceRules {
+		resources = append(resources, rule.Resources...)
+	}
+	assert.Contains(t, resources, "pods")
+	assert.NotContains(t, resources, "sandboxes")
+
+	_, err = MatchConstraintsForControl("C-9999")
+	require.Error(t, err)
+}
+
+// TestMatchConstraintsForPolicyCopiesBundle proves callers get their own copy,
+// so mutating the answer cannot poison the catalog every later lookup reads.
+func TestMatchConstraintsForPolicyCopiesBundle(t *testing.T) {
+	constraints, found, err := MatchConstraintsForPolicy("kubescape-c-0016-allow-privilege-escalation")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotEmpty(t, constraints.ResourceRules)
+
+	constraints.ResourceRules[0].Resources = []string{"sandboxes"}
+
+	fresh, _, err := MatchConstraintsForPolicy("kubescape-c-0016-allow-privilege-escalation")
+	require.NoError(t, err)
+	assert.NotEqual(t, []string{"sandboxes"}, fresh.ResourceRules[0].Resources)
+
+	// A name outside the bundle reports found=false rather than erroring, so a
+	// user-supplied policy name is left unchecked instead of blocked.
+	_, found, err = MatchConstraintsForPolicy("some-custom-policy")
+	require.NoError(t, err)
+	assert.False(t, found)
 }

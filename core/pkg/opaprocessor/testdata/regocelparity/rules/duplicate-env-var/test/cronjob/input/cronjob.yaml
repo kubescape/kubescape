@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: duplicate-env-cronjob
+spec:
+  schedule: "* * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: job
+            image: busybox
+            env:
+            - name: RETRY_COUNT
+              value: "1"
+            - name: RETRY_COUNT
+              value: "3"
+            - name: RETRY_COUNT
+              value: "5"

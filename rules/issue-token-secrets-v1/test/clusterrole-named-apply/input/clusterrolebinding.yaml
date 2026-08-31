@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: named-secret-applier-crb
+subjects:
+- kind: ServiceAccount
+  name: applier-sa
+  namespace: ci
+roleRef:
+  kind: ClusterRole
+  name: named-secret-applier
+  apiGroup: rbac.authorization.k8s.io

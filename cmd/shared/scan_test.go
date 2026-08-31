@@ -2,6 +2,10 @@ package shared
 
 import (
 	"testing"
+
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestValidateScanFormat(t *testing.T) {
@@ -64,6 +68,366 @@ func TestValidateSeverity(t *testing.T) {
 
 			if got != want {
 				t.Errorf("got: %v, want: %v", got, want)
+			}
+		})
+	}
+}
+
+func TestValidateCommonScanFlags(t *testing.T) {
+	tests := []struct {
+		name          string
+		severity      string
+		minSeverity   string
+		maxSeverity   string
+		format        string
+		formatChanged bool
+		submit        bool
+		local         bool
+		omitRaw       bool
+		expectedErr   string
+	}{
+		{
+			name:          "Valid setup",
+			severity:      "High",
+			minSeverity:   "Medium",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
+		{
+			name:          "Invalid severity",
+			severity:      "Extreme",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "unknown severity",
+		},
+		{
+			name:          "Invalid minimum severity",
+			severity:      "High",
+			minSeverity:   "Extreme",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "unknown severity",
+		},
+		{
+			name:          "Empty format flag explicitly passed",
+			severity:      "High",
+			format:        "",
+			formatChanged: true,
+			expectedErr:   "format cannot be empty, supported formats",
+		},
+		{
+			name:          "Invalid format",
+			severity:      "High",
+			format:        "fake-format",
+			formatChanged: true,
+			expectedErr:   "invalid format",
+		},
+		{
+			name:          "Submit with keep-local",
+			submit:        true,
+			local:         true,
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "you can use `keep-local` or `submit`, but not both",
+		},
+		{
+			name:          "Submit with omit-raw-resources",
+			submit:        true,
+			omitRaw:       true,
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "you can use `omit-raw-resources` or `submit`, but not both",
+		},
+		{
+			name:          "Valid max severity",
+			severity:      "High",
+			maxSeverity:   "Critical",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
+		{
+			name:          "Invalid max severity",
+			severity:      "High",
+			maxSeverity:   "Extreme",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "unknown severity",
+		},
+		{
+			name:          "Valid min and max severity range",
+			minSeverity:   "Medium",
+			maxSeverity:   "High",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
+		{
+			name:          "Invalid min and max severity range",
+			minSeverity:   "High",
+			maxSeverity:   "Medium",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "min severity cannot be greater than max severity",
+		},
+		{
+			name:          "Min equals max severity",
+			minSeverity:   "High",
+			maxSeverity:   "High",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
+		{
+			name:          "Padded min severity accepted",
+			minSeverity:   "  high  ",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
+		{
+			name:          "Padded max severity accepted",
+			maxSeverity:   "  critical  ",
+			format:        "json",
+			formatChanged: true,
+			expectedErr:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				FailThresholdSeverity: tt.severity,
+				MinSeverity:           tt.minSeverity,
+				MaxSeverity:           tt.maxSeverity,
+				Format:                tt.format,
+				Local:                 tt.local,
+				OmitRawResources:      tt.omitRaw,
+				Submit:                cautils.NewBoolPtr(&tt.submit),
+			}
+
+			cmd := &cobra.Command{}
+			cmd.Flags().String("format", "", "")
+			if tt.formatChanged {
+				cmd.Flags().Set("format", tt.format)
+			}
+
+			err := ValidateCommonScanFlags(cmd, scanInfo, ScanFormats)
+
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
+func TestValidateKindFilters(t *testing.T) {
+	tests := []struct {
+		name         string
+		includeKinds string
+		excludeKinds string
+		expectedErr  string
+	}{
+		{
+			name:         "both empty is valid",
+			includeKinds: "",
+			excludeKinds: "",
+			expectedErr:  "",
+		},
+		{
+			name:         "valid include-kinds",
+			includeKinds: "Deployment,DaemonSet",
+			excludeKinds: "",
+			expectedErr:  "",
+		},
+		{
+			name:         "valid exclude-kinds",
+			includeKinds: "",
+			excludeKinds: "Job,CronJob",
+			expectedErr:  "",
+		},
+		{
+			name:         "both set is valid",
+			includeKinds: "Deployment",
+			excludeKinds: "DaemonSet",
+			expectedErr:  "",
+		},
+		{
+			name:         "include-kinds whitespace-only tokens are rejected",
+			includeKinds: " , , ",
+			excludeKinds: "",
+			expectedErr:  "contains no valid kind names",
+		},
+		{
+			name:         "exclude-kinds whitespace-only tokens are rejected",
+			includeKinds: "",
+			excludeKinds: "  ,  ",
+			expectedErr:  "contains no valid kind names",
+		},
+		{
+			name:         "single valid kind in include",
+			includeKinds: "Pod",
+			excludeKinds: "",
+			expectedErr:  "",
+		},
+		{
+			name:         "padded valid kind passes",
+			includeKinds: "  Deployment  ",
+			excludeKinds: "",
+			expectedErr:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				IncludeKinds: tt.includeKinds,
+				ExcludeKinds: tt.excludeKinds,
+			}
+			err := ValidateKindFilters(scanInfo)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
+func TestValidateExcludePaths(t *testing.T) {
+	tests := []struct {
+		name         string
+		excludePaths []string
+		expectedErr  string
+	}{
+		{
+			name:         "no patterns is valid",
+			excludePaths: nil,
+			expectedErr:  "",
+		},
+		{
+			name:         "gitignore syntax is accepted",
+			excludePaths: []string{"test/**", "!test/prod.yaml", "/vendor/", "*.tmpl.yaml"},
+			expectedErr:  "",
+		},
+		{
+			name:         "a comment typed as an argument is rejected",
+			excludePaths: []string{"# a comment"},
+			expectedErr:  "carries no rule",
+		},
+		{
+			name:         "a blank argument is rejected",
+			excludePaths: []string{"  "},
+			expectedErr:  "carries no rule",
+		},
+		{
+			name:         "an anchored pattern is still accepted",
+			excludePaths: []string{"/vendor"},
+			expectedErr:  "",
+		},
+		{
+			name:         "unclosed character class is rejected",
+			excludePaths: []string{"pod[.yaml"},
+			expectedErr:  "invalid exclusion pattern",
+		},
+		{
+			name:         "pattern with nothing to match is rejected",
+			excludePaths: []string{"!"},
+			expectedErr:  "exclusion pattern is empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateExcludePaths(&cautils.ScanInfo{ExcludePaths: tt.excludePaths})
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
+// Commas are significant inside a glob alternation, so --exclude-path must not split
+// on them the way a comma-separated flag would.
+func TestValidateExcludePathsAcceptsBraceAlternation(t *testing.T) {
+	err := ValidateExcludePaths(&cautils.ScanInfo{ExcludePaths: []string{"*.{yaml,json}"}})
+	assert.NoError(t, err)
+}
+
+func TestValidateExcludeControls(t *testing.T) {
+	tests := []struct {
+		name            string
+		excludeControls []string
+		expectedErr     string
+	}{
+		{
+			name:            "no controls is valid",
+			excludeControls: nil,
+			expectedErr:     "",
+		},
+		{
+			name:            "control ids are valid",
+			excludeControls: []string{"C-0016", "C-0017"},
+			expectedErr:     "",
+		},
+		{
+			name:            "a control name is valid",
+			excludeControls: []string{"Immutable container filesystem"},
+			expectedErr:     "",
+		},
+		{
+			name:            "an empty identifier is rejected",
+			excludeControls: []string{"C-0016", "  "},
+			expectedErr:     "empty control identifier",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateExcludeControls(&cautils.ScanInfo{ExcludeControls: tt.excludeControls})
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			}
+		})
+	}
+}
+
+func TestValidateLabelSelector(t *testing.T) {
+	tests := []struct {
+		name          string
+		labelSelector string
+		expectedErr   string
+	}{
+		{name: "empty selector is accepted", labelSelector: "", expectedErr: ""},
+		{name: "simple key=value is accepted", labelSelector: "app=nginx", expectedErr: ""},
+		{name: "multiple selectors are accepted", labelSelector: "app=nginx,env!=dev", expectedErr: ""},
+		{name: "set-based selector is accepted", labelSelector: "env in (prod,staging)", expectedErr: ""},
+		{name: "invalid selector is rejected", labelSelector: "invalid!!selector", expectedErr: "invalid --label-selector"},
+		{name: "invalid operator is rejected", labelSelector: "app==nginx==bad", expectedErr: "invalid --label-selector"},
+		{name: "whitespace-only selector is rejected", labelSelector: "   ", expectedErr: "invalid --label-selector"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := &cobra.Command{}
+			cmd.Flags().String("format", "", "")
+			scanInfo := &cautils.ScanInfo{LabelSelector: tt.labelSelector, Format: "pretty-printer"}
+			err := ValidateCommonScanFlags(cmd, scanInfo, ScanFormats)
+			if tt.expectedErr == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
 			}
 		})
 	}

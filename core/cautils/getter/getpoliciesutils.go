@@ -27,8 +27,8 @@ func PolicyCacheFilename(identifier string) (string, error) {
 	if norm == "" {
 		return "", fmt.Errorf("policy identifier is empty")
 	}
-	if norm == "." || norm == ".." || strings.ContainsAny(norm, `/\`) {
-		return "", fmt.Errorf("policy identifier contains path separators")
+	if norm == "." || norm == ".." || strings.ContainsAny(norm, `/\|`) {
+		return "", fmt.Errorf("policy identifier contains path separators or invalid characters")
 	}
 	return norm + ".json", nil
 }
@@ -53,7 +53,7 @@ func SaveInFile(object any, targetFile string) error {
 	}
 
 	targetDir := filepath.Dir(targetFile)
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+	if err := os.MkdirAll(targetDir, 0o750); err != nil {
 		return fmt.Errorf("create target directory: %w", err)
 	}
 

@@ -6,7 +6,7 @@ import (
 
 func DecryptMetadataFromEnv(
 	metadata *reporthandlingv2.Metadata,
-) ([]byte, error) {
+) (*ReportKey, error) {
 
 	masterKey, err := GetMasterKeyFromEnv("decryption")
 	if err != nil {
@@ -19,7 +19,7 @@ func DecryptMetadataFromEnv(
 		}
 	}()
 
-	dek, err := DEKFromMetadata(
+	key, err := DEKFromMetadata(
 		metadata,
 		masterKey,
 	)
@@ -27,15 +27,10 @@ func DecryptMetadataFromEnv(
 		return nil, err
 	}
 
-	if err := DecryptRepoContextMetadata(
-		metadata,
-		masterKey,
-	); err != nil {
-		for i := range dek {
-			dek[i] = 0
-		}
+	if err := decryptRepoContextMetadata(metadata, key); err != nil {
+		key.Zero()
 		return nil, err
 	}
 
-	return dek, nil
+	return key, nil
 }

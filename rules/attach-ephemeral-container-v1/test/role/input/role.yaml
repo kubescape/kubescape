@@ -1,0 +1,9 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: default
+  name: pod-debugger
+rules:
+- apiGroups: ["", "*"]
+  resources: ["pods/ephemeralcontainers", "*"]
+  verbs: ["update", "patch", "*"]

@@ -9,15 +9,19 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	printerv1 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v1"
-	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
-	"github.com/kubescape/kubescape/v3/core/pkg/vapreconcile"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/notification"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	printerv1 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v1"
+	printerv2 "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v4/core/pkg/telemetry"
+	"github.com/kubescape/kubescape/v4/core/pkg/vapreconcile"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"go.opentelemetry.io/otel"
 )
 
 type ResultsHandler struct {
@@ -26,6 +30,7 @@ type ResultsHandler struct {
 	ScanData      *cautils.OPASessionObj
 	PrinterObjs   []printer.IPrinter
 	ImageScanData []cautils.ImageScanData
+	scanError     error
 }
 
 func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrinter, uiPrinter printer.IPrinter) *ResultsHandler {
@@ -57,6 +62,13 @@ func (rh *ResultsHandler) GetData() *cautils.OPASessionObj {
 // SetData sets the scan/action related data
 func (rh *ResultsHandler) SetData(data *cautils.OPASessionObj) {
 	rh.ScanData = data
+}
+
+// SetScanError records a scan error that must be returned after any partial
+// results have been printed. This lets callers preserve useful scan output
+// without reporting a successful exit status for incomplete results.
+func (rh *ResultsHandler) SetScanError(err error) {
+	rh.scanError = err
 }
 
 // GetPrinters returns all printers
@@ -106,6 +118,7 @@ func (rh *ResultsHandler) ToJson() ([]byte, error) {
 		Results        []resultWithEnrichment       `json:"results,omitempty"`
 		ResourceLabels map[string]map[string]string `json:"resourceLabels,omitempty"`
 		ScanCoverage   *cautils.ScanCoverage        `json:"scanCoverage,omitempty"`
+		ExceptionAudit *cautils.ExceptionAudit      `json:"exceptionAudit,omitempty"`
 	}{
 		PostureReport: finalizedReport,
 		SummaryDetails: summaryWithEnrichment{
@@ -115,6 +128,7 @@ func (rh *ResultsHandler) ToJson() ([]byte, error) {
 		Results:        results,
 		ResourceLabels: enrichedReport.ResourceLabels,
 		ScanCoverage:   enrichedReport.ScanCoverage,
+		ExceptionAudit: rh.ScanData.ExceptionAudit,
 	}
 
 	return json.Marshal(&output)
@@ -125,15 +139,165 @@ func (rh *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
 	return printerv2.FinalizeResults(rh.ScanData)
 }
 
+// reportSnapshot holds the parts of ScanData that ApplySeverityFilters mutates
+// in place, so HandleResults can restore them after printers and submission
+// have run.
+type reportSnapshot struct {
+	controls map[string]reportsummary.ControlSummary
+	// Per-resource copies of AssociatedControls, keyed like ScanData.ResourcesResult.
+	associatedControls map[string][]resourcesresults.ResourceAssociatedControl
+	// Derived summary fields recomputed over the filtered control set. They are
+	// restored so the caller (cmd/scan) evaluates exit thresholds against the
+	// true unfiltered score while printers and submission saw the filtered one.
+	complianceScore            float32
+	frameworksComplianceScores []float32
+	frameworksControls         []reportsummary.ControlSummaries
+	controlsSeverityCounters   reportsummary.SeverityCounters
+	resourcesSeverityCounters  reportsummary.SeverityCounters
+	statusCounters             reportsummary.StatusCounters
+	status                     apis.ScanningStatus
+	frameworksStatusCounters   []reportsummary.StatusCounters
+	frameworksStatuses         []apis.ScanningStatus
+}
+
+func snapshotReport(sessionObj *cautils.OPASessionObj) reportSnapshot {
+	if sessionObj == nil || sessionObj.Report == nil {
+		return reportSnapshot{}
+	}
+
+	src := sessionObj.Report.SummaryDetails.Controls
+	controls := make(map[string]reportsummary.ControlSummary, len(src))
+	for k, v := range src {
+		controls[k] = v
+	}
+
+	ac := make(map[string][]resourcesresults.ResourceAssociatedControl, len(sessionObj.ResourcesResult))
+	for id, r := range sessionObj.ResourcesResult {
+		copy_ := make([]resourcesresults.ResourceAssociatedControl, len(r.AssociatedControls))
+		copy(copy_, r.AssociatedControls)
+		ac[id] = copy_
+	}
+
+	fwScores := make([]float32, len(sessionObj.Report.SummaryDetails.Frameworks))
+	fwControls := make([]reportsummary.ControlSummaries, len(sessionObj.Report.SummaryDetails.Frameworks))
+	fwStatusCounters := make([]reportsummary.StatusCounters, len(sessionObj.Report.SummaryDetails.Frameworks))
+	fwStatuses := make([]apis.ScanningStatus, len(sessionObj.Report.SummaryDetails.Frameworks))
+	for i := range sessionObj.Report.SummaryDetails.Frameworks {
+		fwScores[i] = sessionObj.Report.SummaryDetails.Frameworks[i].ComplianceScore
+		fwControls[i] = sessionObj.Report.SummaryDetails.Frameworks[i].Controls
+		fwStatusCounters[i] = sessionObj.Report.SummaryDetails.Frameworks[i].StatusCounters
+		fwStatuses[i] = sessionObj.Report.SummaryDetails.Frameworks[i].Status
+	}
+
+	return reportSnapshot{
+		controls:                   controls,
+		associatedControls:         ac,
+		complianceScore:            sessionObj.Report.SummaryDetails.ComplianceScore,
+		frameworksComplianceScores: fwScores,
+		frameworksControls:         fwControls,
+		controlsSeverityCounters:   sessionObj.Report.SummaryDetails.ControlsSeverityCounters,
+		resourcesSeverityCounters:  sessionObj.Report.SummaryDetails.ResourcesSeverityCounters,
+		statusCounters:             sessionObj.Report.SummaryDetails.StatusCounters,
+		status:                     sessionObj.Report.SummaryDetails.Status,
+		frameworksStatusCounters:   fwStatusCounters,
+		frameworksStatuses:         fwStatuses,
+	}
+}
+
+func restoreReport(sessionObj *cautils.OPASessionObj, snap reportSnapshot) {
+	if sessionObj == nil || sessionObj.Report == nil {
+		return
+	}
+	sessionObj.Report.SummaryDetails.Controls = snap.controls
+	sessionObj.Report.SummaryDetails.ComplianceScore = snap.complianceScore
+	sessionObj.Report.SummaryDetails.ControlsSeverityCounters = snap.controlsSeverityCounters
+	sessionObj.Report.SummaryDetails.ResourcesSeverityCounters = snap.resourcesSeverityCounters
+	sessionObj.Report.SummaryDetails.StatusCounters = snap.statusCounters
+	sessionObj.Report.SummaryDetails.Status = snap.status
+	for i := range sessionObj.Report.SummaryDetails.Frameworks {
+		if i < len(snap.frameworksComplianceScores) {
+			sessionObj.Report.SummaryDetails.Frameworks[i].ComplianceScore = snap.frameworksComplianceScores[i]
+		}
+		if i < len(snap.frameworksControls) {
+			sessionObj.Report.SummaryDetails.Frameworks[i].Controls = snap.frameworksControls[i]
+		}
+		if i < len(snap.frameworksStatusCounters) {
+			sessionObj.Report.SummaryDetails.Frameworks[i].StatusCounters = snap.frameworksStatusCounters[i]
+			sessionObj.Report.SummaryDetails.Frameworks[i].Status = snap.frameworksStatuses[i]
+		}
+	}
+	for id, ac := range snap.associatedControls {
+		if result, ok := sessionObj.ResourcesResult[id]; ok {
+			result.AssociatedControls = ac
+			sessionObj.ResourcesResult[id] = result
+		}
+	}
+}
+
 // HandleResults handles all necessary actions for the scan results
-func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.ScanInfo) error {
+func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.ScanInfo) (err error) {
+	// The reporting span lives here rather than at the call sites so every
+	// entry point that produces output — scan, scan control/framework/workload,
+	// scan image and the patch flow — contributes the same phase to the trace.
+	ctx, span := otel.Tracer(telemetry.TracerName).Start(ctx, "reporting")
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+		}
+		span.End()
+	}()
+
+	// Registered before the severity-filter snapshot below so it runs after
+	// restoreReport: exported metrics describe the full scan, matching how
+	// --compliance-threshold and --severity-threshold are evaluated, and stay
+	// stable when a user narrows output with --min-severity.
+	//
+	// Building the outcome walks every resource, control and CVE match, so it
+	// stays behind the Active check: with no collector configured this must
+	// cost nothing.
+	defer func() {
+		if !telemetry.Active() {
+			return
+		}
+		telemetry.RecordScan(ctx, buildScanOutcome(rh.ScanData, rh.ImageScanData, scanInfo))
+	}()
+
 	if rh.ScanData != nil && len(rh.ScanData.VAPPolicies) > 0 {
 		index := vapreconcile.BuildIndex(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings)
 		vapreconcile.EnrichSummary(rh.ScanData.Report.SummaryDetails.Controls, index)
+
+		// Refine that coarse per-control Bound signal with per-resource
+		// binding-scope matching, before ApplySeverityFilters below narrows
+		// which resources/controls are considered.
+		failing := vapreconcile.CollectFailingResourcesByControl(rh.ScanData.ResourcesResult, rh.ScanData.AllResources)
+		namespaceLabels := vapreconcile.CollectNamespaceLabels(rh.ScanData.AllResources)
+		rh.ScanData.VAPCoverage = vapreconcile.BuildCoverage(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings, failing, namespaceLabels)
 	}
 
-	// Display scan results in the UI first to give immediate value.
+	// Snapshot Report.SummaryDetails.Controls, every
+	// ResourcesResult[id].AssociatedControls, and the derived summary fields
+	// (compliance score, framework compliance scores, severity counters) before
+	// applying severity filters. ApplySeverityFilters mutates all of these in
+	// place; printers and submission see the recomputed set, but the caller
+	// (cmd/scan) evaluates exit thresholds and coverage counts after
+	// HandleResults returns and must see the full unfiltered report.
+	// Other consumers of rh.ScanData (httphandler /v1/results,
+	// StorePostureReportResults) also read the report after this call and
+	// must not receive an internally inconsistent PostureReport.
+	snap := snapshotReport(rh.ScanData)
+	defer restoreReport(rh.ScanData, snap)
+	if scanInfo.MinSeverity != "" || scanInfo.MaxSeverity != "" {
+		// Severity filtering is output-only (see snapshotReport/restoreReport):
+		// printers see the filtered report, but --compliance-threshold,
+		// --severity-threshold, --fail-coverage-below and --fail-on-degraded-config
+		// are evaluated after restoreReport on the full report. Warn once so a
+		// user combining e.g. --min-severity high with html+junit does not
+		// assume the filter also narrows what fails the build.
+		logger.L().Warning("Severity filtering (--min-severity/--max-severity) is output-only and does not affect exit-code thresholds")
+	}
+	ApplySeverityFilters(rh.ScanData, scanInfo.MinSeverity, scanInfo.MaxSeverity)
 
+	// Display scan results in the UI first to give immediate value.
 	var printErr error
 
 	if err := rh.UiPrinter.ActionPrint(ctx, rh.ScanData, rh.ImageScanData); err != nil {
@@ -141,7 +305,9 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 	}
 
 	rh.UiPrinter.PrintNextSteps()
-	closePrinter(rh.UiPrinter)
+	if err := ClosePrinter(rh.UiPrinter); err != nil {
+		printErr = errors.Join(printErr, fmt.Errorf("ui printer close: %w", err))
+	}
 
 	// Then print to output files
 	for _, p := range rh.PrinterObjs {
@@ -151,11 +317,33 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 		if rh.ScanData != nil {
 			p.Score(rh.GetComplianceScore())
 		}
-		closePrinter(p)
+		if err := ClosePrinter(p); err != nil {
+			printErr = errors.Join(printErr, fmt.Errorf("output printer %T close: %w", p, err))
+		}
 	}
 
-	if printErr != nil {
-		return printErr
+	// Deliver the same summary seen by output printers. Delivery is deliberately
+	// best-effort: a notification endpoint must never alter scan results or exit
+	// status.
+	if len(scanInfo.NotifyURLs) > 0 && rh.ScanData != nil && rh.ScanData.Report != nil {
+		client := notification.NewClient(notification.DefaultTimeout)
+		for _, endpoint := range scanInfo.NotifyURLs {
+			payload, err := notification.MarshalPayload(endpoint, &rh.ScanData.Report.SummaryDetails)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("Failed to marshal scan summary for notification", helpers.String("target", notification.SafeTarget(endpoint)), helpers.Error(err))
+				continue
+			}
+			requestCtx, cancel := context.WithTimeout(ctx, notification.DefaultTimeout)
+			sendErr := notification.Send(requestCtx, client, endpoint, payload)
+			cancel()
+			if sendErr != nil {
+				logger.L().Ctx(ctx).Warning("Failed to deliver scan notification", helpers.String("target", notification.SafeTarget(endpoint)), helpers.Error(sendErr))
+			}
+		}
+	}
+
+	if err := errors.Join(printErr, rh.scanError); err != nil {
+		return err
 	}
 
 	// We should submit only after printing results, so a user can see
@@ -189,6 +377,8 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		return printerv2.NewYamlPrinter()
 	case printer.CsvFormat:
 		return printerv2.NewCsvPrinter()
+	case printer.MarkdownFormat:
+		return printerv2.NewMarkdownPrinter()
 	case printer.JunitResultFormat:
 		return printerv2.NewJunitPrinter(scanInfo.VerboseMode)
 	case printer.PrometheusFormat:
@@ -201,15 +391,21 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		return printerv2.NewSARIFPrinter()
 	case printer.GitLabSASTFormat:
 		return printerv2.NewGitLabSASTPrinter()
+	case printer.GitHubActionsFormat:
+		return printerv2.NewGitHubActionsPrinter()
 	case printer.CycloneDXFormat:
 		return printerv2.NewCycloneDXPrinter()
 	case printer.SPDXFormat:
 		return printerv2.NewSPDXPrinter()
+	case printer.PolicyReportFormat:
+		return printerv2.NewPolicyReportPrinter()
+	case printer.ExceptionsFormat:
+		return printerv2.NewExceptionsPrinter()
 	default:
 		if printFormat != printer.PrettyFormat {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
 		}
-		return printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName)
+		return printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName, scanInfo.ShowEvidence, scanInfo.ShowSecrets)
 	}
 }
 
@@ -223,8 +419,8 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 		}
 		return false, fmt.Errorf("format \"%s\" is not supported for image scanning", printFormat)
 	}
-	if printFormat == printer.SARIFFormat || printFormat == printer.GitLabSASTFormat {
-		// SARIF and GitLab SAST resolve file locations, so they only apply to local files
+	if printFormat == printer.SARIFFormat || printFormat == printer.GitLabSASTFormat || printFormat == printer.GitHubActionsFormat {
+		// SARIF, GitLab SAST and GitHub Actions resolve file locations, so they only apply to local files
 		switch scanContext {
 		case cautils.ContextDir, cautils.ContextFile, cautils.ContextGitLocal, cautils.ContextGitRemote:
 			return false, nil
@@ -237,20 +433,29 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 	}
 
 	switch printFormat {
-	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat:
+	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.YamlFormat, printer.CsvFormat, printer.MarkdownFormat, printer.PolicyReportFormat, printer.ExceptionsFormat:
 		return false, nil
 	default:
 		return true, nil
 	}
 }
 
-// closePrinter closes p's output writer if p implements the optional
-// printerCloser interface. This avoids widening the public IPrinter interface.
-func closePrinter(p printer.IPrinter) {
-	type printerCloser interface {
+// ClosePrinter closes p's output writer if p implements an optional close
+// contract, returning any error so callers can surface incomplete writes.
+// Printers migrated to return an error from CloseWriter are preferred; the
+// legacy void contract is still supported for backwards compatibility.
+func ClosePrinter(p printer.IPrinter) error {
+	type errorCloser interface {
+		CloseWriter() error
+	}
+	if c, ok := p.(errorCloser); ok {
+		return c.CloseWriter()
+	}
+	type voidCloser interface {
 		CloseWriter()
 	}
-	if c, ok := p.(printerCloser); ok {
+	if c, ok := p.(voidCloser); ok {
 		c.CloseWriter()
 	}
+	return nil
 }

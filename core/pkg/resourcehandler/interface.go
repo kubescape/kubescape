@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"k8s.io/apimachinery/pkg/version"
 )
 
@@ -23,4 +23,7 @@ type IResourceHandler interface {
 	EstimateClusterSize(ctx context.Context, scanInfo *cautils.ScanInfo) (int, error)
 	GetClusterAPIServerInfo(ctx context.Context) *version.Info
 	GetCloudProvider() string
+	// Preflight checks, without collecting any resources, whether the current
+	// credentials can list every resource type the given policies require.
+	Preflight(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*PreflightResult, error)
 }

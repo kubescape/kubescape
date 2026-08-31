@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,12 +14,14 @@ import (
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/locationresolver"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
 const (
@@ -84,6 +87,7 @@ type gitLabVulnerability struct {
 	Scanner     gitLabScannerRef   `json:"scanner"`
 	Location    gitLabLocation     `json:"location"`
 	Identifiers []gitLabIdentifier `json:"identifiers"`
+	Solution    string             `json:"solution,omitempty"`
 }
 
 type gitLabScannerRef struct {
@@ -127,16 +131,15 @@ func (gp *GitLabSASTPrinter) Score(score float32) {
 }
 
 // SetWriter opens outputFile for writing, defaulting the name and forcing a .json extension
-func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = gitLabSASTOutputFile
-		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != printer.JsonOutputExt {
-			outputFile = outputFile + printer.JsonOutputExt
-		}
+func (gp *GitLabSASTPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.GitLabSASTFormat, outputFile, gitLabSASTOutputFile)
+	if explicitOutput {
+		var err error
+		gp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
 	}
 	gp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 // PrintNextSteps is a no-op: machine-readable output carries no human-facing guidance
@@ -176,9 +179,9 @@ func (gp *GitLabSASTPrinter) printImageScan(imageScanData []cautils.ImageScanDat
 	}
 
 	for _, data := range imageScanData {
-		cves := extractCVEs(data.Matches, data.Image)
+		cves := extractCVEs(data.Matches, data.Image, nil)
 		for _, cve := range cves {
-			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabImageVulnerability(data.Image, cve))
+			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabImageVulnerability(data.Image, data.Platform, cve))
 		}
 	}
 
@@ -231,10 +234,13 @@ func mapGitLabSeverity(severity string) string {
 }
 
 // toGitLabImageVulnerability maps a CVE found in an image to a GitLab Dependency Scanning vulnerability
-func toGitLabImageVulnerability(image string, cve imageprinter.CVE) gitLabVulnerability {
+func toGitLabImageVulnerability(image, platform string, cve imageprinter.CVE) gitLabVulnerability {
 	message := fmt.Sprintf("%s in %s %s", cve.ID, cve.Package, cve.Version)
 
 	description := fmt.Sprintf("Package %s version %s is affected by %s (severity: %s).", cve.Package, cve.Version, cve.ID, cve.Severity)
+	if platform != "" {
+		description += fmt.Sprintf(" Scanned platform: %s.", platform)
+	}
 	if len(cve.FixVersions) > 0 {
 		description += fmt.Sprintf(" Fix available in version(s): %s.", strings.Join(cve.FixVersions, ", "))
 	} else {
@@ -332,7 +338,8 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 			}
 
 			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
-			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, resource.resourceID, resource.relPath, location))
+			res := opaSessionObj.AllResources[resource.resourceID]
+			report.Vulnerabilities = append(report.Vulnerabilities, toGitLabVulnerability(ctl, &ac, res, resource.resourceID, resource.relPath, location))
 		}
 	}
 
@@ -377,10 +384,19 @@ func (gp *GitLabSASTPrinter) printConfigurationScan(ctx context.Context, opaSess
 }
 
 // toGitLabVulnerability maps a failed control on a resource to a GitLab SAST vulnerability.
-func toGitLabVulnerability(ctl reportsummary.IControlSummary, resourceID, filePath string, location locationresolver.Location) gitLabVulnerability {
+// ac and resource are used to populate the Solution field with fix paths and current field values,
+// matching what the pretty-printer and HTML printer already emit.
+func toGitLabVulnerability(ctl reportsummary.IControlSummary, ac *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, resourceID, filePath string, location locationresolver.Location) gitLabVulnerability {
 	controlID := ctl.GetID()
 	// Kubescape severities (Critical/High/Medium/Low/Unknown) are all valid GitLab severities
 	severity := apis.ControlSeverityToString(ctl.GetScoreFactor())
+
+	var solution string
+	if resource != nil {
+		if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
+			solution = strings.Join(paths, "\n")
+		}
+	}
 
 	return gitLabVulnerability{
 		ID:       gitLabVulnerabilityID(controlID, resourceID, filePath),
@@ -403,15 +419,22 @@ func toGitLabVulnerability(ctl reportsummary.IControlSummary, resourceID, filePa
 				URL:   cautils.GetControlLink(controlID),
 			},
 		},
+		Solution: solution,
 	}
 }
 
-// isRepositoryRelative reports whether path is a repository-relative file path, i.e. not empty, absolute, or escaping the repository root via ".."
-func isRepositoryRelative(path string) bool {
-	if path == "" || filepath.IsAbs(path) {
+// isRepositoryRelative reports whether p is a repository-relative file path, i.e. not empty, absolute, or escaping the repository root via ".."
+func isRepositoryRelative(p string) bool {
+	// GitLab resolves these paths against a repository tree using POSIX
+	// semantics, so what counts as absolute must not depend on the host that
+	// produced the report. filepath.IsAbs alone is host-dependent: on Windows
+	// it reports false for "/etc/x", because it wants a drive letter or a UNC
+	// prefix, and such a path would then be emitted as if it were relative.
+	slashed := filepath.ToSlash(p)
+	if p == "" || filepath.IsAbs(p) || path.IsAbs(slashed) {
 		return false
 	}
-	cleaned := filepath.ToSlash(filepath.Clean(path))
+	cleaned := path.Clean(slashed)
 	return cleaned != ".." && !strings.HasPrefix(cleaned, "../")
 }
 
@@ -428,9 +451,10 @@ func kubescapeVersion() string {
 	return versioncheck.BuildNumber
 }
 
-// CloseWriter closes the output file, unless it is stdout, satisfying the optional printerCloser interface
-func (gp *GitLabSASTPrinter) CloseWriter() {
+// CloseWriter closes the GitLab SAST output writer, returning any error from flushing or closing.
+func (gp *GitLabSASTPrinter) CloseWriter() error {
 	if gp.writer != nil && gp.writer != os.Stdout {
-		gp.writer.Close()
+		return gp.writer.Close()
 	}
+	return nil
 }

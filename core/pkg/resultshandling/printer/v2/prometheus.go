@@ -4,14 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
@@ -37,17 +35,15 @@ func (pp *PrometheusPrinter) PrintNextSteps() {
 
 }
 
-func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if outputFile != "" {
-		outputFile = strings.TrimSpace(outputFile)
-		if outputFile == "" {
-			outputFile = prometheusOutputFile
-		}
-		if filepath.Ext(outputFile) != printer.PrometheusOutputExt {
-			outputFile = outputFile + printer.PrometheusOutputExt
-		}
+func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.PrometheusFormat, outputFile, prometheusOutputFile)
+	if explicitOutput {
+		var err error
+		pp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
 	}
 	pp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 func (pp *PrometheusPrinter) Score(score float32) {
@@ -103,8 +99,10 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 	return nil
 }
 
-func (p *PrometheusPrinter) CloseWriter() {
+// CloseWriter closes the Prometheus output writer, returning any error from flushing or closing.
+func (p *PrometheusPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
 // ScanCoverage holds runtime gaps discovered during a scan: GVRs that could
@@ -23,9 +24,15 @@ type ScanCoverage struct {
 	// exceptions) that could not be loaded from their configured source and
 	// were served from a fallback so the scan could proceed.
 	PolicyDegradations []PolicyDegradation `json:"policyDegradations,omitempty"`
+	// SkippedManifests records manifest files that were discovered but could
+	// not be loaded or parsed (invalid YAML/JSON, oversized, missing kind,
+	// unrendered Helm template, etc.). They are a coverage gap like
+	// PartialGVRPulls: the scan succeeded against incomplete input and the
+	// CI gate must be able to fail on it.
+	SkippedManifests []SkippedManifest `json:"skippedManifests,omitempty"`
 	// CoverageScore is an aggregate 0-100 measure of how complete the scan was:
-	// the ratio of evaluated controls, discounted for partial resource pulls
-	// and degraded policy inputs. It is computed once by ComputeCoverageScore.
+	// the ratio of evaluated controls, discounted for partial resource pulls,
+	// degraded policy inputs, and skipped manifests. It is computed once by ComputeCoverageScore.
 	CoverageScore float32 `json:"coverageScore"`
 	// EvaluatedControls is the number of controls that were actually evaluated.
 	EvaluatedControls int `json:"evaluatedControls"`
@@ -38,6 +45,27 @@ type ScanCoverage struct {
 	// so the failure is not already accounted for by NotEvaluatedControls. It is
 	// computed by BuildScanCoverage and applied as a penalty by ComputeCoverageScore.
 	SilentFailedGVRCount int `json:"silentFailedGVRCount,omitempty"`
+	// VacuousFrameworks lists frameworks whose reported score is 100% only
+	// because every control in them was Irrelevant (no resource of the
+	// required type was found in the cluster), not because anything was
+	// actually checked. Populated by DetectVacuousFrameworks.
+	VacuousFrameworks []string `json:"vacuousFrameworks,omitempty"`
+	// UnexaminedKinds lists resource kinds the API server serves that no
+	// control in the selected policy set queried, so a cluster's real coverage
+	// gap is visible even when every selected control evaluated cleanly.
+	UnexaminedKinds []UnexaminedKind `json:"unexaminedKinds,omitempty"`
+}
+
+// UnexaminedKind is a listable resource kind the cluster serves that no rule
+// in the scanned policy set matched, so it was never collected or evaluated.
+//
+// One entry per kind, not per served version: a rule naming any one version of
+// a kind reaches all of its objects, so a kind is listed only when no rule
+// named it at any version, and GroupVersionResource then carries the version
+// the API server ranks highest.
+type UnexaminedKind struct {
+	GroupVersionResource string `json:"groupVersionResource"`
+	Kind                 string `json:"kind"`
 }
 
 // Fixed penalties (in percentage points) applied to the coverage score for
@@ -46,6 +74,7 @@ const (
 	failedGVRPullPenalty     float32 = 3
 	partialGVRPullPenalty    float32 = 2
 	policyDegradationPenalty float32 = 5
+	skippedManifestPenalty   float32 = 5
 )
 
 // ComputeCoverageScore derives CoverageScore from the controls actually
@@ -61,14 +90,19 @@ func (c *ScanCoverage) ComputeCoverageScore(totalControls int) {
 		c.EvaluatedControls = 0
 	}
 
-	score := float32(100)
-	if totalControls > 0 {
+	var score float32
+	if totalControls == 0 {
+		// No controls in scope means nothing was evaluated — report 0%
+		// coverage rather than a misleading 100%.
+		score = 0
+	} else {
 		score = float32(c.EvaluatedControls) / float32(totalControls) * 100
 	}
 
 	score -= failedGVRPullPenalty * float32(c.SilentFailedGVRCount)
 	score -= partialGVRPullPenalty * float32(len(c.PartialGVRPulls))
 	score -= policyDegradationPenalty * float32(len(c.PolicyDegradations))
+	score -= skippedManifestPenalty * float32(len(c.SkippedManifests))
 
 	if score < 0 {
 		score = 0
@@ -78,8 +112,8 @@ func (c *ScanCoverage) ComputeCoverageScore(totalControls int) {
 	}
 
 	c.CoverageScore = score
-	c.Degraded = len(c.FailedGVRPulls) > 0 || len(c.PartialGVRPulls) > 0 ||
-		len(c.PolicyDegradations) > 0 || len(c.NotEvaluatedControls) > 0
+	c.Degraded = totalControls == 0 || len(c.FailedGVRPulls) > 0 || len(c.PartialGVRPulls) > 0 ||
+		len(c.PolicyDegradations) > 0 || len(c.NotEvaluatedControls) > 0 || len(c.SkippedManifests) > 0
 }
 
 // PolicyDegradation records a policy input that could not be loaded from its
@@ -147,7 +181,11 @@ type NotEvaluatedControl struct {
 // policyDegradations carries policy inputs (control configurations,
 // exceptions) that were served from a fallback; they are included as-is in
 // ScanCoverage.PolicyDegradations.
-func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap map[string][]string, timedOutControls map[string]string, partialPulls []PartialGVRPull, policyDegradations []PolicyDegradation) ScanCoverage {
+//
+// skippedManifests carries manifest files that were discovered but could not
+// be loaded or parsed; they are included as-is in ScanCoverage.SkippedManifests
+// and discounted from CoverageScore like PartialGVRPulls.
+func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap map[string][]string, timedOutControls map[string]string, partialPulls []PartialGVRPull, policyDegradations []PolicyDegradation, skippedManifests []SkippedManifest) ScanCoverage {
 	sortedPartialPulls := append([]PartialGVRPull(nil), partialPulls...)
 	sort.Slice(sortedPartialPulls, func(i, j int) bool {
 		if sortedPartialPulls[i].GVR != sortedPartialPulls[j].GVR {
@@ -158,9 +196,17 @@ func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap
 		}
 		return sortedPartialPulls[i].Error < sortedPartialPulls[j].Error
 	})
+	sortedSkips := append([]SkippedManifest(nil), skippedManifests...)
+	sort.Slice(sortedSkips, func(i, j int) bool {
+		if sortedSkips[i].Path != sortedSkips[j].Path {
+			return sortedSkips[i].Path < sortedSkips[j].Path
+		}
+		return sortedSkips[i].Reason < sortedSkips[j].Reason
+	})
 	coverage := ScanCoverage{
 		PartialGVRPulls:    sortedPartialPulls,
 		PolicyDegradations: policyDegradations,
+		SkippedManifests:   sortedSkips,
 	}
 
 	notEvaluated := make(map[string]NotEvaluatedControl, len(timedOutControls))
@@ -278,4 +324,33 @@ func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap
 	})
 
 	return coverage
+}
+
+// DetectVacuousFrameworks returns the names of frameworks whose controls are
+// all Irrelevant (GetSubStatus() == apis.SubStatusIrrelevant with no matched
+// resources), mirroring the check the scoring library uses to award such a
+// framework a 100% score. A framework in this state was never meaningfully
+// evaluated - no resource in the cluster matched any of its controls - so
+// its perfect score is vacuous rather than earned. Empty frameworks (no
+// controls at all) are not included.
+func DetectVacuousFrameworks(frameworks []reportsummary.FrameworkSummary) []string {
+	var vacuous []string
+	for i := range frameworks {
+		fw := frameworks[i]
+		if len(fw.Controls) == 0 {
+			continue
+		}
+		allIrrelevant := true
+		for id := range fw.Controls {
+			ctrl := fw.Controls[id]
+			if ctrl.GetSubStatus() != apis.SubStatusIrrelevant || ctrl.ListResourcesIDs(nil).Len() != 0 {
+				allIrrelevant = false
+				break
+			}
+		}
+		if allIrrelevant {
+			vacuous = append(vacuous, fw.Name)
+		}
+	}
+	return vacuous
 }

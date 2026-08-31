@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 )
 
@@ -18,5 +18,10 @@ func (ksServer *KubescapeMcpserver) RunFrameworkScan(ctx context.Context, namesp
 	policyIdentifiers := []cautils.PolicyIdentifier{
 		{Kind: apisv1.KindFramework, Identifier: frameworkName},
 	}
-	return runScan(ctx, ksServer, namespace, policyIdentifiers, "Framework", true, nil, nil, nil)
+	return runScan(ctx, ksServer, scanRequest{
+		namespace:           namespace,
+		policyIdentifiers:   policyIdentifiers,
+		label:               "Framework",
+		wantComplianceScore: true,
+	})
 }

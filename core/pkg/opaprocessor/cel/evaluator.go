@@ -2,12 +2,14 @@ package cel
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
 	"k8s.io/apiserver/pkg/cel/lazy"
 )
@@ -48,6 +50,42 @@ type ValidationResult struct {
 	// passing or unknown verdict has nothing to remediate. Empty is normal: an
 	// expression we cannot read a path out of reports none rather than guess.
 	Paths []PathHint
+}
+
+// expressionError wraps a validation error the CEL expression itself produced
+// while running — a runtime evaluation error or a non-bool result — as opposed
+// to an offline-only failure such as a compile error, an exhausted cost budget,
+// or a cancelled scan. Only the former is a verdict the apiserver can reach, so
+// only it is governed by the policy's failurePolicy.
+type expressionError struct{ err error }
+
+func (e *expressionError) Error() string { return e.err.Error() }
+func (e *expressionError) Unwrap() error { return e.err }
+
+// IsExpressionError reports whether a validation's error was produced by the
+// expression itself. Compile errors, budget exhaustion and cancellation return
+// false; the scanner leaves those as unknown/skipped verdicts rather than
+// letting failurePolicy turn them into a deny.
+func IsExpressionError(err error) bool {
+	var ee *expressionError
+	return errors.As(err, &ee)
+}
+
+// isContextError reports whether a validation's evaluation error came from a
+// cancelled or expired context rather than from the expression itself. The
+// apiserver never reaches a verdict on a request it did not finish evaluating,
+// so a context error must stay an unknown/skipped verdict, never an
+// expressionError that failurePolicy could turn into a deny.
+//
+// ContextEval reports an interrupt as an error wrapping context.Cause(ctx)
+// (context.Canceled or context.DeadlineExceeded), so errors.Is catches the
+// case where the interrupt fired mid-expression. ctx.Err() covers the same
+// cancellation once it has landed, including an error a lazy variable surfaced
+// whose original cause was flattened into a CEL error value on the way out.
+func isContextError(ctx context.Context, err error) bool {
+	return ctx.Err() != nil ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded)
 }
 
 // Evaluator runs a VAP's variables and validations against scanned objects. The
@@ -119,6 +157,9 @@ func NewEvaluator(opts ...Option) (*Evaluator, error) {
 //   - variables and validations come from the VAP. Once the loader is built it
 //     fills them from real YAML; for now tests fill them by hand. Same structs
 //     either way, so the signature does not change when the loader lands.
+//   - failurePolicy is the VAP's spec.failurePolicy. When a validation expression
+//     errors, Ignore turns the result into a pass and Fail turns it into a
+//     violation. If omitted, eval errors are reported as unknown (Err set).
 //
 // The activation is built once and reused. Variables are bound LAZILY, matching
 // the apiserver (pkg/admission/plugin/cel/composition.go): a variable is
@@ -153,9 +194,15 @@ func (e *Evaluator) EvaluateOnObject(
 	params any,
 	variables []Variable,
 	validations []Validation,
+	failurePolicy ...*admissionregistrationv1.FailurePolicyType,
 ) ([]ValidationResult, error) {
 	budget := newCostBudget(e.budgetLimit())
 	activation := e.activationFor(ctx, obj, namespaceObject, params, variables, budget)
+
+	var fp *admissionregistrationv1.FailurePolicyType
+	if len(failurePolicy) > 0 {
+		fp = failurePolicy[0]
+	}
 
 	results := make([]ValidationResult, 0, len(validations))
 	for _, val := range validations {
@@ -172,7 +219,7 @@ func (e *Evaluator) EvaluateOnObject(
 			results = append(results, ValidationResult{Expression: val.Expression, Err: budget.err()})
 			continue
 		}
-		res := e.evaluateValidation(ctx, val, activation, budget)
+		res := e.evaluateValidation(ctx, val, activation, budget, fp)
 		if res.Err == nil && !res.Passed {
 			res.Paths = e.violationPaths(ctx, val.Expression, obj, namespaceObject, params, variables)
 		}
@@ -276,6 +323,9 @@ func (e *Evaluator) lazyVariables(ctx context.Context, variables []Variable, act
 				return types.NewErr("variable %q: %v", v.Name, reportErr)
 			}
 			if evalErr != nil {
+				if isContextError(ctx, evalErr) {
+					return types.WrapErr(fmt.Errorf("variable %q: %w", v.Name, evalErr))
+				}
 				return types.NewErr("variable %q: %v", v.Name, evalErr)
 			}
 			return out
@@ -285,27 +335,49 @@ func (e *Evaluator) lazyVariables(ctx context.Context, variables []Variable, act
 }
 
 // evaluateValidation evaluates one validation against the prepared activation.
-// Only a compile/eval failure of the validation expression sets Err; everything
-// else resolves to a clean pass or a violation with a message.
-func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, activation map[string]any, budget *costBudget) ValidationResult {
+// A compile/eval failure or non-bool result is handled by applyFailurePolicy:
+// with no policy it is reported as an error, with Ignore it is a pass, and with
+// Fail it is a violation.
+func (e *Evaluator) evaluateValidation(ctx context.Context, val Validation, activation map[string]any, budget *costBudget, failurePolicy *admissionregistrationv1.FailurePolicyType) ValidationResult {
 	res := ValidationResult{Expression: val.Expression}
 
 	out, err := e.evalExpression(ctx, val.Expression, activation, budget)
 	if err != nil {
-		res.Err = err
-		return res
+		return e.applyFailurePolicy(res, err, failurePolicy)
 	}
 
 	passed, ok := out.Value().(bool)
 	if !ok {
-		res.Err = fmt.Errorf("validation expression must return bool, got %T", out.Value())
-		return res
+		return e.applyFailurePolicy(res, &expressionError{fmt.Errorf("validation expression must return bool, got %T", out.Value())}, failurePolicy)
 	}
 
 	res.Passed = passed
 	if !passed {
 		res.Message = e.resolveMessage(ctx, val, activation, budget)
 	}
+	return res
+}
+
+// applyFailurePolicy turns a validation eval/compile/type error into the
+// admission-time outcome dictated by spec.failurePolicy. Without a policy the
+// result is left as an unknown error (the parity-safe fallback). Ignore turns
+// the validation into a pass; Fail keeps the error so the scanner can report a
+// deny. Compile errors, budget exhaustion and cancellation are never expression
+// errors, so failurePolicy does not turn them into a deny.
+func (e *Evaluator) applyFailurePolicy(res ValidationResult, evalErr error, failurePolicy *admissionregistrationv1.FailurePolicyType) ValidationResult {
+	if failurePolicy == nil {
+		res.Err = evalErr
+		res.Passed = false
+		return res
+	}
+	if *failurePolicy == admissionregistrationv1.Ignore && IsExpressionError(evalErr) {
+		res.Passed = true
+		res.Err = nil
+		res.Message = ""
+		return res
+	}
+	res.Passed = false
+	res.Err = evalErr
 	return res
 }
 
@@ -389,7 +461,10 @@ func (e *Evaluator) evalExpression(ctx context.Context, expr string, activation 
 		return nil, err
 	}
 	if evalErr != nil {
-		return nil, evalErr
+		if isContextError(ctx, evalErr) {
+			return nil, evalErr
+		}
+		return nil, &expressionError{evalErr}
 	}
 	return out, nil
 }

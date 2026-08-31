@@ -8,11 +8,12 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/opa-utils/resources"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,7 +46,7 @@ deny[msga] {
         "packagename":  "armo_builtins",
         "alertScore":   5,
         "fixPaths":     [],
-        "failedPaths":  [sprintf("metadata.annotations.bound-by-%s", [pod.metadata.namespace])],
+        "reviewPaths":  [sprintf("metadata.annotations.bound-by-%s", [pod.metadata.namespace])],
         "alertObject":  {"k8sApiObjects": [cr]},
     }
 }
@@ -161,7 +162,7 @@ func referenceProcess(t *testing.T, opap *OPAProcessor, policies *cautils.Polici
 
 		associated := make(map[string]resourcesresults.ResourceAssociatedControl)
 		for i := range control.Rules {
-			ruleResults, err := opap.processRule(context.Background(), &control.Rules[i], control.FixedInput, evaluationScope{}, control.ControlID)
+			ruleResults, err := opap.processRule(context.Background(), &control.Rules[i], control.FixedInput, evaluationScope{}, &control)
 			require.NoError(t, err)
 
 			for resourceID, ruleResult := range ruleResults {
@@ -189,14 +190,13 @@ func referenceProcess(t *testing.T, opap *OPAProcessor, policies *cautils.Polici
 	return results
 }
 
-// normalize makes two result sets comparable. Control and rule ordering is an
-// artefact of map iteration; path ordering reflects the order Rego yielded a
-// rule's findings, which is a set and therefore not ordered either.
+// normalize makes two result sets comparable. Control ordering is guaranteed
+// deterministic by the processor (sortAssociatedControls), but rule ordering
+// reflects the order scopes first saw each rule and path ordering reflects the
+// order Rego yielded a rule's findings — both are sets, so they are sorted here
+// before comparison.
 func normalize(results map[string]resourcesresults.Result) map[string]resourcesresults.Result {
 	for resourceID, result := range results {
-		sort.Slice(result.AssociatedControls, func(i, j int) bool {
-			return result.AssociatedControls[i].ControlID < result.AssociatedControls[j].ControlID
-		})
 		for i := range result.AssociatedControls {
 			rules := result.AssociatedControls[i].ResourceAssociatedRules
 			sort.Slice(rules, func(a, b int) bool { return rules[a].Name < rules[b].Name })
@@ -287,7 +287,7 @@ func TestProcess_ResidentVerdictsMergeAcrossScopes(t *testing.T) {
 
 	paths := map[string]bool{}
 	for _, path := range crossScope[0].ResourceAssociatedRules[0].Paths {
-		paths[path.FailedPath] = true
+		paths[path.ReviewPath] = true
 	}
 	assert.True(t, paths["metadata.annotations.bound-by-ns-a"], "ns-a verdict lost, got %v", paths)
 	assert.True(t, paths["metadata.annotations.bound-by-ns-b"], "ns-b verdict lost, got %v", paths)
@@ -305,7 +305,7 @@ deny[msga] {
         "packagename":  "armo_builtins",
         "alertScore":   1,
         "fixPaths":     [],
-        "failedPaths":  ["metadata.name"],
+        "reviewPaths":  ["metadata.name"],
         "alertObject":  {"k8sApiObjects": [cr]},
     }
 }
@@ -365,7 +365,7 @@ deny[msga] {
         "packagename":  "armo_builtins",
         "alertScore":   1,
         "fixPaths":     [],
-        "failedPaths":  [],
+        "reviewPaths":  [],
         "alertObject":  {"k8sApiObjects": [pods[_]]},
     }
 }
@@ -425,4 +425,130 @@ func slicesOfKeys(results map[string]resourcesresults.Result) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// wholeClusterAggregatingControl is the aggregating control fixture marked
+// requiresWholeClusterInput, so it must be evaluated once against the whole
+// cluster regardless of how the scan is partitioned.
+func wholeClusterAggregatingControl() reporthandling.Control {
+	control := reporthandling.Control{
+		ControlID: "C-AGGREGATE",
+		Rules: []reporthandling.PolicyRule{
+			{
+				Rule:         aggregatingRule,
+				RuleLanguage: reporthandling.RegoLanguage,
+				Match: []reporthandling.RuleMatchObjects{
+					{APIGroups: []string{""}, APIVersions: []string{"v1"}, Resources: []string{"Pod"}},
+				},
+			},
+		},
+	}
+	control.Name = "aggregating control"
+	control.Rules[0].Name = "aggregating-rule"
+	control.Attributes = map[string]interface{}{
+		ControlAttributeRequiresWholeClusterInput: true,
+	}
+	return control
+}
+
+func wholeClusterAggregatingPolicies() (*cautils.Policies, []reporthandling.Framework) {
+	frameworks := []reporthandling.Framework{{Controls: []reporthandling.Control{wholeClusterAggregatingControl()}}}
+	return convertFrameworksToPolicies(frameworks, nil, reporthandling.ScopeCluster), frameworks
+}
+
+// TestWholeClusterControlParityAcrossPaths pins the fix for #2871: a control
+// that joins objects across namespaces must reach the same verdict whether the
+// cluster is evaluated as a single input, partitioned per namespace (eager), or
+// streamed namespace by namespace. The aggregating rule only fires when more
+// than one Pod is in the input, so it silently passes under per-namespace
+// evaluation unless the control is deferred to a whole-cluster pass.
+func TestWholeClusterControlParityAcrossPaths(t *testing.T) {
+	policies, frameworks := wholeClusterAggregatingPolicies()
+	const podID = "/v1/ns-a/Pod/clean"
+
+	t.Run("single scope", func(t *testing.T) {
+		t.Setenv("LARGE_CLUSTER_SIZE", "100000")
+		opap := newParityProcessor(policies)
+		require.NoError(t, opap.Process(context.Background(), policies, nil))
+		require.Contains(t, opap.ResourcesResult, podID)
+		singleResult := opap.ResourcesResult[podID]
+		require.True(t, singleResult.GetStatus(nil).IsFailed(),
+			"single input holds every namespace's pods, so the rule fires")
+	})
+
+	t.Run("partitioned eager", func(t *testing.T) {
+		t.Setenv("LARGE_CLUSTER_SIZE", "1")
+		opap := newParityProcessor(policies)
+		require.Greater(t, len(opap.evaluationScopes()), 1, "fixture must be split into scopes")
+		require.NoError(t, opap.Process(context.Background(), policies, nil))
+		require.Contains(t, opap.ResourcesResult, podID)
+		partitionedResult := opap.ResourcesResult[podID]
+		require.True(t, partitionedResult.GetStatus(nil).IsFailed(),
+			"whole-cluster control must be evaluated once after the scopes merge")
+	})
+
+	t.Run("streaming", func(t *testing.T) {
+		t.Setenv("LARGE_CLUSTER_SIZE", "1")
+
+		k8sResources, allResources := parityFixture()
+		sessionObj := cautils.NewOPASessionObjMock()
+		sessionObj.Policies = frameworks
+		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
+
+		opap := NewOPAProcessor(sessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
+
+		resident, batches := cautils.PartitionResources(len(allResources), k8sResources, nil, allResources)
+		require.NotEmpty(t, batches, "fixture must be split into namespace batches")
+
+		batchChan := make(chan *cautils.ResourceBatch, len(batches)+1)
+		errChan := make(chan error, 1)
+		close(errChan)
+		batchChan <- resident
+		for _, batch := range batches {
+			batchChan <- batch
+		}
+		close(batchChan)
+
+		require.NoError(t, opap.ProcessWithStreaming(context.Background(), batchChan, errChan, cautils.NewProgressHandler(""), len(batches)))
+		require.Contains(t, opap.ResourcesResult, podID)
+		streamingResult := opap.ResourcesResult[podID]
+		require.True(t, streamingResult.GetStatus(nil).IsFailed(),
+			"whole-cluster control must be evaluated once after streaming merges every batch")
+	})
+}
+
+func TestControlRequiresWholeClusterInput(t *testing.T) {
+	withAttr := func(controlID string, value any) *reporthandling.Control {
+		c := &reporthandling.Control{ControlID: controlID}
+		c.Attributes = map[string]interface{}{ControlAttributeRequiresWholeClusterInput: value}
+		return c
+	}
+
+	tests := []struct {
+		name    string
+		control *reporthandling.Control
+		want    bool
+	}{
+		{name: "nil control", control: nil, want: false},
+		{
+			name:    "no attribute, no fallback",
+			control: &reporthandling.Control{ControlID: "C-0001"},
+			want:    false,
+		},
+		{name: "boolean attribute true", control: withAttr("C-X", true), want: true},
+		{name: "boolean attribute false", control: withAttr("C-X", false), want: false},
+		{name: "string attribute true", control: withAttr("C-X", "true"), want: true},
+		{name: "string attribute false", control: withAttr("C-X", "false"), want: false},
+		{
+			name:    "fallback control ID",
+			control: &reporthandling.Control{ControlID: "C-0267"},
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, controlRequiresWholeClusterInput(tt.control))
+		})
+	}
 }

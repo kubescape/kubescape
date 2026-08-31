@@ -7,7 +7,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
@@ -48,8 +48,8 @@ var (
 		ImageVulnerabilities: {"armo.vuln.images/v1", "image.vulnscan.com/v1"}}
 	MapResourceToApiGroupCloud = map[string][]string{
 		ClusterDescribe:         {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"},
-		DescribeRepositories:    {"eks.amazonaws.com/v1"}, //TODO - add google and azure when they are supported
-		ListEntitiesForPolicies: {"eks.amazonaws.com/v1", "management.azure.com/v1"}, //TODO - add google when it is supported
+		DescribeRepositories:    {"container.googleapis.com/v1", "eks.amazonaws.com/v1"}, //TODO - add azure when ensure-image-scanning-enabled-cloud supports ACR
+		ListEntitiesForPolicies: {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"},
 	}
 )
 
@@ -123,6 +123,15 @@ func mapKSResourceToApiGroup(resource string) []string {
 	return []string{}
 }
 
+// isExternalResource reports whether a resolved group/version/resource triplet
+// names a resource Kubescape serves itself - host sensor data, cloud provider
+// descriptions, image vulnerabilities. Their API groups belong to Kubescape, so
+// no cluster ever serves them and they are never collected with a LIST.
+func isExternalResource(triplet string) bool {
+	_, _, resource := k8sinterface.StringToResourceGroup(triplet)
+	return len(mapKSResourceToApiGroup(resource)) > 0
+}
+
 func insertControls(resource string, resourceToControl map[string][]string, control reporthandling.Control) {
 	ksResources := mapKSResourceToApiGroup(resource)
 	for _, ksResource := range ksResources {
@@ -165,11 +174,16 @@ func getGroupNVersion(apiVersion string) (string, string) {
 	return group, version
 }
 
+// getFieldSelectorFromScanInfo picks the namespace filter the collection queries
+// carry. A flag is honored only when its value actually names a namespace: a
+// value made of separators and whitespace ("," or " ") narrows nothing, which is
+// already how countNamespaces and the report metadata read it, and an include
+// selector built from one emits no query at all (see GetNamespacesSelectors).
 func getFieldSelectorFromScanInfo(scanInfo *cautils.ScanInfo) IFieldSelector {
-	if scanInfo.IncludeNamespaces != "" {
+	if len(splitNamespaces(scanInfo.IncludeNamespaces)) > 0 {
 		return NewIncludeSelector(scanInfo.IncludeNamespaces)
 	}
-	if scanInfo.ExcludedNamespaces != "" {
+	if len(splitNamespaces(scanInfo.ExcludedNamespaces)) > 0 {
 		return NewExcludeSelector(scanInfo.ExcludedNamespaces)
 	}
 

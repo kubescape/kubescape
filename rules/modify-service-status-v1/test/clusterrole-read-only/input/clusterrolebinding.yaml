@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: service-status-reader-crb
+subjects:
+- kind: ServiceAccount
+  name: monitoring
+  namespace: observability
+roleRef:
+  kind: ClusterRole
+  name: service-status-reader
+  apiGroup: rbac.authorization.k8s.io

@@ -5,18 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"slices"
-	"strings"
 
 	"github.com/anchore/clio"
 	grypejson "github.com/anchore/grype/grype/presenter/json"
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -34,16 +31,15 @@ func NewJsonPrinter() *JsonPrinter {
 	return &JsonPrinter{}
 }
 
-func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = jsonOutputFile
-		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != printer.JsonOutputExt {
-			outputFile = outputFile + printer.JsonOutputExt
-		}
+func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JsonFormat, outputFile, jsonOutputFile)
+	if explicitOutput {
+		var err error
+		jp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
 	}
 	jp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 func (jp *JsonPrinter) Score(score float32) {
@@ -57,29 +53,6 @@ func (jp *JsonPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.ComplianceScoreToInt(score))
 
 }
-func (jp *JsonPrinter) convertToImageScanSummary(imageScanData []cautils.ImageScanData) (*imageprinter.ImageScanSummary, error) {
-	imageScanSummary := imageprinter.ImageScanSummary{
-		CVEs:                  []imageprinter.CVE{},
-		PackageScores:         map[string]*imageprinter.PackageScore{},
-		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
-	}
-
-	for i := range imageScanData {
-		if !slices.Contains(imageScanSummary.Images, imageScanData[i].Image) {
-			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
-		}
-
-		CVEs := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
-		imageScanSummary.CVEs = append(imageScanSummary.CVEs, CVEs...)
-
-		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
-
-		setSeverityToSummaryMap(CVEs, imageScanSummary.MapsSeverityToSummary)
-	}
-
-	return &imageScanSummary, nil
-}
-
 func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) error {
 	var err error
 
@@ -106,23 +79,24 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 }
 
 func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData, jp *JsonPrinter) error {
+	// Finalize into the report owned by this renderer before adding image data.
+	// The same OPASessionObj is submitted after local output is written, so
+	// enriching opaSessionObj.Report here would make --format change the backend
+	// payload as a side effect.
+	finalizedReport := FinalizeResults(opaSessionObj)
 
 	if imageScanData != nil {
-		imageScanSummary, err := jp.convertToImageScanSummary(imageScanData)
-		if err != nil {
-			logger.L().Error("failed to convert to image scan summary", helpers.Error(err))
-			return err
-		}
-		opaSessionObj.Report.SummaryDetails.Vulnerabilities.MapsSeverityToSummary = convertToReportSummary(imageScanSummary.MapsSeverityToSummary)
-		opaSessionObj.Report.SummaryDetails.Vulnerabilities.CVESummary = convertToCVESummary(imageScanSummary.CVEs)
-		opaSessionObj.Report.SummaryDetails.Vulnerabilities.PackageScores = convertToPackageScores(imageScanSummary.PackageScores)
-		opaSessionObj.Report.SummaryDetails.Vulnerabilities.Images = imageScanSummary.Images
+		imageScanSummary := buildMachineImageScanSummary(imageScanData)
+		finalizedReport.SummaryDetails.Vulnerabilities.MapsSeverityToSummary = convertToReportSummary(imageScanSummary.MapsSeverityToSummary)
+		finalizedReport.SummaryDetails.Vulnerabilities.CVESummary = convertToCVESummary(imageScanSummary.CVEs)
+		finalizedReport.SummaryDetails.Vulnerabilities.PackageScores = convertToPackageScores(imageScanSummary.PackageScores)
+		finalizedReport.SummaryDetails.Vulnerabilities.Images = imageScanSummary.Images
 	}
 
 	// Convert to PostureReportWithSeverity to add severity field to controls,
 	// extract specified labels from workloads, and attach scan coverage gaps.
-	finalizedReport := FinalizeResults(opaSessionObj)
 	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverage(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources, &opaSessionObj.ScanCoverage)
+	reportWithSeverity.ExceptionAudit = opaSessionObj.ExceptionAudit
 
 	r, err := json.Marshal(reportWithSeverity)
 	if err != nil {
@@ -178,8 +152,10 @@ func (jp *JsonPrinter) PrintNextSteps() {
 
 }
 
-func (p *JsonPrinter) CloseWriter() {
+// CloseWriter closes the JSON output writer, returning any error from flushing or closing.
+func (p *JsonPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }

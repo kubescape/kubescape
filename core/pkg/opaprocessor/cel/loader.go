@@ -53,11 +53,9 @@ type VAP struct {
 
 	// matchConditions gates whether a policy runs at all: at admission a policy
 	// whose matchConditions evaluate to false is skipped and none of its
-	// validations run. The offline engine does not evaluate them yet, so we keep
-	// them here only so loadVAP can refuse such a policy (see requireSupported)
-	// rather than run its validations unconditionally and emit violations live
-	// admission would never raise.
-	matchConditions []admissionregistrationv1.MatchCondition
+	// validations run. The evaluator honors the gate offline the same way (see
+	// matchConditionsHold), so a gated policy is scanned rather than refused.
+	matchConditions []MatchCondition
 
 	// paramKind mirrors spec.paramKind; nil when the policy declares no params.
 	paramKind *admissionregistrationv1.ParamKind
@@ -68,15 +66,32 @@ type VAP struct {
 	// non-matching kind, which the scan would otherwise record as a pass live
 	// admission never made (the object would not be matched at all).
 	matchConstraints *admissionregistrationv1.MatchResources
+
+	// failurePolicy mirrors spec.failurePolicy: how an evaluation error is
+	// treated. The apiserver defaults an omitted policy to Fail, so newVAP
+	// stores the resolved value (Fail when nil) rather than the raw pointer.
+	failurePolicy admissionregistrationv1.FailurePolicyType
+}
+
+// failOnError reports whether an evaluation error denies the request. Only an
+// explicit failurePolicy: Ignore changes that; every policy in the embedded
+// bundle defaults to Fail.
+func (v *VAP) failOnError() bool {
+	return v.failurePolicy != admissionregistrationv1.Ignore
+}
+
+// TakesParams reports whether the policy declares a spec.paramKind, i.e. whether
+// a binding's paramRef is something the apiserver resolves rather than ignores.
+func (v *VAP) TakesParams() bool {
+	return v.paramKind != nil
 }
 
 // requireSupported reports whether the offline engine can honor this policy with
-// scan/admission parity. matchConditions is an admission-time gate we do not
-// evaluate yet; running a gated policy's validations unconditionally would emit
-// violations live admission never would, so we refuse the control instead. The
-// error maps to the same errored/skipped status a Rego eval error takes, never a
-// silent pass or a false violation. Removing a guard here is the seam for when
-// the evaluator learns to evaluate that gate.
+// scan/admission parity. A refusal maps to the same errored/skipped status a
+// Rego eval error takes, never a silent pass or a false violation. Removing a
+// guard here is the seam for when the evaluator learns to honor that input —
+// matchConditions came off this list once the evaluator could evaluate the gate
+// (see matchConditionsHold).
 //
 // A namespaceSelector is refused for a subtler reason. Its input is the
 // NAMESPACE's labels, and the scan only has those when some control's match
@@ -89,16 +104,44 @@ type VAP struct {
 // GUARANTEED to exist; the seam for honoring it is guaranteeing Namespace
 // collection whenever a loaded policy needs it.
 //
+// A paramKind is refused for the same reason. Live, a binding's ParamRef points
+// the policy at real objects of that kind, so a policy taking anything other
+// than the ControlConfiguration the bundle ships has no offline params at all.
+// Evaluating it anyway reads params.* off the wrong object, and every such read
+// is a verdict admission never made. The seam for honoring one is resolving a
+// ParamRef against objects the scan collected.
+//
 // The other matchConstraints narrowings do not need refusing, because their
 // inputs are on the scanned object itself and appliesTo evaluates them:
 // objectSelector (the object's own labels) and a resource rule's operations
 // and resourceNames (the object's own name).
 func (v *VAP) requireSupported() error {
-	if len(v.matchConditions) > 0 {
-		return fmt.Errorf("control %q uses spec.matchConditions, which the offline engine does not evaluate yet; refusing it to preserve scan/admission parity", v.ControlID)
+	if err := v.requireNamespaceSelectorSupported(); err != nil {
+		return err
 	}
+	if err := v.requireParamKindSupported(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *VAP) requireNamespaceSelectorSupported() error {
 	if v.matchConstraints != nil && selectorNarrows(v.matchConstraints.NamespaceSelector) {
 		return fmt.Errorf("control %q scopes matchConstraints with a namespaceSelector, whose input (namespace labels) the scan cannot guarantee to have; refusing it to preserve scan/admission parity", v.ControlID)
+	}
+	return nil
+}
+
+func (v *VAP) requireParamKindSupported() error {
+	if v.paramKind == nil {
+		return nil
+	}
+	shipped, err := controlConfigParamKind()
+	if err != nil {
+		return err
+	}
+	if *v.paramKind != *shipped {
+		return fmt.Errorf("control %q takes params of kind %s %s, which the scan has no binding to resolve (only the bundled %s %s is available); refusing it to preserve scan/admission parity", v.ControlID, v.paramKind.APIVersion, v.paramKind.Kind, shipped.APIVersion, shipped.Kind)
 	}
 	return nil
 }
@@ -190,6 +233,27 @@ func loadVAP(controlID string) (*VAP, error) {
 	return vap, nil
 }
 
+// LoadVAP is the exported entry point for callers that need the VAP to resolve
+// a per-binding paramRef. It does not refuse a VAP merely because its paramKind
+// is not the bundled one: a binding's paramRef may point to that kind in the
+// scanned input. It still refuses namespaceSelector-narrowed policies.
+func LoadVAP(controlID string) (*VAP, error) {
+	vap, err := lookupVAP(controlID)
+	if err != nil {
+		return nil, err
+	}
+	if err := vap.requireNamespaceSelectorSupported(); err != nil {
+		return nil, err
+	}
+	return vap, nil
+}
+
+// ErrParamNotFound signals that a binding's paramRef points to an object that
+// is not present in the scanned input. The caller applies the binding's
+// parameterNotFoundAction: Allow means the object is admitted, Deny/empty means
+// the policy cannot produce a verdict and the rule is skipped.
+var ErrParamNotFound = errors.New("param object not found")
+
 // parseVAPBundle turns a multi-document bundle into a vapCatalog.
 //
 // It consumes only v1 ValidatingAdmissionPolicy documents and skips everything
@@ -257,21 +321,29 @@ func indexUnique(index map[string]*VAP, duplicates map[string]struct{}, key stri
 
 // newVAP flattens a parsed policy into the evaluator's structs. The message and
 // messageExpression travel with each validation so the evaluator can resolve the
-// violation message the same way the apiserver does. matchConditions is carried
-// so loadVAP can refuse a gated policy (see requireSupported).
+// violation message the same way the apiserver does. matchConditions and
+// matchConstraints are carried so the evaluator can honor the gate and scope
+// evaluation to the GVKs the policy applies to (see appliesTo).
 //
-// spec.matchConstraints is kept so the scan can scope evaluation to the kinds
-// the policy actually applies to (see appliesTo); without it a non-matching
-// object slips through the validations' self-guards as a pass. spec.failurePolicy
-// is still dropped: eval errors are always mapped to an errored/skipped status
-// regardless of failurePolicy, which is the parity-safe direction.
+// spec.failurePolicy is captured so the evaluator can map eval errors to the
+// same pass/violation outcome the apiserver would.
 func newVAP(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *VAP {
+	failurePolicy := policy.Spec.FailurePolicy
+	if failurePolicy == nil {
+		defaultPolicy := admissionregistrationv1.Fail
+		failurePolicy = &defaultPolicy
+	}
+	matchConditions := make([]MatchCondition, 0, len(policy.Spec.MatchConditions))
+	for _, c := range policy.Spec.MatchConditions {
+		matchConditions = append(matchConditions, MatchCondition{Name: c.Name, Expression: c.Expression})
+	}
 	vap := &VAP{
 		ControlID:        policy.Labels[controlIDLabel],
 		PolicyName:       policy.Name,
-		matchConditions:  policy.Spec.MatchConditions,
-		paramKind:        policy.Spec.ParamKind,
+		failurePolicy:    *failurePolicy,
+		matchConditions:  matchConditions,
 		matchConstraints: policy.Spec.MatchConstraints,
+		paramKind:        policy.Spec.ParamKind,
 	}
 	for _, v := range policy.Spec.Variables {
 		vap.Variables = append(vap.Variables, Variable{Name: v.Name, Expression: v.Expression})
@@ -286,10 +358,54 @@ func newVAP(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *VAP {
 	return vap
 }
 
+// ResolveParamObject returns the value bound to the evaluator's "params"
+// variable for one binding's paramRef. A policy with no paramKind gets nil. A
+// binding with no paramRef falls back to the bundled ControlConfiguration. A
+// binding that names a specific param object is resolved from the scanned input
+// via findParam. If the object is not found, ErrParamNotFound is returned so
+// the caller can honor parameterNotFoundAction.
+func ResolveParamObject(vap *VAP, paramRef *admissionregistrationv1.ParamRef, resourceNamespace string, findParam func(apiVersion, kind, namespace, name string) (map[string]any, bool)) (any, error) {
+	if vap.paramKind == nil {
+		return nil, nil
+	}
+	if paramRef == nil || paramRef.Name == "" {
+		return resolveParams(vap)
+	}
+	for _, ns := range paramLookupNamespaces(paramRef, resourceNamespace) {
+		if obj, ok := findParam(vap.paramKind.APIVersion, vap.paramKind.Kind, ns, paramRef.Name); ok {
+			return obj, nil
+		}
+	}
+	return nil, ErrParamNotFound
+}
+
+// paramLookupNamespaces returns the namespaces to look the param object up in,
+// in order. An explicit namespace on the ref is the only candidate; without one
+// the paramKind's scope decides where the object lives and offline there is no
+// discovery to read that scope from, so both candidates are tried: the scanned
+// resource's namespace for a namespaced kind, then the empty namespace the index
+// keys a cluster-scoped one by. A kind is registered at exactly one scope, so the
+// order cannot pick the wrong object. Trying only the resource's namespace missed
+// the bundled ControlConfiguration (scope: Cluster) for every namespaced resource.
+func paramLookupNamespaces(paramRef *admissionregistrationv1.ParamRef, resourceNamespace string) []string {
+	if paramRef.Namespace != "" {
+		return []string{paramRef.Namespace}
+	}
+	if resourceNamespace == "" {
+		return []string{""}
+	}
+	return []string{resourceNamespace, ""}
+}
+
 // resolveParams returns the value bound to the evaluator's "params" variable. A
 // policy with no paramKind gets nil (matching a live binding with no ParamRef).
 // Otherwise the whole ControlConfiguration is returned so expressions can reach
 // params.settings.<field>, exactly what a live ParamRef would supply.
+//
+// A paramKind the shipped file does not answer is an error rather than the
+// config: binding the wrong object would answer the policy's params.* reads
+// with another kind's fields. loadVAP refuses such a policy before we get here
+// (see requireSupported), so this is the invariant kept where params are bound.
 //
 // The returned map is shared across calls (see controlConfig) and is treated as
 // read-only: the evaluator only binds it into a CEL activation, which never
@@ -298,11 +414,30 @@ func resolveParams(vap *VAP) (any, error) {
 	if vap.paramKind == nil {
 		return nil, nil
 	}
-	params, err := controlConfig()
+	shipped, err := controlConfigParamKind()
 	if err != nil {
 		return nil, err
 	}
-	return params, nil
+	if *vap.paramKind != *shipped {
+		return nil, fmt.Errorf("control %q takes params of kind %s %s, which the bundled %s %s cannot supply", vap.ControlID, vap.paramKind.APIVersion, vap.paramKind.Kind, shipped.APIVersion, shipped.Kind)
+	}
+	return controlConfig()
+}
+
+// controlConfigParamKind is the paramKind the embedded params file answers,
+// read off the file's own apiVersion and kind so a `make sync-vap` that bumps
+// the ControlConfiguration version carries the check with it.
+func controlConfigParamKind() (*admissionregistrationv1.ParamKind, error) {
+	config, err := controlConfig()
+	if err != nil {
+		return nil, err
+	}
+	apiVersion, _ := config["apiVersion"].(string)
+	kind, _ := config["kind"].(string)
+	if apiVersion == "" || kind == "" {
+		return nil, fmt.Errorf("embedded control configuration %q declares no apiVersion/kind, so no policy's paramKind can be matched against it", controlConfigFile)
+	}
+	return &admissionregistrationv1.ParamKind{APIVersion: apiVersion, Kind: kind}, nil
 }
 
 // controlConfig parses the embedded ControlConfiguration once and caches it. It

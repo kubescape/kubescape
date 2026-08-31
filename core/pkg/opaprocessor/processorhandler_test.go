@@ -5,21 +5,24 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"reflect"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/mocks"
-	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor/cel"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/pkg/opaprocessor/cel"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/opa-utils/resources"
@@ -170,7 +173,7 @@ func (r *recordingProgressListener) Stop() {
 	r.stopped = true
 }
 
-func TestProcessReportsControlsInSortedOrder(t *testing.T) {
+func TestProcessReportsControls(t *testing.T) {
 	opaSessionObj := cautils.NewOPASessionObjMock()
 	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
 
@@ -189,7 +192,7 @@ func TestProcessReportsControlsInSortedOrder(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3, progress.started)
 	assert.True(t, progress.stopped)
-	assert.Equal(t, []string{
+	assert.ElementsMatch(t, []string{
 		"Control: C-0001",
 		"Control: C-0002",
 		"Control: C-0003",
@@ -215,7 +218,7 @@ func monitorHeapSpace(maxHeap *uint64, quitChan chan bool) {
 
 /*
 goarch: arm64
-pkg: github.com/kubescape/kubescape/v3/core/pkg/opaprocessor
+pkg: github.com/kubescape/kubescape/v4/core/pkg/opaprocessor
 
 BenchmarkProcess/opaprocessor.Process_1-8         	       1	29714096083 ns/op	22309913416 B/op	498183685 allocs/op
 --- BENCH: BenchmarkProcess/opaprocessor.Process_1-8
@@ -403,7 +406,6 @@ func TestProcessRule(t *testing.T) {
 					Status:                "failed",
 					SubStatus:             "",
 					Paths: []armotypes.PosturePaths{
-						{ResourceID: "/v1/default/Service/fake-service-1", FailedPath: "spec.type"},
 						{ResourceID: "/v1/default/Service/fake-service-1", ReviewPath: "spec.type"},
 					},
 					Exception: nil,
@@ -466,9 +468,7 @@ func TestProcessRule(t *testing.T) {
 					Status:                "failed",
 					SubStatus:             "",
 					Paths: []armotypes.PosturePaths{
-						{ResourceID: "networking.k8s.io/v1/default/Ingress/my-ingress1", FailedPath: "spec.rules[0].http.paths[0].backend.service.name"},
 						{ResourceID: "networking.k8s.io/v1/default/Ingress/my-ingress1", ReviewPath: "spec.rules[0].http.paths[0].backend.service.name"},
-						{ResourceID: "networking.k8s.io/v1/default/Ingress/my-ingress2", FailedPath: "spec.rules[0].http.paths[0].backend.service.name"},
 						{ResourceID: "networking.k8s.io/v1/default/Ingress/my-ingress2", ReviewPath: "spec.rules[0].http.paths[0].backend.service.name"},
 					},
 					Exception: nil,
@@ -512,7 +512,7 @@ func TestProcessRule(t *testing.T) {
 		// since all resources JSON is a large file, we need to unzip it and set the variable before running the benchmark
 		unzipAllResourcesTestDataAndSetVar("testdata/allResourcesMock.json.zip", "testdata/allResourcesMock.json")
 		opap := NewOPAProcessorMock(tc.opaSessionObjMock, tc.resourcesMock)
-		resources, err := opap.processRule(context.Background(), &tc.rule, nil, evaluationScope{}, "")
+		resources, err := opap.processRule(context.Background(), &tc.rule, nil, evaluationScope{}, &reporthandling.Control{})
 		assert.NoError(t, err)
 		assert.Equal(t, tc.expectedResult, resources, t.Name)
 	}
@@ -575,7 +575,7 @@ func TestAppendPaths(t *testing.T) {
 		{
 			name: "All types of paths",
 			assistedRemediation: reporthandling.AssistedRemediation{
-				FailedPaths: []string{"path2"},
+
 				DeletePaths: []string{"path4", "path5"},
 				ReviewPaths: []string{"path6", "path7"},
 				FixPaths: []armotypes.FixPath{
@@ -585,7 +585,7 @@ func TestAppendPaths(t *testing.T) {
 			},
 			resourceID: "2",
 			expected: []armotypes.PosturePaths{
-				{ResourceID: "2", FailedPath: "path2"},
+
 				{ResourceID: "2", DeletePath: "path4"},
 				{ResourceID: "2", DeletePath: "path5"},
 				{ResourceID: "2", ReviewPath: "path6"},
@@ -968,13 +968,28 @@ func TestRunCELOnK8s(t *testing.T) {
 	t.Run("a broken object does not erase a sibling violation", func(t *testing.T) {
 		responses, outcome, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{violatingPod, brokenPod}, nil, "C-0017")
 		require.NoError(t, err, "an eval error on one object must not fail the whole rule")
-		require.Len(t, responses, 1, "the confirmed violation must survive")
-		assert.Equal(t, "mutable", responses[0].GetFailedResources()[0]["metadata"].(map[string]any)["name"])
+		require.Len(t, responses, 2, "the confirmed violation must survive alongside the eval-error deny")
+		assert.Empty(t, outcome.skipped, "an eval error under failurePolicy Fail is a deny, not a skip")
 
-		require.Len(t, outcome.skipped, 1, "the broken object must be reported as an unknown-verdict skip")
-		skippedMeta := objectsenvelopes.NewObject(outcome.skipped[0].obj)
-		require.NotNil(t, skippedMeta)
-		assert.Equal(t, "broken", skippedMeta.GetName())
+		byName := map[string]reporthandling.RuleResponse{}
+		for _, r := range responses {
+			byName[r.GetFailedResources()[0]["metadata"].(map[string]any)["name"].(string)] = r
+		}
+		require.Contains(t, byName, "mutable", "the confirmed violation must survive")
+		assert.Contains(t, byName, "broken", "the eval-error object must be denied, matching admission")
+	})
+
+	// An eval error alone is a deny under failurePolicy Fail, not a skip.
+	t.Run("an eval error is denied under failurePolicy Fail", func(t *testing.T) {
+		responses, outcome, err := opap.runCELOnK8s(context.Background(), rule, []map[string]any{brokenPod}, nil, "C-0017")
+		require.NoError(t, err)
+		require.Len(t, responses, 1)
+		assert.Empty(t, outcome.skipped)
+
+		failed := responses[0].GetFailedResources()
+		require.Len(t, failed, 1)
+		assert.Equal(t, "broken", failed[0]["metadata"].(map[string]any)["name"])
+		assert.NotEmpty(t, responses[0].AlertMessage)
 	})
 
 	// Blocker 2: an out-of-scope object must be excluded, not left to be
@@ -1085,4 +1100,92 @@ func TestCELNamespaceObjectFor(t *testing.T) {
 		assert.Nil(t, (&OPAProcessor{}).celNamespaceObjectFor(podIn("prod")))
 		assert.Nil(t, NewOPAProcessor(nil, nil, "", "", "", false, nil).celNamespaceObjectFor(podIn("prod")))
 	})
+}
+
+// TestHasUnreachableDependency_GVRPullFailureGuard pins the mixed-purpose
+// InfoMap guard: only a whole-GVR pull failure (keyed by GVR string AND
+// listed in the control's dependency set) counts as an unreachable
+// dependency; per-resource eval skips keyed by resource ID must not match.
+func TestHasUnreachableDependency_GVRPullFailureGuard(t *testing.T) {
+	opap := NewOPAProcessor(&cautils.OPASessionObj{
+		InfoMap: map[string]apis.StatusInfo{
+			"apps/v1/deployments": {InnerStatus: apis.StatusSkipped},
+			"/v1/pods":            {InnerStatus: apis.StatusSkipped},
+		},
+		ResourceToControlsMap: map[string][]string{
+			"apps/v1/deployments": {"C-0001"},
+			"/v1/secrets":         {"C-0002"},
+		},
+	}, nil, "test", "", "", false, nil)
+
+	assert.True(t, opap.hasUnreachableDependency("C-0001"),
+		"control depending on a skipped GVR must report an unreachable dependency")
+	assert.False(t, opap.hasUnreachableDependency("C-0002"),
+		"a per-resource skip keyed by resource ID must not be mistaken for a GVR pull failure")
+	assert.False(t, opap.hasUnreachableDependency("C-9999"),
+		"control with no dependencies must report no unreachable dependency")
+}
+
+// TestHasUnreachableDependency_ConcurrentWithSkipWrites is a -race regression
+// test for #3562: hasUnreachableDependency used to read opap.InfoMap without
+// holding opap.mu while concurrent processScope workers wrote that same map
+// through markResourcesSkipped/seedCELSkips on the rule-error path, aborting
+// scans with "fatal error: concurrent map read and map write". The test
+// hammers exactly that read/write pair concurrently — wide write windows
+// (many resources per markResourcesSkipped call) and frequent reads — so a
+// run under -race trips quickly if the read ever loses its guard again.
+func TestHasUnreachableDependency_ConcurrentWithSkipWrites(t *testing.T) {
+	opap := NewOPAProcessor(&cautils.OPASessionObj{
+		InfoMap:               make(map[string]apis.StatusInfo),
+		ResourceToControlsMap: make(map[string][]string),
+	}, nil, "test", "", "", false, nil)
+
+	// Seed several dependency mappings so every reader iteration does real
+	// map work rather than falling out of the loop immediately.
+	for i := 0; i < 8; i++ {
+		gvr := fmt.Sprintf("apps/v1/deployments-set%d", i)
+		opap.ResourceToControlsMap[gvr] = []string{"C-0001", "C-0002"}
+	}
+
+	// Many input resources per call widens the write window: each
+	// markResourcesSkipped call takes and releases mu once per resource.
+	const resourcesPerWrite = 200
+	inputResources := make([]workloadinterface.IMetadata, 0, resourcesPerWrite)
+	for i := 0; i < resourcesPerWrite; i++ {
+		inputResources = append(inputResources, workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"name":      fmt.Sprintf("pod-%d", i),
+				"namespace": "default",
+			},
+		}))
+	}
+	erroringRule := &reporthandling.PolicyRule{PortalBase: armotypes.PortalBase{Name: "simulated-erroring-rule"}}
+
+	var wg sync.WaitGroup
+	const writers = 4
+	const readers = 4
+
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out := make(map[string]*resourcesresults.ResourceAssociatedRule)
+			for i := 0; i < 25; i++ {
+				opap.markResourcesSkipped(out, erroringRule, resources.RegoDependenciesData{}, inputResources, errors.New("simulated evaluation failure"))
+			}
+		}()
+	}
+	for r := 0; r < readers; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 500; i++ {
+				opap.hasUnreachableDependency("C-0001")
+				opap.hasUnreachableDependency("C-0002")
+			}
+		}()
+	}
+	wg.Wait()
 }

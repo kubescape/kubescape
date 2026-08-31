@@ -86,11 +86,14 @@ func cronJob(spec map[string]any) map[string]any {
 // bundleControlIDs lists every control the vendored bundle ships a policy for.
 // TestBundleControlIDsAreCurrent keeps it honest against the bundle itself.
 var bundleControlIDs = []string{
-	"C-0001", "C-0004", "C-0009", "C-0016", "C-0017", "C-0018", "C-0020", "C-0026",
-	"C-0034", "C-0038", "C-0041", "C-0042", "C-0044", "C-0045", "C-0046", "C-0048",
-	"C-0050", "C-0055", "C-0056", "C-0057", "C-0061", "C-0062", "C-0073", "C-0074",
-	"C-0075", "C-0076", "C-0077", "C-0078", "C-0198", "C-0199", "C-0200", "C-0201",
-	"C-0210", "C-0268", "C-0269", "C-0270", "C-0271", "C-0280",
+	"C-0001", "C-0004", "C-0009", "C-0012", "C-0013", "C-0016", "C-0017", "C-0018",
+	"C-0020", "C-0026", "C-0034", "C-0038", "C-0041", "C-0042", "C-0044", "C-0045",
+	"C-0046", "C-0048", "C-0050", "C-0055", "C-0056", "C-0057", "C-0061", "C-0062",
+	"C-0073", "C-0074", "C-0075", "C-0076", "C-0077", "C-0078", "C-0081", "C-0193",
+	"C-0194", "C-0195", "C-0197", "C-0198", "C-0199", "C-0200", "C-0201", "C-0202",
+	"C-0203", "C-0204", "C-0207", "C-0210", "C-0212", "C-0225", "C-0231", "C-0234",
+	"C-0262", "C-0263", "C-0268", "C-0269", "C-0270", "C-0271", "C-0275", "C-0276",
+	"C-0280", "C-0292", "C-0295", "C-0296",
 }
 
 // TestNoEvalErrorOnMinimalWorkloads is the guard for the whole bug class: no
@@ -116,9 +119,9 @@ func TestNoEvalErrorOnMinimalWorkloads(t *testing.T) {
 		for _, id := range bundleControlIDs {
 			ev, err := e.EvaluateControl(context.Background(), id, obj, nil)
 			if err != nil {
-				// The engine refuses policies it cannot honor offline (e.g.
-				// matchConditions); the scanner skips the whole rule, which is a
-				// separate, already-intentional path.
+				// The engine refuses policies it cannot honor offline (e.g. ones
+				// narrowed by a namespaceSelector); the scanner skips the whole
+				// rule, which is a separate, already-intentional path.
 				continue
 			}
 			if !ev.Applicable {

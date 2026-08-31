@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-deployment
+  labels:
+    app : goproxy
+spec:
+  selector:
+    matchLabels:
+      app : goproxy
+  template:
+    metadata :
+      name : goproxy
+      labels :
+        app : goproxy
+    spec :
+      hostIPC: true
+      hostPID: true
+      containers :
+        -
+          name : mysql
+          image : mysql
+          env :
+            -
+              name : MYSQL_ROOT_PASSWORD
+              value : "rootpasswd"
+        -
+          name : php
+          image : php:7.0-apache
+          volumeMounts :
+            -
+              mountPath : /var/www/html
+              name : site-data
+              subPath : html
+      volumes :
+        -
+          name : site-data
+          persistentVolumeClaim :
+            claimName : my-lamp-site-data

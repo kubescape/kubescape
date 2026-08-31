@@ -12,8 +12,8 @@ import (
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -163,7 +163,7 @@ func TestExtractCVEs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actual := extractCVEs(tt.matches, tt.image)
+			actual := extractCVEs(tt.matches, tt.image, nil)
 			if len(actual) != len(tt.want) {
 				t.Errorf("extractCVEs() = %v, want %v", actual, tt.want)
 			}
@@ -198,6 +198,69 @@ func TestExtractCVEs(t *testing.T) {
 		})
 	}
 
+}
+
+func TestExtractCVEsAddsMatchingVEXStatus(t *testing.T) {
+	matches := match.NewMatches(match.Match{
+		Package: pkg.Package{
+			ID:      "1",
+			Name:    "openssl",
+			Version: "1.0.0",
+		},
+		Vulnerability: vulnerability.Vulnerability{
+			Metadata: &vulnerability.Metadata{
+				ID:       "CVE-2026-1234",
+				Severity: "High",
+			},
+			Fix: vulnerability.Fix{
+				State: vulnerability.FixStateNotFixed,
+			},
+		},
+	})
+	vexStatuses := map[string]cautils.VexStatus{
+		"CVE-2026-1234": {
+			Status:        "not_affected",
+			Justification: "component_not_present",
+		},
+		"CVE-2026-9999": {
+			Status:        "fixed",
+			Justification: "inline_mitigations_already_exist",
+		},
+	}
+
+	got := extractCVEs(matches, "registry.example.com/app:v1", vexStatuses)
+
+	require.Len(t, got, 1)
+	assert.Equal(t, "CVE-2026-1234", got[0].ID)
+	assert.Equal(t, "not_affected", got[0].VexStatus)
+	assert.Equal(t, "component_not_present", got[0].VexJustification)
+}
+
+func TestExtractCVEsLeavesUnmatchedVEXEmpty(t *testing.T) {
+	matches := match.NewMatches(match.Match{
+		Package: pkg.Package{
+			ID:      "1",
+			Name:    "openssl",
+			Version: "1.0.0",
+		},
+		Vulnerability: vulnerability.Vulnerability{
+			Metadata: &vulnerability.Metadata{
+				ID:       "CVE-2026-1234",
+				Severity: "High",
+			},
+		},
+	})
+
+	got := extractCVEs(matches, "registry.example.com/app:v1", map[string]cautils.VexStatus{
+		"CVE-2026-9999": {
+			Status:        "not_affected",
+			Justification: "component_not_present",
+		},
+	})
+
+	require.Len(t, got, 1)
+	assert.Empty(t, got[0].VexStatus)
+	assert.Empty(t, got[0].VexJustification)
 }
 
 func TestSetPkgNameToScoreMap(t *testing.T) {
@@ -1057,6 +1120,36 @@ func TestConvertToPostureReport_NilCoverageNotAttached(t *testing.T) {
 	assert.Nil(t, result.ScanCoverage)
 }
 
+// TestConvertToPostureReport_VacuousFrameworksOnlyCoverageAttached verifies
+// that a ScanCoverage containing only VacuousFrameworks (no GVR pull
+// failures, no NotEvaluatedControls) is still attached to the serialized
+// report, so a framework that scored 100% purely because its target
+// resource types are absent from the cluster is visible to JSON/API
+// consumers.
+func TestConvertToPostureReport_VacuousFrameworksOnlyCoverageAttached(t *testing.T) {
+	coverage := &cautils.ScanCoverage{
+		VacuousFrameworks: []string{"istio-security"},
+	}
+
+	result := ConvertToPostureReportWithSeverityLabelsAndCoverage(
+		minimalPostureReport(),
+		nil, nil, coverage,
+	)
+	require.NotNil(t, result)
+	require.NotNil(t, result.ScanCoverage, "ScanCoverage must be attached when VacuousFrameworks is non-empty")
+	assert.Equal(t, []string{"istio-security"}, result.ScanCoverage.VacuousFrameworks)
+
+	raw, err := json.Marshal(result)
+	require.NoError(t, err)
+	var decoded struct {
+		ScanCoverage struct {
+			VacuousFrameworks []string `json:"vacuousFrameworks"`
+		} `json:"scanCoverage"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &decoded))
+	assert.Equal(t, []string{"istio-security"}, decoded.ScanCoverage.VacuousFrameworks)
+}
+
 // TestFinalizeResults_SetsGenerationTimeWhenZero is the regression test for
 // kubescape/kubescape#2325: JSON reports were emitting
 // "generationTime":"0001-01-01T00:00:00Z" because nothing on the scan path
@@ -1093,6 +1186,32 @@ func TestFinalizeResults_PreservesExistingGenerationTime(t *testing.T) {
 	require.NotNil(t, report)
 	assert.Equal(t, preset, report.ReportGenerationTime)
 	assert.Equal(t, preset, session.Report.ReportGenerationTime)
+}
+
+func TestFinalizeResults_SetsReportIDFromSession(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.SessionID = "scan-6f012842"
+	require.Empty(t, session.Report.ReportID,
+		"precondition: the report has not been assigned an ID")
+
+	report := FinalizeResults(session)
+
+	require.NotNil(t, report)
+	assert.Equal(t, "scan-6f012842", report.ReportID)
+	assert.Equal(t, "scan-6f012842", session.Report.ReportID,
+		"FinalizeResults must write the ID back so every downstream consumer observes the same identity")
+}
+
+func TestFinalizeResults_PreservesExistingReportID(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.SessionID = "scan-new"
+	session.Report.ReportID = "report-preset"
+
+	report := FinalizeResults(session)
+
+	require.NotNil(t, report)
+	assert.Equal(t, "report-preset", report.ReportID)
+	assert.Equal(t, "report-preset", session.Report.ReportID)
 }
 
 // TestFinalizeResults_SetsClusterNameWhenEmpty is the regression test for
@@ -1176,6 +1295,37 @@ func TestFinalizeResults_SortsResultsAndResourcesByResourceID(t *testing.T) {
 	}
 }
 
+// TestFinalizeResults_SortsAssociatedControlsByControlID pins deterministic
+// per-resource layout: identical scans must emit each resource's controls in
+// the same order regardless of the order concurrent evaluation appended them.
+func TestFinalizeResults_SortsAssociatedControlsByControlID(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+
+	resource := createWorkloadWithLabels("alpha", "default", nil)
+	result := resourcesresults.Result{ResourceID: resource.GetID()}
+
+	// Insert controls in deliberately shuffled order, mirroring whatever order
+	// concurrent evaluation workers happened to complete in.
+	for _, controlID := range []string{"C-0009", "C-0001", "C-0005", "C-0012", "C-0002"} {
+		result.AssociatedControls = append(result.AssociatedControls,
+			resourcesresults.ResourceAssociatedControl{ControlID: controlID})
+	}
+	session.ResourcesResult[resource.GetID()] = result
+
+	want := []string{"C-0001", "C-0002", "C-0005", "C-0009", "C-0012"}
+	for i := 0; i < 16; i++ {
+		report := FinalizeResults(session)
+		require.NotNil(t, report)
+		require.Len(t, report.Results, 1)
+
+		got := make([]string, 0, len(report.Results[0].AssociatedControls))
+		for _, control := range report.Results[0].AssociatedControls {
+			got = append(got, control.ControlID)
+		}
+		require.Equalf(t, want, got, "associated controls iteration %d", i)
+	}
+}
+
 func Test_mapInfoToPrintInfo_stableMarkers(t *testing.T) {
 	skipReasons := map[string]string{
 		"C-0001": "no cluster connection",
@@ -1204,4 +1354,94 @@ func Test_mapInfoToPrintInfo_stableMarkers(t *testing.T) {
 	for i := 0; i < 64; i++ {
 		require.Equalf(t, want, mapInfoToPrintInfo(controls), "iteration %d", i)
 	}
+}
+
+func TestFilterBySeverity(t *testing.T) {
+	report := &PostureReportWithSeverity{
+		SummaryDetails: SummaryDetailsWithSeverity{
+			Controls: map[string]ControlSummaryWithSeverity{
+				"C-0001": {Severity: "Critical"},
+				"C-0002": {Severity: "High"},
+				"C-0003": {Severity: "Medium"},
+				"C-0004": {Severity: "Low"},
+			},
+		},
+		Results: []ResultWithSeverity{
+			{
+				ResourceID: "res-1",
+				AssociatedControls: []ResourceAssociatedControlWithSeverity{
+					{Severity: "Critical"},
+					{Severity: "High"},
+					{Severity: "Medium"},
+					{Severity: "Low"},
+				},
+			},
+		},
+	}
+
+	FilterBySeverity(report, "high")
+
+	assert.Len(t, report.SummaryDetails.Controls, 2)
+	assert.Contains(t, report.SummaryDetails.Controls, "C-0001")
+	assert.Contains(t, report.SummaryDetails.Controls, "C-0002")
+	assert.NotContains(t, report.SummaryDetails.Controls, "C-0003")
+
+	assert.Len(t, report.Results[0].AssociatedControls, 2)
+	for _, c := range report.Results[0].AssociatedControls {
+		assert.Contains(t, []string{"Critical", "High"}, c.Severity)
+	}
+}
+
+func TestFilterBySeverity_EmptyMinSeverityNoOp(t *testing.T) {
+	report := &PostureReportWithSeverity{
+		SummaryDetails: SummaryDetailsWithSeverity{
+			Controls: map[string]ControlSummaryWithSeverity{
+				"C-0001": {Severity: "Low"},
+			},
+		},
+	}
+	FilterBySeverity(report, "")
+	assert.Len(t, report.SummaryDetails.Controls, 1)
+}
+
+func TestBuildMachineImageScanSummaryKeepsStableImageIdentity(t *testing.T) {
+	data := []cautils.ImageScanData{
+		{Image: "example/app:latest", Platform: "linux/amd64"},
+		{Image: "example/app:latest", Platform: "linux/arm64"},
+	}
+
+	machine := buildMachineImageScanSummary(data)
+	display := buildImageScanSummary(data)
+
+	assert.Equal(t, []string{"example/app:latest"}, machine.Images)
+	assert.Equal(t, []string{
+		"example/app:latest [linux/amd64]",
+		"example/app:latest [linux/arm64]",
+	}, display.Images)
+}
+
+func TestBuildImageScanSummary_CarriesVulnDBBuilt(t *testing.T) {
+	builtAt := time.Now().Add(-24 * time.Hour).Truncate(time.Second)
+
+	imageData := []cautils.ImageScanData{
+		{Image: "img:1", VulnDBBuilt: &builtAt},
+		{Image: "img:2"}, // no built time; first non-nil wins
+	}
+
+	summary := buildImageScanSummary(imageData)
+
+	require.NotNil(t, summary)
+	assert.Equal(t, builtAt, *summary.VulnDBBuilt)
+	assert.Equal(t, []string{"img:1", "img:2"}, summary.Images)
+}
+
+func TestBuildImageScanSummary_NilWhenNoBuilt(t *testing.T) {
+	imageData := []cautils.ImageScanData{
+		{Image: "img:1"},
+	}
+
+	summary := buildImageScanSummary(imageData)
+
+	require.NotNil(t, summary)
+	assert.Nil(t, summary.VulnDBBuilt)
 }

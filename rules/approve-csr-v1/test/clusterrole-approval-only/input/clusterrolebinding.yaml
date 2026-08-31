@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: csr-approval-only-crb
+subjects:
+- kind: ServiceAccount
+  name: approval-only-sa
+  namespace: ci
+roleRef:
+  kind: ClusterRole
+  name: csr-approval-only
+  apiGroup: rbac.authorization.k8s.io

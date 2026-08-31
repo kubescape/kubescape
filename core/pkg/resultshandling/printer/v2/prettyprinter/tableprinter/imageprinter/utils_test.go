@@ -258,3 +258,115 @@ func TestGetImageScanningHeaders(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateRows_AppendsVEXColumnsWhenPresent(t *testing.T) {
+	summary := ImageScanSummary{
+		CVEs: []CVE{
+			{
+				ID:         "CVE-2020-0001",
+				Severity:   "Low",
+				Package:    "package1",
+				Version:    "1.0.0",
+				FixedState: string(v5.NotFixedState),
+				Image:      "nginx:latest",
+			},
+			{
+				ID:               "CVE-2020-0002",
+				Severity:         "High",
+				Package:          "package2",
+				Version:          "1.0.0",
+				FixedState:       string(v5.NotFixedState),
+				Image:            "alpine:3.18",
+				VexStatus:        "not_affected",
+				VexJustification: "component_not_present",
+			},
+		},
+	}
+
+	rows := generateRows(summary)
+
+	assert.Equal(t, []string{
+		"High",
+		"CVE-2020-0002",
+		"package2",
+		"1.0.0",
+		"",
+		"alpine:3.18",
+		"not_affected",
+		"component_not_present",
+	}, rowToStrings(rows[0]))
+	assert.Equal(t, []string{
+		"Low",
+		"CVE-2020-0001",
+		"package1",
+		"1.0.0",
+		"",
+		"nginx:latest",
+		"",
+		"",
+	}, rowToStrings(rows[1]))
+}
+
+func TestRenderTable_WithVEXColumns(t *testing.T) {
+	summary := ImageScanSummary{
+		CVEs: []CVE{
+			{
+				ID:               "CVE-2020-0004",
+				Severity:         "High",
+				Package:          "package4",
+				Version:          "1.0.0",
+				FixedState:       string(v5.NotFixedState),
+				Image:            "alpine:3.18",
+				VexStatus:        "not_affected",
+				VexJustification: "component_not_present",
+			},
+		},
+	}
+	rows := generateRows(summary)
+	f, err := os.CreateTemp("", "print-vex-table")
+	assert.NoError(t, err)
+	defer f.Close()
+
+	renderTable(f, getImageScanningHeadersWithVEX(true), getImageScanningColumnsAlignmentsWithVEX(true), rows)
+	f.Seek(0, 0)
+	got, err := io.ReadAll(f)
+	assert.NoError(t, err)
+
+	assert.Contains(t, string(got), "VEX Status")
+	assert.Contains(t, string(got), "VEX Justification")
+	assert.Contains(t, string(got), "not_affected")
+	assert.Contains(t, string(got), "component_not_present")
+}
+
+func TestGetImageScanningHeadersWithVEX(t *testing.T) {
+	headers := getImageScanningHeadersWithVEX(true)
+	expectedHeaders := []string{"Severity", "Vulnerability", "Component", "Version", "Fixed in", "Image", "VEX Status", "VEX Justification"}
+
+	for i := range headers {
+		if headers[i] != expectedHeaders[i] {
+			t.Errorf("expected %s, got %s", expectedHeaders[i], headers[i])
+		}
+	}
+}
+
+func TestGetImageScanningColumnsAlignmentsWithVEX(t *testing.T) {
+	assert.Len(t, getImageScanningColumnsAlignmentsWithVEX(false), 6)
+	assert.Len(t, getImageScanningColumnsAlignmentsWithVEX(true), 8)
+}
+
+func TestSummaryHasVEX(t *testing.T) {
+	assert.False(t, summaryHasVEX(ImageScanSummary{}))
+	assert.False(t, summaryHasVEX(ImageScanSummary{CVEs: []CVE{{ID: "CVE-1"}}}))
+	assert.True(t, summaryHasVEX(ImageScanSummary{CVEs: []CVE{{ID: "CVE-1", VexStatus: "fixed"}}}))
+	assert.True(t, summaryHasVEX(ImageScanSummary{CVEs: []CVE{{ID: "CVE-1", VexJustification: "component_not_present"}}}))
+}
+
+func rowToStrings(row []interface{}) []string {
+	out := make([]string, 0, len(row))
+	for _, cell := range row {
+		if s, ok := cell.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}

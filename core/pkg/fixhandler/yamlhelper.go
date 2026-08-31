@@ -202,7 +202,7 @@ func getLastLineOfResource(linesSlice *[]string, currentLine int) (int, error) {
 	}
 
 	lastLine := len(*linesSlice)
-	for lastLine >= 0 {
+	for lastLine > 0 {
 		if !isEmptyLineOrComment((*linesSlice)[lastLine-1]) {
 			lastLinesOfResources = append(lastLinesOfResources, lastLine)
 			break

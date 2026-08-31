@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/jedib0t/go-pretty/v6/table"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"sigs.k8s.io/yaml"
@@ -261,6 +261,83 @@ func TestParseControlEntry(t *testing.T) {
 	}
 }
 
+func TestFilterControlEntries(t *testing.T) {
+	entries := []metav1.ControlListEntry{
+		{ID: "C-0001", Name: "Forbidden Container Registries", Frameworks: []string{"NSA", "MITRE"}},
+		{ID: "C-0002", Name: "Privileged Containers", Frameworks: []string{"AllControls", "NSA"}},
+		{ID: "C-0003", Name: "HostPath mount", Frameworks: []string{"MITRE"}},
+		{ID: "C-0100", Name: "API server flags", Frameworks: []string{}},
+	}
+
+	tests := []struct {
+		name    string
+		filters metav1.ControlListFilters
+		wantIDs []string
+	}{
+		{
+			name:    "no filters returns all entries",
+			filters: metav1.ControlListFilters{},
+			wantIDs: []string{"C-0001", "C-0002", "C-0003", "C-0100"},
+		},
+		{
+			name:    "framework filter is exact and case-insensitive",
+			filters: metav1.ControlListFilters{Framework: "nsa"},
+			wantIDs: []string{"C-0001", "C-0002"},
+		},
+		{
+			name:    "search matches control id",
+			filters: metav1.ControlListFilters{Search: "0100"},
+			wantIDs: []string{"C-0100"},
+		},
+		{
+			name:    "search matches control name",
+			filters: metav1.ControlListFilters{Search: "hostpath"},
+			wantIDs: []string{"C-0003"},
+		},
+		{
+			name:    "search matches frameworks",
+			filters: metav1.ControlListFilters{Search: "allcontrols"},
+			wantIDs: []string{"C-0002"},
+		},
+		{
+			name:    "framework and search compose",
+			filters: metav1.ControlListFilters{Framework: "NSA", Search: "registries"},
+			wantIDs: []string{"C-0001"},
+		},
+		{
+			name:    "framework without match returns empty",
+			filters: metav1.ControlListFilters{Framework: "PCI-DSS"},
+			wantIDs: []string{},
+		},
+		{
+			name:    "whitespace filters are ignored",
+			filters: metav1.ControlListFilters{Framework: " ", Search: "\t"},
+			wantIDs: []string{"C-0001", "C-0002", "C-0003", "C-0100"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterControlEntries(entries, tt.filters)
+			assert.Equal(t, tt.wantIDs, controlEntryIDs(got))
+		})
+	}
+}
+
+func TestControlEntryHasFrameworkTrimsCatalogValues(t *testing.T) {
+	entry := metav1.ControlListEntry{Frameworks: []string{" NSA ", "MITRE"}}
+	assert.True(t, controlEntryHasFramework(entry, "nsa"))
+	assert.True(t, controlEntryHasFramework(entry, "NSA "))
+}
+
+func controlEntryIDs(entries []metav1.ControlListEntry) []string {
+	ids := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		ids = append(ids, entry.ID)
+	}
+	return ids
+}
+
 // Generates rows for each entry with ID, name, documentation link, and frameworks.
 func TestGenerateControlRowsWithAllFields(t *testing.T) {
 	entries := []metav1.ControlListEntry{
@@ -493,7 +570,7 @@ func TestListSupportActionsNotEmpty(t *testing.T) {
 
 func TestListSupportActionsReturnsSupportedActions(t *testing.T) {
 	got := ListSupportActions()
-	want := []string{"controls", "exceptions", "frameworks"}
+	want := []string{"controls", "controls-config", "exceptions", "frameworks"}
 	sort.Strings(got)
 
 	assert.Equal(t, want, got)

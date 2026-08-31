@@ -2,16 +2,16 @@ package printer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/anchore/syft/syft/format"
 	"github.com/anchore/syft/syft/format/cyclonedxjson"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 )
 
 const (
@@ -28,16 +28,15 @@ func NewCycloneDXPrinter() *CycloneDXPrinter {
 	return &CycloneDXPrinter{}
 }
 
-func (cp *CycloneDXPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = cyclonedxOutputFile
-		}
-		if !strings.HasSuffix(strings.TrimSpace(outputFile), printer.CycloneDXOutputExt) {
-			outputFile = outputFile + printer.CycloneDXOutputExt
-		}
+func (cp *CycloneDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.CycloneDXFormat, outputFile, cyclonedxOutputFile)
+	if explicitOutput {
+		var err error
+		cp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
 	}
 	cp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 // Score is a no-op: HandleResults only calls Score when opaSessionObj != nil
@@ -50,10 +49,6 @@ func (cp *CycloneDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *caut
 		logger.L().Ctx(ctx).Error("cyclonedx-json output is only supported for image scans")
 		return fmt.Errorf("cyclonedx-json output is only supported for image scans")
 	}
-	if imageScanData[0].SBOM == nil {
-		logger.L().Ctx(ctx).Error("no SBOM data available for cyclonedx-json output")
-		return fmt.Errorf("no SBOM data available for cyclonedx-json output")
-	}
 
 	encoder, err := cyclonedxjson.NewFormatEncoderWithConfig(cyclonedxjson.DefaultEncoderConfig())
 	if err != nil {
@@ -61,13 +56,39 @@ func (cp *CycloneDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *caut
 		return err
 	}
 
-	data, err := format.Encode(*imageScanData[0].SBOM, encoder)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to encode SBOM as cyclonedx-json", helpers.Error(err))
-		return err
+	var encodedDocs []json.RawMessage
+	for _, scan := range imageScanData {
+		if scan.SBOM == nil {
+			logger.L().Ctx(ctx).Warning("skipping image with no SBOM data available for cyclonedx-json output")
+			continue
+		}
+
+		data, err := format.Encode(*scan.SBOM, encoder)
+		if err != nil {
+			logger.L().Ctx(ctx).Error("failed to encode SBOM as cyclonedx-json", helpers.Error(err))
+			return err
+		}
+
+		encodedDocs = append(encodedDocs, json.RawMessage(data))
 	}
 
-	if _, err := cp.writer.Write(data); err != nil {
+	if len(encodedDocs) == 0 {
+		logger.L().Ctx(ctx).Error("no SBOM data available for cyclonedx-json output")
+		return fmt.Errorf("no SBOM data available for cyclonedx-json output")
+	}
+
+	var outputBytes []byte
+	if len(encodedDocs) == 1 {
+		outputBytes = encodedDocs[0]
+	} else {
+		outputBytes, err = json.MarshalIndent(encodedDocs, "", "  ")
+		if err != nil {
+			logger.L().Ctx(ctx).Error("failed to marshal multi-image cyclonedx-json output", helpers.Error(err))
+			return err
+		}
+	}
+
+	if _, err := cp.writer.Write(outputBytes); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write cyclonedx-json output", helpers.Error(err))
 		return err
 	}
@@ -78,8 +99,10 @@ func (cp *CycloneDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *caut
 
 func (cp *CycloneDXPrinter) PrintNextSteps() {}
 
-func (cp *CycloneDXPrinter) CloseWriter() {
+// CloseWriter closes the CycloneDX output writer, returning any error from flushing or closing.
+func (cp *CycloneDXPrinter) CloseWriter() error {
 	if cp.writer != nil && cp.writer != os.Stdout {
-		cp.writer.Close()
+		return cp.writer.Close()
 	}
+	return nil
 }

@@ -1,0 +1,52 @@
+{
+  "name": "rule-credentials-configmap",
+  "attributes": {
+    "m$K8sThreatMatrix": "Credential access::Applications credentials in configuration files, Lateral Movement::Applications credentials in configuration files"
+  },
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        "*"
+      ],
+      "apiVersions": [
+        "*"
+      ],
+      "resources": [
+        "ConfigMap"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "configInputs": [
+    "settings.postureControlInputs.sensitiveValues",
+    "settings.postureControlInputs.sensitiveKeyNames",
+    "settings.postureControlInputs.sensitiveValuesAllowed",
+    "settings.postureControlInputs.sensitiveKeyNamesAllowed"
+  ],
+  "controlConfigInputs": [
+    {
+      "path": "settings.postureControlInputs.sensitiveValues",
+      "name": "Sensitive Values",
+      "description": "Strings that identify a value that Kubescape believes should be stored in a Secret, and not in a ConfigMap or an environment variable."
+    },
+    {
+      "path": "settings.postureControlInputs.sensitiveValuesAllowed",
+      "name": "Allowed Values",
+      "description": "Reduce false positives with known values."
+    },
+    {
+      "path": "settings.postureControlInputs.sensitiveKeyNames",
+      "name": "Sensitive Keys",
+      "description": "Key names that identify a potential value that should be stored in a Secret, and not in a ConfigMap or an environment variable."
+    },
+    {
+      "path": "settings.postureControlInputs.sensitiveKeyNamesAllowed",
+      "name": "Allowed Keys",
+      "description": "Reduce false positives with known key names."
+    }
+  ],
+  "description": "fails if ConfigMaps have sensitive information in configuration",
+  "remediation": "",
+  "ruleQuery": "armo_builtins"
+}

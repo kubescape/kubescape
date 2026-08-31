@@ -3,8 +3,8 @@ package mcpserver
 import (
 	"context"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 )
 
@@ -20,5 +20,11 @@ func (ksServer *KubescapeMcpserver) runIaCScan(ctx context.Context, path string,
 
 	fileHandler := resourcehandler.NewFileResourceHandler()
 
-	return runScan(ctx, ksServer, "", policyIdentifiers, "Local IaC", true, fileHandler, []string{path}, nil)
+	return runScan(ctx, ksServer, scanRequest{
+		policyIdentifiers:   policyIdentifiers,
+		label:               "Local IaC",
+		wantComplianceScore: true,
+		rsrcHandler:         fileHandler,
+		inputPatterns:       []string{path},
+	})
 }

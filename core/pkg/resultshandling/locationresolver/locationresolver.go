@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -30,7 +31,7 @@ type Location struct {
 }
 
 func NewFixPathLocationResolver(yamlPath string) (*FixPathLocationResolver, error) {
-	file, err := os.Open(yamlPath)
+	file, err := os.Open(filepath.Clean(yamlPath))
 	if err != nil {
 		return nil, err
 	}

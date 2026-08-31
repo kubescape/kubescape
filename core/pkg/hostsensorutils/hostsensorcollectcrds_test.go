@@ -3,10 +3,13 @@ package hostsensorutils
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	k8shostsensor "github.com/kubescape/k8s-interface/hostsensor"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -83,7 +86,7 @@ func newCRDDynamicClient(t *testing.T, items ...*unstructured.Unstructured) *fak
 func TestGetCRDResources_UnsupportedResourceType(t *testing.T) {
 	hsh := &HostSensorHandler{}
 
-	got, err := hsh.getCRDResources(context.Background(), k8shostsensor.KubeletConfiguration)
+	got, _, err := hsh.getCRDResources(context.Background(), k8shostsensor.KubeletConfiguration)
 
 	require.Nil(t, got)
 	require.ErrorContains(t, err, "unsupported resource type")
@@ -111,7 +114,7 @@ func TestCRDResourceGetters(t *testing.T) {
 
 	tests := []struct {
 		name  string
-		query func(context.Context) ([]hostsensor.HostSensorDataEnvelope, error)
+		query func(context.Context) ([]hostsensor.HostSensorDataEnvelope, crdCollection, error)
 	}{
 		{"OsReleaseFile", hsh.getOsReleaseFile},
 		{"KernelVersion", hsh.getKernelVersion},
@@ -127,13 +130,37 @@ func TestCRDResourceGetters(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := tt.query(ctx)
+			got, _, err := tt.query(ctx)
 			require.NoError(t, err)
 			require.Len(t, got, 1)
 			assert.Equal(t, "node-1", got[0].GetName())
 			assert.Equal(t, tt.name, got[0].GetKind())
 		})
 	}
+}
+
+// Covers the scan sequence a node-agent restart produces: one scan collects
+// nothing, the next one collects normally. With the cache enabled, the second
+// scan must query the cluster instead of being served the empty first result.
+func TestGetCRDResources_RecoversAfterEmptyCollection(t *testing.T) {
+	withTempCacheDir(t)
+	t.Setenv(HostSensorCacheTtlEnvVar, "1h")
+	withK8sHost(t, "https://cluster-a.example.com")
+
+	hsh := &HostSensorHandler{dynamicClient: newCRDDynamicClient(t)}
+	got, collected, err := hsh.getKubeletInfo(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.Zero(t, collected.listed)
+
+	item := newCRDItem("KubeletInfo", "node-1", map[string]any{"KubeletInfo": map[string]any{"version": "v1.30.0"}})
+	hsh.dynamicClient = newCRDDynamicClient(t, item)
+
+	got, collected, err = hsh.getKubeletInfo(context.Background())
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, 1, collected.listed)
+	assert.Equal(t, "node-1", got[0].GetName())
 }
 
 func TestCollectResources_SkipsControlPlaneInfoWhenCloudProviderPresent(t *testing.T) {
@@ -193,6 +220,36 @@ func TestCollectResources_RecordsQueryErrors(t *testing.T) {
 	assert.Len(t, infoMap, 2)
 }
 
+func TestCollectResources_RecordsZeroItemsErrors(t *testing.T) {
+	client := newCRDDynamicClient(t)
+	// Empty client with no CRD items created, but simulate 1 node existing
+	hsh := &HostSensorHandler{dynamicClient: client, nodeCount: 1}
+
+	res, infoMap, err := hsh.CollectResources(context.Background())
+
+	require.NoError(t, err)
+	assert.Empty(t, res)
+	assert.Len(t, infoMap, 9)
+	for _, resource := range []k8shostsensor.HostSensorResource{
+		k8shostsensor.OsReleaseFile,
+		k8shostsensor.KernelVersion,
+		k8shostsensor.LinuxSecurityHardeningStatus,
+		k8shostsensor.OpenPortsList,
+		k8shostsensor.LinuxKernelVariables,
+		k8shostsensor.KubeletInfo,
+		k8shostsensor.KubeProxyInfo,
+		k8shostsensor.CNIInfo,
+		k8shostsensor.ControlPlaneInfo,
+	} {
+		expectedErr := fmt.Sprintf("node-agent didn't report any %s for 1 nodes", resource.String())
+		group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(resource))
+		for _, r := range k8sinterface.ResourceGroupToString(group, version, resource.String()) {
+			assert.Contains(t, infoMap, r)
+			assert.Equal(t, expectedErr, infoMap[r].InnerInfo)
+		}
+	}
+}
+
 func hasKind(envelopes []hostsensor.HostSensorDataEnvelope, kind k8shostsensor.HostSensorResource) bool {
 	for _, e := range envelopes {
 		if e.GetKind() == kind.String() {
@@ -200,4 +257,128 @@ func hasKind(envelopes []hostsensor.HostSensorDataEnvelope, kind k8shostsensor.H
 		}
 	}
 	return false
+}
+
+// newCRDShell is a CRD item the node-agent created but never filled in, which
+// convertCRDToEnvelope cannot read.
+func newCRDShell(kind, name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": hostDataGroup + "/" + hostDataVersion,
+			"kind":       kind,
+			"metadata": map[string]any{
+				"name": name,
+			},
+		},
+	}
+}
+
+// A resource the node-agent reported but the scan could not read must land in
+// infoMap like a resource it never reported. Without it the resource whose data
+// actually failed is the only one carrying no status, while the resources that
+// are merely absent are all flagged.
+func TestCollectResources_RecordsUnreadableItems(t *testing.T) {
+	hsh := &HostSensorHandler{
+		dynamicClient: newCRDDynamicClient(t, newCRDShell("KubeletInfo", "node-1")),
+		nodeCount:     1,
+	}
+
+	res, infoMap, err := hsh.CollectResources(context.Background())
+
+	require.NoError(t, err)
+	assert.False(t, hasKind(res, k8shostsensor.KubeletInfo))
+	assertInfoMapContains(t, infoMap, k8shostsensor.KubeletInfo,
+		"node-agent reported 1 KubeletInfo but none of them could be read")
+}
+
+// The unreadable-items status must not depend on the node count: the items are
+// there, so "didn't report any" was never the right answer either way.
+func TestCollectResources_RecordsUnreadableItemsWithoutNodeCount(t *testing.T) {
+	hsh := &HostSensorHandler{
+		dynamicClient: newCRDDynamicClient(t, newCRDShell("CNIInfo", "node-1")),
+	}
+
+	res, infoMap, err := hsh.CollectResources(context.Background())
+
+	require.NoError(t, err)
+	assert.Empty(t, res)
+	assertInfoMapContains(t, infoMap, k8shostsensor.CNIInfo,
+		"node-agent reported 1 CNIInfo but none of them could be read")
+}
+
+// A resource that lost only some of its items keeps the ones it read, so it
+// must not be marked skipped over the nodes it is missing.
+func TestCollectResources_KeepsPartiallyReadableItems(t *testing.T) {
+	items := []*unstructured.Unstructured{
+		newCRDItem("KubeProxyInfo", "node-1", map[string]any{"mode": "iptables"}),
+		newCRDShell("KubeProxyInfo", "node-2"),
+	}
+	hsh := &HostSensorHandler{
+		dynamicClient: newCRDDynamicClient(t, items...),
+		nodeCount:     2,
+	}
+
+	res, infoMap, err := hsh.CollectResources(context.Background())
+
+	require.NoError(t, err)
+	assert.True(t, hasKind(res, k8shostsensor.KubeProxyInfo))
+	group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(k8shostsensor.KubeProxyInfo))
+	for _, r := range k8sinterface.ResourceGroupToString(group, version, k8shostsensor.KubeProxyInfo.String()) {
+		assert.NotContains(t, infoMap, r)
+	}
+}
+
+// dropped is what tells a partial loss from a total one, so it is pinned
+// rather than left to the callers that branch on it.
+func TestCrdCollectionDropped(t *testing.T) {
+	assert.Equal(t, 2, crdCollection{listed: 3, converted: 1}.dropped())
+	assert.Zero(t, crdCollection{listed: 3, converted: 3}.dropped())
+	assert.Zero(t, crdCollection{}.dropped())
+}
+
+// assertInfoMapContains checks that a resource was recorded as skipped under
+// every key ResourceGroupToString spells it with, since that is what the scan
+// looks it up by.
+func assertInfoMapContains(t *testing.T, infoMap map[string]apis.StatusInfo, resource k8shostsensor.HostSensorResource, want string) {
+	t.Helper()
+
+	group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(resource))
+	for _, r := range k8sinterface.ResourceGroupToString(group, version, resource.String()) {
+		require.Contains(t, infoMap, r)
+		assert.Equal(t, want, infoMap[r].InnerInfo)
+		assert.Equal(t, apis.StatusSkipped, infoMap[r].InnerStatus)
+	}
+}
+
+// CloudProviderInfo is queried ahead of the loop, so it needs its own coverage:
+// it was the one resource that could lose every item it reported and still
+// carry no status.
+func TestCollectResources_RecordsUnreadableCloudProviderItems(t *testing.T) {
+	hsh := &HostSensorHandler{
+		dynamicClient: newCRDDynamicClient(t, newCRDShell("CloudProviderInfo", "node-1")),
+		nodeCount:     1,
+	}
+
+	res, infoMap, err := hsh.CollectResources(context.Background())
+
+	require.NoError(t, err)
+	assert.False(t, hasKind(res, k8shostsensor.CloudProviderInfo))
+	assertInfoMapContains(t, infoMap, k8shostsensor.CloudProviderInfo,
+		"node-agent reported 1 CloudProviderInfo but none of them could be read")
+}
+
+// A cluster that simply has no CloudProviderInfo is the normal on-prem case, so
+// the zero-item arm the per-node resources get must stay off this query.
+func TestCollectResources_IgnoresAbsentCloudProviderInfo(t *testing.T) {
+	hsh := &HostSensorHandler{
+		dynamicClient: newCRDDynamicClient(t, newCRDItem("OsReleaseFile", "node-1", map[string]any{"pretty": "Ubuntu"})),
+	}
+
+	_, infoMap, err := hsh.CollectResources(context.Background())
+
+	require.NoError(t, err)
+	group, version := k8sinterface.SplitApiVersion(k8shostsensor.MapHostSensorResourceToApiGroup(k8shostsensor.CloudProviderInfo))
+	for _, r := range k8sinterface.ResourceGroupToString(group, version, k8shostsensor.CloudProviderInfo.String()) {
+		assert.NotContains(t, infoMap, r)
+	}
 }

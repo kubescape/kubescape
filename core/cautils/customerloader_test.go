@@ -10,7 +10,7 @@ import (
 	v1 "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -45,6 +45,52 @@ func TestConfig(t *testing.T) {
 	assert.Equal(t, co.CloudAPIURL, cop.CloudAPIURL)
 	assert.Equal(t, "", cop.ClusterName) // Not copied to bytes
 
+}
+
+func TestConfigConcurrentSerializationDoesNotMutateSource(t *testing.T) {
+	co := mockConfigObj()
+
+	originalMarshal := configMarshal
+	firstEntered := make(chan struct{})
+	secondEntered := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	var calls int
+	configMarshal = func(v any) ([]byte, error) {
+		calls++
+		switch calls {
+		case 1:
+			close(firstEntered)
+			<-releaseFirst
+		case 2:
+			close(secondEntered)
+			<-releaseSecond
+		}
+		return json.MarshalIndent(v, "", "  ") // #nosec G117 -- test fixture contains no real credential
+	}
+	t.Cleanup(func() { configMarshal = originalMarshal })
+
+	firstResult := make(chan []byte, 1)
+	go func() { firstResult <- co.Config() }()
+	<-firstEntered
+
+	secondResult := make(chan []byte, 1)
+	go func() { secondResult <- co.Config() }()
+	<-secondEntered
+
+	assert.Equal(t, "ddd", co.ClusterName, "serialization must not expose a temporary empty runtime identity")
+
+	close(releaseFirst)
+	firstJSON := <-firstResult
+	close(releaseSecond)
+	secondJSON := <-secondResult
+
+	assert.Equal(t, "ddd", co.ClusterName, "concurrent serialization must not change the source config")
+	for _, data := range [][]byte{firstJSON, secondJSON} {
+		var persisted map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(data, &persisted))
+		assert.NotContains(t, persisted, "clusterName", "clusterName must remain absent from persisted config")
+	}
 }
 
 func TestITenantConfig(t *testing.T) {
@@ -84,7 +130,7 @@ func TestReadConfig(t *testing.T) {
 	com := mockConfigObj()
 	co := &ConfigObj{}
 
-	b, e := json.Marshal(com)
+	b, e := json.Marshal(com) // #nosec G117 -- test fixture; marshals a mock config object
 	assert.NoError(t, e)
 
 	readConfig(b, co)
@@ -94,7 +140,6 @@ func TestReadConfig(t *testing.T) {
 	assert.Equal(t, com.CloudReportURL, co.CloudReportURL)
 	assert.Equal(t, com.CloudAPIURL, co.CloudAPIURL)
 }
-
 
 func TestAdoptClusterName(t *testing.T) {
 	tests := []struct {

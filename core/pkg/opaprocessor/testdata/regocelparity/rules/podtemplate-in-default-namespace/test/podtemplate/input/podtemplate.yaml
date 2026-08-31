@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PodTemplate
+metadata:
+  name: kubescape
+  namespace: default
+template:
+  metadata:
+    labels:
+      app: nginx
+  spec:
+    containers:
+    - name: nginx
+      image: nginx:1.14.2
+      ports:
+      - containerPort: 80

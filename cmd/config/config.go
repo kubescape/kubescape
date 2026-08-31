@@ -3,15 +3,18 @@ package config
 import (
 	"fmt"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/meta"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/spf13/cobra"
 )
 
 var (
 	configExample = fmt.Sprintf(`
-  # View cached configurations 
+  # View cached configurations
   %[1]s config view
+
+  # Validate cached configurations
+  %[1]s config validate
 
   # Delete cached configurations
   %[1]s config delete
@@ -39,6 +42,7 @@ func GetConfigCmd(ks meta.IKubescape) *cobra.Command {
 
 	configCmd.AddCommand(getDeleteCmd(ks))
 	configCmd.AddCommand(getSetCmd(ks))
+	configCmd.AddCommand(getValidateCmd(ks))
 	configCmd.AddCommand(getViewCmd(ks))
 
 	return configCmd

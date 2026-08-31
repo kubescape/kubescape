@@ -2,24 +2,155 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/pkg/imagescan"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/pkg/imagescan"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/version"
 )
+
+// buildBrokenRuleScanInfo writes a local, offline-loadable scan target (one
+// manifest, one framework with a deliberately invalid rego rule, and empty
+// controls-inputs/exceptions/attack-tracks so nothing needs a network call)
+// into its own temp dir, so callers get fully independent *cautils.ScanInfo
+// values suitable for running concurrently against a shared *Kubescape.
+func buildBrokenRuleScanInfo(t *testing.T) (*cautils.ScanInfo, []cautils.PolicyIdentifier, reporthandling.Control) {
+	t.Helper()
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "pod.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(`apiVersion: v1
+kind: Pod
+metadata:
+  name: partial-result-probe
+  namespace: default
+`), 0o600))
+
+	rule := reporthandling.PolicyRule{
+		Rule:         "package armo_builtins\nthis is not valid rego at all {{{",
+		RuleLanguage: reporthandling.RegoLanguage,
+		Match: []reporthandling.RuleMatchObjects{{
+			APIGroups:   []string{""},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"Pod"},
+		}},
+	}
+	rule.Name = "broken-rule"
+	control := reporthandling.Control{ControlID: "C-BROKEN", BaseScore: 5, Rules: []reporthandling.PolicyRule{rule}}
+	control.Name = "broken-control"
+	framework := reporthandling.Framework{Controls: []reporthandling.Control{control}}
+	framework.Name = "broken-framework"
+	frameworkBytes, err := json.Marshal(framework)
+	require.NoError(t, err)
+	frameworkPath := filepath.Join(dir, "framework.json")
+	require.NoError(t, os.WriteFile(frameworkPath, frameworkBytes, 0o600))
+	controlsInputsPath := filepath.Join(dir, "controls-inputs.json")
+	require.NoError(t, os.WriteFile(controlsInputsPath, []byte(`{"probe":["value"]}`), 0o600))
+	exceptionsPath := filepath.Join(dir, "exceptions.json")
+	require.NoError(t, os.WriteFile(exceptionsPath, []byte(`[]`), 0o600))
+	attackTracksPath := filepath.Join(dir, "attack-tracks.json")
+	require.NoError(t, os.WriteFile(attackTracksPath, []byte(`[]`), 0o600))
+
+	scanInfo := &cautils.ScanInfo{
+		UseFrom:          []string{frameworkPath},
+		ControlsInputs:   controlsInputsPath,
+		UseExceptions:    exceptionsPath,
+		AttackTracks:     attackTracksPath,
+		InputPatterns:    []string{manifestPath},
+		Local:            true,
+		FrameworkScan:    true,
+		ScanType:         cautils.ScanTypeFramework,
+		OmitRawResources: true,
+	}
+	scanInfo.Submit.SetBool(false)
+
+	policyIdentifiers := []cautils.PolicyIdentifier{{
+		Identifier: framework.Name,
+		Kind:       apisv1.KindFramework,
+	}}
+	return scanInfo, policyIdentifiers, control
+}
+
+func TestScan_ReturnsFinalizedPartialDataOnOPAError(t *testing.T) {
+	scanInfo, policyIdentifiers, control := buildBrokenRuleScanInfo(t)
+
+	results, err := NewKubescape(context.Background()).Scan(scanInfo, policyIdentifiers)
+
+	require.ErrorContains(t, err, "broken-rule")
+	require.NotNil(t, results)
+	require.NotNil(t, results.GetData(), "the finalized partial session must remain available alongside the scan error")
+	require.Len(t, results.GetData().ResourcesResult, 1)
+	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
+	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+}
+
+// TestScanContext_ReturnsFinalizedPartialDataOnOPAError exercises the new
+// explicit-context entry point directly (#3237), mirroring
+// TestScan_ReturnsFinalizedPartialDataOnOPAError's assertions to confirm
+// ScanContext behaves identically to Scan when called with ks.Context().
+func TestScanContext_ReturnsFinalizedPartialDataOnOPAError(t *testing.T) {
+	scanInfo, policyIdentifiers, control := buildBrokenRuleScanInfo(t)
+	ks := NewKubescape(context.Background())
+
+	results, err := ks.ScanContext(ks.Context(), scanInfo, policyIdentifiers)
+
+	require.ErrorContains(t, err, "broken-rule")
+	require.NotNil(t, results)
+	require.NotNil(t, results.GetData(), "the finalized partial session must remain available alongside the scan error")
+	require.Len(t, results.GetData().ResourcesResult, 1)
+	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
+	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+}
+
+// TestScanContext_DoesNotMutateSharedKubescapeContext is a regression test
+// for #3237: ScanContext must operate purely on the ctx argument it's given
+// and never read or write ks's own Ctx field, so two operations sharing one
+// *Kubescape can't observe or clobber each other's context the way the old
+// Scan()+SetContext(timeout)+restore pattern could.
+//
+// This intentionally does not run two ScanContext calls concurrently under
+// -race: doing so trips an unrelated, pre-existing data race in
+// k8sinterface.IsConnectedToCluster/SetConnectedToCluster (a package-level
+// cache in github.com/kubescape/k8s-interface, exercised via getInterfaces
+// regardless of scan type). That's a real bug, but it's in a shared
+// dependency's global state, not in *Kubescape's context ownership, and
+// fixing it is out of scope here: #3237 explicitly does not claim the whole
+// scanner is safe for unrestricted parallel execution, only that Scan's own
+// context handling is.
+func TestScanContext_DoesNotMutateSharedKubescapeContext(t *testing.T) {
+	scanInfo, policyIdentifiers, control := buildBrokenRuleScanInfo(t)
+	ks := NewKubescape(context.Background())
+
+	type ctxKey struct{}
+	operationCtx := context.WithValue(context.Background(), ctxKey{}, "operation-owned")
+
+	results, err := ks.ScanContext(operationCtx, scanInfo, policyIdentifiers)
+
+	require.ErrorContains(t, err, "broken-rule")
+	require.NotNil(t, results)
+	require.NotNil(t, results.GetData())
+	controlSummary := results.GetData().Report.SummaryDetails.Controls[control.ControlID]
+	assert.Equal(t, apis.StatusSkipped, controlSummary.GetStatus().Status())
+
+	assert.Equal(t, context.Background(), ks.Context(), "ScanContext must not call SetContext or otherwise mutate ks's own context")
+}
 
 type recordingImageScanService struct {
 	image              string
@@ -61,6 +192,10 @@ func (m estimateClusterSizeMock) GetClusterAPIServerInfo(ctx context.Context) *v
 
 func (m estimateClusterSizeMock) GetCloudProvider() string {
 	return ""
+}
+
+func (m estimateClusterSizeMock) Preflight(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (*resourcehandler.PreflightResult, error) {
+	return nil, nil
 }
 
 func TestEstimateClusterSize(t *testing.T) {
@@ -132,6 +267,82 @@ func TestGetOutputPrinters(t *testing.T) {
 	assert.Equal(t, 3, len(outputPrinters))
 }
 
+func TestScanClosesOutputPrinterWhenPolicyLoadingFails(t *testing.T) {
+	if _, err := os.Stat("/proc/self/fd"); err != nil {
+		t.Skip("requires /proc/self/fd")
+	}
+
+	for _, formatVersion := range []string{"v1", "v2"} {
+		t.Run(formatVersion, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), "report.json")
+			missingPolicy := "missing-" + filepath.Base(t.TempDir())
+			scanInfo := &cautils.ScanInfo{
+				InputPatterns: []string{"../cautils/testdata/mixed_extensions/pod.yaml"},
+				UseFrom:       []string{filepath.Join(t.TempDir(), missingPolicy+".json")},
+				Format:        printer.JsonFormat,
+				FormatVersion: formatVersion,
+				Output:        output,
+				Local:         true,
+				FrameworkScan: true,
+				ScanType:      cautils.ScanTypeFramework,
+			}
+
+			results, err := NewKubescape(context.Background()).Scan(scanInfo, cautils.BuildPolicyIdentifiers([]string{missingPolicy}, apisv1.KindFramework))
+			require.Error(t, err)
+			require.ErrorContains(t, err, missingPolicy)
+			require.NotNil(t, results, "policy loading must fail after the configured printer is attached to a result handler")
+			assertNoOpenFileDescriptor(t, output)
+			// Keep the returned handler (and its printer) reachable while inspecting
+			// /proc so an os.File finalizer cannot hide the leak under test.
+			runtime.KeepAlive(results)
+		})
+	}
+}
+
+func assertNoOpenFileDescriptor(t *testing.T, path string) {
+	t.Helper()
+	absPath, err := filepath.Abs(path)
+	require.NoError(t, err)
+	entries, err := os.ReadDir("/proc/self/fd")
+	require.NoError(t, err)
+	for _, entry := range entries {
+		target, err := os.Readlink(filepath.Join("/proc/self/fd", entry.Name()))
+		if err == nil {
+			assert.NotEqual(t, absPath, strings.TrimSuffix(target, " (deleted)"), "leaked output file descriptor %s", entry.Name())
+		}
+	}
+}
+
+func TestGetOutputPrintersReturnsExplicitSetupErrorsForEveryFormat(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-directory")
+	require.NoError(t, os.WriteFile(blocker, []byte("block"), 0o600))
+	requestedOutput := filepath.Join(blocker, "report")
+
+	for _, format := range printer.AllFormats {
+		t.Run(format, func(t *testing.T) {
+			scanType := cautils.ScanTypeControl
+			if format == printer.CycloneDXFormat || format == printer.SPDXFormat {
+				scanType = cautils.ScanTypeImage
+			}
+			scanInfo := &cautils.ScanInfo{
+				ScanType:      scanType,
+				Format:        format,
+				Output:        requestedOutput,
+				InputPatterns: []string{dir},
+			}
+
+			outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+
+			require.Error(t, err)
+			assert.Nil(t, outputPrinters)
+			assert.Contains(t, err.Error(), "configure \""+format+"\" output")
+			assert.True(t, strings.Contains(err.Error(), "create output directory") || strings.Contains(err.Error(), "open output file"))
+			assert.NoFileExists(t, resolvedOutputPath(format, requestedOutput))
+		})
+	}
+}
+
 func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
 	scanInfo := &cautils.ScanInfo{
 		ScanType: cautils.ScanTypeControl,
@@ -145,6 +356,27 @@ func TestGetOutputPrintersCollisionReturnsError(t *testing.T) {
 	assert.Contains(t, err.Error(), "output path collision")
 }
 
+func TestGetOutputPrintersClosesV1JSONWriterAfterLaterSetupFailure(t *testing.T) {
+	if _, err := os.Stat("/proc/self/fd"); err != nil {
+		t.Skip("requires /proc/self/fd")
+	}
+
+	output := filepath.Join(t.TempDir(), "report")
+	scanInfo := &cautils.ScanInfo{
+		ScanType:      cautils.ScanTypeControl,
+		Format:        printer.JsonFormat + "," + printer.GitLabSASTFormat,
+		FormatVersion: "v1",
+		Output:        output,
+		InputPatterns: []string{"manifest.yaml"},
+	}
+
+	outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+
+	require.ErrorContains(t, err, "output path collision")
+	assert.Nil(t, outputPrinters)
+	assertNoOpenFileDescriptor(t, output+printer.JsonOutputExt)
+}
+
 func TestResolvedOutputPath(t *testing.T) {
 	tests := []struct {
 		name, format, outputFile, want string
@@ -156,11 +388,31 @@ func TestResolvedOutputPath(t *testing.T) {
 		{"append CycloneDX", printer.CycloneDXFormat, "report.json", "report.json.cdx.json"},
 		{"preserve SPDX", printer.SPDXFormat, "report.spdx.json", "report.spdx.json"},
 		{"append SPDX", printer.SPDXFormat, "report.json", "report.json.spdx.json"},
+		{"append markdown", printer.MarkdownFormat, "report", "report.md"},
+		{"preserve markdown", printer.MarkdownFormat, "report.md", "report.md"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			assert.Equal(t, test.want, resolvedOutputPath(test.format, test.outputFile))
+		})
+	}
+}
+
+// markdown writes report.md and pretty-printer writes report.txt, so sharing
+// an --output must not be rejected as a collision.
+func TestGetOutputPrintersAllowsMarkdownAlongsideTextFormats(t *testing.T) {
+	for _, format := range []string{printer.PrettyFormat, printer.PrometheusFormat} {
+		t.Run(format, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				ScanType: cautils.ScanTypeControl,
+				Format:   printer.MarkdownFormat + "," + format,
+				Output:   filepath.Join(t.TempDir(), "report"),
+			}
+
+			outputPrinters, err := GetOutputPrinters(scanInfo, context.Background(), "")
+			require.NoError(t, err)
+			assert.Len(t, outputPrinters, 2)
 		})
 	}
 }
@@ -498,6 +750,10 @@ func (m *streamingCancelMock) GetCloudProvider() string {
 	return m.cloudProvider
 }
 
+func (m *streamingCancelMock) Preflight(context.Context, *cautils.OPASessionObj, *cautils.ScanInfo) (*resourcehandler.PreflightResult, error) {
+	return nil, nil
+}
+
 func TestCollectAndProcessResourcesWithStreaming_InitializesProviderScope(t *testing.T) {
 	apiServerInfo := &version.Info{GitVersion: "v1.31.0-eks"}
 	mockHandler := &streamingCancelMock{
@@ -537,82 +793,161 @@ func TestCollectAndProcessResourcesWithStreaming_CancelsProducerContext(t *testi
 	assert.Equal(t, context.Canceled, mockHandler.passedCtx.Err(), "derived producer context must be canceled when function returns")
 }
 
-func TestCollectWorkloadImages_IncludesInitAndEphemeralContainers(t *testing.T) {
-	wl := workloadinterface.NewWorkloadObj(map[string]any{
+func TestGetAllWorkloadImages(t *testing.T) {
+	podData := map[string]interface{}{
 		"apiVersion": "v1",
 		"kind":       "Pod",
-		"metadata":   map[string]any{"name": "all-container-types"},
-		"spec": map[string]any{
-			"containers": []any{map[string]any{
-				"name": "app", "image": "alpine:3.20",
-			}},
-			"initContainers": []any{map[string]any{
-				"name": "setup", "image": "busybox:1.36",
-			}},
-			"ephemeralContainers": []any{map[string]any{
-				"name": "debugger", "image": "ubuntu:24.04",
-			}},
+		"metadata": map[string]interface{}{
+			"name": "test-pod",
 		},
-	})
+		"spec": map[string]interface{}{
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name":  "main-app",
+					"image": "app:v1",
+				},
+			},
+			"initContainers": []interface{}{
+				map[string]interface{}{
+					"name":  "init-setup",
+					"image": "init:v1",
+				},
+			},
+			"ephemeralContainers": []interface{}{
+				map[string]interface{}{
+					"name":  "debug-tool",
+					"image": "debug:v1",
+				},
+			},
+		},
+	}
 
-	imagesToScan := mapset.NewSet[string]()
-	imageToCreds := make(map[string][]imagescan.RegistryCredentials)
+	wl := workloadinterface.NewWorkloadObj(podData)
+	images, containerErrors := getAllWorkloadImages(wl)
 
-	err := collectWorkloadImages(context.Background(), nil, wl, imagesToScan, imageToCreds)
-
-	require.NoError(t, err)
-	assert.True(t, imagesToScan.Contains("alpine:3.20"), "regular container image must be scheduled")
-	assert.True(t, imagesToScan.Contains("busybox:1.36"), "init container image must be scheduled")
-	assert.True(t, imagesToScan.Contains("ubuntu:24.04"), "ephemeral container image must be scheduled")
-	assert.Equal(t, 3, imagesToScan.Cardinality())
+	require.Empty(t, containerErrors)
+	assert.Contains(t, images, "app:v1")
+	assert.Contains(t, images, "init:v1")
+	assert.Contains(t, images, "debug:v1")
+	assert.Len(t, images, 3)
 }
 
-func allContainerTypesWorkload(name string) map[string]any {
-	return map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Pod",
-		"metadata":   map[string]any{"name": name},
-		"spec": map[string]any{
-			"containers": []any{map[string]any{
-				"name": "app", "image": "alpine:3.20",
-			}},
-			"initContainers": []any{map[string]any{
-				"name": "setup", "image": "busybox:1.36",
-			}},
-			"ephemeralContainers": []any{map[string]any{
-				"name": "debugger", "image": "ubuntu:24.04",
-			}},
+func TestGetAllWorkloadImagesReturnsGetterErrorsAndPreservesOtherClasses(t *testing.T) {
+	tests := []struct {
+		name           string
+		malformedField string
+		containerClass string
+		wantImages     []string
+	}{
+		{
+			name:           "regular containers",
+			malformedField: "containers",
+			containerClass: "containers",
+			wantImages:     []string{"init:v1", "debug:v1"},
 		},
+		{
+			name:           "init containers",
+			malformedField: "initContainers",
+			containerClass: "init containers",
+			wantImages:     []string{"app:v1", "debug:v1"},
+		},
+		{
+			name:           "ephemeral containers",
+			malformedField: "ephemeralContainers",
+			containerClass: "ephemeral containers",
+			wantImages:     []string{"app:v1", "init:v1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spec := map[string]interface{}{
+				"containers": []interface{}{
+					map[string]interface{}{"name": "main-app", "image": "app:v1"},
+				},
+				"initContainers": []interface{}{
+					map[string]interface{}{"name": "init-setup", "image": "init:v1"},
+				},
+				"ephemeralContainers": []interface{}{
+					map[string]interface{}{"name": "debug-tool", "image": "debug:v1"},
+				},
+			}
+			spec[tt.malformedField] = "not-a-container-list"
+			wl := workloadinterface.NewWorkloadObj(map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]interface{}{
+					"name":      "malformed",
+					"namespace": "image-scan-test",
+				},
+				"spec": spec,
+			})
+
+			images, containerErrors := getAllWorkloadImages(wl)
+
+			assert.ElementsMatch(t, tt.wantImages, images)
+			require.Len(t, containerErrors, 1)
+			assert.Contains(t, containerErrors[0].Error(), "failed to get "+tt.containerClass)
+			assert.Contains(t, containerErrors[0].Error(), "kind: Pod")
+			assert.Contains(t, containerErrors[0].Error(), "name: malformed")
+			assert.Contains(t, containerErrors[0].Error(), "namespace: image-scan-test")
+		})
 	}
 }
 
-// TestCollectImageScanTargets_IncludesInitAndEphemeralContainers is the
-// regression test for the actual wiring bug: collectWorkloadImages handling
-// init and ephemeral containers is not enough on its own if the entry point,
-// collectImageScanTargets (the function scanImages calls), never invokes it.
-// This drives collectImageScanTargets itself for both the single-workload and
-// the all-resources scan paths.
+// TestCollectImageScanTargets_IncludesInitAndEphemeralContainers covers the
+// wiring rather than the helper. TestGetAllWorkloadImages already exercises
+// getAllWorkloadImages directly, but a helper that handles init and ephemeral
+// containers is not enough on its own if the entry point scanImages actually
+// calls - collectImageScanTargets - never reaches it. This drives that entry
+// point for both the single-workload and the all-resources scan paths.
 func TestCollectImageScanTargets_IncludesInitAndEphemeralContainers(t *testing.T) {
+	allContainerTypesPod := func(name string) map[string]any {
+		return map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata":   map[string]any{"name": name},
+			"spec": map[string]any{
+				"containers": []any{map[string]any{
+					"name": "app", "image": "alpine:3.20",
+				}},
+				"initContainers": []any{map[string]any{
+					"name": "setup", "image": "busybox:1.36",
+				}},
+				"ephemeralContainers": []any{map[string]any{
+					"name": "debugger", "image": "ubuntu:24.04",
+				}},
+			},
+		}
+	}
+	wantImages := []string{"alpine:3.20", "busybox:1.36", "ubuntu:24.04"}
+
+	scheduledImages := func(targets mapset.Set[ImageScanTarget]) []string {
+		images := make([]string, 0, targets.Cardinality())
+		for _, target := range targets.ToSlice() {
+			images = append(images, target.Image)
+		}
+		return images
+	}
+
 	t.Run("ScanTypeWorkload", func(t *testing.T) {
 		scanData := cautils.NewOPASessionObjMock()
-		scanData.SingleResourceScan = workloadinterface.NewWorkloadObj(allContainerTypesWorkload("single"))
+		scanData.SingleResourceScan = workloadinterface.NewWorkloadObj(allContainerTypesPod("single"))
 
-		imagesToScan, _ := collectImageScanTargets(cautils.ScanTypeWorkload, scanData, context.Background(), cautils.ContextFile, nil)
+		targets, _, containerErrors := collectImageScanTargets(cautils.ScanTypeWorkload, scanData, context.Background(), cautils.ContextFile, nil, "")
 
-		assert.True(t, imagesToScan.Contains("alpine:3.20"), "regular container image must be scheduled")
-		assert.True(t, imagesToScan.Contains("busybox:1.36"), "init container image must be scheduled")
-		assert.True(t, imagesToScan.Contains("ubuntu:24.04"), "ephemeral container image must be scheduled")
+		require.Empty(t, containerErrors)
+		assert.ElementsMatch(t, wantImages, scheduledImages(targets))
 	})
 
 	t.Run("AllResources", func(t *testing.T) {
 		scanData := cautils.NewOPASessionObjMock()
-		wl := workloadinterface.NewWorkloadObj(allContainerTypesWorkload("all-resources"))
+		wl := workloadinterface.NewWorkloadObj(allContainerTypesPod("all-resources"))
 		scanData.AllResources[wl.GetID()] = wl
 
-		imagesToScan, _ := collectImageScanTargets(cautils.ScanTypeCluster, scanData, context.Background(), cautils.ContextFile, nil)
+		targets, _, containerErrors := collectImageScanTargets(cautils.ScanTypeCluster, scanData, context.Background(), cautils.ContextFile, nil, "")
 
-		assert.True(t, imagesToScan.Contains("alpine:3.20"), "regular container image must be scheduled")
-		assert.True(t, imagesToScan.Contains("busybox:1.36"), "init container image must be scheduled")
-		assert.True(t, imagesToScan.Contains("ubuntu:24.04"), "ephemeral container image must be scheduled")
+		require.Empty(t, containerErrors)
+		assert.ElementsMatch(t, wantImages, scheduledImages(targets))
 	})
 }

@@ -3,16 +3,17 @@ package patch
 import (
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/distribution/reference"
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v3/cmd/shared"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/meta"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/cmd/shared"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/meta"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/project-copacetic/copacetic/pkg/buildkit"
 	"github.com/spf13/cobra"
 )
@@ -43,6 +44,8 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			applyRegistryCredentialsFromEnv(cmd, &patchInfo)
+
 			if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
 				return fmt.Errorf("format cannot be empty, supported formats: %s", strings.Join(shared.ImageScanFormats, ", "))
 			}
@@ -82,8 +85,9 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 	patchCmd.PersistentFlags().StringVar(&patchInfo.OutputMode, "output-mode", "docker", "Output mode for the patched image (docker, image, oci, local)")
 	patchCmd.PersistentFlags().StringVar(&patchInfo.OutputPath, "output-path", "", "Destination path for oci or local output mode")
 
-	patchCmd.PersistentFlags().StringVarP(&patchInfo.Username, "username", "u", "", "Username for registry login")
-	patchCmd.PersistentFlags().StringVarP(&patchInfo.Password, "password", "p", "", "Password for registry login")
+	patchCmd.PersistentFlags().StringVarP(&patchInfo.Username, "username", "u", "", "Username for registry login [$"+shared.RegistryUsernameEnvVar+"]")
+	// Note: no backticks in the usage string - pflag reads a backquoted word as the flag's value placeholder.
+	patchCmd.PersistentFlags().StringVarP(&patchInfo.Password, "password", "p", "", "Password for registry login. Prefer the environment variable: a flag value is visible in ps and shell history [$"+shared.RegistryPasswordEnvVar+"]")
 
 	patchCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "",
 		fmt.Sprintf("Output file format. Supported formats: %s", strings.Join(shared.ImageScanFormats, ", ")))
@@ -95,6 +99,31 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 	patchCmd.PersistentFlags().StringVar(&scanInfo.ListingURL, "grype-db-url", "", "Grype vulnerability database URL")
 
 	return patchCmd
+}
+
+// applyRegistryCredentialsFromEnv fills the registry credentials from
+// KUBESCAPE_REGISTRY_USERNAME/KUBESCAPE_REGISTRY_PASSWORD when the corresponding flag
+// was not given on the command line, so a registry password never has to be typed as a
+// `--password` argument - where it is visible in `ps`, /proc/<pid>/cmdline and shell
+// history. `kubescape scan image` already honours these variables (see
+// applyRegistryCredentialsFromEnv in cmd/scan/scan.go); `patch` authenticates against
+// the same registries with the same -u/-p flags, so it accepts them too.
+//
+// An explicitly set flag always wins, including when it is set to an empty value: that
+// is an explicit request for no credential and must not be overridden by the
+// environment. `patch` has no token flag, so only the username/password pair is
+// resolved here.
+func applyRegistryCredentialsFromEnv(cmd *cobra.Command, patchInfo *metav1.PatchInfo) {
+	if patchInfo == nil {
+		return
+	}
+
+	if !shared.RegistryCredentialFlagChanged(cmd, "username") && patchInfo.Username == "" {
+		patchInfo.Username = os.Getenv(shared.RegistryUsernameEnvVar)
+	}
+	if !shared.RegistryCredentialFlagChanged(cmd, "password") && patchInfo.Password == "" {
+		patchInfo.Password = os.Getenv(shared.RegistryPasswordEnvVar)
+	}
 }
 
 // validateImagePatchInfo validates the image patch info for the `patch` command
@@ -138,6 +167,13 @@ func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 		named = reference.TagNameOnly(named)
 	}
 	patchInfo.Image = named.String()
+
+	// Capture the source tag whenever the reference has one, independent of
+	// the patched-tag defaulting below. A digest-pinned reference carries no
+	// tag; that must not be treated as an error here.
+	if taggedName, ok := named.(reference.Tagged); ok {
+		patchInfo.ImageTag = taggedName.Tag()
+	}
 
 	// If no patched image tag is provided, default to '<image-tag>-patched'
 	if patchInfo.PatchedImageTag == "" {

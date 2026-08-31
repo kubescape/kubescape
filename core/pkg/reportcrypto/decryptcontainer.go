@@ -13,7 +13,7 @@ import (
 // This mirrors the traversal used during encryption while applying
 // decryption to container-specific metadata.
 
-func DecryptContainerMetadata(resource workloadinterface.IMetadata, dek []byte) error {
+func DecryptContainerMetadata(resource workloadinterface.IMetadata, dek *ReportKey) error {
 
 	if resource == nil {
 		return nil
@@ -35,7 +35,7 @@ func DecryptContainerMetadata(resource workloadinterface.IMetadata, dek []byte) 
 
 // decryptPodSpecs recursively traverses workload objects looking for
 // pod-spec-shaped sections containing container metadata.
-func decryptPodSpecs(node any, dek []byte) error {
+func decryptPodSpecs(node any, dek *ReportKey) error {
 
 	switch v := node.(type) {
 
@@ -80,7 +80,7 @@ func decryptPodSpecs(node any, dek []byte) error {
 // decryptContainerFields restores encrypted container names and image
 // references contained in an unstructured container definition.
 
-func decryptContainerFields(container map[string]any, dek []byte) error {
+func decryptContainerFields(container map[string]any, dek *ReportKey) error {
 
 	var err error
 
@@ -115,7 +115,7 @@ func decryptContainerFields(container map[string]any, dek []byte) error {
 // decryptContainerList restores encrypted metadata for typed and
 // unstructured containers.
 
-func decryptContainerList(obj map[string]any, key string, dek []byte) error {
+func decryptContainerList(obj map[string]any, key string, dek *ReportKey) error {
 
 	rawContainers, ok := obj[key]
 	if !ok || rawContainers == nil {
@@ -180,7 +180,7 @@ func decryptContainerList(obj map[string]any, key string, dek []byte) error {
 // decryptEphemeralContainerList restores encrypted metadata for typed
 // and unstructured ephemeral containers.
 
-func decryptEphemeralContainerList(obj map[string]any, key string, dek []byte) error {
+func decryptEphemeralContainerList(obj map[string]any, key string, dek *ReportKey) error {
 
 	rawContainers, ok := obj[key]
 	if !ok || rawContainers == nil {
@@ -249,7 +249,7 @@ func decryptEphemeralContainerList(obj map[string]any, key string, dek []byte) e
 // sensitivity rules used during encryption, while Secret and ConfigMap
 // references are always decrypted when present.
 
-func decryptTypedEnv(envVars []corev1.EnvVar, dek []byte) error {
+func decryptTypedEnv(envVars []corev1.EnvVar, dek *ReportKey) error {
 
 	var err error
 
@@ -297,7 +297,7 @@ func decryptTypedEnv(envVars []corev1.EnvVar, dek []byte) error {
 // sensitivity rules used during encryption, while SecretKeyRef and
 // ConfigMapKeyRef references are always decrypted when present.
 
-func decryptUnstructuredEnv(container map[string]any, dek []byte) error {
+func decryptUnstructuredEnv(container map[string]any, dek *ReportKey) error {
 
 	rawEnv, exists := container["env"]
 	if !exists || rawEnv == nil {
@@ -354,7 +354,7 @@ func decryptUnstructuredEnv(container map[string]any, dek []byte) error {
 // Secret and ConfigMap references are decrypted when present while
 // preserving the original workload structure.
 
-func decryptTypedEnvFrom(envFrom []corev1.EnvFromSource, dek []byte) error {
+func decryptTypedEnvFrom(envFrom []corev1.EnvFromSource, dek *ReportKey) error {
 
 	var err error
 
@@ -385,7 +385,7 @@ func decryptTypedEnvFrom(envFrom []corev1.EnvFromSource, dek []byte) error {
 // Secret and ConfigMap references are decrypted while preserving the
 // original workload structure.
 
-func decryptUnstructuredEnvFrom(container map[string]any, dek []byte) error {
+func decryptUnstructuredEnvFrom(container map[string]any, dek *ReportKey) error {
 
 	rawEnvFrom, ok := container["envFrom"].([]any)
 	if !ok {
@@ -415,7 +415,7 @@ func decryptUnstructuredEnvFrom(container map[string]any, dek []byte) error {
 //
 // References that do not contain a name are left unchanged.
 
-func decryptUnstructuredReference(obj map[string]any, key string, dek []byte) error {
+func decryptUnstructuredReference(obj map[string]any, key string, dek *ReportKey) error {
 
 	ref, ok := obj[key].(map[string]any)
 	if !ok {
@@ -444,7 +444,7 @@ func decryptUnstructuredReference(obj map[string]any, key string, dek []byte) er
 // Image pull secret names are decrypted while preserving the original
 // workload structure.
 
-func decryptImagePullSecrets(obj map[string]any, dek []byte) error {
+func decryptImagePullSecrets(obj map[string]any, dek *ReportKey) error {
 
 	rawRefs, ok := obj["imagePullSecrets"]
 	if !ok || rawRefs == nil {
@@ -508,7 +508,7 @@ func decryptImagePullSecrets(obj map[string]any, dek []byte) error {
 // Service account names are decrypted while preserving the workload
 // structure.
 
-func decryptServiceAccountName(obj map[string]any, dek []byte) error {
+func decryptServiceAccountName(obj map[string]any, dek *ReportKey) error {
 
 	var err error
 

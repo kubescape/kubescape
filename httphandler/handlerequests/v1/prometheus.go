@@ -12,8 +12,8 @@ import (
 	"github.com/gorilla/schema"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 )
@@ -74,7 +74,6 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	select {
 	case handler.scanRequestChan <- scanParams:
 	default:
-		handler.state.setNotBusy(scanID)
 		w.Header().Set("Retry-After", "1")
 		handler.writeErrorWithStatus(w,
 			fmt.Errorf("scan queue is full; retry the request later"),

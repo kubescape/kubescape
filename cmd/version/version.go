@@ -5,8 +5,9 @@ import (
 	"fmt"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
-	"github.com/kubescape/kubescape/v3/core/meta"
+	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/spf13/cobra"
+	"sigs.k8s.io/yaml"
 )
 
 type versionInfo struct {
@@ -36,21 +37,37 @@ func GetVersionCmd(ks meta.IKubescape, version, commit, date string) *cobra.Comm
 				}
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), string(b))
 				return err
+			case "yaml":
+				info := versionInfo{
+					Version: version,
+					Commit:  commit,
+					Date:    date,
+				}
+				b, err := yaml.Marshal(info)
+				if err != nil {
+					return fmt.Errorf("failed to marshal version info: %w", err)
+				}
+				_, err = fmt.Fprint(cmd.OutOrStdout(), string(b))
+				return err
 			case "text":
 				v := versioncheck.NewIVersionCheckHandler(ks.Context())
 				_ = v.CheckLatestVersion(ks.Context(), versioncheck.NewVersionCheckRequest("", version, "", "", "version", nil))
 
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Your current version is: %s\n", version)
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Build commit: %s\n", commit)
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "Build date: %s\n", date)
-				return nil
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Your current version is: %s\n", version); err != nil {
+					return err
+				}
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Build commit: %s\n", commit); err != nil {
+					return err
+				}
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "Build date: %s\n", date)
+				return err
 			default:
-				return fmt.Errorf("unsupported format %q, supported: text, json", outputFormat)
+				return fmt.Errorf("unsupported format %q, supported: text, json, yaml", outputFormat)
 			}
 		},
 	}
 
-	versionCmd.Flags().StringVarP(&outputFormat, "format", "f", "text", `Output format. Supported: "text", "json"`)
+	versionCmd.Flags().StringVarP(&outputFormat, "format", "f", "text", `Output format. Supported: "text", "json", "yaml"`)
 
 	return versionCmd
 }

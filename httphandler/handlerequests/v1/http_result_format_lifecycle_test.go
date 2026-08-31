@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
-	resultprinter "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	resultprinter "github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -26,18 +26,18 @@ type artifactPrinter struct {
 	content []byte
 }
 
-func (p *artifactPrinter) SetWriter(context.Context, string) {}
-func (p *artifactPrinter) PrintNextSteps()                   {}
-func (p *artifactPrinter) Score(float32)                     {}
+func (p *artifactPrinter) SetWriter(context.Context, string) error { return nil }
+func (p *artifactPrinter) PrintNextSteps()                         {}
+func (p *artifactPrinter) Score(float32)                           {}
 func (p *artifactPrinter) ActionPrint(context.Context, *cautils.OPASessionObj, []cautils.ImageScanData) error {
 	return os.WriteFile(p.path, p.content, 0o600)
 }
 
 type noOpPrinter struct{}
 
-func (*noOpPrinter) SetWriter(context.Context, string) {}
-func (*noOpPrinter) PrintNextSteps()                   {}
-func (*noOpPrinter) Score(float32)                     {}
+func (*noOpPrinter) SetWriter(context.Context, string) error { return nil }
+func (*noOpPrinter) PrintNextSteps()                         {}
+func (*noOpPrinter) Score(float32)                           {}
 func (*noOpPrinter) ActionPrint(context.Context, *cautils.OPASessionObj, []cautils.ImageScanData) error {
 	return nil
 }

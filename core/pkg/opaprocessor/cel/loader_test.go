@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 )
 
 // TestLoadVAPParamlessControl loads a known paramless control and checks the
@@ -69,6 +70,44 @@ func TestLoadVAPUnknownControl(t *testing.T) {
 	_, err := loadVAP("C-9999")
 	require.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "C-9999"))
+}
+
+// TestVAPFailurePolicy pins how spec.failurePolicy is resolved: omitted defaults
+// to Fail (the apiserver's default), an explicit Fail stays Fail, and only
+// Ignore flips failOnError to false.
+func TestVAPFailurePolicy(t *testing.T) {
+	doc := func(failurePolicy string) string {
+		return `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: pol
+  labels:
+    controlId: C-1000
+spec:
+` + failurePolicy + `  validations:
+  - expression: "true"
+`
+	}
+
+	tests := []struct {
+		name          string
+		failurePolicy string
+		wantFail      bool
+	}{
+		{name: "omitted defaults to Fail", failurePolicy: "", wantFail: true},
+		{name: "explicit Fail", failurePolicy: "  failurePolicy: Fail\n", wantFail: true},
+		{name: "explicit Ignore", failurePolicy: "  failurePolicy: Ignore\n", wantFail: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			catalog, err := parseVAPBundle([]byte(doc(tt.failurePolicy)))
+			require.NoError(t, err)
+			vap, ok := catalog.byControl["C-1000"]
+			require.True(t, ok)
+			assert.Equal(t, tt.wantFail, vap.failOnError())
+		})
+	}
 }
 
 // vapDoc renders a minimal VAP document for the in-memory bundle tests.
@@ -151,11 +190,11 @@ func TestParseVAPBundleDuplicateName(t *testing.T) {
 	assert.Contains(t, catalog.byName, "kubescape-c-2000", "an unrelated name must still index")
 }
 
-// TestLoadVAPRefusesMatchConditions proves a policy with a matchConditions gate is
-// captured but refused, rather than having its validations run unconditionally.
-// Today's bundle ships none, but a future sync could, and running one offline
-// would emit violations live admission (which honors the gate) never would.
-func TestLoadVAPRefusesMatchConditions(t *testing.T) {
+// TestLoadVAPAcceptsMatchConditions proves a policy with a matchConditions gate
+// loads with its conditions captured, rather than being refused. The evaluator
+// honors the gate per object (see TestMatchConditions*), so refusing the control
+// outright would drop it from the scan for no reason.
+func TestLoadVAPAcceptsMatchConditions(t *testing.T) {
 	bundle := `apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -174,11 +213,11 @@ spec:
 
 	vap := catalog.byControl["C-1001"]
 	require.NotNil(t, vap)
-	require.NotEmpty(t, vap.matchConditions, "matchConditions must be captured, not dropped")
+	require.Len(t, vap.matchConditions, 1, "matchConditions must be captured, not dropped")
+	assert.Equal(t, "only-kube-system", vap.matchConditions[0].Name)
+	assert.Equal(t, "object.metadata.namespace == 'kube-system'", vap.matchConditions[0].Expression)
 
-	err = vap.requireSupported()
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "matchConditions")
+	assert.NoError(t, vap.requireSupported(), "a gated policy is evaluated, not refused")
 }
 
 // TestLoadVAPRefusesNarrowingSelectors pins which selector is refused and which
@@ -257,4 +296,245 @@ spec:
 			assert.Contains(t, err.Error(), tc.refusedFor)
 		})
 	}
+}
+
+// TestLoadVAPRefusesForeignParamKind pins the paramKind refusal. Only the
+// ControlConfiguration the bundle ships can be resolved offline; any other kind
+// would come from a binding's ParamRef the scan does not have, so it is refused
+// (a loud skip) rather than evaluated against whatever params.* happens to be
+// bound.
+func TestLoadVAPRefusesForeignParamKind(t *testing.T) {
+	policy := func(paramKindYAML string) string {
+		return `apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kubescape-c-1003
+  labels:
+    controlId: C-1003
+spec:
+` + paramKindYAML + `  matchConstraints:
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: ["v1"]
+      operations: ["CREATE"]
+      resources: ["pods"]
+  validations:
+  - expression: "false"
+`
+	}
+
+	cases := []struct {
+		name          string
+		paramKindYAML string
+		refused       bool
+	}{
+		{
+			name:          "no paramKind is supported",
+			paramKindYAML: "",
+		},
+		{
+			name: "the bundled ControlConfiguration is supported",
+			paramKindYAML: `  paramKind:
+    apiVersion: kubescape.io/v1
+    kind: ControlConfiguration
+`,
+		},
+		{
+			name: "another kind in the bundled group is refused",
+			paramKindYAML: `  paramKind:
+    apiVersion: kubescape.io/v1
+    kind: ScanConfiguration
+`,
+			refused: true,
+		},
+		{
+			name: "another version of the bundled kind is refused",
+			paramKindYAML: `  paramKind:
+    apiVersion: kubescape.io/v2
+    kind: ControlConfiguration
+`,
+			refused: true,
+		},
+		{
+			name: "a cluster CRD kind is refused",
+			paramKindYAML: `  paramKind:
+    apiVersion: ate.dev/v1alpha1
+    kind: WorkerPool
+`,
+			refused: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			catalog, err := parseVAPBundle([]byte(policy(tc.paramKindYAML)))
+			require.NoError(t, err)
+			vap := catalog.byControl["C-1003"]
+			require.NotNil(t, vap)
+
+			err = vap.requireSupported()
+			if !tc.refused {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err, "a paramKind the bundle cannot supply must be refused")
+			assert.Contains(t, err.Error(), "C-1003")
+			assert.Contains(t, err.Error(), vap.paramKind.Kind)
+		})
+	}
+}
+
+// TestResolveParamsRefusesForeignParamKind covers the same invariant where the
+// params are actually bound: a foreign paramKind must not silently receive the
+// ControlConfiguration, whose fields belong to another kind entirely.
+func TestResolveParamsRefusesForeignParamKind(t *testing.T) {
+	vap := &VAP{
+		ControlID: "C-1004",
+		paramKind: &admissionregistrationv1.ParamKind{APIVersion: "ate.dev/v1alpha1", Kind: "WorkerPool"},
+	}
+
+	params, err := resolveParams(vap)
+	require.Error(t, err, "resolveParams must not fall back to the ControlConfiguration")
+	assert.Nil(t, params)
+	assert.Contains(t, err.Error(), "WorkerPool")
+}
+
+// TestControlConfigParamKindMatchesShippedFile keeps the check honest against
+// the file it reads: the GVK comes off basic-control-configuration.yaml, so a
+// `make sync-vap` that renames or re-versions it moves the check with it rather
+// than refusing every params-bearing control.
+func TestControlConfigParamKindMatchesShippedFile(t *testing.T) {
+	shipped, err := controlConfigParamKind()
+	require.NoError(t, err)
+
+	config, err := controlConfig()
+	require.NoError(t, err)
+	assert.Equal(t, config["apiVersion"], shipped.APIVersion)
+	assert.Equal(t, config["kind"], shipped.Kind)
+
+	vap, err := loadVAP("C-0046")
+	require.NoError(t, err)
+	assert.Equal(t, *shipped, *vap.paramKind, "the bundle's params-bearing controls must still resolve")
+}
+
+// TestResolveParamObjectFallback verifies a binding with no paramRef (or a
+// policy with no paramKind) falls back to the bundled ControlConfiguration.
+func TestResolveParamObjectFallback(t *testing.T) {
+	vap, err := loadVAP("C-0046")
+	require.NoError(t, err)
+
+	// No paramRef falls back to the bundled config.
+	params, err := ResolveParamObject(vap, nil, "default", nil)
+	require.NoError(t, err)
+	config, err := controlConfig()
+	require.NoError(t, err)
+	assert.Equal(t, config, params)
+
+	// A paramless control is always nil.
+	vapNoParam, err := loadVAP("C-0017")
+	require.NoError(t, err)
+	params, err = ResolveParamObject(vapNoParam, &admissionregistrationv1.ParamRef{Name: "x"}, "default", nil)
+	require.NoError(t, err)
+	assert.Nil(t, params)
+}
+
+// TestResolveParamObjectBinding resolves a binding's paramRef to a scanned
+// object of the policy's paramKind kind.
+func TestResolveParamObjectBinding(t *testing.T) {
+	vap, err := loadVAP("C-0046")
+	require.NoError(t, err)
+
+	custom := map[string]any{
+		"apiVersion": "kubescape.io/v1",
+		"kind":       vap.paramKind.Kind,
+		"metadata": map[string]any{
+			"name":      "custom",
+			"namespace": "default",
+		},
+		"settings": map[string]any{"insecureCapabilities": []any{"ADD"}},
+	}
+	findParam := func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
+		if apiVersion == vap.paramKind.APIVersion && kind == vap.paramKind.Kind && namespace == "default" && name == "custom" {
+			return custom, true
+		}
+		return nil, false
+	}
+
+	ref := &admissionregistrationv1.ParamRef{
+		Name:      "custom",
+		Namespace: "default",
+	}
+	params, err := ResolveParamObject(vap, ref, "other", findParam)
+	require.NoError(t, err)
+	assert.Equal(t, custom, params)
+
+	// Empty namespace in the paramRef uses the resource's namespace.
+	ref.Namespace = ""
+	params, err = ResolveParamObject(vap, ref, "default", findParam)
+	require.NoError(t, err)
+	assert.Equal(t, custom, params)
+
+	// Missing object returns ErrParamNotFound.
+	_, err = ResolveParamObject(vap, &admissionregistrationv1.ParamRef{Name: "missing"}, "default", findParam)
+	require.ErrorIs(t, err, ErrParamNotFound)
+}
+
+// TestResolveParamObjectClusterScoped resolves a paramRef naming a cluster-scoped
+// param object while the scanned resource is namespaced. The bundled
+// ControlConfiguration is scope: Cluster, so this is the shape every binding that
+// names it takes.
+func TestResolveParamObjectClusterScoped(t *testing.T) {
+	vap, err := loadVAP("C-0046")
+	require.NoError(t, err)
+
+	clusterScoped := map[string]any{
+		"apiVersion": vap.paramKind.APIVersion,
+		"kind":       vap.paramKind.Kind,
+		"metadata":   map[string]any{"name": "custom"},
+		"settings":   map[string]any{"insecureCapabilities": []any{"ADD"}},
+	}
+	findParam := func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
+		if apiVersion == vap.paramKind.APIVersion && kind == vap.paramKind.Kind && namespace == "" && name == "custom" {
+			return clusterScoped, true
+		}
+		return nil, false
+	}
+
+	params, err := ResolveParamObject(vap, &admissionregistrationv1.ParamRef{Name: "custom"}, "prod", findParam)
+	require.NoError(t, err)
+	assert.Equal(t, clusterScoped, params)
+
+	// A cluster-scoped resource already looked the object up under "".
+	params, err = ResolveParamObject(vap, &admissionregistrationv1.ParamRef{Name: "custom"}, "", findParam)
+	require.NoError(t, err)
+	assert.Equal(t, clusterScoped, params)
+
+	// A namespace on the ref stays the only candidate: the apiserver rejects one
+	// against a cluster-scoped paramKind rather than falling back to it.
+	_, err = ResolveParamObject(vap, &admissionregistrationv1.ParamRef{Name: "custom", Namespace: "prod"}, "prod", findParam)
+	require.ErrorIs(t, err, ErrParamNotFound)
+}
+
+// TestResolveParamObjectPrefersResourceNamespace keeps a namespaced param object
+// ahead of the cluster-scoped candidate, so the fallback cannot take over a
+// lookup the resource's own namespace already answers.
+func TestResolveParamObjectPrefersResourceNamespace(t *testing.T) {
+	vap, err := loadVAP("C-0046")
+	require.NoError(t, err)
+
+	namespaced := map[string]any{"metadata": map[string]any{"name": "custom", "namespace": "prod"}}
+	clusterScoped := map[string]any{"metadata": map[string]any{"name": "custom"}}
+	findParam := func(apiVersion, kind, namespace, name string) (map[string]any, bool) {
+		switch namespace {
+		case "prod":
+			return namespaced, true
+		case "":
+			return clusterScoped, true
+		}
+		return nil, false
+	}
+
+	params, err := ResolveParamObject(vap, &admissionregistrationv1.ParamRef{Name: "custom"}, "prod", findParam)
+	require.NoError(t, err)
+	assert.Equal(t, namespaced, params)
 }

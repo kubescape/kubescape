@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -13,16 +12,14 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/jwalton/gchalk"
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
 const (
@@ -41,9 +38,11 @@ type PrettyPrinter struct {
 	inputPatterns   []string
 	verboseMode     bool
 	printAttackTree bool
+	showEvidence    bool
+	showSecrets     bool
 }
 
-func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string, clusterName string) *PrettyPrinter {
+func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string, clusterName string, showEvidence bool, showSecrets bool) *PrettyPrinter {
 	prettyPrinter := &PrettyPrinter{
 		verboseMode:     verboseMode,
 		formatVersion:   formatVersion,
@@ -52,6 +51,8 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, v
 		scanType:        scanType,
 		inputPatterns:   inputPatterns,
 		clusterName:     clusterName,
+		showEvidence:    showEvidence,
+		showSecrets:     showSecrets,
 	}
 
 	return prettyPrinter
@@ -76,37 +77,8 @@ func (pp *PrettyPrinter) PrintNextSteps() {
 	pp.mainPrinter.PrintNextSteps()
 }
 
-// convertToImageScanSummary takes a list of image scan data and converts it to a single image scan summary
-func (pp *PrettyPrinter) convertToImageScanSummary(imageScanData []cautils.ImageScanData) (*imageprinter.ImageScanSummary, error) {
-	imageScanSummary := imageprinter.ImageScanSummary{
-		CVEs:                  []imageprinter.CVE{},
-		PackageScores:         map[string]*imageprinter.PackageScore{},
-		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
-	}
-
-	for i := range imageScanData {
-		if !slices.Contains(imageScanSummary.Images, imageScanData[i].Image) {
-			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
-		}
-
-		CVEs := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
-		imageScanSummary.CVEs = append(imageScanSummary.CVEs, CVEs...)
-
-		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
-
-		setSeverityToSummaryMap(CVEs, imageScanSummary.MapsSeverityToSummary)
-	}
-
-	return &imageScanSummary, nil
-}
-
 func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) error {
-	imageScanSummary, err := pp.convertToImageScanSummary(imageScanData)
-	if err != nil {
-		logger.L().Error("failed to convert to image scan summary", helpers.Error(err))
-		return fmt.Errorf("failed to convert to image scan summary: %w", err)
-	}
-	pp.mainPrinter.PrintImageScanning(imageScanSummary)
+	pp.mainPrinter.PrintImageScanning(buildImageScanSummary(imageScanData))
 	return nil
 }
 
@@ -124,7 +96,7 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 
 		switch pp.viewType {
 		case cautils.ControlViewType:
-			pp.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, sortedControlIDs)
+			pp.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, opaSessionObj.ResourcesResult, sortedControlIDs)
 		case cautils.ResourceViewType:
 			if pp.verboseMode {
 				pp.resourceTable(opaSessionObj)
@@ -192,37 +164,42 @@ func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 
 }
 
-func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
+func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) error {
 	if outputFile == os.Stdout.Name() {
 		pp.writer = printer.GetWriter(ctx, "")
 		pp.SetMainPrinter()
-		return
+		return nil
 	}
 
-	if outputFile != "" {
-		outputFile = strings.TrimSpace(outputFile)
-		if outputFile == "" {
-			outputFile = prettyOutputFile
-		}
-		// os.DevNull is used to silence the UI printer, appending an extension would turn it into a regular file
-		if outputFile != os.DevNull && filepath.Ext(outputFile) != printer.PrettyOutputExt {
-			outputFile = outputFile + printer.PrettyOutputExt
-		}
+	if outputFile == os.DevNull {
+		pp.writer = printer.GetWriter(ctx, outputFile)
+		pp.SetMainPrinter()
+		return nil
 	}
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.PrettyFormat, outputFile, prettyOutputFile)
 
-	pp.writer = printer.GetWriter(ctx, outputFile)
+	if explicitOutput {
+		writer, err := printer.GetWriterNoFallback(outputFile)
+		if err != nil {
+			return err
+		}
+		pp.writer = writer
+	} else {
+		pp.writer = printer.GetWriter(ctx, outputFile)
+	}
 	pp.SetMainPrinter()
+	return nil
 }
 
 func (pp *PrettyPrinter) Score(_ float32) {
 }
 
-func (pp *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, sortedControlIDs [][]string) {
+func (pp *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, resourcesResult map[string]resourcesresults.Result, sortedControlIDs [][]string) {
 	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
 		for _, c := range sortedControlID {
 			controlSummary := controls.GetControl(reportsummary.EControlCriteriaID, c) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
 			pp.printTitle(controlSummary)
-			pp.printResources(controlSummary, allResources)
+			pp.printResources(controlSummary, allResources, resourcesResult)
 			pp.printSummary(controlSummary)
 		}
 	}
@@ -261,9 +238,12 @@ func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.ICon
 	}
 }
 
-func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata) {
+func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata, resourcesResult map[string]resourcesresults.Result) {
 
 	workloadsSummary := listResultSummary(controlSummary, allResources)
+	if pp.verboseMode {
+		attachAssistedRemediation(workloadsSummary, controlSummary.GetID(), resourcesResult, pp.showSecrets)
+	}
 
 	failedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummaryFailed)
 	skippedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummarySkipped)
@@ -287,6 +267,31 @@ func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSum
 
 }
 
+func attachAssistedRemediation(workloads []WorkloadSummary, controlID string, resourcesResult map[string]resourcesresults.Result, showSecrets bool) {
+	for i := range workloads {
+		if workloads[i].status != apis.StatusFailed {
+			continue
+		}
+		result, ok := resourcesResult[workloads[i].resource.GetID()]
+		if !ok {
+			continue
+		}
+		for j := range result.AssociatedControls {
+			if result.AssociatedControls[j].GetID() != controlID {
+				continue
+			}
+			if !result.AssociatedControls[j].GetStatus(nil).IsFailed() {
+				continue
+			}
+			paths := AssistedRemediationPathsWithCurrentValuesFiltered(&result.AssociatedControls[j], workloads[i].resource, showSecrets)
+			if len(paths) > 0 {
+				workloads[i].assistedRemediation = strings.Join(paths, ", ")
+			}
+			break
+		}
+	}
+}
+
 func (pp *PrettyPrinter) printGroupedResources(workloads map[string][]WorkloadSummary) {
 	indent := "  "
 	for title, rsc := range workloads {
@@ -303,12 +308,16 @@ func (pp *PrettyPrinter) printGroupedResource(indent string, title string, rsc [
 	resources := []string{}
 	for r := range rsc {
 		relatedObjectsStr := generateRelatedObjectsStr(rsc[r])
-		resources = append(resources, fmt.Sprintf("%s%s - %s %s", indent, rsc[r].resource.GetKind(), rsc[r].resource.GetName(), relatedObjectsStr))
+		line := fmt.Sprintf("%s%s - %s %s", indent, rsc[r].resource.GetKind(), rsc[r].resource.GetName(), relatedObjectsStr)
+		if rsc[r].assistedRemediation != "" {
+			line = strings.TrimRight(line, " ") + " " + rsc[r].assistedRemediation
+		}
+		resources = append(resources, line)
 	}
 
 	sort.Strings(resources)
 	for i := range resources {
-		cautils.SimpleDisplay(pp.writer, resources[i]+"\n")
+		cautils.SimpleDisplay(pp.writer, "%s\n", resources[i])
 	}
 }
 
@@ -350,7 +359,7 @@ func isPrintSeparatorType(scanType cautils.ScanTypes) bool {
 // failures caused controls to be skipped or partial data was collected.
 // Nothing is printed on a clean scan.
 func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
-	if len(coverage.FailedGVRPulls) == 0 && len(coverage.NotEvaluatedControls) == 0 && len(coverage.PartialGVRPulls) == 0 && len(coverage.PolicyDegradations) == 0 {
+	if len(coverage.FailedGVRPulls) == 0 && len(coverage.NotEvaluatedControls) == 0 && len(coverage.PartialGVRPulls) == 0 && len(coverage.PolicyDegradations) == 0 && len(coverage.VacuousFrameworks) == 0 && len(coverage.SkippedManifests) == 0 {
 		return
 	}
 
@@ -394,6 +403,21 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 		fmt.Fprintf(pp.writer, "\nControls depending on these inputs were evaluated against default configuration, which may not reflect your environment.\n")
 	}
 
+	if len(coverage.VacuousFrameworks) > 0 {
+		fmt.Fprintf(pp.writer, "\nThe following frameworks scored 100%% because no matching resources were found in this cluster:\n")
+		for _, f := range coverage.VacuousFrameworks {
+			fmt.Fprintf(pp.writer, "  • %s\n", f)
+		}
+	}
+
+	if len(coverage.SkippedManifests) > 0 {
+		fmt.Fprintf(pp.writer, "\nThe following manifest files could not be loaded and were not scanned:\n")
+		for _, s := range coverage.SkippedManifests {
+			fmt.Fprintf(pp.writer, "  • %s: %s\n", s.Path, s.Reason)
+		}
+		fmt.Fprintf(pp.writer, "\nControls were evaluated against incomplete input. Fix or exclude these files.\n")
+	}
+
 	if len(coverage.FailedGVRPulls) > 0 || len(coverage.PartialGVRPulls) > 0 {
 		fmt.Fprintf(pp.writer, "\nTo fix this, ensure the scanning identity has list/get permissions on the missing resource types.\n")
 	}
@@ -402,8 +426,10 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 	}
 }
 
-func (p *PrettyPrinter) CloseWriter() {
+// CloseWriter closes the pretty-printer output writer, returning any error from flushing or closing.
+func (p *PrettyPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }

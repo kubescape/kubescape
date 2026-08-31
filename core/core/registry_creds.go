@@ -12,7 +12,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/pkg/imagescan"
+	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 

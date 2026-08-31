@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 )
 
@@ -52,7 +51,31 @@ func formatCiphertext(nonce string, ciphertext string) string {
 // a SOPS-inspired ciphertext representation:
 //
 //	ENC[AES256_GCM,<base64 nonce>,<base64 ciphertext>]
+//
+// The ciphertext carries no associated data, so it is not bound to the report
+// it belongs to and can be swapped with any other ciphertext under the same
+// key. Prefer ReportKey.EncryptString, which binds it.
+//
+// Deprecated: use ReportKey.EncryptString. This remains for reading and writing
+// the pre-binding envelope format.
 func EncryptString(plaintext string, dek []byte) (string, error) {
+	return sealString(plaintext, dek, nil)
+}
+
+// DecryptString decrypts a ciphertext produced by EncryptString.
+//
+// Deprecated: use ReportKey.DecryptString. This remains for reading the
+// pre-binding envelope format.
+func DecryptString(ciphertext string, dek []byte) (string, error) {
+	return openString(ciphertext, dek, nil)
+}
+
+// sealString is the single AES-256-GCM sealing primitive in this package.
+//
+// additionalData is authenticated but not encrypted. Passing nil reproduces the
+// pre-binding format; callers that own a ReportKey pass the report's AAD so the
+// ciphertext is only valid in the report it was written for.
+func sealString(plaintext string, dek []byte, additionalData []byte) (string, error) {
 	if err := ValidateDEK(dek); err != nil {
 		return "", err
 	}
@@ -72,13 +95,17 @@ func EncryptString(plaintext string, dek []byte) (string, error) {
 		return "", err
 	}
 
-	ciphertext := gcm.Seal(nil, nonce, []byte(plaintext), nil)
+	ciphertext := gcm.Seal(nil, nonce, []byte(plaintext), additionalData)
 
 	return formatCiphertext(base64.StdEncoding.EncodeToString(nonce), base64.StdEncoding.EncodeToString(ciphertext)), nil
 }
 
-// DecryptString decrypts a ciphertext produced by EncryptString.
-func DecryptString(ciphertext string, dek []byte) (string, error) {
+// openString is the single AES-256-GCM opening primitive in this package.
+//
+// additionalData must match the value sealString was called with, or the GCM
+// tag check fails. That failure is the point: it is what makes a ciphertext
+// moved between reports an error rather than a clean decryption.
+func openString(ciphertext string, dek []byte, additionalData []byte) (string, error) {
 	if err := ValidateDEK(dek); err != nil {
 		return "", err
 	}
@@ -126,52 +153,10 @@ func DecryptString(ciphertext string, dek []byte) (string, error) {
 		)
 	}
 
-	plaintext, err := gcm.Open(nil, nonce, encryptedData, nil)
+	plaintext, err := gcm.Open(nil, nonce, encryptedData, additionalData)
 	if err != nil {
 		return "", err
 	}
 
 	return string(plaintext), nil
-}
-
-// ValidateMasterKey validates that a master key is suitable
-// for wrapping and unwrapping DEKs.
-func ValidateMasterKey(masterKey []byte) error {
-	if len(masterKey) != dekSize {
-		return fmt.Errorf(
-			"invalid master key length: got %d, want %d",
-			len(masterKey),
-			dekSize,
-		)
-	}
-
-	return nil
-}
-
-// GetMasterKeyFromEnv loads and validates the master key
-// from the KUBESCAPE_MASTER_KEY environment variable.
-func GetMasterKeyFromEnv(operation string) ([]byte, error) {
-
-	masterKey := os.Getenv(
-		"KUBESCAPE_MASTER_KEY",
-	)
-
-	if masterKey == "" {
-		return nil, fmt.Errorf(
-			"%s requires KUBESCAPE_MASTER_KEY to be configured",
-			operation,
-		)
-	}
-
-	keyBytes := []byte(masterKey)
-
-	if err := ValidateMasterKey(
-		keyBytes,
-	); err != nil {
-		return nil, fmt.Errorf(
-			"invalid KUBESCAPE_MASTER_KEY configuration",
-		)
-	}
-
-	return keyBytes, nil
 }

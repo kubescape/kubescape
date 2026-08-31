@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	jsoniter "github.com/json-iterator/go"
-	"github.com/kubescape/kubescape/v3/internal/testutils"
+	"github.com/kubescape/kubescape/v4/internal/testutils"
 	"github.com/stretchr/testify/require"
 )
 
@@ -180,6 +180,24 @@ func TestNewDownloadReleasedPolicyWithVersion(t *testing.T) {
 
 		p := NewDownloadReleasedPolicyWithVersion("v2.0.301")
 		require.Contains(t, p.gs.URL, "download/v2.0.301")
+	})
+}
+
+func TestDownloadReleasedPolicyArtifactPersistence(t *testing.T) {
+	t.Parallel()
+
+	t.Run("rolling release may refresh the shared fallback", func(t *testing.T) {
+		t.Parallel()
+
+		p := NewDownloadReleasedPolicy()
+		require.True(t, p.ShouldPersistPolicyArtifacts())
+	})
+
+	t.Run("pinned release must not replace the unversioned fallback", func(t *testing.T) {
+		t.Parallel()
+
+		p := NewDownloadReleasedPolicyWithVersion("v2.0.301")
+		require.False(t, p.ShouldPersistPolicyArtifacts())
 	})
 }
 

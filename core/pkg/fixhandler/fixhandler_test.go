@@ -3,6 +3,7 @@ package fixhandler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,8 +12,8 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	gitv5 "github.com/go-git/go-git/v5"
 	"github.com/kubescape/go-logger"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/internal/testutils"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/internal/testutils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -368,6 +369,120 @@ func Test_fixPathToValidYamlExpression(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestFixPathToValidYamlExpression_RejectsExpressionSyntax covers fix paths that
+// are yq expressions rather than paths. Both halves of a FixPath come out of the
+// report file, which `kubescape fix` treats as untrusted input (that is what
+// --base-path exists for), and the path used to be spliced into the expression
+// verbatim — so a crafted report could pipe strenv()/load_str() into the
+// assignment and have `fix` write an environment variable or a local file into
+// the user's manifest.
+func TestFixPathToValidYamlExpression_RejectsExpressionSyntax(t *testing.T) {
+	hostilePaths := []string{
+		`metadata.annotations.leak |= strenv(KUBESCAPE_ACCESS_KEY) | select(di==0).spec.hostNetwork`,
+		`metadata.annotations.file |= load_str("/etc/hosts") | select(di==0).spec.hostNetwork`,
+		`spec.hostNetwork) | (.. | select(tag=="!!str"))`,
+		`spec.hostNetwork | del(.metadata)`,
+		`spec["hostNetwork" + strenv(X)]`,
+		`.spec.hostNetwork`, // a leading dot doubles the root separator
+		`spec.hostNetwork = "x"`,
+		`spec.containers[0 | 1].image`,
+		"spec.hostNetwork\n| del(.metadata)",
+	}
+	for _, fixPath := range hostilePaths {
+		t.Run(fixPath, func(t *testing.T) {
+			assert.Empty(t, FixPathToValidYamlExpression(fixPath, "false", 0),
+				"a fix path carrying yq expression syntax must not produce an expression")
+		})
+	}
+}
+
+// TestFixPathToValidYamlExpression_KeepsPlainPaths makes sure the validation
+// above leaves the paths real controls emit alone: nested keys, list indices,
+// and annotation keys (bare or quoted, with dots and slashes in them).
+func TestFixPathToValidYamlExpression_KeepsPlainPaths(t *testing.T) {
+	tests := []struct {
+		fixPath string
+		value   string
+		want    string
+	}{
+		{"spec.hostNetwork", "false", `select(di==0).spec.hostNetwork |= false`},
+		{"spec.template.spec.containers[0].securityContext.runAsNonRoot", "true", `select(di==0).spec.template.spec.containers[0].securityContext.runAsNonRoot |= true`},
+		{"spec.containers[0].image", "nginx:1.28", `select(di==0).spec.containers[0].image |= "nginx:1.28"`},
+		{"metadata.annotations.foo/bar", "hello", `select(di==0).metadata.annotations.foo/bar |= "hello"`},
+		{`metadata.annotations."foo.bar/baz"`, "hello", `select(di==0).metadata.annotations."foo.bar/baz" |= "hello"`},
+		{"spec.containers[*].image", "nginx:1.28", `select(di==0).spec.containers[*].image |= "nginx:1.28"`},
+		{"spec.containers[0].securityContext.capabilities.drop", `["ALL","NET_RAW"]`, `select(di==0).spec.containers[0].securityContext.capabilities.drop |= ["ALL","NET_RAW"]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.fixPath, func(t *testing.T) {
+			assert.Equal(t, tt.want, FixPathToValidYamlExpression(tt.fixPath, tt.value, 0))
+		})
+	}
+}
+
+// TestFixPathToValidYamlExpression_QuotesSequenceLookalikeValues covers the same
+// injection through the value operand: a value is spliced in unquoted when it is
+// meant to be a sequence, and square brackets alone don't make it one — yq reads
+// `[strenv(SECRET)]` as a collect operator wrapped around a function call.
+func TestFixPathToValidYamlExpression_QuotesSequenceLookalikeValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{
+			name:  "genuine sequence stays a sequence",
+			value: `["ALL","NET_RAW"]`,
+			want:  `select(di==0).spec.x |= ["ALL","NET_RAW"]`,
+		},
+		{
+			name:  "empty sequence stays a sequence",
+			value: `[]`,
+			want:  `select(di==0).spec.x |= []`,
+		},
+		{
+			name:  "function call in sequence clothing is quoted",
+			value: `[strenv(KUBESCAPE_ACCESS_KEY)]`,
+			want:  `select(di==0).spec.x |= "[strenv(KUBESCAPE_ACCESS_KEY)]"`,
+		},
+		{
+			name:  "pipeline wrapped in brackets is quoted",
+			value: `[] | (select(di==0).metadata.annotations.leak |= strenv(X)) | [1]`,
+			want:  `select(di==0).spec.x |= "[] | (select(di==0).metadata.annotations.leak |= strenv(X)) | [1]"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, FixPathToValidYamlExpression("spec.x", tt.value, 0))
+		})
+	}
+}
+
+// TestApplyFixToContent_CraftedFixPathLeaksNothing is the end-to-end check: a
+// report whose fix path is a yq expression must leave the manifest untouched
+// rather than have the environment copied into it.
+func TestApplyFixToContent_CraftedFixPathLeaksNothing(t *testing.T) {
+	t.Setenv("KUBESCAPE_ACCESS_KEY", "super-secret-token")
+	yamlContent := "apiVersion: v1\nkind: Pod\nmetadata:\n  name: demo\nspec:\n  hostNetwork: true\n"
+
+	rfi := &ResourceFixInfo{YamlExpressions: map[string]armotypes.FixPath{}}
+	ac := failedControl("C-0001", "crafted",
+		failedRuleWithFix(`metadata.annotations.leak |= strenv(KUBESCAPE_ACCESS_KEY) | select(di==0).spec.hostNetwork`, "false"),
+	)
+
+	added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(0, &ac, false)
+
+	assert.Equal(t, 0, added, "a crafted fix path must not become a fix")
+	assert.Empty(t, rfi.YamlExpressions)
+	if assert.Len(t, skipped, 1, "the crafted path must be surfaced as skipped") {
+		assert.Contains(t, skipped[0], "not a plain yaml path")
+	}
+
+	got, err := ApplyFixToContent(context.Background(), yamlContent, reduceYamlExpressions(rfi))
+	require.NoError(t, err)
+	assert.NotContains(t, got, "super-secret-token")
 }
 
 func TestJoinStrings(t *testing.T) {
@@ -1299,4 +1414,76 @@ func singleResourceReport(t *testing.T, sourcePath, relPath string) *reporthandl
 			}},
 		}},
 	}
+}
+
+// fakeWriteStringCloser lets writeAndClose's Close-time failure be simulated
+// deterministically. A real file's Close() essentially never fails for a
+// well-formed local write, and the scenario this guards - a filesystem
+// (typically NFS) that accepts a Write into its buffer and only reports the
+// real failure (e.g. out of space) when the file is closed - can't be
+// arranged portably against a real *os.File in a unit test.
+type fakeWriteStringCloser struct {
+	writeErr error
+	closeErr error
+	closed   bool
+}
+
+func (f *fakeWriteStringCloser) WriteString(s string) (int, error) {
+	if f.writeErr != nil {
+		return 0, f.writeErr
+	}
+	return len(s), nil
+}
+
+func (f *fakeWriteStringCloser) Close() error {
+	f.closed = true
+	return f.closeErr
+}
+
+func TestWriteAndClose_PropagatesCloseError(t *testing.T) {
+	// Regression: writeFixesToFile previously closed the file via `defer
+	// file.Close()`, discarding any error Close returned. A write can appear
+	// to succeed while the filesystem only reports a real failure at Close
+	// time, so silently dropping that error would report the fix as written
+	// when the file on disk was never actually flushed.
+	f := &fakeWriteStringCloser{closeErr: errors.New("no space left on device")}
+
+	err := writeAndClose(f, "fixed: true\n")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no space left on device")
+	assert.True(t, f.closed, "Close must still be called even though it fails")
+}
+
+func TestWriteAndClose_PropagatesWriteError(t *testing.T) {
+	f := &fakeWriteStringCloser{writeErr: errors.New("disk full")}
+
+	err := writeAndClose(f, "fixed: true\n")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "disk full")
+	assert.True(t, f.closed, "Close must still be attempted (best-effort) after a write error")
+}
+
+func TestWriteAndClose_Success(t *testing.T) {
+	f := &fakeWriteStringCloser{}
+
+	err := writeAndClose(f, "fixed: true\n")
+
+	require.NoError(t, err)
+	assert.True(t, f.closed)
+}
+
+func TestWriteFixesToFile_PropagatesCloseError(t *testing.T) {
+	// End-to-end regression against the real function callers actually use:
+	// a genuine *os.File satisfies writeStringCloser, so the fix must not
+	// have narrowed the interface in a way that only compiles for the fake.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fixed.yaml")
+
+	require.NoError(t, writeFixesToFile(path, "fixed: true\n"))
+
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "fixed: true\n", string(got))
 }

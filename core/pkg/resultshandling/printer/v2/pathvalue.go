@@ -2,6 +2,8 @@ package printer
 
 import (
 	"encoding/json"
+	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -43,10 +45,13 @@ func splitPath(path string) []pathSegment {
 	return segments
 }
 
-// anyToString converts a scalar value to its string representation.
+// anyToString converts a value to its string representation.
 // It handles all numeric types that may appear in JSON-decoded or
-// programmatically-constructed Kubernetes objects.
-// Maps and slices return ("", false).
+// programmatically-constructed Kubernetes objects. Maps and slices are
+// rendered as compact JSON rather than dropped, so a failing path whose
+// value is an object or array (e.g. a container's full securityContext, an
+// env var list) still surfaces something instead of falling back to the
+// bare path with no value at all.
 func anyToString(v any) (string, bool) {
 	switch val := v.(type) {
 	case nil:
@@ -77,9 +82,38 @@ func anyToString(v any) (string, bool) {
 		return strconv.FormatUint(val, 10), true
 	case json.Number:
 		return val.String(), true
+	case map[string]any, []any:
+		b, err := json.Marshal(val)
+		if err != nil {
+			return "", false
+		}
+		return string(b), true
 	default:
 		return "", false
 	}
+}
+
+// normalizeForPathExtraction converts obj into a tree built entirely from
+// encoding/json's generic decoding types (map[string]any, []any, float64,
+// string, bool, nil). Earlier processing stages (for example
+// opaprocessor.removePodData, which reads containers via
+// workload.GetContainers() and writes the resulting []corev1.Container back
+// into the object map) can leave typed structs in place of the plain
+// map/slice shape the manifest originally had. extractValueAtPath only knows
+// how to walk map[string]any and []any, so those typed sections would
+// otherwise be invisible to it - which is most posture findings, since they
+// target container-scoped fields. Round-tripping through JSON once per
+// resource makes the whole tree walkable regardless of how it got there.
+func normalizeForPathExtraction(obj map[string]any) map[string]any {
+	b, err := json.Marshal(obj)
+	if err != nil {
+		return obj
+	}
+	var normalized map[string]any
+	if err := json.Unmarshal(b, &normalized); err != nil {
+		return obj
+	}
+	return normalized
 }
 
 func extractValueAtPath(obj map[string]any, path string) (string, bool) {
@@ -100,40 +134,89 @@ func extractValueAtPath(obj map[string]any, path string) (string, bool) {
 				return "", false
 			}
 			if seg.index >= 0 {
-				arr, ok := next.([]any)
-				if !ok || seg.index >= len(arr) {
+				elem, ok := indexList(next, seg.index)
+				if !ok {
 					return "", false
 				}
-				cur = arr[seg.index]
+				cur = elem
 			} else {
 				cur = next
 			}
-		case []any:
-			if seg.index < 0 || seg.index >= len(v) {
+		default:
+			elem, ok := indexList(v, seg.index)
+			if !ok {
 				return "", false
 			}
-			cur = v[seg.index]
-		default:
-			return "", false
+			cur = elem
 		}
 	}
 	return anyToString(cur)
 }
 
-// isSensitivePath reports whether a path targets a field whose value must
-// not be surfaced in scan output. Secret data and stringData contain
-// credentials that are base64-encoded (or plaintext) and must never be
-// printed regardless of what the existing redaction in updateResults has done.
-func isSensitivePath(kind, path string) bool {
-	if kind != "Secret" {
-		return false
+// indexList returns the element at index i of a slice. JSON-decoded objects
+// use []any; conversions often produce []map[string]any instead, and the
+// previous []any-only assert dropped those lookups. Other slice types are
+// indexed through reflection. Out-of-range indexes fail closed.
+func indexList(v any, i int) (any, bool) {
+	if i < 0 {
+		return nil, false
 	}
+	switch arr := v.(type) {
+	case []any:
+		if i >= len(arr) {
+			return nil, false
+		}
+		return arr[i], true
+	case []map[string]any:
+		if i >= len(arr) {
+			return nil, false
+		}
+		return arr[i], true
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Slice || i >= rv.Len() {
+		return nil, false
+	}
+	return rv.Index(i).Interface(), true
+}
+
+// isSensitivePath reports whether a path targets a field whose value must
+// not be surfaced in scan output unless --show-secrets is set. Secret
+// data/stringData and container env[N].value (C-0012 plaintext credentials)
+// are treated as sensitive.
+func isSensitivePath(kind, path string) bool {
 	if i := strings.Index(path, "="); i >= 0 {
 		path = path[:i]
 	}
 	path = strings.TrimLeft(path, ".")
-	return path == "data" || strings.HasPrefix(path, "data.") ||
-		path == "stringData" || strings.HasPrefix(path, "stringData.")
+	if kind == "Secret" {
+		return path == "data" || strings.HasPrefix(path, "data.") ||
+			path == "stringData" || strings.HasPrefix(path, "stringData.")
+	}
+	// C-0012 plaintext credentials live on container env .value, not Secret.data.
+	return isContainerEnvValuePath(path)
+}
+
+// isContainerEnvValuePath reports whether path selects env[N].value
+// (including under spec.template.spec / initContainers / ephemeralContainers).
+func isContainerEnvValuePath(path string) bool {
+	if !strings.HasSuffix(path, "].value") {
+		return false
+	}
+	env := strings.LastIndex(path, "env[")
+	if env < 0 {
+		return false
+	}
+	inner := path[env+len("env[") : len(path)-len("].value")]
+	if inner == "" {
+		return false
+	}
+	for i := 0; i < len(inner); i++ {
+		if inner[i] < '0' || inner[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // enrichedPathsForField iterates a control's rule paths, extracts the string
@@ -143,7 +226,7 @@ func isSensitivePath(kind, path string) bool {
 // path string so the output is never degraded or a security risk.
 func enrichedPathsForField(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
 	var paths []string
-	obj := resource.GetObject()
+	obj := normalizeForPathExtraction(resource.GetObject())
 	kind := resource.GetKind()
 	for j := range control.ResourceAssociatedRules {
 		for k := range control.ResourceAssociatedRules[j].Paths {
@@ -163,20 +246,111 @@ func enrichedPathsForField(control *resourcesresults.ResourceAssociatedControl, 
 	return paths
 }
 
-func failedPathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
-	return enrichedPathsForField(control, resource, func(p armotypes.PosturePaths) string { return p.FailedPath })
-}
-
 func reviewPathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
 	return enrichedPathsForField(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
+}
+
+// redactedValue is substituted for sensitive field values when --show-secrets is not set.
+const redactedValue = "[redacted]"
+
+// fixPathsToStringFiltered emits fix paths as "path=value", redacting the value to
+// [redacted] for Secret.data and Secret.stringData paths when showSecrets is false.
+// This prevents FixPath.Value leaking secret material through the evidence column.
+func fixPathsToStringFiltered(control *resourcesresults.ResourceAssociatedControl, kind string, showSecrets bool) []string {
+	var paths []string
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			p := control.ResourceAssociatedRules[j].Paths[k].FixPath.Path
+			if p == "" {
+				continue
+			}
+			v := control.ResourceAssociatedRules[j].Paths[k].FixPath.Value
+			if !showSecrets && isSensitivePath(kind, p) {
+				v = redactedValue
+			}
+			paths = append(paths, fmt.Sprintf("%s=%s", p, v))
+		}
+	}
+	return paths
+}
+
+// AssistedRemediationPathsWithCurrentValuesFiltered is like AssistedRemediationPathsWithCurrentValues
+// but redacts sensitive field values (Secret.data, Secret.stringData) unless showSecrets is true.
+// enrichedPathsForFieldUnredacted is like enrichedPathsForField but never suppresses values
+// for sensitive paths — used when --show-secrets is set and the operator explicitly wants
+// Secret.data / Secret.stringData values surfaced.
+func enrichedPathsForFieldUnredacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
+	var paths []string
+	obj := normalizeForPathExtraction(resource.GetObject())
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			p := getPath(control.ResourceAssociatedRules[j].Paths[k])
+			if p == "" {
+				continue
+			}
+			if val, ok := extractValueAtPath(obj, p); ok {
+				paths = append(paths, p+" (current: "+val+")")
+				continue
+			}
+			paths = append(paths, p)
+		}
+	}
+	return paths
+}
+
+func reviewPathsWithCurrentValuesUnredacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
+	return enrichedPathsForFieldUnredacted(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
+}
+
+func AssistedRemediationPathsWithCurrentValuesFiltered(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, showSecrets bool) []string {
+	kind := resource.GetKind()
+	if showSecrets {
+		// extract values for all paths including sensitive ones — caller explicitly opted in
+		fixPaths := fixPathsToStringFiltered(control, kind, true)
+		deletePaths := deletePathsToString(control)
+		enrichedReview := reviewPathsWithCurrentValuesUnredacted(control, resource)
+		paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
+		return deduplicatePaths(paths)
+	}
+	fixPaths := fixPathsToStringFiltered(control, kind, false)
+	deletePaths := deletePathsToString(control)
+	enrichedReview := reviewPathsWithCurrentValuesRedacted(control, resource)
+	paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
+	return deduplicatePaths(paths)
+}
+
+func enrichedPathsForFieldRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata, getPath func(armotypes.PosturePaths) string) []string {
+	var paths []string
+	obj := normalizeForPathExtraction(resource.GetObject())
+	kind := resource.GetKind()
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			p := getPath(control.ResourceAssociatedRules[j].Paths[k])
+			if p == "" {
+				continue
+			}
+			if isSensitivePath(kind, p) {
+				paths = append(paths, p+" (current: "+redactedValue+")")
+				continue
+			}
+			if val, ok := extractValueAtPath(obj, p); ok {
+				paths = append(paths, p+" (current: "+val+")")
+				continue
+			}
+			paths = append(paths, p)
+		}
+	}
+	return paths
+}
+
+func reviewPathsWithCurrentValuesRedacted(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
+	return enrichedPathsForFieldRedacted(control, resource, func(p armotypes.PosturePaths) string { return p.ReviewPath })
 }
 
 func AssistedRemediationPathsWithCurrentValues(control *resourcesresults.ResourceAssociatedControl, resource workloadinterface.IMetadata) []string {
 	fixPaths := fixPathsToString(control, false)
 	deletePaths := deletePathsToString(control)
 	enrichedReview := reviewPathsWithCurrentValues(control, resource)
-	enrichedFailed := failedPathsWithCurrentValues(control, resource)
-
 	paths := append(fixPaths, append(deletePaths, enrichedReview...)...)
-	return appendFailedPathsIfNotInPaths(paths, enrichedFailed)
+	return deduplicatePaths(paths)
 }

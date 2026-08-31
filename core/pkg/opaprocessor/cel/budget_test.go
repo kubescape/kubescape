@@ -292,6 +292,63 @@ func TestCancelledContextInterruptsAComprehension(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
+// TestCancelledContextIsNotAnExpressionError is the regression for the
+// failurePolicy fix: a cancellation that fires while a validation expression is
+// evaluating must NOT be classified as an expressionError, or failurePolicy Fail
+// would turn a cancelled scan into a false deny. ContextEval only notices a
+// cancelled context every CheckFrequency steps INSIDE a comprehension, so
+// pre-cancelling still exercises the mid-evaluation interrupt path (the same one
+// a Ctrl+C during a long comprehension hits), while calling evalExpression
+// directly bypasses the between-validations ctx.Err() guard that would mask the
+// bug.
+func TestCancelledContextIsNotAnExpressionError(t *testing.T) {
+	items := make([]any, 0, 5*celconfig.CheckFrequency)
+	for i := 0; i < 5*celconfig.CheckFrequency; i++ {
+		items = append(items, map[string]any{"name": "c", "image": "nginx"})
+	}
+	obj := map[string]any{"kind": "Pod", "spec": map[string]any{"containers": items}}
+
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = e.evalExpression(ctx, "object.spec.containers.all(c, c.image == 'nginx')",
+		e.activationFor(ctx, obj, nil, nil, nil, nil), nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.False(t, IsExpressionError(err),
+		"a cancelled scan must stay skipped, never become a deny")
+}
+
+// TestCancelledVariableIsNotAnExpressionError covers the same classification on
+// the lazy-variable path: a variable whose evaluation is cut short by a
+// cancellation surfaces as an error to the validation that references it, and
+// that error must still read as a cancellation (not an expressionError) so it is
+// skipped rather than denied.
+func TestCancelledVariableIsNotAnExpressionError(t *testing.T) {
+	items := make([]any, 0, 5*celconfig.CheckFrequency)
+	for i := 0; i < 5*celconfig.CheckFrequency; i++ {
+		items = append(items, map[string]any{"name": "c", "image": "nginx"})
+	}
+	obj := map[string]any{"kind": "Pod", "spec": map[string]any{"containers": items}}
+	variables := []Variable{{Name: "all", Expression: "object.spec.containers.all(c, c.image == 'nginx')"}}
+	validations := []Validation{{Expression: "variables.all == true"}}
+
+	e, err := NewEvaluator()
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	budget := newCostBudget(e.budgetLimit())
+	res := e.evaluateValidation(ctx, validations[0], e.activationFor(ctx, obj, nil, nil, variables, budget), budget, nil)
+	require.Error(t, res.Err)
+	assert.False(t, IsExpressionError(res.Err),
+		"a cancelled variable evaluation must not become a deny")
+}
+
 func TestCancelledContextStopsTheRemainingValidations(t *testing.T) {
 	// InterruptCheckFrequency only makes the runtime check every N steps INSIDE
 	// one evaluation, so an ordinary policy of cheap expressions would run every

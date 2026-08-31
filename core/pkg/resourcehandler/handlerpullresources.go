@@ -8,7 +8,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	cloudsupportv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -30,13 +30,16 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, opaSess
 	opaSessionObj.AllResources = allResources
 	opaSessionObj.ExternalResources = externalResources
 	opaSessionObj.ExcludedRules = excludedRulesMap
-	opaSessionObj.ScanCoverage = cautils.BuildScanCoverage(opaSessionObj.InfoMap, opaSessionObj.ResourceToControlsMap, nil, opaSessionObj.PartialGVRFailures, opaSessionObj.PolicyDegradations)
+	opaSessionObj.ScanCoverage = cautils.BuildScanCoverage(opaSessionObj.InfoMap, opaSessionObj.ResourceToControlsMap, nil, opaSessionObj.PartialGVRFailures, opaSessionObj.PolicyDegradations, opaSessionObj.SkippedManifests)
 
 	if getErr != nil {
 		return getErr
 	}
 
 	if len(opaSessionObj.K8SResources) == 0 && len(opaSessionObj.ExternalResources) == 0 || len(opaSessionObj.AllResources) == 0 {
+		if hint := kindFilterHint(scanInfo); hint != "" {
+			return fmt.Errorf("no resources found to scan: the kind filter (%s) left nothing to evaluate", hint)
+		}
 		return fmt.Errorf("no resources found to scan")
 	}
 

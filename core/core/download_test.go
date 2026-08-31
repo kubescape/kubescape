@@ -11,9 +11,9 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils/getter"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	"github.com/stretchr/testify/assert"
@@ -209,6 +209,31 @@ func TestSetPathAndFilename(t *testing.T) {
 			expectedPath:     "sub",
 			expectedFilename: "nsa.json",
 		},
+		{
+			// Deep nested .json path pre-split
+			downloadInfo: &metav1.DownloadInfo{
+				Path:     filepath.Join("a", "b", "c"),
+				FileName: "framework.json",
+			},
+			expectedPath:     filepath.Join("a", "b", "c"),
+			expectedFilename: "framework.json",
+		},
+		{
+			// Deep nested .json file in full path
+			downloadInfo: &metav1.DownloadInfo{
+				Path: filepath.Join("custom", "output", "dir", "nsa.json"),
+			},
+			expectedPath:     filepath.Join("custom", "output", "dir"),
+			expectedFilename: "nsa.json",
+		},
+		{
+			// Deep nested directory with trailing directory format
+			downloadInfo: &metav1.DownloadInfo{
+				Path: filepath.Join("custom", "output", "nested_dir"),
+			},
+			expectedPath:     filepath.Join("custom", "output", "nested_dir"),
+			expectedFilename: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -262,6 +287,53 @@ func TestDownload_CreatesOutputDirectoryWithRestrictivePermissions(t *testing.T)
 	require.NoError(t, err)
 	mode := info.Mode().Perm()
 	assert.Zerof(t, mode&0o077, "directory %s has mode %o, more permissive than 0700", path, mode)
+}
+
+func TestDownload_CreatesNestedCustomOutputDirectory(t *testing.T) {
+	withTenantConfig(t, &fakeTenantConfig{})
+	want := &reporthandling.Framework{PortalBase: armotypes.PortalBase{Name: "nsa"}}
+	withPolicyGetter(t, &fakePolicyGetter{framework: want}, nil)
+
+	origDownloadFunc := downloadFunc
+	t.Cleanup(func() { downloadFunc = origDownloadFunc })
+
+	tempDir := t.TempDir()
+	nestedTargetDir := filepath.Join(tempDir, "custom", "nested", "reports")
+	targetFilePath := filepath.Join(nestedTargetDir, "nsa.json")
+
+	ks := NewKubescape(context.Background())
+	res, err := ks.Download(&metav1.DownloadInfo{
+		Target:     TargetFramework,
+		Identifier: "nsa",
+		Path:       targetFilePath,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.Len(t, res.Files, 1)
+
+	assert.FileExists(t, targetFilePath)
+	info, err := os.Stat(nestedTargetDir)
+	require.NoError(t, err)
+	assert.True(t, info.IsDir())
+	mode := info.Mode().Perm()
+	assert.Zerof(t, mode&0o077, "directory %s has mode %o, more permissive than 0700", nestedTargetDir, mode)
+}
+
+func TestDownload_DirectoryCreationErrorWrapped(t *testing.T) {
+	tempDir := t.TempDir()
+	filePath := filepath.Join(tempDir, "blocking-file")
+	require.NoError(t, os.WriteFile(filePath, []byte("data"), 0600))
+
+	// Attempting to create a directory under a file should fail
+	invalidDirPath := filepath.Join(filePath, "sub-dir")
+
+	ks := NewKubescape(context.Background())
+	_, err := ks.Download(&metav1.DownloadInfo{
+		Target: TargetFramework,
+		Path:   invalidDirPath,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to create download directory")
 }
 
 // TestDownload_BareJSONOutputPathIsRespected is a regression test for
@@ -332,12 +404,14 @@ func TestDownload_ArtifactsJSONOutputWritesToCurrentDirectory(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type fakePolicyGetter struct {
-	frameworks    []reporthandling.Framework
-	frameworksErr error
-	framework     *reporthandling.Framework
-	frameworkErr  error
-	control       *reporthandling.Control
-	controlErr    error
+	frameworks      []reporthandling.Framework
+	frameworksErr   error
+	framework       *reporthandling.Framework
+	frameworkErr    error
+	control         *reporthandling.Control
+	controlErr      error
+	controlsList    []string
+	controlsListErr error
 }
 
 func (f *fakePolicyGetter) GetFramework(string) (*reporthandling.Framework, error) {
@@ -346,11 +420,14 @@ func (f *fakePolicyGetter) GetFramework(string) (*reporthandling.Framework, erro
 func (f *fakePolicyGetter) GetFrameworks() ([]reporthandling.Framework, error) {
 	return f.frameworks, f.frameworksErr
 }
-func (f *fakePolicyGetter) GetControl(string) (*reporthandling.Control, error) {
+func (f *fakePolicyGetter) GetControl(id string) (*reporthandling.Control, error) {
+	if f.control != nil && f.control.ControlID != "" && f.control.ControlID != id {
+		return nil, fmt.Errorf("control %q not found", id)
+	}
 	return f.control, f.controlErr
 }
 func (f *fakePolicyGetter) ListFrameworks() ([]string, error) { return nil, nil }
-func (f *fakePolicyGetter) ListControls() ([]string, error)   { return nil, nil }
+func (f *fakePolicyGetter) ListControls() ([]string, error)   { return f.controlsList, f.controlsListErr }
 
 type fakeExceptionsGetter struct {
 	exceptions []armotypes.PostureExceptionPolicy
@@ -430,8 +507,8 @@ func withConfigInputsGetter(t *testing.T, g getter.IControlsInputsGetter, err er
 func withExceptionsGetter(t *testing.T, g getter.IExceptionsGetter, err error) {
 	t.Helper()
 	orig := exceptionsGetterFunc
-	exceptionsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IExceptionsGetter, error) {
-		return g, err
+	exceptionsGetterFunc = func(context.Context, string, string, *getter.DownloadReleasedPolicy, bool) (getter.IExceptionsGetter, bool, error) {
+		return g, false, err
 	}
 	t.Cleanup(func() { exceptionsGetterFunc = orig })
 }
@@ -714,12 +791,30 @@ func TestDownloadControl(t *testing.T) {
 		require.EqualError(t, err, "boom")
 	})
 
-	t.Run("returns error when the identifier is missing", func(t *testing.T) {
+	t.Run("returns error from ListControls when identifier is missing", func(t *testing.T) {
 		withTenantConfig(t, &fakeTenantConfig{})
-		withPolicyGetter(t, &fakePolicyGetter{}, nil)
+		withPolicyGetter(t, &fakePolicyGetter{controlsListErr: errors.New("list failed")}, nil)
 
 		_, err := downloadControl(context.Background(), &metav1.DownloadInfo{Target: TargetControl, Path: t.TempDir()})
-		require.EqualError(t, err, "missing control ID")
+		require.EqualError(t, err, "list failed")
+	})
+
+	t.Run("succeeds downloading all controls when identifier is missing", func(t *testing.T) {
+		withTenantConfig(t, &fakeTenantConfig{})
+		wantControl := &reporthandling.Control{ControlID: "C-0001"}
+		withPolicyGetter(t, &fakePolicyGetter{
+			controlsList: []string{"C-0001|control name|framework1, framework2"},
+			control:      wantControl,
+		}, nil)
+
+		dir := t.TempDir()
+		info := &metav1.DownloadInfo{Target: TargetControl, Path: dir}
+		_, err := downloadControl(context.Background(), info)
+		require.NoError(t, err)
+
+		var got reporthandling.Control
+		readJSONFile(t, filepath.Join(dir, "c-0001.json"), &got)
+		assert.Equal(t, wantControl.ControlID, got.ControlID)
 	})
 
 	t.Run("returns error from PolicyCacheFilename", func(t *testing.T) {

@@ -5,13 +5,12 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 	reporthandling "github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -31,17 +30,15 @@ func NewCsvPrinter() *CsvPrinter {
 	return &CsvPrinter{}
 }
 
-func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = csvOutputFile
-		}
-		ext := filepath.Ext(strings.TrimSpace(outputFile))
-		if ext != printer.CsvOutputExt {
-			outputFile = outputFile + printer.CsvOutputExt
-		}
+func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.CsvFormat, outputFile, csvOutputFile)
+	if explicitOutput {
+		var err error
+		cp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
 	}
 	cp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 func (cp *CsvPrinter) Score(score float32) {
@@ -169,10 +166,12 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 func (cp *CsvPrinter) PrintNextSteps() {
 }
 
-func (cp *CsvPrinter) CloseWriter() {
+// CloseWriter closes the CSV output writer, returning any error from flushing or closing.
+func (cp *CsvPrinter) CloseWriter() error {
 	if cp.writer != nil && cp.writer != os.Stdout {
-		_ = cp.writer.Close()
+		return cp.writer.Close()
 	}
+	return nil
 }
 
 // csvControlPaths returns the semicolon-separated failed paths and fix paths
@@ -187,8 +186,8 @@ func csvControlPaths(result resourcesresults.Result, controlID string) (failedPa
 		for j := range result.AssociatedControls[i].ResourceAssociatedRules {
 			for k := range result.AssociatedControls[i].ResourceAssociatedRules[j].Paths {
 				p := result.AssociatedControls[i].ResourceAssociatedRules[j].Paths[k]
-				if p.FailedPath != "" {
-					failed = append(failed, p.FailedPath)
+				if p.ReviewPath != "" {
+					failed = append(failed, p.ReviewPath)
 				}
 				if p.FixPath.Path != "" {
 					if p.FixPath.Value != "" {

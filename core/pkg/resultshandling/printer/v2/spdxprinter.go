@@ -2,16 +2,16 @@ package printer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/anchore/syft/syft/format"
 	"github.com/anchore/syft/syft/format/spdxjson"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 )
 
 const (
@@ -28,16 +28,15 @@ func NewSPDXPrinter() *SPDXPrinter {
 	return &SPDXPrinter{}
 }
 
-func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = spdxOutputFile
-		}
-		if !strings.HasSuffix(strings.TrimSpace(outputFile), printer.SPDXOutputExt) {
-			outputFile = outputFile + printer.SPDXOutputExt
-		}
+func (sp *SPDXPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.SPDXFormat, outputFile, spdxOutputFile)
+	if explicitOutput {
+		var err error
+		sp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
 	}
 	sp.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 // Score is a no-op: HandleResults only calls Score when opaSessionObj != nil
@@ -50,10 +49,6 @@ func (sp *SPDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		logger.L().Ctx(ctx).Error("spdx-json output is only supported for image scans")
 		return fmt.Errorf("spdx-json output is only supported for image scans")
 	}
-	if imageScanData[0].SBOM == nil {
-		logger.L().Ctx(ctx).Error("no SBOM data available for spdx-json output")
-		return fmt.Errorf("no SBOM data available for spdx-json output")
-	}
 
 	encoder, err := spdxjson.NewFormatEncoderWithConfig(spdxjson.DefaultEncoderConfig())
 	if err != nil {
@@ -61,13 +56,39 @@ func (sp *SPDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 		return err
 	}
 
-	data, err := format.Encode(*imageScanData[0].SBOM, encoder)
-	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to encode SBOM as spdx-json", helpers.Error(err))
-		return err
+	var encodedDocs []json.RawMessage
+	for _, scan := range imageScanData {
+		if scan.SBOM == nil {
+			logger.L().Ctx(ctx).Warning("skipping image with no SBOM data available for spdx-json output")
+			continue
+		}
+
+		data, err := format.Encode(*scan.SBOM, encoder)
+		if err != nil {
+			logger.L().Ctx(ctx).Error("failed to encode SBOM as spdx-json", helpers.Error(err))
+			return err
+		}
+
+		encodedDocs = append(encodedDocs, json.RawMessage(data))
 	}
 
-	if _, err := sp.writer.Write(data); err != nil {
+	if len(encodedDocs) == 0 {
+		logger.L().Ctx(ctx).Error("no SBOM data available for spdx-json output")
+		return fmt.Errorf("no SBOM data available for spdx-json output")
+	}
+
+	var outputBytes []byte
+	if len(encodedDocs) == 1 {
+		outputBytes = encodedDocs[0]
+	} else {
+		outputBytes, err = json.MarshalIndent(encodedDocs, "", "  ")
+		if err != nil {
+			logger.L().Ctx(ctx).Error("failed to marshal multi-image spdx-json output", helpers.Error(err))
+			return err
+		}
+	}
+
+	if _, err := sp.writer.Write(outputBytes); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write spdx-json output", helpers.Error(err))
 		return err
 	}
@@ -78,8 +99,10 @@ func (sp *SPDXPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 
 func (sp *SPDXPrinter) PrintNextSteps() {}
 
-func (sp *SPDXPrinter) CloseWriter() {
+// CloseWriter closes the SPDX output writer, returning any error from flushing or closing.
+func (sp *SPDXPrinter) CloseWriter() error {
 	if sp.writer != nil && sp.writer != os.Stdout {
-		sp.writer.Close()
+		return sp.writer.Close()
 	}
+	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -19,6 +20,11 @@ func captureLog(t *testing.T, fn func()) string {
 	t.Helper()
 	buf, err := os.CreateTemp(t.TempDir(), "log-*")
 	require.NoError(t, err)
+	// Registered before the writer restore so it runs after it (cleanups are
+	// LIFO), and after t.TempDir's own removal was registered so it runs
+	// before that. Windows refuses to delete a file that is still open, so
+	// leaving the handle around fails the test in TempDir cleanup.
+	t.Cleanup(func() { _ = buf.Close() })
 	prev := logger.L().GetWriter()
 	logger.L().SetWriter(buf)
 	t.Cleanup(func() { logger.L().SetWriter(prev) })
@@ -102,6 +108,13 @@ func TestGetWriter_ValidFileName(t *testing.T) {
 // this repo also ships Windows builds.
 func assertDirNotMorePermissiveThan0750(t *testing.T, dir string) {
 	t.Helper()
+	// Windows does not model POSIX permission bits at all: os.Stat reports
+	// 0777 for every directory, so the check below can only fail there, never
+	// catch anything. Return rather than t.Skip so the assertions the caller
+	// already made still count.
+	if runtime.GOOS == "windows" {
+		return
+	}
 	info, err := os.Stat(dir)
 	require.NoError(t, err)
 	mode := info.Mode().Perm()
@@ -128,6 +141,20 @@ func TestGetWriter_CreateFailsFallsBackToStdout(t *testing.T) {
 
 	f := GetWriter(context.Background(), target)
 	assert.Same(t, os.Stdout, f)
+}
+
+func TestGetWriterNoFallback_ReturnsExplicitSetupError(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "not-a-directory")
+	require.NoError(t, os.WriteFile(blocker, []byte("x"), 0o600))
+	target := filepath.Join(blocker, "report.json")
+
+	f, err := GetWriterNoFallback(target)
+
+	require.Error(t, err)
+	assert.Nil(t, f)
+	assert.ErrorContains(t, err, "create output directory")
+	assert.NoFileExists(t, target)
 }
 
 func TestGetWriterNoStdoutFallback_ValidFileName(t *testing.T) {
@@ -175,4 +202,136 @@ func TestLogOutputFile(t *testing.T) {
 		out := captureLog(t, func() { LogOutputFile(sink) })
 		assert.Empty(t, strings.TrimSpace(out), "expected no log for %s", sink)
 	}
+}
+
+func TestFormatOutputExtCoversAllFormats(t *testing.T) {
+	for _, format := range AllFormats {
+		ext, ok := FormatOutputExt[format]
+		assert.True(t, ok, "format %q has no entry in FormatOutputExt", format)
+		assert.NotEmpty(t, ext, "format %q maps to an empty extension", format)
+	}
+}
+
+func TestHasOutputExt(t *testing.T) {
+	tests := []struct {
+		name       string
+		outputFile string
+		ext        string
+		want       bool
+	}{
+		{"exact lowercase match", "report.json", ".json", true},
+		{"uppercase extension matches lowercase ext", "Report.JSON", ".json", true},
+		{"mixed case extension matches", "Report.Json", ".json", true},
+		{"different extension does not match", "report.yaml", ".json", false},
+		{"no extension does not match", "report", ".json", false},
+		{"empty outputFile does not match", "", ".json", false},
+		{"compound lowercase match", "report.cdx.json", ".cdx.json", true},
+		{"compound uppercase match", "Report.CDX.JSON", ".cdx.json", true},
+		{"compound partial match", "report.cdx.json", ".json", true},
+		{"compound different extension", "report.spdx.json", ".cdx.json", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, HasOutputExt(tt.outputFile, tt.ext))
+		})
+	}
+}
+
+func TestResolveOutputFile(t *testing.T) {
+	tests := []struct {
+		name         string
+		format       string
+		outputFile   string
+		defaultBase  string
+		wantFile     string
+		wantExplicit bool
+	}{
+		{
+			name:         "empty output remains implicit",
+			format:       JsonFormat,
+			outputFile:   "",
+			defaultBase:  "report",
+			wantFile:     "",
+			wantExplicit: false,
+		},
+		{
+			name:         "whitespace explicit output uses default base",
+			format:       JsonFormat,
+			outputFile:   "   ",
+			defaultBase:  "report",
+			wantFile:     "report.json",
+			wantExplicit: true,
+		},
+		{
+			name:         "trims explicit output before appending extension",
+			format:       JsonFormat,
+			outputFile:   "  reports/scan  ",
+			defaultBase:  "report",
+			wantFile:     "reports/scan.json",
+			wantExplicit: true,
+		},
+		{
+			name:         "keeps existing extension case-insensitively",
+			format:       JsonFormat,
+			outputFile:   "Report.JSON",
+			defaultBase:  "report",
+			wantFile:     "Report.JSON",
+			wantExplicit: true,
+		},
+		{
+			name:         "keeps yaml extension",
+			format:       YamlFormat,
+			outputFile:   "report.yaml",
+			defaultBase:  "report",
+			wantFile:     "report.yaml",
+			wantExplicit: true,
+		},
+		{
+			name:         "keeps yml extension",
+			format:       YamlFormat,
+			outputFile:   "report.yml",
+			defaultBase:  "report",
+			wantFile:     "report.yml",
+			wantExplicit: true,
+		},
+		{
+			name:         "appends compound cyclonedx extension",
+			format:       CycloneDXFormat,
+			outputFile:   "sbom",
+			defaultBase:  "report",
+			wantFile:     "sbom.cdx.json",
+			wantExplicit: true,
+		},
+		{
+			name:         "keeps compound spdx extension case-insensitively",
+			format:       SPDXFormat,
+			outputFile:   "Report.SPDX.JSON",
+			defaultBase:  "report",
+			wantFile:     "Report.SPDX.JSON",
+			wantExplicit: true,
+		},
+		{
+			name:         "unknown format only trims and marks explicit",
+			format:       "custom",
+			outputFile:   "  report.custom  ",
+			defaultBase:  "report",
+			wantFile:     "report.custom",
+			wantExplicit: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotFile, gotExplicit := ResolveOutputFile(tt.format, tt.outputFile, tt.defaultBase)
+			assert.Equal(t, tt.wantFile, gotFile)
+			assert.Equal(t, tt.wantExplicit, gotExplicit)
+		})
+	}
+}
+
+func TestResolveDefaultOutputFile(t *testing.T) {
+	assert.Equal(t, "report.html", ResolveDefaultOutputFile(HtmlFormat, "report"))
+	assert.Equal(t, "report.pdf", ResolveDefaultOutputFile(PdfFormat, "report"))
+	assert.Equal(t, "report.md", ResolveDefaultOutputFile(MarkdownFormat, "report"))
+	assert.Equal(t, "report.yaml", ResolveDefaultOutputFile(PolicyReportFormat, "report"))
 }

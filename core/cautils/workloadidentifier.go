@@ -1,0 +1,102 @@
+package cautils
+
+import (
+	"errors"
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+// Workload identifiers name a single Kubernetes resource to scan, in the form
+// accepted by `kubescape scan workload`:
+//
+//	<kind>[.<version>[.<group>]]/<name>
+//	<namespace>/<kind>[.<version>[.<group>]]/<name>
+//
+// The parsing lives here rather than in cmd/scan because more than one entry
+// point needs it — the scan command and the MCP server — and cmd/scan cannot be
+// imported by the latter without pulling in cobra and the entire command tree.
+// core/cautils is the lowest package both already depend on.
+
+// ErrInvalidWorkloadIdentifier is returned when a workload identifier does not
+// match the documented form. Callers compare against it with errors.Is, and the
+// scan command re-exports this exact value, so it must stay a single package
+// level error rather than being reconstructed per call site.
+var ErrInvalidWorkloadIdentifier = errors.New("invalid workload identifier, expected <kind>[.<version>[.<group>]]/<name>")
+
+// ValidateWorkloadIdentifier reports whether workloadIdentifier is well formed,
+// discarding the parsed components. It exists so argument validation can run
+// before a command is willing to do any other work.
+func ValidateWorkloadIdentifier(workloadIdentifier string) error {
+	_, _, _, _, err := ParseWorkloadIdentifierString(workloadIdentifier)
+	return err
+}
+
+// ParseWorkloadIdentifierString splits a workload identifier into its parts.
+//
+// The namespace is optional and empty when the identifier omits it; the caller
+// decides what an absent namespace means (the scan command falls back to its
+// --namespace flag). apiVersion is likewise empty when the identifier carries a
+// bare kind, which callers resolving against a live cluster may treat as "let
+// discovery pick the group/version".
+func ParseWorkloadIdentifierString(workloadIdentifier string) (namespace, kind, name, apiVersion string, err error) {
+	// workloadIdentifier is in the form of kind/name or namespace/kind/name
+	// example: default/Deployment/nginx-deployment
+	x := strings.Split(workloadIdentifier, "/")
+	if len(x) == 2 {
+		if x[0] == "" || x[1] == "" {
+			return "", "", "", "", ErrInvalidWorkloadIdentifier
+		}
+		parsedKind, parsedApiVersion, err := parseKindAndApiVersion(x[0])
+		if err != nil {
+			return "", "", "", "", err
+		}
+		return "", parsedKind, x[1], parsedApiVersion, nil
+	}
+	if len(x) == 3 {
+		if x[0] == "" || x[1] == "" || x[2] == "" {
+			return "", "", "", "", ErrInvalidWorkloadIdentifier
+		}
+		parsedKind, parsedApiVersion, err := parseKindAndApiVersion(x[1])
+		if err != nil {
+			return "", "", "", "", err
+		}
+		return x[0], parsedKind, x[2], parsedApiVersion, nil
+	}
+
+	return "", "", "", "", ErrInvalidWorkloadIdentifier
+}
+
+// apiVersionPattern matches a bare Kubernetes version segment (v1, v1beta1,
+// v2alpha1). It guards the second dotted component so that "Deployment.apps"
+// is rejected as a missing version rather than being silently read as one.
+var apiVersionPattern = regexp.MustCompile(`^v\d+((alpha|beta)\d+)?$`)
+
+// parseKindAndApiVersion splits the kind segment of an identifier into a kind
+// and, when present, the apiVersion it encodes. The dotted form orders the
+// components kind.version.group for readability, while Kubernetes apiVersion
+// strings are group/version, so the group and version are swapped on the way
+// out.
+func parseKindAndApiVersion(kindStr string) (kind, apiVersion string, err error) {
+	parts := strings.Split(kindStr, ".")
+	if len(parts) == 1 {
+		return kindStr, "", nil
+	}
+
+	// Reject empty components
+	for _, part := range parts {
+		if part == "" {
+			return "", "", fmt.Errorf("%w: empty component in %q", ErrInvalidWorkloadIdentifier, kindStr)
+		}
+	}
+
+	if !apiVersionPattern.MatchString(parts[1]) {
+		return "", "", fmt.Errorf("%w: %q is not a valid API version in %q", ErrInvalidWorkloadIdentifier, parts[1], kindStr)
+	}
+
+	if len(parts) >= 3 {
+		group := strings.Join(parts[2:], ".")
+		return parts[0], group + "/" + parts[1], nil // kind.version.group -> group/version
+	}
+	return parts[0], parts[1], nil // kind.version -> version
+}

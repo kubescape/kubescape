@@ -23,11 +23,11 @@ import (
 	"github.com/docker/cli/cli/config"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	ksmetav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/pkg/imagescan"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	ksmetav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/pkg/imagescan"
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
@@ -53,12 +53,13 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	logger.L().Start(fmt.Sprintf("Scanning image: %s", patchInfo.Image))
 
 	// Setup the scan service
-	distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL)
+	// patch never exposes --skip-db-update; SkipDBUpdate is always false here, so the DB is always updated.
+	distCfg, installCfg, shouldUpdate, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL, false)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Invalid Grype database URL '%s': %v", scanInfo.ListingURL, err))
 		return false, err
 	}
-	svc, err := imagescan.NewScanServiceWithMatchers(distCfg, installCfg, scanInfo.UseDefaultMatchers)
+	svc, err := imagescan.NewScanServiceWithMatchersAndSources(distCfg, installCfg, scanInfo.UseDefaultMatchers, nil, shouldUpdate)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to initialize image scanner: %s", err))
 		return false, err
@@ -91,13 +92,29 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	// Save the scan results to a file in json format
 	pres := grypejson.NewPresenter(models.PresenterConfig{Document: model, SBOM: scanResults.SBOM})
 
-	fileName := fmt.Sprintf("%s:%s.json", patchInfo.ImageName, patchInfo.ImageTag)
-	fileName = strings.ReplaceAll(fileName, "/", "-")
+	// The intermediate name must be filesystem-safe on every OS: image
+	// references legally contain ':' (tags, registry ports) and '@'
+	// (digests), which are reserved filename characters on Windows.
+	fileName := fmt.Sprintf("%s.json", sanitizeImageRefForFilename(patchInfo.Image))
 
-	writer := printer.GetWriter(ks.Context(), fileName)
+	writer, err := printer.GetWriterNoFallback(fileName)
+	if err != nil {
+		return false, fmt.Errorf("creating intermediate scan results file: %w", err)
+	}
+	defer func() {
+		if err := os.Remove(fileName); err != nil && !errors.Is(err, os.ErrNotExist) {
+			logger.L().Warning(fmt.Sprintf("failed to remove residual file: %v", fileName), helpers.Error(err))
+		}
+	}()
 
 	if err = pres.Present(writer); err != nil {
+		if closeErr := writer.Close(); closeErr != nil {
+			return false, errors.Join(err, fmt.Errorf("closing intermediate scan results file: %w", closeErr))
+		}
 		return false, err
+	}
+	if closeErr := writer.Close(); closeErr != nil {
+		return false, fmt.Errorf("closing intermediate scan results file: %w", closeErr)
 	}
 	logger.L().StopSuccess(fmt.Sprintf("Successfully scanned image: %s", patchInfo.Image))
 
@@ -122,12 +139,6 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Loaded locally: %s", patchedImageName))
 	case "oci", "local":
 		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Exported to: %s", patchInfo.OutputPath))
-	}
-
-	// ===================== Clean up =====================
-	// Remove the scan results file, which was used to patch the image
-	if err := os.Remove(fileName); err != nil {
-		logger.L().Warning(fmt.Sprintf("failed to remove residual file: %v", fileName), helpers.Error(err))
 	}
 
 	// ===================== Early return for OCI/Local exports =====================
@@ -173,6 +184,25 @@ func buildPatchedImageName(image, patchedTag string) (string, error) {
 		return "", fmt.Errorf("failed to parse image reference %q: %w", image, err)
 	}
 	return fmt.Sprintf("%s:%s", ref.Name(), patchedTag), nil
+}
+
+// sanitizeImageRefForFilename converts an image reference into a filename
+// component that is safe on every supported OS. Image references legally
+// contain ':' (tag separators, registry ports), '/' (repository paths) and '@'
+// (digests); ':' is a reserved character on Windows, where os.Create on such a
+// name fails outright.
+func sanitizeImageRefForFilename(image string) string {
+	replacer := strings.NewReplacer(":", "-", "/", "-", "@", "-", " ", "-")
+	return replacer.Replace(strings.TrimSpace(image))
+}
+
+// updatesCount reports how many package updates are targeted, tolerating the
+// update-all mode where no scanner report is provided and updates is nil.
+func updatesCount(updates *unversioned.UpdateManifest) int {
+	if updates == nil {
+		return 0
+	}
+	return len(updates.Updates)
 }
 
 // runWithCopaLoggerMuted mutes copa's logrus output for the duration of fn,
@@ -238,11 +268,11 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 			return err
 		}
 		defer os.RemoveAll(workingFolder)
-		if err := os.Chmod(workingFolder, 0o744); err != nil {
+		if err := os.Chmod(workingFolder, 0o700); err != nil { // #nosec G302 -- working directory needs owner-execute (0o700) for a private area
 			return err
 		}
 	} else {
-		if isNew, err := utils.EnsurePath(workingFolder, 0o744); err != nil {
+		if isNew, err := utils.EnsurePath(workingFolder, 0o700); err != nil {
 			log.Errorf("failed to create workingFolder %s", workingFolder)
 			return err
 		} else if isNew {
@@ -325,7 +355,7 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 			}
 		}
 
-		log.Infof("Patching %d vulnerabilities", len(updates.Updates))
+		log.Infof("Patching %d vulnerabilities", updatesCount(updates))
 		patchedImageState, errPkgs, err := manager.InstallUpdates(ctx, updates, ignoreError)
 		if err != nil {
 			return nil, fmt.Errorf("copa: error installing updates :: %w", err)
@@ -433,11 +463,11 @@ func buildPatchExport(outputMode, outputPath, patchedImageName string) (client.E
 			},
 			Output: func(_ map[string]string) (io.WriteCloser, error) {
 				if dir := filepath.Dir(outputPath); dir != "." {
-					if err := os.MkdirAll(dir, 0o755); err != nil {
+					if err := os.MkdirAll(dir, 0o750); err != nil {
 						return nil, fmt.Errorf("failed to create parent directory for output-path %q: %w", outputPath, err)
 					}
 				}
-				return os.Create(outputPath)
+				return os.Create(filepath.Clean(outputPath))
 			},
 		}, nil, nil
 	case "local":

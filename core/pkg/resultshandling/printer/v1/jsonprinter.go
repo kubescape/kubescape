@@ -5,16 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
 )
 
 const (
 	jsonOutputFile = "report"
-	jsonOutputExt  = ".json"
 )
 
 var _ printer.IPrinter = &JsonPrinter{}
@@ -27,16 +24,15 @@ func NewJsonPrinter() *JsonPrinter {
 	return &JsonPrinter{}
 }
 
-func (jsonPrinter *JsonPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = jsonOutputFile
-		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != jsonOutputExt {
-			outputFile = outputFile + jsonOutputExt
-		}
+func (jsonPrinter *JsonPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.JsonFormat, outputFile, jsonOutputFile)
+	if explicitOutput {
+		var err error
+		jsonPrinter.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
 	}
 	jsonPrinter.writer = printer.GetWriter(ctx, outputFile)
+	return nil
 }
 
 func (jsonPrinter *JsonPrinter) Score(score float32) {
@@ -73,8 +69,9 @@ func (jsonPrinter *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 	return nil
 }
 
-func (p *JsonPrinter) CloseWriter() {
+func (p *JsonPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }

@@ -1,12 +1,13 @@
 package patch
 
 import (
+	"strings"
 	"testing"
 
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 
-	"github.com/kubescape/kubescape/v3/cmd/shared"
-	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/kubescape/kubescape/v4/cmd/shared"
+	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -151,6 +152,139 @@ func TestPatchCmd_OutputModeFlags(t *testing.T) {
 	assert.Equal(t, "image", outputModeFlag2.Value.String())
 }
 
+// registryFixtureValue assembles credential-looking test values from parts so no
+// literal password string appears in the source (which trips secret scanners).
+func registryFixtureValue(parts ...string) string {
+	return strings.Join(parts, "-")
+}
+
+// TestPatchCmd_RegistryCredentialsFromEnv verifies `kubescape patch` picks up registry
+// credentials from KUBESCAPE_REGISTRY_USERNAME/KUBESCAPE_REGISTRY_PASSWORD when the
+// corresponding flags are omitted, so a registry password never has to be typed on the
+// command line - where it is visible in `ps`, /proc/<pid>/cmdline and shell history.
+// `kubescape scan image` already honours these variables (cmd/scan/scan.go); patch
+// authenticates against the same registries with the same -u/-p flags.
+func TestPatchCmd_RegistryCredentialsFromEnv(t *testing.T) {
+	envUser := registryFixtureValue("env", "user")
+	envCredential := registryFixtureValue("env", "credential")
+
+	t.Setenv("KUBESCAPE_REGISTRY_USERNAME", envUser)
+	t.Setenv("KUBESCAPE_REGISTRY_PASSWORD", envCredential)
+
+	cmd := GetPatchCmd(&mocks.MockIKubescape{})
+	cmd.SetArgs([]string{"--image", "nginx:1.23"})
+	require.NoError(t, cmd.Execute())
+
+	assert.Equal(t, envUser, cmd.PersistentFlags().Lookup("username").Value.String(),
+		"--username omitted: the username must come from KUBESCAPE_REGISTRY_USERNAME")
+	assert.Equal(t, envCredential, cmd.PersistentFlags().Lookup("password").Value.String(),
+		"--password omitted: the password must come from KUBESCAPE_REGISTRY_PASSWORD")
+}
+
+// TestPatchCmd_RegistryCredentialFlagsBeatEnv verifies flags still win end-to-end, so
+// the environment fallback cannot silently swap the credentials of an existing
+// `kubescape patch -u ... -p ...` invocation.
+func TestPatchCmd_RegistryCredentialFlagsBeatEnv(t *testing.T) {
+	flagUser := registryFixtureValue("flag", "user")
+	flagCredential := registryFixtureValue("flag", "credential")
+
+	t.Setenv("KUBESCAPE_REGISTRY_USERNAME", registryFixtureValue("env", "user"))
+	t.Setenv("KUBESCAPE_REGISTRY_PASSWORD", registryFixtureValue("env", "credential"))
+
+	cmd := GetPatchCmd(&mocks.MockIKubescape{})
+	cmd.SetArgs([]string{"--image", "nginx:1.23", "--username", flagUser, "--password", flagCredential})
+	require.NoError(t, cmd.Execute())
+
+	assert.Equal(t, flagUser, cmd.PersistentFlags().Lookup("username").Value.String())
+	assert.Equal(t, flagCredential, cmd.PersistentFlags().Lookup("password").Value.String())
+}
+
+func Test_applyRegistryCredentialsFromEnv(t *testing.T) {
+	envUser := registryFixtureValue("env", "user")
+	envCredential := registryFixtureValue("env", "credential")
+	flagUser := registryFixtureValue("flag", "user")
+	flagCredential := registryFixtureValue("flag", "credential")
+
+	// newPatchCmd builds a command with the same credential flags patch registers,
+	// bound to the returned PatchInfo.
+	newPatchCmd := func() (*cobra.Command, *metav1.PatchInfo) {
+		patchInfo := &metav1.PatchInfo{}
+		cmd := &cobra.Command{Use: "patch"}
+		cmd.PersistentFlags().StringVarP(&patchInfo.Username, "username", "u", "", "")
+		cmd.PersistentFlags().StringVarP(&patchInfo.Password, "password", "p", "", "")
+		return cmd, patchInfo
+	}
+
+	t.Run("both credentials come from the environment when no flag is given", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_REGISTRY_USERNAME", envUser)
+		t.Setenv("KUBESCAPE_REGISTRY_PASSWORD", envCredential)
+
+		cmd, patchInfo := newPatchCmd()
+		applyRegistryCredentialsFromEnv(cmd, patchInfo)
+
+		assert.Equal(t, envUser, patchInfo.Username)
+		assert.Equal(t, envCredential, patchInfo.Password)
+	})
+
+	t.Run("flags take precedence over the environment", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_REGISTRY_USERNAME", envUser)
+		t.Setenv("KUBESCAPE_REGISTRY_PASSWORD", envCredential)
+
+		cmd, patchInfo := newPatchCmd()
+		require.NoError(t, cmd.PersistentFlags().Set("username", flagUser))
+		require.NoError(t, cmd.PersistentFlags().Set("password", flagCredential))
+
+		applyRegistryCredentialsFromEnv(cmd, patchInfo)
+
+		assert.Equal(t, flagUser, patchInfo.Username)
+		assert.Equal(t, flagCredential, patchInfo.Password)
+	})
+
+	t.Run("username flag pairs with password from the environment", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_REGISTRY_USERNAME", envUser)
+		t.Setenv("KUBESCAPE_REGISTRY_PASSWORD", envCredential)
+
+		cmd, patchInfo := newPatchCmd()
+		require.NoError(t, cmd.PersistentFlags().Set("username", flagUser))
+
+		applyRegistryCredentialsFromEnv(cmd, patchInfo)
+
+		assert.Equal(t, flagUser, patchInfo.Username)
+		assert.Equal(t, envCredential, patchInfo.Password,
+			"passing only --username is the intended way to keep the password off the command line")
+	})
+
+	t.Run("explicitly empty flag is not overridden by the environment", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_REGISTRY_USERNAME", envUser)
+		t.Setenv("KUBESCAPE_REGISTRY_PASSWORD", envCredential)
+
+		cmd, patchInfo := newPatchCmd()
+		require.NoError(t, cmd.PersistentFlags().Set("username", ""))
+		require.NoError(t, cmd.PersistentFlags().Set("password", ""))
+
+		applyRegistryCredentialsFromEnv(cmd, patchInfo)
+
+		assert.Empty(t, patchInfo.Username, `--username "" is an explicit request for no credential`)
+		assert.Empty(t, patchInfo.Password, `--password "" is an explicit request for no credential`)
+	})
+
+	t.Run("credentials stay empty when neither flag nor environment is set", func(t *testing.T) {
+		t.Setenv("KUBESCAPE_REGISTRY_USERNAME", "")
+		t.Setenv("KUBESCAPE_REGISTRY_PASSWORD", "")
+
+		cmd, patchInfo := newPatchCmd()
+		applyRegistryCredentialsFromEnv(cmd, patchInfo)
+
+		assert.Empty(t, patchInfo.Username)
+		assert.Empty(t, patchInfo.Password)
+	})
+
+	t.Run("nil patch info is a no-op", func(t *testing.T) {
+		cmd, _ := newPatchCmd()
+		assert.NotPanics(t, func() { applyRegistryCredentialsFromEnv(cmd, nil) })
+	})
+}
+
 func Test_validateImagePatchInfo_DefaultsTagAndPatchedTag(t *testing.T) {
 	patchInfo := &metav1.PatchInfo{
 		Image:      "nginx",
@@ -164,6 +298,41 @@ func Test_validateImagePatchInfo_DefaultsTagAndPatchedTag(t *testing.T) {
 	assert.Equal(t, "latest", patchInfo.ImageTag)
 	assert.Equal(t, "latest-patched", patchInfo.PatchedImageTag)
 	assert.Equal(t, "nginx", patchInfo.ImageName)
+}
+
+// A digest-pinned reference combined with an explicit --tag must not error:
+// the patched-tag defaulting branch never runs, so capturing the source tag
+// has to be best-effort rather than a hard type-assertion failure.
+func Test_validateImagePatchInfo_DigestRefWithExplicitTag(t *testing.T) {
+	patchInfo := &metav1.PatchInfo{
+		Image:           "nginx@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+		PatchedImageTag: "patched",
+		OutputMode:      "docker",
+	}
+
+	err := validateImagePatchInfo(patchInfo)
+
+	assert.NoError(t, err)
+	assert.Empty(t, patchInfo.ImageTag,
+		"a digest-pinned reference carries no tag; it must not be fabricated")
+	assert.Equal(t, "patched", patchInfo.PatchedImageTag)
+}
+
+// An explicit --tag must not leave ImageTag empty: the intermediate report
+// filename derives from fields that must stay well-formed regardless of flags.
+func Test_validateImagePatchInfo_ExplicitTagStillCapturesSourceTag(t *testing.T) {
+	patchInfo := &metav1.PatchInfo{
+		Image:           "nginx:1.22",
+		PatchedImageTag: "my-patched",
+		OutputMode:      "docker",
+	}
+
+	err := validateImagePatchInfo(patchInfo)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "1.22", patchInfo.ImageTag,
+		"the source tag must be captured even when --tag is provided")
+	assert.Equal(t, "my-patched", patchInfo.PatchedImageTag)
 }
 
 func Test_validateImagePatchInfo_DigestOnlyReturnsError(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	reporthandling "github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -93,14 +93,14 @@ func csvSessionFixtureWithPaths() *cautils.OPASessionObj {
 			{
 				Paths: []armotypes.PosturePaths{
 					{
-						FailedPath: "spec.containers[0].securityContext.privileged",
+						ReviewPath: "spec.containers[0].securityContext.privileged",
 						FixPath: armotypes.FixPath{
 							Path:  "spec.containers[0].securityContext.privileged",
 							Value: "false",
 						},
 					},
 					{
-						FailedPath: "spec.initContainers[0].securityContext.privileged",
+						ReviewPath: "spec.initContainers[0].securityContext.privileged",
 					},
 				},
 			},
@@ -402,7 +402,7 @@ func TestCsvControlPaths(t *testing.T) {
 				{
 					Paths: []armotypes.PosturePaths{
 						{
-							FailedPath: "spec.containers[0].securityContext.privileged",
+							ReviewPath: "spec.containers[0].securityContext.privileged",
 							FixPath:    armotypes.FixPath{Path: "spec.containers[0].securityContext.privileged", Value: "false"},
 						},
 					},
@@ -417,8 +417,8 @@ func TestCsvControlPaths(t *testing.T) {
 			result: makeResult("C-0057", []resourcesresults.ResourceAssociatedRule{
 				{
 					Paths: []armotypes.PosturePaths{
-						{FailedPath: "spec.containers[0].securityContext.privileged"},
-						{FailedPath: "spec.initContainers[0].securityContext.privileged"},
+						{ReviewPath: "spec.containers[0].securityContext.privileged"},
+						{ReviewPath: "spec.initContainers[0].securityContext.privileged"},
 					},
 				},
 			}),
@@ -444,7 +444,7 @@ func TestCsvControlPaths(t *testing.T) {
 			result: makeResult("C-0057", []resourcesresults.ResourceAssociatedRule{
 				{
 					Paths: []armotypes.PosturePaths{
-						{FailedPath: "spec.containers[0].securityContext.privileged"},
+						{ReviewPath: "spec.containers[0].securityContext.privileged"},
 					},
 				},
 			}),
@@ -464,12 +464,12 @@ func TestCsvControlPaths(t *testing.T) {
 			result: makeResult("C-0057", []resourcesresults.ResourceAssociatedRule{
 				{
 					Paths: []armotypes.PosturePaths{
-						{FailedPath: "spec.containers[0].securityContext.privileged"},
+						{ReviewPath: "spec.containers[0].securityContext.privileged"},
 					},
 				},
 				{
 					Paths: []armotypes.PosturePaths{
-						{FailedPath: "spec.containers[1].securityContext.privileged"},
+						{ReviewPath: "spec.containers[1].securityContext.privileged"},
 					},
 				},
 			}),

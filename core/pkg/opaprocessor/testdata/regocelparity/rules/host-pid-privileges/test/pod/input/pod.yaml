@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+    name: test
+spec:
+      containers:
+      - args:
+        - server
+        env:
+          - name: BASE_HREF
+            value: /argo/
+        image: test:latest
+        name: test
+      - name : test2
+        image : test
+      hostNetwork: true
+      hostPID: true

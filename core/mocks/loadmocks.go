@@ -27,7 +27,7 @@ func MockFramework_0013() *reporthandling.Framework {
 		},
 	}
 	c := &reporthandling.Control{}
-	json.Unmarshal([]byte(mockControl_0013), c)
+	json.Unmarshal([]byte(mockControl_0013), c) // #nosec G104 -- mock loads a hardcoded, known-good JSON fixture
 	fw.Controls = []reporthandling.Control{*c}
 	return fw
 }
@@ -44,13 +44,13 @@ func MockFramework_0006_0013() *reporthandling.Framework {
 			reporthandling.ScopeCluster,
 		},
 	}}
-	json.Unmarshal([]byte(mockControl_0006), c06)
+	json.Unmarshal([]byte(mockControl_0006), c06) // #nosec G104 -- mock loads a hardcoded, known-good JSON fixture
 	c13 := &reporthandling.Control{ScanningScope: &reporthandling.ScanningScope{
 		Matches: []reporthandling.ScanningScopeType{
 			reporthandling.ScopeCluster,
 		},
 	}}
-	json.Unmarshal([]byte(mockControl_0013), c13)
+	json.Unmarshal([]byte(mockControl_0013), c13) // #nosec G104 -- mock loads a hardcoded, known-good JSON fixture
 	fw.Controls = []reporthandling.Control{*c06, *c13}
 	return fw
 }
@@ -67,7 +67,7 @@ func MockFramework_0044() *reporthandling.Framework {
 			reporthandling.ScopeCluster,
 		},
 	}}
-	json.Unmarshal([]byte(mockControl_0044), c44)
+	json.Unmarshal([]byte(mockControl_0044), c44) // #nosec G104 -- mock loads a hardcoded, known-good JSON fixture
 
 	fw.Controls = []reporthandling.Control{*c44}
 	return fw
@@ -85,7 +85,7 @@ func MockDevelopmentWithHostpath() workloadinterface.IMetadata {
 func MockExceptionAllKinds(policy *armotypes.PosturePolicy) *armotypes.PostureExceptionPolicy {
 	return &armotypes.PostureExceptionPolicy{
 		PosturePolicies: []armotypes.PosturePolicy{*policy},
-		Actions:         []armotypes.PostureExceptionPolicyActions{armotypes.AlertOnly},
+		Actions:         []armotypes.PostureExceptionPolicyActions{armotypes.Disable},
 		Resources: []identifiers.PortalDesignator{
 			{
 				DesignatorType: identifiers.DesignatorAttributes,

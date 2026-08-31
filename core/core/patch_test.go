@@ -4,17 +4,57 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/moby/buildkit/client"
+	"github.com/project-copacetic/copacetic/pkg/types/unversioned"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestSanitizeImageRefForFilename pins the cross-platform filename guarantee:
+// image references legally contain ':', '/', '@' and whitespace, all of which
+// are illegal or hazardous in filenames on at least one supported OS.
+func TestSanitizeImageRefForFilename(t *testing.T) {
+	tests := []struct {
+		name  string
+		image string
+		want  string
+	}{
+		{name: "tagged image", image: "nginx:1.22", want: "nginx-1.22"},
+		{name: "name-only image", image: "nginx", want: "nginx"},
+		{name: "repository path", image: "myrepo/myapp:2.0", want: "myrepo-myapp-2.0"},
+		{name: "registry with port", image: "registry.example.com:8443/myapp:3.1", want: "registry.example.com-8443-myapp-3.1"},
+		{name: "digest-pinned reference", image: "myrepo/myapp@sha256:9f86d081", want: "myrepo-myapp-sha256-9f86d081"},
+		{name: "surrounding whitespace trimmed", image: "  nginx:1.22  ", want: "nginx-1.22"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeImageRefForFilename(tt.image)
+			assert.Equal(t, tt.want, got)
+			assert.NotContains(t, got, ":")
+			assert.NotContains(t, got, "/")
+			assert.NotContains(t, got, "@")
+		})
+	}
+}
+
+// TestUpdatesCountToleratesUpdateAllMode guards the update-all path: with no
+// scanner report there are no updates, and reading len on a nil value must
+// never panic.
+func TestUpdatesCountToleratesUpdateAllMode(t *testing.T) {
+	assert.Equal(t, 0, updatesCount(nil))
+	assert.Equal(t, 0, updatesCount(&unversioned.UpdateManifest{}))
+	assert.Equal(t, 2, updatesCount(&unversioned.UpdateManifest{
+		Updates: unversioned.UpdatePackages{{}, {}},
+	}))
+}
 
 // TestBuildPatchedImageName guards the fix for kubescape/kubescape#2189: the
 // patched image must be exported under its canonical reference so containerd
@@ -358,4 +398,53 @@ func TestRunWithCopaLoggerMuted_RestoresActualPriorLogrusWriter(t *testing.T) {
 	assert.Equal(t, io.Discard, duringCallWriter, "logrus output must be discarded while fn runs")
 	assert.Empty(t, customWriter.String(), "logrus output during fn must not leak to the pre-existing writer")
 	assert.Same(t, &customWriter, log.StandardLogger().Out, "logrus writer must be restored to what it actually was, not assumed to be os.Stderr")
+}
+
+// TestPatchIntermediateFileCleanup verifies that intermediate scan files
+// created for copacetic are closed and deleted via deferred cleanup on both error and success paths.
+func TestPatchIntermediateFileCleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+	origWD, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmpDir))
+	t.Cleanup(func() { _ = os.Chdir(origWD) })
+
+	// Mirror the sanitized scheme Patch() now uses for its intermediate name.
+	fileName := fmt.Sprintf("%s.json", sanitizeImageRefForFilename("test-image:1.0"))
+
+	// Simulate the file creation and deferred cleanup pattern used in Patch()
+	cleanupFn := func(simulateFailure bool) error {
+		f, createErr := os.Create(fileName)
+		if createErr != nil {
+			return createErr
+		}
+		defer func() {
+			if remErr := os.Remove(fileName); remErr != nil && !errors.Is(remErr, os.ErrNotExist) {
+				t.Errorf("failed to remove intermediate file: %v", remErr)
+			}
+		}()
+
+		_, writeErr := f.WriteString("{\"test\": \"data\"}")
+		require.NoError(t, writeErr)
+		require.NoError(t, f.Close(), "file must close without error before downstream reading/cleanup")
+
+		if simulateFailure {
+			return errors.New("simulated downstream copa failure")
+		}
+		return nil
+	}
+
+	t.Run("cleanup on success", func(t *testing.T) {
+		err := cleanupFn(false)
+		assert.NoError(t, err)
+		_, statErr := os.Stat(fileName)
+		assert.True(t, os.IsNotExist(statErr), "intermediate file must be cleaned up on success")
+	})
+
+	t.Run("cleanup on error", func(t *testing.T) {
+		err := cleanupFn(true)
+		assert.Error(t, err)
+		_, statErr := os.Stat(fileName)
+		assert.True(t, os.IsNotExist(statErr), "intermediate file must be cleaned up even if downstream error occurs")
+	})
 }

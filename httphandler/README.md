@@ -170,8 +170,6 @@ Delete cached scan results.
   "includeNamespaces": ["production", "staging"],
   "useCachedArtifacts": false,
   "keepLocal": true,
-  "account": "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
-  "accessKey": "your-access-key",
   "targetType": "framework",
   "targetNames": ["nsa", "mitre"]
 }
@@ -184,10 +182,15 @@ Delete cached scan results.
 | `includeNamespaces` | []string | Namespaces to include in scan |
 | `useCachedArtifacts` | bool | Use cached artifacts (offline mode) |
 | `keepLocal` | bool | Don't submit results to backend |
-| `account` | string | Kubescape SaaS account ID |
-| `accessKey` | string | Kubescape SaaS access key |
 | `targetType` | string | `"framework"` or `"control"` |
 | `targetNames` | []string | Frameworks/controls to scan |
+
+> **`account` / `accessKey` are ignored.** These endpoints are unauthenticated,
+> so the server never takes its Kubescape SaaS identity from the request body —
+> otherwise any caller could redirect results to an account they control. The
+> identity comes from the server's own configuration (`KS_ACCOUNT_ID` /
+> `KS_ACCESS_KEY`, or the credentials loaded at startup). The fields are still
+> accepted in the payload for backward compatibility, but have no effect.
 
 ### Response Object
 
@@ -257,12 +260,20 @@ curl -X POST http://127.0.0.1:8080/v1/scan \
 
 ### Scan with Account Integration
 
+The account and access key are configured on the server, not sent per request
+(see the note under [Trigger Scan Object](#trigger-scan-object)):
+
+```bash
+# on the server / in the Helm values
+export KS_ACCOUNT_ID="YOUR-ACCOUNT-ID"
+export KS_ACCESS_KEY="YOUR-ACCESS-KEY"
+```
+
 ```bash
 curl -X POST http://127.0.0.1:8080/v1/scan \
   -H "Content-Type: application/json" \
   -d '{
-    "account": "YOUR-ACCOUNT-ID",
-    "accessKey": "YOUR-ACCESS-KEY",
+    "submit": true,
     "targetType": "framework",
     "targetNames": ["nsa"]
   }'
@@ -282,7 +293,8 @@ Configure the HTTP handler using environment variables:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `KS_ACCOUNT` | Default account ID | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| `KS_ACCOUNT_ID` | Kubescape SaaS account ID used for every scan | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| `KS_ACCESS_KEY` | Kubescape SaaS access key used for every scan | `your-access-key` |
 | `KS_EXCLUDE_NAMESPACES` | Default namespaces to exclude | `kube-system,kube-public` |
 | `KS_INCLUDE_NAMESPACES` | Default namespaces to include | `production,staging` |
 | `KS_FORMAT` | Default output format | `json` |
@@ -293,6 +305,7 @@ Configure the HTTP handler using environment variables:
 | `KS_SCAN_REQUEST_MAX_BYTES` | Maximum size in bytes of a `POST /v1/scan` request body | `1048576` |
 | `KS_PPROF_ENABLED` | Enable the pprof debug server (off by default; binds to loopback only) | `true`, `false` |
 | `KS_PPROF_ADDR` | Address the pprof debug server binds to when enabled | `127.0.0.1:6060` |
+| `KS_API_TOKEN` | Bearer token for `/v1/*` API authentication (optional, off by default). When set, every `/v1/scan`, `/v1/results` and `/v1/status` request must present `Authorization: Bearer <token>` or it gets `401`. Health probes `/livez`/`/readyz` and OpenAPI docs stay open. If you expose `:8080` beyond the cluster, set this to a random value and serve over TLS (`KS_CERT_FILE`/`KS_KEY_FILE`) or a TLS-terminating ingress. | `openssl rand -hex 32` |
 
 ---
 

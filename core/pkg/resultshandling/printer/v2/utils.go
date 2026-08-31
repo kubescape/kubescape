@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -9,9 +10,9 @@ import (
 	"github.com/anchore/grype/grype/match"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
@@ -61,6 +62,7 @@ type PostureReportWithSeverity struct {
 	ClusterCloudProvider string                            `json:"clusterCloudProvider"`
 	CustomerGUID         string                            `json:"customerGUID"`
 	ClusterName          string                            `json:"clusterName"`
+	ReportID             string                            `json:"reportGUID"`
 	SummaryDetails       SummaryDetailsWithSeverity        `json:"summaryDetails"`
 	Resources            []reporthandling.Resource         `json:"resources,omitempty"`
 	Attributes           []reportsummary.PostureAttributes `json:"attributes"`
@@ -68,6 +70,7 @@ type PostureReportWithSeverity struct {
 	Metadata             reporthandlingv2.Metadata         `json:"metadata"`
 	ResourceLabels       map[string]map[string]string      `json:"resourceLabels,omitempty"` // map[resourceID]map[labelKey]labelValue - extracted labels from workloads
 	ScanCoverage         *cautils.ScanCoverage             `json:"scanCoverage,omitempty"`
+	ExceptionAudit       *cautils.ExceptionAudit           `json:"exceptionAudit,omitempty"`
 }
 
 // enrichControlsWithSeverity adds severity field to controls based on scoreFactor
@@ -108,6 +111,47 @@ func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummari
 	return enrichedResults
 }
 
+// severityRank returns a comparable rank for a severity string; unknown values rank lowest.
+func severityRank(severity string) int {
+	switch strings.ToLower(severity) {
+	case "critical":
+		return 4
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// FilterBySeverity drops controls (and matching associated controls in results)
+// that are below minSeverity. Pass an empty minSeverity to disable filtering.
+func FilterBySeverity(report *PostureReportWithSeverity, minSeverity string) {
+	if minSeverity == "" || report == nil {
+		return
+	}
+	threshold := severityRank(minSeverity)
+
+	for id, control := range report.SummaryDetails.Controls {
+		if severityRank(control.Severity) < threshold {
+			delete(report.SummaryDetails.Controls, id)
+		}
+	}
+
+	for i, result := range report.Results {
+		filtered := result.AssociatedControls[:0]
+		for _, control := range result.AssociatedControls {
+			if severityRank(control.Severity) >= threshold {
+				filtered = append(filtered, control)
+			}
+		}
+		report.Results[i].AssociatedControls = filtered
+	}
+}
+
 // ConvertToPostureReportWithSeverity converts PostureReport to PostureReportWithSeverity
 func ConvertToPostureReportWithSeverity(report *reporthandlingv2.PostureReport) *PostureReportWithSeverity {
 	return ConvertToPostureReportWithSeverityAndLabels(report, nil, nil)
@@ -136,7 +180,7 @@ func ConvertToPostureReportWithSeverityLabelsAndCoverage(report *reporthandlingv
 
 	// only attach coverage when there is something to show
 	var scanCoverage *cautils.ScanCoverage
-	if coverage != nil && (len(coverage.FailedGVRPulls) > 0 || len(coverage.NotEvaluatedControls) > 0 || len(coverage.PartialGVRPulls) > 0 || len(coverage.PolicyDegradations) > 0) {
+	if coverage != nil && (len(coverage.FailedGVRPulls) > 0 || len(coverage.NotEvaluatedControls) > 0 || len(coverage.PartialGVRPulls) > 0 || len(coverage.PolicyDegradations) > 0 || len(coverage.VacuousFrameworks) > 0 || len(coverage.SkippedManifests) > 0) {
 		scanCoverage = coverage
 	}
 
@@ -146,6 +190,7 @@ func ConvertToPostureReportWithSeverityLabelsAndCoverage(report *reporthandlingv
 		ClusterCloudProvider: report.ClusterCloudProvider,
 		CustomerGUID:         report.CustomerGUID,
 		ClusterName:          report.ClusterName,
+		ReportID:             report.ReportID,
 		SummaryDetails: SummaryDetailsWithSeverity{
 			Controls:                  enrichedControls,
 			Status:                    report.SummaryDetails.Status,
@@ -223,6 +268,9 @@ func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureRepor
 	if data.Report.ClusterName == "" {
 		data.Report.ClusterName = cautils.AdoptClusterName(scanContextName(data))
 	}
+	if data.Report.ReportID == "" {
+		data.Report.ReportID = data.SessionID
+	}
 	report := reporthandlingv2.PostureReport{
 		SummaryDetails:       data.Report.SummaryDetails,
 		Metadata:             *data.Metadata,
@@ -231,6 +279,7 @@ func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureRepor
 		Attributes:           data.Report.Attributes,
 		ClusterName:          data.Report.ClusterName,
 		CustomerGUID:         data.Report.CustomerGUID,
+		ReportID:             data.Report.ReportID,
 		ClusterCloudProvider: data.Report.ClusterCloudProvider,
 	}
 
@@ -252,6 +301,14 @@ func finalizeResults(results []resourcesresults.Result, resourcesResult map[stri
 
 	for index, resourceID := range resourceIDs {
 		results[index] = resourcesResult[resourceID]
+
+		// Deterministic per-resource layout: AssociatedControls arrive in
+		// whatever order concurrent evaluation appended them (or however a
+		// session built outside the processor assembled them), so sort by
+		// ControlID before the report leaves this function.
+		slices.SortFunc(results[index].AssociatedControls, func(a, b resourcesresults.ResourceAssociatedControl) int {
+			return strings.Compare(a.ControlID, b.ControlID)
+		})
 
 		// Add prioritization information to the result
 		if v, exist := prioritizedResources[resourceID]; exist {
@@ -363,7 +420,7 @@ func setPkgNameToScoreMap(matches match.Matches, pkgScores map[string]*imageprin
 	}
 }
 
-func extractCVEs(matches match.Matches, image string) []imageprinter.CVE {
+func extractCVEs(matches match.Matches, image string, vexStatuses map[string]cautils.VexStatus) []imageprinter.CVE {
 	var CVEs []imageprinter.CVE
 	for _, m := range matches.Sorted() {
 		cve := imageprinter.CVE{
@@ -375,7 +432,59 @@ func extractCVEs(matches match.Matches, image string) []imageprinter.CVE {
 			FixedState:  m.Vulnerability.Fix.State.String(),
 			Image:       image,
 		}
+		if vexStatus, ok := vexStatuses[cve.ID]; ok {
+			cve.VexStatus = vexStatus.Status
+			cve.VexJustification = vexStatus.Justification
+		}
 		CVEs = append(CVEs, cve)
 	}
 	return CVEs
+}
+
+// buildImageScanSummary aggregates per-image scan data into the summary every
+// output format consumes. The image list is deduplicated with a set so this is
+// O(N) in the number of images; the printer-local copies this replaces used
+// slices.Contains and were O(N^2) on large image sets.
+func buildImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.ImageScanSummary {
+	return buildImageScanSummaryWithTarget(imageScanData, true)
+}
+
+// buildMachineImageScanSummary preserves the historical image reference used
+// by JSON and YAML reports. Platform metadata must not silently change image
+// identifiers that downstream consumers use for joins and deduplication.
+func buildMachineImageScanSummary(imageScanData []cautils.ImageScanData) *imageprinter.ImageScanSummary {
+	return buildImageScanSummaryWithTarget(imageScanData, false)
+}
+
+func buildImageScanSummaryWithTarget(imageScanData []cautils.ImageScanData, includePlatform bool) *imageprinter.ImageScanSummary {
+	imageScanSummary := &imageprinter.ImageScanSummary{
+		CVEs:                  []imageprinter.CVE{},
+		PackageScores:         map[string]*imageprinter.PackageScore{},
+		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
+	}
+
+	seenImages := make(map[string]struct{}, len(imageScanData))
+	for i := range imageScanData {
+		image := imageScanData[i].Image
+		if includePlatform {
+			image = imageScanData[i].Target()
+		}
+		if _, seen := seenImages[image]; !seen {
+			seenImages[image] = struct{}{}
+			imageScanSummary.Images = append(imageScanSummary.Images, image)
+		}
+
+		if imageScanSummary.VulnDBBuilt == nil {
+			imageScanSummary.VulnDBBuilt = imageScanData[i].VulnDBBuilt
+		}
+
+		cves := extractCVEs(imageScanData[i].Matches, image, imageScanData[i].VexStatuses)
+		imageScanSummary.CVEs = append(imageScanSummary.CVEs, cves...)
+
+		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
+
+		setSeverityToSummaryMap(cves, imageScanSummary.MapsSeverityToSummary)
+	}
+
+	return imageScanSummary
 }

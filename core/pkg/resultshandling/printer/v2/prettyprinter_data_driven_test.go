@@ -9,8 +9,8 @@ import (
 	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -152,6 +152,15 @@ func TestImageSummaryAndDelegation(t *testing.T) {
 		{name: "empty", input: nil, wantImages: nil, wantCVEs: 0},
 		{name: "single image", input: []cautils.ImageScanData{imageData}, wantImages: []string{"test-image:latest"}, wantCVEs: 1},
 		{name: "duplicate image is de-duplicated", input: []cautils.ImageScanData{imageData, imageData}, wantImages: []string{"test-image:latest"}, wantCVEs: 2},
+		{
+			name: "platform variants remain distinct",
+			input: []cautils.ImageScanData{
+				{Image: imageData.Image, Platform: "linux/amd64", Matches: imageData.Matches},
+				{Image: imageData.Image, Platform: "linux/arm64", Matches: imageData.Matches},
+			},
+			wantImages: []string{"test-image:latest [linux/amd64]", "test-image:latest [linux/arm64]"},
+			wantCVEs:   2,
+		},
 	}
 
 	for _, test := range tests {

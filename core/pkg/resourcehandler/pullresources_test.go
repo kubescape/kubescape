@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
@@ -384,7 +384,7 @@ func TestRecordFailedQueryStatuses_PartialFailureSessionField(t *testing.T) {
 
 	// The GVR has data (from selector 1), so InfoMap must NOT have a whole-GVR
 	// skip entry — that would incorrectly mark the control as NotEvaluated.
-	_, inInfoMap := sessionObj.InfoMap["core/v1/secrets"]
+	_, inInfoMap := sessionObj.InfoMap["/v1/secrets"]
 	assert.False(t, inInfoMap, "a partially-collected GVR must not appear as a whole-GVR skip in InfoMap")
 
 	// The per-selector failure must surface in PartialGVRFailures so the caller
@@ -428,6 +428,6 @@ func TestGetResources_DiscoveryFailureReachesScanCoverage(t *testing.T) {
 	assert.Equal(t, "discovery", sessionObj.PartialGVRFailures[0].Selector)
 	assert.Contains(t, sessionObj.PartialGVRFailures[0].Error, "provider unavailable")
 
-	coverage := cautils.BuildScanCoverage(sessionObj.InfoMap, sessionObj.ResourceToControlsMap, nil, sessionObj.PartialGVRFailures, nil)
+	coverage := cautils.BuildScanCoverage(sessionObj.InfoMap, sessionObj.ResourceToControlsMap, nil, sessionObj.PartialGVRFailures, nil, nil)
 	assert.Len(t, coverage.PartialGVRPulls, 1)
 }

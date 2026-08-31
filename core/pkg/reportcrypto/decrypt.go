@@ -22,7 +22,7 @@ import (
 func DEKFromMetadata(
 	metadata *reporthandlingv2.Metadata,
 	masterKey []byte,
-) ([]byte, error) {
+) (*ReportKey, error) {
 
 	if metadata == nil {
 		return nil, fmt.Errorf("metadata is nil")
@@ -36,7 +36,7 @@ func DEKFromMetadata(
 		return nil, fmt.Errorf("encrypted DEK not found")
 	}
 
-	return UnwrapDEK(
+	return UnwrapReportKey(
 		metadata.EncryptionMetadata.EncryptedDEK,
 		masterKey,
 	)
@@ -74,11 +74,153 @@ func DecryptRepoContextMetadata(
 		return err
 	}
 
-	defer func() {
-		for i := range dek {
-			dek[i] = 0
+	defer dek.Zero()
+
+	return decryptRepoContextMetadata(metadata, dek)
+}
+
+// decryptDirectoryContextMetadata and decryptFileContextMetadata restore the
+// scan location the anonymizer encrypted.
+func decryptDirectoryContextMetadata(metadata *reporthandlingv2.Metadata, dek *ReportKey) error {
+	if metadata == nil {
+		return fmt.Errorf("metadata is nil")
+	}
+
+	directoryMetadata := metadata.ContextMetadata.DirectoryContextMetadata
+	if directoryMetadata == nil {
+		return nil
+	}
+
+	var err error
+
+	if directoryMetadata.BasePath != "" {
+		directoryMetadata.BasePath, err = decryptIfEncrypted(directoryMetadata.BasePath, dek)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt basePath: %w", err)
 		}
-	}()
+	}
+
+	if directoryMetadata.HostName != "" {
+		directoryMetadata.HostName, err = decryptIfEncrypted(directoryMetadata.HostName, dek)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt hostName: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func decryptFileContextMetadata(metadata *reporthandlingv2.Metadata, dek *ReportKey) error {
+	if metadata == nil {
+		return fmt.Errorf("metadata is nil")
+	}
+
+	fileMetadata := metadata.ContextMetadata.FileContextMetadata
+	if fileMetadata == nil {
+		return nil
+	}
+
+	var err error
+
+	if fileMetadata.FilePath != "" {
+		fileMetadata.FilePath, err = decryptIfEncrypted(fileMetadata.FilePath, dek)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt filePath: %w", err)
+		}
+	}
+
+	if fileMetadata.HostName != "" {
+		fileMetadata.HostName, err = decryptIfEncrypted(fileMetadata.HostName, dek)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt hostName: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// decryptClusterMetadata restores the cluster identity encrypted by the
+// anonymizer, in both places a report carries it: the target metadata and the
+// deprecated top-level copy. Namespace counts are re-keyed into a fresh map
+// because the keys themselves are ciphertext.
+func decryptClusterMetadata(metadata *reporthandlingv2.Metadata, dek *ReportKey) error {
+	if metadata == nil {
+		return fmt.Errorf("metadata is nil")
+	}
+
+	for _, clusterMetadata := range []*reporthandlingv2.ClusterMetadata{
+		metadata.ContextMetadata.ClusterContextMetadata,
+		&metadata.ClusterMetadata,
+	} {
+		if clusterMetadata == nil {
+			continue
+		}
+
+		if err := decryptClusterMetadataFields(clusterMetadata, dek); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func decryptClusterMetadataFields(clusterMetadata *reporthandlingv2.ClusterMetadata, dek *ReportKey) error {
+	var err error
+
+	if clusterMetadata.ContextName != "" {
+		clusterMetadata.ContextName, err = decryptIfEncrypted(clusterMetadata.ContextName, dek)
+		if err != nil {
+			return fmt.Errorf("failed to decrypt contextName: %w", err)
+		}
+	}
+
+	if cloudMetadata := clusterMetadata.CloudMetadata; cloudMetadata != nil {
+		for name, field := range map[string]*string{
+			"fullName":   &cloudMetadata.FullName,
+			"shortName":  &cloudMetadata.ShortName,
+			"prefixName": &cloudMetadata.PrefixName,
+		} {
+			if *field == "" {
+				continue
+			}
+
+			if *field, err = decryptIfEncrypted(*field, dek); err != nil {
+				return fmt.Errorf("failed to decrypt %s: %w", name, err)
+			}
+		}
+	}
+
+	if clusterMetadata.MapNamespaceToNumberOfResources == nil {
+		return nil
+	}
+
+	namespaceCounts := make(map[string]int, len(clusterMetadata.MapNamespaceToNumberOfResources))
+
+	for namespace, count := range clusterMetadata.MapNamespaceToNumberOfResources {
+		if namespace != "" {
+			namespace, err = decryptIfEncrypted(namespace, dek)
+			if err != nil {
+				return fmt.Errorf("failed to decrypt namespace: %w", err)
+			}
+		}
+
+		namespaceCounts[namespace] += count
+	}
+
+	clusterMetadata.MapNamespaceToNumberOfResources = namespaceCounts
+
+	return nil
+}
+
+// decryptRepoContextMetadata performs the repository metadata portion
+// of report decryption with an already unwrapped data-encryption key. Keeping
+// this internal avoids unwrapping the same key twice during whole-report
+// decryption while the exported helper retains its existing master-key API.
+func decryptRepoContextMetadata(metadata *reporthandlingv2.Metadata, dek *ReportKey) error {
+	if metadata == nil {
+		return fmt.Errorf("metadata is nil")
+	}
+	var err error
 
 	repoMetadata :=
 		metadata.ContextMetadata.RepoContextMetadata
@@ -178,7 +320,7 @@ func DecryptRepoContextMetadata(
 // This operation mutates the supplied LastCommit object in place.
 func decryptLastCommit(
 	commit *reporthandling.LastCommit,
-	dek []byte,
+	dek *ReportKey,
 ) error {
 	if commit == nil {
 		return nil
@@ -261,7 +403,7 @@ func decryptLastCommit(
 //   - LastCommit.Message
 func DecryptResourceSource(
 	source *reporthandling.Source,
-	dek []byte,
+	dek *ReportKey,
 ) error {
 	if source == nil {
 		return nil
@@ -386,7 +528,7 @@ func DecryptResourceSource(
 //   - Namespace
 func DecryptResourceMetadata(
 	resource workloadinterface.IMetadata,
-	dek []byte,
+	dek *ReportKey,
 ) error {
 	if resource == nil {
 		return nil
@@ -436,7 +578,7 @@ func DecryptResourceMetadata(
 // encrypted in the first place — annotation values such as
 // kubectl.kubernetes.io/last-applied-configuration routinely carry a trailing
 // newline that is part of the data.
-func decryptIfEncrypted(value string, dek []byte) (string, error) {
+func decryptIfEncrypted(value string, dek *ReportKey) (string, error) {
 	if value == "" {
 		return value, nil
 	}
@@ -447,14 +589,14 @@ func decryptIfEncrypted(value string, dek []byte) (string, error) {
 		return value, nil
 	}
 
-	return DecryptString(trimmed, dek)
+	return dek.DecryptString(trimmed)
 }
 
 // DecryptResourceLabels restores encrypted resource label values.
 //
 // Every label value is passed through decryptIfEncrypted, which leaves
 // plaintext values unchanged while restoring encrypted values.
-func DecryptResourceLabels(resource workloadinterface.IMetadata, dek []byte) error {
+func DecryptResourceLabels(resource workloadinterface.IMetadata, dek *ReportKey) error {
 
 	if resource == nil {
 		return nil
@@ -498,7 +640,7 @@ func DecryptResourceLabels(resource workloadinterface.IMetadata, dek []byte) err
 
 // DecryptResourceAnnotations restores encrypted annotation values
 // throughout a workload object, including nested workload templates.
-func DecryptResourceAnnotations(resource workloadinterface.IMetadata, dek []byte) error {
+func DecryptResourceAnnotations(resource workloadinterface.IMetadata, dek *ReportKey) error {
 
 	if resource == nil {
 		return nil
@@ -524,7 +666,7 @@ func DecryptResourceAnnotations(resource workloadinterface.IMetadata, dek []byte
 // decryptAnnotationNodes recursively traverses resource objects to
 // locate metadata.annotations blocks regardless of workload nesting
 // depth.
-func decryptAnnotationNodes(node any, dek []byte) error {
+func decryptAnnotationNodes(node any, dek *ReportKey) error {
 
 	switch v := node.(type) {
 
@@ -563,7 +705,7 @@ func decryptAnnotationNodes(node any, dek []byte) error {
 
 // decryptAnnotationMap restores encrypted annotation values while
 // preserving annotation keys.
-func decryptAnnotationMap(obj map[string]any, dek []byte) error {
+func decryptAnnotationMap(obj map[string]any, dek *ReportKey) error {
 
 	rawMetadata, ok := obj["metadata"]
 	if !ok || rawMetadata == nil {
@@ -612,7 +754,7 @@ func decryptAnnotationMap(obj map[string]any, dek []byte) error {
 
 // DecryptResourceObjectSourcePath restores object.sourcePath while
 // preserving trailing line-number context.
-func DecryptResourceObjectSourcePath(resource workloadinterface.IMetadata, dek []byte) error {
+func DecryptResourceObjectSourcePath(resource workloadinterface.IMetadata, dek *ReportKey) error {
 
 	if resource == nil {
 		return nil
@@ -649,7 +791,7 @@ func DecryptResourceObjectSourcePath(resource workloadinterface.IMetadata, dek [
 
 // decryptSourcePath restores the path portion of a sourcePath while
 // preserving any trailing line-number suffix.
-func decryptSourcePath(sourcePath string, dek []byte) (string, error) {
+func decryptSourcePath(sourcePath string, dek *ReportKey) (string, error) {
 
 	lastColon := strings.LastIndex(
 		sourcePath,

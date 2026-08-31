@@ -7,8 +7,8 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -76,19 +76,48 @@ func TestResolveMappedID(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			mapping := NewMapping()
-			result := resolveMappedID(mapping, test.idMapping, test.original, "ref")
+			result, err := resolveMappedID(NewMappingTransformer(), test.idMapping, test.original, "ref")
+			require.NoError(t, err)
 			test.validate(t, result)
 		})
 	}
 }
 
-func TestTransformSession_NilSession(t *testing.T) {
-	mapping := NewMapping()
+func TestResolveMappedIDEncryptionFallbackIsReversible(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
 
+	original := "apps/v1/production/Deployment/payments-api"
+	idMapping := map[string]string{}
+	transformed, err := resolveMappedID(
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
+		idMapping,
+		original,
+		"ref",
+	)
+	require.NoError(t, err)
+	assert.Contains(t, transformed, "ENC[AES256_GCM,")
+	assert.NotContains(t, transformed, "ref-")
+
+	restored, err := reportcrypto.DecryptString(transformed, dek)
+	require.NoError(t, err)
+	assert.Equal(t, original, restored)
+
+	repeated, err := resolveMappedID(NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)), idMapping, original, "ref")
+	require.NoError(t, err)
+	assert.Equal(t, transformed, repeated)
+}
+
+func TestResolveMappedIDReturnsFallbackTransformationError(t *testing.T) {
+	_, err := resolveMappedID(&failingTransformer{}, map[string]string{}, "unknown-id", "ref")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "transform failed")
+}
+
+func TestTransformSession_NilSession(t *testing.T) {
 	require.NoError(
 		t,
-		transformSession(nil, mapping, NewMappingTransformer()),
+		transformSession(nil, NewMapping(), NewMappingTransformer()),
 	)
 }
 
@@ -109,12 +138,10 @@ func TestTransformSession_NamesAndNamespacesReplaced(t *testing.T) {
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourceSource:       make(map[string]reporthandling.Source),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 	}
 
-	mapping := NewMapping()
-
-	err := transformSession(session, mapping, NewMappingTransformer())
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
 	require.NoError(t, err)
 
 	for _, resource := range session.AllResources {
@@ -123,6 +150,61 @@ func TestTransformSession_NamesAndNamespacesReplaced(t *testing.T) {
 		assert.Contains(t, resource.GetName(), "res-")
 		assert.Contains(t, resource.GetNamespace(), "ns-")
 	}
+}
+
+// TestTransformSession_CollidingNamesKeepDistinctResources covers what a
+// pseudonym collision costs at session level, which is more than a confusing
+// report: transformSession rebuilds AllResources and ResourcesResult keyed by
+// the *transformed* ID, so two resources whose names hash to the same
+// pseudonym overwrite each other and one disappears from the output
+// entirely - a scanned, failing workload that the report never mentions.
+//
+// collidingNameA and collidingNameB (mapping_test.go) collide in the first 32
+// bits of their SHA-256 digests, so this test fails whenever the pseudonym
+// suffix is truncated that short.
+func TestTransformSession_CollidingNamesKeepDistinctResources(t *testing.T) {
+	newPod := func(name string) workloadinterface.IMetadata {
+		return workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"name":      name,
+				"namespace": "default",
+			},
+		})
+	}
+
+	podA := newPod(collidingNameA)
+	podB := newPod(collidingNameB)
+
+	session := &cautils.OPASessionObj{
+		AllResources: map[string]workloadinterface.IMetadata{
+			podA.GetID(): podA,
+			podB.GetID(): podB,
+		},
+		ResourcesResult: map[string]resourcesresults.Result{
+			podA.GetID(): {ResourceID: podA.GetID()},
+			podB.GetID(): {ResourceID: podB.GetID()},
+		},
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
+	}
+
+	require.NoError(t, transformSession(session, NewMapping(), NewMappingTransformer()))
+
+	assert.Len(t, session.AllResources, 2,
+		"both pods were scanned, so both must still be present after anonymization")
+	assert.Len(t, session.ResourcesResult, 2,
+		"each pod must keep its own result entry after anonymization")
+
+	names := make(map[string]struct{}, len(session.AllResources))
+	for _, resource := range session.AllResources {
+		assert.NotContains(t, resource.GetName(), "payments-api",
+			"the real name must not survive anonymization")
+		names[resource.GetName()] = struct{}{}
+	}
+	assert.Len(t, names, 2, "the two pods must carry distinct pseudonyms")
 }
 
 func TestTransformSession_IDConsistencyAcrossMaps(t *testing.T) {
@@ -189,8 +271,8 @@ func TestTransformSession_IDConsistencyAcrossMaps(t *testing.T) {
 		ResourcesPrioritized: map[string]prioritization.PrioritizedResource{
 			oldID: {ResourceID: oldID},
 		},
-		ResourceAttackTracks: map[string]v1alpha1.IAttackTrack{
-			oldID: &v1alpha1.AttackTrack{},
+		ResourceAttackTracks: map[string][]v1alpha1.IAttackTrack{
+			oldID: {&v1alpha1.AttackTrack{}},
 		},
 		Report: &reporthandlingv2.PostureReport{
 			SummaryDetails: reportsummary.SummaryDetails{
@@ -203,8 +285,7 @@ func TestTransformSession_IDConsistencyAcrossMaps(t *testing.T) {
 		},
 	}
 
-	mapping := NewMapping()
-	err := transformSession(session, mapping, NewMappingTransformer())
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
 	require.NoError(t, err)
 
 	var newID string
@@ -374,12 +455,11 @@ func TestTransformSession_LabelHandling(t *testing.T) {
 				ResourcesResult:      make(map[string]resourcesresults.Result),
 				ResourceSource:       make(map[string]reporthandling.Source),
 				ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-				ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+				ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 				LabelsToCopy:         test.labelsToCopy,
 			}
 
-			mapping := NewMapping()
-			err := transformSession(session, mapping, NewMappingTransformer())
+			err := transformSession(session, NewMapping(), NewMappingTransformer())
 			require.NoError(t, err)
 
 			for _, resource := range session.AllResources {
@@ -559,13 +639,11 @@ func TestTransformSession_Annotations(t *testing.T) {
 				ResourcesResult:      make(map[string]resourcesresults.Result),
 				ResourceSource:       make(map[string]reporthandling.Source),
 				ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-				ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+				ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 			}
 
-			mapping := NewMapping()
-
 			assert.NotPanics(t, func() {
-				err := transformSession(session, mapping, NewMappingTransformer())
+				err := transformSession(session, NewMapping(), NewMappingTransformer())
 				require.NoError(t, err)
 			})
 
@@ -598,7 +676,7 @@ func TestTransformSession_RepoContextMetadata(t *testing.T) {
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourceSource:       make(map[string]reporthandling.Source),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 
 		Metadata: &reporthandlingv2.Metadata{
 			ContextMetadata: reporthandlingv2.ContextMetadata{
@@ -633,8 +711,7 @@ func TestTransformSession_RepoContextMetadata(t *testing.T) {
 		},
 	}
 
-	mapping := NewMapping()
-	err := transformSession(session, mapping, NewMappingTransformer())
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
 	require.NoError(t, err)
 
 	for _, repo := range []*reporthandlingv2.RepoContextMetadata{
@@ -739,7 +816,7 @@ func TestTransformRepoContextMetadata_EncryptionTransformer(
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	repo := &reporthandlingv2.RepoContextMetadata{
 		Provider:      "github",
@@ -876,7 +953,7 @@ func TestTransformResourceSource_EncryptionTransformer(
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	source := &reporthandling.Source{
 		Path: "/workspace/private/app.yaml",
@@ -962,13 +1039,13 @@ func TestTransformSession_ResourceSourceEncryption(
 
 		ResourcesResult:      make(map[string]resourcesresults.Result),
 		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
-		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
 	}
 
 	err = transformSession(
 		session,
 		NewMapping(),
-		NewEncryptionTransformer(dek),
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
 	)
 	require.NoError(t, err)
 
@@ -1006,7 +1083,7 @@ func TestTransformResourceMetadata_EncryptionTransformer(
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	resource := workloadinterface.NewWorkloadObj(map[string]any{
 		"apiVersion": "v1",
@@ -1110,7 +1187,7 @@ func TestTransformResourceLabels_EncryptionTransformer(t *testing.T) {
 	err = transformResourceLabels(
 		resource,
 		[]string{"team", "env"},
-		NewEncryptionTransformer(dek),
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
 	)
 	require.NoError(t, err)
 
@@ -1146,7 +1223,7 @@ func TestTransformResourceAnnotations_EncryptionTransformer(t *testing.T) {
 
 	err = transformResourceAnnotations(
 		resource,
-		NewEncryptionTransformer(dek),
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
 	)
 	require.NoError(t, err)
 
@@ -1181,7 +1258,7 @@ func TestTransformResourceObjectSourcePath_EncryptionTransformer(t *testing.T) {
 
 	err = transformResourceObjectSourcePath(
 		resource,
-		NewEncryptionTransformer(dek),
+		NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek)),
 	)
 	require.NoError(t, err)
 
@@ -1203,7 +1280,7 @@ func TestTransformSourcePath_EncryptionTransformer(t *testing.T) {
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	transformer := NewEncryptionTransformer(dek)
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
 
 	transformed, err := transformSourcePath(
 		"/workspace/manifests/payment.yaml:42",
@@ -1231,4 +1308,379 @@ func TestTransformSourcePath_EncryptionTransformer(t *testing.T) {
 		"/workspace/manifests/payment.yaml",
 		decryptedPath,
 	)
+}
+
+func TestTransformSourcePath_WindowsDriveLetterNoLineSuffix(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
+
+	// A bare Windows path has no trailing ":<index>" suffix, so its only
+	// colon is the drive letter's. That colon must not be mistaken for a
+	// line-number separator, or everything past "C" leaks in cleartext.
+	transformed, err := transformSourcePath(
+		`C:\Users\alice\manifests\payment.yaml`,
+		transformer,
+	)
+	require.NoError(t, err)
+
+	assert.NotContains(t, transformed, `Users\alice`)
+	assert.Contains(t, transformed, "ENC[AES256_GCM,")
+
+	decryptedPath, err := reportcrypto.DecryptString(transformed, dek)
+	require.NoError(t, err)
+
+	assert.Equal(t, `C:\Users\alice\manifests\payment.yaml`, decryptedPath)
+}
+
+func TestTransformSourcePath_WindowsDriveLetterWithLineSuffix(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	transformer := NewEncryptionTransformer(reportcrypto.UnboundReportKey(dek))
+
+	transformed, err := transformSourcePath(
+		`C:\Users\alice\manifests\payment.yaml:7`,
+		transformer,
+	)
+	require.NoError(t, err)
+
+	assert.NotContains(t, transformed, `Users\alice`)
+
+	lastColon := strings.LastIndex(transformed, ":")
+	require.NotEqual(t, -1, lastColon)
+
+	encryptedPath := transformed[:lastColon]
+	linePart := transformed[lastColon:]
+
+	assert.Contains(t, encryptedPath, "ENC[AES256_GCM,")
+	assert.Equal(t, ":7", linePart)
+
+	decryptedPath, err := reportcrypto.DecryptString(encryptedPath, dek)
+	require.NoError(t, err)
+
+	assert.Equal(t, `C:\Users\alice\manifests\payment.yaml`, decryptedPath)
+}
+
+func TestTransformSession_DirectoryContextMetadata(t *testing.T) {
+	const (
+		basePath = "/home/devjijo/work/internal-platform"
+		hostName = "build-agent-07.corp.internal"
+	)
+
+	directoryContext := func() *reporthandlingv2.DirectoryContextMetadata {
+		return &reporthandlingv2.DirectoryContextMetadata{BasePath: basePath, HostName: hostName}
+	}
+
+	session := &cautils.OPASessionObj{
+		AllResources:         make(map[string]workloadinterface.IMetadata),
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
+
+		Metadata: &reporthandlingv2.Metadata{
+			ContextMetadata: reporthandlingv2.ContextMetadata{DirectoryContextMetadata: directoryContext()},
+		},
+		Report: &reporthandlingv2.PostureReport{
+			Metadata: reporthandlingv2.Metadata{
+				ContextMetadata: reporthandlingv2.ContextMetadata{DirectoryContextMetadata: directoryContext()},
+			},
+		},
+	}
+
+	require.NoError(t, transformSession(session, NewMapping(), NewMappingTransformer()))
+
+	for _, directory := range []*reporthandlingv2.DirectoryContextMetadata{
+		session.Metadata.ContextMetadata.DirectoryContextMetadata,
+		session.Report.Metadata.ContextMetadata.DirectoryContextMetadata,
+	} {
+		require.NotNil(t, directory)
+		assert.NotEqual(t, basePath, directory.BasePath, "the scanned directory names the account it ran under")
+		assert.NotEqual(t, hostName, directory.HostName, "the host names the machine the scan ran on")
+		assert.NotEmpty(t, directory.BasePath)
+		assert.NotEmpty(t, directory.HostName)
+	}
+
+	assert.Equal(t,
+		session.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath,
+		session.Report.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath,
+		"both copies must map to the same pseudonym")
+}
+
+func TestTransformSession_FileContextMetadata(t *testing.T) {
+	const (
+		filePath = "/home/devjijo/work/internal-platform/deploy.yaml"
+		hostName = "build-agent-07.corp.internal"
+	)
+
+	fileContext := func() *reporthandlingv2.FileContextMetadata {
+		return &reporthandlingv2.FileContextMetadata{FilePath: filePath, HostName: hostName}
+	}
+
+	session := &cautils.OPASessionObj{
+		AllResources:         make(map[string]workloadinterface.IMetadata),
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
+
+		Metadata: &reporthandlingv2.Metadata{
+			ContextMetadata: reporthandlingv2.ContextMetadata{FileContextMetadata: fileContext()},
+		},
+		Report: &reporthandlingv2.PostureReport{
+			Metadata: reporthandlingv2.Metadata{
+				ContextMetadata: reporthandlingv2.ContextMetadata{FileContextMetadata: fileContext()},
+			},
+		},
+	}
+
+	require.NoError(t, transformSession(session, NewMapping(), NewMappingTransformer()))
+
+	for _, file := range []*reporthandlingv2.FileContextMetadata{
+		session.Metadata.ContextMetadata.FileContextMetadata,
+		session.Report.Metadata.ContextMetadata.FileContextMetadata,
+	} {
+		require.NotNil(t, file)
+		assert.NotEqual(t, filePath, file.FilePath, "the scanned file names the account it ran under")
+		assert.NotEqual(t, hostName, file.HostName)
+		assert.NotEmpty(t, file.FilePath)
+		assert.NotEmpty(t, file.HostName)
+	}
+}
+
+// TestTransformSession_HostNameSharedAcrossContexts keeps the pseudonym stable:
+// a directory scan and a file scan of the same machine must read alike.
+func TestTransformSession_HostNameSharedAcrossContexts(t *testing.T) {
+	const hostName = "build-agent-07.corp.internal"
+
+	session := &cautils.OPASessionObj{
+		AllResources:         make(map[string]workloadinterface.IMetadata),
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
+
+		Metadata: &reporthandlingv2.Metadata{
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{BasePath: "/tmp/a", HostName: hostName},
+				FileContextMetadata:      &reporthandlingv2.FileContextMetadata{FilePath: "/tmp/a/deploy.yaml", HostName: hostName},
+			},
+		},
+	}
+
+	require.NoError(t, transformSession(session, NewMapping(), NewMappingTransformer()))
+
+	assert.Equal(t,
+		session.Metadata.ContextMetadata.DirectoryContextMetadata.HostName,
+		session.Metadata.ContextMetadata.FileContextMetadata.HostName)
+}
+
+func TestTransformSession_NoDirectoryContextMetadata(t *testing.T) {
+	session := &cautils.OPASessionObj{
+		AllResources:         make(map[string]workloadinterface.IMetadata),
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
+		Metadata:             &reporthandlingv2.Metadata{},
+		Report:               &reporthandlingv2.PostureReport{},
+	}
+
+	assert.NoError(t, transformSession(session, NewMapping(), NewMappingTransformer()))
+}
+
+func TestTransformSession_ClusterContextMetadata(t *testing.T) {
+	const (
+		contextName = "gke_acme-prod-1234_us-central1_payments"
+		fullName    = "gke_acme-prod-1234_us-central1_payments"
+		shortName   = "payments"
+		prefixName  = "gke_acme-prod-1234_us-central1"
+	)
+
+	clusterContext := func() *reporthandlingv2.ClusterMetadata {
+		return &reporthandlingv2.ClusterMetadata{
+			ContextName:         contextName,
+			NumberOfWorkerNodes: 12,
+			CloudProvider:       "gke",
+			CloudMetadata: &reporthandlingv2.CloudMetadata{
+				CloudProvider: "gke",
+				FullName:      fullName,
+				ShortName:     shortName,
+				PrefixName:    prefixName,
+			},
+			MapNamespaceToNumberOfResources: map[string]int{
+				"kube-system":   41,
+				"acme-payments": 17,
+				"":              3,
+			},
+		}
+	}
+
+	session := &cautils.OPASessionObj{
+		AllResources:         make(map[string]workloadinterface.IMetadata),
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
+
+		Metadata: &reporthandlingv2.Metadata{
+			ContextMetadata: reporthandlingv2.ContextMetadata{ClusterContextMetadata: clusterContext()},
+			ClusterMetadata: *clusterContext(),
+		},
+		Report: &reporthandlingv2.PostureReport{
+			Metadata: reporthandlingv2.Metadata{
+				ContextMetadata: reporthandlingv2.ContextMetadata{ClusterContextMetadata: clusterContext()},
+				ClusterMetadata: *clusterContext(),
+			},
+		},
+	}
+
+	require.NoError(t, transformSession(session, NewMapping(), NewMappingTransformer()))
+
+	for _, cluster := range []*reporthandlingv2.ClusterMetadata{
+		session.Metadata.ContextMetadata.ClusterContextMetadata,
+		&session.Metadata.ClusterMetadata,
+		session.Report.Metadata.ContextMetadata.ClusterContextMetadata,
+		&session.Report.Metadata.ClusterMetadata,
+	} {
+		require.NotEqual(t, contextName, cluster.ContextName)
+		require.True(t, strings.HasPrefix(cluster.ContextName, "cluster-"))
+
+		require.NotEqual(t, fullName, cluster.CloudMetadata.FullName)
+		require.NotEqual(t, shortName, cluster.CloudMetadata.ShortName)
+		require.NotEqual(t, prefixName, cluster.CloudMetadata.PrefixName)
+
+		require.Equal(t, "gke", string(cluster.CloudMetadata.CloudProvider))
+		require.Equal(t, "gke", cluster.CloudProvider)
+		require.Equal(t, 12, cluster.NumberOfWorkerNodes)
+
+		require.Len(t, cluster.MapNamespaceToNumberOfResources, 3)
+		require.NotContains(t, cluster.MapNamespaceToNumberOfResources, "kube-system")
+		require.NotContains(t, cluster.MapNamespaceToNumberOfResources, "acme-payments")
+
+		total := 0
+		for namespace, count := range cluster.MapNamespaceToNumberOfResources {
+			if namespace != "" {
+				require.True(t, strings.HasPrefix(namespace, "ns-"))
+			}
+			total += count
+		}
+		require.Equal(t, 61, total)
+	}
+}
+
+func TestTransformSession_ClusterNamespaceCountsStayJoinable(t *testing.T) {
+	const namespace = "acme-payments"
+
+	resource := workloadinterface.NewWorkloadObj(map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]interface{}{"name": "api", "namespace": namespace},
+	})
+
+	session := &cautils.OPASessionObj{
+		AllResources:         map[string]workloadinterface.IMetadata{resource.GetID(): resource},
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
+
+		Metadata: &reporthandlingv2.Metadata{
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				ClusterContextMetadata: &reporthandlingv2.ClusterMetadata{
+					MapNamespaceToNumberOfResources: map[string]int{namespace: 1},
+				},
+			},
+		},
+	}
+
+	require.NoError(t, transformSession(session, NewMapping(), NewMappingTransformer()))
+
+	var transformedNamespace string
+	for _, transformed := range session.AllResources {
+		transformedNamespace = transformed.GetNamespace()
+	}
+
+	require.NotEqual(t, namespace, transformedNamespace)
+	require.Contains(
+		t,
+		session.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources,
+		transformedNamespace,
+	)
+}
+
+func TestTransformSession_NoClusterContextMetadata(t *testing.T) {
+	session := &cautils.OPASessionObj{
+		AllResources:         make(map[string]workloadinterface.IMetadata),
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
+
+		Metadata: &reporthandlingv2.Metadata{},
+		Report:   &reporthandlingv2.PostureReport{},
+	}
+
+	require.NoError(t, transformSession(session, NewMapping(), NewMappingTransformer()))
+	require.Nil(t, session.Metadata.ContextMetadata.ClusterContextMetadata)
+	require.Nil(t, session.Metadata.ClusterMetadata.MapNamespaceToNumberOfResources)
+	require.Nil(t, session.Metadata.ClusterMetadata.CloudMetadata)
+}
+
+func TestTransformSession_ClusterNamespaceCountsJoinAfterDecryption(t *testing.T) {
+	const namespace = "acme-payments"
+
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	reportKey := reportcrypto.UnboundReportKey(dek)
+
+	resource := workloadinterface.NewWorkloadObj(map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]interface{}{"name": "api", "namespace": namespace},
+	})
+
+	session := &cautils.OPASessionObj{
+		AllResources:         map[string]workloadinterface.IMetadata{resource.GetID(): resource},
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
+
+		Metadata: &reporthandlingv2.Metadata{
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				ClusterContextMetadata: &reporthandlingv2.ClusterMetadata{
+					MapNamespaceToNumberOfResources: map[string]int{namespace: 1},
+				},
+			},
+		},
+	}
+
+	require.NoError(t, transformSession(session, NewMapping(), NewEncryptionTransformer(reportKey)))
+
+	clusterMetadata := session.Metadata.ContextMetadata.ClusterContextMetadata
+	require.NotContains(t, clusterMetadata.MapNamespaceToNumberOfResources, namespace)
+
+	var transformedNamespace string
+	for _, transformed := range session.AllResources {
+		transformedNamespace = transformed.GetNamespace()
+		require.NoError(t, reportcrypto.DecryptResourceMetadata(transformed, reportKey))
+	}
+
+	require.NotContains(t, clusterMetadata.MapNamespaceToNumberOfResources, transformedNamespace)
+
+	decryptedCounts := make(map[string]int, len(clusterMetadata.MapNamespaceToNumberOfResources))
+	for encryptedNamespace, count := range clusterMetadata.MapNamespaceToNumberOfResources {
+		decryptedNamespace, decryptErr := reportKey.DecryptString(encryptedNamespace)
+		require.NoError(t, decryptErr)
+		decryptedCounts[decryptedNamespace] += count
+	}
+
+	for _, decrypted := range session.AllResources {
+		require.Equal(t, namespace, decrypted.GetNamespace())
+		require.Contains(t, decryptedCounts, decrypted.GetNamespace())
+	}
 }

@@ -133,15 +133,15 @@ spec:
     kind: ControlConfiguration
   validations:
   - expression: |
-      object.kind != 'Pod' || object.spec.containers.all(container, params.settings.insecureCapabilities.all(insecureCapability, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || container.securityContext.capabilities.add.all(capability, capability != insecureCapability) ))
+      object.kind != 'Pod' || object.spec.containers.all(container, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || (container.securityContext.capabilities.add.all(capability, capability.upperAscii() != 'ALL') && params.settings.insecureCapabilities.all(insecureCapability, container.securityContext.capabilities.add.all(capability, capability.upperAscii() != insecureCapability.upperAscii()))) )
     message: Pod has one or more containers with insecure capabilities! (see more
       at https://kubescape.io/docs/controls/c-0046/)
   - expression: |
-      ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'].all(kind, object.kind != kind) || object.spec.template.spec.containers.all(container, params.settings.insecureCapabilities.all(insecureCapability, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || container.securityContext.capabilities.add.all(capability, capability != insecureCapability) ))
+      ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'].all(kind, object.kind != kind) || object.spec.template.spec.containers.all(container, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || (container.securityContext.capabilities.add.all(capability, capability.upperAscii() != 'ALL') && params.settings.insecureCapabilities.all(insecureCapability, container.securityContext.capabilities.add.all(capability, capability.upperAscii() != insecureCapability.upperAscii()))) )
     message: Workload has one or more containers with insecure capabilities! (see
       more at https://kubescape.io/docs/controls/c-0046/)
   - expression: |
-      object.kind != 'CronJob' || object.spec.jobTemplate.spec.template.spec.containers.all(container, params.settings.insecureCapabilities.all(insecureCapability, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || container.securityContext.capabilities.add.all(capability, capability != insecureCapability) ))
+      object.kind != 'CronJob' || object.spec.jobTemplate.spec.template.spec.containers.all(container, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || (container.securityContext.capabilities.add.all(capability, capability.upperAscii() != 'ALL') && params.settings.insecureCapabilities.all(insecureCapability, container.securityContext.capabilities.add.all(capability, capability.upperAscii() != insecureCapability.upperAscii()))) )
     message: CronJob has one or more containers with insecure capabilities! (see more
       at https://kubescape.io/docs/controls/c-0046/)
 ---
@@ -211,7 +211,7 @@ spec:
 
         (!(has(container.securityContext.privileged)) || container.securityContext.privileged != true) &&
         (!(has(container.securityContext.capabilities)) || !(has(container.securityContext.capabilities.add)) ||
-        container.securityContext.capabilities.add.all(cap, cap != 'SYS_ADM')))
+        container.securityContext.capabilities.add.all(cap, cap.upperAscii() != 'SYS_ADMIN' && cap.upperAscii() != 'ALL')))
       )
     message: Pod has one or more privileged container.(see more at https://kubescape.io/docs/controls/c-0057/)
   - expression: |
@@ -219,7 +219,7 @@ spec:
 
         (!(has(container.securityContext.privileged)) || container.securityContext.privileged != true) &&
         (!(has(container.securityContext.capabilities)) || !(has(container.securityContext.capabilities.add)) ||
-        container.securityContext.capabilities.add.all(cap, cap != 'SYS_ADM')))
+        container.securityContext.capabilities.add.all(cap, cap.upperAscii() != 'SYS_ADMIN' && cap.upperAscii() != 'ALL')))
       )
     message: Workloads has one or more privileged container.(see more at https://kubescape.io/docs/controls/c-0057/)
   - expression: |
@@ -227,7 +227,7 @@ spec:
 
         (!(has(container.securityContext.privileged)) || container.securityContext.privileged != true) &&
         (!(has(container.securityContext.capabilities)) || !(has(container.securityContext.capabilities.add)) ||
-        container.securityContext.capabilities.add.all(cap, cap != 'SYS_ADM')))
+        container.securityContext.capabilities.add.all(cap, cap.upperAscii() != 'SYS_ADMIN' && cap.upperAscii() != 'ALL')))
       )
     message: CronJob has one or more privileged container.(see more at https://kubescape.io/docs/controls/c-0057/)
 ---
@@ -427,6 +427,10 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0012/
+  labels:
+    controlId: C-0012
   name: kubescape-c-0012-deny-resources-with-sensitive-information-in-environment-variables
 spec:
   failurePolicy: Fail
@@ -525,6 +529,10 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0013/
+  labels:
+    controlId: C-0013
   name: kubescape-c-0013-deny-resources-with-capability-to-run-as-root
 spec:
   failurePolicy: Fail
@@ -644,6 +652,7 @@ spec:
       - UPDATE
       resources:
       - pods
+      - pods/ephemeralcontainers
     - apiGroups:
       - apps
       apiVersions:
@@ -667,19 +676,25 @@ spec:
       - jobs
       - cronjobs
   validations:
-  - expression: object.kind != 'Pod' || object.spec.containers.all(container, has(container.securityContext)
-      && has(container.securityContext.allowPrivilegeEscalation) &&  container.securityContext.allowPrivilegeEscalation
-      == false)
-    message: Pods with privileged containers are not allowed! (see more at https://kubescape.io/docs/controls/c-0016/)
-  - expression: '[''Deployment'',''ReplicaSet'',''DaemonSet'',''StatefulSet'',''Job''].all(kind,
-      object.kind != kind) || object.spec.template.spec.containers.all(container,
-      has(container.securityContext) && has(container.securityContext.allowPrivilegeEscalation)
-      &&  container.securityContext.allowPrivilegeEscalation == false)'
-    message: Workloads with privileged containers are not allowed! (see more at https://kubescape.io/docs/controls/c-0016/)
-  - expression: object.kind != 'CronJob' || object.spec.jobTemplate.spec.template.spec.containers.all(container,
-      has(container.securityContext) && has(container.securityContext.allowPrivilegeEscalation)
-      &&  container.securityContext.allowPrivilegeEscalation == false)
-    message: CronJob with privileged containers are not allowed! (see more at https://kubescape.io/docs/controls/c-0016/)
+  - expression: |
+      variables.containers.all(container,
+
+        has(container.securityContext) &&
+        has(container.securityContext.allowPrivilegeEscalation) &&
+        !container.securityContext.allowPrivilegeEscalation
+      )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has a container with allowPrivilegeEscalation not set to false. (see more at https://kubescape.io/docs/controls/c-0016/)'
+  variables:
+  - expression: |
+      object.kind == 'Pod'
+        ? object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? object.spec.template.spec.containers + (has(object.spec.template.spec.initContainers) ? object.spec.template.spec.initContainers : []) + (has(object.spec.template.spec.ephemeralContainers) ? object.spec.template.spec.ephemeralContainers : [])
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec.containers + (has(object.spec.jobTemplate.spec.template.spec.initContainers) ? object.spec.jobTemplate.spec.template.spec.initContainers : []) + (has(object.spec.jobTemplate.spec.template.spec.ephemeralContainers) ? object.spec.jobTemplate.spec.template.spec.ephemeralContainers : [])
+            : []
+    name: containers
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -846,7 +861,7 @@ spec:
   - expression: |
       object.kind != 'Pod' || !has(object.spec.volumes) || object.spec.volumes.all(vol, !has(vol.hostPath) || !has(vol.hostPath.path) || (
 
-        (params.settings.cloudProvider != 'eks' ||
+        (variables.cloudProvider != 'eks' ||
         ["/.aws/","/.aws/config/","/.aws/credentials/"].all(unsafePath,
         (
           (
@@ -858,7 +873,7 @@ spec:
             unsafePath != vol.hostPath.path
           )))) &&
 
-        (params.settings.cloudProvider != 'aks' ||
+        (variables.cloudProvider != 'aks' ||
         ["/etc/","/etc/kubernetes/","/etc/kubernetes/azure.json","/.azure/","/.azure/credentials/","/etc/kubernetes/azure.json"].all(unsafePath,
         (
           (
@@ -870,7 +885,7 @@ spec:
             unsafePath != vol.hostPath.path
           )))) &&
 
-        (params.settings.cloudProvider != 'gke' ||
+        (variables.cloudProvider != 'gke' ||
         ["/.config/gcloud/","/.config/","/gcloud/","/.config/gcloud/application_default_credentials.json","/gcloud/application_default_credentials.json"].all(unsafePath,
         (
           (
@@ -887,7 +902,7 @@ spec:
   - expression: |
       ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'].all(kind, object.kind != kind) || !has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(vol, !has(vol.hostPath) || !has(vol.hostPath.path) || (
 
-        (params.settings.cloudProvider != 'eks' ||
+        (variables.cloudProvider != 'eks' ||
         ["/.aws/","/.aws/config/","/.aws/credentials/"].all(unsafePath,
         (
           (
@@ -899,7 +914,7 @@ spec:
             unsafePath != vol.hostPath.path
           )))) &&
 
-        (params.settings.cloudProvider != 'aks' ||
+        (variables.cloudProvider != 'aks' ||
         ["/etc/","/etc/kubernetes/","/etc/kubernetes/azure.json","/.azure/","/.azure/credentials/","/etc/kubernetes/azure.json"].all(unsafePath,
         (
           (
@@ -911,7 +926,7 @@ spec:
             unsafePath != vol.hostPath.path
           )))) &&
 
-        (params.settings.cloudProvider != 'gke' ||
+        (variables.cloudProvider != 'gke' ||
         ["/.config/gcloud/","/.config/","/gcloud/","/.config/gcloud/application_default_credentials.json","/gcloud/application_default_credentials.json"].all(unsafePath,
         (
           (
@@ -928,7 +943,7 @@ spec:
   - expression: |
       object.kind != 'CronJob' || !has(object.spec.jobTemplate.spec.template.spec.volumes) || object.spec.jobTemplate.spec.template.spec.volumes.all(vol, !has(vol.hostPath) || !has(vol.hostPath.path) || (
 
-        (params.settings.cloudProvider != 'eks' ||
+        (variables.cloudProvider != 'eks' ||
         ["/.aws/","/.aws/config/","/.aws/credentials/"].all(unsafePath,
         (
           (
@@ -940,7 +955,7 @@ spec:
             unsafePath != vol.hostPath.path
           )))) &&
 
-        (params.settings.cloudProvider != 'aks' ||
+        (variables.cloudProvider != 'aks' ||
         ["/etc/","/etc/kubernetes/","/etc/kubernetes/azure.json","/.azure/","/.azure/credentials/","/etc/kubernetes/azure.json"].all(unsafePath,
         (
           (
@@ -952,7 +967,7 @@ spec:
             unsafePath != vol.hostPath.path
           )))) &&
 
-        (params.settings.cloudProvider != 'gke' ||
+        (variables.cloudProvider != 'gke' ||
         ["/.config/gcloud/","/.config/","/gcloud/","/.config/gcloud/application_default_credentials.json","/gcloud/application_default_credentials.json"].all(unsafePath,
         (
           (
@@ -966,6 +981,10 @@ spec:
       ))
     message: CronJob contains volumes with potential access to known cloud credentials!
       (see more at https://kubescape.io/docs/controls/c-0020/)
+  variables:
+  - expression: |
+      has(params.settings.cloudProvider) ? params.settings.cloudProvider : ''
+    name: cloudProvider
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -1442,15 +1461,15 @@ spec:
     kind: ControlConfiguration
   validations:
   - expression: |
-      object.kind != 'Pod' || object.spec.containers.all(container, params.settings.insecureCapabilities.all(insecureCapability, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || container.securityContext.capabilities.add.all(capability, capability != insecureCapability) ))
+      object.kind != 'Pod' || object.spec.containers.all(container, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || (container.securityContext.capabilities.add.all(capability, capability.upperAscii() != 'ALL') && params.settings.insecureCapabilities.all(insecureCapability, container.securityContext.capabilities.add.all(capability, capability.upperAscii() != insecureCapability.upperAscii()))) )
     message: Pod has one or more containers with insecure capabilities! (see more
       at https://kubescape.io/docs/controls/c-0046/)
   - expression: |
-      ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'].all(kind, object.kind != kind) || object.spec.template.spec.containers.all(container, params.settings.insecureCapabilities.all(insecureCapability, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || container.securityContext.capabilities.add.all(capability, capability != insecureCapability) ))
+      ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'].all(kind, object.kind != kind) || object.spec.template.spec.containers.all(container, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || (container.securityContext.capabilities.add.all(capability, capability.upperAscii() != 'ALL') && params.settings.insecureCapabilities.all(insecureCapability, container.securityContext.capabilities.add.all(capability, capability.upperAscii() != insecureCapability.upperAscii()))) )
     message: Workload has one or more containers with insecure capabilities! (see
       more at https://kubescape.io/docs/controls/c-0046/)
   - expression: |
-      object.kind != 'CronJob' || object.spec.jobTemplate.spec.template.spec.containers.all(container, params.settings.insecureCapabilities.all(insecureCapability, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || container.securityContext.capabilities.add.all(capability, capability != insecureCapability) ))
+      object.kind != 'CronJob' || object.spec.jobTemplate.spec.template.spec.containers.all(container, !has(container.securityContext) || !has(container.securityContext.capabilities) || !has(container.securityContext.capabilities.add) || (container.securityContext.capabilities.add.all(capability, capability.upperAscii() != 'ALL') && params.settings.insecureCapabilities.all(insecureCapability, container.securityContext.capabilities.add.all(capability, capability.upperAscii() != insecureCapability.upperAscii()))) )
     message: CronJob has one or more containers with insecure capabilities! (see more
       at https://kubescape.io/docs/controls/c-0046/)
 ---
@@ -1698,6 +1717,7 @@ spec:
       - UPDATE
       resources:
       - pods
+      - pods/ephemeralcontainers
     - apiGroups:
       - apps
       apiVersions:
@@ -1722,29 +1742,24 @@ spec:
       - cronjobs
   validations:
   - expression: |
-      object.kind != 'Pod' || object.spec.containers.all(container, !(has(container.securityContext)) || (
+      variables.containers.all(container, !(has(container.securityContext)) || (
 
         (!(has(container.securityContext.privileged)) || container.securityContext.privileged != true) &&
         (!(has(container.securityContext.capabilities)) || !(has(container.securityContext.capabilities.add)) ||
-        container.securityContext.capabilities.add.all(cap, cap != 'SYS_ADM')))
+        container.securityContext.capabilities.add.all(cap, cap.upperAscii() != 'SYS_ADMIN' && cap.upperAscii() != 'ALL')))
       )
-    message: Pod has one or more privileged container.(see more at https://kubescape.io/docs/controls/c-0057/)
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has one or more privileged container.(see more at https://kubescape.io/docs/controls/c-0057/)'
+  variables:
   - expression: |
-      ['Deployment','ReplicaSet','DaemonSet','StatefulSet', 'Job'].all(kind, object.kind != kind) || object.spec.template.spec.containers.all(container, !(has(container.securityContext)) || (
-
-        (!(has(container.securityContext.privileged)) || container.securityContext.privileged != true) &&
-        (!(has(container.securityContext.capabilities)) || !(has(container.securityContext.capabilities.add)) ||
-        container.securityContext.capabilities.add.all(cap, cap != 'SYS_ADM')))
-      )
-    message: Workloads has one or more privileged container.(see more at https://kubescape.io/docs/controls/c-0057/)
-  - expression: |
-      object.kind != 'CronJob' || object.spec.jobTemplate.spec.template.spec.containers.all(container, !(has(container.securityContext)) || (
-
-        (!(has(container.securityContext.privileged)) || container.securityContext.privileged != true) &&
-        (!(has(container.securityContext.capabilities)) || !(has(container.securityContext.capabilities.add)) ||
-        container.securityContext.capabilities.add.all(cap, cap != 'SYS_ADM')))
-      )
-    message: CronJob has one or more privileged container.(see more at https://kubescape.io/docs/controls/c-0057/)
+      object.kind == 'Pod'
+        ? object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? object.spec.template.spec.containers + (has(object.spec.template.spec.initContainers) ? object.spec.template.spec.initContainers : []) + (has(object.spec.template.spec.ephemeralContainers) ? object.spec.template.spec.ephemeralContainers : [])
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec.containers + (has(object.spec.jobTemplate.spec.template.spec.initContainers) ? object.spec.jobTemplate.spec.template.spec.initContainers : []) + (has(object.spec.jobTemplate.spec.template.spec.ephemeralContainers) ? object.spec.jobTemplate.spec.template.spec.ephemeralContainers : [])
+            : []
+    name: containers
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -2272,6 +2287,298 @@ apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
   annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0081/
+  labels:
+    controlId: C-0081
+  name: kubescape-c-0081-deny-vulnerable-argocd-versions
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+  validations:
+  - expression: |
+      variables.containers.all(container,
+
+        !(container.image.contains('/argocd:v') || container.image.startsWith('argocd:v')) ||
+        [container.image.split('argocd:v')[1].split('.')].all(parts,
+          parts.size() != 3 ||
+          !parts.all(part, part.matches('^[0-9]+$')) ||
+          !(
+            int(parts[0]) == 1 ||
+            (int(parts[0]) == 2 && int(parts[1]) == 0) ||
+            (int(parts[0]) == 2 && int(parts[1]) == 1 && int(parts[2]) < 9) ||
+            (int(parts[0]) == 2 && int(parts[1]) == 2 && int(parts[2]) < 4)
+          )
+        )
+      )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' runs an Argo CD image affected by CVE-2022-24348, fixed in 2.1.9 and 2.2.4. (see more at https://kubescape.io/docs/controls/c-0081/)'
+  variables:
+  - expression: |
+      object.kind == 'Deployment'
+        ? object.spec.template.spec.containers + (has(object.spec.template.spec.initContainers) ? object.spec.template.spec.initContainers : [])
+        : []
+    name: containers
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0193/
+  labels:
+    controlId: C-0193
+  name: kubescape-c-0193-deny-privileged-containers
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+      - pods/ephemeralcontainers
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+  validations:
+  - expression: |
+      variables.containers.all(container,
+
+        !has(container.securityContext) ||
+        !has(container.securityContext.privileged) ||
+        container.securityContext.privileged != true
+      )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has a privileged container, which gets almost all of the host kernel capabilities. (see more at https://kubescape.io/docs/controls/c-0193/)'
+  variables:
+  - expression: |
+      object.kind == 'Pod'
+        ? object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? object.spec.template.spec.containers + (has(object.spec.template.spec.initContainers) ? object.spec.template.spec.initContainers : []) + (has(object.spec.template.spec.ephemeralContainers) ? object.spec.template.spec.ephemeralContainers : [])
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec.containers + (has(object.spec.jobTemplate.spec.template.spec.initContainers) ? object.spec.jobTemplate.spec.template.spec.initContainers : []) + (has(object.spec.jobTemplate.spec.template.spec.ephemeralContainers) ? object.spec.jobTemplate.spec.template.spec.ephemeralContainers : [])
+            : []
+    name: containers
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0194/
+  labels:
+    controlId: C-0194
+  name: kubescape-c-0194-deny-resources-sharing-host-pid-namespace
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+  validations:
+  - expression: '!has(variables.podSpec.hostPID) || variables.podSpec.hostPID == false'
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has hostPID enabled, so its containers share the host process ID namespace. (see more at https://kubescape.io/docs/controls/c-0194/)'
+  variables:
+  - expression: |
+      object.kind == 'Pod'
+        ? object.spec
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? object.spec.template.spec
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec
+            : {}
+    name: podSpec
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0195/
+  labels:
+    controlId: C-0195
+  name: kubescape-c-0195-deny-resources-sharing-host-ipc-namespace
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+  validations:
+  - expression: '!has(variables.podSpec.hostIPC) || variables.podSpec.hostIPC == false'
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has hostIPC enabled, so its containers share the host IPC namespace. (see more at https://kubescape.io/docs/controls/c-0195/)'
+  variables:
+  - expression: |
+      object.kind == 'Pod'
+        ? object.spec
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? object.spec.template.spec
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec
+            : {}
+    name: podSpec
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0197/
+  labels:
+    controlId: C-0197
+  name: kubescape-c-0197-deny-containers-with-allow-privilege-escalation
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+      - pods/ephemeralcontainers
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+  validations:
+  - expression: |
+      variables.containers.all(container,
+
+        has(container.securityContext) &&
+        has(container.securityContext.allowPrivilegeEscalation) &&
+        container.securityContext.allowPrivilegeEscalation == false
+      )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has a container with allowPrivilegeEscalation not set to false, so a process in it can gain more privileges than its parent. (see more at https://kubescape.io/docs/controls/c-0197/)'
+  variables:
+  - expression: |
+      object.kind == 'Pod'
+        ? object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? object.spec.template.spec.containers + (has(object.spec.template.spec.initContainers) ? object.spec.template.spec.initContainers : []) + (has(object.spec.template.spec.ephemeralContainers) ? object.spec.template.spec.ephemeralContainers : [])
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec.containers + (has(object.spec.jobTemplate.spec.template.spec.initContainers) ? object.spec.jobTemplate.spec.template.spec.initContainers : []) + (has(object.spec.jobTemplate.spec.template.spec.ephemeralContainers) ? object.spec.jobTemplate.spec.template.spec.ephemeralContainers : [])
+            : []
+    name: containers
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
     controlUrl: https://kubescape.io/docs/controls/c-0198/
   labels:
     controlId: C-0198
@@ -2568,6 +2875,271 @@ apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
   annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0202/
+  labels:
+    controlId: C-0202
+  name: kubescape-c-0202-deny-windows-hostprocess-containers
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+      - pods/ephemeralcontainers
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+  validations:
+  - expression: |
+      !has(variables.podSpec.securityContext) || !has(variables.podSpec.securityContext.windowsOptions) || !has(variables.podSpec.securityContext.windowsOptions.hostProcess) || variables.podSpec.securityContext.windowsOptions.hostProcess != true
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' sets windowsOptions.hostProcess on the pod security context, so its Windows containers run as host processes. (see more at https://kubescape.io/docs/controls/c-0202/)'
+  - expression: |
+      variables.containers.all(container,
+
+        !has(container.securityContext) ||
+        !has(container.securityContext.windowsOptions) ||
+        !has(container.securityContext.windowsOptions.hostProcess) ||
+        container.securityContext.windowsOptions.hostProcess != true
+      )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has a container that sets windowsOptions.hostProcess, so it runs as a host process on the Windows node. (see more at https://kubescape.io/docs/controls/c-0202/)'
+  variables:
+  - expression: |
+      object.kind == 'Pod'
+        ? object.spec
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? object.spec.template.spec
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec
+            : {}
+    name: podSpec
+  - expression: |
+      object.kind == 'Pod'
+        ? object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? object.spec.template.spec.containers + (has(object.spec.template.spec.initContainers) ? object.spec.template.spec.initContainers : []) + (has(object.spec.template.spec.ephemeralContainers) ? object.spec.template.spec.ephemeralContainers : [])
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec.containers + (has(object.spec.jobTemplate.spec.template.spec.initContainers) ? object.spec.jobTemplate.spec.template.spec.initContainers : []) + (has(object.spec.jobTemplate.spec.template.spec.ephemeralContainers) ? object.spec.jobTemplate.spec.template.spec.ephemeralContainers : [])
+            : []
+    name: containers
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0203/
+  labels:
+    controlId: C-0203
+  name: kubescape-c-0203-deny-hostpath-volumes
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+  validations:
+  - expression: |
+      object.kind != 'Pod' || !has(object.spec.volumes) || object.spec.volumes.all(volume, !has(volume.hostPath))
+    messageExpression: |
+      'Pod/' + object.metadata.name + ' has a hostPath volume, which mounts a path from the node into the pod. (see more at https://kubescape.io/docs/controls/c-0203/)'
+  - expression: |
+      ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'].all(kind, object.kind != kind) || !has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.all(volume, !has(volume.hostPath))
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has a hostPath volume, which mounts a path from the node into its pods. (see more at https://kubescape.io/docs/controls/c-0203/)'
+  - expression: |
+      object.kind != 'CronJob' || !has(object.spec.jobTemplate.spec.template.spec.volumes) || object.spec.jobTemplate.spec.template.spec.volumes.all(volume, !has(volume.hostPath))
+    messageExpression: |
+      'CronJob/' + object.metadata.name + ' has a hostPath volume, which mounts a path from the node into the pods it creates. (see more at https://kubescape.io/docs/controls/c-0203/)'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0204/
+  labels:
+    controlId: C-0204
+  name: kubescape-c-0204-deny-containers-using-host-ports
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+      - pods/ephemeralcontainers
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+  validations:
+  - expression: |
+      variables.containers.all(container,
+
+        !has(container.ports) ||
+        container.ports.all(port, !has(port.hostPort) || port.hostPort == 0)
+      )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has a container claiming a hostPort, which binds a port on the node itself. (see more at https://kubescape.io/docs/controls/c-0204/)'
+  variables:
+  - expression: |
+      object.kind == 'Pod'
+        ? object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? object.spec.template.spec.containers + (has(object.spec.template.spec.initContainers) ? object.spec.template.spec.initContainers : []) + (has(object.spec.template.spec.ephemeralContainers) ? object.spec.template.spec.ephemeralContainers : [])
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec.containers + (has(object.spec.jobTemplate.spec.template.spec.initContainers) ? object.spec.jobTemplate.spec.template.spec.initContainers : []) + (has(object.spec.jobTemplate.spec.template.spec.ephemeralContainers) ? object.spec.jobTemplate.spec.template.spec.ephemeralContainers : [])
+            : []
+    name: containers
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0207/
+  labels:
+    controlId: C-0207
+  name: kubescape-c-0207-deny-secrets-as-environment-variables
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+      - pods/ephemeralcontainers
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+  validations:
+  - expression: |
+      variables.containers.all(container,
+
+        !has(container.env) || container.env.all(env,
+          !has(env.valueFrom) || !has(env.valueFrom.secretKeyRef)
+        )
+      )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' injects a Secret into a container through an environment variable, mount it as a file instead. (see more at https://kubescape.io/docs/controls/c-0207/)'
+  variables:
+  - expression: |
+      object.kind == 'Pod'
+        ? object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? object.spec.template.spec.containers + (has(object.spec.template.spec.initContainers) ? object.spec.template.spec.initContainers : [])
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec.containers + (has(object.spec.jobTemplate.spec.template.spec.initContainers) ? object.spec.jobTemplate.spec.template.spec.initContainers : [])
+            : []
+    name: containers
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
     controlUrl: https://kubescape.io/docs/controls/c-0210/
   labels:
     controlId: C-0210
@@ -2640,6 +3212,334 @@ spec:
             ? (has(object.spec.jobTemplate.spec.template.spec.securityContext) ? object.spec.jobTemplate.spec.template.spec.securityContext : {})
             : {}
     name: podSecurityContext
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0212/
+  labels:
+    controlId: C-0212
+  name: kubescape-c-0212-deny-resources-in-default-namespace
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+      - replicationcontrollers
+      - podtemplates
+      - services
+      - serviceaccounts
+      - secrets
+      - configmaps
+      - endpoints
+      - persistentvolumeclaims
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+    - apiGroups:
+      - rbac.authorization.k8s.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - roles
+      - rolebindings
+    - apiGroups:
+      - networking.k8s.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - ingresses
+    - apiGroups:
+      - discovery.k8s.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - endpointslices
+    - apiGroups:
+      - autoscaling
+      apiVersions:
+      - v1
+      - v2
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - horizontalpodautoscalers
+    - apiGroups:
+      - coordination.k8s.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - leases
+    - apiGroups:
+      - policy
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - poddisruptionbudgets
+    - apiGroups:
+      - storage.k8s.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - csistoragecapacities
+  validations:
+  - expression: has(object.metadata.namespace) && object.metadata.namespace != 'default'
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' is in the default namespace, which has no RBAC, quota or network boundary of its own. (see more at https://kubescape.io/docs/controls/c-0212/)'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0225/
+  labels:
+    controlId: C-0225
+  name: kubescape-c-0225-deny-default-service-account-rbac-and-automount
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - serviceaccounts
+    - apiGroups:
+      - rbac.authorization.k8s.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - rolebindings
+      - clusterrolebindings
+  validations:
+  - expression: |
+      !(object.kind in ['RoleBinding','ClusterRoleBinding']) || !has(object.subjects) || (
+
+        has(object.metadata.labels) &&
+        'kubernetes.io/bootstrapping' in object.metadata.labels &&
+        object.metadata.labels['kubernetes.io/bootstrapping'] == 'rbac-defaults'
+      ) || object.subjects.all(subject,
+
+        subject.kind != 'ServiceAccount' || subject.name != 'default'
+      )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' grants permissions to the default ServiceAccount, which every pod in the namespace gets by default. Bind a dedicated ServiceAccount instead. (see more at https://kubescape.io/docs/controls/c-0225/)'
+  - expression: |
+      object.kind != 'ServiceAccount' || object.metadata.name != 'default' || (has(object.automountServiceAccountToken) && object.automountServiceAccountToken == false)
+    messageExpression: |
+      'ServiceAccount/' + object.metadata.name + ' mounts its token into every pod that does not name another ServiceAccount. Set automountServiceAccountToken to false. (see more at https://kubescape.io/docs/controls/c-0225/)'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0231/
+  labels:
+    controlId: C-0231
+  name: kubescape-c-0231-deny-loadbalancers-without-tls-certificate
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - services
+  validations:
+  - expression: |
+      (
+
+        has(object.metadata.annotations) &&
+        object.metadata.annotations.exists(key,
+          key.startsWith('service.beta.kubernetes.io/aws-load-balancer-ssl-cert')
+        )
+      ) || !has(object.spec.type) || object.spec.type != 'LoadBalancer' || !has(object.spec.ports) || !object.spec.ports.exists(port, port.port == 443)
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' is a LoadBalancer serving 443 with no AWS SSL certificate annotation, so traffic to the backend is not encrypted. (see more at https://kubescape.io/docs/controls/c-0231/)'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0234/
+  labels:
+    controlId: C-0234
+  name: kubescape-c-0234-deny-workloads-without-external-secret-storage
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+  validations:
+  - expression: |
+      variables.volumes.exists(volume,
+
+        has(volume.csi) &&
+        has(volume.csi.driver) &&
+        volume.csi.driver == 'secrets-store.csi.k8s.io' &&
+        has(volume.csi.volumeAttributes) &&
+        has(volume.csi.volumeAttributes.secretProviderClass) &&
+        volume.csi.volumeAttributes.secretProviderClass != ''
+      )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' does not read its secrets from an external store through the secrets-store CSI driver. (see more at https://kubescape.io/docs/controls/c-0234/)'
+  variables:
+  - expression: |
+      object.kind == 'Pod'
+        ? (has(object.spec.volumes) ? object.spec.volumes : [])
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? (has(object.spec.template.spec.volumes) ? object.spec.template.spec.volumes : [])
+          : object.kind == 'CronJob'
+            ? (has(object.spec.jobTemplate.spec.template.spec.volumes) ? object.spec.jobTemplate.spec.template.spec.volumes : [])
+            : []
+    name: volumes
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0262/
+  labels:
+    controlId: C-0262
+  name: kubescape-c-0262-deny-anonymous-access-in-role-bindings
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - rbac.authorization.k8s.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - rolebindings
+      - clusterrolebindings
+  validations:
+  - expression: |
+      !has(object.subjects) || object.subjects.all(subject,
+
+        subject.name != 'system:anonymous' &&
+        subject.name != 'system:unauthenticated'
+      )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' grants permissions to anonymous users, so anyone who can reach the API server without credentials gets them. (see more at https://kubescape.io/docs/controls/c-0262/)'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0263/
+  labels:
+    controlId: C-0263
+  name: kubescape-c-0263-deny-ingress-without-tls
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - networking.k8s.io
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - ingresses
+  validations:
+  - expression: has(object.spec.tls) && object.spec.tls.size() > 0
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has no TLS configuration, so it serves traffic over plaintext HTTP. (see more at https://kubescape.io/docs/controls/c-0263/)'
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -2885,6 +3785,122 @@ apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
   annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0275/
+  labels:
+    controlId: C-0275
+  name: kubescape-c-0275-deny-resources-sharing-host-pid-namespace
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+  validations:
+  - expression: '!has(variables.podSpec.hostPID) || variables.podSpec.hostPID == false'
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has hostPID enabled, so its containers share the host process ID namespace. (see more at https://kubescape.io/docs/controls/c-0275/)'
+  variables:
+  - expression: |
+      object.kind == 'Pod'
+        ? object.spec
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? object.spec.template.spec
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec
+            : {}
+    name: podSpec
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0276/
+  labels:
+    controlId: C-0276
+  name: kubescape-c-0276-deny-resources-sharing-host-ipc-namespace
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+  validations:
+  - expression: '!has(variables.podSpec.hostIPC) || variables.podSpec.hostIPC == false'
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has hostIPC enabled, so its containers share the host IPC namespace. (see more at https://kubescape.io/docs/controls/c-0276/)'
+  variables:
+  - expression: |
+      object.kind == 'Pod'
+        ? object.spec
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job']
+          ? object.spec.template.spec
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec
+            : {}
+    name: podSpec
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
     controlUrl: https://kubescape.io/docs/controls/c-0280/
   labels:
     controlId: C-0280
@@ -2919,3 +3935,216 @@ spec:
       )
     message: RBAC Role or ClusterRole has access to the certificatesigningrequests/approval
       sub-resource which can lead to privilege escalation! (see more at https://kubescape.io/docs/controls/c-0280/)
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0292/
+  labels:
+    controlId: C-0292
+  name: kubescape-c-0292-deny-nginx-ingress-controller-eol
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - daemonsets
+      - statefulsets
+  validations:
+  - expression: |
+      variables.containers.all(container,
+
+        !container.image.contains('ingress-nginx/controller') &&
+        !container.image.contains('k8s.gcr.io/ingress-nginx') &&
+        !container.image.contains('registry.k8s.io/ingress-nginx')
+      )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' runs the community ingress-nginx controller, which reached end of life in March 2026 and gets no security fixes any more. (see more at https://kubescape.io/docs/controls/c-0292/)'
+  variables:
+  - expression: |
+      object.kind in ['Deployment','DaemonSet','StatefulSet']
+        ? object.spec.template.spec.containers + (has(object.spec.template.spec.initContainers) ? object.spec.template.spec.initContainers : [])
+        : []
+    name: containers
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0295/
+  labels:
+    controlId: C-0295
+  name: kubescape-c-0295-deny-duplicate-environment-variables
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pods
+      - pods/ephemeralcontainers
+      - replicationcontrollers
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+  validations:
+  - expression: |
+      variables.containers.all(container,
+
+        !has(container.env) ||
+        container.env.all(entry,
+          container.env.exists_one(other, other.name == entry.name)
+        )
+      )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has a container that defines the same environment variable name twice, and Kubernetes silently keeps the last one. (see more at https://kubescape.io/docs/controls/c-0295/)'
+  variables:
+  - expression: |
+      object.kind == 'Pod'
+        ? object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
+        : object.kind in ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job','ReplicationController']
+          ? object.spec.template.spec.containers + (has(object.spec.template.spec.initContainers) ? object.spec.template.spec.initContainers : []) + (has(object.spec.template.spec.ephemeralContainers) ? object.spec.template.spec.ephemeralContainers : [])
+          : object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template.spec.containers + (has(object.spec.jobTemplate.spec.template.spec.initContainers) ? object.spec.jobTemplate.spec.template.spec.initContainers : []) + (has(object.spec.jobTemplate.spec.template.spec.ephemeralContainers) ? object.spec.jobTemplate.spec.template.spec.ephemeralContainers : [])
+            : []
+    name: containers
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  annotations:
+    controlUrl: https://kubescape.io/docs/controls/c-0296/
+  labels:
+    controlId: C-0296
+  name: kubescape-c-0296-deny-workloads-with-mismatching-selector
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - replicationcontrollers
+    - apiGroups:
+      - apps
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    - apiGroups:
+      - batch
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - jobs
+      - cronjobs
+  validations:
+  - expression: |
+      ['Deployment','ReplicaSet','DaemonSet','StatefulSet','Job'].all(kind, object.kind != kind) || !has(object.spec.selector) || (
+
+        (
+          !has(object.spec.selector.matchLabels) ||
+          object.spec.selector.matchLabels.all(key,
+            key in variables.templateLabels &&
+            variables.templateLabels[key] == object.spec.selector.matchLabels[key]
+          )
+        ) && (
+          !has(object.spec.selector.matchExpressions) ||
+          object.spec.selector.matchExpressions.all(e,
+            (e.operator == 'In' && e.key in variables.templateLabels && has(e.values) && variables.templateLabels[e.key] in e.values) ||
+            (e.operator == 'NotIn' && (!(e.key in variables.templateLabels) || !has(e.values) || !(variables.templateLabels[e.key] in e.values))) ||
+            (e.operator == 'Exists' && e.key in variables.templateLabels) ||
+            (e.operator == 'DoesNotExist' && !(e.key in variables.templateLabels))
+          )
+        )
+      )
+    messageExpression: |
+      object.kind + '/' + object.metadata.name + ' has a spec.selector that does not match the labels on its own pod template, so it owns no pods. (see more at https://kubescape.io/docs/controls/c-0296/)'
+  - expression: |
+      object.kind != 'CronJob' || !has(object.spec.jobTemplate.spec.selector) || (
+
+        (
+          !has(object.spec.jobTemplate.spec.selector.matchLabels) ||
+          object.spec.jobTemplate.spec.selector.matchLabels.all(key,
+            key in variables.jobTemplateLabels &&
+            variables.jobTemplateLabels[key] == object.spec.jobTemplate.spec.selector.matchLabels[key]
+          )
+        ) && (
+          !has(object.spec.jobTemplate.spec.selector.matchExpressions) ||
+          object.spec.jobTemplate.spec.selector.matchExpressions.all(e,
+            (e.operator == 'In' && e.key in variables.jobTemplateLabels && has(e.values) && variables.jobTemplateLabels[e.key] in e.values) ||
+            (e.operator == 'NotIn' && (!(e.key in variables.jobTemplateLabels) || !has(e.values) || !(variables.jobTemplateLabels[e.key] in e.values))) ||
+            (e.operator == 'Exists' && e.key in variables.jobTemplateLabels) ||
+            (e.operator == 'DoesNotExist' && !(e.key in variables.jobTemplateLabels))
+          )
+        )
+      )
+    messageExpression: |
+      'CronJob/' + object.metadata.name + ' has a spec.jobTemplate.spec.selector that does not match the labels on its own pod template, so the Jobs it creates own no pods. (see more at https://kubescape.io/docs/controls/c-0296/)'
+  - expression: |
+      object.kind != 'ReplicationController' || !has(object.spec.selector) || object.spec.selector.all(key,
+
+        key in variables.templateLabels &&
+        variables.templateLabels[key] == object.spec.selector[key]
+      )
+    messageExpression: |
+      'ReplicationController/' + object.metadata.name + ' has a spec.selector that does not match the labels on its own pod template, so it owns no pods. (see more at https://kubescape.io/docs/controls/c-0296/)'
+  variables:
+  - expression: |
+      has(object.spec.template) && has(object.spec.template.metadata) && has(object.spec.template.metadata.labels)
+        ? object.spec.template.metadata.labels : {}
+    name: templateLabels
+  - expression: |
+      has(object.spec.jobTemplate) && has(object.spec.jobTemplate.spec) &&
+      has(object.spec.jobTemplate.spec.template) && has(object.spec.jobTemplate.spec.template.metadata) &&
+      has(object.spec.jobTemplate.spec.template.metadata.labels)
+        ? object.spec.jobTemplate.spec.template.metadata.labels : {}
+    name: jobTemplateLabels

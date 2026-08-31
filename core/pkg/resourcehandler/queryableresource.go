@@ -3,7 +3,7 @@ package resourcehandler
 import (
 	"strings"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 )
 
 type QueryableResources map[string]QueryableResource
@@ -17,6 +17,10 @@ type QueryableResource struct {
 	// Namespaced carries authoritative discovery scope when available. A nil
 	// value preserves the existing k8s-interface scope lookup.
 	Namespaced *bool
+	// Kind is the Kind the API server serves this resource as, empty when the
+	// resolver could not name it. It lets query planning honor the kind filters
+	// before the LIST runs (see filterQueryableResourcesByKind).
+	Kind string
 }
 
 func (qr *QueryableResource) String() string {
@@ -31,6 +35,7 @@ func (qr *QueryableResource) Copy() QueryableResource {
 		GroupVersionResourceTriplet: qr.GroupVersionResourceTriplet,
 		FieldSelectors:              qr.FieldSelectors,
 		Namespaced:                  qr.Namespaced,
+		Kind:                        qr.Kind,
 	}
 }
 

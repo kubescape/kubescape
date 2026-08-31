@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -21,25 +21,26 @@ import (
 // list results per GVR.
 type gvrAwareDynamicClient struct {
 	dynamic.Interface
-	listFunc func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error)
+	listFunc func(gvr schema.GroupVersionResource, ns string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error)
 }
 
 func (m *gvrAwareDynamicClient) Resource(resource schema.GroupVersionResource) dynamic.NamespaceableResourceInterface {
-	return &gvrAwareResourceClient{gvr: resource, listFunc: m.listFunc}
+	return &gvrAwareResourceClient{gvr: resource, ns: "", listFunc: m.listFunc}
 }
 
 type gvrAwareResourceClient struct {
 	dynamic.NamespaceableResourceInterface
 	gvr      schema.GroupVersionResource
-	listFunc func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error)
+	ns       string
+	listFunc func(gvr schema.GroupVersionResource, ns string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error)
 }
 
 func (m *gvrAwareResourceClient) Namespace(s string) dynamic.ResourceInterface {
-	return m
+	return &gvrAwareResourceClient{gvr: m.gvr, ns: s, listFunc: m.listFunc}
 }
 
 func (m *gvrAwareResourceClient) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
-	return m.listFunc(m.gvr, ctx, opts)
+	return m.listFunc(m.gvr, m.ns, ctx, opts)
 }
 
 func TestEstimateClusterSize_NilClient(t *testing.T) {
@@ -56,19 +57,64 @@ func TestEstimateClusterSize_NilDynamicClient(t *testing.T) {
 	assert.Equal(t, 0, size)
 }
 
-func newListWithRemaining(n int64) *unstructured.UnstructuredList {
+func newLimitOneList() *unstructured.UnstructuredList {
 	return &unstructured.UnstructuredList{
-		Object: map[string]any{
-			"metadata": map[string]any{
-				"remainingItemCount": n,
-			},
+		Items: []unstructured.Unstructured{{Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Example",
+			"metadata":   map[string]any{"name": "first"},
+		}}},
+	}
+}
+
+func newLimitOneListWithRemaining(n int64) *unstructured.UnstructuredList {
+	list := newLimitOneList()
+	list.Object = map[string]any{
+		"metadata": map[string]any{
+			"remainingItemCount": n,
 		},
 	}
+	return list
+}
+
+func TestEstimateClusterSize_CountsReturnedItems(t *testing.T) {
+	mockClient := &gvrAwareDynamicClient{
+		listFunc: func(_ schema.GroupVersionResource, _ string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			assert.Equal(t, int64(1), opts.Limit)
+			return newLimitOneList(), nil
+		},
+	}
+
+	handler := &K8sResourceHandler{
+		k8s: &k8sinterface.KubernetesApi{DynamicClient: mockClient},
+	}
+
+	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
+	require.NoError(t, err)
+	assert.Equal(t, len(namespacedResourcesToEstimate), size,
+		"a returned page item must be counted even when remainingItemCount is absent")
+}
+
+func TestEstimateClusterSize_SuccessfulEmptyLists(t *testing.T) {
+	mockClient := &gvrAwareDynamicClient{
+		listFunc: func(_ schema.GroupVersionResource, _ string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			assert.Equal(t, int64(1), opts.Limit)
+			return &unstructured.UnstructuredList{}, nil
+		},
+	}
+
+	handler := &K8sResourceHandler{
+		k8s: &k8sinterface.KubernetesApi{DynamicClient: mockClient},
+	}
+
+	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
+	require.NoError(t, err)
+	assert.Zero(t, size, "successfully listed empty resource types form a valid zero-size estimate")
 }
 
 func TestEstimateClusterSize_SmallCluster(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
-		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+		listFunc: func(gvr schema.GroupVersionResource, _ string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			assert.Equal(t, int64(1), opts.Limit)
 			var n int64 = 10
 			switch gvr.Resource {
@@ -81,7 +127,7 @@ func TestEstimateClusterSize_SmallCluster(t *testing.T) {
 			case "configmaps":
 				n = 20
 			}
-			return newListWithRemaining(n), nil
+			return newLimitOneListWithRemaining(n), nil
 		},
 	}
 
@@ -91,14 +137,14 @@ func TestEstimateClusterSize_SmallCluster(t *testing.T) {
 
 	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
 	require.NoError(t, err)
-	// 50+10+5+20 + (12 other GVRs * 10 each) = 85 + 120 = 205
-	assert.Equal(t, 205, size)
+	// 50+10+5+20 + (11 other GVRs * 10 each) + 15 returned items = 210
+	assert.Equal(t, 210, size)
 }
 
 func TestEstimateClusterSize_LargeCluster(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
-		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
-			return newListWithRemaining(500), nil
+		listFunc: func(gvr schema.GroupVersionResource, _ string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			return newLimitOneListWithRemaining(500), nil
 		},
 	}
 
@@ -108,17 +154,17 @@ func TestEstimateClusterSize_LargeCluster(t *testing.T) {
 
 	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
 	require.NoError(t, err)
-	// 16 GVRs * 500 each = 8000
-	assert.Equal(t, 8000, size)
+	// 15 GVRs * (500 remaining + 1 returned) = 7515
+	assert.Equal(t, 7515, size)
 }
 
 func TestEstimateClusterSize_ListErrors(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
-		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+		listFunc: func(gvr schema.GroupVersionResource, _ string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			if gvr.Resource == "pods" {
 				return nil, errors.New("API server error")
 			}
-			return newListWithRemaining(100), nil
+			return newLimitOneListWithRemaining(100), nil
 		},
 	}
 
@@ -128,13 +174,13 @@ func TestEstimateClusterSize_ListErrors(t *testing.T) {
 
 	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
 	require.NoError(t, err)
-	// 15 GVRs * 100 = 1500 (pods error is skipped)
-	assert.Equal(t, 1500, size)
+	// 14 GVRs * (100 remaining + 1 returned) = 1414 (pods error is skipped)
+	assert.Equal(t, 1414, size)
 }
 
 func TestEstimateClusterSize_AllListErrors(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
-		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+		listFunc: func(gvr schema.GroupVersionResource, _ string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			return nil, errors.New("API server error")
 		},
 	}
@@ -152,7 +198,7 @@ func TestCountNamespaces_AppliesNamespaceFilters(t *testing.T) {
 	ns := func(name string) *corev1.Namespace {
 		return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
 	}
-	//nolint:staticcheck // deprecated but fine for this test
+
 	client := fakeclientset.NewSimpleClientset(ns("default"), ns("kube-system"), ns("prod-a"), ns("prod-b"))
 	handler := &K8sResourceHandler{k8s: &k8sinterface.KubernetesApi{KubernetesClient: client}}
 
@@ -175,12 +221,12 @@ func TestCountNamespaces_AppliesNamespaceFilters(t *testing.T) {
 
 func TestEstimateClusterSize_NilRemainingItemCount(t *testing.T) {
 	mockClient := &gvrAwareDynamicClient{
-		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+		listFunc: func(gvr schema.GroupVersionResource, _ string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
 			if gvr.Resource == "pods" {
-				// No metadata at all — GetRemainingItemCount returns nil
-				return &unstructured.UnstructuredList{}, nil
+				// A complete one-item page has no remainingItemCount.
+				return newLimitOneList(), nil
 			}
-			return newListWithRemaining(200), nil
+			return newLimitOneListWithRemaining(200), nil
 		},
 	}
 
@@ -190,25 +236,16 @@ func TestEstimateClusterSize_NilRemainingItemCount(t *testing.T) {
 
 	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
 	require.NoError(t, err)
-	// 15 GVRs * 200 = 3000 (pods with nil remainingItemCount is skipped)
-	assert.Equal(t, 3000, size)
+	// 14 GVRs * (200 remaining + 1 returned) + 1 returned pod = 2815.
+	assert.Equal(t, 2815, size)
 }
 
-func newListWithItem(gvr schema.GroupVersionResource) unstructured.Unstructured {
-	return unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Example",
-		"metadata":   map[string]any{"name": gvr.Resource + "-1"},
-	}}
-}
-
-func TestEstimateClusterSize_CountsReturnedItems(t *testing.T) {
+func TestEstimateClusterSize_RespectsIncludeNamespaces(t *testing.T) {
+	var queriedNamespaces []string
 	mockClient := &gvrAwareDynamicClient{
-		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
-			assert.Equal(t, int64(1), opts.Limit)
-			// No remainingItemCount at all: a cluster with exactly one object of
-			// this type still returns that one object in Items.
-			return &unstructured.UnstructuredList{Items: []unstructured.Unstructured{newListWithItem(gvr)}}, nil
+		listFunc: func(gvr schema.GroupVersionResource, ns string, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			queriedNamespaces = append(queriedNamespaces, ns)
+			return newLimitOneListWithRemaining(10), nil
 		},
 	}
 
@@ -216,27 +253,20 @@ func TestEstimateClusterSize_CountsReturnedItems(t *testing.T) {
 		k8s: &k8sinterface.KubernetesApi{DynamicClient: mockClient},
 	}
 
-	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
+	scanInfo := &cautils.ScanInfo{IncludeNamespaces: "default,kube-system"}
+	size, err := handler.EstimateClusterSize(context.Background(), scanInfo)
 	require.NoError(t, err)
-	assert.Equal(t, len(namespacedResourcesToEstimate), size,
-		"a returned page item must be counted even when remainingItemCount is absent")
-}
 
-func TestEstimateClusterSize_CountsReturnedItemPlusRemaining(t *testing.T) {
-	mockClient := &gvrAwareDynamicClient{
-		listFunc: func(gvr schema.GroupVersionResource, ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
-			list := newListWithRemaining(9)
-			list.Items = []unstructured.Unstructured{newListWithItem(gvr)}
-			return list, nil
-		},
+	// Each of the 15 GVRs should be queried once per namespace (2 namespaces).
+	assert.Equal(t, len(namespacedResourcesToEstimate)*2, len(queriedNamespaces),
+		"each GVR must be queried once per included namespace")
+
+	// Every queried namespace must be one of the included ones.
+	for _, ns := range queriedNamespaces {
+		assert.Contains(t, []string{"default", "kube-system"}, ns,
+			"queries must be scoped to included namespaces")
 	}
 
-	handler := &K8sResourceHandler{
-		k8s: &k8sinterface.KubernetesApi{DynamicClient: mockClient},
-	}
-
-	size, err := handler.EstimateClusterSize(context.Background(), &cautils.ScanInfo{})
-	require.NoError(t, err)
-	// each successful GVR contributes 1 returned item + 9 remaining = 10
-	assert.Equal(t, len(namespacedResourcesToEstimate)*10, size)
+	// 15 GVRs * 2 namespaces * (10 remaining + 1 returned) = 330
+	assert.Equal(t, 330, size)
 }

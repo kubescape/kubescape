@@ -1,0 +1,24 @@
+{
+    "name": "csistoragecapacity-in-default-namespace",
+    "attributes": {
+    },
+    "ruleLanguage": "Rego",
+    "match": [
+      {
+        "apiGroups": [
+          "storage.k8s.io"
+        ],
+        "apiVersions": [
+          "*"
+        ],
+        "resources": [
+            "CSIStorageCapacity"
+        ]
+      }
+    ],
+    "ruleDependencies": [
+    ],
+    "description": "",
+    "remediation": "",
+    "ruleQuery": "armo_builtins"
+}

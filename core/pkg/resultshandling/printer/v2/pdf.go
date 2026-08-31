@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -13,11 +12,11 @@ import (
 	"github.com/johnfercher/maroto/v2/pkg/props"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/pdf"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/pdf"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -35,21 +34,24 @@ func NewPdfPrinter() *PdfPrinter {
 	return &PdfPrinter{}
 }
 
-func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) {
-	outputFile = strings.TrimSpace(outputFile)
-	if outputFile == "" {
+func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) error {
+	outputFile, explicitOutput := printer.ResolveOutputFile(printer.PdfFormat, outputFile, pdfOutputFile)
+	if !explicitOutput {
 		// Binary PDF must never fall back to stdout: it corrupts TTYs and
 		// is rarely what the user intended. Default to ./report.pdf.
-		outputFile = pdfOutputFile + printer.PdfOutputExt
+		outputFile = printer.ResolveDefaultOutputFile(printer.PdfFormat, pdfOutputFile)
 		logger.L().Info("no --output specified for pdf format; writing to default file",
 			helpers.String("filename", outputFile))
-	} else if filepath.Ext(outputFile) != printer.PdfOutputExt {
-		outputFile = outputFile + printer.PdfOutputExt
 	}
-	// PDF must never fall back to stdout on file-create errors either
-	// (e.g. read-only cwd) — use the no-stdout-fallback helper, which
-	// falls back to a temp file rather than corrupting the TTY.
+	if explicitOutput {
+		var err error
+		pp.writer, err = printer.GetWriterNoFallback(outputFile)
+		return err
+	}
+	// The implicit PDF destination must never fall back to stdout. Preserve
+	// the existing temp-file fallback if the default path cannot be opened.
 	pp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+printer.PdfOutputExt)
+	return nil
 }
 
 func (pp *PdfPrinter) Score(score float32) {
@@ -98,8 +100,9 @@ func (pp *PdfPrinter) generateImagePdf(imageScanData []cautils.ImageScanData) ([
 	var allCVEs []imageprinter.CVE
 	var images []string
 	for i := range imageScanData {
-		allCVEs = append(allCVEs, extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)...)
-		images = append(images, imageScanData[i].Image)
+		target := imageScanData[i].Target()
+		allCVEs = append(allCVEs, extractCVEs(imageScanData[i].Matches, target, imageScanData[i].VexStatuses)...)
+		images = append(images, target)
 	}
 
 	template := pdf.NewReportTemplate()
@@ -193,8 +196,10 @@ func getSeverityColor(severity string) *props.Color {
 	return &props.BlackColor
 }
 
-func (p *PdfPrinter) CloseWriter() {
+// CloseWriter closes the PDF output writer, returning any error from flushing or closing.
+func (p *PdfPrinter) CloseWriter() error {
 	if p.writer != nil && p.writer != os.Stdout {
-		p.writer.Close()
+		return p.writer.Close()
 	}
+	return nil
 }

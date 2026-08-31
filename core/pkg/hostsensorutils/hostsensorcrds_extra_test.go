@@ -10,6 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
+
+	"github.com/kubescape/k8s-interface/k8sinterface"
 )
 
 func TestConvertCRDToEnvelope(t *testing.T) {
@@ -128,6 +132,19 @@ func TestListCRDResources(t *testing.T) {
 }
 
 func TestHostSensorHandlerLifecycleEdges(t *testing.T) {
+	sharedConfig := &rest.Config{
+		Host: "https://cluster.example.test",
+		ContentConfig: rest.ContentConfig{
+			AcceptContentTypes: "application/json",
+			ContentType:        "application/json",
+		},
+	}
+	originalConfig := k8sinterface.K8SConfig
+	k8sinterface.K8SConfig = sharedConfig
+	t.Cleanup(func() {
+		k8sinterface.K8SConfig = originalConfig
+	})
+
 	handler := &HostSensorHandler{}
 
 	assert.NoError(t, handler.TearDown())
@@ -135,6 +152,14 @@ func TestHostSensorHandlerLifecycleEdges(t *testing.T) {
 	got, err := NewHostSensorHandler(nil, "")
 	require.Nil(t, got)
 	require.ErrorContains(t, err, "nil k8s interface received")
+
+	k8sObj := &k8sinterface.KubernetesApi{
+		KubernetesClient: fake.NewSimpleClientset(),
+		Context:          context.Background(),
+	}
+	got2, err2 := NewHostSensorHandler(k8sObj, "")
+	require.Nil(t, got2)
+	require.ErrorContains(t, err2, "failed to get nodes list: no nodes to scan")
 }
 
 func mustJSON(t *testing.T, value map[string]any) string {

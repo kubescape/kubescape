@@ -7,9 +7,9 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/mocks"
-	"github.com/kubescape/kubescape/v3/core/pkg/score"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/mocks"
+	"github.com/kubescape/kubescape/v4/core/pkg/score"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -111,7 +111,7 @@ func TestProcess_ControlTimeout(t *testing.T) {
 	assert.Empty(t, opap.ResourcesResult, "timed-out control must not contribute resources to ResourcesResult")
 
 	// mirrors the rebuild step performed by ProcessRulesListener after Process returns
-	coverage := cautils.BuildScanCoverage(opaSessionObj.InfoMap, opaSessionObj.ResourceToControlsMap, opap.TimedOutControls, opaSessionObj.PartialGVRFailures, opaSessionObj.PolicyDegradations)
+	coverage := cautils.BuildScanCoverage(opaSessionObj.InfoMap, opaSessionObj.ResourceToControlsMap, opap.TimedOutControls, opaSessionObj.PartialGVRFailures, opaSessionObj.PolicyDegradations, nil)
 	require.Len(t, coverage.NotEvaluatedControls, 1)
 	notEvaluated := coverage.NotEvaluatedControls[0]
 	assert.Equal(t, controlID, notEvaluated.ControlID)

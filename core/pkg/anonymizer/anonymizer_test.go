@@ -3,9 +3,9 @@ package anonymizer
 import (
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/reportcrypto"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -69,16 +69,20 @@ func TestApplyEncrypted(t *testing.T) {
 
 	assert.Equal(t, "v1", metadata.Version)
 	assert.Equal(t, "AES256_GCM", metadata.DEKAlgorithm)
-	assert.Equal(t, "AES256_GCM", metadata.KEKAlgorithm)
+	assert.Equal(t, "ARGON2ID_AES256_GCM", metadata.KEKAlgorithm)
 	assert.NotEmpty(t, metadata.EncryptedDEK)
 
-	unwrappedDEK, err := reportcrypto.UnwrapDEK(
+	reportKey, err := reportcrypto.UnwrapReportKey(
 		metadata.EncryptedDEK,
 		masterKey,
 	)
 	require.NoError(t, err)
 
-	assert.Equal(t, dek, unwrappedDEK)
+	assert.Equal(t, dek, reportKey.DEK())
+
+	// ApplyEncrypted must always produce a bound report: the fields below are
+	// sealed against this binding and do not open without it.
+	assert.True(t, reportKey.IsBound())
 
 	if handler.ScanData.Report != nil {
 		require.NotNil(
@@ -98,10 +102,7 @@ func TestApplyEncrypted(t *testing.T) {
 	assert.Contains(t, repo.Repo, "ENC[AES256_GCM,")
 	assert.Contains(t, repo.Owner, "ENC[AES256_GCM,")
 
-	decryptedRepo, err := reportcrypto.DecryptString(
-		repo.Repo,
-		dek,
-	)
+	decryptedRepo, err := reportKey.DecryptString(repo.Repo)
 	require.NoError(t, err)
 
 	assert.Equal(t, "demo-repository", decryptedRepo)
@@ -112,10 +113,7 @@ func TestApplyEncrypted(t *testing.T) {
 		"ENC[AES256_GCM,",
 	)
 
-	decryptedMessage, err := reportcrypto.DecryptString(
-		repo.LastCommit.Message,
-		dek,
-	)
+	decryptedMessage, err := reportKey.DecryptString(repo.LastCommit.Message)
 	require.NoError(t, err)
 
 	assert.Equal(t, "demo commit", decryptedMessage)

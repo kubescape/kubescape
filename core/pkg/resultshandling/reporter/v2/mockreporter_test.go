@@ -16,9 +16,9 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
-	"github.com/kubescape/kubescape/v3/internal/testutils"
+	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v4/internal/testutils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -207,9 +207,9 @@ func mockOPASessionObj(t testing.TB) *cautils.OPASessionObj {
 		o.AllResources[k] = val
 	}
 
-	o.ResourceAttackTracks = make(map[string]v1alpha1.IAttackTrack, len(v.ResourceAttackTracks))
+	o.ResourceAttackTracks = make(map[string][]v1alpha1.IAttackTrack, len(v.ResourceAttackTracks))
 	for k, val := range v.ResourceAttackTracks {
-		o.ResourceAttackTracks[k] = val
+		o.ResourceAttackTracks[k] = []v1alpha1.IAttackTrack{val}
 	}
 
 	o.AttackTracks = make(map[string]v1alpha1.IAttackTrack, len(v.AttackTracks))
