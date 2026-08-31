@@ -1,6 +1,7 @@
 package cel
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -48,7 +49,7 @@ func TestVAPAppliesTo(t *testing.T) {
 		{"cronjob matches batch/cronjobs", "batch/v1", "CronJob", true},
 		{"configmap is out of scope", "v1", "ConfigMap", false},
 		{"deployment in wrong group is out of scope", "v1", "Deployment", false},
-		{"pod in wrong version is out of scope", "v2", "Pod", false},
+		{"pod at another version of its group is in scope", "v2", "Pod", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -491,5 +492,103 @@ func TestVAPAppliesToKindPluralCandidates(t *testing.T) {
 			v := vapWithConstraints(rule([]string{"agents.x-k8s.io"}, []string{"v1alpha1"}, []string{tc.resource}))
 			assert.Equal(t, tc.want, v.AppliesTo(obj("agents.x-k8s.io/v1alpha1", tc.kind)))
 		})
+	}
+}
+
+// withMatchPolicy returns constraints carrying an explicit matchPolicy, for the
+// cases that must not read the API default.
+func withMatchPolicy(policy admissionregistrationv1.MatchPolicyType, rules ...admissionregistrationv1.NamedRuleWithOperations) *VAP {
+	return &VAP{matchConstraints: &admissionregistrationv1.MatchResources{
+		MatchPolicy:   &policy,
+		ResourceRules: rules,
+	}}
+}
+
+// TestVAPAppliesToEquivalentMatchPolicy pins the version half of rule matching.
+// A group serving a resource at several versions returns the same objects at
+// each of them, and the collector keeps whichever one the API server ranks
+// highest (see resourcehandler.preferServedVersion), so requiring the rule to
+// name that exact version dropped the object from a policy admission does apply
+// under the default Equivalent matchPolicy.
+func TestVAPAppliesToEquivalentMatchPolicy(t *testing.T) {
+	sandboxes := rule([]string{"agents.x-k8s.io"}, []string{"v1alpha1"}, []string{"sandboxes"})
+
+	cases := []struct {
+		name       string
+		apiVersion string
+		kind       string
+		want       bool
+	}{
+		{"the version the rule names", "agents.x-k8s.io/v1alpha1", "Sandbox", true},
+		{"a newer version of the same resource", "agents.x-k8s.io/v1beta1", "Sandbox", true},
+		{"another group is still out of scope", "other.io/v1alpha1", "Sandbox", false},
+		{"another resource is still out of scope", "agents.x-k8s.io/v1beta1", "SandboxTemplate", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, vapWithConstraints(sandboxes).AppliesTo(obj(tc.apiVersion, tc.kind)))
+			assert.Equal(t, tc.want, withMatchPolicy(admissionregistrationv1.Equivalent, sandboxes).AppliesTo(obj(tc.apiVersion, tc.kind)),
+				"an explicit Equivalent must read the same as the default")
+		})
+	}
+
+	t.Run("Exact matchPolicy still requires the rule to name the version", func(t *testing.T) {
+		v := withMatchPolicy(admissionregistrationv1.Exact, sandboxes)
+		assert.True(t, v.AppliesTo(obj("agents.x-k8s.io/v1alpha1", "Sandbox")))
+		assert.False(t, v.AppliesTo(obj("agents.x-k8s.io/v1beta1", "Sandbox")))
+	})
+
+	// Exclusions go through the same matcher at admission, so an exclusion
+	// naming one version exempts the resource at every other one too.
+	t.Run("an exclusion naming another version still exempts the object", func(t *testing.T) {
+		v := &VAP{matchConstraints: &admissionregistrationv1.MatchResources{
+			ResourceRules:        []admissionregistrationv1.NamedRuleWithOperations{rule([]string{"*"}, []string{"*"}, []string{"*"})},
+			ExcludeResourceRules: []admissionregistrationv1.NamedRuleWithOperations{sandboxes},
+		}}
+		assert.False(t, v.AppliesTo(obj("agents.x-k8s.io/v1beta1", "Sandbox")))
+		assert.True(t, v.AppliesTo(obj("agents.x-k8s.io/v1beta1", "SandboxTemplate")))
+	})
+}
+
+// siblingVersion is a version no bundle rule names, standing in for the older
+// or newer version of a group a real manifest may still be written at.
+const siblingVersion = "v1beta1"
+
+// TestVAPAppliesToCoversEveryBundleKindAtAnotherVersion is
+// TestVAPAppliesToCoversEveryBundleKind asked at a version the rule does not
+// name. Every bundle policy leaves matchPolicy at its Equivalent default, so
+// admission converts such a request and applies the policy; a `make sync-vap`
+// that lands a policy pinning Exact would fail here rather than at scan time.
+func TestVAPAppliesToCoversEveryBundleKindAtAnotherVersion(t *testing.T) {
+	catalog, err := getVAPCatalog()
+	require.NoError(t, err)
+
+	for name, vap := range catalog.byName {
+		if vap.matchConstraints == nil {
+			continue
+		}
+		for _, rr := range vap.matchConstraints.ResourceRules {
+			if slices.Contains(rr.APIVersions, siblingVersion) || slices.Contains(rr.APIVersions, "*") {
+				continue // the rule names it outright, so it proves nothing here
+			}
+			for _, group := range defaultIfEmpty(rr.APIGroups, "") {
+				if group == "*" {
+					group = ""
+				}
+				apiVersion := siblingVersion
+				if group != "" {
+					apiVersion = group + "/" + siblingVersion
+				}
+				for _, res := range rr.Resources {
+					if res == "*" || strings.Contains(res, "/") {
+						continue
+					}
+					kind, ok := canonicalKinds[res]
+					require.Truef(t, ok, "policy %q constrains resource %q with no canonical Kind in the test", name, res)
+					assert.Truef(t, vap.AppliesTo(obj(apiVersion, kind)),
+						"policy %q constrains %q but appliesTo rejects a %s %s; matchPolicy is Equivalent, so admission would convert and apply it", name, res, apiVersion, kind)
+				}
+			}
+		}
 	}
 }
