@@ -71,6 +71,7 @@ func (prettyPrinter *PrettyPrinter) buildTreeFromAttackTrackStep(tree gotree.Tre
 }
 
 func (prettyPrinter *PrettyPrinter) printResourceAttackGraph(attackTrack v1alpha1.IAttackTrack) {
+	fmt.Fprintf(prettyPrinter.writer, "Attack Track: %s\n", attackTrack.GetName())
 	tree := prettyPrinter.buildTreeFromAttackTrackStep(nil, attackTrack.GetData())
 	fmt.Fprintln(prettyPrinter.writer, tree.Print())
 }
@@ -118,8 +119,8 @@ func (prettyPrinter *PrettyPrinter) printAttackTracks(opaSessionObj *cautils.OPA
 		fmt.Fprintf(prettyPrinter.writer, "Severity: %s\n", apis.SeverityNumberToString(resource.Severity))
 		fmt.Fprintf(prettyPrinter.writer, "Total vectors: %v\n\n", len(resource.PriorityVector))
 
-		if v, found := resourceToAttackTrack[resource.ResourceID]; found {
-			prettyPrinter.printResourceAttackGraph(v)
+		for _, attackTrack := range resourceToAttackTrack[resource.ResourceID] {
+			prettyPrinter.printResourceAttackGraph(attackTrack)
 		}
 
 		sort.Slice(resource.PriorityVector, func(x, y int) bool {
