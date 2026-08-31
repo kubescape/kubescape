@@ -13,7 +13,9 @@ import (
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/cautils/getter"
 	"github.com/kubescape/kubescape/v4/core/mocks"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -244,7 +246,7 @@ func TestGetExceptions(t *testing.T) {
 	getters := &cautils.Getters{
 		ExceptionsGetter: &ExceptionsGetterMock{},
 	}
-	exceptions, err := policyHandler.getExceptions(context.TODO(), getters)
+	exceptions, err := policyHandler.getExceptions(context.TODO(), nil, getters)
 
 	assert.NoError(t, err)
 	assert.Equal(t, cachedExceptions, exceptions)
@@ -257,10 +259,54 @@ func TestGetControlInputs(t *testing.T) {
 		ControlsInputsGetter: &ControlsInputsGetterMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs(context.TODO(), getters)
+	controlInputs, err := policyHandler.getControlInputs(context.TODO(), nil, getters)
 
 	assert.NoError(t, err)
 	assert.Equal(t, cachedControlInputs, controlInputs)
+}
+
+func TestCollectPolicies_ReplaysRunnerInputProvenanceFromCache(t *testing.T) {
+	t.Setenv(PoliciesCacheTtlEnvVar, "1m")
+	handler := NewRequestScopedPolicyHandler("test-cluster")
+	defer handler.Close()
+
+	newScanInfo := func() *cautils.ScanInfo {
+		return &cautils.ScanInfo{ScanContract: &reporthandlingv2.ScanContractMetadata{
+			APIVersion:     "config.kubescape.io/v1alpha1",
+			Contract:       "ci",
+			DigestSchema:   "kubescape-scan-contract:v1",
+			ContractDigest: "sha256:contract",
+		}}
+	}
+	newGetters := func() *cautils.Getters {
+		testdata := filepath.Join("..", "..", "cautils", "getter", "testdata")
+		return &cautils.Getters{
+			PolicyGetter:         &nonPersistentPolicyGetterMock{},
+			ExceptionsGetter:     getter.NewLoadPolicy([]string{filepath.Join(testdata, "exceptions.json")}),
+			ControlsInputsGetter: getter.NewLoadPolicy([]string{filepath.Join(testdata, "controls-inputs.json")}),
+		}
+	}
+	identifiers := []cautils.PolicyIdentifier{{Identifier: FrameworkName, Kind: apisv1.KindFramework}}
+
+	first, err := handler.CollectPolicies(context.Background(), identifiers, newScanInfo(), newGetters())
+	require.NoError(t, err)
+	firstContract := first.Metadata.ScanMetadata.ScanContract
+	require.NotNil(t, firstContract)
+	require.Len(t, firstContract.RunnerInputs, 2)
+
+	secondGetters := newGetters()
+	second, err := handler.CollectPolicies(context.Background(), identifiers, newScanInfo(), secondGetters)
+	require.NoError(t, err)
+	secondContract := second.Metadata.ScanMetadata.ScanContract
+	require.NotNil(t, secondContract)
+
+	assert.Equal(t, firstContract.RunnerInputs, secondContract.RunnerInputs,
+		"a cache hit must replay the file digests captured when the cached values were first consumed")
+	assert.Equal(t, firstContract.EffectiveRunDigest, secondContract.EffectiveRunDigest)
+	_, _, consumed := secondGetters.ExceptionsGetter.(getter.ConsumedFileDigester).ConsumedFileDigest()
+	assert.False(t, consumed, "the second scan should receive exceptions from PolicyHandler's cache")
+	_, _, consumed = secondGetters.ControlsInputsGetter.(getter.ConsumedFileDigester).ConsumedFileDigest()
+	assert.False(t, consumed, "the second scan should receive control inputs from PolicyHandler's cache")
 }
 
 func TestDownloadScanPolicies_LocalCacheBypass(t *testing.T) {
@@ -394,7 +440,7 @@ func TestGetControlInputs_EmptyReturnsErrorNotCached(t *testing.T) {
 		ControlsInputsGetter: &ControlsInputsGetterEmptyMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs(context.TODO(), getters)
+	controlInputs, err := policyHandler.getControlInputs(context.TODO(), nil, getters)
 
 	assert.Error(t, err)
 	assert.Nil(t, controlInputs)
@@ -411,7 +457,7 @@ func TestGetControlInputs_NonNilResultIsCached(t *testing.T) {
 		ControlsInputsGetter: &ControlsInputsGetterMock{},
 	}
 
-	controlInputs, err := policyHandler.getControlInputs(context.TODO(), getters)
+	controlInputs, err := policyHandler.getControlInputs(context.TODO(), nil, getters)
 
 	assert.NoError(t, err)
 	assert.Equal(t, CachedControlInputs, controlInputs)
