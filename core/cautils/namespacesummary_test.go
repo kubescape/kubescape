@@ -92,7 +92,7 @@ func TestBuildNamespaceSummaries_ClusterScopedBucket(t *testing.T) {
 
 	summaries := BuildNamespaceSummaries(reportsummary.ControlSummaries{"C-NODE": failed}, allResources)
 	require.Len(t, summaries, 1)
-	assert.Equal(t, clusterScopedNamespace, summaries[0].Namespace)
+	assert.Equal(t, ClusterScopedNamespace, summaries[0].Namespace)
 	assert.Equal(t, float32(0), summaries[0].ComplianceScore)
 	assert.Equal(t, 1, summaries[0].ResourceCount)
 }
@@ -106,5 +106,33 @@ func TestBuildNamespaceSummaries_UnknownResourceIDFallsBackToClusterScoped(t *te
 
 	summaries := BuildNamespaceSummaries(reportsummary.ControlSummaries{"C-X": ctrl}, map[string]workloadinterface.IMetadata{})
 	require.Len(t, summaries, 1)
-	assert.Equal(t, clusterScopedNamespace, summaries[0].Namespace)
+	assert.Equal(t, ClusterScopedNamespace, summaries[0].Namespace)
+}
+
+// TestBuildNamespaceSummaries_NamespaceWithNoMatchedResourceStillScores
+// covers a namespace holding resources that no control's ResourceIDs ever
+// reference (every control simply does not apply to them). It must still
+// produce a summary, scoring 100 on every control, instead of being silently
+// absent from the rollup.
+func TestBuildNamespaceSummaries_NamespaceWithNoMatchedResourceStillScores(t *testing.T) {
+	untouchedPod := namespacedPod("configmap-only", "quiet-ns")
+	allResources := map[string]workloadinterface.IMetadata{untouchedPod.GetID(): untouchedPod}
+
+	// C-OTHER has resources, but none of them live in quiet-ns.
+	other := reportsummary.ControlSummary{ControlID: "C-OTHER"}
+	other.Append(&apis.StatusInfo{InnerStatus: apis.StatusFailed}, "some-other-resource-id")
+
+	summaries := BuildNamespaceSummaries(reportsummary.ControlSummaries{"C-OTHER": other}, allResources)
+
+	byNamespace := make(map[string]NamespaceSummary, len(summaries))
+	for _, s := range summaries {
+		byNamespace[s.Namespace] = s
+	}
+
+	quiet, ok := byNamespace["quiet-ns"]
+	require.True(t, ok, "a namespace with a resource must appear even if no control matched a resource in it")
+	assert.Equal(t, float32(100), quiet.ComplianceScore)
+	assert.Equal(t, 1, quiet.TotalControls)
+	assert.Equal(t, 0, quiet.FailedControls)
+	assert.Equal(t, 1, quiet.ResourceCount)
 }

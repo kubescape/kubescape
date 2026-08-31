@@ -8,10 +8,12 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
-// clusterScopedNamespace buckets resources that carry no namespace
+// ClusterScopedNamespace buckets resources that carry no namespace
 // (cluster-scoped kinds, or a manifest that omitted one) into a single named
-// entry rather than dropping them from the rollup.
-const clusterScopedNamespace = "<cluster-scoped>"
+// entry rather than dropping them from the rollup. It is not a real
+// Kubernetes namespace, so callers must not treat it as user data (the
+// anonymizer skips it for that reason).
+const ClusterScopedNamespace = "<cluster-scoped>"
 
 // NamespaceSummary is one namespace's compliance rollup. Every control in the
 // scan's policy set is counted toward its score -- the same convention the
@@ -47,7 +49,20 @@ func BuildNamespaceSummaries(controls reportsummary.ControlSummaries, allResourc
 		if resource, ok := allResources[resourceID]; ok && resource.GetNamespace() != "" {
 			return resource.GetNamespace()
 		}
-		return clusterScopedNamespace
+		return ClusterScopedNamespace
+	}
+
+	// resourcesByNamespace is seeded from every scanned resource, not just
+	// ones a control matched, so a namespace holding only resources no
+	// control examines still gets a summary (scoring 100 on every control)
+	// instead of being silently absent from the rollup.
+	resourcesByNamespace := make(map[string]map[string]struct{})
+	for resourceID := range allResources {
+		namespace := namespaceOf(resourceID)
+		if resourcesByNamespace[namespace] == nil {
+			resourcesByNamespace[namespace] = make(map[string]struct{})
+		}
+		resourcesByNamespace[namespace][resourceID] = struct{}{}
 	}
 
 	// perControlCounts[controlID][namespace] = [passed, total], computed once
@@ -56,11 +71,13 @@ func BuildNamespaceSummaries(controls reportsummary.ControlSummaries, allResourc
 	// resource in a given namespace must still contribute 100 to it, and that
 	// namespace must already exist in the result set for that to happen.
 	perControlCounts := make(map[string]map[string][2]int, len(controls))
-	resourcesByNamespace := make(map[string]map[string]struct{})
 	for controlID, control := range controls {
 		counts := make(map[string][2]int)
 		for resourceID, status := range control.ResourceIDs.All() {
 			namespace := namespaceOf(resourceID)
+			// Usually already seeded from allResources above; kept here too
+			// so a control's resource ID that is missing from allResources
+			// still lands in the rollup instead of being silently dropped.
 			if resourcesByNamespace[namespace] == nil {
 				resourcesByNamespace[namespace] = make(map[string]struct{})
 			}

@@ -152,6 +152,60 @@ func TestTransformSession_NamesAndNamespacesReplaced(t *testing.T) {
 	}
 }
 
+// TestTransformSession_NamespaceSummariesRedacted covers a gap that would
+// otherwise leak the real namespace name: --hide/--encrypt transform a
+// resource's own namespace field, but NamespaceSummaries is a separate report
+// section that must be redacted independently, and it must get the exact
+// same pseudonym as the resource it summarizes so the two stay joinable. The
+// cluster-scoped bucket is not a real namespace and must survive untouched.
+func TestTransformSession_NamespaceSummariesRedacted(t *testing.T) {
+	pod := workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "my-secret-pod",
+			"namespace": "my-secret-ns",
+		},
+	})
+	oldID := pod.GetID()
+
+	session := &cautils.OPASessionObj{
+		AllResources:         map[string]workloadinterface.IMetadata{oldID: pod},
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string][]v1alpha1.IAttackTrack),
+		NamespaceSummaries: cautils.NamespaceSummaries{
+			{Namespace: "my-secret-ns", ComplianceScore: 80},
+			{Namespace: cautils.ClusterScopedNamespace, ComplianceScore: 95},
+		},
+	}
+
+	err := transformSession(session, NewMapping(), NewMappingTransformer())
+	require.NoError(t, err)
+
+	var transformedNs, clusterScoped string
+	for _, s := range session.NamespaceSummaries {
+		switch s.ComplianceScore {
+		case 80:
+			transformedNs = s.Namespace
+		case 95:
+			clusterScoped = s.Namespace
+		}
+	}
+
+	assert.NotEqual(t, "my-secret-ns", transformedNs)
+	assert.Contains(t, transformedNs, "ns-")
+
+	var resourceNs string
+	for _, resource := range session.AllResources {
+		resourceNs = resource.GetNamespace()
+	}
+	assert.Equal(t, resourceNs, transformedNs, "the namespace summary must carry the same pseudonym as the resource")
+
+	assert.Equal(t, cautils.ClusterScopedNamespace, clusterScoped, "the cluster-scoped marker must not be pseudonymized")
+}
+
 // TestTransformSession_CollidingNamesKeepDistinctResources covers what a
 // pseudonym collision costs at session level, which is more than a confusing
 // report: transformSession rebuilds AllResources and ResourcesResult keyed by
