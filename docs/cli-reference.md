@@ -263,6 +263,27 @@ itself. Prefer a rule directory when the rule targets specific kinds.
 
 Every custom rule becomes a control named `custom-<rule>` in the report.
 
+#### Custom rule severity
+
+A custom rule is **medium** severity (base score `5`) unless it says otherwise.
+Either layout can declare its own severity with a `# @baseScore <1-10>` comment
+anywhere in its Rego source:
+
+```rego
+package armo_builtins
+
+# @baseScore 9
+
+deny[msga] { ... }
+```
+
+The base score is bucketed the same way as a built-in control — `1-3` low,
+`4-6` medium, `7-8` high, `9-10` critical — so it drives the report's severity
+column, `--min-severity`/`--max-severity` and `--severity-threshold`. A value
+outside `1-10`, a malformed value, or duplicate annotations in the same file
+fail the scan rather than defaulting, because a rule whose severity cannot be
+determined is treated as exceeding every `--severity-threshold`.
+
 
 ### Exception Audit
 
