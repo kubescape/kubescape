@@ -49,7 +49,7 @@ require (
 	github.com/kubescape/backend v0.0.48
 	github.com/kubescape/go-git-url v0.0.33
 	github.com/kubescape/go-logger v0.0.34
-	github.com/kubescape/k8s-interface v0.0.214
+	github.com/kubescape/k8s-interface v0.0.220
 	github.com/kubescape/opa-utils v0.0.312
 	github.com/kubescape/rbac-utils v0.0.21
 	github.com/kubescape/regolibrary/v2 v2.0.1
@@ -133,6 +133,9 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2 v2.1.1 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerregistry/armcontainerregistry v1.2.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v2 v2.4.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/internal v1.1.2 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/internal/v2 v2.0.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources v1.1.1 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Azure/go-autorest v14.2.0+incompatible // indirect
 	github.com/Azure/go-autorest/autorest v0.11.29 // indirect
@@ -633,6 +636,3 @@ replace github.com/google/go-containerregistry => github.com/matthyx/go-containe
 replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.0-20260322054632-16583c73e9b8
 
 replace github.com/distribution/reference => github.com/distribution/reference v0.5.0
-
-// Use unofficial fork to include cache-invalidation fix for Doraemon fork until upstream k8s-interface#161 is merged
-replace github.com/kubescape/k8s-interface => github.com/doraem-on/k8s-interface v0.0.218-0.20260815050130-fa6fe1e9bc98
