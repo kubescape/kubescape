@@ -189,6 +189,13 @@ func (gp *GitHubActionsPrinter) collectAnnotations(ctx context.Context, opaSessi
 			}
 
 			location := resolveFixLocation(opaSessionObj, locationResolver, &ac, resource.resourceID)
+			msg := fmt.Sprintf("%s severity finding on %s. Remediation: %s",
+				apis.ControlSeverityToString(ctl.GetScoreFactor()), resource.resourceID, cautils.GetControlLink(ctl.GetID()))
+			if res, ok := opaSessionObj.AllResources[resource.resourceID]; ok {
+				if paths := AssistedRemediationPathsWithCurrentValuesFiltered(&ac, res, false); len(paths) > 0 {
+					msg += "\nFailed paths:\n" + strings.Join(paths, "\n")
+				}
+			}
 			annotations = append(annotations, ghAnnotation{
 				severityRank: severityRank,
 				severity:     apis.ControlSeverityToString(ctl.GetScoreFactor()),
@@ -197,8 +204,7 @@ func (gp *GitHubActionsPrinter) collectAnnotations(ctx context.Context, opaSessi
 				file:         resource.relPath,
 				line:         location.Line,
 				title:        fmt.Sprintf("%s %s", ctl.GetID(), ctl.GetName()),
-				message: fmt.Sprintf("%s severity finding on %s. Remediation: %s",
-					apis.ControlSeverityToString(ctl.GetScoreFactor()), resource.resourceID, cautils.GetControlLink(ctl.GetID())),
+				message:      msg,
 			})
 		}
 	}
