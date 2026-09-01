@@ -24,6 +24,28 @@ var fixCmdExamples = fmt.Sprintf(`
   directory you control:
   3) %[1]s fix output.json --base-path .
 
+  A cluster scan has no manifests to rewrite, so its fixes are printed instead
+  of applied. Nothing is ever written to the cluster — applying is your call.
+
+  # Fix misconfigurations found by a cluster scan
+  1) %[1]s scan --format json --output cluster.json
+  2) %[1]s fix cluster.json
+
+  # Review, then apply
+  %[1]s fix cluster.json | kubectl apply -f -
+
+  # For a cluster with many findings, write one manifest per resource instead
+  %[1]s fix cluster.json --output-dir ./fixes
+
+  The manifests reflect the cluster as it was scanned, not a live read: a
+  resource that changed since the scan should be re-scanned before applying.
+
+  Resources whose scan record is redacted are declined rather than emitted,
+  since a manifest built from one would overwrite your real configuration:
+  workloads with container environment variables, plus Secrets and ConfigMaps.
+  Owner-managed resources are declined too — fix the owner instead. Each is
+  listed with its reason. Fixing manifest files is unaffected.
+
 `, cautils.ExecName())
 
 func GetFixCmd(ks meta.IKubescape) *cobra.Command {
@@ -49,6 +71,7 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 	fixCmd.PersistentFlags().BoolVar(&fixInfo.SkipUserValues, "skip-user-values", true, "Changes which involve user-defined values will be skipped")
 	fixCmd.PersistentFlags().StringVar(&fixInfo.BasePath, "base-path", "", "Restrict fixes to this directory: the report's own recorded scan location must resolve inside it. Use this when the report file comes from a source you don't fully trust (e.g. a shared CI artifact); without it, the report's recorded location is trusted as-is")
 	fixCmd.PersistentFlags().StringVar(&fixInfo.ContainerProfilePath, "container-profile", "", "Path to a JSON file containing a ContainerProfile to use for drift detection")
+	fixCmd.PersistentFlags().StringVar(&fixInfo.OutputDir, "output-dir", "", "Cluster scans only: write one patched manifest per resource into this directory instead of printing them to stdout. Ignored for file-based reports, which are fixed in place")
 
 	return fixCmd
 }

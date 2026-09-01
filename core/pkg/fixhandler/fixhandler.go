@@ -18,6 +18,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
@@ -71,29 +72,36 @@ func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
 		return nil, err
 	}
 
-	localPath := getLocalPath(&reportObj)
-	if _, err = os.Stat(localPath); err != nil {
-		return nil, err
-	}
+	// A cluster report has no local root: its resources are live objects, never
+	// files. Both checks below exist to locate and constrain manifests on disk,
+	// so neither has anything to act on — and getLocalPath returns "" for a
+	// cluster target, which would fail the stat outright.
+	var localPath string
+	if !isClusterReport(&reportObj) {
+		localPath = getLocalPath(&reportObj)
+		if _, err = os.Stat(localPath); err != nil {
+			return nil, err
+		}
 
-	// localPath comes straight out of the report (RepoContextMetadata.LocalRootPath /
-	// DirectoryContextMetadata.BasePath / dirname(FileContextMetadata.FilePath)), which
-	// is untrusted input if fixInfo.ReportFile came from somewhere the caller doesn't
-	// fully control. By default we still trust it, exactly as before - kubescape fix
-	// has no other way to know where a report's files live. If the caller passed
-	// --base-path, though, require the report's claimed location to actually resolve
-	// inside it before accepting it as the fix root.
-	if fixInfo.BasePath != "" {
-		resolvedLocalPath, err := filepath.EvalSymlinks(localPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve report's scan path %q: %w", localPath, err)
-		}
-		resolvedBasePath, err := filepath.EvalSymlinks(fixInfo.BasePath)
-		if err != nil {
-			return nil, fmt.Errorf("invalid --base-path %q: %w", fixInfo.BasePath, err)
-		}
-		if !isPathContained(resolvedBasePath, resolvedLocalPath) {
-			return nil, fmt.Errorf("report's scan path %q is outside --base-path %q; refusing to trust the report's location claim", localPath, fixInfo.BasePath)
+		// localPath comes straight out of the report (RepoContextMetadata.LocalRootPath /
+		// DirectoryContextMetadata.BasePath / dirname(FileContextMetadata.FilePath)), which
+		// is untrusted input if fixInfo.ReportFile came from somewhere the caller doesn't
+		// fully control. By default we still trust it, exactly as before - kubescape fix
+		// has no other way to know where a report's files live. If the caller passed
+		// --base-path, though, require the report's claimed location to actually resolve
+		// inside it before accepting it as the fix root.
+		if fixInfo.BasePath != "" {
+			resolvedLocalPath, err := filepath.EvalSymlinks(localPath)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve report's scan path %q: %w", localPath, err)
+			}
+			resolvedBasePath, err := filepath.EvalSymlinks(fixInfo.BasePath)
+			if err != nil {
+				return nil, fmt.Errorf("invalid --base-path %q: %w", fixInfo.BasePath, err)
+			}
+			if !isPathContained(resolvedBasePath, resolvedLocalPath) {
+				return nil, fmt.Errorf("report's scan path %q is outside --base-path %q; refusing to trust the report's location claim", localPath, fixInfo.BasePath)
+			}
 		}
 	}
 
@@ -184,8 +192,44 @@ func isSupportedScanningTarget(report *reporthandlingv2.PostureReport) error {
 	if scanningTarget == reporthandlingv2.GitLocal || scanningTarget == reporthandlingv2.Directory || scanningTarget == reporthandlingv2.File {
 		return nil
 	}
+	// A cluster scan records live objects rather than manifests, so there is
+	// nothing on disk to rewrite. Those resources are patched in memory and the
+	// result is emitted for the user to apply, so the report is still usable.
+	if isClusterReport(report) {
+		return nil
+	}
 
-	return fmt.Errorf("unsupported scanning target. Supported scanning targets are: a local git repo, a directory or a file")
+	return fmt.Errorf("unsupported scanning target. Supported scanning targets are: a cluster, a local git repo, a directory or a file")
+}
+
+// isClusterReport reports whether the report came from a live-cluster scan, in
+// which case no resource has a file on disk and every fix is rendered from the
+// scanned object instead.
+//
+// The cluster context metadata is part of the test, not decoration. Cluster is
+// the zero value of ScanningTarget and the field is tagged omitempty, so a
+// report that never had a scanningTarget — a truncated file, a hand-rolled
+// document, a report from a tool that writes the enum differently —
+// deserializes as a cluster scan. Every real cluster scan records its context
+// (cautils.setContextMetadata, and OPASessionObj fills it in unconditionally),
+// so requiring it keeps those malformed reports on the "unsupported scanning
+// target" error they returned before rather than being quietly accepted as an
+// empty cluster scan that reports nothing to fix.
+func isClusterReport(report *reporthandlingv2.PostureReport) bool {
+	return report != nil &&
+		report.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster &&
+		report.Metadata.ContextMetadata.ClusterContextMetadata != nil
+}
+
+func (h *FixHandler) isClusterReport() bool {
+	return isClusterReport(h.reportObj)
+}
+
+// IsClusterReport reports whether the loaded report came from a live-cluster
+// scan, so the caller knows to render manifests with RenderFixes rather than
+// rewrite files with ApplyChanges.
+func (h *FixHandler) IsClusterReport() bool {
+	return h.isClusterReport()
 }
 
 func getLocalPath(report *reporthandlingv2.PostureReport) string {
@@ -295,6 +339,228 @@ func (h *FixHandler) getPathFromRawResource(obj map[string]any) string {
 	return ""
 }
 
+// resourceSource is where a resource's YAML can be read from and written back
+// to. It is resolved once per resource, ahead of any expression building, so
+// that a resource the fixer cannot touch is identified before any work is done
+// on it.
+type resourceSource struct {
+	// filePath is the manifest to patch, already resolved against the
+	// resource's own base path and containment-checked. Empty when skipReason
+	// is set.
+	filePath string
+	// documentIndex is the resource's position within a multi-document file.
+	documentIndex int
+	// reportedPath is the raw path the report recorded for this resource. It is
+	// kept separately from filePath because the user-facing skip entry needs it
+	// even on the paths where resolution never produced a filePath.
+	reportedPath string
+	// inMemory marks a resource with no manifest on disk, patched by rendering
+	// the scanned object instead of rewriting a file.
+	inMemory bool
+	// skipReason, when non-empty, means this resource cannot be fixed. The
+	// caller re-reports the resource's failed controls as unfixed rather than
+	// dropping them.
+	skipReason string
+}
+
+// redactedContentReason reports why a resource's recorded copy is not a
+// faithful one, or "" when it is.
+//
+// A scan report is built for reporting, not for round-tripping. Before results
+// are aggregated, updateResults calls removeData over every resource
+// (opaprocessor/processorhandlerutils.go), which for a workload replaces every
+// container env value with "XXXXXX" and drops valueFrom/envFrom, and for a
+// Secret or ConfigMap redacts data/stringData. Rendering a manifest from such a
+// copy would hand the user YAML that overwrites their real configuration with
+// the redaction placeholder — verified against a real cluster, where the two
+// DaemonSets carrying env vars came back with "value": "XXXXXX".
+//
+// The file scan path is unaffected because it patches the manifest on disk and
+// only reads the report to decide which edits to make. The cluster path has no
+// file, so it has to decline these instead.
+//
+// Everything else removeData strips — the last-applied annotation,
+// managedFields and status — this package removes deliberately anyway, so a
+// resource that passes this check is byte-faithful in every field that matters.
+//
+// Known gap: a container using only envFrom is undetectable here, because
+// envFrom is deleted outright rather than replaced with a marker. Such a
+// manifest is incomplete rather than wrong, and `kubectl apply` on a resource
+// with no last-applied annotation does not delete fields the config omits, so
+// the live envFrom survives.
+func redactedContentReason(obj map[string]any) string {
+	switch kind, _ := obj["kind"].(string); kind {
+	case "Secret", "ConfigMap":
+		return "skipped: scan reports redact this resource's data, so a rendered manifest would not be faithful"
+	}
+
+	workload := workloadinterface.NewWorkloadObj(obj)
+	if workload == nil {
+		return ""
+	}
+
+	const envRedacted = "skipped: scan reports redact container environment variables, so a rendered manifest would overwrite them"
+
+	if containers, err := workload.GetContainers(); err == nil {
+		for i := range containers {
+			if len(containers[i].Env) > 0 || len(containers[i].EnvFrom) > 0 {
+				return envRedacted
+			}
+		}
+	}
+	if initContainers, err := workload.GetInitContainers(); err == nil {
+		for i := range initContainers {
+			if len(initContainers[i].Env) > 0 || len(initContainers[i].EnvFrom) > 0 {
+				return envRedacted
+			}
+		}
+	}
+	if ephemeral, err := workload.GetEphemeralContainers(); err == nil {
+		for i := range ephemeral {
+			if len(ephemeral[i].Env) > 0 || len(ephemeral[i].EnvFrom) > 0 {
+				return envRedacted
+			}
+		}
+	}
+
+	return ""
+}
+
+// clusterResourceLocation stands in for the file path a cluster resource does
+// not have, in both the skip entries and the unfixed-control listing, so the
+// two cannot describe the same resource differently.
+const clusterResourceLocation = "cluster"
+
+// hasOwnerReferences reports whether a Kubernetes object is managed by another
+// resource.
+func hasOwnerReferences(obj map[string]any) bool {
+	metadata, ok := obj["metadata"].(map[string]any)
+	if !ok {
+		return false
+	}
+	owners, ok := metadata["ownerReferences"].([]any)
+	return ok && len(owners) > 0
+}
+
+// resolveClusterResourceSource handles a resource from a live-cluster scan.
+// There is no manifest to locate, so the only question is whether the recorded
+// object is something a manifest can be rendered from.
+func (h *FixHandler) resolveClusterResourceSource(resourceObj *reporthandling.Resource) resourceSource {
+	obj := resourceObj.GetObject()
+
+	// A cluster resource has no path, but the skip entries still have to say
+	// where it came from: left empty they render as "<unknown>", which reads as
+	// the fixer having lost track of the resource rather than the resource
+	// simply having no file. Skips are the common case here — Secrets,
+	// ConfigMaps, owned pods and env-bearing workloads are all declined — so
+	// most of this command's output would otherwise look like a defect.
+	src := resourceSource{reportedPath: clusterResourceLocation}
+
+	// A RegoResponseVector is a rule's finding over several related objects
+	// (RBAC bindings, cloud configuration), not one addressable resource, so
+	// there is no single manifest to emit for it.
+	if objectsenvelopes.IsTypeRegoResponseVector(obj) {
+		src.skipReason = "skipped: not a single patchable workload"
+		return src
+	}
+
+	// Without both of these the rendered YAML is not a manifest anything could
+	// apply, so emitting it would be worse than saying nothing.
+	apiVersion, _ := obj["apiVersion"].(string)
+	kind, _ := obj["kind"].(string)
+	if apiVersion == "" || kind == "" {
+		src.skipReason = "skipped: resource is not a complete Kubernetes object"
+		return src
+	}
+
+	// A resource owned by another cannot be patched where it stands, so emitting
+	// a manifest for it would hand the user something that does not apply. The
+	// owner recreates it from its own template, and for a Pod the API server
+	// rejects nearly every spec change outright:
+	//
+	//	pod updates may not change fields other than `spec.containers[*].image` ...
+	//
+	// Static control-plane pods are the sharpest case — owned by the Node and
+	// rendered by the kubelet from files on it. Verified against a real kind
+	// cluster, where kubectl refused exactly these four.
+	//
+	// This checks ownerReferences directly rather than using
+	// k8sinterface.WorkloadHasParent, which returns false for a Pod that plainly
+	// has an owner and so would not catch this.
+	if hasOwnerReferences(obj) {
+		src.skipReason = "skipped: managed by another resource; fix its owner instead"
+		return src
+	}
+
+	// Last, because it is the most expensive check and the least likely to fire.
+	if reason := redactedContentReason(obj); reason != "" {
+		src.skipReason = reason
+		return src
+	}
+
+	// documentIndex stays 0: a rendered resource is always a single document,
+	// which is what the select(di==0) in the fix expressions addresses.
+	src.inMemory = true
+	return src
+}
+
+// resolveResourceSource decides where a resource's YAML lives, or why it cannot
+// be reached: a local manifest for a file-based scan, or the scanned object
+// itself for a cluster scan.
+func (h *FixHandler) resolveResourceSource(ctx context.Context, resourceObj *reporthandling.Resource) resourceSource {
+	if h.isClusterReport() {
+		return h.resolveClusterResourceSource(resourceObj)
+	}
+
+	src := resourceSource{
+		reportedPath: h.getPathFromRawResource(resourceObj.GetObject()),
+	}
+
+	// Determine an upfront reason if we already know this resource is not
+	// fixable, so we can still surface its failed controls as "unfixed".
+	if src.reportedPath == "" {
+		src.skipReason = "skipped: resource has no local file path"
+		return src
+	}
+	if resourceObj.Source == nil || !isFixableSourceType(resourceObj.Source.FileType) {
+		src.skipReason = "skipped: source is not a YAML or JSON file"
+		return src
+	}
+
+	relativePath, idx, err := h.getFilePathAndIndex(src.reportedPath)
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("Skipping invalid resource path: " + sanitizeForLog(src.reportedPath))
+		src.skipReason = "skipped: invalid resource path"
+		return src
+	}
+
+	// the resource's own root, not the report-wide one: a single-file
+	// scan records the file rather than its root, and a multi-input
+	// scan records only the first input. relativePath is report input
+	// and is the field that can carry "..", so the file this package
+	// writes to must still land inside the root it resolved against.
+	basePath := h.resourceBasePath(resourceObj)
+	candidatePath := filepath.Join(basePath, relativePath)
+	if _, err := os.Stat(candidatePath); err != nil {
+		// Checked before containment so EvalSymlinks (inside
+		// isPathContained) has something to resolve, and so a
+		// missing file is reported as such rather than as
+		// "escapes scanned directory".
+		logger.L().Ctx(ctx).Warning("Skipping missing file: " + sanitizeForLog(candidatePath))
+		src.skipReason = "skipped: file not found"
+		return src
+	}
+	if !isPathContained(basePath, candidatePath) {
+		logger.L().Ctx(ctx).Warning("Skipping resource path that escapes the scanned directory: " + sanitizeForLog(src.reportedPath))
+		src.skipReason = "skipped: resource path escapes scanned directory"
+		return src
+	}
+
+	src.filePath = candidatePath
+	src.documentIndex = idx
+	return src
+}
+
 // PrepareResourcesToFix returns the YAML-source resources that the existing
 // yq-based pipeline can patch. Helm-rendered resources are split off into
 // PrepareHelmSuggestions because their fix paths reference rendered output
@@ -348,50 +614,9 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			}
 			continue
 		}
-		resourcePath := h.getPathFromRawResource(resourceObj.GetObject())
+		src := h.resolveResourceSource(ctx, resourceObj)
 
-		// Determine an upfront reason if we already know this resource is not
-		// fixable, so we can still surface its failed controls as "unfixed".
-		skipReason := ""
-		if resourcePath == "" {
-			skipReason = "skipped: resource has no local file path"
-		} else if resourceObj.Source == nil || !isFixableSourceType(resourceObj.Source.FileType) {
-			skipReason = "skipped: source is not a YAML or JSON file"
-		}
-
-		var absolutePath string
-		var documentIndex int
-		if skipReason == "" {
-			relativePath, idx, err := h.getFilePathAndIndex(resourcePath)
-			if err != nil {
-				logger.L().Ctx(ctx).Warning("Skipping invalid resource path: " + sanitizeForLog(resourcePath))
-				skipReason = "skipped: invalid resource path"
-			} else {
-				// the resource's own root, not the report-wide one: a single-file
-				// scan records the file rather than its root, and a multi-input
-				// scan records only the first input. relativePath is report input
-				// and is the field that can carry "..", so the file this package
-				// writes to must still land inside the root it resolved against.
-				basePath := h.resourceBasePath(resourceObj)
-				candidatePath := filepath.Join(basePath, relativePath)
-				if _, err := os.Stat(candidatePath); err != nil {
-					// Checked before containment so EvalSymlinks (inside
-					// isPathContained) has something to resolve, and so a
-					// missing file is reported as such rather than as
-					// "escapes scanned directory".
-					logger.L().Ctx(ctx).Warning("Skipping missing file: " + sanitizeForLog(candidatePath))
-					skipReason = "skipped: file not found"
-				} else if !isPathContained(basePath, candidatePath) {
-					logger.L().Ctx(ctx).Warning("Skipping resource path that escapes the scanned directory: " + sanitizeForLog(resourcePath))
-					skipReason = "skipped: resource path escapes scanned directory"
-				} else {
-					absolutePath = candidatePath
-					documentIndex = idx
-				}
-			}
-		}
-
-		if skipReason != "" {
+		if src.skipReason != "" {
 			for i := range result.AssociatedControls {
 				ac := &result.AssociatedControls[i]
 				if !ac.GetStatus(nil).IsFailed() {
@@ -402,19 +627,29 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 					ControlName:  ac.GetName(),
 					ResourceName: resourceObj.GetName(),
 					ResourceKind: resourceObj.GetKind(),
-					FilePath:     sanitizeForLog(resourcePath),
-					Reason:       skipReason,
+					FilePath:     sanitizeForLog(src.reportedPath),
+					Reason:       src.skipReason,
 				})
 			}
 			continue
 		}
 
+		// Where an unfixed control gets reported as living. A cluster resource
+		// has no path, and leaving it empty renders as "<unknown>", which reads
+		// like the fixer lost track of the resource rather than the resource
+		// simply having no file.
+		location := sanitizeForLog(src.filePath)
+		if src.inMemory {
+			location = clusterResourceLocation
+		}
+
 		rfi := ResourceFixInfo{
-			FilePath:        absolutePath,
+			FilePath:        src.filePath,
 			fileKey:         h.resourceFileKey(resourceObj),
 			Resource:        resourceObj,
 			YamlExpressions: make(map[string]armotypes.FixPath, 0),
-			DocumentIndex:   documentIndex,
+			DocumentIndex:   src.documentIndex,
+			inMemory:        src.inMemory,
 		}
 
 		// Tentative unfixed entries for this resource. We collect them locally
@@ -432,14 +667,14 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				continue
 			}
 
-			added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(documentIndex, ac, h.fixInfo.SkipUserValues)
+			added, skipped := rfi.addYamlExpressionsFromResourceAssociatedControl(src.documentIndex, ac, h.fixInfo.SkipUserValues)
 
 			rfi.failedControls = append(rfi.failedControls, UnfixedControl{
 				ControlID:    ac.GetID(),
 				ControlName:  ac.GetName(),
 				ResourceName: resourceObj.GetName(),
 				ResourceKind: resourceObj.GetKind(),
-				FilePath:     sanitizeForLog(absolutePath),
+				FilePath:     location,
 			})
 
 			// Fully auto-remediated: every failed path produced an expression.
@@ -466,7 +701,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 					ControlName:  ac.GetName(),
 					ResourceName: resourceObj.GetName(),
 					ResourceKind: resourceObj.GetKind(),
-					FilePath:     sanitizeForLog(absolutePath),
+					FilePath:     location,
 					Reason:       reason,
 				},
 				ac: ac,
@@ -554,6 +789,12 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 func (h *FixHandler) dropWrappedResources(ctx context.Context, resourcesToFix []ResourceFixInfo, resourcesPerFile map[string]int) []ResourceFixInfo {
 	wrapped := make(map[string]bool, len(resourcesPerFile))
 	for i := range resourcesToFix {
+		// Multi-document wrapping is a property of a manifest file. An
+		// in-memory resource has none, and its empty FilePath would otherwise
+		// key every cluster resource together.
+		if resourcesToFix[i].inMemory {
+			continue
+		}
 		filePath := resourcesToFix[i].FilePath
 		resources := resourcesPerFile[resourcesToFix[i].fileKey]
 		if _, checked := wrapped[filePath]; checked || resources < 2 {
@@ -758,7 +999,16 @@ func (h *FixHandler) PrintExpectedChanges(resourcesToFix []ResourceFixInfo) {
 	sb.WriteString("The following changes will be applied:\n")
 
 	for _, resourceFixInfo := range resourcesToFix {
-		fmt.Fprintf(&sb, "File: %s\n", resourceFixInfo.FilePath)
+		// A cluster resource has no file. Printing an empty "File:" line reads
+		// as a bug, so name where the resource actually came from instead.
+		switch {
+		case resourceFixInfo.inMemory && resourceFixInfo.Resource.GetNamespace() != "":
+			fmt.Fprintf(&sb, "Source: cluster, namespace %s\n", resourceFixInfo.Resource.GetNamespace())
+		case resourceFixInfo.inMemory:
+			sb.WriteString("Source: cluster\n")
+		default:
+			fmt.Fprintf(&sb, "File: %s\n", resourceFixInfo.FilePath)
+		}
 		fmt.Fprintf(&sb, "Resource: %s\n", resourceFixInfo.Resource.GetName())
 		fmt.Fprintf(&sb, "Kind: %s\n", resourceFixInfo.Resource.GetKind())
 		sb.WriteString("Changes:\n")
@@ -920,6 +1170,13 @@ func (h *FixHandler) getFileYamlExpressions(resourcesToFix []ResourceFixInfo) ma
 	fileYamlExpressions := make(map[string]string, 0)
 	for _, toPin := range resourcesToFix {
 		resourceToFix := toPin
+
+		// An in-memory resource has no FilePath. Grouping it here would collapse
+		// every cluster resource under the empty key and hand ApplyChanges a
+		// file to write that does not exist.
+		if resourceToFix.inMemory {
+			continue
+		}
 
 		singleExpression := reduceYamlExpressions(&resourceToFix)
 		resourceFilePath := resourceToFix.FilePath

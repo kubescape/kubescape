@@ -38,6 +38,11 @@ type ResourceFixInfo struct {
 	failedControls []UnfixedControl
 	fixedCount     int
 	fileKey        string
+
+	// inMemory marks a resource with no manifest on disk — a live object from a
+	// cluster scan. Its fix is rendered from the scanned object by RenderFixes
+	// rather than written back by ApplyChanges, and FilePath is empty.
+	inMemory bool
 }
 
 // HelmFixSuggestion describes a fix for a Helm-rendered resource. We do not
