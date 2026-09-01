@@ -54,7 +54,7 @@ jobs:
         run: ${{ env.DOCKER_CMD }} go test -v -race ./core/cautils/...
 
       - name: Test httphandler pkg
-        run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test -v ./...'
+        run: ${{ env.DOCKER_CMD }} go test -v ./httphandler/...
 
       - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         name: Setup Syft
