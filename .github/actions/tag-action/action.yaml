@@ -17,28 +17,36 @@ runs:
   using: "composite"
   steps:
     - run: |
-        if [[ -z "${{ inputs.ORIGINAL_TAG }}" ]]; then
-          echo "The value of ORIGINAL_TAG is ${{ inputs.ORIGINAL_TAG }}"
-          echo "Setting the value of ORIGINAL_TAG to ${{ github.ref_name }}"
-          echo ORIGINAL_TAG="${{ github.ref_name }}" >> $GITHUB_ENV
+        if [[ -z "$ORIGINAL_TAG" ]]; then
+          echo "Setting the value of ORIGINAL_TAG to $REF_NAME"
+          echo "ORIGINAL_TAG=$REF_NAME" >> "$GITHUB_ENV"
+        else
+          echo "The value of ORIGINAL_TAG is $ORIGINAL_TAG"
         fi
+      env:
+        ORIGINAL_TAG: ${{ inputs.ORIGINAL_TAG }}
+        REF_NAME: ${{ github.ref_name }}
       shell: bash
 
     - run: |
-        if [[ "${{ inputs.ORIGINAL_TAG }}" == *"${{ inputs.SUB_STRING }}"* ]]; then
+        if [[ "$ORIGINAL_TAG" == *"$SUB_STRING"* ]]; then
             echo "Release candidate tag found."
         else
             echo "Release candidate tag not found."
             exit 1
         fi
+      env:
+        ORIGINAL_TAG: ${{ inputs.ORIGINAL_TAG || github.ref_name }}
+        SUB_STRING: ${{ inputs.SUB_STRING }}
       shell: bash
-
 
     - id: retag
       run: | 
           NEW_TAG=
-          echo "Original tag: ${{ inputs.ORIGINAL_TAG }}"
-          NEW_TAG=$(echo ${{ inputs.ORIGINAL_TAG }} | awk -F '-rc' '{print $1}')
+          echo "Original tag: $ORIGINAL_TAG"
+          NEW_TAG=$(echo "$ORIGINAL_TAG" | awk -F '-rc' '{print $1}')
           echo "New tag: $NEW_TAG"
-          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "NEW_TAG=$NEW_TAG" >> "$GITHUB_OUTPUT"
+      env:
+        ORIGINAL_TAG: ${{ inputs.ORIGINAL_TAG || github.ref_name }}
       shell: bash
