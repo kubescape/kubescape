@@ -11,7 +11,7 @@ import (
 
 func newTestV1Router(next http.Handler) *http.ServeMux {
 	r := http.NewServeMux()
-	
+
 	v1Handler := bearerAuthMiddleware(next)
 
 	r.Handle("POST "+v1PathPrefix+v1ScanPath, v1Handler)
@@ -19,7 +19,7 @@ func newTestV1Router(next http.Handler) *http.ServeMux {
 	r.Handle("GET "+v1PathPrefix+v1ResultsPath, v1Handler)
 	r.Handle("DELETE "+v1PathPrefix+v1ResultsPath, v1Handler)
 	r.Handle("GET "+v1PathPrefix+v1StatusPath, v1Handler)
-	
+
 	return r
 }
 
@@ -111,7 +111,7 @@ func TestHealthProbesOnProductionRouter(t *testing.T) {
 	rtr := http.NewServeMux()
 	rtr.HandleFunc("GET "+livePath, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	rtr.HandleFunc("GET "+readyPath, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	
+
 	v1Handler := bearerAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 	rtr.Handle("POST "+v1PathPrefix+v1ScanPath, v1Handler)
 
