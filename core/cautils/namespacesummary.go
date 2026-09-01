@@ -22,9 +22,14 @@ const ClusterScopedNamespace = "<cluster-scoped>"
 type NamespaceSummary struct {
 	Namespace       string  `json:"namespace"`
 	ComplianceScore float32 `json:"complianceScore"`
-	FailedControls  int     `json:"failedControls"`
-	TotalControls   int     `json:"totalControls"`
-	ResourceCount   int     `json:"resourceCount"`
+	// NonCompliantControls counts controls that did not score a clean 100 in
+	// this namespace. It is not the same as apis.StatusFailed: a control that
+	// is merely partially passing, or entirely skipped/action-required here,
+	// also counts, so this figure does not reconcile with the cluster
+	// summary's failed-control counter.
+	NonCompliantControls int `json:"nonCompliantControls"`
+	TotalControls        int `json:"totalControls"`
+	ResourceCount        int `json:"resourceCount"`
 }
 
 // NamespaceSummaries is sorted ascending by ComplianceScore so the worst
@@ -32,14 +37,17 @@ type NamespaceSummary struct {
 type NamespaceSummaries []NamespaceSummary
 
 // BuildNamespaceSummaries computes a per-namespace compliance rollup from the
-// finalized control summaries.
-//
-// A control with no resource in a given namespace contributes 100 to that
-// namespace's score, mirroring how a control with no resource anywhere
-// already scores 100 at the cluster level (opa-utils
-// ScoreUtil.GetControlComplianceScore). This keeps every namespace's score
-// computed over the same TotalControls denominator, which is what makes them
-// comparable to each other.
+// finalized control summaries. It must run after the score wrapper has set
+// ControlSummary.ComplianceScore for every control (see the callers in
+// processorhandler.go): a control with no resource in a given namespace
+// contributes that already-computed score to the namespace, whatever it is,
+// rather than assuming 100. This matters because opa-utils'
+// GetControlComplianceScore only returns 100 for a zero-resource control that
+// is also Passed (a control the cluster genuinely never needed); a control
+// that could not be evaluated (RBAC-restricted collection, a timeout) is
+// zero-resource too but scores 0, and namespaces must inherit that same 0,
+// not a free 100, to stay comparable to the cluster number sitting next to
+// them in the same report.
 func BuildNamespaceSummaries(controls reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata) NamespaceSummaries {
 	if len(controls) == 0 {
 		return nil
@@ -54,8 +62,8 @@ func BuildNamespaceSummaries(controls reportsummary.ControlSummaries, allResourc
 
 	// resourcesByNamespace is seeded from every scanned resource, not just
 	// ones a control matched, so a namespace holding only resources no
-	// control examines still gets a summary (scoring 100 on every control)
-	// instead of being silently absent from the rollup.
+	// control examines still gets a summary instead of being silently absent
+	// from the rollup.
 	resourcesByNamespace := make(map[string]map[string]struct{})
 	for resourceID := range allResources {
 		namespace := namespaceOf(resourceID)
@@ -65,13 +73,24 @@ func BuildNamespaceSummaries(controls reportsummary.ControlSummaries, allResourc
 		resourcesByNamespace[namespace][resourceID] = struct{}{}
 	}
 
+	// controlIDs is sorted once and reused for every namespace below, so
+	// scoreSum always accumulates in the same order across runs. float32
+	// addition is not associative, and ranging a map iterates in randomized
+	// order, so without this the same input could produce a ComplianceScore
+	// that differs by a ULP between two runs -- and with it, defeat the exact
+	// tie-break the final sort below relies on.
+	controlIDs := make([]string, 0, len(controls))
+	for controlID := range controls {
+		controlIDs = append(controlIDs, controlID)
+	}
+	sort.Strings(controlIDs)
+
 	// perControlCounts[controlID][namespace] = [passed, total], computed once
 	// per control up front so every namespace this scan actually touched is
-	// known before any control's contribution is scored. A control with no
-	// resource in a given namespace must still contribute 100 to it, and that
-	// namespace must already exist in the result set for that to happen.
+	// known before any control's contribution is scored.
 	perControlCounts := make(map[string]map[string][2]int, len(controls))
-	for controlID, control := range controls {
+	for _, controlID := range controlIDs {
+		control := controls[controlID]
 		counts := make(map[string][2]int)
 		for resourceID, status := range control.ResourceIDs.All() {
 			namespace := namespaceOf(resourceID)
@@ -93,39 +112,54 @@ func BuildNamespaceSummaries(controls reportsummary.ControlSummaries, allResourc
 		perControlCounts[controlID] = counts
 	}
 
+	namespaces := make([]string, 0, len(resourcesByNamespace))
+	for namespace := range resourcesByNamespace {
+		namespaces = append(namespaces, namespace)
+	}
+	sort.Strings(namespaces)
+
 	totalControls := len(controls)
-	summaries := make(NamespaceSummaries, 0, len(resourcesByNamespace))
-	for namespace, resources := range resourcesByNamespace {
-		var scoreSum float32
-		var failedControls int
-		for controlID := range controls {
-			passed, total := 0, 0
-			if c, ok := perControlCounts[controlID][namespace]; ok {
-				passed, total = c[0], c[1]
-			}
-			score := float32(100)
-			if total > 0 {
+	summaries := make(NamespaceSummaries, 0, len(namespaces))
+	for _, namespace := range namespaces {
+		var scoreSum float64
+		var nonCompliantControls int
+		for _, controlID := range controlIDs {
+			var score float32
+			if c, ok := perControlCounts[controlID][namespace]; ok && c[1] > 0 {
+				passed, total := c[0], c[1]
 				score = (float32(passed) / float32(total)) * 100
+			} else {
+				// No resource of this control's in this namespace: inherit
+				// the control's own cluster-computed score rather than
+				// assuming 100 (see the function doc comment).
+				control := controls[controlID]
+				score = control.GetComplianceScore()
+				if score < 0 {
+					// Defensive fallback for a caller that runs this before
+					// the score wrapper: mirrors opa-utils' own zero-resource
+					// default so behavior degrades to the old approximation
+					// rather than a negative score.
+					score = 100
+				}
 			}
-			scoreSum += score
+			scoreSum += float64(score)
 			if score < 100 {
-				failedControls++
+				nonCompliantControls++
 			}
 		}
 		summaries = append(summaries, NamespaceSummary{
-			Namespace:       namespace,
-			ComplianceScore: scoreSum / float32(totalControls),
-			FailedControls:  failedControls,
-			TotalControls:   totalControls,
-			ResourceCount:   len(resources),
+			Namespace:            namespace,
+			ComplianceScore:      float32(scoreSum / float64(totalControls)),
+			NonCompliantControls: nonCompliantControls,
+			TotalControls:        totalControls,
+			ResourceCount:        len(resourcesByNamespace[namespace]),
 		})
 	}
 
-	sort.Slice(summaries, func(i, j int) bool {
-		if summaries[i].ComplianceScore != summaries[j].ComplianceScore {
-			return summaries[i].ComplianceScore < summaries[j].ComplianceScore
-		}
-		return summaries[i].Namespace < summaries[j].Namespace
+	// namespaces was built in sorted order, so a stable sort by score alone
+	// keeps ties in that same alphabetical order without a second comparison.
+	sort.SliceStable(summaries, func(i, j int) bool {
+		return summaries[i].ComplianceScore < summaries[j].ComplianceScore
 	})
 	return summaries
 }

@@ -276,12 +276,16 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	opap.markNotEvaluatedControlsSkipped()
 	opap.ScanCoverage.VacuousFrameworks = cautils.DetectVacuousFrameworks(opap.Report.SummaryDetails.Frameworks)
 	opap.ScanCoverage.UnexaminedKinds = opap.UnexaminedKinds
-	opap.NamespaceSummaries = cautils.BuildNamespaceSummaries(opap.Report.SummaryDetails.Controls, opap.AllResources)
 
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
 		logger.L().Ctx(ctx).Warning("failed to calculate score", helpers.Error(err))
 	}
+
+	// BuildNamespaceSummaries relies on ControlSummary.ComplianceScore for
+	// controls it has no resource for in a given namespace, so it must run
+	// after scorewrapper.Calculate has populated that field.
+	opap.NamespaceSummaries = cautils.BuildNamespaceSummaries(opap.Report.SummaryDetails.Controls, opap.AllResources)
 
 	opap.reweightComplianceScores()
 
@@ -472,12 +476,16 @@ done:
 	opap.markNotEvaluatedControlsSkipped()
 	opap.ScanCoverage.VacuousFrameworks = cautils.DetectVacuousFrameworks(opap.Report.SummaryDetails.Frameworks)
 	opap.ScanCoverage.UnexaminedKinds = opap.UnexaminedKinds
-	opap.NamespaceSummaries = cautils.BuildNamespaceSummaries(opap.Report.SummaryDetails.Controls, opap.AllResources)
 
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
 		logger.L().Ctx(ctx).Warning("failed to calculate score", helpers.Error(err))
 	}
+
+	// BuildNamespaceSummaries relies on ControlSummary.ComplianceScore for
+	// controls it has no resource for in a given namespace, so it must run
+	// after scorewrapper.Calculate has populated that field.
+	opap.NamespaceSummaries = cautils.BuildNamespaceSummaries(opap.Report.SummaryDetails.Controls, opap.AllResources)
 
 	opap.reweightComplianceScores()
 

@@ -12,7 +12,7 @@ import (
 const (
 	namespaceColumnName = iota
 	namespaceColumnScore
-	namespaceColumnFailedControls
+	namespaceColumnNonCompliantControls
 	namespaceColumnResources
 )
 
@@ -28,16 +28,16 @@ func printNamespaceSummaries(writer io.Writer, summaries cautils.NamespaceSummar
 	t.SetColumnConfigs([]table.ColumnConfig{
 		{Number: namespaceColumnName + 1, Align: text.AlignLeft},
 		{Number: namespaceColumnScore + 1, Align: text.AlignCenter},
-		{Number: namespaceColumnFailedControls + 1, Align: text.AlignCenter},
+		{Number: namespaceColumnNonCompliantControls + 1, Align: text.AlignCenter},
 		{Number: namespaceColumnResources + 1, Align: text.AlignCenter},
 	})
-	t.AppendHeader(table.Row{"Namespace", "Compliance Score", "Failed Controls", "Resources"})
+	t.AppendHeader(table.Row{"Namespace", "Compliance Score", "Non-Compliant Controls", "Resources"})
 
 	for _, summary := range summaries {
 		t.AppendRow(table.Row{
 			summary.Namespace,
 			fmt.Sprintf("%d%%", cautils.ComplianceScoreToInt(summary.ComplianceScore)),
-			fmt.Sprintf("%d/%d", summary.FailedControls, summary.TotalControls),
+			fmt.Sprintf("%d/%d", summary.NonCompliantControls, summary.TotalControls),
 			summary.ResourceCount,
 		})
 	}
