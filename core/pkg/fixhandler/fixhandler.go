@@ -113,6 +113,7 @@ func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
 		fixInfo:       fixInfo,
 		reportObj:     &reportObj,
 		localBasePath: localPath,
+		controls:      newControlSelector(fixInfo.IncludeControls, fixInfo.SkipControls),
 	}, nil
 }
 
@@ -261,6 +262,42 @@ func getLocalPath(report *reporthandlingv2.PostureReport) string {
 // would resolve against the process working directory rather than anything in the report.
 // Reports without a usable root (cloned repos, older reports) keep using the report-wide
 // path. Traversal is contained where it can actually occur, on the join in
+// reportControlSelection states how much of the report a control selection
+// leaves in scope. Selecting nothing is not an error - a targeted control can
+// legitimately have passed - but it is indistinguishable from a mistyped ID
+// without saying so.
+func (h *FixHandler) reportControlSelection(ctx context.Context) {
+	selected, total := h.controlSelectionCounts()
+
+	if selected == 0 {
+		logger.L().Ctx(ctx).Warning(fmt.Sprintf("%s excluded all %d flagged control instances; nothing will be remediated",
+			h.controls.describe(), total))
+		return
+	}
+	logger.L().Info(fmt.Sprintf("%s selected %d of %d flagged control instances", h.controls.describe(), selected, total))
+}
+
+// controlSelectionCounts reports how many of the report's failed
+// (resource, control) tuples the current selection keeps.
+func (h *FixHandler) controlSelectionCounts() (selected, total int) {
+	for _, result := range h.reportObj.Results {
+		if !result.GetStatus(nil).IsFailed() {
+			continue
+		}
+		for i := range result.AssociatedControls {
+			ac := &result.AssociatedControls[i]
+			if !ac.GetStatus(nil).IsFailed() {
+				continue
+			}
+			total++
+			if h.controls.selects(ac.GetID()) {
+				selected++
+			}
+		}
+	}
+	return selected, total
+}
+
 // PrepareResourcesToFix.
 //
 // Source.Path is as report-supplied as the report-wide path, so --base-path has to
@@ -568,6 +605,10 @@ func (h *FixHandler) resolveResourceSource(ctx context.Context, resourceObj *rep
 func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInfo {
 	resourceIdToResource := h.buildResourcesMap()
 
+	if h.controls.active() {
+		h.reportControlSelection(ctx)
+	}
+
 	resourcesToFix := make([]ResourceFixInfo, 0)
 	resourcesPerFile := h.countResourcesPerFile(resourceIdToResource)
 	h.unfixedControls = h.unfixedControls[:0]
@@ -588,6 +629,15 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		}
 	}
 
+	// Profile drift fixes are derived from observed runtime behaviour, not from
+	// a control, so nothing attributes them to a selected one. Applying them
+	// under a selection would edit the manifest for controls the user excluded.
+	if containerProfile != nil && h.controls.active() {
+		logger.L().Ctx(ctx).Warning(fmt.Sprintf("--container-profile drift remediation is skipped while %s is set: profile fixes belong to no control and cannot be selected",
+			h.controls.describe()))
+		containerProfile = nil
+	}
+
 	for _, result := range h.reportObj.Results {
 		if !result.GetStatus(nil).IsFailed() {
 			continue
@@ -602,7 +652,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			logger.L().Ctx(ctx).Warning("Skipping result with no resource data in report: " + sanitizeForLog(resourceID))
 			for i := range result.AssociatedControls {
 				ac := &result.AssociatedControls[i]
-				if !ac.GetStatus(nil).IsFailed() {
+				if !ac.GetStatus(nil).IsFailed() || !h.controls.selects(ac.GetID()) {
 					continue
 				}
 				h.unfixedControls = append(h.unfixedControls, UnfixedControl{
@@ -619,7 +669,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		if src.skipReason != "" {
 			for i := range result.AssociatedControls {
 				ac := &result.AssociatedControls[i]
-				if !ac.GetStatus(nil).IsFailed() {
+				if !ac.GetStatus(nil).IsFailed() || !h.controls.selects(ac.GetID()) {
 					continue
 				}
 				h.unfixedControls = append(h.unfixedControls, UnfixedControl{
@@ -663,7 +713,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 		for i := range result.AssociatedControls {
 			ac := &result.AssociatedControls[i]
-			if !ac.GetStatus(nil).IsFailed() {
+			if !ac.GetStatus(nil).IsFailed() || !h.controls.selects(ac.GetID()) {
 				continue
 			}
 
@@ -851,7 +901,7 @@ func (h *FixHandler) PrepareHelmSuggestions(ctx context.Context) []HelmFixSugges
 		var fixPaths []armotypes.FixPath
 		for i := range result.AssociatedControls {
 			ac := &result.AssociatedControls[i]
-			if !ac.GetStatus(nil).IsFailed() {
+			if !ac.GetStatus(nil).IsFailed() || !h.controls.selects(ac.GetID()) {
 				continue
 			}
 			for _, rule := range ac.ResourceAssociatedRules {

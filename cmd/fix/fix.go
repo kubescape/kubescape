@@ -3,6 +3,7 @@ package fix
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/kubescape/v4/core/meta"
@@ -62,6 +63,10 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 			}
 			fixInfo.ReportFile = args[0]
 
+			if err := validateControlSelection(&fixInfo); err != nil {
+				return err
+			}
+
 			return ks.Fix(&fixInfo)
 		},
 	}
@@ -71,7 +76,26 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 	fixCmd.PersistentFlags().BoolVar(&fixInfo.SkipUserValues, "skip-user-values", true, "Changes which involve user-defined values will be skipped")
 	fixCmd.PersistentFlags().StringVar(&fixInfo.BasePath, "base-path", "", "Restrict fixes to this directory: the report's own recorded scan location must resolve inside it. Use this when the report file comes from a source you don't fully trust (e.g. a shared CI artifact); without it, the report's recorded location is trusted as-is")
 	fixCmd.PersistentFlags().StringVar(&fixInfo.ContainerProfilePath, "container-profile", "", "Path to a JSON file containing a ContainerProfile to use for drift detection")
+	fixCmd.PersistentFlags().StringSliceVar(&fixInfo.IncludeControls, "include-controls", nil, "Remediate only these control IDs (comma-separated, case-insensitive). Controls outside the list are left untouched and are not reported as unfixed; disables --container-profile drift remediation")
+	fixCmd.PersistentFlags().StringSliceVar(&fixInfo.SkipControls, "skip-controls", nil, "Leave these control IDs untouched (comma-separated, case-insensitive). Takes precedence over --include-controls; disables --container-profile drift remediation")
 	fixCmd.PersistentFlags().StringVar(&fixInfo.OutputDir, "output-dir", "", "Cluster scans only: write one patched manifest per resource into this directory instead of printing them to stdout. Ignored for file-based reports, which are fixed in place")
 
 	return fixCmd
+}
+
+func validateControlSelection(fixInfo *metav1.FixInfo) error {
+	for _, selection := range []struct {
+		flag     string
+		controls []string
+	}{
+		{"--include-controls", fixInfo.IncludeControls},
+		{"--skip-controls", fixInfo.SkipControls},
+	} {
+		for _, control := range selection.controls {
+			if strings.TrimSpace(control) == "" {
+				return fmt.Errorf("%s contains an empty control identifier", selection.flag)
+			}
+		}
+	}
+	return nil
 }
