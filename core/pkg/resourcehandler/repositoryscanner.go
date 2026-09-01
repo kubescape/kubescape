@@ -107,7 +107,10 @@ func getRepository(fullURL string) (IRepository, error) {
 		repo.setIsFile(true)
 	default:
 		parsed, _ := giturls.Parse(fullURL)
-		return nil, fmt.Errorf("unknown repository host: %s, url: '%s'", hostUrl, parsed.Redacted())
+		if parsed != nil {
+			parsed.User = nil
+		}
+		return nil, fmt.Errorf("unknown repository host: %s, url: '%s'", hostUrl, parsed)
 	}
 
 	// Returns the host-url, and the part of the user and repository from the url
@@ -122,7 +125,8 @@ func (g *GitHubRepository) parse(fullURL string) error {
 
 	splittedRepo := strings.FieldsFunc(parsedURL.Path, func(c rune) bool { return c == '/' })
 	if len(splittedRepo) < 2 {
-		return fmt.Errorf("expecting <user>/<repo> in url path, received: '%s', url: '%s'", parsedURL.Path, parsedURL.Redacted())
+		parsedURL.User = nil
+		return fmt.Errorf("expecting <user>/<repo> in url path, received: '%s', url: '%s'", parsedURL.Path, parsedURL)
 	}
 	g.owner = splittedRepo[index]
 	index += 1
