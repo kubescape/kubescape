@@ -145,7 +145,6 @@ func TestGoModMajorMatchesReleaseTags(t *testing.T) {
 		rootModuleFile, modulePath, releaseMajor, releaseMajor, releaseMajor)
 }
 
-
 // TestReleaseWorkflowChecksModuleMajor keeps the release-time guard in place.
 //
 // The pull-request checks can only ever see a tag that already exists, and the
