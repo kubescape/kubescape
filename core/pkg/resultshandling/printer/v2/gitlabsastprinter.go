@@ -248,7 +248,7 @@ func toGitLabImageVulnerability(image, platform string, cve imageprinter.CVE) gi
 	}
 
 	return gitLabVulnerability{
-		ID:          gitLabImageVulnerabilityID(image, cve.Package, cve.Version, cve.ID),
+		ID:          gitLabImageVulnerabilityID(image, cve.Package, cve.Version, cve.ID, platform),
 		Category:    "dependency_scanning",
 		Name:        message,
 		Message:     message,
@@ -273,9 +273,17 @@ func toGitLabImageVulnerability(image, platform string, cve imageprinter.CVE) gi
 	}
 }
 
-// gitLabImageVulnerabilityID returns a stable id so GitLab can track a CVE finding across scans for triage and dismissal
-func gitLabImageVulnerabilityID(image, pkg, version, cveID string) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(image+"/"+pkg+"/"+version+"/"+cveID)))
+// gitLabImageVulnerabilityID returns a stable id so GitLab can track a CVE finding across scans for triage and dismissal.
+// The platform is part of that identity: one image reference can be scanned for several platforms, and a finding
+// dismissed on one is not thereby dismissed on another. It is appended only when a platform was requested, so ids
+// for scans that do not pass --platform stay as they were.
+func gitLabImageVulnerabilityID(image, pkg, version, cveID, platform string) string {
+	id := image + "/" + pkg + "/" + version + "/" + cveID
+	if platform != "" {
+		id += "/" + platform
+	}
+
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(id)))
 }
 
 // printConfigurationScan maps each failed control on each failed resource to a GitLab SAST vulnerability and writes the report
