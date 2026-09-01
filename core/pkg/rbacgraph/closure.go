@@ -1,5 +1,7 @@
 package rbacgraph
 
+import rbacv1 "k8s.io/api/rbac/v1"
+
 // EscalationResult is the outcome of computing every RBAC escalation
 // technique reachable from a starting Subject.
 type EscalationResult struct {
@@ -15,7 +17,11 @@ type EscalationResult struct {
 	// a specific enumerable rule set, together with the subject that holds
 	// it -- deduplicated by (subject, primitive, detail), since the same
 	// grant can otherwise be rediscovered on more than one BFS pass over
-	// the same subject.
+	// the same subject. This is a report of *why*, not a dead end: a
+	// namespace-scoped finding is also materialized into that subject's own
+	// rule set (as a wildcard rule confined to the finding's Scope) and the
+	// subject is re-queued, so anything it unlocks is still chased by the
+	// traversal -- see the e.Unbounded case below.
 	Unbounded []UnboundedFinding
 	// EffectiveRules is the union of every ScopedRule reachable: Start's
 	// own direct rules, every rule granted via bind-verb/escalate-verb
@@ -135,6 +141,27 @@ func (idx *Index) AnalyzeEscalation(start Subject) EscalationResult {
 				}
 				if e.Scope == "" {
 					clusterAdmin = true
+					break
+				}
+				// A namespace-scoped Unbounded finding proves s can grant
+				// itself arbitrary permissions within e.Scope (e.g.
+				// escalate+update on a Role restricted to that namespace).
+				// That is itself a rule s now effectively holds -- materialize
+				// it as a wildcard rule scoped to e.Scope and re-queue s, the
+				// same way a bind/escalate edge's GrantedRules do, so
+				// whatever it unlocks (e.g. gaining create-pods within
+				// e.Scope, then assign-serviceaccount to a privileged SA in
+				// that namespace) is chased rather than treated as a dead
+				// end. Without this, a scoped Unbounded finding was recorded
+				// but never fed back into the traversal, silently missing
+				// real multi-hop paths.
+				if !grantedSeen[s][e.Detail] {
+					grantedSeen[s][e.Detail] = true
+					subjectRules[s] = append(subjectRules[s], ScopedRule{
+						Rule:      rbacv1.PolicyRule{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []string{"*"}},
+						Namespace: e.Scope,
+					})
+					grew = true
 				}
 			default:
 				if grantedSeen[s][e.Detail] {

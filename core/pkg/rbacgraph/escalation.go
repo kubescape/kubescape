@@ -2,6 +2,7 @@ package rbacgraph
 
 import (
 	"fmt"
+	"sort"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 )
@@ -193,6 +194,10 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 				continue
 			}
 
+			// targetNames == empty here (both grants restricted, no
+			// overlapping name) is a genuine rejection -- escalate on
+			// role-a and update on role-b don't authorize rewriting
+			// either, so no edge, no fallback.
 			var targetNames []string
 			switch {
 			case esc.unrestricted:
@@ -205,9 +210,28 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 			if len(targetNames) == 0 {
 				continue
 			}
+			sort.Strings(targetNames)
 
 			if resource == "clusterroles" {
-				for _, cr := range idx.matchingClusterRoles(targetNames, true) {
+				matched := idx.matchingClusterRoles(targetNames, true)
+				if len(matched) == 0 {
+					// targetNames is non-empty (the grants do overlap on a
+					// name) but resolves to no object this Index actually
+					// collected -- that could mean the name is stale, or it
+					// could mean a partial/paginated collection missed it.
+					// Fail toward reporting risk, not silence: the prior
+					// (pre-name-correlation) version of this code reported a
+					// scope-level Unbounded here, and dropping that
+					// silently would be a regression in exactly the
+					// direction this package exists to avoid.
+					edges = append(edges, EscalationEdge{
+						Primitive: PrimitiveEscalateVerb,
+						Detail:    fmt.Sprintf("holds escalate + update/patch on ClusterRole(s) %v, not found in the collected snapshot -- may be a partial collection, not a confirmed absence", targetNames),
+						Unbounded: true,
+						Scope:     "",
+					})
+				}
+				for _, cr := range matched {
 					edges = append(edges, EscalationEdge{
 						Primitive: PrimitiveEscalateVerb,
 						Detail:    fmt.Sprintf("holds escalate + update/patch on ClusterRole %q: can rewrite it to grant itself anything", cr.Name),
@@ -223,6 +247,16 @@ func (idx *Index) escalateVerbEdges(rules []ScopedRule) []EscalationEdge {
 				roles = idx.matchingRolesAnyNamespace(targetNames, true)
 			} else {
 				roles = idx.matchingRoles(scope, targetNames, true)
+			}
+			if len(roles) == 0 {
+				// Same partial-collection fallback as the clusterroles case
+				// above.
+				edges = append(edges, EscalationEdge{
+					Primitive: PrimitiveEscalateVerb,
+					Detail:    fmt.Sprintf("holds escalate + update/patch on Role(s) %v in namespace scope %q, not found in the collected snapshot -- may be a partial collection, not a confirmed absence", targetNames, scope),
+					Unbounded: true,
+					Scope:     scope,
+				})
 			}
 			for _, r := range roles {
 				edges = append(edges, EscalationEdge{

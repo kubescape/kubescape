@@ -591,3 +591,54 @@ func TestAnalyzeEscalation_NotTruncatedWhenClusterAdminConfirmedBeforeBudgetExha
 		t.Error("ClusterAdmin = false, want true")
 	}
 }
+
+// --- matthyx's second review pass on PR #3681 ---
+
+func TestAnalyzeEscalation_ScopedUnboundedEdgeIsReQueuedForMultiHopEscalation(t *testing.T) {
+	// Concrete scenario from review: dev/attacker holds escalate+update on
+	// Role dev/editable (a namespace-scoped Unbounded finding) and is also
+	// bound to dev/editable itself. In reality, attacker rewrites editable
+	// to add create-pods, then schedules a pod as dev/privileged (bound
+	// cluster-wide to a full ClusterRole) to inherit its token. A scoped
+	// Unbounded finding that isn't fed back into the traversal misses this
+	// entirely.
+	editable := role("dev", "editable", rule([]string{""}, []string{"pods"}, []string{"get"}, nil))
+	escalator := role("dev", "escalator", rule([]string{"rbac.authorization.k8s.io"}, []string{"roles"}, []string{"escalate", "update"}, []string{"editable"}))
+	privileged := clusterRole("cluster-admin-ish", rule([]string{"*"}, []string{"*"}, []string{"*"}, nil))
+	idx := NewIndex(
+		[]rbacv1.Role{editable, escalator},
+		[]rbacv1.ClusterRole{privileged},
+		[]rbacv1.RoleBinding{
+			roleBinding("dev", "rb1", "Role", "editable", saSubject("dev", "attacker")),
+			roleBinding("dev", "rb2", "Role", "escalator", saSubject("dev", "attacker")),
+		},
+		[]rbacv1.ClusterRoleBinding{clusterRoleBinding("crb", "cluster-admin-ish", saSubject("dev", "privileged"))},
+		[]corev1.ServiceAccount{saObj("dev", "attacker"), saObj("dev", "privileged")},
+	)
+
+	result := idx.AnalyzeEscalation(sa("dev", "attacker"))
+	if !result.ClusterAdmin {
+		t.Error("ClusterAdmin = false, want true: the scoped Unbounded finding (escalate+update on dev/editable) must be chased -- it unlocks create-pods in dev, which reaches dev/privileged")
+	}
+}
+
+func TestAnalyzeEscalation_EscalateTargetNotInIndexFallsBackToScopeUnbounded(t *testing.T) {
+	// Concrete scenario from review: escalate+update on clusterroles,
+	// cluster-wide, restricted to a resourceName that resolves to no
+	// object this Index actually collected (stale name, or a partial/
+	// paginated collection gap). Silently emitting nothing here would be a
+	// regression from the pre-name-correlation behavior, which reported a
+	// scope-level Unbounded (cluster-wide -> ClusterAdmin) in this case --
+	// failing toward risk, not silence, matches this package's own
+	// documented trust model.
+	cr := clusterRole("escalator", rule([]string{"rbac.authorization.k8s.io"}, []string{"clusterroles"}, []string{"escalate", "update"}, []string{"does-not-exist"}))
+	idx := NewIndex(nil, []rbacv1.ClusterRole{cr}, nil, []rbacv1.ClusterRoleBinding{clusterRoleBinding("crb", "escalator", saSubject("ns", "attacker"))}, nil)
+
+	result := idx.AnalyzeEscalation(sa("ns", "attacker"))
+	if !result.ClusterAdmin {
+		t.Error("ClusterAdmin = false, want true: an unresolvable escalate+update target must fall back to a scope-level Unbounded finding, not silence")
+	}
+	if len(result.Unbounded) == 0 {
+		t.Error("Unbounded = empty, want the fallback finding recorded")
+	}
+}
