@@ -66,7 +66,7 @@ func TestActionPrint_SPDX_ImageScan(t *testing.T) {
 	assert.True(t, strings.HasPrefix(version, "SPDX-"))
 }
 
-func TestActionPrint_SPDX_NonImageScan_NoOutput(t *testing.T) {
+func TestActionPrint_SPDX_PostureScanWithoutImages_NoOutput(t *testing.T) {
 	tmp, err := os.CreateTemp("", "spdx-noimage-*.spdx.json")
 	require.NoError(t, err)
 	defer func() { _ = os.Remove(tmp.Name()) }()
@@ -79,7 +79,7 @@ func TestActionPrint_SPDX_NonImageScan_NoOutput(t *testing.T) {
 
 	raw, err := os.ReadFile(tmp.Name())
 	require.NoError(t, err)
-	assert.Empty(t, raw, "spdx-json must not write anything for a non-image scan")
+	assert.Empty(t, raw, "spdx-json must not write anything when no image was scanned")
 }
 
 func TestActionPrint_SPDX_MultiImageScan(t *testing.T) {
@@ -155,4 +155,27 @@ func TestActionPrint_SPDX_AllNilSBOMs_ReturnsError(t *testing.T) {
 	err = sp.ActionPrint(context.Background(), nil, imageScanData)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no SBOM data available")
+}
+
+func TestActionPrint_SPDX_PostureScanWithImages(t *testing.T) {
+	imageScanData := []cautils.ImageScanData{
+		buildSeverityExceptionImageScanData(),
+		buildSeverityExceptionImageScanData(),
+	}
+
+	tmp, err := os.CreateTemp("", "spdx-posture-*.spdx.json")
+	require.NoError(t, err)
+	defer func() { _ = os.Remove(tmp.Name()) }()
+
+	sp := NewSPDXPrinter()
+	sp.writer = tmp
+	require.NoError(t, sp.ActionPrint(context.Background(), cautils.NewOPASessionObjMock(), imageScanData))
+	require.NoError(t, tmp.Close())
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var documents []json.RawMessage
+	require.NoError(t, json.Unmarshal(raw, &documents))
+	assert.Len(t, documents, 2, "a posture scan with --scan-images must emit one document per scanned image")
 }

@@ -46,7 +46,7 @@ kubescape scan [target] [flags]
 | `--exceptions <path>` | Path to exceptions file | - |
 | `--audit-exceptions` | Include exception usage details in supported scan outputs | `false` |
 | `--fail-coverage-below <float>` | Fail if the scan coverage score is below threshold (`0` disables). Applies in every view — see [score thresholds](#score-thresholds). | `0` |
-| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `github-actions`, `yaml`, `csv`, `markdown`, `policyreport`, `exceptions` — see [generating an exceptions baseline](#generating-an-exceptions-baseline). `github-actions` emits failed High/Critical controls as `::error` workflow commands for inline PR annotations; local file scans only, capped at GitHub's 10-annotations-per-step limit | `pretty-printer` |
+| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `junit`, `prometheus`, `pdf`, `html`, `sarif`, `gitlab-sast`, `github-actions`, `yaml`, `csv`, `markdown`, `policyreport`, `exceptions`, `cyclonedx-json`, `spdx-json` — see [generating an exceptions baseline](#generating-an-exceptions-baseline) and [generating an SBOM](#generating-an-sbom). `github-actions` emits failed High/Critical controls as `::error` workflow commands for inline PR annotations; local file scans only, capped at GitHub's 10-annotations-per-step limit | `pretty-printer` |
 | `--hide` | Replace sensitive report metadata with deterministic pseudonyms. Ignored when `--encrypt` is also specified. | `false` |
 | `--host-scan` | Enable host data collection from cluster nodes for certain controls. When not set, Kubescape auto-detects node-agent CRDs and uses a CRD-based host sensor if available. Use `--host-scan=false` to disable host data collection. See the [Kubescape operator](https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator) for a managed alternative. | auto-detect |
 | `--include-namespaces <ns>` | Namespaces to include (comma-separated) | - |
@@ -56,7 +56,7 @@ kubescape scan [target] [flags]
 | `--kubeconfig <path>` | Path to kubeconfig file | - |
 | `-o, --output <path>` | Output file path | stdout |
 | `--otel-endpoint <endpoint>` | Export scan traces and metrics to an OTLP collector — see [OpenTelemetry export](#opentelemetry-export). Accepts `host:port` (plaintext) or a `http(s)://` URL. | `OTEL_EXPORTER_OTLP_ENDPOINT` |
-| `--scan-images` | Also scan container images for vulnerabilities | `false` |
+| `--scan-images` | Also scan container images for vulnerabilities. Required for `--format cyclonedx-json` and `--format spdx-json` — see [generating an SBOM](#generating-an-sbom) | `false` |
 | `--image-platform <platform>` | OCI platform for workload image scans, such as `linux/amd64`. Overrides platform inferred from Nodes and hard scheduling constraints | inferred |
 | `--min-severity <sev>` | Only show controls at or above this severity: `low`, `medium`, `high`, `critical`. Output-only — exit codes are computed on the full unfiltered report | - |
 | `--max-severity <sev>` | Only show controls at or below this severity. Output-only — exit codes are computed on the full unfiltered report | - |
@@ -198,6 +198,39 @@ resources from it, or widen one by replacing an escaped `name` with a regular
 expression of your own.
 
 Exceptions are posture-only and the format is rejected for `scan image`.
+
+### Generating an SBOM
+
+`--scan-images` already pulls and analyses every image a scan finds. Adding
+`--format cyclonedx-json` or `--format spdx-json` writes the software bill of
+materials that analysis produced, so one command inventories everything running
+in a cluster or referenced by a set of manifests:
+
+```bash
+# CycloneDX SBOM for every image running in the cluster
+kubescape scan --scan-images --format cyclonedx-json --output cluster.cdx.json
+
+# SPDX SBOM for the images referenced by a manifest directory
+kubescape scan ./manifests --scan-images --format spdx-json --output manifests.spdx.json
+
+# Posture report and SBOM from a single scan
+kubescape scan --scan-images --format json,cyclonedx-json --output report
+```
+
+One document is emitted per image, as a JSON array when the scan covered several
+and as the bare document when it covered one — the same shape `kubescape scan
+image` produces. The SBOM describes images only; posture results belong to the
+other formats, so pair them with `--format` when both are needed.
+
+Without `--scan-images` there is nothing to describe and the scan stops before it
+starts, rather than writing an empty file. To scan an image directly, without a
+posture scan around it, use [`kubescape scan image`](#kubescape-scan-image).
+
+`--hide` and `--encrypt` are rejected with these formats. An SBOM is the Anchore
+scan document, whose package identity and relationships are keyed by
+content-derived IDs that anonymization cannot rewrite, so it would name the
+images and packages a `--hide` run is meant to conceal. Anonymized runs keep the
+posture formats, where image references are pseudonymized.
 
 ### Custom rules
 

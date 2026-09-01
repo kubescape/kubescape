@@ -147,6 +147,22 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo, policyIdenti
 	}, nil
 }
 
+func validateSBOMOutput(scanInfo *cautils.ScanInfo, format string) error {
+	if format != printer.CycloneDXFormat && format != printer.SPDXFormat {
+		return nil
+	}
+	if scanInfo.ScanType == cautils.ScanTypeImage {
+		return nil
+	}
+	if !scanInfo.ScanImages {
+		return fmt.Errorf("format %q describes scanned images: add --scan-images, or run %q to scan an image directly", format, cautils.ExecName()+" scan image")
+	}
+	if scanInfo.Hide || scanInfo.EncryptionEnabled {
+		return fmt.Errorf("format %q is not supported with --hide or --encrypt: an SBOM is the Anchore scan document, whose package identity and relationships are keyed by content-derived IDs that anonymization cannot rewrite", format)
+	}
+	return nil
+}
+
 func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterName string) ([]printer.IPrinter, error) {
 	formats := scanInfo.Formats()
 	containPrettyPrinter := false
@@ -160,6 +176,10 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 	for _, format := range formats {
 		usesPrettyPrinter, err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format)
 		if err != nil {
+			return nil, closeConfiguredPrinters(err)
+		}
+
+		if err := validateSBOMOutput(scanInfo, format); err != nil {
 			return nil, closeConfiguredPrinters(err)
 		}
 
