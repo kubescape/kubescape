@@ -174,8 +174,8 @@ func TestDependabotConfigIsValid(t *testing.T) {
 
 // TestDependabotCoversEveryGoModule catches the silent half of this failure
 // mode: a config that parses but no longer covers every module. This repository
-// ships two (the root module and httphandler, which has its own go.mod and its
-// own dependency set), and only CI tests the second one today.
+// ships the root module, and this test asserts coverage against all go.mod files
+// on disk so adding a module later is covered automatically.
 func TestDependabotCoversEveryGoModule(t *testing.T) {
 	config := loadDependabotConfig(t)
 

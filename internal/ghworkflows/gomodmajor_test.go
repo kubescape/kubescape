@@ -20,7 +20,7 @@ import (
 //
 // Go's Semantic Import Versioning makes the suffix part of the module's
 // identity: a module declaring `.../v3` can only ever be published under v3
-// tags. The repository moved to v4 tags at v4.0.0 and left both go.mod files
+// tags. The repository moved to v4 tags at v4.0.0 and left go.mod
 // declaring `/v3`, so every release from v4.0.0 to v4.0.12 was unresolvable as
 // a Go module - `go install .../v4@latest` and `go get` alike failed, and
 // downstream importers stayed pinned to v3.0.48 for the whole v4 line.
@@ -30,8 +30,7 @@ import (
 // turn the tags themselves into the assertion, and 02-release.yaml runs the
 // same check before it publishes anything.
 const (
-	rootModuleFile        = "go.mod"
-	httphandlerModuleFile = "httphandler/go.mod"
+	rootModuleFile = "go.mod"
 )
 
 // releaseTagRe matches the release tags this project actually publishes. It is
@@ -144,53 +143,6 @@ func TestGoModMajorMatchesReleaseTags(t *testing.T) {
 			"Go resolves a module by the major version in its path, so every v%d tag is uninstallable "+
 			"until the module path ends in /v%d (and every internal import follows it)",
 		rootModuleFile, modulePath, releaseMajor, releaseMajor, releaseMajor)
-}
-
-// TestHTTPHandlerModuleTracksRoot keeps the submodule from drifting away from
-// the module it is nested in. httphandler/go.mod names the root module three
-// times - its own path, the require, and the local replace - and a local
-// `replace ... => ../` makes a stale major invisible: the submodule keeps
-// building in-tree while being unresolvable to anyone outside the repository,
-// which is precisely how its `/v3` suffix survived the v4 release line.
-func TestHTTPHandlerModuleTracksRoot(t *testing.T) {
-	root := rootModulePath(t)
-	submodule := parseModule(t, httphandlerModuleFile)
-
-	assert.Equalf(t, root+"/httphandler", submodule.Module.Mod.Path,
-		"%s must be the root module path plus /httphandler", httphandlerModuleFile)
-
-	rootMajor := majorSuffix(t, root)
-
-	var required bool
-	for _, req := range submodule.Require {
-		if _, _, ok := module.SplitPathVersion(req.Mod.Path); !ok || req.Mod.Path != root {
-			continue
-		}
-		required = true
-
-		assert.Equalf(t, rootMajor, majorSuffix(t, req.Mod.Path),
-			"%s requires %q, which is not the root module's major version",
-			httphandlerModuleFile, req.Mod.Path)
-	}
-	assert.Truef(t, required,
-		"%s must require %q; it imports the root module's packages",
-		httphandlerModuleFile, root)
-
-	var replaced bool
-	for _, rep := range submodule.Replace {
-		if rep.New.Path != "../" && rep.New.Path != ".." {
-			continue
-		}
-		replaced = true
-
-		assert.Equalf(t, root, rep.Old.Path,
-			"%s replaces %q with the parent directory, but the parent declares %q; "+
-				"a replace that names a stale module path silently stops applying",
-			httphandlerModuleFile, rep.Old.Path, root)
-	}
-	assert.Truef(t, replaced,
-		"%s must replace %q with ../ so the submodule builds against the working tree",
-		httphandlerModuleFile, root)
 }
 
 // TestReleaseWorkflowChecksModuleMajor keeps the release-time guard in place.
