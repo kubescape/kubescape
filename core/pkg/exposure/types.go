@@ -39,6 +39,13 @@ const (
 	// whose admission can't be confirmed one way or the other is
 	// conservatively treated as admitting it.
 	ExposureHTTPRoute
+	// ExposureExternalIP means the Service has one or more spec.externalIPs
+	// set. kube-proxy programs these on every node regardless of
+	// spec.type, so a ClusterIP Service with externalIPs set is reachable
+	// from off-cluster the same as a NodePort Service -- this is the
+	// mechanism behind CVE-2020-8554 (arbitrary externalIPs hijack via a
+	// Service create/update in a namespace an attacker controls).
+	ExposureExternalIP
 )
 
 func (k ExposureKind) String() string {
@@ -51,6 +58,8 @@ func (k ExposureKind) String() string {
 		return "Ingress"
 	case ExposureHTTPRoute:
 		return "HTTPRoute"
+	case ExposureExternalIP:
+		return "ExternalIP"
 	default:
 		return "unknown"
 	}

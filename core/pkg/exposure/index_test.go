@@ -21,21 +21,21 @@ func ref(namespace, name string) ServiceRef {
 
 func TestServiceExposure_UnknownServiceIsEmpty(t *testing.T) {
 	idx := NewIndex(nil, nil, nil, nil, nil)
-	if paths := idx.ServiceExposure(ref("ns", "missing")); paths != nil {
+	if paths, _ := idx.ServiceExposure(ref("ns", "missing")); paths != nil {
 		t.Errorf("paths = %v, want nil", paths)
 	}
 }
 
 func TestServiceExposure_ClusterIPAloneIsNotExposed(t *testing.T) {
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, nil, nil, nil)
-	if paths := idx.ServiceExposure(ref("ns", "app")); len(paths) != 0 {
+	if paths, _ := idx.ServiceExposure(ref("ns", "app")); len(paths) != 0 {
 		t.Errorf("paths = %v, want empty", paths)
 	}
 }
 
 func TestServiceExposure_LoadBalancerIsExposed(t *testing.T) {
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeLoadBalancer)}, nil, nil, nil, nil)
-	paths := idx.ServiceExposure(ref("ns", "app"))
+	paths, _ := idx.ServiceExposure(ref("ns", "app"))
 	if len(paths) != 1 || paths[0].Kind != ExposureLoadBalancer {
 		t.Errorf("paths = %+v, want one ExposureLoadBalancer", paths)
 	}
@@ -43,9 +43,37 @@ func TestServiceExposure_LoadBalancerIsExposed(t *testing.T) {
 
 func TestServiceExposure_NodePortIsExposed(t *testing.T) {
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeNodePort)}, nil, nil, nil, nil)
-	paths := idx.ServiceExposure(ref("ns", "app"))
+	paths, _ := idx.ServiceExposure(ref("ns", "app"))
 	if len(paths) != 1 || paths[0].Kind != ExposureNodePort {
 		t.Errorf("paths = %+v, want one ExposureNodePort", paths)
+	}
+}
+
+func TestServiceExposure_ExternalIPsExposesClusterIPService(t *testing.T) {
+	s := svc("ns", "app", corev1.ServiceTypeClusterIP)
+	s.Spec.ExternalIPs = []string{"203.0.113.10"}
+	idx := NewIndex([]corev1.Service{s}, nil, nil, nil, nil)
+	paths, _ := idx.ServiceExposure(ref("ns", "app"))
+	if len(paths) != 1 || paths[0].Kind != ExposureExternalIP {
+		t.Errorf("paths = %+v, want one ExposureExternalIP: kube-proxy programs spec.externalIPs on every node regardless of spec.type (CVE-2020-8554)", paths)
+	}
+}
+
+func TestServiceExposure_ExternalIPsAlongsideLoadBalancerReportsBothPaths(t *testing.T) {
+	s := svc("ns", "app", corev1.ServiceTypeLoadBalancer)
+	s.Spec.ExternalIPs = []string{"203.0.113.10"}
+	idx := NewIndex([]corev1.Service{s}, nil, nil, nil, nil)
+	paths, _ := idx.ServiceExposure(ref("ns", "app"))
+	if len(paths) != 2 {
+		t.Errorf("paths = %+v, want two paths: LoadBalancer and ExternalIP are independent exposure mechanisms", paths)
+	}
+}
+
+func TestServiceExposure_NoExternalIPsDoesNotAddAPath(t *testing.T) {
+	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, nil, nil, nil)
+	paths, _ := idx.ServiceExposure(ref("ns", "app"))
+	if len(paths) != 0 {
+		t.Errorf("paths = %+v, want empty", paths)
 	}
 }
 
@@ -59,7 +87,7 @@ func TestServiceExposure_IngressDefaultBackendExposesService(t *testing.T) {
 		Spec:       networkingv1.IngressSpec{DefaultBackend: ptrBackend(ingressBackend("app"))},
 	}
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, []networkingv1.Ingress{ing}, nil, nil, nil)
-	paths := idx.ServiceExposure(ref("ns", "app"))
+	paths, _ := idx.ServiceExposure(ref("ns", "app"))
 	if len(paths) != 1 || paths[0].Kind != ExposureIngress || paths[0].Source != "ns/web" || paths[0].Host != "" {
 		t.Errorf("paths = %+v, want one ExposureIngress from ns/web with empty host", paths)
 	}
@@ -80,7 +108,7 @@ func TestServiceExposure_IngressRuleExposesServiceWithHost(t *testing.T) {
 		}},
 	}
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, []networkingv1.Ingress{ing}, nil, nil, nil)
-	paths := idx.ServiceExposure(ref("ns", "app"))
+	paths, _ := idx.ServiceExposure(ref("ns", "app"))
 	if len(paths) != 1 || paths[0].Kind != ExposureIngress || paths[0].Host != "app.example.com" {
 		t.Errorf("paths = %+v, want one ExposureIngress with host app.example.com", paths)
 	}
@@ -92,7 +120,7 @@ func TestServiceExposure_IngressForDifferentServiceDoesNotMatch(t *testing.T) {
 		Spec:       networkingv1.IngressSpec{DefaultBackend: ptrBackend(ingressBackend("other"))},
 	}
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, []networkingv1.Ingress{ing}, nil, nil, nil)
-	if paths := idx.ServiceExposure(ref("ns", "app")); len(paths) != 0 {
+	if paths, _ := idx.ServiceExposure(ref("ns", "app")); len(paths) != 0 {
 		t.Errorf("paths = %v, want empty", paths)
 	}
 }
@@ -103,7 +131,7 @@ func TestServiceExposure_IngressInAnotherNamespaceDoesNotApply(t *testing.T) {
 		Spec:       networkingv1.IngressSpec{DefaultBackend: ptrBackend(ingressBackend("app"))},
 	}
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, []networkingv1.Ingress{ing}, nil, nil, nil)
-	if paths := idx.ServiceExposure(ref("ns", "app")); len(paths) != 0 {
+	if paths, _ := idx.ServiceExposure(ref("ns", "app")); len(paths) != 0 {
 		t.Errorf("paths = %v, want empty: an Ingress can only name a Service in its own namespace", paths)
 	}
 }
@@ -120,7 +148,7 @@ func TestServiceExposure_HTTPRouteWithUncollectedGatewayStillReportsPath(t *test
 	// what was collected rather than not exist -- so it must be treated as a
 	// possible exposure, not silently dropped.
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []httpRoute{route}, nil, nil)
-	if paths := idx.ServiceExposure(ref("ns", "app")); len(paths) != 1 {
+	if paths, _ := idx.ServiceExposure(ref("ns", "app")); len(paths) != 1 {
 		t.Errorf("paths = %v, want one path: an uncollected Gateway must be treated as a possible exposure", paths)
 	}
 }
@@ -135,7 +163,7 @@ func TestServiceExposure_HTTPRouteAttachedToGatewayExposesService(t *testing.T) 
 		Rules:      []httpRouteRule{{BackendRefs: []backendRef{{Name: "app"}}}},
 	}
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []httpRoute{route}, []gateway{gw}, nil)
-	paths := idx.ServiceExposure(ref("ns", "app"))
+	paths, _ := idx.ServiceExposure(ref("ns", "app"))
 	if len(paths) != 1 || paths[0].Kind != ExposureHTTPRoute || paths[0].Source != "ns/route" || paths[0].Host != "app.example.com" {
 		t.Errorf("paths = %+v, want one ExposureHTTPRoute from ns/route with host app.example.com", paths)
 	}
@@ -150,7 +178,7 @@ func TestServiceExposure_HTTPRouteWithNoHostnamesProducesOnePathWithEmptyHost(t 
 		Rules:      []httpRouteRule{{BackendRefs: []backendRef{{Name: "app"}}}},
 	}
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []httpRoute{route}, []gateway{gw}, nil)
-	paths := idx.ServiceExposure(ref("ns", "app"))
+	paths, _ := idx.ServiceExposure(ref("ns", "app"))
 	if len(paths) != 1 || paths[0].Host != "" {
 		t.Errorf("paths = %+v, want one path with empty host", paths)
 	}
@@ -166,7 +194,7 @@ func TestServiceExposure_CrossNamespaceParentRefBlockedByDefaultSameNamespaceAll
 		Rules:      []httpRouteRule{{BackendRefs: []backendRef{{Name: "app"}}}},
 	}
 	idx := NewIndex([]corev1.Service{svc("route-ns", "app", corev1.ServiceTypeClusterIP)}, nil, []httpRoute{route}, []gateway{gw}, nil)
-	paths := idx.ServiceExposure(ref("route-ns", "app"))
+	paths, _ := idx.ServiceExposure(ref("route-ns", "app"))
 	if len(paths) != 0 {
 		t.Errorf("paths = %+v, want empty: AllowedRoutes defaults to Same, and the route's namespace differs from the Gateway's", paths)
 	}
@@ -186,7 +214,7 @@ func TestServiceExposure_CrossNamespaceParentRefAllowedByExplicitFromAll(t *test
 		Rules:      []httpRouteRule{{BackendRefs: []backendRef{{Name: "app"}}}},
 	}
 	idx := NewIndex([]corev1.Service{svc("route-ns", "app", corev1.ServiceTypeClusterIP)}, nil, []httpRoute{route}, []gateway{gw}, nil)
-	paths := idx.ServiceExposure(ref("route-ns", "app"))
+	paths, _ := idx.ServiceExposure(ref("route-ns", "app"))
 	if len(paths) != 1 {
 		t.Errorf("paths = %+v, want one ExposureHTTPRoute: the listener explicitly allows routes from all namespaces", paths)
 	}
@@ -205,8 +233,58 @@ func TestServiceExposure_HTTPRouteBackendInAnotherNamespaceIsNotModeled(t *testi
 	// other-ns -- without a ReferenceGrant (not modeled), this must not
 	// match ns/app.
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []httpRoute{route}, []gateway{gw}, nil)
-	if paths := idx.ServiceExposure(ref("ns", "app")); len(paths) != 0 {
+	paths, unclear := idx.ServiceExposure(ref("ns", "app"))
+	if len(paths) != 0 {
 		t.Errorf("paths = %v, want empty", paths)
+	}
+	if unclear {
+		t.Error("unclear = true, want false: the backendRef names other-ns/app, not ns/app, so it says nothing about ns/app's exposure")
+	}
+}
+
+func TestServiceExposure_UnclearWhenCrossNamespaceHTTPRouteBackendRefIsUnmodeled(t *testing.T) {
+	gw := gateway{Namespace: "edge", Name: "gw", Listeners: []listener{{Name: "http"}}}
+	targetNS := "ns"
+	// A real, working topology: an HTTPRoute living in "edge" names ns/app as
+	// its backend via an explicit backendRef.namespace, authorized by a
+	// ReferenceGrant in ns (not modeled by this package -- see
+	// crossNamespaceBackendRefIsUnmodeled's doc comment). idx.httpRoutesByNS
+	// only looks up routes living *in* ref.Namespace when building paths, so
+	// this route is never examined there; the unclear signal exists
+	// precisely to catch what that omission would otherwise hide.
+	route := httpRoute{
+		Namespace:  "edge",
+		Name:       "route",
+		ParentRefs: []parentRef{{Name: "gw"}},
+		Rules:      []httpRouteRule{{BackendRefs: []backendRef{{Namespace: &targetNS, Name: "app"}}}},
+	}
+	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []httpRoute{route}, []gateway{gw}, nil)
+	paths, unclear := idx.ServiceExposure(ref("ns", "app"))
+	if len(paths) != 0 {
+		t.Errorf("paths = %v, want empty: this package does not confirm cross-namespace backendRefs", paths)
+	}
+	if !unclear {
+		t.Error("unclear = false, want true: a cross-namespace backendRef from an admitted HTTPRoute names this Service")
+	}
+}
+
+func TestServiceExposure_CrossNamespaceRouteWithUncollectedGatewayIsStillUnclear(t *testing.T) {
+	targetNS := "ns"
+	route := httpRoute{
+		Namespace:  "edge",
+		Name:       "route",
+		ParentRefs: []parentRef{{Name: "missing-gw"}},
+		Rules:      []httpRouteRule{{BackendRefs: []backendRef{{Namespace: &targetNS, Name: "app"}}}},
+	}
+	// No Gateway at all was collected, so routeAttachesToAGateway takes the
+	// conservative "uncollected Gateway" path and reports it as attached --
+	// crossNamespaceBackendRefIsUnmodeled piggybacks on that same
+	// conservative check rather than re-deriving its own, so this must still
+	// be unclear rather than silently dropped for lack of Gateway data.
+	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []httpRoute{route}, nil, nil)
+	_, unclear := idx.ServiceExposure(ref("ns", "app"))
+	if !unclear {
+		t.Error("unclear = false, want true: an uncollected Gateway is conservatively treated as attached, same as routeAttachesToAGateway")
 	}
 }
 
@@ -276,7 +354,7 @@ func TestServiceExposure_HTTPRouteIndeterminateAdmissionStillReportsPath(t *test
 	// evaluated -- this must still report the path rather than silently
 	// dropping a possible exposure.
 	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []httpRoute{route}, []gateway{gw}, nil)
-	if paths := idx.ServiceExposure(ref("ns", "app")); len(paths) != 1 {
+	if paths, _ := idx.ServiceExposure(ref("ns", "app")); len(paths) != 1 {
 		t.Errorf("paths = %v, want one path: an indeterminate admission must still be reported", paths)
 	}
 }

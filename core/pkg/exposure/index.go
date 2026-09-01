@@ -58,23 +58,30 @@ func NewIndex(services []corev1.Service, ingresses []networkingv1.Ingress, httpR
 }
 
 // ServiceExposure reports every path that exposes the named Service to
-// traffic from outside the cluster. An empty result means nothing in this
-// snapshot exposes it -- it is only reachable from inside the cluster (or
+// traffic from outside the cluster, plus whether at least one plausible but
+// unmodeled exposure path exists that this function cannot confirm either
+// way. An empty paths with unclear=false means nothing in this snapshot
+// exposes the Service -- it is only reachable from inside the cluster (or
 // not collected/does not exist at all, which this function cannot tell
-// apart from "exists but not exposed").
-func (idx *Index) ServiceExposure(ref ServiceRef) []ExposurePath {
+// apart from "exists but not exposed"). unclear=true means paths must NOT
+// be read as a confirmed all-clear: a cross-namespace HTTPRoute backendRef
+// names this Service, and whether that reference is authorized (via a
+// ReferenceGrant this package does not collect or evaluate -- see the
+// package doc comment) is genuinely unknown.
+func (idx *Index) ServiceExposure(ref ServiceRef) (paths []ExposurePath, unclear bool) {
 	svc, ok := idx.services[ref]
 	if !ok {
-		return nil
+		return nil, false
 	}
-
-	var paths []ExposurePath
 
 	switch svc.Spec.Type {
 	case corev1.ServiceTypeLoadBalancer:
 		paths = append(paths, ExposurePath{Kind: ExposureLoadBalancer, Source: fmt.Sprintf("%s/%s", ref.Namespace, ref.Name)})
 	case corev1.ServiceTypeNodePort:
 		paths = append(paths, ExposurePath{Kind: ExposureNodePort, Source: fmt.Sprintf("%s/%s", ref.Namespace, ref.Name)})
+	}
+	if len(svc.Spec.ExternalIPs) > 0 {
+		paths = append(paths, ExposurePath{Kind: ExposureExternalIP, Source: fmt.Sprintf("%s/%s", ref.Namespace, ref.Name)})
 	}
 
 	for _, ing := range idx.ingressesByNS[ref.Namespace] {
@@ -98,7 +105,35 @@ func (idx *Index) ServiceExposure(ref ServiceRef) []ExposurePath {
 		}
 	}
 
-	return paths
+	return paths, idx.crossNamespaceBackendRefIsUnmodeled(ref)
+}
+
+// crossNamespaceBackendRefIsUnmodeled reports whether some HTTPRoute this
+// Index was given, living outside ref's namespace and admitted by at least
+// one Gateway, explicitly names ref as a backend via backendRef.namespace.
+// That is a real, working, externally-reachable path when a matching
+// ReferenceGrant exists in ref's namespace -- a resource kind this package
+// does not collect or evaluate (see the package doc comment) -- so its
+// presence must not be silently folded into a confirmed "not exposed".
+func (idx *Index) crossNamespaceBackendRefIsUnmodeled(ref ServiceRef) bool {
+	for ns, routes := range idx.httpRoutesByNS {
+		if ns == ref.Namespace {
+			continue
+		}
+		for _, route := range routes {
+			if !idx.routeAttachesToAGateway(route) {
+				continue
+			}
+			for _, rule := range route.Rules {
+				for _, backend := range rule.BackendRefs {
+					if backend.Namespace != nil && *backend.Namespace == ref.Namespace && backend.Name == ref.Name {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 // ingressPathsFor returns one ExposurePath per Ingress rule (or the
