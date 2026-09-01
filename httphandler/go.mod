@@ -13,12 +13,12 @@ require (
 	github.com/go-openapi/runtime v0.33.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/schema v1.4.1
-	github.com/kubescape/backend v0.0.46
+	github.com/kubescape/backend v0.0.48
 	github.com/kubescape/go-logger v0.0.34
 	github.com/kubescape/k8s-interface v0.0.218
 	github.com/kubescape/kubescape/v4 v4.0.12
 	github.com/kubescape/opa-utils v0.0.312
-	github.com/kubescape/storage v0.0.258
+	github.com/kubescape/storage v0.0.305
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.12.1
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0
