@@ -1218,8 +1218,6 @@ github.com/kubescape/go-git-url v0.0.33 h1:92N/AZZXPUO0B8ug/cPdqFZOj9vZy46z+ZW8V
 github.com/kubescape/go-git-url v0.0.33/go.mod h1:3ddc1HEflms1vMhD9owt/3FBES070UaYTUarcjx8jDk=
 github.com/kubescape/go-logger v0.0.34 h1:k1B1X2GlPHNizvaFt9pRuqIZ3xkdqTUJt707penmWvM=
 github.com/kubescape/go-logger v0.0.34/go.mod h1:Alj7JBQ8/WCxbXe8Ura6ZheSRK45E0p21M3xeqedX90=
-github.com/kubescape/k8s-interface v0.0.214 h1:j7KP0/5VvYOoQdBGV2+gRM3qnR8PWLAGF8RM/k/DmJ0=
-github.com/kubescape/k8s-interface v0.0.214/go.mod h1:WNYUG93aZ5kDmuaRKFLtVhp18Yc6EfaHdD1gLYtVTN4=
 github.com/kubescape/k8s-interface v0.0.220 h1:0UPh5OmEBkczAG/M8G4aCdKygFMj0F1ljwn9r2Ip3Xw=
 github.com/kubescape/k8s-interface v0.0.220/go.mod h1:sOZm48DJn8QO1cWRbuNsPPsk0TxLzm13Ws85EkiH0X0=
 github.com/kubescape/kubescape/v3 v3.0.4 h1:gZ5d8QMxLYZQ6Yz9wRvGcDQlBUIV+v/Y/41g56/YDy8=
@@ -1272,8 +1270,8 @@ github.com/mailru/easyjson v0.0.0-20190312143242-1de009706dbe/go.mod h1:C1wdFJiN
 github.com/mailru/easyjson v0.7.7/go.mod h1:xzfreul335JAWq5oZzymOObrkdz5UnU4kGfJJLY9Nlc=
 github.com/mark3labs/mcp-go v0.58.0 h1:AWfBk8lgRR0KZYve7PaLbR2MIjpw1oK2eGpBApaNS+Q=
 github.com/mark3labs/mcp-go v0.58.0/go.mod h1:+8WclSK1ZUweCP3hvktSji8n8ABG/95QaEkeVE/Uwas=
-github.com/maruel/natural v1.1.1 h1:Hja7XhhmvEFhcByqDoHz9QZbkWey+COd9xWfCfn1ioo=
-github.com/maruel/natural v1.1.1/go.mod h1:v+Rfd79xlw1AgVBjbO0BEQmptqb5HvL/k9GRHB7ZKEg=
+github.com/maruel/natural v1.3.0 h1:VsmCsBmEyrR46RomtgHs5hbKADGRVtliHTyCOLFBpsg=
+github.com/maruel/natural v1.3.0/go.mod h1:v+Rfd79xlw1AgVBjbO0BEQmptqb5HvL/k9GRHB7ZKEg=
 github.com/masahiro331/go-mvn-version v0.0.0-20250131095131-f4974fa13b8a h1:eLvAzVoRfHEOl64OxFhepPf3vj7SKvXY/tFc3BS0b7s=
 github.com/masahiro331/go-mvn-version v0.0.0-20250131095131-f4974fa13b8a/go.mod h1:jZ3F25l7DbD7l7DcA8aj7eo1EZ84nbzcQHBB4lCSrI8=
 github.com/matthyx/go-containerregistry v0.0.0-20250916162850-293c5b36a9f8 h1:am59aKuPqzBLnDy4U+MltUtHjFZHcORv9XTeHxRyq1E=
