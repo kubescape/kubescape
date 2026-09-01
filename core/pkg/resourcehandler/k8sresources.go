@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/time/rate"
+
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/cloudsupport"
@@ -384,12 +386,15 @@ func (k8sHandler *K8sResourceHandler) collectAndStreamBatches(ctx context.Contex
 	failedQueries := make(map[string]queryFailure)
 	collectedAnyResource := false
 
+	apiLimiter := rate.NewLimiter(rate.Limit(50), 100) // 50 requests/sec, burst of 100
+
 	// Single pass: pull each GVR once, partition by scope.
 	for key := range queryableResources {
 		qr := queryableResources[key]
 		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 
+		result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, scanInfo.LabelSelector, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced, apiLimiter)
 		// Partition each object as the pager yields it, so the collector never
 		// holds a whole-GVR []unstructured.Unstructured — nor the two
 		// same-length slices the map/meta conversion built from it — on top of
@@ -655,7 +660,7 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 	if resource.GetNamespace() != "" && ((resolved[0].namespaced != nil && *resolved[0].namespaced) || (resolved[0].namespaced == nil && k8sinterface.IsNamespaceScope(&gvr))) {
 		fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespaceFieldSelectorString(resource.GetNamespace(), FieldSelectorsEqualsOperator))
 	}
-	result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, "", fieldSelectors, globalFieldSelector, resolved[0].namespaced)
+	result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, "", fieldSelectors, globalFieldSelector, resolved[0].namespaced, nil)
 	if len(result) == 0 && len(selectorErrs) > 0 {
 		return nil, fmt.Errorf("failed to get resource %s, reason: %v", getReadableID(resource), selectorErrs[0].err)
 	}
@@ -864,7 +869,9 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 		wg sync.WaitGroup
 	)
 
+	// Bounded worker pool with token-bucket rate limiting against the k8s API
 	sem := make(chan struct{}, maxParallelResourcePulls)
+	apiLimiter := rate.NewLimiter(rate.Limit(50), 100) // 50 requests/sec, burst of 100
 
 	for key := range queryableResources {
 		qr := queryableResources[key]
@@ -887,7 +894,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 
 			apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-			result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, labelSelector, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced)
+			result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, labelSelector, qr.FieldSelectors, globalFieldSelectors, qr.Namespaced, apiLimiter)
 			if err := ctx.Err(); err != nil {
 				mu.Lock()
 				failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
@@ -1040,6 +1047,7 @@ func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResourc
 	return partials
 }
 
+func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, resource *schema.GroupVersionResource, labelSelector string, fields string, fieldSelector IFieldSelector, namespaced *bool, apiLimiter *rate.Limiter) ([]unstructured.Unstructured, []selectorFailure) {
 // resourceSink receives every object a paginated LIST traversal yields, in
 // page order, before any per-GVR slice is built. The pointer handed to a sink
 // aims into the page the pager is currently holding and is only valid for the
@@ -1116,6 +1124,11 @@ func (k8sHandler *K8sResourceHandler) pullSingleResourceInto(ctx context.Context
 		collected := 0
 
 		if err := pager.New(func(pCtx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+			if apiLimiter != nil {
+				if err := apiLimiter.Wait(pCtx); err != nil {
+					return nil, err
+				}
+			}
 			return clientResource.List(pCtx, opts)
 		}).EachListItem(ctx, listOptions, func(obj runtime.Object) error {
 

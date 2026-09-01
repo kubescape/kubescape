@@ -201,7 +201,7 @@ func TestStubRequestGroupedAPIVersion(t *testing.T) {
 // request field against the real env. A missing key would surface here as an
 // eval error, exactly the offline/admission mismatch we are avoiding.
 func TestStubRequestSelectableAgainstEnv(t *testing.T) {
-	env, err := newEnv()
+	env, err := NewEnv()
 	require.NoError(t, err)
 
 	activation := map[string]any{"request": stubRequest(namespacedPod())}

@@ -208,7 +208,7 @@ func TestCompileFailureLeavesTheBudgetToTheRestOfThePolicy(t *testing.T) {
 	// An expression that does not compile never ran, so it spent nothing. Charging
 	// it would latch the budget and take every later validation down with it,
 	// while admission returns on the compile error before it touches the budget
-	// and keeps going. authorizer is deliberately undeclared in newEnv, so a
+	// and keeps going. authorizer is deliberately undeclared in NewEnv, so a
 	// policy referencing it is exactly the "should fail to compile and get
 	// skipped" case env.go describes.
 	obj := budgetPod()

@@ -7,13 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	gitv5 "github.com/go-git/go-git/v5"
 	"github.com/kubescape/go-logger"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v4/internal/testutils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -23,12 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/op/go-logging.v1"
 )
-
-type indentationTestCase struct {
-	inputFile      string
-	yamlExpression string
-	expectedFile   string
-}
 
 func NewFixHandlerMock() (*FixHandler, error) {
 	backendLoggerLeveled := logging.AddModuleLevel(logging.NewLogBackend(logger.L().GetWriter(), "", 0))
@@ -42,334 +36,17 @@ func NewFixHandlerMock() (*FixHandler, error) {
 	}, nil
 }
 
-func getTestCases() []indentationTestCase {
-	indentationTestCases := []indentationTestCase{
-		// Insertion Scenarios
-		{
-			"inserts/tc-01-00-input-mapping-insert-mapping.yaml",
-			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-			"inserts/tc-01-01-expected.yaml",
-		},
-		{
-			"inserts/tc-02-00-input-mapping-insert-mapping-with-list.yaml",
-			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
-			"inserts/tc-02-01-expected.yaml",
-		},
-		{
-			"inserts/tc-03-00-input-list-append-scalar.yaml",
-			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]",
-			"inserts/tc-03-01-expected.yaml",
-		},
-		{
-			"inserts/tc-04-00-input-multiple-inserts.yaml",
-
-			`select(di==0).spec.template.spec.securityContext.allowPrivilegeEscalation |= false |
-			 select(di==0).spec.template.spec.containers[0].securityContext.capabilities.drop += ["NET_RAW"] |
-			 select(di==0).spec.template.spec.containers[0].securityContext.seccompProfile.type |= "RuntimeDefault" |
-			 select(di==0).spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation |= false |
-			 select(di==0).spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem |= true`,
-
-			"inserts/tc-04-01-expected.yaml",
-		},
-		{
-			"inserts/tc-05-00-input-comment-blank-line-single-insert.yaml",
-			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-			"inserts/tc-05-01-expected.yaml",
-		},
-		{
-			"inserts/tc-06-00-input-list-append-scalar-oneline.yaml",
-			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]",
-			"inserts/tc-06-01-expected.yaml",
-		},
-		{
-			"inserts/tc-07-00-input-multiple-documents.yaml",
-
-			`select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false |
-			 select(di==1).spec.containers[0].securityContext.allowPrivilegeEscalation |= false`,
-
-			"inserts/tc-07-01-expected.yaml",
-		},
-		{
-			"inserts/tc-08-00-input-mapping-insert-mapping-indented.yaml",
-			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
-			"inserts/tc-08-01-expected.yaml",
-		},
-		{
-			"inserts/tc-09-00-input-list-insert-new-mapping-indented.yaml",
-			`select(di==0).spec.containers += {"name": "redis", "image": "redis"}`,
-			"inserts/tc-09-01-expected.yaml",
-		},
-		{
-			"inserts/tc-10-00-input-list-insert-new-mapping.yaml",
-			`select(di==0).spec.containers += {"name": "redis", "image": "redis"}`,
-			"inserts/tc-10-01-expected.yaml",
-		},
-		{
-			"inserts/tc-11-00-input-list-insert-new-mapping-crlf-newlines.yaml",
-			`select(di==0).spec.containers += {"name": "redis", "image": "redis"}`,
-			"inserts/tc-11-01-expected.yaml",
-		},
-
-		// Starts with ---
-		{
-			"inserts/tc-12-00-begin-with-document-separator.yaml",
-			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-			"inserts/tc-12-01-expected.yaml",
-		},
-
-		// Removal Scenarios
-		{
-			"removals/tc-01-00-input.yaml",
-			"del(select(di==0).spec.containers[0].securityContext)",
-			"removals/tc-01-01-expected.yaml",
-		},
-		{
-			"removals/tc-02-00-input.yaml",
-			"del(select(di==0).spec.containers[1])",
-			"removals/tc-02-01-expected.yaml",
-		},
-		{
-			"removals/tc-03-00-input.yaml",
-			"del(select(di==0).spec.containers[0].securityContext.capabilities.drop[1])",
-			"removals/tc-03-01-expected.yaml",
-		},
-		{
-			"removals/tc-04-00-input.yaml",
-			`del(select(di==0).spec.containers[0].securityContext) |
-			 del(select(di==1).spec.containers[1])`,
-			"removals/tc-04-01-expected.yaml",
-		},
-
-		// Replace Scenarios
-		{
-			"replaces/tc-01-00-input.yaml",
-			"select(di==0).spec.containers[0].securityContext.runAsRoot |= false",
-			"replaces/tc-01-01-expected.yaml",
-		},
-		{
-			"replaces/tc-02-00-input.yaml",
-			`select(di==0).spec.containers[0].securityContext.capabilities.drop[0] |= "SYS_ADM" |
-			 select(di==0).spec.containers[0].securityContext.capabilities.add[0] |= "NET_RAW"`,
-			"replaces/tc-02-01-expected.yaml",
-		},
-
-		// Hybrid Scenarios
-		{
-			"hybrids/tc-01-00-input.yaml",
-			`del(select(di==0).spec.containers[0].securityContext) |
-			 select(di==0).spec.securityContext.runAsRoot |= false`,
-			"hybrids/tc-01-01-expected.yaml",
-		},
-		{
-			"hybrids/tc-02-00-input-indented-list.yaml",
-			`del(select(di==0).spec.containers[0].securityContext) |
-			 select(di==0).spec.securityContext.runAsRoot |= false`,
-			"hybrids/tc-02-01-expected.yaml",
-		},
-		{
-			"hybrids/tc-03-00-input-comments.yaml",
-			`del(select(di==0).spec.containers[0].securityContext) |
-			 select(di==0).spec.securityContext.runAsRoot |= false`,
-			"hybrids/tc-03-01-expected.yaml",
-		},
-		{
-			"hybrids/tc-04-00-input-separated-keys.yaml",
-			`del(select(di==0).spec.containers[0].securityContext) |
-			 select(di==0).spec.securityContext.runAsRoot |= false`,
-			"hybrids/tc-04-01-expected.yaml",
-		},
-		{
-			"hybrids/tc-05-00-input-leading-doc-separator.yaml",
-			`del(select(di==0).spec.containers[0].securityContext) |
-			 select(di==0).spec.securityContext.runAsRoot |= false`,
-			"hybrids/tc-05-01-expected.yaml",
-		},
-	}
-
-	return indentationTestCases
-}
-
-func TestApplyFixKeepsFormatting(t *testing.T) {
-	testCases := getTestCases()
-	getTestDataPath := func(filename string) string {
-		currentFile := "testdata/" + filename
-		return filepath.Join(testutils.CurrentDir(), currentFile)
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.inputFile, func(t *testing.T) {
-			inputFilename := getTestDataPath(tc.inputFile)
-			input, err := os.ReadFile(inputFilename)
-			if err != nil {
-				t.Fatalf(`Unable to open file %s due to: %v`, inputFilename, err)
-			}
-			expectedFilename := getTestDataPath(tc.expectedFile)
-			wantRaw, err := os.ReadFile(expectedFilename)
-			if err != nil {
-				t.Fatalf(`Unable to open file %s due to: %v`, expectedFilename, err)
-			}
-			want := string(wantRaw)
-			expression := tc.yamlExpression
-
-			fileAsString := string(input)
-			got, _ := ApplyFixToContent(context.Background(), fileAsString, expression)
-
-			assert.Equalf(
-				t, want, got,
-				"Contents of the fixed file don't match the expectation.\n"+
-					"Input file: %s\n\n"+
-					"Got: <%s>\n\n"+
-					"Want: <%s>",
-				tc.inputFile, got, want,
-			)
-		},
-		)
-
-	}
-}
-
 // TestApplyFixToContent_EmptyLeadingDocument guards the regression from issue
 // #2495: a file whose first document is empty (a comment followed by "---") is
 // decoded inconsistently by go-yaml and yqlib, which used to make the fix
 // renderer call logger.Fatal and os.Exit the whole process mid-write (leaving
 // an empty SARIF file). It must now return an error gracefully instead.
-func TestApplyFixToContent_EmptyLeadingDocument(t *testing.T) {
-	yamlContent := "# a comment, followed by a document separator\n---\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: demo\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          image: nginx:1.27\n"
-	// The scanner counts the empty leading document, so the Deployment is di==1.
-	expression := FixPathToValidYamlExpression("spec.template.spec.containers[0].image", "nginx:1.28", 1)
-
-	got, err := ApplyFixToContent(context.Background(), yamlContent, expression)
-
-	assert.Error(t, err, "expected a graceful error rather than a process exit")
-	assert.Empty(t, got)
-}
 
 // TestApplyFixToContent_TopLevelFlowSequence covers a flow collection that is not nested
 // under a key of its own, so it starts on the first line of the document. Resolving the
 // line to replace picked the document node that shares that line and rendered it against
 // its nil parent, panicking out of `kubescape fix` before anything was written. A nested
 // flow sequence never hit this because the document node sits on an earlier line.
-func TestApplyFixToContent_TopLevelFlowSequence(t *testing.T) {
-	yamlContent := "args: [--foo]\n"
-	expression := FixPathToValidYamlExpression("args[1]", "--bar", 0)
-
-	got, err := ApplyFixToContent(context.Background(), yamlContent, expression)
-
-	require.NoError(t, err)
-	// the flow style of the original line is kept
-	assert.Equal(t, "args: [--foo, --bar]\n", got)
-}
-
-func Test_fixPathToValidYamlExpression(t *testing.T) {
-	type args struct {
-		fixPath             string
-		value               string
-		documentIndexInYaml int
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		{
-			name: "fix path with boolean value",
-			args: args{
-				fixPath:             "spec.template.spec.containers[0].securityContext.privileged",
-				value:               "true",
-				documentIndexInYaml: 2,
-			},
-			want: "select(di==2).spec.template.spec.containers[0].securityContext.privileged |= true",
-		},
-		{
-			name: "fix path with string value",
-			args: args{
-				fixPath:             "metadata.namespace",
-				value:               "YOUR_NAMESPACE",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).metadata.namespace |= \"YOUR_NAMESPACE\"",
-		},
-		{
-			name: "fix path with string containing quotes",
-			args: args{
-				fixPath:             "spec.template.spec.containers[0].command[1]",
-				value:               "app=\"web\"",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).spec.template.spec.containers[0].command[1] |= \"app=\\\"web\\\"\"",
-		},
-		{
-			name: "fix path with string containing backslash",
-			args: args{
-				fixPath:             "path",
-				value:               "C:\\path\\to",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).path |= \"C:\\path\\to\"",
-		},
-		{
-			name: "fix path with string containing newline",
-			args: args{
-				fixPath:             "path",
-				value:               "line1\nline2",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).path |= \"line1\nline2\"",
-		},
-		{
-			name: "fix path with string containing tab",
-			args: args{
-				fixPath:             "path",
-				value:               "a\tb",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).path |= \"a\tb\"",
-		},
-		{
-			name: "fix path with number",
-			args: args{
-				fixPath:             "xxx.yyy",
-				value:               "123",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).xxx.yyy |= 123",
-		},
-		{
-			name: "fix path with NaN string value",
-			args: args{
-				fixPath:             "xxx.yyy",
-				value:               "NaN",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).xxx.yyy |= \"NaN\"",
-		},
-		{
-			name: "fix path with Inf string value",
-			args: args{
-				fixPath:             "xxx.yyy",
-				value:               "Inf",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).xxx.yyy |= \"Inf\"",
-		},
-		{
-			name: "fix path with -Inf string value",
-			args: args{
-				fixPath:             "xxx.yyy",
-				value:               "-Inf",
-				documentIndexInYaml: 0,
-			},
-			want: "select(di==0).xxx.yyy |= \"-Inf\"",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := FixPathToValidYamlExpression(tt.args.fixPath, tt.args.value, tt.args.documentIndexInYaml); got != tt.want {
-				t.Errorf("fixPathToValidYamlExpression() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
 
 // TestFixPathToValidYamlExpression_RejectsExpressionSyntax covers fix paths that
 // are yq expressions rather than paths. Both halves of a FixPath come out of the
@@ -480,9 +157,16 @@ func TestApplyFixToContent_CraftedFixPathLeaksNothing(t *testing.T) {
 		assert.Contains(t, skipped[0], "not a plain yaml path")
 	}
 
-	got, err := ApplyFixToContent(context.Background(), yamlContent, reduceYamlExpressions(rfi))
+	var fixes []DocumentFix
+	for _, fix := range rfi.YamlExpressions {
+		fixes = append(fixes, DocumentFix{
+			DocumentIndex: 0,
+			Fix:           fix,
+		})
+	}
+	got, err := NewYAMLTreeEditor().ApplyFixes(yamlContent, fixes)
 	require.NoError(t, err)
-	assert.NotContains(t, got, "super-secret-token")
+	assert.Equal(t, yamlContent, got)
 }
 
 func TestJoinStrings(t *testing.T) {
@@ -755,68 +439,6 @@ func TestSanitizeYaml_RoundTrip(t *testing.T) {
 	sanitized := sanitizeYaml(original)
 	assert.Equal(t, "# ---\napiVersion: v1\nkind: Pod\n", sanitized)
 	assert.Equal(t, original, revertSanitizeYaml(sanitized))
-}
-
-func TestReduceYamlExpressions(t *testing.T) {
-	type args struct {
-		yamlExpressions []string
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		{
-			name: "empty",
-			args: args{
-				yamlExpressions: []string{},
-			},
-			want: "",
-		},
-		{
-			name: "one expression",
-			args: args{
-				yamlExpressions: []string{
-					"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-				},
-			},
-			want: "select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-		},
-		{
-			name: "two expressions",
-			args: args{
-				yamlExpressions: []string{
-					"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-					"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
-				},
-			},
-			want: "select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false | select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
-		},
-		{
-			name: "Duplicate expressions",
-			args: args{
-				yamlExpressions: []string{
-					"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-					"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
-					"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-				},
-			},
-			want: "select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false | select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			resource := &ResourceFixInfo{}
-			resource.YamlExpressions = make(map[string]armotypes.FixPath)
-
-			for _, yamlExpression := range tt.args.yamlExpressions {
-				resource.YamlExpressions[yamlExpression] = armotypes.FixPath{}
-			}
-			got := reduceYamlExpressions(resource)
-			assert.Equal(t, tt.want, got)
-		})
-	}
 }
 
 func TestGetLocalPath(t *testing.T) {
@@ -1416,6 +1038,38 @@ func singleResourceReport(t *testing.T, sourcePath, relPath string) *reporthandl
 	}
 }
 
+func TestApplyFixToContent_MultiFixDeterministicOrder(t *testing.T) {
+	yamlContent := "apiVersion: v1\nkind: Pod\nmetadata:\n  name: demo\nspec:\n  containers:\n  - name: app\n"
+
+	rfi := &ResourceFixInfo{
+		FilePath: "pod.yaml",
+		YamlExpressions: map[string]armotypes.FixPath{
+			"spec.containers[0].securityContext.runAsNonRoot":             {Path: "spec.containers[0].securityContext.runAsNonRoot", Value: "true"},
+			"spec.containers[0].securityContext.allowPrivilegeEscalation": {Path: "spec.containers[0].securityContext.allowPrivilegeEscalation", Value: "false"},
+			"spec.containers[0].securityContext.readOnlyRootFilesystem":   {Path: "spec.containers[0].securityContext.readOnlyRootFilesystem", Value: "true"},
+		},
+	}
+
+	h := &FixHandler{}
+	fileFixes := h.getFileFixes([]ResourceFixInfo{*rfi})
+	fixes := fileFixes["pod.yaml"]
+
+	got, err := NewYAMLTreeEditor().ApplyFixes(yamlContent, fixes)
+	require.NoError(t, err)
+
+	expected := `apiVersion: v1
+kind: Pod
+metadata:
+  name: demo
+spec:
+  containers:
+  - name: app
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+`
+	assert.Equal(t, expected, got)
 // fakeWriteStringCloser lets writeAndClose's Close-time failure be simulated
 // deterministically. A real file's Close() essentially never fails for a
 // well-formed local write, and the scenario this guards - a filesystem

@@ -14,7 +14,7 @@ import (
 // served from the cache: the compile function runs exactly once no matter how
 // many times the expression is fetched.
 func TestProgramCacheCompilesOnce(t *testing.T) {
-	env, err := newEnv()
+	env, err := NewEnv()
 	require.NoError(t, err)
 
 	compiles := 0

@@ -129,9 +129,9 @@ func (e *Evaluator) budgetLimit() int64 {
 	return celconfig.RuntimeCELCostBudget
 }
 
-// NewEvaluator builds an Evaluator over the offline VAP CEL env (see newEnv).
+// NewEvaluator builds an Evaluator over the offline VAP CEL env (see NewEnv).
 func NewEvaluator(opts ...Option) (*Evaluator, error) {
-	env, err := newEnv()
+	env, err := NewEnv()
 	if err != nil {
 		return nil, err
 	}

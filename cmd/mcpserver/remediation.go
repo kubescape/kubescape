@@ -192,10 +192,15 @@ func (ksServer *KubescapeMcpserver) runApplyRemediation(ctx context.Context, pat
 	//    without their disk write. Each key is already scoped with
 	//    select(di==N), so multi-document files compose under one " | " pipeline.
 	fileExprs := make(map[string][]string)
+	fileFixes := make(map[string][]fixhandler.DocumentFix)
 	for _, rfi := range resourcesToFix {
 		exprs := make([]string, 0, len(rfi.YamlExpressions))
-		for expr := range rfi.YamlExpressions {
+		for expr, fixPath := range rfi.YamlExpressions {
 			exprs = append(exprs, expr)
+			fileFixes[rfi.FilePath] = append(fileFixes[rfi.FilePath], fixhandler.DocumentFix{
+				DocumentIndex: rfi.DocumentIndex,
+				Fix:           fixPath,
+			})
 		}
 		sort.Strings(exprs) // map iteration order is random; output must be stable
 		fileExprs[rfi.FilePath] = append(fileExprs[rfi.FilePath], exprs...)
@@ -207,14 +212,14 @@ func (ksServer *KubescapeMcpserver) runApplyRemediation(ctx context.Context, pat
 	}
 	sort.Strings(filePaths)
 
+	editor := fixhandler.NewYAMLTreeEditor()
 	files := make([]remediationFileResult, 0, len(filePaths))
 	for _, fp := range filePaths {
-		joined := strings.Join(fileExprs[fp], " | ")
 		fileAsString, err := fixhandler.GetFileString(fp)
 		if err != nil {
 			return nil, err
 		}
-		patched, err := fixhandler.ApplyFixToContent(ctx, fileAsString, joined)
+		patched, err := editor.ApplyFixes(fileAsString, fileFixes[fp])
 		if err != nil {
 			return nil, fmt.Errorf("failed to compute fix for %s: %w", fp, err)
 		}

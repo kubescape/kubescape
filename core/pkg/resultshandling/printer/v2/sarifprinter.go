@@ -828,7 +828,12 @@ func collectFixes(ctx context.Context, cache *fixReportCache, result *sarif.Resu
 			if yamlExpression == "" {
 				continue
 			}
-			addFixRegions(result, filepath, cache.fixRegions(ctx, rsrcAbsPath, yamlExpression))
+
+			docFix := fixhandler.DocumentFix{
+				DocumentIndex: documentIndex,
+				Fix:           rulePaths.FixPath,
+			}
+			addFixRegions(result, filepath, cache.fixRegions(ctx, rsrcAbsPath, docFix))
 		}
 	}
 }

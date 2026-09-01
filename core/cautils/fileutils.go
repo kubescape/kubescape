@@ -18,12 +18,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/edsrzf/mmap-go"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils/helmprovenance"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
+	"github.com/valyala/fastjson"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -768,6 +770,11 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 		}
 
 		w, e := ReadFile(f, getFileFormat(filePaths[i]))
+		m := mmap.MMap(f)
+		if errUnmap := m.Unmap(); errUnmap != nil {
+			logger.L().Warning("failed to unmap file", helpers.String("path", filePaths[i]), helpers.Error(errUnmap))
+		}
+
 		if e != nil {
 			// Only chart-owned templates/ files reach this loader unrendered —
 			// excludeHelmTemplateFiles drops the templates of every chart whose
@@ -852,29 +859,26 @@ func loadFile(filePath string) ([]byte, error) {
 
 	limit := getMaxFileSize()
 
-	// Fast-path: if Stat succeeds and size is known to exceed limit, fail
-	// without allocating. This also covers sparse files that report a large
-	// logical size.
-	if fi, statErr := f.Stat(); statErr == nil && fi.Size() > limit {
+	fi, statErr := f.Stat()
+	if statErr != nil {
+		return nil, statErr
+	}
+
+	if fi.Size() > limit {
 		return nil, fmt.Errorf("%w: %q size %d exceeds limit %d bytes", ErrFileTooLarge, filePath, fi.Size(), limit)
 	}
 
-	// Use LimitReader at limit+1 so we can detect an oversized file even when
-	// Stat is unavailable (e.g. /proc, pipes) or reports 0.
-	// Guard against overflow when limit == MaxInt64 (rejected above, but keep
-	// defense-in-depth).
-	limitPlusOne := limit
-	if limit != math.MaxInt64 {
-		limitPlusOne = limit + 1
+	if fi.Size() == 0 {
+		return []byte{}, nil
 	}
-	data, err := io.ReadAll(io.LimitReader(f, limitPlusOne))
+
+	// Use mmap to map the file into memory
+	mmapData, err := mmap.Map(f, mmap.RDONLY, 0)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to mmap file %q: %w", filePath, err)
 	}
-	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("%w: %q size exceeds limit %d bytes", ErrFileTooLarge, filePath, limit)
-	}
-	return data, nil
+
+	return mmapData, nil
 }
 func ReadFile(fileContent []byte, fileFormat FileFormat) ([]workloadinterface.IMetadata, error) {
 
@@ -1042,60 +1046,86 @@ func isYAMLDocumentSeparator(line []byte) bool {
 
 func readJsonFile(jsonFile []byte) (workloads []workloadinterface.IMetadata, err error) {
 	workloads = []workloadinterface.IMetadata{}
-	// The object envelopes do unchecked type assertions on the decoded
-	// document, so a well formed but wrongly typed manifest panics. Recover
-	// the same way readYamlFile does, so one bad file fails that file rather
-	// than the whole scan.
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic during JSON parsing: %v", r)
 		}
 	}()
 
-	var jsonObj any
-	decoder := json.NewDecoder(bytes.NewReader(jsonFile))
-	decoder.UseNumber()
-	if err := decoder.Decode(&jsonObj); err != nil {
+	var p fastjson.Parser
+	v, err := p.ParseBytes(jsonFile)
+	if err != nil {
+		if strings.Contains(err.Error(), "unexpected tail") {
+			return workloads, errors.New("multiple top-level JSON values are not supported; use a JSON array or Kubernetes List")
+		}
 		return workloads, err
 	}
 
-	// A manifest file must contain exactly one top-level JSON value. Decoder.Decode
-	// intentionally stops after the first value, so without this EOF check a file
-	// containing a valid manifest followed by another value or malformed trailing
-	// data is accepted and the unscanned suffix is silently ignored.
-	var trailing json.RawMessage
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return workloads, errors.New("multiple top-level JSON values are not supported; use a JSON array or Kubernetes List")
-		}
-		return workloads, fmt.Errorf("invalid trailing JSON data: %w", err)
-	}
-
-	if convertErr := convertJsonToWorkload(jsonObj, &workloads); convertErr != nil {
-		return workloads, convertErr
-	}
-
-	return workloads, nil
-}
-
-func convertJsonToWorkload(jsonObj any, workloads *[]workloadinterface.IMetadata) error {
-
-	switch x := jsonObj.(type) {
-	case map[string]any:
-		objects, err := manifestObjectToWorkloads(x)
-		*workloads = append(*workloads, objects...)
-		return err
-	case []any:
+	switch v.Type() {
+	case fastjson.TypeObject:
+		jsonObj := convertFastjsonToMap(v)
+		objects, err := manifestObjectToWorkloads(jsonObj)
+		workloads = append(workloads, objects...)
+		return workloads, err
+	case fastjson.TypeArray:
 		var itemErrs []error
-		for i := range x {
-			if err := convertJsonToWorkload(x[i], workloads); err != nil {
-				itemErrs = append(itemErrs, fmt.Errorf("array item %d: %w", i, err))
+		for i, val := range v.GetArray() {
+			if val.Type() == fastjson.TypeObject {
+				jsonObj := convertFastjsonToMap(val)
+				objects, err := manifestObjectToWorkloads(jsonObj)
+				workloads = append(workloads, objects...)
+				if err != nil {
+					itemErrs = append(itemErrs, fmt.Errorf("array item %d: %w", i, err))
+				}
 			}
 		}
-		return errors.Join(itemErrs...)
+		return workloads, errors.Join(itemErrs...)
+	default:
+		return workloads, errors.New("invalid JSON format: expected object or array")
 	}
-	return nil
 }
+
+func convertFastjsonToMap(v *fastjson.Value) map[string]any {
+	if v == nil || v.Type() != fastjson.TypeObject {
+		return nil
+	}
+
+	m := make(map[string]any)
+	v.GetObject().Visit(func(key []byte, val *fastjson.Value) {
+		m[string(key)] = convertFastjsonValue(val)
+	})
+	return m
+}
+
+func convertFastjsonValue(v *fastjson.Value) any {
+	switch v.Type() {
+	case fastjson.TypeObject:
+		return convertFastjsonToMap(v)
+	case fastjson.TypeArray:
+		arr := v.GetArray()
+		res := make([]any, len(arr))
+		for i, val := range arr {
+			res[i] = convertFastjsonValue(val)
+		}
+		return res
+	case fastjson.TypeString:
+		b, _ := v.StringBytes()
+		return string(b)
+	case fastjson.TypeNumber:
+		b := v.MarshalTo(nil)
+		return json.Number(string(b))
+	case fastjson.TypeTrue:
+		return true
+	case fastjson.TypeFalse:
+		return false
+	case fastjson.TypeNull:
+		return nil
+	default:
+		return nil
+	}
+}
+
+
 
 // manifestObjectToWorkloads normalizes Kubernetes list envelopes before object
 // envelopes are created. Both YAML and JSON readers use it so the accepted
