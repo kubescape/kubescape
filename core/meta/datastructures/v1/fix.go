@@ -13,6 +13,12 @@ type FixInfo struct {
 	// as-is, as it always has been.
 	BasePath             string
 	ContainerProfilePath string // Path to an optional ContainerProfile JSON file
+	// IncludeControls and SkipControls narrow which failed controls are
+	// remediated. Matching is case-insensitive on the control ID, and
+	// SkipControls wins over IncludeControls, mirroring the scan-side
+	// --include-controls/--skip-controls pair.
+	IncludeControls []string
+	SkipControls    []string
 	// OutputDir applies only to cluster scan reports, which have no manifests
 	// to rewrite. When set, one patched manifest per resource is written there;
 	// when empty, the manifests are printed to stdout. It is ignored for

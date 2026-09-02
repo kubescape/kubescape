@@ -16,6 +16,7 @@ type FixHandler struct {
 	fixInfo       *metav1.FixInfo
 	reportObj     *reporthandlingv2.PostureReport
 	localBasePath string
+	controls      controlSelector
 
 	// unfixedControls is populated by PrepareResourcesToFix with every failed
 	// (resource, control) tuple that the fixer cannot or will not auto-remediate.

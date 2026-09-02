@@ -738,6 +738,51 @@ a config omits, so the live `envFrom` survives.
 | `--no-confirm` | Apply without confirmation | `false` |
 | `--skip-user-values` | Skip changes requiring user values | `true` |
 | `--output-dir` | Cluster scans only: write one patched manifest per resource here instead of printing them | *(print to stdout)* |
+| `--include-controls` | Remediate only these control IDs (comma-separated, case-insensitive). Disables `--container-profile` drift remediation — see [selecting controls to fix](#selecting-controls-to-fix) | *(all)* |
+| `--skip-controls` | Leave these control IDs untouched (comma-separated, case-insensitive). Takes precedence over `--include-controls`, and disables `--container-profile` drift remediation | - |
+
+### Selecting controls to fix
+
+By default `kubescape fix` remediates every failed control it can. In a pipeline
+that is rarely what you want: some remediations are safe to apply unattended,
+others need a human. `--include-controls` and `--skip-controls` narrow the run to
+the controls you trust:
+
+```bash
+# Only apply the two remediations this pipeline has signed off on
+kubescape fix results.json --no-confirm --include-controls C-0016,C-0017
+
+# Apply everything except the one that breaks this workload
+kubescape fix results.json --no-confirm --skip-controls C-0055
+```
+
+Matching is case-insensitive on the control ID, and `--skip-controls` wins when a
+control appears in both. Controls outside the selection are left untouched and
+are not listed as unfixed, so the run's counts describe only what you asked for.
+
+A field can be remediated by more than one control, so skipping a control does
+not always leave its field unchanged — another selected control may still set it.
+
+Each run reports how much of the report the selection kept, so the later
+"Fixed N of M" counts are read against the right total:
+
+```
+--include-controls selected 1 of 22 flagged control instances
+Fixed 1 of 1 flagged control instances across 1 file(s).
+```
+
+`--container-profile` drift remediation is skipped while a selection is active,
+and says so. Those fixes come from observed runtime behaviour rather than from a
+control, so nothing attributes them to a selected one — applying them anyway
+would edit the manifest for controls you excluded. Drop the selection flags to
+get profile drift remediation back; behaviour without them is unchanged.
+
+A selection that matches nothing warns rather than fails, since a targeted
+control can legitimately have passed in that report:
+
+```
+--include-controls excluded all 22 flagged control instances; nothing will be remediated
+```
 
 ### Examples
 
