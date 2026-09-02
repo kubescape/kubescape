@@ -58,7 +58,7 @@ require (
 	github.com/mark3labs/mcp-go v0.58.0
 	github.com/maruel/natural v1.3.0
 	github.com/matthyx/go-gitlog v0.0.0-20231005131906-9ffabe3c5bcd
-	github.com/mattn/go-isatty v0.0.21
+	github.com/mattn/go-isatty v0.0.24
 	github.com/mikefarah/yq/v4 v4.29.1
 	github.com/moby/buildkit v0.29.0
 	github.com/open-policy-agent/opa v1.19.0
