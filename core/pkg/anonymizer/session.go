@@ -227,6 +227,30 @@ func transformSession(session *cautils.OPASessionObj, _ *Mapping, transformer Tr
 			session.Report.SummaryDetails.Controls[controlID] = control
 		}
 	}
+
+	if err := transformNamespaceSummaries(session.NamespaceSummaries, transformer); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// transformNamespaceSummaries anonymizes the namespace name in each
+// NamespaceSummary in place. It reuses the "ns" prefix transformResourceMetadata
+// uses for a resource's own namespace, so a namespace gets the same pseudonym
+// here as everywhere else in the report. ClusterScopedNamespace is a
+// Kubescape-internal marker, not a real namespace, so it is left untouched.
+func transformNamespaceSummaries(summaries cautils.NamespaceSummaries, transformer Transformer) error {
+	for i := range summaries {
+		if summaries[i].Namespace == cautils.ClusterScopedNamespace {
+			continue
+		}
+		namespace, err := transformValue(transformer, "ns", summaries[i].Namespace)
+		if err != nil {
+			return err
+		}
+		summaries[i].Namespace = namespace
+	}
 	return nil
 }
 

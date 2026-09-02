@@ -282,6 +282,11 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 		logger.L().Ctx(ctx).Warning("failed to calculate score", helpers.Error(err))
 	}
 
+	// BuildNamespaceSummaries relies on ControlSummary.ComplianceScore for
+	// controls it has no resource for in a given namespace, so it must run
+	// after scorewrapper.Calculate has populated that field.
+	opap.NamespaceSummaries = cautils.BuildNamespaceSummaries(opap.Report.SummaryDetails.Controls, opap.AllResources)
+
 	opap.reweightComplianceScores()
 
 	return processErr
@@ -476,6 +481,11 @@ done:
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
 		logger.L().Ctx(ctx).Warning("failed to calculate score", helpers.Error(err))
 	}
+
+	// BuildNamespaceSummaries relies on ControlSummary.ComplianceScore for
+	// controls it has no resource for in a given namespace, so it must run
+	// after scorewrapper.Calculate has populated that field.
+	opap.NamespaceSummaries = cautils.BuildNamespaceSummaries(opap.Report.SummaryDetails.Controls, opap.AllResources)
 
 	opap.reweightComplianceScores()
 

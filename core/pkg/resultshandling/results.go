@@ -116,21 +116,23 @@ func (rh *ResultsHandler) WriteJson(w io.Writer) error {
 
 	output := struct {
 		*reporthandlingv2.PostureReport
-		SummaryDetails summaryWithEnrichment        `json:"summaryDetails,omitempty"`
-		Results        []resultWithEnrichment       `json:"results,omitempty"`
-		ResourceLabels map[string]map[string]string `json:"resourceLabels,omitempty"`
-		ScanCoverage   *cautils.ScanCoverage        `json:"scanCoverage,omitempty"`
-		ExceptionAudit *cautils.ExceptionAudit      `json:"exceptionAudit,omitempty"`
+		SummaryDetails     summaryWithEnrichment        `json:"summaryDetails,omitempty"`
+		Results            []resultWithEnrichment       `json:"results,omitempty"`
+		ResourceLabels     map[string]map[string]string `json:"resourceLabels,omitempty"`
+		ScanCoverage       *cautils.ScanCoverage        `json:"scanCoverage,omitempty"`
+		ExceptionAudit     *cautils.ExceptionAudit      `json:"exceptionAudit,omitempty"`
+		NamespaceSummaries cautils.NamespaceSummaries   `json:"namespaceSummaries,omitempty"`
 	}{
 		PostureReport: finalizedReport,
 		SummaryDetails: summaryWithEnrichment{
 			SummaryDetails: finalizedReport.SummaryDetails,
 			Controls:       enrichedReport.SummaryDetails.Controls,
 		},
-		Results:        results,
-		ResourceLabels: enrichedReport.ResourceLabels,
-		ScanCoverage:   enrichedReport.ScanCoverage,
-		ExceptionAudit: rh.ScanData.ExceptionAudit,
+		Results:            results,
+		ResourceLabels:     enrichedReport.ResourceLabels,
+		ScanCoverage:       enrichedReport.ScanCoverage,
+		ExceptionAudit:     rh.ScanData.ExceptionAudit,
+		NamespaceSummaries: rh.ScanData.NamespaceSummaries,
 	}
 
 	return json.NewEncoder(w).Encode(&output)

@@ -106,6 +106,12 @@ const (
 	// action-required resources are always listed, and passed resources are
 	// listed in verbose mode.
 	ControlViewType ViewTypes = "control"
+
+	// NamespaceViewType prints the per-namespace compliance rollup: every
+	// control in the scan's policy set is counted toward each namespace's
+	// score, so namespaces are ranked worst-first and stay comparable to one
+	// another and to the cluster-wide score.
+	NamespaceViewType ViewTypes = "namespace"
 )
 
 type PolicyIdentifier struct {

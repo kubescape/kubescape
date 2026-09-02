@@ -116,6 +116,7 @@ type PostureReportWithSeverity struct {
 	ResourceLabels       map[string]map[string]string      `json:"resourceLabels,omitempty"` // map[resourceID]map[labelKey]labelValue - extracted labels from workloads
 	ScanCoverage         *cautils.ScanCoverage             `json:"scanCoverage,omitempty"`
 	ExceptionAudit       *cautils.ExceptionAudit           `json:"exceptionAudit,omitempty"`
+	NamespaceSummaries   cautils.NamespaceSummaries        `json:"namespaceSummaries,omitempty"`
 }
 
 // enrichControlsWithSeverity adds severity field to controls based on scoreFactor
