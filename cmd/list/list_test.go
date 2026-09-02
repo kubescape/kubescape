@@ -72,14 +72,71 @@ func TestGetListCmd_ControlFilterFlags(t *testing.T) {
 }
 
 func TestGetListCmd_ControlFilterFlagsRejectNonControlsTarget(t *testing.T) {
-	listCmd := GetListCmd(&recordingListKubescape{})
-	listCmd.SilenceUsage = true
-	listCmd.SilenceErrors = true
-	listCmd.SetArgs([]string{"frameworks", "--framework", "NSA"})
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr string
+	}{
+		{
+			name:    "framework flag only",
+			args:    []string{"frameworks", "--framework", "NSA"},
+			wantErr: "--framework can only be used with 'list controls'",
+		},
+		{
+			name:    "search flag only",
+			args:    []string{"frameworks", "--search", "container"},
+			wantErr: "--search can only be used with 'list controls'",
+		},
+		{
+			name:    "both framework and search flags",
+			args:    []string{"frameworks", "--framework", "NSA", "--search", "container"},
+			wantErr: "--framework and --search can only be used with 'list controls'",
+		},
+	}
 
-	err := listCmd.Execute()
-	require.Error(t, err)
-	assert.EqualError(t, err, "--framework and --search can only be used with 'list controls'")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			listCmd := GetListCmd(&recordingListKubescape{})
+			listCmd.SilenceUsage = true
+			listCmd.SilenceErrors = true
+			listCmd.SetArgs(tt.args)
+
+			err := listCmd.Execute()
+			require.Error(t, err)
+			assert.EqualError(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestGetListCmd_ControlFilterFlagsAllowsNonControlsWhenUnsetOrWhitespace(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "no filter flags passed",
+			args: []string{"frameworks"},
+		},
+		{
+			name: "whitespace framework and search flags passed",
+			args: []string{"frameworks", "--framework", "   ", "--search", "\t"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := &recordingListKubescape{}
+			listCmd := GetListCmd(recorder)
+			listCmd.SilenceUsage = true
+			listCmd.SilenceErrors = true
+			listCmd.SetArgs(tt.args)
+
+			err := listCmd.Execute()
+			require.NoError(t, err)
+			require.NotNil(t, recorder.received)
+			assert.Equal(t, "frameworks", recorder.received.Target)
+		})
+	}
 }
 
 func TestGetListCmd_ControlFilterFlagMetadata(t *testing.T) {
