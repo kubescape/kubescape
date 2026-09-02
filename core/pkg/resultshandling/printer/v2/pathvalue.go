@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -201,41 +202,123 @@ var secretFieldPatterns = []string{
 	"connectionstring",
 }
 
-// safeFieldNames lists normalized (lowercased, separator-stripped)
-// Kubernetes API field names that would otherwise match a secretFieldPatterns
-// substring but do not themselves hold a credential value:
-//   - automountServiceAccountToken and serviceAccountToken are a boolean
-//     toggle (PodSpec) and a projected-volume source's configuration block
-//     (ServiceAccountTokenProjection) respectively, not token content.
-//   - secretName references a Secret object by name (SecretVolumeSource); the
-//     value that object holds - not this field - is sensitive, and that
-//     object is already redacted separately by kind ("Secret").
-//
-// A word-boundary-aware match (splitting the field name at camelCase/
-// snake_case/kebab-case boundaries and requiring a whole-word match) was
-// considered instead of this list, but it would not actually distinguish any
-// of these: "Token" and "Secret" are complete, genuine words in each of
-// them, not substring artifacts spanning two unrelated words - the same
-// property that makes them look credential-shaped by name is what a
-// word-based check would also key on. Excluding them by exact normalized
-// name is the more honest fix for what is fundamentally a semantic
-// distinction (a field naming or describing a credential vs. a field that
-// holds one), not a tokenization one.
-var safeFieldNames = map[string]struct{}{
-	"automountserviceaccounttoken": {},
-	"serviceaccounttoken":          {},
-	"secretname":                   {},
+// podSpecKinds are the built-in kinds whose schema carries a PodSpec, either
+// directly (Pod) or through a pod template. Depending on the kind a PodSpec
+// field sits at spec., spec.template.spec., or
+// spec.jobTemplate.spec.template.spec., so the rules below match a field's
+// immediate parents rather than a fully anchored path.
+var podSpecKinds = []string{
+	"Pod", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet",
+	"ReplicationController", "Job", "CronJob",
 }
 
-// hasSecretShapedFieldName reports whether path's final segment looks like
-// a credential field name (e.g. "apiKey", "db_password", "clientSecret"),
-// independent of resource kind. Separators are stripped before matching so
-// API_KEY, api-key, and apiKey are all treated the same way. This only
-// looks at the field name in the path itself - it does not correlate a
-// generic field (e.g. a container env var's "value") with a sibling field
-// that names it (e.g. that same env var's "name"), which is a separate,
-// harder problem left out of scope here.
-func hasSecretShapedFieldName(path string) bool {
+// safeFieldRule scopes a safe-field exception to one documented Kubernetes
+// location: the kinds whose schema defines the field, and the parent segments
+// it sits directly under. parents is matched as a suffix, so a PodSpec field
+// is recognized through any pod-template nesting; an empty parents means the
+// field sits at the object root.
+type safeFieldRule struct {
+	kinds   []string
+	parents []string
+}
+
+// safeFieldRules lists Kubernetes API fields whose names match a
+// secretFieldPatterns substring but which do not themselves hold a
+// credential. Each is keyed by its normalized name and scoped to where that
+// field genuinely exists, because the exception is a statement about a
+// specific API field and not about a field name: a CRD is free to define
+// spec.serviceAccountToken as an actual credential, and excusing it on the
+// strength of its name alone would reopen the very kind-blind hole this file
+// exists to close. Anything outside these locations - a custom resource, or a
+// core kind carrying the name somewhere its schema does not define it - falls
+// through to the pattern match below and is redacted.
+//
+// A word-boundary-aware match (splitting at camelCase/snake_case/kebab-case
+// boundaries and requiring whole-word membership) was considered instead of
+// scoping, but it cannot separate these at all: "Token" and "Secret" are
+// complete, genuine words in each of them, not substring artifacts spanning
+// two unrelated words. The distinction is semantic - a field naming or
+// describing a credential versus a field holding one - so it is drawn by
+// location, which is where that meaning actually lives.
+var safeFieldRules = map[string][]safeFieldRule{
+	// A boolean toggle on PodSpec, and on ServiceAccount as the default for
+	// pods using it - not token content either way.
+	"automountserviceaccounttoken": {
+		{kinds: podSpecKinds, parents: []string{"spec"}},
+		{kinds: []string{"ServiceAccount"}},
+	},
+	// A projected volume source's configuration block
+	// (ServiceAccountTokenProjection). It describes a token the kubelet will
+	// mint at mount time; the block itself carries no credential.
+	"serviceaccounttoken": {
+		{kinds: podSpecKinds, parents: []string{"projected", "sources"}},
+	},
+	// That block's requested lifetime, a number of seconds.
+	"tokenexpirationseconds": {
+		{kinds: podSpecKinds, parents: []string{"sources", "serviceAccountToken"}},
+	},
+	// A reference to a Secret by name (SecretVolumeSource, and Ingress TLS).
+	// The referenced object holds the sensitive value, and that object is
+	// redacted separately by kind ("Secret").
+	"secretname": {
+		{kinds: podSpecKinds, parents: []string{"volumes", "secret"}},
+		{kinds: []string{"Ingress"}, parents: []string{"tls"}},
+	},
+}
+
+// normalizeFieldName lowercases a path segment's key and strips separators, so
+// API_KEY, api-key, and apiKey all normalize to the same form.
+func normalizeFieldName(key string) string {
+	name := strings.ToLower(key)
+	for _, sep := range []string{"_", "-", ".", " "} {
+		name = strings.ReplaceAll(name, sep, "")
+	}
+	return name
+}
+
+// matchesSafeField reports whether kind, and the parents of a field named
+// name, place that field at one of the documented locations in
+// safeFieldRules.
+func matchesSafeField(kind, name string, parents []pathSegment) bool {
+	for _, rule := range safeFieldRules[name] {
+		if !slices.Contains(rule.kinds, kind) {
+			continue
+		}
+		if len(rule.parents) == 0 {
+			// The field is defined at the object root only.
+			if len(parents) == 0 {
+				return true
+			}
+			continue
+		}
+		if len(parents) < len(rule.parents) {
+			continue
+		}
+		tail := parents[len(parents)-len(rule.parents):]
+		matched := true
+		for i, want := range rule.parents {
+			if !strings.EqualFold(tail[i].key, want) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+// hasSecretShapedFieldName reports whether path's final segment looks like a
+// credential field name (e.g. "apiKey", "db_password", "clientSecret"). The
+// match itself is kind-independent - a hardcoded secret can live in a plain
+// field on any resource - but kind is still consulted, to place a field
+// against safeFieldRules before concluding it is credential-shaped. This only
+// looks at the field name in the path itself: it does not correlate a generic
+// field (e.g. a container env var's "value") with a sibling field that names
+// it (e.g. that same env var's "name"), which is a separate, harder problem
+// left out of scope here.
+func hasSecretShapedFieldName(kind, path string) bool {
 	if i := strings.Index(path, "="); i >= 0 {
 		path = path[:i]
 	}
@@ -243,11 +326,8 @@ func hasSecretShapedFieldName(path string) bool {
 	if len(segments) == 0 {
 		return false
 	}
-	name := strings.ToLower(segments[len(segments)-1].key)
-	for _, sep := range []string{"_", "-", ".", " "} {
-		name = strings.ReplaceAll(name, sep, "")
-	}
-	if _, safe := safeFieldNames[name]; safe {
+	name := normalizeFieldName(segments[len(segments)-1].key)
+	if matchesSafeField(kind, name, segments[:len(segments)-1]) {
 		return false
 	}
 	for _, pattern := range secretFieldPatterns {
@@ -284,7 +364,7 @@ func isSensitivePath(kind, path string) bool {
 	if isContainerEnvValuePath(trimmed) {
 		return true
 	}
-	return hasSecretShapedFieldName(path)
+	return hasSecretShapedFieldName(kind, path)
 }
 
 // isContainerEnvValuePath reports whether path selects env[N].value
