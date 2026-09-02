@@ -91,6 +91,10 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				return err
 			}
 
+			// The invocation is valid from this point on. Runtime and result-gate
+			// failures should not print command usage.
+			cmd.SilenceUsage = true
+
 			results, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
 			if err != nil {
 				return err

@@ -91,6 +91,10 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 				UseDefaultMatchers: scanInfo.UseDefaultMatchers,
 			}
 
+			// The invocation is valid from this point on. Runtime and result-gate
+			// failures should not print command usage.
+			cmd.SilenceUsage = true
+
 			exceedsSeverityThreshold, err := ks.ScanImageContext(ctx, imgScanInfo, scanInfo)
 			if err != nil {
 				return err

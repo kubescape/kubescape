@@ -142,6 +142,10 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 			scanInfo.View = requestedView
 
+			// The invocation is valid from this point on. Runtime and result-gate
+			// failures should not print command usage.
+			cmd.SilenceUsage = true
+
 			if policyIdentifiers := contractPolicyIdentifiers(selectedContract); len(policyIdentifiers) > 0 {
 				setContractScanTarget(args, &scanInfo)
 				return securityScan(scanInfo, ks, policyIdentifiers)
