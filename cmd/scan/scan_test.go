@@ -534,19 +534,20 @@ func TestGetScanCommand_PersistentFlagValidation(t *testing.T) {
 // TestGetScanCommand_KubeContextsRejectedWhereUnsupported is a regression
 // test for a real review finding on #3438: --kube-contexts is registered on
 // scanCmd's persistent flags, so every subcommand and --view inherits it,
-// but only the default security view's securityScan actually calls
-// fleetScan. Before this fix, every other combination silently accepted
-// the flag and scanned only one context - the same silently-wrong-cluster
-// failure mode #3217/#3218 closed for sequential scans, recurring as "the
-// flag had no effect."
+// but only the default security view's securityScan (and, since #3439, the
+// framework/control/workload subcommands) actually call fleetScan. Before
+// this fix, every other combination silently accepted the flag and scanned
+// only one context - the same silently-wrong-cluster failure mode
+// #3217/#3218 closed for sequential scans, recurring as "the flag had no
+// effect." scan image and the resource/control views remain genuinely
+// unsupported; framework/control/workload moved to
+// TestGetScanCommand_KubeContextsAcceptedForFrameworkControlWorkload below
+// once #3439 added real fleet support for them.
 func TestGetScanCommand_KubeContextsRejectedWhereUnsupported(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
 	}{
-		{name: "scan control", args: []string{"control", "C-0058", "--kube-contexts=ctx-a,ctx-b"}},
-		{name: "scan framework", args: []string{"framework", "nsa", "--kube-contexts=ctx-a,ctx-b"}},
-		{name: "scan workload", args: []string{"workload", "Deployment/nginx", "--kube-contexts=ctx-a,ctx-b"}},
 		{name: "scan image", args: []string{"image", "nginx:latest", "--kube-contexts=ctx-a,ctx-b"}},
 		{name: "scan --view=resource", args: []string{"--view=resource", "--kube-contexts=ctx-a,ctx-b"}},
 		{name: "scan --view=control", args: []string{"--view=control", "--kube-contexts=ctx-a,ctx-b"}},
@@ -579,6 +580,41 @@ func TestGetScanCommand_KubeContextsAcceptedForDefaultSecurityView(t *testing.T)
 	// the guard's error text must not appear here.
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "is not yet supported")
+}
+
+// TestGetScanCommand_KubeContextsAcceptedForFrameworkControlWorkload proves,
+// through the real CLI entrypoint (GetScanCommand -> cmd.Execute, which
+// exercises scanCmd's PersistentPreRunE and therefore
+// validateKubeContextsSupported for real), that framework/control/workload
+// now reach fleetScan instead of being rejected. The dispatch tests in
+// fleetscan_test.go call each subcommand's RunE directly and so never
+// exercise PersistentPreRunE at all - they would keep passing even if
+// validateKubeContextsSupported still rejected these three subcommands,
+// which is exactly what happened before "framework", "control", "workload"
+// were added to its switch.
+func TestGetScanCommand_KubeContextsAcceptedForFrameworkControlWorkload(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "scan control", args: []string{"control", "C-0058", "--kube-contexts=ctx-a,ctx-b", "--output=report.json"}},
+		{name: "scan framework", args: []string{"framework", "nsa", "--kube-contexts=ctx-a,ctx-b", "--output=report.json"}},
+		{name: "scan workload", args: []string{"workload", "Deployment/nginx", "--kube-contexts=ctx-a,ctx-b", "--output=report.json"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &scanCallCounter{}
+			cmd := GetScanCommand(ks)
+			cmd.SilenceUsage = true
+			cmd.SetArgs(tt.args)
+
+			err := cmd.Execute()
+
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), "is not yet supported")
+			assert.Equal(t, 2, ks.calls, "ScanContext should be reached once per requested context")
+		})
+	}
 }
 
 func TestGetScanCommand_ScanTimeoutFlagRegistered(t *testing.T) {

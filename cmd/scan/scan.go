@@ -382,7 +382,7 @@ func deriveTimeoutContext(scanInfo *cautils.ScanInfo, ks meta.IKubescape) (conte
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
 	if len(scanInfo.KubeContexts) > 0 {
-		return fleetScan(scanInfo, ks, policyIdentifiers)
+		return fleetScan(scanInfo, ks, policyIdentifiers, runSecurityScan)
 	}
 
 	ctx, cancel := deriveTimeoutContext(&scanInfo, ks)

@@ -7,8 +7,10 @@ import (
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/meta"
 	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -39,6 +41,16 @@ func TestPerContextOutputPath(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+// scanContextOnlyRunner is a minimal fleetRunner used by tests that exercise
+// fleetScan's own loop/validation behavior in isolation, without pulling in
+// runSecurityScan/runFrameworkScan/runControlScan/runWorkloadScan's
+// threshold-enforcement logic (covered separately by each command's own
+// tests).
+func scanContextOnlyRunner(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
+	_, err := ks.ScanContext(ctx, scanInfo, policyIdentifiers)
+	return err
 }
 
 // TestPerContextOutputPaths_RejectsCollidingContexts is a regression test
@@ -76,11 +88,29 @@ func TestFleetScan_RejectsCollidingContextsBeforeScanningAny(t *testing.T) {
 		ScanType:     cautils.ScanTypeCluster,
 	}
 
-	err := fleetScan(scanInfo, ks, nil)
+	err := fleetScan(scanInfo, ks, nil, scanContextOnlyRunner)
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "colliding")
 	assert.Empty(t, ks.callsOutputs, "no context should be scanned once a collision is detected up front")
+}
+
+// TestValidateKubeContextsSupported_FrameworkControlWorkloadAllowed guards
+// against a real regression this PR's own dispatch tests can't catch: they
+// all call cmd.RunE directly, bypassing scanCmd's PersistentPreRunE, which
+// is where validateKubeContextsSupported actually runs against a real CLI
+// invocation. Before framework/control/workload were added to its switch,
+// validateKubeContextsSupported's default case rejected --kube-contexts for
+// exactly the three subcommands this PR exists to support, breaking the
+// feature end to end despite every dispatch test passing.
+func TestValidateKubeContextsSupported_FrameworkControlWorkloadAllowed(t *testing.T) {
+	for _, name := range []string{"framework", "control", "workload"} {
+		cmd := &cobra.Command{Use: name}
+		scanInfo := &cautils.ScanInfo{KubeContexts: []string{"ctx-a"}}
+		if err := validateKubeContextsSupported(cmd, scanInfo); err != nil {
+			t.Errorf("cmd.Name()=%q: validateKubeContextsSupported returned error, want nil: %v", name, err)
+		}
+	}
 }
 
 func TestFleetScan_RequiresClusterScanningContext(t *testing.T) {
@@ -90,7 +120,7 @@ func TestFleetScan_RequiresClusterScanningContext(t *testing.T) {
 		InputPatterns: []string{"."}, // makes GetScanningContext() resolve to a non-cluster context
 	}
 
-	err := fleetScan(scanInfo, &mocks.MockIKubescape{}, nil)
+	err := fleetScan(scanInfo, &mocks.MockIKubescape{}, nil, scanContextOnlyRunner)
 	require.ErrorContains(t, err, "live-cluster scan")
 }
 
@@ -99,7 +129,7 @@ func TestFleetScan_RequiresOutput(t *testing.T) {
 		KubeContexts: []string{"ctx-a"},
 	}
 
-	err := fleetScan(scanInfo, &mocks.MockIKubescape{}, nil)
+	err := fleetScan(scanInfo, &mocks.MockIKubescape{}, nil, scanContextOnlyRunner)
 	require.ErrorContains(t, err, "--output")
 }
 
@@ -134,7 +164,7 @@ func TestFleetScan_ScansEveryContextAndDerivesDistinctOutputPaths(t *testing.T) 
 		ScanType:     cautils.ScanTypeCluster,
 	}
 
-	err := fleetScan(scanInfo, ks, nil)
+	err := fleetScan(scanInfo, ks, nil, scanContextOnlyRunner)
 
 	require.NoError(t, err)
 	assert.Equal(t, []string{"report.ctx-a.json", "report.ctx-b.json", "report.ctx-c.json"}, ks.callsOutputs)
@@ -152,7 +182,7 @@ func TestFleetScan_ContinuesPastFailingContextAndReportsIt(t *testing.T) {
 		ScanType:     cautils.ScanTypeCluster,
 	}
 
-	err := fleetScan(scanInfo, ks, nil)
+	err := fleetScan(scanInfo, ks, nil, scanContextOnlyRunner)
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "1 of 3 context(s) failed")
@@ -174,7 +204,7 @@ func TestFleetScan_EachContextGetsAFreshScanID(t *testing.T) {
 	}
 	scanInfo.ScanID = "should-not-be-reused"
 
-	require.NoError(t, fleetScan(scanInfo, ks, nil))
+	require.NoError(t, fleetScan(scanInfo, ks, nil, scanContextOnlyRunner))
 
 	require.Len(t, scanIDs, 2)
 	assert.NotEqual(t, "should-not-be-reused", scanIDs[0])
@@ -200,4 +230,54 @@ func (m *fleetIDTrackingKubescape) ScanContext(_ context.Context, scanInfo *caut
 	results := resultshandling.NewResultsHandler(nil, nil, &fakePrinter{})
 	results.SetData(cautils.NewOPASessionObjMock())
 	return results, nil
+}
+
+// TestGetFrameworkCmd_KubeContextsDispatchesToFleetScan, TestGetControlCmd_*,
+// and TestGetWorkloadCmd_* below exercise each command's real RunE end to
+// end with --kube-contexts set, proving the dispatch added alongside
+// runFrameworkScan/runControlScan/runWorkloadScan actually reaches
+// fleetScan and scans every requested context - not just that fleetScan
+// itself works in isolation (covered above) or that the single-context path
+// still works (covered by each command's own pre-existing tests).
+
+func TestGetFrameworkCmd_KubeContextsDispatchesToFleetScan(t *testing.T) {
+	ks := &fleetTrackingKubescape{}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"ctx-a", "ctx-b"},
+		Output:       "report.json",
+	}
+
+	cmd := getFrameworkCmd(ks, &scanInfo)
+	err := cmd.RunE(&cobra.Command{}, []string{"nsa"})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"report.ctx-a.json", "report.ctx-b.json"}, ks.callsOutputs)
+}
+
+func TestGetControlCmd_KubeContextsDispatchesToFleetScan(t *testing.T) {
+	ks := &fleetTrackingKubescape{}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"ctx-a", "ctx-b"},
+		Output:       "report.json",
+	}
+
+	cmd := getControlCmd(ks, &scanInfo)
+	err := cmd.RunE(&cobra.Command{}, []string{"C-0058"})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"report.ctx-a.json", "report.ctx-b.json"}, ks.callsOutputs)
+}
+
+func TestGetWorkloadCmd_KubeContextsDispatchesToFleetScan(t *testing.T) {
+	ks := &fleetTrackingKubescape{}
+	scanInfo := cautils.ScanInfo{
+		KubeContexts: []string{"ctx-a", "ctx-b"},
+		Output:       "report.json",
+	}
+
+	cmd := getWorkloadCmd(ks, &scanInfo)
+	err := cmd.RunE(&cobra.Command{}, []string{"Deployment/nginx"})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"report.ctx-a.json", "report.ctx-b.json"}, ks.callsOutputs)
 }
