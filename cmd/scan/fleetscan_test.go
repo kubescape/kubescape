@@ -95,6 +95,24 @@ func TestFleetScan_RejectsCollidingContextsBeforeScanningAny(t *testing.T) {
 	assert.Empty(t, ks.callsOutputs, "no context should be scanned once a collision is detected up front")
 }
 
+// TestValidateKubeContextsSupported_FrameworkControlWorkloadAllowed guards
+// against a real regression this PR's own dispatch tests can't catch: they
+// all call cmd.RunE directly, bypassing scanCmd's PersistentPreRunE, which
+// is where validateKubeContextsSupported actually runs against a real CLI
+// invocation. Before framework/control/workload were added to its switch,
+// validateKubeContextsSupported's default case rejected --kube-contexts for
+// exactly the three subcommands this PR exists to support, breaking the
+// feature end to end despite every dispatch test passing.
+func TestValidateKubeContextsSupported_FrameworkControlWorkloadAllowed(t *testing.T) {
+	for _, name := range []string{"framework", "control", "workload"} {
+		cmd := &cobra.Command{Use: name}
+		scanInfo := &cautils.ScanInfo{KubeContexts: []string{"ctx-a"}}
+		if err := validateKubeContextsSupported(cmd, scanInfo); err != nil {
+			t.Errorf("cmd.Name()=%q: validateKubeContextsSupported returned error, want nil: %v", name, err)
+		}
+	}
+}
+
 func TestFleetScan_RequiresClusterScanningContext(t *testing.T) {
 	scanInfo := cautils.ScanInfo{
 		KubeContexts:  []string{"ctx-a"},
