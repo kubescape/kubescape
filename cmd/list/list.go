@@ -101,11 +101,20 @@ func flagValidationList(listPolicies *v1.ListPolicies) error {
 }
 
 func validateControlListFilters(target string, filters v1.ControlListFilters) error {
-	if strings.TrimSpace(filters.Framework) == "" && strings.TrimSpace(filters.Search) == "" {
+	hasFramework := strings.TrimSpace(filters.Framework) != ""
+	hasSearch := strings.TrimSpace(filters.Search) != ""
+
+	if !hasFramework && !hasSearch {
 		return nil
 	}
 	if target != "controls" {
-		return fmt.Errorf("--framework and --search can only be used with 'list controls'")
+		if hasFramework && hasSearch {
+			return fmt.Errorf("--framework and --search can only be used with 'list controls'")
+		}
+		if hasFramework {
+			return fmt.Errorf("--framework can only be used with 'list controls'")
+		}
+		return fmt.Errorf("--search can only be used with 'list controls'")
 	}
 	return nil
 }
