@@ -90,6 +90,16 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			}
 
 			if len(scanInfo.KubeContexts) > 0 {
+				if _, err := validateFleetScanInvocation(scanInfo); err != nil {
+					return err
+				}
+			}
+
+			// The invocation is valid from this point on. Runtime and result-gate
+			// failures should not print command usage.
+			cmd.SilenceUsage = true
+
+			if len(scanInfo.KubeContexts) > 0 {
 				return fleetScan(*scanInfo, ks, policyIdentifiers, runControlScan)
 			}
 

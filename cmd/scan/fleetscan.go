@@ -75,15 +75,22 @@ type fleetRunner func(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.I
 // error - and therefore its exit code - reflects whether any context
 // failed, matching the single-context command's existing all-or-nothing
 // exit-code semantics from the caller's point of view.
-func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) error {
-	if baseScanInfo.GetScanningContext() != cautils.ContextCluster {
-		return fmt.Errorf("--kube-contexts requires a live-cluster scan: it selects which cluster to connect to, so it can't be combined with scanning local files/directories")
+// validateFleetScanInvocation checks the CLI requirements for --kube-contexts
+// before a fleet scan starts: live-cluster only, non-empty --output, and no
+// colliding per-context output paths. Call sites that set SilenceUsage after
+// validation use this so invalid fleet invocations still print usage.
+func validateFleetScanInvocation(scanInfo *cautils.ScanInfo) (map[string]string, error) {
+	if scanInfo.GetScanningContext() != cautils.ContextCluster {
+		return nil, fmt.Errorf("--kube-contexts requires a live-cluster scan: it selects which cluster to connect to, so it can't be combined with scanning local files/directories")
 	}
-	if strings.TrimSpace(baseScanInfo.Output) == "" {
-		return fmt.Errorf("--kube-contexts requires --output: each context's report is written to its own file, derived from --output, since only one context's results can be printed to stdout at a time")
+	if strings.TrimSpace(scanInfo.Output) == "" {
+		return nil, fmt.Errorf("--kube-contexts requires --output: each context's report is written to its own file, derived from --output, since only one context's results can be printed to stdout at a time")
 	}
+	return perContextOutputPaths(scanInfo.Output, scanInfo.KubeContexts)
+}
 
-	outputPaths, err := perContextOutputPaths(baseScanInfo.Output, baseScanInfo.KubeContexts)
+func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) error {
+	outputPaths, err := validateFleetScanInvocation(&baseScanInfo)
 	if err != nil {
 		return err
 	}

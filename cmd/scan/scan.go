@@ -144,11 +144,27 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 			if policyIdentifiers := contractPolicyIdentifiers(selectedContract); len(policyIdentifiers) > 0 {
 				setContractScanTarget(args, &scanInfo)
+				if len(scanInfo.KubeContexts) > 0 {
+					if _, err := validateFleetScanInvocation(&scanInfo); err != nil {
+						return err
+					}
+				}
+				// The invocation is valid from this point on. Runtime and result-gate
+				// failures should not print command usage.
+				cmd.SilenceUsage = true
 				return securityScan(scanInfo, ks, policyIdentifiers)
 			}
 
 			if scanInfo.View == string(cautils.SecurityViewType) {
 				policyIdentifiers := setSecurityViewScanInfo(args, &scanInfo)
+				if len(scanInfo.KubeContexts) > 0 {
+					if _, err := validateFleetScanInvocation(&scanInfo); err != nil {
+						return err
+					}
+				}
+				// The invocation is valid from this point on. Runtime and result-gate
+				// failures should not print command usage.
+				cmd.SilenceUsage = true
 
 				if err := securityScan(scanInfo, ks, policyIdentifiers); err != nil {
 					return err
