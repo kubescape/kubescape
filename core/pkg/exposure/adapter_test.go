@@ -128,15 +128,15 @@ func TestFromUnstructuredGatewayAPI_DecodesHTTPRouteAndGateway(t *testing.T) {
 		gw.GetID():    gw,
 	}
 
-	httpRoutes, gateways, errs := FromUnstructuredGatewayAPI(resources)
+	routes, gateways, errs := FromUnstructuredGatewayAPI(resources)
 
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errs: %v", errs)
 	}
-	if len(httpRoutes) != 1 {
-		t.Fatalf("httpRoutes = %+v, want one", httpRoutes)
+	if len(routes) != 1 {
+		t.Fatalf("routes = %+v, want one", routes)
 	}
-	r := httpRoutes[0]
+	r := routes[0]
 	if r.Namespace != "ns" || r.Name != "route" || len(r.ParentRefs) != 1 || r.ParentRefs[0].Name != "gw" {
 		t.Errorf("route decoded incorrectly: %+v", r)
 	}
@@ -171,9 +171,52 @@ func TestFromUnstructuredGatewayAPI_IgnoresOtherKinds(t *testing.T) {
 	})
 	resources := map[string]workloadinterface.IMetadata{pod.GetID(): pod}
 
-	httpRoutes, gateways, errs := FromUnstructuredGatewayAPI(resources)
-	if len(httpRoutes) != 0 || len(gateways) != 0 || len(errs) != 0 {
-		t.Errorf("httpRoutes=%v gateways=%v errs=%v, want all empty", httpRoutes, gateways, errs)
+	routes, gateways, errs := FromUnstructuredGatewayAPI(resources)
+	if len(routes) != 0 || len(gateways) != 0 || len(errs) != 0 {
+		t.Errorf("routes=%v gateways=%v errs=%v, want all empty", routes, gateways, errs)
+	}
+}
+
+// TestFromUnstructuredGatewayAPI_DecodesGRPCRoute verifies GRPCRoute is
+// decoded through the same route model as HTTPRoute, with the kind
+// attributed so exposure paths can be labeled GRPCRoute.
+func TestFromUnstructuredGatewayAPI_DecodesGRPCRoute(t *testing.T) {
+	route := unstructuredResource(map[string]any{
+		"apiVersion": "gateway.networking.k8s.io/v1",
+		"kind":       "GRPCRoute",
+		"metadata":   map[string]any{"name": "grpc-route", "namespace": "ns"},
+		"spec": map[string]any{
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"hostnames":  []any{"grpc.example.com"},
+			"rules": []any{
+				map[string]any{"backendRefs": []any{map[string]any{"name": "app"}}},
+			},
+		},
+	})
+
+	routes, gateways, errs := FromUnstructuredGatewayAPI(map[string]workloadinterface.IMetadata{route.GetID(): route})
+
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errs: %v", errs)
+	}
+	if len(gateways) != 0 {
+		t.Errorf("gateways = %+v, want none", gateways)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("routes = %+v, want one", routes)
+	}
+	r := routes[0]
+	if r.Kind != "GRPCRoute" {
+		t.Errorf("Kind = %q, want GRPCRoute", r.Kind)
+	}
+	if r.Namespace != "ns" || r.Name != "grpc-route" || len(r.ParentRefs) != 1 || r.ParentRefs[0].Name != "gw" {
+		t.Errorf("route decoded incorrectly: %+v", r)
+	}
+	if len(r.Hostnames) != 1 || r.Hostnames[0] != "grpc.example.com" {
+		t.Errorf("hostnames decoded incorrectly: %v", r.Hostnames)
+	}
+	if len(r.Rules) != 1 || len(r.Rules[0].BackendRefs) != 1 || r.Rules[0].BackendRefs[0].Name != "app" {
+		t.Errorf("backendRefs decoded incorrectly: %+v", r.Rules)
 	}
 }
 
@@ -197,9 +240,9 @@ func TestFromUnstructuredGatewayAPI_MalformedHTTPRouteIsSkippedNotFatal(t *testi
 		bad.GetID():  bad,
 	}
 
-	httpRoutes, _, errs := FromUnstructuredGatewayAPI(resources)
-	if len(httpRoutes) != 1 || httpRoutes[0].Name != "good" {
-		t.Fatalf("expected the well-formed HTTPRoute to still decode, got %+v", httpRoutes)
+	routes, _, errs := FromUnstructuredGatewayAPI(resources)
+	if len(routes) != 1 || routes[0].Name != "good" {
+		t.Fatalf("expected the well-formed HTTPRoute to still decode, got %+v", routes)
 	}
 	if len(errs) != 1 {
 		t.Fatalf("expected exactly one decode error, got %d: %v", len(errs), errs)

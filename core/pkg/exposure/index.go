@@ -9,13 +9,13 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 )
 
-// Index indexes a cluster's Service, Ingress, HTTPRoute, Gateway, and
-// Namespace objects for repeated exposure queries against the same
-// snapshot.
+// Index indexes a cluster's Service, Ingress, Gateway API route
+// (HTTPRoute/GRPCRoute), Gateway, and Namespace objects for repeated
+// exposure queries against the same snapshot.
 type Index struct {
 	services         map[ServiceRef]*corev1.Service
 	ingressesByNS    map[string][]*networkingv1.Ingress
-	httpRoutesByNS   map[string][]*httpRoute
+	routesByNS       map[string][]*gatewayRoute
 	gateways         map[ServiceRef]*gateway // keyed the same shape as ServiceRef: namespace+name
 	namespacesByName map[string]NamespaceInfo
 }
@@ -23,13 +23,13 @@ type Index struct {
 // NewIndex builds an Index from a cluster's (or a query's) collected
 // objects. A nil slice for any parameter is treated as "none collected,"
 // not an error -- a cluster without the Gateway API installed simply has no
-// httpRoutes/gateways to pass, and every query still works, just without
+// routes/gateways to pass, and every query still works, just without
 // that exposure mechanism ever matching.
-func NewIndex(services []corev1.Service, ingresses []networkingv1.Ingress, httpRoutes []httpRoute, gateways []gateway, namespaces []NamespaceInfo) *Index {
+func NewIndex(services []corev1.Service, ingresses []networkingv1.Ingress, routes []gatewayRoute, gateways []gateway, namespaces []NamespaceInfo) *Index {
 	idx := &Index{
 		services:         make(map[ServiceRef]*corev1.Service, len(services)),
 		ingressesByNS:    make(map[string][]*networkingv1.Ingress),
-		httpRoutesByNS:   make(map[string][]*httpRoute),
+		routesByNS:       make(map[string][]*gatewayRoute),
 		gateways:         make(map[ServiceRef]*gateway, len(gateways)),
 		namespacesByName: make(map[string]NamespaceInfo, len(namespaces)),
 	}
@@ -42,9 +42,9 @@ func NewIndex(services []corev1.Service, ingresses []networkingv1.Ingress, httpR
 		ing := &ingresses[i]
 		idx.ingressesByNS[ing.Namespace] = append(idx.ingressesByNS[ing.Namespace], ing)
 	}
-	for i := range httpRoutes {
-		r := &httpRoutes[i]
-		idx.httpRoutesByNS[r.Namespace] = append(idx.httpRoutesByNS[r.Namespace], r)
+	for i := range routes {
+		r := &routes[i]
+		idx.routesByNS[r.Namespace] = append(idx.routesByNS[r.Namespace], r)
 	}
 	for i := range gateways {
 		g := &gateways[i]
@@ -64,7 +64,7 @@ func NewIndex(services []corev1.Service, ingresses []networkingv1.Ingress, httpR
 // exposes the Service -- it is only reachable from inside the cluster (or
 // not collected/does not exist at all, which this function cannot tell
 // apart from "exists but not exposed"). unclear=true means paths must NOT
-// be read as a confirmed all-clear: a cross-namespace HTTPRoute backendRef
+// be read as a confirmed all-clear: a cross-namespace route backendRef
 // names this Service, and whether that reference is authorized (via a
 // ReferenceGrant this package does not collect or evaluate -- see the
 // package doc comment) is genuinely unknown.
@@ -88,27 +88,39 @@ func (idx *Index) ServiceExposure(ref ServiceRef) (paths []ExposurePath, unclear
 		paths = append(paths, ingressPathsFor(ing, ref.Name)...)
 	}
 
-	for _, route := range idx.httpRoutesByNS[ref.Namespace] {
+	for _, route := range idx.routesByNS[ref.Namespace] {
 		if !idx.routeAttachesToAGateway(route) {
 			continue
 		}
-		if !httpRouteReferencesService(route, ref) {
+		if !routeReferencesService(route, ref) {
 			continue
 		}
 		source := fmt.Sprintf("%s/%s", route.Namespace, route.Name)
 		if len(route.Hostnames) == 0 {
-			paths = append(paths, ExposurePath{Kind: ExposureHTTPRoute, Source: source})
+			paths = append(paths, ExposurePath{Kind: routeExposureKind(route.Kind), Source: source})
 			continue
 		}
 		for _, host := range route.Hostnames {
-			paths = append(paths, ExposurePath{Kind: ExposureHTTPRoute, Source: source, Host: host})
+			paths = append(paths, ExposurePath{Kind: routeExposureKind(route.Kind), Source: source, Host: host})
 		}
 	}
 
 	return paths, idx.crossNamespaceBackendRefIsUnmodeled(ref)
 }
 
-// crossNamespaceBackendRefIsUnmodeled reports whether some HTTPRoute this
+// routeExposureKind maps a Gateway API route kind to the ExposureKind that
+// attributes its paths. Unrecognized kinds (possible only if a future
+// Gateway API route kind is decoded before this mapping learns it) fall
+// back to ExposureHTTPRoute, keeping the conservative-report-a-path
+// posture of the rest of the package.
+func routeExposureKind(routeKind string) ExposureKind {
+	if routeKind == "GRPCRoute" {
+		return ExposureGRPCRoute
+	}
+	return ExposureHTTPRoute
+}
+
+// crossNamespaceBackendRefIsUnmodeled reports whether some route this
 // Index was given, living outside ref's namespace and admitted by at least
 // one Gateway, explicitly names ref as a backend via backendRef.namespace.
 // That is a real, working, externally-reachable path when a matching
@@ -116,7 +128,7 @@ func (idx *Index) ServiceExposure(ref ServiceRef) (paths []ExposurePath, unclear
 // does not collect or evaluate (see the package doc comment) -- so its
 // presence must not be silently folded into a confirmed "not exposed".
 func (idx *Index) crossNamespaceBackendRefIsUnmodeled(ref ServiceRef) bool {
-	for ns, routes := range idx.httpRoutesByNS {
+	for ns, routes := range idx.routesByNS {
 		if ns == ref.Namespace {
 			continue
 		}
@@ -164,13 +176,13 @@ func backendNamesService(backend *networkingv1.IngressBackend, serviceName strin
 	return backend != nil && backend.Service != nil && backend.Service.Name == serviceName
 }
 
-// httpRouteReferencesService reports whether any rule in route sends
+// routeReferencesService reports whether any rule in route sends
 // traffic to ref. A backendRef with no Namespace defaults to the route's
 // own namespace, per Gateway API's own defaulting rules -- this package
 // does not model a backendRef reaching into another namespace via a
 // ReferenceGrant, since that requires collecting and evaluating a third
 // resource kind this Index is not given.
-func httpRouteReferencesService(route *httpRoute, ref ServiceRef) bool {
+func routeReferencesService(route *gatewayRoute, ref ServiceRef) bool {
 	for _, rule := range route.Rules {
 		for _, backend := range rule.BackendRefs {
 			ns := route.Namespace
@@ -198,7 +210,7 @@ func httpRouteReferencesService(route *httpRoute, ref ServiceRef) bool {
 // without RBAC to list it elsewhere) rather than not exist -- so it gets the
 // same conservative treatment rather than being silently treated as a
 // non-match.
-func (idx *Index) routeAttachesToAGateway(route *httpRoute) bool {
+func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
 	for _, ref := range route.ParentRefs {
 		ns := route.Namespace
 		if ref.Namespace != nil {

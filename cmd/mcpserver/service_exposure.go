@@ -11,26 +11,32 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 )
 
 var serviceGVR = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "services"}
 var ingressGVR = schema.GroupVersionResource{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}
 var httpRouteGVR = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
+var httpRouteGVRv1beta1 = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1beta1", Resource: "httproutes"}
+var grpcRouteGVR = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "grpcroutes"}
+var grpcRouteGVRv1beta1 = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1beta1", Resource: "grpcroutes"}
 var gatewayGVR = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gateways"}
+var gatewayGVRv1beta1 = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1beta1", Resource: "gateways"}
 
 // createServiceExposureTools registers analyze_service_exposure, which
 // reports whether a Service (or every Service in a namespace) is reachable
 // from outside the cluster, and by what mechanism -- a Service of type
 // LoadBalancer/NodePort directly, or a networking.k8s.io/v1 Ingress or
-// Gateway API HTTPRoute naming it as a backend. See core/pkg/exposure for
+// Gateway API HTTPRoute/GRPCRoute naming it as a backend. See core/pkg/exposure for
 // the matching model and its documented trust model (existence of an
 // exposing object is treated as intent, the same way this repo's
 // NetworkPolicy reachability engine treats a NetworkPolicy's existence).
 func createServiceExposureTools(ksServer *KubescapeMcpserver) {
 	tool := mcp.NewTool(
 		"analyze_service_exposure",
-		mcp.WithDescription("Determine whether a Service (or every Service in a namespace, if service_name is omitted) is reachable from outside the cluster, and by what mechanism: the Service itself being type LoadBalancer or NodePort, spec.externalIPs being set, a networking.k8s.io/v1 Ingress naming it as a backend, or a Gateway API HTTPRoute naming it as a backend through an attached Gateway. Existence of an exposing object is treated as intent to expose -- this does not verify an Ingress controller or Gateway implementation is actually running. Each Service's result carries an 'unclear' note when a cross-namespace HTTPRoute backendRef (ReferenceGrant-authorized cross-namespace references are not modeled) names it, since in that case an empty paths list is not a confirmed all-clear."),
+		mcp.WithDescription("Determine whether a Service (or every Service in a namespace, if service_name is omitted) is reachable from outside the cluster, and by what mechanism: the Service itself being type LoadBalancer or NodePort, spec.externalIPs being set, a networking.k8s.io/v1 Ingress naming it as a backend, or a Gateway API HTTPRoute or GRPCRoute naming it as a backend through an attached Gateway. Existence of an exposing object is treated as intent to expose -- this does not verify an Ingress controller or Gateway implementation is actually running. Each Service's result carries an 'unclear' note when a cross-namespace HTTPRoute/GRPCRoute backendRef (ReferenceGrant-authorized cross-namespace references are not modeled) names it, since in that case an empty paths list is not a confirmed all-clear."),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Namespace to analyze")),
 		mcp.WithString("service_name", mcp.Description("Name of a specific Service to check (optional; omit to report on every Service in the namespace)")),
 	)
@@ -84,10 +90,10 @@ func createServiceExposureTools(ksServer *KubescapeMcpserver) {
 
 		// The Gateway API CRDs may not be installed on this cluster at all;
 		// that is not a tool error, just an empty set of routes/gateways --
-		// every service simply reports no ExposureHTTPRoute paths.
+		// every service simply reports no route paths.
 		//
-		// HTTPRoutes are listed cluster-wide, not scoped to namespace, same as
-		// Gateways below: a Service is exposed via any HTTPRoute naming it as
+		// Routes are listed cluster-wide, not scoped to namespace, same as
+		// Gateways below: a Service is exposed via any route naming it as
 		// a backend, including one that lives in another namespace and
 		// reaches in via a ReferenceGrant this package doesn't evaluate.
 		// Index.ServiceExposure still only builds an actual ExposurePath from
@@ -97,32 +103,36 @@ func createServiceExposureTools(ksServer *KubescapeMcpserver) {
 		// the other -- collecting only the queried namespace would make that
 		// signal silently unreachable.
 		gatewayResources := map[string]workloadinterface.IMetadata{}
-		routeList, routeErr := dynClient.Resource(httpRouteGVR).List(ctx, metav1.ListOptions{})
-		if routeErr != nil && !isMissingAPIErr(routeErr) {
+		routeList, routeErr := listGatewayKind(ctx, dynClient, httpRouteGVR, httpRouteGVRv1beta1)
+		if routeErr != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to list HTTPRoute objects: %v", routeErr)), nil
 		}
-		if routeErr == nil {
-			for i := range routeList.Items {
-				w := workloadinterface.NewWorkloadObj(routeList.Items[i].Object)
-				gatewayResources[w.GetID()] = w
-			}
+		for i := range routeList.Items {
+			w := workloadinterface.NewWorkloadObj(routeList.Items[i].Object)
+			gatewayResources[w.GetID()] = w
+		}
+		grpcRouteList, grpcRouteErr := listGatewayKind(ctx, dynClient, grpcRouteGVR, grpcRouteGVRv1beta1)
+		if grpcRouteErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to list GRPCRoute objects: %v", grpcRouteErr)), nil
+		}
+		for i := range grpcRouteList.Items {
+			w := workloadinterface.NewWorkloadObj(grpcRouteList.Items[i].Object)
+			gatewayResources[w.GetID()] = w
 		}
 		// Gateways are listed cluster-wide, not scoped to namespace: the
 		// dominant real-world topology puts the Gateway in an infra
-		// namespace (e.g. istio-system) with an HTTPRoute in an app
+		// namespace (e.g. istio-system) with a route in an app
 		// namespace referencing it cross-namespace via parentRefs, and
 		// AllowedRoutes deciding whether that attachment is admitted.
 		// Scoping this list to namespace would make every such Gateway
 		// invisible to idx.routeAttachesToAGateway.
-		gwList, gwErr := dynClient.Resource(gatewayGVR).List(ctx, metav1.ListOptions{})
-		if gwErr != nil && !isMissingAPIErr(gwErr) {
+		gwList, gwErr := listGatewayKind(ctx, dynClient, gatewayGVR, gatewayGVRv1beta1)
+		if gwErr != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to list Gateway objects: %v", gwErr)), nil
 		}
-		if gwErr == nil {
-			for i := range gwList.Items {
-				w := workloadinterface.NewWorkloadObj(gwList.Items[i].Object)
-				gatewayResources[w.GetID()] = w
-			}
+		for i := range gwList.Items {
+			w := workloadinterface.NewWorkloadObj(gwList.Items[i].Object)
+			gatewayResources[w.GetID()] = w
 		}
 		httpRoutes, gateways, gwDecodeErrs := exposure.FromUnstructuredGatewayAPI(gatewayResources)
 		decodeErrs = append(decodeErrs, gwDecodeErrs...)
@@ -143,7 +153,7 @@ func createServiceExposureTools(ksServer *KubescapeMcpserver) {
 			paths, unclear := idx.ServiceExposure(exposure.ServiceRef{Namespace: namespace, Name: name})
 			finding := map[string]any{"paths": buildExposurePathSummaries(paths)}
 			if unclear {
-				finding["unclear"] = "a cross-namespace Gateway API HTTPRoute backendRef references this Service; whether it is authorized by a ReferenceGrant is not modeled, so an empty paths here is not a confirmed all-clear"
+				finding["unclear"] = "a cross-namespace Gateway API HTTPRoute/GRPCRoute backendRef references this Service; whether it is authorized by a ReferenceGrant is not modeled, so an empty paths here is not a confirmed all-clear"
 			}
 			findings[name] = finding
 		}
@@ -166,6 +176,30 @@ func createServiceExposureTools(ksServer *KubescapeMcpserver) {
 		}
 		return mcp.NewToolResultText(string(resBytes)), nil
 	})
+}
+
+// listGatewayKind lists a Gateway API kind trying its candidate versions
+// in order (v1, then v1beta1 for clusters whose CRDs predate the kind's
+// graduation to v1) and returning the first list the API server actually
+// serves. Only a missing-API response moves the attempt to the next
+// candidate -- a genuine list failure (RBAC, connectivity) is returned
+// as-is rather than silently degrading. When no candidate is served at
+// all, an empty list is returned: that is the "CRDs not installed" case,
+// not an error. The decoded objects' spec shape is identical across
+// versions, so callers stay version-blind.
+func listGatewayKind(ctx context.Context, dynClient dynamic.Interface, candidates ...schema.GroupVersionResource) (*unstructured.UnstructuredList, error) {
+	for _, gvr := range candidates {
+		list, err := dynClient.Resource(gvr).List(ctx, metav1.ListOptions{})
+		if err == nil {
+			return list, nil
+		}
+		if !isMissingAPIErr(err) {
+			return nil, err
+		}
+	}
+	// No candidate is served: the CRDs are not installed, which is the
+	// "nothing collected" case, not an error.
+	return &unstructured.UnstructuredList{}, nil
 }
 
 // isMissingAPIErr reports whether err indicates the API group/resource

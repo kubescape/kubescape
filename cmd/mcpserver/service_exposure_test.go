@@ -28,11 +28,15 @@ import (
 func newServiceExposureTestServer(t *testing.T, objects ...runtime.Object) *KubescapeMcpserver {
 	t.Helper()
 	listKinds := map[schema.GroupVersionResource]string{
-		serviceGVR:   "ServiceList",
-		ingressGVR:   "IngressList",
-		namespaceGVR: "NamespaceList",
-		httpRouteGVR: "HTTPRouteList",
-		gatewayGVR:   "GatewayList",
+		serviceGVR:          "ServiceList",
+		ingressGVR:          "IngressList",
+		namespaceGVR:        "NamespaceList",
+		httpRouteGVR:        "HTTPRouteList",
+		grpcRouteGVR:        "GRPCRouteList",
+		gatewayGVR:          "GatewayList",
+		httpRouteGVRv1beta1: "HTTPRouteList",
+		grpcRouteGVRv1beta1: "GRPCRouteList",
+		gatewayGVRv1beta1:   "GatewayList",
 	}
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, objects...)
 
@@ -253,6 +257,106 @@ func TestAnalyzeServiceExposure_HTTPRouteThroughGatewayExposesService(t *testing
 	paths := findingPaths(t, services, "app")
 	require.Len(t, paths, 1)
 	require.Equal(t, "HTTPRoute", paths[0].(map[string]any)["kind"])
+}
+
+// TestAnalyzeServiceExposure_GRPCRouteThroughGatewayExposesService covers
+// the same topology as the HTTPRoute test above, but with a GRPCRoute --
+// the core Gateway API kind Envoy Gateway (and similar gRPC-first
+// deployments) use for their ingress paths. GRPCRoute carries the same
+// parentRefs/hostnames/backendRefs shape as HTTPRoute, so a Service whose
+// only ingress path is a GRPCRoute must report an ExposureGRPCRoute path,
+// not a confident "not exposed".
+func TestAnalyzeServiceExposure_GRPCRouteThroughGatewayExposesService(t *testing.T) {
+	svc := unstructuredService("prod", "app", "ClusterIP")
+	route := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "gateway.networking.k8s.io/v1",
+		"kind":       "GRPCRoute",
+		"metadata":   map[string]any{"name": "grpc-route", "namespace": "prod"},
+		"spec": map[string]any{
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"rules":      []any{map[string]any{"backendRefs": []any{map[string]any{"name": "app"}}}},
+		},
+	}}
+	gw := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "gateway.networking.k8s.io/v1",
+		"kind":       "Gateway",
+		"metadata":   map[string]any{"name": "gw", "namespace": "prod"},
+		"spec":       map[string]any{"listeners": []any{map[string]any{"name": "grpc"}}},
+	}}
+	ksServer := newServiceExposureTestServer(t, svc, route)
+
+	// See TestAnalyzeServiceExposure_HTTPRouteThroughGatewayExposesService for
+	// why the Gateway is added via an explicit Create against the real GVR.
+	dyn := ksServer.k8sClient.DynamicClient
+	_, err := dyn.Resource(gatewayGVR).Namespace("prod").Create(context.Background(), gw, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_service_exposure", map[string]any{
+		"namespace":    "prod",
+		"service_name": "app",
+	}))
+	require.False(t, result.IsError)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+	services := parsed["services"].(map[string]any)
+	paths := findingPaths(t, services, "app")
+	require.Len(t, paths, 1, "a Service exposed only via a GRPCRoute must not be reported as not exposed")
+	require.Equal(t, "GRPCRoute", paths[0].(map[string]any)["kind"])
+}
+
+// TestAnalyzeServiceExposure_GRPCRouteV1beta1OnlyClusterStillWorks covers
+// the fallback: clusters whose Gateway API CRDs predate GRPCRoute's v1
+// graduation (Gateway API v1.1) serve it as v1beta1 only. The v1 list
+// returns NotFound, the v1beta1 candidate serves the route, and the
+// exposure analysis must still find it.
+func TestAnalyzeServiceExposure_GRPCRouteV1beta1OnlyClusterStillWorks(t *testing.T) {
+	svc := unstructuredService("prod", "app", "ClusterIP")
+	gw := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "gateway.networking.k8s.io/v1",
+		"kind":       "Gateway",
+		"metadata":   map[string]any{"name": "gw", "namespace": "prod"},
+		"spec":       map[string]any{"listeners": []any{map[string]any{"name": "grpc"}}},
+	}}
+	ksServer := newServiceExposureTestServer(t, svc)
+
+	// Serve grpcroutes only under v1beta1: the reactor 404s the v1 list
+	// attempt (a real cluster without a v1 grpcroutes CRD) and falls through
+	// for v1beta1, which the fake client serves from its registered list
+	// kind.
+	dyn := ksServer.k8sClient.DynamicClient.(*dynamicfake.FakeDynamicClient)
+	dyn.PrependReactor("list", "grpcroutes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.GetResource().Version == "v1" {
+			return true, nil, apierrors.NewNotFound(grpcRouteGVR.GroupResource(), "")
+		}
+		return false, nil, nil
+	})
+	route := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "gateway.networking.k8s.io/v1beta1",
+		"kind":       "GRPCRoute",
+		"metadata":   map[string]any{"name": "grpc-route", "namespace": "prod"},
+		"spec": map[string]any{
+			"parentRefs": []any{map[string]any{"name": "gw"}},
+			"rules":      []any{map[string]any{"backendRefs": []any{map[string]any{"name": "app"}}}},
+		},
+	}}
+	_, err := dyn.Resource(grpcRouteGVRv1beta1).Namespace("prod").Create(context.Background(), route, metav1.CreateOptions{})
+	require.NoError(t, err)
+	_, err = dyn.Resource(gatewayGVR).Namespace("prod").Create(context.Background(), gw, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "analyze_service_exposure", map[string]any{
+		"namespace":    "prod",
+		"service_name": "app",
+	}))
+	require.False(t, result.IsError)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
+	services := parsed["services"].(map[string]any)
+	paths := findingPaths(t, services, "app")
+	require.Len(t, paths, 1, "a v1beta1-only GRPCRoute must still be found via the fallback")
+	require.Equal(t, "GRPCRoute", paths[0].(map[string]any)["kind"])
 }
 
 // TestAnalyzeServiceExposure_CrossNamespaceGatewayWithAllowedRoutesFromAllExposesService
