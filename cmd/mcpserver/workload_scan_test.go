@@ -82,6 +82,18 @@ func TestBuildWorkloadScanRequest_ScanObject(t *testing.T) {
 			wantName:   "nginx",
 			wantAPIVer: "apps/v1",
 		},
+		{
+			name:     "bare short name preserves raw kind",
+			workload: "deploy/nginx",
+			wantKind: "deploy",
+			wantName: "nginx",
+		},
+		{
+			name:     "bare CRD kind preserves casing",
+			workload: "Deploy/crd-deploy",
+			wantKind: "Deploy",
+			wantName: "crd-deploy",
+		},
 	}
 
 	for _, tt := range tests {
@@ -305,6 +317,34 @@ func TestRunWorkloadScan_ResolvesFromFile(t *testing.T) {
 	ksServer := newWorkloadScanTestServer(t)
 
 	respBytes, err := ksServer.RunWorkloadScan(context.Background(), "Deployment/nginx", "", "testdata/deployment.yaml", "nsa")
+	require.NoError(t, err)
+	assert.Contains(t, string(respBytes), `"total_failed":`)
+}
+
+func TestRunWorkloadScan_CaseInsensitiveAndShortName(t *testing.T) {
+	ksServer := newWorkloadScanTestServer(t)
+
+	// Lowercase kind
+	respBytes, err := ksServer.RunWorkloadScan(context.Background(), "deployment/nginx", "", "testdata/deployment.yaml", "nsa")
+	require.NoError(t, err)
+	assert.Contains(t, string(respBytes), `"total_failed":`)
+
+	// Registered kubectl short name
+	respBytes, err = ksServer.RunWorkloadScan(context.Background(), "deploy/nginx", "", "testdata/deployment.yaml", "nsa")
+	require.NoError(t, err)
+	assert.Contains(t, string(respBytes), `"total_failed":`)
+}
+
+func TestRunWorkloadScan_CRDDeploy(t *testing.T) {
+	ksServer := newWorkloadScanTestServer(t)
+
+	// CRD with kind: Deploy matched via exact PascalCase kind
+	respBytes, err := ksServer.RunWorkloadScan(context.Background(), "Deploy/crd-deploy", "", "testdata/crd-deploy.yaml", "nsa")
+	require.NoError(t, err)
+	assert.Contains(t, string(respBytes), `"total_failed":`)
+
+	// CRD with kind: Deploy matched via lowercase alias kind in pass 1
+	respBytes, err = ksServer.RunWorkloadScan(context.Background(), "deploy/crd-deploy", "", "testdata/crd-deploy.yaml", "nsa")
 	require.NoError(t, err)
 	assert.Contains(t, string(respBytes), `"total_failed":`)
 }

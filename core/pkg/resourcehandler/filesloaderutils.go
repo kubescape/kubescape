@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
@@ -26,7 +27,12 @@ func providerRank(fileType string) int {
 
 // resourceIdentity returns the path-independent k8s identity tuple used for dedup.
 func resourceIdentity(w workloadinterface.IMetadata) string {
-	return fmt.Sprintf("%s/%s/%s/%s", w.GetApiVersion(), w.GetNamespace(), w.GetKind(), w.GetName())
+	group, _ := k8sinterface.SplitApiVersion(w.GetApiVersion())
+	kind := w.GetKind()
+	if cautils.IsBuiltinGroup(group) {
+		kind = cautils.NormalizeWorkloadKind(kind)
+	}
+	return fmt.Sprintf("%s/%s/%s/%s", w.GetApiVersion(), w.GetNamespace(), kind, w.GetName())
 }
 
 // dedupWorkloads drops lower-ranked cross-provider duplicates only; same-rank duplicates are kept.
@@ -138,20 +144,26 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 
 	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
 
-	var wls []workloadinterface.IWorkload
-	seenResources := make(map[string]struct{})
-	for _, resources := range mappedResources {
-		for _, r := range resources {
-			// File-loaded resource IDs include their source path, so aliases of
-			// one object collapse while distinct manifests remain distinguishable.
-			if _, seen := seenResources[r.GetID()]; seen {
-				continue
-			}
-			if r.GetKind() == resource.GetKind() && r.GetName() == resource.GetName() {
+	collectMatches := func(kindPredicate func(r workloadinterface.IMetadata) bool) []workloadinterface.IWorkload {
+		var wls []workloadinterface.IWorkload
+		seenResources := make(map[string]struct{})
+		for _, resources := range mappedResources {
+			for _, r := range resources {
+				// File-loaded resource IDs include their source path, so aliases of
+				// one object collapse while distinct manifests remain distinguishable.
+				if _, seen := seenResources[r.GetID()]; seen {
+					continue
+				}
+				if r.GetName() != resource.GetName() {
+					continue
+				}
 				if resource.GetNamespace() != "" && resource.GetNamespace() != r.GetNamespace() {
 					continue
 				}
-				if resource.GetApiVersion() != "" && resource.GetApiVersion() != r.GetApiVersion() {
+				if resource.GetApiVersion() != "" && !strings.EqualFold(resource.GetApiVersion(), r.GetApiVersion()) {
+					continue
+				}
+				if !kindPredicate(r) {
 					continue
 				}
 
@@ -161,6 +173,28 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 					seenResources[r.GetID()] = struct{}{}
 				}
 			}
+		}
+		return wls
+	}
+
+	// Pass 1: Direct case-insensitive match on the requested kind.
+	// This preserves bare CRD Kinds (e.g. Deploy for an example.com/v1 resource)
+	// without alias normalization colliding or rewriting the kind.
+	wls := collectMatches(func(r workloadinterface.IMetadata) bool {
+		return strings.EqualFold(r.GetKind(), resource.GetKind())
+	})
+
+	// Pass 2: Fallback alias normalization for built-in Kubernetes resources.
+	// If direct matching finds no candidates and the requested kind is a recognized
+	// alias/short name for a built-in workload (e.g. "deploy", "po", "ds"), attempt
+	// matching against built-in API group resources with the canonical kind.
+	if len(wls) == 0 {
+		normalizedKind := cautils.NormalizeWorkloadKind(resource.GetKind())
+		if !strings.EqualFold(normalizedKind, resource.GetKind()) {
+			wls = collectMatches(func(r workloadinterface.IMetadata) bool {
+				group, _ := k8sinterface.SplitApiVersion(r.GetApiVersion())
+				return cautils.IsBuiltinGroup(group) && strings.EqualFold(r.GetKind(), normalizedKind)
+			})
 		}
 	}
 
