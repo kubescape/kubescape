@@ -3,6 +3,7 @@ package resultshandling
 import (
 	"testing"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v4/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -56,6 +57,63 @@ func makeFailedControl(id string, scoreFactor float32) reportsummary.ControlSumm
 	c := makeControl(id, scoreFactor)
 	c.StatusInfo = apis.StatusInfo{InnerStatus: apis.StatusFailed}
 	return c
+}
+
+func TestApplySeverityFilters_RebuildsNamespaceSummaries(t *testing.T) {
+	lowFailed := makeControlWithResources("C-low", scoreLow, apis.StatusFailed, "res-app-1")
+	highMixed := makeControlWithResources("C-high", scoreHigh, apis.StatusFailed, "res-db-1")
+	highMixed.ResourceIDs.Append(apis.StatusPassed, "res-app-2")
+
+	s := makeSessionWithControls(map[string]reportsummary.ControlSummary{
+		"C-low":  lowFailed,
+		"C-high": highMixed,
+	})
+	s.AllResources = map[string]workloadinterface.IMetadata{
+		"res-app-1": namespacedPodResource("res-app-1", "app"),
+		"res-app-2": namespacedPodResource("res-app-2", "app"),
+		"res-db-1":  namespacedPodResource("res-db-1", "db"),
+	}
+
+	// Policy processing builds the rollup over the full control set, before
+	// HandleResults applies the severity filters.
+	s.NamespaceSummaries = cautils.BuildNamespaceSummaries(s.Report.SummaryDetails.Controls, s.AllResources)
+	require.NotEmpty(t, s.NamespaceSummaries)
+	for _, ns := range s.NamespaceSummaries {
+		require.Equal(t, 2, ns.TotalControls, "pre-filter rollup must count both controls")
+	}
+
+	ApplySeverityFilters(s, "high", "")
+
+	require.Len(t, s.Report.SummaryDetails.Controls, 1)
+	for _, ns := range s.NamespaceSummaries {
+		assert.Equal(t, 1, ns.TotalControls,
+			"namespace rollup must describe only the controls the filtered report still contains")
+	}
+	assert.Equal(t,
+		cautils.BuildNamespaceSummaries(s.Report.SummaryDetails.Controls, s.AllResources),
+		s.NamespaceSummaries,
+		"namespace rollup must be rebuilt from the filtered control set")
+}
+
+func TestApplySeverityFilters_NoFiltersLeavesNamespaceSummaries(t *testing.T) {
+	s := makeSessionWithControls(map[string]reportsummary.ControlSummary{
+		"C-high": makeControl("C-high", scoreHigh),
+	})
+	pre := cautils.NamespaceSummaries{{Namespace: "app", ComplianceScore: 50, TotalControls: 1}}
+	s.NamespaceSummaries = pre
+
+	ApplySeverityFilters(s, "", "")
+
+	assert.Equal(t, pre, s.NamespaceSummaries,
+		"without severity filters nothing is removed, so the rollup must stay untouched")
+}
+
+func namespacedPodResource(id, namespace string) workloadinterface.IMetadata {
+	return workloadinterface.NewWorkloadObj(map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata":   map[string]any{"name": id, "namespace": namespace},
+	})
 }
 
 func TestApplySeverityFilters_NilSessionObj(t *testing.T) {

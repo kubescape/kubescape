@@ -1099,6 +1099,26 @@ func makeFilteredSession() *cautils.OPASessionObj {
 	}
 }
 
+// TestSnapshotRestoreReport_NamespaceSummaries verifies the namespace rollup
+// follows the same output-only contract as the rest of the report: severity
+// filtering may replace it for printers and submission, and restoreReport must
+// put the pre-filter rollup back for the caller's threshold evaluation.
+func TestSnapshotRestoreReport_NamespaceSummaries(t *testing.T) {
+	sessionObj := &cautils.OPASessionObj{Report: &reporthandlingv2.PostureReport{}}
+	original := cautils.NamespaceSummaries{{Namespace: "app", ComplianceScore: 100, TotalControls: 1}}
+	sessionObj.NamespaceSummaries = original
+
+	snap := snapshotReport(sessionObj)
+
+	filtered := cautils.NamespaceSummaries{{Namespace: "app", ComplianceScore: 50, TotalControls: 1}}
+	sessionObj.NamespaceSummaries = filtered
+	require.Equal(t, filtered, sessionObj.NamespaceSummaries)
+
+	restoreReport(sessionObj, snap)
+	assert.Equal(t, original, sessionObj.NamespaceSummaries,
+		"restoreReport must put back the pre-filter namespace rollup")
+}
+
 // TestHandleResults_RestoresReportOnPrinterError verifies that the deferred
 // restoreReport fires even when a printer close fails and HandleResults returns
 // an error, so rh.ScanData.Report is never left permanently filtered.
