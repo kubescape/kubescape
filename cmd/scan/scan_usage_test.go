@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/kubescape/kubescape/v4/core/cautils"
-	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/kubescape/kubescape/v4/core/meta"
 	metav1 "github.com/kubescape/kubescape/v4/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v4/core/mocks"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/spf13/cobra"
