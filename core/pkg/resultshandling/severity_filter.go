@@ -13,7 +13,9 @@ import (
 // ApplySeverityFilters removes controls from the OPASessionObj that fall outside the
 // [minSeverity, maxSeverity] range. Both bounds are inclusive. An empty string
 // disables that bound. Controls removed here are also removed from every
-// per-resource associated-control list so the report stays consistent.
+// per-resource associated-control list so the report stays consistent, and the
+// per-namespace rollup is rebuilt from the retained controls so the namespace
+// view agrees with the recomputed cluster and framework scores.
 func ApplySeverityFilters(sessionObj *cautils.OPASessionObj, minSeverity, maxSeverity string) {
 	if sessionObj == nil || sessionObj.Report == nil {
 		return
@@ -64,6 +66,13 @@ func ApplySeverityFilters(sessionObj *cautils.OPASessionObj, minSeverity, maxSev
 	}
 
 	recomputeSummaryDetails(sessionObj)
+
+	// NamespaceSummaries was built during policy processing over the full
+	// control set; rebuild it from the retained controls so the namespace
+	// table no longer counts controls the filtered report no longer contains.
+	// The rebuild inherits each control's final cluster-computed score as-is,
+	// keeping the timed-out-control semantics agreed in #2424 unchanged.
+	sessionObj.NamespaceSummaries = cautils.BuildNamespaceSummaries(sessionObj.Report.SummaryDetails.Controls, sessionObj.AllResources)
 }
 
 // recomputeSummaryDetails refreshes every derived summary field that was

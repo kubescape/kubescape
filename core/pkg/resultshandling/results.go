@@ -173,6 +173,9 @@ type reportSnapshot struct {
 	status                     apis.ScanningStatus
 	frameworksStatusCounters   []reportsummary.StatusCounters
 	frameworksStatuses         []apis.ScanningStatus
+	// The per-namespace rollup is replaced (not mutated) by ApplySeverityFilters,
+	// so capturing the slice header is enough to restore the pre-filter rollup.
+	namespaceSummaries cautils.NamespaceSummaries
 }
 
 func snapshotReport(sessionObj *cautils.OPASessionObj) reportSnapshot {
@@ -216,6 +219,7 @@ func snapshotReport(sessionObj *cautils.OPASessionObj) reportSnapshot {
 		status:                     sessionObj.Report.SummaryDetails.Status,
 		frameworksStatusCounters:   fwStatusCounters,
 		frameworksStatuses:         fwStatuses,
+		namespaceSummaries:         sessionObj.NamespaceSummaries,
 	}
 }
 
@@ -247,6 +251,7 @@ func restoreReport(sessionObj *cautils.OPASessionObj, snap reportSnapshot) {
 			sessionObj.ResourcesResult[id] = result
 		}
 	}
+	sessionObj.NamespaceSummaries = snap.namespaceSummaries
 }
 
 // HandleResults handles all necessary actions for the scan results
