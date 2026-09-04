@@ -12,7 +12,9 @@ func getDeleteCmd(ks meta.IKubescape) *cobra.Command {
 		Short: "Delete cached configurations",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return ks.DeleteCachedConfig(&v1.DeleteConfig{})
+			return ks.DeleteCachedConfig(&v1.DeleteConfig{
+				Keys: args,
+			})
 		},
 	}
 	cmd.AddCommand(getDeleteCacheCmd())
