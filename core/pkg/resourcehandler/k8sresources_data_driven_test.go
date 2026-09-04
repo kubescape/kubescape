@@ -46,9 +46,11 @@ func unstructuredResource(apiVersion, kind, namespace, name string) *unstructure
 func TestFindScanObjectResourceDataDriven(t *testing.T) {
 	k8sinterface.InitializeMapResourcesMock()
 	deploymentGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	daemonSetGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"}
 	secretGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
 	listKinds := map[schema.GroupVersionResource]string{
 		deploymentGVR: "DeploymentList",
+		daemonSetGVR:  "DaemonSetList",
 		// Secrets are registered so the fake client is genuinely able to serve
 		// them. Without this the client cannot list secrets at all and the
 		// "no API calls were issued" assertion below would hold even for an
@@ -71,6 +73,36 @@ func TestFindScanObjectResourceDataDriven(t *testing.T) {
 			request:  scanObject("apps/v1", "Deployment", "shop", "checkout"),
 			objects:  []runtime.Object{unstructuredResource("apps/v1", "Deployment", "shop", "checkout")},
 			wantName: "checkout",
+		},
+		{
+			name:     "deployment with lowercase kind resolves cleanly without apiVersion",
+			request:  scanObject("", "deployment", "shop", "checkout"),
+			objects:  []runtime.Object{unstructuredResource("apps/v1", "Deployment", "shop", "checkout")},
+			wantName: "checkout",
+		},
+		{
+			name:     "deployment with short name deploy resolves cleanly without apiVersion",
+			request:  scanObject("", "deploy", "shop", "checkout"),
+			objects:  []runtime.Object{unstructuredResource("apps/v1", "Deployment", "shop", "checkout")},
+			wantName: "checkout",
+		},
+		{
+			name:     "deployment with uppercase short name DEPLOY resolves cleanly without apiVersion",
+			request:  scanObject("", "DEPLOY", "shop", "checkout"),
+			objects:  []runtime.Object{unstructuredResource("apps/v1", "Deployment", "shop", "checkout")},
+			wantName: "checkout",
+		},
+		{
+			name:     "daemonset with lowercase kind resolves cleanly without apiVersion",
+			request:  scanObject("", "daemonset", "kube-system", "fluentd"),
+			objects:  []runtime.Object{unstructuredResource("apps/v1", "DaemonSet", "kube-system", "fluentd")},
+			wantName: "fluentd",
+		},
+		{
+			name:     "daemonset with short name ds resolves cleanly without apiVersion",
+			request:  scanObject("", "ds", "kube-system", "fluentd"),
+			objects:  []runtime.Object{unstructuredResource("apps/v1", "DaemonSet", "kube-system", "fluentd")},
+			wantName: "fluentd",
 		},
 		{
 			name:      "missing deployment reports the requested identity",

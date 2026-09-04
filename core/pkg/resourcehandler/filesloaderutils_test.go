@@ -223,6 +223,34 @@ func TestFindScanObjectResource(t *testing.T) {
 			expectedErrorString:  "",
 		},
 		{
+			name: "case-insensitive kind match",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "pod",
+				ApiVersion: "v1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Name:      "mariadb",
+					Namespace: "",
+				},
+			},
+			expectedResourceName: "mariadb",
+			expectErr:            false,
+			expectedErrorString:  "",
+		},
+		{
+			name: "case-insensitive apiVersion match",
+			scanObject: &objectsenvelopes.ScanObject{
+				Kind:       "Pod",
+				ApiVersion: "V1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Name:      "mariadb",
+					Namespace: "",
+				},
+			},
+			expectedResourceName: "mariadb",
+			expectErr:            false,
+			expectedErrorString:  "",
+		},
+		{
 			name: "no workload match",
 			scanObject: &objectsenvelopes.ScanObject{
 				Kind:       "Deployment",

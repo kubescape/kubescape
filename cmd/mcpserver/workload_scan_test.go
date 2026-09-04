@@ -309,6 +309,20 @@ func TestRunWorkloadScan_ResolvesFromFile(t *testing.T) {
 	assert.Contains(t, string(respBytes), `"total_failed":`)
 }
 
+func TestRunWorkloadScan_CaseInsensitiveAndShortName(t *testing.T) {
+	ksServer := newWorkloadScanTestServer(t)
+
+	// Lowercase kind
+	respBytes, err := ksServer.RunWorkloadScan(context.Background(), "deployment/nginx", "", "testdata/deployment.yaml", "nsa")
+	require.NoError(t, err)
+	assert.Contains(t, string(respBytes), `"total_failed":`)
+
+	// Registered kubectl short name
+	respBytes, err = ksServer.RunWorkloadScan(context.Background(), "deploy/nginx", "", "testdata/deployment.yaml", "nsa")
+	require.NoError(t, err)
+	assert.Contains(t, string(respBytes), `"total_failed":`)
+}
+
 func TestRunWorkloadScan_NotFoundInFile(t *testing.T) {
 	ksServer := newWorkloadScanTestServer(t)
 

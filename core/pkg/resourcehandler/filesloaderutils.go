@@ -147,11 +147,11 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 			if _, seen := seenResources[r.GetID()]; seen {
 				continue
 			}
-			if r.GetKind() == resource.GetKind() && r.GetName() == resource.GetName() {
+			if strings.EqualFold(r.GetKind(), resource.GetKind()) && r.GetName() == resource.GetName() {
 				if resource.GetNamespace() != "" && resource.GetNamespace() != r.GetNamespace() {
 					continue
 				}
-				if resource.GetApiVersion() != "" && resource.GetApiVersion() != r.GetApiVersion() {
+				if resource.GetApiVersion() != "" && !strings.EqualFold(resource.GetApiVersion(), r.GetApiVersion()) {
 					continue
 				}
 
