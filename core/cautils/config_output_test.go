@@ -205,3 +205,52 @@ func TestFormatConfigOutputKeepsEmptyAccessKeyEmpty(t *testing.T) {
 	require.True(t, ok, "--include-empty must still render the accessKey field")
 	assert.Equal(t, "", accessKey)
 }
+
+func TestFormatConfigFieldOutput(t *testing.T) {
+	field := ConfigOutputField{Name: "accountID", Value: "test-account"}
+
+	tests := []struct {
+		name    string
+		format  string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:   "Text format",
+			format: "text",
+			want:   "test-account\n",
+		},
+		{
+			name:   "Default format",
+			format: "",
+			want:   "test-account\n",
+		},
+		{
+			name:   "JSON format",
+			format: "json",
+			want:   "{\n  \"accountID\": \"test-account\"\n}",
+		},
+		{
+			name:   "YAML format",
+			format: "yaml",
+			want:   "accountID: test-account\n",
+		},
+		{
+			name:    "Unsupported format",
+			format:  "xml",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := FormatConfigFieldOutput(field, tt.format)
+			if tt.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, string(got))
+			}
+		})
+	}
+}
