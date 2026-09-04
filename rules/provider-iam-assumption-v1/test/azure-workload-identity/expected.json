@@ -1,0 +1,30 @@
+[
+    {
+        "alertMessage": "ServiceAccount: blob-reader is assigned the Azure workload identity client ID 00000000-0000-0000-0000-000000000000",
+        "failedPaths": [
+            "metadata.annotations[azure.workload.identity/client-id]"
+        ],
+        "reviewPaths": [
+            "metadata.annotations[azure.workload.identity/client-id]"
+        ],
+        "fixPaths": [],
+        "ruleStatus": "",
+        "packagename": "armo_builtins",
+        "alertScore": 3,
+        "alertObject": {
+            "k8sApiObjects": [
+                {
+                    "apiVersion": "v1",
+                    "kind": "ServiceAccount",
+                    "metadata": {
+                        "annotations": {
+                            "azure.workload.identity/client-id": "00000000-0000-0000-0000-000000000000"
+                        },
+                        "name": "blob-reader",
+                        "namespace": "data"
+                    }
+                }
+            ]
+        }
+    }
+]

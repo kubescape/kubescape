@@ -142,17 +142,29 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 			scanInfo.View = requestedView
 
-			// The invocation is valid from this point on. Runtime and result-gate
-			// failures should not print command usage.
-			cmd.SilenceUsage = true
-
 			if policyIdentifiers := contractPolicyIdentifiers(selectedContract); len(policyIdentifiers) > 0 {
 				setContractScanTarget(args, &scanInfo)
+				if len(scanInfo.KubeContexts) > 0 {
+					if _, err := validateFleetScanInvocation(&scanInfo); err != nil {
+						return err
+					}
+				}
+				// The invocation is valid from this point on. Runtime and result-gate
+				// failures should not print command usage.
+				cmd.SilenceUsage = true
 				return securityScan(scanInfo, ks, policyIdentifiers)
 			}
 
 			if scanInfo.View == string(cautils.SecurityViewType) {
 				policyIdentifiers := setSecurityViewScanInfo(args, &scanInfo)
+				if len(scanInfo.KubeContexts) > 0 {
+					if _, err := validateFleetScanInvocation(&scanInfo); err != nil {
+						return err
+					}
+				}
+				// The invocation is valid from this point on. Runtime and result-gate
+				// failures should not print command usage.
+				cmd.SilenceUsage = true
 
 				if err := securityScan(scanInfo, ks, policyIdentifiers); err != nil {
 					return err
@@ -386,7 +398,7 @@ func deriveTimeoutContext(scanInfo *cautils.ScanInfo, ks meta.IKubescape) (conte
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
 	if len(scanInfo.KubeContexts) > 0 {
-		return fleetScan(scanInfo, ks, policyIdentifiers)
+		return fleetScan(scanInfo, ks, policyIdentifiers, runSecurityScan)
 	}
 
 	ctx, cancel := deriveTimeoutContext(&scanInfo, ks)

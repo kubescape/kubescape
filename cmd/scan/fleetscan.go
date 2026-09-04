@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -22,10 +23,11 @@ import (
 // --kube-contexts is registered on scanCmd's persistent flags, so cobra
 // inherits it onto every subcommand (control/framework/workload/image) and
 // it's accepted by --view=resource|control too, but only the default
-// security view's securityScan currently calls fleetScan. cmd here is the
-// actual leaf command being invoked (cobra passes the target command to an
-// inherited PersistentPreRunE, not the command it's defined on), so
-// cmd.Name() reliably reports which one that is.
+// security view's securityScan, plus the framework/control/workload
+// subcommands, currently call fleetScan. cmd here is the actual leaf
+// command being invoked (cobra passes the target command to an inherited
+// PersistentPreRunE, not the command it's defined on), so cmd.Name()
+// reliably reports which one that is.
 func validateKubeContextsSupported(cmd *cobra.Command, scanInfo *cautils.ScanInfo) error {
 	if len(scanInfo.KubeContexts) == 0 {
 		return nil
@@ -35,15 +37,29 @@ func validateKubeContextsSupported(cmd *cobra.Command, scanInfo *cautils.ScanInf
 		if scanInfo.View != string(cautils.SecurityViewType) {
 			return fmt.Errorf("--kube-contexts is not yet supported with --view=%s; only the default security view (no --view, or --view=%s) supports scanning multiple contexts in one run", scanInfo.View, cautils.SecurityViewType)
 		}
+	case "framework", "control", "workload":
+		// These subcommands wire --kube-contexts through to fleetScan
+		// themselves; nothing more to reject here.
 	default:
-		return fmt.Errorf("--kube-contexts is not yet supported for 'scan %s'; only the default 'scan' command (security view) supports scanning multiple contexts in one run", cmd.Name())
+		return fmt.Errorf("--kube-contexts is not yet supported for 'scan %s'; only the default 'scan' command (security view), 'scan framework', 'scan control', and 'scan workload' support scanning multiple contexts in one run", cmd.Name())
 	}
 	return nil
 }
 
-// fleetScan runs securityScan's per-cluster behavior once for every context
-// in baseScanInfo.KubeContexts, sequentially, writing one report per
-// context. It's the --kube-contexts entry point invoked from securityScan.
+// fleetRunner runs one cluster's scan to completion for a specific scan
+// subcommand - Scan/ScanContext, HandleResults, and every threshold/drift
+// enforcement that subcommand's non-fleet RunE performs - exactly as if
+// scanInfo.KubeContexts had never been set. securityScan, the framework
+// command, the control command, and the workload command each pass their
+// own such function (runSecurityScan, runFrameworkScan, runControlScan,
+// runWorkloadScan) to fleetScan so every --kube-contexts-aware subcommand
+// runs the exact per-cluster behavior its single-context path always ran,
+// instead of a parallel, divergent copy of that logic.
+type fleetRunner func(ctx context.Context, scanInfo *cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error
+
+// fleetScan runs run once for every context in baseScanInfo.KubeContexts,
+// sequentially, writing one report per context. It's the --kube-contexts
+// entry point shared by every scan subcommand that supports fleet mode.
 //
 // Contexts are scanned one at a time, not concurrently: k8sinterface's
 // process-global connection state (K8SConfig, clientConfigAPI,
@@ -59,15 +75,22 @@ func validateKubeContextsSupported(cmd *cobra.Command, scanInfo *cautils.ScanInf
 // error - and therefore its exit code - reflects whether any context
 // failed, matching the single-context command's existing all-or-nothing
 // exit-code semantics from the caller's point of view.
-func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier) error {
-	if baseScanInfo.GetScanningContext() != cautils.ContextCluster {
-		return fmt.Errorf("--kube-contexts requires a live-cluster scan: it selects which cluster to connect to, so it can't be combined with scanning local files/directories")
+// validateFleetScanInvocation checks the CLI requirements for --kube-contexts
+// before a fleet scan starts: live-cluster only, non-empty --output, and no
+// colliding per-context output paths. Call sites that set SilenceUsage after
+// validation use this so invalid fleet invocations still print usage.
+func validateFleetScanInvocation(scanInfo *cautils.ScanInfo) (map[string]string, error) {
+	if scanInfo.GetScanningContext() != cautils.ContextCluster {
+		return nil, fmt.Errorf("--kube-contexts requires a live-cluster scan: it selects which cluster to connect to, so it can't be combined with scanning local files/directories")
 	}
-	if strings.TrimSpace(baseScanInfo.Output) == "" {
-		return fmt.Errorf("--kube-contexts requires --output: each context's report is written to its own file, derived from --output, since only one context's results can be printed to stdout at a time")
+	if strings.TrimSpace(scanInfo.Output) == "" {
+		return nil, fmt.Errorf("--kube-contexts requires --output: each context's report is written to its own file, derived from --output, since only one context's results can be printed to stdout at a time")
 	}
+	return perContextOutputPaths(scanInfo.Output, scanInfo.KubeContexts)
+}
 
-	outputPaths, err := perContextOutputPaths(baseScanInfo.Output, baseScanInfo.KubeContexts)
+func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifiers []cautils.PolicyIdentifier, run fleetRunner) error {
+	outputPaths, err := validateFleetScanInvocation(&baseScanInfo)
 	if err != nil {
 		return err
 	}
@@ -82,7 +105,7 @@ func fleetScan(baseScanInfo cautils.ScanInfo, ks meta.IKubescape, policyIdentifi
 
 		leave := cautils.EnterClusterContext(kubeContext)
 		ctx, cancel := deriveTimeoutContext(contextScanInfo, ks)
-		err = runSecurityScan(ctx, contextScanInfo, ks, policyIdentifiers)
+		err = run(ctx, contextScanInfo, ks, policyIdentifiers)
 		cancel()
 		leave()
 

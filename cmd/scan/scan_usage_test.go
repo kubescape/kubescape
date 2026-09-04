@@ -91,3 +91,29 @@ func TestScanValidationErrorStillPrintsUsage(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid --format-version")
 	assert.Contains(t, buf.String(), "Usage:")
 }
+
+func TestScanFleetValidationStillPrintsUsage(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "security view", args: []string{"scan", "--kube-contexts=ctx-a,ctx-b"}},
+		{name: "framework", args: []string{"scan", "framework", "nsa", "--kube-contexts=ctx-a,ctx-b"}},
+		{name: "control", args: []string{"scan", "control", "C-0058", "--kube-contexts=ctx-a,ctx-b"}},
+		{name: "workload", args: []string{"scan", "workload", "Deployment/nginx", "--kube-contexts=ctx-a,ctx-b"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := &usageThresholdKubescape{}
+			root, buf := newKubescapeRootWithScan(ks)
+			root.SetArgs(tt.args)
+
+			err := root.Execute()
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "--kube-contexts requires --output")
+			assert.Contains(t, buf.String(), "Usage:", "invalid fleet CLI input must still print usage")
+		})
+	}
+}
