@@ -80,3 +80,70 @@ func TestIncludeNamespacesSelectors(t *testing.T) {
 	assert.Equal(t, "metadata.namespace==ns1", malformedSelectors[0])
 	assert.Equal(t, "metadata.namespace==ns3", malformedSelectors[1])
 }
+
+func TestAllowsNamespace(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+	podGVR := &schema.GroupVersionResource{Resource: "pods"}
+	nodeGVR := &schema.GroupVersionResource{Resource: "nodes"}
+	nsGVR := &schema.GroupVersionResource{Resource: "namespaces"}
+
+	trueVal := true
+	falseVal := false
+
+	t.Run("empty selector allows everything", func(t *testing.T) {
+		es := &EmptySelector{}
+		assert.True(t, es.AllowsNamespace(podGVR, "default", nil))
+		assert.True(t, es.AllowsNamespace(podGVR, "kube-system", nil))
+		assert.True(t, es.AllowsNamespace(nodeGVR, "", nil))
+		assert.True(t, es.AllowsNamespace(nsGVR, "default", nil))
+	})
+
+	t.Run("exclude selector", func(t *testing.T) {
+		es := NewExcludeSelector("dev,staging")
+		// excluded namespaces
+		assert.False(t, es.AllowsNamespace(podGVR, "dev", nil))
+		assert.False(t, es.AllowsNamespace(podGVR, "staging", nil))
+		// allowed namespace
+		assert.True(t, es.AllowsNamespace(podGVR, "prod", nil))
+		assert.True(t, es.AllowsNamespace(podGVR, "default", nil))
+		// cluster-scoped resources are allowed
+		assert.True(t, es.AllowsNamespace(nodeGVR, "", nil))
+		assert.True(t, es.AllowsNamespace(nodeGVR, "dev", &falseVal))
+		// namespaces resource checked by name
+		assert.False(t, es.AllowsNamespace(nsGVR, "dev", nil))
+		assert.True(t, es.AllowsNamespace(nsGVR, "prod", nil))
+		// explicit namespaced override
+		assert.False(t, es.AllowsNamespace(&schema.GroupVersionResource{Resource: "customresources"}, "dev", &trueVal))
+		assert.True(t, es.AllowsNamespace(&schema.GroupVersionResource{Resource: "customresources"}, "prod", &trueVal))
+		assert.True(t, es.AllowsNamespace(&schema.GroupVersionResource{Resource: "customresources"}, "dev", &falseVal))
+
+		// empty exclude selector allows everything
+		emptyExclude := NewExcludeSelector("")
+		assert.True(t, emptyExclude.AllowsNamespace(podGVR, "dev", nil))
+	})
+
+	t.Run("include selector", func(t *testing.T) {
+		is := NewIncludeSelector("prod,staging")
+		// included namespaces
+		assert.True(t, is.AllowsNamespace(podGVR, "prod", nil))
+		assert.True(t, is.AllowsNamespace(podGVR, "staging", nil))
+		// non-included namespaces
+		assert.False(t, is.AllowsNamespace(podGVR, "dev", nil))
+		assert.False(t, is.AllowsNamespace(podGVR, "default", nil))
+		assert.False(t, is.AllowsNamespace(podGVR, "", nil))
+		// cluster-scoped resources are allowed
+		assert.True(t, is.AllowsNamespace(nodeGVR, "", nil))
+		assert.True(t, is.AllowsNamespace(nodeGVR, "dev", &falseVal))
+		// namespaces resource checked by name
+		assert.True(t, is.AllowsNamespace(nsGVR, "prod", nil))
+		assert.False(t, is.AllowsNamespace(nsGVR, "dev", nil))
+		// explicit namespaced override
+		assert.True(t, is.AllowsNamespace(&schema.GroupVersionResource{Resource: "customresources"}, "prod", &trueVal))
+		assert.False(t, is.AllowsNamespace(&schema.GroupVersionResource{Resource: "customresources"}, "dev", &trueVal))
+		assert.True(t, is.AllowsNamespace(&schema.GroupVersionResource{Resource: "customresources"}, "dev", &falseVal))
+
+		// empty include selector allows everything
+		emptyInclude := NewIncludeSelector("")
+		assert.True(t, emptyInclude.AllowsNamespace(podGVR, "dev", nil))
+	})
+}
