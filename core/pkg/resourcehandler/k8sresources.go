@@ -650,9 +650,58 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context
 		return nil, fmt.Errorf("scanning Secret resources via single resource scan is not supported: %s", getReadableID(resource))
 	}
 	gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resourceName}
+	isNamespaced := (resolved[0].namespaced != nil && *resolved[0].namespaced) || (resolved[0].namespaced == nil && k8sinterface.IsNamespaceScope(&gvr))
 
+	// When the target resource's namespace is known (or the resource is cluster-scoped),
+	// retrieve it directly via Get. This adheres to least-privilege RBAC (requires only 'get',
+	// not 'list') and respects RBAC resourceNames restrictions.
+	if !isNamespaced || resource.GetNamespace() != "" {
+		targetNS := resource.GetNamespace()
+		if targetNS == "" && gvr.Resource == "namespaces" {
+			targetNS = resource.GetName()
+		}
+		if globalFieldSelector != nil && !globalFieldSelector.AllowsNamespace(&gvr, targetNS, resolved[0].namespaced) {
+			return nil, fmt.Errorf("resource %s was not found", getReadableID(resource))
+		}
+
+		var clientResource dynamic.ResourceInterface = k8sHandler.k8s.DynamicClient.Resource(gvr)
+		if isNamespaced {
+			clientResource = k8sHandler.k8s.DynamicClient.Resource(gvr).Namespace(resource.GetNamespace())
+		}
+		uObj, err := clientResource.Get(ctx, resource.GetName(), metav1.GetOptions{})
+		if err == nil {
+			if globalFieldSelector != nil {
+				objNS := uObj.GetNamespace()
+				if objNS == "" && gvr.Resource == "namespaces" {
+					objNS = uObj.GetName()
+				}
+				if !globalFieldSelector.AllowsNamespace(&gvr, objNS, resolved[0].namespaced) {
+					return nil, fmt.Errorf("resource %s was not found", getReadableID(resource))
+				}
+			}
+			if k8sinterface.IsTypeWorkload(uObj.Object) && k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(uObj.Object)) {
+				return nil, fmt.Errorf("resource %s has a parent and cannot be scanned", getReadableID(resource))
+			}
+			if !k8sinterface.IsTypeWorkload(uObj.Object) {
+				return nil, fmt.Errorf("%s is not a valid Kubernetes workload", getReadableID(resource))
+			}
+			return workloadinterface.NewWorkloadObj(uObj.Object), nil
+		}
+		if apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("resource %s was not found", getReadableID(resource))
+		}
+		// If Get failed with another error (e.g. Forbidden if the account was granted
+		// 'list' but not 'get', or an unexpected API issue), log and fall back to
+		// pullSingleResource for backwards compatibility.
+		logger.L().Debug("direct get failed, falling back to list",
+			helpers.String("resource", getReadableID(resource)),
+			helpers.Error(err))
+	}
+
+	// For namespaced resources where namespace is omitted (cluster-wide search across all namespaces),
+	// or as a fallback if Get failed, search via List using field selectors.
 	fieldSelectors := getNameFieldSelectorString(resource.GetName(), FieldSelectorsEqualsOperator)
-	if resource.GetNamespace() != "" && ((resolved[0].namespaced != nil && *resolved[0].namespaced) || (resolved[0].namespaced == nil && k8sinterface.IsNamespaceScope(&gvr))) {
+	if resource.GetNamespace() != "" && isNamespaced {
 		fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespaceFieldSelectorString(resource.GetNamespace(), FieldSelectorsEqualsOperator))
 	}
 	result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, "", fieldSelectors, globalFieldSelector, resolved[0].namespaced)
