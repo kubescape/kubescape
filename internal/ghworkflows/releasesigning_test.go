@@ -90,6 +90,9 @@ var guardedFiles = append([]string{
 	// the same "**.yaml" blind spot as everything else in this list.
 	filepath.Join(".github", "workflows", commentsWorkflowName),
 	filepath.Join("internal", "ghworkflows", "comments_test.go"),
+	// cosignkey_test.go guards how the release job writes and removes the
+	// signing key. It reads the release workflow already listed above.
+	filepath.Join("internal", "ghworkflows", "cosignkey_test.go"),
 }, installScripts...)
 
 // goreleaserSign is the subset of a `signs` / `docker_signs` entry these tests
