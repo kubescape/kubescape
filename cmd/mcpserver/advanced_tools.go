@@ -66,8 +66,7 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		case "statefulsets", "statefulset":
 			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
 		default:
-			// Defaulting to try core v1
-			gvr = schema.GroupVersionResource{Group: "", Version: "v1", Resource: strings.ToLower(kind)}
+			return mcp.NewToolResultError(fmt.Sprintf("unsupported resource kind %q; supported kinds are: pods, deployments, daemonsets, statefulsets", kind)), nil
 		}
 
 		listOpts := metav1.ListOptions{
