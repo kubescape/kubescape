@@ -208,15 +208,43 @@ var secretFieldPatterns = []string{
 // because this is a redaction boundary: the scanner reads manifests directly,
 // without API schema admission, so a document is free to nest an arbitrary
 // spec. anywhere and a suffix match would read that as the PodSpec.
-var podSpecPrefixes = map[string][]string{
-	"Pod":                   {"spec"},
-	"Deployment":            {"spec", "template", "spec"},
-	"StatefulSet":           {"spec", "template", "spec"},
-	"DaemonSet":             {"spec", "template", "spec"},
-	"ReplicaSet":            {"spec", "template", "spec"},
-	"ReplicationController": {"spec", "template", "spec"},
-	"Job":                   {"spec", "template", "spec"},
-	"CronJob":               {"spec", "jobTemplate", "spec", "template", "spec"},
+var podSpecPrefixes = map[string][]parentSegment{
+	"Pod":                   mapPath("spec"),
+	"Deployment":            mapPath("spec", "template", "spec"),
+	"StatefulSet":           mapPath("spec", "template", "spec"),
+	"DaemonSet":             mapPath("spec", "template", "spec"),
+	"ReplicaSet":            mapPath("spec", "template", "spec"),
+	"ReplicationController": mapPath("spec", "template", "spec"),
+	"Job":                   mapPath("spec", "template", "spec"),
+	"CronJob":               mapPath("spec", "jobTemplate", "spec", "template", "spec"),
+}
+
+// parentSegment is one segment of a safe field's canonical parent path, with
+// whether the Kubernetes schema defines that segment as a list.
+//
+// The shape has to be part of the match, not just the key. splitPath records
+// an index only for a bracketed segment, and extractValueAtPath walks an
+// unindexed segment straight through a map - so spec.volumes.secret.secretName
+// resolves against a manifest that happens to carry an object named "volumes",
+// even though PodSpec.volumes is a list and that path is not
+// SecretVolumeSource.secretName at all. Matching on keys alone would hand that
+// object-shaped path the list-shaped path's exception and let its value out
+// through failedPathValues.
+type parentSegment struct {
+	key string
+	// list requires this segment to be indexed ("volumes[0]"). A schema list
+	// reached without an index, or a schema map reached with one, is not the
+	// documented location and is redacted.
+	list bool
+}
+
+// mapPath builds a parent path whose segments are all plain maps.
+func mapPath(keys ...string) []parentSegment {
+	segments := make([]parentSegment, len(keys))
+	for i, key := range keys {
+		segments[i] = parentSegment{key: key}
+	}
+	return segments
 }
 
 // safeFieldRule scopes a safe-field exception to one documented Kubernetes
@@ -230,10 +258,10 @@ var podSpecPrefixes = map[string][]string{
 // kinds at exactly parents, where an empty parents means the object root.
 type safeFieldRule struct {
 	onPodSpec      bool
-	podSpecParents []string
+	podSpecParents []parentSegment
 
 	kinds   []string
-	parents []string
+	parents []parentSegment
 }
 
 // safeFieldRules lists Kubernetes API fields whose names match a
@@ -267,18 +295,26 @@ var safeFieldRules = map[string][]safeFieldRule{
 	// (ServiceAccountTokenProjection). It describes a token the kubelet will
 	// mint at mount time; the block itself carries no credential.
 	"serviceaccounttoken": {
-		{onPodSpec: true, podSpecParents: []string{"volumes", "projected", "sources"}},
+		{onPodSpec: true, podSpecParents: []parentSegment{
+			{key: "volumes", list: true}, {key: "projected"}, {key: "sources", list: true},
+		}},
 	},
 	// That block's requested lifetime, a number of seconds.
 	"tokenexpirationseconds": {
-		{onPodSpec: true, podSpecParents: []string{"volumes", "projected", "sources", "serviceAccountToken"}},
+		{onPodSpec: true, podSpecParents: []parentSegment{
+			{key: "volumes", list: true}, {key: "projected"}, {key: "sources", list: true}, {key: "serviceAccountToken"},
+		}},
 	},
 	// A reference to a Secret by name (SecretVolumeSource, and Ingress TLS).
 	// The referenced object holds the sensitive value, and that object is
 	// redacted separately by kind ("Secret").
 	"secretname": {
-		{onPodSpec: true, podSpecParents: []string{"volumes", "secret"}},
-		{kinds: []string{"Ingress"}, parents: []string{"spec", "tls"}},
+		{onPodSpec: true, podSpecParents: []parentSegment{
+			{key: "volumes", list: true}, {key: "secret"},
+		}},
+		{kinds: []string{"Ingress"}, parents: []parentSegment{
+			{key: "spec"}, {key: "tls", list: true},
+		}},
 	},
 }
 
@@ -293,14 +329,24 @@ func normalizeFieldName(key string) string {
 }
 
 // equalParentPath reports whether parents is exactly want, segment for
-// segment. Comparing the whole path rather than its tail is what keeps an
-// exception pinned to the schema location it was written for.
-func equalParentPath(parents []pathSegment, want []string) bool {
+// segment, in both key and shape. Comparing the whole path rather than its
+// tail is what keeps an exception pinned to the schema location it was written
+// for; comparing the shape is what stops an object-shaped path from borrowing
+// a list-shaped path's exception.
+//
+// A segment splitPath could not read an index from - "volumes[container_ndx]",
+// an unsubstituted rule placeholder - carries index -1 and so reads as
+// unindexed, failing a list segment's match. That is the safe direction: an
+// unresolvable path is redacted rather than excused.
+func equalParentPath(parents []pathSegment, want []parentSegment) bool {
 	if len(parents) != len(want) {
 		return false
 	}
 	for i := range want {
-		if !strings.EqualFold(parents[i].key, want[i]) {
+		if !strings.EqualFold(parents[i].key, want[i].key) {
+			return false
+		}
+		if want[i].list != (parents[i].index >= 0) {
 			return false
 		}
 	}
@@ -319,7 +365,7 @@ func matchesSafeField(kind, name string, parents []pathSegment) bool {
 			if !ok {
 				continue
 			}
-			canonical := make([]string, 0, len(prefix)+len(rule.podSpecParents))
+			canonical := make([]parentSegment, 0, len(prefix)+len(rule.podSpecParents))
 			canonical = append(canonical, prefix...)
 			canonical = append(canonical, rule.podSpecParents...)
 			if equalParentPath(parents, canonical) {

@@ -421,6 +421,25 @@ func TestIsSensitivePath(t *testing.T) {
 		{name: "Pod-shaped path on a workload kind is redacted", kind: "Deployment", path: "spec.automountServiceAccountToken", want: true},
 		{name: "off-schema Ingress TLS tail is redacted", kind: "Ingress", path: "spec.extension.tls[0].secretName", want: true},
 		{name: "ServiceAccount exception does not extend below the root", kind: "ServiceAccount", path: "spec.automountServiceAccountToken", want: true},
+		// Regression: the schema makes volumes, sources and tls lists, so an
+		// exception written for them only covers an indexed path. An
+		// object-shaped path is a different field that extractValueAtPath
+		// resolves perfectly well against a manifest carrying a map there, so
+		// matching on keys alone handed it the list's exception.
+		{name: "object-shaped volumes is not SecretVolumeSource", kind: "Pod", path: "spec.volumes.secret.secretName", want: true},
+		{name: "object-shaped volumes and sources is not a projected token", kind: "Pod", path: "spec.volumes.projected.sources.serviceAccountToken", want: true},
+		{name: "object-shaped sources is not a projected token", kind: "Pod", path: "spec.volumes[0].projected.sources.serviceAccountToken", want: true},
+		{name: "object-shaped volumes is not a projected token", kind: "Pod", path: "spec.volumes.projected.sources[0].serviceAccountToken", want: true},
+		{name: "object-shaped tokenExpirationSeconds parents are redacted", kind: "Pod", path: "spec.volumes.projected.sources.serviceAccountToken.tokenExpirationSeconds", want: true},
+		{name: "object-shaped Ingress tls is not IngressTLS", kind: "Ingress", path: "spec.tls.secretName", want: true},
+		{name: "object-shaped volumes through a pod template is redacted", kind: "Deployment", path: "spec.template.spec.volumes.secret.secretName", want: true},
+		// The mirror of the above: a schema map reached with an index is just
+		// as far off-schema as a schema list reached without one.
+		{name: "indexed secret map is not SecretVolumeSource", kind: "Pod", path: "spec.volumes[0].secret[0].secretName", want: true},
+		{name: "indexed projected map is not a projected token", kind: "Pod", path: "spec.volumes[0].projected[0].sources[0].serviceAccountToken", want: true},
+		// An unsubstituted rule placeholder leaves splitPath with no index, so
+		// it reads as unindexed and is redacted rather than excused.
+		{name: "unresolved list placeholder is redacted", kind: "Pod", path: "spec.volumes[volume_ndx].secret.secretName", want: true},
 	}
 
 	for _, tc := range cases {
@@ -674,5 +693,75 @@ func TestAssistedRemediationPathsWithCurrentValuesFiltered(t *testing.T) {
 		ctrl := makeControlWithPaths(nil, nil)
 		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, false)
 		assert.Nil(t, got)
+	})
+}
+
+// TestFailedPathValuesObjectShapedSafeFields pins the output boundary the
+// safe-field exceptions sit behind. isSensitivePath deciding a path is safe is
+// only half the story: failedPathValues then resolves that path and publishes
+// the value as Evidence. extractValueAtPath walks an unindexed segment straight
+// through a map, so an off-schema object where the schema defines a list
+// resolves perfectly well - and if the exception written for the list-shaped
+// field covered it too, the value would reach output unredacted.
+func TestFailedPathValuesObjectShapedSafeFields(t *testing.T) {
+	controlWithFailedPath := func(path string) *resourcesresults.ResourceAssociatedControl {
+		return &resourcesresults.ResourceAssociatedControl{
+			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+				{Paths: []armotypes.PosturePaths{{FailedPath: path}}},
+			},
+		}
+	}
+
+	t.Run("object-shaped volumes does not reach Evidence", func(t *testing.T) {
+		resource := &mockResource{kind: "Pod", obj: map[string]any{
+			"spec": map[string]any{
+				// PodSpec.volumes is a list; this manifest carries a map, so
+				// this is not SecretVolumeSource.secretName at all.
+				"volumes": map[string]any{
+					"secret": map[string]any{"secretName": "inline-credential"},
+				},
+			},
+		}}
+		got := failedPathValues(controlWithFailedPath("spec.volumes.secret.secretName"), resource)
+		assert.Empty(t, got, "an off-schema object-shaped path must be redacted, not published as Evidence")
+	})
+
+	t.Run("object-shaped projected sources does not reach Evidence", func(t *testing.T) {
+		resource := &mockResource{kind: "Pod", obj: map[string]any{
+			"spec": map[string]any{
+				"volumes": map[string]any{
+					"projected": map[string]any{
+						"sources": map[string]any{"serviceAccountToken": "inline-token"},
+					},
+				},
+			},
+		}}
+		got := failedPathValues(controlWithFailedPath("spec.volumes.projected.sources.serviceAccountToken"), resource)
+		assert.Empty(t, got, "an off-schema object-shaped path must be redacted, not published as Evidence")
+	})
+
+	t.Run("object-shaped Ingress tls does not reach Evidence", func(t *testing.T) {
+		resource := &mockResource{kind: "Ingress", obj: map[string]any{
+			"spec": map[string]any{
+				"tls": map[string]any{"secretName": "inline-credential"},
+			},
+		}}
+		got := failedPathValues(controlWithFailedPath("spec.tls.secretName"), resource)
+		assert.Empty(t, got, "an off-schema object-shaped path must be redacted, not published as Evidence")
+	})
+
+	// The exception still has to work where the schema actually defines it,
+	// or this would be a fix by way of redacting everything.
+	t.Run("canonical indexed SecretVolumeSource still resolves", func(t *testing.T) {
+		resource := &mockResource{kind: "Pod", obj: map[string]any{
+			"spec": map[string]any{
+				"volumes": []any{
+					map[string]any{"secret": map[string]any{"secretName": "referenced-secret"}},
+				},
+			},
+		}}
+		got := failedPathValues(controlWithFailedPath("spec.volumes[0].secret.secretName"), resource)
+		require.Len(t, got, 1)
+		assert.Equal(t, "referenced-secret", got[0].Value)
 	})
 }
