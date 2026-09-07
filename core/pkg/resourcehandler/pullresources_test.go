@@ -38,6 +38,17 @@ func (s *staticFieldSelector) GetNamespaceScopedQueries(*schema.GroupVersionReso
 func (s *staticFieldSelector) GetClusterScope(resource *schema.GroupVersionResource) bool {
 	return false
 }
+func (s *staticFieldSelector) AllowsNamespace(resource *schema.GroupVersionResource, namespace string, namespaced *bool) bool {
+	if len(s.namespaces) > 0 {
+		for _, ns := range s.namespaces {
+			if ns == namespace {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
 func TestPullSingleResource_FieldSelectorDoesNotLeakAcrossIterations(t *testing.T) {
 	var capturedSelectors []string
 
