@@ -49,12 +49,9 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		}
 		continueToken, _ := args["continue"].(string)
 
-		k8sClient, err := ksServer.getK8sClient()
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("failed to get k8s client: %v", err)), nil
-		}
-
-		// Simplified mapping for common kinds, to support granular resource fetching
+		// Simplified mapping for common kinds, to support granular resource fetching.
+		// Validated before client acquisition so an unsupported kind is rejected
+		// regardless of whether a Kubernetes configuration is available.
 		var gvr schema.GroupVersionResource
 		switch strings.ToLower(kind) {
 		case "pods", "pod":
@@ -66,8 +63,12 @@ func createAdvancedTools(ksServer *KubescapeMcpserver) {
 		case "statefulsets", "statefulset":
 			gvr = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
 		default:
-			// Defaulting to try core v1
-			gvr = schema.GroupVersionResource{Group: "", Version: "v1", Resource: strings.ToLower(kind)}
+			return mcp.NewToolResultError(fmt.Sprintf("unsupported resource kind %q; supported kinds are: pods, deployments, daemonsets, statefulsets", kind)), nil
+		}
+
+		k8sClient, err := ksServer.getK8sClient()
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to get k8s client: %v", err)), nil
 		}
 
 		listOpts := metav1.ListOptions{

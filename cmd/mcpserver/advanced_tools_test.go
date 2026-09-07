@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -40,4 +41,62 @@ func TestScanResourceSlice_EmptyResultMarshalsAsEmptyArray(t *testing.T) {
 
 	raw := toolResultText(t, result)
 	require.JSONEq(t, `{"resources":[],"continue":"","count":0}`, raw)
+}
+
+// TestScanResourceSlice_UnsupportedKindReturnsError guards against a silent
+// fallback to core/v1 for resource kinds the tool does not explicitly map
+// (e.g. "jobs"). Falling back would send a request to the wrong API group and
+// surface the cluster's "resource not found" rejection as an opaque list
+// failure, indistinguishable from a connectivity problem.
+func TestScanResourceSlice_UnsupportedKindReturnsError(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{})
+
+	ksServer := &KubescapeMcpserver{
+		s: server.NewMCPServer(
+			"kubescape-test",
+			"test",
+			server.WithToolCapabilities(false),
+			server.WithRecovery(),
+		),
+		k8sClient: &k8sinterface.KubernetesApi{DynamicClient: dyn},
+	}
+	createAdvancedTools(ksServer)
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "scan_resource_slice", map[string]any{
+		"resource_kind": "jobs",
+	}))
+	require.True(t, result.IsError)
+	text := toolResultText(t, result)
+	require.Contains(t, text, `unsupported resource kind "jobs"`)
+	require.Contains(t, text, "pods")
+	require.Contains(t, text, "deployments")
+	require.Contains(t, text, "daemonsets")
+	require.Contains(t, text, "statefulsets")
+}
+
+// TestScanResourceSlice_UnsupportedKindReturnsErrorWithoutClusterConfig
+// guards against the unsupported-kind check being reordered behind
+// getK8sClient(): with no pre-populated k8sClient and no reachable cluster
+// config, the tool must still report the unsupported kind rather than
+// masking it behind "failed to get k8s client".
+func TestScanResourceSlice_UnsupportedKindReturnsErrorWithoutClusterConfig(t *testing.T) {
+	origLoadK8sConfig := loadK8sConfig
+	t.Cleanup(func() { loadK8sConfig = origLoadK8sConfig })
+	loadK8sConfig = func() error { return errors.New("no kubeconfig") }
+
+	ksServer := &KubescapeMcpserver{
+		s: server.NewMCPServer(
+			"kubescape-test",
+			"test",
+			server.WithToolCapabilities(false),
+			server.WithRecovery(),
+		),
+	}
+	createAdvancedTools(ksServer)
+
+	result := registeredToolResult(t, dispatchRegisteredTool(t, ksServer, "scan_resource_slice", map[string]any{
+		"resource_kind": "jobs",
+	}))
+	require.True(t, result.IsError)
+	require.Contains(t, toolResultText(t, result), `unsupported resource kind "jobs"`)
 }
