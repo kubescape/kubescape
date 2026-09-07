@@ -407,6 +407,20 @@ func TestIsSensitivePath(t *testing.T) {
 		{name: "tokenExpirationSeconds is a lifetime, not a token", kind: "Pod", path: "spec.volumes[0].projected.sources[0].serviceAccountToken.tokenExpirationSeconds", want: false},
 		{name: "Ingress TLS secretName references a Secret by name", kind: "Ingress", path: "spec.tls[0].secretName", want: false},
 		{name: "a field that is actually named secret is still caught", kind: "OAuthClient", path: "spec.secret", want: true},
+		// Regression: an exception is pinned to the field's full canonical
+		// parent path, not to a trailing fragment of it. The scanner reads
+		// manifests without API schema admission, so a built-in kind can carry
+		// a field at a path its schema never defines; matching the parents as a
+		// suffix excused those, since the tail still read as PodSpec. They must
+		// fail closed - this is a redaction boundary.
+		{name: "off-schema PodSpec-shaped tail on a built-in kind is redacted", kind: "Pod", path: "spec.extension.spec.automountServiceAccountToken", want: true},
+		{name: "off-schema projected-source tail on a built-in kind is redacted", kind: "Pod", path: "spec.extension.projected.sources[0].serviceAccountToken", want: true},
+		{name: "off-schema secret-volume tail on a built-in kind is redacted", kind: "Pod", path: "spec.extension.volumes[0].secret.secretName", want: true},
+		{name: "off-schema tokenExpirationSeconds on a built-in kind is redacted", kind: "Pod", path: "spec.extension.sources[0].serviceAccountToken.tokenExpirationSeconds", want: true},
+		{name: "pod-template path on a kind without a pod template is redacted", kind: "Pod", path: "spec.template.spec.automountServiceAccountToken", want: true},
+		{name: "Pod-shaped path on a workload kind is redacted", kind: "Deployment", path: "spec.automountServiceAccountToken", want: true},
+		{name: "off-schema Ingress TLS tail is redacted", kind: "Ingress", path: "spec.extension.tls[0].secretName", want: true},
+		{name: "ServiceAccount exception does not extend below the root", kind: "ServiceAccount", path: "spec.automountServiceAccountToken", want: true},
 	}
 
 	for _, tc := range cases {

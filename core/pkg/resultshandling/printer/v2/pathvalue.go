@@ -202,22 +202,36 @@ var secretFieldPatterns = []string{
 	"connectionstring",
 }
 
-// podSpecKinds are the built-in kinds whose schema carries a PodSpec, either
-// directly (Pod) or through a pod template. Depending on the kind a PodSpec
-// field sits at spec., spec.template.spec., or
-// spec.jobTemplate.spec.template.spec., so the rules below match a field's
-// immediate parents rather than a fully anchored path.
-var podSpecKinds = []string{
-	"Pod", "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet",
-	"ReplicationController", "Job", "CronJob",
+// podSpecPrefixes maps each built-in kind whose schema carries a PodSpec to
+// the exact parent segments that precede a PodSpec field on that kind. The
+// prefix is spelled out per kind rather than matched as a trailing "spec",
+// because this is a redaction boundary: the scanner reads manifests directly,
+// without API schema admission, so a document is free to nest an arbitrary
+// spec. anywhere and a suffix match would read that as the PodSpec.
+var podSpecPrefixes = map[string][]string{
+	"Pod":                   {"spec"},
+	"Deployment":            {"spec", "template", "spec"},
+	"StatefulSet":           {"spec", "template", "spec"},
+	"DaemonSet":             {"spec", "template", "spec"},
+	"ReplicaSet":            {"spec", "template", "spec"},
+	"ReplicationController": {"spec", "template", "spec"},
+	"Job":                   {"spec", "template", "spec"},
+	"CronJob":               {"spec", "jobTemplate", "spec", "template", "spec"},
 }
 
 // safeFieldRule scopes a safe-field exception to one documented Kubernetes
-// location: the kinds whose schema defines the field, and the parent segments
-// it sits directly under. parents is matched as a suffix, so a PodSpec field
-// is recognized through any pod-template nesting; an empty parents means the
-// field sits at the object root.
+// location. A rule matches a field's parent path in full, never as a suffix,
+// so the exception covers exactly the canonical location and nothing that
+// merely ends the same way.
+//
+// onPodSpec anchors a rule to every kind in podSpecPrefixes: the canonical
+// parent path is that kind's prefix followed by podSpecParents, which is empty
+// for a field sitting directly on the PodSpec. Otherwise the rule applies to
+// kinds at exactly parents, where an empty parents means the object root.
 type safeFieldRule struct {
+	onPodSpec      bool
+	podSpecParents []string
+
 	kinds   []string
 	parents []string
 }
@@ -231,7 +245,9 @@ type safeFieldRule struct {
 // strength of its name alone would reopen the very kind-blind hole this file
 // exists to close. Anything outside these locations - a custom resource, or a
 // core kind carrying the name somewhere its schema does not define it - falls
-// through to the pattern match below and is redacted.
+// through to the pattern match below and is redacted. Each location is the
+// field's full canonical parent path, so an off-schema path on a built-in kind
+// (Pod spec.extension.spec.automountServiceAccountToken, say) fails closed.
 //
 // A word-boundary-aware match (splitting at camelCase/snake_case/kebab-case
 // boundaries and requiring whole-word membership) was considered instead of
@@ -244,25 +260,25 @@ var safeFieldRules = map[string][]safeFieldRule{
 	// A boolean toggle on PodSpec, and on ServiceAccount as the default for
 	// pods using it - not token content either way.
 	"automountserviceaccounttoken": {
-		{kinds: podSpecKinds, parents: []string{"spec"}},
+		{onPodSpec: true},
 		{kinds: []string{"ServiceAccount"}},
 	},
 	// A projected volume source's configuration block
 	// (ServiceAccountTokenProjection). It describes a token the kubelet will
 	// mint at mount time; the block itself carries no credential.
 	"serviceaccounttoken": {
-		{kinds: podSpecKinds, parents: []string{"projected", "sources"}},
+		{onPodSpec: true, podSpecParents: []string{"volumes", "projected", "sources"}},
 	},
 	// That block's requested lifetime, a number of seconds.
 	"tokenexpirationseconds": {
-		{kinds: podSpecKinds, parents: []string{"sources", "serviceAccountToken"}},
+		{onPodSpec: true, podSpecParents: []string{"volumes", "projected", "sources", "serviceAccountToken"}},
 	},
 	// A reference to a Secret by name (SecretVolumeSource, and Ingress TLS).
 	// The referenced object holds the sensitive value, and that object is
 	// redacted separately by kind ("Secret").
 	"secretname": {
-		{kinds: podSpecKinds, parents: []string{"volumes", "secret"}},
-		{kinds: []string{"Ingress"}, parents: []string{"tls"}},
+		{onPodSpec: true, podSpecParents: []string{"volumes", "secret"}},
+		{kinds: []string{"Ingress"}, parents: []string{"spec", "tls"}},
 	},
 }
 
@@ -276,33 +292,45 @@ func normalizeFieldName(key string) string {
 	return name
 }
 
+// equalParentPath reports whether parents is exactly want, segment for
+// segment. Comparing the whole path rather than its tail is what keeps an
+// exception pinned to the schema location it was written for.
+func equalParentPath(parents []pathSegment, want []string) bool {
+	if len(parents) != len(want) {
+		return false
+	}
+	for i := range want {
+		if !strings.EqualFold(parents[i].key, want[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 // matchesSafeField reports whether kind, and the parents of a field named
 // name, place that field at one of the documented locations in
-// safeFieldRules.
+// safeFieldRules. A kind absent from podSpecPrefixes never matches an
+// onPodSpec rule, and a built-in kind matches only on its own canonical path,
+// so anything off-schema falls through and is redacted.
 func matchesSafeField(kind, name string, parents []pathSegment) bool {
 	for _, rule := range safeFieldRules[name] {
-		if !slices.Contains(rule.kinds, kind) {
-			continue
-		}
-		if len(rule.parents) == 0 {
-			// The field is defined at the object root only.
-			if len(parents) == 0 {
+		if rule.onPodSpec {
+			prefix, ok := podSpecPrefixes[kind]
+			if !ok {
+				continue
+			}
+			canonical := make([]string, 0, len(prefix)+len(rule.podSpecParents))
+			canonical = append(canonical, prefix...)
+			canonical = append(canonical, rule.podSpecParents...)
+			if equalParentPath(parents, canonical) {
 				return true
 			}
 			continue
 		}
-		if len(parents) < len(rule.parents) {
+		if !slices.Contains(rule.kinds, kind) {
 			continue
 		}
-		tail := parents[len(parents)-len(rule.parents):]
-		matched := true
-		for i, want := range rule.parents {
-			if !strings.EqualFold(tail[i].key, want) {
-				matched = false
-				break
-			}
-		}
-		if matched {
+		if equalParentPath(parents, rule.parents) {
 			return true
 		}
 	}
