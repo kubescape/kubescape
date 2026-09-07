@@ -7,6 +7,13 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      kubernetes:
+        patterns:
+          - "k8s.io/api"
+          - "k8s.io/apimachinery"
+          - "k8s.io/apiserver"
+          - "k8s.io/client-go"
 
   - package-ecosystem: "github-actions"
     directory: "/"
