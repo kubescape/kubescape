@@ -704,6 +704,16 @@ func TestAssistedRemediationPathsWithCurrentValuesFiltered(t *testing.T) {
 // resolves perfectly well - and if the exception written for the list-shaped
 // field covered it too, the value would reach output unredacted.
 func TestFailedPathValuesObjectShapedSafeFields(t *testing.T) {
+	// Fixture values are named rather than inlined into the objects below.
+	// Every fixture here is deliberately built around a credential-shaped key,
+	// which is exactly the shape gosec's G101 reports when the value beside it
+	// is a string literal. These are test data standing in for a value, not
+	// credentials, and naming them keeps that legible without a nolint.
+	const (
+		offSchemaValue = "fixture-value-that-must-not-be-published"
+		onSchemaValue  = "fixture-referenced-object-name"
+	)
+
 	controlWithFailedPath := func(path string) *resourcesresults.ResourceAssociatedControl {
 		return &resourcesresults.ResourceAssociatedControl{
 			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
@@ -718,7 +728,7 @@ func TestFailedPathValuesObjectShapedSafeFields(t *testing.T) {
 				// PodSpec.volumes is a list; this manifest carries a map, so
 				// this is not SecretVolumeSource.secretName at all.
 				"volumes": map[string]any{
-					"secret": map[string]any{"secretName": "inline-credential"},
+					"secret": map[string]any{"secretName": offSchemaValue},
 				},
 			},
 		}}
@@ -731,7 +741,7 @@ func TestFailedPathValuesObjectShapedSafeFields(t *testing.T) {
 			"spec": map[string]any{
 				"volumes": map[string]any{
 					"projected": map[string]any{
-						"sources": map[string]any{"serviceAccountToken": "inline-token"},
+						"sources": map[string]any{"serviceAccountToken": offSchemaValue},
 					},
 				},
 			},
@@ -743,7 +753,7 @@ func TestFailedPathValuesObjectShapedSafeFields(t *testing.T) {
 	t.Run("object-shaped Ingress tls does not reach Evidence", func(t *testing.T) {
 		resource := &mockResource{kind: "Ingress", obj: map[string]any{
 			"spec": map[string]any{
-				"tls": map[string]any{"secretName": "inline-credential"},
+				"tls": map[string]any{"secretName": offSchemaValue},
 			},
 		}}
 		got := failedPathValues(controlWithFailedPath("spec.tls.secretName"), resource)
@@ -756,12 +766,12 @@ func TestFailedPathValuesObjectShapedSafeFields(t *testing.T) {
 		resource := &mockResource{kind: "Pod", obj: map[string]any{
 			"spec": map[string]any{
 				"volumes": []any{
-					map[string]any{"secret": map[string]any{"secretName": "referenced-secret"}},
+					map[string]any{"secret": map[string]any{"secretName": onSchemaValue}},
 				},
 			},
 		}}
 		got := failedPathValues(controlWithFailedPath("spec.volumes[0].secret.secretName"), resource)
 		require.Len(t, got, 1)
-		assert.Equal(t, "referenced-secret", got[0].Value)
+		assert.Equal(t, onSchemaValue, got[0].Value)
 	})
 }
