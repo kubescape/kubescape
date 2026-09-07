@@ -1,8 +1,12 @@
 package rbacgraph
 
 import (
+	"slices"
+	"sort"
+	"strings"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -640,5 +644,127 @@ func TestAnalyzeEscalation_EscalateTargetNotInIndexFallsBackToScopeUnbounded(t *
 	}
 	if len(result.Unbounded) == 0 {
 		t.Error("Unbounded = empty, want the fallback finding recorded")
+	}
+}
+
+// --- deterministic ordering ---
+
+// escalationFingerprint renders everything a caller can observe about a
+// result's ordering: the reached identities in order, the edges of each path,
+// and the unbounded findings.
+func escalationFingerprint(r EscalationResult) string {
+	var b strings.Builder
+	for _, p := range r.Reached {
+		for _, e := range p.Edges {
+			b.WriteString(string(e.Primitive) + "|" + e.Detail + "\n")
+		}
+		b.WriteString("--\n")
+	}
+	for _, f := range r.Unbounded {
+		b.WriteString(f.Subject.String() + "|" + f.Edge.Detail + "\n")
+	}
+	return b.String()
+}
+
+func TestAnalyzeEscalation_ClusterWideGrantEnumeratesNamespacesInStableOrder(t *testing.T) {
+	// A cluster-wide "create pods" grant enumerates every namespace the
+	// Index has ServiceAccounts for. That list came straight out of a map,
+	// so the reported escalation paths arrived in a different order on
+	// every run and two scans of one unchanged cluster never matched.
+	cr := clusterRole("pod-creator", rule([]string{""}, []string{"pods"}, []string{"create"}, nil))
+	crb := clusterRoleBinding("crb", "pod-creator", saSubject("home", "attacker"))
+	accounts := []corev1.ServiceAccount{
+		saObj("home", "attacker"),
+		saObj("delta", "d1"),
+		saObj("alpha", "a1"),
+		saObj("charlie", "c1"),
+		saObj("bravo", "b1"),
+		saObj("echo", "e1"),
+	}
+	idx := NewIndex(nil, []rbacv1.ClusterRole{cr}, nil, []rbacv1.ClusterRoleBinding{crb}, accounts)
+
+	want := escalationFingerprint(idx.AnalyzeEscalation(sa("home", "attacker")))
+	for i := 1; i < 25; i++ {
+		if got := escalationFingerprint(idx.AnalyzeEscalation(sa("home", "attacker"))); got != want {
+			t.Fatalf("run %d differs from run 0:\nfirst:\n%s\ngot:\n%s", i, want, got)
+		}
+	}
+
+	namespaces := idx.targetNamespaces("")
+	if !sort.StringsAreSorted(namespaces) {
+		t.Errorf("targetNamespaces(\"\") = %v, want sorted", namespaces)
+	}
+}
+
+func TestAnalyzeEscalation_BindableRolesAndClusterRolesAreEnumeratedInStableOrder(t *testing.T) {
+	// bind-verb walks the collected Roles and ClusterRoles, both stored in
+	// maps, so the edges it emits carried map order into the report too.
+	binder := clusterRole("binder",
+		rule([]string{"rbac.authorization.k8s.io"}, []string{"clusterroles", "roles"}, []string{"bind"}, nil),
+		rule([]string{"rbac.authorization.k8s.io"}, []string{"rolebindings", "clusterrolebindings"}, []string{"create"}, nil),
+	)
+	get := rule([]string{""}, []string{"pods"}, []string{"get"}, nil)
+	idx := NewIndex(
+		[]rbacv1.Role{role("dev", "zeta", get), role("dev", "alpha", get), role("prod", "mu", get), role("prod", "beta", get)},
+		[]rbacv1.ClusterRole{binder, clusterRole("zulu", get), clusterRole("kilo", get), clusterRole("alfa", get)},
+		nil,
+		[]rbacv1.ClusterRoleBinding{clusterRoleBinding("crb", "binder", saSubject("dev", "attacker"))},
+		[]corev1.ServiceAccount{saObj("dev", "attacker")},
+	)
+
+	want := escalationFingerprint(idx.AnalyzeEscalation(sa("dev", "attacker")))
+	for i := 1; i < 25; i++ {
+		if got := escalationFingerprint(idx.AnalyzeEscalation(sa("dev", "attacker"))); got != want {
+			t.Fatalf("run %d differs from run 0:\nfirst:\n%s\ngot:\n%s", i, want, got)
+		}
+	}
+
+	var clusterRoleNames []string
+	for _, cr := range idx.matchingClusterRoles(nil, false) {
+		clusterRoleNames = append(clusterRoleNames, cr.Name)
+	}
+	if !sort.StringsAreSorted(clusterRoleNames) {
+		t.Errorf("matchingClusterRoles = %v, want sorted by name", clusterRoleNames)
+	}
+
+	var roleKeys []string
+	for _, r := range idx.matchingRolesAnyNamespace(nil, false) {
+		roleKeys = append(roleKeys, roleKey(r.Namespace, r.Name))
+	}
+	if !sort.StringsAreSorted(roleKeys) {
+		t.Errorf("matchingRolesAnyNamespace = %v, want sorted by namespace/name", roleKeys)
+	}
+}
+
+func TestFromResources_ConvertsInResourceIDOrder(t *testing.T) {
+	// FromResources reads a map, and everything it returns becomes Index
+	// state that the report's ordering depends on.
+	resources := map[string]workloadinterface.IMetadata{}
+	for _, name := range []string{"zeta", "alpha", "mu", "beta", "kilo"} {
+		obj := workloadinterface.NewWorkloadObj(map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ServiceAccount",
+			"metadata":   map[string]any{"name": name, "namespace": "dev"},
+		})
+		resources[obj.GetID()] = obj
+	}
+
+	var want []string
+	for i := 0; i < 25; i++ {
+		_, _, _, _, serviceAccounts, errs := FromResources(resources)
+		if len(errs) != 0 {
+			t.Fatalf("errs = %v, want none", errs)
+		}
+		got := make([]string, 0, len(serviceAccounts))
+		for _, sa := range serviceAccounts {
+			got = append(got, sa.Name)
+		}
+		if i == 0 {
+			want = got
+			continue
+		}
+		if !slices.Equal(got, want) {
+			t.Fatalf("run %d = %v, want %v (same order every run)", i, got, want)
+		}
 	}
 }

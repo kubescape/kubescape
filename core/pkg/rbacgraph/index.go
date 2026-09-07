@@ -1,6 +1,8 @@
 package rbacgraph
 
 import (
+	"sort"
+
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 )
@@ -45,6 +47,12 @@ func NewIndex(roles []rbacv1.Role, clusterRoles []rbacv1.ClusterRole, roleBindin
 	}
 	for _, sa := range serviceAccounts {
 		idx.serviceAccountsByNS[sa.Namespace] = append(idx.serviceAccountsByNS[sa.Namespace], sa.Name)
+	}
+	// Sorted so the Index is canonical whatever order its inputs arrived in:
+	// these names are enumerated straight into escalation edges, and an
+	// escalation report should not depend on collection order.
+	for ns := range idx.serviceAccountsByNS {
+		sort.Strings(idx.serviceAccountsByNS[ns])
 	}
 	return idx
 }
