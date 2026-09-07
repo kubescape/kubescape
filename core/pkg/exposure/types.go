@@ -136,11 +136,15 @@ const gatewayAPIGroup = "gateway.networking.k8s.io"
 // group and an absent kind is Gateway, so a reference to anything else
 // (e.g. a Service parent for mesh use cases) is not a Gateway reference
 // and must not attach a route to a Gateway that merely shares its name.
+// SectionName, when present, pins the attachment to the one listener with
+// that name: per the Gateway API spec the route then attaches to that
+// section only, and no other listener of the Gateway may admit it.
 type parentRef struct {
-	Group     *string
-	Kind      *string
-	Namespace *string
-	Name      string
+	Group       *string
+	Kind        *string
+	Namespace   *string
+	Name        string
+	SectionName *string
 }
 
 // isGatewayParentRef reports whether ref effectively names a Gateway once

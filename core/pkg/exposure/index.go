@@ -213,20 +213,23 @@ func routeReferencesService(route *gatewayRoute, ref ServiceRef) bool {
 // one listener of a Gateway object this Index was given, via any of the
 // route's parentRefs. Only effective Gateway parents count (per Gateway
 // API's group/kind defaults -- a parentRef naming another kind must not
-// attach a route to a Gateway that merely shares its namespace/name), and
-// a listener must admit the route on BOTH axes: its AllowedRoutes
-// namespaces policy and its AllowedRoutes kinds policy. A listener whose
-// namespace admission cannot be confirmed to exclude the route (a Selector
-// needing namespace labels this Index was not given) is conservatively
-// treated as admitting it: this package errs toward reporting a possible
-// exposure rather than silently hiding one, the same choice
-// core/pkg/mapreconcile makes for its own indeterminate matches. A
-// parentRef naming a Gateway this Index has no record of at all is the
-// most indeterminate case there is -- the Gateway may simply live outside
-// what was collected (a cross-namespace reference, or a caller without
-// RBAC to list it elsewhere) rather than not exist -- so it gets the same
-// conservative treatment rather than being silently treated as a
-// non-match.
+// attach a route to a Gateway that merely shares its namespace/name). When
+// a parentRef carries a sectionName, it pins the attachment to the one
+// listener with that name -- no other listener of the Gateway may admit
+// the route, and a sectionName naming no collected listener contributes
+// nothing. Otherwise every listener is evaluated. A listener must admit
+// the route on BOTH axes: its AllowedRoutes namespaces policy and its
+// AllowedRoutes kinds policy. A listener whose namespace admission cannot
+// be confirmed to exclude the route (a Selector needing namespace labels
+// this Index was not given) is conservatively treated as admitting it:
+// this package errs toward reporting a possible exposure rather than
+// silently hiding one, the same choice core/pkg/mapreconcile makes for its
+// own indeterminate matches. A parentRef naming a Gateway this Index has
+// no record of at all is the most indeterminate case there is -- the
+// Gateway may simply live outside what was collected (a cross-namespace
+// reference, or a caller without RBAC to list it elsewhere) rather than
+// not exist -- so it gets the same conservative treatment rather than
+// being silently treated as a non-match.
 func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
 	for _, ref := range route.ParentRefs {
 		if !isGatewayParentRef(ref) {
@@ -241,6 +244,9 @@ func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
 			return true
 		}
 		for _, l := range gw.Listeners {
+			if ref.SectionName != nil && l.Name != *ref.SectionName {
+				continue
+			}
 			if !idx.listenerAdmitsRouteKind(l, route.Kind) {
 				continue
 			}

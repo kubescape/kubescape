@@ -347,6 +347,52 @@ func TestServiceExposure_GRPCRouteNotAdmittedByHTTPRouteOnlyListener(t *testing.
 	}
 }
 
+// TestServiceExposure_GRPCRouteSectionNamePinsAdmissionToNamedListener
+// verifies parentRefs[].sectionName semantics: a route attaching via
+// sectionName must be evaluated against that listener only -- never
+// admitted by another listener of the same Gateway that merely allows its
+// kind. The Gateway below has a kind-refusing "http" listener and a
+// permissive "grpc" listener; the route pins to "http", so it must not be
+// admitted, and pinning to "grpc" instead must be admitted.
+func TestServiceExposure_GRPCRouteSectionNamePinsAdmissionToNamedListener(t *testing.T) {
+	httpRouteKind := "HTTPRoute"
+	gw := gateway{Namespace: "ns", Name: "gw", Listeners: []listener{
+		{Name: "http", AllowedRoutes: &allowedRoutes{Kinds: []routeGroupKind{{Kind: httpRouteKind}}}},
+		{Name: "grpc"},
+	}}
+
+	pinnedToRefusing := gatewayRoute{
+		Kind:       "GRPCRoute",
+		Namespace:  "ns",
+		Name:       "grpc-route",
+		ParentRefs: []parentRef{{Name: "gw", SectionName: strPtr("http")}},
+		Rules:      []gatewayRouteRule{{BackendRefs: []backendRef{{Name: "app"}}}},
+	}
+	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []gatewayRoute{pinnedToRefusing}, []gateway{gw}, nil)
+	paths, unclear := idx.ServiceExposure(ref("ns", "app"))
+	if len(paths) != 0 {
+		t.Errorf("paths = %+v, want empty: the route attaches to section %q only, and that listener admits only HTTPRoute", paths, "http")
+	}
+	if unclear {
+		t.Error("unclear = true, want false: the same-namespace backendRef is fully evaluated, just not attached")
+	}
+
+	pinnedToPermissive := gatewayRoute{
+		Kind:       "GRPCRoute",
+		Namespace:  "ns",
+		Name:       "grpc-route",
+		ParentRefs: []parentRef{{Name: "gw", SectionName: strPtr("grpc")}},
+		Rules:      []gatewayRouteRule{{BackendRefs: []backendRef{{Name: "app"}}}},
+	}
+	idx2 := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []gatewayRoute{pinnedToPermissive}, []gateway{gw}, nil)
+	paths2, _ := idx2.ServiceExposure(ref("ns", "app"))
+	if len(paths2) != 1 || paths2[0].Kind != ExposureGRPCRoute {
+		t.Errorf("paths = %+v, want one ExposureGRPCRoute: the pinned listener admits GRPCRoute", paths2)
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
 // TestServiceExposure_NonGatewayParentDoesNotAttachToSameNameGateway
 // verifies the parentRef group/kind defaults: a parentRef naming a
 // non-Gateway parent (here a mesh Service) whose namespace/name happen to

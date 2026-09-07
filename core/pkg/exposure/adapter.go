@@ -111,10 +111,11 @@ type gatewayAPIWireShape struct {
 	Spec struct {
 		// Route fields (HTTPRoute and GRPCRoute share this shape).
 		ParentRefs []struct {
-			Group     *string `json:"group,omitempty"`
-			Kind      *string `json:"kind,omitempty"`
-			Namespace *string `json:"namespace,omitempty"`
-			Name      string  `json:"name"`
+			Group       *string `json:"group,omitempty"`
+			Kind        *string `json:"kind,omitempty"`
+			Namespace   *string `json:"namespace,omitempty"`
+			Name        string  `json:"name"`
+			SectionName *string `json:"sectionName,omitempty"`
 		} `json:"parentRefs,omitempty"`
 		Hostnames []string `json:"hostnames,omitempty"`
 		Rules     []struct {
@@ -165,7 +166,7 @@ func decodeGatewayRoute(kind string, obj map[string]any) (gatewayRoute, error) {
 		Hostnames: wire.Spec.Hostnames,
 	}
 	for _, p := range wire.Spec.ParentRefs {
-		r.ParentRefs = append(r.ParentRefs, parentRef{Group: p.Group, Kind: p.Kind, Namespace: p.Namespace, Name: p.Name})
+		r.ParentRefs = append(r.ParentRefs, parentRef{Group: p.Group, Kind: p.Kind, Namespace: p.Namespace, Name: p.Name, SectionName: p.SectionName})
 	}
 	for _, rule := range wire.Spec.Rules {
 		var backends []backendRef
