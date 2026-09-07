@@ -191,7 +191,7 @@ func TestActionPrint_Csv_WriteFailureIsReported(t *testing.T) {
 	// A small fixture whose rows all fit comfortably inside the csv.Writer's
 	// internal buffer: no row write ever touches the underlying file, so the
 	// only write attempt happens on the final Flush.
-	cp := NewCsvPrinter()
+	cp := NewCsvPrinter(false)
 	cp.writer = openDevFull(t)
 
 	err := cp.ActionPrint(context.TODO(), csvSessionFixture(), nil)
@@ -203,7 +203,7 @@ func TestActionPrint_Csv_MidLoopWriteFailureIsReported(t *testing.T) {
 	// forcing a real write to the underlying file (and a resulting error)
 	// before the loop even finishes, exercising the early-return path that
 	// used to skip the final Flush() entirely.
-	cp := NewCsvPrinter()
+	cp := NewCsvPrinter(false)
 	cp.writer = openDevFull(t)
 
 	err := cp.ActionPrint(context.TODO(), csvSessionFixtureManyRows(200), nil)
@@ -211,12 +211,12 @@ func TestActionPrint_Csv_MidLoopWriteFailureIsReported(t *testing.T) {
 }
 
 func TestNewCsvPrinter(t *testing.T) {
-	cp := NewCsvPrinter()
+	cp := NewCsvPrinter(false)
 	assert.NotNil(t, cp)
 }
 
 func TestSetWriter_Csv(t *testing.T) {
-	cp := NewCsvPrinter()
+	cp := NewCsvPrinter(false)
 	assert.NotNil(t, cp)
 
 	cp.SetWriter(context.TODO(), "")
@@ -242,7 +242,7 @@ func TestScore_Csv(t *testing.T) {
 		},
 	}
 
-	cp := NewCsvPrinter()
+	cp := NewCsvPrinter(false)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f, err := os.CreateTemp("", "csvPrinter-score-output")
@@ -280,7 +280,7 @@ func TestActionPrint_Csv(t *testing.T) {
 		_ = os.Remove(tmpCsv.Name())
 	}()
 
-	cp := NewCsvPrinter()
+	cp := NewCsvPrinter(false)
 	cp.writer = tmpCsv
 	cp.ActionPrint(context.TODO(), session, nil)
 	cp.CloseWriter()
@@ -341,7 +341,7 @@ func TestActionPrint_Csv_WithPaths(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(tmpCsv.Name())
 
-	cp := NewCsvPrinter()
+	cp := NewCsvPrinter(false)
 	cp.writer = tmpCsv
 	cp.ActionPrint(context.TODO(), session, nil)
 	cp.CloseWriter()
@@ -372,7 +372,7 @@ func TestActionPrint_Csv_WithPaths(t *testing.T) {
 }
 
 func TestActionPrint_Csv_NilSession(t *testing.T) {
-	cp := NewCsvPrinter()
+	cp := NewCsvPrinter(false)
 	cp.writer = os.Stdout
 	cp.ActionPrint(context.TODO(), nil, nil)
 }
@@ -393,6 +393,7 @@ func TestCsvControlPaths(t *testing.T) {
 		name       string
 		result     resourcesresults.Result
 		controlID  string
+		kind       string
 		wantFailed string
 		wantFix    string
 	}{
@@ -487,6 +488,11 @@ func TestCsvControlPaths(t *testing.T) {
 			wantFix:    "",
 		},
 		{
+			// kind: "Pod" matters here: automountServiceAccountToken is a
+			// secret-shaped field name ("...Token"), but it's an allowlisted
+			// safe field on a Pod spec (see matchesSafeField) -- an empty
+			// kind would fall through to the generic name-pattern check and
+			// wrongly redact a boolean toggle that never holds a secret.
 			name: "fix path with empty value emits bare path without equals",
 			result: makeResult("C-0057", []resourcesresults.ResourceAssociatedRule{
 				{
@@ -496,14 +502,29 @@ func TestCsvControlPaths(t *testing.T) {
 				},
 			}),
 			controlID:  "C-0057",
+			kind:       "Pod",
 			wantFailed: "",
 			wantFix:    "spec.automountServiceAccountToken",
+		},
+		{
+			name: "sensitive Secret.data fix path is redacted by default",
+			result: makeResult("C-0012", []resourcesresults.ResourceAssociatedRule{
+				{
+					Paths: []armotypes.PosturePaths{
+						{FixPath: armotypes.FixPath{Path: "data.password", Value: "s3cr3t-plaintext-password"}},
+					},
+				},
+			}),
+			controlID:  "C-0012",
+			kind:       "Secret",
+			wantFailed: "",
+			wantFix:    "data.password=[redacted]",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotFailed, gotFix := csvControlPaths(tc.result, tc.controlID)
+			gotFailed, gotFix := csvControlPaths(tc.result, tc.controlID, tc.kind, false)
 			assert.Equal(t, tc.wantFailed, gotFailed, "failed paths mismatch")
 			assert.Equal(t, tc.wantFix, gotFix, "fix paths mismatch")
 		})

@@ -15,6 +15,7 @@ import (
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v4/core/cautils"
+	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/kubescape/v4/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -130,7 +131,7 @@ func gitLabReportFor(t *testing.T, session *cautils.OPASessionObj) gitLabSASTRep
 		assert.NoError(t, os.Remove(tmp.Name()))
 	})
 
-	gp := NewGitLabSASTPrinter()
+	gp := NewGitLabSASTPrinter(false)
 	gp.writer = tmp
 	require.NoError(t, gp.printConfigurationScan(context.Background(), session))
 
@@ -358,6 +359,37 @@ func TestGitLabVulnerabilityID(t *testing.T) {
 		"a different resource must produce a different id")
 }
 
+// TestToGitLabVulnerability_RedactsSecretFixPathValueUnlessShowSecrets is a
+// regression test: GitLab SAST reports are committed as CI pipeline
+// artifacts, so a Secret's plaintext fix-path value must be redacted in the
+// Solution field by default, matching the pretty-printer and resource
+// table, and only revealed when the caller explicitly opts in via
+// --show-secrets.
+func TestToGitLabVulnerability_RedactsSecretFixPathValueUnlessShowSecrets(t *testing.T) {
+	control := &reportsummary.ControlSummary{
+		ControlID:   "C-0012",
+		Name:        "Credentials in env var",
+		ScoreFactor: 8.0,
+	}
+	resource := &mockResource{kind: "Secret", obj: map[string]any{}}
+	ac := &resourcesresults.ResourceAssociatedControl{
+		ControlID: "C-0012",
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+			{Paths: []armotypes.PosturePaths{
+				{FixPath: armotypes.FixPath{Path: "data.password", Value: "s3cr3t-plaintext-password"}},
+			}},
+		},
+	}
+	location := locationresolver.Location{Line: 1, Column: 1}
+
+	redacted := toGitLabVulnerability(control, ac, resource, "v1/Secret/default/demo", "secret.yaml", location, false)
+	assert.NotContains(t, redacted.Solution, "s3cr3t-plaintext-password")
+	assert.Contains(t, redacted.Solution, "[redacted]")
+
+	revealed := toGitLabVulnerability(control, ac, resource, "v1/Secret/default/demo", "secret.yaml", location, true)
+	assert.Contains(t, revealed.Solution, "s3cr3t-plaintext-password")
+}
+
 func TestGitLabImageVulnerabilityID(t *testing.T) {
 	const (
 		image   = "docker.io/library/nginx:1.25"
@@ -451,7 +483,7 @@ func gitLabImageReportFor(t *testing.T, imageScanData []cautils.ImageScanData) g
 		assert.NoError(t, os.Remove(tmp.Name()))
 	})
 
-	gp := NewGitLabSASTPrinter()
+	gp := NewGitLabSASTPrinter(false)
 	gp.writer = tmp
 	require.NoError(t, gp.printImageScan(imageScanData))
 
@@ -522,7 +554,7 @@ func TestGitLabImageScan_VersionKeyAlwaysPresent(t *testing.T) {
 		assert.NoError(t, os.Remove(tmp.Name()))
 	})
 
-	gp := NewGitLabSASTPrinter()
+	gp := NewGitLabSASTPrinter(false)
 	gp.writer = tmp
 	require.NoError(t, gp.printImageScan(imageScanData))
 
@@ -597,7 +629,7 @@ func TestGitLabImageScan_NoData(t *testing.T) {
 		assert.NoError(t, os.Remove(tmp.Name()))
 	})
 
-	gp := NewGitLabSASTPrinter()
+	gp := NewGitLabSASTPrinter(false)
 	gp.writer = tmp
 
 	gp.ActionPrint(context.Background(), nil, nil)
@@ -640,7 +672,7 @@ func TestGitLabSASTPrintConfigurationScan_NilResourceDoesNotPanic(t *testing.T) 
 		assert.NoError(t, os.Remove(tmp.Name()))
 	})
 
-	gp := NewGitLabSASTPrinter()
+	gp := NewGitLabSASTPrinter(false)
 	gp.writer = tmp
 	require.NotPanics(t, func() {
 		_ = gp.printConfigurationScan(context.Background(), session)

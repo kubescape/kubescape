@@ -396,7 +396,7 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 		}
 		return printerv2.NewYamlPrinter()
 	case printer.CsvFormat:
-		return printerv2.NewCsvPrinter()
+		return printerv2.NewCsvPrinter(scanInfo.ShowSecrets)
 	case printer.MarkdownFormat:
 		return printerv2.NewMarkdownPrinter()
 	case printer.JunitResultFormat:
@@ -406,11 +406,11 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 	case printer.PdfFormat:
 		return printerv2.NewPdfPrinter()
 	case printer.HtmlFormat:
-		return printerv2.NewHtmlPrinter()
+		return printerv2.NewHtmlPrinter(scanInfo.ShowSecrets)
 	case printer.SARIFFormat:
-		return printerv2.NewSARIFPrinter()
+		return printerv2.NewSARIFPrinter(scanInfo.ShowSecrets)
 	case printer.GitLabSASTFormat:
-		return printerv2.NewGitLabSASTPrinter()
+		return printerv2.NewGitLabSASTPrinter(scanInfo.ShowSecrets)
 	case printer.GitHubActionsFormat:
 		return printerv2.NewGitHubActionsPrinter()
 	case printer.CycloneDXFormat:

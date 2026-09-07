@@ -24,10 +24,15 @@ var _ printer.IPrinter = &CsvPrinter{}
 
 type CsvPrinter struct {
 	writer *os.File
+	// showSecrets controls whether sensitive field values (Secret.data,
+	// container env[].value, and other secret-shaped fields -- see
+	// isSensitivePath) are redacted in the fix-path column below, matching
+	// the terminal pretty-printer's default.
+	showSecrets bool
 }
 
-func NewCsvPrinter() *CsvPrinter {
-	return &CsvPrinter{}
+func NewCsvPrinter(showSecrets bool) *CsvPrinter {
+	return &CsvPrinter{showSecrets: showSecrets}
 }
 
 func (cp *CsvPrinter) SetWriter(ctx context.Context, outputFile string) error {
@@ -130,7 +135,7 @@ func (cp *CsvPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 			failedPaths := ""
 			fixPaths := ""
 			if hasResult {
-				failedPaths, fixPaths = csvControlPaths(resourceResult, ctrlID)
+				failedPaths, fixPaths = csvControlPaths(resourceResult, ctrlID, resKind, cp.showSecrets)
 			}
 
 			remediation := ""
@@ -176,8 +181,11 @@ func (cp *CsvPrinter) CloseWriter() error {
 
 // csvControlPaths returns the semicolon-separated failed paths and fix paths
 // for the given controlID in result. Both strings are empty when the control
-// is not found or has no paths.
-func csvControlPaths(result resourcesresults.Result, controlID string) (failedPaths, fixPaths string) {
+// is not found or has no paths. FixPath.Value is redacted to [redacted] for
+// sensitive paths (Secret.data, container env[].value, and other
+// secret-shaped fields -- see isSensitivePath) unless showSecrets is true,
+// matching the terminal pretty-printer's default.
+func csvControlPaths(result resourcesresults.Result, controlID, kind string, showSecrets bool) (failedPaths, fixPaths string) {
 	for i := range result.AssociatedControls {
 		if result.AssociatedControls[i].GetID() != controlID {
 			continue
@@ -190,8 +198,12 @@ func csvControlPaths(result resourcesresults.Result, controlID string) (failedPa
 					failed = append(failed, p.ReviewPath)
 				}
 				if p.FixPath.Path != "" {
-					if p.FixPath.Value != "" {
-						fix = append(fix, p.FixPath.Path+"="+p.FixPath.Value)
+					v := p.FixPath.Value
+					if !showSecrets && isSensitivePath(kind, p.FixPath.Path) {
+						v = redactedValue
+					}
+					if v != "" {
+						fix = append(fix, p.FixPath.Path+"="+v)
 					} else {
 						fix = append(fix, p.FixPath.Path)
 					}

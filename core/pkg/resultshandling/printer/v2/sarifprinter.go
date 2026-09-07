@@ -69,11 +69,18 @@ var _ printer.IPrinter = &SARIFPrinter{}
 type SARIFPrinter struct {
 	// outputFile is the name of the output file
 	writer *os.File
+	// showSecrets controls whether sensitive field values (Secret.data,
+	// container env[].value, and other secret-shaped fields -- see
+	// isSensitivePath) are redacted in the fix-path evidence emitted below.
+	// SARIF output is routinely uploaded to CI code-scanning dashboards or
+	// committed as a pipeline artifact, so this must default to redacted
+	// the same way the pretty-printer and resource table already do.
+	showSecrets bool
 }
 
 // NewSARIFPrinter returns a new SARIF printer instance
-func NewSARIFPrinter() *SARIFPrinter {
-	return &SARIFPrinter{}
+func NewSARIFPrinter(showSecrets bool) *SARIFPrinter {
+	return &SARIFPrinter{showSecrets: showSecrets}
 }
 
 func (sp *SARIFPrinter) Score(score float32) {
@@ -117,7 +124,7 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location, ac *resourcesresults.ResourceAssociatedControl, resourceID string, resource workloadinterface.IMetadata, reviewPathLocations map[string]locationresolver.Location) *sarif.Result {
 	msg := ctl.GetDescription()
 	if resource != nil {
-		if paths := AssistedRemediationPathsWithCurrentValues(ac, resource); len(paths) > 0 {
+		if paths := AssistedRemediationPathsWithCurrentValuesFiltered(ac, resource, sp.showSecrets); len(paths) > 0 {
 			addContainerNameToAssistedRemediation(resource, &paths)
 			msg += "\n\nAffected fields:\n" + strings.Join(paths, "\n")
 		}
