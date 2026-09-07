@@ -372,6 +372,41 @@ func TestIsSensitivePath(t *testing.T) {
 		{name: "initContainer env value", kind: "Pod", path: "spec.initContainers[0].env[0].value", want: true},
 		{name: "container env name is not sensitive", kind: "Deployment", path: "spec.template.spec.containers[0].env[1].name", want: false},
 		{name: "container env valueFrom is not a literal", kind: "Deployment", path: "spec.containers[0].env[0].valueFrom.secretKeyRef.name", want: false},
+		{name: "ConfigMap field literally named apiKey is caught", kind: "ConfigMap", path: "data.apiKey", want: true},
+		{name: "Deployment field named password is caught regardless of kind", kind: "Deployment", path: "spec.auth.password", want: true},
+		{name: "custom resource token field is caught", kind: "MyCustomResource", path: "spec.auth.token", want: true},
+		{name: "snake_case db_password is caught after separator normalization", kind: "Deployment", path: "spec.env.db_password", want: true},
+		{name: "uppercase API_KEY is caught case-insensitively", kind: "Deployment", path: "spec.API_KEY", want: true},
+		{name: "clientSecret is caught", kind: "OAuthClient", path: "spec.clientSecret", want: true},
+		{name: "ordinary field name is unaffected", kind: "Deployment", path: "spec.replicas", want: false},
+		{name: "keyword is not a false positive for key/apikey", kind: "Deployment", path: "spec.keyword", want: false},
+		// Regression: automountServiceAccountToken is a boolean toggle, not a
+		// token value - "Token" is a genuine word in it, so it previously
+		// matched the "token" pattern as a plain substring.
+		{name: "automountServiceAccountToken boolean is not a token value", kind: "Pod", path: "spec.automountServiceAccountToken", want: false},
+		{name: "automountServiceAccountToken is unaffected by case/separators", kind: "Pod", path: "spec.automount_service_account_token", want: false},
+		{name: "serviceAccountToken projected volume source is not a token value", kind: "Pod", path: "spec.volumes[0].projected.sources[0].serviceAccountToken", want: false},
+		{name: "secretName is a reference to a Secret object, not its value", kind: "Pod", path: "spec.volumes[0].secret.secretName", want: false},
+		{name: "a field that is actually named token is still caught", kind: "MyCustomResource", path: "spec.auth.token", want: true},
+		// Regression: the exceptions above are exceptions for specific
+		// Kubernetes API fields, not for their names. A custom resource
+		// reusing one of those names is free to store a real credential under
+		// it, so it stays redacted - the exception is scoped to the kinds
+		// whose schema defines the field and to the path it lives at.
+		{name: "custom resource reusing serviceAccountToken is still redacted", kind: "MyCustomResource", path: "spec.serviceAccountToken", want: true},
+		{name: "custom resource reusing secretName is still redacted", kind: "MyCustomResource", path: "spec.secretName", want: true},
+		{name: "custom resource reusing automountServiceAccountToken is still redacted", kind: "MyCustomResource", path: "spec.automountServiceAccountToken", want: true},
+		{name: "custom resource is not excused by borrowing the core path shape", kind: "MyCustomResource", path: "spec.volumes[0].projected.sources[0].serviceAccountToken", want: true},
+		{name: "core kind is not excused off its documented path", kind: "Pod", path: "spec.serviceAccountToken", want: true},
+		{name: "core kind is not excused for secretName outside a volume", kind: "Pod", path: "spec.containers[0].secretName", want: true},
+		// The exceptions still hold where the schemas define them, and a
+		// PodSpec field keeps its exception through pod-template nesting.
+		{name: "automountServiceAccountToken through a pod template", kind: "Deployment", path: "spec.template.spec.automountServiceAccountToken", want: false},
+		{name: "automountServiceAccountToken through a CronJob job template", kind: "CronJob", path: "spec.jobTemplate.spec.template.spec.automountServiceAccountToken", want: false},
+		{name: "automountServiceAccountToken at the ServiceAccount root", kind: "ServiceAccount", path: "automountServiceAccountToken", want: false},
+		{name: "tokenExpirationSeconds is a lifetime, not a token", kind: "Pod", path: "spec.volumes[0].projected.sources[0].serviceAccountToken.tokenExpirationSeconds", want: false},
+		{name: "Ingress TLS secretName references a Secret by name", kind: "Ingress", path: "spec.tls[0].secretName", want: false},
+		{name: "a field that is actually named secret is still caught", kind: "OAuthClient", path: "spec.secret", want: true},
 	}
 
 	for _, tc := range cases {
@@ -477,7 +512,7 @@ func TestReviewPathsWithCurrentValues(t *testing.T) {
 			"automountServiceAccountToken": true,
 		},
 	}
-	resource := &mockResource{obj: obj}
+	resource := &mockResource{kind: "Pod", obj: obj}
 
 	t.Run("value extracted", func(t *testing.T) {
 		ctrl := makeControlWithPaths(nil, []string{"spec.automountServiceAccountToken"})
