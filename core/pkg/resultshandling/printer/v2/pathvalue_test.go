@@ -372,6 +372,74 @@ func TestIsSensitivePath(t *testing.T) {
 		{name: "initContainer env value", kind: "Pod", path: "spec.initContainers[0].env[0].value", want: true},
 		{name: "container env name is not sensitive", kind: "Deployment", path: "spec.template.spec.containers[0].env[1].name", want: false},
 		{name: "container env valueFrom is not a literal", kind: "Deployment", path: "spec.containers[0].env[0].valueFrom.secretKeyRef.name", want: false},
+		{name: "ConfigMap field literally named apiKey is caught", kind: "ConfigMap", path: "data.apiKey", want: true},
+		{name: "Deployment field named password is caught regardless of kind", kind: "Deployment", path: "spec.auth.password", want: true},
+		{name: "custom resource token field is caught", kind: "MyCustomResource", path: "spec.auth.token", want: true},
+		{name: "snake_case db_password is caught after separator normalization", kind: "Deployment", path: "spec.env.db_password", want: true},
+		{name: "uppercase API_KEY is caught case-insensitively", kind: "Deployment", path: "spec.API_KEY", want: true},
+		{name: "clientSecret is caught", kind: "OAuthClient", path: "spec.clientSecret", want: true},
+		{name: "ordinary field name is unaffected", kind: "Deployment", path: "spec.replicas", want: false},
+		{name: "keyword is not a false positive for key/apikey", kind: "Deployment", path: "spec.keyword", want: false},
+		// Regression: automountServiceAccountToken is a boolean toggle, not a
+		// token value - "Token" is a genuine word in it, so it previously
+		// matched the "token" pattern as a plain substring.
+		{name: "automountServiceAccountToken boolean is not a token value", kind: "Pod", path: "spec.automountServiceAccountToken", want: false},
+		{name: "automountServiceAccountToken is unaffected by case/separators", kind: "Pod", path: "spec.automount_service_account_token", want: false},
+		{name: "serviceAccountToken projected volume source is not a token value", kind: "Pod", path: "spec.volumes[0].projected.sources[0].serviceAccountToken", want: false},
+		{name: "secretName is a reference to a Secret object, not its value", kind: "Pod", path: "spec.volumes[0].secret.secretName", want: false},
+		{name: "a field that is actually named token is still caught", kind: "MyCustomResource", path: "spec.auth.token", want: true},
+		// Regression: the exceptions above are exceptions for specific
+		// Kubernetes API fields, not for their names. A custom resource
+		// reusing one of those names is free to store a real credential under
+		// it, so it stays redacted - the exception is scoped to the kinds
+		// whose schema defines the field and to the path it lives at.
+		{name: "custom resource reusing serviceAccountToken is still redacted", kind: "MyCustomResource", path: "spec.serviceAccountToken", want: true},
+		{name: "custom resource reusing secretName is still redacted", kind: "MyCustomResource", path: "spec.secretName", want: true},
+		{name: "custom resource reusing automountServiceAccountToken is still redacted", kind: "MyCustomResource", path: "spec.automountServiceAccountToken", want: true},
+		{name: "custom resource is not excused by borrowing the core path shape", kind: "MyCustomResource", path: "spec.volumes[0].projected.sources[0].serviceAccountToken", want: true},
+		{name: "core kind is not excused off its documented path", kind: "Pod", path: "spec.serviceAccountToken", want: true},
+		{name: "core kind is not excused for secretName outside a volume", kind: "Pod", path: "spec.containers[0].secretName", want: true},
+		// The exceptions still hold where the schemas define them, and a
+		// PodSpec field keeps its exception through pod-template nesting.
+		{name: "automountServiceAccountToken through a pod template", kind: "Deployment", path: "spec.template.spec.automountServiceAccountToken", want: false},
+		{name: "automountServiceAccountToken through a CronJob job template", kind: "CronJob", path: "spec.jobTemplate.spec.template.spec.automountServiceAccountToken", want: false},
+		{name: "automountServiceAccountToken at the ServiceAccount root", kind: "ServiceAccount", path: "automountServiceAccountToken", want: false},
+		{name: "tokenExpirationSeconds is a lifetime, not a token", kind: "Pod", path: "spec.volumes[0].projected.sources[0].serviceAccountToken.tokenExpirationSeconds", want: false},
+		{name: "Ingress TLS secretName references a Secret by name", kind: "Ingress", path: "spec.tls[0].secretName", want: false},
+		{name: "a field that is actually named secret is still caught", kind: "OAuthClient", path: "spec.secret", want: true},
+		// Regression: an exception is pinned to the field's full canonical
+		// parent path, not to a trailing fragment of it. The scanner reads
+		// manifests without API schema admission, so a built-in kind can carry
+		// a field at a path its schema never defines; matching the parents as a
+		// suffix excused those, since the tail still read as PodSpec. They must
+		// fail closed - this is a redaction boundary.
+		{name: "off-schema PodSpec-shaped tail on a built-in kind is redacted", kind: "Pod", path: "spec.extension.spec.automountServiceAccountToken", want: true},
+		{name: "off-schema projected-source tail on a built-in kind is redacted", kind: "Pod", path: "spec.extension.projected.sources[0].serviceAccountToken", want: true},
+		{name: "off-schema secret-volume tail on a built-in kind is redacted", kind: "Pod", path: "spec.extension.volumes[0].secret.secretName", want: true},
+		{name: "off-schema tokenExpirationSeconds on a built-in kind is redacted", kind: "Pod", path: "spec.extension.sources[0].serviceAccountToken.tokenExpirationSeconds", want: true},
+		{name: "pod-template path on a kind without a pod template is redacted", kind: "Pod", path: "spec.template.spec.automountServiceAccountToken", want: true},
+		{name: "Pod-shaped path on a workload kind is redacted", kind: "Deployment", path: "spec.automountServiceAccountToken", want: true},
+		{name: "off-schema Ingress TLS tail is redacted", kind: "Ingress", path: "spec.extension.tls[0].secretName", want: true},
+		{name: "ServiceAccount exception does not extend below the root", kind: "ServiceAccount", path: "spec.automountServiceAccountToken", want: true},
+		// Regression: the schema makes volumes, sources and tls lists, so an
+		// exception written for them only covers an indexed path. An
+		// object-shaped path is a different field that extractValueAtPath
+		// resolves perfectly well against a manifest carrying a map there, so
+		// matching on keys alone handed it the list's exception.
+		{name: "object-shaped volumes is not SecretVolumeSource", kind: "Pod", path: "spec.volumes.secret.secretName", want: true},
+		{name: "object-shaped volumes and sources is not a projected token", kind: "Pod", path: "spec.volumes.projected.sources.serviceAccountToken", want: true},
+		{name: "object-shaped sources is not a projected token", kind: "Pod", path: "spec.volumes[0].projected.sources.serviceAccountToken", want: true},
+		{name: "object-shaped volumes is not a projected token", kind: "Pod", path: "spec.volumes.projected.sources[0].serviceAccountToken", want: true},
+		{name: "object-shaped tokenExpirationSeconds parents are redacted", kind: "Pod", path: "spec.volumes.projected.sources.serviceAccountToken.tokenExpirationSeconds", want: true},
+		{name: "object-shaped Ingress tls is not IngressTLS", kind: "Ingress", path: "spec.tls.secretName", want: true},
+		{name: "object-shaped volumes through a pod template is redacted", kind: "Deployment", path: "spec.template.spec.volumes.secret.secretName", want: true},
+		// The mirror of the above: a schema map reached with an index is just
+		// as far off-schema as a schema list reached without one.
+		{name: "indexed secret map is not SecretVolumeSource", kind: "Pod", path: "spec.volumes[0].secret[0].secretName", want: true},
+		{name: "indexed projected map is not a projected token", kind: "Pod", path: "spec.volumes[0].projected[0].sources[0].serviceAccountToken", want: true},
+		// An unsubstituted rule placeholder leaves splitPath with no index, so
+		// it reads as unindexed and is redacted rather than excused.
+		{name: "unresolved list placeholder is redacted", kind: "Pod", path: "spec.volumes[volume_ndx].secret.secretName", want: true},
 	}
 
 	for _, tc := range cases {
@@ -477,7 +545,7 @@ func TestReviewPathsWithCurrentValues(t *testing.T) {
 			"automountServiceAccountToken": true,
 		},
 	}
-	resource := &mockResource{obj: obj}
+	resource := &mockResource{kind: "Pod", obj: obj}
 
 	t.Run("value extracted", func(t *testing.T) {
 		ctrl := makeControlWithPaths(nil, []string{"spec.automountServiceAccountToken"})
@@ -625,5 +693,85 @@ func TestAssistedRemediationPathsWithCurrentValuesFiltered(t *testing.T) {
 		ctrl := makeControlWithPaths(nil, nil)
 		got := AssistedRemediationPathsWithCurrentValuesFiltered(ctrl, resource, false)
 		assert.Nil(t, got)
+	})
+}
+
+// TestFailedPathValuesObjectShapedSafeFields pins the output boundary the
+// safe-field exceptions sit behind. isSensitivePath deciding a path is safe is
+// only half the story: failedPathValues then resolves that path and publishes
+// the value as Evidence. extractValueAtPath walks an unindexed segment straight
+// through a map, so an off-schema object where the schema defines a list
+// resolves perfectly well - and if the exception written for the list-shaped
+// field covered it too, the value would reach output unredacted.
+func TestFailedPathValuesObjectShapedSafeFields(t *testing.T) {
+	// Fixture values are named rather than inlined into the objects below.
+	// Every fixture here is deliberately built around a credential-shaped key,
+	// which is exactly the shape gosec's G101 reports when the value beside it
+	// is a string literal. These are test data standing in for a value, not
+	// credentials, and naming them keeps that legible without a nolint.
+	const (
+		offSchemaValue = "fixture-value-that-must-not-be-published"
+		onSchemaValue  = "fixture-referenced-object-name"
+	)
+
+	controlWithFailedPath := func(path string) *resourcesresults.ResourceAssociatedControl {
+		return &resourcesresults.ResourceAssociatedControl{
+			ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+				{Paths: []armotypes.PosturePaths{{FailedPath: path}}},
+			},
+		}
+	}
+
+	t.Run("object-shaped volumes does not reach Evidence", func(t *testing.T) {
+		resource := &mockResource{kind: "Pod", obj: map[string]any{
+			"spec": map[string]any{
+				// PodSpec.volumes is a list; this manifest carries a map, so
+				// this is not SecretVolumeSource.secretName at all.
+				"volumes": map[string]any{
+					"secret": map[string]any{"secretName": offSchemaValue},
+				},
+			},
+		}}
+		got := failedPathValues(controlWithFailedPath("spec.volumes.secret.secretName"), resource)
+		assert.Empty(t, got, "an off-schema object-shaped path must be redacted, not published as Evidence")
+	})
+
+	t.Run("object-shaped projected sources does not reach Evidence", func(t *testing.T) {
+		resource := &mockResource{kind: "Pod", obj: map[string]any{
+			"spec": map[string]any{
+				"volumes": map[string]any{
+					"projected": map[string]any{
+						"sources": map[string]any{"serviceAccountToken": offSchemaValue},
+					},
+				},
+			},
+		}}
+		got := failedPathValues(controlWithFailedPath("spec.volumes.projected.sources.serviceAccountToken"), resource)
+		assert.Empty(t, got, "an off-schema object-shaped path must be redacted, not published as Evidence")
+	})
+
+	t.Run("object-shaped Ingress tls does not reach Evidence", func(t *testing.T) {
+		resource := &mockResource{kind: "Ingress", obj: map[string]any{
+			"spec": map[string]any{
+				"tls": map[string]any{"secretName": offSchemaValue},
+			},
+		}}
+		got := failedPathValues(controlWithFailedPath("spec.tls.secretName"), resource)
+		assert.Empty(t, got, "an off-schema object-shaped path must be redacted, not published as Evidence")
+	})
+
+	// The exception still has to work where the schema actually defines it,
+	// or this would be a fix by way of redacting everything.
+	t.Run("canonical indexed SecretVolumeSource still resolves", func(t *testing.T) {
+		resource := &mockResource{kind: "Pod", obj: map[string]any{
+			"spec": map[string]any{
+				"volumes": []any{
+					map[string]any{"secret": map[string]any{"secretName": onSchemaValue}},
+				},
+			},
+		}}
+		got := failedPathValues(controlWithFailedPath("spec.volumes[0].secret.secretName"), resource)
+		require.Len(t, got, 1)
+		assert.Equal(t, onSchemaValue, got[0].Value)
 	})
 }
