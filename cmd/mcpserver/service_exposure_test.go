@@ -28,15 +28,15 @@ import (
 func newServiceExposureTestServer(t *testing.T, objects ...runtime.Object) *KubescapeMcpserver {
 	t.Helper()
 	listKinds := map[schema.GroupVersionResource]string{
-		serviceGVR:          "ServiceList",
-		ingressGVR:          "IngressList",
-		namespaceGVR:        "NamespaceList",
-		httpRouteGVR:        "HTTPRouteList",
-		grpcRouteGVR:        "GRPCRouteList",
-		gatewayGVR:          "GatewayList",
-		httpRouteGVRv1beta1: "HTTPRouteList",
-		grpcRouteGVRv1beta1: "GRPCRouteList",
-		gatewayGVRv1beta1:   "GatewayList",
+		serviceGVR:           "ServiceList",
+		ingressGVR:           "IngressList",
+		namespaceGVR:         "NamespaceList",
+		httpRouteGVR:         "HTTPRouteList",
+		grpcRouteGVR:         "GRPCRouteList",
+		gatewayGVR:           "GatewayList",
+		httpRouteGVRv1beta1:  "HTTPRouteList",
+		grpcRouteGVRv1alpha2: "GRPCRouteList",
+		gatewayGVRv1beta1:    "GatewayList",
 	}
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, objects...)
 
@@ -305,12 +305,13 @@ func TestAnalyzeServiceExposure_GRPCRouteThroughGatewayExposesService(t *testing
 	require.Equal(t, "GRPCRoute", paths[0].(map[string]any)["kind"])
 }
 
-// TestAnalyzeServiceExposure_GRPCRouteV1beta1OnlyClusterStillWorks covers
-// the fallback: clusters whose Gateway API CRDs predate GRPCRoute's v1
-// graduation (Gateway API v1.1) serve it as v1beta1 only. The v1 list
-// returns NotFound, the v1beta1 candidate serves the route, and the
-// exposure analysis must still find it.
-func TestAnalyzeServiceExposure_GRPCRouteV1beta1OnlyClusterStillWorks(t *testing.T) {
+// TestAnalyzeServiceExposure_GRPCRouteV1alpha2OnlyClusterStillWorks covers
+// the fallback against the actual legacy version: upstream served GRPCRoute
+// as v1alpha2 through Gateway API v1.0 and promoted it directly to v1 in
+// v1.1 -- no v1beta1 GRPCRoute ever existed. A cluster with a v1alpha2-only
+// grpcroutes CRD 404s the v1 list attempt, and the v1alpha1 candidate must
+// still surface the exposure path.
+func TestAnalyzeServiceExposure_GRPCRouteV1alpha2OnlyClusterStillWorks(t *testing.T) {
 	svc := unstructuredService("prod", "app", "ClusterIP")
 	gw := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "gateway.networking.k8s.io/v1",
@@ -320,10 +321,10 @@ func TestAnalyzeServiceExposure_GRPCRouteV1beta1OnlyClusterStillWorks(t *testing
 	}}
 	ksServer := newServiceExposureTestServer(t, svc)
 
-	// Serve grpcroutes only under v1beta1: the reactor 404s the v1 list
-	// attempt (a real cluster without a v1 grpcroutes CRD) and falls through
-	// for v1beta1, which the fake client serves from its registered list
-	// kind.
+	// Serve grpcroutes only under v1alpha2: the reactor 404s the v1 list
+	// attempt (a real cluster whose grpcroutes CRD predates the v1
+	// graduation) and falls through for v1alpha2, which the fake client
+	// serves from its registered list kind.
 	dyn := ksServer.k8sClient.DynamicClient.(*dynamicfake.FakeDynamicClient)
 	dyn.PrependReactor("list", "grpcroutes", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		if action.GetResource().Version == "v1" {
@@ -332,7 +333,7 @@ func TestAnalyzeServiceExposure_GRPCRouteV1beta1OnlyClusterStillWorks(t *testing
 		return false, nil, nil
 	})
 	route := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "gateway.networking.k8s.io/v1beta1",
+		"apiVersion": "gateway.networking.k8s.io/v1alpha2",
 		"kind":       "GRPCRoute",
 		"metadata":   map[string]any{"name": "grpc-route", "namespace": "prod"},
 		"spec": map[string]any{
@@ -340,7 +341,7 @@ func TestAnalyzeServiceExposure_GRPCRouteV1beta1OnlyClusterStillWorks(t *testing
 			"rules":      []any{map[string]any{"backendRefs": []any{map[string]any{"name": "app"}}}},
 		},
 	}}
-	_, err := dyn.Resource(grpcRouteGVRv1beta1).Namespace("prod").Create(context.Background(), route, metav1.CreateOptions{})
+	_, err := dyn.Resource(grpcRouteGVRv1alpha2).Namespace("prod").Create(context.Background(), route, metav1.CreateOptions{})
 	require.NoError(t, err)
 	_, err = dyn.Resource(gatewayGVR).Namespace("prod").Create(context.Background(), gw, metav1.CreateOptions{})
 	require.NoError(t, err)
@@ -355,7 +356,7 @@ func TestAnalyzeServiceExposure_GRPCRouteV1beta1OnlyClusterStillWorks(t *testing
 	require.NoError(t, json.Unmarshal([]byte(toolResultText(t, result)), &parsed))
 	services := parsed["services"].(map[string]any)
 	paths := findingPaths(t, services, "app")
-	require.Len(t, paths, 1, "a v1beta1-only GRPCRoute must still be found via the fallback")
+	require.Len(t, paths, 1, "a v1alpha2-only GRPCRoute must still be found via the fallback")
 	require.Equal(t, "GRPCRoute", paths[0].(map[string]any)["kind"])
 }
 

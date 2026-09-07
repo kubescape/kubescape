@@ -138,6 +138,12 @@ func (idx *Index) crossNamespaceBackendRefIsUnmodeled(ref ServiceRef) bool {
 			}
 			for _, rule := range route.Rules {
 				for _, backend := range rule.BackendRefs {
+					// Only an effective core-Service backendRef names this
+					// Service; a non-Service backend sharing its name says
+					// nothing about its exposure.
+					if !isServiceBackendRef(backend) {
+						continue
+					}
 					if backend.Namespace != nil && *backend.Namespace == ref.Namespace && backend.Name == ref.Name {
 						return true
 					}
@@ -177,14 +183,20 @@ func backendNamesService(backend *networkingv1.IngressBackend, serviceName strin
 }
 
 // routeReferencesService reports whether any rule in route sends
-// traffic to ref. A backendRef with no Namespace defaults to the route's
-// own namespace, per Gateway API's own defaulting rules -- this package
-// does not model a backendRef reaching into another namespace via a
-// ReferenceGrant, since that requires collecting and evaluating a third
-// resource kind this Index is not given.
+// traffic to ref. Only effective core-Service backends count (per Gateway
+// API's group/kind defaults -- a backendRef naming another kind must not
+// produce a Service exposure path however closely its name matches). A
+// backendRef with no Namespace defaults to the route's own namespace, per
+// Gateway API's own defaulting rules -- this package does not model a
+// backendRef reaching into another namespace via a ReferenceGrant, since
+// that requires collecting and evaluating a third resource kind this Index
+// is not given.
 func routeReferencesService(route *gatewayRoute, ref ServiceRef) bool {
 	for _, rule := range route.Rules {
 		for _, backend := range rule.BackendRefs {
+			if !isServiceBackendRef(backend) {
+				continue
+			}
 			ns := route.Namespace
 			if backend.Namespace != nil {
 				ns = *backend.Namespace
@@ -197,21 +209,29 @@ func routeReferencesService(route *gatewayRoute, ref ServiceRef) bool {
 	return false
 }
 
-// routeAttachesToAGateway reports whether route is admitted by at least one
-// listener of a Gateway object this Index was given, via any of the
-// route's parentRefs. A listener whose AllowedRoutes cannot be confirmed to
-// exclude the route (a Selector needing namespace labels this Index was not
-// given) is conservatively treated as admitting it: this package errs
-// toward reporting a possible exposure rather than silently hiding one, the
-// same choice core/pkg/mapreconcile makes for its own indeterminate
-// matches. A parentRef naming a Gateway this Index has no record of at all
-// is the most indeterminate case there is -- the Gateway may simply live
-// outside what was collected (a cross-namespace reference, or a caller
-// without RBAC to list it elsewhere) rather than not exist -- so it gets the
-// same conservative treatment rather than being silently treated as a
+// routeAttachesToAGateway reports whether route is admitted by at least
+// one listener of a Gateway object this Index was given, via any of the
+// route's parentRefs. Only effective Gateway parents count (per Gateway
+// API's group/kind defaults -- a parentRef naming another kind must not
+// attach a route to a Gateway that merely shares its namespace/name), and
+// a listener must admit the route on BOTH axes: its AllowedRoutes
+// namespaces policy and its AllowedRoutes kinds policy. A listener whose
+// namespace admission cannot be confirmed to exclude the route (a Selector
+// needing namespace labels this Index was not given) is conservatively
+// treated as admitting it: this package errs toward reporting a possible
+// exposure rather than silently hiding one, the same choice
+// core/pkg/mapreconcile makes for its own indeterminate matches. A
+// parentRef naming a Gateway this Index has no record of at all is the
+// most indeterminate case there is -- the Gateway may simply live outside
+// what was collected (a cross-namespace reference, or a caller without
+// RBAC to list it elsewhere) rather than not exist -- so it gets the same
+// conservative treatment rather than being silently treated as a
 // non-match.
 func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
 	for _, ref := range route.ParentRefs {
+		if !isGatewayParentRef(ref) {
+			continue
+		}
 		ns := route.Namespace
 		if ref.Namespace != nil {
 			ns = *ref.Namespace
@@ -221,6 +241,9 @@ func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
 			return true
 		}
 		for _, l := range gw.Listeners {
+			if !idx.listenerAdmitsRouteKind(l, route.Kind) {
+				continue
+			}
 			admits, determinable := idx.gatewayAdmitsRouteNamespace(l, route.Namespace, gw.Namespace)
 			if admits || !determinable {
 				return true
@@ -228,6 +251,18 @@ func (idx *Index) routeAttachesToAGateway(route *gatewayRoute) bool {
 		}
 	}
 	return false
+}
+
+// listenerAdmitsRouteKind reports whether the listener's allowedRoutes
+// kinds list admits a route of the given kind. The kinds policy is always
+// determinable -- unlike the namespace policy it never depends on labels
+// this Index was not given. A listener with no allowedRoutes (or an empty
+// kinds list) admits every kind, per the Gateway API default.
+func (idx *Index) listenerAdmitsRouteKind(l listener, routeKind string) bool {
+	if l.AllowedRoutes == nil {
+		return true
+	}
+	return l.AllowedRoutes.admitsRouteKind(routeKind)
 }
 
 // gatewayAdmitsRouteNamespace evaluates one listener's AllowedRoutes against

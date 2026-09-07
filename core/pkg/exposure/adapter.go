@@ -111,12 +111,16 @@ type gatewayAPIWireShape struct {
 	Spec struct {
 		// Route fields (HTTPRoute and GRPCRoute share this shape).
 		ParentRefs []struct {
+			Group     *string `json:"group,omitempty"`
+			Kind      *string `json:"kind,omitempty"`
 			Namespace *string `json:"namespace,omitempty"`
 			Name      string  `json:"name"`
 		} `json:"parentRefs,omitempty"`
 		Hostnames []string `json:"hostnames,omitempty"`
 		Rules     []struct {
 			BackendRefs []struct {
+				Group     *string `json:"group,omitempty"`
+				Kind      *string `json:"kind,omitempty"`
 				Namespace *string `json:"namespace,omitempty"`
 				Name      string  `json:"name"`
 			} `json:"backendRefs,omitempty"`
@@ -130,6 +134,10 @@ type gatewayAPIWireShape struct {
 					From     *string              `json:"from,omitempty"`
 					Selector *unstructuredRawJSON `json:"selector,omitempty"`
 				} `json:"namespaces,omitempty"`
+				Kinds []struct {
+					Group *string `json:"group,omitempty"`
+					Kind  string  `json:"kind"`
+				} `json:"kinds,omitempty"`
 			} `json:"allowedRoutes,omitempty"`
 		} `json:"listeners,omitempty"`
 	} `json:"spec"`
@@ -157,12 +165,12 @@ func decodeGatewayRoute(kind string, obj map[string]any) (gatewayRoute, error) {
 		Hostnames: wire.Spec.Hostnames,
 	}
 	for _, p := range wire.Spec.ParentRefs {
-		r.ParentRefs = append(r.ParentRefs, parentRef{Namespace: p.Namespace, Name: p.Name})
+		r.ParentRefs = append(r.ParentRefs, parentRef{Group: p.Group, Kind: p.Kind, Namespace: p.Namespace, Name: p.Name})
 	}
 	for _, rule := range wire.Spec.Rules {
 		var backends []backendRef
 		for _, b := range rule.BackendRefs {
-			backends = append(backends, backendRef{Namespace: b.Namespace, Name: b.Name})
+			backends = append(backends, backendRef{Group: b.Group, Kind: b.Kind, Namespace: b.Namespace, Name: b.Name})
 		}
 		r.Rules = append(r.Rules, gatewayRouteRule{BackendRefs: backends})
 	}
@@ -194,6 +202,9 @@ func decodeGateway(obj map[string]any) (gateway, error) {
 					rn.Selector = sel
 				}
 				ar.Namespaces = rn
+			}
+			for _, k := range l.AllowedRoutes.Kinds {
+				ar.Kinds = append(ar.Kinds, routeGroupKind{Group: k.Group, Kind: k.Kind})
 			}
 			out.AllowedRoutes = ar
 		}

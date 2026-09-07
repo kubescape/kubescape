@@ -123,13 +123,31 @@ type gatewayRoute struct {
 	Rules      []gatewayRouteRule
 }
 
+// gatewayAPIGroup is the Gateway API group all route kinds and their
+// parent references belong to. Gateway API's own defaulting rules treat an
+// absent group on a ParentReference as this group.
+const gatewayAPIGroup = "gateway.networking.k8s.io"
+
 // parentRef names the Gateway (or other parent) a route attaches to.
 // Namespace is a pointer because the API defaults an absent namespace to
 // the route's own, per Gateway API's own defaulting rules -- this mirrors
 // that rather than assuming empty-string means "same namespace" implicitly.
+// Group and Kind follow the same rules: an absent group is the Gateway API
+// group and an absent kind is Gateway, so a reference to anything else
+// (e.g. a Service parent for mesh use cases) is not a Gateway reference
+// and must not attach a route to a Gateway that merely shares its name.
 type parentRef struct {
+	Group     *string
+	Kind      *string
 	Namespace *string
 	Name      string
+}
+
+// isGatewayParentRef reports whether ref effectively names a Gateway once
+// Gateway API's own group/kind defaults are applied.
+func isGatewayParentRef(ref parentRef) bool {
+	return (ref.Group == nil || *ref.Group == gatewayAPIGroup) &&
+		(ref.Kind == nil || *ref.Kind == "Gateway")
 }
 
 type gatewayRouteRule struct {
@@ -140,10 +158,22 @@ type gatewayRouteRule struct {
 // defaults to the route's own namespace when nil, same as parentRef --
 // Gateway API does not support a backendRef reaching into another
 // namespace without a ReferenceGrant, which this package does not model
-// (see AnalyzeExposure's doc comment).
+// (see AnalyzeExposure's doc comment). Group and Kind default to a
+// core-group Service when absent; anything else names a non-Service
+// backend (e.g. a multicluster ServiceImport) that this package does not
+// model as a Service exposure path, however closely its name matches one.
 type backendRef struct {
+	Group     *string
+	Kind      *string
 	Namespace *string
 	Name      string
+}
+
+// isServiceBackendRef reports whether ref effectively names a core-group
+// Service once Gateway API's own group/kind defaults are applied.
+func isServiceBackendRef(ref backendRef) bool {
+	return (ref.Group == nil || *ref.Group == "") &&
+		(ref.Kind == nil || *ref.Kind == "Service")
 }
 
 // gateway is a minimal local mirror of gateway.networking.k8s.io/v1 Gateway.
@@ -159,11 +189,36 @@ type listener struct {
 }
 
 // allowedRoutes mirrors Gateway API's AllowedRoutes: which namespaces'
-// routes this listener admits. A nil AllowedRoutes (or a nil Namespaces
-// within it) defaults to "Same" -- routes in the Gateway's own namespace
-// only -- per the Gateway API spec's own default.
+// routes this listener admits, and which route kinds. A nil AllowedRoutes
+// (or a nil Namespaces within it) defaults to "Same" -- routes in the
+// Gateway's own namespace only -- per the Gateway API spec's own default.
+// A nil or empty Kinds list admits every route kind, also per the spec's
+// default.
 type allowedRoutes struct {
 	Namespaces *routeNamespaces
+	Kinds      []routeGroupKind
+}
+
+// routeGroupKind mirrors Gateway API's RouteGroupKind. An absent group is
+// the Gateway API group, per the spec's defaulting rules.
+type routeGroupKind struct {
+	Group *string
+	Kind  string
+}
+
+// admitsRouteKind reports whether the AllowedRoutes kinds list admits a
+// route of the given kind once the group default is applied. An empty list
+// admits every kind.
+func (ar *allowedRoutes) admitsRouteKind(routeKind string) bool {
+	if len(ar.Kinds) == 0 {
+		return true
+	}
+	for _, k := range ar.Kinds {
+		if (k.Group == nil || *k.Group == gatewayAPIGroup) && k.Kind == routeKind {
+			return true
+		}
+	}
+	return false
 }
 
 type fromNamespaces string

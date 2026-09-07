@@ -21,7 +21,12 @@ var ingressGVR = schema.GroupVersionResource{Group: "networking.k8s.io", Version
 var httpRouteGVR = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
 var httpRouteGVRv1beta1 = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1beta1", Resource: "httproutes"}
 var grpcRouteGVR = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "grpcroutes"}
-var grpcRouteGVRv1beta1 = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1beta1", Resource: "grpcroutes"}
+
+// grpcRouteGVRv1alpha2 is the legacy GRPCRoute candidate: upstream served
+// GRPCRoute as v1alpha2 through Gateway API v1.0 and promoted it directly
+// to v1 in v1.1 -- no v1beta1 GRPCRoute ever existed. HTTPRoute and Gateway
+// did serve as v1beta1 pre-v1, so their v1beta1 candidates stay.
+var grpcRouteGVRv1alpha2 = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1alpha2", Resource: "grpcroutes"}
 var gatewayGVR = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gateways"}
 var gatewayGVRv1beta1 = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1beta1", Resource: "gateways"}
 
@@ -111,7 +116,7 @@ func createServiceExposureTools(ksServer *KubescapeMcpserver) {
 			w := workloadinterface.NewWorkloadObj(routeList.Items[i].Object)
 			gatewayResources[w.GetID()] = w
 		}
-		grpcRouteList, grpcRouteErr := listGatewayKind(ctx, dynClient, grpcRouteGVR, grpcRouteGVRv1beta1)
+		grpcRouteList, grpcRouteErr := listGatewayKind(ctx, dynClient, grpcRouteGVR, grpcRouteGVRv1alpha2)
 		if grpcRouteErr != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("failed to list GRPCRoute objects: %v", grpcRouteErr)), nil
 		}

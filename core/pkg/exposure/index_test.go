@@ -321,6 +321,98 @@ func TestServiceExposure_CrossNamespaceGRPCRouteBackendRefIsUnclear(t *testing.T
 	}
 }
 
+// TestServiceExposure_GRPCRouteNotAdmittedByHTTPRouteOnlyListener verifies
+// the allowedRoutes.kinds policy: a listener explicitly permitting only
+// HTTPRoute must not admit a GRPCRoute, even in the same namespace.
+func TestServiceExposure_GRPCRouteNotAdmittedByHTTPRouteOnlyListener(t *testing.T) {
+	httpRouteKind := "HTTPRoute"
+	gw := gateway{Namespace: "ns", Name: "gw", Listeners: []listener{{
+		Name:          "http",
+		AllowedRoutes: &allowedRoutes{Kinds: []routeGroupKind{{Kind: httpRouteKind}}},
+	}}}
+	route := gatewayRoute{
+		Kind:       "GRPCRoute",
+		Namespace:  "ns",
+		Name:       "grpc-route",
+		ParentRefs: []parentRef{{Name: "gw"}},
+		Rules:      []gatewayRouteRule{{BackendRefs: []backendRef{{Name: "app"}}}},
+	}
+	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []gatewayRoute{route}, []gateway{gw}, nil)
+	paths, unclear := idx.ServiceExposure(ref("ns", "app"))
+	if len(paths) != 0 {
+		t.Errorf("paths = %+v, want empty: the listener explicitly admits only HTTPRoute", paths)
+	}
+	if unclear {
+		t.Error("unclear = true, want false: a kind-refused route names no cross-namespace backend")
+	}
+}
+
+// TestServiceExposure_NonGatewayParentDoesNotAttachToSameNameGateway
+// verifies the parentRef group/kind defaults: a parentRef naming a
+// non-Gateway parent (here a mesh Service) whose namespace/name happen to
+// match a collected Gateway must not attach the route to it.
+func TestServiceExposure_NonGatewayParentDoesNotAttachToSameNameGateway(t *testing.T) {
+	coreGroup := ""
+	serviceKind := "Service"
+	gw := gateway{Namespace: "ns", Name: "gw", Listeners: []listener{{Name: "http"}}}
+	route := gatewayRoute{
+		Kind:      "HTTPRoute",
+		Namespace: "ns",
+		Name:      "route",
+		ParentRefs: []parentRef{
+			{Group: &coreGroup, Kind: &serviceKind, Name: "gw"}, // a mesh Service parent, same name as the Gateway
+		},
+		Rules: []gatewayRouteRule{{BackendRefs: []backendRef{{Name: "app"}}}},
+	}
+	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []gatewayRoute{route}, []gateway{gw}, nil)
+	paths, _ := idx.ServiceExposure(ref("ns", "app"))
+	if len(paths) != 0 {
+		t.Errorf("paths = %+v, want empty: a Service parent is not the collected Gateway even though the name matches", paths)
+	}
+}
+
+// TestServiceExposure_NonServiceBackendDoesNotCreateExposurePath verifies
+// the backendRef group/kind defaults: a backendRef naming a non-Service
+// backend (e.g. a multicluster ServiceImport) whose namespace/name match a
+// collected Service must not produce an exposure path -- and a
+// cross-namespace one must not raise the unclear signal either.
+func TestServiceExposure_NonServiceBackendDoesNotCreateExposurePath(t *testing.T) {
+	multiclusterGroup := "multicluster.x-k8s.io"
+	serviceImportKind := "ServiceImport"
+	gw := gateway{Namespace: "ns", Name: "gw", Listeners: []listener{{Name: "http"}}}
+	route := gatewayRoute{
+		Kind:       "HTTPRoute",
+		Namespace:  "ns",
+		Name:       "route",
+		ParentRefs: []parentRef{{Name: "gw"}},
+		Rules:      []gatewayRouteRule{{BackendRefs: []backendRef{{Group: &multiclusterGroup, Kind: &serviceImportKind, Name: "app"}}}},
+	}
+	idx := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []gatewayRoute{route}, []gateway{gw}, nil)
+	paths, unclear := idx.ServiceExposure(ref("ns", "app"))
+	if len(paths) != 0 {
+		t.Errorf("paths = %+v, want empty: a ServiceImport backend is not the Service even though the name matches", paths)
+	}
+	if unclear {
+		t.Error("unclear = true, want false: a same-namespace non-Service backendRef says nothing about the Service")
+	}
+
+	// Cross-namespace variant: the backendRef names other-ns/app, which is
+	// not the Service under query at all, so no unclear either.
+	otherNS := "other-ns"
+	crossRoute := gatewayRoute{
+		Kind:       "HTTPRoute",
+		Namespace:  "edge",
+		Name:       "route",
+		ParentRefs: []parentRef{{Name: "gw"}},
+		Rules:      []gatewayRouteRule{{BackendRefs: []backendRef{{Group: &multiclusterGroup, Kind: &serviceImportKind, Namespace: &otherNS, Name: "app"}}}},
+	}
+	idx2 := NewIndex([]corev1.Service{svc("ns", "app", corev1.ServiceTypeClusterIP)}, nil, []gatewayRoute{crossRoute}, []gateway{gw}, nil)
+	_, unclear2 := idx2.ServiceExposure(ref("ns", "app"))
+	if unclear2 {
+		t.Error("unclear = true, want false: a cross-namespace non-Service backendRef does not name this Service")
+	}
+}
+
 func TestServiceExposure_CrossNamespaceRouteWithUncollectedGatewayIsStillUnclear(t *testing.T) {
 	targetNS := "ns"
 	route := gatewayRoute{Kind: "HTTPRoute",
