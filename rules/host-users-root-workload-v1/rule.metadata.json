@@ -1,0 +1,47 @@
+{
+  "name": "host-users-root-workload-v1",
+  "attributes": {},
+  "ruleLanguage": "Rego",
+  "match": [
+    {
+      "apiGroups": [
+        ""
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "Pod"
+      ]
+    },
+    {
+      "apiGroups": [
+        "apps"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "Deployment",
+        "StatefulSet",
+        "DaemonSet"
+      ]
+    },
+    {
+      "apiGroups": [
+        "batch"
+      ],
+      "apiVersions": [
+        "v1"
+      ],
+      "resources": [
+        "Job",
+        "CronJob"
+      ]
+    }
+  ],
+  "ruleDependencies": [],
+  "description": "determines whether a workload runs a root container (effective runAsNonRoot not true and effective runAsUser unset or 0, across containers, initContainers and ephemeralContainers) while still using the host user namespace (spec.hostUsers not set to false). Since Kubernetes 1.36 (GA) and enabled by default since 1.33, setting spec.hostUsers: false maps container root to an unprivileged host UID, so a container escape stops short of host privileges. Workloads using hostPID, hostNetwork, hostIPC or privileged containers are exempt, as user namespaces are incompatible with them, as are Windows pods, as the field is Linux-only",
+  "remediation": "Set spec.hostUsers: false on the pod spec (or the pod template of the workload controller) to map the container's root to an unprivileged host UID range. Requires Kubernetes 1.36+ (GA) on Linux nodes with kernel 6.3+. Workloads that use hostPID, hostNetwork, hostIPC or privileged containers cannot use user namespaces and are excluded by this rule",
+  "ruleQuery": "armo_builtins"
+}

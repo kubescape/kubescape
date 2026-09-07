@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: build-agent
+  namespace: default
+spec:
+  os:
+    name: windows
+  containers:
+  - name: agent
+    image: registry.example.com/build-agent:5.2.0
+    securityContext:
+      windowsOptions:
+        runAsUserName: ContainerAdministrator
